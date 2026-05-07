@@ -44,6 +44,22 @@ test("executes cmovcc register source without modifying flags", () => {
   strictEqual(getFlag(notTaken, "ZF"), false);
 });
 
+test("executes cmovcc r16 as a conditional partial register write", () => {
+  const taken = createCpuState({ ecx: 0x3333_2222, edx: 0xaaaa_1111, eip: startAddress });
+  const notTaken = createCpuState({ ecx: 0x3333_2222, edx: 0xaaaa_1111, eip: startAddress });
+
+  setFlag(taken, "ZF", true);
+  setFlag(notTaken, "ZF", false);
+
+  execute(taken, [0x66, 0x0f, 0x44, 0xd1]);
+  execute(notTaken, [0x66, 0x0f, 0x44, 0xd1]);
+
+  strictEqual(taken.edx, 0xaaaa_2222);
+  strictEqual(notTaken.edx, 0xaaaa_1111);
+  strictEqual(getFlag(taken, "ZF"), true);
+  strictEqual(getFlag(notTaken, "ZF"), false);
+});
+
 test("cmovcc memory source faults even when condition is false", () => {
   const memory = new ArrayBufferGuestMemory(0x40);
   const state = createCpuState({ ebx: 0x100, edx: 0x1111_1111, eip: startAddress });

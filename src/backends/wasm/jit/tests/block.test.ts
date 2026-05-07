@@ -1397,6 +1397,34 @@ test("jit IR block emits cmovcc as a conditional register write", async () => {
   strictEqual(notTaken.state.instructionCount, 1);
 });
 
+test("jit IR block emits cmovcc r16 as a conditional partial register write", async () => {
+  const taken = await runJitIrBlock(
+    [0x66, 0x0f, 0x44, 0xd1], // cmove dx, cx
+    createCpuState({
+      ecx: 0x3333_2222,
+      edx: 0xaaaa_1111,
+      eflags: preservedEflags | zeroFlag,
+      eip: startAddress
+    })
+  );
+  const notTaken = await runJitIrBlock(
+    [0x66, 0x0f, 0x44, 0xd1], // cmove dx, cx
+    createCpuState({
+      ecx: 0x3333_2222,
+      edx: 0xaaaa_1111,
+      eflags: preservedEflags,
+      eip: startAddress
+    })
+  );
+
+  strictEqual(taken.state.edx, 0xaaaa_2222);
+  strictEqual(taken.state.eflags, (preservedEflags | zeroFlag) >>> 0);
+  strictEqual(taken.state.instructionCount, 1);
+  strictEqual(notTaken.state.edx, 0xaaaa_1111);
+  strictEqual(notTaken.state.eflags, preservedEflags);
+  strictEqual(notTaken.state.instructionCount, 1);
+});
+
 test("jit IR block keeps cmovcc source memory faults unconditional", async () => {
   const result = await runJitIrBlock(
     [0x0f, 0x45, 0x13], // cmovne edx, [ebx]

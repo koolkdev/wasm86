@@ -100,6 +100,14 @@ export const MOV = mnemonic("mov", [
 
 export const CMOVCC = CONDITION_CODE_DESCRIPTORS.map((descriptor) =>
   mnemonic(`cmov${descriptor.suffix}`, [
+    // 66 0F 40+cc /r: CMOVcc r16, r/m16
+    form("r16_rm16", {
+      prefixes: { operandSize: "override" },
+      opcode: [0x0f, 0x40 + descriptor.opcodeLow],
+      operands: [modrmReg("r16"), modrmRm("rm16")],
+      format: { syntax: `cmov${descriptor.suffix} {0}, {1}` },
+      semantics: cmovSemantic(descriptor.cc, 16)
+    }),
     // 0F 40+cc /r: CMOVcc r32, r/m32
     form("r32_rm32", {
       opcode: [0x0f, 0x40 + descriptor.opcodeLow],

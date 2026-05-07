@@ -198,6 +198,13 @@ const fixtures: readonly DecoderFixture[] = [
     id: "cmove.r32_rm32"
   },
   {
+    name: "cmove dx, cx with operand-size override",
+    bytes: [0x66, 0x0f, 0x44, 0xd1],
+    mnemonic: "cmove",
+    operands: [reg("dx"), reg("cx")],
+    id: "cmove.r16_rm16"
+  },
+  {
     name: "cmovne edx, [ebx]",
     bytes: [0x0f, 0x45, 0x13],
     mnemonic: "cmovne",
