@@ -89,16 +89,6 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
 
       return write.kind === "ok" ? undefined : stopFromAccess(context.state, write);
     }
-    case "set.if": {
-      if (evalValueRef(context, op.condition) === 0) {
-        return undefined;
-      }
-
-      const value = evalValueRef(context, op.value);
-      const write = writeStorage(context, op.target, value, op.accessWidth ?? 32);
-
-      return write.kind === "ok" ? undefined : stopFromAccess(context.state, write);
-    }
     case "address": {
       const binding = context.instruction.operands[op.operand.index];
 

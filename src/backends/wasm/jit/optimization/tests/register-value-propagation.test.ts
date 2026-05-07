@@ -295,14 +295,15 @@ test("register-value-propagation does not fold full reads from stale full values
   strictEqual(countOps(result.block, "get"), 2);
 });
 
-test("register-value-propagation drops partial prefix values that depend on materialized clobbered registers", () => {
+test("register-value-propagation folds partial prefix values across selected clobbers", () => {
   const result = propagateJitRegisterValues({
     instructions: [
       syntheticInstruction([
         { op: "get", dst: v(0), source: { kind: "reg", reg: "ecx" } },
         { op: "set", target: { kind: "reg", reg: "eax" }, value: v(0), accessWidth: 8 },
         { op: "value.const", type: "i32", dst: v(1), value: 0 },
-        { op: "set.if", condition: c32(1), target: { kind: "reg", reg: "ecx" }, value: v(1) },
+        { op: "value.select", type: "i32", dst: v(3), condition: c32(1), whenTrue: v(1), whenFalse: c32(0) },
+        { op: "set", target: { kind: "reg", reg: "ecx" }, value: v(3) },
         { op: "get", dst: v(2), source: { kind: "reg", reg: "eax" }, accessWidth: 8 },
         { op: "set", target: { kind: "reg", reg: "ebx" }, value: v(2), accessWidth: 8 },
         { op: "next" }
@@ -310,8 +311,18 @@ test("register-value-propagation drops partial prefix values that depend on mate
     ]
   });
 
-  strictEqual(result.registerValuePropagation.foldedReadCount, 0);
-  strictEqual(countOps(result.block, "get"), 2);
+  strictEqual(result.registerValuePropagation.foldedReadCount, 1);
+  strictEqual(result.registerValuePropagation.materializedSetCount, 1);
+  deepStrictEqual(opNames(result.block), [
+    "get",
+    "set",
+    "value.const",
+    "value.select",
+    "value.binary:and",
+    "set",
+    "set:registerMaterialization",
+    "next"
+  ]);
 });
 
 test("register-value-propagation folds partial prefix values before delayed symbolic clobbers", () => {

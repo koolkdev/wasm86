@@ -66,12 +66,6 @@ function validateOpUses(
       validateStorageRef(op.target, definedVars, options);
       validateValueRef(op.value, definedVars);
       break;
-    case "set.if":
-      validateAccessWidth(op.accessWidth);
-      validateValueRef(op.condition, definedVars);
-      validateStorageRef(op.target, definedVars, options);
-      validateValueRef(op.value, definedVars);
-      break;
     case "address":
       validateOperandIndex(op.operand.index, options);
       break;

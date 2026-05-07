@@ -45,22 +45,6 @@ test("emitIrToWasm emits conditional control values with nested emitValue", asyn
   strictEqual(run(2, 2), nextEipValue);
 });
 
-test("emitIrToWasm emits set.if as a conditional write", async () => {
-  const program = buildIr((s) => {
-    const value = s.get(s.operand(0));
-    const condition = s.get(s.operand(1));
-
-    s.set(s.reg("eax"), 0x55);
-    s.setIf(condition, s.reg("eax"), value);
-  });
-  const run = await instantiateEmittedBinary(program);
-  const opcodes = emittedBodyOpcodes(program);
-
-  strictEqual(run(0x33, 1), 0x33);
-  strictEqual(run(0x33, 0), 0x55);
-  strictEqual(opcodes.includes(wasmOpcode.if), true);
-});
-
 test("emitIrToWasm emits value.select as Wasm select", async () => {
   const program = buildIr((s) => {
     const value = s.i32Select(s.get(s.operand(1)), s.get(s.operand(0)), 0x55);
@@ -158,8 +142,6 @@ function emitTestProgram(program: IrBlock): WasmFunctionBodyEncoder {
     expression: { canInlineGet: () => true },
     emitGet: (source) => emitGet(body, regLocals, source),
     emitSet: (target, value, _accessWidth, helpers) => emitSet(body, regLocals, target, value, helpers),
-    emitSetIf: (condition, target, value, _accessWidth, helpers) =>
-      emitSetIf(body, regLocals, condition, target, value, helpers),
     emitAddress: (source) => {
       if (source.kind !== "operand") {
         unsupported(`${source.kind} address`);
@@ -214,8 +196,6 @@ function emitWithTrackingScratch(
     expression,
     emitGet: (source) => emitGet(body, regLocals, source),
     emitSet: (target, value, _accessWidth, helpers) => emitSet(body, regLocals, target, value, helpers),
-    emitSetIf: (condition, target, value, _accessWidth, helpers) =>
-      emitSetIf(body, regLocals, condition, target, value, helpers),
     emitAddress: () => unsupported("address"),
     emitSetFlags: () => unsupported("flags.set"),
     emitMaterializeFlags: () => unsupported("flags.materialize"),
@@ -276,20 +256,6 @@ function emitSet(
 
   helpers.emitValue(value);
   body.localSet(requireRegLocal(regLocals, target.reg));
-}
-
-function emitSetIf(
-  body: WasmFunctionBodyEncoder,
-  regLocals: Partial<Record<Reg32, number>>,
-  condition: IrValueExpr,
-  target: IrStorageExpr,
-  value: IrValueExpr,
-  helpers: WasmIrEmitHelpers
-): void {
-  helpers.emitValue(condition);
-  body.ifBlock();
-  emitSet(body, regLocals, target, value, helpers);
-  body.endBlock();
 }
 
 function requireRegLocal(regLocals: Partial<Record<Reg32, number>>, reg: Reg32): number {

@@ -125,9 +125,6 @@ function propagateOp(
     case "set":
       propagateSet(instruction, instructionIndex, op, opIndex, indexes, rewrite, stats);
       break;
-    case "set.if":
-      copyOp(instruction, op, rewrite);
-      break;
     default:
       copyOp(instruction, op, rewrite);
       break;

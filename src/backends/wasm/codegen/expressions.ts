@@ -71,13 +71,6 @@ export type IrSetExprRole = "registerMaterialization";
 export type IrExprOp =
   | Readonly<{ op: "let32"; dst: VarRef; value: IrValueExpr }>
   | IrSetExprOp
-  | Readonly<{
-      op: "set.if";
-      condition: IrValueExpr;
-      target: IrStorageExpr;
-      value: IrValueExpr;
-      accessWidth: OperandWidth;
-    }>
   | IrFlagSetOp
   | Readonly<{ op: "flags.materialize"; mask: number }>
   | Readonly<{ op: "flags.boundary"; mask: number }>
@@ -125,14 +118,12 @@ class ExpressionBuilder {
   readonly #bindings = new Map<number, IrValueExpr>();
   readonly #ops: IrExprOp[] = [];
   readonly #useCounts: ReadonlyMap<number, number>;
-  readonly #conditionalWriteValueVars: ReadonlySet<number>;
 
   constructor(
     readonly block: IrExpressionInputBlock,
     readonly options: IrExpressionOptions
   ) {
     this.#useCounts = countVarUses(block);
-    this.#conditionalWriteValueVars = conditionalWriteValueVars(block);
   }
 
   build(): IrExprBlock {
@@ -159,15 +150,6 @@ class ExpressionBuilder {
           break;
         case "set":
           this.#ops.push(this.#setExpr(op));
-          break;
-        case "set.if":
-          this.#ops.push({
-            op: "set.if",
-            condition: this.#valueExpr(op.condition),
-            target: this.#storageExpr(op.target),
-            value: this.#valueExpr(this.#materializedValue(op.value)),
-            accessWidth: op.accessWidth ?? 32
-          });
           break;
         case "address":
           this.#defineValue(op.dst, { kind: "address", operand: op.operand }, true);
@@ -279,7 +261,7 @@ class ExpressionBuilder {
   }
 
   #defineValue(dst: VarRef, value: IrValueExpr, inlineable: boolean): void {
-    if (inlineable && remainingUses(this.#useCounts, dst.id) <= 1 && !this.#conditionalWriteValueVars.has(dst.id)) {
+    if (inlineable && remainingUses(this.#useCounts, dst.id) <= 1) {
       this.#bindings.set(dst.id, value);
       return;
     }
@@ -366,11 +348,6 @@ function countVarUses(block: IrExpressionInputBlock): Map<number, number> {
         countStorageUses(counts, op.target);
         countValueUse(counts, op.value);
         break;
-      case "set.if":
-        countValueUse(counts, op.condition);
-        countStorageUses(counts, op.target);
-        countValueUse(counts, op.value);
-        break;
       case "address":
       case "value.const":
       case "aluFlags.condition":
@@ -436,10 +413,6 @@ function opUsesVar(op: IrExpressionInputOp, id: number): boolean {
       return storageUsesVar(op.source, id);
     case "set":
       return storageUsesVar(op.target, id) || valueUsesVar(op.value, id);
-    case "set.if":
-      return valueUsesVar(op.condition, id) ||
-        storageUsesVar(op.target, id) ||
-        valueUsesVar(op.value, id);
     case "address":
       return false;
     case "value.const":
@@ -486,7 +459,6 @@ function storageUsesVar(storage: StorageRef, id: number): boolean {
 function opWriteStorages(op: IrExpressionInputOp): readonly StorageRef[] {
   switch (op.op) {
     case "set":
-    case "set.if":
       return [op.target];
     default:
       return [];
@@ -514,18 +486,6 @@ function storageRefsMayOverlap(left: StorageRef, right: StorageRef): boolean {
     case "mem":
       return true;
   }
-}
-
-function conditionalWriteValueVars(block: IrExpressionInputBlock): ReadonlySet<number> {
-  const vars = new Set<number>();
-
-  for (const op of block) {
-    if (op.op === "set.if" && op.value.kind === "var") {
-      vars.add(op.value.id);
-    }
-  }
-
-  return vars;
 }
 
 function remainingUses(useCounts: ReadonlyMap<number, number>, id: number): number {

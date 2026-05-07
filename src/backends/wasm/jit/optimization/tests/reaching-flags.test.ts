@@ -10,7 +10,7 @@ import {
   analyzeJitReachingFlags,
   singleReachingFlagProducer
 } from "#backends/wasm/jit/optimization/analyses/reaching-flags.js";
-import { c32, flagOwnerSummary, startAddress, syntheticInstruction, v } from "./helpers.js";
+import { c32, flagOwnerSummary, selectSet, startAddress, syntheticInstruction, v } from "./helpers.js";
 
 test("reaching flags tracks partial flag producer ownership", () => {
   const analysis = analyzeJitReachingFlags({
@@ -49,7 +49,7 @@ test("reaching flags represents mixed-owner reads explicitly", () => {
         { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(1), b: c32(1) },
         createIrFlagSetOp("inc", { left: v(1), result: v(2) }),
         { op: "aluFlags.condition", dst: v(3), cc: "A" },
-        { op: "set.if", condition: v(3), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(3), v(4)),
         { op: "next" }
       ])
     ]
@@ -96,7 +96,7 @@ test("reaching flags classifies local, exit-coupled, and unused condition reads"
     instructions: [
       syntheticInstruction([
         { op: "aluFlags.condition", dst: v(0), cc: "E" },
-        { op: "set.if", condition: v(0), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(0), v(1)),
         { op: "next" }
       ])
     ]
@@ -105,7 +105,7 @@ test("reaching flags classifies local, exit-coupled, and unused condition reads"
     instructions: [
       syntheticInstruction([
         { op: "aluFlags.condition", dst: v(0), cc: "E" },
-        { op: "set.if", condition: v(0), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(0), v(1)),
         { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
       ])
     ]

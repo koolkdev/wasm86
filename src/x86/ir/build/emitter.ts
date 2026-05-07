@@ -115,16 +115,6 @@ export class IrEmitter implements IrBuilder {
     this.#push({ op: "set", target: toStorageRef(target), value: toValueRef(value), accessWidth });
   }
 
-  setIf(condition: ValueInput, target: StorageInput, value: ValueInput, accessWidth: OperandWidth = 32): void {
-    this.#push({
-      op: "set.if",
-      condition: toValueRef(condition),
-      target: toStorageRef(target),
-      value: toValueRef(value),
-      accessWidth
-    });
-  }
-
   address(operandInput: OperandInput): VarRef {
     const dst = this.#allocVar();
 

@@ -16,7 +16,7 @@ export function jitRegClobberedBetween(
   let clobbered = false;
 
   walkJitIrOpsBetween(block, after, before, (instruction, op) => {
-    if ((op.op === "set" || op.op === "set.if") && jitStorageReg(op.target, instruction.operands) === reg) {
+    if (op.op === "set" && jitStorageReg(op.target, instruction.operands) === reg) {
       clobbered = true;
     }
   });

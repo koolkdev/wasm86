@@ -122,9 +122,6 @@ export function analyzeJitReachingFlags(
       case "set":
         recordRegisterSet(op, instruction, values);
         break;
-      case "set.if":
-        deleteRegisterSet(op, instruction);
-        break;
       case "flags.set": {
         const source = buildJitFlagSource(nextSourceId, instructionIndex, opIndex, op, values);
 
@@ -214,16 +211,6 @@ export function analyzeJitReachingFlags(
     }
   }
 
-  function deleteRegisterSet(
-    op: Extract<JitIrOp, { op: "set.if" }>,
-    instruction: JitIrBlockInstruction
-  ): void {
-    const access = jitStorageRegisterAccess(op.target, instruction.operands, op.accessWidth ?? 32);
-
-    if (access !== undefined) {
-      registers.delete(access.reg);
-    }
-  }
 }
 
 export function reachingFlagReadAt(

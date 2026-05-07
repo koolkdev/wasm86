@@ -43,9 +43,6 @@ export function emitPlannedExpression(
         accessWidth
       );
     },
-    emitSetIf: () => {
-      throw new Error("test set.if emission is not implemented");
-    },
     emitAddress: () => {
       throw new Error("test address emission is not implemented");
     },

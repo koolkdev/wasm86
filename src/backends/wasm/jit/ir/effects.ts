@@ -11,17 +11,12 @@ import {
 import { jitMemoryFaultReason, jitPostInstructionExitReasons } from "#backends/wasm/jit/ir/effect-primitives.js";
 import { jitStorageReg } from "#backends/wasm/jit/ir/values.js";
 
-export type JitRegisterWriteEffect = Readonly<{
-  reg: Reg32;
-  kind: "write" | "conditionalWrite";
-}>;
-
 export type JitOpEffects = Readonly<{
   preInstructionExitReason?: ExitReasonValue;
   postInstructionExitReasons: readonly ExitReasonValue[];
   localConditionValues: readonly ValueRef[];
   exitConditionValues: readonly ValueRef[];
-  registerWrite?: JitRegisterWriteEffect;
+  registerWriteReg?: Reg32;
   conditionUse?: JitConditionUse;
 }>;
 
@@ -74,10 +69,10 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
         opEffects = { ...opEffects, preInstructionExitReason };
       }
 
-      const registerWrite = jitRegisterWriteEffect(op, instruction.operands);
+      const registerWriteReg = jitRegisterWriteReg(op, instruction.operands);
 
-      if (registerWrite !== undefined) {
-        opEffects = { ...opEffects, registerWrite };
+      if (registerWriteReg !== undefined) {
+        opEffects = { ...opEffects, registerWriteReg };
       }
 
       const conditionUse = conditionUses.get(instructionIndex)?.get(opIndex);
@@ -169,12 +164,12 @@ export function jitConditionUseAt(
   return jitOpEffectsAt(effects, instructionIndex, opIndex).conditionUse;
 }
 
-export function jitRegisterWriteEffectAt(
+export function jitRegisterWriteRegAt(
   effects: JitEffectIndex,
   instructionIndex: number,
   opIndex: number
-): JitRegisterWriteEffect | undefined {
-  return jitOpEffectsAt(effects, instructionIndex, opIndex).registerWrite;
+): Reg32 | undefined {
+  return jitOpEffectsAt(effects, instructionIndex, opIndex).registerWriteReg;
 }
 
 export function jitInstructionHasPreInstructionExit(
@@ -210,20 +205,13 @@ export function jitLastPreInstructionExitOpIndex(
   return instructionEffects.lastPreInstructionExitOpIndex;
 }
 
-function jitRegisterWriteEffect(
+function jitRegisterWriteReg(
   op: JitIrOp,
   operands: JitIrBlockInstruction["operands"]
-): JitRegisterWriteEffect | undefined {
-  if (op.op !== "set" && op.op !== "set.if") {
+): Reg32 | undefined {
+  if (op.op !== "set") {
     return undefined;
   }
 
-  const reg = jitStorageReg(op.target, operands);
-
-  return reg === undefined
-    ? undefined
-    : {
-      reg,
-      kind: op.op === "set.if" ? "conditionalWrite" : "write"
-    };
+  return jitStorageReg(op.target, operands);
 }

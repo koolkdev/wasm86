@@ -1369,7 +1369,7 @@ test("jit IR block keeps mixed partial-register bitwise mask count bounded", () 
   strictEqual(countOpcode(opcodes, wasmOpcode.i32And) <= 9, true);
 });
 
-test("jit IR block emits cmovcc as a conditional register write", async () => {
+test("jit IR block updates cmovcc destination when the condition passes", async () => {
   const taken = await runJitIrBlock(
     [0x0f, 0x44, 0xd1], // cmove edx, ecx
     createCpuState({
@@ -1397,7 +1397,31 @@ test("jit IR block emits cmovcc as a conditional register write", async () => {
   strictEqual(notTaken.state.instructionCount, 1);
 });
 
-test("jit IR block emits cmovcc r16 as a conditional partial register write", async () => {
+test("jit IR block emits cmovcc through a select value and normal write", () => {
+  const instruction = ok(decodeBytes([0x0f, 0x44, 0xd1], startAddress));
+  const block = buildJitIrBlock([instruction]);
+  const ir = block.instructions[0]!.ir;
+  const opcodes = jitBlockBodyOpcodes(block);
+
+  deepStrictEqual(ir, [
+    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 1 }, accessWidth: 32 },
+    { op: "aluFlags.condition", dst: { kind: "var", id: 1 }, cc: "E" },
+    { op: "get", dst: { kind: "var", id: 2 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
+    {
+      op: "value.select",
+      type: "i32",
+      dst: { kind: "var", id: 3 },
+      condition: { kind: "var", id: 1 },
+      whenTrue: { kind: "var", id: 0 },
+      whenFalse: { kind: "var", id: 2 }
+    },
+    { op: "set", target: { kind: "operand", index: 0 }, value: { kind: "var", id: 3 }, accessWidth: 32 },
+    { op: "next" }
+  ]);
+  strictEqual(opcodes.includes(wasmOpcode.select), true);
+});
+
+test("jit IR block updates cmovcc r16 destination when the condition passes", async () => {
   const taken = await runJitIrBlock(
     [0x66, 0x0f, 0x44, 0xd1], // cmove dx, cx
     createCpuState({
@@ -1423,6 +1447,25 @@ test("jit IR block emits cmovcc r16 as a conditional partial register write", as
   strictEqual(notTaken.state.edx, 0xaaaa_1111);
   strictEqual(notTaken.state.eflags, preservedEflags);
   strictEqual(notTaken.state.instructionCount, 1);
+});
+
+test("jit IR block keeps cmovcc fallback value after previous high-byte write", async () => {
+  const result = await runJitIrBlock(
+    [
+      0xb4, 0x22, // mov ah, 0x22
+      0x0f, 0x45, 0xc1 // cmovne eax, ecx
+    ],
+    createCpuState({
+      eax: 0x1111_1111,
+      ecx: 0x2222_2222,
+      eflags: zeroFlag,
+      eip: startAddress
+    })
+  );
+
+  strictEqual(result.state.eax, 0x1111_2211);
+  strictEqual(result.state.ecx, 0x2222_2222);
+  strictEqual(result.state.instructionCount, 2);
 });
 
 test("jit IR block keeps cmovcc source memory faults unconditional", async () => {
@@ -1479,7 +1522,6 @@ test("jit IR block emits setcc through a select value and normal write", async (
   );
 
   strictEqual(selectIndex !== -1 && setIndex === selectIndex + 1, true);
-  strictEqual(ir.some((op) => op.op === "set.if"), false);
   strictEqual(ir[selectIndex]?.op === "value.select" ? constValue(ir[selectIndex].whenTrue) : undefined, 1);
   strictEqual(ir[selectIndex]?.op === "value.select" ? constValue(ir[selectIndex].whenFalse) : undefined, 0);
   strictEqual(ir[setIndex]?.op === "set" ? ir[setIndex].accessWidth : undefined, 8);
@@ -1542,7 +1584,7 @@ test("jit IR block specializes setcc conditions from local flag producers", asyn
   strictEqual(notEqual.state.instructionCount, 2);
 });
 
-test("jit IR block freezes conditional register values before later full-register copies", async () => {
+test("jit IR block freezes cmovcc-selected register values before later full-register copies", async () => {
   const result = await runJitIrBlock(
     [
       0x0f, 0x44, 0xc1, // cmove eax, ecx
@@ -1568,7 +1610,7 @@ test("jit IR block freezes conditional register values before later full-registe
   deepStrictEqual(result.exit, { exitReason: ExitReason.FALLTHROUGH, payload: startAddress + 8 });
 });
 
-test("jit IR block preserves committed conditional writes on later pre-instruction exits", async () => {
+test("jit IR block preserves committed cmovcc writes on later pre-instruction exits", async () => {
   const result = await runJitIrBlock(
     [
       0x0f, 0x44, 0xd1, // cmove edx, ecx
@@ -1591,7 +1633,7 @@ test("jit IR block preserves committed conditional writes on later pre-instructi
   deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x10000, detail: 4 });
 });
 
-test("jit IR block preserves a pre-instruction exit before later conditional mutation of the same register", async () => {
+test("jit IR block preserves a pre-instruction exit before later cmovcc mutation of the same register", async () => {
   const result = await runJitIrBlock(
     [
       0x0f, 0x44, 0xc1, // cmove eax, ecx
@@ -2236,8 +2278,6 @@ function irOpOperandIndexes(op: JitIrOp): readonly number[] {
     case "get":
       return storageOperandIndexes(op.source);
     case "set":
-      return storageOperandIndexes(op.target);
-    case "set.if":
       return storageOperandIndexes(op.target);
     case "address":
       return [op.operand.index];

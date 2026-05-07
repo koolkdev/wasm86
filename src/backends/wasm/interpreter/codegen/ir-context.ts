@@ -87,8 +87,6 @@ export function emitInterpreterIrWithContext(block: IrBlock, context: Interprete
     emitGet: (source, accessWidth, helpers, options) => emitGetStorage(context, source, accessWidth, helpers, options),
     emitSet: (target, value, accessWidth, helpers) =>
       emitSetStorage(context, target, value, accessWidth, helpers),
-    emitSetIf: (condition, target, value, accessWidth, helpers) =>
-      emitSetStorageIf(context, condition, target, value, accessWidth, helpers),
     emitAddress: (source) => emitAddress(context, source),
     emitSetFlags: (descriptor, helpers) =>
       emitSetFlags(context.body, aluFlags, descriptor, helpers),
@@ -234,20 +232,6 @@ function emitSetStorage(
       );
       return;
   }
-}
-
-function emitSetStorageIf(
-  context: InterpreterIrEmitContext,
-  condition: IrValueExpr,
-  target: IrStorageExpr,
-  value: IrValueExpr,
-  accessWidth: OperandWidth,
-  helpers: WasmIrEmitHelpers
-): void {
-  helpers.emitValue(condition, { requestedWidth: 32 });
-  context.body.ifBlock();
-  emitSetStorage(context, target, value, accessWidth, helpers);
-  context.body.endBlock();
 }
 
 function emitAddress(context: InterpreterIrEmitContext, source: IrStorageExpr): void {

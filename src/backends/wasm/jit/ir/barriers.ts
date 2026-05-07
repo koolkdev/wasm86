@@ -6,15 +6,14 @@ import {
   jitPreInstructionExitReasonAt,
   jitPostInstructionExitReasonsAt,
   jitOpHasPostInstructionExit,
-  jitRegisterWriteEffectAt,
+  jitRegisterWriteRegAt,
   type JitEffectIndex
 } from "#backends/wasm/jit/ir/effects.js";
 
 export type JitBarrierReason =
   | "preInstructionExit"
   | "exit"
-  | "write"
-  | "conditionalWrite";
+  | "write";
 
 export type JitBarrier = Readonly<{
   instructionIndex: number;
@@ -84,14 +83,14 @@ export function analyzeJitBarriers(
         });
       }
 
-      const registerWrite = jitRegisterWriteEffectAt(effects, instructionIndex, opIndex);
+      const registerWriteReg = jitRegisterWriteRegAt(effects, instructionIndex, opIndex);
 
-      if (registerWrite !== undefined) {
+      if (registerWriteReg !== undefined) {
         pushBarrier(barriers, instructionBarriers, {
           instructionIndex,
           opIndex,
-          reason: registerWrite.kind,
-          reg: registerWrite.reg
+          reason: "write",
+          reg: registerWriteReg
         });
       }
 

@@ -26,17 +26,15 @@ test("IR op semantics exposes results, dsts, and terminators", () => {
   strictEqual(irOpIsTerminator(localDef), false);
 });
 
-test("IR op semantics exposes value and storage uses with roles", () => {
+test("IR op semantics exposes set value and storage uses", () => {
   const target = { kind: "mem" as const, address: irVar(1) };
   const op: IrOp = {
-    op: "set.if",
-    condition: irVar(0),
+    op: "set",
     target,
     value: irVar(2)
   };
 
   deepStrictEqual(irOpValueUses(op), [
-    { value: irVar(0), role: "condition" },
     { value: irVar(1), role: "value" },
     { value: irVar(2), role: "value" }
   ]);

@@ -108,9 +108,6 @@ export function analyzeJitCodegenState(
           state.recordStorageWrite(op.target, instruction.operands);
         }
         return;
-      case "set.if":
-        state.recordStorageWrite(op.target, instruction.operands);
-        return;
       case "flags.set":
         state.markSpeculativeFlags(op.writtenMask | op.undefMask);
         return;

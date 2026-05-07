@@ -12,7 +12,7 @@ import {
   jitLastPreInstructionExitOpIndex,
   jitPreInstructionExitReasonAt,
   jitPostInstructionExitReasonsAt,
-  jitRegisterWriteEffectAt
+  jitRegisterWriteRegAt
 } from "#backends/wasm/jit/ir/effects.js";
 import {
   jitExitConditionValues,
@@ -25,7 +25,7 @@ test("JIT op effects identify post-instruction exits and condition values", () =
   const fallthrough = syntheticInstruction([{ op: "next" }], 0, "exit");
   const localNext = syntheticInstruction([{ op: "next" }]);
   const localCondition = syntheticInstruction([
-    { op: "set.if", condition: v(0), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+    { op: "value.select", type: "i32", dst: v(1), condition: v(0), whenTrue: c32(1), whenFalse: c32(0) },
     { op: "next" }
   ]);
   const branch = syntheticInstruction([
@@ -48,7 +48,8 @@ test("indexJitEffects indexes shared op effects", () => {
     instructions: [
       syntheticInstruction([
         { op: "aluFlags.condition", dst: v(0), cc: "E" },
-        { op: "set.if", condition: v(0), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        { op: "value.select", type: "i32", dst: v(1), condition: v(0), whenTrue: c32(1), whenFalse: c32(0) },
+        { op: "set", target: { kind: "reg", reg: "ecx" }, value: v(1) },
         { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
       ]),
       syntheticInstruction([
@@ -58,16 +59,13 @@ test("indexJitEffects indexes shared op effects", () => {
     ]
   });
 
-  deepStrictEqual(jitPostInstructionExitReasonsAt(effects, 0, 2), [
+  deepStrictEqual(jitPostInstructionExitReasonsAt(effects, 0, 3), [
     ExitReason.BRANCH_TAKEN,
     ExitReason.BRANCH_NOT_TAKEN
   ]);
   deepStrictEqual(jitConditionValuesAt(effects, 0, 1, "localCondition"), [v(0)]);
-  deepStrictEqual(jitConditionValuesAt(effects, 0, 2, "exitCondition"), [v(0)]);
-  deepStrictEqual(jitRegisterWriteEffectAt(effects, 0, 1), {
-    reg: "ecx",
-    kind: "conditionalWrite"
-  });
+  deepStrictEqual(jitConditionValuesAt(effects, 0, 3, "exitCondition"), [v(0)]);
+  strictEqual(jitRegisterWriteRegAt(effects, 0, 2), "ecx");
   strictEqual(jitConditionUseAt(effects, 0, 0), "exitCondition");
   strictEqual(jitPreInstructionExitReasonAt(effects, 1, 0), ExitReason.MEMORY_READ_FAULT);
   strictEqual(jitInstructionHasPreInstructionExit(effects, 1), true);

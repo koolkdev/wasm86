@@ -52,13 +52,6 @@ export type WasmIrEmitContext = Readonly<{
     helpers: WasmIrEmitHelpers,
     op: IrSetExprOp
   ): void;
-  emitSetIf(
-    condition: IrValueExpr,
-    target: IrStorageExpr,
-    value: IrValueExpr,
-    accessWidth: OperandWidth,
-    helpers: WasmIrEmitHelpers
-  ): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
   emitSetFlags(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
   emitMaterializeFlags(mask: number, helpers: WasmIrEmitHelpers): void;
@@ -147,9 +140,6 @@ class IrExprWasmEmitter {
         return;
       case "set":
         this.#context.emitSet(op.target, op.value, op.accessWidth, this.#helpers, op);
-        return;
-      case "set.if":
-        this.#context.emitSetIf(op.condition, op.target, op.value, op.accessWidth, this.#helpers);
         return;
       case "flags.set":
         this.#context.emitSetFlags(op, this.#helpers);

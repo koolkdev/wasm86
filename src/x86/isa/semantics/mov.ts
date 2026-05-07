@@ -23,7 +23,9 @@ export function cmovSemantic(cc: ConditionCode, width: OperandWidth = 32): Seman
   return (s) => {
     const value = s.get(s.operand(1), width);
     const condition = s.condition(cc);
+    const fallback = s.get(s.operand(0), width);
+    const selected = s.i32Select(condition, value, fallback);
 
-    s.setIf(condition, s.operand(0), value, width);
+    s.set(s.operand(0), selected, width);
   };
 }

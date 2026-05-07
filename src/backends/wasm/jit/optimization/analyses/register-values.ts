@@ -48,7 +48,6 @@ export type JitRegisterMaterializationReason =
   | "exit"
   | "read"
   | "clobber"
-  | "conditionalWrite"
   | "blockEnd";
 
 export type JitRegisterMaterialization = Readonly<{
@@ -273,27 +272,6 @@ function analyzeInstruction(
         }
         break;
       }
-      case "set.if": {
-        const reg = registerBarrierReg(barriers, instructionIndex, opIndex, "conditionalWrite");
-
-        if (reg !== undefined) {
-          materializeRegs(registers, materializations, [reg], {
-            instructionIndex,
-            opIndex,
-            phase: "beforeOp",
-            reason: "conditionalWrite"
-          });
-          materializeDependencies(registers, materializations, reg, {
-            instructionIndex,
-            opIndex,
-            phase: "beforeOp",
-            reason: "clobber"
-          }, { includeSymbolicRegs: true });
-          registers.delete(reg);
-          values.deleteValuesReadingReg(reg);
-        }
-        break;
-      }
       default:
         values.recordOp(op, instruction, registers.trackedRegisterValues);
         break;
@@ -407,7 +385,7 @@ function registerBarrierReg(
   barriers: JitBarrierAnalysis,
   instructionIndex: number,
   opIndex: number,
-  reason: "write" | "conditionalWrite"
+  reason: "write"
 ): Reg32 | undefined {
   return jitOpBarriersAt(barriers, instructionIndex, opIndex)
     .find((barrier) => barrier.reason === reason)

@@ -37,11 +37,6 @@ export type JitReg32State = Readonly<{
   knownPrefixForAlias(alias: RegisterAlias): LocalRegValueSource | undefined;
   ensureStableFullValueForCopy(reg: Reg32): LocalRegValueSource;
   emitWriteAlias(alias: RegisterAlias, source: JitReg32WriteSource): void;
-  emitWriteAliasIf(
-    alias: RegisterAlias,
-    emitCondition: () => ValueWidth | void,
-    emitValue: () => ValueWidth | void
-  ): void;
   captureCommittedExitStores(regs: readonly Reg32[]): JitReg32ExitStoreSnapshot;
   emitCommittedStore(reg: Reg32): void;
   emitExitSnapshotStore(reg: Reg32, snapshot: JitReg32ExitStoreSnapshot): void;
@@ -63,7 +58,6 @@ export function createJitReg32State(body: WasmFunctionBodyEncoder): JitReg32Stat
     knownPrefixForAlias: (alias) => currentKnownPrefixForAlias(storage, alias),
     ensureStableFullValueForCopy: materializer.ensureStableFullValueForCopy,
     emitWriteAlias: writer.emitWriteAlias,
-    emitWriteAliasIf: writer.emitWriteAliasIf,
     captureCommittedExitStores,
     commitPending,
     commitPendingReg,

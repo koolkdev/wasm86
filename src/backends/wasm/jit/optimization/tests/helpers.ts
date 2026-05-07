@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 
 import type { Reg32 } from "#x86/isa/types.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
-import type { ConditionCode, IrBlock, ValueRef, VarRef } from "#x86/ir/model/types.js";
+import type { ConditionCode, IrBlock, IrOp, ValueRef, VarRef } from "#x86/ir/model/types.js";
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitFlagOwnerMask } from "#backends/wasm/jit/optimization/analyses/flag-owners.js";
@@ -33,11 +33,24 @@ export function logic32LocalConditionBlock(cc: ConditionCode): JitIrBlock {
       ], 0),
       syntheticInstruction([
         { op: "aluFlags.condition", dst: v(0), cc },
-        { op: "set.if", condition: v(0), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(0), v(1)),
         { op: "next" }
       ], 1)
     ]
   };
+}
+
+export function selectSet(
+  condition: ValueRef,
+  dst: VarRef,
+  target: Reg32 = "ecx",
+  whenTrue: ValueRef = c32(1),
+  whenFalse: ValueRef = c32(0)
+): readonly IrOp[] {
+  return [
+    { op: "value.select", type: "i32", dst, condition, whenTrue, whenFalse },
+    { op: "set", target: { kind: "reg", reg: target }, value: dst }
+  ];
 }
 
 export function syntheticInstruction(

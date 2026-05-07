@@ -97,7 +97,6 @@ export type IrGetOptions = Readonly<{
 export type IrOp =
   | Readonly<{ op: "get"; dst: VarRef; source: StorageRef; accessWidth?: OperandWidth; signed?: boolean }>
   | Readonly<{ op: "set"; target: StorageRef; value: ValueRef; accessWidth?: OperandWidth }>
-  | Readonly<{ op: "set.if"; condition: ValueRef; target: StorageRef; value: ValueRef; accessWidth?: OperandWidth }>
   | Readonly<{ op: "address"; dst: VarRef; operand: OperandRef }>
   | Readonly<{ op: "value.const"; type: IrValueType; dst: VarRef; value: number }>
   | IrBinaryValueOp
@@ -124,7 +123,6 @@ export interface IrBuilder {
 
   get(source: StorageInput, accessWidth?: OperandWidth, options?: IrGetOptions): VarRef;
   set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
-  setIf(condition: ValueInput, target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
   address(operand: OperandInput): VarRef;
 
   i32Add(a: ValueInput, b: ValueInput): VarRef;

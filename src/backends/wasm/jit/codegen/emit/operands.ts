@@ -88,32 +88,6 @@ export function emitJitSet(
   }
 }
 
-export function emitJitSetIf(
-  context: JitIrContext,
-  condition: IrValueExpr,
-  target: IrStorageExpr,
-  value: IrValueExpr,
-  accessWidth: OperandWidth,
-  helpers: WasmIrEmitHelpers
-): void {
-  const regs = context.state.regs;
-
-  switch (target.kind) {
-    case "operand":
-      emitSetBindingIf(context, operandBinding(context, target.index), condition, value, accessWidth, helpers);
-      return;
-    case "reg":
-      regs.emitWriteAliasIf(
-        regAccess(target.reg, accessWidth),
-        () => helpers.emitValue(condition, { requestedWidth: 32 }),
-        () => helpers.emitValue(value)
-      );
-      return;
-    case "mem":
-      throw new Error("JIT conditional memory writes are not supported");
-  }
-}
-
 export function emitJitAddress(context: JitIrContext, source: IrStorageExpr): void {
   if (source.kind !== "operand") {
     throw new Error(`unsupported address source for JIT IR: ${source.kind}`);
@@ -209,33 +183,6 @@ function emitSetRegisterAlias(
         emitValue: () => helpers.emitValue(value),
         prefixSource
       });
-}
-
-function emitSetBindingIf(
-  context: JitIrContext,
-  binding: JitOperandBinding,
-  condition: IrValueExpr,
-  value: IrValueExpr,
-  accessWidth: OperandWidth,
-  helpers: WasmIrEmitHelpers
-): void {
-  const regs = context.state.regs;
-
-  switch (binding.kind) {
-    case "static.reg":
-      assertAccessWidth(accessWidth, binding.alias.width, "conditional write");
-      regs.emitWriteAliasIf(
-        binding.alias,
-        () => helpers.emitValue(condition, { requestedWidth: 32 }),
-        () => helpers.emitValue(value)
-      );
-      return;
-    case "static.mem":
-      throw new Error("JIT conditional memory writes are not supported");
-    case "static.imm32":
-    case "static.relTarget":
-      throw new Error(`cannot conditionally set ${binding.kind} operand`);
-  }
 }
 
 function emitEffectiveAddress(body: JitIrContext["body"], regs: JitIrContext["state"]["regs"], ea: MemOperand): void {

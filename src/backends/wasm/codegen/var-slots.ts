@@ -99,11 +99,6 @@ function collectOpVarUses(op: IrExprOp, visit: (id: number) => void): void {
       collectStorageVarUses(op.target, visit);
       collectValueVarUses(op.value, visit);
       return;
-    case "set.if":
-      collectValueVarUses(op.condition, visit);
-      collectStorageVarUses(op.target, visit);
-      collectValueVarUses(op.value, visit);
-      return;
     case "flags.set":
       for (const value of Object.values(op.inputs)) {
         collectValueVarUses(value, visit);

@@ -250,46 +250,7 @@ test("jit register state keeps copied prefix values stable after later source fu
   strictEqual(state.ebx, 0x1111_1111);
 });
 
-test("jit register state freezes committed conditional register values before later full copies", async () => {
-  const body = new WasmFunctionBodyEncoder();
-  const regs = createJitReg32State(body);
-
-  regs.beginInstruction({ preserveCommittedRegs: false });
-  regs.emitWriteAliasIf(
-    fullAlias("eax"),
-    () => {
-      body.i32Const(1);
-    },
-    () => {
-      body.i32Const(0x2222_2222);
-    }
-  );
-  regs.commitPending();
-  regs.beginInstruction({ preserveCommittedRegs: false });
-  emitCopyReg32(regs, "ebx", "eax");
-  regs.commitPending();
-  regs.beginInstruction({ preserveCommittedRegs: false });
-  regs.emitWriteAliasIf(
-    fullAlias("eax"),
-    () => {
-      body.i32Const(1);
-    },
-    () => {
-      body.i32Const(0x3333_3333);
-    }
-  );
-  regs.commitPending();
-  regs.emitCommittedStore("eax");
-  regs.emitCommittedStore("ebx");
-  body.end();
-
-  const state = await runRegisterStateBody(body, createCpuState({ eax: 0x1111_1111 }));
-
-  strictEqual(state.eax, 0x3333_3333);
-  strictEqual(state.ebx, 0x2222_2222);
-});
-
-test("jit register state freezes pending conditional register values before pending full copies", async () => {
+test("jit register state freezes pending full-register values before pending full copies", async () => {
   const body = new WasmFunctionBodyEncoder();
   const regs = createJitReg32State(body);
 
@@ -299,15 +260,9 @@ test("jit register state freezes pending conditional register values before pend
   });
   regs.commitPending();
   regs.beginInstruction({ preserveCommittedRegs: true });
-  regs.emitWriteAliasIf(
-    fullAlias("eax"),
-    () => {
-      body.i32Const(1);
-    },
-    () => {
-      body.i32Const(0x2222_2222);
-    }
-  );
+  emitWriteReg32(regs, "eax", () => {
+    body.i32Const(0x2222_2222);
+  });
   emitCopyReg32(regs, "ebx", "eax");
   regs.commitPending();
   regs.emitCommittedStore("eax");
@@ -328,19 +283,12 @@ test("jit register state freezes pending mutable copies without changing committ
   emitWriteReg32(regs, "eax", () => {
     body.i32Const(0x1111_1111);
   });
-  emitWriteReg32(regs, "ecx", () => {
-    body.i32Const(0x2222_2222);
-  });
   regs.commitPending();
 
   regs.beginInstruction({ preserveCommittedRegs: true });
-  regs.emitWriteAliasIf(
-    fullAlias("eax"),
-    () => {
-      body.i32Const(1);
-    },
-    () => regs.emitReadReg32("ecx")
-  );
+  regs.emitWriteAlias(ah, () => {
+    body.i32Const(0x22);
+  });
   emitCopyReg32(regs, "ebx", "eax");
   // Simulates a pre-instruction exit store before pending writes are committed.
   regs.emitCommittedStore("eax");
@@ -351,7 +299,39 @@ test("jit register state freezes pending mutable copies without changing committ
   const state = await runRegisterStateBody(body);
 
   strictEqual(state.eax, 0x1111_1111);
-  strictEqual(state.ebx, 0x2222_2222);
+  strictEqual(state.ebx, 0x1111_2211);
+});
+
+test("jit register state full writes can read the previous mutable value", async () => {
+  const body = new WasmFunctionBodyEncoder();
+  const regs = createJitReg32State(body);
+
+  regs.beginInstruction({ preserveCommittedRegs: false });
+  emitWriteReg32(regs, "eax", () => {
+    body.i32Const(0x1111_1111);
+  });
+  regs.commitPending();
+
+  regs.beginInstruction({ preserveCommittedRegs: false });
+  regs.emitWriteAlias(ah, () => {
+    body.i32Const(0x22);
+  });
+  regs.commitPending();
+
+  regs.beginInstruction({ preserveCommittedRegs: false });
+  emitWriteReg32(regs, "eax", () => {
+    body.i32Const(0x2222_2222);
+    regs.emitReadReg32("eax");
+    body.i32Const(0);
+    body.select();
+  });
+  regs.commitPending();
+  regs.emitCommittedStore("eax");
+  body.end();
+
+  const state = await runRegisterStateBody(body);
+
+  strictEqual(state.eax, 0x1111_2211);
 });
 
 test("jit register state keeps copied prefix values stable after later destination partial writes", async () => {
@@ -768,33 +748,21 @@ test("jit exit store snapshots require captured register state", () => {
   );
 });
 
-test("jit register exit store snapshots freeze conditional writes before later mutation", async () => {
+test("jit register exit store snapshots freeze committed writes before later mutation", async () => {
   const body = new WasmFunctionBodyEncoder();
   const regs = createJitReg32State(body);
 
   regs.beginInstruction({ preserveCommittedRegs: false });
-  regs.emitWriteAliasIf(
-    fullAlias("eax"),
-    () => {
-      body.i32Const(1);
-    },
-    () => {
-      body.i32Const(0x2222_2222);
-    }
-  );
+  emitWriteReg32(regs, "eax", () => {
+    body.i32Const(0x2222_2222);
+  });
   regs.commitPending();
   const snapshot = regs.captureCommittedExitStores(["eax"]);
 
   regs.beginInstruction({ preserveCommittedRegs: false });
-  regs.emitWriteAliasIf(
-    fullAlias("eax"),
-    () => {
-      body.i32Const(1);
-    },
-    () => {
-      body.i32Const(0x3333_3333);
-    }
-  );
+  emitWriteReg32(regs, "eax", () => {
+    body.i32Const(0x3333_3333);
+  });
   regs.commitPending();
   regs.emitExitSnapshotStore("eax", snapshot);
   body.end();

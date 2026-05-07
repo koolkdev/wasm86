@@ -8,7 +8,7 @@ import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import type { JitIrBlock, JitIrOp } from "#backends/wasm/jit/ir/types.js";
 import { flagConditionSpecializationPass, specializeJitFlagConditions } from "#backends/wasm/jit/optimization/passes/flag-condition-specialization.js";
 import { runJitOptimizationPasses } from "#backends/wasm/jit/optimization/pass.js";
-import { c32, logic32LocalConditionBlock, startAddress, syntheticInstruction, v } from "./helpers.js";
+import { c32, logic32LocalConditionBlock, selectSet, startAddress, syntheticInstruction, v } from "./helpers.js";
 
 test("flag-condition-specialization emits direct cmp branch conditions", () => {
   const result = specializeJitFlagConditions({
@@ -30,7 +30,7 @@ test("flag-condition-specialization emits direct cmp branch conditions", () => {
   strictEqual(opNames(result.block).includes("conditionalJump"), true);
 });
 
-test("flag-condition-specialization emits direct cmp conditional writes", () => {
+test("flag-condition-specialization emits direct cmp select conditions", () => {
   const result = specializeJitFlagConditions({
     instructions: [
       syntheticInstruction([
@@ -39,7 +39,7 @@ test("flag-condition-specialization emits direct cmp conditional writes", () => 
         { op: "value.binary", type: "i32", operator: "sub", dst: v(2), a: v(0), b: v(1) },
         createIrFlagSetOp("sub", { left: v(0), right: v(1), result: v(2) }),
         { op: "aluFlags.condition", dst: v(3), cc: "E" },
-        { op: "set.if", condition: v(3), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(3), v(4)),
         { op: "next" }
       ])
     ]
@@ -63,7 +63,7 @@ test("flag-condition-specialization falls back when producer inputs are clobbere
         { op: "value.const", type: "i32", dst: v(0), value: 0 },
         { op: "set", target: { kind: "reg", reg: "eax" }, value: v(0) },
         { op: "aluFlags.condition", dst: v(1), cc: "E" },
-        { op: "set.if", condition: v(1), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(1), v(2)),
         { op: "next" }
       ], 1)
     ]
@@ -82,7 +82,7 @@ test("flag-condition-specialization handles supported result-only partial flag c
         { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) },
         createIrFlagSetOp("inc", { left: v(0), result: v(1) }),
         { op: "aluFlags.condition", dst: v(2), cc: "E" },
-        { op: "set.if", condition: v(2), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(2), v(3)),
         { op: "next" }
       ])
     ]
@@ -102,7 +102,7 @@ test("flag-condition-specialization rejects mixed-owner reads", () => {
         { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(1), b: c32(1) },
         createIrFlagSetOp("inc", { left: v(1), result: v(2) }),
         { op: "aluFlags.condition", dst: v(3), cc: "A" },
-        { op: "set.if", condition: v(3), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(3), v(4)),
         { op: "next" }
       ])
     ]
@@ -131,7 +131,7 @@ test("flag-condition-specialization emits result conditions from writeback regis
       ], 1),
       syntheticInstruction([
         { op: "aluFlags.condition", dst: v(0), cc: "E" },
-        { op: "set.if", condition: v(0), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(0), v(1)),
         { op: "next" }
       ], 2)
     ]
@@ -143,7 +143,7 @@ test("flag-condition-specialization emits result conditions from writeback regis
   strictEqual(conditionInstruction.ir.some((op) => op.op === "aluFlags.condition"), false);
   strictEqual(condition.producer, "inc");
   strictEqual(condition.cc, "E");
-  deepStrictEqual(condition.inputs, { result: v(1) });
+  deepStrictEqual(condition.inputs, { result: v(2) });
   strictEqual(conditionInstruction.ir.some((op) =>
     op.op === "get" && op.source.kind === "reg" && op.source.reg === "eax"
   ), true);
@@ -166,7 +166,7 @@ test("flag-condition-specialization falls back when writeback registers are clob
       ], 1),
       syntheticInstruction([
         { op: "aluFlags.condition", dst: v(0), cc: "E" },
-        { op: "set.if", condition: v(0), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(0), v(1)),
         { op: "next" }
       ], 2)
     ]
@@ -189,7 +189,7 @@ test("flag-condition-specialization emits sub equality from writeback registers"
       ]),
       syntheticInstruction([
         { op: "aluFlags.condition", dst: v(0), cc: "E" },
-        { op: "set.if", condition: v(0), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(0), v(1)),
         { op: "next" }
       ], 1)
     ]
@@ -199,7 +199,7 @@ test("flag-condition-specialization emits sub equality from writeback registers"
   strictEqual(result.flagConditionSpecialization.directConditionCount, 1);
   strictEqual(condition.producer, "sub");
   strictEqual(condition.cc, "E");
-  deepStrictEqual(condition.inputs, { result: v(1) });
+  deepStrictEqual(condition.inputs, { result: v(2) });
 });
 
 test("flag-condition-specialization handles decoded cmovcc writeback results", () => {
@@ -213,7 +213,7 @@ test("flag-condition-specialization handles decoded cmovcc writeback results", (
   strictEqual(result.flagConditionSpecialization.directConditionCount, 1);
   strictEqual(condition.producer, "inc");
   strictEqual(condition.cc, "E");
-  deepStrictEqual(condition.inputs, { result: v(2) });
+  deepStrictEqual(condition.inputs, { result: v(4) });
 });
 
 test("flag-condition-specialization supports logic condition variants", () => {
@@ -239,7 +239,7 @@ test("flag-condition-specialization supports logic condition variants", () => {
     strictEqual(result.flagConditionSpecialization.directConditionCount, 1, cc);
     strictEqual(condition.producer, "logic", cc);
     strictEqual(condition.cc, cc);
-    deepStrictEqual(condition.inputs, resultInput ? { result: v(1) } : {}, cc);
+    deepStrictEqual(condition.inputs, resultInput ? { result: v(2) } : {}, cc);
   }
 });
 
@@ -266,7 +266,7 @@ test("flag-condition-specialization is a validating repeatable optimization pass
         { op: "value.binary", type: "i32", operator: "and", dst: v(1), a: v(0), b: c32(0xff) },
         createIrFlagSetOp("logic", { result: v(1) }),
         { op: "aluFlags.condition", dst: v(2), cc: "E" },
-        { op: "set.if", condition: v(2), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(2), v(3)),
         { op: "next" }
       ])
     ]

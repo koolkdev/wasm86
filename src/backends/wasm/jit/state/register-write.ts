@@ -32,11 +32,6 @@ export type JitReg32WriteSource = (() => ValueWidth | void) | Readonly<{
 
 export type RegisterWriter = Readonly<{
   emitWriteAlias(alias: RegisterAlias, source: JitReg32WriteSource): void;
-  emitWriteAliasIf(
-    alias: RegisterAlias,
-    emitCondition: () => ValueWidth | void,
-    emitValue: () => ValueWidth | void
-  ): void;
 }>;
 
 export function createRegisterWriter(
@@ -46,8 +41,7 @@ export function createRegisterWriter(
   getPreserveCommittedRegs: () => boolean
 ): RegisterWriter {
   return {
-    emitWriteAlias,
-    emitWriteAliasIf
+    emitWriteAlias
   };
 
   function emitWriteAlias(alias: RegisterAlias, source: JitReg32WriteSource): void {
@@ -57,13 +51,12 @@ export function createRegisterWriter(
     const state = writableStateForReg(storage, alias.base, preserveCommittedRegs);
 
     if (alias.width === fullWidth) {
-      clearWritableMutableCell(storage, alias.base, preserveCommittedRegs);
-
       if (writeSource.prefixSource !== undefined) {
         if (writeSource.prefixSource.width !== fullWidth) {
           throw new Error(`full-register writes need a 32-bit prefix source, got ${writeSource.prefixSource.width}`);
         }
 
+        clearWritableMutableCell(storage, alias.base, preserveCommittedRegs);
         recordRegValueSource(state, writeSource.prefixSource);
         return;
       }
@@ -72,6 +65,7 @@ export function createRegisterWriter(
       const local = body.addLocal(wasmValueType.i32);
 
       body.localSet(local);
+      clearWritableMutableCell(storage, alias.base, preserveCommittedRegs);
       recordStableRegValue(state, local, fullWidth);
       return;
     }
@@ -102,29 +96,6 @@ export function createRegisterWriter(
     }
 
     recordStableRegValue(state, valueLocal, alias.width);
-  }
-
-  function emitWriteAliasIf(
-    alias: RegisterAlias,
-    emitCondition: () => ValueWidth | void,
-    emitValue: () => ValueWidth | void
-  ): void {
-    const preserveCommittedRegs = getPreserveCommittedRegs();
-    const local = materializer.ensureMutableCell(alias.base, preserveCommittedRegs);
-
-    emitCleanValueForFullUse(body, emitCondition() ?? undefined);
-    body.ifBlock();
-
-    if (alias.width === fullWidth) {
-      emitCleanValueForFullUse(body, emitValue() ?? undefined);
-      body.localSet(local);
-    } else {
-      const valueLocal = localForMaskedValue(alias.width, emitValue);
-
-      emitStoreAliasValueIntoFullLocal(body, local, alias, valueLocal);
-    }
-
-    body.endBlock();
   }
 
   function localForMaskedValue(width: OperandWidth, emitValue: () => ValueWidth | void): number {

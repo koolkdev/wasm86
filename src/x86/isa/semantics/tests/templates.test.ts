@@ -26,11 +26,13 @@ test("mov semantic gets source, sets destination, and falls through", () => {
   ]);
 });
 
-test("cmov semantic reads source unconditionally and conditionally sets destination", () => {
+test("cmov semantic reads source unconditionally and selects the destination value", () => {
   deepStrictEqual(buildIr(cmovSemantic("E")), [
     { op: "get", dst: v(0), source: op(1), accessWidth: 32 },
     { op: "aluFlags.condition", dst: v(1), cc: "E" },
-    { op: "set.if", condition: v(1), target: op(0), value: v(0), accessWidth: 32 },
+    { op: "get", dst: v(2), source: op(0), accessWidth: 32 },
+    { op: "value.select", type: "i32", dst: v(3), condition: v(1), whenTrue: v(0), whenFalse: v(2) },
+    { op: "set", target: op(0), value: v(3), accessWidth: 32 },
     { op: "next" }
   ]);
 });

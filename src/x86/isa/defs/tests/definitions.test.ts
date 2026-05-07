@@ -105,7 +105,7 @@ test("multi-byte nop forms use slash-zero ModRM operands without side effects", 
   deepStrictEqual(operandSize.operands, [{ kind: "modrm.rm", type: "rm16" }]);
 });
 
-test("cmovcc forms are concrete specs with conditional-write semantics", () => {
+test("cmovcc forms are concrete specs with select-value semantics", () => {
   const word = instruction("cmove.r16_rm16");
   const spec = instruction("cmove.r32_rm32");
 
@@ -127,10 +127,23 @@ test("cmovcc forms are concrete specs with conditional-write semantics", () => {
 
   deepStrictEqual(program[1], { op: "aluFlags.condition", dst: { kind: "var", id: 1 }, cc: "E" });
   deepStrictEqual(program[2], {
-    op: "set.if",
+    op: "get",
+    dst: { kind: "var", id: 2 },
+    source: { kind: "operand", index: 0 },
+    accessWidth: 32
+  });
+  deepStrictEqual(program[3], {
+    op: "value.select",
+    type: "i32",
+    dst: { kind: "var", id: 3 },
     condition: { kind: "var", id: 1 },
+    whenTrue: { kind: "var", id: 0 },
+    whenFalse: { kind: "var", id: 2 }
+  });
+  deepStrictEqual(program[4], {
+    op: "set",
     target: { kind: "operand", index: 0 },
-    value: { kind: "var", id: 0 },
+    value: { kind: "var", id: 3 },
     accessWidth: 32
   });
   strictEqual(program.at(-1)?.op, "next");
@@ -143,10 +156,23 @@ test("cmovcc forms are concrete specs with conditional-write semantics", () => {
     accessWidth: 16
   });
   deepStrictEqual(wordProgram[2], {
-    op: "set.if",
+    op: "get",
+    dst: { kind: "var", id: 2 },
+    source: { kind: "operand", index: 0 },
+    accessWidth: 16
+  });
+  deepStrictEqual(wordProgram[3], {
+    op: "value.select",
+    type: "i32",
+    dst: { kind: "var", id: 3 },
     condition: { kind: "var", id: 1 },
+    whenTrue: { kind: "var", id: 0 },
+    whenFalse: { kind: "var", id: 2 }
+  });
+  deepStrictEqual(wordProgram[4], {
+    op: "set",
     target: { kind: "operand", index: 0 },
-    value: { kind: "var", id: 0 },
+    value: { kind: "var", id: 3 },
     accessWidth: 16
   });
 });

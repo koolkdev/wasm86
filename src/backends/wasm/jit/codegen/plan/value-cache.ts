@@ -174,11 +174,6 @@ function valueUsesForOp(
 
       return [...expressionUses, ...retainedUses];
     }
-    case "set.if":
-      return [
-        ...valueUsesForValue(instruction, op.condition, state),
-        ...valueUsesForValue(instruction, op.value, state)
-      ];
     case "flags.set":
       return Object.values(op.inputs).flatMap((value) =>
         retainedValueUsesForValueRef(value, state)
@@ -508,7 +503,6 @@ function opWriteReg(
 ): Reg32 | undefined {
   switch (op.op) {
     case "set":
-    case "set.if":
       return jitInstructionWrittenReg(instruction, op.target, op.accessWidth);
     default:
       return undefined;

@@ -6,7 +6,7 @@ import { IR_ALU_FLAG_MASK, IR_ALU_FLAG_MASKS } from "#x86/ir/model/flag-effects.
 import { analyzeJitFlagLiveness } from "#backends/wasm/jit/optimization/analyses/flag-liveness.js";
 import { runJitOptimizationPasses } from "#backends/wasm/jit/optimization/pass.js";
 import { flagDcePass, pruneDeadJitFlagSets } from "#backends/wasm/jit/optimization/passes/flag-dce.js";
-import { c32, syntheticInstruction, v } from "./helpers.js";
+import { c32, selectSet, syntheticInstruction, v } from "./helpers.js";
 
 test("flag-dce removes overwritten flag producers", () => {
   const result = pruneDeadJitFlagSets({
@@ -18,7 +18,7 @@ test("flag-dce removes overwritten flag producers", () => {
         { op: "value.binary", type: "i32", operator: "sub", dst: v(2), a: v(1), b: c32(1) },
         createIrFlagSetOp("sub", { left: v(1), right: c32(1), result: v(2) }),
         { op: "aluFlags.condition", dst: v(3), cc: "E" },
-        { op: "set.if", condition: v(3), target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        ...selectSet(v(3), v(4)),
         { op: "next" }
       ])
     ]
