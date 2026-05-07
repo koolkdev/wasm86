@@ -212,6 +212,34 @@ const fixtures: readonly DecoderFixture[] = [
     id: "cmovne.r32_rm32"
   },
   {
+    name: "cmovne dx, [ebx] with operand-size override",
+    bytes: [0x66, 0x0f, 0x45, 0x13],
+    mnemonic: "cmovne",
+    operands: [reg("dx"), mem(16, { base: "ebx", scale: 1, disp: 0 })],
+    id: "cmovne.r16_rm16"
+  },
+  {
+    name: "sete al",
+    bytes: [0x0f, 0x94, 0xc0],
+    mnemonic: "sete",
+    operands: [reg("al")],
+    id: "sete.rm8"
+  },
+  {
+    name: "setne ah",
+    bytes: [0x0f, 0x95, 0xc4],
+    mnemonic: "setne",
+    operands: [reg("ah")],
+    id: "setne.rm8"
+  },
+  {
+    name: "sete [ebx]",
+    bytes: [0x0f, 0x94, 0x03],
+    mnemonic: "sete",
+    operands: [mem(8, { base: "ebx", scale: 1, disp: 0 })],
+    id: "sete.rm8"
+  },
+  {
     name: "lea eax, [ebx + ecx*4 + 0x10]",
     bytes: [0x8d, 0x44, 0x8b, 0x10],
     mnemonic: "lea",

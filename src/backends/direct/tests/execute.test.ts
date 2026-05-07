@@ -73,6 +73,60 @@ test("cmovcc memory source faults even when condition is false", () => {
   strictEqual(state.instructionCount, 0);
 });
 
+test("cmovcc r16 memory source faults even when condition is false", () => {
+  const memory = new ArrayBufferGuestMemory(0x40);
+  const state = createCpuState({ ebx: 0x100, edx: 0xaaaa_1111, eip: startAddress });
+
+  setFlag(state, "ZF", true);
+  const result = execute(state, [0x66, 0x0f, 0x45, 0x13], memory);
+
+  strictEqual(result.stopReason, StopReason.MEMORY_FAULT);
+  strictEqual(result.faultAddress, 0x100);
+  strictEqual(state.edx, 0xaaaa_1111);
+  strictEqual(state.instructionCount, 0);
+});
+
+test("executes register-only setcc without modifying flags", () => {
+  const flags = 0x8d5;
+  const taken = createCpuState({ eax: 0x1234_5678, eflags: flags, eip: startAddress });
+  const notTaken = createCpuState({ eax: 0x1234_5678, eflags: flags, eip: startAddress });
+  const highByte = createCpuState({ eax: 0x1234_5678, eflags: flags, eip: startAddress });
+
+  setFlag(taken, "ZF", true);
+  setFlag(notTaken, "ZF", false);
+  setFlag(highByte, "ZF", false);
+
+  execute(taken, [0x0f, 0x94, 0xc0]);
+  execute(notTaken, [0x0f, 0x94, 0xc0]);
+  execute(highByte, [0x0f, 0x95, 0xc4]);
+
+  strictEqual(taken.eax, 0x1234_5601);
+  strictEqual(notTaken.eax, 0x1234_5600);
+  strictEqual(highByte.eax, 0x1234_0178);
+  strictEqual(getFlag(taken, "ZF"), true);
+  strictEqual(getFlag(notTaken, "ZF"), false);
+  strictEqual(getFlag(highByte, "ZF"), false);
+});
+
+test("executes memory setcc as a selected byte store", () => {
+  const memory = new ArrayBufferGuestMemory(0x40);
+  const taken = createCpuState({ ebx: 0x20, eip: startAddress });
+  const notTaken = createCpuState({ ebx: 0x21, eip: startAddress });
+
+  setFlag(taken, "ZF", true);
+  setFlag(notTaken, "ZF", false);
+
+  deepStrictEqual(memory.writeU8(0x20, 0xaa), { ok: true });
+  deepStrictEqual(memory.writeU8(0x21, 0xaa), { ok: true });
+  execute(taken, [0x0f, 0x94, 0x03], memory);
+  execute(notTaken, [0x0f, 0x94, 0x03], memory);
+
+  deepStrictEqual(memory.readU8(0x20), { ok: true, value: 1 });
+  deepStrictEqual(memory.readU8(0x21), { ok: true, value: 0 });
+  strictEqual(getFlag(taken, "ZF"), true);
+  strictEqual(getFlag(notTaken, "ZF"), false);
+});
+
 test("executes mov r/m32, imm32", () => {
   const state = createCpuState({ eax: 0, eip: startAddress });
   const result = execute(state, [0xc7, 0xc0, 0x78, 0x56, 0x34, 0x12]);

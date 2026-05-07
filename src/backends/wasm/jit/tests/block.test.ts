@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
-import type { StorageRef } from "#x86/ir/model/types.js";
+import type { StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import { createCpuState, getFlag } from "#x86/state/cpu-state.js";
 import { stateOffset, wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
@@ -1442,6 +1442,106 @@ test("jit IR block keeps cmovcc source memory faults unconditional", async () =>
   deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x10000, detail: 4 });
 });
 
+test("jit IR block keeps cmovcc r16 source memory faults unconditional", async () => {
+  const result = await runJitIrBlock(
+    [0x66, 0x0f, 0x45, 0x13], // cmovne dx, [ebx]
+    createCpuState({
+      ebx: 0x10000,
+      edx: 0xaaaa_1111,
+      eflags: preservedEflags | zeroFlag,
+      eip: startAddress
+    })
+  );
+
+  strictEqual(result.state.edx, 0xaaaa_1111);
+  strictEqual(result.state.eip, startAddress);
+  strictEqual(result.state.instructionCount, 0);
+  deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x10000, detail: 2 });
+});
+
+test("jit IR block emits setcc through a select value and normal write", async () => {
+  const instruction = ok(decodeBytes([0x0f, 0x94, 0xc0], startAddress));
+  const ir = buildJitIrBlock([instruction]).instructions[0]!.ir;
+  const selectIndex = ir.findIndex((op) => op.op === "value.select");
+  const setIndex = ir.findIndex((op) => op.op === "set");
+  const opcodes = jitBlockBodyOpcodes(buildJitIrBlock([instruction]));
+  const taken = await runJitIrBlock(
+    [0x0f, 0x94, 0xc0], // sete al
+    createCpuState({ eax: 0x1234_5678, eflags: preservedEflags | zeroFlag, eip: startAddress })
+  );
+  const notTaken = await runJitIrBlock(
+    [0x0f, 0x94, 0xc0], // sete al
+    createCpuState({ eax: 0x1234_5678, eflags: preservedEflags, eip: startAddress })
+  );
+  const highByte = await runJitIrBlock(
+    [0x0f, 0x95, 0xc4], // setne ah
+    createCpuState({ eax: 0x1234_5678, eflags: preservedEflags, eip: startAddress })
+  );
+
+  strictEqual(selectIndex !== -1 && setIndex === selectIndex + 1, true);
+  strictEqual(ir.some((op) => op.op === "set.if"), false);
+  strictEqual(ir[selectIndex]?.op === "value.select" ? constValue(ir[selectIndex].whenTrue) : undefined, 1);
+  strictEqual(ir[selectIndex]?.op === "value.select" ? constValue(ir[selectIndex].whenFalse) : undefined, 0);
+  strictEqual(ir[setIndex]?.op === "set" ? ir[setIndex].accessWidth : undefined, 8);
+  strictEqual(opcodes.includes(wasmOpcode.select), true);
+
+  strictEqual(taken.state.eax, 0x1234_5601);
+  strictEqual(taken.state.eflags, (preservedEflags | zeroFlag) >>> 0);
+  strictEqual(taken.state.instructionCount, 1);
+  strictEqual(notTaken.state.eax, 0x1234_5600);
+  strictEqual(notTaken.state.eflags, preservedEflags);
+  strictEqual(notTaken.state.instructionCount, 1);
+  strictEqual(highByte.state.eax, 0x1234_0178);
+  strictEqual(highByte.state.eflags, preservedEflags);
+  strictEqual(highByte.state.instructionCount, 1);
+});
+
+test("jit IR block emits memory setcc as a selected byte store", async () => {
+  const taken = await runJitIrBlock(
+    [0x0f, 0x94, 0x03], // sete [ebx]
+    createCpuState({ ebx: 0x20, eflags: preservedEflags | zeroFlag, eip: startAddress }),
+    [{ address: 0x20, bytes: [0xaa] }]
+  );
+  const notTaken = await runJitIrBlock(
+    [0x0f, 0x94, 0x03], // sete [ebx]
+    createCpuState({ ebx: 0x20, eflags: preservedEflags, eip: startAddress }),
+    [{ address: 0x20, bytes: [0xaa] }]
+  );
+
+  strictEqual(taken.guestView.getUint8(0x20), 1);
+  strictEqual(taken.state.eflags, (preservedEflags | zeroFlag) >>> 0);
+  strictEqual(taken.state.instructionCount, 1);
+  strictEqual(notTaken.guestView.getUint8(0x20), 0);
+  strictEqual(notTaken.state.eflags, preservedEflags);
+  strictEqual(notTaken.state.instructionCount, 1);
+});
+
+test("jit IR block specializes setcc conditions from local flag producers", async () => {
+  const cmp = ok(decodeBytes([0x39, 0xd8], startAddress));
+  const sete = ok(decodeBytes([0x0f, 0x94, 0xc0], cmp.nextEip));
+  const ir = codegenIr(buildJitIrBlock([cmp, sete]));
+  const equal = await runJitIrBlock(
+    [
+      0x39, 0xd8, // cmp eax, ebx
+      0x0f, 0x94, 0xc0 // sete al
+    ],
+    createCpuState({ eax: 0x1234_5678, ebx: 0x1234_5678, eflags: preservedEflags, eip: startAddress })
+  );
+  const notEqual = await runJitIrBlock(
+    [
+      0x39, 0xd8, // cmp eax, ebx
+      0x0f, 0x94, 0xc0 // sete al
+    ],
+    createCpuState({ eax: 0x1234_5678, ebx: 0x1234_5679, eflags: preservedEflags, eip: startAddress })
+  );
+
+  strictEqual(ir.some((op) => op.op === "flagProducer.condition"), true);
+  strictEqual(equal.state.eax, 0x1234_5601);
+  strictEqual(equal.state.instructionCount, 2);
+  strictEqual(notEqual.state.eax, 0x1234_5600);
+  strictEqual(notEqual.state.instructionCount, 2);
+});
+
 test("jit IR block freezes conditional register values before later full-register copies", async () => {
   const result = await runJitIrBlock(
     [
@@ -2044,6 +2144,10 @@ function codegenIr(block: ReturnType<typeof buildJitIrBlock>): readonly JitIrOp[
   );
 }
 
+function constValue(value: ValueRef): number | undefined {
+  return value.kind === "const" ? value.value : undefined;
+}
+
 function littleEndianBytes(value: number, width: 8 | 16 | 32): readonly number[] {
   const byteCount = width / 8;
 
@@ -2257,6 +2361,7 @@ function memoryAccesses(functionBody: Uint8Array<ArrayBuffer>): readonly WasmMem
       }
       case wasmOpcode.else:
       case wasmOpcode.return:
+      case wasmOpcode.select:
       case wasmOpcode.i32Eqz:
       case wasmOpcode.i32LtU:
       case wasmOpcode.i32GtU:

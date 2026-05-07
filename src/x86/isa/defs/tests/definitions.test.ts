@@ -9,7 +9,7 @@ import type { InstructionSpec } from "#x86/isa/schema/types.js";
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 198);
+  strictEqual(X86_32_CORE.instructions.length, 230);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -32,7 +32,9 @@ test("x86-32 core registers the initial instruction surface", () => {
     "movsx.r16_rm8",
     "movsx.r32_rm8",
     "movsx.r32_rm16",
+    "cmove.r16_rm16",
     "cmove.r32_rm32",
+    "sete.rm8",
     "xchg.rm8_r8",
     "xchg.rm16_r16",
     "xchg.rm32_r32",
@@ -104,7 +106,15 @@ test("multi-byte nop forms use slash-zero ModRM operands without side effects", 
 });
 
 test("cmovcc forms are concrete specs with conditional-write semantics", () => {
+  const word = instruction("cmove.r16_rm16");
   const spec = instruction("cmove.r32_rm32");
+
+  deepStrictEqual(word.prefixes, { operandSize: "override" });
+  deepStrictEqual(word.opcode, [0x0f, 0x44]);
+  deepStrictEqual(word.operands, [
+    { kind: "modrm.reg", type: "r16" },
+    { kind: "modrm.rm", type: "rm16" }
+  ]);
 
   deepStrictEqual(spec.opcode, [0x0f, 0x44]);
   deepStrictEqual(spec.operands, [
@@ -124,6 +134,49 @@ test("cmovcc forms are concrete specs with conditional-write semantics", () => {
     accessWidth: 32
   });
   strictEqual(program.at(-1)?.op, "next");
+
+  const wordProgram = buildIr(word.semantics as SemanticTemplate);
+  deepStrictEqual(wordProgram[0], {
+    op: "get",
+    dst: { kind: "var", id: 0 },
+    source: { kind: "operand", index: 1 },
+    accessWidth: 16
+  });
+  deepStrictEqual(wordProgram[2], {
+    op: "set.if",
+    condition: { kind: "var", id: 1 },
+    target: { kind: "operand", index: 0 },
+    value: { kind: "var", id: 0 },
+    accessWidth: 16
+  });
+});
+
+test("setcc forms use select-value semantics for register or memory destinations", () => {
+  const spec = instruction("sete.rm8");
+
+  deepStrictEqual(spec.opcode, [0x0f, 0x94]);
+  strictEqual(spec.modrm, undefined);
+  deepStrictEqual(spec.operands, [{ kind: "modrm.rm", type: "rm8" }]);
+  deepStrictEqual(spec.format, { syntax: "sete {0}" });
+
+  deepStrictEqual(buildIr(spec.semantics as SemanticTemplate), [
+    { op: "aluFlags.condition", dst: { kind: "var", id: 0 }, cc: "E" },
+    {
+      op: "value.select",
+      type: "i32",
+      dst: { kind: "var", id: 1 },
+      condition: { kind: "var", id: 0 },
+      whenTrue: { kind: "const", type: "i32", value: 1 },
+      whenFalse: { kind: "const", type: "i32", value: 0 }
+    },
+    {
+      op: "set",
+      target: { kind: "operand", index: 0 },
+      value: { kind: "var", id: 1 },
+      accessWidth: 8
+    },
+    { op: "next" }
+  ]);
 });
 
 test("leave is a no-operand stack frame instruction", () => {

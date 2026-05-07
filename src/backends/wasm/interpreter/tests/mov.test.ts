@@ -17,6 +17,8 @@ import {
   writeGuestBytes
 } from "./support.js";
 
+const zeroFlag = 1 << 6;
+
 test("executes MOV eax, imm32", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const initialState = createCpuState({
@@ -207,6 +209,109 @@ test("executes MOVZX and MOVSX memory forms", async () => {
   strictEqual(signExtend.state.eax, 0xffff_8001);
   strictEqual(signExtend.state.eflags, flags);
   assertCompletedInstruction(signExtend.state, startAddress + 3, 8);
+});
+
+test("executes CMOVcc r16 as a conditional partial register write", async () => {
+  const taken = await executeInstruction(
+    [0x66, 0x0f, 0x44, 0xd1],
+    createCpuState({
+      ecx: 0x3333_2222,
+      edx: 0xaaaa_1111,
+      eflags: zeroFlag,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+  const notTaken = await executeInstruction(
+    [0x66, 0x0f, 0x44, 0xd1],
+    createCpuState({
+      ecx: 0x3333_2222,
+      edx: 0xaaaa_1111,
+      eflags: 0,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+
+  assertSingleInstructionExit(taken.exit);
+  strictEqual(taken.state.edx, 0xaaaa_2222);
+  strictEqual(taken.state.eflags, zeroFlag);
+  assertCompletedInstruction(taken.state, startAddress + 4, 8);
+
+  assertSingleInstructionExit(notTaken.exit);
+  strictEqual(notTaken.state.edx, 0xaaaa_1111);
+  strictEqual(notTaken.state.eflags, 0);
+  assertCompletedInstruction(notTaken.state, startAddress + 4, 8);
+});
+
+test("CMOVcc r16 memory source faults even when condition is false", async () => {
+  const initial = createCpuState({
+    ebx: 0x1_0000,
+    edx: 0xaaaa_1111,
+    eflags: zeroFlag,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const { exit, state } = await executeInstruction([0x66, 0x0f, 0x45, 0x13], initial);
+
+  deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x1_0000, detail: 2 });
+  strictEqual(state.edx, initial.edx);
+  strictEqual(state.eflags, initial.eflags);
+  strictEqual(state.eip, initial.eip);
+  strictEqual(state.instructionCount, initial.instructionCount);
+});
+
+test("executes register-only SETcc without modifying flags", async () => {
+  const taken = await executeInstruction(
+    [0x0f, 0x94, 0xc0],
+    createCpuState({ eax: 0x1234_5678, eflags: zeroFlag, eip: startAddress, instructionCount: 7 })
+  );
+  const notTaken = await executeInstruction(
+    [0x0f, 0x94, 0xc0],
+    createCpuState({ eax: 0x1234_5678, eflags: 0, eip: startAddress, instructionCount: 7 })
+  );
+  const highByte = await executeInstruction(
+    [0x0f, 0x95, 0xc4],
+    createCpuState({ eax: 0x1234_5678, eflags: 0, eip: startAddress, instructionCount: 7 })
+  );
+
+  assertSingleInstructionExit(taken.exit);
+  strictEqual(taken.state.eax, 0x1234_5601);
+  strictEqual(taken.state.eflags, zeroFlag);
+  assertCompletedInstruction(taken.state, startAddress + 3, 8);
+
+  assertSingleInstructionExit(notTaken.exit);
+  strictEqual(notTaken.state.eax, 0x1234_5600);
+  strictEqual(notTaken.state.eflags, 0);
+  assertCompletedInstruction(notTaken.state, startAddress + 3, 8);
+
+  assertSingleInstructionExit(highByte.exit);
+  strictEqual(highByte.state.eax, 0x1234_0178);
+  strictEqual(highByte.state.eflags, 0);
+  assertCompletedInstruction(highByte.state, startAddress + 3, 8);
+});
+
+test("executes memory SETcc as a selected byte store", async () => {
+  const taken = await executeInstruction(
+    [0x0f, 0x94, 0x03],
+    createCpuState({ ebx: 0x20, eflags: zeroFlag, eip: startAddress, instructionCount: 7 }),
+    [{ address: 0x20, bytes: [0xaa] }]
+  );
+  const notTaken = await executeInstruction(
+    [0x0f, 0x94, 0x03],
+    createCpuState({ ebx: 0x20, eflags: 0, eip: startAddress, instructionCount: 7 }),
+    [{ address: 0x20, bytes: [0xaa] }]
+  );
+
+  assertSingleInstructionExit(taken.exit);
+  strictEqual(taken.guestView.getUint8(0x20), 1);
+  strictEqual(taken.state.eflags, zeroFlag);
+  assertCompletedInstruction(taken.state, startAddress + 3, 8);
+
+  assertSingleInstructionExit(notTaken.exit);
+  strictEqual(notTaken.guestView.getUint8(0x20), 0);
+  strictEqual(notTaken.state.eflags, 0);
+  assertCompletedInstruction(notTaken.state, startAddress + 3, 8);
 });
 
 test("executes multi-byte NOP without reading memory or modifying flags", async () => {
