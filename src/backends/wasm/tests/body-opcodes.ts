@@ -93,6 +93,7 @@ export function wasmBodyOpcodes(functionBody: Uint8Array<ArrayBuffer>): readonly
         break;
       case wasmOpcode.else:
       case wasmOpcode.return:
+      case wasmOpcode.select:
       case wasmOpcode.i32Eqz:
       case wasmOpcode.i32LtU:
       case wasmOpcode.i32GtU:
@@ -250,6 +251,7 @@ export function wasmBodyMemoryAccesses(functionBody: Uint8Array<ArrayBuffer>): r
         break;
       case wasmOpcode.else:
       case wasmOpcode.return:
+      case wasmOpcode.select:
       case wasmOpcode.i32Eqz:
       case wasmOpcode.i32LtU:
       case wasmOpcode.i32GtU:

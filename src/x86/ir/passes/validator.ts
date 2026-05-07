@@ -84,6 +84,11 @@ function validateOpUses(
     case "value.unary":
       validateValueRef(op.value, definedVars);
       break;
+    case "value.select":
+      validateValueRef(op.condition, definedVars);
+      validateValueRef(op.whenTrue, definedVars);
+      validateValueRef(op.whenFalse, definedVars);
+      break;
     case "flags.set":
       validateFlagSetDescriptor(op, definedVars);
       break;

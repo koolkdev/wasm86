@@ -118,6 +118,15 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
     case "value.unary":
       setVar(context, op.dst, evalI32Unary(op.operator, evalValueRef(context, op.value)));
       return undefined;
+    case "value.select":
+      setVar(
+        context,
+        op.dst,
+        evalValueRef(context, op.condition) !== 0
+          ? evalValueRef(context, op.whenTrue)
+          : evalValueRef(context, op.whenFalse)
+      );
+      return undefined;
     case "flags.set":
       setFlags(context, op);
       return undefined;

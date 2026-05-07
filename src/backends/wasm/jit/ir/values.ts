@@ -28,11 +28,20 @@ export type JitUnaryValue = Readonly<{
   value: JitValue;
 }>;
 
+export type JitSelectValue = Readonly<{
+  kind: "value.select";
+  type: IrValueType;
+  condition: JitValue;
+  whenTrue: JitValue;
+  whenFalse: JitValue;
+}>;
+
 export type JitValue =
   | Readonly<{ kind: "const"; type: IrValueType; value: number }>
   | Readonly<{ kind: "reg"; reg: Reg32 }>
   | JitUnaryValue
-  | JitBinaryValue;
+  | JitBinaryValue
+  | JitSelectValue;
 
 export function jitValueForStorage(
   storage: StorageRef,
@@ -159,6 +168,10 @@ export function jitValueReadsReg(value: JitValue, reg: Reg32): boolean {
       return jitValueReadsReg(value.a, reg) || jitValueReadsReg(value.b, reg);
     case "value.unary":
       return jitValueReadsReg(value.value, reg);
+    case "value.select":
+      return jitValueReadsReg(value.condition, reg) ||
+        jitValueReadsReg(value.whenTrue, reg) ||
+        jitValueReadsReg(value.whenFalse, reg);
     case "const":
     case "reg":
       return false;
@@ -181,6 +194,10 @@ export function jitValueUsesSymbolicReg(value: JitValue, reg: Reg32): boolean {
       return jitValueUsesSymbolicReg(value.a, reg) || jitValueUsesSymbolicReg(value.b, reg);
     case "value.unary":
       return jitValueUsesSymbolicReg(value.value, reg);
+    case "value.select":
+      return jitValueUsesSymbolicReg(value.condition, reg) ||
+        jitValueUsesSymbolicReg(value.whenTrue, reg) ||
+        jitValueUsesSymbolicReg(value.whenFalse, reg);
     case "const":
       return false;
     case "reg":
@@ -209,6 +226,14 @@ export function jitValuesEqual(a: JitValue, b: JitValue): boolean {
         a.operator === unary.operator &&
         jitValuesEqual(a.value, unary.value);
     }
+    case "value.select": {
+      const select = b as JitSelectValue;
+
+      return a.type === select.type &&
+        jitValuesEqual(a.condition, select.condition) &&
+        jitValuesEqual(a.whenTrue, select.whenTrue) &&
+        jitValuesEqual(a.whenFalse, select.whenFalse);
+    }
     case "const": {
       const constant = b as Extract<JitValue, { kind: "const" }>;
 
@@ -225,6 +250,8 @@ export function jitValueCost(value: JitValue): number {
       return 1 + jitValueCost(value.a) + jitValueCost(value.b);
     case "value.unary":
       return 1 + jitValueCost(value.value);
+    case "value.select":
+      return 1 + jitValueCost(value.condition) + jitValueCost(value.whenTrue) + jitValueCost(value.whenFalse);
     case "const":
     case "reg":
       return 1;

@@ -238,6 +238,12 @@ function childValueUsesForValue(
       ];
     case "value.unary":
       return valueUsesForValue(instruction, value.value, state);
+    case "value.select":
+      return [
+        ...valueUsesForValue(instruction, value.condition, state),
+        ...valueUsesForValue(instruction, value.whenTrue, state),
+        ...valueUsesForValue(instruction, value.whenFalse, state)
+      ];
     case "flagProducer.condition":
       return Object.values(value.inputs).flatMap((input) =>
         valueUsesForValueRef(input, state)
@@ -464,6 +470,15 @@ function jitValueForExpressionUntracked(
       return inner === undefined
         ? undefined
         : { kind: value.kind, type: value.type, operator: value.operator, value: inner };
+    }
+    case "value.select": {
+      const condition = jitValueForExpression(instruction, value.condition, state);
+      const whenTrue = jitValueForExpression(instruction, value.whenTrue, state);
+      const whenFalse = jitValueForExpression(instruction, value.whenFalse, state);
+
+      return condition === undefined || whenTrue === undefined || whenFalse === undefined
+        ? undefined
+        : { kind: value.kind, type: value.type, condition, whenTrue, whenFalse };
     }
     case "nextEip":
     case "aluFlags.condition":

@@ -43,3 +43,21 @@ test("IR op semantics exposes value and storage uses with roles", () => {
   deepStrictEqual(irOpStorageReads(op), []);
   deepStrictEqual(irOpStorageWrites(op), [target]);
 });
+
+test("IR select values expose their selector as a condition use", () => {
+  const op: IrOp = {
+    op: "value.select",
+    type: "i32",
+    dst: irVar(3),
+    condition: irVar(0),
+    whenTrue: irVar(1),
+    whenFalse: irVar(2)
+  };
+
+  deepStrictEqual(irOpValueUses(op), [
+    { value: irVar(0), role: "condition" },
+    { value: irVar(1), role: "value" },
+    { value: irVar(2), role: "value" }
+  ]);
+  deepStrictEqual(irOpResult(op), { kind: "value", dst: irVar(3), sideEffect: "none" });
+});

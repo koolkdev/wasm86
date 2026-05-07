@@ -119,6 +119,11 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  select(): this {
+    this.#writeInstruction(wasmOpcode.select);
+    return this;
+  }
+
   callFunction(functionIndex: number): this {
     this.#writeInstruction(wasmOpcode.call);
     this.#instructions.writeU32(functionIndex);

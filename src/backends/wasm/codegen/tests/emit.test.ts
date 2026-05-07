@@ -61,6 +61,21 @@ test("emitIrToWasm emits set.if as a conditional write", async () => {
   strictEqual(opcodes.includes(wasmOpcode.if), true);
 });
 
+test("emitIrToWasm emits value.select as Wasm select", async () => {
+  const program = buildIr((s) => {
+    const value = s.i32Select(s.get(s.operand(1)), s.get(s.operand(0)), 0x55);
+
+    s.set(s.reg("eax"), value);
+  });
+  const run = await instantiateEmittedBinary(program);
+  const opcodes = emittedBodyOpcodes(program);
+
+  strictEqual(run(0x33, 1), 0x33);
+  strictEqual(run(0x33, 0), 0x55);
+  strictEqual(opcodes.includes(wasmOpcode.select), true);
+  strictEqual(opcodes.includes(wasmOpcode.if), false);
+});
+
 test("emitIrToWasm uses planned slots for non-overlapping IR locals", () => {
   const scratch = emitWithTrackingScratch(
     buildIr((s) => {

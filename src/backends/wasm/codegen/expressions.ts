@@ -49,6 +49,13 @@ export type IrValueExpr =
       type: IrValueType;
       operator: IrUnaryOperator;
       value: IrValueExpr;
+    }>
+  | Readonly<{
+      kind: "value.select";
+      type: IrValueType;
+      condition: IrValueExpr;
+      whenTrue: IrValueExpr;
+      whenFalse: IrValueExpr;
     }>;
 
 export type IrSetExprOp = Readonly<{
@@ -183,6 +190,15 @@ class ExpressionBuilder {
             type: op.type,
             operator: op.operator,
             value: this.#valueExpr(op.value)
+          }, true);
+          break;
+        case "value.select":
+          this.#defineValue(op.dst, {
+            kind: "value.select",
+            type: op.type,
+            condition: this.#valueExpr(op.condition),
+            whenTrue: this.#valueExpr(op.whenTrue),
+            whenFalse: this.#valueExpr(op.whenFalse)
           }, true);
           break;
         case "aluFlags.condition":
@@ -372,6 +388,11 @@ function countVarUses(block: IrExpressionInputBlock): Map<number, number> {
       case "value.unary":
         countValueUse(counts, op.value);
         break;
+      case "value.select":
+        countValueUse(counts, op.condition);
+        countValueUse(counts, op.whenTrue);
+        countValueUse(counts, op.whenFalse);
+        break;
       case "flags.set":
         for (const value of Object.values(op.inputs)) {
           countValueUse(counts, value);
@@ -433,6 +454,10 @@ function opUsesVar(op: IrExpressionInputOp, id: number): boolean {
       return valueUsesVar(op.a, id) || valueUsesVar(op.b, id);
     case "value.unary":
       return valueUsesVar(op.value, id);
+    case "value.select":
+      return valueUsesVar(op.condition, id) ||
+        valueUsesVar(op.whenTrue, id) ||
+        valueUsesVar(op.whenFalse, id);
     case "flags.set":
       return Object.values(op.inputs).some((value) => valueUsesVar(value, id));
     case "flags.materialize":

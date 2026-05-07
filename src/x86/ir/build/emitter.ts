@@ -146,6 +146,20 @@ export class IrEmitter implements IrBuilder {
     return dst;
   }
 
+  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef {
+    const dst = this.#allocVar();
+
+    this.#push({
+      op: "value.select",
+      type: "i32",
+      dst,
+      condition: toValueRef(condition),
+      whenTrue: toValueRef(whenTrue),
+      whenFalse: toValueRef(whenFalse)
+    });
+    return dst;
+  }
+
   i32Add(a: ValueInput, b: ValueInput): VarRef {
     return this.#binaryValue("add", a, b);
   }

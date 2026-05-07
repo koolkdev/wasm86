@@ -81,6 +81,15 @@ export type IrUnaryValueOp = Readonly<{
   value: ValueRef;
 }>;
 
+export type IrSelectValueOp = Readonly<{
+  op: "value.select";
+  type: IrValueType;
+  dst: VarRef;
+  condition: ValueRef;
+  whenTrue: ValueRef;
+  whenFalse: ValueRef;
+}>;
+
 export type IrGetOptions = Readonly<{
   signed?: boolean;
 }>;
@@ -93,6 +102,7 @@ export type IrOp =
   | Readonly<{ op: "value.const"; type: IrValueType; dst: VarRef; value: number }>
   | IrBinaryValueOp
   | IrUnaryValueOp
+  | IrSelectValueOp
   | IrFlagSetOp
   | Readonly<{ op: "flags.materialize"; mask: FlagMask }>
   | Readonly<{ op: "flags.boundary"; mask: FlagMask }>
@@ -125,6 +135,7 @@ export interface IrBuilder {
   i32ShrU(a: ValueInput, b: ValueInput): VarRef;
   i32Extend8S(value: ValueInput): VarRef;
   i32Extend16S(value: ValueInput): VarRef;
+  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef;
 
   setFlags(producer: FlagProducerName, inputs: Readonly<Record<string, ValueInput>>, width?: OperandWidth): void;
   materializeFlags(mask: FlagMask): void;

@@ -65,6 +65,7 @@ export function jitExitConditionValues(
 export function jitLocalConditionValues(op: JitIrOp): readonly ValueRef[] {
   switch (op.op) {
     case "set.if":
+    case "value.select":
       return [op.condition];
     default:
       return [];

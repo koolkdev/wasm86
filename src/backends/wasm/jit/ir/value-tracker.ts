@@ -1,4 +1,4 @@
-import type { IrBinaryValueOp, IrUnaryValueOp, ValueRef } from "#x86/ir/model/types.js";
+import type { IrBinaryValueOp, IrSelectValueOp, IrUnaryValueOp, ValueRef } from "#x86/ir/model/types.js";
 import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
 import {
   jitValueForEffectiveAddress,
@@ -73,6 +73,9 @@ export class JitValueTracker {
       case "value.unary":
         this.record(op.dst.id, this.unaryValue(op));
         return true;
+      case "value.select":
+        this.record(op.dst.id, this.selectValue(op));
+        return true;
       default:
         return false;
     }
@@ -105,6 +108,16 @@ export class JitValueTracker {
     const value = this.valueFor(op.value);
 
     return value === undefined ? undefined : { kind: op.op, type: op.type, operator: op.operator, value };
+  }
+
+  private selectValue(op: Extract<JitIrOp, IrSelectValueOp>): JitValue | undefined {
+    const condition = this.valueFor(op.condition);
+    const whenTrue = this.valueFor(op.whenTrue);
+    const whenFalse = this.valueFor(op.whenFalse);
+
+    return condition === undefined || whenTrue === undefined || whenFalse === undefined
+      ? undefined
+      : { kind: op.op, type: op.type, condition, whenTrue, whenFalse };
   }
 }
 

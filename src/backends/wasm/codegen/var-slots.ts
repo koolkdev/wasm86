@@ -159,5 +159,10 @@ function collectValueVarUses(value: IrValueExpr, visit: (id: number) => void): v
     case "value.unary":
       collectValueVarUses(value.value, visit);
       return;
+    case "value.select":
+      collectValueVarUses(value.condition, visit);
+      collectValueVarUses(value.whenTrue, visit);
+      collectValueVarUses(value.whenFalse, visit);
+      return;
   }
 }

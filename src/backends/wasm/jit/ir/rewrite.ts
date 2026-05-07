@@ -145,6 +145,20 @@ export function emitJitValueRef(rewrite: JitInstructionRewrite, value: JitValue)
       rewrite.values.record(dst.id, value);
       return dst;
     }
+    case "value.select": {
+      const dst = allocVar(rewrite);
+
+      rewrite.ops.push({
+        op: "value.select",
+        type: value.type,
+        dst,
+        condition: emitJitValueRef(rewrite, value.condition),
+        whenTrue: emitJitValueRef(rewrite, value.whenTrue),
+        whenFalse: emitJitValueRef(rewrite, value.whenFalse)
+      });
+      rewrite.values.record(dst.id, value);
+      return dst;
+    }
     case "const":
       return { kind: "const", type: value.type, value: value.value };
     case "reg":
@@ -175,6 +189,16 @@ export function assignJitValue(
         operator: value.operator,
         dst,
         value: emitJitValueRef(rewrite, value.value)
+      });
+      return;
+    case "value.select":
+      rewrite.ops.push({
+        op: "value.select",
+        type: value.type,
+        dst,
+        condition: emitJitValueRef(rewrite, value.condition),
+        whenTrue: emitJitValueRef(rewrite, value.whenTrue),
+        whenFalse: emitJitValueRef(rewrite, value.whenFalse)
       });
       return;
     case "const":

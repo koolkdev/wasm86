@@ -104,6 +104,32 @@ export function i32BinaryResultValueWidth(
   }
 }
 
+export function i32SelectResultValueWidth(
+  condition: ValueWidth,
+  whenTrue: ValueWidth,
+  whenFalse: ValueWidth
+): ValueWidth {
+  if (condition.constValue !== undefined) {
+    return condition.constValue !== 0 ? whenTrue : whenFalse;
+  }
+
+  if (
+    whenTrue.constValue !== undefined &&
+    whenFalse.constValue !== undefined &&
+    whenTrue.constValue === whenFalse.constValue
+  ) {
+    return constValueWidth(whenTrue.constValue);
+  }
+
+  if (whenTrue.cleanWidth !== undefined && whenFalse.cleanWidth !== undefined) {
+    return cleanValueWidth(maxWidth(whenTrue.cleanWidth, whenFalse.cleanWidth));
+  }
+
+  const logicalWidth = maxWidth(whenTrue.logicalWidth, whenFalse.logicalWidth);
+
+  return logicalWidth === 32 ? untrackedValueWidth() : dirtyValueWidth(logicalWidth);
+}
+
 function bitwiseResultValueWidth(
   operator: Extract<IrBinaryOperator, "and" | "or" | "xor">,
   left: ValueWidth,

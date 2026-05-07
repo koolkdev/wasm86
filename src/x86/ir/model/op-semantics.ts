@@ -33,6 +33,7 @@ export function irOpResult(op: IrOp): IrOpResult {
     case "value.const":
     case "value.binary":
     case "value.unary":
+    case "value.select":
     case "aluFlags.condition":
       return { kind: "value", dst: op.dst, sideEffect: "none" };
     case "set":
@@ -70,6 +71,7 @@ export function irOpIsTerminator(op: IrOp): op is IrTerminatorOp {
     case "value.const":
     case "value.binary":
     case "value.unary":
+    case "value.select":
     case "flags.set":
     case "flags.materialize":
     case "flags.boundary":
@@ -115,6 +117,11 @@ export function visitIrOpValueRefs(
       return;
     case "value.unary":
       visit(op.value, "value");
+      return;
+    case "value.select":
+      visit(op.condition, "condition");
+      visit(op.whenTrue, "value");
+      visit(op.whenFalse, "value");
       return;
     case "flags.set":
       for (const value of Object.values(op.inputs)) {
@@ -179,6 +186,7 @@ export function visitIrOpStorageRefs(
     case "value.const":
     case "value.binary":
     case "value.unary":
+    case "value.select":
     case "flags.set":
     case "flags.materialize":
     case "flags.boundary":

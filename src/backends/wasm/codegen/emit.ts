@@ -27,6 +27,7 @@ import {
   emitMaskValueToWidth,
   emitSignExtendValueToWidth,
   i32BinaryResultValueWidth,
+  i32SelectResultValueWidth,
   maskedConstValue,
   untrackedValueWidth,
   type WasmIrEmitValueOptions,
@@ -228,6 +229,8 @@ class IrExprWasmEmitter {
         return this.#emitI32Binary(value.operator, value.a, value.b);
       case "value.unary":
         return this.#emitI32Unary(value.operator, value.value, options);
+      case "value.select":
+        return this.#emitI32Select(value.condition, value.whenTrue, value.whenFalse);
     }
   }
 
@@ -279,6 +282,15 @@ class IrExprWasmEmitter {
 
     this.#emitValue(value, { widthInsensitive: true });
     return emitSignExtendValueToWidth(this.#context.body, width);
+  }
+
+  #emitI32Select(condition: IrValueExpr, whenTrue: IrValueExpr, whenFalse: IrValueExpr): ValueWidth {
+    const trueWidth = this.#emitValue(whenTrue);
+    const falseWidth = this.#emitValue(whenFalse);
+    const conditionWidth = this.#emitValue(condition, { requestedWidth: 32 });
+
+    this.#context.body.select();
+    return i32SelectResultValueWidth(conditionWidth, trueWidth, falseWidth);
   }
 
   #freeSlotLocals(): void {

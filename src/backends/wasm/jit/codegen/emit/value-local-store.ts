@@ -314,6 +314,8 @@ function jitValueKey(value: JitValue): string {
       return `binary:${value.type}:${value.operator}:${jitValueKey(value.a)}:${jitValueKey(value.b)}`;
     case "value.unary":
       return `unary:${value.type}:${value.operator}:${jitValueKey(value.value)}`;
+    case "value.select":
+      return `select:${value.type}:${jitValueKey(value.condition)}:${jitValueKey(value.whenTrue)}:${jitValueKey(value.whenFalse)}`;
   }
 }
 
