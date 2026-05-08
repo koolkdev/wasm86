@@ -10,7 +10,9 @@ import { planJitMaterializedValueUses } from "#backends/wasm/jit/codegen/plan/ma
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import type {
   JitCodegenPlan,
+  JitExitMaterializationStore,
   JitInstructionEntryPoint,
+  JitMaterializationNeed,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
@@ -25,8 +27,8 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
 
   strictEqual(codegenPlan.maxExitMaterializationIndex, 1);
   deepStrictEqual(codegenPlan.exitMaterializations, [
-    { regs: [], flagMask: 0 },
-    { regs: ["eax"], flagMask: 0 }
+    { stores: [], flagMask: 0 },
+    { stores: [registerStore("eax")], flagMask: 0 }
   ]);
   strictEqual(instructionState.entryPoint.instructionIndex, 0);
   strictEqual(instructionState.entryPoint.snapshot.kind, "preInstruction");
@@ -125,8 +127,8 @@ test("planJitCodegen keeps same-register-set exit materializations separate", ()
   deepStrictEqual(writeFaults.map((exit) => exit.snapshot.committedRegs), [["eax"], ["eax"]]);
   strictEqual(writeFaults[0]!.exitMaterializationIndex !== writeFaults[1]!.exitMaterializationIndex, true);
   deepStrictEqual(writeFaults.map((exit) => codegenPlan.exitMaterializations[exit.exitMaterializationIndex]), [
-    { regs: ["eax"], flagMask: 0 },
-    { regs: ["eax"], flagMask: 0 }
+    { stores: [registerStore("eax")], flagMask: 0 },
+    { stores: [registerStore("eax")], flagMask: 0 }
   ]);
 });
 
@@ -158,8 +160,8 @@ test("planJitCodegen records exit materializations only for actual exit points",
 
   strictEqual(codegenPlan.maxExitMaterializationIndex, 1);
   deepStrictEqual(codegenPlan.exitMaterializations, [
-    { regs: [], flagMask: 0 },
-    { regs: ["eax", "ebx"], flagMask: 0 }
+    { stores: [], flagMask: 0 },
+    { stores: [registerStore("eax"), registerStore("ebx")], flagMask: 0 }
   ]);
   deepStrictEqual(codegenPlan.instructionStates.map((entry) =>
     entry.entryPoint.preInstructionExitPlan?.exitPointCount ?? 0
@@ -198,8 +200,8 @@ test("planJitCodegen records flag materialization requirements before conditions
   strictEqual(conditionalJumpIndex > 0, true);
   strictEqual(branchExits[0]!.exitMaterializationIndex !== branchExits[1]!.exitMaterializationIndex, true);
   deepStrictEqual(branchExits.map((exit) => codegenPlan.exitMaterializations[exit.exitMaterializationIndex]), [
-    { regs: ["eax"], flagMask: IR_ALU_FLAG_MASK },
-    { regs: ["eax"], flagMask: IR_ALU_FLAG_MASK }
+    { stores: [registerStore("eax")], flagMask: IR_ALU_FLAG_MASK },
+    { stores: [registerStore("eax")], flagMask: IR_ALU_FLAG_MASK }
   ]);
   deepStrictEqual(
     codegenPlan.materializationNeeds
@@ -249,7 +251,7 @@ test("planJitCodegen omits materialization needs for empty exits", () => {
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
 
   strictEqual(exit.exitMaterializationIndex, 0);
-  deepStrictEqual(codegenPlan.exitMaterializations, [{ regs: [], flagMask: 0 }]);
+  deepStrictEqual(codegenPlan.exitMaterializations, [{ stores: [], flagMask: 0 }]);
   deepStrictEqual(codegenPlan.materializationNeeds, []);
 });
 
@@ -378,8 +380,16 @@ test("buildJitCodegenEmissionPlan does not count overwritten materializations as
       exitMaterializationIndex: 1
     }],
     flagMaterializationRequirements: [],
-    materializationNeeds: [],
-    exitMaterializations: [{ regs: [], flagMask: 0 }, { regs: ["eax"], flagMask: 0 }],
+    materializationNeeds: [
+      registerExitStoreNeed("eax", {
+        instructionIndex: 1,
+        opIndex: 1,
+        exitPointIndex: 0,
+        exitReason: ExitReason.HOST_TRAP,
+        exitMaterializationIndex: 1
+      })
+    ],
+    exitMaterializations: [{ stores: [], flagMask: 0 }, { stores: [registerStore("eax")], flagMask: 0 }],
     maxExitMaterializationIndex: 1
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
@@ -446,8 +456,16 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later material
       exitMaterializationIndex: 1
     }],
     flagMaterializationRequirements: [],
-    materializationNeeds: [],
-    exitMaterializations: [{ regs: [], flagMask: 0 }, { regs: ["eax"], flagMask: 0 }],
+    materializationNeeds: [
+      registerExitStoreNeed("eax", {
+        instructionIndex: 0,
+        opIndex: 0,
+        exitPointIndex: 0,
+        exitReason: ExitReason.MEMORY_READ_FAULT,
+        exitMaterializationIndex: 1
+      })
+    ],
+    exitMaterializations: [{ stores: [], flagMask: 0 }, { stores: [registerStore("eax")], flagMask: 0 }],
     maxExitMaterializationIndex: 1
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
@@ -523,11 +541,19 @@ test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks
       }
     ],
     flagMaterializationRequirements: [],
-    materializationNeeds: [],
+    materializationNeeds: [
+      registerExitStoreNeed("eax", {
+        instructionIndex: 0,
+        opIndex: 4,
+        exitPointIndex: 1,
+        exitReason: ExitReason.HOST_TRAP,
+        exitMaterializationIndex: 2
+      })
+    ],
     exitMaterializations: [
-      { regs: [], flagMask: 0 },
-      { regs: [], flagMask: IR_ALU_FLAG_MASK },
-      { regs: ["eax"], flagMask: 0 }
+      { stores: [], flagMask: 0 },
+      { stores: [], flagMask: IR_ALU_FLAG_MASK },
+      { stores: [registerStore("eax")], flagMask: 0 }
     ],
     maxExitMaterializationIndex: 2
   };
@@ -539,13 +565,51 @@ test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks
   }
 
   const expressionBlock = instruction.expressionBlock;
-  const materializedValueUsePlan = planJitMaterializedValueUses([{ expressionBlock }], plan);
+  const materializedValueUsePlan = planJitMaterializedValueUses([{ expressionBlock }], {
+    block,
+    materializationNeeds: plan.materializationNeeds
+  });
+  const withoutRegisterStorePlan: JitCodegenPlan = {
+    ...plan,
+    materializationNeeds: [],
+    exitMaterializations: [
+      { stores: [], flagMask: 0 },
+      { stores: [], flagMask: IR_ALU_FLAG_MASK },
+      { stores: [], flagMask: 0 }
+    ]
+  };
+  const withoutRegisterNeedUsePlan = planJitMaterializedValueUses([{ expressionBlock }], {
+    block,
+    materializationNeeds: withoutRegisterStorePlan.materializationNeeds
+  });
   const setIndex = expressionBlock.findIndex((op) => op.op === "set" && op.role === "registerMaterialization");
 
   strictEqual(expressionBlock.some((op) => op.op === "flags.boundary"), false);
   strictEqual(setIndex !== -1, true);
   deepStrictEqual([...(materializedValueUsePlan.expressionUseIndexesByInstruction[0] ?? new Set())], [setIndex]);
+  deepStrictEqual([...(withoutRegisterNeedUsePlan.expressionUseIndexesByInstruction[0] ?? new Set())], []);
 });
+
+function registerExitStoreNeed(
+  reg: JitStateSnapshot["committedRegs"][number],
+  placement: JitMaterializationNeed["placement"],
+  pathScope: JitMaterializationNeed["pathScope"] = "deferredExit"
+): JitMaterializationNeed {
+  return {
+    value: { kind: "committedRegister", reg },
+    consumer: "registerExitStore",
+    placement,
+    pathScope
+  };
+}
+
+function registerStore(reg: JitStateSnapshot["committedRegs"][number]): JitExitMaterializationStore {
+  return {
+    kind: "register",
+    target: reg,
+    source: { kind: "committedRegister", reg }
+  };
+}
 
 function instructionEntryPoint(
   instructionIndex: number,

@@ -59,6 +59,13 @@ export type JitMaterializationNeed = Readonly<{
   pathScope: JitMaterializationPathScope;
 }>;
 
+export type JitExitMaterializationStore =
+  | Readonly<{
+      kind: "register";
+      target: Reg32;
+      source: Extract<JitMaterializationValue, { kind: "committedRegister" }>;
+    }>;
+
 export type JitPreInstructionExitPlan = Readonly<{
   exitPointCount: number;
   preserveCommittedRegs: boolean;
@@ -81,7 +88,9 @@ export type JitInstructionState = Readonly<{
 }>;
 
 export type JitExitMaterializationPlan = Readonly<{
-  regs: readonly Reg32[];
+  stores: readonly JitExitMaterializationStore[];
+  // Flags remain on the legacy mask path until flag materialization stores are
+  // migrated to the generic store model.
   flagMask: number;
 }>;
 

@@ -7,6 +7,7 @@ export type {
   JitExitPoint,
   JitExitSnapshotKind,
   JitExitMaterializationPlan,
+  JitExitMaterializationStore,
   JitFlagMaterializationRequirement,
   JitFlagSnapshot,
   JitInstructionState,

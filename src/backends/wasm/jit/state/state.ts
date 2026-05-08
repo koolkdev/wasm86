@@ -1,10 +1,12 @@
 import { i32 } from "#x86/state/cpu-state.js";
+import type { Reg32 } from "#x86/isa/types.js";
 import { stateOffset } from "#backends/wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { emitLoadStateU32, emitStoreStateU32 } from "#backends/wasm/codegen/state.js";
 import type {
   JitExitMaterializationPlan,
+  JitExitMaterializationStore,
   JitExitPoint,
   JitInstructionEntryPoint
 } from "#backends/wasm/jit/codegen/plan/types.js";
@@ -38,6 +40,8 @@ type JitExitMaterializationSnapshot = Readonly<{
   regs?: JitReg32ExitStoreSnapshot;
   flags?: JitFlagExitStoreSnapshot;
 }>;
+
+type JitRegisterExitMaterializationStore = Extract<JitExitMaterializationStore, { kind: "register" }>;
 
 type CaptureExitMaterializationOptions = Readonly<{
   allowPendingFlags?: boolean;
@@ -137,13 +141,15 @@ export function createJitIrState(
 
       const snapshot = exitMaterializationSnapshots.get(index);
 
-      if (plan.regs.length !== 0) {
+      const registerStores = registerMaterializationStores(plan);
+
+      if (registerStores.length !== 0) {
         if (snapshot?.regs === undefined) {
           throw new Error(`JIT exit materialization was not captured: ${index}`);
         }
 
-        for (const reg of plan.regs) {
-          regs.emitExitSnapshotStore(reg, snapshot.regs);
+        for (const store of registerStores) {
+          regs.emitExitSnapshotStore(store.target, snapshot.regs, store.source.reg);
         }
       }
 
@@ -164,7 +170,7 @@ export function createJitIrState(
 
       releasePendingFlagOwnersOnce();
 
-      if (plan.regs.length === 0 && plan.flagMask === 0) {
+      if (plan.stores.length === 0 && plan.flagMask === 0) {
         return;
       }
 
@@ -247,9 +253,10 @@ export function createJitIrState(
       flags.assertPendingCoveredBy(plan.flagMask);
     }
 
-    const registerSnapshot = plan.regs.length === 0
+    const registerStoreSources = registerMaterializationStoreSources(plan);
+    const registerSnapshot = registerStoreSources.length === 0
       ? undefined
-      : regs.captureCommittedExitStores(plan.regs);
+      : regs.captureCommittedExitStores(registerStoreSources);
     const flagSnapshot = flags.captureExitStoreSnapshot(
       plan.flagMask
     );
@@ -272,7 +279,7 @@ export function createJitIrState(
       throw new Error(`missing JIT exit materialization: ${index}`);
     }
 
-    if (plan.regs.length === 0 && plan.flagMask === 0) {
+    if (plan.stores.length === 0 && plan.flagMask === 0) {
       return;
     }
 
@@ -299,4 +306,16 @@ export function createJitIrState(
 
     return activeExit;
   }
+}
+
+function registerMaterializationStores(
+  plan: JitExitMaterializationPlan
+): readonly JitRegisterExitMaterializationStore[] {
+  return plan.stores.filter((store): store is JitRegisterExitMaterializationStore =>
+    store.kind === "register"
+  );
+}
+
+function registerMaterializationStoreSources(plan: JitExitMaterializationPlan): readonly Reg32[] {
+  return registerMaterializationStores(plan).map((store) => store.source.reg);
 }

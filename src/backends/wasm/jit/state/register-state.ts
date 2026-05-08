@@ -39,7 +39,7 @@ export type JitReg32State = Readonly<{
   emitWriteAlias(alias: RegisterAlias, source: JitReg32WriteSource): void;
   captureCommittedExitStores(regs: readonly Reg32[]): JitReg32ExitStoreSnapshot;
   emitCommittedStore(reg: Reg32): void;
-  emitExitSnapshotStore(reg: Reg32, snapshot: JitReg32ExitStoreSnapshot): void;
+  emitExitSnapshotStore(target: Reg32, snapshot: JitReg32ExitStoreSnapshot, source?: Reg32): void;
 }>;
 
 export function createJitReg32State(body: WasmFunctionBodyEncoder): JitReg32State {
@@ -62,14 +62,14 @@ export function createJitReg32State(body: WasmFunctionBodyEncoder): JitReg32Stat
     commitPending,
     commitPendingReg,
     emitCommittedStore,
-    emitExitSnapshotStore: (reg, snapshot) => {
-      const state = snapshot.get(reg);
+    emitExitSnapshotStore: (target, snapshot, source = target) => {
+      const state = snapshot.get(source);
 
       if (state === undefined) {
-        throw new Error(`JIT register snapshot has no state for ${reg}`);
+        throw new Error(`JIT register snapshot has no state for ${source}`);
       }
 
-      emitStoreRegState(body, reg, state);
+      emitStoreRegState(body, target, state);
     }
   };
 

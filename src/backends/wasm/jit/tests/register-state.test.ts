@@ -739,13 +739,104 @@ test("jit register state stores full registers after a partial write is material
 
 test("jit exit materializations require captured register state", () => {
   const body = new WasmFunctionBodyEncoder();
-  const state = createJitIrState(body, [{ regs: [], flagMask: 0 }, { regs: ["eax"], flagMask: 0 }]);
+  const state = createJitIrState(body, [
+    { stores: [], flagMask: 0 },
+    {
+      stores: [{
+        kind: "register",
+        target: "eax",
+        source: { kind: "committedRegister", reg: "eax" }
+      }],
+      flagMask: 0
+    }
+  ]);
 
   state.emitExitMaterializationStores(0);
   throws(
     () => state.emitExitMaterializationStores(1),
     /JIT exit materialization was not captured: 1/
   );
+});
+
+test("jit exit materializations copy register store source to target", async () => {
+  const body = new WasmFunctionBodyEncoder();
+  const exitLocal = body.addLocal(wasmValueType.i64);
+  const state = createJitIrState(body, [
+    { stores: [], flagMask: 0 },
+    {
+      stores: [{
+        kind: "register",
+        target: "ebx",
+        source: { kind: "committedRegister", reg: "eax" }
+      }],
+      flagMask: 0
+    }
+  ]);
+
+  state.beginInstruction(
+    { exitLocal, exitLabelDepth: 0 },
+    {
+      instructionIndex: 0,
+      snapshot: {
+        kind: "preInstruction",
+        eip: startAddress,
+        instructionCountDelta: 0,
+        committedRegs: [],
+        speculativeRegs: [],
+        committedFlags: { mask: 0 },
+        speculativeFlags: { mask: 0 }
+      }
+    }
+  );
+  emitWriteReg32(state.regs, "eax", () => {
+    body.i32Const(0x2222_2222);
+  });
+  state.commitInstructionExit({
+    instructionIndex: 0,
+    opIndex: 0,
+    exitReason: ExitReason.FALLTHROUGH,
+    snapshot: {
+      kind: "postInstruction",
+      eip: startAddress + 1,
+      instructionCountDelta: 1,
+      committedRegs: ["eax"],
+      speculativeRegs: [],
+      committedFlags: { mask: 0 },
+      speculativeFlags: { mask: 0 }
+    },
+    exitMaterializationIndex: 1
+  }, () => {
+    body.i32Const(startAddress + 1);
+  });
+  state.emitExitMaterializationStores(1);
+  body.end();
+
+  const result = await runRegisterStateBody(body, createCpuState({
+    eax: 0x1111_1111,
+    ebx: 0x3333_3333
+  }));
+
+  strictEqual(result.eax, 0x1111_1111);
+  strictEqual(result.ebx, 0x2222_2222);
+});
+
+test("jit register exit snapshot stores read source register state", async () => {
+  const body = new WasmFunctionBodyEncoder();
+  const regs = createJitReg32State(body);
+
+  regs.beginInstruction({ preserveCommittedRegs: false });
+  emitWriteReg32(regs, "eax", () => {
+    body.i32Const(0x2222_2222);
+  });
+  regs.commitPending();
+  const snapshot = regs.captureCommittedExitStores(["eax"]);
+
+  regs.emitExitSnapshotStore("ebx", snapshot, "eax");
+  body.end();
+
+  const state = await runRegisterStateBody(body, createCpuState({ ebx: 0x1111_1111 }));
+
+  strictEqual(state.ebx, 0x2222_2222);
 });
 
 test("jit register exit store snapshots freeze committed writes before later mutation", async () => {

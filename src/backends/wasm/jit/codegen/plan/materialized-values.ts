@@ -2,7 +2,7 @@ import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import type { Reg32 } from "#x86/isa/types.js";
 import { jitInstructionWrittenReg } from "./operand-analysis.js";
-import type { JitCodegenPlan } from "./types.js";
+import type { JitCodegenPlan, JitMaterializationNeed } from "./types.js";
 
 export type JitMaterializedValueUsePlanInput = Readonly<{
   expressionBlock: IrExprBlock;
@@ -14,7 +14,7 @@ export type JitMaterializedValueUsePlan = Readonly<{
 
 export function planJitMaterializedValueUses(
   instructions: readonly JitMaterializedValueUsePlanInput[],
-  codegenPlan: Pick<JitCodegenPlan, "block" | "instructionStates" | "exitPoints" | "exitMaterializations">
+  codegenPlan: Pick<JitCodegenPlan, "block" | "materializationNeeds">
 ): JitMaterializedValueUsePlan {
   if (instructions.length !== codegenPlan.block.instructions.length) {
     throw new Error(
@@ -22,7 +22,9 @@ export function planJitMaterializedValueUses(
     );
   }
 
-  const exitMaterializationRegsByInstructionOp = exitMaterializationRegsByInstructionOpIndex(codegenPlan);
+  const exitStoreRegsByInstructionOp = registerExitStoreRegsByInstructionOpIndex(
+    codegenPlan.materializationNeeds
+  );
   const expressionUseIndexesByInstruction = new Array<Set<number>>(instructions.length);
   let neededAfterInstruction = new Set<Reg32>();
 
@@ -34,7 +36,7 @@ export function planJitMaterializedValueUses(
       throw new Error(`missing JIT instruction while planning materialized value uses: ${instructionIndex}`);
     }
 
-    const exitMaterializationRegsByOp = exitMaterializationRegsByInstructionOp[instructionIndex] ?? new Map();
+    const exitStoreRegsByOp = exitStoreRegsByInstructionOp[instructionIndex] ?? new Map();
     const needed = new Set(neededAfterInstruction);
     const sourceUseIndexes = new Set<number>();
 
@@ -60,7 +62,7 @@ export function planJitMaterializedValueUses(
         }
       }
 
-      for (const reg of exitMaterializationRegsByOp.get(opIndex) ?? []) {
+      for (const reg of exitStoreRegsByOp.get(opIndex) ?? []) {
         needed.add(reg);
       }
     }
@@ -130,35 +132,37 @@ function expressionMaterializedValueUseIndexes(
   return expressionIndexes;
 }
 
-function exitMaterializationRegsByInstructionOpIndex(
-  codegenPlan: Pick<JitCodegenPlan, "instructionStates" | "exitPoints" | "exitMaterializations">
+type JitRegisterExitStoreNeed = JitMaterializationNeed & Readonly<{
+  consumer: "registerExitStore";
+  value: Readonly<{ kind: "committedRegister"; reg: Reg32 }>;
+}>;
+
+function registerExitStoreRegsByInstructionOpIndex(
+  materializationNeeds: readonly JitMaterializationNeed[]
 ): readonly ReadonlyMap<number, readonly Reg32[]>[] {
-  const regs = new Array<Map<number, Reg32[]>>(codegenPlan.instructionStates.length);
+  const regs: Map<number, Reg32[]>[] = [];
+  const registerExitStoreNeeds = materializationNeeds.filter(isRegisterExitStoreNeed);
 
-  for (const exitPoint of codegenPlan.exitPoints) {
-    const exitMaterialization = codegenPlan.exitMaterializations[exitPoint.exitMaterializationIndex];
-
-    if (exitMaterialization === undefined) {
-      throw new Error(`missing JIT exit materialization while planning materialized value uses: ${exitPoint.exitMaterializationIndex}`);
-    }
-
-    let instructionRegs = regs[exitPoint.instructionIndex];
+  for (const need of registerExitStoreNeeds) {
+    let instructionRegs = regs[need.placement.instructionIndex];
 
     if (instructionRegs === undefined) {
       instructionRegs = new Map();
-      regs[exitPoint.instructionIndex] = instructionRegs;
+      regs[need.placement.instructionIndex] = instructionRegs;
     }
 
-    const opRegs = instructionRegs.get(exitPoint.opIndex) ?? [];
+    const opRegs = instructionRegs.get(need.placement.opIndex) ?? [];
 
-    for (const reg of exitMaterialization.regs) {
-      if (!opRegs.includes(reg)) {
-        opRegs.push(reg);
-      }
+    if (!opRegs.includes(need.value.reg)) {
+      opRegs.push(need.value.reg);
     }
 
-    instructionRegs.set(exitPoint.opIndex, opRegs);
+    instructionRegs.set(need.placement.opIndex, opRegs);
   }
 
   return regs;
+}
+
+function isRegisterExitStoreNeed(need: JitMaterializationNeed): need is JitRegisterExitStoreNeed {
+  return need.consumer === "registerExitStore" && need.value.kind === "committedRegister";
 }

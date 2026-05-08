@@ -33,7 +33,7 @@ export function analyzeJitCodegenState(
   // Non-empty exit materializations stay per-exit because register and flag
   // locals can change before deferred exit blocks are emitted. Empty exits
   // share index 0.
-  const exitMaterializations: JitExitMaterializationPlan[] = [{ regs: [], flagMask: 0 }];
+  const exitMaterializations: JitExitMaterializationPlan[] = [{ stores: [], flagMask: 0 }];
   let currentPostState: JitStateSnapshot | undefined;
 
   for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
@@ -224,7 +224,7 @@ export function analyzeJitCodegenState(
     const index = exitMaterializations.length;
 
     exitMaterializations.push({
-      regs,
+      stores: registerExitMaterializationStores(regs),
       flagMask
     });
     return index;
@@ -266,6 +266,16 @@ export function analyzeJitCodegenState(
       });
     }
   }
+}
+
+function registerExitMaterializationStores(
+  regs: readonly Reg32[]
+): JitExitMaterializationPlan["stores"] {
+  return regs.map((reg) => ({
+    kind: "register",
+    target: reg,
+    source: { kind: "committedRegister", reg }
+  }));
 }
 
 function exitMaterializationPathScope(exitReason: ExitReasonValue): JitMaterializationPathScope {

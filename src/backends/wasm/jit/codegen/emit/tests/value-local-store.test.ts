@@ -409,7 +409,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const state = createJitIrState(body, [{ regs: [], flagMask: 0 }]);
+  const state = createJitIrState(body, [{ stores: [], flagMask: 0 }]);
   const entrySnapshot = stateSnapshot("preInstruction", 0x1000, 0);
 
   emitJitIrWithContext({
