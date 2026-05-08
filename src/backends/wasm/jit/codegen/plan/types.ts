@@ -34,6 +34,31 @@ export type JitFlagMaterializationRequirement = Readonly<{
   pendingMask: number;
 }>;
 
+export type JitMaterializationValue =
+  | Readonly<{ kind: "committedRegister"; reg: Reg32 }>
+  | Readonly<{ kind: "exitFlags"; mask: number }>;
+
+export type JitMaterializationConsumer =
+  | "registerExitStore"
+  | "flagExitStore";
+
+export type JitMaterializationPlacement = Readonly<{
+  instructionIndex: number;
+  opIndex: number;
+  exitPointIndex: number;
+  exitReason: ExitReasonValue;
+  exitMaterializationIndex: number;
+}>;
+
+export type JitMaterializationPathScope = "taken" | "notTaken" | "deferredExit";
+
+export type JitMaterializationNeed = Readonly<{
+  value: JitMaterializationValue;
+  consumer: JitMaterializationConsumer;
+  placement: JitMaterializationPlacement;
+  pathScope: JitMaterializationPathScope;
+}>;
+
 export type JitPreInstructionExitPlan = Readonly<{
   exitPointCount: number;
   preserveCommittedRegs: boolean;
@@ -65,6 +90,7 @@ export type JitCodegenPlan = Readonly<{
   instructionStates: readonly JitInstructionState[];
   exitPoints: readonly JitExitPoint[];
   flagMaterializationRequirements: readonly JitFlagMaterializationRequirement[];
+  materializationNeeds: readonly JitMaterializationNeed[];
   exitMaterializations: readonly JitExitMaterializationPlan[];
   maxExitMaterializationIndex: number;
 }>;

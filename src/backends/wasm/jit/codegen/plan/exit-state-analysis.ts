@@ -1,6 +1,6 @@
 import type { Reg32 } from "#x86/isa/types.js";
 import { conditionFlagReadMask } from "#x86/ir/model/flag-effects.js";
-import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
+import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
 import { JitBlockStateTracker } from "#backends/wasm/jit/codegen/plan/block-state-tracker.js";
 import {
@@ -16,6 +16,8 @@ import type {
   JitExitMaterializationPlan,
   JitFlagMaterializationRequirement,
   JitInstructionState,
+  JitMaterializationNeed,
+  JitMaterializationPathScope,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
 
@@ -27,6 +29,7 @@ export function analyzeJitCodegenState(
   const instructionStates: JitInstructionState[] = [];
   const exitPoints: JitExitPoint[] = [];
   const flagMaterializationRequirements: JitFlagMaterializationRequirement[] = [];
+  const materializationNeeds: JitMaterializationNeed[] = [];
   // Non-empty exit materializations stay per-exit because register and flag
   // locals can change before deferred exit blocks are emitted. Empty exits
   // share index 0.
@@ -97,6 +100,7 @@ export function analyzeJitCodegenState(
     instructionStates,
     exitPoints,
     flagMaterializationRequirements,
+    materializationNeeds,
     exitMaterializations,
     maxExitMaterializationIndex: exitMaterializations.length - 1
   };
@@ -181,6 +185,7 @@ export function analyzeJitCodegenState(
     const pendingFlagMask = snapshot.speculativeFlags.mask;
     const requiredFlagMask = exitFlagMaterializationMask(snapshot);
     const exitMaterializationIndex = appendExitMaterialization(snapshot.committedRegs, requiredFlagMask);
+    const exitPointIndex = exitPoints.length;
 
     exitPoints.push({
       instructionIndex,
@@ -189,6 +194,16 @@ export function analyzeJitCodegenState(
       snapshot,
       exitMaterializationIndex
     });
+    appendMaterializationNeeds(
+      instructionIndex,
+      opIndex,
+      exitPointIndex,
+      exitReason,
+      exitMaterializationIndex,
+      exitMaterializationPathScope(exitReason),
+      snapshot.committedRegs,
+      requiredFlagMask
+    );
 
     if (requiredFlagMask !== 0) {
       flagMaterializationRequirements.push({
@@ -213,6 +228,54 @@ export function analyzeJitCodegenState(
       flagMask
     });
     return index;
+  }
+
+  function appendMaterializationNeeds(
+    instructionIndex: number,
+    opIndex: number,
+    exitPointIndex: number,
+    exitReason: ExitReasonValue,
+    exitMaterializationIndex: number,
+    pathScope: JitMaterializationPathScope,
+    regs: readonly Reg32[],
+    flagMask: number
+  ): void {
+    const placement = {
+      instructionIndex,
+      opIndex,
+      exitPointIndex,
+      exitReason,
+      exitMaterializationIndex
+    };
+
+    for (const reg of regs) {
+      materializationNeeds.push({
+        value: { kind: "committedRegister", reg },
+        consumer: "registerExitStore",
+        placement,
+        pathScope
+      });
+    }
+
+    if (flagMask !== 0) {
+      materializationNeeds.push({
+        value: { kind: "exitFlags", mask: flagMask },
+        consumer: "flagExitStore",
+        placement,
+        pathScope
+      });
+    }
+  }
+}
+
+function exitMaterializationPathScope(exitReason: ExitReasonValue): JitMaterializationPathScope {
+  switch (exitReason) {
+    case ExitReason.BRANCH_TAKEN:
+      return "taken";
+    case ExitReason.BRANCH_NOT_TAKEN:
+      return "notTaken";
+    default:
+      return "deferredExit";
   }
 }
 

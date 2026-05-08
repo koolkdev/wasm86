@@ -40,6 +40,18 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
   deepStrictEqual(exit.snapshot.committedRegs, ["eax"]);
   deepStrictEqual(exit.snapshot.speculativeRegs, []);
   strictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.flagMask, 0);
+  deepStrictEqual(codegenPlan.materializationNeeds, [{
+    value: { kind: "committedRegister", reg: "eax" },
+    consumer: "registerExitStore",
+    placement: {
+      instructionIndex: exit.instructionIndex,
+      opIndex: exit.opIndex,
+      exitPointIndex: 0,
+      exitReason: ExitReason.FALLTHROUGH,
+      exitMaterializationIndex: 1
+    },
+    pathScope: "deferredExit"
+  }]);
 });
 
 test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
@@ -68,6 +80,32 @@ test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
   deepStrictEqual(exit.snapshot.speculativeRegs, []);
   strictEqual(exit.snapshot.speculativeFlags.mask, IR_ALU_FLAG_MASK);
   strictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.flagMask, IR_ALU_FLAG_MASK);
+  deepStrictEqual(codegenPlan.materializationNeeds.filter((need) => need.placement.exitPointIndex === 0), [
+    {
+      value: { kind: "committedRegister", reg: "eax" },
+      consumer: "registerExitStore",
+      placement: {
+        instructionIndex: exit.instructionIndex,
+        opIndex: exit.opIndex,
+        exitPointIndex: 0,
+        exitReason: ExitReason.MEMORY_READ_FAULT,
+        exitMaterializationIndex: 1
+      },
+      pathScope: "deferredExit"
+    },
+    {
+      value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
+      consumer: "flagExitStore",
+      placement: {
+        instructionIndex: exit.instructionIndex,
+        opIndex: exit.opIndex,
+        exitPointIndex: 0,
+        exitReason: ExitReason.MEMORY_READ_FAULT,
+        exitMaterializationIndex: 1
+      },
+      pathScope: "deferredExit"
+    }
+  ]);
 });
 
 test("planJitCodegen keeps same-register-set exit materializations separate", () => {
@@ -163,7 +201,56 @@ test("planJitCodegen records flag materialization requirements before conditions
     { regs: ["eax"], flagMask: IR_ALU_FLAG_MASK },
     { regs: ["eax"], flagMask: IR_ALU_FLAG_MASK }
   ]);
+  deepStrictEqual(
+    codegenPlan.materializationNeeds
+      .filter((need) =>
+        need.placement.exitReason === ExitReason.BRANCH_TAKEN ||
+        need.placement.exitReason === ExitReason.BRANCH_NOT_TAKEN
+      )
+      .map((need) => ({
+        value: need.value,
+        consumer: need.consumer,
+        pathScope: need.pathScope,
+        exitReason: need.placement.exitReason
+      })),
+    [
+      {
+        value: { kind: "committedRegister", reg: "eax" },
+        consumer: "registerExitStore",
+        pathScope: "taken",
+        exitReason: ExitReason.BRANCH_TAKEN
+      },
+      {
+        value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
+        consumer: "flagExitStore",
+        pathScope: "taken",
+        exitReason: ExitReason.BRANCH_TAKEN
+      },
+      {
+        value: { kind: "committedRegister", reg: "eax" },
+        consumer: "registerExitStore",
+        pathScope: "notTaken",
+        exitReason: ExitReason.BRANCH_NOT_TAKEN
+      },
+      {
+        value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
+        consumer: "flagExitStore",
+        pathScope: "notTaken",
+        exitReason: ExitReason.BRANCH_NOT_TAKEN
+      }
+    ]
+  );
   strictEqual(branchExpressionBlock?.some((op) => op.op === "flags.materialize" || op.op === "flags.boundary"), false);
+});
+
+test("planJitCodegen omits materialization needs for empty exits", () => {
+  const trap = ok(decodeBytes([0xcd, 0x2e], startAddress));
+  const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([trap])));
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+
+  strictEqual(exit.exitMaterializationIndex, 0);
+  deepStrictEqual(codegenPlan.exitMaterializations, [{ regs: [], flagMask: 0 }]);
+  deepStrictEqual(codegenPlan.materializationNeeds, []);
 });
 
 test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache specs", () => {
@@ -208,6 +295,7 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
 
   strictEqual(instruction?.instructionId, "cache-plan");
   strictEqual(emissionPlan.exitPoints, codegenPlan.exitPoints);
+  strictEqual(emissionPlan.materializationNeeds, codegenPlan.materializationNeeds);
   strictEqual(emissionPlan.exitMaterializations, codegenPlan.exitMaterializations);
   strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
   strictEqual((instruction?.valueCachePlan?.selectedUseCounts.length ?? 0) > 0, true);
@@ -290,6 +378,7 @@ test("buildJitCodegenEmissionPlan does not count overwritten materializations as
       exitMaterializationIndex: 1
     }],
     flagMaterializationRequirements: [],
+    materializationNeeds: [],
     exitMaterializations: [{ regs: [], flagMask: 0 }, { regs: ["eax"], flagMask: 0 }],
     maxExitMaterializationIndex: 1
   };
@@ -357,6 +446,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later material
       exitMaterializationIndex: 1
     }],
     flagMaterializationRequirements: [],
+    materializationNeeds: [],
     exitMaterializations: [{ regs: [], flagMask: 0 }, { regs: ["eax"], flagMask: 0 }],
     maxExitMaterializationIndex: 1
   };
@@ -433,6 +523,7 @@ test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks
       }
     ],
     flagMaterializationRequirements: [],
+    materializationNeeds: [],
     exitMaterializations: [
       { regs: [], flagMask: 0 },
       { regs: [], flagMask: IR_ALU_FLAG_MASK },

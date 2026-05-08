@@ -10,6 +10,11 @@ export type {
   JitFlagMaterializationRequirement,
   JitFlagSnapshot,
   JitInstructionState,
+  JitMaterializationConsumer,
+  JitMaterializationNeed,
+  JitMaterializationPlacement,
+  JitMaterializationPathScope,
+  JitMaterializationValue,
   JitPreInstructionExitPlan,
   JitCodegenPlan,
   JitStateSnapshot
