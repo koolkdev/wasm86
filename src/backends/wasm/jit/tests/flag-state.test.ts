@@ -198,6 +198,96 @@ test("JIT flag state releases cached pending inputs when stored", () => {
   strictEqual(handle.releaseCount(), 1);
 });
 
+test("JIT flag state releases cached pending inputs after exit snapshot capture", () => {
+  const body = new WasmFunctionBodyEncoder(1);
+  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
+  const handle = trackedCachedHandle(0);
+  const flags = createJitFlagState(body, aluFlagsLocal, {
+    emitLoadAluFlags: () => {
+      throw new Error("logic exit snapshot should not load incoming aluFlags");
+    },
+    emitLoadAluFlagsValue: () => {
+      throw new Error("logic exit snapshot should not merge incoming aluFlags");
+    },
+    emitStoreAluFlags: () => {
+      throw new Error("logic exit snapshot capture should not store aluFlags");
+    },
+    valueCache: cachedFlagValueCache([handle])
+  });
+
+  flags.emitSet(createIrFlagSetOp("logic", { result: v(0) }), {
+    emitValue: (value) => emitValueExpr(body, value),
+    emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
+  });
+
+  strictEqual(handle.releaseCount(), 0);
+  strictEqual(flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK)?.mask, IR_ALU_FLAG_MASK);
+  body.end();
+
+  strictEqual(handle.releaseCount(), 1);
+});
+
+test("JIT flag state keeps cached pending inputs after non-consuming exit snapshot capture", () => {
+  const body = new WasmFunctionBodyEncoder(1);
+  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
+  const handle = trackedCachedHandle(0);
+  const flags = createJitFlagState(body, aluFlagsLocal, {
+    emitLoadAluFlags: () => {
+      throw new Error("logic non-consuming exit snapshot should not load incoming aluFlags");
+    },
+    emitLoadAluFlagsValue: () => {
+      throw new Error("logic non-consuming exit snapshot should not merge incoming aluFlags");
+    },
+    emitStoreAluFlags: () => {
+      throw new Error("logic non-consuming exit snapshot should not store aluFlags");
+    },
+    valueCache: cachedFlagValueCache([handle])
+  });
+
+  flags.emitSet(createIrFlagSetOp("logic", { result: v(0) }), {
+    emitValue: (value) => emitValueExpr(body, value),
+    emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
+  });
+
+  strictEqual(flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK, { consume: false })?.mask, IR_ALU_FLAG_MASK);
+  strictEqual(handle.releaseCount(), 0);
+
+  flags.emitMaterialize(IR_ALU_FLAG_MASK);
+  body.end();
+
+  strictEqual(handle.releaseCount(), 1);
+});
+
+test("JIT flag state releases cached pending inputs after non-consuming then consuming snapshots", () => {
+  const body = new WasmFunctionBodyEncoder(1);
+  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
+  const handle = trackedCachedHandle(0);
+  const flags = createJitFlagState(body, aluFlagsLocal, {
+    emitLoadAluFlags: () => {
+      throw new Error("logic branch exit snapshots should not load incoming aluFlags");
+    },
+    emitLoadAluFlagsValue: () => {
+      throw new Error("logic branch exit snapshots should not merge incoming aluFlags");
+    },
+    emitStoreAluFlags: () => {
+      throw new Error("logic branch exit snapshot capture should not store aluFlags");
+    },
+    valueCache: cachedFlagValueCache([handle])
+  });
+
+  flags.emitSet(createIrFlagSetOp("logic", { result: v(0) }), {
+    emitValue: (value) => emitValueExpr(body, value),
+    emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
+  });
+
+  strictEqual(flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK, { consume: false })?.mask, IR_ALU_FLAG_MASK);
+  strictEqual(handle.releaseCount(), 0);
+  strictEqual(flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK)?.mask, IR_ALU_FLAG_MASK);
+  body.end();
+
+  strictEqual(handle.releaseCount(), 1);
+});
+
 function emitValueExpr(body: WasmFunctionBodyEncoder, value: IrValueExpr): ValueWidth {
   switch (value.kind) {
     case "var":

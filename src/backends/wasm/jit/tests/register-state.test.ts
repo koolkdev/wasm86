@@ -737,14 +737,14 @@ test("jit register state stores full registers after a partial write is material
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Store16), 0);
 });
 
-test("jit exit store snapshots require captured register state", () => {
+test("jit exit materializations require captured register state", () => {
   const body = new WasmFunctionBodyEncoder();
-  const state = createJitIrState(body, [{ regs: [] }, { regs: ["eax"] }]);
+  const state = createJitIrState(body, [{ regs: [], flagMask: 0 }, { regs: ["eax"], flagMask: 0 }]);
 
-  state.emitExitStoreSnapshotStores(0);
+  state.emitExitMaterializationStores(0);
   throws(
-    () => state.emitExitStoreSnapshotStores(1),
-    /JIT exit store snapshot was not captured: 1/
+    () => state.emitExitMaterializationStores(1),
+    /JIT exit materialization was not captured: 1/
   );
 });
 

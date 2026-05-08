@@ -23,8 +23,7 @@ export type JitExitPoint = Readonly<{
   opIndex: number;
   exitReason: ExitReasonValue;
   snapshot: JitStateSnapshot;
-  exitStoreSnapshotIndex: number;
-  requiredFlagCommitMask: number;
+  exitMaterializationIndex: number;
 }>;
 
 export type JitFlagMaterializationRequirement = Readonly<{
@@ -35,19 +34,30 @@ export type JitFlagMaterializationRequirement = Readonly<{
   pendingMask: number;
 }>;
 
+export type JitPreInstructionExitPlan = Readonly<{
+  exitPointCount: number;
+  preserveCommittedRegs: boolean;
+}>;
+
+export type JitInstructionEntryPoint = Readonly<{
+  instructionIndex: number;
+  snapshot: JitStateSnapshot;
+  preInstructionExitPlan?: JitPreInstructionExitPlan;
+}>;
+
 export type JitInstructionState = Readonly<{
   instructionId: string;
   eip: number;
   nextEip: number;
   nextMode: "continue" | "exit";
-  preInstructionState: JitStateSnapshot;
+  entryPoint: JitInstructionEntryPoint;
   postInstructionState: JitStateSnapshot;
-  preInstructionExitPointCount: number;
   exitPointCount: number;
 }>;
 
-export type JitExitStoreSnapshotPlan = Readonly<{
+export type JitExitMaterializationPlan = Readonly<{
   regs: readonly Reg32[];
+  flagMask: number;
 }>;
 
 export type JitCodegenPlan = Readonly<{
@@ -55,6 +65,6 @@ export type JitCodegenPlan = Readonly<{
   instructionStates: readonly JitInstructionState[];
   exitPoints: readonly JitExitPoint[];
   flagMaterializationRequirements: readonly JitFlagMaterializationRequirement[];
-  exitStoreSnapshots: readonly JitExitStoreSnapshotPlan[];
-  maxExitStoreSnapshotIndex: number;
+  exitMaterializations: readonly JitExitMaterializationPlan[];
+  maxExitMaterializationIndex: number;
 }>;

@@ -17,7 +17,9 @@ import {
   emitAluFlagsCondition,
   emitFlagProducerCondition
 } from "#backends/wasm/codegen/conditions.js";
-import { wasmIrLocalAluFlagsStorage } from "#backends/wasm/codegen/alu-flags.js";
+import {
+  wasmIrLocalAluFlagsStorage
+} from "#backends/wasm/codegen/alu-flags.js";
 import { emitSetFlags } from "#backends/wasm/codegen/flags.js";
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import {
@@ -61,12 +63,27 @@ type JitFlagStateOptions = Readonly<{
   valueCache?: JitValueCacheRuntime | undefined;
 }>;
 
+type JitFlagExitStoreSnapshotOptions = Readonly<{
+  consume?: boolean;
+}>;
+
 export type JitFlagState = Readonly<{
   emitSet(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
   emitMaterialize(mask: number): void;
   emitBoundary(mask: number): void;
   emitAluFlagsCondition(cc: ConditionCode): void;
+  captureExitStoreSnapshot(
+    mask: number,
+    options?: JitFlagExitStoreSnapshotOptions
+  ): JitFlagExitStoreSnapshot | undefined;
+  emitExitSnapshotStore(snapshot: JitFlagExitStoreSnapshot): void;
+  assertPendingCoveredBy(mask: number): void;
   assertNoPending(): void;
+}>;
+
+export type JitFlagExitStoreSnapshot = Readonly<{
+  mask: number;
+  local: number;
 }>;
 
 export function createJitFlagState(
@@ -162,6 +179,52 @@ export function createJitFlagState(
       materializeFlags(conditionFlagReadMask(cc) & ~materializedMask);
       emitAluFlagsCondition(body, aluFlags, cc);
     },
+    captureExitStoreSnapshot: (mask, options = {}) => {
+      const snapshotMask = mask & IR_ALU_FLAG_MASK;
+
+      if (snapshotMask === 0) {
+        return undefined;
+      }
+
+      if (options.consume === false) {
+        return captureNonConsumingExitStoreSnapshot(snapshotMask);
+      }
+
+      materializeFlags(snapshotMask & ~materializedMask);
+
+      const snapshotLocal = body.addLocal(wasmValueType.i32);
+
+      body.localGet(aluFlagsLocal);
+      body.localSet(snapshotLocal);
+      return { mask: snapshotMask, local: snapshotLocal };
+    },
+    emitExitSnapshotStore: (snapshot) => {
+      const storeMask = snapshot.mask & IR_ALU_FLAG_MASK;
+
+      if (storeMask === 0) {
+        return;
+      }
+
+      options.emitStoreAluFlags(() => {
+        if (storeMask === IR_ALU_FLAG_MASK) {
+          body.localGet(snapshot.local);
+          return;
+        }
+
+        options.emitLoadAluFlagsValue();
+        body.i32Const(i32(IR_ALU_FLAG_MASK & ~storeMask)).i32And();
+        body.localGet(snapshot.local);
+        body.i32Const(i32(storeMask)).i32And();
+        body.i32Or();
+      });
+    },
+    assertPendingCoveredBy: (mask) => {
+      const uncoveredMask = sourceMask("pending") & ~mask;
+
+      if (uncoveredMask !== 0) {
+        throw new Error(`JIT pending flags are not covered by exit snapshot mask: ${uncoveredMask}`);
+      }
+    },
     assertNoPending
   };
 
@@ -188,6 +251,45 @@ export function createJitFlagState(
           valueWidth: materialized.valueWidth,
           handle: materialized
         };
+  }
+
+  function captureNonConsumingExitStoreSnapshot(mask: number): JitFlagExitStoreSnapshot {
+    const snapshotLocal = body.addLocal(wasmValueType.i32);
+    const localMask = sourceMask("local") & mask;
+    const incomingMask = sourceMask("incoming") & mask;
+
+    body.i32Const(0);
+    body.localSet(snapshotLocal);
+
+    if (localMask !== 0) {
+      mergeSnapshotBits(snapshotLocal, localMask, () => {
+        body.localGet(aluFlagsLocal);
+      });
+    }
+
+    if (incomingMask !== 0) {
+      mergeSnapshotBits(snapshotLocal, incomingMask, () => {
+        options.emitLoadAluFlagsValue();
+      });
+    }
+
+    for (const [pendingFlags, pendingMask] of pendingMasks(mask)) {
+      emitPendingFlags(pendingFlags, pendingMask);
+      mergeSnapshotBits(snapshotLocal, pendingMask, () => {
+        body.localGet(aluFlagsLocal);
+      });
+    }
+
+    return { mask, local: snapshotLocal };
+  }
+
+  function mergeSnapshotBits(targetLocal: number, mask: number, emitValue: () => void): void {
+    body.localGet(targetLocal);
+    emitValue();
+    body.i32Const(i32(mask));
+    body.i32And();
+    body.i32Or();
+    body.localSet(targetLocal);
   }
 
   function materializeFlags(mask: number): void {
@@ -238,7 +340,10 @@ export function createJitFlagState(
     }
   }
 
-  function emitPendingFlags(pendingFlags: PendingFlags, mask: number): void {
+  function emitPendingFlags(
+    pendingFlags: PendingFlags,
+    mask: number
+  ): void {
     const inputs = pendingInputRefs(pendingFlags, FLAG_PRODUCERS[pendingFlags.producer].inputs);
 
     emitSetFlags(

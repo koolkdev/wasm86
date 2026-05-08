@@ -3,12 +3,14 @@ import { analyzeJitCodegenState } from "./exit-state-analysis.js";
 import type { JitCodegenPlan } from "./types.js";
 
 export type {
+  JitInstructionEntryPoint,
   JitExitPoint,
   JitExitSnapshotKind,
-  JitExitStoreSnapshotPlan,
+  JitExitMaterializationPlan,
   JitFlagMaterializationRequirement,
   JitFlagSnapshot,
   JitInstructionState,
+  JitPreInstructionExitPlan,
   JitCodegenPlan,
   JitStateSnapshot
 } from "./types.js";

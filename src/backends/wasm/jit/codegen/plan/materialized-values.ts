@@ -14,7 +14,7 @@ export type JitMaterializedValueUsePlan = Readonly<{
 
 export function planJitMaterializedValueUses(
   instructions: readonly JitMaterializedValueUsePlanInput[],
-  codegenPlan: Pick<JitCodegenPlan, "block" | "instructionStates" | "exitPoints" | "exitStoreSnapshots">
+  codegenPlan: Pick<JitCodegenPlan, "block" | "instructionStates" | "exitPoints" | "exitMaterializations">
 ): JitMaterializedValueUsePlan {
   if (instructions.length !== codegenPlan.block.instructions.length) {
     throw new Error(
@@ -22,7 +22,7 @@ export function planJitMaterializedValueUses(
     );
   }
 
-  const exitStoreSnapshotRegsByInstructionOp = exitStoreSnapshotRegsByInstructionOpIndex(codegenPlan);
+  const exitMaterializationRegsByInstructionOp = exitMaterializationRegsByInstructionOpIndex(codegenPlan);
   const expressionUseIndexesByInstruction = new Array<Set<number>>(instructions.length);
   let neededAfterInstruction = new Set<Reg32>();
 
@@ -34,13 +34,13 @@ export function planJitMaterializedValueUses(
       throw new Error(`missing JIT instruction while planning materialized value uses: ${instructionIndex}`);
     }
 
-    const exitStoreSnapshotRegsByOp = exitStoreSnapshotRegsByInstructionOp[instructionIndex] ?? new Map();
+    const exitMaterializationRegsByOp = exitMaterializationRegsByInstructionOp[instructionIndex] ?? new Map();
     const needed = new Set(neededAfterInstruction);
     const sourceUseIndexes = new Set<number>();
 
-    // Exit points refer to source IR op indexes, but expression blocks can gain
-    // flags.boundary ops, so reachability is computed on source IR and mapped by
-    // registerMaterialization ordinal to expression-block indexes.
+    // Exit points refer to source IR op indexes, while value-cache planning
+    // consumes expression-block indexes, so reachability is computed on source
+    // IR and mapped by registerMaterialization ordinal to expression ops.
     for (let opIndex = sourceInstruction.ir.length - 1; opIndex >= 0; opIndex -= 1) {
       const op = sourceInstruction.ir[opIndex];
 
@@ -60,7 +60,7 @@ export function planJitMaterializedValueUses(
         }
       }
 
-      for (const reg of exitStoreSnapshotRegsByOp.get(opIndex) ?? []) {
+      for (const reg of exitMaterializationRegsByOp.get(opIndex) ?? []) {
         needed.add(reg);
       }
     }
@@ -130,16 +130,16 @@ function expressionMaterializedValueUseIndexes(
   return expressionIndexes;
 }
 
-function exitStoreSnapshotRegsByInstructionOpIndex(
-  codegenPlan: Pick<JitCodegenPlan, "instructionStates" | "exitPoints" | "exitStoreSnapshots">
+function exitMaterializationRegsByInstructionOpIndex(
+  codegenPlan: Pick<JitCodegenPlan, "instructionStates" | "exitPoints" | "exitMaterializations">
 ): readonly ReadonlyMap<number, readonly Reg32[]>[] {
   const regs = new Array<Map<number, Reg32[]>>(codegenPlan.instructionStates.length);
 
   for (const exitPoint of codegenPlan.exitPoints) {
-    const exitStoreSnapshot = codegenPlan.exitStoreSnapshots[exitPoint.exitStoreSnapshotIndex];
+    const exitMaterialization = codegenPlan.exitMaterializations[exitPoint.exitMaterializationIndex];
 
-    if (exitStoreSnapshot === undefined) {
-      throw new Error(`missing JIT exit store snapshot while planning materialized value uses: ${exitPoint.exitStoreSnapshotIndex}`);
+    if (exitMaterialization === undefined) {
+      throw new Error(`missing JIT exit materialization while planning materialized value uses: ${exitPoint.exitMaterializationIndex}`);
     }
 
     let instructionRegs = regs[exitPoint.instructionIndex];
@@ -151,7 +151,7 @@ function exitStoreSnapshotRegsByInstructionOpIndex(
 
     const opRegs = instructionRegs.get(exitPoint.opIndex) ?? [];
 
-    for (const reg of exitStoreSnapshot.regs) {
+    for (const reg of exitMaterialization.regs) {
       if (!opRegs.includes(reg)) {
         opRegs.push(reg);
       }

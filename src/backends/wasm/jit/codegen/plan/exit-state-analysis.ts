@@ -13,7 +13,7 @@ import {
 import type {
   JitCodegenPlan,
   JitExitPoint,
-  JitExitStoreSnapshotPlan,
+  JitExitMaterializationPlan,
   JitFlagMaterializationRequirement,
   JitInstructionState,
   JitStateSnapshot
@@ -27,9 +27,10 @@ export function analyzeJitCodegenState(
   const instructionStates: JitInstructionState[] = [];
   const exitPoints: JitExitPoint[] = [];
   const flagMaterializationRequirements: JitFlagMaterializationRequirement[] = [];
-  // Non-empty exit store snapshots stay per-exit because register locals can
-  // change before deferred exit blocks are emitted. Empty exits share index 0.
-  const exitStoreSnapshots: JitExitStoreSnapshotPlan[] = [{ regs: [] }];
+  // Non-empty exit materializations stay per-exit because register and flag
+  // locals can change before deferred exit blocks are emitted. Empty exits
+  // share index 0.
+  const exitMaterializations: JitExitMaterializationPlan[] = [{ regs: [], flagMask: 0 }];
   let currentPostState: JitStateSnapshot | undefined;
 
   for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
@@ -68,14 +69,26 @@ export function analyzeJitCodegenState(
       throw new Error(`missing JIT instruction terminator while planning JIT codegen: ${instructionIndex}`);
     }
 
+    const preInstructionExitPointCount = countPreInstructionExitPoints(exitPoints, exitStart);
+
     instructionStates.push({
       instructionId: instruction.instructionId,
       eip: instruction.eip,
       nextEip: instruction.nextEip,
       nextMode: instruction.nextMode,
-      preInstructionState: entry,
+      entryPoint: {
+        instructionIndex,
+        snapshot: entry,
+        ...(preInstructionExitPointCount === 0
+          ? {}
+          : {
+              preInstructionExitPlan: {
+                exitPointCount: preInstructionExitPointCount,
+                preserveCommittedRegs: true
+              }
+            })
+      },
       postInstructionState: currentPostState,
-      preInstructionExitPointCount: preInstructionExitPointCount(exitPoints, exitStart),
       exitPointCount: exitPoints.length - exitStart
     });
   }
@@ -84,8 +97,8 @@ export function analyzeJitCodegenState(
     instructionStates,
     exitPoints,
     flagMaterializationRequirements,
-    exitStoreSnapshots,
-    maxExitStoreSnapshotIndex: exitStoreSnapshots.length - 1
+    exitMaterializations,
+    maxExitMaterializationIndex: exitMaterializations.length - 1
   };
 
   function instructionPostState(instruction: JitIrBlockInstruction): JitStateSnapshot {
@@ -165,39 +178,50 @@ export function analyzeJitCodegenState(
     exitReason: ExitReasonValue,
     snapshot: JitStateSnapshot
   ): void {
-    const requiredFlagCommitMask = snapshot.speculativeFlags.mask;
-    const exitStoreSnapshotIndex = appendExitStoreSnapshot(snapshot.committedRegs);
+    const pendingFlagMask = snapshot.speculativeFlags.mask;
+    const requiredFlagMask = exitFlagMaterializationMask(snapshot);
+    const exitMaterializationIndex = appendExitMaterialization(snapshot.committedRegs, requiredFlagMask);
 
     exitPoints.push({
       instructionIndex,
       opIndex,
       exitReason,
       snapshot,
-      exitStoreSnapshotIndex,
-      requiredFlagCommitMask
+      exitMaterializationIndex
     });
 
-    if (requiredFlagCommitMask !== 0) {
+    if (requiredFlagMask !== 0) {
       flagMaterializationRequirements.push({
         instructionIndex,
         opIndex,
         reason: "exit",
-        requiredMask: requiredFlagCommitMask,
-        pendingMask: requiredFlagCommitMask
+        requiredMask: requiredFlagMask,
+        pendingMask: pendingFlagMask
       });
     }
   }
 
-  function appendExitStoreSnapshot(regs: readonly Reg32[]): number {
-    if (regs.length === 0) {
+  function appendExitMaterialization(regs: readonly Reg32[], flagMask: number): number {
+    if (regs.length === 0 && flagMask === 0) {
       return 0;
     }
 
-    const index = exitStoreSnapshots.length;
+    const index = exitMaterializations.length;
 
-    exitStoreSnapshots.push({ regs });
+    exitMaterializations.push({
+      regs,
+      flagMask
+    });
     return index;
   }
+}
+
+function exitFlagMaterializationMask(snapshot: JitStateSnapshot): number {
+  const speculativeMask = snapshot.speculativeFlags.mask;
+
+  return speculativeMask === 0
+    ? 0
+    : speculativeMask | snapshot.committedFlags.mask;
 }
 
 function preInstructionFaultSnapshot(
@@ -211,7 +235,7 @@ function preInstructionFaultSnapshot(
   };
 }
 
-function preInstructionExitPointCount(exitPoints: readonly JitExitPoint[], exitStart: number): number {
+function countPreInstructionExitPoints(exitPoints: readonly JitExitPoint[], exitStart: number): number {
   let count = 0;
 
   for (let index = exitStart; index < exitPoints.length; index += 1) {

@@ -3,7 +3,7 @@ import {
   type IrExpressionOptions,
   type IrExprBlock
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   canInlineJitInstructionGet,
   jitInstructionStorageRefsMayAlias
@@ -16,7 +16,7 @@ import {
 import type {
   JitCodegenPlan,
   JitExitPoint,
-  JitExitStoreSnapshotPlan,
+  JitExitMaterializationPlan,
   JitFlagMaterializationRequirement,
   JitInstructionState
 } from "./types.js";
@@ -33,15 +33,14 @@ export type JitCodegenEmissionPlan = Readonly<{
   instructions: readonly JitCodegenInstructionPlan[];
   exitPoints: readonly JitExitPoint[];
   flagMaterializationRequirements: readonly JitFlagMaterializationRequirement[];
-  exitStoreSnapshots: readonly JitExitStoreSnapshotPlan[];
-  maxExitStoreSnapshotIndex: number;
+  exitMaterializations: readonly JitExitMaterializationPlan[];
+  maxExitMaterializationIndex: number;
   valueCachePlan?: JitExpressionValueCachePlan;
 }>;
 
-export function buildJitCodegenEmissionPlan(
-  block: JitIrBlock,
-  codegenPlan: JitCodegenPlan
-): JitCodegenEmissionPlan {
+export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCodegenEmissionPlan {
+  const block = codegenPlan.block;
+
   if (block.instructions.length !== codegenPlan.instructionStates.length) {
     throw new Error(
       `JIT codegen instruction count mismatch: ${block.instructions.length} !== ${codegenPlan.instructionStates.length}`
@@ -82,8 +81,8 @@ export function buildJitCodegenEmissionPlan(
       : instructions.map((instruction) => ({ ...instruction, valueCachePlan })),
     exitPoints: codegenPlan.exitPoints,
     flagMaterializationRequirements: codegenPlan.flagMaterializationRequirements,
-    exitStoreSnapshots: codegenPlan.exitStoreSnapshots,
-    maxExitStoreSnapshotIndex: codegenPlan.maxExitStoreSnapshotIndex,
+    exitMaterializations: codegenPlan.exitMaterializations,
+    maxExitMaterializationIndex: codegenPlan.maxExitMaterializationIndex,
     ...(valueCachePlan === undefined ? {} : { valueCachePlan })
   };
 }

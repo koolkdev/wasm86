@@ -34,21 +34,18 @@ export function emitJitControlExit(
   target: IrValueExpr,
   exitReason: ExitReason,
   helpers: WasmIrEmitHelpers,
-  extraDepth = 0
+  extraDepth = 0,
+  exitPoint = context.currentExitPoint(exitReason)
 ): void {
   const targetLocal = context.scratch.allocLocal(wasmValueType.i32);
 
   try {
     helpers.emitValue(target, { requestedWidth: 32 });
     context.body.localSet(targetLocal);
-    const exitPoint = context.currentExitPoint(exitReason);
 
-    context.state.commitInstructionExit(
-      exitPoint,
-      () => {
-        context.body.localGet(targetLocal);
-      }
-    );
+    context.state.commitInstructionExit(exitPoint, () => {
+      context.body.localGet(targetLocal);
+    });
     context.body.localGet(targetLocal);
     emitWasmIrExitFromI32Stack(context.body, context.exit, exitReason, extraDepth);
   } finally {
@@ -63,11 +60,15 @@ export function emitJitConditionalJump(
   notTaken: IrValueExpr,
   helpers: WasmIrEmitHelpers
 ): void {
+  const takenExitPoint = context.currentExitPoint(ExitReason.BRANCH_TAKEN);
+  const notTakenExitPoint = context.currentExitPoint(ExitReason.BRANCH_NOT_TAKEN);
+
   helpers.emitValue(condition, { requestedWidth: 32 });
   context.body.ifBlock();
-  emitJitControlTransfer(context, taken, ExitReason.BRANCH_TAKEN, helpers, 1);
+  emitJitControlTransfer(context, taken, ExitReason.BRANCH_TAKEN, helpers, 1, takenExitPoint);
+  context.body.elseBlock();
+  emitJitControlTransfer(context, notTaken, ExitReason.BRANCH_NOT_TAKEN, helpers, 1, notTakenExitPoint);
   context.body.endBlock();
-  emitJitControlTransfer(context, notTaken, ExitReason.BRANCH_NOT_TAKEN, helpers);
 }
 
 export function emitJitHostTrap(context: JitIrContext, vector: IrValueExpr, helpers: WasmIrEmitHelpers): void {
@@ -79,12 +80,9 @@ export function emitJitHostTrap(context: JitIrContext, vector: IrValueExpr, help
     const instruction = context.currentInstruction();
     const exitPoint = context.currentExitPoint(ExitReason.HOST_TRAP);
 
-    context.state.commitInstructionExit(
-      exitPoint,
-      () => {
-        context.body.i32Const(i32(instruction.nextEip));
-      }
-    );
+    context.state.commitInstructionExit(exitPoint, () => {
+      context.body.i32Const(i32(instruction.nextEip));
+    });
     context.body.localGet(vectorLocal);
     emitWasmIrExitFromI32Stack(context.body, context.exit, ExitReason.HOST_TRAP);
   } finally {
@@ -97,16 +95,17 @@ function emitJitControlTransfer(
   target: IrValueExpr,
   exitReason: ExitReasonValue,
   helpers: WasmIrEmitHelpers,
-  extraDepth = 0
+  extraDepth = 0,
+  exitPoint = context.currentExitPoint(exitReason)
 ): boolean {
   const targetEip = staticControlTarget(context, target);
 
   if (targetEip === undefined) {
-    emitJitControlExit(context, target, exitReason, helpers, extraDepth);
+    emitJitControlExit(context, target, exitReason, helpers, extraDepth, exitPoint);
     return false;
   }
 
-  emitJitStaticControlTransfer(context, targetEip, exitReason, extraDepth);
+  emitJitStaticControlTransfer(context, targetEip, exitReason, extraDepth, exitPoint);
   return true;
 }
 
@@ -114,10 +113,9 @@ function emitJitStaticControlTransfer(
   context: JitIrContext,
   targetEip: number,
   exitReason: ExitReasonValue,
-  extraDepth = 0
+  extraDepth = 0,
+  exitPoint = context.currentExitPoint(exitReason)
 ): void {
-  const exitPoint = context.currentExitPoint(exitReason);
-
   context.state.commitInstructionExit(exitPoint, () => {
     context.body.i32Const(i32(targetEip));
   });
@@ -165,7 +163,7 @@ function emitJitLinkedControlTransferStateStores(
   exitPoint: JitExitPoint
 ): void {
   context.exit.emitBeforeExit?.();
-  context.state.emitExitStoreSnapshotStores(exitPoint.exitStoreSnapshotIndex);
+  context.state.emitExitMaterializationStores(exitPoint.exitMaterializationIndex);
 }
 
 function staticControlTarget(context: JitIrContext, target: IrValueExpr): number | undefined {

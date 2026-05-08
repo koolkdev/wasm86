@@ -2,12 +2,20 @@ import { i32 } from "#x86/state/cpu-state.js";
 import { stateOffset } from "#backends/wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import { ExitReason } from "#backends/wasm/exit.js";
 import { emitLoadStateU32, emitStoreStateU32 } from "#backends/wasm/codegen/state.js";
-import type { JitExitPoint, JitExitStoreSnapshotPlan, JitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
-import { createJitFlagState, type JitFlagState } from "./flag-state.js";
+import type {
+  JitExitMaterializationPlan,
+  JitExitPoint,
+  JitInstructionEntryPoint
+} from "#backends/wasm/jit/codegen/plan/types.js";
+import {
+  createJitFlagState,
+  type JitFlagExitStoreSnapshot,
+  type JitFlagState
+} from "./flag-state.js";
 import {
   createJitReg32State,
-  type JitReg32InstructionOptions,
   type JitReg32State,
   type JitReg32ExitStoreSnapshot
 } from "./register-state.js";
@@ -27,29 +35,39 @@ type JitIrStateOptions = Readonly<{
   valueCache?: JitValueCacheRuntime | undefined;
 }>;
 
+type JitExitMaterializationSnapshot = Readonly<{
+  regs?: JitReg32ExitStoreSnapshot;
+  flags?: JitFlagExitStoreSnapshot;
+}>;
+
+type CaptureExitMaterializationOptions = Readonly<{
+  allowPendingFlags?: boolean;
+  consumeFlags?: boolean;
+}>;
+
 export type JitIrState = Readonly<{
   regs: JitReg32State;
   flags: JitFlagState;
   eipLocal: number;
   aluFlagsLocal: number;
   instructionCountLocal: number;
-  maxExitStoreSnapshotIndex: number;
+  maxExitMaterializationIndex: number;
   emitLoadInstructionCount(): void;
-  beginInstruction(exit: JitExitTarget, snapshot: JitStateSnapshot, options: JitReg32InstructionOptions): void;
+  beginInstruction(exit: JitExitTarget, entryPoint: JitInstructionEntryPoint): void;
   prepareExitPoint(exitPoint: JitExitPoint, emitEip: () => void): void;
   finishPreInstructionExitPoints(): void;
   commitInstruction(): void;
   commitInstructionExit(exitPoint: JitExitPoint, emitEip: () => void): void;
-  emitExitStoreSnapshotStores(index: number): void;
+  emitExitMaterializationStores(index: number): void;
 }>;
 
 export function createJitIrState(
   body: WasmFunctionBodyEncoder,
-  exitStoreSnapshots: readonly JitExitStoreSnapshotPlan[],
+  exitMaterializations: readonly JitExitMaterializationPlan[],
   options: JitIrStateOptions = {}
 ): JitIrState {
   const regs = createJitReg32State(body);
-  const maxExitStoreSnapshotIndex = exitStoreSnapshots.length - 1;
+  const maxExitMaterializationIndex = exitMaterializations.length - 1;
   const eipLocal = body.addLocal(wasmValueType.i32);
   const aluFlagsLocal = body.addLocal(wasmValueType.i32);
   const flags = createJitFlagState(body, aluFlagsLocal, {
@@ -59,7 +77,7 @@ export function createJitIrState(
     valueCache: options.valueCache
   });
   const instructionCountLocal = body.addLocal(wasmValueType.i32);
-  const exitRegisterStoreSnapshots = new Map<number, JitReg32ExitStoreSnapshot>();
+  const exitMaterializationSnapshots = new Map<number, JitExitMaterializationSnapshot>();
   let activeExit: JitExitTarget | undefined;
 
   return {
@@ -68,26 +86,32 @@ export function createJitIrState(
     eipLocal,
     aluFlagsLocal,
     instructionCountLocal,
-    maxExitStoreSnapshotIndex,
+    maxExitMaterializationIndex,
     emitLoadInstructionCount: () => {
       emitLoadStateU32(body, stateOffset.instructionCount);
       body.localSet(instructionCountLocal);
     },
-    beginInstruction: (exit, snapshot, options) => {
+    beginInstruction: (exit, entryPoint) => {
+      const preInstructionExitPlan = entryPoint.preInstructionExitPlan;
+
       activeExit = exit;
-      regs.beginInstruction(options);
-      useExitStoreSnapshot(exit, 0);
+      regs.beginInstruction({ preserveCommittedRegs: preInstructionExitPlan?.preserveCommittedRegs ?? false });
+      useExitMaterialization(exit, 0);
       installExitMetadataStores(exit, () => {
-        body.i32Const(i32(snapshot.eip));
-      }, snapshot.instructionCountDelta);
+        body.i32Const(i32(entryPoint.snapshot.eip));
+      }, entryPoint.snapshot.instructionCountDelta);
     },
     prepareExitPoint: (exitPoint, emitEip) => {
       const exit = requiredActiveExit();
+      const allowPendingFlags = exitPoint.snapshot.kind === "preInstruction";
+      const snapshot = captureExitMaterializationSnapshot(exitPoint.exitMaterializationIndex, {
+        allowPendingFlags
+      });
 
-      useExitStoreSnapshot(exit, exitPoint.exitStoreSnapshotIndex);
-      captureExitRegisterStoreSnapshot(exitPoint.exitStoreSnapshotIndex);
+      storeExitMaterializationSnapshot(exitPoint.exitMaterializationIndex, snapshot);
+      useExitMaterialization(exit, exitPoint.exitMaterializationIndex);
       installExitMetadataStores(exit, emitEip, exitPoint.snapshot.instructionCountDelta, {
-        allowPendingFlags: exitPoint.snapshot.kind === "preInstruction"
+        allowPendingFlags
       });
     },
     finishPreInstructionExitPoints: () => {
@@ -100,31 +124,41 @@ export function createJitIrState(
       emitEip();
       body.localSet(eipLocal);
       regs.commitPending();
-      captureExitRegisterStoreSnapshot(exitPoint.exitStoreSnapshotIndex);
-      useExitStoreSnapshot(exit, exitPoint.exitStoreSnapshotIndex);
+      captureAndStoreExitMaterialization(exitPoint.exitMaterializationIndex, {
+        consumeFlags: shouldConsumeExitFlags(exitPoint)
+      });
+      useExitMaterialization(exit, exitPoint.exitMaterializationIndex);
       installExitMetadataStores(exit, () => {
         body.localGet(eipLocal);
-      }, exitPoint.snapshot.instructionCountDelta);
+      }, exitPoint.snapshot.instructionCountDelta, {
+        allowPendingFlags: true
+      });
     },
-    emitExitStoreSnapshotStores: (index) => {
-      const snapshot = exitStoreSnapshots[index];
+    emitExitMaterializationStores: (index) => {
+      const plan = exitMaterializations[index];
 
-      if (snapshot === undefined) {
-        throw new Error(`missing JIT exit store snapshot: ${index}`);
+      if (plan === undefined) {
+        throw new Error(`missing JIT exit materialization: ${index}`);
       }
 
-      if (snapshot.regs.length === 0) {
-        return;
+      const snapshot = exitMaterializationSnapshots.get(index);
+
+      if (plan.regs.length !== 0) {
+        if (snapshot?.regs === undefined) {
+          throw new Error(`JIT exit materialization was not captured: ${index}`);
+        }
+
+        for (const reg of plan.regs) {
+          regs.emitExitSnapshotStore(reg, snapshot.regs);
+        }
       }
 
-      const registerSnapshot = exitRegisterStoreSnapshots.get(index);
+      if (plan.flagMask !== 0) {
+        if (snapshot?.flags === undefined) {
+          throw new Error(`JIT flag exit materialization was not captured: ${index}`);
+        }
 
-      if (registerSnapshot === undefined) {
-        throw new Error(`JIT exit store snapshot was not captured: ${index}`);
-      }
-
-      for (const reg of snapshot.regs) {
-        regs.emitExitSnapshotStore(reg, registerSnapshot);
+        flags.emitExitSnapshotStore(snapshot.flags);
       }
     }
   };
@@ -168,20 +202,79 @@ export function createJitIrState(
     };
   }
 
-  function useExitStoreSnapshot(exit: JitExitTarget, index: number): void {
-    exit.exitLabelDepth = maxExitStoreSnapshotIndex - index;
+  function useExitMaterialization(exit: JitExitTarget, index: number): void {
+    exit.exitLabelDepth = maxExitMaterializationIndex - index;
   }
 
-  function captureExitRegisterStoreSnapshot(index: number): void {
-    const snapshot = exitStoreSnapshots[index];
-
-    if (snapshot === undefined || snapshot.regs.length === 0) {
+  function captureAndStoreExitMaterialization(
+    index: number,
+    options: CaptureExitMaterializationOptions = {}
+  ): void {
+    if (exitMaterializationSnapshots.has(index)) {
       return;
     }
 
-    // Deferred exit blocks store this snapshot after later code may have run.
-    // Capture prefix locals at the exit point.
-    exitRegisterStoreSnapshots.set(index, regs.captureCommittedExitStores(snapshot.regs));
+    const snapshot = captureExitMaterializationSnapshot(index, options);
+
+    storeExitMaterializationSnapshot(index, snapshot);
+  }
+
+  function captureExitMaterializationSnapshot(
+    index: number,
+    options: CaptureExitMaterializationOptions = {}
+  ): JitExitMaterializationSnapshot | undefined {
+    const plan = exitMaterializations[index];
+
+    if (plan === undefined) {
+      throw new Error(`missing JIT exit materialization: ${index}`);
+    }
+
+    if (options.allowPendingFlags !== true) {
+      flags.assertPendingCoveredBy(plan.flagMask);
+    }
+
+    const registerSnapshot = plan.regs.length === 0
+      ? undefined
+      : regs.captureCommittedExitStores(plan.regs);
+    const flagSnapshot = flags.captureExitStoreSnapshot(
+      plan.flagMask,
+      options.consumeFlags === false ? { consume: false } : undefined
+    );
+
+    return registerSnapshot === undefined && flagSnapshot === undefined
+      ? undefined
+      : {
+          ...(registerSnapshot === undefined ? {} : { regs: registerSnapshot }),
+          ...(flagSnapshot === undefined ? {} : { flags: flagSnapshot })
+        };
+  }
+
+  function storeExitMaterializationSnapshot(
+    index: number,
+    snapshot: JitExitMaterializationSnapshot | undefined
+  ): void {
+    const plan = exitMaterializations[index];
+
+    if (plan === undefined) {
+      throw new Error(`missing JIT exit materialization: ${index}`);
+    }
+
+    if (plan.regs.length === 0 && plan.flagMask === 0) {
+      return;
+    }
+
+    if (snapshot === undefined) {
+      throw new Error(`JIT exit materialization was not captured: ${index}`);
+    }
+
+    exitMaterializationSnapshots.set(index, snapshot);
+  }
+
+  function shouldConsumeExitFlags(exitPoint: JitExitPoint): boolean {
+    // emitJitConditionalJump emits the taken arm first and not-taken second.
+    // Keep the first arm non-consuming so the second arm can still snapshot
+    // pending flags, then let the second arm consume and release ownership.
+    return exitPoint.exitReason !== ExitReason.BRANCH_TAKEN;
   }
 
   function requiredActiveExit(): JitExitTarget {

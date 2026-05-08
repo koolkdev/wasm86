@@ -16,6 +16,8 @@ const aEip = 0x1000;
 const bEip = 0x2000;
 const cEip = 0x3000;
 const zeroFlag = 0x40;
+const preservedEflags = 0xffff_0000;
+const addWraparoundEflags = 0x55;
 
 test("cold final static jmp uses module-local fallback stub", () => {
   const fixture = createLinkingFixture([
@@ -139,6 +141,43 @@ test("compiled conditional targets patch both branch slots", () => {
 
   deepStrictEqual(notTakenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(notTakenState.eax, 2);
+});
+
+test("linked conditional branch exits preserve committed flags", () => {
+  const takenEip = aEip + 0x20;
+  const branchBytes = addEaxOneJnzRel8(aEip, takenEip);
+  const notTakenEip = aEip + branchBytes.length;
+  const fixture = createLinkingFixture([
+    block(aEip, branchBytes),
+    block(notTakenEip, hostTrap()),
+    block(takenEip, hostTrap())
+  ]);
+  const branch = compileBlock(fixture, aEip);
+  const notTaken = compileBlock(fixture, notTakenEip);
+  const taken = compileBlock(fixture, takenEip);
+  const notTakenSlot = slotForTarget(branch, notTakenEip);
+  const takenSlot = slotForTarget(branch, takenEip);
+
+  strictEqual(branch.moduleLinkTable?.table.get(notTakenSlot), notTaken.exportedBlockFunctionForEip(notTakenEip));
+  strictEqual(branch.moduleLinkTable?.table.get(takenSlot), taken.exportedBlockFunctionForEip(takenEip));
+
+  fixture.memories.state.load({ eip: aEip, eax: 0, eflags: preservedEflags });
+
+  const takenRun = branch.run();
+  const takenState = fixture.memories.state.snapshot();
+
+  deepStrictEqual(takenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  strictEqual(takenState.eax, 1);
+  strictEqual(takenState.eflags, preservedEflags);
+
+  fixture.memories.state.load({ eip: aEip, eax: 0xffff_ffff, eflags: preservedEflags });
+
+  const notTakenRun = branch.run();
+  const notTakenState = fixture.memories.state.snapshot();
+
+  deepStrictEqual(notTakenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  strictEqual(notTakenState.eax, 0);
+  strictEqual(notTakenState.eflags, (preservedEflags | addWraparoundEflags) >>> 0);
 });
 
 test("invalidating compiled target restores dependent module-local fallback", () => {
@@ -292,11 +331,22 @@ function incEaxJnzRel8(blockEip: number, targetEip: number): readonly number[] {
   ];
 }
 
+function addEaxOneJnzRel8(blockEip: number, targetEip: number): readonly number[] {
+  return [
+    0x83, 0xc0, 0x01,
+    ...jnzRel8(blockEip + 3, targetEip)
+  ];
+}
+
 function incEaxHostTrap(): readonly number[] {
   return [
     0x40,
     0xcd, 0x2e
   ];
+}
+
+function hostTrap(): readonly number[] {
+  return [0xcd, 0x2e];
 }
 
 function callRel32(eip: number, targetEip: number): readonly number[] {

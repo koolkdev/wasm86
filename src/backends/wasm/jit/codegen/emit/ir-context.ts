@@ -119,11 +119,13 @@ function createJitIrContext(context: JitIrBlockEmitContext): JitIrContext {
         throw new Error(`missing JIT IR instruction context: ${instructionIndex}`);
       }
 
-      if (completedPreInstructionExitPointCount > instruction.preInstructionExitPointCount) {
+      const expectedPreInstructionExitPointCount = instruction.entryPoint.preInstructionExitPlan?.exitPointCount ?? 0;
+
+      if (completedPreInstructionExitPointCount > expectedPreInstructionExitPointCount) {
         throw new Error(`completed too many JIT pre-instruction exit points: ${instructionIndex}`);
       }
 
-      if (completedPreInstructionExitPointCount === instruction.preInstructionExitPointCount) {
+      if (completedPreInstructionExitPointCount === expectedPreInstructionExitPointCount) {
         context.state.finishPreInstructionExitPoints();
       }
     },
@@ -175,9 +177,7 @@ function beginInstruction(
   exit: JitExitTarget,
   instruction: JitIrInstructionContext
 ): void {
-  context.state.beginInstruction(exit, instruction.preInstructionState, {
-    preserveCommittedRegs: instruction.preInstructionExitPointCount !== 0
-  });
+  context.state.beginInstruction(exit, instruction.entryPoint);
 }
 
 function indexExitPoints(exitPoints: readonly JitExitPoint[]): ReadonlyMap<string, readonly JitExitPoint[]> {

@@ -7,7 +7,6 @@ import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { encodeExit, ExitReason } from "#backends/wasm/exit.js";
 import { jitModuleLinkFallbackExportName } from "./compiled-blocks/module-link-table.js";
 import { validateJitIrBlock } from "./ir/validate.js";
-import { buildJitCodegenIr } from "./codegen/plan/block.js";
 import { buildJitCodegenEmissionPlan } from "./codegen/plan/emission.js";
 import { planJitCodegen } from "./codegen/plan/plan.js";
 import {
@@ -104,21 +103,20 @@ function encodeJitIrBlockFunctionBody(
 ): WasmFunctionBodyEncoder {
   const optimizedBlock = optimizeJitIrBlock(block);
   const codegenPlan = planJitCodegen(optimizedBlock);
-  const codegenIr = buildJitCodegenIr(codegenPlan);
 
-  validateJitIrBlock(codegenIr);
+  validateJitIrBlock(optimizedBlock);
 
-  const emissionPlan = buildJitCodegenEmissionPlan(codegenIr, codegenPlan);
+  const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
   const valueCache = createJitValueCacheRuntime(body, emissionPlan.valueCachePlan);
-  const state = createJitIrState(body, emissionPlan.exitStoreSnapshots, { valueCache });
-  const exit: JitExitTarget = { exitLocal, exitLabelDepth: state.maxExitStoreSnapshotIndex };
+  const state = createJitIrState(body, emissionPlan.exitMaterializations, { valueCache });
+  const exit: JitExitTarget = { exitLocal, exitLabelDepth: state.maxExitMaterializationIndex };
 
   state.emitLoadInstructionCount();
 
-  emitExitStoreSnapshotBlocks(body, state.maxExitStoreSnapshotIndex);
+  emitExitMaterializationBlocks(body, state.maxExitMaterializationIndex);
   emitJitIrWithContext({
     body,
     scratch,
@@ -129,7 +127,7 @@ function encodeJitIrBlockFunctionBody(
     valueCache,
     linking
   });
-  emitExitStoreSnapshotStores(body, state, exitLocal);
+  emitExitMaterializationStores(body, state, exitLocal);
   scratch.assertClear();
   body.end();
 
@@ -195,8 +193,8 @@ function blockFunctionIndicesForEntries(
   return indices;
 }
 
-function emitExitStoreSnapshotBlocks(body: WasmFunctionBodyEncoder, maxExitStoreSnapshotIndex: number): void {
-  for (let index = 0; index <= maxExitStoreSnapshotIndex; index += 1) {
+function emitExitMaterializationBlocks(body: WasmFunctionBodyEncoder, maxExitMaterializationIndex: number): void {
+  for (let index = 0; index <= maxExitMaterializationIndex; index += 1) {
     void index;
     body.block();
   }
@@ -219,14 +217,14 @@ function emitLinkFallbackExports(
   }
 }
 
-function emitExitStoreSnapshotStores(
+function emitExitMaterializationStores(
   body: WasmFunctionBodyEncoder,
   state: JitIrState,
   exitLocal: number
 ): void {
-  for (let index = state.maxExitStoreSnapshotIndex; index >= 0; index -= 1) {
+  for (let index = state.maxExitMaterializationIndex; index >= 0; index -= 1) {
     body.endBlock();
-    state.emitExitStoreSnapshotStores(index);
+    state.emitExitMaterializationStores(index);
     body.localGet(exitLocal).returnFromFunction();
   }
 }
