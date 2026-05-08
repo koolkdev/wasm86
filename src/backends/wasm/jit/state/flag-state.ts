@@ -14,13 +14,10 @@ import { i32 } from "#x86/state/cpu-state.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import {
-  emitAluFlagsCondition,
+  emitAluFlagsConditionFromValue,
   emitFlagProducerCondition
 } from "#backends/wasm/codegen/conditions.js";
-import {
-  wasmIrLocalAluFlagsStorage
-} from "#backends/wasm/codegen/alu-flags.js";
-import { emitSetFlags } from "#backends/wasm/codegen/flags.js";
+import { emitFlagProducerBits } from "#backends/wasm/codegen/flags.js";
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import {
   constValueWidth,
@@ -49,22 +46,16 @@ type PendingInputRefs = Readonly<{
   inputsByVarId: ReadonlyMap<number, PendingInput>;
 }>;
 
-// Each compact aluFlags bit can come from a different place after partial writes:
-// memory on entry, the cached local, or a still-lazy producer descriptor.
+// Each compact aluFlags bit can come from a different source after partial writes:
+// memory on entry or a still-lazy producer descriptor.
 type FlagSource =
   | Readonly<{ kind: "incoming" }>
-  | Readonly<{ kind: "local" }>
   | Readonly<{ kind: "pending"; pending: PendingFlags }>;
 
 type JitFlagStateOptions = Readonly<{
-  emitLoadAluFlags(): void;
   emitLoadAluFlagsValue(): void;
   emitStoreAluFlags(emitValue: () => void): void;
   valueCache?: JitValueCacheRuntime | undefined;
-}>;
-
-type JitFlagExitStoreSnapshotOptions = Readonly<{
-  consume?: boolean;
 }>;
 
 export type JitFlagState = Readonly<{
@@ -72,33 +63,42 @@ export type JitFlagState = Readonly<{
   emitMaterialize(mask: number): void;
   emitBoundary(mask: number): void;
   emitAluFlagsCondition(cc: ConditionCode): void;
-  captureExitStoreSnapshot(
-    mask: number,
-    options?: JitFlagExitStoreSnapshotOptions
-  ): JitFlagExitStoreSnapshot | undefined;
+  captureExitStoreSnapshot(mask: number): JitFlagExitStoreSnapshot | undefined;
   emitExitSnapshotStore(snapshot: JitFlagExitStoreSnapshot): void;
+  releaseExitSnapshot(snapshot: JitFlagExitStoreSnapshot): void;
+  releasePendingOwners(): void;
   assertPendingCoveredBy(mask: number): void;
   assertNoPending(): void;
 }>;
 
 export type JitFlagExitStoreSnapshot = Readonly<{
   mask: number;
-  local: number;
+  source: JitFlagExitStoreSnapshotSource;
+  owners: readonly JitCachedValueHandle[];
 }>;
+
+type JitFlagExitStoreSnapshotSource =
+  | JitFlagIncomingSnapshotSource
+  | Readonly<{ kind: "pending"; pending: PendingFlags }>
+  | Readonly<{ kind: "merge"; parts: readonly JitFlagMergePart[] }>;
+
+type JitFlagIncomingSnapshotSource = Readonly<{
+  kind: "incoming";
+}>;
+
+type JitFlagMergePart =
+  | Readonly<{ kind: "incoming"; mask: number }>
+  | Readonly<{ kind: "pending"; pending: PendingFlags; mask: number }>;
 
 export function createJitFlagState(
   body: WasmFunctionBodyEncoder,
-  aluFlagsLocal: number,
   options: JitFlagStateOptions
 ): JitFlagState {
-  const aluFlags = wasmIrLocalAluFlagsStorage(body, aluFlagsLocal);
   // Keyed by one-bit IR_ALU_FLAG_MASKS values, not by x86 EFLAGS bit positions.
   const flagSources = new Map<number, FlagSource>(
     aluFlagMasks.map((mask) => [mask, incomingFlagSource])
   );
   const releasedPendingFlags = new WeakSet<PendingFlags>();
-  let aluFlagsLocalDirty = false;
-  let materializedMask = 0;
 
   return {
     emitSet: (descriptor, helpers) => {
@@ -142,31 +142,12 @@ export function createJitFlagState(
       const writtenMask = descriptor.writtenMask | descriptor.undefMask;
 
       setSource(writtenMask, { kind: "pending", pending: pendingFlags });
-      materializedMask &= ~writtenMask;
     },
     emitMaterialize: (mask) => {
-      const missingMask = mask & ~materializedMask;
-
-      if (missingMask === 0) {
-        return;
-      }
-
-      materializeFlags(missingMask);
+      throw new Error(`JIT flags.materialize reached Wasm codegen with mask ${mask}`);
     },
     emitBoundary: (mask) => {
-      materializePendingFlags(mask & ~materializedMask);
-
-      if (!aluFlagsLocalDirty) {
-        return;
-      }
-
-      // If local producer bits will be stored, merge any untouched incoming bits
-      // first so the store publishes a complete compact aluFlags word.
-      materializeFlags(IR_ALU_FLAG_MASK & ~materializedMask);
-      options.emitStoreAluFlags(() => {
-        body.localGet(aluFlagsLocal);
-      });
-      aluFlagsLocalDirty = false;
+      throw new Error(`JIT flags.boundary reached Wasm codegen with mask ${mask}`);
     },
     emitAluFlagsCondition: (cc) => {
       const pendingFlags = pendingFlagConditionSource(cc);
@@ -176,27 +157,16 @@ export function createJitFlagState(
         return;
       }
 
-      materializeFlags(conditionFlagReadMask(cc) & ~materializedMask);
-      emitAluFlagsCondition(body, aluFlags, cc);
+      emitAluFlagsConditionFromValue(body, cc, emitFlagBits);
     },
-    captureExitStoreSnapshot: (mask, options = {}) => {
+    captureExitStoreSnapshot: (mask) => {
       const snapshotMask = mask & IR_ALU_FLAG_MASK;
 
       if (snapshotMask === 0) {
         return undefined;
       }
 
-      if (options.consume === false) {
-        return captureNonConsumingExitStoreSnapshot(snapshotMask);
-      }
-
-      materializeFlags(snapshotMask & ~materializedMask);
-
-      const snapshotLocal = body.addLocal(wasmValueType.i32);
-
-      body.localGet(aluFlagsLocal);
-      body.localSet(snapshotLocal);
-      return { mask: snapshotMask, local: snapshotLocal };
+      return captureExitStoreSnapshot(snapshotMask);
     },
     emitExitSnapshotStore: (snapshot) => {
       const storeMask = snapshot.mask & IR_ALU_FLAG_MASK;
@@ -207,17 +177,23 @@ export function createJitFlagState(
 
       options.emitStoreAluFlags(() => {
         if (storeMask === IR_ALU_FLAG_MASK) {
-          body.localGet(snapshot.local);
+          emitSnapshotSourceValue(snapshot.source, storeMask);
           return;
         }
 
-        options.emitLoadAluFlagsValue();
+        emitIncomingAluFlagsValue();
         body.i32Const(i32(IR_ALU_FLAG_MASK & ~storeMask)).i32And();
-        body.localGet(snapshot.local);
+        emitSnapshotSourceValue(snapshot.source, storeMask);
         body.i32Const(i32(storeMask)).i32And();
         body.i32Or();
       });
     },
+    releaseExitSnapshot: (snapshot) => {
+      for (const owner of snapshot.owners) {
+        owner.release();
+      }
+    },
+    releasePendingOwners: releaseAllPendingFlagInputs,
     assertPendingCoveredBy: (mask) => {
       const uncoveredMask = sourceMask("pending") & ~mask;
 
@@ -253,102 +229,147 @@ export function createJitFlagState(
         };
   }
 
-  function captureNonConsumingExitStoreSnapshot(mask: number): JitFlagExitStoreSnapshot {
-    const snapshotLocal = body.addLocal(wasmValueType.i32);
-    const localMask = sourceMask("local") & mask;
-    const incomingMask = sourceMask("incoming") & mask;
+  function captureExitStoreSnapshot(mask: number): JitFlagExitStoreSnapshot {
+    const owners = [...retainSnapshotPendingOwners(mask)];
+    const incomingSource = { kind: "incoming" } as const satisfies JitFlagIncomingSnapshotSource;
+    const singleSource = singleSnapshotSource(mask, incomingSource);
 
-    body.i32Const(0);
-    body.localSet(snapshotLocal);
-
-    if (localMask !== 0) {
-      mergeSnapshotBits(snapshotLocal, localMask, () => {
-        body.localGet(aluFlagsLocal);
-      });
+    if (singleSource !== undefined) {
+      return { mask, source: singleSource, owners };
     }
 
-    if (incomingMask !== 0) {
-      mergeSnapshotBits(snapshotLocal, incomingMask, () => {
-        options.emitLoadAluFlagsValue();
-      });
-    }
-
-    for (const [pendingFlags, pendingMask] of pendingMasks(mask)) {
-      emitPendingFlags(pendingFlags, pendingMask);
-      mergeSnapshotBits(snapshotLocal, pendingMask, () => {
-        body.localGet(aluFlagsLocal);
-      });
-    }
-
-    return { mask, local: snapshotLocal };
+    return { mask, source: { kind: "merge", parts: mergeParts(mask, incomingSource) }, owners };
   }
 
-  function mergeSnapshotBits(targetLocal: number, mask: number, emitValue: () => void): void {
-    body.localGet(targetLocal);
-    emitValue();
-    body.i32Const(i32(mask));
-    body.i32And();
-    body.i32Or();
-    body.localSet(targetLocal);
+  function emitSnapshotSourceValue(source: JitFlagExitStoreSnapshotSource, mask: number): void {
+    switch (source.kind) {
+      case "incoming":
+        emitIncomingSnapshotSourceValue(source);
+        return;
+      case "merge":
+        emitMergeParts(source.parts);
+        return;
+      case "pending":
+        emitPendingFlagsValue(source.pending, mask);
+        return;
+    }
   }
 
-  function materializeFlags(mask: number): void {
-    if (mask === 0) {
+  function emitIncomingSnapshotSourceValue(_source: JitFlagIncomingSnapshotSource): void {
+    emitIncomingAluFlagsValue();
+  }
+
+  function emitFlagBits(mask: number): void {
+    const flagsMask = mask & IR_ALU_FLAG_MASK;
+
+    if (flagsMask === 0) {
+      body.i32Const(0);
       return;
     }
 
+    const singleSource = singleSnapshotSource(flagsMask, { kind: "incoming" });
+
+    if (singleSource !== undefined) {
+      emitSnapshotSourceValue(singleSource, flagsMask);
+      return;
+    }
+
+    emitMergeParts(mergeParts(flagsMask, { kind: "incoming" }));
+  }
+
+  function mergeParts(
+    mask: number,
+    incomingSource: JitFlagIncomingSnapshotSource
+  ): readonly JitFlagMergePart[] {
+    const parts: JitFlagMergePart[] = [];
     const incomingMask = sourceMask("incoming") & mask;
 
     if (incomingMask !== 0) {
-      materializeIncoming(incomingMask);
+      parts.push({ ...incomingSource, mask: incomingMask });
     }
 
-    materializePendingFlags(mask);
-  }
-
-  function materializePendingFlags(mask: number): void {
     for (const [pendingFlags, pendingMask] of pendingMasks(mask)) {
-      emitPendingFlags(pendingFlags, pendingMask);
-      setSource(pendingMask, localFlagSource);
-      materializedMask |= pendingMask;
-      aluFlagsLocalDirty = true;
+      parts.push({ kind: "pending", pending: pendingFlags, mask: pendingMask });
+    }
+
+    return parts;
+  }
+
+  function emitMergeParts(parts: readonly JitFlagMergePart[]): void {
+    if (parts.length === 0) {
+      body.i32Const(0);
+      return;
+    }
+
+    let emitted = false;
+
+    for (const part of parts) {
+      emitMergePart(part);
+
+      if (emitted) {
+        body.i32Or();
+      } else {
+        emitted = true;
+      }
     }
   }
 
-  function materializeIncoming(mask: number): void {
-    if (materializedMask === 0) {
-      options.emitLoadAluFlags();
-    } else {
-      // Preserve already-materialized local bits while pulling only the requested
-      // incoming bits from state. This is what lets INC publish new ZF/SF/etc.
-      // without clobbering incoming CF.
-      body.localGet(aluFlagsLocal);
-      body.i32Const(i32(IR_ALU_FLAG_MASK & ~mask)).i32And();
-      options.emitLoadAluFlagsValue();
-      body.i32Const(mask).i32And();
-      body.i32Or();
-      body.localSet(aluFlagsLocal);
+  function emitMergePart(part: JitFlagMergePart): void {
+    switch (part.kind) {
+      case "incoming":
+        emitIncomingSnapshotSourceValue(part);
+        body.i32Const(i32(part.mask));
+        body.i32And();
+        return;
+      case "pending":
+        emitPendingFlagsValue(part.pending, part.mask);
+        return;
+    }
+  }
+
+  function singleSnapshotSource(
+    mask: number,
+    incomingSource: JitFlagIncomingSnapshotSource
+  ): JitFlagExitStoreSnapshotSource | undefined {
+    let source: FlagSource | undefined;
+
+    for (const flagMask of aluFlagMasks) {
+      if ((mask & flagMask) === 0) {
+        continue;
+      }
+
+      const flagSource = requiredSource(flagMask);
+
+      if (source === undefined) {
+        source = flagSource;
+      } else if (!sameFlagSource(source, flagSource)) {
+        return undefined;
+      }
     }
 
-    setSource(mask, localFlagSource);
-    materializedMask |= mask;
+    if (source === undefined) {
+      return undefined;
+    }
+
+    switch (source.kind) {
+      case "incoming":
+        return incomingSource;
+      case "pending":
+        return { kind: "pending", pending: source.pending };
+    }
   }
 
   function assertNoPending(): void {
     if (sourceMask("pending") !== 0) {
-      throw new Error("JIT pending flags must be materialized explicitly");
+      throw new Error("JIT pending flags must be covered by an exit snapshot or released explicitly");
     }
   }
 
-  function emitPendingFlags(
-    pendingFlags: PendingFlags,
-    mask: number
-  ): void {
+  function emitPendingFlagsValue(pendingFlags: PendingFlags, mask: number): void {
     const inputs = pendingInputRefs(pendingFlags, FLAG_PRODUCERS[pendingFlags.producer].inputs);
 
-    emitSetFlags(
+    emitFlagProducerBits(
       body,
-      aluFlags,
       {
         op: "flags.set",
         producer: pendingFlags.producer,
@@ -362,8 +383,12 @@ export function createJitFlagState(
         emitMaskedValue: (value, width) =>
           emitMaskValueToWidth(body, width, emitPendingInputValue(inputs.inputsByVarId, value, "pending flag input"))
       },
-      { mask }
+      mask
     );
+  }
+
+  function emitIncomingAluFlagsValue(): void {
+    options.emitLoadAluFlagsValue();
   }
 
   function emitPendingFlagCondition(pendingFlags: PendingFlags, cc: ConditionCode): void {
@@ -548,6 +573,37 @@ export function createJitFlagState(
     }
   }
 
+  function retainSnapshotPendingOwners(mask: number): readonly JitCachedValueHandle[] {
+    const owners: JitCachedValueHandle[] = [];
+
+    for (const pendingFlags of pendingMasks(mask).keys()) {
+      for (const input of pendingFlags.inputs.values()) {
+        if (input.kind === "local" && input.handle !== undefined) {
+          owners.push(input.handle.retain());
+        }
+      }
+    }
+
+    return owners;
+  }
+
+  function releaseAllPendingFlagInputs(): void {
+    const pendingFlags = new Set<PendingFlags>();
+
+    for (const source of flagSources.values()) {
+      if (source.kind === "pending") {
+        pendingFlags.add(source.pending);
+      }
+    }
+
+    for (const pending of pendingFlags) {
+      if (!releasedPendingFlags.has(pending)) {
+        releasedPendingFlags.add(pending);
+        releasePendingFlagInputs(pending);
+      }
+    }
+  }
+
   function pendingMasks(mask: number): ReadonlyMap<PendingFlags, number> {
     const groups = new Map<PendingFlags, number>();
 
@@ -595,4 +651,11 @@ function requiredPendingInput(inputsByVarId: ReadonlyMap<number, PendingInput>, 
 
 const aluFlagMasks = Object.values(IR_ALU_FLAG_MASKS);
 const incomingFlagSource = { kind: "incoming" } as const satisfies FlagSource;
-const localFlagSource = { kind: "local" } as const satisfies FlagSource;
+
+function sameFlagSource(left: FlagSource, right: FlagSource): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+
+  return left.kind !== "pending" || right.kind !== "pending" || left.pending === right.pending;
+}

@@ -2,7 +2,6 @@ import { i32 } from "#x86/state/cpu-state.js";
 import { stateOffset } from "#backends/wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import { ExitReason } from "#backends/wasm/exit.js";
 import { emitLoadStateU32, emitStoreStateU32 } from "#backends/wasm/codegen/state.js";
 import type {
   JitExitMaterializationPlan,
@@ -42,14 +41,12 @@ type JitExitMaterializationSnapshot = Readonly<{
 
 type CaptureExitMaterializationOptions = Readonly<{
   allowPendingFlags?: boolean;
-  consumeFlags?: boolean;
 }>;
 
 export type JitIrState = Readonly<{
   regs: JitReg32State;
   flags: JitFlagState;
   eipLocal: number;
-  aluFlagsLocal: number;
   instructionCountLocal: number;
   maxExitMaterializationIndex: number;
   emitLoadInstructionCount(): void;
@@ -59,6 +56,7 @@ export type JitIrState = Readonly<{
   commitInstruction(): void;
   commitInstructionExit(exitPoint: JitExitPoint, emitEip: () => void): void;
   emitExitMaterializationStores(index: number): void;
+  releaseExitMaterialization(index: number): void;
 }>;
 
 export function createJitIrState(
@@ -69,9 +67,7 @@ export function createJitIrState(
   const regs = createJitReg32State(body);
   const maxExitMaterializationIndex = exitMaterializations.length - 1;
   const eipLocal = body.addLocal(wasmValueType.i32);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags,
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue,
     emitStoreAluFlags,
     valueCache: options.valueCache
@@ -79,12 +75,12 @@ export function createJitIrState(
   const instructionCountLocal = body.addLocal(wasmValueType.i32);
   const exitMaterializationSnapshots = new Map<number, JitExitMaterializationSnapshot>();
   let activeExit: JitExitTarget | undefined;
+  let pendingFlagOwnersReleased = false;
 
   return {
     regs,
     flags,
     eipLocal,
-    aluFlagsLocal,
     instructionCountLocal,
     maxExitMaterializationIndex,
     emitLoadInstructionCount: () => {
@@ -104,11 +100,11 @@ export function createJitIrState(
     prepareExitPoint: (exitPoint, emitEip) => {
       const exit = requiredActiveExit();
       const allowPendingFlags = exitPoint.snapshot.kind === "preInstruction";
-      const snapshot = captureExitMaterializationSnapshot(exitPoint.exitMaterializationIndex, {
+
+      captureExitMaterialization(exitPoint.exitMaterializationIndex, {
         allowPendingFlags
       });
 
-      storeExitMaterializationSnapshot(exitPoint.exitMaterializationIndex, snapshot);
       useExitMaterialization(exit, exitPoint.exitMaterializationIndex);
       installExitMetadataStores(exit, emitEip, exitPoint.snapshot.instructionCountDelta, {
         allowPendingFlags
@@ -124,9 +120,7 @@ export function createJitIrState(
       emitEip();
       body.localSet(eipLocal);
       regs.commitPending();
-      captureAndStoreExitMaterialization(exitPoint.exitMaterializationIndex, {
-        consumeFlags: shouldConsumeExitFlags(exitPoint)
-      });
+      captureExitMaterialization(exitPoint.exitMaterializationIndex);
       useExitMaterialization(exit, exitPoint.exitMaterializationIndex);
       installExitMetadataStores(exit, () => {
         body.localGet(eipLocal);
@@ -160,16 +154,36 @@ export function createJitIrState(
 
         flags.emitExitSnapshotStore(snapshot.flags);
       }
+    },
+    releaseExitMaterialization: (index) => {
+      const plan = exitMaterializations[index];
+
+      if (plan === undefined) {
+        throw new Error(`missing JIT exit materialization: ${index}`);
+      }
+
+      releasePendingFlagOwnersOnce();
+
+      if (plan.regs.length === 0 && plan.flagMask === 0) {
+        return;
+      }
+
+      const snapshot = exitMaterializationSnapshots.get(index);
+
+      if (snapshot === undefined) {
+        throw new Error(`JIT exit materialization was not captured: ${index}`);
+      }
+
+      if (snapshot.flags !== undefined) {
+        flags.releaseExitSnapshot(snapshot.flags);
+      }
+
+      exitMaterializationSnapshots.delete(index);
     }
   };
 
   function commitInstruction(): void {
     regs.commitPending();
-  }
-
-  function emitLoadAluFlags(): void {
-    emitLoadAluFlagsValue();
-    body.localSet(aluFlagsLocal);
   }
 
   function emitLoadAluFlagsValue(): void {
@@ -206,7 +220,7 @@ export function createJitIrState(
     exit.exitLabelDepth = maxExitMaterializationIndex - index;
   }
 
-  function captureAndStoreExitMaterialization(
+  function captureExitMaterialization(
     index: number,
     options: CaptureExitMaterializationOptions = {}
   ): void {
@@ -221,7 +235,7 @@ export function createJitIrState(
 
   function captureExitMaterializationSnapshot(
     index: number,
-    options: CaptureExitMaterializationOptions = {}
+    captureOptions: CaptureExitMaterializationOptions = {}
   ): JitExitMaterializationSnapshot | undefined {
     const plan = exitMaterializations[index];
 
@@ -229,7 +243,7 @@ export function createJitIrState(
       throw new Error(`missing JIT exit materialization: ${index}`);
     }
 
-    if (options.allowPendingFlags !== true) {
+    if (captureOptions.allowPendingFlags !== true) {
       flags.assertPendingCoveredBy(plan.flagMask);
     }
 
@@ -237,8 +251,7 @@ export function createJitIrState(
       ? undefined
       : regs.captureCommittedExitStores(plan.regs);
     const flagSnapshot = flags.captureExitStoreSnapshot(
-      plan.flagMask,
-      options.consumeFlags === false ? { consume: false } : undefined
+      plan.flagMask
     );
 
     return registerSnapshot === undefined && flagSnapshot === undefined
@@ -270,11 +283,13 @@ export function createJitIrState(
     exitMaterializationSnapshots.set(index, snapshot);
   }
 
-  function shouldConsumeExitFlags(exitPoint: JitExitPoint): boolean {
-    // emitJitConditionalJump emits the taken arm first and not-taken second.
-    // Keep the first arm non-consuming so the second arm can still snapshot
-    // pending flags, then let the second arm consume and release ownership.
-    return exitPoint.exitReason !== ExitReason.BRANCH_TAKEN;
+  function releasePendingFlagOwnersOnce(): void {
+    if (pendingFlagOwnersReleased) {
+      return;
+    }
+
+    pendingFlagOwnersReleased = true;
+    flags.releasePendingOwners();
   }
 
   function requiredActiveExit(): JitExitTarget {

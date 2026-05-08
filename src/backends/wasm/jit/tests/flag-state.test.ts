@@ -1,14 +1,14 @@
-import { strictEqual } from "node:assert";
+import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
-import { IR_ALU_FLAG_MASK, IR_ALU_FLAG_MASKS } from "#x86/ir/model/flag-effects.js";
+import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
-import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
+import { wasmBodyLocalCount, wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { createJitFlagState } from "#backends/wasm/jit/state/flag-state.js";
 import {
   cleanValueWidth,
@@ -22,19 +22,15 @@ import type {
   JitValueCacheRuntime
 } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 
-test("JIT flag state materializes only requested pending flags", () => {
+test("JIT flag state emits pending flag conditions from source calculations", () => {
   const body = new WasmFunctionBodyEncoder(3);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
   const conditionLocal = body.addLocal(wasmValueType.i32);
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags: () => {
-      throw new Error("ZF materialization from add should not load incoming aluFlags");
-    },
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue: () => {
-      throw new Error("ZF materialization from add should not merge incoming aluFlags");
+      throw new Error("direct add condition should not load incoming aluFlags");
     },
     emitStoreAluFlags: () => {
-      throw new Error("flags.materialize should not store aluFlags");
+      throw new Error("direct add condition should not store aluFlags");
     }
   });
 
@@ -42,7 +38,6 @@ test("JIT flag state materializes only requested pending flags", () => {
     emitValue: (value) => emitValueExpr(body, value),
     emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
   });
-  flags.emitMaterialize(IR_ALU_FLAG_MASKS.ZF);
   flags.emitAluFlagsCondition("E");
   body.localSet(conditionLocal).end();
 
@@ -55,12 +50,8 @@ test("JIT flag state materializes only requested pending flags", () => {
 
 test("JIT flag state emits supported pending flag conditions directly", () => {
   const body = new WasmFunctionBodyEncoder(3);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
   const conditionLocal = body.addLocal(wasmValueType.i32);
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags: () => {
-      throw new Error("direct sub condition should not load incoming aluFlags");
-    },
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue: () => {
       throw new Error("direct sub condition should not merge incoming aluFlags");
     },
@@ -81,12 +72,8 @@ test("JIT flag state emits supported pending flag conditions directly", () => {
 
 test("JIT flag state keeps const pending flag inputs direct", () => {
   const body = new WasmFunctionBodyEncoder(3);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
   const conditionLocal = body.addLocal(wasmValueType.i32);
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags: () => {
-      throw new Error("direct sub condition should not load incoming aluFlags");
-    },
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue: () => {
       throw new Error("direct sub condition should not merge incoming aluFlags");
     },
@@ -105,19 +92,47 @@ test("JIT flag state keeps const pending flag inputs direct", () => {
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.localSet), 3);
 });
 
-test("JIT flag state releases cached pending inputs after materialization", () => {
-  const body = new WasmFunctionBodyEncoder(1);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
-  const handle = trackedCachedHandle(0);
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags: () => {
-      throw new Error("logic materialization should not load incoming aluFlags");
-    },
+test("JIT flag state emits incoming flag conditions without a fallback local", () => {
+  const body = new WasmFunctionBodyEncoder(0);
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue: () => {
-      throw new Error("logic materialization should not merge incoming aluFlags");
+      body.i32Const(1);
     },
     emitStoreAluFlags: () => {
-      throw new Error("flags.materialize should not store aluFlags");
+      throw new Error("incoming condition should not store aluFlags");
+    }
+  });
+
+  flags.emitAluFlagsCondition("B");
+  body.end();
+
+  strictEqual(wasmBodyLocalCount(body.encode()), 0);
+});
+
+test("JIT flag state rejects materialize and boundary ops in JIT codegen", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const flags = createJitFlagState(body, {
+    emitLoadAluFlagsValue: () => {
+      throw new Error("unexpected incoming aluFlags load");
+    },
+    emitStoreAluFlags: () => {
+      throw new Error("unexpected aluFlags store");
+    }
+  });
+
+  throws(() => flags.emitMaterialize(IR_ALU_FLAG_MASK), /flags\.materialize reached Wasm codegen/);
+  throws(() => flags.emitBoundary(IR_ALU_FLAG_MASK), /flags\.boundary reached Wasm codegen/);
+});
+
+test("JIT flag state releases cached pending inputs when pending owners are released", () => {
+  const body = new WasmFunctionBodyEncoder(1);
+  const handle = trackedCachedHandle(0);
+  const flags = createJitFlagState(body, {
+    emitLoadAluFlagsValue: () => {
+      throw new Error("pending-owner release should not merge incoming aluFlags");
+    },
+    emitStoreAluFlags: () => {
+      throw new Error("pending-owner release should not store aluFlags");
     },
     valueCache: cachedFlagValueCache([handle])
   });
@@ -129,7 +144,7 @@ test("JIT flag state releases cached pending inputs after materialization", () =
 
   strictEqual(handle.releaseCount(), 0);
 
-  flags.emitMaterialize(IR_ALU_FLAG_MASK);
+  flags.releasePendingOwners();
   body.end();
 
   strictEqual(handle.releaseCount(), 1);
@@ -137,13 +152,9 @@ test("JIT flag state releases cached pending inputs after materialization", () =
 
 test("JIT flag state releases cached pending inputs when overwritten", () => {
   const body = new WasmFunctionBodyEncoder(1);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
   const first = trackedCachedHandle(0);
   const second = trackedCachedHandle(0);
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags: () => {
-      throw new Error("overwritten logic flags should not load incoming aluFlags");
-    },
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue: () => {
       throw new Error("overwritten logic flags should not merge incoming aluFlags");
     },
@@ -167,45 +178,53 @@ test("JIT flag state releases cached pending inputs when overwritten", () => {
   strictEqual(second.releaseCount(), 0);
 });
 
-test("JIT flag state releases cached pending inputs when stored", () => {
-  const body = new WasmFunctionBodyEncoder(1);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
-  const handle = trackedCachedHandle(0);
-  let stored = false;
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags: () => {
-      throw new Error("logic boundary should not load incoming aluFlags");
-    },
+test("JIT flag state excludes overwritten partial flag sources from symbolic snapshots", () => {
+  const body = new WasmFunctionBodyEncoder(2);
+  const firstLeft = trackedCachedHandle(0);
+  const firstResult = trackedCachedHandle(1);
+  const secondLeft = trackedCachedHandle(0);
+  const secondResult = trackedCachedHandle(1);
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue: () => {
-      throw new Error("logic boundary should not merge incoming aluFlags");
+      throw new Error("symbolic snapshot capture should not load incoming aluFlags");
     },
-    emitStoreAluFlags: (emitValue) => {
-      stored = true;
-      emitValue();
-      body.localSet(aluFlagsLocal);
+    emitStoreAluFlags: () => {
+      throw new Error("symbolic snapshot capture should not store aluFlags");
     },
-    valueCache: cachedFlagValueCache([handle])
+    valueCache: cachedFlagValueCache([firstLeft, firstResult, secondLeft, secondResult])
   });
 
-  flags.emitSet(createIrFlagSetOp("logic", { result: v(0) }), {
+  flags.emitSet(createIrFlagSetOp("inc", { left: v(0), result: v(1) }), {
     emitValue: (value) => emitValueExpr(body, value),
     emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
   });
-  flags.emitBoundary(IR_ALU_FLAG_MASK);
+  flags.emitSet(createIrFlagSetOp("inc", { left: v(0), result: v(1) }), {
+    emitValue: (value) => emitValueExpr(body, value),
+    emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
+  });
+
+  strictEqual(firstLeft.releaseCount(), 1);
+  strictEqual(firstResult.releaseCount(), 1);
+  strictEqual(secondLeft.releaseCount(), 0);
+  strictEqual(secondResult.releaseCount(), 0);
+
+  const snapshot = flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK);
+
+  strictEqual(snapshot?.mask, IR_ALU_FLAG_MASK);
+  strictEqual(secondLeft.releaseCount(), 0);
+  strictEqual(secondResult.releaseCount(), 0);
+  flags.releaseExitSnapshot(snapshot!);
   body.end();
 
-  strictEqual(stored, true);
-  strictEqual(handle.releaseCount(), 1);
+  strictEqual(secondLeft.releaseCount(), 1);
+  strictEqual(secondResult.releaseCount(), 1);
+  strictEqual(wasmBodyLocalCount(body.encode()), 0);
 });
 
-test("JIT flag state releases cached pending inputs after exit snapshot capture", () => {
+test("JIT flag state retains cached pending inputs until exit snapshot release", () => {
   const body = new WasmFunctionBodyEncoder(1);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
   const handle = trackedCachedHandle(0);
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags: () => {
-      throw new Error("logic exit snapshot should not load incoming aluFlags");
-    },
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue: () => {
       throw new Error("logic exit snapshot should not merge incoming aluFlags");
     },
@@ -221,20 +240,20 @@ test("JIT flag state releases cached pending inputs after exit snapshot capture"
   });
 
   strictEqual(handle.releaseCount(), 0);
-  strictEqual(flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK)?.mask, IR_ALU_FLAG_MASK);
+  const snapshot = flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK);
+
+  strictEqual(snapshot?.mask, IR_ALU_FLAG_MASK);
+  strictEqual(handle.releaseCount(), 0);
+  flags.releaseExitSnapshot(snapshot!);
   body.end();
 
   strictEqual(handle.releaseCount(), 1);
 });
 
-test("JIT flag state keeps cached pending inputs after non-consuming exit snapshot capture", () => {
+test("JIT flag state keeps pending owner after exit snapshot release", () => {
   const body = new WasmFunctionBodyEncoder(1);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
   const handle = trackedCachedHandle(0);
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags: () => {
-      throw new Error("logic non-consuming exit snapshot should not load incoming aluFlags");
-    },
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue: () => {
       throw new Error("logic non-consuming exit snapshot should not merge incoming aluFlags");
     },
@@ -249,23 +268,23 @@ test("JIT flag state keeps cached pending inputs after non-consuming exit snapsh
     emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
   });
 
-  strictEqual(flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK, { consume: false })?.mask, IR_ALU_FLAG_MASK);
-  strictEqual(handle.releaseCount(), 0);
+  const snapshot = flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK);
 
-  flags.emitMaterialize(IR_ALU_FLAG_MASK);
+  strictEqual(snapshot?.mask, IR_ALU_FLAG_MASK);
+  strictEqual(handle.releaseCount(), 0);
+  flags.releaseExitSnapshot(snapshot!);
+  strictEqual(handle.releaseCount(), 1);
+
+  flags.releasePendingOwners();
   body.end();
 
-  strictEqual(handle.releaseCount(), 1);
+  strictEqual(handle.releaseCount(), 2);
 });
 
-test("JIT flag state releases cached pending inputs after non-consuming then consuming snapshots", () => {
+test("JIT flag state releases two branch snapshots from the same pending flags independently", () => {
   const body = new WasmFunctionBodyEncoder(1);
-  const aluFlagsLocal = body.addLocal(wasmValueType.i32);
   const handle = trackedCachedHandle(0);
-  const flags = createJitFlagState(body, aluFlagsLocal, {
-    emitLoadAluFlags: () => {
-      throw new Error("logic branch exit snapshots should not load incoming aluFlags");
-    },
+  const flags = createJitFlagState(body, {
     emitLoadAluFlagsValue: () => {
       throw new Error("logic branch exit snapshots should not merge incoming aluFlags");
     },
@@ -280,12 +299,40 @@ test("JIT flag state releases cached pending inputs after non-consuming then con
     emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
   });
 
-  strictEqual(flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK, { consume: false })?.mask, IR_ALU_FLAG_MASK);
+  const first = flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK);
+  const second = flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK);
+
+  strictEqual(first?.mask, IR_ALU_FLAG_MASK);
+  strictEqual(second?.mask, IR_ALU_FLAG_MASK);
   strictEqual(handle.releaseCount(), 0);
+  flags.releaseExitSnapshot(first!);
+  strictEqual(handle.releaseCount(), 1);
+  flags.releaseExitSnapshot(second!);
+  body.end();
+
+  strictEqual(handle.releaseCount(), 2);
+});
+
+test("JIT flag state captures full-mask single pending source without an accumulator local", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const flags = createJitFlagState(body, {
+    emitLoadAluFlagsValue: () => {
+      throw new Error("single pending snapshot should not merge incoming aluFlags");
+    },
+    emitStoreAluFlags: () => {
+      throw new Error("single pending snapshot capture should not store aluFlags");
+    }
+  });
+
+  flags.emitSet(createIrFlagSetOp("logic", { result: c32(0) }), {
+    emitValue: (value) => emitValueExpr(body, value),
+    emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
+  });
+
   strictEqual(flags.captureExitStoreSnapshot(IR_ALU_FLAG_MASK)?.mask, IR_ALU_FLAG_MASK);
   body.end();
 
-  strictEqual(handle.releaseCount(), 1);
+  strictEqual(wasmBodyLocalCount(body.encode()), 0);
 });
 
 function emitValueExpr(body: WasmFunctionBodyEncoder, value: IrValueExpr): ValueWidth {
@@ -339,21 +386,31 @@ function cachedFlagValueCache(handles: JitCachedValueHandle[]): JitValueCacheRun
 function trackedCachedHandle(local: number): JitCachedValueHandle & Readonly<{
   releaseCount(): number;
 }> {
-  let releases = 0;
+  const state = { releases: 0 };
+
+  return trackedCachedHandleWithState(local, state);
+}
+
+function trackedCachedHandleWithState(
+  local: number,
+  state: { releases: number }
+): JitCachedValueHandle & Readonly<{
+  releaseCount(): number;
+}> {
   let released = false;
 
   return {
     local,
     valueWidth: cleanValueWidth(32),
-    retain: () => trackedCachedHandle(local),
+    retain: () => trackedCachedHandleWithState(local, state),
     release: () => {
       if (released) {
         throw new Error("tracked cached handle released twice");
       }
 
       released = true;
-      releases += 1;
+      state.releases += 1;
     },
-    releaseCount: () => releases
+    releaseCount: () => state.releases
   };
 }

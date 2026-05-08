@@ -20,6 +20,14 @@ export function emitAluFlagsCondition(
   emitFlagBoolExpr(body, aluFlags, CONDITIONS[cc].expr);
 }
 
+export function emitAluFlagsConditionFromValue(
+  body: WasmFunctionBodyEncoder,
+  cc: ConditionCode,
+  emitAluFlagsValue: (mask: number) => void
+): void {
+  emitFlagBoolExprFromValue(body, emitAluFlagsValue, CONDITIONS[cc].expr);
+}
+
 export function emitFlagProducerCondition(
   body: WasmFunctionBodyEncoder,
   condition: Extract<IrValueExpr, { kind: "flagProducer.condition" }>,
@@ -133,6 +141,41 @@ function emitFlagBoolExpr(
     case "xor":
       emitFlagBoolExpr(body, aluFlags, expr.a);
       emitFlagBoolExpr(body, aluFlags, expr.b);
+      body.i32Xor();
+      return;
+  }
+}
+
+function emitFlagBoolExprFromValue(
+  body: WasmFunctionBodyEncoder,
+  emitAluFlagsValue: (mask: number) => void,
+  expr: FlagBoolExpr
+): void {
+  switch (expr.kind) {
+    case "flag": {
+      const mask = x86ArithmeticFlagMask[expr.flag];
+
+      emitAluFlagsValue(mask);
+      body.i32Const(mask).i32And().i32Eqz().i32Eqz();
+      return;
+    }
+    case "not":
+      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.value);
+      body.i32Eqz();
+      return;
+    case "and":
+      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.a);
+      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.b);
+      body.i32And();
+      return;
+    case "or":
+      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.a);
+      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.b);
+      body.i32Or();
+      return;
+    case "xor":
+      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.a);
+      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.b);
       body.i32Xor();
       return;
   }

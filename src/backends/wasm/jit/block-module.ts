@@ -225,6 +225,7 @@ function emitExitMaterializationStores(
   for (let index = state.maxExitMaterializationIndex; index >= 0; index -= 1) {
     body.endBlock();
     state.emitExitMaterializationStores(index);
+    state.releaseExitMaterialization(index);
     body.localGet(exitLocal).returnFromFunction();
   }
 }

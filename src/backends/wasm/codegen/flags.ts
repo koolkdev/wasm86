@@ -57,6 +57,28 @@ export function emitSetFlags(
   });
 }
 
+export function emitFlagProducerBits(
+  body: WasmFunctionBodyEncoder,
+  descriptor: IrFlagSetOp,
+  helpers: WasmIrEmitHelpers,
+  mask: number
+): void {
+  const flagProducer = FLAG_PRODUCERS[descriptor.producer];
+  const writeMask = descriptor.writtenMask & mask;
+
+  if (writeMask === 0) {
+    body.i32Const(0);
+    return;
+  }
+
+  emitWrittenFlags(
+    body,
+    flagProducer.define(descriptor.inputs, descriptor.width ?? 32),
+    helpersForFlagInputs(body, descriptor, helpers),
+    writeMask
+  );
+}
+
 function emitWrittenFlags(
   body: WasmFunctionBodyEncoder,
   defs: Readonly<Partial<Record<FlagName, FlagExpr>>>,

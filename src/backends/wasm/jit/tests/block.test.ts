@@ -139,7 +139,7 @@ test("buildJitIrBlock does not specialize incoming CF after INC", () => {
 
   strictEqual(ir.some((op) => op.op === "flagProducer.condition"), false);
   strictEqual(ir.some((op) => op.op === "flags.materialize"), false);
-  deepStrictEqual(aluFlagMemoryAccessCounts(block), { loads: 1, stores: 2 });
+  deepStrictEqual(aluFlagMemoryAccessCounts(block), { loads: 3, stores: 2 });
 });
 
 test("buildJitIrBlock does not synthesize exit flag boundaries for speculative flags", () => {
@@ -2151,6 +2151,23 @@ test("jit IR block materializes deferred flags on later fault exits", async () =
   strictEqual(result.state.eax, 0);
   strictEqual(result.state.eflags, (preservedEflags | addWraparoundEflags) >>> 0);
   strictEqual(result.state.eip, startAddress + 3);
+  strictEqual(result.state.instructionCount, 1);
+  deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x10000, detail: 4 });
+});
+
+test("jit IR block preserves incoming CF across INC on later fault exits", async () => {
+  const result = await runJitIrBlock([
+    0x40, // inc eax (preserves CF, updates the other ALU flags)
+    0x8b, 0x05, 0x00, 0x00, 0x01, 0x00 // mov eax, [0x10000]
+  ], createCpuState({
+    eax: 0,
+    eflags: preservedEflags | 0x01,
+    eip: startAddress
+  }));
+
+  strictEqual(result.state.eax, 1);
+  strictEqual(getFlag(result.state, "CF"), true);
+  strictEqual(result.state.eip, startAddress + 1);
   strictEqual(result.state.instructionCount, 1);
   deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x10000, detail: 4 });
 });
