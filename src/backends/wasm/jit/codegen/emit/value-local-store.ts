@@ -9,7 +9,9 @@ import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressi
 import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 import {
+  jitValueKey,
   jitValueReadsReg,
+  simplifyJitValue,
   jitValuesEqual,
   jitValueUsesSymbolicReg,
   type JitValue
@@ -63,9 +65,11 @@ export class JitValueLocalStore {
     this.#body = body;
 
     for (const useCount of useCounts) {
-      if (shouldCacheValue(useCount.value, useCount.useCount)) {
-        this.#entries.set(jitValueKey(useCount.value), {
-          value: useCount.value,
+      const value = simplifyJitValue(useCount.value);
+
+      if (shouldCacheValue(value, useCount.useCount)) {
+        this.#entries.set(jitValueKey(value), {
+          value,
           valueWidth: undefined,
           available: false
         });
@@ -149,9 +153,10 @@ export class JitValueLocalStore {
   }
 
   #entryFor(value: JitValue): CachedJitValue | undefined {
-    const entry = this.#entries.get(jitValueKey(value));
+    const simplified = simplifyJitValue(value);
+    const entry = this.#entries.get(jitValueKey(simplified));
 
-    return entry !== undefined && jitValuesEqual(entry.value, value) ? entry : undefined;
+    return entry !== undefined && jitValuesEqual(entry.value, simplified) ? entry : undefined;
   }
 
   #localForEntry(entry: CachedJitValue): CachedJitLocal {
@@ -304,21 +309,8 @@ function requiredValueWidth(entry: CachedJitValue): ValueWidth {
   return entry.valueWidth;
 }
 
-function jitValueKey(value: JitValue): string {
-  switch (value.kind) {
-    case "const":
-      return `const:${value.type}:${value.value}`;
-    case "reg":
-      return `reg:${value.reg}`;
-    case "value.binary":
-      return `binary:${value.type}:${value.operator}:${jitValueKey(value.a)}:${jitValueKey(value.b)}`;
-    case "value.unary":
-      return `unary:${value.type}:${value.operator}:${jitValueKey(value.value)}`;
-    case "value.select":
-      return `select:${value.type}:${jitValueKey(value.condition)}:${jitValueKey(value.whenTrue)}:${jitValueKey(value.whenFalse)}`;
-  }
-}
-
 function valueIsSelected(selected: readonly JitValueUseCount[], value: JitValue): boolean {
-  return selected.some((entry) => jitValuesEqual(entry.value, value));
+  const simplified = simplifyJitValue(value);
+
+  return selected.some((entry) => jitValuesEqual(simplifyJitValue(entry.value), simplified));
 }

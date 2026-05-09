@@ -13,9 +13,10 @@ import {
 } from "#backends/wasm/jit/optimization/analyses/direct-flag-conditions.js";
 import {
   createJitInstructionRewrite,
-  emitJitValueRef,
+  emitRewritableJitValueRef,
   rewriteJitIrInstructionInto
 } from "#backends/wasm/jit/ir/rewrite.js";
+import { jitValueIsLegacyRewritable } from "#backends/wasm/jit/ir/values.js";
 
 export type JitFlagConditionSpecialization = Readonly<{
   directConditionCount: number;
@@ -146,7 +147,11 @@ function emitFlagInputRef(
 ): ValueRef {
   switch (input.kind) {
     case "value":
-      return emitJitValueRef(rewrite, input.value);
+      if (!jitValueIsLegacyRewritable(input.value)) {
+        throw new Error("flag-condition-specialization can only lower the legacy rewritable JitValue subset");
+      }
+
+      return emitRewritableJitValueRef(rewrite, input.value);
     case "reg":
       return emitFlagRegInputRef(rewrite, input.reg);
   }

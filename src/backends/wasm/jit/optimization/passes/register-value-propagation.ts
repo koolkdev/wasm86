@@ -2,13 +2,17 @@ import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/
 import type { JitOptimizationPass } from "#backends/wasm/jit/optimization/pass.js";
 import { jitIrOpIsTerminator } from "#backends/wasm/jit/ir/semantics.js";
 import {
-  assignJitValue,
+  assignRewritableJitValue,
   materializeJitRegisterValues,
   createJitInstructionRewrite,
   rewriteJitIrInstructionInto,
   type JitInstructionRewrite
 } from "#backends/wasm/jit/ir/rewrite.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values.js";
+import {
+  jitValueIsLegacyRewritable,
+  type JitLegacyRewritableValue,
+  type JitValue
+} from "#backends/wasm/jit/ir/values.js";
 import {
   analyzeJitRegisterValues,
   validateJitRegisterValueAnalysis,
@@ -205,7 +209,11 @@ function assignTrackedValue(
   dst: Extract<JitIrOp, { op: "get" | "address" }>["dst"],
   value: JitValue
 ): void {
-  assignJitValue(rewrite, dst, value);
+  assignRewritableJitValue(
+    rewrite,
+    dst,
+    requiredLegacyRewritableValue(value, "register-value-propagation fold")
+  );
   rewrite.values.record(dstId, value);
 }
 
@@ -216,7 +224,13 @@ function emitMaterializations(
   let materializedSetCount = 0;
 
   for (const materialization of materializations) {
-    materializedSetCount += materializeJitRegisterValues(rewrite, materialization.values);
+    materializedSetCount += materializeJitRegisterValues(
+      rewrite,
+      materialization.values.map(({ reg, value }) => ({
+        reg,
+        value: requiredLegacyRewritableValue(value, "register-value-propagation materialization")
+      }))
+    );
   }
 
   return materializedSetCount;
@@ -304,6 +318,14 @@ function appendOpMaterialization(
 
 function registerValueAnalysisKey(instructionIndex: number, opIndex: number): string {
   return `${instructionIndex}:${opIndex}`;
+}
+
+function requiredLegacyRewritableValue(value: JitValue, context: string): JitLegacyRewritableValue {
+  if (jitValueIsLegacyRewritable(value)) {
+    return value;
+  }
+
+  throw new Error(`${context} can only lower the legacy rewritable JitValue subset`);
 }
 
 type MutableJitRegisterValuePropagation = {

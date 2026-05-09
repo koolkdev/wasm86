@@ -2,7 +2,7 @@ import type { Reg32 } from "#x86/isa/types.js";
 import type { ValueRef, VarRef } from "#x86/ir/model/types.js";
 import { jitIrOpDst } from "#backends/wasm/jit/ir/semantics.js";
 import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values.js";
+import type { JitLegacyRewritableValue, JitRegValue } from "#backends/wasm/jit/ir/values.js";
 import { jitValueIsSymbolicReg } from "#backends/wasm/jit/ir/values.js";
 import { JitValueTracker } from "#backends/wasm/jit/ir/value-tracker.js";
 
@@ -67,19 +67,19 @@ export function createJitInstructionRewrite(
 export function materializeJitRegisterValue(
   rewrite: JitInstructionRewrite,
   reg: Reg32,
-  value: JitValue
+  value: JitLegacyRewritableValue
 ): boolean {
   return materializeJitRegisterValues(rewrite, [{ reg, value }]) !== 0;
 }
 
 export function materializeJitRegisterValues(
   rewrite: JitInstructionRewrite,
-  values: readonly Readonly<{ reg: Reg32; value: JitValue }>[]
+  values: readonly Readonly<{ reg: Reg32; value: JitLegacyRewritableValue }>[]
 ): number {
   const refs = values.flatMap(({ reg, value }) =>
     jitValueIsSymbolicReg(value, reg)
       ? []
-      : [{ reg, value: emitJitValueRef(rewrite, value) }]
+      : [{ reg, value: emitRewritableJitValueRef(rewrite, value) }]
   );
 
   for (const { reg, value } of refs) {
@@ -96,7 +96,7 @@ export function materializeJitRegisterValues(
 
 function emitJitValueGet(
   rewrite: JitInstructionRewrite,
-  value: Extract<JitValue, { kind: "reg" }>
+  value: JitRegValue
 ): ValueRef {
   const dst = allocVar(rewrite);
 
@@ -110,7 +110,10 @@ function emitJitValueGet(
   return dst;
 }
 
-export function emitJitValueRef(rewrite: JitInstructionRewrite, value: JitValue): ValueRef {
+export function emitRewritableJitValueRef(
+  rewrite: JitInstructionRewrite,
+  value: JitLegacyRewritableValue
+): ValueRef {
   const existingValue = rewrite.values.refFor(value);
 
   if (existingValue !== undefined) {
@@ -126,8 +129,8 @@ export function emitJitValueRef(rewrite: JitInstructionRewrite, value: JitValue)
         type: value.type,
         operator: value.operator,
         dst,
-        a: emitJitValueRef(rewrite, value.a),
-        b: emitJitValueRef(rewrite, value.b)
+        a: emitRewritableJitValueRef(rewrite, value.a),
+        b: emitRewritableJitValueRef(rewrite, value.b)
       });
       rewrite.values.record(dst.id, value);
       return dst;
@@ -140,7 +143,7 @@ export function emitJitValueRef(rewrite: JitInstructionRewrite, value: JitValue)
         type: value.type,
         operator: value.operator,
         dst,
-        value: emitJitValueRef(rewrite, value.value)
+        value: emitRewritableJitValueRef(rewrite, value.value)
       });
       rewrite.values.record(dst.id, value);
       return dst;
@@ -152,9 +155,9 @@ export function emitJitValueRef(rewrite: JitInstructionRewrite, value: JitValue)
         op: "value.select",
         type: value.type,
         dst,
-        condition: emitJitValueRef(rewrite, value.condition),
-        whenTrue: emitJitValueRef(rewrite, value.whenTrue),
-        whenFalse: emitJitValueRef(rewrite, value.whenFalse)
+        condition: emitRewritableJitValueRef(rewrite, value.condition),
+        whenTrue: emitRewritableJitValueRef(rewrite, value.whenTrue),
+        whenFalse: emitRewritableJitValueRef(rewrite, value.whenFalse)
       });
       rewrite.values.record(dst.id, value);
       return dst;
@@ -166,10 +169,10 @@ export function emitJitValueRef(rewrite: JitInstructionRewrite, value: JitValue)
   }
 }
 
-export function assignJitValue(
+export function assignRewritableJitValue(
   rewrite: JitInstructionRewrite,
   dst: VarRef,
-  value: JitValue
+  value: JitLegacyRewritableValue
 ): void {
   switch (value.kind) {
     case "value.binary":
@@ -178,8 +181,8 @@ export function assignJitValue(
         type: value.type,
         operator: value.operator,
         dst,
-        a: emitJitValueRef(rewrite, value.a),
-        b: emitJitValueRef(rewrite, value.b)
+        a: emitRewritableJitValueRef(rewrite, value.a),
+        b: emitRewritableJitValueRef(rewrite, value.b)
       });
       return;
     case "value.unary":
@@ -188,7 +191,7 @@ export function assignJitValue(
         type: value.type,
         operator: value.operator,
         dst,
-        value: emitJitValueRef(rewrite, value.value)
+        value: emitRewritableJitValueRef(rewrite, value.value)
       });
       return;
     case "value.select":
@@ -196,9 +199,9 @@ export function assignJitValue(
         op: "value.select",
         type: value.type,
         dst,
-        condition: emitJitValueRef(rewrite, value.condition),
-        whenTrue: emitJitValueRef(rewrite, value.whenTrue),
-        whenFalse: emitJitValueRef(rewrite, value.whenFalse)
+        condition: emitRewritableJitValueRef(rewrite, value.condition),
+        whenTrue: emitRewritableJitValueRef(rewrite, value.whenTrue),
+        whenFalse: emitRewritableJitValueRef(rewrite, value.whenFalse)
       });
       return;
     case "const":
