@@ -23,6 +23,8 @@ import {
 
 export type JitConstValue = Readonly<{ kind: "const"; type: IrValueType; value: number }>;
 export type JitRegValue = Readonly<{ kind: "reg"; reg: Reg32 }>;
+export type JitProducedValueId = string;
+export type JitProducedValue = Readonly<{ kind: "produced"; id: JitProducedValueId; type: IrValueType }>;
 
 export type JitBinaryValue = Readonly<{
   kind: "value.binary";
@@ -101,6 +103,7 @@ export type JitFlagConditionValue = Readonly<{
 export type JitValue =
   | JitConstValue
   | JitRegValue
+  | JitProducedValue
   | JitUnaryValue
   | JitBinaryValue
   | JitSelectValue
@@ -142,6 +145,10 @@ export function jitInputReg32Value(reg: Reg32): JitInputValue {
 
 export function jitInputAluFlagsValue(): JitInputValue {
   return { kind: "input", slot: { kind: "aluFlags" } };
+}
+
+export function jitProducedValue(id: JitProducedValueId, type: IrValueType): JitProducedValue {
+  return { kind: "produced", id, type };
 }
 
 export function jitFlagProducerValue(
@@ -373,6 +380,11 @@ export function jitValuesEqual(a: JitValue, b: JitValue): boolean {
 
       return a.type === constant.type && a.value === constant.value;
     }
+    case "produced": {
+      const produced = b as JitProducedValue;
+
+      return a.id === produced.id && a.type === produced.type;
+    }
     case "reg":
       return a.reg === (b as JitRegValue).reg;
     case "input":
@@ -431,6 +443,7 @@ export function simplifyJitValue(value: JitValue): JitValue {
       return normalized === value.value ? value : { ...value, value: normalized };
     }
     case "reg":
+    case "produced":
     case "input":
       return value;
     case "value.binary":
@@ -482,6 +495,7 @@ export function jitValueCost(value: JitValue): number {
       return 1 + flagProducerInputValues(value).reduce((cost, input) => cost + jitValueCost(input), 0);
     case "const":
     case "reg":
+    case "produced":
     case "input":
       return 1;
   }
@@ -499,6 +513,8 @@ export function jitValueKey(value: JitValue): string {
       return `const:${value.type}:${i32(value.value)}`;
     case "reg":
       return `reg:${value.reg}`;
+    case "produced":
+      return `produced:${value.type}:${value.id}`;
     case "input":
       return `input:${jitArchitecturalSlotKey(value.slot)}`;
     case "value.binary":
@@ -551,6 +567,7 @@ export function jitValueIsLegacyRewritable(value: JitValue): value is JitLegacyR
         jitValueIsLegacyRewritable(value.whenTrue) &&
         jitValueIsLegacyRewritable(value.whenFalse);
     case "input":
+    case "produced":
     case "extractBits":
     case "insertBits":
     case "extractMaskedBits":
@@ -984,6 +1001,7 @@ function jitValueChildren(value: JitValue): readonly JitValue[] {
       return [value.flags];
     case "const":
     case "reg":
+    case "produced":
     case "input":
       return [];
   }
@@ -1047,6 +1065,8 @@ function collectMaterializationSlots(value: JitValue, slots: Map<string, JitArch
       return;
     case "input":
       slots.set(jitArchitecturalSlotKey(value.slot), value.slot);
+      return;
+    case "produced":
       return;
     default:
       for (const child of jitValueChildren(value)) {

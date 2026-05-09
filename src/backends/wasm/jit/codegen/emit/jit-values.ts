@@ -24,6 +24,7 @@ import {
   type JitArchitecturalSlot,
   type JitFlagProducerValue,
   type JitInputValue,
+  type JitProducedValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
 import type { JitValueCacheRuntime } from "./value-local-store.js";
@@ -32,6 +33,7 @@ export type JitValueEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   valueCache?: JitValueCacheRuntime | undefined;
   emitInput(slot: JitArchitecturalSlot): ValueWidth;
+  emitProduced?(value: JitProducedValue): ValueWidth;
   emitReg?(reg: Reg32): ValueWidth;
 }>;
 
@@ -65,6 +67,8 @@ function emitJitValueUncached(context: JitValueEmitContext, value: JitValue): Va
       return emitJitReg(context, value.reg);
     case "input":
       return emitJitInput(context, value);
+    case "produced":
+      return emitJitProduced(context, value);
     case "value.binary":
       return emitI32Binary(context, value.operator, value.a, value.b);
     case "value.unary":
@@ -84,6 +88,14 @@ function emitJitValueUncached(context: JitValueEmitContext, value: JitValue): Va
     case "flagCondition":
       return emitFlagConditionValue(context, value.flags, value.cc);
   }
+}
+
+function emitJitProduced(context: JitValueEmitContext, value: JitProducedValue): ValueWidth {
+  if (context.emitProduced === undefined) {
+    throw new Error(`produced JIT value is not available for lowering: ${value.id}`);
+  }
+
+  return context.emitProduced(value);
 }
 
 function emitJitReg(context: JitValueEmitContext, reg: Reg32): ValueWidth {

@@ -16,6 +16,7 @@ import {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits,
+  jitProducedValue,
   type JitArchitecturalSlot,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
@@ -155,6 +156,40 @@ test("JitValueLocalStore cache keys support canonical symbolic nodes", () => {
 
   strictEqual(emitted, 1);
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localTee, wasmOpcode.localGet]);
+});
+
+test("emitJitValue lowers produced values through retained locals", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const produced = jitProducedValue("load#0:0:1", "i32");
+  const store = new JitValueLocalStore(body, useCounts([{ value: produced, useCount: 1 }]));
+  const captured = store.captureForReuse(produced, () => {
+    body.i32Const(0x1234);
+    return cleanValueWidth(32);
+  });
+
+  if (captured === undefined) {
+    throw new Error("expected produced value capture");
+  }
+
+  const valueWidth = emitJitValue({
+    ...bodyContext(body),
+    valueCache: {
+      emitForUse: (_value, emitter) => emitter(),
+      emitJitValueForUse: (value, emitter) => store.emitForUseWithLocal(value, emitter),
+      captureJitValueForReuse: (value, emitter) => store.captureForReuse(value, emitter),
+      beginInstruction: () => {},
+      notifyWrite: () => {},
+      captureForReuse: () => undefined,
+      jitValueForExpression: () => undefined,
+      jitValueForValueRef: () => undefined
+    },
+    emitProduced: () => unexpectedEmitter()
+  }, produced);
+
+  body.end();
+
+  strictEqual(valueWidth.cleanWidth, 32);
+  deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localGet]);
 });
 
 function emitSymbolicValue(value: JitValue): readonly number[] {

@@ -4,6 +4,7 @@ import {
   type IrExprBlock
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/produced-values.js";
 import {
   canInlineJitInstructionGet,
   jitInstructionStorageRefsMayAlias
@@ -57,10 +58,12 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     }
 
     const expressionBlock = buildIrExpressionBlock(instruction.ir, jitExpressionOptions(instruction));
+    const producedValuesByVarId = indexProducedValuesByVarIdForInstruction(instruction, index);
 
     return {
       ...state,
       operands: instruction.operands,
+      producedValuesByVarId,
       expressionBlock
     };
   });
@@ -73,6 +76,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     instructions.map((instruction, index) => ({
       operands: instruction.operands,
       expressionBlock: instruction.expressionBlock,
+      producedValuesByVarId: instruction.producedValuesByVarId,
       materializedValueExpressionUseIndexes: expressionUseIndexesByInstruction[index] ?? new Set()
     }))
   );

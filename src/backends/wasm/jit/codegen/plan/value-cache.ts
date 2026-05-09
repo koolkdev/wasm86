@@ -9,7 +9,9 @@ import {
   jitValueCost,
   jitValueForEffectiveAddress,
   jitValueForStorage,
+  simplifyJitValue,
   jitValuesEqual,
+  type JitProducedValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
@@ -30,6 +32,7 @@ export type JitExpressionValueCachePlan = Readonly<{
 export type JitExpressionValueCacheInstruction = Readonly<{
   operands: readonly JitOperandBinding[];
   materializedValueExpressionUseIndexes?: ReadonlySet<number>;
+  producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
 }>;
 
 export type JitInstructionValueCachePlan = JitExpressionValueCacheInstruction & Readonly<{
@@ -80,6 +83,10 @@ export function planJitExpressionValueCacheForInstructions(
 }
 
 export function shouldCacheValue(value: JitValue, useCount: number): boolean {
+  if (simplifyJitValue(value).kind === "produced") {
+    return useCount > 0;
+  }
+
   const inlineCost = jitValueCost(value);
 
   if (useCount <= 1 || inlineCost <= 1) {
@@ -152,10 +159,15 @@ function valueUsesForOp(
 ): readonly JitValueUse[] {
   switch (op.op) {
     case "let32": {
-      const jitValue = jitValueForExpression(instruction, op.value, state);
+      const producedValue = instruction.producedValuesByVarId?.get(op.dst.id);
+      const jitValue = producedValue ?? jitValueForExpression(instruction, op.value, state);
 
       if (jitValue !== undefined) {
         state.valueRefJitValues.set(op.dst.id, jitValue);
+
+        if (producedValue !== undefined) {
+          state.expressionJitValues.set(op.value, producedValue);
+        }
       }
 
       return [];
@@ -349,8 +361,9 @@ function selectEpochValues(uses: readonly JitValueUse[]): readonly JitValueUseCo
   const selected: JitValueUseCount[] = [];
 
   for (const value of candidateValues) {
+    const forceSelected = shouldForceSelectValue(value);
     const usableUseCount = flatUses.filter((use) =>
-      jitValuesEqual(use.value, value) && !hasSelectedAncestor(use, selected)
+      jitValuesEqual(use.value, value) && (forceSelected || !hasSelectedAncestor(use, selected))
     ).length;
 
     if (shouldCacheValue(value, usableUseCount)) {
@@ -359,6 +372,10 @@ function selectEpochValues(uses: readonly JitValueUse[]): readonly JitValueUseCo
   }
 
   return selected;
+}
+
+function shouldForceSelectValue(value: JitValue): boolean {
+  return simplifyJitValue(value).kind === "produced";
 }
 
 function flattenUses(uses: readonly JitValueUse[]): readonly FlatJitValueUse[] {

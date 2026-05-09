@@ -8,6 +8,7 @@ import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitMaterializedValueUses } from "#backends/wasm/jit/codegen/plan/materialized-values.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
+import { planJitExpressionValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import type {
   JitCodegenPlan,
   JitExitMaterializationStore,
@@ -15,6 +16,7 @@ import type {
   JitMaterializationNeed,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
+import { jitProducedValue } from "#backends/wasm/jit/ir/values.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { optimizeJitIrBlock } from "#backends/wasm/jit/optimization/optimize.js";
 import { onlyExit, startAddress } from "../../../optimization/tests/helpers.js";
@@ -588,6 +590,105 @@ test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks
   strictEqual(setIndex !== -1, true);
   deepStrictEqual([...(materializedValueUsePlan.expressionUseIndexesByInstruction[0] ?? new Set())], [setIndex]);
   deepStrictEqual([...(withoutRegisterNeedUsePlan.expressionUseIndexesByInstruction[0] ?? new Set())], []);
+});
+
+test("JIT value-cache planning retains produced values needed after their definition", () => {
+  const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
+  const expressionBlock = [
+    {
+      op: "let32",
+      dst: { kind: "var", id: 0 },
+      value: {
+        kind: "source",
+        source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
+        accessWidth: 32
+      }
+    },
+    {
+      op: "set",
+      role: "registerMaterialization",
+      target: { kind: "reg", reg: "eax" },
+      value: { kind: "var", id: 0 },
+      accessWidth: 32
+    }
+  ] as const;
+  const cachePlan = planJitExpressionValueCacheForInstructions([{
+    operands: [],
+    expressionBlock,
+    producedValuesByVarId: new Map([[0, produced]]),
+    materializedValueExpressionUseIndexes: new Set([1])
+  }]);
+
+  deepStrictEqual(cachePlan?.instructionPlans[0]?.valueRefValues.get(0), produced);
+  deepStrictEqual(cachePlan?.instructionPlans[0]?.expressionValues.get(expressionBlock[0].value), produced);
+  // Current retained-use accounting counts register materialization through both legacy paths.
+  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 2 }]);
+});
+
+test("JIT value-cache planning merges repeated produced-value retained uses", () => {
+  const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
+  const expressionBlock = [
+    {
+      op: "let32",
+      dst: { kind: "var", id: 0 },
+      value: {
+        kind: "source",
+        source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
+        accessWidth: 32
+      }
+    },
+    {
+      op: "set",
+      role: "registerMaterialization",
+      target: { kind: "reg", reg: "eax" },
+      value: { kind: "var", id: 0 },
+      accessWidth: 32
+    },
+    {
+      op: "set",
+      role: "registerMaterialization",
+      target: { kind: "reg", reg: "edx" },
+      value: { kind: "var", id: 0 },
+      accessWidth: 32
+    }
+  ] as const;
+  const cachePlan = planJitExpressionValueCacheForInstructions([{
+    operands: [],
+    expressionBlock,
+    producedValuesByVarId: new Map([[0, produced]]),
+    materializedValueExpressionUseIndexes: new Set([1, 2])
+  }]);
+
+  // Current retained-use accounting counts register materialization through both legacy paths.
+  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 4 }]);
+});
+
+test("JIT value-cache planning skips unused produced values", () => {
+  const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
+  const expressionBlock = [
+    {
+      op: "let32",
+      dst: { kind: "var", id: 0 },
+      value: {
+        kind: "source",
+        source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
+        accessWidth: 32
+      }
+    },
+    {
+      op: "set",
+      target: { kind: "reg", reg: "eax" },
+      value: { kind: "var", id: 0 },
+      accessWidth: 32
+    }
+  ] as const;
+  const cachePlan = planJitExpressionValueCacheForInstructions([{
+    operands: [],
+    expressionBlock,
+    producedValuesByVarId: new Map([[0, produced]])
+  }]);
+
+  strictEqual(cachePlan, undefined);
 });
 
 function registerExitStoreNeed(

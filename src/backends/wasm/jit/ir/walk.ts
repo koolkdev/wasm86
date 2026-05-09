@@ -28,15 +28,24 @@ export function walkJitIrBlockOps(
   for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
     const instruction = requiredJitIrInstruction(block, instructionIndex, context);
 
-    for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
-      const op = instruction.ir[opIndex];
+    walkJitIrInstructionOps(instruction, instructionIndex, visit, context);
+  }
+}
 
-      if (op === undefined) {
-        throw new Error(`missing JIT IR op while ${context}: ${instructionIndex}:${opIndex}`);
-      }
+export function walkJitIrInstructionOps(
+  instruction: JitIrBlockInstruction,
+  instructionIndex: number,
+  visit: JitIrOpVisitor,
+  context = "walking JIT IR instruction"
+): void {
+  for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
+    const op = instruction.ir[opIndex];
 
-      visit(instruction, op, jitIrLocation(instructionIndex, opIndex));
+    if (op === undefined) {
+      throw new Error(`missing JIT IR op while ${context}: ${instructionIndex}:${opIndex}`);
     }
+
+    visit(instruction, op, jitIrLocation(instructionIndex, opIndex));
   }
 }
 

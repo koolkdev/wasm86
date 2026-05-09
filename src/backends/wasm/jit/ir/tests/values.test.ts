@@ -13,6 +13,7 @@ import {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits,
+  jitProducedValue,
   jitValueCost,
   jitValueDependencies,
   jitValueKey,
@@ -22,6 +23,8 @@ import {
   type JitArchitecturalSlot,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
+import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/produced-values.js";
+import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 
 test("JitValue bit simplification preserves exact unsigned bit semantics", () => {
   const eax = jitInputReg32Value("eax");
@@ -92,6 +95,48 @@ test("JitValue equality and cache keys are canonical after simplification", () =
   strictEqual(jitValueKey(first), jitValueKey(second));
   strictEqual(jitValuesEqual(left, right), true);
   strictEqual(jitValueKey(left), jitValueKey(right));
+});
+
+test("JitValue produced nodes are opaque point-bound results", () => {
+  const first = jitProducedValue("load#0:1:2", "i32");
+  const same = jitProducedValue("load#0:1:2", "i32");
+  const other = jitProducedValue("load#0:1:3", "i32");
+  const walked: JitValue[] = [];
+
+  walkJitValueDependencies(first, (dependency) => walked.push(dependency));
+
+  strictEqual(jitValuesEqual(first, same), true);
+  strictEqual(jitValuesEqual(first, other), false);
+  strictEqual(jitValueKey(first), jitValueKey(same));
+  deepStrictEqual(jitValueDependencies(first), []);
+  deepStrictEqual(walked, []);
+  deepStrictEqual(jitValueMaterializationSlots(first), []);
+  strictEqual(jitValueCost(first), 1);
+});
+
+test("JIT produced-value indexing assigns ids to effectful get results only", () => {
+  const instruction = {
+    instructionId: "mov-r32-rm32",
+    eip: 0x1000,
+    nextEip: 0x1002,
+    nextMode: "exit",
+    operands: [{
+      kind: "static.mem",
+      ea: { kind: "mem", base: "ebx", scale: 1, disp: 0, accessWidth: 32 }
+    }],
+    ir: [
+      { op: "address", dst: { kind: "var", id: 0 }, operand: { kind: "operand", index: 0 } },
+      { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
+      { op: "get", dst: { kind: "var", id: 2 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 }
+    ]
+  } as const satisfies JitIrBlockInstruction;
+  const producedValues = indexProducedValuesByVarIdForInstruction(instruction, 3);
+
+  deepStrictEqual([...producedValues.keys()], [1]);
+  deepStrictEqual(
+    producedValues.get(1),
+    jitProducedValue("load#mov-r32-rm32:3:1:1", "i32")
+  );
 });
 
 test("JitValue dependency and materialization-slot walking includes nested flag inputs", () => {
