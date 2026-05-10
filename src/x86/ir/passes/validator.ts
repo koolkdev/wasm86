@@ -86,7 +86,7 @@ function validateOpUses(
     case "flags.set":
       validateFlagSetDescriptor(op, definedVars);
       break;
-    case "aluFlags.condition":
+    case "flags.condition":
       break;
     case "flags.materialize":
     case "flags.boundary":

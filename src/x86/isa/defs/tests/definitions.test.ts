@@ -125,7 +125,7 @@ test("cmovcc forms are concrete specs with select-value semantics", () => {
 
   const program = buildIr(spec.semantics as SemanticTemplate);
 
-  deepStrictEqual(program[1], { op: "aluFlags.condition", dst: { kind: "var", id: 1 }, cc: "E" });
+  deepStrictEqual(program[1], { op: "flags.condition", dst: { kind: "var", id: 1 }, cc: "E" });
   deepStrictEqual(program[2], {
     op: "get",
     dst: { kind: "var", id: 2 },
@@ -186,7 +186,7 @@ test("setcc forms use select-value semantics for register or memory destinations
   deepStrictEqual(spec.format, { syntax: "sete {0}" });
 
   deepStrictEqual(buildIr(spec.semantics as SemanticTemplate), [
-    { op: "aluFlags.condition", dst: { kind: "var", id: 0 }, cc: "E" },
+    { op: "flags.condition", dst: { kind: "var", id: 0 }, cc: "E" },
     {
       op: "value.select",
       type: "i32",
@@ -529,7 +529,7 @@ test("jcc forms are concrete specs with condition-specific semantics", () => {
   deepStrictEqual(near.format, { syntax: "jne {0}" });
 
   const program = buildIr(short.semantics as SemanticTemplate);
-  deepStrictEqual(program[0], { op: "aluFlags.condition", dst: { kind: "var", id: 0 }, cc: "NE" });
+  deepStrictEqual(program[0], { op: "flags.condition", dst: { kind: "var", id: 0 }, cc: "NE" });
   strictEqual(program.at(-1)?.op, "conditionalJump");
 });
 

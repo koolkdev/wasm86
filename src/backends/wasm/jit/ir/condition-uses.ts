@@ -81,7 +81,7 @@ export function analyzeJitConditionUses(
         throw new Error(`missing JIT IR op while analyzing condition uses: ${instructionIndex}:${opIndex}`);
       }
 
-      if (op.op !== "aluFlags.condition") {
+      if (op.op !== "flags.condition") {
         continue;
       }
 
@@ -102,7 +102,7 @@ function instructionConditionVars(instruction: JitIrBlockInstruction): ReadonlyS
   const conditionVars = new Set<number>();
 
   for (const op of instruction.ir) {
-    if (op.op === "aluFlags.condition") {
+    if (op.op === "flags.condition") {
       conditionVars.add(op.dst.id);
     }
   }

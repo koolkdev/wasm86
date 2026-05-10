@@ -184,7 +184,7 @@ test("expression selector inlines select values into writes", () => {
     buildIrExpressionBlock(
       [
         { op: "get", dst: v(0), source: op(1) },
-        { op: "aluFlags.condition", dst: v(1), cc: "E" },
+        { op: "flags.condition", dst: v(1), cc: "E" },
         { op: "value.select", type: "i32", dst: v(2), condition: v(1), whenTrue: v(0), whenFalse: c32(0) },
         { op: "set", target: op(0), value: v(2) },
         { op: "next" }
@@ -192,7 +192,7 @@ test("expression selector inlines select values into writes", () => {
       { canInlineGet: () => true }
     ),
     [
-      { op: "let32", dst: v(1), value: { kind: "aluFlags.condition", cc: "E" } },
+      { op: "let32", dst: v(1), value: { kind: "flags.condition", cc: "E" } },
       {
         op: "set",
         target: op(0),
@@ -214,13 +214,13 @@ test("expression selector keeps condition reads before later flag boundaries", (
   deepStrictEqual(
     buildIrExpressionBlock([
       { op: "flags.materialize", mask: IR_ALU_FLAG_MASKS.ZF },
-      { op: "aluFlags.condition", dst: v(0), cc: "E" },
+      { op: "flags.condition", dst: v(0), cc: "E" },
       { op: "flags.boundary", mask: IR_ALU_FLAG_MASK },
       { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
     ]),
     [
       { op: "flags.materialize", mask: IR_ALU_FLAG_MASKS.ZF },
-      { op: "let32", dst: v(0), value: { kind: "aluFlags.condition", cc: "E" } },
+      { op: "let32", dst: v(0), value: { kind: "flags.condition", cc: "E" } },
       { op: "flags.boundary", mask: IR_ALU_FLAG_MASK },
       { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
     ]

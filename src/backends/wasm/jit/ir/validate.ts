@@ -70,7 +70,7 @@ function validateJitInstructionBody(
 function jitValidationIrBlock(block: JitIrBody): IrBlock {
   return block.map((op) => {
     if (op.op === "flagProducer.condition") {
-      return { op: "aluFlags.condition", dst: op.dst, cc: op.cc };
+      return { op: "flags.condition", dst: op.dst, cc: op.cc };
     }
 
     return op;

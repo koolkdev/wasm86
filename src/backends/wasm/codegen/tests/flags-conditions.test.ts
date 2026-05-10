@@ -10,7 +10,7 @@ import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js
 import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
-import { emitAluFlagsCondition, emitFlagProducerCondition } from "#backends/wasm/codegen/conditions.js";
+import { emitFlagsCondition, emitFlagProducerCondition } from "#backends/wasm/codegen/conditions.js";
 import { wasmIrLocalAluFlagsStorage } from "#backends/wasm/codegen/alu-flags.js";
 import { emitSetFlags } from "#backends/wasm/codegen/flags.js";
 import {
@@ -77,7 +77,7 @@ test("emitSetFlags does not allocate an accumulator local", () => {
   strictEqual(body.encode()[0], 0);
 });
 
-test("emitAluFlagsCondition evaluates compound condition formulas from arithmetic flags", async () => {
+test("emitFlagsCondition evaluates compound condition formulas from arithmetic flags", async () => {
   const le = await instantiateCondition("LE");
   const g = await instantiateCondition("G");
 
@@ -223,7 +223,7 @@ function encodeConditionModule(cc: ConditionCode): Uint8Array<ArrayBuffer> {
   });
   const body = new WasmFunctionBodyEncoder(1);
 
-  emitAluFlagsCondition(body, wasmIrLocalAluFlagsStorage(body, 0), cc);
+  emitFlagsCondition(body, wasmIrLocalAluFlagsStorage(body, 0), cc);
   body.end();
 
   const functionIndex = module.addFunction(typeIndex, body);

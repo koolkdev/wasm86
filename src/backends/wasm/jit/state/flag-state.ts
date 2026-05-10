@@ -14,7 +14,7 @@ import { i32 } from "#x86/state/cpu-state.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import {
-  emitAluFlagsConditionFromValue,
+  emitFlagsConditionFromAluFlagsValue,
   emitFlagProducerCondition
 } from "#backends/wasm/codegen/conditions.js";
 import { emitFlagProducerBits } from "#backends/wasm/codegen/flags.js";
@@ -62,7 +62,7 @@ export type JitFlagState = Readonly<{
   emitSet(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
   emitMaterialize(mask: number): void;
   emitBoundary(mask: number): void;
-  emitAluFlagsCondition(cc: ConditionCode): void;
+  emitFlagsCondition(cc: ConditionCode): void;
   captureExitStoreSnapshot(mask: number): JitFlagExitStoreSnapshot | undefined;
   emitExitSnapshotStore(snapshot: JitFlagExitStoreSnapshot): void;
   releaseExitSnapshot(snapshot: JitFlagExitStoreSnapshot): void;
@@ -149,7 +149,7 @@ export function createJitFlagState(
     emitBoundary: (mask) => {
       throw new Error(`JIT flags.boundary reached Wasm codegen with mask ${mask}`);
     },
-    emitAluFlagsCondition: (cc) => {
+    emitFlagsCondition: (cc) => {
       const pendingFlags = pendingFlagConditionSource(cc);
 
       if (pendingFlags !== undefined) {
@@ -157,7 +157,7 @@ export function createJitFlagState(
         return;
       }
 
-      emitAluFlagsConditionFromValue(body, cc, emitFlagBits);
+      emitFlagsConditionFromAluFlagsValue(body, cc, emitFlagBits);
     },
     captureExitStoreSnapshot: (mask) => {
       const snapshotMask = mask & IR_ALU_FLAG_MASK;

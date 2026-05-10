@@ -130,7 +130,7 @@ export function analyzeJitReachingFlags(
         owners.recordSource(source);
         break;
       }
-      case "aluFlags.condition": {
+      case "flags.condition": {
         const conditionUse = jitConditionUseAt(barriers.effects, instructionIndex, opIndex);
 
         if (conditionUse !== undefined) {

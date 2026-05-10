@@ -34,7 +34,7 @@ import type { InterpreterStateCache } from "./state-cache.js";
 import { emitIfModRmMemory, emitIfModRmRegister, emitModRmIsRegister, emitModRmRegIndex } from "#backends/wasm/interpreter/decode/modrm-bits.js";
 import { emitIrToWasm, type WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import { emitSetFlags } from "#backends/wasm/codegen/flags.js";
-import { emitAluFlagsCondition, emitFlagProducerCondition } from "#backends/wasm/codegen/conditions.js";
+import { emitFlagsCondition, emitFlagProducerCondition } from "#backends/wasm/codegen/conditions.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import type { InterpreterLocals } from "./locals.js";
 import type { InterpreterDispatchDepths } from "./depths.js";
@@ -92,7 +92,7 @@ export function emitInterpreterIrWithContext(block: IrBlock, context: Interprete
       emitSetFlags(context.body, aluFlags, descriptor, helpers),
     emitMaterializeFlags: () => {},
     emitBoundaryFlags: () => {},
-    emitAluFlagsCondition: (cc) => emitAluFlagsCondition(context.body, aluFlags, cc),
+    emitFlagsCondition: (cc) => emitFlagsCondition(context.body, aluFlags, cc),
     emitFlagProducerCondition: (condition, helpers) => emitFlagProducerCondition(context.body, condition, helpers),
     emitNext: () => emitNext(context),
     emitNextEip: () => emitNextEip(context),

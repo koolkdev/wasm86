@@ -89,7 +89,7 @@ export class JitBlockStateTracker {
           }
         );
         return;
-      case "aluFlags.condition":
+      case "flags.condition":
         this.values.record(op.dst.id, this.valueState.flags.condition(op.cc));
         return;
       case "set":

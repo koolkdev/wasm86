@@ -38,7 +38,7 @@ test("JIT flag state emits pending flag conditions from source calculations", ()
     emitValue: (value) => emitValueExpr(body, value),
     emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
   });
-  flags.emitAluFlagsCondition("E");
+  flags.emitFlagsCondition("E");
   body.localSet(conditionLocal).end();
 
   const opcodes = wasmBodyOpcodes(body.encode());
@@ -64,7 +64,7 @@ test("JIT flag state emits supported pending flag conditions directly", () => {
     emitValue: (value) => emitValueExpr(body, value),
     emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
   });
-  flags.emitAluFlagsCondition("E");
+  flags.emitFlagsCondition("E");
   body.localSet(conditionLocal).end();
 
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.localSet), 4);
@@ -86,7 +86,7 @@ test("JIT flag state keeps const pending flag inputs direct", () => {
     emitValue: (value) => emitValueExpr(body, value),
     emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
   });
-  flags.emitAluFlagsCondition("E");
+  flags.emitFlagsCondition("E");
   body.localSet(conditionLocal).end();
 
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.localSet), 3);
@@ -103,7 +103,7 @@ test("JIT flag state emits incoming flag conditions without a fallback local", (
     }
   });
 
-  flags.emitAluFlagsCondition("B");
+  flags.emitFlagsCondition("B");
   body.end();
 
   strictEqual(wasmBodyLocalCount(body.encode()), 0);

@@ -70,7 +70,7 @@ test("runJitIrOptimizationPipeline keeps flag conditions planning-visible throug
   strictEqual(cmoveInstruction.ir.some((op) =>
     op.op === "set" && op.target.kind === "reg" && op.target.reg === "eax"
   ), false);
-  strictEqual(cmoveInstruction.ir.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(cmoveInstruction.ir.some((op) => op.op === "flags.condition"), true);
   strictEqual(cmoveInstruction.ir.some((op) => op.op === "flagProducer.condition"), false);
 });
 
@@ -121,7 +121,7 @@ test("runJitIrOptimizationPipeline exposes the new pass pipeline as plain JIT IR
     "localDce"
   ]);
   strictEqual(result.block.instructions.some((instruction) =>
-    instruction.ir.some((op) => op.op === "aluFlags.condition")
+    instruction.ir.some((op) => op.op === "flags.condition")
   ), true);
   strictEqual(result.block.instructions.some((instruction) =>
     instruction.ir.some((op) => op.op === "flagProducer.condition")
@@ -135,7 +135,7 @@ test("planJitCodegen keeps branch exit flag materialization separate from direct
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([add, inc, je])));
   const branchIr = codegenPlan.block.instructions[2]!.ir;
 
-  strictEqual(branchIr.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
   strictEqual(branchIr.some((op) => op.op === "flagProducer.condition"), false);
   deepStrictEqual(
     codegenPlan.flagMaterializationRequirements.map((requirement) => ({

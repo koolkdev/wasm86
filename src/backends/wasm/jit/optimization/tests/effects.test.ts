@@ -47,7 +47,7 @@ test("indexJitEffects indexes shared op effects", () => {
   const effects = indexJitEffects({
     instructions: [
       syntheticInstruction([
-        { op: "aluFlags.condition", dst: v(0), cc: "E" },
+        { op: "flags.condition", dst: v(0), cc: "E" },
         { op: "value.select", type: "i32", dst: v(1), condition: v(0), whenTrue: c32(1), whenFalse: c32(0) },
         { op: "set", target: { kind: "reg", reg: "ecx" }, value: v(1) },
         { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
@@ -95,7 +95,7 @@ test("JIT condition use analysis rejects ordinary condition value uses", () => {
     () => analyzeJitConditionUses({
       instructions: [
         syntheticInstruction([
-          { op: "aluFlags.condition", dst: v(0), cc: "E" },
+          { op: "flags.condition", dst: v(0), cc: "E" },
           { op: "set", target: { kind: "reg", reg: "ecx" }, value: v(0) },
           { op: "next" }
         ])

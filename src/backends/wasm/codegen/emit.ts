@@ -56,7 +56,7 @@ export type WasmIrEmitContext = Readonly<{
   emitSetFlags(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
   emitMaterializeFlags(mask: number, helpers: WasmIrEmitHelpers): void;
   emitBoundaryFlags(mask: number, helpers: WasmIrEmitHelpers): void;
-  emitAluFlagsCondition(cc: ConditionCode): void;
+  emitFlagsCondition(cc: ConditionCode): void;
   emitFlagProducerCondition(condition: Extract<IrValueExpr, { kind: "flagProducer.condition" }>, helpers: WasmIrEmitHelpers): void;
   emitNext(helpers: WasmIrEmitHelpers): void;
   emitNextEip(helpers: WasmIrEmitHelpers): void;
@@ -209,8 +209,8 @@ class IrExprWasmEmitter {
       case "address":
         this.#context.emitAddress(value.operand, this.#helpers);
         return untrackedValueWidth();
-      case "aluFlags.condition":
-        this.#context.emitAluFlagsCondition(value.cc);
+      case "flags.condition":
+        this.#context.emitFlagsCondition(value.cc);
         return cleanValueWidth(8);
       case "flagProducer.condition":
         this.#context.emitFlagProducerCondition(value, this.#helpers);

@@ -32,7 +32,7 @@ export function logic32LocalConditionBlock(cc: ConditionCode): JitIrBlock {
         { op: "next" }
       ], 0),
       syntheticInstruction([
-        { op: "aluFlags.condition", dst: v(0), cc },
+        { op: "flags.condition", dst: v(0), cc },
         ...selectSet(v(0), v(1)),
         { op: "next" }
       ], 1)

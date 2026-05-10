@@ -127,7 +127,7 @@ test("buildJitIrBlock keeps cmp and jcc branch conditions in flag value state", 
   const je = ok(decodeBytes([0x74, 0x05], cmp.nextEip));
   const ir = codegenIr(buildJitIrBlock([cmp, je]));
 
-  strictEqual(ir.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(ir.some((op) => op.op === "flags.condition"), true);
   strictEqual(ir.some((op) => op.op === "flagProducer.condition"), false);
   strictEqual(ir.some((op) => op.op === "flags.materialize"), false);
 });
@@ -1407,7 +1407,7 @@ test("jit IR block emits cmovcc through a select value and normal write", () => 
 
   deepStrictEqual(ir, [
     { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 1 }, accessWidth: 32 },
-    { op: "aluFlags.condition", dst: { kind: "var", id: 1 }, cc: "E" },
+    { op: "flags.condition", dst: { kind: "var", id: 1 }, cc: "E" },
     { op: "get", dst: { kind: "var", id: 2 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
     {
       op: "value.select",
@@ -1579,7 +1579,7 @@ test("jit IR block lowers setcc conditions from local flag value state", async (
     createCpuState({ eax: 0x1234_5678, ebx: 0x1234_5679, eflags: preservedEflags, eip: startAddress })
   );
 
-  strictEqual(ir.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(ir.some((op) => op.op === "flags.condition"), true);
   strictEqual(ir.some((op) => op.op === "flagProducer.condition"), false);
   strictEqual(equal.state.eax, 0x1234_5601);
   strictEqual(equal.state.instructionCount, 2);

@@ -11,7 +11,7 @@ import {
   type ValueWidth,
   type WasmIrEmitValueOptions
 } from "#backends/wasm/codegen/value-width.js";
-import { emitAluFlagsConditionFromValue, emitFlagProducerCondition } from "#backends/wasm/codegen/conditions.js";
+import { emitFlagsConditionFromAluFlagsValue, emitFlagProducerCondition } from "#backends/wasm/codegen/conditions.js";
 import { emitFlagProducerBits } from "#backends/wasm/codegen/flags.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { conditionFlagReadMask } from "#x86/ir/model/flag-effects.js";
@@ -250,7 +250,7 @@ function emitFlagConditionValue(
     return cleanValueWidth(8);
   }
 
-  emitAluFlagsConditionFromValue(context.body, cc, (mask) => {
+  emitFlagsConditionFromAluFlagsValue(context.body, cc, (mask) => {
     emitFlagBitsForMask(context, simplifiedFlags, mask);
   });
   return cleanValueWidth(8);

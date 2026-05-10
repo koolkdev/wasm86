@@ -29,7 +29,7 @@ test("mov semantic gets source, sets destination, and falls through", () => {
 test("cmov semantic reads source unconditionally and selects the destination value", () => {
   deepStrictEqual(buildIr(cmovSemantic("E")), [
     { op: "get", dst: v(0), source: op(1), accessWidth: 32 },
-    { op: "aluFlags.condition", dst: v(1), cc: "E" },
+    { op: "flags.condition", dst: v(1), cc: "E" },
     { op: "get", dst: v(2), source: op(0), accessWidth: 32 },
     { op: "value.select", type: "i32", dst: v(3), condition: v(1), whenTrue: v(0), whenFalse: v(2) },
     { op: "set", target: op(0), value: v(3), accessWidth: 32 },
@@ -180,7 +180,7 @@ test("ret imm semantic adjusts esp explicitly after popping target", () => {
 
 test("jcc semantic resolves relative target value before conditional jump", () => {
   deepStrictEqual(buildIr(jccSemantic("NE")), [
-    { op: "aluFlags.condition", dst: v(0), cc: "NE" },
+    { op: "flags.condition", dst: v(0), cc: "NE" },
     { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
     {
       op: "conditionalJump",

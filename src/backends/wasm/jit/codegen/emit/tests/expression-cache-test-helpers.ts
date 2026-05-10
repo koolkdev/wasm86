@@ -49,7 +49,7 @@ export function emitPlannedExpression(
     emitSetFlags: () => {},
     emitMaterializeFlags: () => {},
     emitBoundaryFlags: () => {},
-    emitAluFlagsCondition: () => {
+    emitFlagsCondition: () => {
       body.i32Const(0);
     },
     emitFlagProducerCondition: () => {

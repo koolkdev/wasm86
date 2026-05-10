@@ -83,7 +83,7 @@ export function irOpFlagEffect(op: IrOp): IrFlagOpEffect {
         writes: op.writtenMask,
         undefines: op.undefMask
       };
-    case "aluFlags.condition":
+    case "flags.condition":
       return {
         reads: conditionFlagReadMask(op.cc),
         writes: IR_FLAG_MASK_NONE,

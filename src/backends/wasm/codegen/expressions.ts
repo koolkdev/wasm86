@@ -27,7 +27,7 @@ export type IrValueExpr =
   | ValueRef
   | Readonly<{ kind: "source"; source: IrStorageExpr; accessWidth: OperandWidth; signed?: boolean }>
   | Readonly<{ kind: "address"; operand: OperandRef }>
-  | Readonly<{ kind: "aluFlags.condition"; cc: ConditionCode }>
+  | Readonly<{ kind: "flags.condition"; cc: ConditionCode }>
   | Readonly<{
       kind: "flagProducer.condition";
       cc: ConditionCode;
@@ -183,8 +183,8 @@ class ExpressionBuilder {
             whenFalse: this.#valueExpr(op.whenFalse)
           }, true);
           break;
-        case "aluFlags.condition":
-          this.#defineValue(op.dst, { kind: "aluFlags.condition", cc: op.cc }, false);
+        case "flags.condition":
+          this.#defineValue(op.dst, { kind: "flags.condition", cc: op.cc }, false);
           break;
         case "flagProducer.condition":
           this.#defineValue(op.dst, {
@@ -350,7 +350,7 @@ function countVarUses(block: IrExpressionInputBlock): Map<number, number> {
         break;
       case "address":
       case "value.const":
-      case "aluFlags.condition":
+      case "flags.condition":
       case "next":
         break;
       case "flagProducer.condition":
@@ -417,7 +417,7 @@ function opUsesVar(op: IrExpressionInputOp, id: number): boolean {
       return false;
     case "value.const":
       return false;
-    case "aluFlags.condition":
+    case "flags.condition":
       return false;
     case "flagProducer.condition":
       return flagProducerConditionInputNames(op).some((name) =>

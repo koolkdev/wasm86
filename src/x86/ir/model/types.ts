@@ -46,8 +46,8 @@ export type IrFlagSetOp = Readonly<{
   inputs: Readonly<Record<string, ValueRef>>;
 }>;
 
-export type IrAluFlagsConditionOp = Readonly<{
-  op: "aluFlags.condition";
+export type IrFlagsConditionOp = Readonly<{
+  op: "flags.condition";
   dst: VarRef;
   cc: ConditionCode;
 }>;
@@ -106,7 +106,7 @@ export type IrOp =
   | IrFlagSetOp
   | Readonly<{ op: "flags.materialize"; mask: FlagMask }>
   | Readonly<{ op: "flags.boundary"; mask: FlagMask }>
-  | IrAluFlagsConditionOp
+  | IrFlagsConditionOp
   | Readonly<{ op: "next" }>
   | Readonly<{ op: "jump"; target: TargetRef }>
   | Readonly<{ op: "conditionalJump"; condition: ValueRef; taken: TargetRef; notTaken: TargetRef }>

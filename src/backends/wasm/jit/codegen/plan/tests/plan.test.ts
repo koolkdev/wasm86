@@ -236,7 +236,7 @@ test("planJitCodegen records flag materialization requirements for branch exits"
   const branchExpressionBlock = emissionPlan.instructions[1]?.expressionBlock;
   const conditionalJumpIndex = branchExpressionBlock?.findIndex((op) => op.op === "conditionalJump") ?? -1;
 
-  strictEqual(branchIr.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
   strictEqual(branchIr.some((op) => op.op === "flagProducer.condition"), false);
   strictEqual(branchExits.length, 2);
 
@@ -617,7 +617,7 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
   } as const satisfies JitValue;
 
   strictEqual(cmpInstruction.ir.some((op) => op.op === "flags.set"), true);
-  strictEqual(cmoveInstruction.ir.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(cmoveInstruction.ir.some((op) => op.op === "flags.condition"), true);
   strictEqual(cmoveInstruction.ir.some((op) => op.op === "flagProducer.condition"), false);
   deepStrictEqual(exit.snapshot.valueState.regs.exitStore("edx"), registerStore("edx", selectedEdx));
 });

@@ -122,7 +122,7 @@ export function jitFlagLivenessOpAt(
 
 function flagReadMask(op: JitIrOp): FlagMask {
   switch (op.op) {
-    case "aluFlags.condition":
+    case "flags.condition":
     case "flagProducer.condition":
       return conditionFlagReadMask(op.cc);
     case "flags.materialize":

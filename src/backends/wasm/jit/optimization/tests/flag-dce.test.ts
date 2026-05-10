@@ -17,7 +17,7 @@ test("flag-dce removes overwritten flag producers", () => {
         createIrFlagSetOp("add", { left: v(0), right: c32(1), result: v(1) }),
         { op: "value.binary", type: "i32", operator: "sub", dst: v(2), a: v(1), b: c32(1) },
         createIrFlagSetOp("sub", { left: v(1), right: c32(1), result: v(2) }),
-        { op: "aluFlags.condition", dst: v(3), cc: "E" },
+        { op: "flags.condition", dst: v(3), cc: "E" },
         ...selectSet(v(3), v(4)),
         { op: "next" }
       ])
@@ -38,7 +38,7 @@ test("flag-dce keeps partial flag producers needed by later CF reads", () => {
         createIrFlagSetOp("add", { left: v(0), right: c32(1), result: v(1) }),
         { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(1), b: c32(1) },
         createIrFlagSetOp("inc", { left: v(1), result: v(2) }),
-        { op: "aluFlags.condition", dst: v(3), cc: "B" },
+        { op: "flags.condition", dst: v(3), cc: "B" },
         { op: "conditionalJump", condition: v(3), taken: c32(0x2000), notTaken: c32(0x1001) }
       ])
     ]

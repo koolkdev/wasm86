@@ -12,20 +12,24 @@ import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-bo
 import type { WasmIrAluFlagsStorage } from "./alu-flags.js";
 import type { WasmIrEmitHelpers } from "./emit.js";
 
-export function emitAluFlagsCondition(
+type EmitAluFlagsValue = (mask: number) => void;
+
+export function emitFlagsCondition(
   body: WasmFunctionBodyEncoder,
   aluFlags: WasmIrAluFlagsStorage,
   cc: ConditionCode
 ): void {
-  emitFlagBoolExpr(body, aluFlags, CONDITIONS[cc].expr);
+  emitFlagsConditionFromAluFlagsValue(body, cc, () => {
+    aluFlags.emitLoad();
+  });
 }
 
-export function emitAluFlagsConditionFromValue(
+export function emitFlagsConditionFromAluFlagsValue(
   body: WasmFunctionBodyEncoder,
   cc: ConditionCode,
-  emitAluFlagsValue: (mask: number) => void
+  emitAluFlagsValue: EmitAluFlagsValue
 ): void {
-  emitFlagBoolExprFromValue(body, emitAluFlagsValue, CONDITIONS[cc].expr);
+  emitFlagsConditionExpression(body, cc, emitAluFlagsValue);
 }
 
 export function emitFlagProducerCondition(
@@ -114,41 +118,20 @@ export function emitFlagProducerCondition(
   }
 }
 
-function emitFlagBoolExpr(
+function emitFlagsConditionExpression(
   body: WasmFunctionBodyEncoder,
-  aluFlags: WasmIrAluFlagsStorage,
-  expr: FlagBoolExpr
+  cc: ConditionCode,
+  emitAluFlagsValue: EmitAluFlagsValue
 ): void {
-  switch (expr.kind) {
-    case "flag":
-      aluFlags.emitLoad();
-      body.i32Const(x86ArithmeticFlagMask[expr.flag]).i32And().i32Eqz().i32Eqz();
-      return;
-    case "not":
-      emitFlagBoolExpr(body, aluFlags, expr.value);
-      body.i32Eqz();
-      return;
-    case "and":
-      emitFlagBoolExpr(body, aluFlags, expr.a);
-      emitFlagBoolExpr(body, aluFlags, expr.b);
-      body.i32And();
-      return;
-    case "or":
-      emitFlagBoolExpr(body, aluFlags, expr.a);
-      emitFlagBoolExpr(body, aluFlags, expr.b);
-      body.i32Or();
-      return;
-    case "xor":
-      emitFlagBoolExpr(body, aluFlags, expr.a);
-      emitFlagBoolExpr(body, aluFlags, expr.b);
-      body.i32Xor();
-      return;
-  }
+  const condition = CONDITIONS[cc];
+
+  assertAluFlagsCondition(cc);
+  emitFlagBoolExpr(body, emitAluFlagsValue, condition.expr);
 }
 
-function emitFlagBoolExprFromValue(
+function emitFlagBoolExpr(
   body: WasmFunctionBodyEncoder,
-  emitAluFlagsValue: (mask: number) => void,
+  emitAluFlagsValue: EmitAluFlagsValue,
   expr: FlagBoolExpr
 ): void {
   switch (expr.kind) {
@@ -160,24 +143,34 @@ function emitFlagBoolExprFromValue(
       return;
     }
     case "not":
-      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.value);
+      emitFlagBoolExpr(body, emitAluFlagsValue, expr.value);
       body.i32Eqz();
       return;
     case "and":
-      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.a);
-      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.b);
+      emitFlagBoolExpr(body, emitAluFlagsValue, expr.a);
+      emitFlagBoolExpr(body, emitAluFlagsValue, expr.b);
       body.i32And();
       return;
     case "or":
-      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.a);
-      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.b);
+      emitFlagBoolExpr(body, emitAluFlagsValue, expr.a);
+      emitFlagBoolExpr(body, emitAluFlagsValue, expr.b);
       body.i32Or();
       return;
     case "xor":
-      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.a);
-      emitFlagBoolExprFromValue(body, emitAluFlagsValue, expr.b);
+      emitFlagBoolExpr(body, emitAluFlagsValue, expr.a);
+      emitFlagBoolExpr(body, emitAluFlagsValue, expr.b);
       body.i32Xor();
       return;
+  }
+}
+
+function assertAluFlagsCondition(cc: ConditionCode): void {
+  const condition = CONDITIONS[cc];
+
+  for (const flag of condition.reads) {
+    if (!Object.hasOwn(x86ArithmeticFlagMask, flag)) {
+      throw new Error(`flags.condition ${cc} reads non-ALU flag ${flag}`);
+    }
   }
 }
 

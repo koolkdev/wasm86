@@ -255,7 +255,7 @@ function childValueUsesForValue(
     case "const":
     case "nextEip":
     case "address":
-    case "aluFlags.condition":
+    case "flags.condition":
     case "flagProducer.condition":
       return [];
   }
@@ -472,7 +472,7 @@ function jitValueForExpressionUntracked(
         : { kind: value.kind, type: value.type, condition, whenTrue, whenFalse };
     }
     case "nextEip":
-    case "aluFlags.condition":
+    case "flags.condition":
     case "flagProducer.condition":
       return undefined;
   }

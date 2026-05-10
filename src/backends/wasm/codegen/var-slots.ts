@@ -137,7 +137,7 @@ function collectValueVarUses(value: IrValueExpr, visit: (id: number) => void): v
     case "const":
     case "nextEip":
     case "address":
-    case "aluFlags.condition":
+    case "flags.condition":
       return;
     case "flagProducer.condition":
       for (const name of flagProducerConditionInputNames(value)) {

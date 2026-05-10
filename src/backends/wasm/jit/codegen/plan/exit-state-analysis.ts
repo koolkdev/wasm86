@@ -134,7 +134,7 @@ export function analyzeJitCodegenState(
       case "flags.boundary":
         state.commitFlags(op.mask);
         return;
-      case "aluFlags.condition":
+      case "flags.condition":
         return;
       case "next":
         recordPostInstructionExits(instruction, instructionIndex, opIndex);

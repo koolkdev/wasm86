@@ -161,7 +161,7 @@ function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionC
       jitContext.state.flags.emitSet(descriptor, helpers),
     emitMaterializeFlags: (mask) => jitContext.state.flags.emitMaterialize(mask),
     emitBoundaryFlags: (mask) => jitContext.state.flags.emitBoundary(mask),
-    emitAluFlagsCondition: (cc) => jitContext.state.flags.emitAluFlagsCondition(cc),
+    emitFlagsCondition: (cc) => jitContext.state.flags.emitFlagsCondition(cc),
     emitFlagProducerCondition: (condition, helpers) => emitFlagProducerCondition(jitContext.body, condition, helpers),
     emitNext: () => emitJitNext(jitContext),
     emitNextEip: () => emitJitNextEip(jitContext),

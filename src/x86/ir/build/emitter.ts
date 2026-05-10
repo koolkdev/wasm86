@@ -207,7 +207,7 @@ export class IrEmitter implements IrBuilder {
   condition(cc: ConditionCode): VarRef {
     const dst = this.#allocVar();
 
-    this.#push({ op: "aluFlags.condition", dst, cc });
+    this.#push({ op: "flags.condition", dst, cc });
     return dst;
   }
 
