@@ -1744,14 +1744,16 @@ test("jit IR block keeps mixed cached pending flag inputs stable after invalidat
   const optimizedBlock = optimizeJitIrBlock(block);
   const codegenPlan = planJitCodegen(optimizedBlock);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
-  const cachedAddEpochs = emissionPlan.valueCachePlan?.selectedValuesByEpoch.filter((epoch) =>
+  const producedLoadConsumerEpochs = emissionPlan.valueCachePlan?.selectedConsumerValuesByEpoch.filter((epoch) =>
     epoch.some(({ value }) =>
-      value.kind === "value.binary" &&
-        value.operator === "add" &&
-        value.a.kind === "reg" &&
-        value.a.reg === "eax" &&
-        value.b.kind === "const" &&
-        value.b.value === 1
+      value.kind === "produced" &&
+        value.id === "load#mov.r32_rm32:1:3:0"
+    )
+  ).length ?? 0;
+  const producedLoadCaptureEpochs = emissionPlan.valueCachePlan?.captureValuesByEpoch.filter((epoch) =>
+    epoch.some((value) =>
+      value.kind === "produced" &&
+        value.id === "load#mov.r32_rm32:1:3:0"
     )
   ).length ?? 0;
   const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
@@ -1760,7 +1762,8 @@ test("jit IR block keeps mixed cached pending flag inputs stable after invalidat
     eip: startAddress
   }), [{ address: 0x60, bytes: littleEndianBytes(0xffff_ffff, 32) }]);
 
-  strictEqual(cachedAddEpochs, 2);
+  strictEqual(producedLoadCaptureEpochs, 1);
+  strictEqual(producedLoadConsumerEpochs, 1);
   strictEqual(result.state.eax, 0);
   strictEqual(result.state.eflags, (preservedEflags | arithmeticEflags(expectedFlags)) >>> 0);
   assertArithmeticFlags(result.state, expectedFlags, "cached pending flag input");

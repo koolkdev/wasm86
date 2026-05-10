@@ -6,11 +6,12 @@ import {
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/produced-values.js";
+import type { JitProducedValue } from "#backends/wasm/jit/ir/values.js";
 import {
   canInlineJitInstructionGet,
   jitInstructionStorageRefsMayAlias
 } from "./operand-analysis.js";
-import { planJitMaterializedValueUses } from "./materialized-values.js";
+import { planJitMaterializationUses } from "./materialization-uses.js";
 import {
   planJitExpressionValueCacheForInstructions,
   type JitExpressionValueCachePlan
@@ -30,6 +31,7 @@ export type JitCodegenInstructionPlan = JitInstructionState & Pick<
 > & Readonly<{
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
+  producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
   valueCachePlan?: JitExpressionValueCachePlan;
 }>;
 
@@ -73,17 +75,17 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
       sourceExpressionMap: expressionPlan.sourceMap
     };
   });
-  const materializedValueUsePlan = planJitMaterializedValueUses(
+  const materializationUsePlan = planJitMaterializationUses(
     instructions,
     codegenPlan
   );
-  const { expressionUseIndexesByInstruction } = materializedValueUsePlan;
+  const { jitValueUsesByInstruction } = materializationUsePlan;
   const valueCachePlan = planJitExpressionValueCacheForInstructions(
     instructions.map((instruction, index) => ({
       operands: instruction.operands,
       expressionBlock: instruction.expressionBlock,
       producedValuesByVarId: instruction.producedValuesByVarId,
-      materializedValueExpressionUseIndexes: expressionUseIndexesByInstruction[index] ?? new Set()
+      materializationJitValueUsesByExpressionIndex: jitValueUsesByInstruction[index] ?? new Map()
     }))
   );
 

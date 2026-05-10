@@ -187,6 +187,7 @@ export function analyzeJitCodegenState(
       exitReason,
       exitMaterializationIndex,
       exitMaterializationPathScope(exitReason),
+      stores,
       requiredFlagMask
     );
 
@@ -222,6 +223,7 @@ export function analyzeJitCodegenState(
     exitReason: ExitReasonValue,
     exitMaterializationIndex: number,
     pathScope: JitMaterializationPathScope,
+    stores: readonly ExitMaterializationStore[],
     flagMask: number
   ): void {
     const placement = {
@@ -231,6 +233,16 @@ export function analyzeJitCodegenState(
       exitReason,
       exitMaterializationIndex
     };
+
+    for (const store of stores) {
+      materializationNeeds.push({
+        consumer: "registerExitStore",
+        target: store.target,
+        value: store.value,
+        placement,
+        pathScope
+      });
+    }
 
     if (flagMask !== 0) {
       materializationNeeds.push({

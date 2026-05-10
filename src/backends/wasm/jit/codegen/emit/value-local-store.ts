@@ -232,23 +232,23 @@ export function createJitValueCacheRuntime(
     emitForUse: (value, emitter) => {
       const jitValue = currentInstructionPlan().expressionValues.get(value);
 
-      return jitValue !== undefined && valueIsSelected(cachePlan.selectedValuesByEpoch[currentEpoch] ?? [], jitValue)
+      return jitValue !== undefined && valueIsSelectedInEpoch(jitValue)
         ? store.emitForUse(jitValue, emitter)
         : emitter();
     },
     emitJitValueForUse: (value, emitter) =>
-      valueIsSelected(cachePlan.selectedValuesByEpoch[currentEpoch] ?? [], value)
+      valueIsSelectedInEpoch(value)
         ? store.emitForUseWithLocal(value, emitter)
         : { valueWidth: emitter() },
     captureForReuse: (value, emitter) => {
       const jitValue = currentInstructionPlan().expressionValues.get(value);
 
-      return jitValue !== undefined && valueIsSelected(cachePlan.selectedValuesByEpoch[currentEpoch] ?? [], jitValue)
+      return jitValue !== undefined && valueIsSelectedInEpoch(jitValue)
         ? store.captureForReuse(jitValue, emitter)
         : undefined;
     },
     captureJitValueForReuse: (value, emitter) =>
-      valueIsSelected(cachePlan.selectedValuesByEpoch[currentEpoch] ?? [], value)
+      valueIsSelectedInEpoch(value)
         ? store.captureForReuse(value, emitter)
         : undefined,
     jitValueForExpression: (value) =>
@@ -273,9 +273,14 @@ export function createJitValueCacheRuntime(
       store.forgetWhere((value) =>
         jitValueReadsReg(value, reg) || jitValueUsesSymbolicReg(value, reg)
       );
-      currentEpoch = Math.min(currentEpoch + 1, cachePlan.selectedValuesByEpoch.length - 1);
+      currentEpoch = Math.min(currentEpoch + 1, cachePlan.selectedConsumerValuesByEpoch.length - 1);
     }
   };
+
+  function valueIsSelectedInEpoch(value: JitValue): boolean {
+    return valueIsSelected(cachePlan.selectedConsumerValuesByEpoch[currentEpoch] ?? [], value) ||
+      valueIsCaptureSelected(cachePlan.captureValuesByEpoch[currentEpoch] ?? [], value);
+  }
 
   function currentInstructionPlan() {
     const instructionPlan = cachePlan.instructionPlans[currentInstructionIndex];
@@ -313,4 +318,10 @@ function valueIsSelected(selected: readonly JitValueUseCount[], value: JitValue)
   const simplified = simplifyJitValue(value);
 
   return selected.some((entry) => jitValuesEqual(simplifyJitValue(entry.value), simplified));
+}
+
+function valueIsCaptureSelected(selected: readonly JitValue[], value: JitValue): boolean {
+  const simplified = simplifyJitValue(value);
+
+  return selected.some((entry) => jitValuesEqual(simplifyJitValue(entry), simplified));
 }

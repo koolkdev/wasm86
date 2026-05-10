@@ -11,6 +11,7 @@ import {
   jitValueForStorage,
   simplifyJitValue,
   jitValuesEqual,
+  jitValueDependencies,
   type JitProducedValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
@@ -25,13 +26,14 @@ export type JitValueUseCount = Readonly<{
 
 export type JitExpressionValueCachePlan = Readonly<{
   instructionPlans: readonly JitInstructionValueCachePlan[];
-  selectedValuesByEpoch: readonly (readonly JitValueUseCount[])[];
+  selectedConsumerValuesByEpoch: readonly (readonly JitValueUseCount[])[];
+  captureValuesByEpoch: readonly (readonly JitValue[])[];
   selectedUseCounts: readonly JitValueUseCount[];
 }>;
 
 export type JitExpressionValueCacheInstruction = Readonly<{
   operands: readonly JitOperandBinding[];
-  materializedValueExpressionUseIndexes?: ReadonlySet<number>;
+  materializationJitValueUsesByExpressionIndex?: ReadonlyMap<number, readonly JitValue[]>;
   producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
 }>;
 
@@ -47,6 +49,11 @@ export type JitExpressionValueCachePlanInput = JitExpressionValueCacheInstructio
 type JitValueUse = Readonly<{
   value: JitValue;
   children: readonly JitValueUse[];
+}>;
+
+type JitValueEpochUses = Readonly<{
+  consumerUsesByEpoch: readonly (readonly JitValueUse[])[];
+  captureValuesByEpoch: readonly (readonly JitValue[])[];
 }>;
 
 type FlatJitValueUse = Readonly<{
@@ -70,14 +77,15 @@ export function planJitExpressionValueCacheForInstructions(
 ): JitExpressionValueCachePlan | undefined {
   const instructionPlans: JitInstructionValueCachePlan[] = [];
   const epochUses = expressionValueUseEpochs(instructions, instructionPlans);
-  const selectedValuesByEpoch = epochUses.map(selectEpochValues);
-  const selectedUseCounts = mergeSelectedUseCounts(selectedValuesByEpoch);
+  const selectedConsumerValuesByEpoch = epochUses.consumerUsesByEpoch.map(selectEpochValues);
+  const selectedUseCounts = mergeSelectedUseCounts(selectedConsumerValuesByEpoch);
 
   return selectedUseCounts.length === 0
     ? undefined
     : {
         instructionPlans,
-        selectedValuesByEpoch,
+        selectedConsumerValuesByEpoch,
+        captureValuesByEpoch: epochUses.captureValuesByEpoch,
         selectedUseCounts
       };
 }
@@ -103,8 +111,10 @@ export function shouldCacheValue(value: JitValue, useCount: number): boolean {
 function expressionValueUseEpochs(
   instructions: readonly JitExpressionValueCachePlanInput[],
   instructionPlans: JitInstructionValueCachePlan[]
-): readonly (readonly JitValueUse[])[] {
+): JitValueEpochUses {
   const epochs: JitValueUse[][] = [];
+  const captureValuesByEpoch: JitValue[][] = [];
+  const producedDefinitionCaptures = materializationProducedValueKeys(instructions);
   let currentEpoch: JitValueUse[] = [];
 
   for (const instruction of instructions) {
@@ -118,6 +128,13 @@ function expressionValueUseEpochs(
       }
 
       currentEpoch.push(...valueUsesForOp(instruction, op, opIndex, state));
+      appendProducedDefinitionCapture(
+        captureValuesByEpoch,
+        epochs.length,
+        instruction,
+        op,
+        producedDefinitionCaptures
+      );
 
       if (opWriteReg(instruction, op) !== undefined) {
         epochs.push(currentEpoch);
@@ -127,16 +144,19 @@ function expressionValueUseEpochs(
 
     instructionPlans.push({
       operands: instruction.operands,
-      ...(instruction.materializedValueExpressionUseIndexes === undefined
+      ...(instruction.materializationJitValueUsesByExpressionIndex === undefined
         ? {}
-        : { materializedValueExpressionUseIndexes: instruction.materializedValueExpressionUseIndexes }),
+        : { materializationJitValueUsesByExpressionIndex: instruction.materializationJitValueUsesByExpressionIndex }),
       expressionValues: state.expressionJitValues,
       valueRefValues: state.valueRefJitValues
     });
   }
 
   epochs.push(currentEpoch);
-  return epochs;
+  return {
+    consumerUsesByEpoch: epochs,
+    captureValuesByEpoch: denseCaptureValuesByEpoch(captureValuesByEpoch, epochs.length)
+  };
 }
 
 type JitValueUseInstructionState = Readonly<{
@@ -157,7 +177,8 @@ function valueUsesForOp(
   opIndex: number,
   state: JitValueUseInstructionState
 ): readonly JitValueUse[] {
-  switch (op.op) {
+  const opUses = (() => {
+    switch (op.op) {
     case "let32": {
       const producedValue = instruction.producedValuesByVarId?.get(op.dst.id);
       const jitValue = producedValue ?? jitValueForExpression(instruction, op.value, state);
@@ -173,18 +194,10 @@ function valueUsesForOp(
       return [];
     }
     case "set": {
-      const expressionUses = [
+      return [
         ...valueUsesForStorage(instruction, op.target, state),
         ...(op.role === "registerMaterialization" ? [] : valueUsesForValue(instruction, op.value, state))
       ];
-      const retainedUses = op.role === "registerMaterialization"
-        ? [
-            ...retainedValueUsesForValue(instruction, op.value, state),
-            ...materializedValueUsesForSet(instruction, opIndex, op, state)
-          ]
-        : [];
-
-      return [...expressionUses, ...retainedUses];
     }
     case "flags.set":
       return Object.values(op.inputs).flatMap((value) =>
@@ -202,7 +215,46 @@ function valueUsesForOp(
       return valueUsesForValue(instruction, op.vector, state);
     case "next":
       return [];
+    }
+  })();
+
+  return [
+    ...opUses,
+    ...materializationJitValueUsesForOp(instruction, opIndex)
+  ];
+}
+
+function appendProducedDefinitionCapture(
+  captureValuesByEpoch: JitValue[][],
+  epochIndex: number,
+  instruction: JitExpressionValueCacheInstruction,
+  op: IrExprOp,
+  producedDefinitionCaptures: ReadonlySet<string>
+): void {
+  if (op.op !== "let32") {
+    return;
   }
+
+  const producedValue = instruction.producedValuesByVarId?.get(op.dst.id);
+
+  if (producedValue === undefined || !producedDefinitionCaptures.has(producedValueKey(producedValue))) {
+    return;
+  }
+
+  const epochCaptures = captureValuesByEpoch[epochIndex] ?? [];
+
+  if (!epochCaptures.some((value) => jitValuesEqual(value, producedValue))) {
+    captureValuesByEpoch[epochIndex] = [...epochCaptures, producedValue];
+  }
+}
+
+function denseCaptureValuesByEpoch(
+  captureValuesByEpoch: readonly (readonly JitValue[] | undefined)[],
+  epochCount: number
+): readonly (readonly JitValue[])[] {
+  return Array.from({ length: epochCount }, (_, epochIndex) =>
+    captureValuesByEpoch[epochIndex] ?? []
+  );
 }
 
 function valueUsesForStorage(
@@ -258,33 +310,6 @@ function childValueUsesForValue(
   }
 }
 
-function retainedValueUsesForValue(
-  instruction: JitExpressionValueCacheInstruction,
-  value: IrValueExpr,
-  state: JitValueUseInstructionState
-): readonly JitValueUse[] {
-  const jitValue = jitValueForExpression(instruction, value, state) ??
-    retainedJitValueForValueExpr(value, state);
-
-  return jitValue === undefined
-    ? []
-    : [{ value: jitValue, children: [] }];
-}
-
-function retainedJitValueForValueExpr(
-  value: IrValueExpr,
-  state: JitValueUseInstructionState
-): JitValue | undefined {
-  switch (value.kind) {
-    case "const":
-    case "var":
-    case "nextEip":
-      return retainedJitValueForValueRef(value, state);
-    default:
-      return undefined;
-  }
-}
-
 function retainedValueUsesForValueRef(
   value: ValueRef,
   state: JitValueUseInstructionState
@@ -314,20 +339,45 @@ function retainedJitValueForValueRef(
   }
 }
 
-function materializedValueUsesForSet(
+function materializationJitValueUsesForOp(
   instruction: JitExpressionValueCacheInstruction,
-  opIndex: number,
-  op: Extract<IrExprOp, { op: "set" }>,
-  state: JitValueUseInstructionState
+  opIndex: number
 ): readonly JitValueUse[] {
-  if (
-    op.role !== "registerMaterialization" ||
-    instruction.materializedValueExpressionUseIndexes?.has(opIndex) !== true
-  ) {
-    return [];
+  return (instruction.materializationJitValueUsesByExpressionIndex?.get(opIndex) ?? [])
+    .map(jitValueUseTree);
+}
+
+function materializationProducedValueKeys(
+  instructions: readonly JitExpressionValueCachePlanInput[]
+): ReadonlySet<string> {
+  const produced = new Set<string>();
+
+  for (const instruction of instructions) {
+    for (const values of instruction.materializationJitValueUsesByExpressionIndex?.values() ?? []) {
+      for (const value of values) {
+        for (const use of flattenUse(jitValueUseTree(value))) {
+          if (use.value.kind === "produced") {
+            produced.add(producedValueKey(use.value));
+          }
+        }
+      }
+    }
   }
 
-  return retainedValueUsesForValue(instruction, op.value, state);
+  return produced;
+}
+
+function producedValueKey(value: JitProducedValue): string {
+  return `${value.type}:${value.id}`;
+}
+
+function jitValueUseTree(value: JitValue): JitValueUse {
+  const simplified = simplifyJitValue(value);
+
+  return {
+    value: simplified,
+    children: jitValueDependencies(simplified).map(jitValueUseTree)
+  };
 }
 
 function selectEpochValues(uses: readonly JitValueUse[]): readonly JitValueUseCount[] {

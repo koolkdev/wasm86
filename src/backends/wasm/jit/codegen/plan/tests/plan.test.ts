@@ -8,13 +8,15 @@ import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
-import { planJitMaterializedValueUses } from "#backends/wasm/jit/codegen/plan/materialized-values.js";
+import { planJitMaterializationUses } from "#backends/wasm/jit/codegen/plan/materialization-uses.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import { planJitExpressionValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import type {
   JitCodegenPlan,
   JitExitMaterializationStore,
+  JitExitPoint,
   JitInstructionEntryPoint,
+  JitMaterializationNeed,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
@@ -53,7 +55,9 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
   strictEqual(exit.exitMaterializationIndex, 1);
   deepStrictEqual(exit.snapshot.valueState.regs.exitStores(), [registerStore("eax", c32(1))]);
   strictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.flagMask, 0);
-  deepStrictEqual(codegenPlan.materializationNeeds, []);
+  deepStrictEqual(codegenPlan.materializationNeeds, [
+    exitStoreNeed(registerStore("eax", c32(1)), exit, 0)
+  ]);
 });
 
 test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
@@ -84,6 +88,7 @@ test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
   strictEqual(exit.snapshot.speculativeFlags.mask, IR_ALU_FLAG_MASK);
   strictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.flagMask, IR_ALU_FLAG_MASK);
   deepStrictEqual(codegenPlan.materializationNeeds.filter((need) => need.placement.exitPointIndex === 0), [
+    exitStoreNeed(registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1))), exit, 0),
     {
       value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
       consumer: "flagExitStore",
@@ -253,8 +258,11 @@ test("planJitCodegen records flag materialization requirements for branch exits"
   deepStrictEqual(
     codegenPlan.materializationNeeds
       .filter((need) =>
-        need.placement.exitReason === ExitReason.BRANCH_TAKEN ||
-        need.placement.exitReason === ExitReason.BRANCH_NOT_TAKEN
+        need.consumer === "flagExitStore" &&
+        (
+          need.placement.exitReason === ExitReason.BRANCH_TAKEN ||
+          need.placement.exitReason === ExitReason.BRANCH_NOT_TAKEN
+        )
       )
       .map((need) => ({
         value: need.value,
@@ -597,6 +605,106 @@ test("planJitCodegen omits materialization needs for empty exits", () => {
   deepStrictEqual(codegenPlan.materializationNeeds, []);
 });
 
+test("planJitCodegen feeds produced register exit-store values into materialization needs", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "produced-exit-store",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        {
+          op: "get",
+          dst: { kind: "var", id: 0 },
+          source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
+          accessWidth: 32
+        },
+        { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "reg", reg: "ebx" }, accessWidth: 32 },
+        {
+          op: "value.binary",
+          type: "i32",
+          operator: "add",
+          dst: { kind: "var", id: 2 },
+          a: { kind: "var", id: 0 },
+          b: { kind: "var", id: 1 }
+        },
+        {
+          op: "set",
+          target: { kind: "reg", reg: "eax" },
+          value: { kind: "var", id: 2 },
+          accessWidth: 32
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
+  const produced = jitProducedValue("load#produced-exit-store:0:0:0", "i32");
+  const exitValue = addValue(produced, jitInputReg32Value("ebx"));
+
+  deepStrictEqual(codegenPlan.materializationNeeds, [
+    exitStoreNeed(registerStore("eax", exitValue), exit, exitPointIndex)
+  ]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+    { value: produced, useCount: 1 }
+  ]);
+});
+
+test("planJitCodegen keeps clobber-sensitive exit-store values symbolic in materialization needs", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "clobber-sensitive-exit-store",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+        {
+          op: "value.binary",
+          type: "i32",
+          operator: "add",
+          dst: { kind: "var", id: 1 },
+          a: { kind: "var", id: 0 },
+          b: { kind: "const", type: "i32", value: 1 }
+        },
+        {
+          op: "set",
+          target: { kind: "reg", reg: "ebx" },
+          value: { kind: "var", id: 1 },
+          accessWidth: 32
+        },
+        {
+          op: "set",
+          target: { kind: "reg", reg: "eax" },
+          value: { kind: "const", type: "i32", value: 0 },
+          accessWidth: 32
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const clobberedInputValue = addValue(jitInputReg32Value("eax"), c32(1));
+
+  deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.stores, [
+    registerStore("eax", c32(0)),
+    registerStore("ebx", clobberedInputValue)
+  ]);
+  deepStrictEqual(
+    codegenPlan.materializationNeeds.filter((need) => need.consumer === "registerExitStore"),
+    [
+      exitStoreNeed(registerStore("eax", c32(0)), exit, 0),
+      exitStoreNeed(registerStore("ebx", clobberedInputValue), exit, 0)
+    ]
+  );
+});
+
 test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache specs", () => {
   const block: JitIrBlock = {
     instructions: [{
@@ -643,7 +751,7 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
   strictEqual(emissionPlan.exitMaterializations, codegenPlan.exitMaterializations);
   strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
   strictEqual((instruction?.valueCachePlan?.selectedUseCounts.length ?? 0) > 0, true);
-  strictEqual((instruction?.valueCachePlan?.selectedValuesByEpoch.length ?? 0) > 0, true);
+  strictEqual((instruction?.valueCachePlan?.selectedConsumerValuesByEpoch.length ?? 0) > 0, true);
 });
 
 test("buildJitCodegenEmissionPlan does not count overwritten materializations as exit-store uses", () => {
@@ -799,7 +907,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later material
   strictEqual(emissionPlan.valueCachePlan, undefined);
 });
 
-test("buildJitCodegenEmissionPlan maps later materialized uses past flag-only exits", () => {
+test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations past flag-only exits", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "flag-exit-before-materialization",
@@ -867,7 +975,19 @@ test("buildJitCodegenEmissionPlan maps later materialized uses past flag-only ex
       }
     ],
     flagMaterializationRequirements: [],
-    materializationNeeds: [],
+    materializationNeeds: [{
+      consumer: "registerExitStore",
+      target: { kind: "reg32", reg: "eax" },
+      value: jitInputReg32Value("eax"),
+      placement: {
+        instructionIndex: 0,
+        opIndex: 4,
+        exitPointIndex: 1,
+        exitReason: ExitReason.HOST_TRAP,
+        exitMaterializationIndex: 2
+      },
+      pathScope: "deferredExit"
+    }],
     exitMaterializations: [
       { stores: [], flagMask: 0 },
       { stores: [], flagMask: IR_ALU_FLAG_MASK },
@@ -883,14 +1003,15 @@ test("buildJitCodegenEmissionPlan maps later materialized uses past flag-only ex
   }
 
   const expressionBlock = instruction.expressionBlock;
-  const materializedValueUsePlan = planJitMaterializedValueUses([{
+  const materializationUsePlan = planJitMaterializationUses([{
     expressionBlock,
     sourceExpressionMap: instruction.sourceExpressionMap
   }], plan);
-  const setIndex = expressionBlock.findIndex((op) => op.op === "set" && op.role === "registerMaterialization");
+  const hostTrapIndex = expressionBlock.findIndex((op) => op.op === "hostTrap");
+  const uses = materializationUsePlan.jitValueUsesByInstruction[0];
 
-  strictEqual(setIndex !== -1, true);
-  deepStrictEqual([...(materializedValueUsePlan.expressionUseIndexesByInstruction[0] ?? new Set())], [setIndex]);
+  strictEqual(hostTrapIndex !== -1, true);
+  deepStrictEqual(uses?.get(hostTrapIndex), [jitInputReg32Value("eax")]);
 });
 
 test("JIT value-cache planning retains produced values needed after their definition", () => {
@@ -907,6 +1028,12 @@ test("JIT value-cache planning retains produced values needed after their defini
     },
     {
       op: "set",
+      target: { kind: "reg", reg: "ebx" },
+      value: { kind: "const", type: "i32", value: 0 },
+      accessWidth: 32
+    },
+    {
+      op: "set",
       role: "registerMaterialization",
       target: { kind: "reg", reg: "eax" },
       value: { kind: "var", id: 0 },
@@ -917,13 +1044,15 @@ test("JIT value-cache planning retains produced values needed after their defini
     operands: [],
     expressionBlock,
     producedValuesByVarId: new Map([[0, produced]]),
-    materializedValueExpressionUseIndexes: new Set([1])
+    materializationJitValueUsesByExpressionIndex: new Map([[2, [produced]]])
   }]);
 
   deepStrictEqual(cachePlan?.instructionPlans[0]?.valueRefValues.get(0), produced);
   deepStrictEqual(cachePlan?.instructionPlans[0]?.expressionValues.get(expressionBlock[0].value), produced);
-  // Current retained-use accounting counts register materialization through both legacy paths.
-  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 2 }]);
+  deepStrictEqual(cachePlan?.captureValuesByEpoch[0], [produced]);
+  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[0], []);
+  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[1], [{ value: produced, useCount: 1 }]);
+  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 1 }]);
 });
 
 test("JIT value-cache planning merges repeated produced-value retained uses", () => {
@@ -957,11 +1086,10 @@ test("JIT value-cache planning merges repeated produced-value retained uses", ()
     operands: [],
     expressionBlock,
     producedValuesByVarId: new Map([[0, produced]]),
-    materializedValueExpressionUseIndexes: new Set([1, 2])
+    materializationJitValueUsesByExpressionIndex: new Map([[1, [produced]], [2, [produced]]])
   }]);
 
-  // Current retained-use accounting counts register materialization through both legacy paths.
-  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 4 }]);
+  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 2 }]);
 });
 
 test("JIT value-cache planning skips unused produced values", () => {
@@ -996,6 +1124,30 @@ function registerStore(reg: Reg32, value: JitValue = jitInputReg32Value(reg)): J
   return {
     target: { kind: "reg32", reg },
     value
+  };
+}
+
+function exitStoreNeed(
+  store: JitExitMaterializationStore,
+  exitPoint: JitExitPoint,
+  exitPointIndex: number
+): JitMaterializationNeed {
+  return {
+    consumer: "registerExitStore",
+    target: store.target,
+    value: store.value,
+    placement: {
+      instructionIndex: exitPoint.instructionIndex,
+      opIndex: exitPoint.opIndex,
+      exitPointIndex,
+      exitReason: exitPoint.exitReason,
+      exitMaterializationIndex: exitPoint.exitMaterializationIndex
+    },
+    pathScope: exitPoint.exitReason === ExitReason.BRANCH_TAKEN
+      ? "taken"
+      : exitPoint.exitReason === ExitReason.BRANCH_NOT_TAKEN
+        ? "notTaken"
+        : "deferredExit"
   };
 }
 
