@@ -18,6 +18,7 @@ import type {
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
+  jitFlagConditionValue,
   jitFlagProducerValue,
   jitInputAluFlagsValue,
   jitInputReg32Value,
@@ -567,6 +568,35 @@ test("planJitCodegen lets later full flag producers replace partial merges", () 
   }, { mask: IR_ALU_FLAG_MASK }));
 });
 
+test("planJitCodegen records direct cmov conditions from current flag value state", () => {
+  const cmp = ok(decodeBytes([0x39, 0xd8], startAddress));
+  const cmove = ok(decodeBytes([0x0f, 0x44, 0xd1], cmp.nextEip));
+  const trap = ok(decodeBytes([0xcd, 0x2e], cmove.nextEip));
+  const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([cmp, cmove, trap])));
+  const cmpInstruction = codegenPlan.block.instructions[0]!;
+  const cmoveInstruction = codegenPlan.block.instructions[1]!;
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const eax = jitInputReg32Value("eax");
+  const ebx = jitInputReg32Value("ebx");
+  const currentFlags = jitFlagProducerValue("sub", {
+    left: eax,
+    right: ebx,
+    result: subValue(eax, ebx)
+  }, { mask: IR_ALU_FLAG_MASK });
+  const selectedEdx = {
+    kind: "value.select",
+    type: "i32",
+    condition: jitFlagConditionValue(currentFlags, "E"),
+    whenTrue: jitInputReg32Value("ecx"),
+    whenFalse: jitInputReg32Value("edx")
+  } as const satisfies JitValue;
+
+  strictEqual(cmpInstruction.ir.some((op) => op.op === "flags.set"), true);
+  strictEqual(cmoveInstruction.ir.some((op) => op.op === "aluFlags.condition"), false);
+  strictEqual(cmoveInstruction.ir.some((op) => op.op === "flagProducer.condition"), true);
+  deepStrictEqual(exit.snapshot.valueState.regs.exitStore("edx"), registerStore("edx", selectedEdx));
+});
+
 test("planJitCodegen omits materialization needs for empty exits", () => {
   const trap = ok(decodeBytes([0xcd, 0x2e], startAddress));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([trap])));
@@ -1021,4 +1051,8 @@ function c32(value: number): JitValue {
 
 function addValue(a: JitValue, b: JitValue): JitValue {
   return { kind: "value.binary", type: "i32", operator: "add", a, b };
+}
+
+function subValue(a: JitValue, b: JitValue): JitValue {
+  return { kind: "value.binary", type: "i32", operator: "sub", a, b };
 }

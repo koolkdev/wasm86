@@ -49,6 +49,34 @@ test("flag-dce keeps partial flag producers needed by later CF reads", () => {
   deepStrictEqual(flagProducerNames(result.block), ["add", "inc"]);
 });
 
+test("flag-dce keeps producers needed by direct flag conditions", () => {
+  const result = pruneDeadJitFlagSets({
+    instructions: [
+      syntheticInstruction([
+        { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
+        { op: "get", dst: v(1), source: { kind: "reg", reg: "ebx" } },
+        { op: "value.binary", type: "i32", operator: "sub", dst: v(2), a: v(0), b: v(1) },
+        createIrFlagSetOp("sub", { left: v(0), right: v(1), result: v(2) }),
+        {
+          op: "flagProducer.condition",
+          dst: v(3),
+          cc: "E",
+          producer: "sub",
+          writtenMask: IR_ALU_FLAG_MASK,
+          undefMask: 0,
+          inputs: { left: v(0), right: v(1) }
+        },
+        ...selectSet(v(3), v(4)),
+        { op: "next" }
+      ])
+    ]
+  });
+
+  strictEqual(result.flagDce.removedSetCount, 0);
+  strictEqual(result.flagDce.retainedSetCount, 1);
+  deepStrictEqual(flagProducerNames(result.block), ["sub"]);
+});
+
 test("flag-dce keeps producers needed by memory fault and control exits", () => {
   const result = pruneDeadJitFlagSets({
     instructions: [

@@ -96,6 +96,9 @@ export class JitBlockStateTracker {
       case "aluFlags.condition":
         this.values.record(op.dst.id, this.valueState.flags.condition(op.cc));
         return;
+      case "flagProducer.condition":
+        this.values.record(op.dst.id, this.valueState.flags.condition(op.cc));
+        return;
       case "set":
         this.recordSet(op, instruction);
         return;
@@ -104,7 +107,6 @@ export class JitBlockStateTracker {
         return;
       case "flags.materialize":
       case "flags.boundary":
-      case "flagProducer.condition":
       case "next":
       case "jump":
       case "conditionalJump":

@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 
 import type { Reg32 } from "#x86/isa/types.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
-import type { ConditionCode, IrBlock, IrOp, ValueRef, VarRef } from "#x86/ir/model/types.js";
+import type { ConditionCode, IrOp, ValueRef, VarRef } from "#x86/ir/model/types.js";
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitFlagOwnerMask } from "#backends/wasm/jit/optimization/analyses/flag-owners.js";
@@ -54,7 +54,7 @@ export function selectSet(
 }
 
 export function syntheticInstruction(
-  ir: IrBlock,
+  ir: JitIrBody,
   index = 0,
   nextMode: JitIrBlock["instructions"][number]["nextMode"] = "continue"
 ): JitIrBlock["instructions"][number] {

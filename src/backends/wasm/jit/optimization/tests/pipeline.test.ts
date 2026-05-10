@@ -46,7 +46,7 @@ test("runJitIrOptimizationPipeline exposes ordered transform results", () => {
   strictEqual(result.block.instructions.every((instruction) => !("prelude" in instruction)), true);
 });
 
-test("runJitIrOptimizationPipeline prunes dead flag producer inputs before register values", () => {
+test("runJitIrOptimizationPipeline keeps direct-condition flag sources for value-state planning", () => {
   const movEaxEcx = ok(decodeBytes([0x89, 0xc8], startAddress));
   const xorEax = ok(decodeBytes([0x83, 0xf0, 0x02], movEaxEcx.nextEip));
   const cmpEaxZero = ok(decodeBytes([0x83, 0xf8, 0x00], xorEax.nextEip));
@@ -67,13 +67,12 @@ test("runJitIrOptimizationPipeline prunes dead flag producer inputs before regis
   const cmoveInstruction = result.block.instructions[3]!;
 
   strictEqual(result.stats["flagConditionSpecialization"]?.directConditionCount, 1);
-  strictEqual(result.passResults.some((pass) =>
-    pass.name === "localDce" && pass.stats.removedOpCount === 3
-  ), true);
-  deepStrictEqual(cmpInstruction.ir.map((op) => op.op), ["next"]);
+  strictEqual(result.stats["flagDce"]?.retainedSetCount, 2);
+  strictEqual(cmpInstruction.ir.some((op) => op.op === "flags.set"), true);
   strictEqual(cmoveInstruction.ir.some((op) =>
     op.op === "set" && op.target.kind === "reg" && op.target.reg === "eax"
   ), false);
+  strictEqual(cmoveInstruction.ir.some((op) => op.op === "aluFlags.condition"), false);
   strictEqual(cmoveInstruction.ir.some((op) => op.op === "flagProducer.condition"), true);
 });
 
