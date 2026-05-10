@@ -15,28 +15,33 @@ import {
   IR_ALU_FLAG_MASKS,
   maskIrAluFlags
 } from "#x86/ir/model/flag-effects.js";
-import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
+import { FLAG_PRODUCERS, leaf } from "#x86/ir/model/flags.js";
 import type { ConditionCode, FlagProducerName, IrFlagSetOp } from "#x86/ir/model/types.js";
 
 const left = irVar(0);
 const right = irVar(1);
 const result = irVar(2);
+const leftExpr = leaf(left);
+const rightExpr = leaf(right);
+const resultExpr = leaf(result);
+const oneExpr = { kind: "const", type: "i32", value: 1 } as const;
+const sign32Expr = { kind: "const", type: "i32", value: 0x8000_0000 } as const;
 
 test("add producer defines aluFlags symbolically", () => {
   deepStrictEqual(FLAG_PRODUCERS.add.inputs, ["left", "right", "result"]);
   deepStrictEqual(FLAG_PRODUCERS.add.writtenMask, IR_ALU_FLAG_MASK);
   deepStrictEqual(FLAG_PRODUCERS.add.undefMask, 0);
   deepStrictEqual(FLAG_PRODUCERS.add.define({ left, right, result }), {
-    ZF: { kind: "eqz", value: result },
-    SF: { kind: "signBit", value: result, width: 32 },
-    PF: { kind: "parity8", value: result },
-    CF: { kind: "uLt", a: result, b: left },
+    ZF: { kind: "eqz", value: resultExpr },
+    SF: { kind: "signBit", value: resultExpr, width: 32 },
+    PF: { kind: "parity8", value: resultExpr },
+    CF: { kind: "uLt", a: resultExpr, b: leftExpr },
     AF: {
       kind: "bit",
       value: {
         kind: "xor",
-        a: { kind: "xor", a: left, b: right },
-        b: result
+        a: { kind: "xor", a: leftExpr, b: rightExpr },
+        b: resultExpr
       },
       bit: 4
     },
@@ -46,10 +51,10 @@ test("add producer defines aluFlags symbolically", () => {
         kind: "and",
         a: {
           kind: "and",
-          a: { kind: "xor", a: left, b: result },
-          b: { kind: "xor", a: right, b: result }
+          a: { kind: "xor", a: leftExpr, b: resultExpr },
+          b: { kind: "xor", a: rightExpr, b: resultExpr }
         },
-        b: { kind: "const", type: "i32", value: 0x8000_0000 }
+        b: sign32Expr
       }
     }
   });
@@ -59,8 +64,8 @@ test("sub producer defines borrow and overflow symbolically", () => {
   deepStrictEqual(FLAG_PRODUCERS.sub.inputs, ["left", "right", "result"]);
   deepStrictEqual(FLAG_PRODUCERS.sub.define({ left, right, result }).CF, {
     kind: "uLt",
-    a: left,
-    b: right
+    a: leftExpr,
+    b: rightExpr
   });
   deepStrictEqual(FLAG_PRODUCERS.sub.define({ left, right, result }).OF, {
     kind: "ne0",
@@ -68,10 +73,10 @@ test("sub producer defines borrow and overflow symbolically", () => {
       kind: "and",
       a: {
         kind: "and",
-        a: { kind: "xor", a: left, b: right },
-        b: { kind: "xor", a: left, b: result }
+        a: { kind: "xor", a: leftExpr, b: rightExpr },
+        b: { kind: "xor", a: leftExpr, b: resultExpr }
       },
-      b: { kind: "const", type: "i32", value: 0x8000_0000 }
+      b: sign32Expr
     }
   });
 });
@@ -81,9 +86,9 @@ test("logic producer defines logical flags and keeps AF undefined", () => {
   deepStrictEqual(FLAG_PRODUCERS.logic.writtenMask, IR_ALU_FLAG_MASK);
   deepStrictEqual(FLAG_PRODUCERS.logic.undefMask, IR_ALU_FLAG_MASKS.AF);
   deepStrictEqual(FLAG_PRODUCERS.logic.define({ result }), {
-    ZF: { kind: "eqz", value: result },
-    SF: { kind: "signBit", value: result, width: 32 },
-    PF: { kind: "parity8", value: result },
+    ZF: { kind: "eqz", value: resultExpr },
+    SF: { kind: "signBit", value: resultExpr, width: 32 },
+    PF: { kind: "parity8", value: resultExpr },
     CF: { kind: "constFlag", value: 0 },
     OF: { kind: "constFlag", value: 0 },
     AF: { kind: "undefFlag" }
@@ -103,10 +108,10 @@ test("inc and dec producers write all arithmetic flags except CF", () => {
       kind: "and",
       a: {
         kind: "and",
-        a: { kind: "xor", a: left, b: result },
-        b: { kind: "xor", a: { kind: "const", type: "i32", value: 1 }, b: result }
+        a: { kind: "xor", a: leftExpr, b: resultExpr },
+        b: { kind: "xor", a: oneExpr, b: resultExpr }
       },
-      b: { kind: "const", type: "i32", value: 0x8000_0000 }
+      b: sign32Expr
     }
   });
 
@@ -120,10 +125,10 @@ test("inc and dec producers write all arithmetic flags except CF", () => {
       kind: "and",
       a: {
         kind: "and",
-        a: { kind: "xor", a: left, b: { kind: "const", type: "i32", value: 1 } },
-        b: { kind: "xor", a: left, b: result }
+        a: { kind: "xor", a: leftExpr, b: oneExpr },
+        b: { kind: "xor", a: leftExpr, b: resultExpr }
       },
-      b: { kind: "const", type: "i32", value: 0x8000_0000 }
+      b: sign32Expr
     }
   });
 });

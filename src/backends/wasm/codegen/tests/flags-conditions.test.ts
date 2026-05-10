@@ -172,7 +172,9 @@ function encodeSetFlagsFunctionBody(producer: FlagProducerName, mask?: number): 
   const aluFlags = wasmIrLocalAluFlagsStorage(body, 3);
   const inputs: Readonly<Record<string, ValueRef>> = producer === "logic"
     ? { result: v(2) }
-    : { left: v(0), right: v(1), result: v(2) };
+    : producer === "inc" || producer === "dec"
+      ? { left: v(0), result: v(2) }
+      : { left: v(0), right: v(1), result: v(2) };
 
   emitSetFlags(
     body,

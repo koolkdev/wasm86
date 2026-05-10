@@ -3,21 +3,17 @@ import {
   IR_ALU_FLAG_MASK,
   IR_ALU_FLAG_MASKS
 } from "#x86/ir/model/flag-effects.js";
-import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
-import {
-  flagProducerConditionInputNames,
-  flagProducerConditionKind
-} from "#x86/ir/model/flag-conditions.js";
-import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import { FLAG_PRODUCERS, flagProducerInputsFromRecord } from "#x86/ir/model/flags.js";
+import { flagProducerConditionKind } from "#x86/ir/model/flag-conditions.js";
 import type { ConditionCode, IrFlagSetOp, ValueRef } from "#x86/ir/model/types.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import {
   emitFlagsConditionFromAluFlagsValue,
-  emitFlagProducerCondition
+  emitFlagProducerConditionFromInputs
 } from "#backends/wasm/codegen/conditions.js";
-import { emitFlagProducerBits } from "#backends/wasm/codegen/flags.js";
+import { emitFlagProducerBitsFromInputs, type WasmFlagValueEmitHelpers } from "#backends/wasm/codegen/flags.js";
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import {
   constValueWidth,
@@ -40,11 +36,6 @@ type PendingFlags = Readonly<{
 type PendingInput =
   | Readonly<{ kind: "local"; local: number; valueWidth: ValueWidth; handle?: JitCachedValueHandle | undefined }>
   | Readonly<{ kind: "value"; value: ValueRef }>;
-
-type PendingInputRefs = Readonly<{
-  inputRefs: Readonly<Record<string, ValueRef>>;
-  inputsByVarId: ReadonlyMap<number, PendingInput>;
-}>;
 
 // Each compact aluFlags bit can come from a different source after partial writes:
 // memory on entry or a still-lazy producer descriptor.
@@ -366,23 +357,14 @@ export function createJitFlagState(
   }
 
   function emitPendingFlagsValue(pendingFlags: PendingFlags, mask: number): void {
-    const inputs = pendingInputRefs(pendingFlags, FLAG_PRODUCERS[pendingFlags.producer].inputs);
-
-    emitFlagProducerBits(
+    emitFlagProducerBitsFromInputs(
       body,
       {
-        op: "flags.set",
         producer: pendingFlags.producer,
         ...(pendingFlags.width === undefined ? {} : { width: pendingFlags.width }),
-        writtenMask: pendingFlags.writtenMask,
-        undefMask: pendingFlags.undefMask,
-        inputs: inputs.inputRefs
+        inputs: pendingFlagProducerInputs(pendingFlags)
       },
-      {
-        emitValue: (value) => emitPendingInputValue(inputs.inputsByVarId, value, "pending flag input"),
-        emitMaskedValue: (value, width) =>
-          emitMaskValueToWidth(body, width, emitPendingInputValue(inputs.inputsByVarId, value, "pending flag input"))
-      },
+      pendingInputHelpers(),
       mask
     );
   }
@@ -392,93 +374,60 @@ export function createJitFlagState(
   }
 
   function emitPendingFlagCondition(pendingFlags: PendingFlags, cc: ConditionCode): void {
-    const inputs = pendingInputRefs(
-      pendingFlags,
-      flagProducerConditionInputNames({ producer: pendingFlags.producer, width: pendingFlags.width, cc })
-    );
-
-    emitFlagProducerCondition(
+    emitFlagProducerConditionFromInputs(
       body,
       {
-        kind: "flagProducer.condition",
         cc,
         producer: pendingFlags.producer,
         ...(pendingFlags.width === undefined ? {} : { width: pendingFlags.width }),
-        writtenMask: pendingFlags.writtenMask,
-        undefMask: pendingFlags.undefMask,
-        inputs: inputs.inputRefs
+        inputs: pendingFlagProducerInputs(pendingFlags)
       },
-      {
-        emitValue: (value) => emitPendingInputValue(inputs.inputsByVarId, value, "pending flag condition input"),
-        emitMaskedValue: (value, width) =>
-          emitMaskValueToWidth(
-            body,
-            width,
-            emitPendingInputValue(inputs.inputsByVarId, value, "pending flag condition input")
-          )
-      }
+      pendingInputHelpers()
     );
   }
 
-  function pendingInputRefs(pendingFlags: PendingFlags, inputNames: readonly string[]): PendingInputRefs {
-    const inputRefs: Record<string, ValueRef> = {};
-    const inputsByVarId = new Map<number, PendingInput>();
+  function pendingFlagProducerInputs(pendingFlags: PendingFlags) {
+    const inputRecord: Record<string, PendingInput> = {};
 
-    for (let index = 0; index < inputNames.length; index += 1) {
-      const inputName = inputNames[index]!;
+    for (const inputName of FLAG_PRODUCERS[pendingFlags.producer].inputs) {
       const input = pendingFlags.inputs.get(inputName);
 
       if (input === undefined) {
         throw new Error(`missing pending flag input '${inputName}' for ${pendingFlags.producer}`);
       }
 
-      if (input.kind === "value") {
-        inputRefs[inputName] = input.value;
-      } else {
-        inputRefs[inputName] = { kind: "var", id: index };
-        inputsByVarId.set(index, input);
-      }
+      inputRecord[inputName] = input;
     }
 
-    return { inputRefs, inputsByVarId };
+    return flagProducerInputsFromRecord(pendingFlags.producer, inputRecord);
   }
 
-  function emitPendingInputValue(
-    inputsByVarId: ReadonlyMap<number, PendingInput>,
-    value: IrValueExpr,
-    context: string
-  ): ValueWidth {
-    switch (value.kind) {
-      case "var": {
-        const input = requiredPendingInput(inputsByVarId, value.id);
+  function pendingInputHelpers(): WasmFlagValueEmitHelpers<PendingInput> {
+    return {
+      emitValue: emitPendingInputValue,
+      emitMaskedValue: (input, width) => emitMaskValueToWidth(body, width, emitPendingInputValue(input))
+    };
+  }
 
-        switch (input.kind) {
-          case "local":
-            body.localGet(input.local);
-            return input.valueWidth;
-          case "value":
-            return emitDirectPendingInput(input.value, context);
-        }
-      }
-      case "const":
-        body.i32Const(i32(value.value));
-        return constValueWidth(value.value);
-      case "nextEip":
-        throw new Error(`nextEip is not a valid ${context}`);
-      default:
-        throw new Error(`unsupported ${context}: ${value.kind}`);
+  function emitPendingInputValue(input: PendingInput): ValueWidth {
+    switch (input.kind) {
+      case "local":
+        body.localGet(input.local);
+        return input.valueWidth;
+      case "value":
+        return emitDirectPendingInput(input.value);
     }
   }
 
-  function emitDirectPendingInput(value: ValueRef, context: string): ValueWidth {
+  function emitDirectPendingInput(value: ValueRef): ValueWidth {
     switch (value.kind) {
       case "const":
         body.i32Const(i32(value.value));
         return constValueWidth(value.value);
       case "nextEip":
-        throw new Error(`nextEip is not a valid ${context}`);
+        throw new Error("nextEip is not a valid pending flag input");
       default:
-        throw new Error(`unsupported direct ${context}: ${value.kind}`);
+        throw new Error(`unsupported direct pending flag input: ${value.kind}`);
     }
   }
 
@@ -637,16 +586,6 @@ export function createJitFlagState(
 
 function canKeepPendingInputDirect(input: ValueRef): boolean {
   return input.kind === "const";
-}
-
-function requiredPendingInput(inputsByVarId: ReadonlyMap<number, PendingInput>, id: number): PendingInput {
-  const input = inputsByVarId.get(id);
-
-  if (input === undefined) {
-    throw new Error(`missing pending flag input: ${id}`);
-  }
-
-  return input;
 }
 
 const aluFlagMasks = Object.values(IR_ALU_FLAG_MASKS);

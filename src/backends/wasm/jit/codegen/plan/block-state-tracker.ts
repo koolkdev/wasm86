@@ -1,5 +1,6 @@
 import { reg32 } from "#x86/isa/types.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
+import { flagProducerInputsFromRecord } from "#x86/ir/model/flags.js";
 import type {
   JitExitSnapshotKind,
   JitStateSnapshot
@@ -162,7 +163,7 @@ export class JitBlockStateTracker {
   ): JitValue {
     return jitFlagProducerValue(
       op.producer,
-      this.values.inputRecordFor(op.inputs, `flags.set ${op.producer}`),
+      flagProducerInputsFromRecord(op.producer, this.values.inputRecordFor(op.inputs)),
       {
         ...(op.width === undefined ? {} : { width: op.width }),
         mask: op.writtenMask | op.undefMask

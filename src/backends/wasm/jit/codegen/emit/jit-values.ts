@@ -1,5 +1,4 @@
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import {
   cleanValueWidth,
   constValueWidth,
@@ -11,14 +10,13 @@ import {
   type ValueWidth,
   type WasmIrEmitValueOptions
 } from "#backends/wasm/codegen/value-width.js";
-import { emitFlagsConditionFromAluFlagsValue, emitFlagProducerCondition } from "#backends/wasm/codegen/conditions.js";
-import { emitFlagProducerBits } from "#backends/wasm/codegen/flags.js";
-import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
+import { emitFlagsConditionFromAluFlagsValue, emitFlagProducerConditionFromInputs } from "#backends/wasm/codegen/conditions.js";
+import { emitFlagProducerBitsFromInputs, type WasmFlagValueEmitHelpers } from "#backends/wasm/codegen/flags.js";
 import { conditionFlagReadMask } from "#x86/ir/model/flag-effects.js";
 import { flagProducerConditionKind } from "#x86/ir/model/flag-conditions.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import { widthMask, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
-import type { ConditionCode, IrBinaryOperator, IrUnaryOperator, ValueRef } from "#x86/ir/model/types.js";
+import type { ConditionCode, IrBinaryOperator, IrUnaryOperator } from "#x86/ir/model/types.js";
 import {
   simplifyJitValue,
   type JitArchitecturalSlot,
@@ -220,20 +218,10 @@ function emitInsertMaskedBits(context: JitValueEmitContext, base: JitValue, valu
 }
 
 function emitFlagProducerValue(context: JitValueEmitContext, value: JitFlagProducerValue): ValueWidth {
-  const flagProducer = FLAG_PRODUCERS[value.producer];
-  const inputs = syntheticFlagInputs(value);
-
-  emitFlagProducerBits(
+  emitFlagProducerBitsFromInputs(
     context.body,
-    {
-      op: "flags.set",
-      producer: value.producer,
-      ...(value.width === undefined ? {} : { width: value.width }),
-      writtenMask: flagProducer.writtenMask,
-      undefMask: flagProducer.undefMask,
-      inputs: inputs.refs
-    },
-    syntheticInputHelpers(context, inputs.byVarId, "symbolic flag producer input"),
+    value,
+    jitFlagValueHelpers(context),
     value.mask
   );
   return cleanValueWidthForMask(value.mask);
@@ -358,85 +346,23 @@ function emitDirectFlagProducerCondition(
   value: JitFlagProducerValue,
   cc: ConditionCode
 ): void {
-  const flagProducer = FLAG_PRODUCERS[value.producer];
-  const inputs = syntheticFlagInputs(value);
-
-  emitFlagProducerCondition(
+  emitFlagProducerConditionFromInputs(
     context.body,
     {
-      kind: "flagProducer.condition",
       cc,
       producer: value.producer,
       ...(value.width === undefined ? {} : { width: value.width }),
-      writtenMask: flagProducer.writtenMask,
-      undefMask: flagProducer.undefMask,
-      inputs: inputs.refs
+      inputs: value.inputs
     },
-    syntheticInputHelpers(context, inputs.byVarId, "symbolic flag condition input")
+    jitFlagValueHelpers(context)
   );
 }
 
-function syntheticFlagInputs(value: JitFlagProducerValue): Readonly<{
-  refs: Readonly<Record<string, ValueRef>>;
-  byVarId: ReadonlyMap<number, JitValue>;
-}> {
-  const refs: Record<string, ValueRef> = {};
-  const byVarId = new Map<number, JitValue>();
-  const inputNames = FLAG_PRODUCERS[value.producer].inputs;
-
-  for (let index = 0; index < inputNames.length; index += 1) {
-    const inputName = inputNames[index]!;
-    const input = value.inputs[inputName];
-
-    if (input === undefined) {
-      throw new Error(`missing symbolic flag input '${inputName}' for ${value.producer}`);
-    }
-
-    refs[inputName] = { kind: "var", id: index };
-    byVarId.set(index, input);
-  }
-
-  return { refs, byVarId };
-}
-
-function syntheticInputHelpers(
-  context: JitValueEmitContext,
-  byVarId: ReadonlyMap<number, JitValue>,
-  label: string
-) {
+function jitFlagValueHelpers(context: JitValueEmitContext): WasmFlagValueEmitHelpers<JitValue> {
   return {
-    emitValue: (value: IrValueExpr, options?: WasmIrEmitValueOptions) =>
-      emitSyntheticInputValue(context, byVarId, value, label, options),
-    emitMaskedValue: (value: IrValueExpr, width: OperandWidth) =>
-      emitMaskValueToWidth(context.body, width, emitSyntheticInputValue(context, byVarId, value, label))
+    emitValue: (value, options) => emitJitValue(context, value, options),
+    emitMaskedValue: (value, width) => emitMaskedJitValue(context, value, width)
   };
-}
-
-function emitSyntheticInputValue(
-  context: JitValueEmitContext,
-  byVarId: ReadonlyMap<number, JitValue>,
-  value: IrValueExpr,
-  label: string,
-  options: WasmIrEmitValueOptions = {}
-): ValueWidth {
-  switch (value.kind) {
-    case "var": {
-      const input = byVarId.get(value.id);
-
-      if (input === undefined) {
-        throw new Error(`missing ${label}: ${value.id}`);
-      }
-
-      return emitJitValue(context, input, options);
-    }
-    case "const":
-      context.body.i32Const(i32(value.value));
-      return applyRequestedWidth(context.body, constValueWidth(value.value), options);
-    case "nextEip":
-      throw new Error(`nextEip is not a valid ${label}`);
-    default:
-      throw new Error(`unsupported ${label}: ${value.kind}`);
-  }
 }
 
 function applyRequestedWidth(

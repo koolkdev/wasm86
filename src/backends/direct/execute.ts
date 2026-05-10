@@ -14,7 +14,13 @@ import {
 } from "#x86/state/cpu-state.js";
 import { buildIr } from "#x86/ir/build/builder.js";
 import { CONDITIONS, type FlagBoolExpr } from "#x86/ir/model/conditions.js";
-import { FLAG_PRODUCERS, type FlagDefs, type FlagExpr, type FlagName, type ValueExpr } from "#x86/ir/model/flags.js";
+import {
+  defineFlagProducer,
+  flagProducerInputsFromRecord,
+  type FlagExpr,
+  type FlagName,
+  type ValueExpr
+} from "#x86/ir/model/flags.js";
 import type {
   IrBinaryOperator,
   IrFlagSetOp,
@@ -324,18 +330,10 @@ function setFlags(
   context: ExecutionContext,
   descriptor: IrFlagSetOp
 ): void {
-  const producer = FLAG_PRODUCERS[descriptor.producer] as Readonly<{
-    inputs: readonly string[];
-    define(inputs: Readonly<Record<string, ValueRef>>, width?: OperandWidth): FlagDefs;
-  }>;
+  const inputs = flagProducerInputsFromRecord(descriptor.producer, descriptor.inputs);
+  const defs = defineFlagProducer(descriptor.producer, inputs, descriptor.width ?? 32);
 
-  for (const name of producer.inputs) {
-    if (descriptor.inputs[name] === undefined) {
-      throw new Error(`missing ${descriptor.producer} flag input: ${name}`);
-    }
-  }
-
-  for (const [flag, expr] of Object.entries(producer.define(descriptor.inputs, descriptor.width ?? 32)) as [FlagName, FlagExpr][]) {
+  for (const [flag, expr] of Object.entries(defs) as [FlagName, FlagExpr][]) {
     setFlag(context.state, flag, evalFlagExpr(context, expr));
   }
 }
@@ -382,14 +380,14 @@ function evalFlagExpr(context: ExecutionContext, expr: FlagExpr): boolean {
 
 function evalValueExpr(context: ExecutionContext, expr: ValueExpr): number {
   switch (expr.kind) {
+    case "leaf":
+      return evalValueRef(context, expr.value);
+    case "const":
+      return evalValueRef(context, expr);
     case "and":
       return u32(evalValueExpr(context, expr.a) & evalValueExpr(context, expr.b));
     case "xor":
       return u32(evalValueExpr(context, expr.a) ^ evalValueExpr(context, expr.b));
-    case "var":
-    case "const":
-    case "nextEip":
-      return evalValueRef(context, expr);
   }
 }
 

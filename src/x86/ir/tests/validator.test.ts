@@ -95,7 +95,7 @@ test("validator rejects malformed flag producer inputs", () => {
         createIrFlagSetOp("logic", {}),
         { op: "next" }
       ]),
-    /flags\.set logic is missing input 'result'/
+    /logic flag producer is missing input 'result'/
   );
 
   throws(
@@ -105,7 +105,7 @@ test("validator rejects malformed flag producer inputs", () => {
         createIrFlagSetOp("logic", { result: irVar(0), extra: irVar(0) }),
         { op: "next" }
       ]),
-    /flags\.set logic has unexpected input 'extra'/
+    /logic flag producer has unexpected input 'extra'/
   );
 });
 

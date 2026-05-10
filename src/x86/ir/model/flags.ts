@@ -1,75 +1,104 @@
 import { x86ArithmeticFlagMask } from "#x86/isa/flags.js";
 import type { X86ArithmeticFlag } from "#x86/isa/flags.js";
 import type { OperandWidth } from "#x86/isa/types.js";
-import type { FlagProducerName, IrFlagSetOp, ValueRef } from "./types.js";
+import type { FlagProducerName, IrConstValueRef, IrFlagSetOp, ValueRef } from "./types.js";
 
 export type FlagName = X86ArithmeticFlag;
 
-export type ValueExpr =
-  | ValueRef
-  | Readonly<{ kind: "and"; a: ValueExpr; b: ValueExpr }>
-  | Readonly<{ kind: "xor"; a: ValueExpr; b: ValueExpr }>;
+export type ValueExpr<T = ValueRef> =
+  | Readonly<{ kind: "leaf"; value: T }>
+  | IrConstValueRef
+  | Readonly<{ kind: "and"; a: ValueExpr<T>; b: ValueExpr<T> }>
+  | Readonly<{ kind: "xor"; a: ValueExpr<T>; b: ValueExpr<T> }>;
 
-export type FlagExpr =
+export type FlagExpr<T = ValueRef> =
   | Readonly<{ kind: "constFlag"; value: 0 | 1 }>
   | Readonly<{ kind: "undefFlag" }>
-  | Readonly<{ kind: "eqz"; value: ValueExpr }>
-  | Readonly<{ kind: "ne0"; value: ValueExpr }>
-  | Readonly<{ kind: "uLt"; a: ValueExpr; b: ValueExpr }>
-  | Readonly<{ kind: "bit"; value: ValueExpr; bit: number }>
-  | Readonly<{ kind: "parity8"; value: ValueExpr }>
-  | Readonly<{ kind: "signBit"; value: ValueExpr; width: 8 | 16 | 32 }>;
+  | Readonly<{ kind: "eqz"; value: ValueExpr<T> }>
+  | Readonly<{ kind: "ne0"; value: ValueExpr<T> }>
+  | Readonly<{ kind: "uLt"; a: ValueExpr<T>; b: ValueExpr<T> }>
+  | Readonly<{ kind: "bit"; value: ValueExpr<T>; bit: number }>
+  | Readonly<{ kind: "parity8"; value: ValueExpr<T> }>
+  | Readonly<{ kind: "signBit"; value: ValueExpr<T>; width: 8 | 16 | 32 }>;
 
-export type FlagDefs = Readonly<Partial<Record<FlagName, FlagExpr>>>;
+export type FlagDefs<T = ValueRef> = Readonly<Partial<Record<FlagName, FlagExpr<T>>>>;
 
-export type FlagProducer<InputName extends string> = Readonly<{
-  inputs: readonly InputName[];
+export const FLAG_PRODUCER_INPUTS = {
+  add: ["left", "right", "result"],
+  sub: ["left", "right", "result"],
+  logic: ["result"],
+  inc: ["left", "result"],
+  dec: ["left", "result"]
+} as const satisfies Readonly<Record<FlagProducerName, readonly string[]>>;
+
+type FlagProducerInputSchema = typeof FLAG_PRODUCER_INPUTS;
+
+export type FlagProducerInputNames<Producer extends FlagProducerName = FlagProducerName> =
+  FlagProducerInputSchema[Producer];
+
+export type FlagProducerInputs<
+  T,
+  Producer extends FlagProducerName = FlagProducerName
+> = Producer extends FlagProducerName
+  ? Readonly<{ [Name in FlagProducerInputName<Producer>]: T }>
+  : never;
+
+export type FlagProducerInputName<Producer extends FlagProducerName = FlagProducerName> =
+  FlagProducerInputNames<Producer>[number];
+
+export type FlagProducer<Producer extends FlagProducerName> = Readonly<{
+  inputs: FlagProducerInputNames<Producer>;
   // Masks are explicit metadata so analysis can reason about partial writers
   // without inspecting every symbolic expression. The define() result must
   // still provide expressions for every written bit.
   writtenMask: number;
   undefMask: number;
-  define(inputs: Readonly<Record<InputName, ValueRef>>, width?: OperandWidth): FlagDefs;
+  define<T>(
+    inputs: FlagProducerInputs<T, Producer>,
+    width?: OperandWidth
+  ): FlagDefs<T>;
 }>;
 
-export const constFlag = (value: 0 | 1): FlagExpr => ({ kind: "constFlag", value });
-export const undefFlag = (): FlagExpr => ({ kind: "undefFlag" });
-export const eqz = (value: ValueExpr): FlagExpr => ({ kind: "eqz", value });
-export const ne0 = (value: ValueExpr): FlagExpr => ({ kind: "ne0", value });
-export const uLt = (a: ValueExpr, b: ValueExpr): FlagExpr => ({ kind: "uLt", a, b });
-export const bit = (value: ValueExpr, bitIndex: number): FlagExpr => ({
+export const leaf = <T>(value: T): ValueExpr<T> => ({ kind: "leaf", value });
+export const constFlag = <T = ValueRef>(value: 0 | 1): FlagExpr<T> => ({ kind: "constFlag", value });
+export const undefFlag = <T = ValueRef>(): FlagExpr<T> => ({ kind: "undefFlag" });
+export const eqz = <T>(value: ValueExpr<T>): FlagExpr<T> => ({ kind: "eqz", value });
+export const ne0 = <T>(value: ValueExpr<T>): FlagExpr<T> => ({ kind: "ne0", value });
+export const uLt = <T>(a: ValueExpr<T>, b: ValueExpr<T>): FlagExpr<T> => ({ kind: "uLt", a, b });
+export const bit = <T>(value: ValueExpr<T>, bitIndex: number): FlagExpr<T> => ({
   kind: "bit",
   value,
   bit: bitIndex
 });
-export const parity8 = (value: ValueExpr): FlagExpr => ({ kind: "parity8", value });
-export const signBit = (value: ValueExpr, width: 8 | 16 | 32): FlagExpr => ({
+export const parity8 = <T>(value: ValueExpr<T>): FlagExpr<T> => ({ kind: "parity8", value });
+export const signBit = <T>(value: ValueExpr<T>, width: 8 | 16 | 32): FlagExpr<T> => ({
   kind: "signBit",
   value,
   width
 });
 
-export const and = (a: ValueExpr, b: ValueExpr): ValueExpr => ({ kind: "and", a, b });
-export const xor = (a: ValueExpr, b: ValueExpr): ValueExpr => ({ kind: "xor", a, b });
-export const xor3 = (a: ValueExpr, b: ValueExpr, c: ValueExpr): ValueExpr => xor(xor(a, b), c);
+export const and = <T>(a: ValueExpr<T>, b: ValueExpr<T>): ValueExpr<T> => ({ kind: "and", a, b });
+export const xor = <T>(a: ValueExpr<T>, b: ValueExpr<T>): ValueExpr<T> => ({ kind: "xor", a, b });
+export const xor3 = <T>(a: ValueExpr<T>, b: ValueExpr<T>, c: ValueExpr<T>): ValueExpr<T> =>
+  xor(xor(a, b), c);
 
-export const signMask = (width: 8 | 16 | 32): ValueExpr => ({
+export const signMask = <T>(width: 8 | 16 | 32): ValueExpr<T> => ({
   kind: "const",
   type: "i32",
   value: width === 32 ? 0x8000_0000 : width === 16 ? 0x8000 : 0x80
 });
 
-export const widthMask = (width: 8 | 16 | 32): ValueExpr => ({
+export const widthMask = <T>(width: 8 | 16 | 32): ValueExpr<T> => ({
   kind: "const",
   type: "i32",
   value: width === 32 ? 0xffff_ffff : width === 16 ? 0xffff : 0xff
 });
 
-export function truncateToWidth(width: 8 | 16 | 32, value: ValueExpr): ValueExpr {
+export function truncateToWidth<T>(width: 8 | 16 | 32, value: ValueExpr<T>): ValueExpr<T> {
   return width === 32 ? value : and(value, widthMask(width));
 }
 
-export function zspFlags(width: 8 | 16 | 32, result: ValueExpr): FlagDefs {
+export function zspFlags<T>(width: 8 | 16 | 32, result: ValueExpr<T>): FlagDefs<T> {
   return {
     ZF: eqz(result),
     SF: signBit(result, width),
@@ -77,12 +106,12 @@ export function zspFlags(width: 8 | 16 | 32, result: ValueExpr): FlagDefs {
   };
 }
 
-export function addCarryFlags(
+export function addCarryFlags<T>(
   width: 8 | 16 | 32,
-  left: ValueExpr,
-  right: ValueExpr,
-  result: ValueExpr
-): FlagDefs {
+  left: ValueExpr<T>,
+  right: ValueExpr<T>,
+  result: ValueExpr<T>
+): FlagDefs<T> {
   return {
     CF: uLt(result, left),
     AF: bit(xor3(left, right, result), 4),
@@ -90,12 +119,12 @@ export function addCarryFlags(
   };
 }
 
-export function subCarryFlags(
+export function subCarryFlags<T>(
   width: 8 | 16 | 32,
-  left: ValueExpr,
-  right: ValueExpr,
-  result: ValueExpr
-): FlagDefs {
+  left: ValueExpr<T>,
+  right: ValueExpr<T>,
+  result: ValueExpr<T>
+): FlagDefs<T> {
   return {
     CF: uLt(left, right),
     AF: bit(xor3(left, right, result), 4),
@@ -103,7 +132,7 @@ export function subCarryFlags(
   };
 }
 
-export function logicFlags(width: 8 | 16 | 32, result: ValueExpr): FlagDefs {
+export function logicFlags<T>(width: 8 | 16 | 32, result: ValueExpr<T>): FlagDefs<T> {
   return {
     ...zspFlags(width, result),
     CF: constFlag(0),
@@ -112,17 +141,20 @@ export function logicFlags(width: 8 | 16 | 32, result: ValueExpr): FlagDefs {
   };
 }
 
-export function flagProducer<const InputName extends string>(
-  inputs: readonly InputName[],
+export function flagProducer<const Producer extends FlagProducerName>(
+  producer: Producer,
   writtenFlags: readonly FlagName[],
   undefFlags: readonly FlagName[],
-  define: (inputs: Readonly<Record<InputName, ValueRef>>, width: OperandWidth) => FlagDefs
-): FlagProducer<InputName> {
+  define: <T>(
+    inputs: FlagProducerInputs<ValueExpr<T>, Producer>,
+    width: OperandWidth
+  ) => FlagDefs<T>
+): FlagProducer<Producer> {
   return {
-    inputs,
+    inputs: FLAG_PRODUCER_INPUTS[producer],
     writtenMask: maskFlags(writtenFlags),
     undefMask: maskFlags(undefFlags),
-    define: (inputValues, width = 32) => define(inputValues, width)
+    define: (inputValues, width = 32) => define(flagProducerInputLeaves(producer, inputValues), width)
   };
 }
 
@@ -130,7 +162,7 @@ const arithmeticFlagNames = ["CF", "PF", "AF", "ZF", "SF", "OF"] as const satisf
 const incDecWrittenFlagNames = ["PF", "AF", "ZF", "SF", "OF"] as const satisfies readonly FlagName[];
 
 export const FLAG_PRODUCERS = {
-  add: flagProducer(["left", "right", "result"], arithmeticFlagNames, [], ({ left, right, result }, width) => {
+  add: flagProducer("add", arithmeticFlagNames, [], ({ left, right, result }, width) => {
     const truncatedResult = truncateToWidth(width, result);
 
     return {
@@ -139,7 +171,7 @@ export const FLAG_PRODUCERS = {
     };
   }),
 
-  sub: flagProducer(["left", "right", "result"], arithmeticFlagNames, [], ({ left, right, result }, width) => {
+  sub: flagProducer("sub", arithmeticFlagNames, [], ({ left, right, result }, width) => {
     const truncatedResult = truncateToWidth(width, result);
 
     return {
@@ -148,13 +180,13 @@ export const FLAG_PRODUCERS = {
     };
   }),
 
-  logic: flagProducer(["result"], arithmeticFlagNames, ["AF"], ({ result }, width) =>
+  logic: flagProducer("logic", arithmeticFlagNames, ["AF"], ({ result }, width) =>
     logicFlags(width, truncateToWidth(width, result))
   ),
 
   // INC/DEC intentionally omit CF from writtenMask. Consumers of CF after INC/DEC
   // must keep using the previous CF source.
-  inc: flagProducer(["left", "result"], incDecWrittenFlagNames, [], ({ left, result }, width) => {
+  inc: flagProducer("inc", incDecWrittenFlagNames, [], ({ left, result }, width) => {
     const truncatedResult = truncateToWidth(width, result);
     const carry = addCarryFlags(width, left, i32Const(1), truncatedResult);
 
@@ -165,7 +197,7 @@ export const FLAG_PRODUCERS = {
     };
   }),
 
-  dec: flagProducer(["left", "result"], incDecWrittenFlagNames, [], ({ left, result }, width) => {
+  dec: flagProducer("dec", incDecWrittenFlagNames, [], ({ left, result }, width) => {
     const truncatedResult = truncateToWidth(width, result);
     const carry = subCarryFlags(width, left, i32Const(1), truncatedResult);
 
@@ -175,7 +207,65 @@ export const FLAG_PRODUCERS = {
       OF: requiredFlagExpr(carry, "OF", "dec")
     };
   })
-} as const satisfies Record<FlagProducerName, FlagProducer<string>>;
+} as const satisfies { readonly [Producer in FlagProducerName]: FlagProducer<Producer> };
+
+export function flagProducerInputNames<const Producer extends FlagProducerName>(
+  producer: Producer
+): FlagProducerInputNames<Producer> {
+  return FLAG_PRODUCER_INPUTS[producer];
+}
+
+export function flagProducerInputsFromRecord<T, Producer extends FlagProducerName>(
+  producer: Producer,
+  inputs: Readonly<Record<string, T>>
+): FlagProducerInputs<T, Producer> {
+  const inputNames = flagProducerInputNames(producer);
+  const inputNameSet = new Set<string>(inputNames);
+  const typedInputs: Record<string, T> = {};
+  const unexpected = Object.keys(inputs).find((name) => !inputNameSet.has(name));
+
+  if (unexpected !== undefined) {
+    throw new Error(`${producer} flag producer has unexpected input '${unexpected}'`);
+  }
+
+  for (const inputName of inputNames) {
+    const input = inputs[inputName];
+
+    if (input === undefined) {
+      throw new Error(`${producer} flag producer is missing input '${inputName}'`);
+    }
+
+    typedInputs[inputName] = input;
+  }
+
+  return typedInputs as FlagProducerInputs<T, Producer>;
+}
+
+export function flagProducerInputsToRecord<T, Producer extends FlagProducerName>(
+  producer: Producer,
+  inputs: FlagProducerInputs<T, Producer>
+): Readonly<Record<FlagProducerInputName<Producer>, T>> {
+  void producer;
+  return inputs as Readonly<Record<FlagProducerInputName<Producer>, T>>;
+}
+
+export function requiredFlagProducerInput<T>(
+  producer: FlagProducerName,
+  inputs: FlagProducerInputs<T>,
+  name: string
+): T {
+  if (!new Set<string>(flagProducerInputNames(producer)).has(name)) {
+    throw new Error(`${producer} flag producer has no '${name}' input`);
+  }
+
+  const input = (inputs as Readonly<Record<string, T>>)[name];
+
+  if (input === undefined) {
+    throw new Error(`${producer} flag producer is missing input '${name}'`);
+  }
+
+  return input;
+}
 
 export function createIrFlagSetOp(
   producer: FlagProducerName,
@@ -183,18 +273,34 @@ export function createIrFlagSetOp(
   width?: OperandWidth
 ): IrFlagSetOp {
   const flagProducer = FLAG_PRODUCERS[producer];
+  const typedInputs = flagProducerInputsFromRecord(producer, inputs);
   const op = {
     op: "flags.set",
     producer,
     writtenMask: flagProducer.writtenMask,
     undefMask: flagProducer.undefMask,
-    inputs
+    inputs: flagProducerInputsToRecord(producer, typedInputs)
   } as const satisfies IrFlagSetOp;
 
   return width === undefined || width === 32 ? op : { ...op, width };
 }
 
-function i32Const(value: number): ValueExpr {
+type AnyFlagProducer = Readonly<{
+  define<T>(
+    inputs: FlagProducerInputs<T>,
+    width?: OperandWidth
+  ): FlagDefs<T>;
+}>;
+
+export function defineFlagProducer<T>(
+  producer: FlagProducerName,
+  inputs: FlagProducerInputs<T>,
+  width?: OperandWidth
+): FlagDefs<T> {
+  return (FLAG_PRODUCERS[producer] as AnyFlagProducer).define(inputs, width);
+}
+
+function i32Const<T>(value: number): ValueExpr<T> {
   return { kind: "const", type: "i32", value };
 }
 
@@ -202,7 +308,11 @@ function maskFlags(flags: readonly FlagName[]): number {
   return flags.reduce((mask, flag) => mask | x86ArithmeticFlagMask[flag], 0);
 }
 
-function requiredFlagExpr(defs: FlagDefs, flag: FlagName, producer: FlagProducerName): FlagExpr {
+function requiredFlagExpr<T>(
+  defs: FlagDefs<T>,
+  flag: FlagName,
+  producer: FlagProducerName
+): FlagExpr<T> {
   const expr = defs[flag];
 
   if (expr === undefined) {
@@ -210,4 +320,18 @@ function requiredFlagExpr(defs: FlagDefs, flag: FlagName, producer: FlagProducer
   }
 
   return expr;
+}
+
+function flagProducerInputLeaves<T, Producer extends FlagProducerName>(
+  producer: Producer,
+  inputs: FlagProducerInputs<T, Producer>
+): FlagProducerInputs<ValueExpr<T>, Producer> {
+  const inputRecord = flagProducerInputsFromRecord(producer, flagProducerInputsToRecord(producer, inputs));
+  const leaves: Record<string, ValueExpr<T>> = {};
+
+  for (const inputName of flagProducerInputNames(producer)) {
+    leaves[inputName] = leaf(requiredFlagProducerInput(producer, inputRecord, inputName));
+  }
+
+  return flagProducerInputsFromRecord(producer, leaves);
 }

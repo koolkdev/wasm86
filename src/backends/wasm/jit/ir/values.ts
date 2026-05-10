@@ -6,7 +6,14 @@ import type {
   IrUnaryOperator,
   IrValueType
 } from "#x86/ir/model/types.js";
-import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
+import {
+  FLAG_PRODUCERS,
+  flagProducerInputNames,
+  flagProducerInputsFromRecord,
+  flagProducerInputsToRecord,
+  requiredFlagProducerInput,
+  type FlagProducerInputs
+} from "#x86/ir/model/flags.js";
 import { IR_ALU_FLAG_MASK, assertIrAluFlagMask } from "#x86/ir/model/flag-effects.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import type { OperandRef, StorageRef, ValueRef } from "#x86/ir/model/types.js";
@@ -86,13 +93,17 @@ export type JitInsertMaskedBitsValue = Readonly<{
   mask: number;
 }>;
 
-export type JitFlagProducerValue = Readonly<{
+export type JitFlagProducerValueFor<Producer extends FlagProducerName> = Readonly<{
   kind: "flagProducer";
-  producer: FlagProducerName;
+  producer: Producer;
   width?: OperandWidth;
-  inputs: Readonly<Record<string, JitValue>>;
+  inputs: FlagProducerInputs<JitValue, Producer>;
   mask: number;
 }>;
+
+export type JitFlagProducerValue = {
+  readonly [Producer in FlagProducerName]: JitFlagProducerValueFor<Producer>;
+}[FlagProducerName];
 
 export type JitFlagConditionValue = Readonly<{
   kind: "flagCondition";
@@ -151,21 +162,25 @@ export function jitProducedValue(id: JitProducedValueId, type: IrValueType): Jit
   return { kind: "produced", id, type };
 }
 
-export function jitFlagProducerValue(
-  producer: FlagProducerName,
-  inputs: Readonly<Record<string, JitValue>>,
+export function jitFlagProducerValue<Producer extends FlagProducerName>(
+  producer: Producer,
+  inputs: FlagProducerInputs<JitValue, Producer>,
   options: Readonly<{ width?: OperandWidth; mask?: number }> = {}
 ): JitValue {
   const normalizedWidth = normalizeOptionalWidth(options.width);
   const mask = normalizeFlagProducerMask(producer, options.mask ?? FLAG_PRODUCERS[producer].writtenMask);
+  const typedInputs = flagProducerInputsFromRecord(
+    producer,
+    flagProducerInputsToRecord(producer, inputs)
+  );
 
   return simplifyJitValue({
     kind: "flagProducer",
     producer,
     ...(normalizedWidth === undefined ? {} : { width: normalizedWidth }),
-    inputs,
+    inputs: typedInputs,
     mask
-  });
+  } as unknown as JitFlagProducerValue);
 }
 
 export function jitExtractBits(value: JitValue, bitOffset: number, width: OperandWidth): JitValue {
@@ -448,7 +463,7 @@ export function jitValuesEqual(a: JitValue, b: JitValue): boolean {
       return a.producer === producer.producer &&
         flagProducerWidth(a) === flagProducerWidth(producer) &&
         normalizeFlagProducerMask(a.producer, a.mask) === normalizeFlagProducerMask(producer.producer, producer.mask) &&
-        jitValueInputRecordsEqual(a.inputs, producer.inputs);
+        jitFlagProducerInputsEqual(a, producer);
     }
     case "flagCondition": {
       const condition = b as JitFlagConditionValue;
@@ -555,7 +570,7 @@ export function jitValueKey(value: JitValue): string {
     case "insertMaskedBits":
       return `insertMaskedBits:${normalizeU32Mask(value.mask, "insertMaskedBits mask")}:${jitValueKey(value.base)}:${jitValueKey(value.value)}`;
     case "flagProducer":
-      return `flagProducer:${value.producer}:${flagProducerWidth(value)}:${normalizeFlagProducerMask(value.producer, value.mask)}:${jitValueInputRecordKey(value.inputs)}`;
+      return `flagProducer:${value.producer}:${flagProducerWidth(value)}:${normalizeFlagProducerMask(value.producer, value.mask)}:${jitFlagProducerInputKey(value)}`;
     case "flagCondition":
       return `flagCondition:${value.cc}:${jitValueKey(value.flags)}`;
   }
@@ -910,7 +925,7 @@ function simplifyJitFlagProducerValue(value: JitFlagProducerValue): JitValue {
     return { kind: "const", type: "i32", value: 0 };
   }
 
-  const inputs = simplifyJitValueInputRecord(value.inputs);
+  const inputs = simplifyJitFlagProducerInputs(value);
 
   return inputs === value.inputs && mask === value.mask && width === value.width
     ? value
@@ -920,7 +935,7 @@ function simplifyJitFlagProducerValue(value: JitFlagProducerValue): JitValue {
         ...(width === undefined ? {} : { width }),
         inputs,
         mask
-      };
+      } as JitFlagProducerValue;
 }
 
 function foldUnaryConst(operator: IrUnaryOperator, value: number): number {
@@ -1040,54 +1055,45 @@ function jitValueChildren(value: JitValue): readonly JitValue[] {
 }
 
 function flagProducerInputValues(value: JitFlagProducerValue): readonly JitValue[] {
-  return jitValueInputRecordKeys(value.inputs).map((key) => requiredJitValueInput(value.inputs, key));
+  return flagProducerInputNames(value.producer).map((key) =>
+    requiredFlagProducerInput(value.producer, value.inputs, key)
+  );
 }
 
-function simplifyJitValueInputRecord(inputs: Readonly<Record<string, JitValue>>): Readonly<Record<string, JitValue>> {
+function simplifyJitFlagProducerInputs(value: JitFlagProducerValue): FlagProducerInputs<JitValue> {
   let changed = false;
   const simplified: Record<string, JitValue> = {};
 
-  for (const [key, value] of Object.entries(inputs)) {
-    const simplifiedValue = simplifyJitValue(value);
+  for (const key of flagProducerInputNames(value.producer)) {
+    const input = requiredFlagProducerInput(value.producer, value.inputs, key);
+    const simplifiedValue = simplifyJitValue(input);
 
     simplified[key] = simplifiedValue;
-    changed ||= simplifiedValue !== value;
+    changed ||= simplifiedValue !== input;
   }
 
-  return changed ? simplified : inputs;
+  return changed
+    ? flagProducerInputsFromRecord(value.producer, simplified)
+    : value.inputs;
 }
 
-function jitValueInputRecordsEqual(
-  left: Readonly<Record<string, JitValue>>,
-  right: Readonly<Record<string, JitValue>>
-): boolean {
-  const leftKeys = jitValueInputRecordKeys(left);
-  const rightKeys = jitValueInputRecordKeys(right);
+function jitFlagProducerInputsEqual(left: JitFlagProducerValue, right: JitFlagProducerValue): boolean {
+  if (left.producer !== right.producer) {
+    return false;
+  }
 
-  return leftKeys.length === rightKeys.length &&
-    leftKeys.every((key, index) =>
-      key === rightKeys[index] && jitValuesEqual(requiredJitValueInput(left, key), requiredJitValueInput(right, key))
-    );
+  return flagProducerInputNames(left.producer).every((key) =>
+    jitValuesEqual(
+      requiredFlagProducerInput(left.producer, left.inputs, key),
+      requiredFlagProducerInput(right.producer, right.inputs, key)
+    )
+  );
 }
 
-function jitValueInputRecordKey(inputs: Readonly<Record<string, JitValue>>): string {
-  return jitValueInputRecordKeys(inputs)
-    .map((key) => `${key}=${jitValueKey(requiredJitValueInput(inputs, key))}`)
+function jitFlagProducerInputKey(value: JitFlagProducerValue): string {
+  return flagProducerInputNames(value.producer)
+    .map((key) => `${key}=${jitValueKey(requiredFlagProducerInput(value.producer, value.inputs, key))}`)
     .join(",");
-}
-
-function jitValueInputRecordKeys(inputs: Readonly<Record<string, JitValue>>): readonly string[] {
-  return Object.keys(inputs).sort();
-}
-
-function requiredJitValueInput(inputs: Readonly<Record<string, JitValue>>, key: string): JitValue {
-  const input = inputs[key];
-
-  if (input === undefined) {
-    throw new Error(`missing JIT value input '${key}'`);
-  }
-
-  return input;
 }
 
 function collectMaterializationSlots(value: JitValue, slots: Map<string, JitArchitecturalSlot>): void {

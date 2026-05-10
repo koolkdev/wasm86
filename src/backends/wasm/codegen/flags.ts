@@ -6,10 +6,16 @@ import {
 import type {
   FlagExpr,
   FlagName,
+  FlagProducerInputs,
   ValueExpr
 } from "#x86/ir/model/flags.js";
-import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
-import type { IrBinaryOperator, IrFlagSetOp, ValueRef } from "#x86/ir/model/types.js";
+import {
+  FLAG_PRODUCERS,
+  defineFlagProducer,
+  flagProducerInputsFromRecord,
+  requiredFlagProducerInput
+} from "#x86/ir/model/flags.js";
+import type { FlagProducerName, IrFlagSetOp, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
@@ -18,9 +24,12 @@ import type { WasmIrAluFlagsStorage } from "./alu-flags.js";
 import type { WasmIrEmitHelpers } from "./emit.js";
 import {
   cleanValueWidth,
+  constValueWidth,
   emitMaskValueToWidth,
   i32BinaryResultValueWidth,
+  maskedConstValue,
   maskWidthFromConstValue,
+  type WasmIrEmitValueOptions,
   type ValueWidth
 } from "./value-width.js";
 
@@ -30,6 +39,17 @@ export type EmitSetFlagsOptions = Readonly<{
   mask?: number;
 }>;
 
+export type WasmFlagValueEmitHelpers<T> = Readonly<{
+  emitValue(value: T, options?: WasmIrEmitValueOptions): ValueWidth;
+  emitMaskedValue(value: T, width: OperandWidth): ValueWidth;
+}>;
+
+export type FlagProducerBitsDescriptor<T> = Readonly<{
+  producer: FlagProducerName;
+  width?: OperandWidth;
+  inputs: FlagProducerInputs<T>;
+}>;
+
 export function emitSetFlags(
   body: WasmFunctionBodyEncoder,
   aluFlags: WasmIrAluFlagsStorage,
@@ -37,17 +57,17 @@ export function emitSetFlags(
   helpers: WasmIrEmitHelpers,
   options: EmitSetFlagsOptions = {}
 ): void {
-  const flagProducer = FLAG_PRODUCERS[descriptor.producer];
-  const defs = flagProducer.define(descriptor.inputs, descriptor.width ?? 32);
+  const inputs = flagProducerInputsFromRecord(descriptor.producer, descriptor.inputs);
+  const defs = defineFlagProducer(descriptor.producer, inputs, descriptor.width ?? 32);
   // Masked materialization computes only requested bits; partial producers also
   // preserve bits outside writtenMask, such as CF for INC/DEC.
-  const writeMask = descriptor.writtenMask & (options.mask ?? x86ArithmeticFlagsMask);
+  const writeMask = flagProducerWrittenMask(descriptor.producer) & (options.mask ?? x86ArithmeticFlagsMask);
 
   if (writeMask === 0) {
     return;
   }
 
-  const flagHelpers = helpersForFlagInputs(body, descriptor, helpers);
+  const flagHelpers = helpersForFlagInputs(body, descriptor.width ?? 32, resultInput(descriptor.producer, inputs), helpers);
 
   aluFlags.emitStore(() => {
     aluFlags.emitLoad();
@@ -63,8 +83,25 @@ export function emitFlagProducerBits(
   helpers: WasmIrEmitHelpers,
   mask: number
 ): void {
-  const flagProducer = FLAG_PRODUCERS[descriptor.producer];
-  const writeMask = descriptor.writtenMask & mask;
+  emitFlagProducerBitsFromInputs(
+    body,
+    {
+      producer: descriptor.producer,
+      ...(descriptor.width === undefined ? {} : { width: descriptor.width }),
+      inputs: flagProducerInputsFromRecord(descriptor.producer, descriptor.inputs)
+    },
+    helpers,
+    mask
+  );
+}
+
+export function emitFlagProducerBitsFromInputs<T>(
+  body: WasmFunctionBodyEncoder,
+  descriptor: FlagProducerBitsDescriptor<T>,
+  helpers: WasmFlagValueEmitHelpers<T>,
+  mask: number
+): void {
+  const writeMask = flagProducerWrittenMask(descriptor.producer) & mask;
 
   if (writeMask === 0) {
     body.i32Const(0);
@@ -73,16 +110,16 @@ export function emitFlagProducerBits(
 
   emitWrittenFlags(
     body,
-    flagProducer.define(descriptor.inputs, descriptor.width ?? 32),
-    helpersForFlagInputs(body, descriptor, helpers),
+    defineFlagProducer(descriptor.producer, descriptor.inputs, descriptor.width ?? 32),
+    helpersForFlagInputs(body, descriptor.width ?? 32, resultInput(descriptor.producer, descriptor.inputs), helpers),
     writeMask
   );
 }
 
-function emitWrittenFlags(
+function emitWrittenFlags<T>(
   body: WasmFunctionBodyEncoder,
-  defs: Readonly<Partial<Record<FlagName, FlagExpr>>>,
-  helpers: WasmIrEmitHelpers,
+  defs: Readonly<Partial<Record<FlagName, FlagExpr<T>>>>,
+  helpers: WasmFlagValueEmitHelpers<T>,
   mask: number
 ): void {
   let hasWrittenFlag = false;
@@ -112,17 +149,21 @@ function emitWrittenFlags(
   }
 }
 
-function emitFlagBit(
+function emitFlagBit<T>(
   body: WasmFunctionBodyEncoder,
   flag: FlagName,
-  expr: FlagExpr,
-  helpers: WasmIrEmitHelpers
+  expr: FlagExpr<T>,
+  helpers: WasmFlagValueEmitHelpers<T>
 ): void {
   emitFlagExpr(body, expr, helpers);
   body.i32Const(flagBit(flag)).i32Shl();
 }
 
-function emitFlagExpr(body: WasmFunctionBodyEncoder, expr: FlagExpr, helpers: WasmIrEmitHelpers): void {
+function emitFlagExpr<T>(
+  body: WasmFunctionBodyEncoder,
+  expr: FlagExpr<T>,
+  helpers: WasmFlagValueEmitHelpers<T>
+): void {
   switch (expr.kind) {
     case "constFlag":
       body.i32Const(expr.value);
@@ -158,12 +199,17 @@ function emitFlagExpr(body: WasmFunctionBodyEncoder, expr: FlagExpr, helpers: Wa
   }
 }
 
-function emitValueExpr(body: WasmFunctionBodyEncoder, expr: ValueExpr, helpers: WasmIrEmitHelpers): ValueWidth {
+function emitValueExpr<T>(
+  body: WasmFunctionBodyEncoder,
+  expr: ValueExpr<T>,
+  helpers: WasmFlagValueEmitHelpers<T>
+): ValueWidth {
   switch (expr.kind) {
-    case "var":
+    case "leaf":
+      return helpers.emitValue(expr.value);
     case "const":
-    case "nextEip":
-      return helpers.emitValue(expr);
+      body.i32Const(i32(expr.value));
+      return constValueWidth(expr.value);
     case "and": {
       const masked = maskedValueExpr(expr);
 
@@ -171,19 +217,19 @@ function emitValueExpr(body: WasmFunctionBodyEncoder, expr: ValueExpr, helpers: 
         return emitMaskedValueExpr(body, masked.value, helpers, masked.width);
       }
 
-      return emitI32BinaryValueExpr(body, "and", expr.a, expr.b, helpers);
+      return emitI32BinaryValueExpr(body, expr.kind, expr.a, expr.b, helpers);
     }
     case "xor":
-      return emitI32BinaryValueExpr(body, "xor", expr.a, expr.b, helpers);
+      return emitI32BinaryValueExpr(body, expr.kind, expr.a, expr.b, helpers);
   }
 }
 
-function emitI32BinaryValueExpr(
+function emitI32BinaryValueExpr<T>(
   body: WasmFunctionBodyEncoder,
-  operator: Extract<IrBinaryOperator, "and" | "xor">,
-  a: ValueExpr,
-  b: ValueExpr,
-  helpers: WasmIrEmitHelpers
+  operator: "and" | "xor",
+  a: ValueExpr<T>,
+  b: ValueExpr<T>,
+  helpers: WasmFlagValueEmitHelpers<T>
 ): ValueWidth {
   const left = emitValueExpr(body, a, helpers);
   const right = emitValueExpr(body, b, helpers);
@@ -194,7 +240,7 @@ function emitI32BinaryValueExpr(
 
 function emitI32BinaryInstruction(
   body: WasmFunctionBodyEncoder,
-  operator: Extract<IrBinaryOperator, "and" | "xor">
+  operator: "and" | "xor"
 ): void {
   switch (operator) {
     case "and":
@@ -206,27 +252,33 @@ function emitI32BinaryInstruction(
   }
 }
 
-function emitMaskedValueExpr(
+function emitMaskedValueExpr<T>(
   body: WasmFunctionBodyEncoder,
-  expr: ValueExpr,
-  helpers: WasmIrEmitHelpers,
+  expr: ValueExpr<T>,
+  helpers: WasmFlagValueEmitHelpers<T>,
   width: OperandWidth
 ): ValueWidth {
-  if (isIrValueExpr(expr)) {
-    return helpers.emitMaskedValue(expr, width);
-  }
+  switch (expr.kind) {
+    case "leaf":
+      return helpers.emitMaskedValue(expr.value, width);
+    case "const": {
+      const masked = maskedConstValue(expr.value, width);
 
-  return emitMaskValueToWidth(body, width, emitValueExpr(body, expr, helpers));
+      body.i32Const(masked);
+      return constValueWidth(masked);
+    }
+    case "and":
+    case "xor":
+      return emitMaskValueToWidth(body, width, emitValueExpr(body, expr, helpers));
+  }
 }
 
-function helpersForFlagInputs(
+function helpersForFlagInputs<T>(
   body: WasmFunctionBodyEncoder,
-  descriptor: IrFlagSetOp,
-  helpers: WasmIrEmitHelpers
-): WasmIrEmitHelpers {
-  const width = descriptor.width ?? 32;
-  const result = descriptor.inputs.result;
-
+  width: OperandWidth,
+  result: T | undefined,
+  helpers: WasmFlagValueEmitHelpers<T>
+): WasmFlagValueEmitHelpers<T> {
   if (width === 32 || result === undefined) {
     return helpers;
   }
@@ -240,7 +292,7 @@ function helpersForFlagInputs(
 
   return {
     emitValue: (value, options) => {
-      if (!isValueRef(value) || !sameValueRef(value, result)) {
+      if (!sameFlagValueLeaf(value, result)) {
         return helpers.emitValue(value, options);
       }
 
@@ -253,7 +305,7 @@ function helpersForFlagInputs(
       return options.requestedWidth === 32 ? valueWidth : emitMaskValueToWidth(body, options.requestedWidth, valueWidth);
     },
     emitMaskedValue: (value, requestedWidth) => {
-      if (!isValueRef(value) || !sameValueRef(value, result)) {
+      if (!sameFlagValueLeaf(value, result)) {
         return helpers.emitMaskedValue(value, requestedWidth);
       }
 
@@ -263,9 +315,9 @@ function helpersForFlagInputs(
   };
 }
 
-function maskedValueExpr(
-  expr: Extract<ValueExpr, { kind: "and" }>
-): Readonly<{ value: ValueExpr; width: OperandWidth }> | undefined {
+function maskedValueExpr<T>(
+  expr: Extract<ValueExpr<T>, { kind: "and" }>
+): Readonly<{ value: ValueExpr<T>; width: OperandWidth }> | undefined {
   const rightWidth = constMaskWidth(expr.b);
 
   if (rightWidth !== undefined) {
@@ -277,40 +329,64 @@ function maskedValueExpr(
   return leftWidth === undefined ? undefined : { value: expr.b, width: leftWidth };
 }
 
-function constMaskWidth(expr: ValueExpr): OperandWidth | undefined {
+function constMaskWidth<T>(expr: ValueExpr<T>): OperandWidth | undefined {
   return expr.kind === "const" ? maskWidthFromConstValue(expr.value) : undefined;
 }
 
-function isIrValueExpr(expr: ValueExpr): expr is ValueRef {
-  switch (expr.kind) {
-    case "var":
-    case "const":
-    case "nextEip":
-      return true;
-    case "and":
-    case "xor":
-      return false;
+function flagProducerWrittenMask(producer: FlagProducerName): number {
+  return FLAG_PRODUCERS[producer].writtenMask;
+}
+
+function resultInput<T>(
+  producer: FlagProducerName,
+  inputs: FlagProducerInputs<T>
+): T | undefined {
+  return requiredFlagProducerInput(producer, inputs, "result");
+}
+
+function sameFlagValueLeaf<T>(left: T, right: T): boolean {
+  if (left === right) {
+    return true;
   }
-}
 
-function isValueRef(value: { kind: string }): value is ValueRef {
-  return value.kind === "var" || value.kind === "const" || value.kind === "nextEip";
-}
+  if (!isKindedObject(left) || !isKindedObject(right)) {
+    return false;
+  }
 
-function sameValueRef(left: ValueRef, right: ValueRef): boolean {
   if (left.kind !== right.kind) {
     return false;
   }
 
   switch (left.kind) {
     case "var":
-      return left.id === (right as Extract<ValueRef, { kind: "var" }>).id;
+      return isVarValueRef(left) && isVarValueRef(right) && left.id === right.id;
     case "const":
-      return left.type === (right as Extract<ValueRef, { kind: "const" }>).type &&
-        left.value === (right as Extract<ValueRef, { kind: "const" }>).value;
+      return isConstValueRef(left) &&
+        isConstValueRef(right) &&
+        left.type === right.type &&
+        left.value === right.value;
     case "nextEip":
       return true;
+    default:
+      return false;
   }
+}
+
+function isKindedObject<T>(value: T): value is T & Readonly<{ kind: string }> {
+  return typeof value === "object" && value !== null && "kind" in value;
+}
+
+function isVarValueRef<T>(value: T): value is T & Extract<ValueRef, { kind: "var" }> {
+  return isKindedObject(value) && value.kind === "var" && "id" in value && typeof value.id === "number";
+}
+
+function isConstValueRef<T>(value: T): value is T & Extract<ValueRef, { kind: "const" }> {
+  return isKindedObject(value) &&
+    value.kind === "const" &&
+    "type" in value &&
+    "value" in value &&
+    value.type === "i32" &&
+    typeof value.value === "number";
 }
 
 function flagBit(flag: FlagName): number {

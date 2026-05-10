@@ -33,24 +33,21 @@ export class JitValueTracker {
     return jitValueForValue(value, this.locals);
   }
 
-  requiredValueFor(value: ValueRef, context: string): JitValue {
+  requiredValueFor(value: ValueRef): JitValue {
     const jitValue = this.valueFor(value);
 
     if (jitValue === undefined) {
-      throw new Error(`${context} could not resolve ${valueRefLabel(value)} as a JIT value`);
+      throw new Error(`could not resolve ${valueRefLabel(value)} as a JIT value`);
     }
 
     return jitValue;
   }
 
-  inputRecordFor(
-    inputs: Readonly<Record<string, ValueRef>>,
-    context: string
-  ): Readonly<Record<string, JitValue>> {
+  inputRecordFor(inputs: Readonly<Record<string, ValueRef>>): Readonly<Record<string, JitValue>> {
     const resolved: Record<string, JitValue> = {};
 
     for (const [name, value] of Object.entries(inputs)) {
-      resolved[name] = this.requiredValueFor(value, `${context} input '${name}'`);
+      resolved[name] = this.requiredValueFor(value);
     }
 
     return resolved;
