@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
+import type { Reg32 } from "#x86/isa/types.js";
 import { IR_ALU_FLAG_MASK, IR_ALU_FLAG_MASKS } from "#x86/ir/model/flag-effects.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
@@ -13,12 +14,16 @@ import type {
   JitCodegenPlan,
   JitExitMaterializationStore,
   JitInstructionEntryPoint,
-  JitMaterializationNeed,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
-import { jitProducedValue } from "#backends/wasm/jit/ir/values.js";
+import {
+  jitInputReg32Value,
+  jitProducedValue,
+  type JitValue
+} from "#backends/wasm/jit/ir/values.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { optimizeJitIrBlock } from "#backends/wasm/jit/optimization/optimize.js";
+import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { onlyExit, startAddress } from "../../../optimization/tests/helpers.js";
 
 test("planJitCodegen records post-instruction fallthrough exits", () => {
@@ -30,7 +35,7 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
   strictEqual(codegenPlan.maxExitMaterializationIndex, 1);
   deepStrictEqual(codegenPlan.exitMaterializations, [
     { stores: [], flagMask: 0 },
-    { stores: [registerStore("eax")], flagMask: 0 }
+    { stores: [registerStore("eax", c32(1))], flagMask: 0 }
   ]);
   strictEqual(instructionState.entryPoint.instructionIndex, 0);
   strictEqual(instructionState.entryPoint.snapshot.kind, "preInstruction");
@@ -41,21 +46,9 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
   strictEqual(exit.snapshot.eip, instruction.nextEip);
   strictEqual(exit.snapshot.instructionCountDelta, 1);
   strictEqual(exit.exitMaterializationIndex, 1);
-  deepStrictEqual(exit.snapshot.committedRegs, ["eax"]);
-  deepStrictEqual(exit.snapshot.speculativeRegs, []);
+  deepStrictEqual(exit.snapshot.valueState.regs.exitStores(), [registerStore("eax", c32(1))]);
   strictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.flagMask, 0);
-  deepStrictEqual(codegenPlan.materializationNeeds, [{
-    value: { kind: "committedRegister", reg: "eax" },
-    consumer: "registerExitStore",
-    placement: {
-      instructionIndex: exit.instructionIndex,
-      opIndex: exit.opIndex,
-      exitPointIndex: 0,
-      exitReason: ExitReason.FALLTHROUGH,
-      exitMaterializationIndex: 1
-    },
-    pathScope: "deferredExit"
-  }]);
+  deepStrictEqual(codegenPlan.materializationNeeds, []);
 });
 
 test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
@@ -80,23 +73,12 @@ test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
   strictEqual(exit.snapshot.eip, load.address);
   strictEqual(exit.snapshot.instructionCountDelta, 1);
   strictEqual(exit.exitMaterializationIndex, 1);
-  deepStrictEqual(exit.snapshot.committedRegs, ["eax"]);
-  deepStrictEqual(exit.snapshot.speculativeRegs, []);
+  deepStrictEqual(exit.snapshot.valueState.regs.exitStores(), [
+    registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))
+  ]);
   strictEqual(exit.snapshot.speculativeFlags.mask, IR_ALU_FLAG_MASK);
   strictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.flagMask, IR_ALU_FLAG_MASK);
   deepStrictEqual(codegenPlan.materializationNeeds.filter((need) => need.placement.exitPointIndex === 0), [
-    {
-      value: { kind: "committedRegister", reg: "eax" },
-      consumer: "registerExitStore",
-      placement: {
-        instructionIndex: exit.instructionIndex,
-        opIndex: exit.opIndex,
-        exitPointIndex: 0,
-        exitReason: ExitReason.MEMORY_READ_FAULT,
-        exitMaterializationIndex: 1
-      },
-      pathScope: "deferredExit"
-    },
     {
       value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
       consumer: "flagExitStore",
@@ -126,12 +108,41 @@ test("planJitCodegen keeps same-register-set exit materializations separate", ()
   const writeFaults = codegenPlan.exitPoints.filter((exit) => exit.exitReason === ExitReason.MEMORY_WRITE_FAULT);
 
   strictEqual(writeFaults.length, 2);
-  deepStrictEqual(writeFaults.map((exit) => exit.snapshot.committedRegs), [["eax"], ["eax"]]);
+  deepStrictEqual(writeFaults.map((exit) => exit.snapshot.valueState.regs.exitStores()), [
+    [registerStore("eax", c32(0x1111_1111))],
+    [registerStore("eax", c32(0x2222_2222))]
+  ]);
   strictEqual(writeFaults[0]!.exitMaterializationIndex !== writeFaults[1]!.exitMaterializationIndex, true);
   deepStrictEqual(writeFaults.map((exit) => codegenPlan.exitMaterializations[exit.exitMaterializationIndex]), [
-    { stores: [registerStore("eax")], flagMask: 0 },
-    { stores: [registerStore("eax")], flagMask: 0 }
+    { stores: [registerStore("eax", c32(0x1111_1111))], flagMask: 0 },
+    { stores: [registerStore("eax", c32(0x2222_2222))], flagMask: 0 }
   ]);
+});
+
+test("planJitCodegen derives xchg exit stores from value-state snapshots", () => {
+  const firstSwap = ok(decodeBytes([0x87, 0xd8], startAddress));
+  const cancelSwap = ok(decodeBytes([0x87, 0xd8], firstSwap.nextEip));
+  const remainingSwap = ok(decodeBytes([0x87, 0xd1], cancelSwap.nextEip));
+  const trap = ok(decodeBytes([0xcd, 0x2e], remainingSwap.nextEip));
+  const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([
+    firstSwap,
+    cancelSwap,
+    remainingSwap,
+    trap
+  ])));
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+
+  deepStrictEqual(exit.snapshot.valueState.regs.exitStores(), [
+    registerStore("ecx", jitInputReg32Value("edx")),
+    registerStore("edx", jitInputReg32Value("ecx"))
+  ]);
+  deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
+    stores: [
+      registerStore("ecx", jitInputReg32Value("edx")),
+      registerStore("edx", jitInputReg32Value("ecx"))
+    ],
+    flagMask: 0
+  });
 });
 
 test("planJitCodegen excludes current-instruction speculative writes from memory fault snapshots", () => {
@@ -148,10 +159,47 @@ test("planJitCodegen excludes current-instruction speculative writes from memory
   strictEqual(writeFault.snapshot.eip, instruction.address);
   strictEqual(writeFault.snapshot.instructionCountDelta, 0);
   strictEqual(writeFault.exitMaterializationIndex, 0);
-  deepStrictEqual(writeFault.snapshot.committedRegs, []);
-  deepStrictEqual(writeFault.snapshot.speculativeRegs, []);
+  deepStrictEqual(writeFault.snapshot.valueState.regs.exitStores(), []);
   strictEqual(writeFault.snapshot.speculativeFlags.mask, 0);
   strictEqual(codegenPlan.exitMaterializations[writeFault.exitMaterializationIndex]?.flagMask, 0);
+});
+
+test("planJitCodegen keeps same-instruction writes out of later pre-instruction faults", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "write-before-fault",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        { op: "value.const", type: "i32", dst: { kind: "var", id: 0 }, value: 0x1234 },
+        {
+          op: "set",
+          target: { kind: "reg", reg: "eax" },
+          value: { kind: "var", id: 0 },
+          accessWidth: 32
+        },
+        {
+          op: "get",
+          dst: { kind: "var", id: 1 },
+          source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x10000 } },
+          accessWidth: 32
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const readFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
+  const hostTrap = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+
+  strictEqual(readFault.snapshot.kind, "preInstruction");
+  strictEqual(readFault.exitMaterializationIndex, 0);
+  deepStrictEqual(readFault.snapshot.valueState.regs.exitStores(), []);
+  strictEqual(hostTrap.snapshot.kind, "postInstruction");
+  strictEqual(hostTrap.exitMaterializationIndex, 1);
+  deepStrictEqual(hostTrap.snapshot.valueState.regs.exitStores(), [registerStore("eax", c32(0x1234))]);
 });
 
 test("planJitCodegen records exit materializations only for actual exit points", () => {
@@ -163,7 +211,7 @@ test("planJitCodegen records exit materializations only for actual exit points",
   strictEqual(codegenPlan.maxExitMaterializationIndex, 1);
   deepStrictEqual(codegenPlan.exitMaterializations, [
     { stores: [], flagMask: 0 },
-    { stores: [registerStore("eax"), registerStore("ebx")], flagMask: 0 }
+    { stores: [registerStore("eax", c32(1)), registerStore("ebx", c32(2))], flagMask: 0 }
   ]);
   deepStrictEqual(codegenPlan.instructionStates.map((entry) =>
     entry.entryPoint.preInstructionExitPlan?.exitPointCount ?? 0
@@ -202,8 +250,8 @@ test("planJitCodegen records flag materialization requirements before conditions
   strictEqual(conditionalJumpIndex > 0, true);
   strictEqual(branchExits[0]!.exitMaterializationIndex !== branchExits[1]!.exitMaterializationIndex, true);
   deepStrictEqual(branchExits.map((exit) => codegenPlan.exitMaterializations[exit.exitMaterializationIndex]), [
-    { stores: [registerStore("eax")], flagMask: IR_ALU_FLAG_MASK },
-    { stores: [registerStore("eax")], flagMask: IR_ALU_FLAG_MASK }
+    { stores: [registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))], flagMask: IR_ALU_FLAG_MASK },
+    { stores: [registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))], flagMask: IR_ALU_FLAG_MASK }
   ]);
   deepStrictEqual(
     codegenPlan.materializationNeeds
@@ -219,22 +267,10 @@ test("planJitCodegen records flag materialization requirements before conditions
       })),
     [
       {
-        value: { kind: "committedRegister", reg: "eax" },
-        consumer: "registerExitStore",
-        pathScope: "taken",
-        exitReason: ExitReason.BRANCH_TAKEN
-      },
-      {
         value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
         consumer: "flagExitStore",
         pathScope: "taken",
         exitReason: ExitReason.BRANCH_TAKEN
-      },
-      {
-        value: { kind: "committedRegister", reg: "eax" },
-        consumer: "registerExitStore",
-        pathScope: "notTaken",
-        exitReason: ExitReason.BRANCH_NOT_TAKEN
       },
       {
         value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
@@ -382,15 +418,7 @@ test("buildJitCodegenEmissionPlan does not count overwritten materializations as
       exitMaterializationIndex: 1
     }],
     flagMaterializationRequirements: [],
-    materializationNeeds: [
-      registerExitStoreNeed("eax", {
-        instructionIndex: 1,
-        opIndex: 1,
-        exitPointIndex: 0,
-        exitReason: ExitReason.HOST_TRAP,
-        exitMaterializationIndex: 1
-      })
-    ],
+    materializationNeeds: [],
     exitMaterializations: [{ stores: [], flagMask: 0 }, { stores: [registerStore("eax")], flagMask: 0 }],
     maxExitMaterializationIndex: 1
   };
@@ -458,15 +486,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later material
       exitMaterializationIndex: 1
     }],
     flagMaterializationRequirements: [],
-    materializationNeeds: [
-      registerExitStoreNeed("eax", {
-        instructionIndex: 0,
-        opIndex: 0,
-        exitPointIndex: 0,
-        exitReason: ExitReason.MEMORY_READ_FAULT,
-        exitMaterializationIndex: 1
-      })
-    ],
+    materializationNeeds: [],
     exitMaterializations: [{ stores: [], flagMask: 0 }, { stores: [registerStore("eax")], flagMask: 0 }],
     maxExitMaterializationIndex: 1
   };
@@ -543,15 +563,7 @@ test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks
       }
     ],
     flagMaterializationRequirements: [],
-    materializationNeeds: [
-      registerExitStoreNeed("eax", {
-        instructionIndex: 0,
-        opIndex: 4,
-        exitPointIndex: 1,
-        exitReason: ExitReason.HOST_TRAP,
-        exitMaterializationIndex: 2
-      })
-    ],
+    materializationNeeds: [],
     exitMaterializations: [
       { stores: [], flagMask: 0 },
       { stores: [], flagMask: IR_ALU_FLAG_MASK },
@@ -567,29 +579,12 @@ test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks
   }
 
   const expressionBlock = instruction.expressionBlock;
-  const materializedValueUsePlan = planJitMaterializedValueUses([{ expressionBlock }], {
-    block,
-    materializationNeeds: plan.materializationNeeds
-  });
-  const withoutRegisterStorePlan: JitCodegenPlan = {
-    ...plan,
-    materializationNeeds: [],
-    exitMaterializations: [
-      { stores: [], flagMask: 0 },
-      { stores: [], flagMask: IR_ALU_FLAG_MASK },
-      { stores: [], flagMask: 0 }
-    ]
-  };
-  const withoutRegisterNeedUsePlan = planJitMaterializedValueUses([{ expressionBlock }], {
-    block,
-    materializationNeeds: withoutRegisterStorePlan.materializationNeeds
-  });
+  const materializedValueUsePlan = planJitMaterializedValueUses([{ expressionBlock }], plan);
   const setIndex = expressionBlock.findIndex((op) => op.op === "set" && op.role === "registerMaterialization");
 
   strictEqual(expressionBlock.some((op) => op.op === "flags.boundary"), false);
   strictEqual(setIndex !== -1, true);
   deepStrictEqual([...(materializedValueUsePlan.expressionUseIndexesByInstruction[0] ?? new Set())], [setIndex]);
-  deepStrictEqual([...(withoutRegisterNeedUsePlan.expressionUseIndexesByInstruction[0] ?? new Set())], []);
 });
 
 test("JIT value-cache planning retains produced values needed after their definition", () => {
@@ -691,24 +686,10 @@ test("JIT value-cache planning skips unused produced values", () => {
   strictEqual(cachePlan, undefined);
 });
 
-function registerExitStoreNeed(
-  reg: JitStateSnapshot["committedRegs"][number],
-  placement: JitMaterializationNeed["placement"],
-  pathScope: JitMaterializationNeed["pathScope"] = "deferredExit"
-): JitMaterializationNeed {
+function registerStore(reg: Reg32, value: JitValue = jitInputReg32Value(reg)): JitExitMaterializationStore {
   return {
-    value: { kind: "committedRegister", reg },
-    consumer: "registerExitStore",
-    placement,
-    pathScope
-  };
-}
-
-function registerStore(reg: JitStateSnapshot["committedRegs"][number]): JitExitMaterializationStore {
-  return {
-    kind: "register",
-    target: reg,
-    source: { kind: "committedRegister", reg }
+    target: { kind: "reg32", reg },
+    value
   };
 }
 
@@ -731,16 +712,29 @@ function snapshot(
   kind: JitStateSnapshot["kind"],
   eip: number,
   instructionCountDelta: number,
-  committedRegs: JitStateSnapshot["committedRegs"] = [],
+  changedRegs: readonly Reg32[] = [],
   speculativeFlagMask = 0
 ): JitStateSnapshot {
+  const valueState = createJitValueState();
+
+  for (const reg of changedRegs) {
+    valueState.regs.writeReg32(reg, jitInputReg32Value(reg));
+  }
+
   return {
     kind,
     eip,
     instructionCountDelta,
-    committedRegs,
-    speculativeRegs: [],
+    valueState: valueState.snapshot(),
     committedFlags: { mask: 0 },
     speculativeFlags: { mask: speculativeFlagMask }
   };
+}
+
+function c32(value: number): JitValue {
+  return { kind: "const", type: "i32", value };
+}
+
+function addValue(a: JitValue, b: JitValue): JitValue {
+  return { kind: "value.binary", type: "i32", operator: "add", a, b };
 }

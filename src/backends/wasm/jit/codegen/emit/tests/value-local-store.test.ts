@@ -25,6 +25,7 @@ import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { emitJitIrWithContext } from "#backends/wasm/jit/codegen/emit/ir-context.js";
 import type { JitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
+import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
 import { createJitReg32State } from "#backends/wasm/jit/state/register-state.js";
 import { emitPlannedExpression } from "./expression-cache-test-helpers.js";
@@ -595,8 +596,7 @@ function stateSnapshot(
     kind,
     eip,
     instructionCountDelta,
-    committedRegs: [],
-    speculativeRegs: [],
+    valueState: createJitValueState().snapshot(),
     committedFlags: { mask: 0 },
     speculativeFlags: { mask: 0 }
   };

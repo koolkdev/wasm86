@@ -1,81 +1,116 @@
-import { reg32, type Reg32 } from "#x86/isa/types.js";
+import { reg32 } from "#x86/isa/types.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
-import type { StorageRef } from "#x86/ir/model/types.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
+import type { ValueRef } from "#x86/ir/model/types.js";
 import type {
   JitExitSnapshotKind,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
+import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import { JitValueTracker } from "#backends/wasm/jit/ir/value-tracker.js";
+import {
+  jitFlagProducerValue,
+  jitValueForStorage,
+  type JitValue
+} from "#backends/wasm/jit/ir/values.js";
+import {
+  jitStorageRegisterAccess,
+  type JitRegisterValueMap
+} from "#backends/wasm/jit/ir/register-prefix-values.js";
+import {
+  createJitValueState,
+  type JitValueStateSnapshot
+} from "#backends/wasm/jit/state/value-state.js";
 
 export class JitBlockStateTracker {
-  private readonly committedRegs = new Set<Reg32>();
-  private readonly speculativeRegs = new Set<Reg32>();
+  private readonly valueState = createJitValueState();
+  private readonly values = new JitValueTracker();
+  private effectVisibleValueState: JitValueStateSnapshot = this.valueState.snapshot();
   private committedFlagsMask = IR_ALU_FLAG_MASK;
   private speculativeFlagsMask = 0;
   private instructionCountDelta = 0;
+
+  beginInstruction(): void {
+    this.values.clear();
+    this.effectVisibleValueState = this.valueState.snapshot();
+  }
 
   snapshot(kind: JitExitSnapshotKind, eip: number): JitStateSnapshot {
     return {
       kind,
       eip,
       instructionCountDelta: this.instructionCountDelta,
-      committedRegs: sortedRegs(this.committedRegs),
-      speculativeRegs: sortedRegs(this.speculativeRegs),
+      valueState: this.valueState.snapshot(),
       committedFlags: { mask: this.committedFlagsMask },
       speculativeFlags: { mask: this.speculativeFlagsMask }
     };
   }
 
   snapshotPostInstruction(eip: number): JitStateSnapshot {
-    const committedRegs = sortedRegs(new Set([...this.committedRegs, ...this.speculativeRegs]));
-
     return {
       kind: "postInstruction",
       eip,
       instructionCountDelta: this.instructionCountDelta + 1,
-      committedRegs,
-      speculativeRegs: [],
+      valueState: this.valueState.snapshot(),
       committedFlags: { mask: this.committedFlagsMask },
       speculativeFlags: { mask: this.speculativeFlagsMask }
     };
+  }
+
+  effectVisiblePreInstructionSnapshot(entry: JitStateSnapshot): JitStateSnapshot {
+    return {
+      ...entry,
+      valueState: this.effectVisibleValueState,
+      committedFlags: { mask: this.committedFlagsMask }
+    };
+  }
+
+  advanceEffectVisibleSnapshot(): void {
+    this.effectVisibleValueState = this.valueState.snapshot();
   }
 
   pendingFlags(mask: number): number {
     return mask & this.speculativeFlagsMask;
   }
 
-  recordStorageWrite(storage: StorageRef, operands: readonly JitOperandBinding[]): void {
-    switch (storage.kind) {
-      case "reg":
-        this.speculativeRegs.add(storage.reg);
+  recordOp(
+    op: JitIrOp,
+    instruction: JitIrBlockInstruction,
+    _instructionIndex: number,
+    _opIndex: number
+  ): void {
+    switch (op.op) {
+      case "get":
+        this.values.record(op.dst.id, jitValueForStorage(
+          op.source,
+          instruction.operands,
+          this.currentRegisterValues(),
+          op.accessWidth ?? 32,
+          op.signed === true
+        ));
         return;
-      case "operand": {
-        const binding = operands[storage.index]!;
-
-        if (binding.kind === "static.reg") {
-          this.speculativeRegs.add(binding.alias.base);
-        }
+      case "address":
+      case "value.const":
+      case "value.binary":
+      case "value.unary":
+      case "value.select":
+        this.values.recordOp(op, instruction, this.currentRegisterValues());
         return;
-      }
-      case "mem":
+      case "aluFlags.condition":
+        this.values.record(op.dst.id, this.valueState.flags.condition(op.cc));
         return;
-    }
-  }
-
-  recordCommittedStorageWrite(storage: StorageRef, operands: readonly JitOperandBinding[]): void {
-    switch (storage.kind) {
-      case "reg":
-        this.committedRegs.add(storage.reg);
+      case "set":
+        this.recordSet(op, instruction);
         return;
-      case "operand": {
-        const binding = operands[storage.index]!;
-
-        if (binding.kind === "static.reg") {
-          this.committedRegs.add(binding.alias.base);
-        }
+      case "flags.set":
+        this.recordFlagSet(op);
         return;
-      }
-      case "mem":
+      case "flags.materialize":
+      case "flags.boundary":
+      case "flagProducer.condition":
+      case "next":
+      case "jump":
+      case "conditionalJump":
+      case "hostTrap":
         return;
     }
   }
@@ -93,15 +128,70 @@ export class JitBlockStateTracker {
   }
 
   commitInstruction(): void {
-    for (const reg of this.speculativeRegs) {
-      this.committedRegs.add(reg);
-    }
-
-    this.speculativeRegs.clear();
     this.instructionCountDelta += 1;
   }
-}
 
-function sortedRegs(regs: ReadonlySet<Reg32>): readonly Reg32[] {
-  return reg32.filter((reg) => regs.has(reg));
+  private recordSet(op: Extract<JitIrOp, { op: "set" }>, instruction: JitIrBlockInstruction): void {
+    const value = this.values.valueFor(op.value);
+    const access = jitStorageRegisterAccess(op.target, instruction.operands, op.accessWidth ?? 32);
+
+    if (access === undefined) {
+      return;
+    }
+
+    if (value === undefined) {
+      // 3B only needs the legacy exit bridge to know that the target register
+      // changed. The concrete produced/store-source value is handled in 3C.
+      this.valueState.regs.writeReg32(access.reg, { kind: "reg", reg: access.reg });
+      return;
+    }
+
+    if (access.width === 32 && access.bitOffset === 0) {
+      this.valueState.regs.writeReg32(access.reg, value);
+    } else {
+      this.valueState.regs.writeRegPart(access.reg, access.bitOffset, access.width, value);
+    }
+  }
+
+  private recordFlagSet(op: Extract<JitIrOp, { op: "flags.set" }>): void {
+    const producer = this.flagProducerValue(op);
+    const mask = (op.writtenMask | op.undefMask) >>> 0;
+
+    if (producer !== undefined && mask !== 0) {
+      this.valueState.flags.writeFlagBits(mask, producer);
+    }
+  }
+
+  private flagProducerValue(
+    op: Extract<JitIrOp, { op: "flags.set" }>
+  ): JitValue | undefined {
+    const inputs = this.flagProducerInputs(op.inputs);
+
+    return inputs === undefined
+      ? undefined
+      : jitFlagProducerValue(op.producer, inputs, {
+          ...(op.width === undefined ? {} : { width: op.width }),
+          mask: op.writtenMask | op.undefMask
+        });
+  }
+
+  private flagProducerInputs(inputs: Readonly<Record<string, ValueRef>>): Readonly<Record<string, JitValue>> | undefined {
+    const values: Record<string, JitValue> = {};
+
+    for (const [name, ref] of Object.entries(inputs)) {
+      const value = this.values.valueFor(ref);
+
+      if (value === undefined) {
+        return undefined;
+      }
+
+      values[name] = value;
+    }
+
+    return values;
+  }
+
+  private currentRegisterValues(): JitRegisterValueMap {
+    return new Map(reg32.map((reg) => [reg, this.valueState.regs.readReg32(reg)]));
+  }
 }

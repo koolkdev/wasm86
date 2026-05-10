@@ -13,6 +13,7 @@ import {
   type JitRegisterValueMap
 } from "#backends/wasm/jit/ir/register-prefix-values.js";
 import type { Reg32 } from "#x86/isa/types.js";
+import { i32 } from "#x86/state/cpu-state.js";
 
 export class JitValueTracker {
   private readonly locals = new Map<number, JitValue>();
@@ -65,7 +66,7 @@ export class JitValueTracker {
         );
         return true;
       case "value.const":
-        this.record(op.dst.id, { kind: "const", type: op.type, value: op.value });
+        this.record(op.dst.id, { kind: "const", type: op.type, value: i32(op.value) });
         return true;
       case "value.binary":
         this.record(op.dst.id, this.binaryValue(op));

@@ -1,10 +1,11 @@
-import type { Reg32 } from "#x86/isa/types.js";
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
+import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
 export type {
   ExitMaterializationStore,
   MaterializationTarget
 } from "#backends/wasm/jit/ir/materialization.js";
+import type { ExitMaterializationStore } from "#backends/wasm/jit/ir/materialization.js";
 
 export type JitExitSnapshotKind = "preInstruction" | "postInstruction";
 
@@ -16,8 +17,7 @@ export type JitStateSnapshot = Readonly<{
   kind: JitExitSnapshotKind;
   eip: number;
   instructionCountDelta: number;
-  committedRegs: readonly Reg32[];
-  speculativeRegs: readonly Reg32[];
+  valueState: JitValueStateSnapshot;
   committedFlags: JitFlagSnapshot;
   speculativeFlags: JitFlagSnapshot;
 }>;
@@ -39,12 +39,10 @@ export type JitFlagMaterializationRequirement = Readonly<{
 }>;
 
 export type JitMaterializationValue =
-  | Readonly<{ kind: "committedRegister"; reg: Reg32 }>
-  | Readonly<{ kind: "exitFlags"; mask: number }>;
+  Readonly<{ kind: "exitFlags"; mask: number }>;
 
 export type JitMaterializationConsumer =
-  | "registerExitStore"
-  | "flagExitStore";
+  "flagExitStore";
 
 export type JitMaterializationPlacement = Readonly<{
   instructionIndex: number;
@@ -63,12 +61,7 @@ export type JitMaterializationNeed = Readonly<{
   pathScope: JitMaterializationPathScope;
 }>;
 
-export type JitExitMaterializationStore =
-  | Readonly<{
-      kind: "register";
-      target: Reg32;
-      source: Extract<JitMaterializationValue, { kind: "committedRegister" }>;
-    }>;
+export type JitExitMaterializationStore = ExitMaterializationStore;
 
 export type JitPreInstructionExitPlan = Readonly<{
   exitPointCount: number;

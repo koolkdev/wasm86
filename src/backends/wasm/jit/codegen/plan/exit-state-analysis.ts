@@ -1,4 +1,3 @@
-import type { Reg32 } from "#x86/isa/types.js";
 import { conditionFlagReadMask } from "#x86/ir/model/flag-effects.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
@@ -6,11 +5,13 @@ import { JitBlockStateTracker } from "#backends/wasm/jit/codegen/plan/block-stat
 import {
   indexJitEffects,
   type JitEffectIndex,
+  jitOpAdvancesEffectVisibleSnapshotAt,
   jitOpHasPostInstructionExit,
   jitPreInstructionExitReasonAt,
   jitPostInstructionExitReasonsAt
 } from "#backends/wasm/jit/ir/effects.js";
 import type {
+  ExitMaterializationStore,
   JitCodegenPlan,
   JitExitPoint,
   JitExitMaterializationPlan,
@@ -44,6 +45,7 @@ export function analyzeJitCodegenState(
       throw new Error(`missing JIT instruction while planning JIT codegen: ${instructionIndex}`);
     }
 
+    state.beginInstruction();
     const entry = state.snapshot("preInstruction", instruction.eip);
     const exitStart = exitPoints.length;
 
@@ -61,11 +63,16 @@ export function analyzeJitCodegenState(
           instructionIndex,
           opIndex,
           faultReason,
-          preInstructionFaultSnapshot(entry, state.snapshot("preInstruction", instruction.eip))
+          state.effectVisiblePreInstructionSnapshot(entry)
         );
       }
 
       recordOpEffects(op, instruction, instructionIndex, opIndex);
+      state.recordOp(op, instruction, instructionIndex, opIndex);
+
+      if (jitOpAdvancesEffectVisibleSnapshotAt(effects, instructionIndex, opIndex)) {
+        state.advanceEffectVisibleSnapshot();
+      }
     }
 
     if (currentPostState === undefined) {
@@ -119,11 +126,6 @@ export function analyzeJitCodegenState(
   ): void {
     switch (op.op) {
       case "set":
-        if (op.role === "registerMaterialization") {
-          state.recordCommittedStorageWrite(op.target, instruction.operands);
-        } else {
-          state.recordStorageWrite(op.target, instruction.operands);
-        }
         return;
       case "flags.set":
         state.markSpeculativeFlags(op.writtenMask | op.undefMask);
@@ -184,7 +186,8 @@ export function analyzeJitCodegenState(
   ): void {
     const pendingFlagMask = snapshot.speculativeFlags.mask;
     const requiredFlagMask = exitFlagMaterializationMask(snapshot);
-    const exitMaterializationIndex = appendExitMaterialization(snapshot.committedRegs, requiredFlagMask);
+    const stores = snapshot.valueState.regs.exitStores();
+    const exitMaterializationIndex = appendExitMaterialization(stores, requiredFlagMask);
     const exitPointIndex = exitPoints.length;
 
     exitPoints.push({
@@ -201,7 +204,6 @@ export function analyzeJitCodegenState(
       exitReason,
       exitMaterializationIndex,
       exitMaterializationPathScope(exitReason),
-      snapshot.committedRegs,
       requiredFlagMask
     );
 
@@ -216,15 +218,15 @@ export function analyzeJitCodegenState(
     }
   }
 
-  function appendExitMaterialization(regs: readonly Reg32[], flagMask: number): number {
-    if (regs.length === 0 && flagMask === 0) {
+  function appendExitMaterialization(stores: readonly ExitMaterializationStore[], flagMask: number): number {
+    if (stores.length === 0 && flagMask === 0) {
       return 0;
     }
 
     const index = exitMaterializations.length;
 
     exitMaterializations.push({
-      stores: registerExitMaterializationStores(regs),
+      stores,
       flagMask
     });
     return index;
@@ -237,7 +239,6 @@ export function analyzeJitCodegenState(
     exitReason: ExitReasonValue,
     exitMaterializationIndex: number,
     pathScope: JitMaterializationPathScope,
-    regs: readonly Reg32[],
     flagMask: number
   ): void {
     const placement = {
@@ -248,15 +249,6 @@ export function analyzeJitCodegenState(
       exitMaterializationIndex
     };
 
-    for (const reg of regs) {
-      materializationNeeds.push({
-        value: { kind: "committedRegister", reg },
-        consumer: "registerExitStore",
-        placement,
-        pathScope
-      });
-    }
-
     if (flagMask !== 0) {
       materializationNeeds.push({
         value: { kind: "exitFlags", mask: flagMask },
@@ -266,16 +258,6 @@ export function analyzeJitCodegenState(
       });
     }
   }
-}
-
-function registerExitMaterializationStores(
-  regs: readonly Reg32[]
-): JitExitMaterializationPlan["stores"] {
-  return regs.map((reg) => ({
-    kind: "register",
-    target: reg,
-    source: { kind: "committedRegister", reg }
-  }));
 }
 
 function exitMaterializationPathScope(exitReason: ExitReasonValue): JitMaterializationPathScope {
@@ -295,17 +277,6 @@ function exitFlagMaterializationMask(snapshot: JitStateSnapshot): number {
   return speculativeMask === 0
     ? 0
     : speculativeMask | snapshot.committedFlags.mask;
-}
-
-function preInstructionFaultSnapshot(
-  entry: JitStateSnapshot,
-  current: JitStateSnapshot
-): JitStateSnapshot {
-  return {
-    ...entry,
-    committedRegs: current.committedRegs,
-    committedFlags: current.committedFlags
-  };
 }
 
 function countPreInstructionExitPoints(exitPoints: readonly JitExitPoint[], exitStart: number): number {

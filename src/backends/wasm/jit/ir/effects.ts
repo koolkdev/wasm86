@@ -16,6 +16,7 @@ export type JitOpEffects = Readonly<{
   postInstructionExitReasons: readonly ExitReasonValue[];
   localConditionValues: readonly ValueRef[];
   exitConditionValues: readonly ValueRef[];
+  advancesEffectVisibleSnapshot: boolean;
   registerWriteReg?: Reg32;
   conditionUse?: JitConditionUse;
 }>;
@@ -62,7 +63,8 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
       let opEffects: JitOpEffects = {
         postInstructionExitReasons: jitPostInstructionExitReasons(op, instruction),
         localConditionValues: localConditionValues.get(instructionIndex)?.get(opIndex) ?? [],
-        exitConditionValues: exitConditionValues.get(instructionIndex)?.get(opIndex) ?? []
+        exitConditionValues: exitConditionValues.get(instructionIndex)?.get(opIndex) ?? [],
+        advancesEffectVisibleSnapshot: jitAdvancesEffectVisibleSnapshot(op)
       };
 
       if (preInstructionExitReason !== undefined) {
@@ -156,6 +158,14 @@ export function jitOpHasPostInstructionExit(
   return jitPostInstructionExitReasonsAt(effects, instructionIndex, opIndex).length !== 0;
 }
 
+export function jitOpAdvancesEffectVisibleSnapshotAt(
+  effects: JitEffectIndex,
+  instructionIndex: number,
+  opIndex: number
+): boolean {
+  return jitOpEffectsAt(effects, instructionIndex, opIndex).advancesEffectVisibleSnapshot;
+}
+
 export function jitConditionUseAt(
   effects: JitEffectIndex,
   instructionIndex: number,
@@ -214,4 +224,10 @@ function jitRegisterWriteReg(
   }
 
   return jitStorageReg(op.target, operands);
+}
+
+function jitAdvancesEffectVisibleSnapshot(op: JitIrOp): boolean {
+  // Legacy registerMaterialization ops are emitted before observation points,
+  // so analysis marks them as advancing the pre-instruction fault view.
+  return op.op === "set" && op.role === "registerMaterialization";
 }

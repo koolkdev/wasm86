@@ -10,8 +10,10 @@ import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
 import { wasmImport } from "#backends/wasm/abi.js";
 import { readWasmCpuState, writeWasmCpuState } from "#backends/wasm/state-layout.js";
 import { ExitReason } from "#backends/wasm/exit.js";
+import { jitInputReg32Value } from "#backends/wasm/jit/ir/values.js";
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
 import { createJitReg32State, type JitReg32State } from "#backends/wasm/jit/state/register-state.js";
+import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import {
   emitStoreStateU16,
@@ -743,9 +745,8 @@ test("jit exit materializations require captured register state", () => {
     { stores: [], flagMask: 0 },
     {
       stores: [{
-        kind: "register",
-        target: "eax",
-        source: { kind: "committedRegister", reg: "eax" }
+        target: { kind: "reg32", reg: "eax" },
+        value: jitInputReg32Value("eax")
       }],
       flagMask: 0
     }
@@ -758,16 +759,15 @@ test("jit exit materializations require captured register state", () => {
   );
 });
 
-test("jit exit materializations copy register store source to target", async () => {
+test("jit exit materializations copy register store targets to CPU state", async () => {
   const body = new WasmFunctionBodyEncoder();
   const exitLocal = body.addLocal(wasmValueType.i64);
   const state = createJitIrState(body, [
     { stores: [], flagMask: 0 },
     {
       stores: [{
-        kind: "register",
-        target: "ebx",
-        source: { kind: "committedRegister", reg: "eax" }
+        target: { kind: "reg32", reg: "ebx" },
+        value: jitInputReg32Value("ebx")
       }],
       flagMask: 0
     }
@@ -781,14 +781,13 @@ test("jit exit materializations copy register store source to target", async () 
         kind: "preInstruction",
         eip: startAddress,
         instructionCountDelta: 0,
-        committedRegs: [],
-        speculativeRegs: [],
+        valueState: createJitValueState().snapshot(),
         committedFlags: { mask: 0 },
         speculativeFlags: { mask: 0 }
       }
     }
   );
-  emitWriteReg32(state.regs, "eax", () => {
+  emitWriteReg32(state.regs, "ebx", () => {
     body.i32Const(0x2222_2222);
   });
   state.commitInstructionExit({
@@ -799,8 +798,7 @@ test("jit exit materializations copy register store source to target", async () 
       kind: "postInstruction",
       eip: startAddress + 1,
       instructionCountDelta: 1,
-      committedRegs: ["eax"],
-      speculativeRegs: [],
+      valueState: createJitValueState().snapshot(),
       committedFlags: { mask: 0 },
       speculativeFlags: { mask: 0 }
     },
