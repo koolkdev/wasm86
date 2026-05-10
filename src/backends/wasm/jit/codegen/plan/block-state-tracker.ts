@@ -1,6 +1,5 @@
 import { reg32 } from "#x86/isa/types.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
-import type { ValueRef } from "#x86/ir/model/types.js";
 import type {
   JitExitSnapshotKind,
   JitStateSnapshot
@@ -9,7 +8,6 @@ import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types
 import { JitValueTracker } from "#backends/wasm/jit/ir/value-tracker.js";
 import {
   jitFlagProducerValue,
-  jitValueForStorage,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
 import {
@@ -75,25 +73,25 @@ export class JitBlockStateTracker {
   recordOp(
     op: JitIrOp,
     instruction: JitIrBlockInstruction,
-    _instructionIndex: number,
-    _opIndex: number
+    instructionIndex: number,
+    opIndex: number
   ): void {
     switch (op.op) {
       case "get":
-        this.values.record(op.dst.id, jitValueForStorage(
-          op.source,
-          instruction.operands,
-          this.currentRegisterValues(),
-          op.accessWidth ?? 32,
-          op.signed === true
-        ));
-        return;
       case "address":
       case "value.const":
       case "value.binary":
       case "value.unary":
       case "value.select":
-        this.values.recordOp(op, instruction, this.currentRegisterValues());
+        this.values.recordOp(
+          op,
+          instruction,
+          this.currentRegisterValues(),
+          {
+            location: { instructionIndex, opIndex },
+            symbolicReadMode: "storage"
+          }
+        );
         return;
       case "aluFlags.condition":
         this.values.record(op.dst.id, this.valueState.flags.condition(op.cc));
@@ -154,41 +152,27 @@ export class JitBlockStateTracker {
   }
 
   private recordFlagSet(op: Extract<JitIrOp, { op: "flags.set" }>): void {
-    const producer = this.flagProducerValue(op);
     const mask = (op.writtenMask | op.undefMask) >>> 0;
 
-    if (producer !== undefined && mask !== 0) {
-      this.valueState.flags.writeFlagBits(mask, producer);
+    if (mask === 0) {
+      return;
     }
+
+    const producer = this.flagProducerValue(op);
+    this.valueState.flags.writeFlagBits(mask, producer);
   }
 
   private flagProducerValue(
     op: Extract<JitIrOp, { op: "flags.set" }>
-  ): JitValue | undefined {
-    const inputs = this.flagProducerInputs(op.inputs);
-
-    return inputs === undefined
-      ? undefined
-      : jitFlagProducerValue(op.producer, inputs, {
-          ...(op.width === undefined ? {} : { width: op.width }),
-          mask: op.writtenMask | op.undefMask
-        });
-  }
-
-  private flagProducerInputs(inputs: Readonly<Record<string, ValueRef>>): Readonly<Record<string, JitValue>> | undefined {
-    const values: Record<string, JitValue> = {};
-
-    for (const [name, ref] of Object.entries(inputs)) {
-      const value = this.values.valueFor(ref);
-
-      if (value === undefined) {
-        return undefined;
+  ): JitValue {
+    return jitFlagProducerValue(
+      op.producer,
+      this.values.inputRecordFor(op.inputs, `flags.set ${op.producer}`),
+      {
+        ...(op.width === undefined ? {} : { width: op.width }),
+        mask: op.writtenMask | op.undefMask
       }
-
-      values[name] = value;
-    }
-
-    return values;
+    );
   }
 
   private currentRegisterValues(): JitRegisterValueMap {

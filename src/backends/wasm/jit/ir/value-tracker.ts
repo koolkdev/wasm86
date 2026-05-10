@@ -1,5 +1,6 @@
 import type { IrBinaryValueOp, IrSelectValueOp, IrUnaryValueOp, ValueRef } from "#x86/ir/model/types.js";
 import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import { jitProducedValueForEffectfulRead } from "#backends/wasm/jit/ir/produced-values.js";
 import {
   jitValueForEffectiveAddress,
   jitValueForStorage,
@@ -12,8 +13,14 @@ import {
   jitStorageRegisterAccess,
   type JitRegisterValueMap
 } from "#backends/wasm/jit/ir/register-prefix-values.js";
+import type { JitIrLocation } from "#backends/wasm/jit/ir/walk.js";
 import type { Reg32 } from "#x86/isa/types.js";
 import { i32 } from "#x86/state/cpu-state.js";
+
+export type JitValueTrackerRecordOptions = Readonly<{
+  location?: JitIrLocation;
+  symbolicReadMode?: "symbolic" | "storage";
+}>;
 
 export class JitValueTracker {
   private readonly locals = new Map<number, JitValue>();
@@ -24,6 +31,29 @@ export class JitValueTracker {
 
   valueFor(value: ValueRef): JitValue | undefined {
     return jitValueForValue(value, this.locals);
+  }
+
+  requiredValueFor(value: ValueRef, context: string): JitValue {
+    const jitValue = this.valueFor(value);
+
+    if (jitValue === undefined) {
+      throw new Error(`${context} could not resolve ${valueRefLabel(value)} as a JIT value`);
+    }
+
+    return jitValue;
+  }
+
+  inputRecordFor(
+    inputs: Readonly<Record<string, ValueRef>>,
+    context: string
+  ): Readonly<Record<string, JitValue>> {
+    const resolved: Record<string, JitValue> = {};
+
+    for (const [name, value] of Object.entries(inputs)) {
+      resolved[name] = this.requiredValueFor(value, `${context} input '${name}'`);
+    }
+
+    return resolved;
   }
 
   record(id: number, value: JitValue | undefined): void {
@@ -45,19 +75,14 @@ export class JitValueTracker {
   recordOp(
     op: JitIrOp,
     instruction: JitIrBlockInstruction,
-    registerValues: JitRegisterValueMap = new Map()
+    registerValues: JitRegisterValueMap = new Map(),
+    options: JitIrLocation | JitValueTrackerRecordOptions = {}
   ): boolean {
+    const recordOptions = normalizeRecordOptions(options);
+
     switch (op.op) {
       case "get":
-        this.record(op.dst.id, op.role === "symbolicRead"
-          ? symbolicRegisterReadValue(op, instruction)
-          : jitValueForStorage(
-            op.source,
-            instruction.operands,
-            registerValues,
-            op.accessWidth ?? 32,
-            op.signed === true
-          ));
+        this.record(op.dst.id, this.getValue(op, instruction, registerValues, recordOptions));
         return true;
       case "address":
         this.record(
@@ -120,6 +145,36 @@ export class JitValueTracker {
       ? undefined
       : { kind: op.op, type: op.type, condition, whenTrue, whenFalse };
   }
+
+  private getValue(
+    op: Extract<JitIrOp, { op: "get" }>,
+    instruction: JitIrBlockInstruction,
+    registerValues: JitRegisterValueMap,
+    options: JitValueTrackerRecordOptions
+  ): JitValue | undefined {
+    if (op.role === "symbolicRead" && options.symbolicReadMode !== "storage") {
+      return symbolicRegisterReadValue(op, instruction);
+    }
+
+    return (options.location === undefined
+      ? undefined
+      : jitProducedValueForEffectfulRead(instruction, options.location, op)) ??
+      jitValueForStorage(
+        op.source,
+        instruction.operands,
+        registerValues,
+        op.accessWidth ?? 32,
+        op.signed === true
+      );
+  }
+}
+
+function normalizeRecordOptions(
+  options: JitIrLocation | JitValueTrackerRecordOptions
+): JitValueTrackerRecordOptions {
+  return "instructionIndex" in options
+    ? { location: options }
+    : options;
 }
 
 function symbolicRegisterReadValue(
@@ -131,4 +186,15 @@ function symbolicRegisterReadValue(
   return access?.width === 32 && access.bitOffset === 0
     ? { kind: "reg", reg: access.reg }
     : undefined;
+}
+
+function valueRefLabel(value: ValueRef): string {
+  switch (value.kind) {
+    case "var":
+      return `var ${value.id}`;
+    case "const":
+      return `const ${value.value}`;
+    case "nextEip":
+      return "nextEip";
+  }
 }

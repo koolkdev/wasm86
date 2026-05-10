@@ -1,9 +1,10 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
 import type { Reg32 } from "#x86/isa/types.js";
 import { IR_ALU_FLAG_MASK, IR_ALU_FLAG_MASKS } from "#x86/ir/model/flag-effects.js";
+import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
@@ -17,7 +18,10 @@ import type {
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
+  jitFlagProducerValue,
+  jitInputAluFlagsValue,
   jitInputReg32Value,
+  jitInsertMaskedBits,
   jitProducedValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
@@ -281,6 +285,286 @@ test("planJitCodegen records flag materialization requirements before conditions
     ]
   );
   strictEqual(branchExpressionBlock?.some((op) => op.op === "flags.materialize" || op.op === "flags.boundary"), false);
+});
+
+test("planJitCodegen records full flag producers in value-state snapshots", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "full-flags",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+        { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "reg", reg: "ebx" }, accessWidth: 32 },
+        {
+          op: "value.binary",
+          type: "i32",
+          operator: "add",
+          dst: { kind: "var", id: 2 },
+          a: { kind: "var", id: 0 },
+          b: { kind: "var", id: 1 }
+        },
+        {
+          op: "set",
+          target: { kind: "reg", reg: "eax" },
+          value: { kind: "var", id: 2 },
+          accessWidth: 32
+        },
+        {
+          op: "flags.set",
+          producer: "add",
+          writtenMask: IR_ALU_FLAG_MASK,
+          undefMask: 0,
+          inputs: {
+            left: { kind: "var", id: 0 },
+            right: { kind: "var", id: 1 },
+            result: { kind: "var", id: 2 }
+          }
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const eax = jitInputReg32Value("eax");
+  const ebx = jitInputReg32Value("ebx");
+  const result = addValue(eax, ebx);
+
+  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), jitFlagProducerValue("add", {
+    left: eax,
+    right: ebx,
+    result
+  }, { mask: IR_ALU_FLAG_MASK }));
+});
+
+test("planJitCodegen records partial flag producers as symbolic masked inserts", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "partial-flags",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+        {
+          op: "value.binary",
+          type: "i32",
+          operator: "add",
+          dst: { kind: "var", id: 1 },
+          a: { kind: "var", id: 0 },
+          b: { kind: "const", type: "i32", value: 1 }
+        },
+        {
+          op: "set",
+          target: { kind: "reg", reg: "eax" },
+          value: { kind: "var", id: 1 },
+          accessWidth: 32
+        },
+        {
+          op: "flags.set",
+          producer: "inc",
+          writtenMask: FLAG_PRODUCERS.inc.writtenMask,
+          undefMask: 0,
+          inputs: {
+            left: { kind: "var", id: 0 },
+            result: { kind: "var", id: 1 }
+          }
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const eax = jitInputReg32Value("eax");
+  const result = addValue(eax, c32(1));
+  const incFlags = jitFlagProducerValue("inc", {
+    left: eax,
+    result
+  }, { mask: FLAG_PRODUCERS.inc.writtenMask });
+
+  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), jitInsertMaskedBits(
+    jitInputAluFlagsValue(),
+    incFlags,
+    FLAG_PRODUCERS.inc.writtenMask
+  ));
+});
+
+test("planJitCodegen records effectful flag producer inputs as produced values", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "effectful-flag-input",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        {
+          op: "get",
+          dst: { kind: "var", id: 0 },
+          source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
+          accessWidth: 32
+        },
+        { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "reg", reg: "ebx" }, accessWidth: 32 },
+        {
+          op: "value.binary",
+          type: "i32",
+          operator: "add",
+          dst: { kind: "var", id: 2 },
+          a: { kind: "var", id: 0 },
+          b: { kind: "var", id: 1 }
+        },
+        {
+          op: "flags.set",
+          producer: "add",
+          writtenMask: IR_ALU_FLAG_MASK,
+          undefMask: 0,
+          inputs: {
+            left: { kind: "var", id: 0 },
+            right: { kind: "var", id: 1 },
+            result: { kind: "var", id: 2 }
+          }
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const produced = jitProducedValue("load#effectful-flag-input:0:0:0", "i32");
+  const ebx = jitInputReg32Value("ebx");
+  const result = addValue(produced, ebx);
+
+  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), jitFlagProducerValue("add", {
+    left: produced,
+    right: ebx,
+    result
+  }, { mask: IR_ALU_FLAG_MASK }));
+});
+
+test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "missing-flag-input",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        {
+          op: "flags.set",
+          producer: "add",
+          writtenMask: IR_ALU_FLAG_MASK,
+          undefMask: 0,
+          inputs: {
+            left: { kind: "var", id: 0 },
+            right: { kind: "const", type: "i32", value: 1 },
+            result: { kind: "const", type: "i32", value: 2 }
+          }
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+
+  throws(
+    () => planJitCodegen(block),
+    /flags\.set add input 'left' could not resolve var 0 as a JIT value/
+  );
+});
+
+test("planJitCodegen lets later full flag producers replace partial merges", () => {
+  const block: JitIrBlock = {
+    instructions: [
+      {
+        instructionId: "partial-flags",
+        eip: startAddress,
+        nextEip: startAddress + 1,
+        nextMode: "continue",
+        operands: [],
+        ir: [
+          { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+          {
+            op: "value.binary",
+            type: "i32",
+            operator: "add",
+            dst: { kind: "var", id: 1 },
+            a: { kind: "var", id: 0 },
+            b: { kind: "const", type: "i32", value: 1 }
+          },
+          {
+            op: "set",
+            target: { kind: "reg", reg: "eax" },
+            value: { kind: "var", id: 1 },
+            accessWidth: 32
+          },
+          {
+            op: "flags.set",
+            producer: "inc",
+            writtenMask: FLAG_PRODUCERS.inc.writtenMask,
+            undefMask: 0,
+            inputs: {
+              left: { kind: "var", id: 0 },
+              result: { kind: "var", id: 1 }
+            }
+          },
+          { op: "next" }
+        ]
+      },
+      {
+        instructionId: "full-flags",
+        eip: startAddress + 1,
+        nextEip: startAddress + 2,
+        nextMode: "exit",
+        operands: [],
+        ir: [
+          { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "ecx" }, accessWidth: 32 },
+          { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "reg", reg: "edx" }, accessWidth: 32 },
+          {
+            op: "value.binary",
+            type: "i32",
+            operator: "add",
+            dst: { kind: "var", id: 2 },
+            a: { kind: "var", id: 0 },
+            b: { kind: "var", id: 1 }
+          },
+          {
+            op: "set",
+            target: { kind: "reg", reg: "ecx" },
+            value: { kind: "var", id: 2 },
+            accessWidth: 32
+          },
+          {
+            op: "flags.set",
+            producer: "add",
+            writtenMask: IR_ALU_FLAG_MASK,
+            undefMask: 0,
+            inputs: {
+              left: { kind: "var", id: 0 },
+              right: { kind: "var", id: 1 },
+              result: { kind: "var", id: 2 }
+            }
+          },
+          { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+        ]
+      }
+    ]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const ecx = jitInputReg32Value("ecx");
+  const edx = jitInputReg32Value("edx");
+  const result = addValue(ecx, edx);
+
+  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), jitFlagProducerValue("add", {
+    left: ecx,
+    right: edx,
+    result
+  }, { mask: IR_ALU_FLAG_MASK }));
 });
 
 test("planJitCodegen omits materialization needs for empty exits", () => {
