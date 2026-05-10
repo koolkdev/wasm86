@@ -1,6 +1,7 @@
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import { reg32, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
 import type { ConditionCode } from "#x86/ir/model/types.js";
 import { IR_ALU_FLAG_MASK, assertIrAluFlagMask } from "#x86/ir/model/flag-effects.js";
+import type { ExitMaterializationStore, MaterializationTarget } from "#backends/wasm/jit/ir/materialization.js";
 import {
   jitExtractBits,
   jitExtractMaskedBits,
@@ -126,6 +127,27 @@ export class JitRegisterValueSnapshotFamily {
   differsFromInput(reg: Reg32): boolean {
     return this.slots.differsFromInput(reg32Slot(reg));
   }
+
+  exitStores(regs: readonly Reg32[] = reg32): readonly ExitMaterializationStore[] {
+    return regs.flatMap((reg) => {
+      const store = this.exitStore(reg);
+
+      return store === undefined ? [] : [store];
+    });
+  }
+
+  exitStore(reg: Reg32): ExitMaterializationStore | undefined {
+    const value = this.readReg32(reg);
+
+    if (jitValuesEqual(value, this.slots.inputValue(reg32Slot(reg)))) {
+      return undefined;
+    }
+
+    return narrowRegisterExitStore(reg, value) ?? {
+      target: { kind: "reg32", reg },
+      value
+    };
+  }
 }
 
 export class JitAluFlagValueFamily {
@@ -209,4 +231,50 @@ function jitValueSlotKey(slot: JitArchitecturalSlot): string {
     case "aluFlags":
       return "aluFlags";
   }
+}
+
+function narrowRegisterExitStore(reg: Reg32, value: JitValue): ExitMaterializationStore | undefined {
+  const simplified = simplifyJitValue(value);
+
+  if (simplified.kind !== "insertBits" || !isInputReg32(simplified.base, reg)) {
+    return undefined;
+  }
+
+  const target = regPartTarget(reg, simplified.bitOffset, simplified.width);
+
+  return target === undefined
+    ? undefined
+    : {
+        target,
+        value: simplified.value
+      };
+}
+
+function regPartTarget(
+  reg: Reg32,
+  bitOffset: number,
+  width: OperandWidth
+): MaterializationTarget | undefined {
+  if (!isLegalRegPart(bitOffset, width)) {
+    return undefined;
+  }
+
+  return { kind: "regPart", reg, bitOffset, width };
+}
+
+function isLegalRegPart(bitOffset: number, width: OperandWidth): boolean {
+  switch (width) {
+    case 8:
+      return bitOffset === 0 || bitOffset === 8;
+    case 16:
+      return bitOffset === 0;
+    case 32:
+      return false;
+  }
+}
+
+function isInputReg32(value: JitValue, reg: Reg32): boolean {
+  const simplified = simplifyJitValue(value);
+
+  return simplified.kind === "input" && simplified.slot.kind === "reg32" && simplified.slot.reg === reg;
 }

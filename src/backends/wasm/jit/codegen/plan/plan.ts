@@ -4,6 +4,7 @@ import type { JitCodegenPlan } from "./types.js";
 
 export type {
   JitInstructionEntryPoint,
+  ExitMaterializationStore,
   JitExitPoint,
   JitExitSnapshotKind,
   JitExitMaterializationPlan,
@@ -16,6 +17,7 @@ export type {
   JitMaterializationPlacement,
   JitMaterializationPathScope,
   JitMaterializationValue,
+  MaterializationTarget,
   JitPreInstructionExitPlan,
   JitCodegenPlan,
   JitStateSnapshot

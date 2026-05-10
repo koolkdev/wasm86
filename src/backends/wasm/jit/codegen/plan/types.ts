@@ -1,6 +1,10 @@
 import type { Reg32 } from "#x86/isa/types.js";
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
+export type {
+  ExitMaterializationStore,
+  MaterializationTarget
+} from "#backends/wasm/jit/ir/materialization.js";
 
 export type JitExitSnapshotKind = "preInstruction" | "postInstruction";
 
