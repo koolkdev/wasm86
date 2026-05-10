@@ -258,18 +258,41 @@ export function jitValueForEffectiveAddress(
   }
 
   if (binding.ea.index !== undefined) {
-    if (binding.ea.scale !== 1) {
-      return undefined;
-    }
-
-    terms.push(jitValueForReg(binding.ea.index, registerValues));
+    terms.push(scaleJitValue(jitValueForReg(binding.ea.index, registerValues), binding.ea.scale));
   }
 
   if (binding.ea.disp !== 0 || terms.length === 0) {
     terms.push({ kind: "const", type: "i32", value: i32(binding.ea.disp) });
   }
 
-  return terms.reduce((a, b) => simplifyJitValue({ kind: "value.binary", type: "i32", operator: "add", a, b }));
+  return terms.reduce((a, b) => addJitValues(a, b));
+}
+
+function scaleJitValue(value: JitValue, scale: 1 | 2 | 4 | 8): JitValue {
+  switch (scale) {
+    case 1:
+      return value;
+    case 2:
+      return shlJitValue(value, 1);
+    case 4:
+      return shlJitValue(value, 2);
+    case 8:
+      return shlJitValue(value, 3);
+  }
+}
+
+function addJitValues(a: JitValue, b: JitValue): JitValue {
+  return simplifyJitValue({ kind: "value.binary", type: "i32", operator: "add", a, b });
+}
+
+function shlJitValue(a: JitValue, shift: 1 | 2 | 3): JitValue {
+  return simplifyJitValue({
+    kind: "value.binary",
+    type: "i32",
+    operator: "shl",
+    a,
+    b: { kind: "const", type: "i32", value: shift }
+  });
 }
 
 export function jitRegisterValuesReadByEffectiveAddress(
@@ -652,6 +675,7 @@ function simplifyJitBinaryValue(value: JitBinaryValue): JitValue {
       case "add":
       case "or":
       case "xor":
+      case "shl":
       case "shr_u":
         if (b.value === 0) {
           return a;
@@ -692,6 +716,14 @@ function simplifyJitBinaryValue(value: JitBinaryValue): JitValue {
         break;
       case "sub":
       case "shr_u":
+        break;
+      case "shl":
+        if (a.value === 0) {
+          return { kind: "const", type: value.type, value: 0 };
+        }
+        if (b.kind === "const") {
+          return { kind: "const", type: value.type, value: i32(a.value << (b.value & 31)) };
+        }
         break;
     }
   }

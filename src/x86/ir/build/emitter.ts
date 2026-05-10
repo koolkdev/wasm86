@@ -170,6 +170,10 @@ export class IrEmitter implements IrBuilder {
     return this.#binaryValue("and", a, b);
   }
 
+  i32Shl(a: ValueInput, b: ValueInput): VarRef {
+    return this.#binaryValue("shl", a, b);
+  }
+
   i32ShrU(a: ValueInput, b: ValueInput): VarRef {
     return this.#binaryValue("shr_u", a, b);
   }

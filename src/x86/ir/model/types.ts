@@ -58,6 +58,7 @@ export type IrBinaryOperator =
   | "xor"
   | "or"
   | "and"
+  | "shl"
   | "shr_u";
 
 export type IrUnaryOperator =
@@ -130,6 +131,7 @@ export interface IrBuilder {
   i32Xor(a: ValueInput, b: ValueInput): VarRef;
   i32Or(a: ValueInput, b: ValueInput): VarRef;
   i32And(a: ValueInput, b: ValueInput): VarRef;
+  i32Shl(a: ValueInput, b: ValueInput): VarRef;
   i32ShrU(a: ValueInput, b: ValueInput): VarRef;
   i32Extend8S(value: ValueInput): VarRef;
   i32Extend16S(value: ValueInput): VarRef;

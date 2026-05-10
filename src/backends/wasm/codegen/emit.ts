@@ -250,6 +250,9 @@ class IrExprWasmEmitter {
       case "and":
         this.#context.body.i32And();
         return;
+      case "shl":
+        this.#context.body.i32Shl();
+        return;
       case "shr_u":
         this.#context.body.i32ShrU();
         return;
@@ -310,6 +313,7 @@ function i32BinaryOperandEmitOptions(operator: IrBinaryOperator): WasmIrEmitValu
   switch (operator) {
     case "add":
     case "sub":
+    case "shl":
     case "shr_u":
       return { requestedWidth: 32 };
     case "xor":

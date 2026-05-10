@@ -99,6 +99,8 @@ export function i32BinaryResultValueWidth(
     case "or":
     case "xor":
       return bitwiseResultValueWidth(operator, left, right);
+    case "shl":
+      return shiftResultValueWidth(left, right);
     case "shr_u":
       return untrackedValueWidth();
   }
@@ -186,6 +188,14 @@ function arithmeticResultValueWidth(
   const logicalWidth = maxWidth(left.logicalWidth, right.logicalWidth);
 
   return logicalWidth === 32 ? untrackedValueWidth() : dirtyValueWidth(logicalWidth);
+}
+
+function shiftResultValueWidth(left: ValueWidth, right: ValueWidth): ValueWidth {
+  if (left.constValue !== undefined && right.constValue !== undefined) {
+    return constValueWidth(i32(left.constValue << (right.constValue & 31)));
+  }
+
+  return untrackedValueWidth();
 }
 
 export function maskWidthFromConstValue(value: number): OperandWidth | undefined {

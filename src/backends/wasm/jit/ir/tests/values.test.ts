@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
+import type { Reg32 } from "#x86/isa/types.js";
 import {
   IR_ALU_FLAG_MASK,
   IR_ALU_FLAG_MASKS
@@ -14,6 +15,7 @@ import {
   jitInsertBits,
   jitInsertMaskedBits,
   jitProducedValue,
+  jitValueForEffectiveAddress,
   jitValueCost,
   jitValueDependencies,
   jitValueKey,
@@ -139,6 +141,32 @@ test("JIT produced-value indexing assigns ids to effectful get results only", ()
   );
 });
 
+test("JitValue effective addresses lower scaled index terms with shl", () => {
+  const ebx = jitInputReg32Value("ebx");
+  const ecx = jitInputReg32Value("ecx");
+  const registerValues = new Map<Reg32, JitValue>([
+    ["ebx", ebx],
+    ["ecx", ecx]
+  ]);
+  const value = jitValueForEffectiveAddress(
+    { kind: "operand", index: 0 },
+    [{
+      kind: "static.mem",
+      ea: {
+        kind: "mem",
+        base: "ebx",
+        index: "ecx",
+        scale: 4,
+        disp: 0x10,
+        accessWidth: 32
+      }
+    }],
+    registerValues
+  );
+
+  deepStrictEqual(value, add(add(ebx, shl(ecx, c32(2))), c32(0x10)));
+});
+
 test("JitValue dependency and materialization-slot walking includes nested flag inputs", () => {
   const ebx = jitInputReg32Value("ebx");
   const ecx = jitInputReg32Value("ecx");
@@ -172,6 +200,10 @@ function c32(value: number): JitValue {
 
 function add(a: JitValue, b: JitValue): JitValue {
   return { kind: "value.binary", type: "i32", operator: "add", a, b };
+}
+
+function shl(a: JitValue, b: JitValue): JitValue {
+  return { kind: "value.binary", type: "i32", operator: "shl", a, b };
 }
 
 function sub(a: JitValue, b: JitValue): JitValue {

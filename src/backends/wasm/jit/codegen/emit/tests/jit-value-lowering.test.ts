@@ -37,6 +37,12 @@ test("emitJitValue lowers register bit insertion directly to Wasm", () => {
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Or), 1);
 });
 
+test("emitJitValue lowers shl binary values to Wasm shift-left", () => {
+  const opcodes = emitSymbolicValue(shl(jitInputReg32Value("ecx"), c32(2)));
+
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Shl), 1);
+});
+
 test("emitJitValue lowers symbolic flag producers with existing flag-bit logic", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
@@ -236,6 +242,10 @@ function c32(value: number): JitValue {
 
 function add(a: JitValue, b: JitValue): JitValue {
   return { kind: "value.binary", type: "i32", operator: "add", a, b };
+}
+
+function shl(a: JitValue, b: JitValue): JitValue {
+  return { kind: "value.binary", type: "i32", operator: "shl", a, b };
 }
 
 function sub(a: JitValue, b: JitValue): JitValue {

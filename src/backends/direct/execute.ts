@@ -152,6 +152,8 @@ function evalI32Binary(operator: IrBinaryOperator, a: number, b: number): number
       return u32(a | b);
     case "and":
       return u32(a & b);
+    case "shl":
+      return u32(a << (b & 31));
     case "shr_u":
       return u32(a >>> (b & 31));
   }

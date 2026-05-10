@@ -30,6 +30,19 @@ test("emitIrToWasm emits arithmetic through storage callbacks", async () => {
   strictEqual(run(0, 0), 0x89);
 });
 
+test("emitIrToWasm lowers i32Shl to Wasm shift-left", async () => {
+  const program = buildIr((s) => {
+    const left = s.get(s.operand(0));
+
+    s.set(s.reg("eax"), s.i32Shl(left, 2));
+  });
+  const run = await instantiateEmittedBinary(program);
+  const opcodes = emittedBodyOpcodes(program);
+
+  strictEqual(run(0x11, 0), 0x44);
+  strictEqual(opcodes.includes(wasmOpcode.i32Shl), true);
+});
+
 test("emitIrToWasm emits conditional control values with nested emitValue", async () => {
   const run = await instantiateEmittedBinary(
     buildIr((s) => {

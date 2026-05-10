@@ -133,6 +133,9 @@ function emitI32BinaryInstruction(body: WasmFunctionBodyEncoder, operator: IrBin
     case "and":
       body.i32And();
       return;
+    case "shl":
+      body.i32Shl();
+      return;
     case "shr_u":
       body.i32ShrU();
       return;
@@ -472,6 +475,7 @@ function i32BinaryOperandEmitOptions(operator: IrBinaryOperator): WasmIrEmitValu
   switch (operator) {
     case "add":
     case "sub":
+    case "shl":
     case "shr_u":
       return { requestedWidth: 32 };
     case "xor":

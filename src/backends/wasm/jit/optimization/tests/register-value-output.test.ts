@@ -128,7 +128,7 @@ test("runRegisterValuePass folds register values into effective addresses", () =
   deepStrictEqual(setTargetRegs(folded.block.instructions), ["eax", "ebx"]);
 });
 
-test("runRegisterValuePass materializes register values for scaled effective addresses", () => {
+test("runRegisterValuePass folds register values into scaled effective addresses", () => {
   const movEaxEcx = ok(decodeBytes([0x89, 0xc8], startAddress));
   const leaEbx = ok(decodeBytes([0x8d, 0x1c, 0x45, 0x04, 0x00, 0x00, 0x00], movEaxEcx.nextEip));
   const movEaxZero = ok(decodeBytes([0xb8, 0x00, 0x00, 0x00, 0x00], leaEbx.nextEip));
@@ -140,10 +140,10 @@ test("runRegisterValuePass materializes register values for scaled effective add
     trap
   ]));
 
-  strictEqual(folded.registerValuePropagation.removedSetCount, 2);
+  strictEqual(folded.registerValuePropagation.removedSetCount, 3);
   strictEqual(folded.registerValuePropagation.materializedSetCount, 2);
-  strictEqual(folded.block.instructions[1]!.ir.some((op) => op.op === "address"), true);
-  deepStrictEqual(setTargetRegs(folded.block.instructions), ["eax", "ebx", "eax"]);
+  strictEqual(folded.block.instructions[1]!.ir.some((op) => op.op === "address"), false);
+  deepStrictEqual(setTargetRegs(folded.block.instructions), ["eax", "ebx"]);
 });
 
 test("runRegisterValuePass materializes address registers before faultable memory reads", () => {
