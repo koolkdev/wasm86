@@ -20,6 +20,7 @@ import {
   jitValueDependencies,
   jitValueKey,
   jitValueMaterializationSlots,
+  jitValueMaterializationSlotsForMask,
   jitValuesEqual,
   walkJitValueDependencies,
   type JitArchitecturalSlot,
@@ -194,6 +195,31 @@ test("JitValue dependency and materialization-slot walking includes nested flag 
   strictEqual(jitValueCost(producer) > jitValueCost(lea), true);
 });
 
+test("JitValue masked materialization-slot walking follows required bits", () => {
+  const eax = jitInputReg32Value("eax");
+  const ebx = jitInputReg32Value("ebx");
+  const insertedLowWord = jitInsertBits(eax, ebx, 0, 16);
+  const insertedByteAt8 = jitInsertBits(eax, ebx, 8, 8);
+  const signExtendedLowByte = extend8s(jitInsertBits(eax, ebx, 0, 8));
+
+  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(insertedLowWord, 0xffff)), [
+    "reg32:ebx"
+  ]);
+  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(insertedLowWord, 0xffff_0000)), [
+    "reg32:eax"
+  ]);
+  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(insertedLowWord, 0xffff_ffff)), [
+    "reg32:eax",
+    "reg32:ebx"
+  ]);
+  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(jitExtractBits(insertedByteAt8, 8, 8), 0xff)), [
+    "reg32:ebx"
+  ]);
+  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(signExtendedLowByte, 0xffff_0000)), [
+    "reg32:ebx"
+  ]);
+});
+
 function c32(value: number): JitValue {
   return { kind: "const", type: "i32", value };
 }
@@ -208,6 +234,10 @@ function shl(a: JitValue, b: JitValue): JitValue {
 
 function sub(a: JitValue, b: JitValue): JitValue {
   return { kind: "value.binary", type: "i32", operator: "sub", a, b };
+}
+
+function extend8s(value: JitValue): JitValue {
+  return { kind: "value.unary", type: "i32", operator: "extend8_s", value };
 }
 
 function slotKeys(slots: readonly JitArchitecturalSlot[]): readonly string[] {

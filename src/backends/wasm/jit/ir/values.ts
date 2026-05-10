@@ -373,6 +373,20 @@ export function jitValueMaterializationSlots(value: JitValue): readonly JitArchi
   return [...slots.values()];
 }
 
+export function jitValueMaterializationSlotsForMask(
+  value: JitValue,
+  requiredMask: number
+): readonly JitArchitecturalSlot[] {
+  const slots = new Map<string, JitArchitecturalSlot>();
+
+  collectMaterializationSlotsForMask(
+    simplifyJitValue(value),
+    normalizeU32Mask(requiredMask, "required materialization mask"),
+    slots
+  );
+  return [...slots.values()];
+}
+
 export function jitValueUsesSymbolicReg(value: JitValue, reg: Reg32): boolean {
   switch (value.kind) {
     case "reg":
@@ -708,6 +722,13 @@ function simplifyJitBinaryValue(value: JitBinaryValue): JitValue {
         if (b.value === 0) {
           return { kind: "const", type: value.type, value: 0 };
         }
+        {
+          const masked = simplifyJitMaskedValue(a, b.value);
+
+          if (masked !== undefined) {
+            return masked;
+          }
+        }
         break;
     }
   }
@@ -728,6 +749,13 @@ function simplifyJitBinaryValue(value: JitBinaryValue): JitValue {
         if (a.value === 0) {
           return { kind: "const", type: value.type, value: 0 };
         }
+        {
+          const masked = simplifyJitMaskedValue(b, a.value);
+
+          if (masked !== undefined) {
+            return masked;
+          }
+        }
         break;
       case "sub":
       case "shr_u":
@@ -744,6 +772,60 @@ function simplifyJitBinaryValue(value: JitBinaryValue): JitValue {
   }
 
   return a === value.a && b === value.b ? value : { ...value, a, b };
+}
+
+function simplifyJitMaskedValue(value: JitValue, maskValue: number): JitValue | undefined {
+  const mask = maskValue >>> 0;
+
+  if (value.kind === "insertBits" && value.bitOffset === 0) {
+    const insertedMask = bitRangeMask(value.bitOffset, value.width);
+
+    if ((mask & ~insertedMask) === 0) {
+      return simplifyJitValue({
+        kind: "value.binary",
+        type: "i32",
+        operator: "and",
+        a: value.value,
+        b: { kind: "const", type: "i32", value: i32(mask) }
+      });
+    }
+
+    if ((mask & insertedMask) === 0) {
+      return simplifyJitValue({
+        kind: "value.binary",
+        type: "i32",
+        operator: "and",
+        a: value.base,
+        b: { kind: "const", type: "i32", value: i32(mask) }
+      });
+    }
+  }
+
+  if (value.kind === "insertMaskedBits") {
+    const insertedMask = normalizeU32Mask(value.mask, "insertMaskedBits mask");
+
+    if ((mask & ~insertedMask) === 0) {
+      return simplifyJitValue({
+        kind: "value.binary",
+        type: "i32",
+        operator: "and",
+        a: value.value,
+        b: { kind: "const", type: "i32", value: i32(mask) }
+      });
+    }
+
+    if ((mask & insertedMask) === 0) {
+      return simplifyJitValue({
+        kind: "value.binary",
+        type: "i32",
+        operator: "and",
+        a: value.base,
+        b: { kind: "const", type: "i32", value: i32(mask) }
+      });
+    }
+  }
+
+  return undefined;
 }
 
 function simplifyJitUnaryValue(value: JitUnaryValue): JitValue {
@@ -1111,6 +1193,116 @@ function collectMaterializationSlots(value: JitValue, slots: Map<string, JitArch
         collectMaterializationSlots(child, slots);
       }
   }
+}
+
+function collectMaterializationSlotsForMask(
+  value: JitValue,
+  requiredMask: number,
+  slots: Map<string, JitArchitecturalSlot>
+): void {
+  if (requiredMask === 0) {
+    return;
+  }
+
+  const simplified = simplifyJitValue(value);
+
+  switch (simplified.kind) {
+    case "const":
+    case "produced":
+      return;
+    case "reg":
+      slots.set(jitArchitecturalSlotKey({ kind: "reg32", reg: simplified.reg }), { kind: "reg32", reg: simplified.reg });
+      return;
+    case "input":
+      slots.set(jitArchitecturalSlotKey(simplified.slot), simplified.slot);
+      return;
+    case "value.unary":
+      collectMaterializationSlotsForMask(
+        simplified.value,
+        unaryInputRequiredMask(simplified.operator, requiredMask),
+        slots
+      );
+      return;
+    case "value.binary": {
+      const maskedValue = binaryAndMaskedValue(simplified);
+
+      if (maskedValue !== undefined) {
+        collectMaterializationSlotsForMask(
+          maskedValue.value,
+          (requiredMask & maskedValue.mask) >>> 0,
+          slots
+        );
+        return;
+      }
+
+      collectMaterializationSlots(simplified, slots);
+      return;
+    }
+    case "extractBits":
+      collectMaterializationSlotsForMask(
+        simplified.value,
+        extractBitsRequiredMask(requiredMask, simplified.bitOffset, simplified.width),
+        slots
+      );
+      return;
+    case "extractMaskedBits":
+      collectMaterializationSlotsForMask(
+        simplified.value,
+        (requiredMask & simplified.mask) >>> 0,
+        slots
+      );
+      return;
+    case "insertBits": {
+      const insertedMask = bitRangeMask(simplified.bitOffset, simplified.width);
+      const valueRequiredMask = ((requiredMask & insertedMask) >>> simplified.bitOffset) >>> 0;
+
+      collectMaterializationSlotsForMask(simplified.base, (requiredMask & ~insertedMask) >>> 0, slots);
+      collectMaterializationSlotsForMask(simplified.value, valueRequiredMask, slots);
+      return;
+    }
+    case "insertMaskedBits":
+      collectMaterializationSlotsForMask(simplified.base, (requiredMask & ~simplified.mask) >>> 0, slots);
+      collectMaterializationSlotsForMask(simplified.value, (requiredMask & simplified.mask) >>> 0, slots);
+      return;
+    default:
+      collectMaterializationSlots(simplified, slots);
+  }
+}
+
+function unaryInputRequiredMask(
+  operator: IrUnaryOperator,
+  requiredMask: number
+): number {
+  switch (operator) {
+    case "extend8_s":
+      return requiredMask === 0 ? 0 : 0xff;
+    case "extend16_s":
+      return requiredMask === 0 ? 0 : 0xffff;
+  }
+}
+
+function binaryAndMaskedValue(
+  value: JitBinaryValue
+): Readonly<{ value: JitValue; mask: number }> | undefined {
+  if (value.operator !== "and") {
+    return undefined;
+  }
+
+  if (value.a.kind === "const") {
+    return { value: value.b, mask: value.a.value >>> 0 };
+  }
+
+  if (value.b.kind === "const") {
+    return { value: value.a, mask: value.b.value >>> 0 };
+  }
+
+  return undefined;
+}
+
+function extractBitsRequiredMask(requiredMask: number, bitOffset: number, width: OperandWidth): number {
+  const resultMask = widthMask(width) >>> 0;
+
+  return (((requiredMask & resultMask) << bitOffset) >>> 0);
 }
 
 function jitArchitecturalSlotsEqual(left: JitArchitecturalSlot, right: JitArchitecturalSlot): boolean {

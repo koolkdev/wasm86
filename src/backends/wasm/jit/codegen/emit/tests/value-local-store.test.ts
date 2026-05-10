@@ -278,6 +278,65 @@ test("JitValueLocalStore reuses retired escaped locals after owners release", ()
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
+test("JitValueLocalStore restoreAvailability hides branch-local captures from sibling arms", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const value = addValue("eax", 1);
+  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const branchAvailability = store.snapshotAvailability();
+  let emitted = 0;
+
+  const taken = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+
+  if (taken === undefined) {
+    throw new Error("expected taken branch materialization");
+  }
+
+  store.restoreAvailability(branchAvailability);
+
+  const notTaken = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+
+  if (notTaken === undefined) {
+    throw new Error("expected not-taken branch materialization");
+  }
+
+  body.end();
+
+  strictEqual(taken.emitted, true);
+  strictEqual(notTaken.emitted, true);
+  strictEqual(taken.local === notTaken.local, false);
+  strictEqual(emitted, 2);
+  deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
+});
+
+test("JitValueLocalStore restoreAvailability preserves values available before branch split", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const value = addValue("eax", 1);
+  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  let emitted = 0;
+
+  const preBranch = store.emitForUseWithLocal(value, () => emitAdd(body, () => { emitted += 1; }));
+
+  if (preBranch.local === undefined) {
+    throw new Error("expected pre-branch cached local");
+  }
+
+  const branchAvailability = store.snapshotAvailability();
+  const taken = store.captureForReuse(value, unexpectedEmitter);
+
+  store.restoreAvailability(branchAvailability);
+
+  const notTaken = store.captureForReuse(value, unexpectedEmitter);
+
+  body.end();
+
+  strictEqual(taken?.emitted, false);
+  strictEqual(notTaken?.emitted, false);
+  strictEqual(taken?.local, preBranch.local);
+  strictEqual(notTaken?.local, preBranch.local);
+  strictEqual(emitted, 1);
+  deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localTee]);
+});
+
 test("JitValueLocalStore keeps pinned exit snapshot locals out of reuse", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
@@ -316,22 +375,22 @@ test("JitValueLocalStore keeps pinned exit snapshot locals out of reuse", () => 
   strictEqual(rematerialized.local === captured.local, false);
 });
 
-test("JIT expression emission uses local.tee for cached optimized expression vars", () => {
+test("JIT expression emission snapshots cached branch-arm expression vars independently", () => {
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitIrBlock([repeatedInlineExpressionBlock()])));
 
-  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 2);
 });
 
-test("JIT legacy register exit bridge rematerializes pure NEG exit stores", () => {
+test("JIT generic register exit capture rematerializes pure NEG exit stores conservatively", () => {
   const mov = ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress));
   const neg = ok(decodeBytes([0xf7, 0xd8], mov.nextEip));
   const trap = ok(decodeBytes([0xcd, 0x2e], neg.nextEip));
   const body = extractOnlyWasmFunctionBody(encodeJitIrBlock([buildJitIrBlock([mov, neg, trap])]));
   const opcodes = wasmBodyOpcodes(body);
 
-  // Register exit stores still pass through the legacy bridge, so this
-  // expression is not shared with the planned materialization use yet.
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32Sub), 2);
+  // The current generic exit-store path emits planned store sources through the
+  // normal JitValue path, which still rematerializes this pure expression.
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Sub), 3);
 });
 
 test("JIT expression cache does not cache let32-backed var reads", () => {

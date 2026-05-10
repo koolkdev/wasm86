@@ -64,10 +64,17 @@ export function emitJitConditionalJump(
   const notTakenExitPoint = context.currentExitPoint(ExitReason.BRANCH_NOT_TAKEN);
 
   helpers.emitValue(condition, { requestedWidth: 32 });
+  const valueCacheAvailability = context.valueCache?.snapshotAvailability();
   context.body.ifBlock();
   emitJitControlTransfer(context, taken, ExitReason.BRANCH_TAKEN, helpers, 1, takenExitPoint);
   context.body.elseBlock();
+  if (valueCacheAvailability !== undefined) {
+    context.valueCache?.restoreAvailability(valueCacheAvailability);
+  }
   emitJitControlTransfer(context, notTaken, ExitReason.BRANCH_NOT_TAKEN, helpers, 1, notTakenExitPoint);
+  if (valueCacheAvailability !== undefined) {
+    context.valueCache?.restoreAvailability(valueCacheAvailability);
+  }
   context.body.endBlock();
 }
 

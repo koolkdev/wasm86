@@ -344,7 +344,7 @@ function materializationJitValueUsesForOp(
   opIndex: number
 ): readonly JitValueUse[] {
   return (instruction.materializationJitValueUsesByExpressionIndex?.get(opIndex) ?? [])
-    .map(jitValueUseTree);
+    .map((value) => jitValueUseTree(value));
 }
 
 function materializationProducedValueKeys(
@@ -376,7 +376,7 @@ function jitValueUseTree(value: JitValue): JitValueUse {
 
   return {
     value: simplified,
-    children: jitValueDependencies(simplified).map(jitValueUseTree)
+    children: jitValueDependencies(simplified).map((dependency) => jitValueUseTree(dependency))
   };
 }
 
@@ -387,13 +387,17 @@ function selectEpochValues(uses: readonly JitValueUse[]): readonly JitValueUseCo
   const selected: JitValueUseCount[] = [];
 
   for (const value of candidateValues) {
+    const matchingUses = flatUses.filter((use) => jitValuesEqual(use.value, value));
     const forceSelected = shouldForceSelectValue(value);
-    const usableUseCount = flatUses.filter((use) =>
-      jitValuesEqual(use.value, value) && (forceSelected || !hasSelectedAncestor(use, selected))
+    const usableUseCount = matchingUses.filter((use) =>
+      forceSelected || !hasSelectedAncestor(use, selected)
     ).length;
 
     if (shouldCacheValue(value, usableUseCount)) {
-      selected.push({ value, useCount: usableUseCount });
+      selected.push({
+        value,
+        useCount: usableUseCount
+      });
     }
   }
 

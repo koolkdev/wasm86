@@ -1,0 +1,266 @@
+import { stateOffset } from "#backends/wasm/abi.js";
+import {
+  emitLoadStateU32,
+  emitStoreStateU16,
+  emitStoreStateU32,
+  emitStoreStateU8
+} from "#backends/wasm/codegen/state.js";
+import {
+  emitCleanValueForFullUse,
+  type ValueWidth
+} from "#backends/wasm/codegen/value-width.js";
+import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
+import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import type {
+  JitExitMaterializationStore,
+  MaterializationTarget
+} from "#backends/wasm/jit/codegen/plan/types.js";
+import { emitJitValue } from "./jit-values.js";
+import type {
+  JitCachedValueHandle,
+  JitValueCacheRuntime
+} from "./value-local-store.js";
+import {
+  jitValueMaterializationSlotsForMask,
+  simplifyJitValue,
+  type JitArchitecturalSlot,
+  type JitValue
+} from "#backends/wasm/jit/ir/values.js";
+
+export type JitCapturedExitMaterializationStore = Readonly<{
+  store: JitExitMaterializationStore;
+  source?: JitCapturedExitStoreSource;
+}>;
+
+type JitCapturedExitStoreSource = Readonly<{
+  kind: "cache";
+  local: number;
+  valueWidth: ValueWidth;
+  owner: JitCachedValueHandle;
+}> | Readonly<{
+  kind: "snapshot";
+  local: number;
+  valueWidth: ValueWidth;
+}>;
+
+export type JitExitStoreEmitContext = Readonly<{
+  body: WasmFunctionBodyEncoder;
+  valueCache?: JitValueCacheRuntime | undefined;
+}>;
+
+export function captureJitExitMaterializationStores(
+  context: JitExitStoreEmitContext,
+  stores: readonly JitExitMaterializationStore[]
+): readonly JitCapturedExitMaterializationStore[] | undefined {
+  if (stores.length === 0) {
+    return undefined;
+  }
+
+  const previousTargets: MaterializationTarget[] = [];
+
+  return stores.map((store) => {
+    const captured = captureJitExitMaterializationStore(context, store, previousTargets);
+
+    previousTargets.push(store.target);
+    return captured;
+  });
+}
+
+export function emitJitExitMaterializationStores(
+  context: JitExitStoreEmitContext,
+  stores: readonly JitCapturedExitMaterializationStore[]
+): void {
+  for (const store of stores) {
+    emitJitExitMaterializationStore(context, store);
+  }
+}
+
+export function releaseJitExitMaterializationStores(
+  stores: readonly JitCapturedExitMaterializationStore[]
+): void {
+  for (const store of stores) {
+    if (store.source?.kind === "cache") {
+      store.source.owner.release();
+    }
+  }
+}
+
+function captureJitExitMaterializationStore(
+  context: JitExitStoreEmitContext,
+  store: JitExitMaterializationStore,
+  previousTargets: readonly MaterializationTarget[]
+): JitCapturedExitMaterializationStore {
+  const captured = context.valueCache?.captureJitValueForReuse(
+    store.value,
+    () => emitJitExitStoreSourceValue(context, store.value)
+  );
+
+  if (captured !== undefined) {
+    return {
+      store,
+      source: {
+        kind: "cache",
+        local: captured.local,
+        valueWidth: captured.valueWidth,
+        owner: captured
+      }
+    };
+  }
+
+  const value = simplifyJitValue(store.value);
+
+  if (value.kind === "const") {
+    return { store };
+  }
+
+  if (value.kind === "produced") {
+    throw new Error("JIT produced exit store value was not captured before exit materialization");
+  }
+
+  if (!exitStoreSourceNeedsSnapshot(value, previousTargets)) {
+    return { store };
+  }
+
+  const local = context.body.addLocal(wasmValueType.i32);
+  const valueWidth = emitJitExitStoreSourceValue(context, value);
+
+  context.body.localSet(local);
+  return {
+    store,
+    source: {
+      kind: "snapshot",
+      local,
+      valueWidth
+    }
+  };
+}
+
+function exitStoreSourceNeedsSnapshot(
+  value: JitValue,
+  previousTargets: readonly MaterializationTarget[]
+): boolean {
+  if (previousTargets.length === 0) {
+    return false;
+  }
+
+  const sourceSlots = jitValueMaterializationSlotsForMask(value, 0xffff_ffff);
+
+  return previousTargets.some((target) => {
+    const targetSlot = materializationTargetSlot(target);
+
+    return targetSlot !== undefined && sourceSlots.some((slot) =>
+      jitArchitecturalSlotsEqual(slot, targetSlot)
+    );
+  });
+}
+
+function materializationTargetSlot(target: MaterializationTarget): JitArchitecturalSlot | undefined {
+  switch (target.kind) {
+    case "reg32":
+      return { kind: "reg32", reg: target.reg };
+    case "regPart":
+      return { kind: "reg32", reg: target.reg };
+    case "aluFlags":
+      return { kind: "aluFlags" };
+  }
+}
+
+function jitArchitecturalSlotsEqual(left: JitArchitecturalSlot, right: JitArchitecturalSlot): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+
+  switch (left.kind) {
+    case "reg32":
+      return right.kind === "reg32" && left.reg === right.reg;
+    case "aluFlags":
+      return true;
+  }
+}
+
+function emitJitExitMaterializationStore(
+  context: JitExitStoreEmitContext,
+  capturedStore: JitCapturedExitMaterializationStore
+): void {
+  const { target, value } = capturedStore.store;
+
+  emitJitStoreTarget(context.body, target, () => emitCapturedOrInlineStoreSource(
+    context,
+    value,
+    capturedStore.source,
+    target
+  ));
+}
+
+function emitCapturedOrInlineStoreSource(
+  context: JitExitStoreEmitContext,
+  value: JitValue,
+  source: JitCapturedExitStoreSource | undefined,
+  target: MaterializationTarget
+): ValueWidth {
+  if (source !== undefined) {
+    context.body.localGet(source.local);
+
+    return target.kind === "reg32" || target.kind === "aluFlags"
+      ? emitCleanValueForFullUse(context.body, source.valueWidth)
+      : source.valueWidth;
+  }
+
+  return emitJitExitStoreSourceValue(
+    context,
+    value,
+    target.kind === "reg32" || target.kind === "aluFlags"
+  );
+}
+
+function emitJitExitStoreSourceValue(
+  context: JitExitStoreEmitContext,
+  value: JitValue,
+  requireFullWidth = false
+): ValueWidth {
+  return emitJitValue({
+    body: context.body,
+    valueCache: context.valueCache,
+    emitInput: (slot) => emitJitInputSlot(context.body, slot)
+  }, value, requireFullWidth ? { requestedWidth: 32 } : {});
+}
+
+function emitJitInputSlot(body: WasmFunctionBodyEncoder, slot: JitArchitecturalSlot): ValueWidth {
+  switch (slot.kind) {
+    case "reg32":
+      emitLoadStateU32(body, stateOffset[slot.reg]);
+      return { logicalWidth: 32, cleanWidth: 32 };
+    case "aluFlags":
+      emitLoadStateU32(body, stateOffset.aluFlags);
+      return { logicalWidth: 32, cleanWidth: 32 };
+  }
+}
+
+function emitJitStoreTarget(
+  body: WasmFunctionBodyEncoder,
+  target: MaterializationTarget,
+  emitValue: () => void
+): void {
+  switch (target.kind) {
+    case "reg32":
+      emitStoreStateU32(body, stateOffset[target.reg], emitValue);
+      return;
+    case "regPart": {
+      const offset = stateOffset[target.reg] + target.bitOffset / 8;
+
+      switch (target.width) {
+        case 8:
+          emitStoreStateU8(body, offset, emitValue);
+          return;
+        case 16:
+          emitStoreStateU16(body, offset, emitValue);
+          return;
+        case 32:
+          throw new Error("JIT regPart exit stores cannot use 32-bit width");
+      }
+    }
+    case "aluFlags":
+      emitStoreStateU32(body, stateOffset.aluFlags, emitValue);
+      return;
+  }
+}

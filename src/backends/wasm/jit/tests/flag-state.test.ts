@@ -351,6 +351,8 @@ function cachedFlagValueCache(handles: JitCachedValueHandle[]): JitValueCacheRun
   return {
     beginInstruction: () => {},
     notifyWrite: () => {},
+    snapshotAvailability: () => ({ currentEpoch: 0, store: { entries: [] } }),
+    restoreAvailability: () => {},
     emitForUse: (_value, emitter) => emitter(),
     emitJitValueForUse: (_value, emitter) => ({ valueWidth: emitter() }),
     captureForReuse: () => undefined,

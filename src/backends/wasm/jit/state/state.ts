@@ -1,15 +1,12 @@
 import { i32 } from "#x86/state/cpu-state.js";
-import type { Reg32 } from "#x86/isa/types.js";
 import { stateOffset } from "#backends/wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { emitLoadStateU32, emitStoreStateU32 } from "#backends/wasm/codegen/state.js";
 import type {
   JitExitMaterializationPlan,
-  JitExitMaterializationStore,
   JitExitPoint,
-  JitInstructionEntryPoint,
-  MaterializationTarget
+  JitInstructionEntryPoint
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
   createJitFlagState,
@@ -18,10 +15,15 @@ import {
 } from "./flag-state.js";
 import {
   createJitReg32State,
-  type JitReg32State,
-  type JitReg32ExitStoreSnapshot
+  type JitReg32State
 } from "./register-state.js";
 import type { JitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
+import {
+  captureJitExitMaterializationStores,
+  emitJitExitMaterializationStores,
+  releaseJitExitMaterializationStores,
+  type JitCapturedExitMaterializationStore
+} from "#backends/wasm/jit/codegen/emit/exit-stores.js";
 
 export type JitExitTarget = {
   exitLocal: number;
@@ -38,7 +40,7 @@ type JitIrStateOptions = Readonly<{
 }>;
 
 type JitExitMaterializationSnapshot = Readonly<{
-  regs?: JitReg32ExitStoreSnapshot;
+  stores?: readonly JitCapturedExitMaterializationStore[];
   flags?: JitFlagExitStoreSnapshot;
 }>;
 
@@ -140,16 +142,15 @@ export function createJitIrState(
 
       const snapshot = exitMaterializationSnapshots.get(index);
 
-      const registerStores = legacyRegisterMaterializationStores(plan);
-
-      if (registerStores.length !== 0) {
-        if (snapshot?.regs === undefined) {
+      if (plan.stores.length !== 0) {
+        if (snapshot?.stores === undefined) {
           throw new Error(`JIT exit materialization was not captured: ${index}`);
         }
 
-        for (const store of registerStores) {
-          regs.emitExitSnapshotStore(legacyRegisterStoreTargetReg(store), snapshot.regs);
-        }
+        emitJitExitMaterializationStores({
+          body,
+          valueCache: options.valueCache
+        }, snapshot.stores);
       }
 
       if (plan.flagMask !== 0) {
@@ -181,6 +182,10 @@ export function createJitIrState(
 
       if (snapshot.flags !== undefined) {
         flags.releaseExitSnapshot(snapshot.flags);
+      }
+
+      if (snapshot.stores !== undefined) {
+        releaseJitExitMaterializationStores(snapshot.stores);
       }
 
       exitMaterializationSnapshots.delete(index);
@@ -252,18 +257,18 @@ export function createJitIrState(
       flags.assertPendingCoveredBy(plan.flagMask);
     }
 
-    const registerStoreSources = legacyRegisterMaterializationStoreSources(plan);
-    const registerSnapshot = registerStoreSources.length === 0
-      ? undefined
-      : regs.captureCommittedExitStores(registerStoreSources);
+    const storeSnapshot = captureJitExitMaterializationStores({
+      body,
+      valueCache: options.valueCache
+    }, plan.stores);
     const flagSnapshot = flags.captureExitStoreSnapshot(
       plan.flagMask
     );
 
-    return registerSnapshot === undefined && flagSnapshot === undefined
+    return storeSnapshot === undefined && flagSnapshot === undefined
       ? undefined
       : {
-          ...(registerSnapshot === undefined ? {} : { regs: registerSnapshot }),
+          ...(storeSnapshot === undefined ? {} : { stores: storeSnapshot }),
           ...(flagSnapshot === undefined ? {} : { flags: flagSnapshot })
         };
   }
@@ -305,36 +310,4 @@ export function createJitIrState(
 
     return activeExit;
   }
-}
-
-// Temporary Step 3B bridge: exit stores already use the generic target/value
-// shape, but runtime emission still snapshots target full registers after
-// legacy registerMaterialization ops. Direct store.value and precise regPart
-// emission are handled by the next lowering step.
-function legacyRegisterMaterializationStores(
-  plan: JitExitMaterializationPlan
-): readonly JitExitMaterializationStore[] {
-  return plan.stores.filter((store) => store.target.kind === "reg32" || store.target.kind === "regPart");
-}
-
-function legacyRegisterMaterializationStoreSources(plan: JitExitMaterializationPlan): readonly Reg32[] {
-  return uniqueRegs(legacyRegisterMaterializationStores(plan).map(legacyRegisterStoreTargetReg));
-}
-
-function legacyRegisterStoreTargetReg(store: JitExitMaterializationStore): Reg32 {
-  return legacyMaterializationTargetBaseReg(store.target);
-}
-
-function legacyMaterializationTargetBaseReg(target: MaterializationTarget): Reg32 {
-  switch (target.kind) {
-    case "reg32":
-    case "regPart":
-      return target.reg;
-    case "aluFlags":
-      throw new Error("aluFlags materialization target is not a register store");
-  }
-}
-
-function uniqueRegs(regs: readonly Reg32[]): readonly Reg32[] {
-  return [...new Set(regs)];
 }

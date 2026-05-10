@@ -33,12 +33,30 @@ export type JitCachedValueUse = Readonly<{
 
 export type JitCachedValueHandle = WasmIrCachedValueHandle;
 export type JitCachedValueLocal = WasmIrCachedValueLocal;
+export type JitValueCacheAvailabilitySnapshot = Readonly<{
+  entries: readonly JitValueCacheAvailabilitySnapshotEntry[];
+}>;
+export type JitValueCacheAvailabilitySnapshotEntry = Readonly<{
+  key: string;
+  available: boolean;
+  valueWidth: ValueWidth | undefined;
+  local: number | undefined;
+}>;
+export type JitValueCacheRuntimeAvailabilitySnapshot = Readonly<{
+  currentEpoch: number;
+  store: JitValueCacheAvailabilitySnapshot;
+}>;
 
 export type JitValueCacheRuntime = WasmIrValueCache & Readonly<{
   beginInstruction(index: number): void;
   notifyWrite(target: IrStorageExpr, accessWidth: OperandWidth): void;
+  snapshotAvailability(): JitValueCacheRuntimeAvailabilitySnapshot;
+  restoreAvailability(snapshot: JitValueCacheRuntimeAvailabilitySnapshot): void;
   emitJitValueForUse(value: JitValue, emitter: () => ValueWidth): JitCachedValueUse;
-  captureJitValueForReuse(value: JitValue, emitter: () => ValueWidth): JitCachedValueLocal | undefined;
+  captureJitValueForReuse(
+    value: JitValue,
+    emitter: () => ValueWidth
+  ): JitCachedValueLocal | undefined;
   jitValueForExpression(value: IrValueExpr): JitValue | undefined;
   jitValueForValueRef(value: ValueRef): JitValue | undefined;
 }>;
@@ -60,6 +78,7 @@ export class JitValueLocalStore {
   readonly #body: WasmFunctionBodyEncoder;
   readonly #entries = new Map<string, CachedJitValue>();
   readonly #freeLocals: CachedJitLocal[] = [];
+  readonly #localsByIndex = new Map<number, CachedJitLocal>();
 
   constructor(body: WasmFunctionBodyEncoder, useCounts: readonly JitValueUseCount[]) {
     this.#body = body;
@@ -106,10 +125,7 @@ export class JitValueLocalStore {
   // Pre-fill a selected cache entry for consumers that need the value later,
   // without leaving it on the stack. Returns true only when this call emitted
   // the expression and stored it with local.set.
-  captureForReuse(
-    value: JitValue,
-    emitter: () => ValueWidth
-  ): JitCachedValueLocal | undefined {
+  captureForReuse(value: JitValue, emitter: () => ValueWidth): JitCachedValueLocal | undefined {
     const entry = this.#entryFor(value);
 
     if (entry === undefined) {
@@ -138,16 +154,65 @@ export class JitValueLocalStore {
     };
   }
 
+  snapshotAvailability(): JitValueCacheAvailabilitySnapshot {
+    const entries: JitValueCacheAvailabilitySnapshotEntry[] = [];
+
+    for (const [key, entry] of this.#entries) {
+      entries.push({
+        key,
+        available: entry.available,
+        valueWidth: entry.valueWidth,
+        local: entry.local?.local
+      });
+    }
+
+    return { entries };
+  }
+
+  restoreAvailability(snapshot: JitValueCacheAvailabilitySnapshot): void {
+    const entriesByKey = new Map(snapshot.entries.map((entry) => [entry.key, entry]));
+
+    for (const [key, entry] of this.#entries) {
+      const availability = entriesByKey.get(key);
+
+      if (availability === undefined) {
+        throw new Error(`missing JIT value cache availability snapshot entry: ${key}`);
+      }
+
+      const currentLocal = entry.local;
+      const restoredLocal = availability.local === undefined
+        ? undefined
+        : this.#localSnapshotRef(availability.local);
+
+      if (currentLocal !== undefined && currentLocal !== restoredLocal) {
+        currentLocal.entry = undefined;
+
+        if (currentLocal.ownerCount === 0) {
+          this.#freeLocals.push(currentLocal);
+        }
+      }
+
+      entry.available = availability.available;
+      entry.valueWidth = availability.valueWidth;
+      entry.local = restoredLocal;
+
+      if (entry.local !== undefined) {
+        entry.local.entry = entry;
+      }
+
+      if (!entry.available) {
+        this.#detachUnavailableOwnedLocal(entry);
+      }
+    }
+  }
+
   forgetWhere(predicate: (value: JitValue) => boolean): void {
     for (const entry of this.#entries.values()) {
       if (predicate(entry.value)) {
         entry.available = false;
         entry.valueWidth = undefined;
 
-        if (entry.local !== undefined && entry.local.ownerCount !== 0) {
-          entry.local.entry = undefined;
-          entry.local = undefined;
-        }
+        this.#detachUnavailableOwnedLocal(entry);
       }
     }
   }
@@ -166,6 +231,7 @@ export class JitValueLocalStore {
         ownerCount: 0
       };
 
+      this.#localsByIndex.set(cacheLocal.local, cacheLocal);
       cacheLocal.entry = entry;
       entry.local = cacheLocal;
     }
@@ -205,6 +271,23 @@ export class JitValueLocalStore {
         }
       }
     };
+  }
+
+  #detachUnavailableOwnedLocal(entry: CachedJitValue): void {
+    if (entry.local !== undefined && entry.local.ownerCount !== 0) {
+      entry.local.entry = undefined;
+      entry.local = undefined;
+    }
+  }
+
+  #localSnapshotRef(local: number): CachedJitLocal {
+    const cacheLocal = this.#localsByIndex.get(local);
+
+    if (cacheLocal === undefined) {
+      throw new Error(`JIT value cache availability snapshot references unknown local: ${local}`);
+    }
+
+    return cacheLocal;
   }
 }
 
@@ -251,6 +334,14 @@ export function createJitValueCacheRuntime(
       valueIsSelectedInEpoch(value)
         ? store.captureForReuse(value, emitter)
         : undefined,
+    snapshotAvailability: () => ({
+      currentEpoch,
+      store: store.snapshotAvailability()
+    }),
+    restoreAvailability: (snapshot) => {
+      currentEpoch = snapshot.currentEpoch;
+      store.restoreAvailability(snapshot.store);
+    },
     jitValueForExpression: (value) =>
       currentInstructionPlan().expressionValues.get(value) ?? jitValueForExpressionRef(value),
     jitValueForValueRef: (value) => {

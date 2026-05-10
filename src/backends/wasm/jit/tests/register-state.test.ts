@@ -759,7 +759,7 @@ test("jit exit materializations require captured register state", () => {
   );
 });
 
-test("jit exit materializations copy register store targets to CPU state", async () => {
+test("jit exit materializations store planned sources to CPU state", async () => {
   const body = new WasmFunctionBodyEncoder();
   const exitLocal = body.addLocal(wasmValueType.i64);
   const state = createJitIrState(body, [
@@ -767,7 +767,7 @@ test("jit exit materializations copy register store targets to CPU state", async
     {
       stores: [{
         target: { kind: "reg32", reg: "ebx" },
-        value: jitInputReg32Value("ebx")
+        value: jitInputReg32Value("eax")
       }],
       flagMask: 0
     }
@@ -815,7 +815,7 @@ test("jit exit materializations copy register store targets to CPU state", async
   }));
 
   strictEqual(result.eax, 0x1111_1111);
-  strictEqual(result.ebx, 0x2222_2222);
+  strictEqual(result.ebx, 0x1111_1111);
 });
 
 test("jit register exit snapshot stores read source register state", async () => {
