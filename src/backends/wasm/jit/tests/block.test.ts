@@ -122,12 +122,13 @@ test("buildJitIrBlock keeps earlier CF producer live across INC", () => {
   strictEqual(ir.some((op) => op.op === "flags.materialize"), false);
 });
 
-test("buildJitIrBlock emits direct cmp and jcc branch conditions", () => {
+test("buildJitIrBlock keeps cmp and jcc branch conditions in flag value state", () => {
   const cmp = ok(decodeBytes([0x39, 0xd8], startAddress));
   const je = ok(decodeBytes([0x74, 0x05], cmp.nextEip));
   const ir = codegenIr(buildJitIrBlock([cmp, je]));
 
-  strictEqual(ir.some((op) => op.op === "flagProducer.condition"), true);
+  strictEqual(ir.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(ir.some((op) => op.op === "flagProducer.condition"), false);
   strictEqual(ir.some((op) => op.op === "flags.materialize"), false);
 });
 
@@ -1559,7 +1560,7 @@ test("jit IR block emits memory setcc as a selected byte store", async () => {
   strictEqual(notTaken.state.instructionCount, 1);
 });
 
-test("jit IR block specializes setcc conditions from local flag producers", async () => {
+test("jit IR block lowers setcc conditions from local flag value state", async () => {
   const cmp = ok(decodeBytes([0x39, 0xd8], startAddress));
   const sete = ok(decodeBytes([0x0f, 0x94, 0xc0], cmp.nextEip));
   const ir = codegenIr(buildJitIrBlock([cmp, sete]));
@@ -1578,7 +1579,8 @@ test("jit IR block specializes setcc conditions from local flag producers", asyn
     createCpuState({ eax: 0x1234_5678, ebx: 0x1234_5679, eflags: preservedEflags, eip: startAddress })
   );
 
-  strictEqual(ir.some((op) => op.op === "flagProducer.condition"), true);
+  strictEqual(ir.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(ir.some((op) => op.op === "flagProducer.condition"), false);
   strictEqual(equal.state.eax, 0x1234_5601);
   strictEqual(equal.state.instructionCount, 2);
   strictEqual(notEqual.state.eax, 0x1234_5600);

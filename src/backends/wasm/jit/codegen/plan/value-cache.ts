@@ -251,33 +251,12 @@ function childValueUsesForValue(
         ...valueUsesForValue(instruction, value.whenTrue, state),
         ...valueUsesForValue(instruction, value.whenFalse, state)
       ];
-    case "flagProducer.condition":
-      return Object.values(value.inputs).flatMap((input) =>
-        valueUsesForValueRef(input, state)
-      );
     case "var":
     case "const":
     case "nextEip":
     case "address":
     case "aluFlags.condition":
-      return [];
-  }
-}
-
-function valueUsesForValueRef(
-  value: ValueRef,
-  state: JitValueUseInstructionState
-): readonly JitValueUse[] {
-  switch (value.kind) {
-    case "const": {
-      const jitValue = { kind: "const", type: value.type, value: value.value } as const satisfies JitValue;
-
-      state.expressionJitValues.set(value, jitValue);
-      return [{ value: jitValue, children: [] }];
-    }
-    case "var":
-      return [];
-    case "nextEip":
+    case "flagProducer.condition":
       return [];
   }
 }

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
 import type { Reg32 } from "#x86/isa/types.js";
-import { IR_ALU_FLAG_MASK, IR_ALU_FLAG_MASKS } from "#x86/ir/model/flag-effects.js";
+import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
@@ -224,27 +224,20 @@ test("planJitCodegen records exit materializations only for actual exit points",
   deepStrictEqual(codegenPlan.instructionStates.map((entry) => entry.exitPointCount), [0, 0, 1]);
 });
 
-test("planJitCodegen records flag materialization requirements before conditions and exits", () => {
+test("planJitCodegen records flag materialization requirements for branch exits", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const jb = ok(decodeBytes([0x72, 0x05], add.nextEip));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([add, jb])));
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
-  const conditionMaterialization = codegenPlan.flagMaterializationRequirements.find(
-    (entry) => entry.reason === "condition"
-  );
   const branchExits = codegenPlan.exitPoints.filter((entry) =>
     entry.exitReason === ExitReason.BRANCH_TAKEN || entry.exitReason === ExitReason.BRANCH_NOT_TAKEN
   );
+  const branchIr = codegenPlan.block.instructions[1]!.ir;
   const branchExpressionBlock = emissionPlan.instructions[1]?.expressionBlock;
   const conditionalJumpIndex = branchExpressionBlock?.findIndex((op) => op.op === "conditionalJump") ?? -1;
 
-  deepStrictEqual(conditionMaterialization, {
-    instructionIndex: 1,
-    opIndex: 0,
-    reason: "condition",
-    requiredMask: IR_ALU_FLAG_MASKS.CF,
-    pendingMask: IR_ALU_FLAG_MASKS.CF
-  });
+  strictEqual(branchIr.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(branchIr.some((op) => op.op === "flagProducer.condition"), false);
   strictEqual(branchExits.length, 2);
 
   for (const exit of branchExits) {
@@ -478,6 +471,38 @@ test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () 
   );
 });
 
+test("planJitCodegen rejects legacy direct flag condition IR", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "legacy-direct-condition",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        {
+          op: "flagProducer.condition",
+          dst: { kind: "var", id: 0 },
+          cc: "E",
+          producer: "sub",
+          writtenMask: IR_ALU_FLAG_MASK,
+          undefMask: 0,
+          inputs: {
+            left: { kind: "const", type: "i32", value: 1 },
+            right: { kind: "const", type: "i32", value: 1 }
+          }
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+
+  throws(
+    () => planJitCodegen(block),
+    /flagProducer\.condition is legacy emitter-only IR and cannot reach codegen planning at 0:0/
+  );
+});
+
 test("planJitCodegen lets later full flag producers replace partial merges", () => {
   const block: JitIrBlock = {
     instructions: [
@@ -592,8 +617,8 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
   } as const satisfies JitValue;
 
   strictEqual(cmpInstruction.ir.some((op) => op.op === "flags.set"), true);
-  strictEqual(cmoveInstruction.ir.some((op) => op.op === "aluFlags.condition"), false);
-  strictEqual(cmoveInstruction.ir.some((op) => op.op === "flagProducer.condition"), true);
+  strictEqual(cmoveInstruction.ir.some((op) => op.op === "aluFlags.condition"), true);
+  strictEqual(cmoveInstruction.ir.some((op) => op.op === "flagProducer.condition"), false);
   deepStrictEqual(exit.snapshot.valueState.regs.exitStore("edx"), registerStore("edx", selectedEdx));
 });
 

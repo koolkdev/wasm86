@@ -1,4 +1,3 @@
-import { conditionFlagReadMask } from "#x86/ir/model/flag-effects.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
 import { JitBlockStateTracker } from "#backends/wasm/jit/codegen/plan/block-state-tracker.js";
@@ -55,6 +54,8 @@ export function analyzeJitCodegenState(
       if (op === undefined) {
         throw new Error(`missing JIT IR op while planning JIT codegen: ${instructionIndex}:${opIndex}`);
       }
+
+      rejectLegacyCodegenPlanningOp(op, instructionIndex, opIndex);
 
       const faultReason = jitPreInstructionExitReasonAt(effects, instructionIndex, opIndex);
 
@@ -133,21 +134,8 @@ export function analyzeJitCodegenState(
       case "flags.boundary":
         state.commitFlags(op.mask);
         return;
-      case "aluFlags.condition": {
-        const requiredMask = conditionFlagReadMask(op.cc);
-        const pendingMask = state.pendingFlags(requiredMask);
-
-        if (requiredMask !== 0) {
-          flagMaterializationRequirements.push({
-            instructionIndex,
-            opIndex,
-            reason: "condition",
-            requiredMask,
-            pendingMask
-          });
-        }
+      case "aluFlags.condition":
         return;
-      }
       case "next":
         recordPostInstructionExits(instruction, instructionIndex, opIndex);
 
@@ -163,6 +151,21 @@ export function analyzeJitCodegenState(
       default:
         return;
     }
+  }
+
+  function rejectLegacyCodegenPlanningOp(
+    op: JitIrOp,
+    instructionIndex: number,
+    opIndex: number
+  ): void {
+    if (op.op !== "flagProducer.condition") {
+      return;
+    }
+
+    throw new Error(
+      `JIT flagProducer.condition is legacy emitter-only IR and cannot reach codegen planning at ` +
+      `${instructionIndex}:${opIndex}`
+    );
   }
 
   function recordPostInstructionExits(

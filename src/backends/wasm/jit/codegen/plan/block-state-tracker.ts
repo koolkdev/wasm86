@@ -66,10 +66,6 @@ export class JitBlockStateTracker {
     this.effectVisibleValueState = this.valueState.snapshot();
   }
 
-  pendingFlags(mask: number): number {
-    return mask & this.speculativeFlagsMask;
-  }
-
   recordOp(
     op: JitIrOp,
     instruction: JitIrBlockInstruction,
@@ -94,9 +90,6 @@ export class JitBlockStateTracker {
         );
         return;
       case "aluFlags.condition":
-        this.values.record(op.dst.id, this.valueState.flags.condition(op.cc));
-        return;
-      case "flagProducer.condition":
         this.values.record(op.dst.id, this.valueState.flags.condition(op.cc));
         return;
       case "set":

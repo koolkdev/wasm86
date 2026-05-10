@@ -33,7 +33,7 @@ export type JitExitPoint = Readonly<{
 export type JitFlagMaterializationRequirement = Readonly<{
   instructionIndex: number;
   opIndex: number;
-  reason: "condition" | "exit";
+  reason: "exit";
   requiredMask: number;
   pendingMask: number;
 }>;
