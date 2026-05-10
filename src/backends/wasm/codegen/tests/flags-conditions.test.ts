@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
-import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
+import { createIrFlagSetOp, flagProducerInputsFromRecord } from "#x86/ir/model/flags.js";
 import type { ConditionCode, FlagProducerName, ValueRef } from "#x86/ir/model/types.js";
 import { x86ArithmeticFlagMask } from "#x86/isa/flags.js";
 import { i32 } from "#x86/state/cpu-state.js";
@@ -10,7 +10,7 @@ import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js
 import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
-import { emitFlagsCondition, emitFlagProducerCondition } from "#backends/wasm/codegen/conditions.js";
+import { emitFlagsCondition, emitFlagProducerConditionFromInputs } from "#backends/wasm/codegen/conditions.js";
 import { wasmIrLocalAluFlagsStorage } from "#backends/wasm/codegen/alu-flags.js";
 import { emitSetFlags } from "#backends/wasm/codegen/flags.js";
 import {
@@ -91,7 +91,7 @@ test("emitFlagsCondition evaluates compound condition formulas from arithmetic f
   strictEqual(g(x86ArithmeticFlagMask.SF | x86ArithmeticFlagMask.OF), 1);
 });
 
-test("emitFlagProducerCondition evaluates producer-backed sub comparisons directly", async () => {
+test("emitFlagProducerConditionFromInputs evaluates producer-backed sub comparisons directly", async () => {
   const eq = await instantiateFlagProducerCondition("E");
   const below = await instantiateFlagProducerCondition("B");
   const signedLess = await instantiateFlagProducerCondition("L");
@@ -105,12 +105,11 @@ test("emitFlagProducerCondition evaluates producer-backed sub comparisons direct
   strictEqual(signedGreater(0x7fff_ffff, 0xffff_ffff), 1);
 });
 
-test("emitFlagProducerCondition evaluates producer-backed result conditions directly", async () => {
+test("emitFlagProducerConditionFromInputs evaluates producer-backed result conditions directly", async () => {
   const incZero = await instantiateResultFlagProducerCondition("inc", "E");
   const logicNonZero = await instantiateResultFlagProducerCondition("logic", "NE");
   const decSign = await instantiateResultFlagProducerCondition("dec", "S");
   const addNotSign = await instantiateResultFlagProducerCondition("add", "NS");
-  const subZero = await instantiateResultFlagProducerCondition("sub", "E");
   const addParity = await instantiateResultFlagProducerCondition("add", "P");
   const logicNotParity = await instantiateResultFlagProducerCondition("logic", "NP");
   const logicBelow = await instantiateResultFlagProducerCondition("logic", "B");
@@ -124,8 +123,6 @@ test("emitFlagProducerCondition evaluates producer-backed result conditions dire
   strictEqual(logicNonZero(1), 1);
   strictEqual(decSign(0x8000_0000), 1);
   strictEqual(addNotSign(0x7fff_ffff), 1);
-  strictEqual(subZero(0), 1);
-  strictEqual(subZero(1), 0);
   strictEqual(addParity(3), 1);
   strictEqual(logicNotParity(1), 1);
   strictEqual(logicBelow(0), 0);
@@ -242,13 +239,10 @@ function encodeFlagProducerConditionModule(cc: ConditionCode): Uint8Array<ArrayB
   });
   const body = new WasmFunctionBodyEncoder(2);
 
-  emitFlagProducerCondition(body, {
-    kind: "flagProducer.condition",
+  emitFlagProducerConditionFromInputs(body, {
     cc,
     producer: "sub",
-    writtenMask: createIrFlagSetOp("sub", { left: v(0), right: v(1), result: v(2) }).writtenMask,
-    undefMask: 0,
-    inputs: { left: v(0), right: v(1) }
+    inputs: flagProducerInputsFromRecord("sub", { left: v(0), right: v(1), result: v(0) })
   }, {
     emitValue: (value) => emitValueExpr(body, value),
     emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))
@@ -286,15 +280,11 @@ function encodeResultFlagProducerConditionModule(
     results: [wasmValueType.i32]
   });
   const body = new WasmFunctionBodyEncoder(1);
-  const descriptor = createIrFlagSetOp(producer, flagSetInputs(producer));
 
-  emitFlagProducerCondition(body, {
-    kind: "flagProducer.condition",
+  emitFlagProducerConditionFromInputs(body, {
     cc,
     producer,
-    writtenMask: descriptor.writtenMask,
-    undefMask: descriptor.undefMask,
-    inputs: { result: v(0) }
+    inputs: flagProducerInputsFromRecord(producer, flagSetInputs(producer))
   }, {
     emitValue: (value) => emitValueExpr(body, value),
     emitMaskedValue: (value, width) => emitMaskValueToWidth(body, width, emitValueExpr(body, value))

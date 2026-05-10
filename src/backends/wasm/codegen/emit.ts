@@ -54,10 +54,7 @@ export type WasmIrEmitContext = Readonly<{
   ): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
   emitSetFlags(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
-  emitMaterializeFlags(mask: number, helpers: WasmIrEmitHelpers): void;
-  emitBoundaryFlags(mask: number, helpers: WasmIrEmitHelpers): void;
   emitFlagsCondition(cc: ConditionCode): void;
-  emitFlagProducerCondition(condition: Extract<IrValueExpr, { kind: "flagProducer.condition" }>, helpers: WasmIrEmitHelpers): void;
   emitNext(helpers: WasmIrEmitHelpers): void;
   emitNextEip(helpers: WasmIrEmitHelpers): void;
   emitJump(target: IrValueExpr, helpers: WasmIrEmitHelpers): void;
@@ -144,12 +141,6 @@ class IrExprWasmEmitter {
       case "flags.set":
         this.#context.emitSetFlags(op, this.#helpers);
         return;
-      case "flags.materialize":
-        this.#context.emitMaterializeFlags(op.mask, this.#helpers);
-        return;
-      case "flags.boundary":
-        this.#context.emitBoundaryFlags(op.mask, this.#helpers);
-        return;
       case "next":
         this.#context.emitNext(this.#helpers);
         return;
@@ -211,9 +202,6 @@ class IrExprWasmEmitter {
         return untrackedValueWidth();
       case "flags.condition":
         this.#context.emitFlagsCondition(value.cc);
-        return cleanValueWidth(8);
-      case "flagProducer.condition":
-        this.#context.emitFlagProducerCondition(value, this.#helpers);
         return cleanValueWidth(8);
       case "value.binary":
         return this.#emitI32Binary(value.operator, value.a, value.b);

@@ -1,6 +1,6 @@
 import type { Reg32 } from "#x86/isa/types.js";
 import type { ValueRef, VarRef } from "#x86/ir/model/types.js";
-import { jitIrOpDst } from "#backends/wasm/jit/ir/semantics.js";
+import { irOpDst } from "#x86/ir/model/op-semantics.js";
 import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
 import type { JitLegacyRewritableValue, JitRegValue } from "#backends/wasm/jit/ir/values.js";
 import { jitValueIsSymbolicReg } from "#backends/wasm/jit/ir/values.js";
@@ -229,7 +229,7 @@ function nextInstructionVarId(instruction: JitIrBlockInstruction): number {
   let nextVarId = 0;
 
   for (const op of instruction.ir) {
-    const dst = jitIrOpDst(op);
+    const dst = irOpDst(op);
 
     if (dst !== undefined) {
       nextVarId = Math.max(nextVarId, dst.id + 1);

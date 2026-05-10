@@ -1,8 +1,3 @@
-import {
-  flagProducerConditionInputNames,
-  requiredFlagProducerConditionInput,
-  type IrFlagProducerConditionDescriptor
-} from "#x86/ir/model/flag-conditions.js";
 import type {
   ConditionCode,
   IrBinaryOperator,
@@ -28,15 +23,6 @@ export type IrValueExpr =
   | Readonly<{ kind: "source"; source: IrStorageExpr; accessWidth: OperandWidth; signed?: boolean }>
   | Readonly<{ kind: "address"; operand: OperandRef }>
   | Readonly<{ kind: "flags.condition"; cc: ConditionCode }>
-  | Readonly<{
-      kind: "flagProducer.condition";
-      cc: ConditionCode;
-      producer: IrFlagProducerConditionDescriptor["producer"];
-      width?: IrFlagProducerConditionDescriptor["width"];
-      writtenMask: IrFlagProducerConditionDescriptor["writtenMask"];
-      undefMask: IrFlagProducerConditionDescriptor["undefMask"];
-      inputs: Readonly<Record<string, ValueRef>>;
-    }>
   | Readonly<{
       kind: "value.binary";
       type: IrValueType;
@@ -72,8 +58,6 @@ export type IrExprOp =
   | Readonly<{ op: "let32"; dst: VarRef; value: IrValueExpr }>
   | IrSetExprOp
   | IrFlagSetOp
-  | Readonly<{ op: "flags.materialize"; mask: number }>
-  | Readonly<{ op: "flags.boundary"; mask: number }>
   | Readonly<{ op: "next" }>
   | Readonly<{ op: "jump"; target: IrValueExpr }>
   | Readonly<{ op: "conditionalJump"; condition: IrValueExpr; taken: IrValueExpr; notTaken: IrValueExpr }>
@@ -81,19 +65,13 @@ export type IrExprOp =
 
 export type IrExprBlock = readonly IrExprOp[];
 
-export type IrExpressionFlagProducerConditionOp = IrFlagProducerConditionDescriptor & Readonly<{
-  op: "flagProducer.condition";
-  dst: VarRef;
-}>;
-
 export type IrExpressionSetInputOp = Extract<IrOp, { op: "set" }> & Readonly<{
   role?: IrSetExprRole;
 }>;
 
 export type IrExpressionInputOp =
   | Exclude<IrOp, Extract<IrOp, { op: "set" }>>
-  | IrExpressionSetInputOp
-  | IrExpressionFlagProducerConditionOp;
+  | IrExpressionSetInputOp;
 export type IrExpressionInputBlock = readonly IrExpressionInputOp[];
 
 export type IrExpressionAliasModel = Readonly<{
@@ -186,17 +164,6 @@ class ExpressionBuilder {
         case "flags.condition":
           this.#defineValue(op.dst, { kind: "flags.condition", cc: op.cc }, false);
           break;
-        case "flagProducer.condition":
-          this.#defineValue(op.dst, {
-            kind: "flagProducer.condition",
-            cc: op.cc,
-            producer: op.producer,
-            ...(op.width === undefined ? {} : { width: op.width }),
-            writtenMask: op.writtenMask,
-            undefMask: op.undefMask,
-            inputs: this.#materializedFlagProducerConditionInputs(op)
-          }, true);
-          break;
         case "flags.set":
           this.#ops.push({
             op: "flags.set",
@@ -208,12 +175,6 @@ class ExpressionBuilder {
               Object.entries(op.inputs).map(([name, value]) => [name, this.#materializedValue(value)])
             )
           });
-          break;
-        case "flags.materialize":
-          this.#ops.push(op);
-          break;
-        case "flags.boundary":
-          this.#ops.push(op);
           break;
         case "next":
           this.#ops.push(op);
@@ -298,15 +259,6 @@ class ExpressionBuilder {
     return materialized;
   }
 
-  #materializedFlagProducerConditionInputs(op: IrFlagProducerConditionDescriptor): Readonly<Record<string, ValueRef>> {
-    return Object.fromEntries(
-      flagProducerConditionInputNames(op).map((name) => [
-        name,
-        this.#materializedValue(requiredFlagProducerConditionInput(op, name))
-      ])
-    );
-  }
-
   #storageExpr(storage: StorageRef): IrStorageExpr {
     switch (storage.kind) {
       case "operand":
@@ -353,11 +305,6 @@ function countVarUses(block: IrExpressionInputBlock): Map<number, number> {
       case "flags.condition":
       case "next":
         break;
-      case "flagProducer.condition":
-        for (const name of flagProducerConditionInputNames(op)) {
-          countValueUse(counts, requiredFlagProducerConditionInput(op, name));
-        }
-        break;
       case "value.binary":
         countValueUse(counts, op.a);
         countValueUse(counts, op.b);
@@ -374,9 +321,6 @@ function countVarUses(block: IrExpressionInputBlock): Map<number, number> {
         for (const value of Object.values(op.inputs)) {
           countValueUse(counts, value);
         }
-        break;
-      case "flags.materialize":
-      case "flags.boundary":
         break;
       case "jump":
         countValueUse(counts, op.target);
@@ -419,10 +363,6 @@ function opUsesVar(op: IrExpressionInputOp, id: number): boolean {
       return false;
     case "flags.condition":
       return false;
-    case "flagProducer.condition":
-      return flagProducerConditionInputNames(op).some((name) =>
-        valueUsesVar(requiredFlagProducerConditionInput(op, name), id)
-      );
     case "value.binary":
       return valueUsesVar(op.a, id) || valueUsesVar(op.b, id);
     case "value.unary":
@@ -433,8 +373,6 @@ function opUsesVar(op: IrExpressionInputOp, id: number): boolean {
         valueUsesVar(op.whenFalse, id);
     case "flags.set":
       return Object.values(op.inputs).some((value) => valueUsesVar(value, id));
-    case "flags.materialize":
-    case "flags.boundary":
     case "next":
       return false;
     case "jump":

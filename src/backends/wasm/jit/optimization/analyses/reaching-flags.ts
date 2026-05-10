@@ -31,8 +31,6 @@ export type {
 
 export type JitReachingFlagReadReason =
   | "condition"
-  | "materialize"
-  | "boundary"
   | "preInstructionExit"
   | "exit";
 
@@ -145,24 +143,6 @@ export function analyzeJitReachingFlags(
         }
         break;
       }
-      case "flags.materialize":
-        recordRead({
-          instructionIndex,
-          opIndex,
-          reason: "materialize",
-          requiredMask: op.mask
-        });
-        owners.recordMaterialized(op.mask);
-        break;
-      case "flags.boundary":
-        recordRead({
-          instructionIndex,
-          opIndex,
-          reason: "boundary",
-          requiredMask: op.mask
-        });
-        owners.recordMaterialized(op.mask);
-        break;
       default:
         break;
     }

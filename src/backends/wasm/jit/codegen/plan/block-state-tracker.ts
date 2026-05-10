@@ -99,8 +99,6 @@ export class JitBlockStateTracker {
       case "flags.set":
         this.recordFlagSet(op);
         return;
-      case "flags.materialize":
-      case "flags.boundary":
       case "next":
       case "jump":
       case "conditionalJump":
@@ -112,13 +110,6 @@ export class JitBlockStateTracker {
   markSpeculativeFlags(mask: number): void {
     this.speculativeFlagsMask |= mask;
     this.committedFlagsMask &= ~mask;
-  }
-
-  commitFlags(mask: number): void {
-    const committedMask = mask & this.speculativeFlagsMask;
-
-    this.speculativeFlagsMask &= ~mask;
-    this.committedFlagsMask |= committedMask;
   }
 
   commitInstruction(): void {

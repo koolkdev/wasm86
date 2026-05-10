@@ -1,9 +1,8 @@
-import { assertIrAluFlagMask, IR_FLAG_MASK_NONE } from "#x86/ir/model/flag-effects.js";
-import type { IrFlagProducerDescriptor } from "#x86/ir/model/flag-conditions.js";
+import { assertIrAluFlagMask } from "#x86/ir/model/flag-effects.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import type { OperandWidth } from "#x86/isa/types.js";
-import type { FlagMask, IrOp, IrBlock, StorageRef, ValueRef } from "#x86/ir/model/types.js";
+import type { IrFlagSetOp, IrOp, IrBlock, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 
 export type ValidateIrBlockOptions = Readonly<{
   operandCount?: number;
@@ -88,10 +87,6 @@ function validateOpUses(
       break;
     case "flags.condition":
       break;
-    case "flags.materialize":
-    case "flags.boundary":
-      validateAluFlagOpMask(op.mask, op.op);
-      break;
     case "jump":
       validateValueRef(op.target, definedVars);
       break;
@@ -141,15 +136,10 @@ function validateValueRef(value: ValueRef, definedVars: ReadonlySet<number>): vo
   }
 }
 
-function validateAluFlagOpMask(mask: FlagMask, op: "flags.materialize" | "flags.boundary"): void {
-  assertIrAluFlagMask(mask, `${op} mask`);
-
-  if (mask === IR_FLAG_MASK_NONE) {
-    throw new Error(`${op} requires a nonzero aluFlags mask`);
-  }
-}
-
-function validateFlagSetDescriptor(op: IrFlagProducerDescriptor, definedVars: ReadonlySet<number>): void {
+function validateFlagSetDescriptor(
+  op: Pick<IrFlagSetOp, "producer" | "width" | "writtenMask" | "undefMask" | "inputs">,
+  definedVars: ReadonlySet<number>
+): void {
   const producer = FLAG_PRODUCERS[op.producer];
 
   validateAccessWidth(op.width);
@@ -178,7 +168,7 @@ function validateSignedGet(op: Extract<IrOp, { op: "get" }>): void {
 }
 
 function validateFlagDescriptorMasks(
-  op: IrFlagProducerDescriptor,
+  op: Pick<IrFlagSetOp, "producer" | "writtenMask" | "undefMask">,
   label: "flags.set"
 ): void {
   const producer = FLAG_PRODUCERS[op.producer];
@@ -200,7 +190,7 @@ function validateFlagDescriptorMasks(
 }
 
 function validateFlagInputs(
-  op: IrFlagProducerDescriptor,
+  op: Pick<IrFlagSetOp, "producer" | "inputs">,
   definedVars: ReadonlySet<number>,
   options: Readonly<{
     label: "flags.set";

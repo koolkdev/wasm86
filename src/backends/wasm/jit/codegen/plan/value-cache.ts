@@ -200,8 +200,6 @@ function valueUsesForOp(
       ];
     case "hostTrap":
       return valueUsesForValue(instruction, op.vector, state);
-    case "flags.materialize":
-    case "flags.boundary":
     case "next":
       return [];
   }
@@ -256,7 +254,6 @@ function childValueUsesForValue(
     case "nextEip":
     case "address":
     case "flags.condition":
-    case "flagProducer.condition":
       return [];
   }
 }
@@ -473,7 +470,6 @@ function jitValueForExpressionUntracked(
     }
     case "nextEip":
     case "flags.condition":
-    case "flagProducer.condition":
       return undefined;
   }
 }

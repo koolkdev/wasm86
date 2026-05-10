@@ -1,18 +1,13 @@
 import { CONDITIONS, type FlagBoolExpr } from "#x86/ir/model/conditions.js";
-import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
-import {
-  flagProducerConditionKind,
-  requiredFlagProducerConditionInput
-} from "#x86/ir/model/flag-conditions.js";
+import { flagProducerConditionKind } from "#x86/ir/model/flag-conditions.js";
 import type { FlagProducerInputs } from "#x86/ir/model/flags.js";
 import { requiredFlagProducerInput } from "#x86/ir/model/flags.js";
-import type { ConditionCode, FlagProducerName, ValueRef } from "#x86/ir/model/types.js";
+import type { ConditionCode, FlagProducerName } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import { x86ArithmeticFlagMask } from "#x86/isa/flags.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import type { WasmIrAluFlagsStorage } from "./alu-flags.js";
-import type { WasmIrEmitHelpers } from "./emit.js";
 import type { WasmFlagValueEmitHelpers } from "./flags.js";
 
 type EmitAluFlagsValue = (mask: number) => void;
@@ -51,19 +46,6 @@ export function emitFlagsConditionFromAluFlagsValue(
   emitFlagsConditionExpression(body, cc, emitAluFlagsValue);
 }
 
-export function emitFlagProducerCondition(
-  body: WasmFunctionBodyEncoder,
-  condition: Extract<IrValueExpr, { kind: "flagProducer.condition" }>,
-  helpers: WasmIrEmitHelpers
-): void {
-  emitFlagProducerConditionWithInputs(
-    body,
-    condition,
-    (inputName, width) => helpers.emitMaskedValue(requiredFlagProducerConditionInput(condition, inputName), width),
-    condition.inputs
-  );
-}
-
 export function emitFlagProducerConditionFromInputs<T>(
   body: WasmFunctionBodyEncoder,
   condition: FlagProducerConditionInputDescriptor<T>,
@@ -79,10 +61,9 @@ export function emitFlagProducerConditionFromInputs<T>(
 function emitFlagProducerConditionWithInputs(
   body: WasmFunctionBodyEncoder,
   condition: FlagProducerConditionMetadata,
-  emitMaskedInput: EmitMaskedConditionInput,
-  legacyInputs?: Readonly<Record<string, ValueRef>>
+  emitMaskedInput: EmitMaskedConditionInput
 ): void {
-  switch (flagProducerConditionKindDescriptor(condition, legacyInputs)) {
+  switch (flagProducerConditionKindDescriptor(condition)) {
     case "eq":
       emitInputCompare(condition, emitMaskedInput);
       body.i32Xor().i32Eqz();
@@ -164,8 +145,7 @@ function emitFlagProducerConditionWithInputs(
 }
 
 function flagProducerConditionKindDescriptor(
-  condition: FlagProducerConditionMetadata,
-  legacyInputs: Readonly<Record<string, ValueRef>> | undefined
+  condition: FlagProducerConditionMetadata
 ) {
   const descriptor = {
     cc: condition.cc,
@@ -173,9 +153,7 @@ function flagProducerConditionKindDescriptor(
     ...(condition.width === undefined ? {} : { width: condition.width })
   };
 
-  return flagProducerConditionKind(
-    legacyInputs === undefined ? descriptor : { ...descriptor, inputs: legacyInputs }
-  );
+  return flagProducerConditionKind(descriptor);
 }
 
 function emitFlagsConditionExpression(

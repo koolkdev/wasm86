@@ -1,4 +1,4 @@
-import { strictEqual, throws } from "node:assert";
+import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
@@ -107,21 +107,6 @@ test("JIT flag state emits incoming flag conditions without a fallback local", (
   body.end();
 
   strictEqual(wasmBodyLocalCount(body.encode()), 0);
-});
-
-test("JIT flag state rejects materialize and boundary ops in JIT codegen", () => {
-  const body = new WasmFunctionBodyEncoder();
-  const flags = createJitFlagState(body, {
-    emitLoadAluFlagsValue: () => {
-      throw new Error("unexpected incoming aluFlags load");
-    },
-    emitStoreAluFlags: () => {
-      throw new Error("unexpected aluFlags store");
-    }
-  });
-
-  throws(() => flags.emitMaterialize(IR_ALU_FLAG_MASK), /flags\.materialize reached Wasm codegen/);
-  throws(() => flags.emitBoundary(IR_ALU_FLAG_MASK), /flags\.boundary reached Wasm codegen/);
 });
 
 test("JIT flag state releases cached pending inputs when pending owners are released", () => {

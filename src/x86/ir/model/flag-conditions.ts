@@ -1,4 +1,4 @@
-import type { ConditionCode, FlagMask, FlagProducerName, IrFlagSetOp, ValueRef } from "./types.js";
+import type { ConditionCode, FlagProducerName, IrFlagSetOp } from "./types.js";
 
 export type IrFlagProducerConditionKind =
   | "eq"
@@ -20,23 +20,14 @@ export type IrFlagProducerConditionKind =
   | "zeroOrSign"
   | "nonZeroAndNotSign";
 
-export type IrFlagProducerConditionDescriptor = Readonly<{
+export type FlagProducerConditionDescriptor = Readonly<{
   cc: ConditionCode;
   producer: FlagProducerName;
   width?: IrFlagSetOp["width"];
-  writtenMask: FlagMask;
-  undefMask: FlagMask;
-  inputs: Readonly<Record<string, ValueRef>>;
 }>;
 
-export type IrFlagProducerDescriptor = Pick<
-  IrFlagSetOp,
-  "producer" | "width" | "writtenMask" | "undefMask" | "inputs"
->;
-
 export function flagProducerConditionKind(
-  condition: Pick<IrFlagProducerConditionDescriptor, "cc" | "producer"> &
-    Partial<Pick<IrFlagProducerConditionDescriptor, "inputs" | "width">>
+  condition: FlagProducerConditionDescriptor
 ): IrFlagProducerConditionKind | undefined {
   if (condition.producer === "logic") {
     switch (condition.cc) {
@@ -69,7 +60,7 @@ export function flagProducerConditionKind(
     }
   }
 
-  if (condition.producer === "sub" && !conditionUsesOnlyResultInput(condition)) {
+  if (condition.producer === "sub") {
     switch (condition.cc) {
       case "E":
         return "eq";
@@ -112,76 +103,10 @@ export function flagProducerConditionKind(
   }
 }
 
-export function canUseFlagProducerCondition(
-  descriptor: IrFlagProducerDescriptor,
-  cc: ConditionCode
-): boolean {
-  return flagProducerConditionKind({
-    producer: descriptor.producer,
-    width: descriptor.width,
-    cc,
-    inputs: descriptor.inputs
-  }) !== undefined;
-}
-
-export function flagProducerConditionInputNames(
-  condition: Pick<IrFlagProducerConditionDescriptor, "cc" | "producer"> &
-    Partial<Pick<IrFlagProducerConditionDescriptor, "inputs" | "width">>
-): readonly string[] {
-  switch (flagProducerConditionKind(condition)) {
-    case "eq":
-    case "ne":
-    case "uLt":
-    case "uGe":
-    case "sLt":
-    case "sGe":
-    case "sLe":
-    case "sGt":
-      return ["left", "right"];
-    case "zero":
-    case "nonZero":
-    case "sign":
-    case "notSign":
-    case "parity8":
-    case "notParity8":
-    case "zeroOrSign":
-    case "nonZeroAndNotSign":
-      return ["result"];
-    case "constTrue":
-    case "constFalse":
-      return [];
-    case undefined:
-      throw new Error(`unsupported flag producer condition: ${condition.producer}/${condition.cc}`);
-  }
-}
-
-export function requiredFlagProducerConditionInput(
-  condition: IrFlagProducerConditionDescriptor,
-  name: string
-): ValueRef {
-  const input = condition.inputs[name];
-
-  if (input === undefined) {
-    throw new Error(`missing flag producer condition input '${name}' for ${condition.producer}/${condition.cc}`);
-  }
-
-  return input;
-}
-
 function producerHasResultInput(producer: FlagProducerName): boolean {
   return producer === "add" ||
     producer === "sub" ||
     producer === "logic" ||
     producer === "inc" ||
     producer === "dec";
-}
-
-function conditionUsesOnlyResultInput(condition: Partial<Pick<IrFlagProducerConditionDescriptor, "inputs">>): boolean {
-  if (condition.inputs === undefined) {
-    return false;
-  }
-
-  return condition.inputs.result !== undefined &&
-    condition.inputs.left === undefined &&
-    condition.inputs.right === undefined;
 }

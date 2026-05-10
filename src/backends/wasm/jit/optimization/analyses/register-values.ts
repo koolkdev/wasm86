@@ -1,6 +1,6 @@
 import { reg32, type Reg32 } from "#x86/isa/types.js";
 import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
-import { jitIrOpIsTerminator } from "#backends/wasm/jit/ir/semantics.js";
+import { irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import { JitValueTracker } from "#backends/wasm/jit/ir/value-tracker.js";
 import {
   jitStorageReg,
@@ -402,7 +402,7 @@ function isImmediatelyMaterializedAtExit(
   const nextOp = instruction.ir[nextOpIndex];
 
   return nextOp !== undefined &&
-    jitIrOpIsTerminator(nextOp) &&
+    irOpIsTerminator(nextOp) &&
     jitOpHasBarrier(barriers, instructionIndex, nextOpIndex, "exit");
 }
 
@@ -418,6 +418,6 @@ function isFinalBlockTerminatorWithoutExit(
   return instructionIndex === block.instructions.length - 1 &&
     instruction !== undefined &&
     opIndex === instruction.ir.length - 1 &&
-    jitIrOpIsTerminator(op) &&
+    irOpIsTerminator(op) &&
     !jitOpHasBarrier(barriers, instructionIndex, opIndex, "exit");
 }

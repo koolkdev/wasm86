@@ -3,11 +3,7 @@ import { test } from "node:test";
 
 import { irVar } from "#x86/ir/build/builder.js";
 import { CONDITIONS } from "#x86/ir/model/conditions.js";
-import {
-  canUseFlagProducerCondition,
-  flagProducerConditionInputNames,
-  flagProducerConditionKind
-} from "#x86/ir/model/flag-conditions.js";
+import { flagProducerConditionKind } from "#x86/ir/model/flag-conditions.js";
 import {
   conditionFlagReadMask,
   flagProducerEffect,
@@ -16,7 +12,7 @@ import {
   maskIrAluFlags
 } from "#x86/ir/model/flag-effects.js";
 import { FLAG_PRODUCERS, leaf } from "#x86/ir/model/flags.js";
-import type { ConditionCode, FlagProducerName, IrFlagSetOp } from "#x86/ir/model/types.js";
+import type { ConditionCode } from "#x86/ir/model/types.js";
 
 const left = irVar(0);
 const right = irVar(1);
@@ -189,7 +185,6 @@ test("sub flag producers support direct comparison condition emission", () => {
     cases.map(([cc]) => flagProducerConditionKind({ producer: "sub", cc })),
     cases.map(([, kind]) => kind)
   );
-  deepStrictEqual(canUseFlagProducerCondition(createDescriptor("sub"), "E"), true);
   deepStrictEqual(flagProducerConditionKind({ producer: "sub", cc: "P" }), "parity8");
   deepStrictEqual(flagProducerConditionKind({ producer: "sub", width: 8, cc: "L" }), "sLt");
 });
@@ -209,17 +204,11 @@ test("result flag producers support direct result condition emission", () => {
       cases.map(([cc]) => flagProducerConditionKind({ producer, cc })),
       cases.map(([, kind]) => kind)
     );
-    deepStrictEqual(canUseFlagProducerCondition(createDescriptor(producer), "E"), true);
   }
 
-  deepStrictEqual(
-    cases.map(([cc]) => flagProducerConditionKind({ producer: "sub", cc, inputs: { result } })),
-    cases.map(([, kind]) => kind)
-  );
   deepStrictEqual(flagProducerConditionKind({ producer: "sub", cc: "E" }), "eq");
-  deepStrictEqual(flagProducerConditionKind({ producer: "sub", cc: "E", inputs: { result } }), "zero");
   deepStrictEqual(flagProducerConditionKind({ producer: "add", width: 16, cc: "S" }), "sign");
-  deepStrictEqual(canUseFlagProducerCondition(createDescriptor("inc"), "B"), false);
+  deepStrictEqual(flagProducerConditionKind({ producer: "inc", cc: "B" }), undefined);
 });
 
 test("logic producer folds conditions that depend on cleared carry and overflow", () => {
@@ -240,16 +229,4 @@ test("logic producer folds conditions that depend on cleared carry and overflow"
     cases.map(([cc]) => flagProducerConditionKind({ producer: "logic", cc })),
     cases.map(([, kind]) => kind)
   );
-  deepStrictEqual(flagProducerConditionInputNames({ producer: "logic", cc: "B" }), []);
-  deepStrictEqual(flagProducerConditionInputNames({ producer: "logic", cc: "LE" }), ["result"]);
-  deepStrictEqual(canUseFlagProducerCondition(createDescriptor("logic"), "B"), true);
 });
-
-function createDescriptor(producer: FlagProducerName): Pick<IrFlagSetOp, "producer" | "writtenMask" | "undefMask" | "inputs"> {
-  return {
-    producer,
-    writtenMask: FLAG_PRODUCERS[producer].writtenMask,
-    undefMask: FLAG_PRODUCERS[producer].undefMask,
-    inputs: {}
-  };
-}

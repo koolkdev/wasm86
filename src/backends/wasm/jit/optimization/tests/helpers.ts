@@ -102,7 +102,6 @@ export function flagOwnerSummary(owners: readonly JitFlagOwnerMask[]): readonly 
       case "producer":
         return { mask, kind: owner.kind, sourceId: owner.source.id, producer: owner.source.producer };
       case "incoming":
-      case "materialized":
         return { mask, kind: owner.kind };
     }
   });

@@ -1,5 +1,5 @@
 import type { ValueRef } from "#x86/ir/model/types.js";
-import { visitJitIrOpValueRefs } from "#backends/wasm/jit/ir/semantics.js";
+import { visitIrOpValueRefs } from "#x86/ir/model/op-semantics.js";
 import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { walkJitIrBlockOps } from "#backends/wasm/jit/ir/walk.js";
 import { jitExitConditionValues, jitLocalConditionValues } from "#backends/wasm/jit/ir/effect-primitives.js";
@@ -133,7 +133,7 @@ function validateConditionConsumers(
       exitConditionValues?.get(opIndex)
     );
 
-    visitJitIrOpValueRefs(op, (value, role) => {
+    visitIrOpValueRefs(op, (value, role) => {
       if (value.kind !== "var" || !conditionVars.has(value.id)) {
         return;
       }

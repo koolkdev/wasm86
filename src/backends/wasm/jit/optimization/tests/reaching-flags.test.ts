@@ -63,31 +63,25 @@ test("reaching flags represents mixed-owner reads explicitly", () => {
   ]);
 });
 
-test("reaching flags records materialized owners and pre-instruction exit entry owners", () => {
+test("reaching flags records pre-instruction exit entry owners independently from current producers", () => {
   const analysis = analyzeJitReachingFlags({
     instructions: [
       syntheticInstruction([
         { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
         { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) },
         createIrFlagSetOp("add", { left: v(0), right: c32(1), result: v(1) }),
-        { op: "flags.materialize", mask: IR_ALU_FLAG_MASKS.ZF },
         { op: "get", dst: v(2), source: { kind: "mem", address: c32(0x2000) } },
         { op: "next" }
       ])
     ]
   });
-  const materializeRead = analysis.reads.find((read) => read.reason === "materialize")!;
   const preExitRead = analysis.reads.find((read) => read.reason === "preInstructionExit")!;
 
-  deepStrictEqual(flagOwnerSummary(materializeRead.owners), [
-    { mask: IR_ALU_FLAG_MASKS.ZF, kind: "producer", sourceId: 0, producer: "add" }
-  ]);
   deepStrictEqual(flagOwnerSummary(preExitRead.owners), [
     { mask: IR_ALU_FLAG_MASK, kind: "incoming" }
   ]);
   deepStrictEqual(flagOwnerSummary(analysis.finalOwners), [
-    { mask: IR_ALU_FLAG_MASK & ~IR_ALU_FLAG_MASKS.ZF, kind: "producer", sourceId: 0, producer: "add" },
-    { mask: IR_ALU_FLAG_MASKS.ZF, kind: "materialized" }
+    { mask: IR_ALU_FLAG_MASK, kind: "producer", sourceId: 0, producer: "add" }
   ]);
 });
 

@@ -4,10 +4,6 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import {
-  flagProducerConditionInputNames,
-  requiredFlagProducerConditionInput
-} from "#x86/ir/model/flag-conditions.js";
 
 export type IrExprVarSlotAssignment = Readonly<{
   slotCount: number;
@@ -104,9 +100,6 @@ function collectOpVarUses(op: IrExprOp, visit: (id: number) => void): void {
         collectValueVarUses(value, visit);
       }
       return;
-    case "flags.materialize":
-    case "flags.boundary":
-      return;
     case "next":
       return;
     case "jump":
@@ -138,11 +131,6 @@ function collectValueVarUses(value: IrValueExpr, visit: (id: number) => void): v
     case "nextEip":
     case "address":
     case "flags.condition":
-      return;
-    case "flagProducer.condition":
-      for (const name of flagProducerConditionInputNames(value)) {
-        collectValueVarUses(requiredFlagProducerConditionInput(value, name), visit);
-      }
       return;
     case "source":
       collectStorageVarUses(value.source, visit);

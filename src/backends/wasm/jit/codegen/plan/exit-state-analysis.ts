@@ -55,8 +55,6 @@ export function analyzeJitCodegenState(
         throw new Error(`missing JIT IR op while planning JIT codegen: ${instructionIndex}:${opIndex}`);
       }
 
-      rejectLegacyCodegenPlanningOp(op, instructionIndex, opIndex);
-
       const faultReason = jitPreInstructionExitReasonAt(effects, instructionIndex, opIndex);
 
       if (faultReason !== undefined) {
@@ -131,9 +129,6 @@ export function analyzeJitCodegenState(
       case "flags.set":
         state.markSpeculativeFlags(op.writtenMask | op.undefMask);
         return;
-      case "flags.boundary":
-        state.commitFlags(op.mask);
-        return;
       case "flags.condition":
         return;
       case "next":
@@ -151,21 +146,6 @@ export function analyzeJitCodegenState(
       default:
         return;
     }
-  }
-
-  function rejectLegacyCodegenPlanningOp(
-    op: JitIrOp,
-    instructionIndex: number,
-    opIndex: number
-  ): void {
-    if (op.op !== "flagProducer.condition") {
-      return;
-    }
-
-    throw new Error(
-      `JIT flagProducer.condition is legacy emitter-only IR and cannot reach codegen planning at ` +
-      `${instructionIndex}:${opIndex}`
-    );
   }
 
   function recordPostInstructionExits(

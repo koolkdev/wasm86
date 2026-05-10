@@ -38,8 +38,6 @@ export function irOpResult(op: IrOp): IrOpResult {
       return { kind: "value", dst: op.dst, sideEffect: "none" };
     case "set":
     case "flags.set":
-    case "flags.materialize":
-    case "flags.boundary":
     case "next":
     case "jump":
     case "conditionalJump":
@@ -71,8 +69,6 @@ export function irOpIsTerminator(op: IrOp): op is IrTerminatorOp {
     case "value.unary":
     case "value.select":
     case "flags.set":
-    case "flags.materialize":
-    case "flags.boundary":
     case "flags.condition":
       return false;
   }
@@ -121,8 +117,6 @@ export function visitIrOpValueRefs(
         visit(value, "value");
       }
       return;
-    case "flags.materialize":
-    case "flags.boundary":
     case "flags.condition":
     case "next":
       return;
@@ -180,8 +174,6 @@ export function visitIrOpStorageRefs(
     case "value.unary":
     case "value.select":
     case "flags.set":
-    case "flags.materialize":
-    case "flags.boundary":
     case "flags.condition":
     case "next":
     case "jump":

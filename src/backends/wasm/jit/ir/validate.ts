@@ -1,10 +1,5 @@
-import { flagProducerConditionInputNames, requiredFlagProducerConditionInput } from "#x86/ir/model/flag-conditions.js";
-import { assertIrAluFlagMask } from "#x86/ir/model/flag-effects.js";
-import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
-import type { IrBlock, ValueRef } from "#x86/ir/model/types.js";
 import { validateIrBlock } from "#x86/ir/passes/validator.js";
-import { jitIrOpDst } from "#backends/wasm/jit/ir/semantics.js";
-import type { JitIrBlock, JitIrBlockInstruction, JitIrBody, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlock, JitIrBlockInstruction, JitIrBody } from "#backends/wasm/jit/ir/types.js";
 import {
   analyzeJitBarriers,
   jitOpBarriersAt,
@@ -60,37 +55,10 @@ export function validateJitIrBlock(
 function validateJitInstructionBody(
   instruction: JitIrBlockInstruction
 ): void {
-  validateIrBlock(jitValidationIrBlock(instruction.ir), {
+  validateIrBlock(instruction.ir, {
     operandCount: instruction.operands.length,
     terminatorMode: "single"
   });
-  validateJitFlagProducerConditionInputUses(instruction.ir);
-}
-
-function jitValidationIrBlock(block: JitIrBody): IrBlock {
-  return block.map((op) => {
-    if (op.op === "flagProducer.condition") {
-      return { op: "flags.condition", dst: op.dst, cc: op.cc };
-    }
-
-    return op;
-  });
-}
-
-function validateJitFlagProducerConditionInputUses(block: JitIrBody): void {
-  const definedVars = new Set<number>();
-
-  for (const op of block) {
-    if (op.op === "flagProducer.condition") {
-      validateJitFlagProducerConditionInputs(op, definedVars);
-    }
-
-    const dst = jitIrOpDst(op);
-
-    if (dst !== undefined) {
-      definedVars.add(dst.id);
-    }
-  }
 }
 
 function validateJitBarrierIndex(block: JitIrBlock, barriers: JitBarrierAnalysis): void {
@@ -225,52 +193,5 @@ function validateJitRegisterMaterializations(
     if (writeBarrier?.reg !== op.target.reg) {
       throw new Error(`JIT register materialization is missing a write barrier for ${op.target.reg}`);
     }
-  }
-}
-
-function validateJitFlagProducerConditionInputs(
-  op: Extract<JitIrOp, { op: "flagProducer.condition" }>,
-  definedVars: ReadonlySet<number>
-): void {
-  validateJitFlagProducerConditionMasks(op);
-
-  const inputNames = flagProducerConditionInputNames(op);
-  const allowedInputs: ReadonlySet<string> = new Set(inputNames);
-
-  for (const inputName of inputNames) {
-    validateValueRef(requiredFlagProducerConditionInput(op, inputName), definedVars);
-  }
-
-  for (const [inputName, value] of Object.entries(op.inputs)) {
-    if (!allowedInputs.has(inputName)) {
-      throw new Error(`JIT flag condition ${op.producer}/${op.cc} has unexpected input '${inputName}'`);
-    }
-
-    validateValueRef(value, definedVars);
-  }
-}
-
-function validateJitFlagProducerConditionMasks(op: Extract<JitIrOp, { op: "flagProducer.condition" }>): void {
-  const producer = FLAG_PRODUCERS[op.producer];
-
-  assertIrAluFlagMask(op.writtenMask, "flagProducer.condition writtenMask");
-  assertIrAluFlagMask(op.undefMask, "flagProducer.condition undefMask");
-
-  if (op.writtenMask !== producer.writtenMask) {
-    throw new Error(`JIT flag condition ${op.producer} writtenMask does not match producer metadata`);
-  }
-
-  if (op.undefMask !== producer.undefMask) {
-    throw new Error(`JIT flag condition ${op.producer} undefMask does not match producer metadata`);
-  }
-
-  if ((op.undefMask & ~op.writtenMask) !== 0) {
-    throw new Error(`JIT flag condition ${op.producer} undefMask must be contained in writtenMask`);
-  }
-}
-
-function validateValueRef(value: ValueRef, definedVars: ReadonlySet<number>): void {
-  if (value.kind === "var" && !definedVars.has(value.id)) {
-    throw new Error(`JIT IR var ${value.id} is used before definition`);
   }
 }

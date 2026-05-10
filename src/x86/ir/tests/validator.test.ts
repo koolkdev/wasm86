@@ -75,18 +75,6 @@ test("validator rejects signed get without byte or word access width", () => {
   );
 });
 
-test("validator rejects invalid aluFlags operation masks", () => {
-  throws(
-    () => validateIrBlock([{ op: "flags.materialize", mask: 0 }, { op: "next" }]),
-    /flags\.materialize requires a nonzero aluFlags mask/
-  );
-
-  throws(
-    () => validateIrBlock([{ op: "flags.boundary", mask: 1 << 6 }, { op: "next" }]),
-    /flags\.boundary mask must contain only IR aluFlags bits/
-  );
-});
-
 test("validator rejects malformed flag producer inputs", () => {
   throws(
     () =>

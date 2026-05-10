@@ -2,7 +2,6 @@ import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { buildIrExpressionBlock } from "#backends/wasm/codegen/expressions.js";
-import { IR_ALU_FLAG_MASK, IR_ALU_FLAG_MASKS } from "#x86/ir/model/flag-effects.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 
 const v = (id: number) => ({ kind: "var" as const, id });
@@ -210,18 +209,14 @@ test("expression selector inlines select values into writes", () => {
   );
 });
 
-test("expression selector keeps condition reads before later flag boundaries", () => {
+test("expression selector materializes condition reads before conditional jumps", () => {
   deepStrictEqual(
     buildIrExpressionBlock([
-      { op: "flags.materialize", mask: IR_ALU_FLAG_MASKS.ZF },
       { op: "flags.condition", dst: v(0), cc: "E" },
-      { op: "flags.boundary", mask: IR_ALU_FLAG_MASK },
       { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
     ]),
     [
-      { op: "flags.materialize", mask: IR_ALU_FLAG_MASKS.ZF },
       { op: "let32", dst: v(0), value: { kind: "flags.condition", cc: "E" } },
-      { op: "flags.boundary", mask: IR_ALU_FLAG_MASK },
       { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
     ]
   );

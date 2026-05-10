@@ -9,7 +9,7 @@ import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
-import { jitIrOpDst, jitIrOpIsTerminator } from "#backends/wasm/jit/ir/semantics.js";
+import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import { optimizeJitIrBlock } from "#backends/wasm/jit/optimization/optimize.js";
@@ -59,8 +59,8 @@ test("JIT codegen plan keeps instruction-local operand namespaces", () => {
   strictEqual("ir" in optimizedBlock, false);
   strictEqual("operands" in optimizedBlock, false);
   strictEqual(emissionPlan.instructions.length, 2);
-  strictEqual(firstIr.filter(jitIrOpIsTerminator).length, 1);
-  strictEqual(secondIr.filter(jitIrOpIsTerminator).length, 1);
+  strictEqual(firstIr.filter(irOpIsTerminator).length, 1);
+  strictEqual(secondIr.filter(irOpIsTerminator).length, 1);
   deepStrictEqual([...new Set(firstIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
   deepStrictEqual([...new Set(secondIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
 });
@@ -99,16 +99,13 @@ test("buildJitIrBlock leaves condition materialization to JIT flag state", () =>
   const conditionalJumpOpIndex = branchBlock.instructions[1]!.ir.findIndex((op) => op.op === "conditionalJump");
 
   strictEqual(conditionalJumpOpIndex !== -1, true);
-  strictEqual(branchIr.some((op) => op.op === "flags.materialize"), false);
-  strictEqual(branchIr.some((op) => op.op === "flags.boundary"), false);
+  strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
 
   const trap = ok(decodeBytes([0xcd, 0x2e], add.nextEip));
   const exitBlock = optimizeJitIrBlock(buildJitIrBlock([add, trap]));
-  const exitIr = blockIr(exitBlock);
   const hostTrapOpIndex = exitBlock.instructions[1]!.ir.findIndex((op) => op.op === "hostTrap");
 
   strictEqual(hostTrapOpIndex !== -1, true);
-  strictEqual(exitIr.some((op) => op.op === "flags.boundary"), false);
 });
 
 test("buildJitIrBlock keeps earlier CF producer live across INC", () => {
@@ -119,7 +116,6 @@ test("buildJitIrBlock keeps earlier CF producer live across INC", () => {
   const flagSets = ir.filter((op) => op.op === "flags.set");
 
   deepStrictEqual(flagSets.map((op) => op.op === "flags.set" ? op.producer : undefined), ["add", "inc"]);
-  strictEqual(ir.some((op) => op.op === "flags.materialize"), false);
 });
 
 test("buildJitIrBlock keeps cmp and jcc branch conditions in flag value state", () => {
@@ -128,46 +124,17 @@ test("buildJitIrBlock keeps cmp and jcc branch conditions in flag value state", 
   const ir = codegenIr(buildJitIrBlock([cmp, je]));
 
   strictEqual(ir.some((op) => op.op === "flags.condition"), true);
-  strictEqual(ir.some((op) => op.op === "flagProducer.condition"), false);
-  strictEqual(ir.some((op) => op.op === "flags.materialize"), false);
 });
 
 test("buildJitIrBlock does not specialize incoming CF after INC", () => {
   const inc = ok(decodeBytes([0x40], startAddress));
   const jc = ok(decodeBytes([0x72, 0x05], inc.nextEip));
   const block = buildJitIrBlock([inc, jc]);
-  const ir = codegenIr(block);
 
-  strictEqual(ir.some((op) => op.op === "flagProducer.condition"), false);
-  strictEqual(ir.some((op) => op.op === "flags.materialize"), false);
   deepStrictEqual(aluFlagMemoryAccessCounts(block), { loads: 3, stores: 2 });
 });
 
-test("buildJitIrBlock does not synthesize exit flag boundaries for speculative flags", () => {
-  const flagFreeBlock = buildJitIrBlock([
-    ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress)),
-    ok(decodeBytes([0xbb, 0x02, 0x00, 0x00, 0x00], startAddress + 5)),
-    ok(decodeBytes([0xcd, 0x2e], startAddress + 10))
-  ]);
-  const flagFreeIr = codegenIr(flagFreeBlock);
-  const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
-  const addTrapBlock = buildJitIrBlock([
-    add,
-    ok(decodeBytes([0xcd, 0x2e], add.nextEip))
-  ]);
-  const addTrapIr = codegenIr(addTrapBlock);
-
-  strictEqual(flagFreeIr.some((op) => op.op === "flags.boundary"), false);
-  strictEqual(addTrapIr.some((op) => op.op === "flags.boundary"), false);
-
-  const jzBlock = buildJitIrBlock([ok(decodeBytes([0x74, 0x05], startAddress))]);
-  const jzIr = codegenIr(jzBlock);
-
-  strictEqual(jzIr.some((op) => op.op === "flags.materialize"), false);
-  strictEqual(jzIr.some((op) => op.op === "flags.boundary"), false);
-});
-
-test("jit IR block exit handling commits aluFlags at observable exits", () => {
+test("jit IR block emits aluFlags memory traffic only for flag reads and observable exits", () => {
   const flagFreeBlock = buildJitIrBlock([
     ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress)),
     ok(decodeBytes([0xbb, 0x02, 0x00, 0x00, 0x00], startAddress + 5)),
@@ -1580,7 +1547,6 @@ test("jit IR block lowers setcc conditions from local flag value state", async (
   );
 
   strictEqual(ir.some((op) => op.op === "flags.condition"), true);
-  strictEqual(ir.some((op) => op.op === "flagProducer.condition"), false);
   strictEqual(equal.state.eax, 0x1234_5601);
   strictEqual(equal.state.instructionCount, 2);
   strictEqual(notEqual.state.eax, 0x1234_5600);
@@ -2315,7 +2281,7 @@ function countOpcode(opcodes: readonly number[], opcode: number): number {
 }
 
 function irOpDstId(op: JitIrOp): readonly number[] {
-  const dst = jitIrOpDst(op);
+  const dst = irOpDst(op);
 
   return dst === undefined ? [] : [dst.id];
 }

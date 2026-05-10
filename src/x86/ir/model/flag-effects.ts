@@ -89,18 +89,6 @@ export function irOpFlagEffect(op: IrOp): IrFlagOpEffect {
         writes: IR_FLAG_MASK_NONE,
         undefines: IR_FLAG_MASK_NONE
       };
-    case "flags.materialize":
-      return {
-        reads: op.mask,
-        writes: IR_FLAG_MASK_NONE,
-        undefines: IR_FLAG_MASK_NONE
-      };
-    case "flags.boundary":
-      return {
-        reads: op.mask,
-        writes: IR_FLAG_MASK_NONE,
-        undefines: IR_FLAG_MASK_NONE
-      };
     default:
       return noFlagEffect;
   }

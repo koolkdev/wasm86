@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
-import { IR_ALU_FLAG_MASK, IR_ALU_FLAG_MASKS } from "#x86/ir/model/flag-effects.js";
+import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import { analyzeJitFlagLiveness } from "#backends/wasm/jit/optimization/analyses/flag-liveness.js";
 import { runJitOptimizationPasses } from "#backends/wasm/jit/optimization/pass.js";
 import { flagDcePass, pruneDeadJitFlagSets } from "#backends/wasm/jit/optimization/passes/flag-dce.js";
@@ -49,7 +49,7 @@ test("flag-dce keeps partial flag producers needed by later CF reads", () => {
   deepStrictEqual(flagProducerNames(result.block), ["add", "inc"]);
 });
 
-test("flag-dce keeps producers needed by direct flag conditions", () => {
+test("flag-dce keeps producers needed by flag conditions", () => {
   const result = pruneDeadJitFlagSets({
     instructions: [
       syntheticInstruction([
@@ -57,15 +57,7 @@ test("flag-dce keeps producers needed by direct flag conditions", () => {
         { op: "get", dst: v(1), source: { kind: "reg", reg: "ebx" } },
         { op: "value.binary", type: "i32", operator: "sub", dst: v(2), a: v(0), b: v(1) },
         createIrFlagSetOp("sub", { left: v(0), right: v(1), result: v(2) }),
-        {
-          op: "flagProducer.condition",
-          dst: v(3),
-          cc: "E",
-          producer: "sub",
-          writtenMask: IR_ALU_FLAG_MASK,
-          undefMask: 0,
-          inputs: { left: v(0), right: v(1) }
-        },
+        { op: "flags.condition", dst: v(3), cc: "E" },
         ...selectSet(v(3), v(4)),
         { op: "next" }
       ])
@@ -113,41 +105,6 @@ test("flag liveness applies pre-instruction fault reads at instruction entry", (
 
   strictEqual(liveness.instructions[0]?.entryReadMask, IR_ALU_FLAG_MASK);
   strictEqual(liveness.instructions[0]?.ops[2]?.keptFlagSet, false);
-});
-
-test("flag-dce keeps undefined bits needed by explicit boundaries", () => {
-  const result = pruneDeadJitFlagSets({
-    instructions: [
-      syntheticInstruction([
-        { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
-        { op: "value.binary", type: "i32", operator: "and", dst: v(1), a: v(0), b: c32(0xff) },
-        createIrFlagSetOp("logic", { result: v(1) }),
-        { op: "flags.boundary", mask: IR_ALU_FLAG_MASKS.AF },
-        { op: "next" }
-      ])
-    ]
-  });
-
-  strictEqual(result.flagDce.removedSetCount, 0);
-  strictEqual(result.flagDce.retainedSetCount, 1);
-});
-
-test("flag-dce keeps producers needed by explicit flag materialization", () => {
-  const result = pruneDeadJitFlagSets({
-    instructions: [
-      syntheticInstruction([
-        { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
-        { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) },
-        createIrFlagSetOp("add", { left: v(0), right: c32(1), result: v(1) }),
-        { op: "flags.materialize", mask: IR_ALU_FLAG_MASKS.ZF },
-        { op: "next" }
-      ])
-    ]
-  });
-
-  strictEqual(result.flagDce.removedSetCount, 0);
-  strictEqual(result.flagDce.retainedSetCount, 1);
-  deepStrictEqual(flagProducerNames(result.block), ["add"]);
 });
 
 test("flag-dce is a validating repeatable optimization pass", () => {

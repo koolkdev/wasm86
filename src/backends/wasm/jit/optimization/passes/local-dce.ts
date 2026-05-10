@@ -1,8 +1,8 @@
 import {
-  jitIrOpDst,
-  jitIrOpResult,
-  visitJitIrOpValueRefs
-} from "#backends/wasm/jit/ir/semantics.js";
+  irOpDst,
+  irOpResult,
+  visitIrOpValueRefs
+} from "#x86/ir/model/op-semantics.js";
 import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
 import {
   analyzeJitBarriers,
@@ -62,7 +62,7 @@ function pruneInstructionDeadLocalValues(
       throw new Error(`missing JIT IR op while pruning dead local values: ${instructionIndex}:${opIndex}`);
     }
 
-    const dst = jitIrOpDst(op);
+    const dst = irOpDst(op);
 
     if (dst !== undefined && !liveVars.has(dst.id) && canDropUnusedResult(op, instructionIndex, opIndex, barriers)) {
       removedOpCount += 1;
@@ -73,7 +73,7 @@ function pruneInstructionDeadLocalValues(
       liveVars.delete(dst.id);
     }
 
-    visitJitIrOpValueRefs(op, (value) => {
+    visitIrOpValueRefs(op, (value) => {
       if (value.kind === "var") {
         liveVars.add(value.id);
       }
@@ -97,7 +97,7 @@ function canDropUnusedResult(
   opIndex: number,
   barriers: JitBarrierAnalysis
 ): boolean {
-  const result = jitIrOpResult(op);
+  const result = irOpResult(op);
 
   if (result.kind === "none") {
     return false;

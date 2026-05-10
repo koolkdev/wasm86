@@ -104,8 +104,6 @@ export type IrOp =
   | IrUnaryValueOp
   | IrSelectValueOp
   | IrFlagSetOp
-  | Readonly<{ op: "flags.materialize"; mask: FlagMask }>
-  | Readonly<{ op: "flags.boundary"; mask: FlagMask }>
   | IrFlagsConditionOp
   | Readonly<{ op: "next" }>
   | Readonly<{ op: "jump"; target: TargetRef }>
@@ -138,8 +136,6 @@ export interface IrBuilder {
   i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef;
 
   setFlags(producer: FlagProducerName, inputs: Readonly<Record<string, ValueInput>>, width?: OperandWidth): void;
-  materializeFlags(mask: FlagMask): void;
-  boundaryFlags(mask: FlagMask): void;
   condition(cc: ConditionCode): VarRef;
 
   next(): void;

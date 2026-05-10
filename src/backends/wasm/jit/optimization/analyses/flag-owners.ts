@@ -7,7 +7,6 @@ import type { JitFlagSource } from "#backends/wasm/jit/optimization/analyses/fla
 
 export type JitFlagOwner =
   | Readonly<{ kind: "incoming" }>
-  | Readonly<{ kind: "materialized" }>
   | Readonly<{ kind: "producer"; source: JitFlagSource }>;
 
 export type JitFlagOwnerMask = Readonly<{
@@ -16,7 +15,6 @@ export type JitFlagOwnerMask = Readonly<{
 }>;
 
 const incomingJitFlagOwner: JitFlagOwner = { kind: "incoming" };
-const materializedJitFlagOwner: JitFlagOwner = { kind: "materialized" };
 
 const flagBits = Object.values(IR_ALU_FLAG_MASKS);
 
@@ -31,10 +29,6 @@ export class JitFlagOwners {
 
   clone(): JitFlagOwners {
     return new JitFlagOwners(new Map(this.byFlag));
-  }
-
-  recordMaterialized(mask: number): void {
-    this.set(mask, materializedJitFlagOwner);
   }
 
   recordSource(source: JitFlagSource): void {

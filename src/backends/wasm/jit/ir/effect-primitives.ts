@@ -1,8 +1,8 @@
 import type { StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import {
-  jitIrOpStorageReads,
-  jitIrOpStorageWrites
-} from "#backends/wasm/jit/ir/semantics.js";
+  irOpStorageReads,
+  irOpStorageWrites
+} from "#x86/ir/model/op-semantics.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
@@ -11,11 +11,11 @@ export function jitMemoryFaultReason(
   op: JitIrOp,
   operands: readonly JitOperandBinding[]
 ): ExitReasonValue | undefined {
-  if (jitIrOpStorageReads(op).some((storage) => storageMayAccessMemory(storage, operands))) {
+  if (irOpStorageReads(op).some((storage) => storageMayAccessMemory(storage, operands))) {
     return ExitReason.MEMORY_READ_FAULT;
   }
 
-  const writesMemory = jitIrOpStorageWrites(op).some((storage) => storageMayAccessMemory(storage, operands));
+  const writesMemory = irOpStorageWrites(op).some((storage) => storageMayAccessMemory(storage, operands));
 
   if (!writesMemory) {
     return undefined;

@@ -51,8 +51,6 @@ type JitFlagStateOptions = Readonly<{
 
 export type JitFlagState = Readonly<{
   emitSet(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
-  emitMaterialize(mask: number): void;
-  emitBoundary(mask: number): void;
   emitFlagsCondition(cc: ConditionCode): void;
   captureExitStoreSnapshot(mask: number): JitFlagExitStoreSnapshot | undefined;
   emitExitSnapshotStore(snapshot: JitFlagExitStoreSnapshot): void;
@@ -133,12 +131,6 @@ export function createJitFlagState(
       const writtenMask = descriptor.writtenMask | descriptor.undefMask;
 
       setSource(writtenMask, { kind: "pending", pending: pendingFlags });
-    },
-    emitMaterialize: (mask) => {
-      throw new Error(`JIT flags.materialize reached Wasm codegen with mask ${mask}`);
-    },
-    emitBoundary: (mask) => {
-      throw new Error(`JIT flags.boundary reached Wasm codegen with mask ${mask}`);
     },
     emitFlagsCondition: (cc) => {
       const pendingFlags = pendingFlagConditionSource(cc);

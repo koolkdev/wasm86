@@ -71,7 +71,6 @@ test("runJitIrOptimizationPipeline keeps flag conditions planning-visible throug
     op.op === "set" && op.target.kind === "reg" && op.target.reg === "eax"
   ), false);
   strictEqual(cmoveInstruction.ir.some((op) => op.op === "flags.condition"), true);
-  strictEqual(cmoveInstruction.ir.some((op) => op.op === "flagProducer.condition"), false);
 });
 
 test("runJitOptimizationPasses runs named IR-to-IR passes and validates pass output", () => {
@@ -123,9 +122,6 @@ test("runJitIrOptimizationPipeline exposes the new pass pipeline as plain JIT IR
   strictEqual(result.block.instructions.some((instruction) =>
     instruction.ir.some((op) => op.op === "flags.condition")
   ), true);
-  strictEqual(result.block.instructions.some((instruction) =>
-    instruction.ir.some((op) => op.op === "flagProducer.condition")
-  ), false);
 });
 
 test("planJitCodegen keeps branch exit flag materialization separate from direct conditions", () => {
@@ -136,7 +132,6 @@ test("planJitCodegen keeps branch exit flag materialization separate from direct
   const branchIr = codegenPlan.block.instructions[2]!.ir;
 
   strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
-  strictEqual(branchIr.some((op) => op.op === "flagProducer.condition"), false);
   deepStrictEqual(
     codegenPlan.flagMaterializationRequirements.map((requirement) => ({
       reason: requirement.reason,

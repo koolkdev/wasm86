@@ -47,12 +47,7 @@ export function emitPlannedExpression(
       throw new Error("test address emission is not implemented");
     },
     emitSetFlags: () => {},
-    emitMaterializeFlags: () => {},
-    emitBoundaryFlags: () => {},
     emitFlagsCondition: () => {
-      body.i32Const(0);
-    },
-    emitFlagProducerCondition: () => {
       body.i32Const(0);
     },
     emitNext: () => {},

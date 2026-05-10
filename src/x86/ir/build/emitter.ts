@@ -14,7 +14,6 @@ import {
 } from "#x86/ir/model/refs.js";
 import type {
   ConditionCode,
-  FlagMask,
   FlagProducerName,
   IrBinaryOperator,
   IrConstValueRef,
@@ -194,14 +193,6 @@ export class IrEmitter implements IrBuilder {
         width
       )
     );
-  }
-
-  materializeFlags(mask: FlagMask): void {
-    this.#push({ op: "flags.materialize", mask });
-  }
-
-  boundaryFlags(mask: FlagMask): void {
-    this.#push({ op: "flags.boundary", mask });
   }
 
   condition(cc: ConditionCode): VarRef {

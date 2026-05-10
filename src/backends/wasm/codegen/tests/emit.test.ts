@@ -162,10 +162,7 @@ function emitTestProgram(program: IrBlock): WasmFunctionBodyEncoder {
       body.i32Const(0x1000 + source.index);
     },
     emitSetFlags: () => unsupported("flags.set"),
-    emitMaterializeFlags: () => unsupported("flags.materialize"),
-    emitBoundaryFlags: () => unsupported("flags.boundary"),
     emitFlagsCondition: () => unsupported("flags.condition"),
-    emitFlagProducerCondition: () => unsupported("flagProducer.condition"),
     emitNext: () => {
       body.localGet(requireRegLocal(regLocals, "eax"));
     },
@@ -211,10 +208,7 @@ function emitWithTrackingScratch(
     emitSet: (target, value, _accessWidth, helpers) => emitSet(body, regLocals, target, value, helpers),
     emitAddress: () => unsupported("address"),
     emitSetFlags: () => unsupported("flags.set"),
-    emitMaterializeFlags: () => unsupported("flags.materialize"),
-    emitBoundaryFlags: () => unsupported("flags.boundary"),
     emitFlagsCondition: () => unsupported("flags.condition"),
-    emitFlagProducerCondition: () => unsupported("flagProducer.condition"),
     emitNext: () => {},
     emitNextEip: () => {
       body.i32Const(nextEipValue);

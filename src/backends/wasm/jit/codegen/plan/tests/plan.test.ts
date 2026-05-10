@@ -237,7 +237,6 @@ test("planJitCodegen records flag materialization requirements for branch exits"
   const conditionalJumpIndex = branchExpressionBlock?.findIndex((op) => op.op === "conditionalJump") ?? -1;
 
   strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
-  strictEqual(branchIr.some((op) => op.op === "flagProducer.condition"), false);
   strictEqual(branchExits.length, 2);
 
   for (const exit of branchExits) {
@@ -278,7 +277,6 @@ test("planJitCodegen records flag materialization requirements for branch exits"
       }
     ]
   );
-  strictEqual(branchExpressionBlock?.some((op) => op.op === "flags.materialize" || op.op === "flags.boundary"), false);
 });
 
 test("planJitCodegen records full flag producers in value-state snapshots", () => {
@@ -471,38 +469,6 @@ test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () 
   );
 });
 
-test("planJitCodegen rejects legacy direct flag condition IR", () => {
-  const block: JitIrBlock = {
-    instructions: [{
-      instructionId: "legacy-direct-condition",
-      eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
-      ir: [
-        {
-          op: "flagProducer.condition",
-          dst: { kind: "var", id: 0 },
-          cc: "E",
-          producer: "sub",
-          writtenMask: IR_ALU_FLAG_MASK,
-          undefMask: 0,
-          inputs: {
-            left: { kind: "const", type: "i32", value: 1 },
-            right: { kind: "const", type: "i32", value: 1 }
-          }
-        },
-        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
-      ]
-    }]
-  };
-
-  throws(
-    () => planJitCodegen(block),
-    /flagProducer\.condition is legacy emitter-only IR and cannot reach codegen planning at 0:0/
-  );
-});
-
 test("planJitCodegen lets later full flag producers replace partial merges", () => {
   const block: JitIrBlock = {
     instructions: [
@@ -618,7 +584,6 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
 
   strictEqual(cmpInstruction.ir.some((op) => op.op === "flags.set"), true);
   strictEqual(cmoveInstruction.ir.some((op) => op.op === "flags.condition"), true);
-  strictEqual(cmoveInstruction.ir.some((op) => op.op === "flagProducer.condition"), false);
   deepStrictEqual(exit.snapshot.valueState.regs.exitStore("edx"), registerStore("edx", selectedEdx));
 });
 
@@ -921,7 +886,6 @@ test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks
   const materializedValueUsePlan = planJitMaterializedValueUses([{ expressionBlock }], plan);
   const setIndex = expressionBlock.findIndex((op) => op.op === "set" && op.role === "registerMaterialization");
 
-  strictEqual(expressionBlock.some((op) => op.op === "flags.boundary"), false);
   strictEqual(setIndex !== -1, true);
   deepStrictEqual([...(materializedValueUsePlan.expressionUseIndexesByInstruction[0] ?? new Set())], [setIndex]);
 });

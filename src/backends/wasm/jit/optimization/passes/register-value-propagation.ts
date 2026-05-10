@@ -1,6 +1,6 @@
 import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
 import type { JitOptimizationPass } from "#backends/wasm/jit/optimization/pass.js";
-import { jitIrOpIsTerminator } from "#backends/wasm/jit/ir/semantics.js";
+import { irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import {
   assignRewritableJitValue,
   materializeJitRegisterValues,
@@ -85,7 +85,7 @@ function propagateInstructionRegisterValues(
     ({ op, opIndex }) => {
       const key = registerValueAnalysisKey(instructionIndex, opIndex);
       const beforeExit = indexes.materializationsBeforeExit.get(key) ?? [];
-      const isTerminator = jitIrOpIsTerminator(op);
+      const isTerminator = irOpIsTerminator(op);
 
       stats.materializedSetCount += emitMaterializations(
         rewrite,

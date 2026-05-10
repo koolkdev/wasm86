@@ -3,7 +3,6 @@ import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-bo
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitModuleLinkTable } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
 import { emitIrExpressionBlockToWasm } from "#backends/wasm/codegen/emit.js";
-import { emitFlagProducerCondition } from "#backends/wasm/codegen/conditions.js";
 import {
   emitJitConditionalJump,
   emitJitHostTrap,
@@ -159,10 +158,7 @@ function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionC
     emitAddress: (source) => emitJitAddress(jitContext, source),
     emitSetFlags: (descriptor, helpers) =>
       jitContext.state.flags.emitSet(descriptor, helpers),
-    emitMaterializeFlags: (mask) => jitContext.state.flags.emitMaterialize(mask),
-    emitBoundaryFlags: (mask) => jitContext.state.flags.emitBoundary(mask),
     emitFlagsCondition: (cc) => jitContext.state.flags.emitFlagsCondition(cc),
-    emitFlagProducerCondition: (condition, helpers) => emitFlagProducerCondition(jitContext.body, condition, helpers),
     emitNext: () => emitJitNext(jitContext),
     emitNextEip: () => emitJitNextEip(jitContext),
     emitJump: (target, helpers) => emitJitJump(jitContext, target, helpers),
