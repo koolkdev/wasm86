@@ -1,5 +1,7 @@
-import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
-import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type {
+  IrExprBlock,
+  IrExpressionSourceMap
+} from "#backends/wasm/codegen/expressions.js";
 import type { Reg32 } from "#x86/isa/types.js";
 import { jitInstructionWrittenReg } from "./operand-analysis.js";
 import type {
@@ -11,6 +13,7 @@ import type {
 
 export type JitMaterializedValueUsePlanInput = Readonly<{
   expressionBlock: IrExprBlock;
+  sourceExpressionMap: IrExpressionSourceMap;
 }>;
 
 export type JitMaterializedValueUsePlan = Readonly<{
@@ -51,7 +54,7 @@ export function planJitMaterializedValueUses(
 
     // Exit points refer to source IR op indexes, while value-cache planning
     // consumes expression-block indexes, so reachability is computed on source
-    // IR and mapped by registerMaterialization ordinal to expression ops.
+    // IR and mapped through the expression builder's source-placement map.
     for (let opIndex = sourceInstruction.ir.length - 1; opIndex >= 0; opIndex -= 1) {
       const op = sourceInstruction.ir[opIndex];
 
@@ -77,7 +80,6 @@ export function planJitMaterializedValueUses(
     }
 
     expressionUseIndexesByInstruction[instructionIndex] = expressionMaterializedValueUseIndexes(
-      sourceInstruction,
       instruction,
       sourceUseIndexes
     );
@@ -88,54 +90,26 @@ export function planJitMaterializedValueUses(
 }
 
 function expressionMaterializedValueUseIndexes(
-  sourceInstruction: JitIrBlockInstruction,
   instruction: JitMaterializedValueUsePlanInput,
   sourceUseIndexes: ReadonlySet<number>
 ): Set<number> {
-  const selectedOrdinals = new Set<number>();
   const expressionIndexes = new Set<number>();
-  let ordinal = 0;
 
-  for (let opIndex = 0; opIndex < sourceInstruction.ir.length; opIndex += 1) {
-    const op = sourceInstruction.ir[opIndex];
+  for (const sourceOpIndex of sourceUseIndexes) {
+    const placements = instruction.sourceExpressionMap.placementsBySourceOpIndex.get(sourceOpIndex) ?? [];
+    const emittedOpPlacements = placements.filter((placement) => placement.kind === "emittedOp");
 
-    if (op === undefined) {
-      throw new Error(`missing JIT IR op while mapping materialized value uses: ${opIndex}`);
+    if (emittedOpPlacements.length === 0) {
+      throw new Error(`could not map JIT source op to expression op: ${sourceOpIndex}`);
     }
 
-    if (op.op !== "set" || op.role !== "registerMaterialization") {
-      continue;
+    for (const placement of emittedOpPlacements) {
+      if (instruction.expressionBlock[placement.expressionOpIndex] === undefined) {
+        throw new Error(`missing mapped JIT expression op: ${placement.expressionOpIndex}`);
+      }
+
+      expressionIndexes.add(placement.expressionOpIndex);
     }
-
-    if (sourceUseIndexes.has(opIndex)) {
-      selectedOrdinals.add(ordinal);
-    }
-
-    ordinal += 1;
-  }
-
-  ordinal = 0;
-
-  for (let opIndex = 0; opIndex < instruction.expressionBlock.length; opIndex += 1) {
-    const op = instruction.expressionBlock[opIndex];
-
-    if (op === undefined) {
-      throw new Error(`missing JIT expression op while mapping materialized value uses: ${opIndex}`);
-    }
-
-    if (op.op !== "set" || op.role !== "registerMaterialization") {
-      continue;
-    }
-
-    if (selectedOrdinals.has(ordinal)) {
-      expressionIndexes.add(opIndex);
-    }
-
-    ordinal += 1;
-  }
-
-  if (expressionIndexes.size !== selectedOrdinals.size) {
-    throw new Error("could not map JIT materialized value use indexes to expression ops");
   }
 
   return expressionIndexes;

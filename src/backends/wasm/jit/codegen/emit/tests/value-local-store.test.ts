@@ -434,7 +434,8 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
       expressionBlock: [
         { op: "set", target: reg("ebx"), value: const32(0x2a), accessWidth: 32 },
         { op: "next" }
-      ]
+      ],
+      sourceExpressionMap: { placementsBySourceOpIndex: new Map() }
     }]
   });
   scratch.assertClear();

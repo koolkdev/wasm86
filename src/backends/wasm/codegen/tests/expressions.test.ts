@@ -1,15 +1,21 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { buildIrExpressionBlock } from "#backends/wasm/codegen/expressions.js";
+import {
+  buildIrExpressionBlock,
+  buildIrExpressionBlockWithSourceMap,
+  type IrExpressionBuildResult,
+  type IrExpressionSourcePlacement
+} from "#backends/wasm/codegen/expressions.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 
 const v = (id: number) => ({ kind: "var" as const, id });
 const op = (index: number) => ({ kind: "operand" as const, index });
 const reg = (reg: "eax" | "ebx") => ({ kind: "reg" as const, reg });
 const c32 = (value: number) => ({ kind: "const" as const, type: "i32" as const, value });
+const mem = (address: ReturnType<typeof v> | ReturnType<typeof c32>) => ({ kind: "mem" as const, address });
 const sourceValue = (
-  source: ReturnType<typeof op> | ReturnType<typeof reg>,
+  source: ReturnType<typeof op> | ReturnType<typeof reg> | ReturnType<typeof mem>,
   accessWidth: 8 | 16 | 32 = 32,
   signed = false
 ) => ({
@@ -221,3 +227,113 @@ test("expression selector materializes condition reads before conditional jumps"
     ]
   );
 });
+
+test("expression source map places effectful get results at their materialized expression op", () => {
+  const result = buildIrExpressionBlockWithSourceMap(
+    [
+      { op: "get", dst: v(0), source: mem(c32(0x1000)) },
+      { op: "set", target: op(0), value: v(0) },
+      { op: "next" }
+    ]
+  );
+
+  deepStrictEqual(result.expressionBlock, [
+    { op: "let32", dst: v(0), value: sourceValue(mem(c32(0x1000))) },
+    set(op(0), v(0)),
+    { op: "next" }
+  ]);
+  deepStrictEqual(sourcePlacements(result, 0), [{ expressionOpIndex: 0, kind: "emittedOp" }]);
+  deepStrictEqual(sourcePlacements(result, 1), [{ expressionOpIndex: 1, kind: "emittedOp" }]);
+});
+
+test("expression source map places memory-address origins at their effectful read", () => {
+  const result = buildIrExpressionBlockWithSourceMap([
+    { op: "value.const", type: "i32", dst: v(0), value: 0x1000 },
+    { op: "get", dst: v(1), source: mem(v(0)) },
+    { op: "set", target: op(0), value: v(1) }
+  ]);
+
+  deepStrictEqual(result.expressionBlock, [
+    { op: "let32", dst: v(1), value: sourceValue(mem(c32(0x1000))) },
+    set(op(0), v(1))
+  ]);
+  deepStrictEqual(sourcePlacements(result, 0), [{ expressionOpIndex: 0, kind: "valueUse" }]);
+  deepStrictEqual(sourcePlacements(result, 1), [{ expressionOpIndex: 0, kind: "emittedOp" }]);
+  deepStrictEqual(sourcePlacements(result, 2), [{ expressionOpIndex: 1, kind: "emittedOp" }]);
+});
+
+test("expression source map places inlined pure value ops at the consuming set source", () => {
+  const result = buildIrExpressionBlockWithSourceMap(
+    [
+      { op: "get", dst: v(0), source: reg("eax") },
+      { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) },
+      { op: "set", target: reg("ebx"), value: v(1) },
+      { op: "next" }
+    ],
+    { canInlineGet: () => true }
+  );
+
+  deepStrictEqual(result.expressionBlock, [
+    set(reg("ebx"), {
+      kind: "value.binary",
+      type: "i32",
+      operator: "add",
+      a: sourceValue(reg("eax")),
+      b: c32(1)
+    }),
+    { op: "next" }
+  ]);
+  deepStrictEqual(sourcePlacements(result, 0), [{ expressionOpIndex: 0, kind: "valueUse" }]);
+  deepStrictEqual(sourcePlacements(result, 1), [{ expressionOpIndex: 0, kind: "valueUse" }]);
+  deepStrictEqual(sourcePlacements(result, 2), [{ expressionOpIndex: 0, kind: "emittedOp" }]);
+});
+
+test("expression source map places reusable pure value ops at their let expression op", () => {
+  const result = buildIrExpressionBlockWithSourceMap(
+    [
+      { op: "get", dst: v(0), source: reg("eax") },
+      { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) },
+      { op: "set", target: reg("ebx"), value: v(1) },
+      { op: "set", target: reg("eax"), value: v(1) }
+    ],
+    { canInlineGet: () => true }
+  );
+
+  deepStrictEqual(result.expressionBlock, [
+    {
+      op: "let32",
+      dst: v(1),
+      value: {
+        kind: "value.binary",
+        type: "i32",
+        operator: "add",
+        a: sourceValue(reg("eax")),
+        b: c32(1)
+      }
+    },
+    set(reg("ebx"), v(1)),
+    set(reg("eax"), v(1))
+  ]);
+  deepStrictEqual(sourcePlacements(result, 0), [{ expressionOpIndex: 0, kind: "valueUse" }]);
+  deepStrictEqual(sourcePlacements(result, 1), [{ expressionOpIndex: 0, kind: "emittedOp" }]);
+  deepStrictEqual(sourcePlacements(result, 2), [{ expressionOpIndex: 1, kind: "emittedOp" }]);
+  deepStrictEqual(sourcePlacements(result, 3), [{ expressionOpIndex: 2, kind: "emittedOp" }]);
+});
+
+test("expression source map leaves omitted unused ops unmapped", () => {
+  const result = buildIrExpressionBlockWithSourceMap([
+    { op: "value.const", type: "i32", dst: v(0), value: 7 },
+    { op: "next" }
+  ]);
+
+  deepStrictEqual(result.expressionBlock, [{ op: "next" }]);
+  deepStrictEqual(sourcePlacements(result, 0), []);
+  deepStrictEqual(sourcePlacements(result, 1), [{ expressionOpIndex: 0, kind: "emittedOp" }]);
+});
+
+function sourcePlacements(
+  result: IrExpressionBuildResult,
+  sourceOpIndex: number
+): readonly IrExpressionSourcePlacement[] {
+  return result.sourceMap.placementsBySourceOpIndex.get(sourceOpIndex) ?? [];
+}

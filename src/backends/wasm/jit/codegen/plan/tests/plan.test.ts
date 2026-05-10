@@ -799,10 +799,10 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later material
   strictEqual(emissionPlan.valueCachePlan, undefined);
 });
 
-test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks", () => {
+test("buildJitCodegenEmissionPlan maps later materialized uses past flag-only exits", () => {
   const block: JitIrBlock = {
     instructions: [{
-      instructionId: "boundary-before-materialization",
+      instructionId: "flag-exit-before-materialization",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
@@ -837,7 +837,7 @@ test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks
   const plan: JitCodegenPlan = {
     block,
     instructionStates: [{
-      instructionId: "boundary-before-materialization",
+      instructionId: "flag-exit-before-materialization",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
@@ -883,7 +883,10 @@ test("buildJitCodegenEmissionPlan keeps flag boundaries out of expression blocks
   }
 
   const expressionBlock = instruction.expressionBlock;
-  const materializedValueUsePlan = planJitMaterializedValueUses([{ expressionBlock }], plan);
+  const materializedValueUsePlan = planJitMaterializedValueUses([{
+    expressionBlock,
+    sourceExpressionMap: instruction.sourceExpressionMap
+  }], plan);
   const setIndex = expressionBlock.findIndex((op) => op.op === "set" && op.role === "registerMaterialization");
 
   strictEqual(setIndex !== -1, true);

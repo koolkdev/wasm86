@@ -1,7 +1,8 @@
 import {
-  buildIrExpressionBlock,
   type IrExpressionOptions,
-  type IrExprBlock
+  type IrExprBlock,
+  type IrExpressionSourceMap,
+  buildIrExpressionBlockWithSourceMap
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/produced-values.js";
@@ -28,6 +29,7 @@ export type JitCodegenInstructionPlan = JitInstructionState & Pick<
   "operands"
 > & Readonly<{
   expressionBlock: IrExprBlock;
+  sourceExpressionMap: IrExpressionSourceMap;
   valueCachePlan?: JitExpressionValueCachePlan;
 }>;
 
@@ -57,14 +59,18 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
       throw new Error(`missing JIT instruction state for codegen: ${index}`);
     }
 
-    const expressionBlock = buildIrExpressionBlock(instruction.ir, jitExpressionOptions(instruction));
+    const expressionPlan = buildIrExpressionBlockWithSourceMap(
+      instruction.ir,
+      jitExpressionOptions(instruction)
+    );
     const producedValuesByVarId = indexProducedValuesByVarIdForInstruction(instruction, index);
 
     return {
       ...state,
       operands: instruction.operands,
       producedValuesByVarId,
-      expressionBlock
+      expressionBlock: expressionPlan.expressionBlock,
+      sourceExpressionMap: expressionPlan.sourceMap
     };
   });
   const materializedValueUsePlan = planJitMaterializedValueUses(

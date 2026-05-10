@@ -11,6 +11,10 @@ import type {
   ValueRef,
   VarRef
 } from "#x86/ir/model/types.js";
+import {
+  irOpStorageWrites,
+  visitIrOpValueRefs
+} from "#x86/ir/model/op-semantics.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 
 export type IrStorageExpr =
@@ -65,6 +69,26 @@ export type IrExprOp =
 
 export type IrExprBlock = readonly IrExprOp[];
 
+export type IrExpressionSourcePlacementKind =
+  // The source op emitted this expression op directly.
+  | "emittedOp"
+  // The source op's value was omitted or inlined, and is consumed here.
+  | "valueUse";
+
+export type IrExpressionSourcePlacement = Readonly<{
+  expressionOpIndex: number;
+  kind: IrExpressionSourcePlacementKind;
+}>;
+
+export type IrExpressionSourceMap = Readonly<{
+  placementsBySourceOpIndex: ReadonlyMap<number, readonly IrExpressionSourcePlacement[]>;
+}>;
+
+export type IrExpressionBuildResult = Readonly<{
+  expressionBlock: IrExprBlock;
+  sourceMap: IrExpressionSourceMap;
+}>;
+
 export type IrExpressionSetInputOp = Extract<IrOp, { op: "set" }> & Readonly<{
   role?: IrSetExprRole;
 }>;
@@ -87,15 +111,39 @@ export function buildIrExpressionBlock(
   block: IrExpressionInputBlock,
   options: IrExpressionOptions = {}
 ): IrExprBlock {
+  return buildIrExpressionBlockWithSourceMap(block, options).expressionBlock;
+}
+
+export function buildIrExpressionBlockWithSourceMap(
+  block: IrExpressionInputBlock,
+  options: IrExpressionOptions = {}
+): IrExpressionBuildResult {
   const builder = new ExpressionBuilder(block, options);
 
   return builder.build();
 }
 
+type ExpressionBinding = Readonly<{
+  value: IrValueExpr;
+  sourceOpIndexes: readonly number[];
+}>;
+
+type ExpressionValueResult = Readonly<{
+  value: IrValueExpr;
+  sourceOpIndexes: readonly number[];
+}>;
+
+type ExpressionStorageResult = Readonly<{
+  storage: IrStorageExpr;
+  sourceOpIndexes: readonly number[];
+}>;
+
 class ExpressionBuilder {
-  readonly #bindings = new Map<number, IrValueExpr>();
+  readonly #bindings = new Map<number, ExpressionBinding>();
   readonly #ops: IrExprOp[] = [];
+  readonly #placementsBySourceOpIndex = new Map<number, IrExpressionSourcePlacement[]>();
   readonly #useCounts: ReadonlyMap<number, number>;
+  #sourceOpIndex = -1;
 
   constructor(
     readonly block: IrExpressionInputBlock,
@@ -104,7 +152,7 @@ class ExpressionBuilder {
     this.#useCounts = countVarUses(block);
   }
 
-  build(): IrExprBlock {
+  build(): IrExpressionBuildResult {
     for (let opIndex = 0; opIndex < this.block.length; opIndex += 1) {
       const op = this.block[opIndex];
 
@@ -112,91 +160,142 @@ class ExpressionBuilder {
         throw new Error(`missing IR expression input op: ${opIndex}`);
       }
 
+      this.#sourceOpIndex = opIndex;
+
       switch (op.op) {
-        case "get":
+        case "get": {
+          const source = this.#storageExpr(op.source);
+
           this.#defineValue(
             op.dst,
             {
               kind: "source",
-              source: this.#storageExpr(op.source),
+              source: source.storage,
               accessWidth: op.accessWidth ?? 32,
               ...(op.signed === true ? { signed: true } : {})
             },
+            source.sourceOpIndexes,
             this.options.canInlineGet?.(op.source) === true &&
               !this.#inlineGetWouldCrossAliasBarrier(op.dst, op.source, opIndex)
           );
           break;
+        }
         case "set":
-          this.#ops.push(this.#setExpr(op));
+          this.#pushOp(...this.#setExpr(op));
           break;
         case "address":
-          this.#defineValue(op.dst, { kind: "address", operand: op.operand }, true);
+          this.#defineValue(op.dst, { kind: "address", operand: op.operand }, [], true);
           break;
         case "value.const":
-          this.#bindings.set(op.dst.id, { kind: "const", type: op.type, value: op.value });
+          this.#bindings.set(op.dst.id, {
+            value: { kind: "const", type: op.type, value: op.value },
+            sourceOpIndexes: [opIndex]
+          });
           break;
-        case "value.binary":
+        case "value.binary": {
+          const a = this.#valueExpr(op.a);
+          const b = this.#valueExpr(op.b);
+
           this.#defineValue(op.dst, {
             kind: "value.binary",
             type: op.type,
             operator: op.operator,
-            a: this.#valueExpr(op.a),
-            b: this.#valueExpr(op.b)
-          }, true);
+            a: a.value,
+            b: b.value
+          }, [...a.sourceOpIndexes, ...b.sourceOpIndexes], true);
           break;
-        case "value.unary":
+        }
+        case "value.unary": {
+          const value = this.#valueExpr(op.value);
+
           this.#defineValue(op.dst, {
             kind: "value.unary",
             type: op.type,
             operator: op.operator,
-            value: this.#valueExpr(op.value)
-          }, true);
+            value: value.value
+          }, value.sourceOpIndexes, true);
           break;
-        case "value.select":
+        }
+        case "value.select": {
+          const condition = this.#valueExpr(op.condition);
+          const whenTrue = this.#valueExpr(op.whenTrue);
+          const whenFalse = this.#valueExpr(op.whenFalse);
+
           this.#defineValue(op.dst, {
             kind: "value.select",
             type: op.type,
-            condition: this.#valueExpr(op.condition),
-            whenTrue: this.#valueExpr(op.whenTrue),
-            whenFalse: this.#valueExpr(op.whenFalse)
-          }, true);
+            condition: condition.value,
+            whenTrue: whenTrue.value,
+            whenFalse: whenFalse.value
+          }, [
+            ...condition.sourceOpIndexes,
+            ...whenTrue.sourceOpIndexes,
+            ...whenFalse.sourceOpIndexes
+          ], true);
           break;
+        }
         case "flags.condition":
-          this.#defineValue(op.dst, { kind: "flags.condition", cc: op.cc }, false);
+          this.#defineValue(op.dst, { kind: "flags.condition", cc: op.cc }, [], false);
           break;
-        case "flags.set":
-          this.#ops.push({
+        case "flags.set": {
+          const inputs = Object.entries(op.inputs).map(([name, value]) => ({
+            name,
+            value: this.#materializedValue(value)
+          }));
+
+          this.#pushOp({
             op: "flags.set",
             producer: op.producer,
             ...(op.width === undefined ? {} : { width: op.width }),
             writtenMask: op.writtenMask,
             undefMask: op.undefMask,
             inputs: Object.fromEntries(
-              Object.entries(op.inputs).map(([name, value]) => [name, this.#materializedValue(value)])
+              inputs.map(({ name, value }) => [name, value.value])
             )
-          });
+          }, inputs.flatMap(({ value }) => value.sourceOpIndexes));
           break;
+        }
         case "next":
-          this.#ops.push(op);
+          this.#pushOp(op, []);
           break;
-        case "jump":
-          this.#ops.push({ op: "jump", target: this.#valueExpr(op.target) });
+        case "jump": {
+          const target = this.#valueExpr(op.target);
+
+          this.#pushOp({ op: "jump", target: target.value }, target.sourceOpIndexes);
           break;
-        case "conditionalJump":
-          this.#ops.push({
+        }
+        case "conditionalJump": {
+          const condition = this.#valueExpr(op.condition);
+          const taken = this.#valueExpr(op.taken);
+          const notTaken = this.#valueExpr(op.notTaken);
+
+          this.#pushOp({
             op: "conditionalJump",
-            condition: this.#valueExpr(op.condition),
-            taken: this.#valueExpr(op.taken),
-            notTaken: this.#valueExpr(op.notTaken)
-          });
+            condition: condition.value,
+            taken: taken.value,
+            notTaken: notTaken.value
+          }, [
+            ...condition.sourceOpIndexes,
+            ...taken.sourceOpIndexes,
+            ...notTaken.sourceOpIndexes
+          ]);
           break;
-        case "hostTrap":
-          this.#ops.push({ op: "hostTrap", vector: this.#valueExpr(op.vector) });
+        }
+        case "hostTrap": {
+          const vector = this.#valueExpr(op.vector);
+
+          this.#pushOp({ op: "hostTrap", vector: vector.value }, vector.sourceOpIndexes);
           break;
+        }
       }
     }
 
-    return this.#ops;
+    return {
+      expressionBlock: this.#ops,
+      sourceMap: {
+        placementsBySourceOpIndex: this.#placementsBySourceOpIndex
+      }
+    };
   }
 
   #inlineGetWouldCrossAliasBarrier(dst: VarRef, readStorage: StorageRef, opIndex: number): boolean {
@@ -221,31 +320,42 @@ class ExpressionBuilder {
     return false;
   }
 
-  #defineValue(dst: VarRef, value: IrValueExpr, inlineable: boolean): void {
+  #defineValue(
+    dst: VarRef,
+    value: IrValueExpr,
+    sourceOpIndexes: readonly number[],
+    inlineable: boolean
+  ): void {
+    const origins = uniqueSourceOpIndexes([...sourceOpIndexes, this.#sourceOpIndex]);
+
     if (inlineable && remainingUses(this.#useCounts, dst.id) <= 1) {
-      this.#bindings.set(dst.id, value);
+      this.#bindings.set(dst.id, { value, sourceOpIndexes: origins });
       return;
     }
 
-    this.#ops.push({ op: "let32", dst, value });
+    this.#pushOp({ op: "let32", dst, value }, sourceOpIndexes);
   }
 
-  #setExpr(op: Extract<IrExpressionInputOp, { op: "set" }>): IrSetExprOp {
+  #setExpr(op: Extract<IrExpressionInputOp, { op: "set" }>): readonly [IrSetExprOp, readonly number[]] {
+    const target = this.#storageExpr(op.target);
+    const value = this.#valueExpr(op.value);
     const expr: IrSetExprOp = {
       op: "set",
-      target: this.#storageExpr(op.target),
-      value: this.#valueExpr(op.value),
+      target: target.storage,
+      value: value.value,
       accessWidth: op.accessWidth ?? 32
     };
+    const origins = [...target.sourceOpIndexes, ...value.sourceOpIndexes];
 
-    return op.role === undefined ? expr : { ...expr, role: op.role };
+    return [op.role === undefined ? expr : { ...expr, role: op.role }, origins];
   }
 
-  #materializedValue(value: ValueRef): ValueRef {
+  #materializedValue(value: ValueRef): Readonly<{ value: ValueRef; sourceOpIndexes: readonly number[] }> {
     const expr = this.#valueExpr(value);
+    const exprValue = expr.value;
 
-    if (expr.kind === "var" || expr.kind === "const" || expr.kind === "nextEip") {
-      return expr;
+    if (exprValue.kind === "var" || exprValue.kind === "const" || exprValue.kind === "nextEip") {
+      return { value: exprValue, sourceOpIndexes: expr.sourceOpIndexes };
     }
 
     const materialized = value.kind === "var" ? value : undefined;
@@ -254,153 +364,111 @@ class ExpressionBuilder {
       throw new Error("cannot materialize non-var IR expression input");
     }
 
-    this.#ops.push({ op: "let32", dst: materialized, value: expr });
+    this.#pushOp({ op: "let32", dst: materialized, value: expr.value }, expr.sourceOpIndexes);
     this.#bindings.delete(materialized.id);
-    return materialized;
+    return { value: materialized, sourceOpIndexes: [] };
   }
 
-  #storageExpr(storage: StorageRef): IrStorageExpr {
+  #storageExpr(storage: StorageRef): ExpressionStorageResult {
     switch (storage.kind) {
       case "operand":
       case "reg":
-        return storage;
-      case "mem":
-        return { kind: "mem", address: this.#valueExpr(storage.address) };
+        return { storage, sourceOpIndexes: [] };
+      case "mem": {
+        const address = this.#valueExpr(storage.address);
+
+        return {
+          storage: { kind: "mem", address: address.value },
+          sourceOpIndexes: address.sourceOpIndexes
+        };
+      }
     }
   }
 
-  #valueExpr(value: ValueRef): IrValueExpr {
+  #valueExpr(value: ValueRef): ExpressionValueResult {
     if (value.kind !== "var") {
-      return value;
+      return { value, sourceOpIndexes: [] };
     }
 
     const binding = this.#bindings.get(value.id);
 
     if (binding === undefined) {
-      return value;
+      return { value, sourceOpIndexes: [] };
     }
 
-    if (binding.kind !== "const") {
+    if (binding.value.kind !== "const") {
       this.#bindings.delete(value.id);
     }
 
     return binding;
   }
+
+  #pushOp(op: IrExprOp, sourceOpIndexes: readonly number[]): void {
+    const expressionOpIndex = this.#ops.length;
+
+    this.#ops.push(op);
+    this.#recordPlacement(this.#sourceOpIndex, expressionOpIndex, "emittedOp");
+
+    for (const sourceOpIndex of uniqueSourceOpIndexes(sourceOpIndexes)) {
+      this.#recordPlacement(sourceOpIndex, expressionOpIndex, "valueUse");
+    }
+  }
+
+  #recordPlacement(
+    sourceOpIndex: number,
+    expressionOpIndex: number,
+    kind: IrExpressionSourcePlacementKind
+  ): void {
+    const placements = this.#placementsBySourceOpIndex.get(sourceOpIndex) ?? [];
+
+    if (!placements.some((placement) =>
+      placement.expressionOpIndex === expressionOpIndex && placement.kind === kind
+    )) {
+      placements.push({ expressionOpIndex, kind });
+    }
+
+    this.#placementsBySourceOpIndex.set(sourceOpIndex, placements);
+  }
+}
+
+function uniqueSourceOpIndexes(indexes: readonly number[]): readonly number[] {
+  const unique: number[] = [];
+
+  for (const index of indexes) {
+    if (index >= 0 && !unique.includes(index)) {
+      unique.push(index);
+    }
+  }
+
+  return unique;
 }
 
 function countVarUses(block: IrExpressionInputBlock): Map<number, number> {
   const counts = new Map<number, number>();
 
   for (const op of block) {
-    switch (op.op) {
-      case "get":
-        countStorageUses(counts, op.source);
-        break;
-      case "set":
-        countStorageUses(counts, op.target);
-        countValueUse(counts, op.value);
-        break;
-      case "address":
-      case "value.const":
-      case "flags.condition":
-      case "next":
-        break;
-      case "value.binary":
-        countValueUse(counts, op.a);
-        countValueUse(counts, op.b);
-        break;
-      case "value.unary":
-        countValueUse(counts, op.value);
-        break;
-      case "value.select":
-        countValueUse(counts, op.condition);
-        countValueUse(counts, op.whenTrue);
-        countValueUse(counts, op.whenFalse);
-        break;
-      case "flags.set":
-        for (const value of Object.values(op.inputs)) {
-          countValueUse(counts, value);
-        }
-        break;
-      case "jump":
-        countValueUse(counts, op.target);
-        break;
-      case "conditionalJump":
-        countValueUse(counts, op.condition);
-        countValueUse(counts, op.taken);
-        countValueUse(counts, op.notTaken);
-        break;
-      case "hostTrap":
-        countValueUse(counts, op.vector);
-        break;
-    }
+    visitIrOpValueRefs(op, (value) => {
+      if (value.kind === "var") {
+        counts.set(value.id, remainingUses(counts, value.id) + 1);
+      }
+    });
   }
 
   return counts;
 }
 
-function countStorageUses(counts: Map<number, number>, storage: StorageRef): void {
-  if (storage.kind === "mem") {
-    countValueUse(counts, storage.address);
-  }
-}
-
-function countValueUse(counts: Map<number, number>, value: ValueRef): void {
-  if (value.kind === "var") {
-    counts.set(value.id, remainingUses(counts, value.id) + 1);
-  }
-}
-
 function opUsesVar(op: IrExpressionInputOp, id: number): boolean {
-  switch (op.op) {
-    case "get":
-      return storageUsesVar(op.source, id);
-    case "set":
-      return storageUsesVar(op.target, id) || valueUsesVar(op.value, id);
-    case "address":
-      return false;
-    case "value.const":
-      return false;
-    case "flags.condition":
-      return false;
-    case "value.binary":
-      return valueUsesVar(op.a, id) || valueUsesVar(op.b, id);
-    case "value.unary":
-      return valueUsesVar(op.value, id);
-    case "value.select":
-      return valueUsesVar(op.condition, id) ||
-        valueUsesVar(op.whenTrue, id) ||
-        valueUsesVar(op.whenFalse, id);
-    case "flags.set":
-      return Object.values(op.inputs).some((value) => valueUsesVar(value, id));
-    case "next":
-      return false;
-    case "jump":
-      return valueUsesVar(op.target, id);
-    case "conditionalJump":
-      return valueUsesVar(op.condition, id) ||
-        valueUsesVar(op.taken, id) ||
-        valueUsesVar(op.notTaken, id);
-    case "hostTrap":
-      return valueUsesVar(op.vector, id);
-  }
-}
+  let found = false;
 
-function valueUsesVar(value: ValueRef, id: number): boolean {
-  return value.kind === "var" && value.id === id;
-}
+  visitIrOpValueRefs(op, (value) => {
+    found ||= value.kind === "var" && value.id === id;
+  });
 
-function storageUsesVar(storage: StorageRef, id: number): boolean {
-  return storage.kind === "mem" && valueUsesVar(storage.address, id);
+  return found;
 }
 
 function opWriteStorages(op: IrExpressionInputOp): readonly StorageRef[] {
-  switch (op.op) {
-    case "set":
-      return [op.target];
-    default:
-      return [];
-  }
+  return irOpStorageWrites(op);
 }
 
 function storagesMayAlias(
