@@ -7,16 +7,15 @@ import type {
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import {
   jitValueCost,
-  jitValueForEffectiveAddress,
-  jitValueForStorage,
   simplifyJitValue,
   jitValuesEqual,
   jitValueDependencies,
   type JitProducedValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
+import { createJitValueResolver } from "#backends/wasm/jit/ir/value-resolver.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import type { Reg32 } from "#x86/isa/types.js";
 import { jitInstructionWrittenReg } from "./operand-analysis.js";
 
 export type JitValueUseCount = Readonly<{
@@ -489,58 +488,12 @@ function jitValueForExpressionUntracked(
   value: IrValueExpr,
   state?: JitValueUseInstructionState
 ): JitValue | undefined {
-  switch (value.kind) {
-    case "var":
-      return undefined;
-    case "const":
-      return { kind: "const", type: value.type, value: value.value };
-    case "source":
-      return jitValueForStorageExpr(instruction, value.source, value.accessWidth, value.signed === true);
-    case "address":
-      return jitValueForEffectiveAddress(value.operand, instruction.operands, new Map());
-    case "value.binary": {
-      const a = jitValueForExpression(instruction, value.a, state);
-      const b = jitValueForExpression(instruction, value.b, state);
-
-      return a === undefined || b === undefined
-        ? undefined
-        : { kind: value.kind, type: value.type, operator: value.operator, a, b };
+  return createJitValueResolver({
+    operands: instruction.operands,
+    onExpressionValue: (expression, jitValue) => {
+      state?.expressionJitValues.set(expression, jitValue);
     }
-    case "value.unary": {
-      const inner = jitValueForExpression(instruction, value.value, state);
-
-      return inner === undefined
-        ? undefined
-        : { kind: value.kind, type: value.type, operator: value.operator, value: inner };
-    }
-    case "value.select": {
-      const condition = jitValueForExpression(instruction, value.condition, state);
-      const whenTrue = jitValueForExpression(instruction, value.whenTrue, state);
-      const whenFalse = jitValueForExpression(instruction, value.whenFalse, state);
-
-      return condition === undefined || whenTrue === undefined || whenFalse === undefined
-        ? undefined
-        : { kind: value.kind, type: value.type, condition, whenTrue, whenFalse };
-    }
-    case "nextEip":
-    case "flags.condition":
-      return undefined;
-  }
-}
-
-function jitValueForStorageExpr(
-  instruction: JitExpressionValueCacheInstruction,
-  storage: IrStorageExpr,
-  accessWidth: OperandWidth,
-  signed: boolean
-): JitValue | undefined {
-  switch (storage.kind) {
-    case "reg":
-    case "operand":
-      return jitValueForStorage(storage, instruction.operands, new Map(), accessWidth, signed);
-    case "mem":
-      return undefined;
-  }
+  }).valueForExpression(value);
 }
 
 function opWriteReg(

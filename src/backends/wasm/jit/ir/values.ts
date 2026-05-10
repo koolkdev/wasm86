@@ -215,6 +215,9 @@ export function jitValueForStorage(
   accessWidth: OperandWidth = 32,
   signed = false
 ): JitValue | undefined {
+  // Legacy construction path. New planner/emitter code should use
+  // JitValueResolver so full-register reads come from an explicit reader and
+  // cold partial aliases are represented as extractBits(input(reg32), ...).
   const value = jitValueForStorageUnsigned(storage, operands, registerValues, accessWidth);
 
   return value === undefined || !signed || accessWidth >= 32
@@ -260,6 +263,9 @@ export function jitValueForEffectiveAddress(
   operands: readonly JitOperandBinding[],
   registerValues: JitRegisterValueMap
 ): JitValue | undefined {
+  // Legacy construction path. New planner/emitter code should use
+  // JitValueResolver so address terms are built from an explicit register-value
+  // reader instead of implicitly falling back to legacy symbolic registers.
   const binding = operands[operand.index]!;
 
   if (binding.kind !== "static.mem") {

@@ -20,6 +20,7 @@ import type {
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
+  jitExtractBits,
   jitFlagConditionValue,
   jitFlagProducerValue,
   jitInputAluFlagsValue,
@@ -1053,6 +1054,42 @@ test("JIT value-cache planning retains produced values needed after their defini
   deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[0], []);
   deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[1], [{ value: produced, useCount: 1 }]);
   deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 1 }]);
+});
+
+test("JIT value-cache planning resolves cold partial register reads with shared value rules", () => {
+  const coldAl = {
+    kind: "source",
+    source: { kind: "reg", reg: "eax" },
+    accessWidth: 8
+  } as const;
+  const expression = {
+    kind: "value.binary",
+    type: "i32",
+    operator: "xor",
+    a: coldAl,
+    b: { kind: "const", type: "i32", value: 0x12 }
+  } as const;
+  const expressionBlock = [{
+    op: "conditionalJump",
+    condition: { kind: "const", type: "i32", value: 1 },
+    taken: expression,
+    notTaken: expression
+  }] as const;
+  const cachePlan = planJitExpressionValueCacheForInstructions([{
+    operands: [],
+    expressionBlock
+  }]);
+  const expectedSource = jitExtractBits(jitInputReg32Value("eax"), 0, 8);
+  const expectedExpression = {
+    kind: "value.binary",
+    type: "i32",
+    operator: "xor",
+    a: expectedSource,
+    b: c32(0x12)
+  } as const;
+
+  deepStrictEqual(cachePlan?.instructionPlans[0]?.expressionValues.get(coldAl), expectedSource);
+  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: expectedExpression, useCount: 2 }]);
 });
 
 test("JIT value-cache planning merges repeated produced-value retained uses", () => {
