@@ -20,6 +20,7 @@ import {
 import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { emitJitIrWithContext } from "#backends/wasm/jit/codegen/emit/ir-context.js";
+import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
@@ -444,6 +445,10 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
   const exitLocal = body.addLocal(wasmValueType.i64);
   const state = createJitIrState(body, [{ stores: [], flagMask: 0 }]);
   const entrySnapshot = stateSnapshot("preInstruction", 0x1000, 0);
+  const expressionBlock = [
+    { op: "set", target: reg("ebx"), value: const32(0x2a), accessWidth: 32 },
+    { op: "next" }
+  ] as const;
 
   emitJitIrWithContext({
     body,
@@ -463,10 +468,12 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
       postInstructionState: stateSnapshot("postInstruction", 0x1001, 1),
       exitPointCount: 0,
       operands: [],
-      expressionBlock: [
-        { op: "set", target: reg("ebx"), value: const32(0x2a), accessWidth: 32 },
-        { op: "next" }
-      ],
+      expressionBlock,
+      valueTimeline: buildJitInstructionValueTimeline({
+        operands: [],
+        expressionBlock,
+        entryValueState: entrySnapshot.valueState
+      }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() }
     }]
   });

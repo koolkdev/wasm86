@@ -16,6 +16,10 @@ import {
   planJitExpressionValueCacheForInstructions,
   type JitExpressionValueCachePlan
 } from "./value-cache.js";
+import {
+  buildJitInstructionValueTimeline,
+  type JitInstructionValueTimeline
+} from "./value-timeline.js";
 import type {
   JitCodegenPlan,
   JitExitPoint,
@@ -32,6 +36,7 @@ export type JitCodegenInstructionPlan = JitInstructionState & Pick<
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
   producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
+  valueTimeline: JitInstructionValueTimeline;
   valueCachePlan?: JitExpressionValueCachePlan;
 }>;
 
@@ -66,11 +71,18 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
       jitExpressionOptions(instruction)
     );
     const producedValuesByVarId = indexProducedValuesByVarIdForInstruction(instruction, index);
+    const valueTimeline = buildJitInstructionValueTimeline({
+      operands: instruction.operands,
+      expressionBlock: expressionPlan.expressionBlock,
+      entryValueState: state.entryPoint.snapshot.valueState,
+      producedValuesByVarId
+    });
 
     return {
       ...state,
       operands: instruction.operands,
       producedValuesByVarId,
+      valueTimeline,
       expressionBlock: expressionPlan.expressionBlock,
       sourceExpressionMap: expressionPlan.sourceMap
     };

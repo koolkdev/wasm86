@@ -474,7 +474,7 @@ function jitValueForExpression(
   value: IrValueExpr,
   state?: JitValueUseInstructionState
 ): JitValue | undefined {
-  const jitValue = jitValueForExpressionUntracked(instruction, value, state);
+  const jitValue = jitValueForExpressionUntracked(instruction, value);
 
   if (jitValue !== undefined) {
     state?.expressionJitValues.set(value, jitValue);
@@ -485,14 +485,10 @@ function jitValueForExpression(
 
 function jitValueForExpressionUntracked(
   instruction: JitExpressionValueCacheInstruction,
-  value: IrValueExpr,
-  state?: JitValueUseInstructionState
+  value: IrValueExpr
 ): JitValue | undefined {
   return createJitValueResolver({
-    operands: instruction.operands,
-    onExpressionValue: (expression, jitValue) => {
-      state?.expressionJitValues.set(expression, jitValue);
-    }
+    operands: instruction.operands
   }).valueForExpression(value);
 }
 

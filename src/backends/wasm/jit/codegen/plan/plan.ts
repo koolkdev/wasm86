@@ -22,6 +22,16 @@ export type {
   JitCodegenPlan,
   JitStateSnapshot
 } from "./types.js";
+export type {
+  JitInstructionValueTimeline,
+  JitInstructionValueTimelineInput,
+  JitPlacedEffectiveAddressValue,
+  JitPlacedExpressionValue,
+  JitPlacedStorageRead,
+  JitPlacedValueRefValue,
+  JitValueTimelineWrite
+} from "./value-timeline.js";
+export { buildJitInstructionValueTimeline } from "./value-timeline.js";
 
 export function planJitCodegen(optimizedBlock: JitIrBlock): JitCodegenPlan {
   const state = analyzeJitCodegenState(optimizedBlock);

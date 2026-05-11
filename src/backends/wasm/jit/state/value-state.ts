@@ -207,6 +207,16 @@ export function createJitValueState(): JitValueState {
   return new JitValueState();
 }
 
+export function createJitValueStateFromSnapshot(snapshot: JitValueStateSnapshot): JitValueState {
+  const state = createJitValueState();
+
+  for (const { slot, value } of snapshot.slots.changedEntries()) {
+    state.slots.write(slot, value);
+  }
+
+  return state;
+}
+
 export function reg32Slot(reg: Reg32): JitArchitecturalSlot {
   return { kind: "reg32", reg };
 }

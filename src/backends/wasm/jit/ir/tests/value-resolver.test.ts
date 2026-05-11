@@ -7,6 +7,8 @@ import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.j
 import { createJitValueResolver } from "#backends/wasm/jit/ir/value-resolver.js";
 import {
   jitExtractBits,
+  jitFlagConditionValue,
+  jitInputAluFlagsValue,
   jitInputReg32Value,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
@@ -109,7 +111,7 @@ test("JIT value resolver resolves value refs inside larger expressions", () => {
   const eax = jitInputReg32Value("eax");
   const resolver = createJitValueResolver({
     operands: [],
-    valueForValueRef: (value) =>
+    readValueRef: (value) =>
       value.kind === "var" && value.id === 0 ? eax : undefined
   });
   const expression = {
@@ -121,6 +123,28 @@ test("JIT value resolver resolves value refs inside larger expressions", () => {
   } as const;
 
   deepStrictEqual(resolver.valueForExpression(expression), add(eax, c32(3)));
+});
+
+test("JIT value resolver leaves flag conditions unresolved without a flag reader", () => {
+  const resolver = createJitValueResolver({ operands: [] });
+
+  deepStrictEqual(
+    resolver.valueForExpression({ kind: "flags.condition", cc: "E" }),
+    undefined
+  );
+});
+
+test("JIT value resolver resolves flag conditions from the supplied flag reader", () => {
+  const flags = jitInputAluFlagsValue();
+  const resolver = createJitValueResolver({
+    operands: [],
+    readAluFlags: () => flags
+  });
+
+  deepStrictEqual(
+    resolver.valueForExpression({ kind: "flags.condition", cc: "E" }),
+    jitFlagConditionValue(flags, "E")
+  );
 });
 
 function c32(value: number): JitValue {

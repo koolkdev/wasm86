@@ -2,6 +2,7 @@ import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressi
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import {
   jitExtractBits,
+  jitFlagConditionValue,
   jitInputReg32Value,
   simplifyJitValue,
   type JitValue
@@ -11,27 +12,27 @@ import type { OperandRef, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
 
 export type JitValueResolverReadReg32 = (reg: Reg32) => JitValue;
-export type JitValueResolverValueRef = (value: ValueRef) => JitValue | undefined;
-export type JitValueResolverExpressionRecord = (expression: IrValueExpr, value: JitValue) => void;
+export type JitValueResolverReadAluFlags = () => JitValue | undefined;
+export type JitValueResolverReadValueRef = (value: ValueRef) => JitValue | undefined;
 
 export type JitValueResolverOptions = Readonly<{
   operands: readonly JitOperandBinding[];
   readReg32?: JitValueResolverReadReg32;
-  valueForValueRef?: JitValueResolverValueRef;
-  onExpressionValue?: JitValueResolverExpressionRecord;
+  readAluFlags?: JitValueResolverReadAluFlags;
+  readValueRef?: JitValueResolverReadValueRef;
 }>;
 
 export class JitValueResolver {
   readonly #operands: readonly JitOperandBinding[];
   readonly #readReg32: JitValueResolverReadReg32;
-  readonly #valueForValueRef: JitValueResolverValueRef | undefined;
-  readonly #onExpressionValue: JitValueResolverExpressionRecord | undefined;
+  readonly #readAluFlags: JitValueResolverReadAluFlags | undefined;
+  readonly #readValueRef: JitValueResolverReadValueRef | undefined;
 
   constructor(options: JitValueResolverOptions) {
     this.#operands = options.operands;
     this.#readReg32 = options.readReg32 ?? jitInputReg32Value;
-    this.#valueForValueRef = options.valueForValueRef;
-    this.#onExpressionValue = options.onExpressionValue;
+    this.#readAluFlags = options.readAluFlags;
+    this.#readValueRef = options.readValueRef;
   }
 
   valueForStorage(
@@ -73,22 +74,16 @@ export class JitValueResolver {
   valueForValueRef(value: ValueRef): JitValue | undefined {
     switch (value.kind) {
       case "var":
-        return this.#valueForValueRef?.(value);
+        return this.#readValueRef?.(value);
       case "const":
-        return { kind: "const", type: value.type, value: i32(value.value) };
+        return c32(value.value);
       case "nextEip":
         return undefined;
     }
   }
 
   valueForExpression(expression: IrValueExpr): JitValue | undefined {
-    const value = this.valueForExpressionUnrecorded(expression);
-
-    if (value !== undefined) {
-      this.#onExpressionValue?.(expression, value);
-    }
-
-    return value;
+    return this.valueForExpressionUnrecorded(expression);
   }
 
   private valueForStorageUnsigned(
@@ -184,8 +179,13 @@ export class JitValueResolver {
               whenFalse
             });
       }
-      case "flags.condition":
-        return undefined;
+      case "flags.condition": {
+        const flags = this.#readAluFlags?.();
+
+        return flags === undefined
+          ? undefined
+          : jitFlagConditionValue(flags, expression.cc);
+      }
     }
   }
 }

@@ -1,16 +1,11 @@
 import { reg32 } from "#x86/isa/types.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
-import { flagProducerInputsFromRecord } from "#x86/ir/model/flags.js";
 import type {
   JitExitSnapshotKind,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
 import { JitValueTracker } from "#backends/wasm/jit/ir/value-tracker.js";
-import {
-  jitFlagProducerValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
 import {
   jitStorageRegisterAccess,
   type JitRegisterValueMap
@@ -19,6 +14,10 @@ import {
   createJitValueState,
   type JitValueStateSnapshot
 } from "#backends/wasm/jit/state/value-state.js";
+import {
+  jitFlagSetProducerValue,
+  jitFlagSetWrittenMask
+} from "./flag-values.js";
 
 export class JitBlockStateTracker {
   private readonly valueState = createJitValueState();
@@ -139,27 +138,14 @@ export class JitBlockStateTracker {
   }
 
   private recordFlagSet(op: Extract<JitIrOp, { op: "flags.set" }>): void {
-    const mask = (op.writtenMask | op.undefMask) >>> 0;
+    const mask = jitFlagSetWrittenMask(op);
 
     if (mask === 0) {
       return;
     }
 
-    const producer = this.flagProducerValue(op);
+    const producer = jitFlagSetProducerValue(op, this.values.inputRecordFor(op.inputs));
     this.valueState.flags.writeFlagBits(mask, producer);
-  }
-
-  private flagProducerValue(
-    op: Extract<JitIrOp, { op: "flags.set" }>
-  ): JitValue {
-    return jitFlagProducerValue(
-      op.producer,
-      flagProducerInputsFromRecord(op.producer, this.values.inputRecordFor(op.inputs)),
-      {
-        ...(op.width === undefined ? {} : { width: op.width }),
-        mask: op.writtenMask | op.undefMask
-      }
-    );
   }
 
   private currentRegisterValues(): JitRegisterValueMap {
