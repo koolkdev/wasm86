@@ -29,6 +29,7 @@ export type {
   JitPlacedExpressionValue,
   JitPlacedStorageRead,
   JitPlacedValueRefValue,
+  JitTimelineProducedValueDefinition,
   JitValueTimelineWrite
 } from "./value-timeline.js";
 export { buildJitInstructionValueTimeline } from "./value-timeline.js";

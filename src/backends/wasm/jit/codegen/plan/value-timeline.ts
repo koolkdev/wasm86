@@ -56,6 +56,12 @@ export type JitValueTimelineWrite = Readonly<{
   value: JitValue;
 }>;
 
+export type JitTimelineProducedValueDefinition = Readonly<{
+  expressionOpIndex: number;
+  valueRef: ValueRef;
+  value: JitProducedValue;
+}>;
+
 export type JitInstructionValueTimeline = Readonly<{
   entryValueState: JitValueStateSnapshot;
   valueStateSnapshotsByExpressionOpIndex: readonly JitValueStateSnapshot[];
@@ -68,6 +74,7 @@ export type JitInstructionValueTimeline = Readonly<{
   placedEffectiveAddressValues: readonly JitPlacedEffectiveAddressValue[];
   placedStorageReads: readonly JitPlacedStorageRead[];
   logicalWrites: readonly JitValueTimelineWrite[];
+  producedDefinitions: readonly JitTimelineProducedValueDefinition[];
 }>;
 
 export type JitInstructionValueTimelineInput = Readonly<{
@@ -81,6 +88,29 @@ export function buildJitInstructionValueTimeline(
   input: JitInstructionValueTimelineInput
 ): JitInstructionValueTimeline {
   return new JitInstructionValueTimelineBuilder(input).build();
+}
+
+export function jitTimelineExpressionValueAt(
+  timeline: Pick<JitInstructionValueTimeline, "expressionValuesByExpressionOpIndex">,
+  expressionOpIndex: number,
+  expression: IrValueExpr
+): JitValue | undefined {
+  return timeline.expressionValuesByExpressionOpIndex[expressionOpIndex]?.get(expression);
+}
+
+export function jitTimelineValueRefValueAt(
+  timeline: Pick<JitInstructionValueTimeline, "valueRefValuesByExpressionOpIndex">,
+  expressionOpIndex: number,
+  valueRef: ValueRef
+): JitValue | undefined {
+  switch (valueRef.kind) {
+    case "const":
+      return { kind: "const", type: valueRef.type, value: valueRef.value };
+    case "var":
+      return timeline.valueRefValuesByExpressionOpIndex[expressionOpIndex]?.get(valueRef.id);
+    case "nextEip":
+      return undefined;
+  }
 }
 
 class JitInstructionValueTimelineBuilder {
@@ -99,6 +129,7 @@ class JitInstructionValueTimelineBuilder {
   readonly #placedEffectiveAddressValues: JitPlacedEffectiveAddressValue[] = [];
   readonly #placedStorageReads: JitPlacedStorageRead[] = [];
   readonly #logicalWrites: JitValueTimelineWrite[] = [];
+  readonly #producedDefinitions: JitTimelineProducedValueDefinition[] = [];
   readonly #placedValueRefKeys = new Set<string>();
   #currentExpressionOpIndex = -1;
 
@@ -133,7 +164,8 @@ class JitInstructionValueTimelineBuilder {
       placedValueRefValues: this.#placedValueRefValues,
       placedEffectiveAddressValues: this.#placedEffectiveAddressValues,
       placedStorageReads: this.#placedStorageReads,
-      logicalWrites: this.#logicalWrites
+      logicalWrites: this.#logicalWrites,
+      producedDefinitions: this.#producedDefinitions
     };
   }
 
@@ -188,6 +220,14 @@ class JitInstructionValueTimelineBuilder {
 
     this.#valueRefs.set(op.dst.id, value);
     this.#recordValueRefValue(op.dst, value);
+
+    if (producedValue !== undefined) {
+      this.#producedDefinitions.push({
+        expressionOpIndex: this.#currentExpressionOpIndex,
+        valueRef: op.dst,
+        value: producedValue
+      });
+    }
   }
 
   #recordSet(op: Extract<IrExprOp, { op: "set" }>): void {

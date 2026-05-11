@@ -5,24 +5,23 @@ import type {
   WasmIrCachedValueLocal,
   WasmIrValueCache
 } from "#backends/wasm/codegen/emit.js";
-import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 import {
   jitValueKey,
-  jitValueReadsReg,
   simplifyJitValue,
   jitValuesEqual,
-  jitValueUsesSymbolicReg,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
-import type { OperandWidth } from "#x86/isa/types.js";
 import {
-  shouldCacheValue,
   type JitExpressionValueCachePlan,
   type JitValueUseCount
 } from "#backends/wasm/jit/codegen/plan/value-cache.js";
-import { jitInstructionWrittenReg } from "#backends/wasm/jit/codegen/plan/operand-analysis.js";
+import {
+  jitTimelineExpressionValueAt,
+  jitTimelineValueRefValueAt
+} from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 
 export type { JitExpressionValueCachePlan, JitValueUseCount } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 
@@ -49,7 +48,7 @@ export type JitValueCacheRuntimeAvailabilitySnapshot = Readonly<{
 
 export type JitValueCacheRuntime = WasmIrValueCache & Readonly<{
   beginInstruction(index: number): void;
-  notifyWrite(target: IrStorageExpr, accessWidth: OperandWidth): void;
+  beginExpressionOp(opIndex: number): void;
   snapshotAvailability(): JitValueCacheRuntimeAvailabilitySnapshot;
   restoreAvailability(snapshot: JitValueCacheRuntimeAvailabilitySnapshot): void;
   emitJitValueForUse(value: JitValue, emitter: () => ValueWidth): JitCachedValueUse;
@@ -86,13 +85,11 @@ export class JitValueLocalStore {
     for (const useCount of useCounts) {
       const value = simplifyJitValue(useCount.value);
 
-      if (shouldCacheValue(value, useCount.useCount)) {
-        this.#entries.set(jitValueKey(value), {
-          value,
-          valueWidth: undefined,
-          available: false
-        });
-      }
+      this.#entries.set(jitValueKey(value), {
+        value,
+        valueWidth: undefined,
+        available: false
+      });
     }
   }
 
@@ -303,6 +300,7 @@ export function createJitValueCacheRuntime(
   const store = new JitValueLocalStore(body, cachePlan.selectedUseCounts);
   let currentEpoch = 0;
   let currentInstructionIndex = 0;
+  let currentExpressionOpIndex = 0;
 
   return {
     beginInstruction: (index) => {
@@ -311,9 +309,25 @@ export function createJitValueCacheRuntime(
       }
 
       currentInstructionIndex = index;
+      currentExpressionOpIndex = 0;
+      currentEpoch = currentInstructionPlan().epochByExpressionOpIndex[0] ?? currentEpoch;
+    },
+    beginExpressionOp: (opIndex) => {
+      const instructionPlan = currentInstructionPlan();
+
+      if (opIndex < 0 || opIndex >= instructionPlan.valueTimeline.expressionValuesByExpressionOpIndex.length) {
+        throw new Error(`JIT value cache expression op index out of range: ${opIndex}`);
+      }
+
+      currentExpressionOpIndex = opIndex;
+      currentEpoch = instructionPlan.epochByExpressionOpIndex[opIndex] ?? currentEpoch;
     },
     emitForUse: (value, emitter) => {
-      const jitValue = currentInstructionPlan().expressionValues.get(value);
+      if (value.kind === "var") {
+        return emitter();
+      }
+
+      const jitValue = jitValueForExpressionAtCurrentOp(value);
 
       return jitValue !== undefined && valueIsSelectedInEpoch(jitValue)
         ? store.emitForUse(jitValue, emitter)
@@ -324,7 +338,11 @@ export function createJitValueCacheRuntime(
         ? store.emitForUseWithLocal(value, emitter)
         : { valueWidth: emitter() },
     captureForReuse: (value, emitter) => {
-      const jitValue = currentInstructionPlan().expressionValues.get(value);
+      if (value.kind === "var") {
+        return undefined;
+      }
+
+      const jitValue = jitValueForExpressionAtCurrentOp(value);
 
       return jitValue !== undefined && valueIsSelectedInEpoch(jitValue)
         ? store.captureForReuse(jitValue, emitter)
@@ -342,30 +360,12 @@ export function createJitValueCacheRuntime(
       currentEpoch = snapshot.currentEpoch;
       store.restoreAvailability(snapshot.store);
     },
-    jitValueForExpression: (value) =>
-      currentInstructionPlan().expressionValues.get(value) ?? jitValueForExpressionRef(value),
-    jitValueForValueRef: (value) => {
-      switch (value.kind) {
-        case "const":
-          return { kind: "const", type: value.type, value: value.value };
-        case "var":
-          return currentInstructionPlan().valueRefValues.get(value.id);
-        case "nextEip":
-          return undefined;
-      }
-    },
-    notifyWrite: (target, accessWidth) => {
-      const reg = jitInstructionWrittenReg(currentInstructionPlan(), target, accessWidth);
-
-      if (reg === undefined) {
-        return;
-      }
-
-      store.forgetWhere((value) =>
-        jitValueReadsReg(value, reg) || jitValueUsesSymbolicReg(value, reg)
-      );
-      currentEpoch = Math.min(currentEpoch + 1, cachePlan.selectedConsumerValuesByEpoch.length - 1);
-    }
+    jitValueForExpression: (value) => jitValueForExpressionAtCurrentOp(value),
+    jitValueForValueRef: (value) => jitTimelineValueRefValueAt(
+      currentInstructionPlan().valueTimeline,
+      currentExpressionOpIndex,
+      value
+    )
   };
 
   function valueIsSelectedInEpoch(value: JitValue): boolean {
@@ -383,17 +383,12 @@ export function createJitValueCacheRuntime(
     return instructionPlan;
   }
 
-  function jitValueForExpressionRef(value: IrValueExpr): JitValue | undefined {
-    switch (value.kind) {
-      case "const":
-        return { kind: "const", type: value.type, value: value.value };
-      case "var":
-        return currentInstructionPlan().valueRefValues.get(value.id);
-      case "nextEip":
-        return undefined;
-      default:
-        return undefined;
-    }
+  function jitValueForExpressionAtCurrentOp(value: IrValueExpr): JitValue | undefined {
+    return jitTimelineExpressionValueAt(
+      currentInstructionPlan().valueTimeline,
+      currentExpressionOpIndex,
+      value
+    );
   }
 }
 

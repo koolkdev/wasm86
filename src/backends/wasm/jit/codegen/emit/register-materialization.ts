@@ -28,7 +28,6 @@ export function emitJitRegisterMaterialization(
   }
 
   jitContext.state.regs.commitPendingReg(target.reg);
-  valueCache?.notifyWrite(target, accessWidth);
 }
 
 function emitRegisterMaterializationFromCapturedReuseValue(

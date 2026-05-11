@@ -96,7 +96,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     instructions.map((instruction, index) => ({
       operands: instruction.operands,
       expressionBlock: instruction.expressionBlock,
-      producedValuesByVarId: instruction.producedValuesByVarId,
+      valueTimeline: instruction.valueTimeline,
       materializationJitValueUsesByExpressionIndex: jitValueUsesByInstruction[index] ?? new Map()
     }))
   );

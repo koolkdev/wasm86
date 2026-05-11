@@ -3,24 +3,28 @@ import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { emitIrExpressionBlockToWasm } from "#backends/wasm/codegen/emit.js";
 import { cleanValueWidth } from "#backends/wasm/codegen/value-width.js";
-import type { IrExprBlock, IrStorageExpr } from "#backends/wasm/codegen/expressions.js";
+import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
 
-export type EmitPlannedExpressionOptions = Readonly<{
-  cloneWriteTargetsForNotification?: boolean;
-}>;
-
 export function emitPlannedExpression(
-  block: IrExprBlock,
-  options: EmitPlannedExpressionOptions = {}
+  block: IrExprBlock
 ): readonly number[] {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const sinkLocal = body.addLocal(wasmValueType.i32);
-  const cachePlan = planJitExpressionValueCache({ operands: [] }, block);
+  const cachePlan = planJitExpressionValueCache({
+    operands: [],
+    valueTimeline: buildJitInstructionValueTimeline({
+      operands: [],
+      expressionBlock: block,
+      entryValueState: createJitValueState().snapshot()
+    })
+  }, block);
   const valueCache = createJitValueCacheRuntime(body, cachePlan);
 
   emitIrExpressionBlockToWasm(block, {
@@ -35,13 +39,9 @@ export function emitPlannedExpression(
       body.i32Const(registerSeed(source.reg));
       return cleanValueWidth(32);
     },
-    emitSet: (target, value, accessWidth, helpers) => {
+    emitSet: (_target, value, _accessWidth, helpers) => {
       helpers.emitValue(value);
       body.localSet(sinkLocal);
-      valueCache?.notifyWrite(
-        options.cloneWriteTargetsForNotification === true ? cloneStorage(target) : target,
-        accessWidth
-      );
     },
     emitAddress: () => {
       throw new Error("test address emission is not implemented");
@@ -75,17 +75,6 @@ export function emitPlannedExpression(
   scratch.assertClear();
   body.end();
   return wasmBodyOpcodes(body.encode());
-}
-
-function cloneStorage(storage: IrStorageExpr): IrStorageExpr {
-  switch (storage.kind) {
-    case "reg":
-      return { kind: "reg", reg: storage.reg };
-    case "operand":
-      return { kind: "operand", index: storage.index };
-    case "mem":
-      return { kind: "mem", address: storage.address };
-  }
 }
 
 function registerSeed(regName: Reg32): number {

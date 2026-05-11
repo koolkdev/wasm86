@@ -6,11 +6,14 @@ import type { Reg32 } from "#x86/isa/types.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { ExitReason } from "#backends/wasm/exit.js";
+import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitMaterializationUses } from "#backends/wasm/jit/codegen/plan/materialization-uses.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import { planJitExpressionValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   JitCodegenPlan,
   JitExitMaterializationStore,
@@ -27,6 +30,7 @@ import {
   jitInputReg32Value,
   jitInsertMaskedBits,
   jitProducedValue,
+  type JitProducedValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
@@ -1042,15 +1046,14 @@ test("JIT value-cache planning retains produced values needed after their defini
       accessWidth: 32
     }
   ] as const;
-  const cachePlan = planJitExpressionValueCacheForInstructions([{
-    operands: [],
+  const cachePlan = planValueCacheForTest({
     expressionBlock,
     producedValuesByVarId: new Map([[0, produced]]),
     materializationJitValueUsesByExpressionIndex: new Map([[2, [produced]]])
-  }]);
+  });
 
-  deepStrictEqual(cachePlan?.instructionPlans[0]?.valueRefValues.get(0), produced);
-  deepStrictEqual(cachePlan?.instructionPlans[0]?.expressionValues.get(expressionBlock[0].value), produced);
+  deepStrictEqual(cachePlan?.instructionPlans[0]?.valueTimeline.valueRefValuesByExpressionOpIndex[0]?.get(0), produced);
+  deepStrictEqual(cachePlan?.instructionPlans[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(expressionBlock[0].value), produced);
   deepStrictEqual(cachePlan?.captureValuesByEpoch[0], [produced]);
   deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[0], []);
   deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[1], [{ value: produced, useCount: 1 }]);
@@ -1076,10 +1079,9 @@ test("JIT value-cache planning resolves cold partial register reads with shared 
     taken: expression,
     notTaken: expression
   }] as const;
-  const cachePlan = planJitExpressionValueCacheForInstructions([{
-    operands: [],
+  const cachePlan = planValueCacheForTest({
     expressionBlock
-  }]);
+  });
   const expectedSource = jitExtractBits(jitInputReg32Value("eax"), 0, 8);
   const expectedExpression = {
     kind: "value.binary",
@@ -1089,8 +1091,75 @@ test("JIT value-cache planning resolves cold partial register reads with shared 
     b: c32(0x12)
   } as const;
 
-  deepStrictEqual(cachePlan?.instructionPlans[0]?.expressionValues.get(coldAl), expectedSource);
+  deepStrictEqual(cachePlan?.instructionPlans[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(coldAl), expectedSource);
   deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: expectedExpression, useCount: 2 }]);
+});
+
+test("JIT value-cache planning keeps repeated post-write expression uses point-specific", () => {
+  const expression = {
+    kind: "value.binary",
+    type: "i32",
+    operator: "add",
+    a: {
+      kind: "source",
+      source: { kind: "reg", reg: "eax" },
+      accessWidth: 32
+    },
+    b: { kind: "const", type: "i32", value: 1 }
+  } as const;
+  const expressionBlock = [
+    { op: "hostTrap", vector: expression },
+    { op: "set", target: { kind: "reg", reg: "eax" }, value: { kind: "const", type: "i32", value: 5 }, accessWidth: 32 },
+    { op: "hostTrap", vector: expression },
+    { op: "hostTrap", vector: expression }
+  ] as const;
+  const cachePlan = planValueCacheForTest({ expressionBlock });
+  const instructionPlan = cachePlan?.instructionPlans[0];
+  const preWriteValue = addValue(jitInputReg32Value("eax"), c32(1));
+  const postWriteValue = addValue(c32(5), c32(1));
+
+  deepStrictEqual(
+    instructionPlan?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(expression),
+    preWriteValue
+  );
+  deepStrictEqual(
+    instructionPlan?.valueTimeline.expressionValuesByExpressionOpIndex[2]?.get(expression),
+    postWriteValue
+  );
+  deepStrictEqual(instructionPlan?.epochByExpressionOpIndex, [0, 0, 1, 1]);
+  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[0], []);
+  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[1], [{ value: postWriteValue, useCount: 2 }]);
+  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: postWriteValue, useCount: 2 }]);
+});
+
+test("JIT value-cache planning does not count emitted var reads as underlying graph uses", () => {
+  const expressionBlock = [
+    {
+      op: "let32",
+      dst: { kind: "var", id: 0 },
+      value: {
+        kind: "value.binary",
+        type: "i32",
+        operator: "xor",
+        a: {
+          kind: "value.binary",
+          type: "i32",
+          operator: "add",
+          a: {
+            kind: "source",
+            source: { kind: "reg", reg: "eax" },
+            accessWidth: 32
+          },
+          b: { kind: "const", type: "i32", value: 1 }
+        },
+        b: { kind: "const", type: "i32", value: 0xff }
+      }
+    },
+    { op: "hostTrap", vector: { kind: "var", id: 0 } },
+    { op: "hostTrap", vector: { kind: "var", id: 0 } }
+  ] as const;
+
+  strictEqual(planValueCacheForTest({ expressionBlock }), undefined);
 });
 
 test("JIT value-cache planning merges repeated produced-value retained uses", () => {
@@ -1120,12 +1189,11 @@ test("JIT value-cache planning merges repeated produced-value retained uses", ()
       accessWidth: 32
     }
   ] as const;
-  const cachePlan = planJitExpressionValueCacheForInstructions([{
-    operands: [],
+  const cachePlan = planValueCacheForTest({
     expressionBlock,
     producedValuesByVarId: new Map([[0, produced]]),
     materializationJitValueUsesByExpressionIndex: new Map([[1, [produced]], [2, [produced]]])
-  }]);
+  });
 
   deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 2 }]);
 });
@@ -1149,14 +1217,38 @@ test("JIT value-cache planning skips unused produced values", () => {
       accessWidth: 32
     }
   ] as const;
-  const cachePlan = planJitExpressionValueCacheForInstructions([{
-    operands: [],
+  const cachePlan = planValueCacheForTest({
     expressionBlock,
     producedValuesByVarId: new Map([[0, produced]])
-  }]);
+  });
 
   strictEqual(cachePlan, undefined);
 });
+
+function planValueCacheForTest(input: Readonly<{
+  operands?: readonly JitOperandBinding[];
+  expressionBlock: IrExprBlock;
+  producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
+  materializationJitValueUsesByExpressionIndex?: ReadonlyMap<number, readonly JitValue[]>;
+}>) {
+  const operands = input.operands ?? [];
+
+  return planJitExpressionValueCacheForInstructions([{
+    operands,
+    expressionBlock: input.expressionBlock,
+    valueTimeline: buildJitInstructionValueTimeline({
+      operands,
+      expressionBlock: input.expressionBlock,
+      entryValueState: createJitValueState().snapshot(),
+      ...(input.producedValuesByVarId === undefined
+        ? {}
+        : { producedValuesByVarId: input.producedValuesByVarId })
+    }),
+    ...(input.materializationJitValueUsesByExpressionIndex === undefined
+      ? {}
+      : { materializationJitValueUsesByExpressionIndex: input.materializationJitValueUsesByExpressionIndex })
+  }]);
+}
 
 function registerStore(reg: Reg32, value: JitValue = jitInputReg32Value(reg)): JitExitMaterializationStore {
   return {

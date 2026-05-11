@@ -350,7 +350,7 @@ function countOpcode(opcodes: readonly number[], opcode: number): number {
 function cachedFlagValueCache(handles: JitCachedValueHandle[]): JitValueCacheRuntime {
   return {
     beginInstruction: () => {},
-    notifyWrite: () => {},
+    beginExpressionOp: () => {},
     snapshotAvailability: () => ({ currentEpoch: 0, store: { entries: [] } }),
     restoreAvailability: () => {},
     emitForUse: (_value, emitter) => emitter(),

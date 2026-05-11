@@ -21,7 +21,7 @@ import {
 } from "./value-local-store.js";
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { emitJitRegisterMaterialization } from "./register-materialization.js";
-import { emitJitStorageSet } from "./storage.js";
+import { emitJitSet } from "./operands.js";
 
 export type JitIrInstructionContext = JitCodegenInstructionPlan;
 
@@ -153,7 +153,7 @@ function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionC
         return;
       }
 
-      emitJitStorageSet(jitContext, valueCache, target, value, accessWidth, helpers);
+      emitJitSet(jitContext, target, value, accessWidth, helpers);
     },
     emitAddress: (source) => emitJitAddress(jitContext, source),
     emitSetFlags: (descriptor, helpers) =>

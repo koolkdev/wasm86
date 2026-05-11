@@ -14,12 +14,14 @@ import {
 } from "#backends/wasm/tests/body-opcodes.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values.js";
 import {
+  createJitValueCacheRuntime,
   JitValueLocalStore,
   type JitValueUseCount
 } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { emitJitIrWithContext } from "#backends/wasm/jit/codegen/emit/ir-context.js";
+import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
@@ -97,10 +99,10 @@ test("JitValueLocalStore reuses high-cost retained expressions through one local
   deepStrictEqual(localOpcodes(opcodes), [wasmOpcode.localTee, wasmOpcode.localGet]);
 });
 
-test("JitValueLocalStore does not cache single-use high-cost retained expressions", () => {
+test("JitValueLocalStore does not cache unselected high-cost retained expressions", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = highCostValue();
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 1 }]));
+  const store = new JitValueLocalStore(body, useCounts([]));
   let emitted = 0;
 
   store.emitForUse(value, () => emitHighCostValue(body, () => { emitted += 1; }));
@@ -114,10 +116,10 @@ test("JitValueLocalStore does not cache single-use high-cost retained expression
   deepStrictEqual(localOpcodes(opcodes), []);
 });
 
-test("JitValueLocalStore does not cache constants", () => {
+test("JitValueLocalStore does not cache unselected constants", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = { kind: "const", type: "i32", value: 7 } as const satisfies JitValue;
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 3 }]));
+  const store = new JitValueLocalStore(body, useCounts([]));
   let emitted = 0;
 
   store.emitForUse(value, () => emitConst(body, 7, () => { emitted += 1; }));
@@ -133,7 +135,7 @@ test("JitValueLocalStore does not cache constants", () => {
   deepStrictEqual(localOpcodes(opcodes), []);
 });
 
-test("JitValueLocalStore does not cache when reuse only ties repeated inline cost", () => {
+test("JitValueLocalStore does not cache unselected tied-cost expressions", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = {
     kind: "value.unary",
@@ -141,7 +143,7 @@ test("JitValueLocalStore does not cache when reuse only ties repeated inline cos
     operator: "extend8_s",
     value: { kind: "reg", reg: "eax" }
   } as const satisfies JitValue;
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 2 }]));
+  const store = new JitValueLocalStore(body, useCounts([]));
   let emitted = 0;
 
   store.emitForUse(value, () => emitExtend8(body, () => { emitted += 1; }));
@@ -421,12 +423,43 @@ test("JIT expression cache invalidates cached values across written-register epo
     { op: "set", target: reg("eax"), value: const32(5), accessWidth: 32 },
     { op: "hostTrap", vector: addExpr("eax", 1) },
     { op: "hostTrap", vector: addExpr("eax", 1) }
-  ], { cloneWriteTargetsForNotification: true });
+  ]);
 
   deepStrictEqual(localOpcodes(opcodes).filter((opcode) =>
     opcode === wasmOpcode.localTee ||
     opcode === wasmOpcode.localGet
   ), [wasmOpcode.localTee, wasmOpcode.localGet, wasmOpcode.localTee, wasmOpcode.localGet]);
+});
+
+test("JIT value-cache runtime follows planned timeline epoch positions", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const expressionBlock = [
+    { op: "hostTrap", vector: addExpr("eax", 1) },
+    { op: "hostTrap", vector: addExpr("eax", 1) },
+    { op: "set", target: reg("eax"), value: const32(5), accessWidth: 32 },
+    { op: "hostTrap", vector: addExpr("eax", 1) },
+    { op: "hostTrap", vector: addExpr("eax", 1) }
+  ] as const;
+  const timeline = buildJitInstructionValueTimeline({
+    operands: [],
+    expressionBlock,
+    entryValueState: createJitValueState().snapshot()
+  });
+  const plan = planJitExpressionValueCache({
+    operands: [],
+    valueTimeline: timeline
+  }, expressionBlock);
+  const valueCache = createJitValueCacheRuntime(body, plan);
+
+  valueCache?.beginInstruction(0);
+
+  const runtimeEpochs = expressionBlock.map((_op, opIndex) => {
+    valueCache?.beginExpressionOp(opIndex);
+    return valueCache?.snapshotAvailability().currentEpoch;
+  });
+
+  deepStrictEqual(runtimeEpochs, plan?.instructionPlans[0]?.epochByExpressionOpIndex);
+  deepStrictEqual(runtimeEpochs, [0, 0, 0, 1, 1]);
 });
 
 test("JIT expression cache prefers repeated parent expressions over nested children", () => {

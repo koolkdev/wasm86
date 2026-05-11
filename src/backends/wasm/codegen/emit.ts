@@ -79,6 +79,7 @@ export type WasmIrCachedValueLocal = WasmIrCachedValueHandle & Readonly<{
 }>;
 
 export type WasmIrValueCache = Readonly<{
+  beginExpressionOp?(opIndex: number): void;
   emitForUse(value: IrValueExpr, emitter: () => ValueWidth): ValueWidth;
   captureForReuse?(value: IrValueExpr, emitter: () => ValueWidth): WasmIrCachedValueLocal | undefined;
 }>;
@@ -121,7 +122,14 @@ class IrExprWasmEmitter {
 
   emit(): void {
     try {
-      for (const op of this.#block) {
+      for (let opIndex = 0; opIndex < this.#block.length; opIndex += 1) {
+        const op = this.#block[opIndex];
+
+        if (op === undefined) {
+          throw new Error(`missing IR expression op: ${opIndex}`);
+        }
+
+        this.#context.valueCache?.beginExpressionOp?.(opIndex);
         this.#emitOp(op);
       }
     } finally {
