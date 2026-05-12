@@ -74,7 +74,7 @@ test("emitJitValue reports flag producer width from its mask", () => {
   strictEqual(valueWidth.cleanWidth, cleanWidthForMask(IR_ALU_FLAG_MASK));
 });
 
-test("emitJitValue does not bypass a selected input root for direct slice lowering", () => {
+test("emitJitValue does not bypass a selected input dependency for direct slice lowering", () => {
   const body = new WasmFunctionBodyEncoder();
   const root = jitInputReg32Value("eax");
   let selectedRootUseCount = 0;
@@ -92,12 +92,41 @@ test("emitJitValue does not bypass a selected input root for direct slice loweri
       canEmitInline: (value) => value.kind !== "input"
     }),
     emitInputBits: () => {
-      throw new Error("direct input bits should not bypass selected input root");
+      throw new Error("direct input bits should not bypass selected input dependency");
     }
   }, jitExtractBits(root, 8, 8));
   body.end();
 
   strictEqual(selectedRootUseCount, 1);
+});
+
+test("emitJitValue does not bypass a selected slice root for signed direct lowering", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const root = jitExtractBits(jitInputReg32Value("eax"), 0, 8);
+  let selectedRootUseCount = 0;
+
+  emitJitValue({
+    ...bodyContext(body),
+    valueCache: passthroughValueCache({
+      emitForUse: (value, emitter) => {
+        if (value.kind === "extractBits") {
+          selectedRootUseCount += 1;
+          body.i32Const(0x7f);
+          return { valueWidth: cleanValueWidth(8) };
+        }
+
+        return { valueWidth: emitter() };
+      },
+      canEmitInline: (value) => value.kind !== "extractBits"
+    }),
+    emitInputBits: () => {
+      throw new Error("direct input bits should not bypass selected slice root");
+    }
+  }, extend8s(root));
+  body.end();
+
+  strictEqual(selectedRootUseCount, 1);
+  strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Extend8S), 1);
 });
 
 test("emitJitValue returns signed direct slices without a second sign extension", () => {
@@ -116,6 +145,20 @@ test("emitJitValue returns signed direct slices without a second sign extension"
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Extend8S), 0);
 });
 
+test("emitJitValue lowers signed input slot slices to signed state loads", () => {
+  const byteOpcodes = emitSymbolicValueResult(extend8s(jitExtractBits(jitInputReg32Value("eax"), 0, 8)), {
+    emitInputBits: emitJitInputSlotBits
+  }).opcodes;
+  const wordOpcodes = emitSymbolicValueResult(extend16s(jitExtractBits(jitInputReg32Value("eax"), 0, 16)), {
+    emitInputBits: emitJitInputSlotBits
+  }).opcodes;
+
+  strictEqual(countOpcode(byteOpcodes, wasmOpcode.i32Load8S), 1);
+  strictEqual(countOpcode(byteOpcodes, wasmOpcode.i32Extend8S), 0);
+  strictEqual(countOpcode(wordOpcodes, wasmOpcode.i32Load16S), 1);
+  strictEqual(countOpcode(wordOpcodes, wasmOpcode.i32Extend16S), 0);
+});
+
 test("emitJitInputSlotBits rejects slices that extend past a 32-bit register slot", () => {
   const body = new WasmFunctionBodyEncoder();
   const valueWidth = emitJitInputSlotBits(body, { kind: "reg32", reg: "eax" }, 24, 16, false);
@@ -124,6 +167,16 @@ test("emitJitInputSlotBits rejects slices that extend past a 32-bit register slo
 
   strictEqual(valueWidth, undefined);
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Load16U), 0);
+});
+
+test("emitJitInputSlotBits rejects non-register slots for slice access", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const valueWidth = emitJitInputSlotBits(body, { kind: "aluFlags" }, 0, 8, false);
+
+  body.end();
+
+  strictEqual(valueWidth, undefined);
+  strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Load8U), 0);
 });
 
 test("emitJitValue lowers flag conditions from producer inputs when possible", () => {
@@ -255,7 +308,13 @@ test("emitJitValue lowers produced values through retained locals", () => {
 });
 
 type EmitSymbolicValueOptions = Readonly<{
-  emitInputBits?(body: WasmFunctionBodyEncoder): ValueWidth;
+  emitInputBits?(
+    body: WasmFunctionBodyEncoder,
+    slot: JitArchitecturalSlot,
+    bitOffset: number,
+    width: 8 | 16 | 32,
+    signed: boolean
+  ): ValueWidth | undefined;
 }>;
 
 function emitSymbolicValue(value: JitValue): readonly number[] {
@@ -272,7 +331,8 @@ function emitSymbolicValueResult(
     ...(options.emitInputBits === undefined
       ? {}
       : {
-          emitInputBits: () => options.emitInputBits!(body)
+          emitInputBits: (slot, bitOffset, width, signed) =>
+            options.emitInputBits!(body, slot, bitOffset, width, signed)
         })
   }, value);
 
@@ -320,6 +380,14 @@ function shl(a: JitValue, b: JitValue): JitValue {
 
 function sub(a: JitValue, b: JitValue): JitValue {
   return { kind: "value.binary", type: "i32", operator: "sub", a, b };
+}
+
+function extend8s(value: JitValue): JitValue {
+  return { kind: "value.unary", type: "i32", operator: "extend8_s", value };
+}
+
+function extend16s(value: JitValue): JitValue {
+  return { kind: "value.unary", type: "i32", operator: "extend16_s", value };
 }
 
 function emitAdd(body: WasmFunctionBodyEncoder, onEmit: () => void): ValueWidth {

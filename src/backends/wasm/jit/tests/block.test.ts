@@ -1275,36 +1275,36 @@ test("jit IR block emits MOVSX with signed loads or sign-extension opcodes", () 
   strictEqual(movsxWordMem.includes(wasmOpcode.i32Extend16S), false);
   strictEqual(movsxWordMem.includes(wasmOpcode.i32Xor), false);
 
-  // Register-source MOVSX now flows through the generic JitValue graph. Keeping
-  // this as a direct signed byte state load is a Step 3L lowering shortcut.
   strictEqual(
     registerStateMemoryAccesses(movsxEbxAlBlock, stateOffset.eax)
       .some((access) => access.opcode === wasmOpcode.i32Load8S),
-    false
+    true
   );
-  strictEqual(movsxEbxAl.includes(wasmOpcode.i32Extend8S), true);
+  strictEqual(movsxEbxAl.includes(wasmOpcode.i32Extend8S), false);
   strictEqual(movsxEbxAl.includes(wasmOpcode.i32Xor), false);
 
-  strictEqual(movsxAfterTrackedReg.includes(wasmOpcode.i32Extend16S), true);
+  strictEqual(movsxAfterTrackedReg.includes(wasmOpcode.i32Extend16S), false);
   strictEqual(
-    registerStateMemoryAccesses(movsxAfterTrackedRegBlock, stateOffset.eax).some(
+    registerStateMemoryAccesses(movsxAfterTrackedRegBlock, stateOffset.ebx).some(
       (access) => access.opcode === wasmOpcode.i32Load16S
     ),
-    false
+    true
   );
   strictEqual(movsxAfterTrackedReg.includes(wasmOpcode.i32Xor), false);
 });
 
 test("jit IR block keeps MOVZX on unsigned loads without redundant masks", () => {
-  const movzxBl = singleInstructionBodyOpcodes([0x0f, 0xb6, 0xc3]);
+  const movzxBlBlock = buildJitIrBlock([ok(decodeBytes([0x0f, 0xb6, 0xc3], startAddress))]);
+  const movzxBl = jitBlockBodyOpcodes(movzxBlBlock);
   const movzxWordMem = singleInstructionBodyOpcodes([0x0f, 0xb7, 0x03]);
 
-  // Register-source MOVZX uses value-first full-register input lowering until
-  // Step 3L adds selected direct slice loads.
-  strictEqual(movzxBl.includes(wasmOpcode.i32Load8U), false);
+  strictEqual(
+    registerStateMemoryAccesses(movzxBlBlock, stateOffset.ebx)
+      .some((access) => access.opcode === wasmOpcode.i32Load8U),
+    true
+  );
   strictEqual(movzxBl.includes(wasmOpcode.i32Load8S), false);
-  // Step 3L should restore this direct-load assertion:
-  // assertNoMaskImmediatelyAfter(movzxBl, wasmOpcode.i32Load8U);
+  assertNoMaskImmediatelyAfter(movzxBl, wasmOpcode.i32Load8U);
 
   strictEqual(movzxWordMem.includes(wasmOpcode.i32Load16U), true);
   strictEqual(movzxWordMem.includes(wasmOpcode.i32Load16S), false);
@@ -1330,11 +1330,8 @@ test("jit IR block shares planned cold AH xor result with narrow writeback", asy
   strictEqual(result.state.eflags, (preservedEflags | 0x04) >>> 0);
   strictEqual(result.state.eip, startAddress + bytes.length);
   strictEqual(result.state.instructionCount, 1);
-  // The high-byte input and xor result are captured through the planned value
-  // graph, so the exit writeback does not rebuild EAX through an extra full load.
   deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
     { opcode: wasmOpcode.i32Load8U, offset: stateOffset.eax + 1 },
-    { opcode: wasmOpcode.i32Load, offset: stateOffset.eax },
     { opcode: wasmOpcode.i32Store8, offset: stateOffset.eax + 1 }
   ]);
   strictEqual(countOpcode(jitBlockBodyOpcodes(block), wasmOpcode.localTee), 1);
@@ -1357,7 +1354,6 @@ test("jit IR block keeps cold AX xor state traffic word-width", async () => {
   // flags and the narrow exit writeback.
   deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
     { opcode: wasmOpcode.i32Load16U, offset: stateOffset.eax },
-    { opcode: wasmOpcode.i32Load, offset: stateOffset.eax },
     { opcode: wasmOpcode.i32Store16, offset: stateOffset.eax }
   ]);
   strictEqual(countOpcode(jitBlockBodyOpcodes(block), wasmOpcode.localTee), 1);

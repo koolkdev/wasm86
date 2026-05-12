@@ -75,6 +75,15 @@ export function extractJitRegisterAccessValue(
     };
   }
 
+  if (width !== fullWidth) {
+    return {
+      kind: "extractBits",
+      value,
+      bitOffset,
+      width
+    };
+  }
+
   const shifted = bitOffset === 0
     ? value
     : {
