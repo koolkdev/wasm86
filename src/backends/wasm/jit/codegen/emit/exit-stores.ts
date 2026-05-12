@@ -1,6 +1,5 @@
 import { stateOffset } from "#backends/wasm/abi.js";
 import {
-  emitLoadStateU32,
   emitStoreStateU16,
   emitStoreStateU32,
   emitStoreStateU8
@@ -26,6 +25,7 @@ import {
   type JitArchitecturalSlot,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
+import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 
 export type JitCapturedExitMaterializationStore = Readonly<{
   store: JitExitMaterializationStore;
@@ -221,19 +221,10 @@ function emitJitExitStoreSourceValue(
   return emitJitValue({
     body: context.body,
     valueCache: context.valueCache,
-    emitInput: (slot) => emitJitInputSlot(context.body, slot)
+    emitInput: (slot) => emitJitInputSlot(context.body, slot),
+    emitInputBits: (slot, bitOffset, width, signed) =>
+      emitJitInputSlotBits(context.body, slot, bitOffset, width, signed)
   }, value, requireFullWidth ? { requestedWidth: 32 } : {});
-}
-
-function emitJitInputSlot(body: WasmFunctionBodyEncoder, slot: JitArchitecturalSlot): ValueWidth {
-  switch (slot.kind) {
-    case "reg32":
-      emitLoadStateU32(body, stateOffset[slot.reg]);
-      return { logicalWidth: 32, cleanWidth: 32 };
-    case "aluFlags":
-      emitLoadStateU32(body, stateOffset.aluFlags);
-      return { logicalWidth: 32, cleanWidth: 32 };
-  }
 }
 
 function emitJitStoreTarget(

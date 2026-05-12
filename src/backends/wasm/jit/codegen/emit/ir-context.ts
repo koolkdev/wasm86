@@ -2,7 +2,8 @@ import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scr
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitModuleLinkTable } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
-import { emitIrExpressionBlockToWasm } from "#backends/wasm/codegen/emit.js";
+import { cleanValueWidth } from "#backends/wasm/codegen/value-width.js";
+import { emitJitExpressionBlock } from "./expression-block.js";
 import {
   emitJitConditionalJump,
   emitJitHostTrap,
@@ -22,6 +23,7 @@ import {
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { emitJitRegisterMaterialization } from "./register-materialization.js";
 import { emitJitSet } from "./operands.js";
+import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 
 export type JitIrInstructionContext = JitCodegenInstructionPlan;
 
@@ -142,25 +144,35 @@ function emitCurrentInstruction(jitContext: JitIrContext): void {
 function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionContext): void {
   const valueCache = jitContext.valueCache;
 
-  emitIrExpressionBlockToWasm(instruction.expressionBlock, {
+  emitJitExpressionBlock({
     body: jitContext.body,
-    scratch: jitContext.scratch,
+    instruction,
     valueCache,
-    emitGet: (source, accessWidth, helpers, options) => emitJitGet(jitContext, source, accessWidth, helpers, options),
-    emitSet: (target, value, accessWidth, helpers, op) => {
+    emitInput: (slot) => emitJitInputSlot(jitContext.body, slot),
+    emitInputBits: (slot, bitOffset, width, signed) =>
+      emitJitInputSlotBits(jitContext.body, slot, bitOffset, width, signed),
+    emitGet: (source, accessWidth, helpers, options) =>
+      emitJitGet(jitContext, source, accessWidth, helpers, options),
+    emitSet: (op, helpers) => {
       if (op.role === "registerMaterialization") {
-        emitJitRegisterMaterialization(jitContext, valueCache, target, value, accessWidth, helpers);
+        emitJitRegisterMaterialization(jitContext, valueCache, op.target, op.value, op.accessWidth, helpers);
         return;
       }
 
-      emitJitSet(jitContext, target, value, accessWidth, helpers);
+      emitJitSet(jitContext, op.target, op.value, op.accessWidth, helpers);
     },
     emitAddress: (source) => emitJitAddress(jitContext, source),
     emitSetFlags: (descriptor, helpers) =>
       jitContext.state.flags.emitSet(descriptor, helpers),
-    emitFlagsCondition: (cc) => jitContext.state.flags.emitFlagsCondition(cc),
-    emitNext: () => emitJitNext(jitContext),
-    emitNextEip: () => emitJitNextEip(jitContext),
+    emitNext: (helpers) => {
+      void helpers;
+      emitJitNext(jitContext);
+    },
+    emitNextEip: (helpers) => {
+      void helpers;
+      emitJitNextEip(jitContext);
+      return cleanValueWidth(32);
+    },
     emitJump: (target, helpers) => emitJitJump(jitContext, target, helpers),
     emitConditionalJump: (condition, taken, notTaken, helpers) =>
       emitJitConditionalJump(jitContext, condition, taken, notTaken, helpers),

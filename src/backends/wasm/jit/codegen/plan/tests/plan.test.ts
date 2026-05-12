@@ -654,6 +654,7 @@ test("planJitCodegen feeds produced register exit-store values into materializat
   deepStrictEqual(codegenPlan.materializationNeeds, [
     exitStoreNeed(registerStore("eax", exitValue), exit, exitPointIndex)
   ]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
   deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
     { value: produced, useCount: 1 }
   ]);
@@ -1132,7 +1133,7 @@ test("JIT value-cache planning keeps repeated post-write expression uses point-s
   deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: postWriteValue, useCount: 2 }]);
 });
 
-test("JIT value-cache planning does not count emitted var reads as underlying graph uses", () => {
+test("JIT value-cache planning prices emitted var reads as resolved JitValue graph uses", () => {
   const expressionBlock = [
     {
       op: "let32",
@@ -1158,8 +1159,17 @@ test("JIT value-cache planning does not count emitted var reads as underlying gr
     { op: "hostTrap", vector: { kind: "var", id: 0 } },
     { op: "hostTrap", vector: { kind: "var", id: 0 } }
   ] as const;
+  const expected = {
+    kind: "value.binary",
+    type: "i32",
+    operator: "xor",
+    a: addValue(jitInputReg32Value("eax"), c32(1)),
+    b: c32(0xff)
+  } as const satisfies JitValue;
+  const cachePlan = planValueCacheForTest({ expressionBlock });
 
-  strictEqual(planValueCacheForTest({ expressionBlock }), undefined);
+  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[0], [{ value: expected, useCount: 2 }]);
+  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: expected, useCount: 2 }]);
 });
 
 test("JIT value-cache planning merges repeated produced-value retained uses", () => {
@@ -1198,7 +1208,31 @@ test("JIT value-cache planning merges repeated produced-value retained uses", ()
   deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 2 }]);
 });
 
-test("JIT value-cache planning skips unused produced values", () => {
+test("JIT value-cache planning does not treat logical register writes as produced consumers", () => {
+  const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
+  const expressionBlock = [
+    {
+      op: "let32",
+      dst: { kind: "var", id: 0 },
+      value: {
+        kind: "source",
+        source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
+        accessWidth: 32
+      }
+    },
+    { op: "set", target: { kind: "reg", reg: "ebx" }, value: { kind: "var", id: 0 }, accessWidth: 32 },
+    { op: "set", target: { kind: "reg", reg: "ecx" }, value: { kind: "var", id: 0 }, accessWidth: 32 },
+    { op: "set", target: { kind: "reg", reg: "edx" }, value: { kind: "var", id: 0 }, accessWidth: 32 }
+  ] as const;
+  const cachePlan = planValueCacheForTest({
+    expressionBlock,
+    producedValuesByVarId: new Map([[0, produced]])
+  });
+
+  strictEqual(cachePlan, undefined);
+});
+
+test("JIT value-cache planning skips produced values with no emitted or materialized consumer", () => {
   const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
   const expressionBlock = [
     {
@@ -1211,10 +1245,8 @@ test("JIT value-cache planning skips unused produced values", () => {
       }
     },
     {
-      op: "set",
-      target: { kind: "reg", reg: "eax" },
-      value: { kind: "var", id: 0 },
-      accessWidth: 32
+      op: "hostTrap",
+      vector: { kind: "const", type: "i32", value: 0x2e }
     }
   ] as const;
   const cachePlan = planValueCacheForTest({

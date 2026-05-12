@@ -1795,29 +1795,15 @@ test("jit IR block keeps mixed cached pending flag inputs stable after invalidat
     decodeEip = instruction.nextEip;
     return instruction;
   }));
-  const optimizedBlock = optimizeJitIrBlock(block);
-  const codegenPlan = planJitCodegen(optimizedBlock);
-  const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
-  const producedLoadConsumerEpochs = emissionPlan.valueCachePlan?.selectedConsumerValuesByEpoch.filter((epoch) =>
-    epoch.some(({ value }) =>
-      value.kind === "produced" &&
-        value.id === "load#mov.r32_rm32:1:3:0"
-    )
-  ).length ?? 0;
-  const producedLoadCaptureEpochs = emissionPlan.valueCachePlan?.captureValuesByEpoch.filter((epoch) =>
-    epoch.some((value) =>
-      value.kind === "produced" &&
-        value.id === "load#mov.r32_rm32:1:3:0"
-    )
-  ).length ?? 0;
+  const guestLoads = memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))
+    .filter((access) => access.memoryIndex === wasmMemoryIndex.guest && access.opcode === wasmOpcode.i32Load);
   const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
     eax: 1,
     eflags: (preservedEflags | allArithmeticEflags) >>> 0,
     eip: startAddress
   }), [{ address: 0x60, bytes: littleEndianBytes(0xffff_ffff, 32) }]);
 
-  strictEqual(producedLoadCaptureEpochs, 1);
-  strictEqual(producedLoadConsumerEpochs, 1);
+  strictEqual(guestLoads.length, 1);
   strictEqual(result.state.eax, 0);
   strictEqual(result.state.eflags, (preservedEflags | arithmeticEflags(expectedFlags)) >>> 0);
   assertArithmeticFlags(result.state, expectedFlags, "cached pending flag input");
@@ -2488,6 +2474,7 @@ function memoryAccesses(functionBody: Uint8Array<ArrayBuffer>): readonly WasmMem
       }
       case wasmOpcode.else:
       case wasmOpcode.return:
+      case wasmOpcode.drop:
       case wasmOpcode.select:
       case wasmOpcode.i32Eqz:
       case wasmOpcode.i32LtU:

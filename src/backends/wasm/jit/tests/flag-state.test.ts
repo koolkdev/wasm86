@@ -355,6 +355,7 @@ function cachedFlagValueCache(handles: JitCachedValueHandle[]): JitValueCacheRun
     restoreAvailability: () => {},
     emitForUse: (_value, emitter) => emitter(),
     emitJitValueForUse: (_value, emitter) => ({ valueWidth: emitter() }),
+    canEmitJitValueInline: () => true,
     captureForReuse: () => undefined,
     captureJitValueForReuse: () => {
       const handle = handles.shift();

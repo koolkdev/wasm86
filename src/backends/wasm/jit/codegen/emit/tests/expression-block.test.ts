@@ -14,6 +14,7 @@ import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/valu
 import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
+import { jitProducedValue, type JitProducedValue } from "#backends/wasm/jit/ir/values.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import type { Reg32 } from "#x86/isa/types.js";
 
@@ -88,19 +89,70 @@ test("JIT expression-block emitter fails loudly when a value has no timeline fac
   }, /JIT expression-block value is not available at expression op 0/);
 });
 
-test("JIT expression-block emitter fails loudly for effects outside the foundation surface", () => {
+test("JIT expression-block emitter emits uncached produced let32 definitions at their source point", () => {
+  const produced = jitProducedValue("load#uncached-produced:0:0:0", "i32");
+  const result = emitFoundationBlock([
+    {
+      op: "let32",
+      dst: v(0),
+      value: {
+        kind: "source",
+        source: { kind: "mem", address: c32(0x1000) },
+        accessWidth: 32
+      }
+    }
+  ], {
+    producedValuesByVarId: new Map([[0, produced]])
+  });
+
+  strictEqual(countOpcode(result.opcodes, wasmOpcode.drop), 1);
+  deepStrictEqual(localOpcodes(result.opcodes), []);
+});
+
+test("JIT expression-block emitter fails when a produced consumer has no captured definition", () => {
+  const produced = jitProducedValue("load#uncaptured-produced:0:0:0", "i32");
+
   throws(() => {
-    emitFoundationBlock([{ op: "jump", target: c32(0x1000) }]);
-  }, /unsupported JIT expression-block op in 3H emitter: jump/);
+    emitFoundationBlock([
+      {
+        op: "let32",
+        dst: v(0),
+        value: {
+          kind: "source",
+          source: { kind: "mem", address: c32(0x1000) },
+          accessWidth: 32
+        }
+      },
+      { op: "hostTrap", vector: v(0) }
+    ], {
+      cache: false,
+      producedValuesByVarId: new Map([[0, produced]])
+    });
+  }, /produced JIT value is not available for lowering/);
+});
+
+test("JIT expression-block emitter routes normal planned effects", () => {
+  const result = emitFoundationBlock([
+    { op: "set", target: reg("ebx"), value: addExpr("eax", 1), accessWidth: 32 },
+    { op: "jump", target: c32(0x1000) }
+  ]);
+
+  strictEqual(result.setCalls, 1);
+  strictEqual(result.jumpCalls, 1);
+  strictEqual(countOpcode(result.opcodes, wasmOpcode.i32Add), 1);
 });
 
 type FoundationEmitResult = Readonly<{
   opcodes: readonly number[];
   nextCalls: number;
+  setCalls: number;
+  jumpCalls: number;
+  conditionalJumpCalls: number;
 }>;
 
 type FoundationEmitOptions = Readonly<{
   cache?: boolean;
+  producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
 }>;
 
 function emitFoundationBlock(
@@ -112,13 +164,19 @@ function emitFoundationBlock(
   const valueTimeline = buildJitInstructionValueTimeline({
     operands: [],
     expressionBlock,
-    entryValueState: createJitValueState().snapshot()
+    entryValueState: createJitValueState().snapshot(),
+    ...(options.producedValuesByVarId === undefined
+      ? {}
+      : { producedValuesByVarId: options.producedValuesByVarId })
   });
   const cachePlan = options.cache === false
     ? undefined
     : planJitExpressionValueCache({ operands: [], valueTimeline }, expressionBlock);
   const valueCache = createJitValueCacheRuntime(body, cachePlan);
   let nextCalls = 0;
+  let setCalls = 0;
+  let jumpCalls = 0;
+  let conditionalJumpCalls = 0;
 
   valueCache?.beginInstruction(0);
   emitJitExpressionBlock({
@@ -133,8 +191,53 @@ function emitFoundationBlock(
       body.i32Const(registerSeed(slot.reg));
       return cleanValueWidth(32);
     },
+    emitGet: (source) => {
+      if (source.kind === "mem") {
+        body.i32Const(0x77);
+        return cleanValueWidth(32);
+      }
+
+      if (source.kind !== "reg") {
+        throw new Error(`unsupported expression-block test get: ${source.kind}`);
+      }
+
+      body.i32Const(registerSeed(source.reg));
+      return cleanValueWidth(32);
+    },
+    emitSet: (op, helpers) => {
+      setCalls += 1;
+      helpers.emitValue(op.value);
+      body.localSet(sinkLocal);
+    },
+    emitAddress: () => {
+      throw new Error("expression-block test address emission is not implemented");
+    },
+    emitSetFlags: (descriptor, helpers) => {
+      for (const value of Object.values(descriptor.inputs)) {
+        helpers.emitValue(value);
+        body.localSet(sinkLocal);
+      }
+    },
+    emitNextEip: () => {
+      body.i32Const(0);
+      return cleanValueWidth(32);
+    },
     emitNext: () => {
       nextCalls += 1;
+    },
+    emitJump: (target, helpers) => {
+      jumpCalls += 1;
+      helpers.emitValue(target);
+      body.localSet(sinkLocal);
+    },
+    emitConditionalJump: (condition, taken, notTaken, helpers) => {
+      conditionalJumpCalls += 1;
+      helpers.emitValue(condition);
+      body.localSet(sinkLocal);
+      helpers.emitValue(taken);
+      body.localSet(sinkLocal);
+      helpers.emitValue(notTaken);
+      body.localSet(sinkLocal);
     },
     emitHostTrap: (vector, helpers) => {
       helpers.emitValue(vector);
@@ -145,7 +248,10 @@ function emitFoundationBlock(
 
   return {
     opcodes: wasmBodyOpcodes(body.encode()),
-    nextCalls
+    nextCalls,
+    setCalls,
+    jumpCalls,
+    conditionalJumpCalls
   };
 }
 

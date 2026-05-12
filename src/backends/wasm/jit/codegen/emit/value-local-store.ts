@@ -56,6 +56,7 @@ export type JitValueCacheRuntime = WasmIrValueCache & Readonly<{
     value: JitValue,
     emitter: () => ValueWidth
   ): JitCachedValueLocal | undefined;
+  canEmitJitValueInline(value: JitValue): boolean;
   jitValueForExpression(value: IrValueExpr): JitValue | undefined;
   jitValueForValueRef(value: ValueRef): JitValue | undefined;
 }>;
@@ -148,6 +149,35 @@ export class JitValueLocalStore {
       ...this.#handleForLocal(cacheLocal, valueWidth),
       valueWidth,
       emitted: true
+    };
+  }
+
+  emitAvailableForUse(value: JitValue): JitCachedValueUse | undefined {
+    const entry = this.#entryFor(value);
+
+    if (entry === undefined || !entry.available) {
+      return undefined;
+    }
+
+    const local = requiredEntryLocal(entry);
+
+    this.#body.localGet(local.local);
+    return { valueWidth: requiredValueWidth(entry), local: local.local };
+  }
+
+  captureAvailableForReuse(value: JitValue): JitCachedValueLocal | undefined {
+    const entry = this.#entryFor(value);
+
+    if (entry === undefined || !entry.available) {
+      return undefined;
+    }
+
+    const local = requiredEntryLocal(entry);
+
+    return {
+      ...this.#handleForLocal(local, requiredValueWidth(entry)),
+      valueWidth: requiredValueWidth(entry),
+      emitted: false
     };
   }
 
@@ -329,14 +359,23 @@ export function createJitValueCacheRuntime(
 
       const jitValue = jitValueForExpressionAtCurrentOp(value);
 
-      return jitValue !== undefined && valueIsSelectedInEpoch(jitValue)
-        ? store.emitForUse(jitValue, emitter)
-        : emitter();
+      if (jitValue === undefined) {
+        return emitter();
+      }
+
+      if (valueIsSelectedInEpoch(jitValue)) {
+        return store.emitForUse(jitValue, emitter);
+      }
+
+      return store.emitAvailableForUse(jitValue)?.valueWidth ?? emitter();
     },
-    emitJitValueForUse: (value, emitter) =>
-      valueIsSelectedInEpoch(value)
-        ? store.emitForUseWithLocal(value, emitter)
-        : { valueWidth: emitter() },
+    emitJitValueForUse: (value, emitter) => {
+      if (valueIsSelectedInEpoch(value)) {
+        return store.emitForUseWithLocal(value, emitter);
+      }
+
+      return store.emitAvailableForUse(value) ?? { valueWidth: emitter() };
+    },
     captureForReuse: (value, emitter) => {
       if (value.kind === "var") {
         return undefined;
@@ -344,14 +383,19 @@ export function createJitValueCacheRuntime(
 
       const jitValue = jitValueForExpressionAtCurrentOp(value);
 
-      return jitValue !== undefined && valueIsSelectedInEpoch(jitValue)
+      if (jitValue === undefined) {
+        return undefined;
+      }
+
+      return valueIsSelectedInEpoch(jitValue)
         ? store.captureForReuse(jitValue, emitter)
-        : undefined;
+        : store.captureAvailableForReuse(jitValue);
     },
     captureJitValueForReuse: (value, emitter) =>
       valueIsSelectedInEpoch(value)
         ? store.captureForReuse(value, emitter)
-        : undefined,
+        : store.captureAvailableForReuse(value),
+    canEmitJitValueInline: (value) => !valueIsSelectedInEpoch(value),
     snapshotAvailability: () => ({
       currentEpoch,
       store: store.snapshotAvailability()
@@ -398,6 +442,14 @@ function requiredValueWidth(entry: CachedJitValue): ValueWidth {
   }
 
   return entry.valueWidth;
+}
+
+function requiredEntryLocal(entry: CachedJitValue): CachedJitLocal {
+  if (entry.local === undefined) {
+    throw new Error("cached JIT value is available without a local");
+  }
+
+  return entry.local;
 }
 
 function valueIsSelected(selected: readonly JitValueUseCount[], value: JitValue): boolean {

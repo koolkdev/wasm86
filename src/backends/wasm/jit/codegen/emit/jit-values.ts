@@ -1,5 +1,9 @@
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import {
+  emitI32BinaryInstruction,
+  i32BinaryOperandEmitOptions
+} from "#backends/wasm/codegen/emit.js";
+import {
   cleanValueWidth,
   constValueWidth,
   emitCleanValueForFullUse,
@@ -31,6 +35,12 @@ export type JitValueEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   valueCache?: JitValueCacheRuntime | undefined;
   emitInput(slot: JitArchitecturalSlot): ValueWidth;
+  emitInputBits?: ((
+    slot: JitArchitecturalSlot,
+    bitOffset: number,
+    width: OperandWidth,
+    signed: boolean
+  ) => ValueWidth | undefined) | undefined;
   emitProduced?(value: JitProducedValue): ValueWidth;
   emitReg?(reg: Reg32): ValueWidth;
 }>;
@@ -114,41 +124,24 @@ function emitI32Binary(context: JitValueEmitContext, operator: IrBinaryOperator,
   return i32BinaryResultValueWidth(operator, left, right);
 }
 
-function emitI32BinaryInstruction(body: WasmFunctionBodyEncoder, operator: IrBinaryOperator): void {
-  switch (operator) {
-    case "add":
-      body.i32Add();
-      return;
-    case "sub":
-      body.i32Sub();
-      return;
-    case "xor":
-      body.i32Xor();
-      return;
-    case "or":
-      body.i32Or();
-      return;
-    case "and":
-      body.i32And();
-      return;
-    case "shl":
-      body.i32Shl();
-      return;
-    case "shr_u":
-      body.i32ShrU();
-      return;
-  }
-}
-
 function emitI32Unary(context: JitValueEmitContext, operator: IrUnaryOperator, value: JitValue): ValueWidth {
   switch (operator) {
     case "extend8_s":
-      emitJitValue(context, value, { widthInsensitive: true });
-      return emitSignExtendValueToWidth(context.body, 8);
+      return emitI32SignExtend(context, value, 8);
     case "extend16_s":
-      emitJitValue(context, value, { widthInsensitive: true });
-      return emitSignExtendValueToWidth(context.body, 16);
+      return emitI32SignExtend(context, value, 16);
   }
+}
+
+function emitI32SignExtend(context: JitValueEmitContext, value: JitValue, width: 8 | 16): ValueWidth {
+  const inputBits = emitSignExtendInputExtractBits(context, value, width);
+
+  if (inputBits !== undefined) {
+    return inputBits;
+  }
+
+  emitJitValue(context, value, { widthInsensitive: true });
+  return emitSignExtendValueToWidth(context.body, width);
 }
 
 function emitI32Select(context: JitValueEmitContext, condition: JitValue, whenTrue: JitValue, whenFalse: JitValue): ValueWidth {
@@ -166,6 +159,12 @@ function emitExtractBits(
   bitOffset: number,
   width: OperandWidth
 ): ValueWidth {
+  const inputBits = emitInputExtractBits(context, value, bitOffset, width, false);
+
+  if (inputBits !== undefined) {
+    return inputBits;
+  }
+
   const valueWidth = emitJitValue(context, value, bitOffset === 0 ? { widthInsensitive: true } : { requestedWidth: 32 });
 
   if (bitOffset !== 0) {
@@ -175,6 +174,43 @@ function emitExtractBits(
   return width === 32
     ? cleanValueWidth(32)
     : emitMaskValueToWidth(context.body, width, bitOffset === 0 ? valueWidth : cleanValueWidth(32));
+}
+
+function emitInputExtractBits(
+  context: JitValueEmitContext,
+  value: JitValue,
+  bitOffset: number,
+  width: OperandWidth,
+  signed: boolean
+): ValueWidth | undefined {
+  const simplified = simplifyJitValue(value);
+
+  if (
+    simplified.kind !== "input" ||
+    context.valueCache?.canEmitJitValueInline(simplified) === false
+  ) {
+    return undefined;
+  }
+
+  return context.emitInputBits?.(simplified.slot, bitOffset, width, signed);
+}
+
+function emitSignExtendInputExtractBits(
+  context: JitValueEmitContext,
+  value: JitValue,
+  width: 8 | 16
+): ValueWidth | undefined {
+  const simplified = simplifyJitValue(value);
+
+  if (
+    simplified.kind !== "extractBits" ||
+    simplified.width !== width ||
+    context.valueCache?.canEmitJitValueInline(simplified) === false
+  ) {
+    return undefined;
+  }
+
+  return emitInputExtractBits(context, simplified.value, simplified.bitOffset, width, true);
 }
 
 function emitInsertBits(
@@ -395,18 +431,4 @@ function cleanValueWidthForMask(mask: number): ValueWidth {
   }
 
   return cleanValueWidth(32);
-}
-
-function i32BinaryOperandEmitOptions(operator: IrBinaryOperator): WasmIrEmitValueOptions {
-  switch (operator) {
-    case "add":
-    case "sub":
-    case "shl":
-    case "shr_u":
-      return { requestedWidth: 32 };
-    case "xor":
-    case "or":
-    case "and":
-      return { widthInsensitive: true };
-  }
 }

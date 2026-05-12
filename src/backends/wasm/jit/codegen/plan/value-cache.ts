@@ -49,6 +49,7 @@ export type JitExpressionValueCachePlanInput = JitExpressionValueCacheInstructio
 type JitValueUse = Readonly<{
   value: JitValue;
   emittedCost: number;
+  forceLegacyFlagSetInputCache: boolean;
   children: readonly JitValueUse[];
 }>;
 
@@ -60,6 +61,7 @@ type JitValueEpochUses = Readonly<{
 type FlatJitValueUse = Readonly<{
   value: JitValue;
   emittedCost: number;
+  forceLegacyFlagSetInputCache: boolean;
   ancestors: readonly JitValue[];
 }>;
 
@@ -79,7 +81,7 @@ export function planJitExpressionValueCacheForInstructions(
 ): JitExpressionValueCachePlan | undefined {
   const instructionPlans: JitInstructionValueCachePlan[] = [];
   const epochUses = expressionValueUseEpochs(instructions, instructionPlans);
-  const selectedConsumerValuesByEpoch = epochUses.consumerUsesByEpoch.map(selectEpochValues);
+  const selectedConsumerValuesByEpoch = selectConsumerValuesByEpoch(epochUses.consumerUsesByEpoch);
   const selectedUseCounts = mergeSelectedUseCounts(selectedConsumerValuesByEpoch);
 
   return selectedUseCounts.length === 0
@@ -98,7 +100,7 @@ function expressionValueUseEpochs(
 ): JitValueEpochUses {
   const epochs: JitValueUse[][] = [];
   const captureValuesByEpoch: JitValue[][] = [];
-  const producedDefinitionCaptures = materializationProducedValueKeys(instructions);
+  const producedDefinitionCaptures = producedValueKeysNeededByConsumers(instructions);
   let currentEpoch: JitValueUse[] = [];
 
   for (const instruction of instructions) {
@@ -158,21 +160,25 @@ function valueUsesForOp(
     case "let32":
       return [];
     case "set": {
-      const stateUpdateOnlyValue = instructionHasLogicalWriteAt(instruction, opIndex);
+      const stateUpdateOnly = instructionHasLogicalWriteAt(instruction, opIndex);
 
       return [
         ...valueUsesForStorage(instruction, op.target, opIndex),
-        ...(op.role === "registerMaterialization" || stateUpdateOnlyValue
+        ...(op.role === "registerMaterialization" || stateUpdateOnly
           ? []
           : valueUsesForValue(instruction, op.value, opIndex))
       ];
     }
     case "flags.set":
-      return instructionHasLogicalWriteAt(instruction, opIndex)
-        ? []
-        : Object.values(op.inputs).flatMap((value) =>
-            retainedValueUsesForValueRef(instruction, value, opIndex)
-          );
+      // Temporary until Step 5 converts flag exits to planned target/value stores.
+      // The legacy flag-state emitter captures pending non-const inputs here, so
+      // value-cache must retain those roots to avoid rematerializing the same
+      // source before a following register writeback.
+      return Object.values(op.inputs).flatMap((value) =>
+        retainedValueUsesForValueRef(instruction, value, opIndex, {
+          forceLegacyFlagSetInputCache: value.kind !== "const"
+        })
+      );
     case "jump":
       return valueUsesForValue(instruction, op.target, opIndex);
     case "conditionalJump":
@@ -250,16 +256,11 @@ function valueUsesForValue(
   value: IrValueExpr,
   opIndex: number
 ): readonly JitValueUse[] {
-  if (value.kind === "var") {
-    return [];
-  }
-
-  const children = childValueUsesForValue(instruction, value, opIndex);
-  const jitValue = jitTimelineExpressionValueAt(instruction.valueTimeline, opIndex, value);
+  const jitValue = jitValueForValue(instruction, value, opIndex);
 
   return jitValue === undefined
-    ? children
-    : [{ value: jitValue, emittedCost: irExpressionEmitCost(value), children }];
+    ? childValueUsesForValue(instruction, value, opIndex)
+    : [jitValueUseTree(jitValue)];
 }
 
 function childValueUsesForValue(
@@ -295,13 +296,14 @@ function childValueUsesForValue(
 function retainedValueUsesForValueRef(
   instruction: JitExpressionValueCacheInstruction,
   value: ValueRef,
-  opIndex: number
+  opIndex: number,
+  options: Readonly<{ forceLegacyFlagSetInputCache?: boolean }> = {}
 ): readonly JitValueUse[] {
   const jitValue = jitTimelineValueRefValueAt(instruction.valueTimeline, opIndex, value);
 
   return jitValue === undefined
     ? []
-    : [{ value: jitValue, emittedCost: valueRefEmitCost(value), children: [] }];
+    : [jitValueUseTree(jitValue, options.forceLegacyFlagSetInputCache === true)];
 }
 
 function materializationJitValueUsesForOp(
@@ -312,18 +314,22 @@ function materializationJitValueUsesForOp(
     .map((value) => jitValueUseTree(value));
 }
 
-function materializationProducedValueKeys(
+function producedValueKeysNeededByConsumers(
   instructions: readonly JitExpressionValueCachePlanInput[]
 ): ReadonlySet<string> {
   const produced = new Set<string>();
 
   for (const instruction of instructions) {
-    for (const values of instruction.materializationJitValueUsesByExpressionIndex?.values() ?? []) {
-      for (const value of values) {
-        for (const use of flattenUse(jitValueUseTree(value))) {
-          if (use.value.kind === "produced") {
-            produced.add(producedValueKey(use.value));
-          }
+    for (let opIndex = 0; opIndex < instruction.expressionBlock.length; opIndex += 1) {
+      const op = instruction.expressionBlock[opIndex];
+
+      if (op === undefined) {
+        throw new Error(`missing JIT value-cache expression op while collecting produced captures: ${opIndex}`);
+      }
+
+      for (const use of flattenUses(valueUsesForOp(instruction, op, opIndex))) {
+        if (use.value.kind === "produced") {
+          produced.add(producedValueKey(use.value));
         }
       }
     }
@@ -336,14 +342,35 @@ function producedValueKey(value: JitProducedValue): string {
   return `${value.type}:${value.id}`;
 }
 
-function jitValueUseTree(value: JitValue): JitValueUse {
+function jitValueUseTree(value: JitValue, forceLegacyFlagSetInputCache = false): JitValueUse {
   const simplified = simplifyJitValue(value);
 
   return {
     value: simplified,
     emittedCost: jitValueCost(simplified),
+    forceLegacyFlagSetInputCache,
     children: jitValueDependencies(simplified).map((dependency) => jitValueUseTree(dependency))
   };
+}
+
+function jitValueForValue(
+  instruction: JitExpressionValueCacheInstruction,
+  value: IrValueExpr,
+  opIndex: number
+): JitValue | undefined {
+  switch (value.kind) {
+    case "var":
+    case "const":
+    case "nextEip":
+      return jitTimelineValueRefValueAt(instruction.valueTimeline, opIndex, value);
+    case "source":
+    case "address":
+    case "flags.condition":
+    case "value.binary":
+    case "value.unary":
+    case "value.select":
+      return jitTimelineExpressionValueAt(instruction.valueTimeline, opIndex, value);
+  }
 }
 
 function instructionHasLogicalWriteAt(
@@ -379,9 +406,47 @@ function selectEpochValues(uses: readonly JitValueUse[]): readonly JitValueUseCo
   return selected;
 }
 
+function selectConsumerValuesByEpoch(
+  usesByEpoch: readonly (readonly JitValueUse[])[]
+): readonly (readonly JitValueUseCount[])[] {
+  const selectedByEpoch = usesByEpoch.map(selectEpochValues);
+  const globallySelected = selectEpochValues(usesByEpoch.flat());
+
+  if (globallySelected.length === 0) {
+    return selectedByEpoch;
+  }
+
+  return selectedByEpoch.map((epochSelected, epochIndex) => {
+    const epochUses = flattenUses(usesByEpoch[epochIndex] ?? []);
+    const selected = [...epochSelected];
+
+    for (const globalEntry of globallySelected) {
+      if (selected.some((entry) => jitValuesEqual(entry.value, globalEntry.value))) {
+        continue;
+      }
+
+      const forceSelected = shouldForceSelectValue(globalEntry.value);
+      const epochUseCount = epochUses.filter((use) =>
+        jitValuesEqual(use.value, globalEntry.value) &&
+          (forceSelected || !hasSelectedAncestor(use, selected))
+      ).length;
+
+      if (epochUseCount !== 0) {
+        selected.push({ value: globalEntry.value, useCount: epochUseCount });
+      }
+    }
+
+    return selected;
+  });
+}
+
 function shouldCacheValueForUses(value: JitValue, uses: readonly FlatJitValueUse[]): boolean {
   if (uses.length === 0) {
     return false;
+  }
+
+  if (uses.some((use) => use.forceLegacyFlagSetInputCache)) {
+    return true;
   }
 
   const firstEmittedCost = uses[0]!.emittedCost;
@@ -419,7 +484,12 @@ function flattenUses(uses: readonly JitValueUse[]): readonly FlatJitValueUse[] {
 }
 
 function flattenUse(use: JitValueUse, ancestors: readonly JitValue[] = []): readonly FlatJitValueUse[] {
-  const current = { value: use.value, emittedCost: use.emittedCost, ancestors };
+  const current = {
+    value: use.value,
+    emittedCost: use.emittedCost,
+    forceLegacyFlagSetInputCache: use.forceLegacyFlagSetInputCache,
+    ancestors
+  };
   const childAncestors = [...ancestors, use.value];
 
   return [
@@ -474,34 +544,4 @@ function mergeSelectedUseCounts(
   }
 
   return merged;
-}
-
-function irExpressionEmitCost(value: IrValueExpr): number {
-  switch (value.kind) {
-    case "var":
-    case "const":
-    case "nextEip":
-    case "source":
-    case "address":
-    case "flags.condition":
-      return 1;
-    case "value.binary":
-      return 1 + irExpressionEmitCost(value.a) + irExpressionEmitCost(value.b);
-    case "value.unary":
-      return 1 + irExpressionEmitCost(value.value);
-    case "value.select":
-      return 1 +
-        irExpressionEmitCost(value.condition) +
-        irExpressionEmitCost(value.whenTrue) +
-        irExpressionEmitCost(value.whenFalse);
-  }
-}
-
-function valueRefEmitCost(value: ValueRef): number {
-  switch (value.kind) {
-    case "const":
-    case "var":
-    case "nextEip":
-      return 1;
-  }
 }

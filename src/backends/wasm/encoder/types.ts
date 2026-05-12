@@ -24,6 +24,7 @@ export const wasmOpcode = {
   returnCall: 0x12,
   returnCallIndirect: 0x13,
   return: 0x0f,
+  drop: 0x1a,
   select: 0x1b,
   localGet: 0x20,
   localSet: 0x21,

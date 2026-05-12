@@ -384,26 +384,26 @@ test("JIT expression emission snapshots cached branch-arm expression vars indepe
   strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 2);
 });
 
-test("JIT generic register exit capture rematerializes pure NEG exit stores conservatively", () => {
+test("JIT generic register exit capture reuses pure NEG planned values", () => {
   const mov = ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress));
   const neg = ok(decodeBytes([0xf7, 0xd8], mov.nextEip));
   const trap = ok(decodeBytes([0xcd, 0x2e], neg.nextEip));
   const body = extractOnlyWasmFunctionBody(encodeJitIrBlock([buildJitIrBlock([mov, neg, trap])]));
   const opcodes = wasmBodyOpcodes(body);
 
-  // The current generic exit-store path emits planned store sources through the
-  // normal JitValue path, which still rematerializes this pure expression.
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32Sub), 3);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Sub), 1);
 });
 
-test("JIT expression cache does not cache let32-backed var reads", () => {
+test("JIT expression cache reuses resolved let32-backed JitValues", () => {
   const opcodes = emitPlannedExpression([
     { op: "let32", dst: { kind: "var", id: 0 }, value: addExpr("eax", 1) },
     { op: "hostTrap", vector: { kind: "var", id: 0 } },
     { op: "hostTrap", vector: { kind: "var", id: 0 } }
   ]);
 
-  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 0);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Add), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localGet), 1);
 });
 
 test("JIT expression cache does not reuse one-before and one-after clobber", () => {

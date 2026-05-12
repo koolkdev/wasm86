@@ -1,10 +1,9 @@
 import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import { emitIrExpressionBlockToWasm } from "#backends/wasm/codegen/emit.js";
 import { cleanValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
+import { emitJitExpressionBlock } from "#backends/wasm/jit/codegen/emit/expression-block.js";
 import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
@@ -15,22 +14,32 @@ export function emitPlannedExpression(
   block: IrExprBlock
 ): readonly number[] {
   const body = new WasmFunctionBodyEncoder();
-  const scratch = new WasmLocalScratchAllocator(body);
   const sinkLocal = body.addLocal(wasmValueType.i32);
+  const valueTimeline = buildJitInstructionValueTimeline({
+    operands: [],
+    expressionBlock: block,
+    entryValueState: createJitValueState().snapshot()
+  });
   const cachePlan = planJitExpressionValueCache({
     operands: [],
-    valueTimeline: buildJitInstructionValueTimeline({
-      operands: [],
-      expressionBlock: block,
-      entryValueState: createJitValueState().snapshot()
-    })
+    valueTimeline
   }, block);
   const valueCache = createJitValueCacheRuntime(body, cachePlan);
 
-  emitIrExpressionBlockToWasm(block, {
+  valueCache?.beginInstruction(0);
+  emitJitExpressionBlock({
     body,
-    scratch,
+    instruction: { expressionBlock: block, valueTimeline },
     valueCache,
+    emitInput: (slot) => {
+      if (slot.kind === "aluFlags") {
+        body.i32Const(0);
+        return cleanValueWidth(32);
+      }
+
+      body.i32Const(registerSeed(slot.reg));
+      return cleanValueWidth(32);
+    },
     emitGet: (source) => {
       if (source.kind !== "reg") {
         throw new Error(`unsupported test source: ${source.kind}`);
@@ -39,20 +48,18 @@ export function emitPlannedExpression(
       body.i32Const(registerSeed(source.reg));
       return cleanValueWidth(32);
     },
-    emitSet: (_target, value, _accessWidth, helpers) => {
-      helpers.emitValue(value);
+    emitSet: (op, helpers) => {
+      helpers.emitValue(op.value);
       body.localSet(sinkLocal);
     },
     emitAddress: () => {
       throw new Error("test address emission is not implemented");
     },
     emitSetFlags: () => {},
-    emitFlagsCondition: () => {
-      body.i32Const(0);
-    },
     emitNext: () => {},
     emitNextEip: () => {
       body.i32Const(0);
+      return cleanValueWidth(32);
     },
     emitJump: (target, helpers) => {
       helpers.emitValue(target);
@@ -72,7 +79,6 @@ export function emitPlannedExpression(
     }
   });
 
-  scratch.assertClear();
   body.end();
   return wasmBodyOpcodes(body.encode());
 }

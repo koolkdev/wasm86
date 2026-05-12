@@ -225,34 +225,8 @@ class IrExprWasmEmitter {
     const left = this.#emitValue(a, operandOptions);
     const right = this.#emitValue(b, operandOptions);
 
-    this.#emitI32BinaryInstruction(operator);
+    emitI32BinaryInstruction(this.#context.body, operator);
     return i32BinaryResultValueWidth(operator, left, right);
-  }
-
-  #emitI32BinaryInstruction(operator: IrBinaryOperator): void {
-    switch (operator) {
-      case "add":
-        this.#context.body.i32Add();
-        return;
-      case "sub":
-        this.#context.body.i32Sub();
-        return;
-      case "xor":
-        this.#context.body.i32Xor();
-        return;
-      case "or":
-        this.#context.body.i32Or();
-        return;
-      case "and":
-        this.#context.body.i32And();
-        return;
-      case "shl":
-        this.#context.body.i32Shl();
-        return;
-      case "shr_u":
-        this.#context.body.i32ShrU();
-        return;
-    }
   }
 
   #emitI32Unary(operator: IrUnaryOperator, value: IrValueExpr, options: WasmIrEmitValueOptions): ValueWidth {
@@ -305,7 +279,33 @@ class IrExprWasmEmitter {
   }
 }
 
-function i32BinaryOperandEmitOptions(operator: IrBinaryOperator): WasmIrEmitValueOptions {
+export function emitI32BinaryInstruction(body: WasmFunctionBodyEncoder, operator: IrBinaryOperator): void {
+  switch (operator) {
+    case "add":
+      body.i32Add();
+      return;
+    case "sub":
+      body.i32Sub();
+      return;
+    case "xor":
+      body.i32Xor();
+      return;
+    case "or":
+      body.i32Or();
+      return;
+    case "and":
+      body.i32And();
+      return;
+    case "shl":
+      body.i32Shl();
+      return;
+    case "shr_u":
+      body.i32ShrU();
+      return;
+  }
+}
+
+export function i32BinaryOperandEmitOptions(operator: IrBinaryOperator): WasmIrEmitValueOptions {
   switch (operator) {
     case "add":
     case "sub":

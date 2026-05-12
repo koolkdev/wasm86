@@ -21,7 +21,10 @@ import { i32 } from "#x86/state/cpu-state.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import type { WasmIrAluFlagsStorage } from "./alu-flags.js";
-import type { WasmIrEmitHelpers } from "./emit.js";
+import {
+  emitI32BinaryInstruction,
+  type WasmIrEmitHelpers
+} from "./emit.js";
 import {
   cleanValueWidth,
   constValueWidth,
@@ -236,20 +239,6 @@ function emitI32BinaryValueExpr<T>(
 
   emitI32BinaryInstruction(body, operator);
   return i32BinaryResultValueWidth(operator, left, right);
-}
-
-function emitI32BinaryInstruction(
-  body: WasmFunctionBodyEncoder,
-  operator: "and" | "xor"
-): void {
-  switch (operator) {
-    case "and":
-      body.i32And();
-      return;
-    case "xor":
-      body.i32Xor();
-      return;
-  }
 }
 
 function emitMaskedValueExpr<T>(

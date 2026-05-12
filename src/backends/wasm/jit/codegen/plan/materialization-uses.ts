@@ -37,7 +37,7 @@ export function planJitMaterializationUses(
       continue;
     }
 
-    appendMaterializationNeedUse(
+    appendRegisterMaterializationNeedUse(
       jitValueUsesByInstruction,
       instructions,
       codegenPlan,
@@ -48,7 +48,7 @@ export function planJitMaterializationUses(
   return { jitValueUsesByInstruction };
 }
 
-function appendMaterializationNeedUse(
+function appendRegisterMaterializationNeedUse(
   usesByInstruction: readonly Map<number, JitValue[]>[],
   instructions: readonly JitMaterializationUsePlanInput[],
   codegenPlan: Pick<JitCodegenPlan, "block">,
