@@ -1,10 +1,5 @@
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type {
-  WasmIrCachedValueHandle,
-  WasmIrCachedValueLocal,
-  WasmIrValueCache
-} from "#backends/wasm/codegen/emit.js";
 import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
@@ -30,8 +25,15 @@ export type JitCachedValueUse = Readonly<{
   local?: number;
 }>;
 
-export type JitCachedValueHandle = WasmIrCachedValueHandle;
-export type JitCachedValueLocal = WasmIrCachedValueLocal;
+export type JitCachedValueHandle = Readonly<{
+  local: number;
+  valueWidth: ValueWidth;
+  retain(): JitCachedValueHandle;
+  release(): void;
+}>;
+export type JitCachedValueLocal = JitCachedValueHandle & Readonly<{
+  emitted: boolean;
+}>;
 export type JitValueCacheAvailabilitySnapshot = Readonly<{
   entries: readonly JitValueCacheAvailabilitySnapshotEntry[];
 }>;
@@ -46,19 +48,19 @@ export type JitValueCacheRuntimeAvailabilitySnapshot = Readonly<{
   store: JitValueCacheAvailabilitySnapshot;
 }>;
 
-export type JitValueCacheRuntime = WasmIrValueCache & Readonly<{
+export type JitValueCacheRuntime = Readonly<{
   beginInstruction(index: number): void;
   beginExpressionOp(opIndex: number): void;
   snapshotAvailability(): JitValueCacheRuntimeAvailabilitySnapshot;
   restoreAvailability(snapshot: JitValueCacheRuntimeAvailabilitySnapshot): void;
-  emitJitValueForUse(value: JitValue, emitter: () => ValueWidth): JitCachedValueUse;
-  captureJitValueForReuse(
+  emitForUse(value: JitValue, emitter: () => ValueWidth): JitCachedValueUse;
+  captureForReuse(
     value: JitValue,
     emitter: () => ValueWidth
   ): JitCachedValueLocal | undefined;
-  canEmitJitValueInline(value: JitValue): boolean;
-  jitValueForExpression(value: IrValueExpr): JitValue | undefined;
-  jitValueForValueRef(value: ValueRef): JitValue | undefined;
+  canEmitInline(value: JitValue): boolean;
+  valueForExpression(value: IrValueExpr): JitValue | undefined;
+  valueForValueRef(value: ValueRef): JitValue | undefined;
 }>;
 
 type CachedJitValue = {
@@ -353,49 +355,17 @@ export function createJitValueCacheRuntime(
       currentEpoch = instructionPlan.epochByExpressionOpIndex[opIndex] ?? currentEpoch;
     },
     emitForUse: (value, emitter) => {
-      if (value.kind === "var") {
-        return emitter();
-      }
-
-      const jitValue = jitValueForExpressionAtCurrentOp(value);
-
-      if (jitValue === undefined) {
-        return emitter();
-      }
-
-      if (valueIsSelectedInEpoch(jitValue)) {
-        return store.emitForUse(jitValue, emitter);
-      }
-
-      return store.emitAvailableForUse(jitValue)?.valueWidth ?? emitter();
-    },
-    emitJitValueForUse: (value, emitter) => {
-      if (valueIsSelectedInEpoch(value)) {
+      if (valueRequiresCacheAtCurrentEpoch(value)) {
         return store.emitForUseWithLocal(value, emitter);
       }
 
       return store.emitAvailableForUse(value) ?? { valueWidth: emitter() };
     },
-    captureForReuse: (value, emitter) => {
-      if (value.kind === "var") {
-        return undefined;
-      }
-
-      const jitValue = jitValueForExpressionAtCurrentOp(value);
-
-      if (jitValue === undefined) {
-        return undefined;
-      }
-
-      return valueIsSelectedInEpoch(jitValue)
-        ? store.captureForReuse(jitValue, emitter)
-        : store.captureAvailableForReuse(jitValue);
-    },
-    captureJitValueForReuse: (value, emitter) =>
-      valueIsSelectedInEpoch(value)
+    captureForReuse: (value, emitter) =>
+      valueRequiresCacheAtCurrentEpoch(value)
         ? store.captureForReuse(value, emitter)
         : store.captureAvailableForReuse(value),
-    canEmitJitValueInline: (value) => !valueIsSelectedInEpoch(value),
+    canEmitInline: (value) => !valueRequiresCacheAtCurrentEpoch(value),
     snapshotAvailability: () => ({
       currentEpoch,
       store: store.snapshotAvailability()
@@ -404,15 +374,15 @@ export function createJitValueCacheRuntime(
       currentEpoch = snapshot.currentEpoch;
       store.restoreAvailability(snapshot.store);
     },
-    jitValueForExpression: (value) => jitValueForExpressionAtCurrentOp(value),
-    jitValueForValueRef: (value) => jitTimelineValueRefValueAt(
+    valueForExpression: (value) => valueForExpressionAtCurrentOp(value),
+    valueForValueRef: (value) => jitTimelineValueRefValueAt(
       currentInstructionPlan().valueTimeline,
       currentExpressionOpIndex,
       value
     )
   };
 
-  function valueIsSelectedInEpoch(value: JitValue): boolean {
+  function valueRequiresCacheAtCurrentEpoch(value: JitValue): boolean {
     return valueIsSelected(cachePlan.selectedConsumerValuesByEpoch[currentEpoch] ?? [], value) ||
       valueIsCaptureSelected(cachePlan.captureValuesByEpoch[currentEpoch] ?? [], value);
   }
@@ -427,7 +397,7 @@ export function createJitValueCacheRuntime(
     return instructionPlan;
   }
 
-  function jitValueForExpressionAtCurrentOp(value: IrValueExpr): JitValue | undefined {
+  function valueForExpressionAtCurrentOp(value: IrValueExpr): JitValue | undefined {
     return jitTimelineExpressionValueAt(
       currentInstructionPlan().valueTimeline,
       currentExpressionOpIndex,

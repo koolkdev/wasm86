@@ -9,13 +9,13 @@ import type {
   WasmIrEmitHelpers
 } from "#backends/wasm/codegen/emit.js";
 import {
+  applyRequestedValueWidth,
   emitI32BinaryInstruction,
   i32BinaryOperandEmitOptions
 } from "#backends/wasm/codegen/emit.js";
 import {
   constValueWidth,
   dirtyValueWidth,
-  emitCleanValueForFullUse,
   emitMaskValueToWidth,
   emitSignExtendValueToWidth,
   i32BinaryResultValueWidth,
@@ -143,7 +143,8 @@ class JitExpressionBlockEmitter {
 
   #emitValue(value: IrValueExpr, options: WasmIrEmitValueOptions = {}): ValueWidth {
     if (value.kind === "nextEip") {
-      return this.#applyRequestedWidth(
+      return applyRequestedValueWidth(
+        this.#context.body,
         this.#context.emitNextEip(this.#helpers),
         options
       );
@@ -189,7 +190,7 @@ class JitExpressionBlockEmitter {
       return;
     }
 
-    if (this.#jitValueForValueRef(op.dst) === undefined) {
+    if (this.#valueForValueRef(op.dst) === undefined) {
       throw new Error(
         `JIT expression-block let32 has no timeline value at expression op ${this.#currentOpIndex}`
       );
@@ -197,7 +198,7 @@ class JitExpressionBlockEmitter {
   }
 
   #emitProducedDefinition(produced: JitProducedValue, value: IrValueExpr): void {
-    const captured = this.#context.valueCache?.captureJitValueForReuse(
+    const captured = this.#context.valueCache?.captureForReuse(
       produced,
       () => this.#emitDefinitionValue(value)
     );
@@ -214,10 +215,14 @@ class JitExpressionBlockEmitter {
   }
 
   #emitDefinitionValue(value: IrValueExpr, options: WasmIrEmitValueOptions = {}): ValueWidth {
-    return this.#applyRequestedWidth(this.#emitDefinitionValueUncached(value, options), options);
+    return applyRequestedValueWidth(
+      this.#context.body,
+      this.#emitDefinitionValueDirect(value, options),
+      options
+    );
   }
 
-  #emitDefinitionValueUncached(value: IrValueExpr, options: WasmIrEmitValueOptions): ValueWidth {
+  #emitDefinitionValueDirect(value: IrValueExpr, options: WasmIrEmitValueOptions): ValueWidth {
     switch (value.kind) {
       case "var":
       case "flags.condition":
@@ -288,16 +293,6 @@ class JitExpressionBlockEmitter {
     return i32SelectResultValueWidth(conditionWidth, trueWidth, falseWidth);
   }
 
-  #applyRequestedWidth(valueWidth: ValueWidth, options: WasmIrEmitValueOptions): ValueWidth {
-    if (options.requestedWidth === undefined) {
-      return valueWidth;
-    }
-
-    return options.requestedWidth === 32
-      ? emitCleanValueForFullUse(this.#context.body, valueWidth)
-      : emitMaskValueToWidth(this.#context.body, options.requestedWidth, valueWidth);
-  }
-
   #producedDefinitionForValueRef(valueRef: ValueRef): JitProducedValue | undefined {
     if (valueRef.kind !== "var") {
       return undefined;
@@ -311,7 +306,7 @@ class JitExpressionBlockEmitter {
   }
 
   #requiredJitValueForExpression(value: IrValueExpr): JitValue {
-    const resolved = this.#jitValueForExpression(value);
+    const resolved = this.#valueForExpression(value);
 
     if (resolved === undefined) {
       throw new Error(
@@ -322,12 +317,12 @@ class JitExpressionBlockEmitter {
     return resolved;
   }
 
-  #jitValueForExpression(value: IrValueExpr): JitValue | undefined {
+  #valueForExpression(value: IrValueExpr): JitValue | undefined {
     if (value.kind === "nextEip") {
       return undefined;
     }
 
-    const cachedExpressionValue = this.#context.valueCache?.jitValueForExpression(value);
+    const cachedExpressionValue = this.#context.valueCache?.valueForExpression(value);
 
     if (cachedExpressionValue !== undefined) {
       return cachedExpressionValue;
@@ -335,7 +330,7 @@ class JitExpressionBlockEmitter {
 
     const valueRef = valueRefExpression(value);
     if (valueRef !== undefined) {
-      return this.#jitValueForValueRef(valueRef);
+      return this.#valueForValueRef(valueRef);
     }
 
     return jitTimelineExpressionValueAt(
@@ -345,12 +340,12 @@ class JitExpressionBlockEmitter {
     );
   }
 
-  #jitValueForValueRef(valueRef: ValueRef): JitValue | undefined {
+  #valueForValueRef(valueRef: ValueRef): JitValue | undefined {
     if (valueRef.kind === "nextEip") {
       return undefined;
     }
 
-    const cachedValueRefValue = this.#context.valueCache?.jitValueForValueRef(valueRef);
+    const cachedValueRefValue = this.#context.valueCache?.valueForValueRef(valueRef);
 
     if (cachedValueRefValue !== undefined) {
       return cachedValueRefValue;

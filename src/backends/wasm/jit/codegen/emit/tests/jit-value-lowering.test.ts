@@ -82,14 +82,14 @@ test("emitJitValue does not bypass a selected input root for direct slice loweri
   emitJitValue({
     ...bodyContext(body),
     valueCache: passthroughValueCache({
-      emitJitValueForUse: (value, emitter) => {
+      emitForUse: (value, emitter) => {
         if (value.kind === "input") {
           selectedRootUseCount += 1;
         }
 
         return { valueWidth: emitter() };
       },
-      canEmitJitValueInline: (value) => value.kind !== "input"
+      canEmitInline: (value) => value.kind !== "input"
     }),
     emitInputBits: () => {
       throw new Error("direct input bits should not bypass selected input root");
@@ -235,17 +235,15 @@ test("emitJitValue lowers produced values through retained locals", () => {
   const valueWidth = emitJitValue({
     ...bodyContext(body),
     valueCache: {
-      emitForUse: (_value, emitter) => emitter(),
-      emitJitValueForUse: (value, emitter) => store.emitForUseWithLocal(value, emitter),
-      captureJitValueForReuse: (value, emitter) => store.captureForReuse(value, emitter),
-      canEmitJitValueInline: () => true,
+      emitForUse: (value, emitter) => store.emitForUseWithLocal(value, emitter),
+      captureForReuse: (value, emitter) => store.captureForReuse(value, emitter),
+      canEmitInline: () => true,
       beginInstruction: () => {},
       beginExpressionOp: () => {},
       snapshotAvailability: () => ({ currentEpoch: 0, store: { entries: [] } }),
       restoreAvailability: () => {},
-      captureForReuse: () => undefined,
-      jitValueForExpression: () => undefined,
-      jitValueForValueRef: () => undefined
+      valueForExpression: () => undefined,
+      valueForValueRef: () => undefined
     },
     emitProduced: () => unexpectedEmitter()
   }, produced);
@@ -342,13 +340,11 @@ function passthroughValueCache(
     beginExpressionOp: () => {},
     snapshotAvailability: () => ({ currentEpoch: 0, store: { entries: [] } }),
     restoreAvailability: () => {},
-    emitForUse: (_value, emitter) => emitter(),
-    emitJitValueForUse: (_value, emitter) => ({ valueWidth: emitter() }),
+    emitForUse: (_value, emitter) => ({ valueWidth: emitter() }),
     captureForReuse: () => undefined,
-    captureJitValueForReuse: () => undefined,
-    canEmitJitValueInline: () => true,
-    jitValueForExpression: () => undefined,
-    jitValueForValueRef: () => undefined,
+    canEmitInline: () => true,
+    valueForExpression: () => undefined,
+    valueForValueRef: () => undefined,
     ...overrides
   };
 }

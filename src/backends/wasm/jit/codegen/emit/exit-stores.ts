@@ -90,7 +90,7 @@ function captureJitExitMaterializationStore(
   store: JitExitMaterializationStore,
   previousTargets: readonly MaterializationTarget[]
 ): JitCapturedExitMaterializationStore {
-  const captured = context.valueCache?.captureJitValueForReuse(
+  const captured = context.valueCache?.captureForReuse(
     store.value,
     () => emitJitExitStoreSourceValue(context, store.value)
   );

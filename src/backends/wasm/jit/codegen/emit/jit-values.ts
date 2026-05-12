@@ -1,12 +1,12 @@
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import {
+  applyRequestedValueWidth,
   emitI32BinaryInstruction,
   i32BinaryOperandEmitOptions
 } from "#backends/wasm/codegen/emit.js";
 import {
   cleanValueWidth,
   constValueWidth,
-  emitCleanValueForFullUse,
   emitMaskValueToWidth,
   emitSignExtendValueToWidth,
   i32BinaryResultValueWidth,
@@ -53,9 +53,9 @@ export function emitJitValue(
   const simplified = simplifyJitValue(value);
   const valueWidth = context.valueCache === undefined
     ? emitJitValueUncached(context, simplified)
-    : context.valueCache.emitJitValueForUse(simplified, () => emitJitValueUncached(context, simplified)).valueWidth;
+    : context.valueCache.emitForUse(simplified, () => emitJitValueUncached(context, simplified)).valueWidth;
 
-  return applyRequestedWidth(context.body, valueWidth, options);
+  return applyRequestedValueWidth(context.body, valueWidth, options);
 }
 
 export function emitMaskedJitValue(
@@ -187,7 +187,7 @@ function emitInputExtractBits(
 
   if (
     simplified.kind !== "input" ||
-    context.valueCache?.canEmitJitValueInline(simplified) === false
+    context.valueCache?.canEmitInline(simplified) === false
   ) {
     return undefined;
   }
@@ -205,7 +205,7 @@ function emitSignExtendInputExtractBits(
   if (
     simplified.kind !== "extractBits" ||
     simplified.width !== width ||
-    context.valueCache?.canEmitJitValueInline(simplified) === false
+    context.valueCache?.canEmitInline(simplified) === false
   ) {
     return undefined;
   }
@@ -399,20 +399,6 @@ function jitFlagValueHelpers(context: JitValueEmitContext): WasmFlagValueEmitHel
     emitValue: (value, options) => emitJitValue(context, value, options),
     emitMaskedValue: (value, width) => emitMaskedJitValue(context, value, width)
   };
-}
-
-function applyRequestedWidth(
-  body: WasmFunctionBodyEncoder,
-  valueWidth: ValueWidth,
-  options: WasmIrEmitValueOptions
-): ValueWidth {
-  if (options.requestedWidth === undefined) {
-    return valueWidth;
-  }
-
-  return options.requestedWidth === 32
-    ? emitCleanValueForFullUse(body, valueWidth)
-    : emitMaskValueToWidth(body, options.requestedWidth, valueWidth);
 }
 
 function bitRangeMask(bitOffset: number, width: OperandWidth): number {

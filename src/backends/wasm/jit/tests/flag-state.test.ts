@@ -353,11 +353,9 @@ function cachedFlagValueCache(handles: JitCachedValueHandle[]): JitValueCacheRun
     beginExpressionOp: () => {},
     snapshotAvailability: () => ({ currentEpoch: 0, store: { entries: [] } }),
     restoreAvailability: () => {},
-    emitForUse: (_value, emitter) => emitter(),
-    emitJitValueForUse: (_value, emitter) => ({ valueWidth: emitter() }),
-    canEmitJitValueInline: () => true,
-    captureForReuse: () => undefined,
-    captureJitValueForReuse: () => {
+    emitForUse: (_value, emitter) => ({ valueWidth: emitter() }),
+    canEmitInline: () => true,
+    captureForReuse: () => {
       const handle = handles.shift();
 
       if (handle === undefined) {
@@ -366,8 +364,8 @@ function cachedFlagValueCache(handles: JitCachedValueHandle[]): JitValueCacheRun
 
       return { ...handle, emitted: false };
     },
-    jitValueForExpression: () => undefined,
-    jitValueForValueRef: (value) => value.kind === "var" ? { kind: "reg", reg: "eax" } : undefined
+    valueForExpression: () => undefined,
+    valueForValueRef: (value) => value.kind === "var" ? { kind: "reg", reg: "eax" } : undefined
   };
 }
 

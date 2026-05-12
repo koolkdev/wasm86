@@ -37,13 +37,13 @@ function emitRegisterMaterializationFromCapturedReuseValue(
   value: IrValueExpr,
   helpers: WasmIrEmitHelpers
 ): boolean {
-  const jitValue = valueCache?.jitValueForExpression(value);
+  const jitValue = valueCache?.valueForExpression(value);
 
   if (jitValue === undefined) {
     return false;
   }
 
-  const captured = valueCache?.captureJitValueForReuse(jitValue, () =>
+  const captured = valueCache?.captureForReuse(jitValue, () =>
     helpers.emitValue(value)
   );
 

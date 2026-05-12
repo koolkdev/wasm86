@@ -192,13 +192,13 @@ export function createJitFlagState(
   }
 
   function cachedPendingInput(input: ValueRef, helpers: WasmIrEmitHelpers): PendingInput | undefined {
-    const jitValue = options.valueCache?.jitValueForValueRef(input);
+    const jitValue = options.valueCache?.valueForValueRef(input);
 
     if (jitValue === undefined) {
       return undefined;
     }
 
-    const materialized = options.valueCache?.captureJitValueForReuse(jitValue, () =>
+    const materialized = options.valueCache?.captureForReuse(jitValue, () =>
       helpers.emitValue(input)
     );
 

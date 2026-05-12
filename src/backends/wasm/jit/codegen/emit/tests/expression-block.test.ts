@@ -15,7 +15,7 @@ import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/val
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { jitProducedValue, type JitProducedValue } from "#backends/wasm/jit/ir/values.js";
-import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
+import { wasmBodyLocalCount, wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import type { Reg32 } from "#x86/isa/types.js";
 
 test("JIT expression-block emitter treats let32 as an observation for supported values", () => {
@@ -24,6 +24,7 @@ test("JIT expression-block emitter treats let32 as an observation for supported 
     { op: "hostTrap", vector: v(0) }
   ], { cache: false });
 
+  strictEqual(result.localCount, 1);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.i32Add), 1);
   deepStrictEqual(localOpcodes(result.opcodes), [wasmOpcode.localSet]);
 });
@@ -144,6 +145,7 @@ test("JIT expression-block emitter routes normal planned effects", () => {
 
 type FoundationEmitResult = Readonly<{
   opcodes: readonly number[];
+  localCount: number;
   nextCalls: number;
   setCalls: number;
   jumpCalls: number;
@@ -246,8 +248,11 @@ function emitFoundationBlock(
   });
   body.end();
 
+  const encoded = body.encode();
+
   return {
-    opcodes: wasmBodyOpcodes(body.encode()),
+    opcodes: wasmBodyOpcodes(encoded),
+    localCount: wasmBodyLocalCount(encoded),
     nextCalls,
     setCalls,
     jumpCalls,

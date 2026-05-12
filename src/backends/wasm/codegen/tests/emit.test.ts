@@ -3,14 +3,14 @@ import { test } from "node:test";
 
 import type { Reg32 } from "#x86/isa/types.js";
 import { buildIr } from "#x86/ir/build/builder.js";
-import type { IrExpressionOptions, IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import type { IrExpressionOptions, IrExprBlock, IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { IrBlock } from "#x86/ir/model/types.js";
 import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
 import { wasmOpcode, wasmValueType, type WasmValueType } from "#backends/wasm/encoder/types.js";
-import { emitIrToWasm, type WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
-import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
+import { emitIrExpressionBlockToWasm, emitIrToWasm, type WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
+import { wasmBodyLocalCount, wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { untrackedValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
 
 const nextEipValue = 0x1234_5678;
@@ -105,6 +105,43 @@ test("emitIrToWasm uses a reused input slot for a materialized let destination",
   );
 
   strictEqual(scratch.maxLive, 1);
+});
+
+test("emitIrExpressionBlockToWasm keeps let32 local-first in the shared emitter", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const scratch = new WasmLocalScratchAllocator(body);
+  const sinkLocal = body.addLocal(wasmValueType.i32);
+  const block: IrExprBlock = [
+    { op: "let32", dst: { kind: "var", id: 0 }, value: { kind: "const", type: "i32", value: 0x2a } },
+    { op: "hostTrap", vector: { kind: "var", id: 0 } }
+  ];
+
+  emitIrExpressionBlockToWasm(block, {
+    body,
+    scratch,
+    emitGet: () => unsupported("get"),
+    emitSet: () => unsupported("set"),
+    emitAddress: () => unsupported("address"),
+    emitSetFlags: () => unsupported("flags.set"),
+    emitFlagsCondition: () => unsupported("flags.condition"),
+    emitNext: () => unsupported("next"),
+    emitNextEip: () => unsupported("nextEip"),
+    emitJump: () => unsupported("jump"),
+    emitConditionalJump: () => unsupported("conditionalJump"),
+    emitHostTrap: (vector, helpers) => {
+      helpers.emitValue(vector);
+      body.localSet(sinkLocal);
+    }
+  });
+  scratch.assertClear();
+  body.end();
+
+  const encoded = body.encode();
+  const opcodes = wasmBodyOpcodes(encoded);
+
+  strictEqual(wasmBodyLocalCount(encoded), 2);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localSet), 2);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localGet), 1);
 });
 
 async function instantiateEmittedBinary(program: IrBlock): Promise<(left: number, right: number) => number> {
@@ -277,6 +314,10 @@ function requireRegLocal(regLocals: Partial<Record<Reg32, number>>, reg: Reg32):
 
 function unsupported(message: string): never {
   throw new Error(`unsupported emit test hook: ${message}`);
+}
+
+function countOpcode(opcodes: readonly number[], opcode: number): number {
+  return opcodes.filter((entry) => entry === opcode).length;
 }
 
 class TrackingScratchAllocator extends WasmLocalScratchAllocator {
