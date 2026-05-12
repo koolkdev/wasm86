@@ -94,14 +94,18 @@ export class JitValueStateSnapshot {
 }
 
 export class JitRegisterValueFamily {
-  constructor(private readonly slots: JitValueSlots) {}
+  #slots: JitValueSlots;
+
+  constructor(slots: JitValueSlots) {
+    this.#slots = slots;
+  }
 
   readReg32(reg: Reg32): JitValue {
-    return this.slots.read(reg32Slot(reg));
+    return this.#slots.read(reg32Slot(reg));
   }
 
   writeReg32(reg: Reg32, value: JitValue): void {
-    this.slots.write(reg32Slot(reg), value);
+    this.#slots.write(reg32Slot(reg), value);
   }
 
   readRegPart(reg: Reg32, bitOffset: number, width: OperandWidth): JitValue {
@@ -114,10 +118,14 @@ export class JitRegisterValueFamily {
 }
 
 export class JitRegisterValueSnapshotFamily {
-  constructor(private readonly slots: JitValueSlotSnapshot) {}
+  #slots: JitValueSlotSnapshot;
+
+  constructor(slots: JitValueSlotSnapshot) {
+    this.#slots = slots;
+  }
 
   readReg32(reg: Reg32): JitValue {
-    return this.slots.read(reg32Slot(reg));
+    return this.#slots.read(reg32Slot(reg));
   }
 
   readRegPart(reg: Reg32, bitOffset: number, width: OperandWidth): JitValue {
@@ -125,7 +133,7 @@ export class JitRegisterValueSnapshotFamily {
   }
 
   differsFromInput(reg: Reg32): boolean {
-    return this.slots.differsFromInput(reg32Slot(reg));
+    return this.#slots.differsFromInput(reg32Slot(reg));
   }
 
   exitStores(regs: readonly Reg32[] = reg32): readonly ExitMaterializationStore[] {
@@ -139,7 +147,7 @@ export class JitRegisterValueSnapshotFamily {
   exitStore(reg: Reg32): ExitMaterializationStore | undefined {
     const value = this.readReg32(reg);
 
-    if (jitValuesEqual(value, this.slots.inputValue(reg32Slot(reg)))) {
+    if (jitValuesEqual(value, this.#slots.inputValue(reg32Slot(reg)))) {
       return undefined;
     }
 
@@ -151,14 +159,18 @@ export class JitRegisterValueSnapshotFamily {
 }
 
 export class JitAluFlagValueFamily {
-  constructor(private readonly slots: JitValueSlots) {}
+  #slots: JitValueSlots;
+
+  constructor(slots: JitValueSlots) {
+    this.#slots = slots;
+  }
 
   readAluFlags(): JitValue {
-    return this.slots.read(aluFlagsSlot());
+    return this.#slots.read(aluFlagsSlot());
   }
 
   writeAluFlags(value: JitValue): void {
-    this.slots.write(aluFlagsSlot(), value);
+    this.#slots.write(aluFlagsSlot(), value);
   }
 
   readFlagBits(mask: number): JitValue {
@@ -183,10 +195,14 @@ export class JitAluFlagValueFamily {
 }
 
 export class JitAluFlagValueSnapshotFamily {
-  constructor(private readonly slots: JitValueSlotSnapshot) {}
+  #slots: JitValueSlotSnapshot;
+
+  constructor(slots: JitValueSlotSnapshot) {
+    this.#slots = slots;
+  }
 
   readAluFlags(): JitValue {
-    return this.slots.read(aluFlagsSlot());
+    return this.#slots.read(aluFlagsSlot());
   }
 
   readFlagBits(mask: number): JitValue {
@@ -199,7 +215,7 @@ export class JitAluFlagValueSnapshotFamily {
   }
 
   differsFromInput(): boolean {
-    return this.slots.differsFromInput(aluFlagsSlot());
+    return this.#slots.differsFromInput(aluFlagsSlot());
   }
 }
 

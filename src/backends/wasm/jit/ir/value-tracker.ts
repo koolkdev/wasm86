@@ -23,14 +23,14 @@ export type JitValueTrackerRecordOptions = Readonly<{
 }>;
 
 export class JitValueTracker {
-  private readonly locals = new Map<number, JitValue>();
+  #locals = new Map<number, JitValue>();
 
   clear(): void {
-    this.locals.clear();
+    this.#locals.clear();
   }
 
   valueFor(value: ValueRef): JitValue | undefined {
-    return jitValueForValue(value, this.locals);
+    return jitValueForValue(value, this.#locals);
   }
 
   requiredValueFor(value: ValueRef): JitValue {
@@ -55,16 +55,16 @@ export class JitValueTracker {
 
   record(id: number, value: JitValue | undefined): void {
     if (value === undefined) {
-      this.locals.delete(id);
+      this.#locals.delete(id);
     } else {
-      this.locals.set(id, value);
+      this.#locals.set(id, value);
     }
   }
 
   deleteValuesReadingReg(reg: Reg32): void {
-    for (const [id, value] of this.locals) {
+    for (const [id, value] of this.#locals) {
       if (jitValueReadsReg(value, reg)) {
-        this.locals.delete(id);
+        this.#locals.delete(id);
       }
     }
   }
@@ -79,7 +79,7 @@ export class JitValueTracker {
 
     switch (op.op) {
       case "get":
-        this.record(op.dst.id, this.getValue(op, instruction, registerValues, recordOptions));
+        this.record(op.dst.id, this.#getValue(op, instruction, registerValues, recordOptions));
         return true;
       case "address":
         this.record(
@@ -91,13 +91,13 @@ export class JitValueTracker {
         this.record(op.dst.id, { kind: "const", type: op.type, value: i32(op.value) });
         return true;
       case "value.binary":
-        this.record(op.dst.id, this.binaryValue(op));
+        this.record(op.dst.id, this.#binaryValue(op));
         return true;
       case "value.unary":
-        this.record(op.dst.id, this.unaryValue(op));
+        this.record(op.dst.id, this.#unaryValue(op));
         return true;
       case "value.select":
-        this.record(op.dst.id, this.selectValue(op));
+        this.record(op.dst.id, this.#selectValue(op));
         return true;
       default:
         return false;
@@ -109,7 +109,7 @@ export class JitValueTracker {
       return { kind: "const", type: value.type, value: value.value };
     }
 
-    for (const [id, localValue] of this.locals) {
+    for (const [id, localValue] of this.#locals) {
       if (jitValuesEqual(localValue, value)) {
         return { kind: "var", id };
       }
@@ -118,7 +118,7 @@ export class JitValueTracker {
     return undefined;
   }
 
-  private binaryValue(op: Extract<JitIrOp, IrBinaryValueOp>): JitValue | undefined {
+  #binaryValue(op: Extract<JitIrOp, IrBinaryValueOp>): JitValue | undefined {
     const a = this.valueFor(op.a);
     const b = this.valueFor(op.b);
 
@@ -127,13 +127,13 @@ export class JitValueTracker {
       : undefined;
   }
 
-  private unaryValue(op: Extract<JitIrOp, IrUnaryValueOp>): JitValue | undefined {
+  #unaryValue(op: Extract<JitIrOp, IrUnaryValueOp>): JitValue | undefined {
     const value = this.valueFor(op.value);
 
     return value === undefined ? undefined : { kind: op.op, type: op.type, operator: op.operator, value };
   }
 
-  private selectValue(op: Extract<JitIrOp, IrSelectValueOp>): JitValue | undefined {
+  #selectValue(op: Extract<JitIrOp, IrSelectValueOp>): JitValue | undefined {
     const condition = this.valueFor(op.condition);
     const whenTrue = this.valueFor(op.whenTrue);
     const whenFalse = this.valueFor(op.whenFalse);
@@ -143,7 +143,7 @@ export class JitValueTracker {
       : { kind: op.op, type: op.type, condition, whenTrue, whenFalse };
   }
 
-  private getValue(
+  #getValue(
     op: Extract<JitIrOp, { op: "get" }>,
     instruction: JitIrBlockInstruction,
     registerValues: JitRegisterValueMap,

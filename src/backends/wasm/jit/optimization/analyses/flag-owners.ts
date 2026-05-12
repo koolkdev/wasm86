@@ -25,14 +25,18 @@ export class JitFlagOwners {
     );
   }
 
-  private constructor(private readonly byFlag: Map<number, JitFlagOwner>) {}
+  #byFlag: Map<number, JitFlagOwner>;
+
+  private constructor(byFlag: Map<number, JitFlagOwner>) {
+    this.#byFlag = byFlag;
+  }
 
   clone(): JitFlagOwners {
-    return new JitFlagOwners(new Map(this.byFlag));
+    return new JitFlagOwners(new Map(this.#byFlag));
   }
 
   recordSource(source: JitFlagSource): void {
-    this.set(source.writtenMask | source.undefMask, { kind: "producer", source });
+    this.#set(source.writtenMask | source.undefMask, { kind: "producer", source });
   }
 
   forMask(mask: number): readonly JitFlagOwnerMask[] {
@@ -43,7 +47,7 @@ export class JitFlagOwners {
         continue;
       }
 
-      const owner = this.byFlag.get(flagBit) ?? incomingJitFlagOwner;
+      const owner = this.#byFlag.get(flagBit) ?? incomingJitFlagOwner;
       const existingIndex = owners.findIndex((entry) => sameOwner(entry.owner, owner));
 
       if (existingIndex === -1) {
@@ -67,10 +71,10 @@ export class JitFlagOwners {
     );
   }
 
-  private set(mask: number, owner: JitFlagOwner): void {
+  #set(mask: number, owner: JitFlagOwner): void {
     for (const flagBit of flagBits) {
       if ((mask & flagBit) !== 0) {
-        this.byFlag.set(flagBit, owner);
+        this.#byFlag.set(flagBit, owner);
       }
     }
   }

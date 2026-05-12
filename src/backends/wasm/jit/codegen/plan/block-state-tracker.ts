@@ -20,26 +20,26 @@ import {
 } from "./flag-values.js";
 
 export class JitBlockStateTracker {
-  private readonly valueState = createJitValueState();
-  private readonly values = new JitValueTracker();
-  private effectVisibleValueState: JitValueStateSnapshot = this.valueState.snapshot();
-  private committedFlagsMask = IR_ALU_FLAG_MASK;
-  private speculativeFlagsMask = 0;
-  private instructionCountDelta = 0;
+  #valueState = createJitValueState();
+  #values = new JitValueTracker();
+  #effectVisibleValueState: JitValueStateSnapshot = this.#valueState.snapshot();
+  #committedFlagsMask = IR_ALU_FLAG_MASK;
+  #speculativeFlagsMask = 0;
+  #instructionCountDelta = 0;
 
   beginInstruction(): void {
-    this.values.clear();
-    this.effectVisibleValueState = this.valueState.snapshot();
+    this.#values.clear();
+    this.#effectVisibleValueState = this.#valueState.snapshot();
   }
 
   snapshot(kind: JitExitSnapshotKind, eip: number): JitStateSnapshot {
     return {
       kind,
       eip,
-      instructionCountDelta: this.instructionCountDelta,
-      valueState: this.valueState.snapshot(),
-      committedFlags: { mask: this.committedFlagsMask },
-      speculativeFlags: { mask: this.speculativeFlagsMask }
+      instructionCountDelta: this.#instructionCountDelta,
+      valueState: this.#valueState.snapshot(),
+      committedFlags: { mask: this.#committedFlagsMask },
+      speculativeFlags: { mask: this.#speculativeFlagsMask }
     };
   }
 
@@ -47,23 +47,23 @@ export class JitBlockStateTracker {
     return {
       kind: "postInstruction",
       eip,
-      instructionCountDelta: this.instructionCountDelta + 1,
-      valueState: this.valueState.snapshot(),
-      committedFlags: { mask: this.committedFlagsMask },
-      speculativeFlags: { mask: this.speculativeFlagsMask }
+      instructionCountDelta: this.#instructionCountDelta + 1,
+      valueState: this.#valueState.snapshot(),
+      committedFlags: { mask: this.#committedFlagsMask },
+      speculativeFlags: { mask: this.#speculativeFlagsMask }
     };
   }
 
   effectVisiblePreInstructionSnapshot(entry: JitStateSnapshot): JitStateSnapshot {
     return {
       ...entry,
-      valueState: this.effectVisibleValueState,
-      committedFlags: { mask: this.committedFlagsMask }
+      valueState: this.#effectVisibleValueState,
+      committedFlags: { mask: this.#committedFlagsMask }
     };
   }
 
   advanceEffectVisibleSnapshot(): void {
-    this.effectVisibleValueState = this.valueState.snapshot();
+    this.#effectVisibleValueState = this.#valueState.snapshot();
   }
 
   recordOp(
@@ -79,10 +79,10 @@ export class JitBlockStateTracker {
       case "value.binary":
       case "value.unary":
       case "value.select":
-        this.values.recordOp(
+        this.#values.recordOp(
           op,
           instruction,
-          this.currentRegisterValues(),
+          this.#currentRegisterValues(),
           {
             location: { instructionIndex, opIndex },
             symbolicReadMode: "storage"
@@ -90,13 +90,13 @@ export class JitBlockStateTracker {
         );
         return;
       case "flags.condition":
-        this.values.record(op.dst.id, this.valueState.flags.condition(op.cc));
+        this.#values.record(op.dst.id, this.#valueState.flags.condition(op.cc));
         return;
       case "set":
-        this.recordSet(op, instruction);
+        this.#recordSet(op, instruction);
         return;
       case "flags.set":
-        this.recordFlagSet(op);
+        this.#recordFlagSet(op);
         return;
       case "next":
       case "jump":
@@ -107,16 +107,16 @@ export class JitBlockStateTracker {
   }
 
   markSpeculativeFlags(mask: number): void {
-    this.speculativeFlagsMask |= mask;
-    this.committedFlagsMask &= ~mask;
+    this.#speculativeFlagsMask |= mask;
+    this.#committedFlagsMask &= ~mask;
   }
 
   commitInstruction(): void {
-    this.instructionCountDelta += 1;
+    this.#instructionCountDelta += 1;
   }
 
-  private recordSet(op: Extract<JitIrOp, { op: "set" }>, instruction: JitIrBlockInstruction): void {
-    const value = this.values.valueFor(op.value);
+  #recordSet(op: Extract<JitIrOp, { op: "set" }>, instruction: JitIrBlockInstruction): void {
+    const value = this.#values.valueFor(op.value);
     const access = jitStorageRegisterAccess(op.target, instruction.operands, op.accessWidth ?? 32);
 
     if (access === undefined) {
@@ -126,29 +126,29 @@ export class JitBlockStateTracker {
     if (value === undefined) {
       // 3B only needs the legacy exit bridge to know that the target register
       // changed. The concrete produced/store-source value is handled in 3C.
-      this.valueState.regs.writeReg32(access.reg, { kind: "reg", reg: access.reg });
+      this.#valueState.regs.writeReg32(access.reg, { kind: "reg", reg: access.reg });
       return;
     }
 
     if (access.width === 32 && access.bitOffset === 0) {
-      this.valueState.regs.writeReg32(access.reg, value);
+      this.#valueState.regs.writeReg32(access.reg, value);
     } else {
-      this.valueState.regs.writeRegPart(access.reg, access.bitOffset, access.width, value);
+      this.#valueState.regs.writeRegPart(access.reg, access.bitOffset, access.width, value);
     }
   }
 
-  private recordFlagSet(op: Extract<JitIrOp, { op: "flags.set" }>): void {
+  #recordFlagSet(op: Extract<JitIrOp, { op: "flags.set" }>): void {
     const mask = jitFlagSetWrittenMask(op);
 
     if (mask === 0) {
       return;
     }
 
-    const producer = jitFlagSetProducerValue(op, this.values.inputRecordFor(op.inputs));
-    this.valueState.flags.writeFlagBits(mask, producer);
+    const producer = jitFlagSetProducerValue(op, this.#values.inputRecordFor(op.inputs));
+    this.#valueState.flags.writeFlagBits(mask, producer);
   }
 
-  private currentRegisterValues(): JitRegisterValueMap {
-    return new Map(reg32.map((reg) => [reg, this.valueState.regs.readReg32(reg)]));
+  #currentRegisterValues(): JitRegisterValueMap {
+    return new Map(reg32.map((reg) => [reg, this.#valueState.regs.readReg32(reg)]));
   }
 }

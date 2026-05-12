@@ -40,7 +40,7 @@ export class JitValueResolver {
     accessWidth: OperandWidth = 32,
     signed = false
   ): JitValue | undefined {
-    const value = this.valueForStorageUnsigned(storage, accessWidth);
+    const value = this.#valueForStorageUnsigned(storage, accessWidth);
 
     return value === undefined || !signed || accessWidth >= 32
       ? value
@@ -57,11 +57,11 @@ export class JitValueResolver {
     const terms: JitValue[] = [];
 
     if (binding.ea.base !== undefined) {
-      terms.push(this.fullRegValue(binding.ea.base));
+      terms.push(this.#fullRegValue(binding.ea.base));
     }
 
     if (binding.ea.index !== undefined) {
-      terms.push(scaleJitValue(this.fullRegValue(binding.ea.index), binding.ea.scale));
+      terms.push(scaleJitValue(this.#fullRegValue(binding.ea.index), binding.ea.scale));
     }
 
     if (binding.ea.disp !== 0 || terms.length === 0) {
@@ -83,30 +83,30 @@ export class JitValueResolver {
   }
 
   valueForExpression(expression: IrValueExpr): JitValue | undefined {
-    return this.valueForExpressionUnrecorded(expression);
+    return this.#valueForExpressionUnrecorded(expression);
   }
 
-  private valueForStorageUnsigned(
+  #valueForStorageUnsigned(
     storage: StorageRef | IrStorageExpr,
     accessWidth: OperandWidth
   ): JitValue | undefined {
     switch (storage.kind) {
       case "reg":
-        return this.valueForRegisterAccess({ reg: storage.reg, width: accessWidth, bitOffset: 0 });
+        return this.#valueForRegisterAccess({ reg: storage.reg, width: accessWidth, bitOffset: 0 });
       case "operand":
-        return this.valueForOperandBinding(this.#operands[storage.index], accessWidth);
+        return this.#valueForOperandBinding(this.#operands[storage.index], accessWidth);
       case "mem":
         return undefined;
     }
   }
 
-  private valueForOperandBinding(
+  #valueForOperandBinding(
     binding: JitOperandBinding | undefined,
     accessWidth: OperandWidth
   ): JitValue | undefined {
     switch (binding?.kind) {
       case "static.reg":
-        return this.valueForRegisterAccess({
+        return this.#valueForRegisterAccess({
           reg: binding.alias.base,
           width: binding.alias.width,
           bitOffset: binding.alias.bitOffset
@@ -121,25 +121,25 @@ export class JitValueResolver {
     }
   }
 
-  private valueForRegisterAccess(
+  #valueForRegisterAccess(
     access: Readonly<{
       reg: Reg32;
       width: OperandWidth;
       bitOffset: RegisterAlias["bitOffset"];
     }>
   ): JitValue {
-    const full = this.fullRegValue(access.reg);
+    const full = this.#fullRegValue(access.reg);
 
     return access.width === 32 && access.bitOffset === 0
       ? full
       : jitExtractBits(full, access.bitOffset, access.width);
   }
 
-  private fullRegValue(reg: Reg32): JitValue {
+  #fullRegValue(reg: Reg32): JitValue {
     return simplifyJitValue(this.#readReg32(reg));
   }
 
-  private valueForExpressionUnrecorded(expression: IrValueExpr): JitValue | undefined {
+  #valueForExpressionUnrecorded(expression: IrValueExpr): JitValue | undefined {
     switch (expression.kind) {
       case "var":
       case "const":
@@ -150,24 +150,24 @@ export class JitValueResolver {
       case "address":
         return this.valueForEffectiveAddress(expression.operand);
       case "value.binary": {
-        const a = this.valueForExpression(expression.a);
-        const b = this.valueForExpression(expression.b);
+        const a = this.#valueForExpressionUnrecorded(expression.a);
+        const b = this.#valueForExpressionUnrecorded(expression.b);
 
         return a === undefined || b === undefined
           ? undefined
           : simplifyJitValue({ kind: expression.kind, type: expression.type, operator: expression.operator, a, b });
       }
       case "value.unary": {
-        const value = this.valueForExpression(expression.value);
+        const value = this.#valueForExpressionUnrecorded(expression.value);
 
         return value === undefined
           ? undefined
           : simplifyJitValue({ kind: expression.kind, type: expression.type, operator: expression.operator, value });
       }
       case "value.select": {
-        const condition = this.valueForExpression(expression.condition);
-        const whenTrue = this.valueForExpression(expression.whenTrue);
-        const whenFalse = this.valueForExpression(expression.whenFalse);
+        const condition = this.#valueForExpressionUnrecorded(expression.condition);
+        const whenTrue = this.#valueForExpressionUnrecorded(expression.whenTrue);
+        const whenFalse = this.#valueForExpressionUnrecorded(expression.whenFalse);
 
         return condition === undefined || whenTrue === undefined || whenFalse === undefined
           ? undefined
