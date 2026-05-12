@@ -5,13 +5,10 @@ import { runJitOptimizationPasses } from "./pass.js";
 import { collectJitPassStats, type JitPassStatsByName } from "./stats.js";
 import { localDcePass } from "./passes/local-dce.js";
 import { flagDcePass } from "./passes/flag-dce.js";
-import { registerValuePropagationPass } from "./passes/register-value-propagation.js";
 
 export const jitIrOptimizationPasses = [
   localDcePass,
   flagDcePass,
-  localDcePass,
-  registerValuePropagationPass,
   localDcePass
 ] as const satisfies readonly JitOptimizationPass[];
 
@@ -20,8 +17,6 @@ export type JitIrOptimizationPassName = typeof jitIrOptimizationPasses[number]["
 export const jitIrOptimizationPassOrder = [
   "localDce",
   "flagDce",
-  "localDce",
-  "registerValuePropagation",
   "localDce"
 ] as const satisfies readonly JitIrOptimizationPassName[];
 

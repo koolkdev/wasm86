@@ -126,30 +126,6 @@ export type JitValue =
   | JitFlagProducerValue
   | JitFlagConditionValue;
 
-export type JitLegacyRewritableValue =
-  | JitConstValue
-  | JitRegValue
-  | Readonly<{
-      kind: "value.binary";
-      type: IrValueType;
-      operator: IrBinaryOperator;
-      a: JitLegacyRewritableValue;
-      b: JitLegacyRewritableValue;
-    }>
-  | Readonly<{
-      kind: "value.unary";
-      type: IrValueType;
-      operator: IrUnaryOperator;
-      value: JitLegacyRewritableValue;
-    }>
-  | Readonly<{
-      kind: "value.select";
-      type: IrValueType;
-      condition: JitLegacyRewritableValue;
-      whenTrue: JitLegacyRewritableValue;
-      whenFalse: JitLegacyRewritableValue;
-    }>;
-
 export function jitInputReg32Value(reg: Reg32): JitInputValue {
   return { kind: "input", slot: { kind: "reg32", reg } };
 }
@@ -609,31 +585,6 @@ export function walkJitValueDependencies(value: JitValue, visit: (dependency: Ji
 
 export function jitValueIsSymbolicReg(value: JitValue, reg?: Reg32): value is JitRegValue {
   return value.kind === "reg" && (reg === undefined || value.reg === reg);
-}
-
-export function jitValueIsLegacyRewritable(value: JitValue): value is JitLegacyRewritableValue {
-  switch (value.kind) {
-    case "const":
-    case "reg":
-      return true;
-    case "value.binary":
-      return jitValueIsLegacyRewritable(value.a) && jitValueIsLegacyRewritable(value.b);
-    case "value.unary":
-      return jitValueIsLegacyRewritable(value.value);
-    case "value.select":
-      return jitValueIsLegacyRewritable(value.condition) &&
-        jitValueIsLegacyRewritable(value.whenTrue) &&
-        jitValueIsLegacyRewritable(value.whenFalse);
-    case "input":
-    case "produced":
-    case "extractBits":
-    case "insertBits":
-    case "extractMaskedBits":
-    case "insertMaskedBits":
-    case "flagProducer":
-    case "flagCondition":
-      return false;
-  }
 }
 
 function jitValueForReg(

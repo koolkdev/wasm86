@@ -29,8 +29,6 @@ test("runJitIrOptimizationPipeline exposes ordered transform results", () => {
   deepStrictEqual(jitIrOptimizationPassOrder, [
     "localDce",
     "flagDce",
-    "localDce",
-    "registerValuePropagation",
     "localDce"
   ]);
   deepStrictEqual(result.passResults.map((pass) => pass.name), jitIrOptimizationPassOrder);
@@ -41,7 +39,6 @@ test("runJitIrOptimizationPipeline exposes ordered transform results", () => {
       .filter((pass) => pass.name === "localDce")
       .reduce((total, pass) => total + (pass.stats.removedOpCount ?? 0), 0)
   );
-  strictEqual(result.stats["registerValuePropagation"]?.removedSetCount, 3);
   strictEqual(result.block.instructions.every((instruction) => !("prelude" in instruction)), true);
 });
 
@@ -115,8 +112,6 @@ test("runJitIrOptimizationPipeline exposes the new pass pipeline as plain JIT IR
   deepStrictEqual(jitIrOptimizationPassOrder, [
     "localDce",
     "flagDce",
-    "localDce",
-    "registerValuePropagation",
     "localDce"
   ]);
   strictEqual(result.block.instructions.some((instruction) =>

@@ -4,12 +4,14 @@ import { test } from "node:test";
 import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
+import { ExitReason } from "#backends/wasm/exit.js";
 import { ok, decodeBytes, startAddress } from "#x86/isa/decoder/tests/helpers.js";
 import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import {
   extractOnlyWasmFunctionBody,
   wasmBodyLocalCount,
+  wasmBodyInstructions,
   wasmBodyOpcodes
 } from "#backends/wasm/tests/body-opcodes.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values.js";
@@ -478,9 +480,9 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
   const exitLocal = body.addLocal(wasmValueType.i64);
   const state = createJitIrState(body, [{ stores: [], flagMask: 0 }]);
   const entrySnapshot = stateSnapshot("preInstruction", 0x1000, 0);
+  const postSnapshot = stateSnapshot("postInstruction", 0x1001, 1);
   const expressionBlock = [
-    { op: "set", target: reg("ebx"), value: const32(0x2a), accessWidth: 32 },
-    { op: "next" }
+    { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
   ] as const;
 
   emitJitIrWithContext({
@@ -488,7 +490,6 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
     scratch,
     state,
     exit: { exitLocal, exitLabelDepth: 0 },
-    exitPoints: [],
     instructions: [{
       instructionId: "prebuilt-expression-block",
       eip: 0x1000,
@@ -498,8 +499,8 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
         instructionIndex: 0,
         snapshot: entrySnapshot
       },
-      postInstructionState: stateSnapshot("postInstruction", 0x1001, 1),
-      exitPointCount: 0,
+      postInstructionState: postSnapshot,
+      exitPointCount: 1,
       operands: [],
       expressionBlock,
       valueTimeline: buildJitInstructionValueTimeline({
@@ -508,12 +509,41 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
         entryValueState: entrySnapshot.valueState
       }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() }
+    }],
+    exitPoints: [{
+      instructionIndex: 0,
+      opIndex: 0,
+      exitReason: ExitReason.HOST_TRAP,
+      snapshot: postSnapshot,
+      exitMaterializationIndex: 0
     }]
   });
   scratch.assertClear();
   body.end();
 
-  strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Const), 1);
+  const encoded = body.encode();
+  const instructions = wasmBodyInstructions(encoded);
+  const vectorStoreIndex = instructions.findIndex((instruction, index) =>
+    instruction.opcode === wasmOpcode.localSet &&
+      instructions[index - 1]?.opcode === wasmOpcode.i32Xor
+  );
+
+  strictEqual(countOpcode(wasmBodyOpcodes(encoded), wasmOpcode.br), 1);
+  strictEqual(vectorStoreIndex !== -1, true);
+
+  const vectorLocal = instructions[vectorStoreIndex]?.local;
+  const payloadExtendIndex = instructions.findIndex((instruction) =>
+    instruction.opcode === wasmOpcode.i64ExtendI32U
+  );
+  const payloadGetIndex = instructions.findIndex((instruction, index) =>
+    instruction.opcode === wasmOpcode.localGet &&
+      instruction.local === vectorLocal &&
+      index > vectorStoreIndex &&
+      index < payloadExtendIndex
+  );
+
+  strictEqual(payloadExtendIndex > vectorStoreIndex, true);
+  strictEqual(payloadGetIndex !== -1, true);
 });
 
 test("JitValueLocalStore forgetWhere invalidates only matching values", () => {
@@ -589,6 +619,16 @@ function addExpr(regName: Reg32, value: number): IrValueExpr {
     operator: "add",
     a: { kind: "source", source: reg(regName), accessWidth: 32 },
     b: const32(value)
+  };
+}
+
+function xorExpr(a: IrValueExpr, b: IrValueExpr): IrValueExpr {
+  return {
+    kind: "value.binary",
+    type: "i32",
+    operator: "xor",
+    a,
+    b
   };
 }
 

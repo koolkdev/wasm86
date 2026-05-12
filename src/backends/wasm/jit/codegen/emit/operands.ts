@@ -1,7 +1,6 @@
-import type { MemOperand, RegisterAlias, Reg32 } from "#x86/isa/types.js";
+import type { RegisterAlias, Reg32 } from "#x86/isa/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
-import type { StorageRef } from "#x86/ir/model/types.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
@@ -9,12 +8,13 @@ import { emitWasmIrLoadGuestFromStack, emitWasmIrStoreGuest } from "#backends/wa
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
+import type { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitIrContext } from "./ir-context.js";
 import {
-  canInlineJitInstructionGet,
-  jitInstructionStorageRefsMayAlias,
   jitStorageRegisterAlias
 } from "#backends/wasm/jit/codegen/plan/operand-analysis.js";
+import { emitJitValue } from "./jit-values.js";
+import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 import {
   cleanValueWidth,
   constValueWidth,
@@ -29,196 +29,263 @@ import {
 import {
   type LocalRegValueSource
 } from "#backends/wasm/jit/state/register-values.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values.js";
 
-export { canInlineJitInstructionGet, jitInstructionStorageRefsMayAlias } from "#backends/wasm/jit/codegen/plan/operand-analysis.js";
+type NormalizedStorage =
+  | NormalizedRegisterStorage
+  | NormalizedMemoryStorage
+  | NormalizedImmediateStorage;
 
-export function canInlineJitGet(context: JitIrContext, source: StorageRef): boolean {
-  return canInlineJitInstructionGet(context.currentInstruction(), source);
-}
+type NormalizedRegisterStorage = Readonly<{
+  kind: "reg";
+  alias: RegisterAlias;
+}>;
 
-export function jitStorageRefsMayAlias(context: JitIrContext, write: StorageRef, read: StorageRef): boolean {
-  return jitInstructionStorageRefsMayAlias(context.currentInstruction(), write, read);
-}
+type NormalizedMemoryStorage = Readonly<{
+  kind: "mem";
+  address: NormalizedMemoryAddress;
+  accessWidth: OperandWidth;
+}>;
+
+type NormalizedMemoryAddress =
+  | Readonly<{ kind: "expression"; value: IrValueExpr }>
+  | Readonly<{ kind: "jitValue"; value: JitValue }>;
+
+type NormalizedImmediateStorage = Readonly<{
+  kind: "imm";
+  immediateKind: "imm32" | "relTarget";
+  value: number;
+  accessWidth: OperandWidth;
+}>;
 
 export function emitJitGet(
   context: JitIrContext,
+  timelineOp: JitTimelineOpContext,
   source: IrStorageExpr,
   accessWidth: OperandWidth,
   helpers: WasmIrEmitHelpers,
   options: WasmIrEmitValueOptions = {}
 ): ValueWidth {
-  const regs = context.state.regs;
-
-  switch (source.kind) {
-    case "operand":
-      return emitGetBinding(context, operandBinding(context, source.index), accessWidth, options);
-    case "reg":
-      return regs.emitReadAlias(regAccess(source.reg, accessWidth), options);
-    case "mem":
-      helpers.emitValue(source.address, { requestedWidth: 32 });
-      emitLoadGuestFromStack(context, accessWidth, options.signed === true);
-      return signedLoadValueWidth(accessWidth, options);
-  }
+  return emitNormalizedRead(
+    context,
+    timelineOp,
+    normalizeStorage(context, timelineOp, source, accessWidth, "read"),
+    helpers,
+    options
+  );
 }
 
 export function emitJitSet(
   context: JitIrContext,
+  timelineOp: JitTimelineOpContext,
   target: IrStorageExpr,
   value: IrValueExpr,
   accessWidth: OperandWidth,
+  helpers: WasmIrEmitHelpers,
+  options: Readonly<{ materializeRegisterWrite?: boolean }> = {}
+): void {
+  emitNormalizedWrite(
+    context,
+    timelineOp,
+    normalizeStorage(context, timelineOp, target, accessWidth, "write"),
+    value,
+    helpers,
+    options
+  );
+}
+
+export function emitJitAddress(
+  context: JitIrContext,
+  timelineOp: JitTimelineOpContext,
+  source: IrStorageExpr,
   helpers: WasmIrEmitHelpers
 ): void {
-  switch (target.kind) {
-    case "operand":
-      emitSetBinding(context, operandBinding(context, target.index), value, helpers);
-      return;
+  const storage = normalizeStorage(context, timelineOp, source, 32, "address");
+
+  if (storage.kind !== "mem") {
+    throw new Error(`address source is not memory: ${storage.kind}`);
+  }
+
+  emitMemoryAddress(context, storage.address, helpers);
+}
+
+function normalizeStorage(
+  context: JitIrContext,
+  timelineOp: JitTimelineOpContext,
+  storage: IrStorageExpr,
+  accessWidth: OperandWidth,
+  access: string
+): NormalizedStorage {
+  switch (storage.kind) {
     case "reg":
-      emitSetRegisterAlias(context, regAccess(target.reg, accessWidth), value, helpers);
-      return;
+      return {
+        kind: "reg",
+        alias: regAccess(storage.reg, accessWidth)
+      };
+    case "mem":
+      return {
+        kind: "mem",
+        address: { kind: "expression", value: storage.address },
+        accessWidth
+      };
+    case "operand":
+      return normalizeOperandStorage(context, timelineOp, storage, accessWidth, access);
+  }
+}
+
+function normalizeOperandStorage(
+  context: JitIrContext,
+  timelineOp: JitTimelineOpContext,
+  operand: Readonly<{ kind: "operand"; index: number }>,
+  accessWidth: OperandWidth,
+  access: string
+): NormalizedStorage {
+  const binding = operandBinding(context, operand.index);
+
+  switch (binding.kind) {
+    case "static.reg":
+      assertAccessWidth(accessWidth, binding.alias.width, access);
+      return {
+        kind: "reg",
+        alias: binding.alias
+      };
+    case "static.mem":
+      return {
+        kind: "mem",
+        address: {
+          kind: "jitValue",
+          value: requiredResolvedJitValue(
+            timelineOp.valueForEffectiveAddress(operand),
+            `JIT effective address operand ${operand.index}`
+          )
+        },
+        accessWidth
+      };
+    case "static.imm32":
+      return {
+        kind: "imm",
+        immediateKind: "imm32",
+        value: binding.value,
+        accessWidth
+      };
+    case "static.relTarget":
+      return {
+        kind: "imm",
+        immediateKind: "relTarget",
+        value: binding.target,
+        accessWidth
+      };
+  }
+}
+
+function emitNormalizedRead(
+  context: JitIrContext,
+  timelineOp: JitTimelineOpContext,
+  storage: NormalizedStorage,
+  helpers: WasmIrEmitHelpers,
+  options: WasmIrEmitValueOptions = {}
+): ValueWidth {
+  switch (storage.kind) {
+    case "reg":
+      return emitRegisterStorageValue(context, timelineOp, storage, options);
+    case "mem":
+      emitMemoryAddress(context, storage.address, helpers);
+      emitLoadGuestFromStack(context, storage.accessWidth, options.signed === true);
+      return signedLoadValueWidth(storage.accessWidth, options);
+    case "imm":
+      return emitImmediateValue(context, storage, options);
+  }
+}
+
+function emitNormalizedWrite(
+  context: JitIrContext,
+  timelineOp: JitTimelineOpContext,
+  storage: NormalizedStorage,
+  value: IrValueExpr,
+  helpers: WasmIrEmitHelpers,
+  options: Readonly<{ materializeRegisterWrite?: boolean }> = {}
+): void {
+  switch (storage.kind) {
+    case "reg":
+      emitSetRegisterAlias(context, timelineOp, storage, value, helpers, options);
+      break;
     case "mem":
       emitStoreMem(
         context,
-        () => {
-          helpers.emitValue(target.address, { requestedWidth: 32 });
-        },
+        () => emitMemoryAddress(context, storage.address, helpers),
         () => helpers.emitValue(value),
-        accessWidth
+        storage.accessWidth
       );
-      return;
+      break;
+    case "imm":
+      throw new Error(`cannot set ${storage.immediateKind} operand`);
   }
 }
 
-export function emitJitAddress(context: JitIrContext, source: IrStorageExpr): void {
-  if (source.kind !== "operand") {
-    throw new Error(`unsupported address source for JIT IR: ${source.kind}`);
-  }
-
-  const binding = operandBinding(context, source.index);
-
-  if (binding.kind !== "static.mem") {
-    throw new Error(`address operand is not memory: ${binding.kind}`);
-  }
-
-  emitEffectiveAddress(context.body, context.state.regs, binding.ea);
-}
-
-function emitGetBinding(
+function emitImmediateValue(
   context: JitIrContext,
-  binding: JitOperandBinding,
-  accessWidth: OperandWidth,
-  options: WasmIrEmitValueOptions = {}
+  immediate: NormalizedImmediateStorage,
+  options: WasmIrEmitValueOptions
 ): ValueWidth {
-  const regs = context.state.regs;
-
-  switch (binding.kind) {
-    case "static.reg":
-      assertAccessWidth(accessWidth, binding.alias.width, "read");
-      return regs.emitReadAlias(binding.alias, options);
-    case "static.mem":
-      emitEffectiveAddress(context.body, regs, binding.ea);
-      emitLoadGuestFromStack(context, accessWidth, options.signed === true);
-      return signedLoadValueWidth(accessWidth, options);
-    case "static.imm32":
-      if (options.signed === true && accessWidth < 32) {
-        context.body.i32Const(i32(binding.value));
-        return emitSignExtendValueToWidth(context.body, accessWidth as 8 | 16);
-      }
-
-      if (options.widthInsensitive !== true && accessWidth < 32) {
-        const masked = maskedConstValue(binding.value, accessWidth);
-
-        context.body.i32Const(masked);
-        return constValueWidth(masked);
-      }
-
-      context.body.i32Const(i32(binding.value));
-      return options.widthInsensitive === true && accessWidth < 32
-        ? dirtyValueWidth(accessWidth)
-        : emitMaskValueToWidth(context.body, accessWidth, constValueWidth(binding.value));
-    case "static.relTarget":
-      context.body.i32Const(i32(binding.target));
-      return constValueWidth(binding.target);
+  if (immediate.immediateKind === "relTarget") {
+    context.body.i32Const(i32(immediate.value));
+    return constValueWidth(immediate.value);
   }
+
+  if (options.signed === true && immediate.accessWidth < 32) {
+    context.body.i32Const(i32(immediate.value));
+    return emitSignExtendValueToWidth(context.body, immediate.accessWidth as 8 | 16);
+  }
+
+  if (options.widthInsensitive !== true && immediate.accessWidth < 32) {
+    const masked = maskedConstValue(immediate.value, immediate.accessWidth);
+
+    context.body.i32Const(masked);
+    return constValueWidth(masked);
+  }
+
+  context.body.i32Const(i32(immediate.value));
+  return options.widthInsensitive === true && immediate.accessWidth < 32
+    ? dirtyValueWidth(immediate.accessWidth)
+    : emitMaskValueToWidth(context.body, immediate.accessWidth, constValueWidth(immediate.value));
 }
 
-function emitSetBinding(
+function emitMemoryAddress(
   context: JitIrContext,
-  binding: JitOperandBinding,
-  value: IrValueExpr,
+  address: NormalizedMemoryAddress,
   helpers: WasmIrEmitHelpers
 ): void {
-  const regs = context.state.regs;
-
-  switch (binding.kind) {
-    case "static.reg":
-      emitSetRegisterAlias(context, binding.alias, value, helpers);
+  switch (address.kind) {
+    case "expression":
+      helpers.emitValue(address.value, { requestedWidth: 32 });
       return;
-    case "static.mem":
-      emitStoreMem(
-        context,
-        () => {
-          emitEffectiveAddress(context.body, regs, binding.ea);
-        },
-        () => helpers.emitValue(value),
-        binding.ea.accessWidth
-      );
+    case "jitValue":
+      emitResolvedJitValue(context, address.value, { requestedWidth: 32 });
       return;
-    case "static.imm32":
-    case "static.relTarget":
-      throw new Error(`cannot set ${binding.kind} operand`);
   }
 }
 
 function emitSetRegisterAlias(
   context: JitIrContext,
-  target: RegisterAlias,
+  timelineOp: JitTimelineOpContext,
+  target: NormalizedRegisterStorage,
   value: IrValueExpr,
-  helpers: WasmIrEmitHelpers
+  helpers: WasmIrEmitHelpers,
+  options: Readonly<{ materializeRegisterWrite?: boolean }> = {}
 ): void {
-  const prefixSource = materializeFullPrefixForSetValue(context, target, value);
+  if (options.materializeRegisterWrite !== true) {
+    assertSymbolicRegisterWrite(timelineOp, target.alias);
+    return;
+  }
 
-  context.state.regs.emitWriteAlias(target, prefixSource === undefined
+  const prefixSource = materializeFullPrefixForSetValue(context, target.alias, value);
+
+  context.state.regs.emitWriteAlias(target.alias, prefixSource === undefined
     ? () => helpers.emitValue(value)
     : {
         emitValue: () => helpers.emitValue(value),
         prefixSource
       });
-}
-
-function emitEffectiveAddress(body: JitIrContext["body"], regs: JitIrContext["state"]["regs"], ea: MemOperand): void {
-  let hasTerm = false;
-
-  if (ea.base !== undefined) {
-    regs.emitReadReg32(ea.base);
-    hasTerm = true;
-  }
-
-  if (ea.index !== undefined) {
-    regs.emitReadReg32(ea.index);
-    emitScale(body, ea.scale);
-
-    if (hasTerm) {
-      body.i32Add();
-    }
-
-    hasTerm = true;
-  }
-
-  if (ea.disp !== 0 || !hasTerm) {
-    body.i32Const(i32(ea.disp));
-
-    if (hasTerm) {
-      body.i32Add();
-    }
-  }
-}
-
-function emitScale(body: JitIrContext["body"], scale: MemOperand["scale"]): void {
-  const shift = scale === 1 ? 0 : scale === 2 ? 1 : scale === 4 ? 2 : 3;
-
-  if (shift !== 0) {
-    body.i32Const(shift).i32Shl();
-  }
 }
 
 function emitLoadGuestFromStack(context: JitIrContext, width: OperandWidth, signed = false): void {
@@ -298,6 +365,50 @@ function operandBinding(context: JitIrContext, index: number): JitOperandBinding
   }
 
   return binding;
+}
+
+function emitRegisterStorageValue(
+  context: JitIrContext,
+  timelineOp: JitTimelineOpContext,
+  source: NormalizedRegisterStorage,
+  options: WasmIrEmitValueOptions
+): ValueWidth {
+  return emitResolvedJitValue(
+    context,
+    timelineOp.valueForRegisterAlias(source.alias, options.signed === true),
+    options
+  );
+}
+
+function assertSymbolicRegisterWrite(
+  timelineOp: JitTimelineOpContext,
+  target: RegisterAlias
+): void {
+  if (!timelineOp.hasRegisterWrite(target)) {
+    throw new Error(`JIT register write has no value-state timeline entry for ${target.name} at expression op ${timelineOp.expressionOpIndex}`);
+  }
+}
+
+function emitResolvedJitValue(
+  context: JitIrContext,
+  value: JitValue,
+  options: WasmIrEmitValueOptions = {}
+): ValueWidth {
+  return emitJitValue({
+    body: context.body,
+    valueCache: context.valueCache,
+    emitInput: (slot) => emitJitInputSlot(context.body, slot),
+    emitInputBits: (slot, bitOffset, width, signed) =>
+      emitJitInputSlotBits(context.body, slot, bitOffset, width, signed)
+  }, value, options);
+}
+
+function requiredResolvedJitValue(value: JitValue | undefined, context: string): JitValue {
+  if (value === undefined) {
+    throw new Error(`${context} is not available in the JIT value timeline`);
+  }
+
+  return value;
 }
 
 function materializeFullPrefixForSetValue(

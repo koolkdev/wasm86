@@ -60,6 +60,7 @@ export type JitExpressionBlockEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   instruction: JitExpressionBlockInstruction;
   valueCache?: JitValueCacheRuntime | undefined;
+  beginExpressionOp?(opIndex: number): void;
   emitInput(slot: JitArchitecturalSlot): ValueWidth;
   emitInputBits?(
     slot: JitArchitecturalSlot,
@@ -110,9 +111,18 @@ class JitExpressionBlockEmitter {
       }
 
       this.#currentOpIndex = opIndex;
-      this.#context.valueCache?.beginExpressionOp(opIndex);
+      this.#beginExpressionOp(opIndex);
       this.#emitOp(op);
     }
+  }
+
+  #beginExpressionOp(opIndex: number): void {
+    if (this.#context.beginExpressionOp !== undefined) {
+      this.#context.beginExpressionOp(opIndex);
+      return;
+    }
+
+    this.#context.valueCache?.beginExpressionOp(opIndex);
   }
 
   #emitOp(op: IrExprOp): void {

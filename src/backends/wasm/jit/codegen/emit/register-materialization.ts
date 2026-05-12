@@ -2,6 +2,7 @@ import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import { valueWidthIsCleanForWidth } from "#backends/wasm/codegen/value-width.js";
 import type { OperandWidth } from "#x86/isa/types.js";
+import type { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitIrContext } from "./ir-context.js";
 import { emitJitSet } from "./operands.js";
 import type { JitValueCacheRuntime } from "./value-local-store.js";
@@ -9,6 +10,7 @@ import type { LocalRegValueSource } from "#backends/wasm/jit/state/register-valu
 
 export function emitJitRegisterMaterialization(
   jitContext: JitIrContext,
+  timelineOp: JitTimelineOpContext,
   valueCache: JitValueCacheRuntime | undefined,
   target: IrStorageExpr,
   value: IrValueExpr,
@@ -24,7 +26,7 @@ export function emitJitRegisterMaterialization(
   }
 
   if (!emitRegisterMaterializationFromCapturedReuseValue(jitContext, valueCache, target, value, helpers)) {
-    emitJitSet(jitContext, target, value, accessWidth, helpers);
+    emitJitSet(jitContext, timelineOp, target, value, accessWidth, helpers, { materializeRegisterWrite: true });
   }
 
   jitContext.state.regs.commitPendingReg(target.reg);

@@ -22,7 +22,7 @@ import {
   jitFlagSetWrittenMask
 } from "./flag-values.js";
 import { jitStorageRegisterAlias } from "./operand-analysis.js";
-import type { OperandWidth } from "#x86/isa/types.js";
+import type { OperandWidth, RegisterAlias } from "#x86/isa/types.js";
 
 export type JitPlacedExpressionValue = Readonly<{
   expressionOpIndex: number;
@@ -110,6 +110,53 @@ export function jitTimelineValueRefValueAt(
       return timeline.valueRefValuesByExpressionOpIndex[expressionOpIndex]?.get(valueRef.id);
     case "nextEip":
       return undefined;
+  }
+}
+
+export class JitTimelineOpContext {
+  readonly #timeline: JitInstructionValueTimeline;
+  readonly #expressionOpIndex: number;
+  readonly #resolver: ReturnType<typeof createJitValueResolver>;
+
+  constructor(
+    timeline: JitInstructionValueTimeline,
+    operands: readonly JitOperandBinding[],
+    expressionOpIndex: number
+  ) {
+    const snapshot = timeline.valueStateSnapshotsByExpressionOpIndex[expressionOpIndex];
+
+    if (snapshot === undefined) {
+      throw new Error(`missing JIT value-state snapshot for expression op ${expressionOpIndex}`);
+    }
+
+    this.#timeline = timeline;
+    this.#expressionOpIndex = expressionOpIndex;
+    this.#resolver = createJitValueResolver({
+      operands,
+      readReg32: (reg) => snapshot.regs.readReg32(reg),
+      readAluFlags: () => snapshot.flags.readAluFlags(),
+      readValueRef: (value) => jitTimelineValueRefValueAt(timeline, expressionOpIndex, value)
+    });
+  }
+
+  get expressionOpIndex(): number {
+    return this.#expressionOpIndex;
+  }
+
+  valueForRegisterAlias(alias: RegisterAlias, signed = false): JitValue {
+    return this.#resolver.valueForRegisterAlias(alias, signed);
+  }
+
+  valueForEffectiveAddress(operand: OperandRef): JitValue | undefined {
+    return this.#resolver.valueForEffectiveAddress(operand);
+  }
+
+  hasRegisterWrite(alias: RegisterAlias): boolean {
+    return this.#timeline.logicalWrites.some((entry) =>
+      entry.expressionOpIndex === this.#expressionOpIndex &&
+        entry.slot.kind === "reg32" &&
+        entry.slot.reg === alias.base
+    );
   }
 }
 

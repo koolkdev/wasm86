@@ -21,6 +21,7 @@ import {
   type JitValueCacheRuntime
 } from "./value-local-store.js";
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
+import { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import { emitJitRegisterMaterialization } from "./register-materialization.js";
 import { emitJitSet } from "./operands.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
@@ -55,6 +56,7 @@ export type JitIrContext = Readonly<{
   state: JitIrState;
   exit: JitExitTarget;
   currentInstruction(): JitIrInstructionContext;
+  beginExpressionOp(opIndex: number): JitTimelineOpContext;
   currentExitPoint(exitReason: ExitReasonValue): JitExitPoint;
   completeExitPoint(exitPoint: JitExitPoint): void;
   advanceInstruction(): void;
@@ -93,6 +95,22 @@ function createJitIrContext(context: JitIrBlockEmitContext): JitIrContext {
       }
 
       return instruction;
+    },
+    beginExpressionOp: (opIndex) => {
+      const instruction = context.instructions[instructionIndex];
+
+      if (instruction === undefined) {
+        throw new Error(`missing JIT IR instruction context: ${instructionIndex}`);
+      }
+
+      const timelineOp = new JitTimelineOpContext(
+        instruction.valueTimeline,
+        instruction.operands,
+        opIndex
+      );
+
+      context.valueCache?.beginExpressionOp(opIndex);
+      return timelineOp;
     },
     currentExitPoint: (exitReason) => {
       const key = exitPointKey(instructionIndex, exitReason);
@@ -143,25 +161,42 @@ function emitCurrentInstruction(jitContext: JitIrContext): void {
 
 function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionContext): void {
   const valueCache = jitContext.valueCache;
+  let currentTimelineOp: JitTimelineOpContext | undefined;
 
   emitJitExpressionBlock({
     body: jitContext.body,
     instruction,
     valueCache,
+    beginExpressionOp: (opIndex) => {
+      currentTimelineOp = jitContext.beginExpressionOp(opIndex);
+    },
     emitInput: (slot) => emitJitInputSlot(jitContext.body, slot),
     emitInputBits: (slot, bitOffset, width, signed) =>
       emitJitInputSlotBits(jitContext.body, slot, bitOffset, width, signed),
     emitGet: (source, accessWidth, helpers, options) =>
-      emitJitGet(jitContext, source, accessWidth, helpers, options),
+      emitJitGet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), source, accessWidth, helpers, options),
     emitSet: (op, helpers) => {
       if (op.role === "registerMaterialization") {
-        emitJitRegisterMaterialization(jitContext, valueCache, op.target, op.value, op.accessWidth, helpers);
+        emitJitRegisterMaterialization(
+          jitContext,
+          requiredCurrentTimelineOp(currentTimelineOp),
+          valueCache,
+          op.target,
+          op.value,
+          op.accessWidth,
+          helpers
+        );
         return;
       }
 
-      emitJitSet(jitContext, op.target, op.value, op.accessWidth, helpers);
+      emitJitSet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), op.target, op.value, op.accessWidth, helpers);
     },
-    emitAddress: (source) => emitJitAddress(jitContext, source),
+    emitAddress: (source, helpers) => emitJitAddress(
+      jitContext,
+      requiredCurrentTimelineOp(currentTimelineOp),
+      source,
+      helpers
+    ),
     emitSetFlags: (descriptor, helpers) =>
       jitContext.state.flags.emitSet(descriptor, helpers),
     emitNext: (helpers) => {
@@ -178,6 +213,14 @@ function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionC
       emitJitConditionalJump(jitContext, condition, taken, notTaken, helpers),
     emitHostTrap: (vector, helpers) => emitJitHostTrap(jitContext, vector, helpers)
   });
+}
+
+function requiredCurrentTimelineOp(timelineOp: JitTimelineOpContext | undefined): JitTimelineOpContext {
+  if (timelineOp === undefined) {
+    throw new Error("JIT expression op context requested before emission started");
+  }
+
+  return timelineOp;
 }
 
 function beginInstruction(

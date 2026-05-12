@@ -47,6 +47,18 @@ export class JitValueResolver {
       : signExtendJitValue(value, accessWidth as 8 | 16);
   }
 
+  valueForRegisterAlias(alias: RegisterAlias, signed = false): JitValue {
+    const value = this.#valueForRegisterAccess({
+      reg: alias.base,
+      width: alias.width,
+      bitOffset: alias.bitOffset
+    });
+
+    return signed && alias.width < 32
+      ? signExtendJitValue(value, alias.width as 8 | 16)
+      : value;
+  }
+
   valueForEffectiveAddress(operand: OperandRef): JitValue | undefined {
     const binding = this.#operands[operand.index];
 
