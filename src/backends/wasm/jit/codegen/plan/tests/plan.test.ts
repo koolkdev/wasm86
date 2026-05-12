@@ -79,8 +79,7 @@ test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
   strictEqual(loadInstructionState.entryPoint.snapshot.kind, "preInstruction");
   strictEqual(loadInstructionState.entryPoint.snapshot.eip, load.address);
   deepStrictEqual(loadInstructionState.entryPoint.preInstructionExitPlan, {
-    exitPointCount: 1,
-    preserveCommittedRegs: true
+    exitPointCount: 1
   });
   strictEqual(exit.instructionIndex, 1);
   strictEqual(exit.snapshot.kind, "preInstruction");
@@ -167,8 +166,7 @@ test("planJitCodegen excludes current-instruction speculative writes from memory
   const writeFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_WRITE_FAULT);
 
   deepStrictEqual(instructionState.entryPoint.preInstructionExitPlan, {
-    exitPointCount: 2,
-    preserveCommittedRegs: true
+    exitPointCount: 2
   });
   strictEqual(writeFault.snapshot.kind, "preInstruction");
   strictEqual(writeFault.snapshot.eip, instruction.address);
@@ -761,11 +759,11 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
   strictEqual((instruction?.valueCachePlan?.selectedConsumerValuesByEpoch.length ?? 0) > 0, true);
 });
 
-test("buildJitCodegenEmissionPlan does not count overwritten materializations as exit-store uses", () => {
+test("buildJitCodegenEmissionPlan does not count overwritten planned register writes as exit-store uses", () => {
   const block: JitIrBlock = {
     instructions: [
       {
-        instructionId: "materialize-before-overwrite",
+        instructionId: "write-before-overwrite",
         eip: startAddress,
         nextEip: startAddress + 1,
         nextMode: "continue",
@@ -782,7 +780,6 @@ test("buildJitCodegenEmissionPlan does not count overwritten materializations as
           },
           {
             op: "set",
-            role: "registerMaterialization",
             target: { kind: "reg", reg: "eax" },
             value: { kind: "var", id: 1 }
           },
@@ -811,7 +808,7 @@ test("buildJitCodegenEmissionPlan does not count overwritten materializations as
     block,
     instructionStates: [
       {
-        instructionId: "materialize-before-overwrite",
+        instructionId: "write-before-overwrite",
         eip: startAddress,
         nextEip: startAddress + 1,
         nextMode: "continue",
@@ -846,10 +843,10 @@ test("buildJitCodegenEmissionPlan does not count overwritten materializations as
   strictEqual(emissionPlan.valueCachePlan, undefined);
 });
 
-test("buildJitCodegenEmissionPlan does not count same-instruction later materializations for earlier exits", () => {
+test("buildJitCodegenEmissionPlan does not count same-instruction later register writes for earlier exits", () => {
   const block: JitIrBlock = {
     instructions: [{
-      instructionId: "fault-before-materialization",
+      instructionId: "fault-before-register-write",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "continue",
@@ -872,7 +869,6 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later material
         },
         {
           op: "set",
-          role: "registerMaterialization",
           target: { kind: "reg", reg: "eax" },
           value: { kind: "var", id: 2 },
           accessWidth: 32
@@ -884,14 +880,13 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later material
   const plan: JitCodegenPlan = {
     block,
     instructionStates: [{
-      instructionId: "fault-before-materialization",
+      instructionId: "fault-before-register-write",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "continue",
       entryPoint: instructionEntryPoint(0, snapshot("preInstruction", startAddress, 0, ["eax"]), {
         preInstructionExitPlan: {
-          exitPointCount: 1,
-          preserveCommittedRegs: true
+          exitPointCount: 1
         }
       }),
       postInstructionState: snapshot("postInstruction", startAddress + 1, 1, ["eax"]),
@@ -917,7 +912,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later material
 test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations past flag-only exits", () => {
   const block: JitIrBlock = {
     instructions: [{
-      instructionId: "flag-exit-before-materialization",
+      instructionId: "flag-exit-before-register-write",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
@@ -940,7 +935,6 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
         },
         {
           op: "set",
-          role: "registerMaterialization",
           target: { kind: "reg", reg: "eax" },
           value: { kind: "var", id: 2 },
           accessWidth: 32
@@ -952,14 +946,13 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
   const plan: JitCodegenPlan = {
     block,
     instructionStates: [{
-      instructionId: "flag-exit-before-materialization",
+      instructionId: "flag-exit-before-register-write",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
       entryPoint: instructionEntryPoint(0, snapshot("preInstruction", startAddress, 0, [], IR_ALU_FLAG_MASK), {
         preInstructionExitPlan: {
-          exitPointCount: 1,
-          preserveCommittedRegs: true
+          exitPointCount: 1
         }
       }),
       postInstructionState: snapshot("postInstruction", startAddress + 1, 1, ["eax"]),
@@ -985,7 +978,7 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
     materializationNeeds: [{
       consumer: "registerExitStore",
       target: { kind: "reg32", reg: "eax" },
-      value: jitInputReg32Value("eax"),
+      value: addValue(jitInputReg32Value("eax"), c32(1)),
       placement: {
         instructionIndex: 0,
         opIndex: 4,
@@ -998,7 +991,7 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
     exitMaterializations: [
       { stores: [], flagMask: 0 },
       { stores: [], flagMask: IR_ALU_FLAG_MASK },
-      { stores: [registerStore("eax")], flagMask: 0 }
+      { stores: [registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))], flagMask: 0 }
     ],
     maxExitMaterializationIndex: 2
   };
@@ -1018,7 +1011,7 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
   const uses = materializationUsePlan.jitValueUsesByInstruction[0];
 
   strictEqual(hostTrapIndex !== -1, true);
-  deepStrictEqual(uses?.get(hostTrapIndex), [jitInputReg32Value("eax")]);
+  deepStrictEqual(uses?.get(hostTrapIndex), [addValue(jitInputReg32Value("eax"), c32(1))]);
 });
 
 test("JIT value-cache planning retains produced values needed after their definition", () => {
@@ -1041,7 +1034,6 @@ test("JIT value-cache planning retains produced values needed after their defini
     },
     {
       op: "set",
-      role: "registerMaterialization",
       target: { kind: "reg", reg: "eax" },
       value: { kind: "var", id: 0 },
       accessWidth: 32
@@ -1186,14 +1178,12 @@ test("JIT value-cache planning merges repeated produced-value retained uses", ()
     },
     {
       op: "set",
-      role: "registerMaterialization",
       target: { kind: "reg", reg: "eax" },
       value: { kind: "var", id: 0 },
       accessWidth: 32
     },
     {
       op: "set",
-      role: "registerMaterialization",
       target: { kind: "reg", reg: "edx" },
       value: { kind: "var", id: 0 },
       accessWidth: 32

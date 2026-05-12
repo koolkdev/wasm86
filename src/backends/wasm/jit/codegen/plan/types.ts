@@ -82,7 +82,6 @@ export type JitExitMaterializationStore = ExitMaterializationStore;
 
 export type JitPreInstructionExitPlan = Readonly<{
   exitPointCount: number;
-  preserveCommittedRegs: boolean;
 }>;
 
 export type JitInstructionEntryPoint = Readonly<{

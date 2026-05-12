@@ -1,10 +1,11 @@
 import { reg32 } from "#x86/isa/types.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
+import type { IrOp } from "#x86/ir/model/types.js";
 import type {
   JitExitSnapshotKind,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
-import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { JitValueTracker } from "#backends/wasm/jit/ir/value-tracker.js";
 import {
   jitStorageRegisterAccess,
@@ -12,7 +13,6 @@ import {
 } from "#backends/wasm/jit/ir/register-prefix-values.js";
 import {
   createJitValueState,
-  type JitValueStateSnapshot
 } from "#backends/wasm/jit/state/value-state.js";
 import {
   jitFlagSetProducerValue,
@@ -22,14 +22,12 @@ import {
 export class JitBlockStateTracker {
   #valueState = createJitValueState();
   #values = new JitValueTracker();
-  #effectVisibleValueState: JitValueStateSnapshot = this.#valueState.snapshot();
   #committedFlagsMask = IR_ALU_FLAG_MASK;
   #speculativeFlagsMask = 0;
   #instructionCountDelta = 0;
 
   beginInstruction(): void {
     this.#values.clear();
-    this.#effectVisibleValueState = this.#valueState.snapshot();
   }
 
   snapshot(kind: JitExitSnapshotKind, eip: number): JitStateSnapshot {
@@ -57,17 +55,12 @@ export class JitBlockStateTracker {
   effectVisiblePreInstructionSnapshot(entry: JitStateSnapshot): JitStateSnapshot {
     return {
       ...entry,
-      valueState: this.#effectVisibleValueState,
       committedFlags: { mask: this.#committedFlagsMask }
     };
   }
 
-  advanceEffectVisibleSnapshot(): void {
-    this.#effectVisibleValueState = this.#valueState.snapshot();
-  }
-
   recordOp(
-    op: JitIrOp,
+    op: IrOp,
     instruction: JitIrBlockInstruction,
     instructionIndex: number,
     opIndex: number
@@ -84,8 +77,7 @@ export class JitBlockStateTracker {
           instruction,
           this.#currentRegisterValues(),
           {
-            location: { instructionIndex, opIndex },
-            symbolicReadMode: "storage"
+            location: { instructionIndex, opIndex }
           }
         );
         return;
@@ -115,7 +107,10 @@ export class JitBlockStateTracker {
     this.#instructionCountDelta += 1;
   }
 
-  #recordSet(op: Extract<JitIrOp, { op: "set" }>, instruction: JitIrBlockInstruction): void {
+  #recordSet(
+    op: Extract<IrOp, { op: "set" }>,
+    instruction: JitIrBlockInstruction
+  ): void {
     const value = this.#values.valueFor(op.value);
     const access = jitStorageRegisterAccess(op.target, instruction.operands, op.accessWidth ?? 32);
 
@@ -124,10 +119,7 @@ export class JitBlockStateTracker {
     }
 
     if (value === undefined) {
-      // 3B only needs the legacy exit bridge to know that the target register
-      // changed. The concrete produced/store-source value is handled in 3C.
-      this.#valueState.regs.writeReg32(access.reg, { kind: "reg", reg: access.reg });
-      return;
+      throw new Error("could not resolve JIT block-state register write");
     }
 
     if (access.width === 32 && access.bitOffset === 0) {
@@ -137,7 +129,7 @@ export class JitBlockStateTracker {
     }
   }
 
-  #recordFlagSet(op: Extract<JitIrOp, { op: "flags.set" }>): void {
+  #recordFlagSet(op: Extract<IrOp, { op: "flags.set" }>): void {
     const mask = jitFlagSetWrittenMask(op);
 
     if (mask === 0) {

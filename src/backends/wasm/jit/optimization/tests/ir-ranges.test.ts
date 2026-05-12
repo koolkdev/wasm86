@@ -1,17 +1,13 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
   jitIrLocation,
   walkJitIrOpsBetween
 } from "#backends/wasm/jit/ir/walk.js";
-import {
-  findJitRegWritebackBetween,
-  jitRegClobberedBetween
-} from "#backends/wasm/jit/ir/ranges.js";
 import { syntheticInstruction, v } from "./helpers.js";
 
-test("IR range utilities iterate between locations and find register writebacks", () => {
+test("walkJitIrOpsBetween iterates between locations", () => {
   const block = {
     instructions: [
       syntheticInstruction([
@@ -33,10 +29,4 @@ test("IR range utilities iterate between locations and find register writebacks"
   });
 
   deepStrictEqual(visited, ["0:1:set", "0:2:next", "1:0:value.const"]);
-  strictEqual(jitRegClobberedBetween(block, "eax", jitIrLocation(0, 0), jitIrLocation(1, 1)), true);
-  strictEqual(jitRegClobberedBetween(block, "ecx", jitIrLocation(0, 0), jitIrLocation(1, 1)), false);
-  deepStrictEqual(findJitRegWritebackBetween(block, v(0), jitIrLocation(0, 0), jitIrLocation(1, 1)), {
-    reg: "eax",
-    location: jitIrLocation(0, 1)
-  });
 });

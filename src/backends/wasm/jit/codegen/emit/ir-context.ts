@@ -22,7 +22,6 @@ import {
 } from "./value-local-store.js";
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
-import { emitJitRegisterMaterialization } from "./register-materialization.js";
 import { emitJitSet } from "./operands.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 
@@ -144,9 +143,6 @@ function createJitIrContext(context: JitIrBlockEmitContext): JitIrContext {
         throw new Error(`completed too many JIT pre-instruction exit points: ${instructionIndex}`);
       }
 
-      if (completedPreInstructionExitPointCount === expectedPreInstructionExitPointCount) {
-        context.state.finishPreInstructionExitPoints();
-      }
     },
     advanceInstruction: () => {
       instructionIndex += 1;
@@ -175,22 +171,8 @@ function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionC
       emitJitInputSlotBits(jitContext.body, slot, bitOffset, width, signed),
     emitGet: (source, accessWidth, helpers, options) =>
       emitJitGet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), source, accessWidth, helpers, options),
-    emitSet: (op, helpers) => {
-      if (op.role === "registerMaterialization") {
-        emitJitRegisterMaterialization(
-          jitContext,
-          requiredCurrentTimelineOp(currentTimelineOp),
-          valueCache,
-          op.target,
-          op.value,
-          op.accessWidth,
-          helpers
-        );
-        return;
-      }
-
-      emitJitSet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), op.target, op.value, op.accessWidth, helpers);
-    },
+    emitSet: (op, helpers) =>
+      emitJitSet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), op.target, op.value, op.accessWidth, helpers),
     emitAddress: (source, helpers) => emitJitAddress(
       jitContext,
       requiredCurrentTimelineOp(currentTimelineOp),

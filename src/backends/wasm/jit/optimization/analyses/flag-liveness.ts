@@ -3,8 +3,8 @@ import {
   IR_ALU_FLAG_MASK,
   IR_FLAG_MASK_NONE
 } from "#x86/ir/model/flag-effects.js";
-import type { FlagMask } from "#x86/ir/model/types.js";
-import type { JitIrBlock, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { FlagMask, IrOp } from "#x86/ir/model/types.js";
+import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import {
   analyzeJitBarriers,
   jitOpHasBarrier,
@@ -120,7 +120,7 @@ export function jitFlagLivenessOpAt(
   return op;
 }
 
-function flagReadMask(op: JitIrOp): FlagMask {
+function flagReadMask(op: IrOp): FlagMask {
   switch (op.op) {
     case "flags.condition":
       return conditionFlagReadMask(op.cc);

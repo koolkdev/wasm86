@@ -18,8 +18,13 @@ import type { JitValue } from "#backends/wasm/jit/ir/values.js";
 import {
   createJitValueCacheRuntime,
   JitValueLocalStore,
+  type JitValueCacheRuntime,
   type JitValueUseCount
 } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
+import {
+  captureJitExitMaterializationStores,
+  releaseJitExitMaterializationStores
+} from "#backends/wasm/jit/codegen/emit/exit-stores.js";
 import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { emitJitIrWithContext } from "#backends/wasm/jit/codegen/emit/ir-context.js";
@@ -29,7 +34,6 @@ import type { JitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js"
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
-import { createJitReg32State } from "#backends/wasm/jit/state/register-state.js";
 import { emitPlannedExpression } from "./expression-cache-test-helpers.js";
 
 test("JitValueLocalStore reuses one local for equal non-trivial values", () => {
@@ -346,26 +350,28 @@ test("JitValueLocalStore keeps pinned exit snapshot locals out of reuse", () => 
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
   const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
-  const regs = createJitReg32State(body);
+  const valueCache = {
+    captureForReuse: (cachedValue, emitter) => store.captureForReuse(cachedValue, emitter)
+  } as JitValueCacheRuntime;
   const captured = store.captureForReuse(value, () => emitAdd(body, () => {}));
 
   if (captured === undefined) {
     throw new Error("expected captured cached local");
   }
 
-  regs.beginInstruction({ preserveCommittedRegs: false });
-  regs.emitWriteAlias({ name: "eax", base: "eax", bitOffset: 0, width: 32 }, {
-    emitValue: unexpectedEmitter,
-    prefixSource: { kind: "local", local: captured.local, width: 32, owner: captured }
-  });
-  regs.commitPending();
+  const exitStores = captureJitExitMaterializationStores({
+    body,
+    valueCache
+  }, [{
+    target: { kind: "reg32", reg: "eax" },
+    value
+  }]);
 
-  const snapshot = regs.captureCommittedExitStores(["eax"]);
+  if (exitStores === undefined) {
+    throw new Error("expected captured exit store");
+  }
 
-  regs.emitWriteAlias({ name: "eax", base: "eax", bitOffset: 0, width: 32 }, () => {
-    body.i32Const(2);
-    return cleanValueWidth(32);
-  });
+  captured.release();
   store.forgetWhere((candidate) => candidate.kind === "value.binary");
 
   const rematerialized = store.captureForReuse(value, () => emitAdd(body, () => {}));
@@ -374,7 +380,7 @@ test("JitValueLocalStore keeps pinned exit snapshot locals out of reuse", () => 
     throw new Error("expected rematerialized cached local");
   }
 
-  regs.emitExitSnapshotStore("eax", snapshot);
+  releaseJitExitMaterializationStores(exitStores);
   body.end();
 
   strictEqual(rematerialized.local === captured.local, false);

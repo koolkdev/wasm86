@@ -164,7 +164,7 @@ function valueUsesForOp(
 
       return [
         ...valueUsesForStorage(instruction, op.target, opIndex),
-        ...(op.role === "registerMaterialization" || stateUpdateOnly
+        ...(stateUpdateOnly
           ? []
           : valueUsesForValue(instruction, op.value, opIndex))
       ];

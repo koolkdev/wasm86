@@ -1,10 +1,10 @@
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
-import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { IrOp } from "#x86/ir/model/types.js";
+import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { JitBlockStateTracker } from "#backends/wasm/jit/codegen/plan/block-state-tracker.js";
 import {
   indexJitEffects,
   type JitEffectIndex,
-  jitOpAdvancesEffectVisibleSnapshotAt,
   jitOpHasPostInstructionExit,
   jitPreInstructionExitReasonAt,
   jitPostInstructionExitReasonsAt
@@ -68,10 +68,6 @@ export function analyzeJitCodegenState(
 
       recordOpEffects(op, instruction, instructionIndex, opIndex);
       state.recordOp(op, instruction, instructionIndex, opIndex);
-
-      if (jitOpAdvancesEffectVisibleSnapshotAt(effects, instructionIndex, opIndex)) {
-        state.advanceEffectVisibleSnapshot();
-      }
     }
 
     if (currentPostState === undefined) {
@@ -92,8 +88,7 @@ export function analyzeJitCodegenState(
           ? {}
           : {
               preInstructionExitPlan: {
-                exitPointCount: preInstructionExitPointCount,
-                preserveCommittedRegs: true
+                exitPointCount: preInstructionExitPointCount
               }
             })
       },
@@ -118,7 +113,7 @@ export function analyzeJitCodegenState(
   }
 
   function recordOpEffects(
-    op: JitIrOp,
+    op: IrOp,
     instruction: JitIrBlockInstruction,
     instructionIndex: number,
     opIndex: number

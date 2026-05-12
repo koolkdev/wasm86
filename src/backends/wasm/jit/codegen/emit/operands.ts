@@ -10,9 +10,6 @@ import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitIrContext } from "./ir-context.js";
-import {
-  jitStorageRegisterAlias
-} from "#backends/wasm/jit/codegen/plan/operand-analysis.js";
 import { emitJitValue } from "./jit-values.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 import {
@@ -26,9 +23,6 @@ import {
   type WasmIrEmitValueOptions,
   type ValueWidth
 } from "#backends/wasm/codegen/value-width.js";
-import {
-  type LocalRegValueSource
-} from "#backends/wasm/jit/state/register-values.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values.js";
 
 type NormalizedStorage =
@@ -81,16 +75,14 @@ export function emitJitSet(
   target: IrStorageExpr,
   value: IrValueExpr,
   accessWidth: OperandWidth,
-  helpers: WasmIrEmitHelpers,
-  options: Readonly<{ materializeRegisterWrite?: boolean }> = {}
+  helpers: WasmIrEmitHelpers
 ): void {
   emitNormalizedWrite(
     context,
     timelineOp,
     normalizeStorage(context, timelineOp, target, accessWidth, "write"),
     value,
-    helpers,
-    options
+    helpers
   );
 }
 
@@ -202,12 +194,11 @@ function emitNormalizedWrite(
   timelineOp: JitTimelineOpContext,
   storage: NormalizedStorage,
   value: IrValueExpr,
-  helpers: WasmIrEmitHelpers,
-  options: Readonly<{ materializeRegisterWrite?: boolean }> = {}
+  helpers: WasmIrEmitHelpers
 ): void {
   switch (storage.kind) {
     case "reg":
-      emitSetRegisterAlias(context, timelineOp, storage, value, helpers, options);
+      assertSymbolicRegisterWrite(timelineOp, storage.alias);
       break;
     case "mem":
       emitStoreMem(
@@ -263,29 +254,6 @@ function emitMemoryAddress(
       emitResolvedJitValue(context, address.value, { requestedWidth: 32 });
       return;
   }
-}
-
-function emitSetRegisterAlias(
-  context: JitIrContext,
-  timelineOp: JitTimelineOpContext,
-  target: NormalizedRegisterStorage,
-  value: IrValueExpr,
-  helpers: WasmIrEmitHelpers,
-  options: Readonly<{ materializeRegisterWrite?: boolean }> = {}
-): void {
-  if (options.materializeRegisterWrite !== true) {
-    assertSymbolicRegisterWrite(timelineOp, target.alias);
-    return;
-  }
-
-  const prefixSource = materializeFullPrefixForSetValue(context, target.alias, value);
-
-  context.state.regs.emitWriteAlias(target.alias, prefixSource === undefined
-    ? () => helpers.emitValue(value)
-    : {
-        emitValue: () => helpers.emitValue(value),
-        prefixSource
-      });
 }
 
 function emitLoadGuestFromStack(context: JitIrContext, width: OperandWidth, signed = false): void {
@@ -409,31 +377,4 @@ function requiredResolvedJitValue(value: JitValue | undefined, context: string):
   }
 
   return value;
-}
-
-function materializeFullPrefixForSetValue(
-  context: JitIrContext,
-  target: RegisterAlias,
-  value: IrValueExpr
-): LocalRegValueSource | undefined {
-  // Only exact full-width register sources can copy known values.
-  // Expressions, constants, memory loads, signed/narrow reads, and conditionals
-  // all continue through the normal value-emission path.
-  if (target.width !== 32 || value.kind !== "source" || value.accessWidth !== 32 || value.signed === true) {
-    return undefined;
-  }
-
-  const sourceAlias = jitStorageRegisterAlias(context.currentInstruction(), value.source);
-
-  if (sourceAlias === undefined) {
-    return undefined;
-  }
-
-  if (sourceAlias.width !== 32 || sourceAlias.bitOffset !== 0) {
-    return undefined;
-  }
-
-  // This may emit and mutate register state by freezing/materializing the
-  // source before the destination records a reusable stable full prefix.
-  return context.state.regs.ensureStableFullValueForCopy(sourceAlias.base);
 }

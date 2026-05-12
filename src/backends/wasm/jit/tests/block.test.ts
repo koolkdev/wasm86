@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
-import type { StorageRef, ValueRef } from "#x86/ir/model/types.js";
+import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import { createCpuState, getFlag } from "#x86/state/cpu-state.js";
 import { stateOffset, wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
@@ -13,7 +13,6 @@ import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import { optimizeJitIrBlock } from "#backends/wasm/jit/optimization/optimize.js";
-import type { JitIrOp } from "#backends/wasm/jit/ir/types.js";
 import { runJitIrBlock } from "./helpers.js";
 
 const startAddress = 0x1000;
@@ -1213,7 +1212,7 @@ test("jit IR block emits NEG memory forms for byte, word, and dword operands", a
   }
 });
 
-test("jit IR block preserves unary ALU flags and memory effects after value propagation", async () => {
+test("jit IR block preserves unary ALU flags and memory effects with value timeline lowering", async () => {
   const oneFlags = { CF: true, OF: false, SF: true, ZF: false, PF: true, AF: true };
   const initialEflags = (preservedEflags | allArithmeticEflags) >>> 0;
   const foldedNeg = await runJitIrBlock([
@@ -1900,7 +1899,7 @@ test("jit IR block materializes repeated register value reads without changing r
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block folds register values into indirect jump targets", async () => {
+test("jit IR block lowers value timeline register state into indirect jump targets", async () => {
   const result = await runJitIrBlock([
     0x89, 0xc8, // mov eax, ecx
     0x83, 0xf0, 0x02, // xor eax, 2
@@ -1918,7 +1917,7 @@ test("jit IR block folds register values into indirect jump targets", async () =
   deepStrictEqual(result.exit, { exitReason: ExitReason.JUMP, payload: 0x1234_567a });
 });
 
-test("jit IR block folds register values into effective addresses", async () => {
+test("jit IR block lowers value timeline register state into effective addresses", async () => {
   const result = await runJitIrBlock([
     0x89, 0xc8, // mov eax, ecx
     0x8d, 0x58, 0x04, // lea ebx, [eax+4]
@@ -2252,11 +2251,11 @@ function arithmeticEflags(flags: ArithmeticFlagExpectations): number {
   ) >>> 0;
 }
 
-function codegenIr(block: ReturnType<typeof buildJitIrBlock>): readonly JitIrOp[] {
+function codegenIr(block: ReturnType<typeof buildJitIrBlock>): readonly IrOp[] {
   return blockIr(optimizeJitIrBlock(block));
 }
 
-function blockIr(block: ReturnType<typeof optimizeJitIrBlock>): readonly JitIrOp[] {
+function blockIr(block: ReturnType<typeof optimizeJitIrBlock>): readonly IrOp[] {
   return block.instructions.flatMap((instruction) => instruction.ir);
 }
 
@@ -2341,13 +2340,13 @@ function countOpcode(opcodes: readonly number[], opcode: number): number {
   return opcodeIndexes(opcodes, opcode).length;
 }
 
-function irOpDstId(op: JitIrOp): readonly number[] {
+function irOpDstId(op: IrOp): readonly number[] {
   const dst = irOpDst(op);
 
   return dst === undefined ? [] : [dst.id];
 }
 
-function irOpOperandIndexes(op: JitIrOp): readonly number[] {
+function irOpOperandIndexes(op: IrOp): readonly number[] {
   switch (op.op) {
     case "get":
       return storageOperandIndexes(op.source);

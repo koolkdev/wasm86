@@ -53,10 +53,7 @@ export type IrSetExprOp = Readonly<{
   target: IrStorageExpr;
   value: IrValueExpr;
   accessWidth: OperandWidth;
-  role?: IrSetExprRole;
 }>;
-
-export type IrSetExprRole = "registerMaterialization";
 
 export type IrExprOp =
   | Readonly<{ op: "let32"; dst: VarRef; value: IrValueExpr }>
@@ -89,9 +86,7 @@ export type IrExpressionBuildResult = Readonly<{
   sourceMap: IrExpressionSourceMap;
 }>;
 
-export type IrExpressionSetInputOp = Extract<IrOp, { op: "set" }> & Readonly<{
-  role?: IrSetExprRole;
-}>;
+export type IrExpressionSetInputOp = Extract<IrOp, { op: "set" }>;
 
 export type IrExpressionInputOp =
   | Exclude<IrOp, Extract<IrOp, { op: "set" }>>
@@ -347,7 +342,7 @@ class ExpressionBuilder {
     };
     const origins = [...target.sourceOpIndexes, ...value.sourceOpIndexes];
 
-    return [op.role === undefined ? expr : { ...expr, role: op.role }, origins];
+    return [expr, origins];
   }
 
   #materializedValue(value: ValueRef): Readonly<{ value: ValueRef; sourceOpIndexes: readonly number[] }> {

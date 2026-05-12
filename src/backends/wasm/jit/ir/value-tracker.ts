@@ -1,25 +1,18 @@
-import type { IrBinaryValueOp, IrSelectValueOp, IrUnaryValueOp, ValueRef } from "#x86/ir/model/types.js";
-import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { IrBinaryValueOp, IrOp, IrSelectValueOp, IrUnaryValueOp, ValueRef } from "#x86/ir/model/types.js";
+import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { jitProducedValueForEffectfulRead } from "#backends/wasm/jit/ir/produced-values.js";
 import {
   jitValueForEffectiveAddress,
   jitValueForStorage,
   jitValueForValue,
-  jitValueReadsReg,
-  jitValuesEqual,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
-import {
-  jitStorageRegisterAccess,
-  type JitRegisterValueMap
-} from "#backends/wasm/jit/ir/register-prefix-values.js";
+import type { JitRegisterValueMap } from "#backends/wasm/jit/ir/register-prefix-values.js";
 import type { JitIrLocation } from "#backends/wasm/jit/ir/walk.js";
-import type { Reg32 } from "#x86/isa/types.js";
 import { i32 } from "#x86/state/cpu-state.js";
 
 export type JitValueTrackerRecordOptions = Readonly<{
   location?: JitIrLocation;
-  symbolicReadMode?: "symbolic" | "storage";
 }>;
 
 export class JitValueTracker {
@@ -61,16 +54,8 @@ export class JitValueTracker {
     }
   }
 
-  deleteValuesReadingReg(reg: Reg32): void {
-    for (const [id, value] of this.#locals) {
-      if (jitValueReadsReg(value, reg)) {
-        this.#locals.delete(id);
-      }
-    }
-  }
-
   recordOp(
-    op: JitIrOp,
+    op: IrOp,
     instruction: JitIrBlockInstruction,
     registerValues: JitRegisterValueMap = new Map(),
     options: JitIrLocation | JitValueTrackerRecordOptions = {}
@@ -104,21 +89,7 @@ export class JitValueTracker {
     }
   }
 
-  refFor(value: JitValue): ValueRef | undefined {
-    if (value.kind === "const") {
-      return { kind: "const", type: value.type, value: value.value };
-    }
-
-    for (const [id, localValue] of this.#locals) {
-      if (jitValuesEqual(localValue, value)) {
-        return { kind: "var", id };
-      }
-    }
-
-    return undefined;
-  }
-
-  #binaryValue(op: Extract<JitIrOp, IrBinaryValueOp>): JitValue | undefined {
+  #binaryValue(op: Extract<IrOp, IrBinaryValueOp>): JitValue | undefined {
     const a = this.valueFor(op.a);
     const b = this.valueFor(op.b);
 
@@ -127,13 +98,13 @@ export class JitValueTracker {
       : undefined;
   }
 
-  #unaryValue(op: Extract<JitIrOp, IrUnaryValueOp>): JitValue | undefined {
+  #unaryValue(op: Extract<IrOp, IrUnaryValueOp>): JitValue | undefined {
     const value = this.valueFor(op.value);
 
     return value === undefined ? undefined : { kind: op.op, type: op.type, operator: op.operator, value };
   }
 
-  #selectValue(op: Extract<JitIrOp, IrSelectValueOp>): JitValue | undefined {
+  #selectValue(op: Extract<IrOp, IrSelectValueOp>): JitValue | undefined {
     const condition = this.valueFor(op.condition);
     const whenTrue = this.valueFor(op.whenTrue);
     const whenFalse = this.valueFor(op.whenFalse);
@@ -144,15 +115,11 @@ export class JitValueTracker {
   }
 
   #getValue(
-    op: Extract<JitIrOp, { op: "get" }>,
+    op: Extract<IrOp, { op: "get" }>,
     instruction: JitIrBlockInstruction,
     registerValues: JitRegisterValueMap,
     options: JitValueTrackerRecordOptions
   ): JitValue | undefined {
-    if (op.role === "symbolicRead" && options.symbolicReadMode !== "storage") {
-      return symbolicRegisterReadValue(op, instruction);
-    }
-
     return (options.location === undefined
       ? undefined
       : jitProducedValueForEffectfulRead(instruction, options.location, op)) ??
@@ -172,17 +139,6 @@ function normalizeRecordOptions(
   return "instructionIndex" in options
     ? { location: options }
     : options;
-}
-
-function symbolicRegisterReadValue(
-  op: Extract<JitIrOp, { op: "get" }>,
-  instruction: JitIrBlockInstruction
-): JitValue | undefined {
-  const access = jitStorageRegisterAccess(op.source, instruction.operands, op.accessWidth ?? 32);
-
-  return access?.width === 32 && access.bitOffset === 0
-    ? { kind: "reg", reg: access.reg }
-    : undefined;
 }
 
 function valueRefLabel(value: ValueRef): string {

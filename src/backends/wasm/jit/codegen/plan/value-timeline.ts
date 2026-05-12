@@ -281,10 +281,6 @@ class JitInstructionValueTimelineBuilder {
     this.#recordStorageInputs(op.target);
     const value = this.#valueForExpression(op.value);
 
-    if (op.role === "registerMaterialization") {
-      return;
-    }
-
     const alias = jitStorageRegisterAlias(
       { operands: this.#operands },
       op.target,

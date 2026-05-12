@@ -13,10 +13,6 @@ import {
   type JitFlagExitStoreSnapshot,
   type JitFlagState
 } from "./flag-state.js";
-import {
-  createJitReg32State,
-  type JitReg32State
-} from "./register-state.js";
 import type { JitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import {
   captureJitExitMaterializationStores,
@@ -49,7 +45,6 @@ type CaptureExitMaterializationOptions = Readonly<{
 }>;
 
 export type JitIrState = Readonly<{
-  regs: JitReg32State;
   flags: JitFlagState;
   eipLocal: number;
   instructionCountLocal: number;
@@ -57,8 +52,6 @@ export type JitIrState = Readonly<{
   emitLoadInstructionCount(): void;
   beginInstruction(exit: JitExitTarget, entryPoint: JitInstructionEntryPoint): void;
   prepareExitPoint(exitPoint: JitExitPoint, emitEip: () => void): void;
-  finishPreInstructionExitPoints(): void;
-  commitInstruction(): void;
   commitInstructionExit(exitPoint: JitExitPoint, emitEip: () => void): void;
   emitExitMaterializationStores(index: number): void;
   releaseExitMaterialization(index: number): void;
@@ -69,7 +62,6 @@ export function createJitIrState(
   exitMaterializations: readonly JitExitMaterializationPlan[],
   options: JitIrStateOptions = {}
 ): JitIrState {
-  const regs = createJitReg32State(body);
   const maxExitMaterializationIndex = exitMaterializations.length - 1;
   const eipLocal = body.addLocal(wasmValueType.i32);
   const flags = createJitFlagState(body, {
@@ -83,7 +75,6 @@ export function createJitIrState(
   let pendingFlagOwnersReleased = false;
 
   return {
-    regs,
     flags,
     eipLocal,
     instructionCountLocal,
@@ -93,10 +84,7 @@ export function createJitIrState(
       body.localSet(instructionCountLocal);
     },
     beginInstruction: (exit, entryPoint) => {
-      const preInstructionExitPlan = entryPoint.preInstructionExitPlan;
-
       activeExit = exit;
-      regs.beginInstruction({ preserveCommittedRegs: preInstructionExitPlan?.preserveCommittedRegs ?? false });
       useExitMaterialization(exit, 0);
       installExitMetadataStores(exit, () => {
         body.i32Const(i32(entryPoint.snapshot.eip));
@@ -115,16 +103,11 @@ export function createJitIrState(
         allowPendingFlags
       });
     },
-    finishPreInstructionExitPoints: () => {
-      regs.commitPending();
-    },
-    commitInstruction,
     commitInstructionExit: (exitPoint, emitEip) => {
       const exit = requiredActiveExit();
 
       emitEip();
       body.localSet(eipLocal);
-      regs.commitPending();
       captureExitMaterialization(exitPoint.exitMaterializationIndex);
       useExitMaterialization(exit, exitPoint.exitMaterializationIndex);
       installExitMetadataStores(exit, () => {
@@ -191,10 +174,6 @@ export function createJitIrState(
       exitMaterializationSnapshots.delete(index);
     }
   };
-
-  function commitInstruction(): void {
-    regs.commitPending();
-  }
 
   function emitLoadAluFlagsValue(): void {
     emitLoadStateU32(body, stateOffset.aluFlags);

@@ -15,7 +15,6 @@ export function emitJitNext(context: JitIrContext): void {
     return;
   }
 
-  context.state.commitInstruction();
   context.advanceInstruction();
 }
 

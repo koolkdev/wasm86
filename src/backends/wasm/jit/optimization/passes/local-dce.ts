@@ -3,7 +3,8 @@ import {
   irOpResult,
   visitIrOpValueRefs
 } from "#x86/ir/model/op-semantics.js";
-import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { IrOp } from "#x86/ir/model/types.js";
+import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   analyzeJitBarriers,
   jitOpPreInstructionExitReasonAt,
@@ -52,7 +53,7 @@ function pruneInstructionDeadLocalValues(
   barriers: JitBarrierAnalysis
 ): Readonly<{ instruction: JitIrBlockInstruction; removedOpCount: number }> {
   const liveVars = new Set<number>();
-  const ops: JitIrOp[] = [];
+  const ops: IrOp[] = [];
   let removedOpCount = 0;
 
   for (let opIndex = instruction.ir.length - 1; opIndex >= 0; opIndex -= 1) {
@@ -92,7 +93,7 @@ function pruneInstructionDeadLocalValues(
 }
 
 function canDropUnusedResult(
-  op: JitIrOp,
+  op: IrOp,
   instructionIndex: number,
   opIndex: number,
   barriers: JitBarrierAnalysis

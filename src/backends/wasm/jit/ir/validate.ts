@@ -1,8 +1,7 @@
 import { validateIrBlock } from "#x86/ir/passes/validator.js";
-import type { JitIrBlock, JitIrBlockInstruction, JitIrBody } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   analyzeJitBarriers,
-  jitOpBarriersAt,
   type JitBarrier,
   type JitBarrierAnalysis
 } from "#backends/wasm/jit/ir/barriers.js";
@@ -34,22 +33,6 @@ export function validateJitIrBlock(
   const barriers = options.barriers ?? analyzeJitBarriers(block);
 
   validateJitBarrierIndex(block, barriers);
-
-  for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
-    const instruction = block.instructions[instructionIndex];
-
-    if (instruction === undefined) {
-      throw new Error(`missing JIT instruction: ${instructionIndex}`);
-    }
-
-    try {
-      validateJitRegisterMaterializations(instruction.ir, instructionIndex, barriers);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-
-      throw new Error(`invalid JIT IR at instruction ${instructionIndex}: ${message}`);
-    }
-  }
 }
 
 function validateJitInstructionBody(
@@ -168,30 +151,5 @@ function validateBarrierShape(barrier: JitBarrier): void {
 
   if (barrier.reason === "exit" && (barrier.exitReasons?.length ?? 0) === 0) {
     throw new Error(`exit barrier is missing exit reasons at ${barrier.instructionIndex}:${barrier.opIndex}`);
-  }
-}
-
-function validateJitRegisterMaterializations(
-  block: JitIrBody,
-  instructionIndex: number,
-  barriers: JitBarrierAnalysis
-): void {
-  for (let opIndex = 0; opIndex < block.length; opIndex += 1) {
-    const op = block[opIndex];
-
-    if (op?.op !== "set" || op.role !== "registerMaterialization") {
-      continue;
-    }
-
-    if (op.target.kind !== "reg") {
-      throw new Error(`JIT register materialization cannot target ${op.target.kind}`);
-    }
-
-    const writeBarrier = jitOpBarriersAt(barriers, instructionIndex, opIndex)
-      .find((barrier) => barrier.reason === "write");
-
-    if (writeBarrier?.reg !== op.target.reg) {
-      throw new Error(`JIT register materialization is missing a write barrier for ${op.target.reg}`);
-    }
   }
 }

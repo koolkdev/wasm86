@@ -1,4 +1,5 @@
-import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { IrOp } from "#x86/ir/model/types.js";
+import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import type { JitOptimizationPass } from "#backends/wasm/jit/optimization/pass.js";
 import {
   analyzeJitFlagLiveness,
@@ -53,7 +54,7 @@ function pruneInstructionDeadFlagSets(
   removedSetCount: number;
   retainedSetCount: number;
 }> {
-  const ops: JitIrOp[] = [];
+  const ops: IrOp[] = [];
   let removedSetCount = 0;
   let retainedSetCount = 0;
 

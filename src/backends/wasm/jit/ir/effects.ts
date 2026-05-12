@@ -1,7 +1,7 @@
 import type { Reg32 } from "#x86/isa/types.js";
-import type { ValueRef } from "#x86/ir/model/types.js";
+import type { IrOp, ValueRef } from "#x86/ir/model/types.js";
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
-import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   analyzeJitConditionUses,
   indexJitExitConditionValues,
@@ -16,7 +16,6 @@ export type JitOpEffects = Readonly<{
   postInstructionExitReasons: readonly ExitReasonValue[];
   localConditionValues: readonly ValueRef[];
   exitConditionValues: readonly ValueRef[];
-  advancesEffectVisibleSnapshot: boolean;
   registerWriteReg?: Reg32;
   conditionUse?: JitConditionUse;
 }>;
@@ -63,8 +62,7 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
       let opEffects: JitOpEffects = {
         postInstructionExitReasons: jitPostInstructionExitReasons(op, instruction),
         localConditionValues: localConditionValues.get(instructionIndex)?.get(opIndex) ?? [],
-        exitConditionValues: exitConditionValues.get(instructionIndex)?.get(opIndex) ?? [],
-        advancesEffectVisibleSnapshot: jitAdvancesEffectVisibleSnapshot(op)
+        exitConditionValues: exitConditionValues.get(instructionIndex)?.get(opIndex) ?? []
       };
 
       if (preInstructionExitReason !== undefined) {
@@ -158,14 +156,6 @@ export function jitOpHasPostInstructionExit(
   return jitPostInstructionExitReasonsAt(effects, instructionIndex, opIndex).length !== 0;
 }
 
-export function jitOpAdvancesEffectVisibleSnapshotAt(
-  effects: JitEffectIndex,
-  instructionIndex: number,
-  opIndex: number
-): boolean {
-  return jitOpEffectsAt(effects, instructionIndex, opIndex).advancesEffectVisibleSnapshot;
-}
-
 export function jitConditionUseAt(
   effects: JitEffectIndex,
   instructionIndex: number,
@@ -216,7 +206,7 @@ export function jitLastPreInstructionExitOpIndex(
 }
 
 function jitRegisterWriteReg(
-  op: JitIrOp,
+  op: IrOp,
   operands: JitIrBlockInstruction["operands"]
 ): Reg32 | undefined {
   if (op.op !== "set") {
@@ -224,10 +214,4 @@ function jitRegisterWriteReg(
   }
 
   return jitStorageReg(op.target, operands);
-}
-
-function jitAdvancesEffectVisibleSnapshot(op: JitIrOp): boolean {
-  // Legacy registerMaterialization ops are emitted before observation points,
-  // so analysis marks them as advancing the pre-instruction fault view.
-  return op.op === "set" && op.role === "registerMaterialization";
 }

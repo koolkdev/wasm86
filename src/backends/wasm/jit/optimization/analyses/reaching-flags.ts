@@ -2,9 +2,9 @@ import {
   conditionFlagReadMask,
   IR_ALU_FLAG_MASK
 } from "#x86/ir/model/flag-effects.js";
-import type { ConditionCode, FlagMask } from "#x86/ir/model/types.js";
+import type { ConditionCode, FlagMask, IrOp } from "#x86/ir/model/types.js";
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
-import type { JitIrBlock, JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   analyzeJitBarriers,
   jitOpBarriersAt,
@@ -91,7 +91,7 @@ export function analyzeJitReachingFlags(
   function analyzeOp(
     instruction: JitIrBlockInstruction,
     instructionIndex: number,
-    op: JitIrOp,
+    op: IrOp,
     opIndex: number,
     values: JitValueTracker,
     instructionEntryOwners: JitFlagOwners
@@ -172,7 +172,7 @@ export function analyzeJitReachingFlags(
   }
 
   function recordRegisterSet(
-    op: Extract<JitIrOp, { op: "set" }>,
+    op: Extract<IrOp, { op: "set" }>,
     instruction: JitIrBlockInstruction,
     values: JitValueTracker
   ): void {

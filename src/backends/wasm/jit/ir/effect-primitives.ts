@@ -1,14 +1,14 @@
-import type { StorageRef, ValueRef } from "#x86/ir/model/types.js";
+import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import {
   irOpStorageReads,
   irOpStorageWrites
 } from "#x86/ir/model/op-semantics.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import type { JitIrBlockInstruction, JitIrOp } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 
 export function jitMemoryFaultReason(
-  op: JitIrOp,
+  op: IrOp,
   operands: readonly JitOperandBinding[]
 ): ExitReasonValue | undefined {
   if (irOpStorageReads(op).some((storage) => storageMayAccessMemory(storage, operands))) {
@@ -25,7 +25,7 @@ export function jitMemoryFaultReason(
 }
 
 export function jitPostInstructionExitReasons(
-  op: JitIrOp,
+  op: IrOp,
   instruction: JitIrBlockInstruction
 ): readonly ExitReasonValue[] {
   switch (op.op) {
@@ -43,7 +43,7 @@ export function jitPostInstructionExitReasons(
 }
 
 export function jitExitConditionValues(
-  op: JitIrOp,
+  op: IrOp,
   instruction: JitIrBlockInstruction
 ): readonly ValueRef[] {
   if (jitPostInstructionExitReasons(op, instruction).length === 0) {
@@ -58,7 +58,7 @@ export function jitExitConditionValues(
   }
 }
 
-export function jitLocalConditionValues(op: JitIrOp): readonly ValueRef[] {
+export function jitLocalConditionValues(op: IrOp): readonly ValueRef[] {
   switch (op.op) {
     case "value.select":
       return [op.condition];
