@@ -1701,7 +1701,7 @@ test("jit IR block preserves CF across INC partial flag writes", async () => {
   strictEqual(result.state.eflags, (preservedEflags | 0x01) >>> 0);
   strictEqual(result.state.eip, startAddress + 11);
   strictEqual(result.state.instructionCount, 3);
-  deepStrictEqual(result.exit, { exitReason: ExitReason.BRANCH_TAKEN, payload: startAddress + 11 });
+  deepStrictEqual(result.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 11 });
 });
 
 test("jit IR block branches on incoming CF after INC", async () => {
@@ -1726,13 +1726,13 @@ test("jit IR block branches on incoming CF after INC", async () => {
   strictEqual(taken.state.eflags, (preservedEflags | 0x01) >>> 0);
   strictEqual(taken.state.eip, startAddress + 8);
   strictEqual(taken.state.instructionCount, 2);
-  deepStrictEqual(taken.exit, { exitReason: ExitReason.BRANCH_TAKEN, payload: startAddress + 8 });
+  deepStrictEqual(taken.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 8 });
 
   strictEqual(notTaken.state.eax, 1);
   strictEqual(notTaken.state.eflags, preservedEflags);
   strictEqual(notTaken.state.eip, startAddress + 3);
   strictEqual(notTaken.state.instructionCount, 2);
-  deepStrictEqual(notTaken.exit, { exitReason: ExitReason.BRANCH_NOT_TAKEN, payload: startAddress + 3 });
+  deepStrictEqual(notTaken.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 3 });
 });
 
 test("jit IR block keeps not-taken INC exit stores path-local after JC", async () => {
@@ -1749,7 +1749,7 @@ test("jit IR block keeps not-taken INC exit stores path-local after JC", async (
   strictEqual(result.state.eflags, preservedEflags);
   strictEqual(result.state.eip, startAddress + 3);
   strictEqual(result.state.instructionCount, 2);
-  deepStrictEqual(result.exit, { exitReason: ExitReason.BRANCH_NOT_TAKEN, payload: startAddress + 3 });
+  deepStrictEqual(result.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 3 });
 });
 
 test("jit IR block emits cmp without writing operands", async () => {
@@ -1791,7 +1791,7 @@ test("jit IR block handles specialized cmp condition branches", async () => {
 
     strictEqual(result.state.eip, startAddress + 9, testCase.name);
     strictEqual(result.state.instructionCount, 2, testCase.name);
-    deepStrictEqual(result.exit, { exitReason: ExitReason.BRANCH_TAKEN, payload: startAddress + 9 });
+    deepStrictEqual(result.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 9 });
   }
 });
 
@@ -1809,7 +1809,7 @@ test("jit IR block materializes planned flag values before condition consumers",
   strictEqual(result.state.eflags, (preservedEflags | addWraparoundEflags) >>> 0);
   strictEqual(result.state.eip, startAddress + 10);
   strictEqual(result.state.instructionCount, 2);
-  deepStrictEqual(result.exit, { exitReason: ExitReason.BRANCH_TAKEN, payload: startAddress + 10 });
+  deepStrictEqual(result.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 10 });
 });
 
 test("jit IR block materializes planned flag values on both conditional branch exits", async () => {
@@ -1831,9 +1831,9 @@ test("jit IR block materializes planned flag values on both conditional branch e
   }));
 
   strictEqual(taken.state.eflags, (preservedEflags | addWraparoundEflags) >>> 0);
-  deepStrictEqual(taken.exit, { exitReason: ExitReason.BRANCH_TAKEN, payload: startAddress + 10 });
+  deepStrictEqual(taken.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 10 });
   strictEqual(notTaken.state.eflags, preservedEflags);
-  deepStrictEqual(notTaken.exit, { exitReason: ExitReason.BRANCH_NOT_TAKEN, payload: startAddress + 5 });
+  deepStrictEqual(notTaken.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 5 });
 });
 
 test("jit IR block emits conditional branches", async () => {
@@ -1847,10 +1847,10 @@ test("jit IR block emits conditional branches", async () => {
     instructionCount: 10
   }));
 
-  deepStrictEqual(taken.exit, { exitReason: ExitReason.BRANCH_TAKEN, payload: startAddress + 7 });
+  deepStrictEqual(taken.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 7 });
   strictEqual(taken.state.eip, startAddress + 7);
   strictEqual(taken.state.instructionCount, 11);
-  deepStrictEqual(notTaken.exit, { exitReason: ExitReason.BRANCH_NOT_TAKEN, payload: startAddress + 2 });
+  deepStrictEqual(notTaken.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 2 });
   strictEqual(notTaken.state.eip, startAddress + 2);
   strictEqual(notTaken.state.instructionCount, 11);
 });

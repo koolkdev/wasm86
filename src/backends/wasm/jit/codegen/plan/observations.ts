@@ -1,4 +1,4 @@
-import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
+import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import { u32 } from "#x86/state/cpu-state.js";
 import type { TargetRef } from "#x86/ir/model/types.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
@@ -15,8 +15,9 @@ import {
 import {
   type JitEffectIndex,
   jitPreInstructionExitReasonAt,
-  jitPostInstructionExitReasonsAt
+  jitPostInstructionExitsAt
 } from "#backends/wasm/jit/ir/effects.js";
+import type { JitPostInstructionExit } from "#backends/wasm/jit/ir/effect-primitives.js";
 
 export type JitPlannedObservationPoint = Readonly<{
   instructionIndex: number;
@@ -58,7 +59,7 @@ export function jitPreInstructionObservationForOp(
       kind: "runtime",
       source: "memoryAddress"
     },
-    pathScope: exitMaterializationPathScope(faultReason)
+    pathScope: "deferredExit"
   };
 }
 
@@ -69,18 +70,18 @@ export function jitPostInstructionObservationsForOp(
   opIndex: number,
   postState: JitBoundaryState
 ): readonly JitPlannedObservationPoint[] {
-  const exitReasons = jitPostInstructionExitReasonsAt(effects, instructionIndex, opIndex);
+  const exits = jitPostInstructionExitsAt(effects, instructionIndex, opIndex);
 
-  return exitReasons.map((exitReason) => ({
+  return exits.map((exit) => ({
     instructionIndex,
     opIndex,
     emitBoundary: beforeOp(instructionIndex, opIndex),
     observedBoundary: postState.boundary,
     observedState: postState,
-    visibleEip: visibleEipForPostInstructionExit(instruction, exitReason, opIndex),
-    exitReason,
-    payload: payloadForPostInstructionExit(instruction, exitReason, opIndex),
-    pathScope: exitMaterializationPathScope(exitReason)
+    visibleEip: visibleEipForPostInstructionExit(instruction, exit, opIndex),
+    exitReason: exit.exitReason,
+    payload: payloadForPostInstructionExit(instruction, exit, opIndex),
+    pathScope: exitMaterializationPathScope(exit)
   }));
 }
 
@@ -103,23 +104,23 @@ export function countInstructionEntryObservations(
 
 function visibleEipForPostInstructionExit(
   instruction: JitIrBlockInstruction,
-  exitReason: ExitReasonValue,
+  exit: JitPostInstructionExit,
   opIndex: number
 ): JitObservationValue {
-  switch (exitReason) {
-    case ExitReason.HOST_TRAP:
+  switch (exit.kind) {
+    case "hostTrap":
       return {
         kind: "static",
         value: instruction.nextEip
       };
     default:
-      return payloadForPostInstructionExit(instruction, exitReason, opIndex);
+      return payloadForPostInstructionExit(instruction, exit, opIndex);
   }
 }
 
 function payloadForPostInstructionExit(
   instruction: JitIrBlockInstruction,
-  exitReason: ExitReasonValue,
+  exit: JitPostInstructionExit,
   opIndex: number
 ): JitObservationPayload {
   const op = instruction.ir[opIndex];
@@ -128,16 +129,16 @@ function payloadForPostInstructionExit(
     throw new Error(`missing JIT IR op while planning JIT exit payload: ${instruction.instructionId}:${opIndex}`);
   }
 
-  switch (exitReason) {
-    case ExitReason.FALLTHROUGH:
+  switch (exit.kind) {
+    case "fallthrough":
       return { kind: "static", value: instruction.nextEip };
-    case ExitReason.JUMP:
+    case "jump":
       return controlTargetObservationValue(op.op === "jump" ? op.target : undefined, instruction);
-    case ExitReason.BRANCH_TAKEN:
+    case "branchTaken":
       return controlTargetObservationValue(op.op === "conditionalJump" ? op.taken : undefined, instruction);
-    case ExitReason.BRANCH_NOT_TAKEN:
+    case "branchNotTaken":
       return controlTargetObservationValue(op.op === "conditionalJump" ? op.notTaken : undefined, instruction);
-    case ExitReason.HOST_TRAP:
+    case "hostTrap":
       return { kind: "runtime", source: "hostTrapVector" };
     default:
       return { kind: "runtime", source: "controlTarget" };
@@ -186,11 +187,11 @@ function staticConstVarValue(varId: number, instruction: JitIrBlockInstruction):
   return undefined;
 }
 
-function exitMaterializationPathScope(exitReason: ExitReasonValue): JitMaterializationPathScope {
-  switch (exitReason) {
-    case ExitReason.BRANCH_TAKEN:
+function exitMaterializationPathScope(exit: JitPostInstructionExit): JitMaterializationPathScope {
+  switch (exit.kind) {
+    case "branchTaken":
       return "taken";
-    case ExitReason.BRANCH_NOT_TAKEN:
+    case "branchNotTaken":
       return "notTaken";
     default:
       return "deferredExit";

@@ -4,11 +4,12 @@ import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import {
   indexJitEffects,
   jitPreInstructionExitReasonAt,
-  jitPostInstructionExitReasonsAt,
+  jitPostInstructionExitsAt,
   jitOpHasPostInstructionExit,
   jitRegisterWriteRegAt,
   type JitEffectIndex
 } from "#backends/wasm/jit/ir/effects.js";
+import type { JitPostInstructionExit } from "#backends/wasm/jit/ir/effect-primitives.js";
 
 export type JitBarrierReason =
   | "preInstructionExit"
@@ -20,7 +21,7 @@ export type JitBarrier = Readonly<{
   opIndex?: number;
   reason: JitBarrierReason;
   exitReason?: ExitReasonValue;
-  exitReasons?: readonly ExitReasonValue[];
+  exits?: readonly JitPostInstructionExit[];
   reg?: Reg32;
 }>;
 
@@ -99,7 +100,7 @@ export function analyzeJitBarriers(
           instructionIndex,
           opIndex,
           reason: "exit",
-          exitReasons: jitPostInstructionExitReasonsAt(effects, instructionIndex, opIndex)
+          exits: jitPostInstructionExitsAt(effects, instructionIndex, opIndex)
         });
       }
     }

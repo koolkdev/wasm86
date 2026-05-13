@@ -178,13 +178,7 @@ export function exitPoint(input: Readonly<{
     visibleEip,
     exitReason: input.exitReason,
     payload: input.payload ?? visibleEip,
-    pathScope: input.pathScope ?? (
-      input.exitReason === ExitReason.BRANCH_TAKEN
-        ? "taken"
-        : input.exitReason === ExitReason.BRANCH_NOT_TAKEN
-          ? "notTaken"
-          : "deferredExit"
-    ),
+    pathScope: input.pathScope ?? "deferredExit",
     exitMaterializationIndex: input.exitMaterializationIndex
   };
 }

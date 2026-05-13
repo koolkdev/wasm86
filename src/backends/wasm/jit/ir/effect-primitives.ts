@@ -7,6 +7,18 @@ import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/e
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 
+export type JitPostInstructionExitKind =
+  | "fallthrough"
+  | "jump"
+  | "branchTaken"
+  | "branchNotTaken"
+  | "hostTrap";
+
+export type JitPostInstructionExit = Readonly<{
+  kind: JitPostInstructionExitKind;
+  exitReason: ExitReasonValue;
+}>;
+
 export function jitMemoryFaultReason(
   op: IrOp,
   operands: readonly JitOperandBinding[]
@@ -24,19 +36,24 @@ export function jitMemoryFaultReason(
   return ExitReason.MEMORY_WRITE_FAULT;
 }
 
-export function jitPostInstructionExitReasons(
+export function jitPostInstructionExits(
   op: IrOp,
   instruction: JitIrBlockInstruction
-): readonly ExitReasonValue[] {
+): readonly JitPostInstructionExit[] {
   switch (op.op) {
     case "next":
-      return instruction.nextMode === "exit" ? [ExitReason.FALLTHROUGH] : [];
+      return instruction.nextMode === "exit"
+        ? [{ kind: "fallthrough", exitReason: ExitReason.FALLTHROUGH }]
+        : [];
     case "jump":
-      return [ExitReason.JUMP];
+      return [{ kind: "jump", exitReason: ExitReason.JUMP }];
     case "conditionalJump":
-      return [ExitReason.BRANCH_TAKEN, ExitReason.BRANCH_NOT_TAKEN];
+      return [
+        { kind: "branchTaken", exitReason: ExitReason.JUMP },
+        { kind: "branchNotTaken", exitReason: ExitReason.JUMP }
+      ];
     case "hostTrap":
-      return [ExitReason.HOST_TRAP];
+      return [{ kind: "hostTrap", exitReason: ExitReason.HOST_TRAP }];
     default:
       return [];
   }
@@ -46,7 +63,7 @@ export function jitExitConditionValues(
   op: IrOp,
   instruction: JitIrBlockInstruction
 ): readonly ValueRef[] {
-  if (jitPostInstructionExitReasons(op, instruction).length === 0) {
+  if (jitPostInstructionExits(op, instruction).length === 0) {
     return [];
   }
 

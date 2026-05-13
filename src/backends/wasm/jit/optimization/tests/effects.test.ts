@@ -11,13 +11,13 @@ import {
   jitInstructionHasPreInstructionExit,
   jitLastPreInstructionExitOpIndex,
   jitPreInstructionExitReasonAt,
-  jitPostInstructionExitReasonsAt,
+  jitPostInstructionExitsAt,
   jitRegisterWriteRegAt
 } from "#backends/wasm/jit/ir/effects.js";
 import {
   jitExitConditionValues,
   jitLocalConditionValues,
-  jitPostInstructionExitReasons
+  jitPostInstructionExits
 } from "#backends/wasm/jit/ir/effect-primitives.js";
 import { c32, syntheticInstruction, v } from "./helpers.js";
 
@@ -33,11 +33,13 @@ test("JIT op effects identify post-instruction exits and condition values", () =
   ]);
   const branchOp = branch.ir[0]!;
 
-  deepStrictEqual(jitPostInstructionExitReasons(fallthrough.ir[0]!, fallthrough), [ExitReason.FALLTHROUGH]);
-  deepStrictEqual(jitPostInstructionExitReasons(localNext.ir[0]!, localNext), []);
-  deepStrictEqual(jitPostInstructionExitReasons(branchOp, branch), [
-    ExitReason.BRANCH_TAKEN,
-    ExitReason.BRANCH_NOT_TAKEN
+  deepStrictEqual(jitPostInstructionExits(fallthrough.ir[0]!, fallthrough), [
+    { kind: "fallthrough", exitReason: ExitReason.FALLTHROUGH }
+  ]);
+  deepStrictEqual(jitPostInstructionExits(localNext.ir[0]!, localNext), []);
+  deepStrictEqual(jitPostInstructionExits(branchOp, branch), [
+    { kind: "branchTaken", exitReason: ExitReason.JUMP },
+    { kind: "branchNotTaken", exitReason: ExitReason.JUMP }
   ]);
   deepStrictEqual(jitLocalConditionValues(localCondition.ir[0]!), [v(0)]);
   deepStrictEqual(jitExitConditionValues(branchOp, branch), [v(0)]);
@@ -59,9 +61,9 @@ test("indexJitEffects indexes shared op effects", () => {
     ]
   });
 
-  deepStrictEqual(jitPostInstructionExitReasonsAt(effects, 0, 3), [
-    ExitReason.BRANCH_TAKEN,
-    ExitReason.BRANCH_NOT_TAKEN
+  deepStrictEqual(jitPostInstructionExitsAt(effects, 0, 3), [
+    { kind: "branchTaken", exitReason: ExitReason.JUMP },
+    { kind: "branchNotTaken", exitReason: ExitReason.JUMP }
   ]);
   deepStrictEqual(jitConditionValuesAt(effects, 0, 1, "localCondition"), [v(0)]);
   deepStrictEqual(jitConditionValuesAt(effects, 0, 3, "exitCondition"), [v(0)]);

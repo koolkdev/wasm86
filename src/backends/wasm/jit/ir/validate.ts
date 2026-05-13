@@ -149,7 +149,7 @@ function validateBarrierShape(barrier: JitBarrier): void {
     );
   }
 
-  if (barrier.reason === "exit" && (barrier.exitReasons?.length ?? 0) === 0) {
-    throw new Error(`exit barrier is missing exit reasons at ${barrier.instructionIndex}:${barrier.opIndex}`);
+  if (barrier.reason === "exit" && (barrier.exits?.length ?? 0) === 0) {
+    throw new Error(`exit barrier is missing exits at ${barrier.instructionIndex}:${barrier.opIndex}`);
   }
 }

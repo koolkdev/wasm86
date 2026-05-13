@@ -305,7 +305,7 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([add, jb])));
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const branchExits = codegenPlan.exitPoints.filter((entry) =>
-    entry.exitReason === ExitReason.BRANCH_TAKEN || entry.exitReason === ExitReason.BRANCH_NOT_TAKEN
+    entry.exitReason === ExitReason.JUMP && (entry.pathScope === "taken" || entry.pathScope === "notTaken")
   );
   const branchIr = codegenPlan.block.instructions[1]!.ir;
   const branchExpressionBlock = emissionPlan.instructions[1]?.expressionBlock;
@@ -353,10 +353,8 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
     codegenPlan.materializationNeeds
       .filter((need) =>
         need.consumer === "flagExitStore" &&
-        (
-          need.placement.exitReason === ExitReason.BRANCH_TAKEN ||
-          need.placement.exitReason === ExitReason.BRANCH_NOT_TAKEN
-        )
+        need.placement.exitReason === ExitReason.JUMP &&
+        (need.pathScope === "taken" || need.pathScope === "notTaken")
       )
       .map((need) => ({
         value: need.value,
@@ -371,14 +369,14 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
         target: { kind: "aluFlags" },
         consumer: "flagExitStore",
         pathScope: "taken",
-        exitReason: ExitReason.BRANCH_TAKEN
+        exitReason: ExitReason.JUMP
       },
       {
         value: branchFlagStore.value,
         target: { kind: "aluFlags" },
         consumer: "flagExitStore",
         pathScope: "notTaken",
-        exitReason: ExitReason.BRANCH_NOT_TAKEN
+        exitReason: ExitReason.JUMP
       }
     ]
   );

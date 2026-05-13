@@ -8,12 +8,16 @@ import {
   indexJitLocalConditionValues,
   type JitConditionUse
 } from "#backends/wasm/jit/ir/condition-uses.js";
-import { jitMemoryFaultReason, jitPostInstructionExitReasons } from "#backends/wasm/jit/ir/effect-primitives.js";
+import {
+  jitMemoryFaultReason,
+  jitPostInstructionExits,
+  type JitPostInstructionExit
+} from "#backends/wasm/jit/ir/effect-primitives.js";
 import { jitStorageReg } from "#backends/wasm/jit/ir/values.js";
 
 export type JitOpEffects = Readonly<{
   preInstructionExitReason?: ExitReasonValue;
-  postInstructionExitReasons: readonly ExitReasonValue[];
+  postInstructionExits: readonly JitPostInstructionExit[];
   localConditionValues: readonly ValueRef[];
   exitConditionValues: readonly ValueRef[];
   registerWriteReg?: Reg32;
@@ -60,7 +64,7 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
       }
 
       let opEffects: JitOpEffects = {
-        postInstructionExitReasons: jitPostInstructionExitReasons(op, instruction),
+        postInstructionExits: jitPostInstructionExits(op, instruction),
         localConditionValues: localConditionValues.get(instructionIndex)?.get(opIndex) ?? [],
         exitConditionValues: exitConditionValues.get(instructionIndex)?.get(opIndex) ?? []
       };
@@ -140,12 +144,12 @@ export function jitPreInstructionExitReasonAt(
   return jitOpEffectsAt(effects, instructionIndex, opIndex).preInstructionExitReason;
 }
 
-export function jitPostInstructionExitReasonsAt(
+export function jitPostInstructionExitsAt(
   effects: JitEffectIndex,
   instructionIndex: number,
   opIndex: number
-): readonly ExitReasonValue[] {
-  return jitOpEffectsAt(effects, instructionIndex, opIndex).postInstructionExitReasons;
+): readonly JitPostInstructionExit[] {
+  return jitOpEffectsAt(effects, instructionIndex, opIndex).postInstructionExits;
 }
 
 export function jitOpHasPostInstructionExit(
@@ -153,7 +157,7 @@ export function jitOpHasPostInstructionExit(
   instructionIndex: number,
   opIndex: number
 ): boolean {
-  return jitPostInstructionExitReasonsAt(effects, instructionIndex, opIndex).length !== 0;
+  return jitPostInstructionExitsAt(effects, instructionIndex, opIndex).length !== 0;
 }
 
 export function jitConditionUseAt(
