@@ -86,25 +86,19 @@ test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
   strictEqual(exit.snapshot.eip, load.address);
   strictEqual(exit.snapshot.instructionCountDelta, 1);
   strictEqual(exit.exitMaterializationIndex, 1);
-  deepStrictEqual(exit.snapshot.valueState.regs.exitStores(), [
-    registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))
-  ]);
+  const expectedRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
+  const expectedFlagStore = flagStore(exit.snapshot.valueState.flags.readAluFlags());
+
+  deepStrictEqual(exit.snapshot.valueState.regs.exitStores(), [expectedRegisterStore]);
+  deepStrictEqual(exit.snapshot.valueState.flags.exitStores(), [expectedFlagStore]);
   strictEqual(exit.snapshot.speculativeFlags.mask, IR_ALU_FLAG_MASK);
-  strictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.flagMask, IR_ALU_FLAG_MASK);
+  deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
+    stores: [expectedRegisterStore, expectedFlagStore],
+    flagMask: 0
+  });
   deepStrictEqual(codegenPlan.materializationNeeds.filter((need) => need.placement.exitPointIndex === 0), [
-    exitStoreNeed(registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1))), exit, 0),
-    {
-      value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
-      consumer: "flagExitStore",
-      placement: {
-        instructionIndex: exit.instructionIndex,
-        opIndex: exit.opIndex,
-        exitPointIndex: 0,
-        exitReason: ExitReason.MEMORY_READ_FAULT,
-        exitMaterializationIndex: 1
-      },
-      pathScope: "deferredExit"
-    }
+    exitStoreNeed(expectedRegisterStore, exit, 0),
+    exitStoreNeed(expectedFlagStore, exit, 0)
   ]);
 });
 
@@ -232,7 +226,7 @@ test("planJitCodegen records exit materializations only for actual exit points",
   deepStrictEqual(codegenPlan.instructionStates.map((entry) => entry.exitPointCount), [0, 0, 1]);
 });
 
-test("planJitCodegen records flag materialization requirements for branch exits", () => {
+test("planJitCodegen records snapshot-derived flag stores for branch exits", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const jb = ok(decodeBytes([0x72, 0x05], add.nextEip));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([add, jb])));
@@ -249,14 +243,19 @@ test("planJitCodegen records flag materialization requirements for branch exits"
 
   for (const exit of branchExits) {
     strictEqual(exit.snapshot.kind, "postInstruction");
-    strictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.flagMask, IR_ALU_FLAG_MASK);
+    deepStrictEqual(exit.snapshot.valueState.flags.exitStores(), [
+      flagStore(exit.snapshot.valueState.flags.readAluFlags())
+    ]);
   }
 
   strictEqual(conditionalJumpIndex > 0, true);
   strictEqual(branchExits[0]!.exitMaterializationIndex !== branchExits[1]!.exitMaterializationIndex, true);
+  const branchRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
+  const branchFlagStore = flagStore(branchExits[0]!.snapshot.valueState.flags.readAluFlags());
+
   deepStrictEqual(branchExits.map((exit) => codegenPlan.exitMaterializations[exit.exitMaterializationIndex]), [
-    { stores: [registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))], flagMask: IR_ALU_FLAG_MASK },
-    { stores: [registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))], flagMask: IR_ALU_FLAG_MASK }
+    { stores: [branchRegisterStore, branchFlagStore], flagMask: 0 },
+    { stores: [branchRegisterStore, branchFlagStore], flagMask: 0 }
   ]);
   deepStrictEqual(
     codegenPlan.materializationNeeds
@@ -269,19 +268,22 @@ test("planJitCodegen records flag materialization requirements for branch exits"
       )
       .map((need) => ({
         value: need.value,
+        target: need.target,
         consumer: need.consumer,
         pathScope: need.pathScope,
         exitReason: need.placement.exitReason
       })),
     [
       {
-        value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
+        value: branchFlagStore.value,
+        target: { kind: "aluFlags" },
         consumer: "flagExitStore",
         pathScope: "taken",
         exitReason: ExitReason.BRANCH_TAKEN
       },
       {
-        value: { kind: "exitFlags", mask: IR_ALU_FLAG_MASK },
+        value: branchFlagStore.value,
+        target: { kind: "aluFlags" },
         consumer: "flagExitStore",
         pathScope: "notTaken",
         exitReason: ExitReason.BRANCH_NOT_TAKEN
@@ -335,12 +337,22 @@ test("planJitCodegen records full flag producers in value-state snapshots", () =
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const result = addValue(eax, ebx);
-
-  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), jitFlagProducerValue("add", {
+  const expectedFlags = jitFlagProducerValue("add", {
     left: eax,
     right: ebx,
     result
-  }, { mask: IR_ALU_FLAG_MASK }));
+  }, { mask: IR_ALU_FLAG_MASK });
+  const expectedFlagStore = flagStore(expectedFlags);
+
+  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
+  deepStrictEqual(exit.snapshot.valueState.flags.exitStores(), [expectedFlagStore]);
+  deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
+    stores: [
+      registerStore("eax", result),
+      expectedFlagStore
+    ],
+    flagMask: 0
+  });
 });
 
 test("planJitCodegen records partial flag producers as symbolic masked inserts", () => {
@@ -437,16 +449,99 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
     }]
   };
   const codegenPlan = planJitCodegen(block);
+  const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
   const produced = jitProducedValue("load#effectful-flag-input:0:0:0", "i32");
   const ebx = jitInputReg32Value("ebx");
   const result = addValue(produced, ebx);
-
-  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), jitFlagProducerValue("add", {
+  const expectedFlags = jitFlagProducerValue("add", {
     left: produced,
     right: ebx,
     result
-  }, { mask: IR_ALU_FLAG_MASK }));
+  }, { mask: IR_ALU_FLAG_MASK });
+  const expectedFlagStore = flagStore(expectedFlags);
+
+  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
+  deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
+    stores: [expectedFlagStore],
+    flagMask: 0
+  });
+  deepStrictEqual(codegenPlan.materializationNeeds, [
+    exitStoreNeed(expectedFlagStore, exit, exitPointIndex)
+  ]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+    { value: produced, useCount: 2 }
+  ]);
+});
+
+test("planJitCodegen feeds partial flag exit-store inputs through materialization needs", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "partial-effectful-flag-input",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        {
+          op: "get",
+          dst: { kind: "var", id: 0 },
+          source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
+          accessWidth: 32
+        },
+        {
+          op: "value.binary",
+          type: "i32",
+          operator: "add",
+          dst: { kind: "var", id: 1 },
+          a: { kind: "var", id: 0 },
+          b: { kind: "const", type: "i32", value: 1 }
+        },
+        {
+          op: "flags.set",
+          producer: "inc",
+          writtenMask: FLAG_PRODUCERS.inc.writtenMask,
+          undefMask: 0,
+          inputs: {
+            left: { kind: "var", id: 0 },
+            result: { kind: "var", id: 1 }
+          }
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
+  const produced = jitProducedValue("load#partial-effectful-flag-input:0:0:0", "i32");
+  const result = addValue(produced, c32(1));
+  const incFlags = jitFlagProducerValue("inc", {
+    left: produced,
+    result
+  }, { mask: FLAG_PRODUCERS.inc.writtenMask });
+  const expectedFlags = jitInsertMaskedBits(
+    jitInputAluFlagsValue(),
+    incFlags,
+    FLAG_PRODUCERS.inc.writtenMask
+  );
+  const expectedFlagStore = flagStore(expectedFlags);
+
+  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
+  deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
+    stores: [expectedFlagStore],
+    flagMask: 0
+  });
+  deepStrictEqual(codegenPlan.materializationNeeds, [
+    exitStoreNeed(expectedFlagStore, exit, exitPointIndex)
+  ]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+    { value: produced, useCount: 2 }
+  ]);
 });
 
 test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () => {
@@ -909,7 +1004,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
   strictEqual(emissionPlan.valueCachePlan, undefined);
 });
 
-test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations past flag-only exits", () => {
+test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations past flag-store exits", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "flag-exit-before-register-write",
@@ -990,7 +1085,7 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
     }],
     exitMaterializations: [
       { stores: [], flagMask: 0 },
-      { stores: [], flagMask: IR_ALU_FLAG_MASK },
+      { stores: [flagStore(c32(IR_ALU_FLAG_MASK))], flagMask: 0 },
       { stores: [registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))], flagMask: 0 }
     ],
     maxExitMaterializationIndex: 2
@@ -1012,6 +1107,96 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
 
   strictEqual(hostTrapIndex !== -1, true);
   deepStrictEqual(uses?.get(hostTrapIndex), [addValue(jitInputReg32Value("eax"), c32(1))]);
+});
+
+test("buildJitCodegenEmissionPlan walks flag-store condition and select dependencies", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "flag-store-select-dependencies",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        {
+          op: "get",
+          dst: { kind: "var", id: 0 },
+          source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
+          accessWidth: 32
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+  const produced = jitProducedValue("load#flag-store-select-dependencies:0:0:0", "i32");
+  const conditionFlags = jitInsertMaskedBits(
+    jitInputAluFlagsValue(),
+    produced,
+    FLAG_PRODUCERS.inc.writtenMask
+  );
+  const selectedFlags = {
+    kind: "value.select",
+    type: "i32",
+    condition: jitFlagConditionValue(conditionFlags, "E"),
+    whenTrue: c32(0x10),
+    whenFalse: c32(0x20)
+  } as const satisfies JitValue;
+  const plan: JitCodegenPlan = {
+    block,
+    instructionStates: [{
+      instructionId: "flag-store-select-dependencies",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      entryPoint: instructionEntryPoint(0, snapshot("preInstruction", startAddress, 0)),
+      postInstructionState: snapshot("postInstruction", startAddress + 1, 1),
+      exitPointCount: 1
+    }],
+    exitPoints: [{
+      instructionIndex: 0,
+      opIndex: 1,
+      exitReason: ExitReason.HOST_TRAP,
+      snapshot: snapshot("postInstruction", startAddress + 1, 1),
+      exitMaterializationIndex: 1
+    }],
+    flagMaterializationRequirements: [],
+    materializationNeeds: [{
+      consumer: "flagExitStore",
+      target: { kind: "aluFlags" },
+      value: selectedFlags,
+      placement: {
+        instructionIndex: 0,
+        opIndex: 1,
+        exitPointIndex: 0,
+        exitReason: ExitReason.HOST_TRAP,
+        exitMaterializationIndex: 1
+      },
+      pathScope: "deferredExit"
+    }],
+    exitMaterializations: [
+      { stores: [], flagMask: 0 },
+      { stores: [flagStore(selectedFlags)], flagMask: 0 }
+    ],
+    maxExitMaterializationIndex: 1
+  };
+  const emissionPlan = buildJitCodegenEmissionPlan(plan);
+  const [instruction] = emissionPlan.instructions;
+
+  if (instruction === undefined) {
+    throw new Error("missing emission instruction");
+  }
+
+  const hostTrapIndex = instruction.expressionBlock.findIndex((op) => op.op === "hostTrap");
+
+  strictEqual(hostTrapIndex !== -1, true);
+  deepStrictEqual(
+    instruction.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
+    [selectedFlags]
+  );
+  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+    { value: produced, useCount: 1 }
+  ]);
 });
 
 test("JIT value-cache planning retains produced values needed after their definition", () => {
@@ -1279,13 +1464,20 @@ function registerStore(reg: Reg32, value: JitValue = jitInputReg32Value(reg)): J
   };
 }
 
+function flagStore(value: JitValue): JitExitMaterializationStore {
+  return {
+    target: { kind: "aluFlags" },
+    value
+  };
+}
+
 function exitStoreNeed(
   store: JitExitMaterializationStore,
   exitPoint: JitExitPoint,
   exitPointIndex: number
 ): JitMaterializationNeed {
   return {
-    consumer: "registerExitStore",
+    consumer: store.target.kind === "aluFlags" ? "flagExitStore" : "registerExitStore",
     target: store.target,
     value: store.value,
     placement: {

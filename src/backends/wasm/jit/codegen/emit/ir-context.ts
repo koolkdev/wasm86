@@ -179,8 +179,10 @@ function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionC
       source,
       helpers
     ),
-    emitSetFlags: (descriptor, helpers) =>
-      jitContext.state.flags.emitSet(descriptor, helpers),
+    emitSetFlags: (descriptor, helpers) => {
+      void descriptor;
+      void helpers;
+    },
     emitNext: (helpers) => {
       void helpers;
       emitJitNext(jitContext);

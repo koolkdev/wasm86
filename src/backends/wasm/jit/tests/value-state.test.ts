@@ -35,6 +35,8 @@ test("JIT value state omits unchanged input register and flag slots", () => {
   strictEqual(snapshot.regs.differsFromInput("eax"), false);
   strictEqual(snapshot.flags.differsFromInput(), false);
   deepStrictEqual(snapshot.slots.changedEntries(), []);
+  deepStrictEqual(snapshot.flags.exitStores(), []);
+  deepStrictEqual(snapshot.exitStores(), []);
 });
 
 test("JIT register value family models prefixes as bit extraction and insertion", () => {
@@ -198,6 +200,10 @@ test("JIT ALU flag value family preserves partial flag writes symbolically", () 
   ));
   deepStrictEqual(state.flags.condition("E"), jitFlagConditionValue(expected, "E"));
   deepStrictEqual(changedSlots(state.snapshot().slots.changedEntries()), ["aluFlags"]);
+  deepStrictEqual(state.snapshot().flags.exitStores(), [{
+    target: { kind: "aluFlags" },
+    value: expected
+  }]);
 });
 
 test("JIT ALU flag value family lets later full writes replace partial merges", () => {
@@ -223,6 +229,10 @@ test("JIT ALU flag value family lets later full writes replace partial merges", 
   deepStrictEqual(snapshot.flags.readAluFlags(), addFlags);
   deepStrictEqual(changedSlots(snapshot.slots.changedEntries()), ["aluFlags"]);
   deepStrictEqual(snapshot.slots.changedEntries()[0]?.value, addFlags);
+  deepStrictEqual(snapshot.flags.exitStores(), [{
+    target: { kind: "aluFlags" },
+    value: addFlags
+  }]);
 });
 
 test("JIT value state snapshots are immutable views of earlier slot values", () => {

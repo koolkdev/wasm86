@@ -42,9 +42,6 @@ export type JitFlagMaterializationRequirement = Readonly<{
   pendingMask: number;
 }>;
 
-export type JitMaterializationValue =
-  Readonly<{ kind: "exitFlags"; mask: number }>;
-
 export type JitMaterializationConsumer =
   | "flagExitStore"
   | "registerExitStore";
@@ -59,24 +56,15 @@ export type JitMaterializationPlacement = Readonly<{
 
 export type JitMaterializationPathScope = "taken" | "notTaken" | "deferredExit";
 
-export type JitFlagMaterializationNeed = Readonly<{
-  value: JitMaterializationValue;
-  consumer: "flagExitStore";
-  placement: JitMaterializationPlacement;
-  pathScope: JitMaterializationPathScope;
-}>;
-
-export type JitRegisterExitStoreMaterializationNeed = Readonly<{
-  consumer: "registerExitStore";
+export type JitExitStoreMaterializationNeed = Readonly<{
+  consumer: JitMaterializationConsumer;
   target: MaterializationTarget;
   value: JitValue;
   placement: JitMaterializationPlacement;
   pathScope: JitMaterializationPathScope;
 }>;
 
-export type JitMaterializationNeed =
-  | JitFlagMaterializationNeed
-  | JitRegisterExitStoreMaterializationNeed;
+export type JitMaterializationNeed = JitExitStoreMaterializationNeed;
 
 export type JitExitMaterializationStore = ExitMaterializationStore;
 
@@ -102,8 +90,8 @@ export type JitInstructionState = Readonly<{
 
 export type JitExitMaterializationPlan = Readonly<{
   stores: readonly JitExitMaterializationStore[];
-  // Flags remain on the legacy mask path until flag materialization stores are
-  // migrated to the generic store model.
+  // Retained for legacy flag-state emission paths. Snapshot-derived flag exit
+  // stores use stores[] with an aluFlags target and leave this mask empty.
   flagMask: number;
 }>;
 

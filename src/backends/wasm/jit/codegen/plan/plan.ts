@@ -16,7 +16,6 @@ export type {
   JitMaterializationNeed,
   JitMaterializationPlacement,
   JitMaterializationPathScope,
-  JitMaterializationValue,
   MaterializationTarget,
   JitPreInstructionExitPlan,
   JitCodegenPlan,

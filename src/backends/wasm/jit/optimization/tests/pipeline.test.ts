@@ -2,7 +2,6 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
-import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import { optimizeJitIrBlock } from "#backends/wasm/jit/optimization/optimize.js";
@@ -127,15 +126,17 @@ test("planJitCodegen keeps branch exit flag materialization separate from direct
   const branchIr = codegenPlan.block.instructions[2]!.ir;
 
   strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
+  deepStrictEqual(codegenPlan.flagMaterializationRequirements, []);
   deepStrictEqual(
-    codegenPlan.flagMaterializationRequirements.map((requirement) => ({
-      reason: requirement.reason,
-      requiredMask: requirement.requiredMask,
-      pendingMask: requirement.pendingMask
-    })),
+    codegenPlan.materializationNeeds
+      .filter((need) => need.consumer === "flagExitStore")
+      .map((need) => ({
+        target: need.target,
+        flagMask: codegenPlan.exitMaterializations[need.placement.exitMaterializationIndex]?.flagMask
+      })),
     [
-      { reason: "exit", requiredMask: IR_ALU_FLAG_MASK, pendingMask: IR_ALU_FLAG_MASK },
-      { reason: "exit", requiredMask: IR_ALU_FLAG_MASK, pendingMask: IR_ALU_FLAG_MASK }
+      { target: { kind: "aluFlags" }, flagMask: 0 },
+      { target: { kind: "aluFlags" }, flagMask: 0 }
     ]
   );
 });

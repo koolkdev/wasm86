@@ -162,10 +162,8 @@ export function analyzeJitCodegenState(
     exitReason: ExitReasonValue,
     snapshot: JitStateSnapshot
   ): void {
-    const pendingFlagMask = snapshot.speculativeFlags.mask;
-    const requiredFlagMask = exitFlagMaterializationMask(snapshot);
-    const stores = snapshot.valueState.regs.exitStores();
-    const exitMaterializationIndex = appendExitMaterialization(stores, requiredFlagMask);
+    const stores = snapshot.valueState.exitStores();
+    const exitMaterializationIndex = appendExitMaterialization(stores);
     const exitPointIndex = exitPoints.length;
 
     exitPoints.push({
@@ -182,23 +180,12 @@ export function analyzeJitCodegenState(
       exitReason,
       exitMaterializationIndex,
       exitMaterializationPathScope(exitReason),
-      stores,
-      requiredFlagMask
+      stores
     );
-
-    if (requiredFlagMask !== 0) {
-      flagMaterializationRequirements.push({
-        instructionIndex,
-        opIndex,
-        reason: "exit",
-        requiredMask: requiredFlagMask,
-        pendingMask: pendingFlagMask
-      });
-    }
   }
 
-  function appendExitMaterialization(stores: readonly ExitMaterializationStore[], flagMask: number): number {
-    if (stores.length === 0 && flagMask === 0) {
+  function appendExitMaterialization(stores: readonly ExitMaterializationStore[]): number {
+    if (stores.length === 0) {
       return 0;
     }
 
@@ -206,7 +193,7 @@ export function analyzeJitCodegenState(
 
     exitMaterializations.push({
       stores,
-      flagMask
+      flagMask: 0
     });
     return index;
   }
@@ -218,8 +205,7 @@ export function analyzeJitCodegenState(
     exitReason: ExitReasonValue,
     exitMaterializationIndex: number,
     pathScope: JitMaterializationPathScope,
-    stores: readonly ExitMaterializationStore[],
-    flagMask: number
+    stores: readonly ExitMaterializationStore[]
   ): void {
     const placement = {
       instructionIndex,
@@ -231,18 +217,9 @@ export function analyzeJitCodegenState(
 
     for (const store of stores) {
       materializationNeeds.push({
-        consumer: "registerExitStore",
+        consumer: store.target.kind === "aluFlags" ? "flagExitStore" : "registerExitStore",
         target: store.target,
         value: store.value,
-        placement,
-        pathScope
-      });
-    }
-
-    if (flagMask !== 0) {
-      materializationNeeds.push({
-        value: { kind: "exitFlags", mask: flagMask },
-        consumer: "flagExitStore",
         placement,
         pathScope
       });
@@ -259,14 +236,6 @@ function exitMaterializationPathScope(exitReason: ExitReasonValue): JitMateriali
     default:
       return "deferredExit";
   }
-}
-
-function exitFlagMaterializationMask(snapshot: JitStateSnapshot): number {
-  const speculativeMask = snapshot.speculativeFlags.mask;
-
-  return speculativeMask === 0
-    ? 0
-    : speculativeMask | snapshot.committedFlags.mask;
 }
 
 function countPreInstructionExitPoints(exitPoints: readonly JitExitPoint[], exitStart: number): number {

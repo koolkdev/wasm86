@@ -91,6 +91,13 @@ export class JitValueStateSnapshot {
     this.regs = new JitRegisterValueSnapshotFamily(slots);
     this.flags = new JitAluFlagValueSnapshotFamily(slots);
   }
+
+  exitStores(): readonly ExitMaterializationStore[] {
+    return [
+      ...this.regs.exitStores(),
+      ...this.flags.exitStores()
+    ];
+  }
 }
 
 export class JitRegisterValueFamily {
@@ -216,6 +223,25 @@ export class JitAluFlagValueSnapshotFamily {
 
   differsFromInput(): boolean {
     return this.#slots.differsFromInput(aluFlagsSlot());
+  }
+
+  exitStores(): readonly ExitMaterializationStore[] {
+    const store = this.exitStore();
+
+    return store === undefined ? [] : [store];
+  }
+
+  exitStore(): ExitMaterializationStore | undefined {
+    const value = this.readAluFlags();
+
+    if (jitValuesEqual(value, this.#slots.inputValue(aluFlagsSlot()))) {
+      return undefined;
+    }
+
+    return {
+      target: { kind: "aluFlags" },
+      value
+    };
   }
 }
 

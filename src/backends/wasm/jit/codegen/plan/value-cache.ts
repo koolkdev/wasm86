@@ -13,7 +13,6 @@ import {
   type JitProducedValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
-import type { ValueRef } from "#x86/ir/model/types.js";
 import {
   jitTimelineExpressionValueAt,
   jitTimelineValueRefValueAt,
@@ -49,7 +48,6 @@ export type JitExpressionValueCachePlanInput = JitExpressionValueCacheInstructio
 type JitValueUse = Readonly<{
   value: JitValue;
   emittedCost: number;
-  forceLegacyFlagSetInputCache: boolean;
   children: readonly JitValueUse[];
 }>;
 
@@ -61,7 +59,6 @@ type JitValueEpochUses = Readonly<{
 type FlatJitValueUse = Readonly<{
   value: JitValue;
   emittedCost: number;
-  forceLegacyFlagSetInputCache: boolean;
   ancestors: readonly JitValue[];
 }>;
 
@@ -170,15 +167,7 @@ function valueUsesForOp(
       ];
     }
     case "flags.set":
-      // Temporary until Step 5 converts flag exits to planned target/value stores.
-      // The legacy flag-state emitter captures pending non-const inputs here, so
-      // value-cache must retain those roots to avoid rematerializing the same
-      // source before a following register writeback.
-      return Object.values(op.inputs).flatMap((value) =>
-        retainedValueUsesForValueRef(instruction, value, opIndex, {
-          forceLegacyFlagSetInputCache: value.kind !== "const"
-        })
-      );
+      return [];
     case "jump":
       return valueUsesForValue(instruction, op.target, opIndex);
     case "conditionalJump":
@@ -293,19 +282,6 @@ function childValueUsesForValue(
   }
 }
 
-function retainedValueUsesForValueRef(
-  instruction: JitExpressionValueCacheInstruction,
-  value: ValueRef,
-  opIndex: number,
-  options: Readonly<{ forceLegacyFlagSetInputCache?: boolean }> = {}
-): readonly JitValueUse[] {
-  const jitValue = jitTimelineValueRefValueAt(instruction.valueTimeline, opIndex, value);
-
-  return jitValue === undefined
-    ? []
-    : [jitValueUseTree(jitValue, options.forceLegacyFlagSetInputCache === true)];
-}
-
 function materializationJitValueUsesForOp(
   instruction: JitExpressionValueCacheInstruction,
   opIndex: number
@@ -342,13 +318,12 @@ function producedValueKey(value: JitProducedValue): string {
   return `${value.type}:${value.id}`;
 }
 
-function jitValueUseTree(value: JitValue, forceLegacyFlagSetInputCache = false): JitValueUse {
+function jitValueUseTree(value: JitValue): JitValueUse {
   const simplified = simplifyJitValue(value);
 
   return {
     value: simplified,
     emittedCost: jitValueCost(simplified),
-    forceLegacyFlagSetInputCache,
     children: jitValueDependencies(simplified).map((dependency) => jitValueUseTree(dependency))
   };
 }
@@ -445,10 +420,6 @@ function shouldCacheValueForUses(value: JitValue, uses: readonly FlatJitValueUse
     return false;
   }
 
-  if (uses.some((use) => use.forceLegacyFlagSetInputCache)) {
-    return true;
-  }
-
   const firstEmittedCost = uses[0]!.emittedCost;
   const repeatedEmittedCost = uses.reduce((cost, use) => cost + use.emittedCost, 0);
 
@@ -487,7 +458,6 @@ function flattenUse(use: JitValueUse, ancestors: readonly JitValue[] = []): read
   const current = {
     value: use.value,
     emittedCost: use.emittedCost,
-    forceLegacyFlagSetInputCache: use.forceLegacyFlagSetInputCache,
     ancestors
   };
   const childAncestors = [...ancestors, use.value];

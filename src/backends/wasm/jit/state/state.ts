@@ -1,4 +1,5 @@
 import { i32 } from "#x86/state/cpu-state.js";
+import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import { stateOffset } from "#backends/wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
@@ -233,7 +234,7 @@ export function createJitIrState(
     }
 
     if (captureOptions.allowPendingFlags !== true) {
-      flags.assertPendingCoveredBy(plan.flagMask);
+      flags.assertPendingCoveredBy(exitMaterializationPendingFlagCoverageMask(plan));
     }
 
     const storeSnapshot = captureJitExitMaterializationStores({
@@ -289,4 +290,10 @@ export function createJitIrState(
 
     return activeExit;
   }
+}
+
+function exitMaterializationPendingFlagCoverageMask(plan: JitExitMaterializationPlan): number {
+  return plan.stores.some((store) => store.target.kind === "aluFlags")
+    ? plan.flagMask | IR_ALU_FLAG_MASK
+    : plan.flagMask;
 }

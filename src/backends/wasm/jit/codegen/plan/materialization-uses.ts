@@ -33,11 +33,7 @@ export function planJitMaterializationUses(
   const jitValueUsesByInstruction = instructions.map(() => new Map<number, JitValue[]>());
 
   for (const need of codegenPlan.materializationNeeds) {
-    if (need.consumer !== "registerExitStore") {
-      continue;
-    }
-
-    appendRegisterMaterializationNeedUse(
+    appendMaterializationNeedUse(
       jitValueUsesByInstruction,
       instructions,
       codegenPlan,
@@ -48,11 +44,11 @@ export function planJitMaterializationUses(
   return { jitValueUsesByInstruction };
 }
 
-function appendRegisterMaterializationNeedUse(
+function appendMaterializationNeedUse(
   usesByInstruction: readonly Map<number, JitValue[]>[],
   instructions: readonly JitMaterializationUsePlanInput[],
   codegenPlan: Pick<JitCodegenPlan, "block">,
-  need: Extract<JitMaterializationNeed, { consumer: "registerExitStore" }>
+  need: JitMaterializationNeed
 ): void {
   const instructionIndex = need.placement.instructionIndex;
   const sourceOpIndex = need.placement.opIndex;
