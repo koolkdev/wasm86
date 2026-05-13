@@ -126,17 +126,13 @@ test("planJitCodegen keeps branch exit flag materialization separate from direct
   const branchIr = codegenPlan.block.instructions[2]!.ir;
 
   strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
-  deepStrictEqual(codegenPlan.flagMaterializationRequirements, []);
   deepStrictEqual(
     codegenPlan.materializationNeeds
       .filter((need) => need.consumer === "flagExitStore")
-      .map((need) => ({
-        target: need.target,
-        flagMask: codegenPlan.exitMaterializations[need.placement.exitMaterializationIndex]?.flagMask
-      })),
+      .map((need) => need.target),
     [
-      { target: { kind: "aluFlags" }, flagMask: 0 },
-      { target: { kind: "aluFlags" }, flagMask: 0 }
+      { kind: "aluFlags" },
+      { kind: "aluFlags" }
     ]
   );
 });

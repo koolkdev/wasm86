@@ -13,17 +13,11 @@ import type {
 
 export type JitExitSnapshotKind = "preInstruction" | "postInstruction";
 
-export type JitFlagSnapshot = Readonly<{
-  mask: number;
-}>;
-
 export type JitStateSnapshot = Readonly<{
   kind: JitExitSnapshotKind;
   eip: number;
   instructionCountDelta: number;
   valueState: JitValueStateSnapshot;
-  committedFlags: JitFlagSnapshot;
-  speculativeFlags: JitFlagSnapshot;
 }>;
 
 export type JitExitPoint = Readonly<{
@@ -32,14 +26,6 @@ export type JitExitPoint = Readonly<{
   exitReason: ExitReasonValue;
   snapshot: JitStateSnapshot;
   exitMaterializationIndex: number;
-}>;
-
-export type JitFlagMaterializationRequirement = Readonly<{
-  instructionIndex: number;
-  opIndex: number;
-  reason: "exit";
-  requiredMask: number;
-  pendingMask: number;
 }>;
 
 export type JitMaterializationConsumer =
@@ -90,16 +76,12 @@ export type JitInstructionState = Readonly<{
 
 export type JitExitMaterializationPlan = Readonly<{
   stores: readonly JitExitMaterializationStore[];
-  // Retained for legacy flag-state emission paths. Snapshot-derived flag exit
-  // stores use stores[] with an aluFlags target and leave this mask empty.
-  flagMask: number;
 }>;
 
 export type JitCodegenPlan = Readonly<{
   block: JitIrBlock;
   instructionStates: readonly JitInstructionState[];
   exitPoints: readonly JitExitPoint[];
-  flagMaterializationRequirements: readonly JitFlagMaterializationRequirement[];
   materializationNeeds: readonly JitMaterializationNeed[];
   exitMaterializations: readonly JitExitMaterializationPlan[];
   maxExitMaterializationIndex: number;

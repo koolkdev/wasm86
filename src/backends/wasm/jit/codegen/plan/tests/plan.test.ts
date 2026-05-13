@@ -46,8 +46,8 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
 
   strictEqual(codegenPlan.maxExitMaterializationIndex, 1);
   deepStrictEqual(codegenPlan.exitMaterializations, [
-    { stores: [], flagMask: 0 },
-    { stores: [registerStore("eax", c32(1))], flagMask: 0 }
+    { stores: [] },
+    { stores: [registerStore("eax", c32(1))] }
   ]);
   strictEqual(instructionState.entryPoint.instructionIndex, 0);
   strictEqual(instructionState.entryPoint.snapshot.kind, "preInstruction");
@@ -59,7 +59,6 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
   strictEqual(exit.snapshot.instructionCountDelta, 1);
   strictEqual(exit.exitMaterializationIndex, 1);
   deepStrictEqual(exit.snapshot.valueState.regs.exitStores(), [registerStore("eax", c32(1))]);
-  strictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.flagMask, 0);
   deepStrictEqual(codegenPlan.materializationNeeds, [
     exitStoreNeed(registerStore("eax", c32(1)), exit, 0)
   ]);
@@ -91,10 +90,8 @@ test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
 
   deepStrictEqual(exit.snapshot.valueState.regs.exitStores(), [expectedRegisterStore]);
   deepStrictEqual(exit.snapshot.valueState.flags.exitStores(), [expectedFlagStore]);
-  strictEqual(exit.snapshot.speculativeFlags.mask, IR_ALU_FLAG_MASK);
   deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
-    stores: [expectedRegisterStore, expectedFlagStore],
-    flagMask: 0
+    stores: [expectedRegisterStore, expectedFlagStore]
   });
   deepStrictEqual(codegenPlan.materializationNeeds.filter((need) => need.placement.exitPointIndex === 0), [
     exitStoreNeed(expectedRegisterStore, exit, 0),
@@ -122,8 +119,8 @@ test("planJitCodegen keeps same-register-set exit materializations separate", ()
   ]);
   strictEqual(writeFaults[0]!.exitMaterializationIndex !== writeFaults[1]!.exitMaterializationIndex, true);
   deepStrictEqual(writeFaults.map((exit) => codegenPlan.exitMaterializations[exit.exitMaterializationIndex]), [
-    { stores: [registerStore("eax", c32(0x1111_1111))], flagMask: 0 },
-    { stores: [registerStore("eax", c32(0x2222_2222))], flagMask: 0 }
+    { stores: [registerStore("eax", c32(0x1111_1111))] },
+    { stores: [registerStore("eax", c32(0x2222_2222))] }
   ]);
 });
 
@@ -148,8 +145,7 @@ test("planJitCodegen derives xchg exit stores from value-state snapshots", () =>
     stores: [
       registerStore("ecx", jitInputReg32Value("edx")),
       registerStore("edx", jitInputReg32Value("ecx"))
-    ],
-    flagMask: 0
+    ]
   });
 });
 
@@ -167,8 +163,6 @@ test("planJitCodegen excludes current-instruction speculative writes from memory
   strictEqual(writeFault.snapshot.instructionCountDelta, 0);
   strictEqual(writeFault.exitMaterializationIndex, 0);
   deepStrictEqual(writeFault.snapshot.valueState.regs.exitStores(), []);
-  strictEqual(writeFault.snapshot.speculativeFlags.mask, 0);
-  strictEqual(codegenPlan.exitMaterializations[writeFault.exitMaterializationIndex]?.flagMask, 0);
 });
 
 test("planJitCodegen keeps same-instruction writes out of later pre-instruction faults", () => {
@@ -217,8 +211,8 @@ test("planJitCodegen records exit materializations only for actual exit points",
 
   strictEqual(codegenPlan.maxExitMaterializationIndex, 1);
   deepStrictEqual(codegenPlan.exitMaterializations, [
-    { stores: [], flagMask: 0 },
-    { stores: [registerStore("eax", c32(1)), registerStore("ebx", c32(2))], flagMask: 0 }
+    { stores: [] },
+    { stores: [registerStore("eax", c32(1)), registerStore("ebx", c32(2))] }
   ]);
   deepStrictEqual(codegenPlan.instructionStates.map((entry) =>
     entry.entryPoint.preInstructionExitPlan?.exitPointCount ?? 0
@@ -254,8 +248,8 @@ test("planJitCodegen records snapshot-derived flag stores for branch exits", () 
   const branchFlagStore = flagStore(branchExits[0]!.snapshot.valueState.flags.readAluFlags());
 
   deepStrictEqual(branchExits.map((exit) => codegenPlan.exitMaterializations[exit.exitMaterializationIndex]), [
-    { stores: [branchRegisterStore, branchFlagStore], flagMask: 0 },
-    { stores: [branchRegisterStore, branchFlagStore], flagMask: 0 }
+    { stores: [branchRegisterStore, branchFlagStore] },
+    { stores: [branchRegisterStore, branchFlagStore] }
   ]);
   deepStrictEqual(
     codegenPlan.materializationNeeds
@@ -350,8 +344,7 @@ test("planJitCodegen records full flag producers in value-state snapshots", () =
     stores: [
       registerStore("eax", result),
       expectedFlagStore
-    ],
-    flagMask: 0
+    ]
   });
 });
 
@@ -464,8 +457,7 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
 
   deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
   deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
-    stores: [expectedFlagStore],
-    flagMask: 0
+    stores: [expectedFlagStore]
   });
   deepStrictEqual(codegenPlan.materializationNeeds, [
     exitStoreNeed(expectedFlagStore, exit, exitPointIndex)
@@ -532,8 +524,7 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
 
   deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
   deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
-    stores: [expectedFlagStore],
-    flagMask: 0
+    stores: [expectedFlagStore]
   });
   deepStrictEqual(codegenPlan.materializationNeeds, [
     exitStoreNeed(expectedFlagStore, exit, exitPointIndex)
@@ -699,7 +690,7 @@ test("planJitCodegen omits materialization needs for empty exits", () => {
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
 
   strictEqual(exit.exitMaterializationIndex, 0);
-  deepStrictEqual(codegenPlan.exitMaterializations, [{ stores: [], flagMask: 0 }]);
+  deepStrictEqual(codegenPlan.exitMaterializations, [{ stores: [] }]);
   deepStrictEqual(codegenPlan.materializationNeeds, []);
 });
 
@@ -928,9 +919,8 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
       snapshot: snapshot("postInstruction", startAddress + 2, 2, ["eax"]),
       exitMaterializationIndex: 1
     }],
-    flagMaterializationRequirements: [],
     materializationNeeds: [],
-    exitMaterializations: [{ stores: [], flagMask: 0 }, { stores: [registerStore("eax")], flagMask: 0 }],
+    exitMaterializations: [{ stores: [] }, { stores: [registerStore("eax")] }],
     maxExitMaterializationIndex: 1
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
@@ -994,9 +984,8 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       snapshot: snapshot("preInstruction", startAddress, 0, ["eax"]),
       exitMaterializationIndex: 1
     }],
-    flagMaterializationRequirements: [],
     materializationNeeds: [],
-    exitMaterializations: [{ stores: [], flagMask: 0 }, { stores: [registerStore("eax")], flagMask: 0 }],
+    exitMaterializations: [{ stores: [] }, { stores: [registerStore("eax")] }],
     maxExitMaterializationIndex: 1
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
@@ -1045,7 +1034,7 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
-      entryPoint: instructionEntryPoint(0, snapshot("preInstruction", startAddress, 0, [], IR_ALU_FLAG_MASK), {
+      entryPoint: instructionEntryPoint(0, snapshot("preInstruction", startAddress, 0), {
         preInstructionExitPlan: {
           exitPointCount: 1
         }
@@ -1058,7 +1047,7 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
         instructionIndex: 0,
         opIndex: 0,
         exitReason: ExitReason.MEMORY_READ_FAULT,
-        snapshot: snapshot("preInstruction", startAddress, 0, [], IR_ALU_FLAG_MASK),
+        snapshot: snapshot("preInstruction", startAddress, 0),
         exitMaterializationIndex: 1
       },
       {
@@ -1069,7 +1058,6 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
         exitMaterializationIndex: 2
       }
     ],
-    flagMaterializationRequirements: [],
     materializationNeeds: [{
       consumer: "registerExitStore",
       target: { kind: "reg32", reg: "eax" },
@@ -1084,9 +1072,9 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
       pathScope: "deferredExit"
     }],
     exitMaterializations: [
-      { stores: [], flagMask: 0 },
-      { stores: [flagStore(c32(IR_ALU_FLAG_MASK))], flagMask: 0 },
-      { stores: [registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))], flagMask: 0 }
+      { stores: [] },
+      { stores: [flagStore(c32(IR_ALU_FLAG_MASK))] },
+      { stores: [registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))] }
     ],
     maxExitMaterializationIndex: 2
   };
@@ -1159,7 +1147,6 @@ test("buildJitCodegenEmissionPlan walks flag-store condition and select dependen
       snapshot: snapshot("postInstruction", startAddress + 1, 1),
       exitMaterializationIndex: 1
     }],
-    flagMaterializationRequirements: [],
     materializationNeeds: [{
       consumer: "flagExitStore",
       target: { kind: "aluFlags" },
@@ -1174,8 +1161,8 @@ test("buildJitCodegenEmissionPlan walks flag-store condition and select dependen
       pathScope: "deferredExit"
     }],
     exitMaterializations: [
-      { stores: [], flagMask: 0 },
-      { stores: [flagStore(selectedFlags)], flagMask: 0 }
+      { stores: [] },
+      { stores: [flagStore(selectedFlags)] }
     ],
     maxExitMaterializationIndex: 1
   };
@@ -1514,8 +1501,7 @@ function snapshot(
   kind: JitStateSnapshot["kind"],
   eip: number,
   instructionCountDelta: number,
-  changedRegs: readonly Reg32[] = [],
-  speculativeFlagMask = 0
+  changedRegs: readonly Reg32[] = []
 ): JitStateSnapshot {
   const valueState = createJitValueState();
 
@@ -1527,9 +1513,7 @@ function snapshot(
     kind,
     eip,
     instructionCountDelta,
-    valueState: valueState.snapshot(),
-    committedFlags: { mask: 0 },
-    speculativeFlags: { mask: speculativeFlagMask }
+    valueState: valueState.snapshot()
   };
 }
 

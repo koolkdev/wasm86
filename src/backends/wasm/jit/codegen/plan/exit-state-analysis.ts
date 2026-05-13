@@ -14,7 +14,6 @@ import type {
   JitCodegenPlan,
   JitExitPoint,
   JitExitMaterializationPlan,
-  JitFlagMaterializationRequirement,
   JitInstructionState,
   JitMaterializationNeed,
   JitMaterializationPathScope,
@@ -28,12 +27,11 @@ export function analyzeJitCodegenState(
   const state = new JitBlockStateTracker();
   const instructionStates: JitInstructionState[] = [];
   const exitPoints: JitExitPoint[] = [];
-  const flagMaterializationRequirements: JitFlagMaterializationRequirement[] = [];
   const materializationNeeds: JitMaterializationNeed[] = [];
   // Non-empty exit materializations stay per-exit because register and flag
   // locals can change before deferred exit blocks are emitted. Empty exits
   // share index 0.
-  const exitMaterializations: JitExitMaterializationPlan[] = [{ stores: [], flagMask: 0 }];
+  const exitMaterializations: JitExitMaterializationPlan[] = [{ stores: [] }];
   let currentPostState: JitStateSnapshot | undefined;
 
   for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
@@ -62,7 +60,7 @@ export function analyzeJitCodegenState(
           instructionIndex,
           opIndex,
           faultReason,
-          state.effectVisiblePreInstructionSnapshot(entry)
+          entry
         );
       }
 
@@ -100,7 +98,6 @@ export function analyzeJitCodegenState(
   return {
     instructionStates,
     exitPoints,
-    flagMaterializationRequirements,
     materializationNeeds,
     exitMaterializations,
     maxExitMaterializationIndex: exitMaterializations.length - 1
@@ -122,7 +119,6 @@ export function analyzeJitCodegenState(
       case "set":
         return;
       case "flags.set":
-        state.markSpeculativeFlags(op.writtenMask | op.undefMask);
         return;
       case "flags.condition":
         return;
@@ -192,8 +188,7 @@ export function analyzeJitCodegenState(
     const index = exitMaterializations.length;
 
     exitMaterializations.push({
-      stores,
-      flagMask: 0
+      stores
     });
     return index;
   }

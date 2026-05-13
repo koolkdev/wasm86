@@ -5,16 +5,18 @@ import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js
 import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
 import { ExitReason } from "#backends/wasm/exit.js";
+import { stateOffset } from "#backends/wasm/abi.js";
 import { ok, decodeBytes, startAddress } from "#x86/isa/decoder/tests/helpers.js";
 import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import {
   extractOnlyWasmFunctionBody,
+  wasmBodyMemoryAccesses,
   wasmBodyLocalCount,
   wasmBodyInstructions,
   wasmBodyOpcodes
 } from "#backends/wasm/tests/body-opcodes.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values.js";
+import { jitInputAluFlagsValue, type JitValue } from "#backends/wasm/jit/ir/values.js";
 import {
   createJitValueCacheRuntime,
   JitValueLocalStore,
@@ -23,6 +25,7 @@ import {
 } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import {
   captureJitExitMaterializationStores,
+  emitJitExitMaterializationStores,
   releaseJitExitMaterializationStores
 } from "#backends/wasm/jit/codegen/emit/exit-stores.js";
 import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
@@ -386,6 +389,84 @@ test("JitValueLocalStore keeps pinned exit snapshot locals out of reuse", () => 
   strictEqual(rematerialized.local === captured.local, false);
 });
 
+test("JIT generic exit stores snapshot aluFlags sources before overwriting flags", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const captured = captureJitExitMaterializationStores({
+    body
+  }, [
+    {
+      target: { kind: "aluFlags" },
+      value: { kind: "const", type: "i32", value: 0 }
+    },
+    {
+      target: { kind: "reg32", reg: "eax" },
+      value: jitInputAluFlagsValue()
+    }
+  ]);
+
+  if (captured === undefined) {
+    throw new Error("expected captured exit stores");
+  }
+
+  emitJitExitMaterializationStores({ body }, captured);
+  releaseJitExitMaterializationStores(captured);
+  body.end();
+
+  const encoded = body.encode();
+
+  deepStrictEqual(localOpcodes(wasmBodyOpcodes(encoded)), [wasmOpcode.localSet, wasmOpcode.localGet]);
+  deepStrictEqual(
+    wasmBodyMemoryAccesses(encoded)
+      .filter((access) =>
+        access.offset === stateOffset.aluFlags ||
+        access.offset === stateOffset.eax
+      )
+      .map(({ opcode, offset }) => ({ opcode, offset })),
+    [
+      { opcode: wasmOpcode.i32Load, offset: stateOffset.aluFlags },
+      { opcode: wasmOpcode.i32Store, offset: stateOffset.aluFlags },
+      { opcode: wasmOpcode.i32Store, offset: stateOffset.eax }
+    ]
+  );
+});
+
+test("JIT generic flag exit stores lower planned sources through value cache", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const value = addValue("eax", 1);
+  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 2 }]));
+  const valueCache = cacheRuntimeForStore(store);
+  const captured = captureJitExitMaterializationStores({
+    body,
+    valueCache
+  }, [{
+    target: { kind: "aluFlags" },
+    value
+  }]);
+
+  if (captured === undefined) {
+    throw new Error("expected captured flag exit store");
+  }
+
+  emitJitExitMaterializationStores({
+    body,
+    valueCache
+  }, captured);
+  releaseJitExitMaterializationStores(captured);
+  body.end();
+
+  const encoded = body.encode();
+  const opcodes = wasmBodyOpcodes(encoded);
+
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Add), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localGet) > 0, true);
+  deepStrictEqual(
+    wasmBodyMemoryAccesses(encoded)
+      .filter((access) => access.opcode === wasmOpcode.i32Store)
+      .map(({ opcode, offset }) => ({ opcode, offset })),
+    [{ opcode: wasmOpcode.i32Store, offset: stateOffset.aluFlags }]
+  );
+});
+
 test("JIT expression emission snapshots cached branch-arm expression vars independently", () => {
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitIrBlock([repeatedInlineExpressionBlock()])));
 
@@ -484,7 +565,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const state = createJitIrState(body, [{ stores: [], flagMask: 0 }]);
+  const state = createJitIrState(body, [{ stores: [] }]);
   const entrySnapshot = stateSnapshot("preInstruction", 0x1000, 0);
   const postSnapshot = stateSnapshot("postInstruction", 0x1001, 1);
   const expressionBlock = [
@@ -610,6 +691,25 @@ function useCounts(counts: readonly JitValueUseCount[]): readonly JitValueUseCou
   return counts;
 }
 
+function cacheRuntimeForStore(store: JitValueLocalStore): JitValueCacheRuntime {
+  return {
+    beginInstruction: () => {},
+    beginExpressionOp: () => {},
+    snapshotAvailability: () => ({
+      currentEpoch: 0,
+      store: store.snapshotAvailability()
+    }),
+    restoreAvailability: (snapshot) => {
+      store.restoreAvailability(snapshot.store);
+    },
+    emitForUse: (value, emitter) => store.emitForUseWithLocal(value, emitter),
+    captureForReuse: (value, emitter) => store.captureForReuse(value, emitter),
+    canEmitInline: () => true,
+    valueForExpression: () => undefined,
+    valueForValueRef: () => undefined
+  };
+}
+
 function reg(regName: Reg32): IrStorageExpr {
   return { kind: "reg", reg: regName };
 }
@@ -705,9 +805,7 @@ function stateSnapshot(
     kind,
     eip,
     instructionCountDelta,
-    valueState: createJitValueState().snapshot(),
-    committedFlags: { mask: 0 },
-    speculativeFlags: { mask: 0 }
+    valueState: createJitValueState().snapshot()
   };
 }
 

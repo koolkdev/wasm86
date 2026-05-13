@@ -1,5 +1,4 @@
 import { reg32 } from "#x86/isa/types.js";
-import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import type { IrOp } from "#x86/ir/model/types.js";
 import type {
   JitExitSnapshotKind,
@@ -22,8 +21,6 @@ import {
 export class JitBlockStateTracker {
   #valueState = createJitValueState();
   #values = new JitValueTracker();
-  #committedFlagsMask = IR_ALU_FLAG_MASK;
-  #speculativeFlagsMask = 0;
   #instructionCountDelta = 0;
 
   beginInstruction(): void {
@@ -35,9 +32,7 @@ export class JitBlockStateTracker {
       kind,
       eip,
       instructionCountDelta: this.#instructionCountDelta,
-      valueState: this.#valueState.snapshot(),
-      committedFlags: { mask: this.#committedFlagsMask },
-      speculativeFlags: { mask: this.#speculativeFlagsMask }
+      valueState: this.#valueState.snapshot()
     };
   }
 
@@ -46,16 +41,7 @@ export class JitBlockStateTracker {
       kind: "postInstruction",
       eip,
       instructionCountDelta: this.#instructionCountDelta + 1,
-      valueState: this.#valueState.snapshot(),
-      committedFlags: { mask: this.#committedFlagsMask },
-      speculativeFlags: { mask: this.#speculativeFlagsMask }
-    };
-  }
-
-  effectVisiblePreInstructionSnapshot(entry: JitStateSnapshot): JitStateSnapshot {
-    return {
-      ...entry,
-      committedFlags: { mask: this.#committedFlagsMask }
+      valueState: this.#valueState.snapshot()
     };
   }
 
@@ -96,11 +82,6 @@ export class JitBlockStateTracker {
       case "hostTrap":
         return;
     }
-  }
-
-  markSpeculativeFlags(mask: number): void {
-    this.#speculativeFlagsMask |= mask;
-    this.#committedFlagsMask &= ~mask;
   }
 
   commitInstruction(): void {
