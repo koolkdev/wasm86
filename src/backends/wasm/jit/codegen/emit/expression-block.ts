@@ -75,8 +75,8 @@ export type JitExpressionBlockEmitContext = Readonly<{
   ): ValueWidth;
   emitSet(op: IrSetExprOp, helpers: WasmIrEmitHelpers): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
-  emitNextEip(helpers: WasmIrEmitHelpers): ValueWidth;
-  emitNext(helpers: WasmIrEmitHelpers): void;
+  emitNextEip(): ValueWidth;
+  emitNext(): void;
   emitJump(target: IrValueExpr, helpers: WasmIrEmitHelpers): void;
   emitConditionalJump(condition: IrValueExpr, taken: IrValueExpr, notTaken: IrValueExpr, helpers: WasmIrEmitHelpers): void;
   emitHostTrap(vector: IrValueExpr, helpers: WasmIrEmitHelpers): void;
@@ -132,7 +132,7 @@ class JitExpressionBlockEmitter {
         this.#context.emitHostTrap(op.vector, this.#helpers);
         return;
       case "next":
-        this.#context.emitNext(this.#helpers);
+        this.#context.emitNext();
         return;
       case "set":
         this.#context.emitSet(op, this.#helpers);
@@ -152,7 +152,7 @@ class JitExpressionBlockEmitter {
     if (value.kind === "nextEip") {
       return applyRequestedValueWidth(
         this.#context.body,
-        this.#context.emitNextEip(this.#helpers),
+        this.#context.emitNextEip(),
         options
       );
     }
@@ -169,7 +169,7 @@ class JitExpressionBlockEmitter {
       return emitMaskValueToWidth(
         this.#context.body,
         width,
-        this.#context.emitNextEip(this.#helpers)
+        this.#context.emitNextEip()
       );
     }
 
@@ -238,7 +238,7 @@ class JitExpressionBlockEmitter {
         this.#context.body.i32Const(i32(value.value));
         return constValueWidth(value.value);
       case "nextEip":
-        return this.#context.emitNextEip(this.#helpers);
+        return this.#context.emitNextEip();
       case "source":
         return this.#context.emitGet(value.source, value.accessWidth, this.#helpers, {
           ...options,

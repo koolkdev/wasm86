@@ -31,7 +31,7 @@ import {
 } from "#backends/wasm/jit/codegen/emit/exit-stores.js";
 import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
-import { emitJitIrWithContext } from "#backends/wasm/jit/codegen/emit/ir-context.js";
+import { emitJitBlock } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
@@ -599,7 +599,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
     { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
   ] as const;
 
-  emitJitIrWithContext({
+  emitJitBlock({
     body,
     scratch,
     state,

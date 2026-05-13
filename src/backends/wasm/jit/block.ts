@@ -6,7 +6,7 @@ export type {
   JitIrBlock,
   JitIrBlockInstruction
 } from "./types.js";
-export type { JitLinkResolver } from "./codegen/emit/ir-context.js";
+export type { JitLinkResolver } from "./codegen/emit/block-emitter.js";
 export type { EncodeJitIrBlockOptions } from "./block-module.js";
 export { encodeJitIrBlock, jitBlockExportName } from "./block-module.js";
 export { staticJitLinkTargets } from "./link-targets.js";

@@ -10,10 +10,10 @@ import { validateJitIrBlock } from "./ir/validate.js";
 import { buildJitCodegenEmissionPlan } from "./codegen/plan/emission.js";
 import { planJitCodegen } from "./codegen/plan/plan.js";
 import {
-  emitJitIrWithContext,
+  emitJitBlock,
   type JitLinkEmitContext,
   type JitLinkResolver
-} from "./codegen/emit/ir-context.js";
+} from "./codegen/emit/block-emitter.js";
 import { createJitValueCacheRuntime } from "./codegen/emit/value-local-store.js";
 import { optimizeJitIrBlock } from "./optimization/optimize.js";
 import { createJitIrState, type JitExitTarget, type JitIrState } from "./state/state.js";
@@ -117,7 +117,7 @@ function encodeJitIrBlockFunctionBody(
   state.emitLoadInstructionCount();
 
   emitExitMaterializationBlocks(body, state.maxExitMaterializationIndex);
-  emitJitIrWithContext({
+  emitJitBlock({
     body,
     scratch,
     state,

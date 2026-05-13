@@ -9,7 +9,7 @@ import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
-import type { JitIrContext } from "./ir-context.js";
+import type { JitInstructionEmitContext } from "./block-emitter.js";
 import { emitJitValue } from "./jit-values.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 import {
@@ -53,7 +53,7 @@ type NormalizedImmediateStorage = Readonly<{
 }>;
 
 export function emitJitGet(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   timelineOp: JitTimelineOpContext,
   source: IrStorageExpr,
   accessWidth: OperandWidth,
@@ -70,7 +70,7 @@ export function emitJitGet(
 }
 
 export function emitJitSet(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   timelineOp: JitTimelineOpContext,
   target: IrStorageExpr,
   value: IrValueExpr,
@@ -87,7 +87,7 @@ export function emitJitSet(
 }
 
 export function emitJitAddress(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   timelineOp: JitTimelineOpContext,
   source: IrStorageExpr,
   helpers: WasmIrEmitHelpers
@@ -102,7 +102,7 @@ export function emitJitAddress(
 }
 
 function normalizeStorage(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   timelineOp: JitTimelineOpContext,
   storage: IrStorageExpr,
   accessWidth: OperandWidth,
@@ -126,7 +126,7 @@ function normalizeStorage(
 }
 
 function normalizeOperandStorage(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   timelineOp: JitTimelineOpContext,
   operand: Readonly<{ kind: "operand"; index: number }>,
   accessWidth: OperandWidth,
@@ -171,7 +171,7 @@ function normalizeOperandStorage(
 }
 
 function emitNormalizedRead(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   timelineOp: JitTimelineOpContext,
   storage: NormalizedStorage,
   helpers: WasmIrEmitHelpers,
@@ -190,7 +190,7 @@ function emitNormalizedRead(
 }
 
 function emitNormalizedWrite(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   timelineOp: JitTimelineOpContext,
   storage: NormalizedStorage,
   value: IrValueExpr,
@@ -214,7 +214,7 @@ function emitNormalizedWrite(
 }
 
 function emitImmediateValue(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   immediate: NormalizedImmediateStorage,
   options: WasmIrEmitValueOptions
 ): ValueWidth {
@@ -242,7 +242,7 @@ function emitImmediateValue(
 }
 
 function emitMemoryAddress(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   address: NormalizedMemoryAddress,
   helpers: WasmIrEmitHelpers
 ): void {
@@ -256,7 +256,11 @@ function emitMemoryAddress(
   }
 }
 
-function emitLoadGuestFromStack(context: JitIrContext, width: OperandWidth, signed = false): void {
+function emitLoadGuestFromStack(
+  context: JitInstructionEmitContext,
+  width: OperandWidth,
+  signed = false
+): void {
   const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
 
   try {
@@ -278,7 +282,7 @@ function signedLoadValueWidth(width: OperandWidth, options: WasmIrEmitValueOptio
 }
 
 function emitStoreMem(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   emitAddress: () => void,
   emitValue: () => ValueWidth,
   width: OperandWidth,
@@ -315,7 +319,10 @@ function assertAccessWidth(actual: OperandWidth, expected: OperandWidth, access:
   }
 }
 
-function prepareMemoryFaultExit(context: JitIrContext, exitReason: ExitReasonValue): JitExitPoint {
+function prepareMemoryFaultExit(
+  context: JitInstructionEmitContext,
+  exitReason: ExitReasonValue
+): JitExitPoint {
   const exitPoint = context.currentExitPoint(exitReason);
 
   context.state.prepareExitPoint(exitPoint, () => {
@@ -325,7 +332,7 @@ function prepareMemoryFaultExit(context: JitIrContext, exitReason: ExitReasonVal
   return exitPoint;
 }
 
-function operandBinding(context: JitIrContext, index: number): JitOperandBinding {
+function operandBinding(context: JitInstructionEmitContext, index: number): JitOperandBinding {
   const binding = context.currentInstruction().operands[index];
 
   if (binding === undefined) {
@@ -336,7 +343,7 @@ function operandBinding(context: JitIrContext, index: number): JitOperandBinding
 }
 
 function emitRegisterStorageValue(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   timelineOp: JitTimelineOpContext,
   source: NormalizedRegisterStorage,
   options: WasmIrEmitValueOptions
@@ -358,7 +365,7 @@ function assertSymbolicRegisterWrite(
 }
 
 function emitResolvedJitValue(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   value: JitValue,
   options: WasmIrEmitValueOptions = {}
 ): ValueWidth {

@@ -5,9 +5,9 @@ import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/e
 import { emitWasmIrExitFromI32Stack } from "#backends/wasm/codegen/exit.js";
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
-import type { JitIrContext } from "./ir-context.js";
+import type { JitInstructionEmitContext } from "./block-emitter.js";
 
-export function emitJitNext(context: JitIrContext): void {
+export function emitJitNext(context: JitInstructionEmitContext): void {
   const instruction = context.currentInstruction();
 
   if (instruction.nextMode === "exit") {
@@ -18,18 +18,22 @@ export function emitJitNext(context: JitIrContext): void {
   context.advanceInstruction();
 }
 
-export function emitJitNextEip(context: JitIrContext): void {
+export function emitJitNextEip(context: JitInstructionEmitContext): void {
   context.body.i32Const(i32(context.currentInstruction().nextEip));
 }
 
-export function emitJitJump(context: JitIrContext, target: IrValueExpr, helpers: WasmIrEmitHelpers): void {
+export function emitJitJump(
+  context: JitInstructionEmitContext,
+  target: IrValueExpr,
+  helpers: WasmIrEmitHelpers
+): void {
   if (emitJitControlTransfer(context, target, ExitReason.JUMP, helpers)) {
     return;
   }
 }
 
 export function emitJitControlExit(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   target: IrValueExpr,
   exitReason: ExitReason,
   helpers: WasmIrEmitHelpers,
@@ -53,7 +57,7 @@ export function emitJitControlExit(
 }
 
 export function emitJitConditionalJump(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   condition: IrValueExpr,
   taken: IrValueExpr,
   notTaken: IrValueExpr,
@@ -77,7 +81,11 @@ export function emitJitConditionalJump(
   context.body.endBlock();
 }
 
-export function emitJitHostTrap(context: JitIrContext, vector: IrValueExpr, helpers: WasmIrEmitHelpers): void {
+export function emitJitHostTrap(
+  context: JitInstructionEmitContext,
+  vector: IrValueExpr,
+  helpers: WasmIrEmitHelpers
+): void {
   const vectorLocal = context.scratch.allocLocal(wasmValueType.i32);
 
   try {
@@ -97,7 +105,7 @@ export function emitJitHostTrap(context: JitIrContext, vector: IrValueExpr, help
 }
 
 function emitJitControlTransfer(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   target: IrValueExpr,
   exitReason: ExitReasonValue,
   helpers: WasmIrEmitHelpers,
@@ -116,7 +124,7 @@ function emitJitControlTransfer(
 }
 
 function emitJitStaticControlTransfer(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   targetEip: number,
   exitReason: ExitReasonValue,
   extraDepth = 0,
@@ -135,7 +143,7 @@ function emitJitStaticControlTransfer(
 }
 
 function emitJitLinkedStaticControlTransfer(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   targetEip: number,
   exitPoint: JitExitPoint
 ): boolean {
@@ -165,14 +173,14 @@ function emitJitLinkedStaticControlTransfer(
 }
 
 function emitJitLinkedControlTransferStateStores(
-  context: JitIrContext,
+  context: JitInstructionEmitContext,
   exitPoint: JitExitPoint
 ): void {
   context.exit.emitBeforeExit?.();
   context.state.emitExitMaterializationStores(exitPoint.exitMaterializationIndex);
 }
 
-function staticControlTarget(context: JitIrContext, target: IrValueExpr): number | undefined {
+function staticControlTarget(context: JitInstructionEmitContext, target: IrValueExpr): number | undefined {
   const instruction = context.currentInstruction();
 
   if (instruction.nextMode !== "exit") {

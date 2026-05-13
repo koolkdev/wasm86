@@ -38,7 +38,7 @@ export type JitLinkEmitContext = JitLinkResolver & Readonly<{
   tableIndex?: number;
 }>;
 
-export type JitIrBlockEmitContext = Readonly<{
+export type JitBlockEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   state: JitIrState;
@@ -49,7 +49,7 @@ export type JitIrBlockEmitContext = Readonly<{
   linking?: JitLinkEmitContext | undefined;
 }>;
 
-export type JitIrContext = Readonly<{
+export type JitInstructionEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   state: JitIrState;
@@ -63,8 +63,8 @@ export type JitIrContext = Readonly<{
   linking?: JitLinkEmitContext | undefined;
 }>;
 
-export function emitJitIrWithContext(context: JitIrBlockEmitContext): void {
-  const jitContext = createJitIrContext(context);
+export function emitJitBlock(context: JitBlockEmitContext): void {
+  const jitContext = createJitInstructionEmitContext(context);
 
   for (let index = 0; index < context.instructions.length; index += 1) {
     jitContext.valueCache?.beginInstruction(index);
@@ -73,7 +73,7 @@ export function emitJitIrWithContext(context: JitIrBlockEmitContext): void {
   }
 }
 
-function createJitIrContext(context: JitIrBlockEmitContext): JitIrContext {
+function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstructionEmitContext {
   let instructionIndex = 0;
   let completedPreInstructionExitPointCount = 0;
   const exitPointsByKey = indexExitPoints(context.exitPoints);
@@ -151,11 +151,11 @@ function createJitIrContext(context: JitIrBlockEmitContext): JitIrContext {
   };
 }
 
-function emitCurrentInstruction(jitContext: JitIrContext): void {
-  emitJitIrBlock(jitContext, jitContext.currentInstruction());
+function emitCurrentInstruction(jitContext: JitInstructionEmitContext): void {
+  emitJitInstruction(jitContext, jitContext.currentInstruction());
 }
 
-function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionContext): void {
+function emitJitInstruction(jitContext: JitInstructionEmitContext, instruction: JitIrInstructionContext): void {
   const valueCache = jitContext.valueCache;
   let currentTimelineOp: JitTimelineOpContext | undefined;
 
@@ -179,12 +179,8 @@ function emitJitIrBlock(jitContext: JitIrContext, instruction: JitIrInstructionC
       source,
       helpers
     ),
-    emitNext: (helpers) => {
-      void helpers;
-      emitJitNext(jitContext);
-    },
-    emitNextEip: (helpers) => {
-      void helpers;
+    emitNext: () => emitJitNext(jitContext),
+    emitNextEip: () => {
       emitJitNextEip(jitContext);
       return cleanValueWidth(32);
     },
@@ -204,7 +200,7 @@ function requiredCurrentTimelineOp(timelineOp: JitTimelineOpContext | undefined)
 }
 
 function beginInstruction(
-  context: Pick<JitIrContext, "state">,
+  context: Pick<JitInstructionEmitContext, "state">,
   exit: JitExitTarget,
   instruction: JitIrInstructionContext
 ): void {
