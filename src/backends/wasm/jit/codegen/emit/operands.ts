@@ -325,9 +325,7 @@ function prepareMemoryFaultExit(
 ): JitExitPoint {
   const exitPoint = context.currentExitPoint(exitReason);
 
-  context.state.prepareExitPoint(exitPoint, () => {
-    context.body.i32Const(i32(context.currentInstruction().eip));
-  });
+  context.state.prepareExitPoint(exitPoint);
 
   return exitPoint;
 }

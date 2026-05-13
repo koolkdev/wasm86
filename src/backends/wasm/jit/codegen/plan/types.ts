@@ -24,13 +24,35 @@ export type JitBoundaryState = Readonly<{
 
 export type JitStateSnapshot = JitBoundaryState;
 
-export type JitExitPoint = Readonly<{
+export type JitObservationRuntimeSource =
+  | "controlTarget"
+  | "hostTrapVector"
+  | "memoryAddress";
+
+export type JitObservationValue =
+  | Readonly<{ kind: "static"; value: number }>
+  | Readonly<{ kind: "runtime"; source: JitObservationRuntimeSource }>;
+
+export type JitObservationPayload = JitObservationValue;
+
+export type JitMaterializationPathScope = "taken" | "notTaken" | "deferredExit";
+
+export type JitObservationPoint = Readonly<{
   instructionIndex: number;
   opIndex: number;
+  emitBoundary: JitBoundaryRef;
+  observedBoundary: JitBoundaryRef;
+  observedState: JitStateSnapshot;
+  visibleEip: JitObservationValue;
   exitReason: ExitReasonValue;
+  payload: JitObservationPayload;
+  pathScope: JitMaterializationPathScope;
+  /** Compatibility alias while older emission code still speaks in snapshots. */
   snapshot: JitStateSnapshot;
   exitMaterializationIndex: number;
 }>;
+
+export type JitExitPoint = JitObservationPoint;
 
 export type JitMaterializationConsumer =
   | "flagExitStore"
@@ -39,12 +61,13 @@ export type JitMaterializationConsumer =
 export type JitMaterializationPlacement = Readonly<{
   instructionIndex: number;
   opIndex: number;
+  emitBoundary: JitBoundaryRef;
+  observedBoundary: JitBoundaryRef;
+  observationIndex: number;
   exitPointIndex: number;
   exitReason: ExitReasonValue;
   exitMaterializationIndex: number;
 }>;
-
-export type JitMaterializationPathScope = "taken" | "notTaken" | "deferredExit";
 
 export type JitExitStoreMaterializationNeed = Readonly<{
   consumer: JitMaterializationConsumer;

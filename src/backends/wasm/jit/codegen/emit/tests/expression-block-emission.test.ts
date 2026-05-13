@@ -65,7 +65,13 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
     exitPoints: [{
       instructionIndex: 0,
       opIndex: 0,
+      emitBoundary: instructionEntry(0),
+      observedBoundary: postSnapshot.boundary,
+      observedState: postSnapshot,
+      visibleEip: { kind: "static", value: instruction.nextEip },
       exitReason: ExitReason.HOST_TRAP,
+      payload: { kind: "runtime", source: "hostTrapVector" },
+      pathScope: "deferredExit",
       snapshot: postSnapshot,
       exitMaterializationIndex: 0
     }]

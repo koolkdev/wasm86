@@ -91,12 +91,9 @@ export function emitJitHostTrap(
   try {
     helpers.emitValue(vector, { requestedWidth: 32 });
     context.body.localSet(vectorLocal);
-    const instruction = context.currentInstruction();
     const exitPoint = context.currentExitPoint(ExitReason.HOST_TRAP);
 
-    context.state.commitInstructionExit(exitPoint, () => {
-      context.body.i32Const(i32(instruction.nextEip));
-    });
+    context.state.commitInstructionExit(exitPoint);
     context.body.localGet(vectorLocal);
     emitWasmIrExitFromI32Stack(context.body, context.exit, ExitReason.HOST_TRAP);
   } finally {
@@ -130,9 +127,7 @@ function emitJitStaticControlTransfer(
   extraDepth = 0,
   exitPoint = context.currentExitPoint(exitReason)
 ): void {
-  context.state.commitInstructionExit(exitPoint, () => {
-    context.body.i32Const(i32(targetEip));
-  });
+  context.state.commitInstructionExit(exitPoint);
 
   if (emitJitLinkedStaticControlTransfer(context, targetEip, exitPoint)) {
     return;

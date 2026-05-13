@@ -34,8 +34,8 @@ export type JitIrState = Readonly<{
   maxExitMaterializationIndex: number;
   emitLoadInstructionCount(): void;
   beginInstruction(exit: JitExitTarget, entryPoint: JitInstructionEntryPoint, entryEip: number): void;
-  prepareExitPoint(exitPoint: JitExitPoint, emitEip: () => void): void;
-  commitInstructionExit(exitPoint: JitExitPoint, emitEip: () => void): void;
+  prepareExitPoint(exitPoint: JitExitPoint, emitRuntimeVisibleEip?: () => void): void;
+  commitInstructionExit(exitPoint: JitExitPoint, emitRuntimeVisibleEip?: () => void): void;
   emitExitMaterializationStores(index: number): void;
   releaseExitMaterialization(index: number): void;
 }>;
@@ -66,24 +66,28 @@ export function createJitIrState(
         body.i32Const(i32(entryEip));
       }, entryPoint.snapshot.instructionCountDelta);
     },
-    prepareExitPoint: (exitPoint, emitEip) => {
+    prepareExitPoint: (exitPoint, emitRuntimeVisibleEip) => {
       const exit = requiredActiveExit();
 
       captureExitMaterialization(exitPoint.exitMaterializationIndex);
 
       useExitMaterialization(exit, exitPoint.exitMaterializationIndex);
-      installExitMetadataStores(exit, emitEip, exitPoint.snapshot.instructionCountDelta);
+      installExitMetadataStores(
+        exit,
+        () => emitObservationVisibleEip(exitPoint, emitRuntimeVisibleEip),
+        exitPoint.observedState.instructionCountDelta
+      );
     },
-    commitInstructionExit: (exitPoint, emitEip) => {
+    commitInstructionExit: (exitPoint, emitRuntimeVisibleEip) => {
       const exit = requiredActiveExit();
 
-      emitEip();
+      emitObservationVisibleEip(exitPoint, emitRuntimeVisibleEip);
       body.localSet(eipLocal);
       captureExitMaterialization(exitPoint.exitMaterializationIndex);
       useExitMaterialization(exit, exitPoint.exitMaterializationIndex);
       installExitMetadataStores(exit, () => {
         body.localGet(eipLocal);
-      }, exitPoint.snapshot.instructionCountDelta);
+      }, exitPoint.observedState.instructionCountDelta);
     },
     emitExitMaterializationStores: (index) => {
       const plan = exitMaterializations[index];
@@ -201,5 +205,23 @@ export function createJitIrState(
     }
 
     return activeExit;
+  }
+
+  function emitObservationVisibleEip(
+    exitPoint: JitExitPoint,
+    emitRuntimeVisibleEip: (() => void) | undefined
+  ): void {
+    switch (exitPoint.visibleEip.kind) {
+      case "static":
+        body.i32Const(i32(exitPoint.visibleEip.value));
+        return;
+      case "runtime":
+        if (emitRuntimeVisibleEip === undefined) {
+          throw new Error("JIT runtime visible EIP requested without an emitter");
+        }
+
+        emitRuntimeVisibleEip();
+        return;
+    }
   }
 }

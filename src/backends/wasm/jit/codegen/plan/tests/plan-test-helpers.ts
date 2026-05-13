@@ -27,6 +27,8 @@ import type {
   JitExitPoint,
   JitInstructionEntryPoint,
   JitMaterializationNeed,
+  JitObservationPayload,
+  JitObservationValue,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
@@ -86,6 +88,8 @@ export type {
   JitExitPoint,
   JitInstructionEntryPoint,
   JitMaterializationNeed,
+  JitObservationPayload,
+  JitObservationValue,
   JitStateSnapshot,
   JitProducedValue,
   JitValue,
@@ -143,15 +147,48 @@ export function exitStoreNeed(
     placement: {
       instructionIndex: exitPoint.instructionIndex,
       opIndex: exitPoint.opIndex,
+      emitBoundary: exitPoint.emitBoundary,
+      observedBoundary: exitPoint.observedBoundary,
+      observationIndex: exitPointIndex,
       exitPointIndex,
       exitReason: exitPoint.exitReason,
       exitMaterializationIndex: exitPoint.exitMaterializationIndex
     },
-    pathScope: exitPoint.exitReason === ExitReason.BRANCH_TAKEN
-      ? "taken"
-      : exitPoint.exitReason === ExitReason.BRANCH_NOT_TAKEN
-        ? "notTaken"
-        : "deferredExit"
+    pathScope: exitPoint.pathScope
+  };
+}
+
+export function exitPoint(input: Readonly<{
+  instructionIndex: number;
+  opIndex: number;
+  exitReason: ExitReason;
+  snapshot: JitStateSnapshot;
+  exitMaterializationIndex: number;
+  visibleEip?: JitObservationValue;
+  payload?: JitObservationPayload;
+  pathScope?: JitExitPoint["pathScope"];
+}>): JitExitPoint {
+  const emitBoundary = beforeOp(input.instructionIndex, input.opIndex);
+  const visibleEip = input.visibleEip ?? { kind: "static", value: 0 };
+
+  return {
+    instructionIndex: input.instructionIndex,
+    opIndex: input.opIndex,
+    emitBoundary,
+    observedBoundary: input.snapshot.boundary,
+    observedState: input.snapshot,
+    visibleEip,
+    exitReason: input.exitReason,
+    payload: input.payload ?? visibleEip,
+    pathScope: input.pathScope ?? (
+      input.exitReason === ExitReason.BRANCH_TAKEN
+        ? "taken"
+        : input.exitReason === ExitReason.BRANCH_NOT_TAKEN
+          ? "notTaken"
+          : "deferredExit"
+    ),
+    snapshot: input.snapshot,
+    exitMaterializationIndex: input.exitMaterializationIndex
   };
 }
 

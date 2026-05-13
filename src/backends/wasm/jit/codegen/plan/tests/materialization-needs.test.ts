@@ -23,6 +23,7 @@ import {
   registerStore,
   flagStore,
   exitStoreNeed,
+  exitPoint,
   instructionEntryPoint,
   boundaryState,
   instructionEntry,
@@ -245,6 +246,27 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
       ]
     }]
   };
+  const entrySnapshot = boundaryState(instructionEntry(0), 0);
+  const postSnapshot = boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]);
+  const readFaultExit = exitPoint({
+    instructionIndex: 0,
+    opIndex: 0,
+    exitReason: ExitReason.MEMORY_READ_FAULT,
+    snapshot: entrySnapshot,
+    visibleEip: { kind: "static", value: startAddress },
+    payload: { kind: "runtime", source: "memoryAddress" },
+    exitMaterializationIndex: 1
+  });
+  const hostTrapExit = exitPoint({
+    instructionIndex: 0,
+    opIndex: 4,
+    exitReason: ExitReason.HOST_TRAP,
+    snapshot: postSnapshot,
+    visibleEip: { kind: "static", value: startAddress + 1 },
+    payload: { kind: "runtime", source: "hostTrapVector" },
+    exitMaterializationIndex: 2
+  });
+  const hostTrapRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
   const plan: JitCodegenPlan = {
     block,
     instructionStates: [{
@@ -252,47 +274,25 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
-      entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0), {
+      entryPoint: instructionEntryPoint(0, entrySnapshot, {
         preInstructionExitPlan: {
           exitPointCount: 1
         }
       }),
-      postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
+      postInstructionState: postSnapshot,
       exitPointCount: 2
     }],
     exitPoints: [
-      {
-        instructionIndex: 0,
-        opIndex: 0,
-        exitReason: ExitReason.MEMORY_READ_FAULT,
-        snapshot: boundaryState(instructionEntry(0), 0),
-        exitMaterializationIndex: 1
-      },
-      {
-        instructionIndex: 0,
-        opIndex: 4,
-        exitReason: ExitReason.HOST_TRAP,
-        snapshot: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
-        exitMaterializationIndex: 2
-      }
+      readFaultExit,
+      hostTrapExit
     ],
-    materializationNeeds: [{
-      consumer: "registerExitStore",
-      target: { kind: "reg32", reg: "eax" },
-      value: addValue(jitInputReg32Value("eax"), c32(1)),
-      placement: {
-        instructionIndex: 0,
-        opIndex: 4,
-        exitPointIndex: 1,
-        exitReason: ExitReason.HOST_TRAP,
-        exitMaterializationIndex: 2
-      },
-      pathScope: "deferredExit"
-    }],
+    materializationNeeds: [
+      exitStoreNeed(hostTrapRegisterStore, hostTrapExit, 1)
+    ],
     exitMaterializations: [
       { stores: [] },
       { stores: [flagStore(c32(IR_ALU_FLAG_MASK))] },
-      { stores: [registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)))] }
+      { stores: [hostTrapRegisterStore] }
     ],
     maxExitMaterializationIndex: 2
   };
@@ -347,6 +347,17 @@ test("buildJitCodegenEmissionPlan walks flag-store condition and select dependen
     whenTrue: c32(0x10),
     whenFalse: c32(0x20)
   } as const satisfies JitValue;
+  const entrySnapshot = boundaryState(instructionEntry(0), 0);
+  const postSnapshot = boundaryState(instructionExit(0, block.instructions[0]!), 1);
+  const hostTrapExit = exitPoint({
+    instructionIndex: 0,
+    opIndex: 1,
+    exitReason: ExitReason.HOST_TRAP,
+    snapshot: postSnapshot,
+    visibleEip: { kind: "static", value: startAddress + 1 },
+    payload: { kind: "runtime", source: "hostTrapVector" },
+    exitMaterializationIndex: 1
+  });
   const plan: JitCodegenPlan = {
     block,
     instructionStates: [{
@@ -354,30 +365,14 @@ test("buildJitCodegenEmissionPlan walks flag-store condition and select dependen
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
-      entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0)),
-      postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1),
+      entryPoint: instructionEntryPoint(0, entrySnapshot),
+      postInstructionState: postSnapshot,
       exitPointCount: 1
     }],
-    exitPoints: [{
-      instructionIndex: 0,
-      opIndex: 1,
-      exitReason: ExitReason.HOST_TRAP,
-      snapshot: boundaryState(instructionExit(0, block.instructions[0]!), 1),
-      exitMaterializationIndex: 1
-    }],
-    materializationNeeds: [{
-      consumer: "flagExitStore",
-      target: { kind: "aluFlags" },
-      value: selectedFlags,
-      placement: {
-        instructionIndex: 0,
-        opIndex: 1,
-        exitPointIndex: 0,
-        exitReason: ExitReason.HOST_TRAP,
-        exitMaterializationIndex: 1
-      },
-      pathScope: "deferredExit"
-    }],
+    exitPoints: [hostTrapExit],
+    materializationNeeds: [
+      exitStoreNeed(flagStore(selectedFlags), hostTrapExit, 0)
+    ],
     exitMaterializations: [
       { stores: [] },
       { stores: [flagStore(selectedFlags)] }

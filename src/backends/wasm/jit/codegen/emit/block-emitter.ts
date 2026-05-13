@@ -125,7 +125,7 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
       return exitPoint;
     },
     completeExitPoint: (exitPoint) => {
-      if (exitPoint.snapshot.boundary.boundaryIndex !== 0) {
+      if (exitPoint.observedBoundary.boundaryIndex !== 0) {
         return;
       }
 
