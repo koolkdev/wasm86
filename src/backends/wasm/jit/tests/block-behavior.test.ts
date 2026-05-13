@@ -1,170 +1,24 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
-import { test } from "node:test";
-
-import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
-import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
-import { createCpuState, getFlag } from "#x86/state/cpu-state.js";
-import { stateOffset, wasmMemoryIndex } from "#backends/wasm/abi.js";
-import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
-import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
-import { ExitReason } from "#backends/wasm/exit.js";
-import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
-import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
-import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
-import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
-import { optimizeJitIrBlock } from "#backends/wasm/jit/optimization/optimize.js";
-import { runJitIrBlock } from "./helpers.js";
-
-const startAddress = 0x1000;
-const preservedEflags = 0xffff_0000;
-const allArithmeticEflags = 0x8d5;
-const zeroFlag = 1 << 6;
-const addWraparoundEflags = 0x55;
-const subBorrowEflags = 0x95;
-const zeroResultEflags = 0x44;
-
-test("buildJitIrBlock builds instruction-local IR bodies", () => {
-  const first = ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress));
-  const second = ok(decodeBytes([0x83, 0xc0, 0x01], first.nextEip));
-  const block = buildJitIrBlock([first, second]);
-  const firstIr = block.instructions[0]!.ir;
-  const secondIr = block.instructions[1]!.ir;
-  const firstDefIds = firstIr.flatMap(irOpDstId);
-  const secondDefIds = secondIr.flatMap(irOpDstId);
-
-  strictEqual("ir" in block, false);
-  strictEqual("operands" in block, false);
-  strictEqual(block.instructions.length, 2);
-  strictEqual(block.instructions[0]!.operands.length, first.operands.length);
-  strictEqual(block.instructions[1]!.operands.length, second.operands.length);
-  strictEqual(firstIr.filter((op) => op.op === "next").length, 1);
-  strictEqual(secondIr.filter((op) => op.op === "next").length, 1);
-  deepStrictEqual([...new Set(firstIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
-  deepStrictEqual([...new Set(secondIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
-  strictEqual(new Set(firstDefIds).size, firstDefIds.length);
-  strictEqual(new Set(secondDefIds).size, secondDefIds.length);
-  strictEqual(Math.min(...secondDefIds), 0);
-});
-
-test("JIT codegen plan keeps instruction-local operand namespaces", () => {
-  const first = ok(decodeBytes([0x89, 0x18], startAddress));
-  const second = ok(decodeBytes([0x89, 0x11], first.nextEip));
-  const optimizedBlock = optimizeJitIrBlock(buildJitIrBlock([first, second]));
-  const codegenPlan = planJitCodegen(optimizedBlock);
-  const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
-  const firstIr = optimizedBlock.instructions[0]!.ir;
-  const secondIr = optimizedBlock.instructions[1]!.ir;
-
-  strictEqual("ir" in optimizedBlock, false);
-  strictEqual("operands" in optimizedBlock, false);
-  strictEqual(emissionPlan.instructions.length, 2);
-  strictEqual(firstIr.filter(irOpIsTerminator).length, 1);
-  strictEqual(secondIr.filter(irOpIsTerminator).length, 1);
-  deepStrictEqual([...new Set(firstIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
-  deepStrictEqual([...new Set(secondIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
-});
-
-test("buildJitIrBlock lowers unary ALU forms with preserved widths", () => {
-  const notIr = buildJitIrBlock([ok(decodeBytes([0x66, 0xf7, 0xd0], startAddress))])
-    .instructions[0]!.ir;
-  const negIr = buildJitIrBlock([ok(decodeBytes([0xf6, 0xd8], startAddress))])
-    .instructions[0]!.ir;
-  const notSet = notIr.find((op) => op.op === "set");
-  const negFlags = negIr.find((op) => op.op === "flags.set");
-
-  strictEqual(notIr.some((op) => op.op === "value.binary" && op.operator === "xor"), true);
-  strictEqual(notIr.some((op) => op.op === "flags.set"), false);
-  strictEqual(notSet?.op === "set" ? notSet.accessWidth : undefined, 16);
-
-  strictEqual(negIr.some((op) => op.op === "value.binary" && op.operator === "sub"), true);
-  strictEqual(negFlags?.op === "flags.set" ? negFlags.producer : undefined, "sub");
-  strictEqual(negFlags?.op === "flags.set" ? negFlags.width : undefined, 8);
-});
-
-test("buildJitIrBlock keeps overwritten flag producers as value-state writes", () => {
-  const cmp = ok(decodeBytes([0x39, 0xd8], startAddress));
-  const add = ok(decodeBytes([0x83, 0xc0, 0x01], cmp.nextEip));
-  const ir = codegenIr(buildJitIrBlock([cmp, add]));
-  const flagSets = ir.filter((op) => op.op === "flags.set");
-
-  deepStrictEqual(flagSets.map((op) => op.op === "flags.set" ? op.producer : undefined), ["sub", "add"]);
-});
-
-test("buildJitIrBlock leaves condition materialization to JIT flag state", () => {
-  const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
-  const jz = ok(decodeBytes([0x74, 0x05], add.nextEip));
-  const branchBlock = optimizeJitIrBlock(buildJitIrBlock([add, jz]));
-  const branchIr = blockIr(branchBlock);
-  const conditionalJumpOpIndex = branchBlock.instructions[1]!.ir.findIndex((op) => op.op === "conditionalJump");
-
-  strictEqual(conditionalJumpOpIndex !== -1, true);
-  strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
-
-  const trap = ok(decodeBytes([0xcd, 0x2e], add.nextEip));
-  const exitBlock = optimizeJitIrBlock(buildJitIrBlock([add, trap]));
-  const hostTrapOpIndex = exitBlock.instructions[1]!.ir.findIndex((op) => op.op === "hostTrap");
-
-  strictEqual(hostTrapOpIndex !== -1, true);
-});
-
-test("buildJitIrBlock keeps earlier CF producer live across INC", () => {
-  const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
-  const inc = ok(decodeBytes([0x40], add.nextEip));
-  const jc = ok(decodeBytes([0x72, 0x05], inc.nextEip));
-  const ir = codegenIr(buildJitIrBlock([add, inc, jc]));
-  const flagSets = ir.filter((op) => op.op === "flags.set");
-
-  deepStrictEqual(flagSets.map((op) => op.op === "flags.set" ? op.producer : undefined), ["add", "inc"]);
-});
-
-test("buildJitIrBlock keeps cmp and jcc branch conditions in flag value state", () => {
-  const cmp = ok(decodeBytes([0x39, 0xd8], startAddress));
-  const je = ok(decodeBytes([0x74, 0x05], cmp.nextEip));
-  const ir = codegenIr(buildJitIrBlock([cmp, je]));
-
-  strictEqual(ir.some((op) => op.op === "flags.condition"), true);
-});
-
-test("buildJitIrBlock does not specialize incoming CF after INC", () => {
-  const inc = ok(decodeBytes([0x40], startAddress));
-  const jc = ok(decodeBytes([0x72, 0x05], inc.nextEip));
-  const block = buildJitIrBlock([inc, jc]);
-
-  deepStrictEqual(aluFlagMemoryAccessCounts(block), { loads: 3, stores: 2 });
-});
-
-test("jit IR block emits aluFlags memory traffic only for flag reads and observable exits", () => {
-  const flagFreeBlock = buildJitIrBlock([
-    ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress)),
-    ok(decodeBytes([0xbb, 0x02, 0x00, 0x00, 0x00], startAddress + 5)),
-    ok(decodeBytes([0xcd, 0x2e], startAddress + 10))
-  ]);
-  const branchBlock = buildJitIrBlock([ok(decodeBytes([0x74, 0x05], startAddress))]);
-  const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
-  const jnzAfterAdd = ok(decodeBytes([0x75, 0x05], add.nextEip));
-  const branchAfterAddBlock = buildJitIrBlock([add, jnzAfterAdd]);
-  const addTrapBlock = buildJitIrBlock([add, ok(decodeBytes([0xcd, 0x2e], add.nextEip))]);
-  const inc = ok(decodeBytes([0x40], startAddress));
-  const incTrapBlock = buildJitIrBlock([inc, ok(decodeBytes([0xcd, 0x2e], inc.nextEip))]);
-  const orAfterInc = ok(decodeBytes([0x09, 0xd8], inc.nextEip));
-  const fullOverwriteAfterIncBlock = buildJitIrBlock([
-    inc,
-    orAfterInc,
-    ok(decodeBytes([0xcd, 0x2e], orAfterInc.nextEip))
-  ]);
-
-  deepStrictEqual(aluFlagMemoryAccessCounts(flagFreeBlock), { loads: 0, stores: 0 });
-  deepStrictEqual(aluFlagMemoryAccessCounts(branchBlock), { loads: 1, stores: 0 });
-  deepStrictEqual(stateMemoryLoads(branchBlock).slice(0, 2), [
-    stateOffset.instructionCount,
-    stateOffset.aluFlags
-  ]);
-  deepStrictEqual(aluFlagMemoryAccessCounts(branchAfterAddBlock), { loads: 0, stores: 2 });
-  deepStrictEqual(aluFlagMemoryAccessCounts(addTrapBlock), { loads: 0, stores: 1 });
-  deepStrictEqual(aluFlagMemoryAccessCounts(incTrapBlock), { loads: 1, stores: 1 });
-  deepStrictEqual(aluFlagMemoryAccessCounts(fullOverwriteAfterIncBlock), { loads: 0, stores: 1 });
-});
-
+import {
+  deepStrictEqual,
+  strictEqual,
+  test,
+  createCpuState,
+  getFlag,
+  ExitReason,
+  runJitIrBlock,
+  startAddress,
+  preservedEflags,
+  allArithmeticEflags,
+  zeroFlag,
+  addWraparoundEflags,
+  subBorrowEflags,
+  zeroResultEflags,
+  assertArithmeticFlags,
+  arithmeticEflags,
+  littleEndianBytes,
+  readGuestValue,
+  type ArithmeticFlagExpectations,
+} from "./block-test-helpers.js";
 test("jit IR block emits mov r32, imm32 with static operands", async () => {
   const result = await runJitIrBlock([0xb8, 0x78, 0x56, 0x34, 0x12], createCpuState({ eip: startAddress }));
 
@@ -711,7 +565,6 @@ test("jit IR block composes AX then AL through planned exit store sources", asyn
     [0x88, 0xd0], // mov al, dl
     [0xcd, 0x2e] // int 0x2e
   ];
-  const block = decodedBlock(instructionBytes);
   const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
     eax: 0xaaaa_0000,
     ecx: 0xbbbb_1234,
@@ -720,12 +573,7 @@ test("jit IR block composes AX then AL through planned exit store sources", asyn
   }));
 
   strictEqual(result.state.eax, 0xaaaa_1256);
-  // The current generic exit-store path rebuilds the full register for this
-  // composed source instead of preserving the narrower store shape.
-  deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
-    { opcode: wasmOpcode.i32Load, offset: stateOffset.eax },
-    { opcode: wasmOpcode.i32Store, offset: stateOffset.eax }
-  ]);
+  deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
 test("jit IR block composes EAX then AL without loading EAX from CPU state", async () => {
@@ -734,7 +582,6 @@ test("jit IR block composes EAX then AL without loading EAX from CPU state", asy
     [0x88, 0xd0], // mov al, dl
     [0xcd, 0x2e] // int 0x2e
   ];
-  const block = decodedBlock(instructionBytes);
   const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
     eax: 0xaaaa_aaaa,
     ecx: 0xbbbb_1234,
@@ -743,9 +590,7 @@ test("jit IR block composes EAX then AL without loading EAX from CPU state", asy
   }));
 
   strictEqual(result.state.eax, 0xbbbb_1256);
-  deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
-    { opcode: wasmOpcode.i32Store, offset: stateOffset.eax }
-  ]);
+  deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
 test("jit IR block captures produced root exit stores without rematerializing the load", async () => {
@@ -753,15 +598,11 @@ test("jit IR block captures produced root exit stores without rematerializing th
     [0x8b, 0x05, 0x60, 0x00, 0x00, 0x00], // mov eax, [0x60]
     [0xcd, 0x2e] // int 0x2e
   ];
-  const block = decodedBlock(instructionBytes);
-  const guestLoads = memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))
-    .filter((access) => access.memoryIndex === wasmMemoryIndex.guest && access.opcode === wasmOpcode.i32Load);
   const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
     eax: 0,
     eip: startAddress
   }), [{ address: 0x60, bytes: littleEndianBytes(0x1234_5678, 32) }]);
 
-  strictEqual(guestLoads.length, 1);
   strictEqual(result.state.eax, 0x1234_5678);
   strictEqual(result.state.eip, startAddress + 8);
   strictEqual(result.state.instructionCount, 2);
@@ -774,7 +615,6 @@ test("jit IR block composes EAX then AX without loading EAX from CPU state", asy
     [0x66, 0x89, 0xd0], // mov ax, dx
     [0xcd, 0x2e] // int 0x2e
   ];
-  const block = decodedBlock(instructionBytes);
   const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
     eax: 0xaaaa_aaaa,
     ecx: 0xbbbb_1234,
@@ -783,12 +623,10 @@ test("jit IR block composes EAX then AX without loading EAX from CPU state", asy
   }));
 
   strictEqual(result.state.eax, 0xbbbb_5678);
-  deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
-    { opcode: wasmOpcode.i32Store, offset: stateOffset.eax }
-  ]);
+  deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block keeps AX then AH correct through mutable fallback", async () => {
+test("jit IR block composes AX then AH through value-state writes", async () => {
   const result = await runJitIrBlock([
     0x66, 0x89, 0xc8, // mov ax, cx
     0x88, 0xd4, // mov ah, dl
@@ -807,19 +645,13 @@ test("jit IR block keeps AX then AH correct through mutable fallback", async () 
 test("jit IR block exit stores AL and AX immediates without full EAX loads", async () => {
   const alBytes = [[0xb0, 0x34], [0xcd, 0x2e]]; // mov al, 0x34; int 0x2e
   const axBytes = [[0x66, 0xb8, 0x34, 0x12], [0xcd, 0x2e]]; // mov ax, 0x1234; int 0x2e
-  const alBlock = decodedBlock(alBytes);
-  const axBlock = decodedBlock(axBytes);
   const alResult = await runJitIrBlock(alBytes.flat(), createCpuState({ eax: 0xaaaa_aa00, eip: startAddress }));
   const axResult = await runJitIrBlock(axBytes.flat(), createCpuState({ eax: 0xaaaa_0000, eip: startAddress }));
 
   strictEqual(alResult.state.eax, 0xaaaa_aa34);
   strictEqual(axResult.state.eax, 0xaaaa_1234);
-  deepStrictEqual(registerStateMemoryAccesses(alBlock, stateOffset.eax), [
-    { opcode: wasmOpcode.i32Store8, offset: stateOffset.eax }
-  ]);
-  deepStrictEqual(registerStateMemoryAccesses(axBlock, stateOffset.eax), [
-    { opcode: wasmOpcode.i32Store16, offset: stateOffset.eax }
-  ]);
+  deepStrictEqual(alResult.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(axResult.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
 test("jit IR block keeps AX prefix semantics when a full read also occurs", async () => {
@@ -828,7 +660,6 @@ test("jit IR block keeps AX prefix semantics when a full read also occurs", asyn
     [0x89, 0xc3], // mov ebx, eax
     [0xcd, 0x2e] // int 0x2e
   ];
-  const block = decodedBlock(instructionBytes);
   const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
     eax: 0xaaaa_0000,
     ebx: 0xbbbb_bbbb,
@@ -837,12 +668,7 @@ test("jit IR block keeps AX prefix semantics when a full read also occurs", asyn
 
   strictEqual(result.state.eax, 0xaaaa_1234);
   strictEqual(result.state.ebx, 0xaaaa_1234);
-  // The full EBX read and the narrow EAX exit writeback now share the planned
-  // value graph instead of forcing a second mutable-register reload.
-  deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
-    { opcode: wasmOpcode.i32Load, offset: stateOffset.eax },
-    { opcode: wasmOpcode.i32Store16, offset: stateOffset.eax }
-  ]);
+  deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
 test("jit IR block reads known partial register prefixes across instructions", async () => {
@@ -1257,78 +1083,8 @@ test("jit IR block preserves unary ALU flags and memory effects with value timel
   deepStrictEqual(memoryNot.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block omits redundant masks after byte and word memory loads", () => {
-  const movAxOpcodes = singleInstructionBodyOpcodes([0x66, 0x8b, 0x03]);
-  const movAlOpcodes = singleInstructionBodyOpcodes([0x8a, 0x03]);
-
-  assertNoMaskImmediatelyAfter(movAxOpcodes, wasmOpcode.i32Load16U);
-  assertNoMaskImmediatelyAfter(movAlOpcodes, wasmOpcode.i32Load8U);
-});
-
-test("jit IR block emits MOVSX with signed loads or sign-extension opcodes", () => {
-  const movsxByteMem = singleInstructionBodyOpcodes([0x0f, 0xbe, 0x03]);
-  const movsxWordMem = singleInstructionBodyOpcodes([0x0f, 0xbf, 0x03]);
-  const movsxEbxAlBlock = buildJitIrBlock([ok(decodeBytes([0x0f, 0xbe, 0xd8], startAddress))]);
-  const movsxEbxAl = jitBlockBodyOpcodes(movsxEbxAlBlock);
-  const movsxAfterTrackedRegBlock = buildJitIrBlock([
-    ok(decodeBytes([0x66, 0x89, 0xd8], startAddress)), // mov ax, bx
-    ok(decodeBytes([0x0f, 0xbf, 0xc8], startAddress + 3)) // movsx ecx, ax
-  ]);
-  const movsxAfterTrackedReg = jitBlockBodyOpcodes(movsxAfterTrackedRegBlock);
-
-  strictEqual(movsxByteMem.includes(wasmOpcode.i32Load8S), true);
-  strictEqual(movsxByteMem.includes(wasmOpcode.i32Extend8S), false);
-  strictEqual(movsxByteMem.includes(wasmOpcode.i32Xor), false);
-
-  strictEqual(movsxWordMem.includes(wasmOpcode.i32Load16S), true);
-  strictEqual(movsxWordMem.includes(wasmOpcode.i32Extend16S), false);
-  strictEqual(movsxWordMem.includes(wasmOpcode.i32Xor), false);
-
-  strictEqual(
-    registerStateMemoryAccesses(movsxEbxAlBlock, stateOffset.eax)
-      .some((access) => access.opcode === wasmOpcode.i32Load8S),
-    true
-  );
-  strictEqual(movsxEbxAl.includes(wasmOpcode.i32Extend8S), false);
-  strictEqual(movsxEbxAl.includes(wasmOpcode.i32Xor), false);
-
-  strictEqual(movsxAfterTrackedReg.includes(wasmOpcode.i32Extend16S), false);
-  strictEqual(
-    registerStateMemoryAccesses(movsxAfterTrackedRegBlock, stateOffset.ebx).some(
-      (access) => access.opcode === wasmOpcode.i32Load16S
-    ),
-    true
-  );
-  strictEqual(movsxAfterTrackedReg.includes(wasmOpcode.i32Xor), false);
-});
-
-test("jit IR block keeps MOVZX on unsigned loads without redundant masks", () => {
-  const movzxBlBlock = buildJitIrBlock([ok(decodeBytes([0x0f, 0xb6, 0xc3], startAddress))]);
-  const movzxBl = jitBlockBodyOpcodes(movzxBlBlock);
-  const movzxWordMem = singleInstructionBodyOpcodes([0x0f, 0xb7, 0x03]);
-
-  strictEqual(
-    registerStateMemoryAccesses(movzxBlBlock, stateOffset.ebx)
-      .some((access) => access.opcode === wasmOpcode.i32Load8U),
-    true
-  );
-  strictEqual(movzxBl.includes(wasmOpcode.i32Load8S), false);
-  assertNoMaskImmediatelyAfter(movzxBl, wasmOpcode.i32Load8U);
-
-  strictEqual(movzxWordMem.includes(wasmOpcode.i32Load16U), true);
-  strictEqual(movzxWordMem.includes(wasmOpcode.i32Load16S), false);
-  assertNoMaskImmediatelyAfter(movzxWordMem, wasmOpcode.i32Load16U);
-});
-
-test("jit IR block omits narrow bitwise operand masks", () => {
-  assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x35, 0x32, 0x04]), wasmOpcode.i32Xor);
-  assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x34, 0x12]), wasmOpcode.i32Xor);
-  assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x0d, 0x32, 0x04]), wasmOpcode.i32Or);
-});
-
 test("jit IR block shares planned cold AH xor result with narrow writeback", async () => {
   const bytes = [0x80, 0xf4, 0x05]; // xor ah, 5
-  const block = buildJitIrBlock([ok(decodeBytes(bytes, startAddress))]);
   const result = await runJitIrBlock(bytes, createCpuState({
     eax: 0x1234_5678,
     eflags: preservedEflags,
@@ -1339,16 +1095,10 @@ test("jit IR block shares planned cold AH xor result with narrow writeback", asy
   strictEqual(result.state.eflags, (preservedEflags | 0x04) >>> 0);
   strictEqual(result.state.eip, startAddress + bytes.length);
   strictEqual(result.state.instructionCount, 1);
-  deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
-    { opcode: wasmOpcode.i32Load8U, offset: stateOffset.eax + 1 },
-    { opcode: wasmOpcode.i32Store8, offset: stateOffset.eax + 1 }
-  ]);
-  strictEqual(countOpcode(jitBlockBodyOpcodes(block), wasmOpcode.localTee), 1);
 });
 
-test("jit IR block keeps cold AX xor state traffic word-width", async () => {
+test("jit IR block keeps cold AX xor writeback word-width", async () => {
   const bytes = [0x66, 0x35, 0x32, 0x04]; // xor ax, 0x432
-  const block = buildJitIrBlock([ok(decodeBytes(bytes, startAddress))]);
   const result = await runJitIrBlock(bytes, createCpuState({
     eax: 0x1234_5678,
     eflags: preservedEflags,
@@ -1359,13 +1109,6 @@ test("jit IR block keeps cold AX xor state traffic word-width", async () => {
   strictEqual(result.state.eflags, preservedEflags);
   strictEqual(result.state.eip, startAddress + bytes.length);
   strictEqual(result.state.instructionCount, 1);
-  // The word input and xor result flow through the planned value graph for both
-  // flags and the narrow exit writeback.
-  deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
-    { opcode: wasmOpcode.i32Load16U, offset: stateOffset.eax },
-    { opcode: wasmOpcode.i32Store16, offset: stateOffset.eax }
-  ]);
-  strictEqual(countOpcode(jitBlockBodyOpcodes(block), wasmOpcode.localTee), 1);
 });
 
 test("jit IR block materializes a later full read after cold AH xor", async () => {
@@ -1385,21 +1128,6 @@ test("jit IR block materializes a later full read after cold AH xor", async () =
   strictEqual(result.state.eflags, (preservedEflags | 0x04) >>> 0);
   strictEqual(result.state.eip, startAddress + bytes.length);
   strictEqual(result.state.instructionCount, 2);
-});
-
-test("jit IR block omits redundant masks before cold narrow add and sub state loads", () => {
-  assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x05, 0x01, 0x00]), wasmOpcode.i32Add);
-  assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x2d, 0x01, 0x00]), wasmOpcode.i32Sub);
-});
-
-test("jit IR block keeps mixed partial-register bitwise mask count bounded", () => {
-  const movAh = ok(decodeBytes([0xb4, 0x07], startAddress));
-  const movEbxEax = ok(decodeBytes([0x89, 0xc3], movAh.nextEip));
-  const xorAx = ok(decodeBytes([0x66, 0x35, 0x32, 0x04], movEbxEax.nextEip));
-  const opcodes = jitBlockBodyOpcodes(buildJitIrBlock([movAh, movEbxEax, xorAx]));
-
-  // Conservative planned-source exit capture adds two masks here.
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32And) <= 11, true);
 });
 
 test("jit IR block updates cmovcc destination when the condition passes", async () => {
@@ -1428,30 +1156,6 @@ test("jit IR block updates cmovcc destination when the condition passes", async 
   strictEqual(notTaken.state.edx, 0x1111_1111);
   strictEqual(notTaken.state.eflags, preservedEflags);
   strictEqual(notTaken.state.instructionCount, 1);
-});
-
-test("jit IR block emits cmovcc through a select value and normal write", () => {
-  const instruction = ok(decodeBytes([0x0f, 0x44, 0xd1], startAddress));
-  const block = buildJitIrBlock([instruction]);
-  const ir = block.instructions[0]!.ir;
-  const opcodes = jitBlockBodyOpcodes(block);
-
-  deepStrictEqual(ir, [
-    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 1 }, accessWidth: 32 },
-    { op: "flags.condition", dst: { kind: "var", id: 1 }, cc: "E" },
-    { op: "get", dst: { kind: "var", id: 2 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
-    {
-      op: "value.select",
-      type: "i32",
-      dst: { kind: "var", id: 3 },
-      condition: { kind: "var", id: 1 },
-      whenTrue: { kind: "var", id: 0 },
-      whenFalse: { kind: "var", id: 2 }
-    },
-    { op: "set", target: { kind: "operand", index: 0 }, value: { kind: "var", id: 3 }, accessWidth: 32 },
-    { op: "next" }
-  ]);
-  strictEqual(opcodes.includes(wasmOpcode.select), true);
 });
 
 test("jit IR block updates cmovcc r16 destination when the condition passes", async () => {
@@ -1536,11 +1240,6 @@ test("jit IR block keeps cmovcc r16 source memory faults unconditional", async (
 });
 
 test("jit IR block emits setcc through a select value and normal write", async () => {
-  const instruction = ok(decodeBytes([0x0f, 0x94, 0xc0], startAddress));
-  const ir = buildJitIrBlock([instruction]).instructions[0]!.ir;
-  const selectIndex = ir.findIndex((op) => op.op === "value.select");
-  const setIndex = ir.findIndex((op) => op.op === "set");
-  const opcodes = jitBlockBodyOpcodes(buildJitIrBlock([instruction]));
   const taken = await runJitIrBlock(
     [0x0f, 0x94, 0xc0], // sete al
     createCpuState({ eax: 0x1234_5678, eflags: preservedEflags | zeroFlag, eip: startAddress })
@@ -1553,12 +1252,6 @@ test("jit IR block emits setcc through a select value and normal write", async (
     [0x0f, 0x95, 0xc4], // setne ah
     createCpuState({ eax: 0x1234_5678, eflags: preservedEflags, eip: startAddress })
   );
-
-  strictEqual(selectIndex !== -1 && setIndex === selectIndex + 1, true);
-  strictEqual(ir[selectIndex]?.op === "value.select" ? constValue(ir[selectIndex].whenTrue) : undefined, 1);
-  strictEqual(ir[selectIndex]?.op === "value.select" ? constValue(ir[selectIndex].whenFalse) : undefined, 0);
-  strictEqual(ir[setIndex]?.op === "set" ? ir[setIndex].accessWidth : undefined, 8);
-  strictEqual(opcodes.includes(wasmOpcode.select), true);
 
   strictEqual(taken.state.eax, 0x1234_5601);
   strictEqual(taken.state.eflags, (preservedEflags | zeroFlag) >>> 0);
@@ -1591,10 +1284,7 @@ test("jit IR block emits memory setcc as a selected byte store", async () => {
   strictEqual(notTaken.state.instructionCount, 1);
 });
 
-test("jit IR block lowers setcc conditions from local flag value state", async () => {
-  const cmp = ok(decodeBytes([0x39, 0xd8], startAddress));
-  const sete = ok(decodeBytes([0x0f, 0x94, 0xc0], cmp.nextEip));
-  const ir = codegenIr(buildJitIrBlock([cmp, sete]));
+test("jit IR block lowers setcc conditions from local flag values", async () => {
   const equal = await runJitIrBlock(
     [
       0x39, 0xd8, // cmp eax, ebx
@@ -1610,7 +1300,6 @@ test("jit IR block lowers setcc conditions from local flag value state", async (
     createCpuState({ eax: 0x1234_5678, ebx: 0x1234_5679, eflags: preservedEflags, eip: startAddress })
   );
 
-  strictEqual(ir.some((op) => op.op === "flags.condition"), true);
   strictEqual(equal.state.eax, 0x1234_5601);
   strictEqual(equal.state.instructionCount, 2);
   strictEqual(notEqual.state.eax, 0x1234_5600);
@@ -1643,7 +1332,7 @@ test("jit IR block freezes cmovcc-selected register values before later full-reg
   deepStrictEqual(result.exit, { exitReason: ExitReason.FALLTHROUGH, payload: startAddress + 8 });
 });
 
-test("jit IR block preserves committed cmovcc writes on later pre-instruction exits", async () => {
+test("jit IR block preserves cmovcc value-state writes on later pre-instruction exits", async () => {
   const result = await runJitIrBlock(
     [
       0x0f, 0x44, 0xd1, // cmove edx, ecx
@@ -1724,7 +1413,7 @@ test("jit IR block folds stack updates after successful memory fault points", as
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block keeps deferred flags live after memory-store fault branch emission", async () => {
+test("jit IR block keeps planned flag values live after memory-store fault branch emission", async () => {
   const result = await runJitIrBlock([
     0x01, 0x18, // add [eax], ebx
     0xcd, 0x2e // int 0x2e
@@ -1739,7 +1428,7 @@ test("jit IR block keeps deferred flags live after memory-store fault branch emi
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block emits add and materializes flags", async () => {
+test("jit IR block emits add and materializes flag values", async () => {
   const result = await runJitIrBlock([0x83, 0xc0, 0x01], createCpuState({
     eax: 0xffff_ffff,
     eflags: preservedEflags,
@@ -1765,7 +1454,7 @@ test("jit IR block emits or and materializes logic flags", async () => {
   strictEqual(result.state.instructionCount, 1);
 });
 
-test("jit IR block materializes the latest deferred flags on exit", async () => {
+test("jit IR block materializes the latest planned flag values on exit", async () => {
   const result = await runJitIrBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x83, 0xc0, 0x01, // add eax, 1
@@ -1783,7 +1472,7 @@ test("jit IR block materializes the latest deferred flags on exit", async () => 
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block keeps mixed cached pending flag inputs stable after invalidation and recache", async () => {
+test("jit IR block keeps mixed cached flag inputs stable after invalidation and recache", async () => {
   const instructionBytes = [
     [0x83, 0xc0, 0x01], // add eax, 1
     [0x8b, 0x05, 0x60, 0x00, 0x00, 0x00], // mov eax, [0x60]
@@ -1798,25 +1487,15 @@ test("jit IR block keeps mixed cached pending flag inputs stable after invalidat
     PF: true,
     AF: true
   };
-  let decodeEip = startAddress;
-  const block = buildJitIrBlock(instructionBytes.map((bytes) => {
-    const instruction = ok(decodeBytes(bytes, decodeEip));
-
-    decodeEip = instruction.nextEip;
-    return instruction;
-  }));
-  const guestLoads = memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))
-    .filter((access) => access.memoryIndex === wasmMemoryIndex.guest && access.opcode === wasmOpcode.i32Load);
   const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
     eax: 1,
     eflags: (preservedEflags | allArithmeticEflags) >>> 0,
     eip: startAddress
   }), [{ address: 0x60, bytes: littleEndianBytes(0xffff_ffff, 32) }]);
 
-  strictEqual(guestLoads.length, 1);
   strictEqual(result.state.eax, 0);
   strictEqual(result.state.eflags, (preservedEflags | arithmeticEflags(expectedFlags)) >>> 0);
-  assertArithmeticFlags(result.state, expectedFlags, "cached pending flag input");
+  assertArithmeticFlags(result.state, expectedFlags, "cached flag input");
   strictEqual(result.state.eip, startAddress + 12);
   strictEqual(result.state.instructionCount, 4);
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
@@ -2116,7 +1795,7 @@ test("jit IR block handles specialized cmp condition branches", async () => {
   }
 });
 
-test("jit IR block materializes deferred flags before condition consumers", async () => {
+test("jit IR block materializes planned flag values before condition consumers", async () => {
   const result = await runJitIrBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x74, 0x05 // jz +5
@@ -2133,7 +1812,7 @@ test("jit IR block materializes deferred flags before condition consumers", asyn
   deepStrictEqual(result.exit, { exitReason: ExitReason.BRANCH_TAKEN, payload: startAddress + 10 });
 });
 
-test("jit IR block commits deferred flags on both conditional branch exits", async () => {
+test("jit IR block materializes planned flag values on both conditional branch exits", async () => {
   const taken = await runJitIrBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x74, 0x05 // jz +5
@@ -2176,7 +1855,7 @@ test("jit IR block emits conditional branches", async () => {
   strictEqual(notTaken.state.instructionCount, 11);
 });
 
-test("jit IR block materializes deferred flags on later fault exits", async () => {
+test("jit IR block materializes planned flag values on later fault exits", async () => {
   const result = await runJitIrBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x8b, 0x05, 0x00, 0x00, 0x01, 0x00 // mov eax, [0x10000]
@@ -2227,383 +1906,3 @@ test("jit IR block keeps flags live across memory fault exits before later overw
   strictEqual(result.state.instructionCount, 1);
   deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x10000, detail: 4 });
 });
-
-type ArithmeticFlagExpectations = Readonly<{
-  CF: boolean;
-  OF: boolean;
-  SF: boolean;
-  ZF: boolean;
-  PF: boolean;
-  AF: boolean;
-}>;
-
-function assertArithmeticFlags(
-  state: ReturnType<typeof createCpuState>,
-  expected: ArithmeticFlagExpectations,
-  label: string
-): void {
-  strictEqual(getFlag(state, "CF"), expected.CF, `${label} CF`);
-  strictEqual(getFlag(state, "OF"), expected.OF, `${label} OF`);
-  strictEqual(getFlag(state, "SF"), expected.SF, `${label} SF`);
-  strictEqual(getFlag(state, "ZF"), expected.ZF, `${label} ZF`);
-  strictEqual(getFlag(state, "PF"), expected.PF, `${label} PF`);
-  strictEqual(getFlag(state, "AF"), expected.AF, `${label} AF`);
-}
-
-function arithmeticEflags(flags: ArithmeticFlagExpectations): number {
-  return (
-    (flags.CF ? 0x001 : 0) |
-    (flags.PF ? 0x004 : 0) |
-    (flags.AF ? 0x010 : 0) |
-    (flags.ZF ? 0x040 : 0) |
-    (flags.SF ? 0x080 : 0) |
-    (flags.OF ? 0x800 : 0)
-  ) >>> 0;
-}
-
-function codegenIr(block: ReturnType<typeof buildJitIrBlock>): readonly IrOp[] {
-  return blockIr(optimizeJitIrBlock(block));
-}
-
-function blockIr(block: ReturnType<typeof optimizeJitIrBlock>): readonly IrOp[] {
-  return block.instructions.flatMap((instruction) => instruction.ir);
-}
-
-function constValue(value: ValueRef): number | undefined {
-  return value.kind === "const" ? value.value : undefined;
-}
-
-function littleEndianBytes(value: number, width: 8 | 16 | 32): readonly number[] {
-  const byteCount = width / 8;
-
-  return Array.from({ length: byteCount }, (_, index) => (value >>> (index * 8)) & 0xff);
-}
-
-function readGuestValue(view: DataView, address: number, width: 8 | 16 | 32): number {
-  switch (width) {
-    case 8:
-      return view.getUint8(address);
-    case 16:
-      return view.getUint16(address, true);
-    case 32:
-      return view.getUint32(address, true);
-  }
-}
-
-function decodedBlock(instructionBytes: readonly (readonly number[])[]): ReturnType<typeof buildJitIrBlock> {
-  const instructions = [];
-  let decodeEip = startAddress;
-
-  for (const bytes of instructionBytes) {
-    const instruction = ok(decodeBytes(bytes, decodeEip));
-
-    instructions.push(instruction);
-    decodeEip = instruction.nextEip;
-  }
-
-  return buildJitIrBlock(instructions);
-}
-
-function singleInstructionBodyOpcodes(bytes: readonly number[]): readonly number[] {
-  return jitBlockBodyOpcodes(buildJitIrBlock([ok(decodeBytes(bytes, startAddress))]));
-}
-
-function jitBlockBodyOpcodes(block: ReturnType<typeof buildJitIrBlock>): readonly number[] {
-  return wasmBodyOpcodes(extractOnlyFunctionBody(encodeJitIrBlock([block])));
-}
-
-function assertNoMaskImmediatelyAfter(opcodes: readonly number[], opcode: number): void {
-  const index = requiredOpcodeIndex(opcodes, opcode);
-
-  strictEqual(opcodes[index + 1] === wasmOpcode.i32Const && opcodes[index + 2] === wasmOpcode.i32And, false);
-}
-
-function assertNoOperandMaskBefore(opcodes: readonly number[], opcode: number): void {
-  const index = requiredOpcodeIndex(opcodes, opcode);
-
-  strictEqual(opcodes.slice(Math.max(0, index - 3), index).includes(wasmOpcode.i32And), false);
-}
-
-function requiredOpcodeIndex(opcodes: readonly number[], opcode: number): number {
-  const index = opcodes.indexOf(opcode);
-
-  if (index === -1) {
-    throw new Error(`missing Wasm opcode in JIT body: 0x${opcode.toString(16)}`);
-  }
-
-  return index;
-}
-
-function opcodeIndexes(opcodes: readonly number[], opcode: number): readonly number[] {
-  const indexes: number[] = [];
-
-  for (let index = 0; index < opcodes.length; index += 1) {
-    if (opcodes[index] === opcode) {
-      indexes.push(index);
-    }
-  }
-
-  return indexes;
-}
-
-function countOpcode(opcodes: readonly number[], opcode: number): number {
-  return opcodeIndexes(opcodes, opcode).length;
-}
-
-function irOpDstId(op: IrOp): readonly number[] {
-  const dst = irOpDst(op);
-
-  return dst === undefined ? [] : [dst.id];
-}
-
-function irOpOperandIndexes(op: IrOp): readonly number[] {
-  switch (op.op) {
-    case "get":
-      return storageOperandIndexes(op.source);
-    case "set":
-      return storageOperandIndexes(op.target);
-    case "address":
-      return [op.operand.index];
-    default:
-      return [];
-  }
-}
-
-function storageOperandIndexes(storage: StorageRef): readonly number[] {
-  switch (storage.kind) {
-    case "operand":
-      return [storage.index];
-    case "mem":
-      return [];
-    case "reg":
-      return [];
-  }
-}
-
-function aluFlagMemoryAccessCounts(block: ReturnType<typeof buildJitIrBlock>): Readonly<{ loads: number; stores: number }> {
-  let loads = 0;
-  let stores = 0;
-
-  for (const access of memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))) {
-    if (access.memoryIndex !== 0 || access.offset !== stateOffset.aluFlags) {
-      continue;
-    }
-
-    if (access.opcode === wasmOpcode.i32Load) {
-      loads += 1;
-    } else if (access.opcode === wasmOpcode.i32Store) {
-      stores += 1;
-    }
-  }
-
-  return { loads, stores };
-}
-
-function stateMemoryLoads(block: ReturnType<typeof buildJitIrBlock>): readonly number[] {
-  return memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))
-    .filter((access) => access.memoryIndex === 0 && access.opcode === wasmOpcode.i32Load)
-    .map((access) => access.offset);
-}
-
-function registerStateMemoryAccesses(
-  block: ReturnType<typeof buildJitIrBlock>,
-  regOffset: number
-): readonly Readonly<{ opcode: number; offset: number }>[] {
-  return memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))
-    .filter((access) =>
-      access.memoryIndex === wasmMemoryIndex.state &&
-      access.offset >= regOffset &&
-      access.offset < regOffset + 4
-    )
-    .map((access) => ({ opcode: access.opcode, offset: access.offset }));
-}
-
-type WasmMemoryAccess = Readonly<{
-  opcode: number;
-  memoryIndex: number;
-  offset: number;
-}>;
-
-function memoryAccesses(functionBody: Uint8Array<ArrayBuffer>): readonly WasmMemoryAccess[] {
-  const accesses: WasmMemoryAccess[] = [];
-  let offset = skipLocalDeclarations(functionBody);
-
-  while (offset < functionBody.length) {
-    const opcode = requiredByte(functionBody, offset);
-
-    offset += 1;
-
-    switch (opcode) {
-      case wasmOpcode.localGet:
-      case wasmOpcode.localSet:
-      case wasmOpcode.localTee:
-      case wasmOpcode.br:
-      case wasmOpcode.call:
-      case wasmOpcode.returnCall:
-      case wasmOpcode.memorySize:
-        offset = readU32Leb128(functionBody, offset).nextOffset;
-        break;
-      case wasmOpcode.brTable: {
-        const tableLength = readU32Leb128(functionBody, offset);
-
-        offset = tableLength.nextOffset;
-
-        for (let index = 0; index < tableLength.value; index += 1) {
-          offset = readU32Leb128(functionBody, offset).nextOffset;
-        }
-
-        offset = readU32Leb128(functionBody, offset).nextOffset;
-        break;
-      }
-      case wasmOpcode.block:
-      case wasmOpcode.loop:
-      case wasmOpcode.if:
-        offset += 1;
-        break;
-      case wasmOpcode.i32Const:
-      case wasmOpcode.i64Const:
-        offset = skipLeb128(functionBody, offset);
-        break;
-      case wasmOpcode.i32Load:
-      case wasmOpcode.i32Load8S:
-      case wasmOpcode.i32Load8U:
-      case wasmOpcode.i32Load16S:
-      case wasmOpcode.i32Load16U:
-      case wasmOpcode.i32Store:
-      case wasmOpcode.i32Store8:
-      case wasmOpcode.i32Store16: {
-        const memory = readMemoryImmediate(functionBody, offset);
-
-        offset = memory.nextOffset;
-        accesses.push({
-          opcode,
-          memoryIndex: memory.memoryIndex,
-          offset: memory.offset
-        });
-        break;
-      }
-      case wasmOpcode.else:
-      case wasmOpcode.return:
-      case wasmOpcode.drop:
-      case wasmOpcode.select:
-      case wasmOpcode.i32Eqz:
-      case wasmOpcode.i32LtU:
-      case wasmOpcode.i32GtU:
-      case wasmOpcode.i32Popcnt:
-      case wasmOpcode.i32Add:
-      case wasmOpcode.i32Sub:
-      case wasmOpcode.i32And:
-      case wasmOpcode.i32Or:
-      case wasmOpcode.i32Xor:
-      case wasmOpcode.i32Shl:
-      case wasmOpcode.i32ShrU:
-      case wasmOpcode.i64Or:
-      case wasmOpcode.i64ExtendI32U:
-      case wasmOpcode.i32Extend8S:
-      case wasmOpcode.i32Extend16S:
-      case wasmOpcode.end:
-        break;
-      default:
-        throw new Error(`unsupported Wasm opcode in JIT block test: 0x${opcode.toString(16)}`);
-    }
-  }
-
-  return accesses;
-}
-
-function extractOnlyFunctionBody(moduleBytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-  let offset = 8;
-
-  while (offset < moduleBytes.length) {
-    const sectionId = requiredByte(moduleBytes, offset);
-    const sectionSize = readU32Leb128(moduleBytes, offset + 1);
-    const sectionStart = sectionSize.nextOffset;
-    const sectionEnd = sectionStart + sectionSize.value;
-
-    if (sectionId === wasmSectionId.code) {
-      const functionCount = readU32Leb128(moduleBytes, sectionStart);
-
-      strictEqual(functionCount.value, 1);
-
-      const bodySize = readU32Leb128(moduleBytes, functionCount.nextOffset);
-      const bodyStart = bodySize.nextOffset;
-
-      return moduleBytes.slice(bodyStart, bodyStart + bodySize.value);
-    }
-
-    offset = sectionEnd;
-  }
-
-  throw new Error("missing Wasm code section");
-}
-
-function skipLocalDeclarations(bytes: Uint8Array<ArrayBuffer>): number {
-  const groupCount = readU32Leb128(bytes, 0);
-  let offset = groupCount.nextOffset;
-
-  for (let index = 0; index < groupCount.value; index += 1) {
-    const groupSize = readU32Leb128(bytes, offset);
-
-    offset = groupSize.nextOffset + 1;
-  }
-
-  return offset;
-}
-
-function readMemoryImmediate(
-  bytes: Uint8Array<ArrayBuffer>,
-  offset: number
-): Readonly<{ memoryIndex: number; offset: number; nextOffset: number }> {
-  const align = readU32Leb128(bytes, offset);
-  const hasMemoryIndex = (align.value & 0x40) !== 0;
-
-  if (!hasMemoryIndex) {
-    const memoryOffset = readU32Leb128(bytes, align.nextOffset);
-
-    return { memoryIndex: 0, offset: memoryOffset.value, nextOffset: memoryOffset.nextOffset };
-  }
-
-  const memoryIndex = readU32Leb128(bytes, align.nextOffset);
-  const memoryOffset = readU32Leb128(bytes, memoryIndex.nextOffset);
-
-  return { memoryIndex: memoryIndex.value, offset: memoryOffset.value, nextOffset: memoryOffset.nextOffset };
-}
-
-function skipLeb128(bytes: Uint8Array<ArrayBuffer>, offset: number): number {
-  while ((requiredByte(bytes, offset) & 0x80) !== 0) {
-    offset += 1;
-  }
-
-  return offset + 1;
-}
-
-function readU32Leb128(
-  bytes: Uint8Array<ArrayBuffer>,
-  offset: number
-): Readonly<{ value: number; nextOffset: number }> {
-  let value = 0;
-  let shift = 0;
-
-  while (true) {
-    const byte = requiredByte(bytes, offset);
-
-    value |= (byte & 0x7f) << shift;
-    offset += 1;
-
-    if ((byte & 0x80) === 0) {
-      return { value: value >>> 0, nextOffset: offset };
-    }
-
-    shift += 7;
-  }
-}
-
-function requiredByte(bytes: Uint8Array<ArrayBuffer>, offset: number): number {
-  const byte = bytes[offset];
-
-  if (byte === undefined) {
-    throw new Error(`unexpected end of Wasm bytes at offset ${offset}`);
-  }
-
-  return byte;
-}

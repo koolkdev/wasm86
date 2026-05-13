@@ -143,7 +143,7 @@ test("compiled conditional targets patch both branch slots", () => {
   strictEqual(notTakenState.eax, 2);
 });
 
-test("linked conditional branch exits preserve committed flags", () => {
+test("linked conditional branch exits preserve materialized flag values", () => {
   const takenEip = aEip + 0x20;
   const branchBytes = addEaxOneJnzRel8(aEip, takenEip);
   const notTakenEip = aEip + branchBytes.length;
