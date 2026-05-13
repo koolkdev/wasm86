@@ -16,6 +16,7 @@ import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/pla
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { jitProducedValue, type JitProducedValue } from "#backends/wasm/jit/ir/values.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
+import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import type { Reg32 } from "#x86/isa/types.js";
 
 test("JIT expression-block emitter treats let32 as an observation for supported values", () => {
@@ -57,6 +58,22 @@ test("JIT expression-block emitter supports next as a foundation effect", () => 
   const result = emitFoundationBlock([{ op: "next" }]);
 
   strictEqual(result.nextCalls, 1);
+});
+
+test("JIT expression-block emitter treats flags.set as value-state only", () => {
+  const result = emitFoundationBlock([
+    {
+      op: "flags.set",
+      producer: "logic",
+      writtenMask: IR_ALU_FLAG_MASK,
+      undefMask: 0,
+      inputs: {
+        result: c32(0)
+      }
+    }
+  ]);
+
+  deepStrictEqual(result.opcodes, [wasmOpcode.end]);
 });
 
 test("JIT expression-block emitter fails loudly for unsupported let32 values", () => {
@@ -213,12 +230,6 @@ function emitFoundationBlock(
     },
     emitAddress: () => {
       throw new Error("expression-block test address emission is not implemented");
-    },
-    emitSetFlags: (descriptor, helpers) => {
-      for (const value of Object.values(descriptor.inputs)) {
-        helpers.emitValue(value);
-        body.localSet(sinkLocal);
-      }
     },
     emitNextEip: () => {
       body.i32Const(0);

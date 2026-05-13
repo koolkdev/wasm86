@@ -55,7 +55,6 @@ export function emitPlannedExpression(
     emitAddress: () => {
       throw new Error("test address emission is not implemented");
     },
-    emitSetFlags: () => {},
     emitNext: () => {},
     emitNextEip: () => {
       body.i32Const(0);

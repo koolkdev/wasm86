@@ -144,6 +144,14 @@ test("jit IR block emits aluFlags memory traffic only for flag reads and observa
   const jnzAfterAdd = ok(decodeBytes([0x75, 0x05], add.nextEip));
   const branchAfterAddBlock = buildJitIrBlock([add, jnzAfterAdd]);
   const addTrapBlock = buildJitIrBlock([add, ok(decodeBytes([0xcd, 0x2e], add.nextEip))]);
+  const inc = ok(decodeBytes([0x40], startAddress));
+  const incTrapBlock = buildJitIrBlock([inc, ok(decodeBytes([0xcd, 0x2e], inc.nextEip))]);
+  const orAfterInc = ok(decodeBytes([0x09, 0xd8], inc.nextEip));
+  const fullOverwriteAfterIncBlock = buildJitIrBlock([
+    inc,
+    orAfterInc,
+    ok(decodeBytes([0xcd, 0x2e], orAfterInc.nextEip))
+  ]);
 
   deepStrictEqual(aluFlagMemoryAccessCounts(flagFreeBlock), { loads: 0, stores: 0 });
   deepStrictEqual(aluFlagMemoryAccessCounts(branchBlock), { loads: 1, stores: 0 });
@@ -153,6 +161,8 @@ test("jit IR block emits aluFlags memory traffic only for flag reads and observa
   ]);
   deepStrictEqual(aluFlagMemoryAccessCounts(branchAfterAddBlock), { loads: 0, stores: 2 });
   deepStrictEqual(aluFlagMemoryAccessCounts(addTrapBlock), { loads: 0, stores: 1 });
+  deepStrictEqual(aluFlagMemoryAccessCounts(incTrapBlock), { loads: 1, stores: 1 });
+  deepStrictEqual(aluFlagMemoryAccessCounts(fullOverwriteAfterIncBlock), { loads: 0, stores: 1 });
 });
 
 test("jit IR block emits mov r32, imm32 with static operands", async () => {

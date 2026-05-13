@@ -9,6 +9,7 @@ import { stateOffset } from "#backends/wasm/abi.js";
 import { ok, decodeBytes, startAddress } from "#x86/isa/decoder/tests/helpers.js";
 import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import {
   extractOnlyWasmFunctionBody,
   wasmBodyMemoryAccesses,
@@ -561,6 +562,32 @@ test("JIT expression cache prefers repeated parent expressions over nested child
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 1);
 });
 
+test("JIT value-cache planning does not treat flags.set as a materialization consumer", () => {
+  const expressionBlock = [
+    { op: "let32", dst: { kind: "var", id: 0 }, value: highCostExpr() },
+    {
+      op: "flags.set",
+      producer: "logic",
+      writtenMask: IR_ALU_FLAG_MASK,
+      undefMask: 0,
+      inputs: {
+        result: { kind: "var", id: 0 }
+      }
+    },
+    { op: "next" }
+  ] as const;
+  const valueTimeline = buildJitInstructionValueTimeline({
+    operands: [],
+    expressionBlock,
+    entryValueState: createJitValueState().snapshot()
+  });
+
+  strictEqual(planJitExpressionValueCache({
+    operands: [],
+    valueTimeline
+  }, expressionBlock), undefined);
+});
+
 test("JIT emission consumes prebuilt expression blocks from instruction plans", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
@@ -745,6 +772,26 @@ function parentExpr(): IrValueExpr {
     operator: "xor",
     a: addExpr("eax", 1),
     b: const32(0xff)
+  };
+}
+
+function highCostExpr(): IrValueExpr {
+  return {
+    kind: "value.binary",
+    type: "i32",
+    operator: "or",
+    a: {
+      kind: "value.binary",
+      type: "i32",
+      operator: "xor",
+      a: addExpr("eax", 1),
+      b: addExpr("ebx", 2)
+    },
+    b: {
+      kind: "source",
+      source: reg("ecx"),
+      accessWidth: 32
+    }
   };
 }
 

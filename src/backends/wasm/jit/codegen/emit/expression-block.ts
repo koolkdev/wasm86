@@ -27,7 +27,6 @@ import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-bo
 import { i32 } from "#x86/state/cpu-state.js";
 import type {
   IrBinaryOperator,
-  IrFlagSetOp,
   IrUnaryOperator
 } from "#x86/ir/model/types.js";
 import {
@@ -76,7 +75,6 @@ export type JitExpressionBlockEmitContext = Readonly<{
   ): ValueWidth;
   emitSet(op: IrSetExprOp, helpers: WasmIrEmitHelpers): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
-  emitSetFlags(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
   emitNextEip(helpers: WasmIrEmitHelpers): ValueWidth;
   emitNext(helpers: WasmIrEmitHelpers): void;
   emitJump(target: IrValueExpr, helpers: WasmIrEmitHelpers): void;
@@ -140,7 +138,6 @@ class JitExpressionBlockEmitter {
         this.#context.emitSet(op, this.#helpers);
         return;
       case "flags.set":
-        this.#context.emitSetFlags(op, this.#helpers);
         return;
       case "jump":
         this.#context.emitJump(op.target, this.#helpers);

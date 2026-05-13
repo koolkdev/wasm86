@@ -203,6 +203,64 @@ test("planJitCodegen keeps same-instruction writes out of later pre-instruction 
   deepStrictEqual(hostTrap.snapshot.valueState.regs.exitStores(), [registerStore("eax", c32(0x1234))]);
 });
 
+test("planJitCodegen keeps uncommitted flag writes out of later pre-instruction faults", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "flag-write-before-fault",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "exit",
+      operands: [],
+      ir: [
+        { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+        {
+          op: "value.binary",
+          type: "i32",
+          operator: "add",
+          dst: { kind: "var", id: 1 },
+          a: { kind: "var", id: 0 },
+          b: { kind: "const", type: "i32", value: 1 }
+        },
+        {
+          op: "flags.set",
+          producer: "inc",
+          writtenMask: FLAG_PRODUCERS.inc.writtenMask,
+          undefMask: 0,
+          inputs: {
+            left: { kind: "var", id: 0 },
+            result: { kind: "var", id: 1 }
+          }
+        },
+        {
+          op: "get",
+          dst: { kind: "var", id: 2 },
+          source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x10000 } },
+          accessWidth: 32
+        },
+        { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
+      ]
+    }]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const readFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
+  const hostTrap = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const expectedFlags = jitInsertMaskedBits(
+    jitInputAluFlagsValue(),
+    jitFlagProducerValue("inc", {
+      left: jitInputReg32Value("eax"),
+      result: addValue(jitInputReg32Value("eax"), c32(1))
+    }, { mask: FLAG_PRODUCERS.inc.writtenMask }),
+    FLAG_PRODUCERS.inc.writtenMask
+  );
+
+  strictEqual(readFault.snapshot.kind, "preInstruction");
+  strictEqual(readFault.exitMaterializationIndex, 0);
+  deepStrictEqual(readFault.snapshot.valueState.flags.exitStores(), []);
+  strictEqual(hostTrap.snapshot.kind, "postInstruction");
+  strictEqual(hostTrap.exitMaterializationIndex, 1);
+  deepStrictEqual(hostTrap.snapshot.valueState.flags.exitStores(), [flagStore(expectedFlags)]);
+});
+
 test("planJitCodegen records exit materializations only for actual exit points", () => {
   const movEax = ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress));
   const movEbx = ok(decodeBytes([0xbb, 0x02, 0x00, 0x00, 0x00], movEax.nextEip));
