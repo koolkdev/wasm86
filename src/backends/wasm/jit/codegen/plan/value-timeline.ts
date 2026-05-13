@@ -12,15 +12,10 @@ import {
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
 import {
-  createJitValueStateFromSnapshot,
-  type JitValueState,
   type JitValueStateSnapshot
 } from "#backends/wasm/jit/state/value-state.js";
 import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
-import {
-  jitFlagSetProducerValue,
-  jitFlagSetWrittenMask
-} from "./flag-values.js";
+import { JitValueStateBuilder } from "./value-state-builder.js";
 import { jitStorageRegisterAlias } from "./operand-analysis.js";
 import type { OperandWidth, RegisterAlias } from "#x86/isa/types.js";
 
@@ -165,7 +160,7 @@ class JitInstructionValueTimelineBuilder {
   readonly #expressionBlock: IrExprBlock;
   readonly #entryValueState: JitValueStateSnapshot;
   readonly #producedValuesByVarId: ReadonlyMap<number, JitProducedValue> | undefined;
-  readonly #valueState: JitValueState;
+  readonly #valueState: JitValueStateBuilder;
   readonly #valueRefs = new Map<number, JitValue>();
   readonly #valueStateSnapshotsByExpressionOpIndex: JitValueStateSnapshot[] = [];
   readonly #expressionValuesByExpressionOpIndex: Map<IrValueExpr, JitValue>[] = [];
@@ -185,7 +180,7 @@ class JitInstructionValueTimelineBuilder {
     this.#expressionBlock = input.expressionBlock;
     this.#entryValueState = input.entryValueState;
     this.#producedValuesByVarId = input.producedValuesByVarId;
-    this.#valueState = createJitValueStateFromSnapshot(input.entryValueState);
+    this.#valueState = new JitValueStateBuilder(input.entryValueState);
   }
 
   build(): JitInstructionValueTimeline {
@@ -281,43 +276,38 @@ class JitInstructionValueTimelineBuilder {
     this.#recordStorageInputs(op.target);
     const value = this.#valueForExpression(op.value);
 
-    const alias = jitStorageRegisterAlias(
-      { operands: this.#operands },
-      op.target,
-      op.accessWidth
-    );
-
-    if (alias === undefined) {
-      return;
-    }
-
     if (value === undefined) {
+      const alias = jitStorageRegisterAlias(
+        { operands: this.#operands },
+        op.target,
+        op.accessWidth
+      );
+
+      if (alias === undefined) {
+        return;
+      }
+
       throw new Error(`could not resolve JIT value timeline register write at expression op ${this.#currentExpressionOpIndex}`);
     }
 
-    if (alias.width === 32 && alias.bitOffset === 0) {
-      this.#valueState.regs.writeReg32(alias.base, value);
-    } else {
-      this.#valueState.regs.writeRegPart(alias.base, alias.bitOffset, alias.width, value);
-    }
+    const write = this.#valueState.recordExpressionSet(
+      op.target,
+      this.#operands,
+      op.accessWidth,
+      value
+    );
 
-    this.#recordLogicalWrite({
-      kind: "reg32",
-      reg: alias.base
-    }, this.#valueState.regs.readReg32(alias.base));
+    if (write !== undefined) {
+      this.#recordLogicalWrite(write.slot, write.value);
+    }
   }
 
   #recordFlagSet(op: Extract<IrExprOp, { op: "flags.set" }>): void {
-    const mask = jitFlagSetWrittenMask(op);
+    const write = this.#valueState.recordFlagSet(op, () => this.#inputRecordFor(op.inputs));
 
-    if (mask === 0) {
-      return;
+    if (write !== undefined) {
+      this.#recordLogicalWrite(write.slot, write.value);
     }
-
-    const producer = jitFlagSetProducerValue(op, this.#inputRecordFor(op.inputs));
-
-    this.#valueState.flags.writeFlagBits(mask, producer);
-    this.#recordLogicalWrite({ kind: "aluFlags" }, this.#valueState.flags.readAluFlags());
   }
 
   #inputRecordFor(inputs: Readonly<Record<string, ValueRef>>): Readonly<Record<string, JitValue>> {
@@ -453,8 +443,8 @@ class JitInstructionValueTimelineBuilder {
   #resolver() {
     return createJitValueResolver({
       operands: this.#operands,
-      readReg32: (reg) => this.#valueState.regs.readReg32(reg),
-      readAluFlags: () => this.#valueState.flags.readAluFlags(),
+      readReg32: (reg) => this.#valueState.readReg32(reg),
+      readAluFlags: () => this.#valueState.readAluFlags(),
       readValueRef: (value) =>
         value.kind === "var" ? this.#valueRefs.get(value.id) : undefined,
     });

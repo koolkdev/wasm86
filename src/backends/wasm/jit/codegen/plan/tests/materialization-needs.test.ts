@@ -9,7 +9,6 @@ import {
   ExitReason,
   buildJitIrBlock,
   buildJitCodegenEmissionPlan,
-  planJitMaterializationUses,
   planJitCodegen,
   jitFlagConditionValue,
   jitFlagProducerValue,
@@ -88,7 +87,7 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
   );
   const expectedFlagStore = flagStore(expectedFlags);
 
-  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
+  deepStrictEqual(exit.observedState.valueState.flags.readAluFlags(), expectedFlags);
   deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
     stores: [expectedFlagStore]
   });
@@ -252,7 +251,7 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
     instructionIndex: 0,
     opIndex: 0,
     exitReason: ExitReason.MEMORY_READ_FAULT,
-    snapshot: entrySnapshot,
+    observedState: entrySnapshot,
     visibleEip: { kind: "static", value: startAddress },
     payload: { kind: "runtime", source: "memoryAddress" },
     exitMaterializationIndex: 1
@@ -261,12 +260,13 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
     instructionIndex: 0,
     opIndex: 4,
     exitReason: ExitReason.HOST_TRAP,
-    snapshot: postSnapshot,
+    observedState: postSnapshot,
     visibleEip: { kind: "static", value: startAddress + 1 },
     payload: { kind: "runtime", source: "hostTrapVector" },
     exitMaterializationIndex: 2
   });
-  const hostTrapRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
+  const produced = jitProducedValue("load#flag-exit-before-register-write:0:0:0", "i32");
+  const hostTrapRegisterStore = registerStore("eax", produced);
   const plan: JitCodegenPlan = {
     block,
     instructionStates: [{
@@ -282,6 +282,10 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
       postInstructionState: postSnapshot,
       exitPointCount: 2
     }],
+    boundaryStates: [
+      entrySnapshot,
+      postSnapshot
+    ],
     exitPoints: [
       readFaultExit,
       hostTrapExit
@@ -304,15 +308,14 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
   }
 
   const expressionBlock = instruction.expressionBlock;
-  const materializationUsePlan = planJitMaterializationUses([{
-    expressionBlock,
-    sourceExpressionMap: instruction.sourceExpressionMap
-  }], plan);
   const hostTrapIndex = expressionBlock.findIndex((op) => op.op === "hostTrap");
-  const uses = materializationUsePlan.jitValueUsesByInstruction[0];
 
   strictEqual(hostTrapIndex !== -1, true);
-  deepStrictEqual(uses?.get(hostTrapIndex), [addValue(jitInputReg32Value("eax"), c32(1))]);
+  deepStrictEqual(
+    instruction.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
+    [produced]
+  );
+  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
 });
 
 test("buildJitCodegenEmissionPlan walks flag-store condition and select dependencies", () => {
@@ -353,7 +356,7 @@ test("buildJitCodegenEmissionPlan walks flag-store condition and select dependen
     instructionIndex: 0,
     opIndex: 1,
     exitReason: ExitReason.HOST_TRAP,
-    snapshot: postSnapshot,
+    observedState: postSnapshot,
     visibleEip: { kind: "static", value: startAddress + 1 },
     payload: { kind: "runtime", source: "hostTrapVector" },
     exitMaterializationIndex: 1
@@ -369,6 +372,7 @@ test("buildJitCodegenEmissionPlan walks flag-store condition and select dependen
       postInstructionState: postSnapshot,
       exitPointCount: 1
     }],
+    boundaryStates: [postSnapshot],
     exitPoints: [hostTrapExit],
     materializationNeeds: [
       exitStoreNeed(flagStore(selectedFlags), hostTrapExit, 0)

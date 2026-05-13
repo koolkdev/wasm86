@@ -64,7 +64,7 @@ export function createJitIrState(
       useExitMaterialization(exit, 0);
       installExitMetadataStores(exit, () => {
         body.i32Const(i32(entryEip));
-      }, entryPoint.snapshot.instructionCountDelta);
+      }, entryPoint.boundaryState.instructionCountDelta);
     },
     prepareExitPoint: (exitPoint, emitRuntimeVisibleEip) => {
       const exit = requiredActiveExit();

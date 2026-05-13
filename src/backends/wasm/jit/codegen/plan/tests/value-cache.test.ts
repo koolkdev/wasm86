@@ -139,11 +139,14 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         exitPointCount: 1
       }
     ],
+    boundaryStates: [
+      boundaryState(instructionExit(1, block.instructions[1]!), 2, ["eax"])
+    ],
     exitPoints: [exitPoint({
       instructionIndex: 1,
       opIndex: 1,
       exitReason: ExitReason.HOST_TRAP,
-      snapshot: boundaryState(instructionExit(1, block.instructions[1]!), 2, ["eax"]),
+      observedState: boundaryState(instructionExit(1, block.instructions[1]!), 2, ["eax"]),
       exitMaterializationIndex: 1
     })],
     materializationNeeds: [],
@@ -204,11 +207,14 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
       exitPointCount: 1
     }],
+    boundaryStates: [
+      boundaryState(instructionEntry(0), 0, ["eax"])
+    ],
     exitPoints: [exitPoint({
       instructionIndex: 0,
       opIndex: 0,
       exitReason: ExitReason.MEMORY_READ_FAULT,
-      snapshot: boundaryState(instructionEntry(0), 0, ["eax"]),
+      observedState: boundaryState(instructionEntry(0), 0, ["eax"]),
       visibleEip: { kind: "static", value: startAddress },
       payload: { kind: "runtime", source: "memoryAddress" },
       exitMaterializationIndex: 1

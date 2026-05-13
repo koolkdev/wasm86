@@ -1,21 +1,154 @@
-import type { IrBinaryValueOp, IrOp, IrSelectValueOp, IrUnaryValueOp, ValueRef } from "#x86/ir/model/types.js";
+import type {
+  IrBinaryValueOp,
+  ConditionCode,
+  IrOp,
+  IrSelectValueOp,
+  IrUnaryValueOp,
+  ValueRef
+} from "#x86/ir/model/types.js";
+import type {
+  IrExprOp,
+  IrStorageExpr
+} from "#backends/wasm/codegen/expressions.js";
+import { i32 } from "#x86/state/cpu-state.js";
+import { reg32, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { jitProducedValueForEffectfulRead } from "#backends/wasm/jit/ir/produced-values.js";
 import {
   jitValueForEffectiveAddress,
   jitValueForStorage,
   jitValueForValue,
+  type JitArchitecturalSlot,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
-import type { JitRegisterValueMap } from "#backends/wasm/jit/ir/register-prefix-values.js";
+import {
+  jitStorageRegisterAccess,
+  type JitRegisterValueMap
+} from "#backends/wasm/jit/ir/register-prefix-values.js";
 import type { JitIrLocation } from "#backends/wasm/jit/ir/walk.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
+import {
+  createJitValueState,
+  createJitValueStateFromSnapshot,
+  type JitValueState,
+  type JitValueStateSnapshot
+} from "#backends/wasm/jit/state/value-state.js";
+import {
+  jitFlagSetProducerValue,
+  jitFlagSetWrittenMask
+} from "./flag-values.js";
+import { jitStorageRegisterAlias } from "./operand-analysis.js";
 
-export type JitValueTrackerRecordOptions = Readonly<{
+export type JitValueStateBuilderWrite = Readonly<{
+  slot: JitArchitecturalSlot;
+  value: JitValue;
+}>;
+
+export type JitSourceValueMapRecordOptions = Readonly<{
   location?: JitIrLocation;
 }>;
 
-export class JitValueTracker {
+export class JitValueStateBuilder {
+  readonly #valueState: JitValueState;
+
+  constructor(snapshot?: JitValueStateSnapshot) {
+    this.#valueState = snapshot === undefined
+      ? createJitValueState()
+      : createJitValueStateFromSnapshot(snapshot);
+  }
+
+  snapshot(): JitValueStateSnapshot {
+    return this.#valueState.snapshot();
+  }
+
+  readReg32(reg: Reg32): JitValue {
+    return this.#valueState.regs.readReg32(reg);
+  }
+
+  readAluFlags(): JitValue {
+    return this.#valueState.flags.readAluFlags();
+  }
+
+  condition(cc: ConditionCode): JitValue {
+    return this.#valueState.flags.condition(cc);
+  }
+
+  currentRegisterValues(): JitRegisterValueMap {
+    return new Map(reg32.map((reg) => [reg, this.#valueState.regs.readReg32(reg)]));
+  }
+
+  recordSourceSet(
+    op: Extract<IrOp, { op: "set" }>,
+    instruction: JitIrBlockInstruction,
+    value: JitValue | undefined
+  ): JitValueStateBuilderWrite | undefined {
+    const access = jitStorageRegisterAccess(op.target, instruction.operands, op.accessWidth ?? 32);
+
+    if (access === undefined) {
+      return undefined;
+    }
+
+    if (value === undefined) {
+      throw new Error("could not resolve JIT boundary-state register write");
+    }
+
+    return this.#writeReg(access.reg, access.bitOffset, access.width, value);
+  }
+
+  recordExpressionSet(
+    target: IrStorageExpr,
+    operands: readonly JitOperandBinding[],
+    accessWidth: OperandWidth,
+    value: JitValue
+  ): JitValueStateBuilderWrite | undefined {
+    const alias = jitStorageRegisterAlias({ operands }, target, accessWidth);
+
+    if (alias === undefined) {
+      return undefined;
+    }
+
+    return this.#writeReg(alias.base, alias.bitOffset, alias.width, value);
+  }
+
+  recordFlagSet(
+    op: Extract<IrOp | IrExprOp, { op: "flags.set" }>,
+    resolveInputs: () => Readonly<Record<string, JitValue>>
+  ): JitValueStateBuilderWrite | undefined {
+    const mask = jitFlagSetWrittenMask(op);
+
+    if (mask === 0) {
+      return undefined;
+    }
+
+    const producer = jitFlagSetProducerValue(op, resolveInputs());
+
+    this.#valueState.flags.writeFlagBits(mask, producer);
+    return {
+      slot: { kind: "aluFlags" },
+      value: this.#valueState.flags.readAluFlags()
+    };
+  }
+
+  #writeReg(
+    reg: Reg32,
+    bitOffset: number,
+    width: OperandWidth,
+    value: JitValue
+  ): JitValueStateBuilderWrite {
+    if (width === 32 && bitOffset === 0) {
+      this.#valueState.regs.writeReg32(reg, value);
+    } else {
+      this.#valueState.regs.writeRegPart(reg, bitOffset, width, value);
+    }
+
+    return {
+      slot: { kind: "reg32", reg },
+      value: this.#valueState.regs.readReg32(reg)
+    };
+  }
+}
+
+export class JitSourceValueMap {
   #locals = new Map<number, JitValue>();
 
   clear(): void {
@@ -58,7 +191,7 @@ export class JitValueTracker {
     op: IrOp,
     instruction: JitIrBlockInstruction,
     registerValues: JitRegisterValueMap = new Map(),
-    options: JitIrLocation | JitValueTrackerRecordOptions = {}
+    options: JitIrLocation | JitSourceValueMapRecordOptions = {}
   ): boolean {
     const recordOptions = normalizeRecordOptions(options);
 
@@ -118,7 +251,7 @@ export class JitValueTracker {
     op: Extract<IrOp, { op: "get" }>,
     instruction: JitIrBlockInstruction,
     registerValues: JitRegisterValueMap,
-    options: JitValueTrackerRecordOptions
+    options: JitSourceValueMapRecordOptions
   ): JitValue | undefined {
     return (options.location === undefined
       ? undefined
@@ -134,8 +267,8 @@ export class JitValueTracker {
 }
 
 function normalizeRecordOptions(
-  options: JitIrLocation | JitValueTrackerRecordOptions
-): JitValueTrackerRecordOptions {
+  options: JitIrLocation | JitSourceValueMapRecordOptions
+): JitSourceValueMapRecordOptions {
   return "instructionIndex" in options
     ? { location: options }
     : options;

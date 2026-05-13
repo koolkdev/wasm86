@@ -6,12 +6,9 @@ import {
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/produced-values.js";
-import type { JitProducedValue } from "#backends/wasm/jit/ir/values.js";
-import {
-  canInlineJitInstructionGet,
-  jitInstructionStorageRefsMayAlias
-} from "./operand-analysis.js";
-import { planJitMaterializationUses } from "./materialization-uses.js";
+import type {
+  JitProducedValue
+} from "#backends/wasm/jit/ir/values.js";
 import {
   planJitExpressionValueCacheForInstructions,
   type JitExpressionValueCachePlan
@@ -27,6 +24,11 @@ import type {
   JitMaterializationNeed,
   JitInstructionState
 } from "./types.js";
+import {
+  canInlineJitInstructionGet,
+  jitInstructionStorageRefsMayAlias
+} from "./operand-analysis.js";
+import { placeJitValueUsesOnExpressions } from "./expression-uses.js";
 
 export type JitCodegenInstructionPlan = JitInstructionState & Pick<
   JitIrBlockInstruction,
@@ -72,7 +74,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     const valueTimeline = buildJitInstructionValueTimeline({
       operands: instruction.operands,
       expressionBlock: expressionPlan.expressionBlock,
-      entryValueState: state.entryPoint.snapshot.valueState,
+      entryValueState: state.entryPoint.boundaryState.valueState,
       producedValuesByVarId
     });
 
@@ -85,17 +87,16 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
       sourceExpressionMap: expressionPlan.sourceMap
     };
   });
-  const materializationUsePlan = planJitMaterializationUses(
+  const jitValueUsesByExpression = placeJitValueUsesOnExpressions(
     instructions,
-    codegenPlan
+    codegenPlan.materializationNeeds
   );
-  const { jitValueUsesByInstruction } = materializationUsePlan;
   const valueCachePlan = planJitExpressionValueCacheForInstructions(
     instructions.map((instruction, index) => ({
       operands: instruction.operands,
       expressionBlock: instruction.expressionBlock,
       valueTimeline: instruction.valueTimeline,
-      materializationJitValueUsesByExpressionIndex: jitValueUsesByInstruction[index] ?? new Map()
+      materializationJitValueUsesByExpressionIndex: jitValueUsesByExpression[index] ?? new Map()
     }))
   );
 

@@ -40,7 +40,7 @@ import {
 } from "#backends/wasm/jit/codegen/plan/plan.js";
 import type {
   JitBoundaryRef,
-  JitStateSnapshot
+  JitBoundaryState
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
@@ -93,7 +93,7 @@ export type {
   JitValueUseCount,
   JitIrBlock,
   JitBoundaryRef,
-  JitStateSnapshot,
+  JitBoundaryState,
   Reg32
 };
 
@@ -255,7 +255,7 @@ export function countOpcode(opcodes: readonly number[], opcode: number): number 
 export function boundaryState(
   boundary: JitBoundaryRef,
   instructionCountDelta: number
-): JitStateSnapshot {
+): JitBoundaryState {
   return {
     boundary,
     instructionCountDelta,

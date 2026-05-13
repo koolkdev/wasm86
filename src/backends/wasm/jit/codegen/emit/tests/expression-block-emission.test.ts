@@ -49,7 +49,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
       nextMode: instruction.nextMode,
       entryPoint: {
         instructionIndex: 0,
-        snapshot: entrySnapshot
+        boundaryState: entrySnapshot
       },
       postInstructionState: postSnapshot,
       exitPointCount: 1,
@@ -72,7 +72,6 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
       exitReason: ExitReason.HOST_TRAP,
       payload: { kind: "runtime", source: "hostTrapVector" },
       pathScope: "deferredExit",
-      snapshot: postSnapshot,
       exitMaterializationIndex: 0
     }]
   });

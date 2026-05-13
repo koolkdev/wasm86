@@ -22,8 +22,6 @@ export type JitBoundaryState = Readonly<{
   valueState: JitValueStateSnapshot;
 }>;
 
-export type JitStateSnapshot = JitBoundaryState;
-
 export type JitObservationRuntimeSource =
   | "controlTarget"
   | "hostTrapVector"
@@ -42,13 +40,11 @@ export type JitObservationPoint = Readonly<{
   opIndex: number;
   emitBoundary: JitBoundaryRef;
   observedBoundary: JitBoundaryRef;
-  observedState: JitStateSnapshot;
+  observedState: JitBoundaryState;
   visibleEip: JitObservationValue;
   exitReason: ExitReasonValue;
   payload: JitObservationPayload;
   pathScope: JitMaterializationPathScope;
-  /** Compatibility alias while older emission code still speaks in snapshots. */
-  snapshot: JitStateSnapshot;
   exitMaterializationIndex: number;
 }>;
 
@@ -87,7 +83,7 @@ export type JitPreInstructionExitPlan = Readonly<{
 
 export type JitInstructionEntryPoint = Readonly<{
   instructionIndex: number;
-  snapshot: JitStateSnapshot;
+  boundaryState: JitBoundaryState;
   preInstructionExitPlan?: JitPreInstructionExitPlan;
 }>;
 
@@ -97,7 +93,7 @@ export type JitInstructionState = Readonly<{
   nextEip: number;
   nextMode: "continue" | "exit";
   entryPoint: JitInstructionEntryPoint;
-  postInstructionState: JitStateSnapshot;
+  postInstructionState: JitBoundaryState;
   exitPointCount: number;
 }>;
 
@@ -108,27 +104,9 @@ export type JitExitMaterializationPlan = Readonly<{
 export type JitCodegenPlan = Readonly<{
   block: JitIrBlock;
   instructionStates: readonly JitInstructionState[];
+  boundaryStates: readonly JitBoundaryState[];
   exitPoints: readonly JitExitPoint[];
   materializationNeeds: readonly JitMaterializationNeed[];
   exitMaterializations: readonly JitExitMaterializationPlan[];
   maxExitMaterializationIndex: number;
 }>;
-
-export function instructionEntry(instructionIndex: number): JitBoundaryRef {
-  return { instructionIndex, boundaryIndex: 0 };
-}
-
-export function beforeOp(instructionIndex: number, opIndex: number): JitBoundaryRef {
-  return { instructionIndex, boundaryIndex: opIndex };
-}
-
-export function afterOp(instructionIndex: number, opIndex: number): JitBoundaryRef {
-  return { instructionIndex, boundaryIndex: opIndex + 1 };
-}
-
-export function instructionExit(
-  instructionIndex: number,
-  instruction: Readonly<{ ir: readonly unknown[] }>
-): JitBoundaryRef {
-  return { instructionIndex, boundaryIndex: instruction.ir.length };
-}

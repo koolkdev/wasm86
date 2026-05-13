@@ -9,7 +9,6 @@ import { ExitReason } from "#backends/wasm/exit.js";
 import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
-import { planJitMaterializationUses } from "#backends/wasm/jit/codegen/plan/materialization-uses.js";
 import {
   afterOp,
   beforeOp,
@@ -22,14 +21,14 @@ import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/pla
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   JitBoundaryRef,
+  JitBoundaryState,
   JitCodegenPlan,
   JitExitMaterializationStore,
   JitExitPoint,
   JitInstructionEntryPoint,
   JitMaterializationNeed,
   JitObservationPayload,
-  JitObservationValue,
-  JitStateSnapshot
+  JitObservationValue
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
   jitExtractBits,
@@ -59,7 +58,6 @@ export {
   ExitReason,
   buildJitIrBlock,
   buildJitCodegenEmissionPlan,
-  planJitMaterializationUses,
   afterOp,
   beforeOp,
   instructionEntry,
@@ -90,7 +88,7 @@ export type {
   JitMaterializationNeed,
   JitObservationPayload,
   JitObservationValue,
-  JitStateSnapshot,
+  JitBoundaryState,
   JitProducedValue,
   JitValue,
   JitIrBlock
@@ -162,7 +160,7 @@ export function exitPoint(input: Readonly<{
   instructionIndex: number;
   opIndex: number;
   exitReason: ExitReason;
-  snapshot: JitStateSnapshot;
+  observedState: JitBoundaryState;
   exitMaterializationIndex: number;
   visibleEip?: JitObservationValue;
   payload?: JitObservationPayload;
@@ -175,8 +173,8 @@ export function exitPoint(input: Readonly<{
     instructionIndex: input.instructionIndex,
     opIndex: input.opIndex,
     emitBoundary,
-    observedBoundary: input.snapshot.boundary,
-    observedState: input.snapshot,
+    observedBoundary: input.observedState.boundary,
+    observedState: input.observedState,
     visibleEip,
     exitReason: input.exitReason,
     payload: input.payload ?? visibleEip,
@@ -187,14 +185,13 @@ export function exitPoint(input: Readonly<{
           ? "notTaken"
           : "deferredExit"
     ),
-    snapshot: input.snapshot,
     exitMaterializationIndex: input.exitMaterializationIndex
   };
 }
 
 export function instructionEntryPoint(
   instructionIndex: number,
-  entrySnapshot: JitStateSnapshot,
+  boundaryState: JitBoundaryState,
   overrides: Partial<Pick<
     JitInstructionEntryPoint,
     "preInstructionExitPlan"
@@ -202,7 +199,7 @@ export function instructionEntryPoint(
 ): JitInstructionEntryPoint {
   return {
     instructionIndex,
-    snapshot: entrySnapshot,
+    boundaryState,
     ...overrides
   };
 }
@@ -211,7 +208,7 @@ export function boundaryState(
   boundary: JitBoundaryRef,
   instructionCountDelta: number,
   changedRegs: readonly Reg32[] = []
-): JitStateSnapshot {
+): JitBoundaryState {
   const valueState = createJitValueState();
 
   for (const reg of changedRegs) {

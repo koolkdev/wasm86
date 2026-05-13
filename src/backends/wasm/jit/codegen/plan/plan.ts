@@ -1,5 +1,5 @@
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
-import { analyzeJitCodegenState } from "./exit-state-analysis.js";
+import { analyzeJitCodegenState } from "./state-plan.js";
 import type { JitCodegenPlan } from "./types.js";
 
 export type {
@@ -21,15 +21,14 @@ export type {
   JitMaterializationPathScope,
   MaterializationTarget,
   JitPreInstructionExitPlan,
-  JitCodegenPlan,
-  JitStateSnapshot
+  JitCodegenPlan
 } from "./types.js";
 export {
   afterOp,
   beforeOp,
   instructionEntry,
   instructionExit
-} from "./types.js";
+} from "./boundaries.js";
 export type {
   JitInstructionValueTimeline,
   JitInstructionValueTimelineInput,
