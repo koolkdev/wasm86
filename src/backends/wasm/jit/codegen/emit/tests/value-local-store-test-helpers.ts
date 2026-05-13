@@ -34,7 +34,14 @@ import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { emitJitBlock } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
-import type { JitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
+import {
+  instructionEntry,
+  instructionExit
+} from "#backends/wasm/jit/codegen/plan/plan.js";
+import type {
+  JitBoundaryRef,
+  JitStateSnapshot
+} from "#backends/wasm/jit/codegen/plan/types.js";
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
@@ -71,6 +78,8 @@ export {
   emitJitBlock,
   planJitExpressionValueCache,
   buildJitInstructionValueTimeline,
+  instructionEntry,
+  instructionExit,
   createJitIrState,
   createJitValueState,
   emitPlannedExpression
@@ -83,6 +92,7 @@ export type {
   JitValueCacheRuntime,
   JitValueUseCount,
   JitIrBlock,
+  JitBoundaryRef,
   JitStateSnapshot,
   Reg32
 };
@@ -242,14 +252,12 @@ export function countOpcode(opcodes: readonly number[], opcode: number): number 
   return opcodes.filter((entry) => entry === opcode).length;
 }
 
-export function stateSnapshot(
-  kind: JitStateSnapshot["kind"],
-  eip: number,
+export function boundaryState(
+  boundary: JitBoundaryRef,
   instructionCountDelta: number
 ): JitStateSnapshot {
   return {
-    kind,
-    eip,
+    boundary,
     instructionCountDelta,
     valueState: createJitValueState().snapshot()
   };

@@ -26,9 +26,22 @@ import {
   c32,
   addValue,
   subValue,
+  beforeOp,
+  afterOp,
+  instructionEntry,
+  instructionExit,
   type JitValue,
   type JitIrBlock,
 } from "./plan-test-helpers.js";
+test("JIT boundary helpers produce explicit instruction timeline coordinates", () => {
+  const instruction = { ir: [{ op: "first" }, { op: "second" }, { op: "third" }] };
+
+  deepStrictEqual(instructionEntry(4), { instructionIndex: 4, boundaryIndex: 0 });
+  deepStrictEqual(beforeOp(4, 2), { instructionIndex: 4, boundaryIndex: 2 });
+  deepStrictEqual(afterOp(4, 2), { instructionIndex: 4, boundaryIndex: 3 });
+  deepStrictEqual(instructionExit(4, instruction), { instructionIndex: 4, boundaryIndex: 3 });
+});
+
 test("planJitCodegen records post-instruction fallthrough exits", () => {
   const instruction = ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([instruction])));
@@ -41,12 +54,14 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
     { stores: [registerStore("eax", c32(1))] }
   ]);
   strictEqual(instructionState.entryPoint.instructionIndex, 0);
-  strictEqual(instructionState.entryPoint.snapshot.kind, "preInstruction");
-  strictEqual(instructionState.entryPoint.snapshot.eip, instruction.address);
+  deepStrictEqual(instructionState.entryPoint.snapshot.boundary, instructionEntry(0));
+  strictEqual("kind" in instructionState.entryPoint.snapshot, false);
+  strictEqual("eip" in instructionState.entryPoint.snapshot, false);
   strictEqual(instructionState.entryPoint.preInstructionExitPlan, undefined);
   strictEqual(instructionState.exitPointCount, 1);
-  strictEqual(exit.snapshot.kind, "postInstruction");
-  strictEqual(exit.snapshot.eip, instruction.nextEip);
+  deepStrictEqual(exit.snapshot.boundary, instructionExit(0, codegenPlan.block.instructions[0]!));
+  strictEqual("kind" in exit.snapshot, false);
+  strictEqual("eip" in exit.snapshot, false);
   strictEqual(exit.snapshot.instructionCountDelta, 1);
   strictEqual(exit.exitMaterializationIndex, 1);
   deepStrictEqual(exit.snapshot.valueState.regs.exitStores(), [registerStore("eax", c32(1))]);
@@ -66,14 +81,12 @@ test("planJitCodegen keeps memory faults at pre-instruction snapshots", () => {
     entry.entryPoint.preInstructionExitPlan?.exitPointCount ?? 0
   ), [0, 1]);
   strictEqual(loadInstructionState.entryPoint.instructionIndex, 1);
-  strictEqual(loadInstructionState.entryPoint.snapshot.kind, "preInstruction");
-  strictEqual(loadInstructionState.entryPoint.snapshot.eip, load.address);
+  deepStrictEqual(loadInstructionState.entryPoint.snapshot.boundary, instructionEntry(1));
   deepStrictEqual(loadInstructionState.entryPoint.preInstructionExitPlan, {
     exitPointCount: 1
   });
   strictEqual(exit.instructionIndex, 1);
-  strictEqual(exit.snapshot.kind, "preInstruction");
-  strictEqual(exit.snapshot.eip, load.address);
+  deepStrictEqual(exit.snapshot.boundary, instructionEntry(1));
   strictEqual(exit.snapshot.instructionCountDelta, 1);
   strictEqual(exit.exitMaterializationIndex, 1);
   const expectedRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
@@ -149,8 +162,7 @@ test("planJitCodegen excludes current-instruction speculative writes from memory
   deepStrictEqual(instructionState.entryPoint.preInstructionExitPlan, {
     exitPointCount: 2
   });
-  strictEqual(writeFault.snapshot.kind, "preInstruction");
-  strictEqual(writeFault.snapshot.eip, instruction.address);
+  deepStrictEqual(writeFault.snapshot.boundary, instructionEntry(0));
   strictEqual(writeFault.snapshot.instructionCountDelta, 0);
   strictEqual(writeFault.exitMaterializationIndex, 0);
   deepStrictEqual(writeFault.snapshot.valueState.regs.exitStores(), []);
@@ -186,10 +198,10 @@ test("planJitCodegen keeps same-instruction writes out of later pre-instruction 
   const readFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
 
-  strictEqual(readFault.snapshot.kind, "preInstruction");
+  deepStrictEqual(readFault.snapshot.boundary, instructionEntry(0));
   strictEqual(readFault.exitMaterializationIndex, 0);
   deepStrictEqual(readFault.snapshot.valueState.regs.exitStores(), []);
-  strictEqual(hostTrap.snapshot.kind, "postInstruction");
+  deepStrictEqual(hostTrap.snapshot.boundary, instructionExit(0, codegenPlan.block.instructions[0]!));
   strictEqual(hostTrap.exitMaterializationIndex, 1);
   deepStrictEqual(hostTrap.snapshot.valueState.regs.exitStores(), [registerStore("eax", c32(0x1234))]);
 });
@@ -244,10 +256,10 @@ test("planJitCodegen keeps same-instruction flag writes out of later pre-instruc
     FLAG_PRODUCERS.inc.writtenMask
   );
 
-  strictEqual(readFault.snapshot.kind, "preInstruction");
+  deepStrictEqual(readFault.snapshot.boundary, instructionEntry(0));
   strictEqual(readFault.exitMaterializationIndex, 0);
   deepStrictEqual(readFault.snapshot.valueState.flags.exitStores(), []);
-  strictEqual(hostTrap.snapshot.kind, "postInstruction");
+  deepStrictEqual(hostTrap.snapshot.boundary, instructionExit(0, codegenPlan.block.instructions[0]!));
   strictEqual(hostTrap.exitMaterializationIndex, 1);
   deepStrictEqual(hostTrap.snapshot.valueState.flags.exitStores(), [flagStore(expectedFlags)]);
 });
@@ -285,7 +297,7 @@ test("planJitCodegen records snapshot-derived flag stores for branch exits", () 
   strictEqual(branchExits.length, 2);
 
   for (const exit of branchExits) {
-    strictEqual(exit.snapshot.kind, "postInstruction");
+    deepStrictEqual(exit.snapshot.boundary, instructionExit(1, codegenPlan.block.instructions[1]!));
     deepStrictEqual(exit.snapshot.valueState.flags.exitStores(), [
       flagStore(exit.snapshot.valueState.flags.readAluFlags())
     ]);

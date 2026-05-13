@@ -11,14 +11,18 @@ import type {
   MaterializationTarget
 } from "#backends/wasm/jit/ir/materialization.js";
 
-export type JitExitSnapshotKind = "preInstruction" | "postInstruction";
+export type JitBoundaryRef = Readonly<{
+  instructionIndex: number;
+  boundaryIndex: number;
+}>;
 
-export type JitStateSnapshot = Readonly<{
-  kind: JitExitSnapshotKind;
-  eip: number;
+export type JitBoundaryState = Readonly<{
+  boundary: JitBoundaryRef;
   instructionCountDelta: number;
   valueState: JitValueStateSnapshot;
 }>;
+
+export type JitStateSnapshot = JitBoundaryState;
 
 export type JitExitPoint = Readonly<{
   instructionIndex: number;
@@ -86,3 +90,22 @@ export type JitCodegenPlan = Readonly<{
   exitMaterializations: readonly JitExitMaterializationPlan[];
   maxExitMaterializationIndex: number;
 }>;
+
+export function instructionEntry(instructionIndex: number): JitBoundaryRef {
+  return { instructionIndex, boundaryIndex: 0 };
+}
+
+export function beforeOp(instructionIndex: number, opIndex: number): JitBoundaryRef {
+  return { instructionIndex, boundaryIndex: opIndex };
+}
+
+export function afterOp(instructionIndex: number, opIndex: number): JitBoundaryRef {
+  return { instructionIndex, boundaryIndex: opIndex + 1 };
+}
+
+export function instructionExit(
+  instructionIndex: number,
+  instruction: Readonly<{ ir: readonly unknown[] }>
+): JitBoundaryRef {
+  return { instructionIndex, boundaryIndex: instruction.ir.length };
+}

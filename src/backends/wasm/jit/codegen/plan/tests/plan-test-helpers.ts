@@ -10,11 +10,18 @@ import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitMaterializationUses } from "#backends/wasm/jit/codegen/plan/materialization-uses.js";
-import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
+import {
+  afterOp,
+  beforeOp,
+  instructionEntry,
+  instructionExit,
+  planJitCodegen
+} from "#backends/wasm/jit/codegen/plan/plan.js";
 import { planJitExpressionValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
+  JitBoundaryRef,
   JitCodegenPlan,
   JitExitMaterializationStore,
   JitExitPoint,
@@ -51,6 +58,10 @@ export {
   buildJitIrBlock,
   buildJitCodegenEmissionPlan,
   planJitMaterializationUses,
+  afterOp,
+  beforeOp,
+  instructionEntry,
+  instructionExit,
   planJitCodegen,
   planJitExpressionValueCacheForInstructions,
   buildJitInstructionValueTimeline,
@@ -159,9 +170,8 @@ export function instructionEntryPoint(
   };
 }
 
-export function snapshot(
-  kind: JitStateSnapshot["kind"],
-  eip: number,
+export function boundaryState(
+  boundary: JitBoundaryRef,
   instructionCountDelta: number,
   changedRegs: readonly Reg32[] = []
 ): JitStateSnapshot {
@@ -172,8 +182,7 @@ export function snapshot(
   }
 
   return {
-    kind,
-    eip,
+    boundary,
     instructionCountDelta,
     valueState: valueState.snapshot()
   };

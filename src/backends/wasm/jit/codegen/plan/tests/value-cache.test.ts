@@ -12,7 +12,9 @@ import {
   planValueCacheForTest,
   registerStore,
   instructionEntryPoint,
-  snapshot,
+  boundaryState,
+  instructionEntry,
+  instructionExit,
   c32,
   addValue,
   type JitCodegenPlan,
@@ -122,8 +124,8 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         eip: startAddress,
         nextEip: startAddress + 1,
         nextMode: "continue",
-        entryPoint: instructionEntryPoint(0, snapshot("preInstruction", startAddress, 0)),
-        postInstructionState: snapshot("postInstruction", startAddress + 1, 1, ["eax"]),
+        entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0)),
+        postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
         exitPointCount: 0
       },
       {
@@ -131,8 +133,8 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         eip: startAddress + 1,
         nextEip: startAddress + 2,
         nextMode: "exit",
-        entryPoint: instructionEntryPoint(1, snapshot("preInstruction", startAddress + 1, 1, ["eax"])),
-        postInstructionState: snapshot("postInstruction", startAddress + 2, 2, ["eax"]),
+        entryPoint: instructionEntryPoint(1, boundaryState(instructionEntry(1), 1, ["eax"])),
+        postInstructionState: boundaryState(instructionExit(1, block.instructions[1]!), 2, ["eax"]),
         exitPointCount: 1
       }
     ],
@@ -140,7 +142,7 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
       instructionIndex: 1,
       opIndex: 1,
       exitReason: ExitReason.HOST_TRAP,
-      snapshot: snapshot("postInstruction", startAddress + 2, 2, ["eax"]),
+      snapshot: boundaryState(instructionExit(1, block.instructions[1]!), 2, ["eax"]),
       exitMaterializationIndex: 1
     }],
     materializationNeeds: [],
@@ -193,19 +195,19 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "continue",
-      entryPoint: instructionEntryPoint(0, snapshot("preInstruction", startAddress, 0, ["eax"]), {
+      entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0, ["eax"]), {
         preInstructionExitPlan: {
           exitPointCount: 1
         }
       }),
-      postInstructionState: snapshot("postInstruction", startAddress + 1, 1, ["eax"]),
+      postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
       exitPointCount: 1
     }],
     exitPoints: [{
       instructionIndex: 0,
       opIndex: 0,
       exitReason: ExitReason.MEMORY_READ_FAULT,
-      snapshot: snapshot("preInstruction", startAddress, 0, ["eax"]),
+      snapshot: boundaryState(instructionEntry(0), 0, ["eax"]),
       exitMaterializationIndex: 1
     }],
     materializationNeeds: [],

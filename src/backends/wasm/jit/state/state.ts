@@ -33,7 +33,7 @@ export type JitIrState = Readonly<{
   instructionCountLocal: number;
   maxExitMaterializationIndex: number;
   emitLoadInstructionCount(): void;
-  beginInstruction(exit: JitExitTarget, entryPoint: JitInstructionEntryPoint): void;
+  beginInstruction(exit: JitExitTarget, entryPoint: JitInstructionEntryPoint, entryEip: number): void;
   prepareExitPoint(exitPoint: JitExitPoint, emitEip: () => void): void;
   commitInstructionExit(exitPoint: JitExitPoint, emitEip: () => void): void;
   emitExitMaterializationStores(index: number): void;
@@ -59,11 +59,11 @@ export function createJitIrState(
       emitLoadStateU32(body, stateOffset.instructionCount);
       body.localSet(instructionCountLocal);
     },
-    beginInstruction: (exit, entryPoint) => {
+    beginInstruction: (exit, entryPoint, entryEip) => {
       activeExit = exit;
       useExitMaterialization(exit, 0);
       installExitMetadataStores(exit, () => {
-        body.i32Const(i32(entryPoint.snapshot.eip));
+        body.i32Const(i32(entryEip));
       }, entryPoint.snapshot.instructionCountDelta);
     },
     prepareExitPoint: (exitPoint, emitEip) => {

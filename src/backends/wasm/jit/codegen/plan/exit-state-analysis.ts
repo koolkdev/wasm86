@@ -19,6 +19,7 @@ import type {
   JitMaterializationPathScope,
   JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
+import { instructionEntry } from "#backends/wasm/jit/codegen/plan/types.js";
 
 export function analyzeJitCodegenState(
   block: JitIrBlock,
@@ -43,7 +44,7 @@ export function analyzeJitCodegenState(
     }
 
     state.beginInstruction();
-    const entry = state.snapshot("preInstruction", instruction.eip);
+    const entry = state.snapshot(instructionEntry(instructionIndex));
     const exitStart = exitPoints.length;
 
     for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
@@ -103,8 +104,11 @@ export function analyzeJitCodegenState(
     maxExitMaterializationIndex: exitMaterializations.length - 1
   };
 
-  function instructionPostState(instruction: JitIrBlockInstruction): JitStateSnapshot {
-    currentPostState ??= state.snapshotPostInstruction(instruction.nextEip);
+  function instructionPostState(
+    instruction: JitIrBlockInstruction,
+    instructionIndex: number
+  ): JitStateSnapshot {
+    currentPostState ??= state.snapshotPostInstruction(instructionIndex, instruction);
 
     return currentPostState;
   }
@@ -145,7 +149,7 @@ export function analyzeJitCodegenState(
     opIndex: number
   ): void {
     const exitReasons = jitPostInstructionExitReasonsAt(effects, instructionIndex, opIndex);
-    const snapshot = instructionPostState(instruction);
+    const snapshot = instructionPostState(instruction, instructionIndex);
 
     for (const exitReason of exitReasons) {
       recordExitPoint(instructionIndex, opIndex, exitReason, snapshot);
@@ -239,7 +243,7 @@ function countPreInstructionExitPoints(exitPoints: readonly JitExitPoint[], exit
   for (let index = exitStart; index < exitPoints.length; index += 1) {
     const exitPoint = exitPoints[index];
 
-    if (exitPoint?.snapshot.kind === "preInstruction") {
+    if (exitPoint?.snapshot.boundary.boundaryIndex === 0) {
       count += 1;
     }
   }

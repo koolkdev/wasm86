@@ -125,7 +125,7 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
       return exitPoint;
     },
     completeExitPoint: (exitPoint) => {
-      if (exitPoint.snapshot.kind !== "preInstruction") {
+      if (exitPoint.snapshot.boundary.boundaryIndex !== 0) {
         return;
       }
 
@@ -204,7 +204,7 @@ function beginInstruction(
   exit: JitExitTarget,
   instruction: JitIrInstructionContext
 ): void {
-  context.state.beginInstruction(exit, instruction.entryPoint);
+  context.state.beginInstruction(exit, instruction.entryPoint, instruction.eip);
 }
 
 function indexExitPoints(exitPoints: readonly JitExitPoint[]): ReadonlyMap<string, readonly JitExitPoint[]> {

@@ -24,7 +24,9 @@ import {
   flagStore,
   exitStoreNeed,
   instructionEntryPoint,
-  snapshot,
+  boundaryState,
+  instructionEntry,
+  instructionExit,
   c32,
   addValue,
   type JitCodegenPlan,
@@ -250,12 +252,12 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
-      entryPoint: instructionEntryPoint(0, snapshot("preInstruction", startAddress, 0), {
+      entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0), {
         preInstructionExitPlan: {
           exitPointCount: 1
         }
       }),
-      postInstructionState: snapshot("postInstruction", startAddress + 1, 1, ["eax"]),
+      postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
       exitPointCount: 2
     }],
     exitPoints: [
@@ -263,14 +265,14 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations 
         instructionIndex: 0,
         opIndex: 0,
         exitReason: ExitReason.MEMORY_READ_FAULT,
-        snapshot: snapshot("preInstruction", startAddress, 0),
+        snapshot: boundaryState(instructionEntry(0), 0),
         exitMaterializationIndex: 1
       },
       {
         instructionIndex: 0,
         opIndex: 4,
         exitReason: ExitReason.HOST_TRAP,
-        snapshot: snapshot("postInstruction", startAddress + 1, 1, ["eax"]),
+        snapshot: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
         exitMaterializationIndex: 2
       }
     ],
@@ -352,15 +354,15 @@ test("buildJitCodegenEmissionPlan walks flag-store condition and select dependen
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
-      entryPoint: instructionEntryPoint(0, snapshot("preInstruction", startAddress, 0)),
-      postInstructionState: snapshot("postInstruction", startAddress + 1, 1),
+      entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0)),
+      postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1),
       exitPointCount: 1
     }],
     exitPoints: [{
       instructionIndex: 0,
       opIndex: 1,
       exitReason: ExitReason.HOST_TRAP,
-      snapshot: snapshot("postInstruction", startAddress + 1, 1),
+      snapshot: boundaryState(instructionExit(0, block.instructions[0]!), 1),
       exitMaterializationIndex: 1
     }],
     materializationNeeds: [{

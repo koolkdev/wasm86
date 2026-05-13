@@ -11,21 +11,31 @@ import {
   emitJitBlock,
   buildJitInstructionValueTimeline,
   createJitIrState,
+  boundaryState,
   const32,
   xorExpr,
   countOpcode,
-  stateSnapshot,
+  instructionEntry,
+  instructionExit,
 } from "./value-local-store-test-helpers.js";
 test("JIT emission consumes prebuilt expression blocks from instruction plans", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
   const state = createJitIrState(body, [{ stores: [] }]);
-  const entrySnapshot = stateSnapshot("preInstruction", 0x1000, 0);
-  const postSnapshot = stateSnapshot("postInstruction", 0x1001, 1);
   const expressionBlock = [
     { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
   ] as const;
+  const instruction = {
+    instructionId: "prebuilt-expression-block",
+    eip: 0x1000,
+    nextEip: 0x1001,
+    nextMode: "continue",
+    operands: [],
+    ir: expressionBlock
+  } as const;
+  const entrySnapshot = boundaryState(instructionEntry(0), 0);
+  const postSnapshot = boundaryState(instructionExit(0, instruction), 1);
 
   emitJitBlock({
     body,
@@ -33,17 +43,17 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
     state,
     exit: { exitLocal, exitLabelDepth: 0 },
     instructions: [{
-      instructionId: "prebuilt-expression-block",
-      eip: 0x1000,
-      nextEip: 0x1001,
-      nextMode: "continue",
+      instructionId: instruction.instructionId,
+      eip: instruction.eip,
+      nextEip: instruction.nextEip,
+      nextMode: instruction.nextMode,
       entryPoint: {
         instructionIndex: 0,
         snapshot: entrySnapshot
       },
       postInstructionState: postSnapshot,
       exitPointCount: 1,
-      operands: [],
+      operands: instruction.operands,
       expressionBlock,
       valueTimeline: buildJitInstructionValueTimeline({
         operands: [],

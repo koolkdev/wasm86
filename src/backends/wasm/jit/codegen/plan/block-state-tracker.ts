@@ -1,8 +1,9 @@
 import { reg32 } from "#x86/isa/types.js";
 import type { IrOp } from "#x86/ir/model/types.js";
-import type {
-  JitExitSnapshotKind,
-  JitStateSnapshot
+import {
+  instructionExit,
+  type JitBoundaryRef,
+  type JitStateSnapshot
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { JitValueTracker } from "#backends/wasm/jit/ir/value-tracker.js";
@@ -27,19 +28,20 @@ export class JitBlockStateTracker {
     this.#values.clear();
   }
 
-  snapshot(kind: JitExitSnapshotKind, eip: number): JitStateSnapshot {
+  snapshot(boundary: JitBoundaryRef): JitStateSnapshot {
     return {
-      kind,
-      eip,
+      boundary,
       instructionCountDelta: this.#instructionCountDelta,
       valueState: this.#valueState.snapshot()
     };
   }
 
-  snapshotPostInstruction(eip: number): JitStateSnapshot {
+  snapshotPostInstruction(
+    instructionIndex: number,
+    instruction: JitIrBlockInstruction
+  ): JitStateSnapshot {
     return {
-      kind: "postInstruction",
-      eip,
+      boundary: instructionExit(instructionIndex, instruction),
       instructionCountDelta: this.#instructionCountDelta + 1,
       valueState: this.#valueState.snapshot()
     };
