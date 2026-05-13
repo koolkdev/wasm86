@@ -5,7 +5,6 @@ import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 import type { ConditionCode, IrBlock, IrOp, ValueRef, VarRef } from "#x86/ir/model/types.js";
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
-import type { JitFlagOwnerMask } from "#backends/wasm/jit/optimization/analyses/flag-owners.js";
 import type {
   JitIrBlock,
   JitIrBlockInstruction
@@ -93,17 +92,6 @@ export function setTargetRegs(
 
 function instructionOps(instruction: JitIrBlockInstruction): IrBlock {
   return instruction.ir;
-}
-
-export function flagOwnerSummary(owners: readonly JitFlagOwnerMask[]): readonly object[] {
-  return owners.map(({ mask, owner }) => {
-    switch (owner.kind) {
-      case "producer":
-        return { mask, kind: owner.kind, sourceId: owner.source.id, producer: owner.source.producer };
-      case "incoming":
-        return { mask, kind: owner.kind };
-    }
-  });
 }
 
 export function v(id: number): VarRef {

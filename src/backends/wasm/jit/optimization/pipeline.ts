@@ -4,19 +4,14 @@ import type { JitOptimizationPass, JitOptimizationPassRun, JitPassContext } from
 import { runJitOptimizationPasses } from "./pass.js";
 import { collectJitPassStats, type JitPassStatsByName } from "./stats.js";
 import { localDcePass } from "./passes/local-dce.js";
-import { flagDcePass } from "./passes/flag-dce.js";
 
 export const jitIrOptimizationPasses = [
-  localDcePass,
-  flagDcePass,
   localDcePass
 ] as const satisfies readonly JitOptimizationPass[];
 
 export type JitIrOptimizationPassName = typeof jitIrOptimizationPasses[number]["name"];
 
 export const jitIrOptimizationPassOrder = [
-  "localDce",
-  "flagDce",
   "localDce"
 ] as const satisfies readonly JitIrOptimizationPassName[];
 

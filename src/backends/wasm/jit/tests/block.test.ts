@@ -81,13 +81,13 @@ test("buildJitIrBlock lowers unary ALU forms with preserved widths", () => {
   strictEqual(negFlags?.op === "flags.set" ? negFlags.width : undefined, 8);
 });
 
-test("buildJitIrBlock prunes flag producers overwritten inside the block", () => {
+test("buildJitIrBlock keeps overwritten flag producers as value-state writes", () => {
   const cmp = ok(decodeBytes([0x39, 0xd8], startAddress));
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], cmp.nextEip));
   const ir = codegenIr(buildJitIrBlock([cmp, add]));
   const flagSets = ir.filter((op) => op.op === "flags.set");
 
-  deepStrictEqual(flagSets.map((op) => op.op === "flags.set" ? op.producer : undefined), ["add"]);
+  deepStrictEqual(flagSets.map((op) => op.op === "flags.set" ? op.producer : undefined), ["sub", "add"]);
 });
 
 test("buildJitIrBlock leaves condition materialization to JIT flag state", () => {

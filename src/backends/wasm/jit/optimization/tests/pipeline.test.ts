@@ -2,6 +2,8 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
+import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
+import { ExitReason } from "#backends/wasm/exit.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import { optimizeJitIrBlock } from "#backends/wasm/jit/optimization/optimize.js";
@@ -11,7 +13,7 @@ import {
 } from "#backends/wasm/jit/optimization/pipeline.js";
 import type { JitOptimizationPass } from "#backends/wasm/jit/optimization/pass.js";
 import { runJitOptimizationPasses } from "#backends/wasm/jit/optimization/pass.js";
-import { startAddress, syntheticInstruction, v } from "./helpers.js";
+import { c32, onlyExit, startAddress, syntheticInstruction, v } from "./helpers.js";
 
 test("runJitIrOptimizationPipeline exposes ordered transform results", () => {
   const movEaxEcx = ok(decodeBytes([0x89, 0xc8], startAddress));
@@ -26,12 +28,9 @@ test("runJitIrOptimizationPipeline exposes ordered transform results", () => {
   ]));
 
   deepStrictEqual(jitIrOptimizationPassOrder, [
-    "localDce",
-    "flagDce",
     "localDce"
   ]);
   deepStrictEqual(result.passResults.map((pass) => pass.name), jitIrOptimizationPassOrder);
-  strictEqual(result.passResults.some((pass) => pass.changed), true);
   strictEqual(
     result.stats.localDce?.removedOpCount,
     result.passResults
@@ -61,7 +60,6 @@ test("runJitIrOptimizationPipeline keeps flag conditions planning-visible throug
   const cmpInstruction = result.block.instructions[2]!;
   const cmoveInstruction = result.block.instructions[3]!;
 
-  strictEqual(result.stats["flagDce"]?.retainedSetCount, 2);
   strictEqual(cmpInstruction.ir.some((op) => op.op === "flags.set"), true);
   strictEqual(cmoveInstruction.ir.some((op) =>
     op.op === "set" && op.target.kind === "reg" && op.target.reg === "eax"
@@ -109,13 +107,35 @@ test("runJitIrOptimizationPipeline exposes the new pass pipeline as plain JIT IR
   const result = runJitIrOptimizationPipeline(buildJitIrBlock([cmp, cmove, trap]), { validate: true });
 
   deepStrictEqual(jitIrOptimizationPassOrder, [
-    "localDce",
-    "flagDce",
     "localDce"
   ]);
   strictEqual(result.block.instructions.some((instruction) =>
     instruction.ir.some((op) => op.op === "flags.condition")
   ), true);
+});
+
+test("runJitIrOptimizationPipeline leaves overwritten flag producers to value state", () => {
+  const result = runJitIrOptimizationPipeline({
+    instructions: [
+      syntheticInstruction([
+        { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
+        { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) },
+        createIrFlagSetOp("add", { left: v(0), right: c32(1), result: v(1) }),
+        { op: "value.binary", type: "i32", operator: "sub", dst: v(2), a: v(0), b: c32(2) },
+        createIrFlagSetOp("sub", { left: v(0), right: c32(2), result: v(2) }),
+        { op: "hostTrap", vector: c32(0x2e) }
+      ], 0, "exit")
+    ]
+  }, { validate: true });
+  const codegenPlan = planJitCodegen(result.block);
+  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const flagNeeds = codegenPlan.materializationNeeds.filter((need) => need.consumer === "flagExitStore");
+
+  deepStrictEqual(flagProducerNames(result.block), ["add", "sub"]);
+  strictEqual(flagNeeds.length, 1);
+  strictEqual(flagNeeds[0]?.placement.exitPointIndex, codegenPlan.exitPoints.indexOf(exit));
+  strictEqual(flagNeeds[0]?.value.kind, "flagProducer");
+  strictEqual(flagNeeds[0]?.value.kind === "flagProducer" ? flagNeeds[0].value.producer : undefined, "sub");
 });
 
 test("planJitCodegen keeps branch exit flag materialization separate from direct conditions", () => {
@@ -136,3 +156,9 @@ test("planJitCodegen keeps branch exit flag materialization separate from direct
     ]
   );
 });
+
+function flagProducerNames(block: { instructions: readonly { ir: readonly { op: string; producer?: string }[] }[] }): readonly string[] {
+  return block.instructions.flatMap((instruction) =>
+    instruction.ir.flatMap((op) => op.op === "flags.set" ? [op.producer ?? ""] : [])
+  );
+}
