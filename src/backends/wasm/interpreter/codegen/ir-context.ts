@@ -2,6 +2,7 @@ import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type {
   IrBlock,
+  SemanticOperandInfo,
   StorageRef
 } from "#x86/ir/model/types.js";
 import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
@@ -60,6 +61,23 @@ export type InterpreterOperandBinding =
 export type InterpreterInstructionLength =
   | number
   | Readonly<{ kind: "local"; local: number }>;
+
+export function interpreterSemanticOperandInfo(binding: InterpreterOperandBinding): SemanticOperandInfo {
+  switch (binding.kind) {
+    case "opcode.reg":
+    case "modrm.reg":
+    case "implicit.reg":
+      return { storage: "reg" };
+    case "rm":
+      return { storage: "regOrMem" };
+    case "mem":
+      return { storage: "mem" };
+    case "imm":
+      return { storage: "imm" };
+    case "relTarget":
+      return { storage: "relTarget" };
+  }
+}
 
 export type InterpreterIrEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;

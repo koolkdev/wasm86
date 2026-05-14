@@ -1,4 +1,4 @@
-import { IrEmitter, irBlockTerminator } from "./emitter.js";
+import { IrEmitter, irBlockTerminator, type IrEmitterOptions } from "./emitter.js";
 import type { SemanticTemplate, IrBlock } from "#x86/ir/model/types.js";
 
 export {
@@ -12,9 +12,11 @@ export {
 export { irBlockTerminator };
 export type { IrBlockTerminator } from "./emitter.js";
 
-export function buildIr(template: SemanticTemplate): IrBlock {
-  const builder = new IrEmitter();
+export type BuildIrOptions = Pick<IrEmitterOptions, "operandInfo">;
 
-  template(builder);
+export function buildIr(template: SemanticTemplate, options: BuildIrOptions = {}): IrBlock {
+  const builder = new IrEmitter(options);
+
+  template(builder, builder);
   return builder.block();
 }

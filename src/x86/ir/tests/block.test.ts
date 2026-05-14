@@ -48,3 +48,53 @@ test("IrBlockBuilder appends instructions with one var namespace", () => {
   deepStrictEqual(first, { terminator: "next" });
   deepStrictEqual(second, { terminator: "next" });
 });
+
+test("IrBlockBuilder preserves semantic operand metadata through operand remapping", () => {
+  const builder = new IrBlockBuilder();
+
+  builder.appendInstruction({
+    semantics: (s, context) => {
+      const operandInfo = context.operandInfo(s.operand(0));
+
+      s.set(s.reg("eax"), operandInfo.storage === "mem" ? 1 : 0);
+    },
+    operands: [operand(3)],
+    operandInfo: [{ storage: "mem" }]
+  });
+
+  deepStrictEqual(builder.build(), [
+    {
+      op: "set",
+      target: { kind: "reg", reg: "eax" },
+      value: { kind: "const", type: "i32", value: 1 },
+      accessWidth: 32
+    },
+    { op: "next" }
+  ]);
+});
+
+test("IrBlockBuilder does not infer remapped metadata from reconstructed operand refs", () => {
+  const builder = new IrBlockBuilder();
+
+  builder.appendInstruction({
+    semantics: (s, context) => {
+      s.operand(0);
+
+      const operandInfo = context.operandInfo(operand(3));
+
+      s.set(s.reg("eax"), operandInfo.storage === "mem" ? 1 : 0);
+    },
+    operands: [operand(3)],
+    operandInfo: [{ storage: "mem" }]
+  });
+
+  deepStrictEqual(builder.build(), [
+    {
+      op: "set",
+      target: { kind: "reg", reg: "eax" },
+      value: { kind: "const", type: "i32", value: 0 },
+      accessWidth: 32
+    },
+    { op: "next" }
+  ]);
+});

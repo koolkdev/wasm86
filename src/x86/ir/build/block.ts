@@ -2,6 +2,7 @@ import { IrEmitter, type IrBlockTerminator } from "./emitter.js";
 import { irVar } from "#x86/ir/model/refs.js";
 import type {
   OperandRef,
+  SemanticOperandInfo,
   SemanticTemplate,
   IrOp,
   IrBlock,
@@ -11,6 +12,7 @@ import type {
 export type IrBlockInstruction = Readonly<{
   semantics: SemanticTemplate;
   operands: readonly OperandRef[];
+  operandInfo?: readonly (SemanticOperandInfo | undefined)[];
 }>;
 
 export type IrBlockAppendResult = Readonly<{
@@ -25,10 +27,13 @@ export class IrBlockBuilder {
     const emitter = new IrEmitter({
       ops: this.#ops,
       allocateVar: () => this.#allocVar(),
-      resolveOperand: (index) => blockOperand(instruction.operands, index)
+      resolveOperand: (index) => blockOperand(instruction.operands, index),
+      ...(instruction.operandInfo !== undefined
+        ? { operandInfo: instruction.operandInfo }
+        : {})
     });
 
-    instruction.semantics(emitter);
+    instruction.semantics(emitter, emitter);
     return { terminator: emitter.finish() };
   }
 

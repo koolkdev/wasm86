@@ -3,7 +3,10 @@ import type { ExpandedInstructionSpec, ModRmMatch, Reg3 } from "#x86/isa/schema/
 import type { OpcodeDispatchCandidateSet, OpcodeDispatchLeaf } from "#x86/isa/decoder/opcode-dispatch.js";
 import type { SemanticTemplate } from "#x86/ir/model/types.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import { emitInterpreterIrWithContext } from "#backends/wasm/interpreter/codegen/ir-context.js";
+import {
+  emitInterpreterIrWithContext,
+  interpreterSemanticOperandInfo
+} from "#backends/wasm/interpreter/codegen/ir-context.js";
 import type { InterpreterHandlerContext } from "#backends/wasm/interpreter/codegen/handler-context.js";
 import { emitModRmDispatch, type ModRmDispatchCase } from "./modrm-dispatch.js";
 import { decodeInstructionOperands } from "#backends/wasm/interpreter/decode/operand-decode.js";
@@ -73,7 +76,9 @@ function emitInstructionHandler(
   modRmLocal: number | undefined
 ): void {
   const decoded = decodeInstructionOperands(instruction, context, modRmLocal);
-  const program = buildIr(instruction.spec.semantics);
+  const program = buildIr(instruction.spec.semantics, {
+    operandInfo: decoded.operands.map(interpreterSemanticOperandInfo)
+  });
 
   try {
     emitInterpreterIrWithContext(program, {

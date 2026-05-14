@@ -26,6 +26,9 @@ import type {
   IrGetOptions,
   IrOp,
   IrBlock,
+  SemanticBuildContext,
+  SemanticOperandInfo,
+  SemanticOperandInput,
   StorageInput,
   TargetInput,
   IrUnaryOperator,
@@ -39,12 +42,15 @@ export type IrEmitterOptions = Readonly<{
   ops?: IrOp[];
   allocateVar?: () => VarRef;
   resolveOperand?: (index: number) => OperandRef;
+  operandInfo?: readonly (SemanticOperandInfo | undefined)[];
 }>;
 
-export class IrEmitter implements IrBuilder {
+export class IrEmitter implements IrBuilder, SemanticBuildContext {
   readonly #ops: IrOp[];
   readonly #allocateVarOverride: (() => VarRef) | undefined;
   readonly #resolveOperand: (index: number) => OperandRef;
+  readonly #operandInfo: readonly (SemanticOperandInfo | undefined)[];
+  readonly #semanticOperandIndexByOperandRef = new WeakMap<OperandRef, number>();
   #nextVarId = 0;
   #terminator: IrBlockTerminator | undefined;
 
@@ -52,6 +58,7 @@ export class IrEmitter implements IrBuilder {
     this.#ops = options.ops ?? [];
     this.#allocateVarOverride = options.allocateVar;
     this.#resolveOperand = options.resolveOperand ?? operand;
+    this.#operandInfo = options.operandInfo ?? [];
   }
 
   #allocVar(): VarRef {
@@ -78,7 +85,10 @@ export class IrEmitter implements IrBuilder {
   }
 
   operand(index: number): OperandRef {
-    return this.#resolveOperand(index);
+    const operandRef = this.#resolveOperand(index);
+
+    this.#semanticOperandIndexByOperandRef.set(operandRef, index);
+    return operandRef;
   }
 
   const32(value: number): IrConstValueRef {
@@ -99,11 +109,12 @@ export class IrEmitter implements IrBuilder {
 
   get(source: StorageInput, accessWidth: OperandWidth = 32, options: IrGetOptions = {}): VarRef {
     const dst = this.#allocVar();
+    const sourceRef = toStorageRef(source);
 
     this.#push({
       op: "get",
       dst,
-      source: toStorageRef(source),
+      source: sourceRef,
       accessWidth,
       ...(options.signed === true ? { signed: true } : {})
     });
@@ -111,7 +122,21 @@ export class IrEmitter implements IrBuilder {
   }
 
   set(target: StorageInput, value: ValueInput, accessWidth: OperandWidth = 32): void {
-    this.#push({ op: "set", target: toStorageRef(target), value: toValueRef(value), accessWidth });
+    const targetRef = toStorageRef(target);
+
+    this.#push({ op: "set", target: targetRef, value: toValueRef(value), accessWidth });
+  }
+
+  operandInfo(operandInput: SemanticOperandInput): SemanticOperandInfo {
+    const semanticIndex = typeof operandInput === "number"
+      ? operandInput
+      : this.#semanticOperandIndexForOperand(operandInput);
+
+    return this.#operandInfo[semanticIndex] ?? { storage: "unknown" };
+  }
+
+  #semanticOperandIndexForOperand(operandRef: OperandRef): number {
+    return this.#semanticOperandIndexByOperandRef.get(operandRef) ?? operandRef.index;
   }
 
   address(operandInput: OperandInput): VarRef {

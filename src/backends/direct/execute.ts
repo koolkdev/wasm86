@@ -27,6 +27,7 @@ import type {
   IrOp,
   IrUnaryOperator,
   MemRef,
+  SemanticOperandInfo,
   StorageRef,
   ValueRef,
   VarRef
@@ -61,7 +62,9 @@ export function executeDirectInstruction(
   options: DirectExecutionOptions = {}
 ): RunResult {
   const context: ExecutionContext = { state, instruction, memory: options.memory, vars: new Map() };
-  const program = buildIr(instruction.spec.semantics);
+  const program = buildIr(instruction.spec.semantics, {
+    operandInfo: instruction.operands.map(semanticOperandInfoForBinding)
+  });
 
   for (const op of program) {
     const result = executeOp(context, op);
@@ -72,6 +75,19 @@ export function executeDirectInstruction(
   }
 
   return stop(state, StopReason.UNSUPPORTED);
+}
+
+function semanticOperandInfoForBinding(binding: IsaOperandBinding): SemanticOperandInfo {
+  switch (binding.kind) {
+    case "reg":
+      return { storage: "reg" };
+    case "mem":
+      return { storage: "mem" };
+    case "imm":
+      return { storage: "imm" };
+    case "relTarget":
+      return { storage: "relTarget" };
+  }
 }
 
 function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {

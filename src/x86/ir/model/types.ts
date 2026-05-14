@@ -16,6 +16,18 @@ export type StorageRef = OperandRef | RegRef | MemRef;
 
 export type TargetRef = ValueRef;
 
+export type SemanticOperandStorageKind =
+  | "unknown"
+  | "reg"
+  | "mem"
+  | "regOrMem"
+  | "imm"
+  | "relTarget";
+
+export type SemanticOperandInfo = Readonly<{
+  storage: SemanticOperandStorageKind;
+}>;
+
 export type ConditionCode =
   | "O"
   | "NO"
@@ -111,7 +123,13 @@ export type IrOp =
   | Readonly<{ op: "hostTrap"; vector: ValueRef }>;
 
 export type IrBlock = readonly IrOp[];
-export type SemanticTemplate = (builder: IrBuilder) => void;
+export type SemanticOperandInput = number | OperandRef;
+
+export interface SemanticBuildContext {
+  operandInfo(operand: SemanticOperandInput): SemanticOperandInfo;
+}
+
+export type SemanticTemplate = (builder: IrBuilder, context: SemanticBuildContext) => void;
 
 export interface IrBuilder {
   operand(index: number): OperandRef;

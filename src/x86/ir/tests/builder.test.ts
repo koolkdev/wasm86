@@ -17,3 +17,44 @@ test("builder rejects ops after a terminator", () => {
     /cannot emit get after IR terminator/
   );
 });
+
+test("builder exposes unknown operand metadata by default", () => {
+  deepStrictEqual(
+    buildIr((s, context) => {
+      const operandInfo = context.operandInfo(0);
+
+      s.set(s.reg("eax"), operandInfo.storage === "mem" ? 1 : 0);
+    }),
+    [
+      {
+        op: "set",
+        target: { kind: "reg", reg: "eax" },
+        value: { kind: "const", type: "i32", value: 0 },
+        accessWidth: 32
+      },
+      { op: "next" }
+    ]
+  );
+});
+
+test("builder exposes semantic operand metadata", () => {
+  deepStrictEqual(
+    buildIr(
+      (s, context) => {
+        const operandInfo = context.operandInfo(0);
+
+        s.set(s.reg("eax"), operandInfo.storage === "mem" ? 1 : 0);
+      },
+      { operandInfo: [{ storage: "mem" }] }
+    ),
+    [
+      {
+        op: "set",
+        target: { kind: "reg", reg: "eax" },
+        value: { kind: "const", type: "i32", value: 1 },
+        accessWidth: 32
+      },
+      { op: "next" }
+    ]
+  );
+});
