@@ -2,48 +2,54 @@ import type { IrOp, ValueRef } from "#x86/ir/model/types.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 
-export type JitPostInstructionExitKind =
+export type JitOpExitKind =
+  | "memoryReadFault"
+  | "memoryWriteFault"
   | "fallthrough"
   | "jump"
   | "branchTaken"
   | "branchNotTaken"
   | "hostTrap";
 
-export type JitPostInstructionExit = Readonly<{
-  kind: JitPostInstructionExitKind;
-  exitReason: ExitReasonValue;
-}>;
-
-export function jitMemoryFaultReason(op: IrOp): ExitReasonValue | undefined {
-  if (op.op === "memory.guard") {
-    return op.access === "read"
-      ? ExitReason.MEMORY_READ_FAULT
-      : ExitReason.MEMORY_WRITE_FAULT;
-  }
-
-  return undefined;
-}
-
-export function jitPostInstructionExits(
+export function jitOpExits(
   op: IrOp,
   instruction: JitIrBlockInstruction
-): readonly JitPostInstructionExit[] {
+): readonly JitOpExitKind[] {
   switch (op.op) {
+    case "memory.guard":
+      return [op.access === "read" ? "memoryReadFault" : "memoryWriteFault"];
     case "next":
       return instruction.nextMode === "exit"
-        ? [{ kind: "fallthrough", exitReason: ExitReason.FALLTHROUGH }]
+        ? ["fallthrough"]
         : [];
     case "jump":
-      return [{ kind: "jump", exitReason: ExitReason.JUMP }];
+      return ["jump"];
     case "conditionalJump":
       return [
-        { kind: "branchTaken", exitReason: ExitReason.JUMP },
-        { kind: "branchNotTaken", exitReason: ExitReason.JUMP }
+        "branchTaken",
+        "branchNotTaken"
       ];
     case "hostTrap":
-      return [{ kind: "hostTrap", exitReason: ExitReason.HOST_TRAP }];
+      return ["hostTrap"];
     default:
       return [];
+  }
+}
+
+export function jitOpExitReason(exit: JitOpExitKind): ExitReasonValue {
+  switch (exit) {
+    case "memoryReadFault":
+      return ExitReason.MEMORY_READ_FAULT;
+    case "memoryWriteFault":
+      return ExitReason.MEMORY_WRITE_FAULT;
+    case "fallthrough":
+      return ExitReason.FALLTHROUGH;
+    case "jump":
+    case "branchTaken":
+    case "branchNotTaken":
+      return ExitReason.JUMP;
+    case "hostTrap":
+      return ExitReason.HOST_TRAP;
   }
 }
 
@@ -51,7 +57,7 @@ export function jitExitConditionValues(
   op: IrOp,
   instruction: JitIrBlockInstruction
 ): readonly ValueRef[] {
-  if (jitPostInstructionExits(op, instruction).length === 0) {
+  if (jitOpExits(op, instruction).length === 0) {
     return [];
   }
 

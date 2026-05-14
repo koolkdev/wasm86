@@ -10,10 +10,6 @@ import type { IrExprBlock, IrValueExpr } from "#backends/wasm/codegen/expression
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import {
-  afterOp,
-  beforeOp,
-  instructionEntry,
-  instructionExit,
   planJitCodegen
 } from "#backends/wasm/jit/codegen/plan/plan.js";
 import {
@@ -24,12 +20,11 @@ import { planJitExpressionValueCacheForInstructions } from "#backends/wasm/jit/c
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
-  JitBoundaryRef,
-  JitBoundaryState,
   JitCodegenPlan,
   JitExitMaterializationStore,
   JitExitPoint,
-  JitInstructionEntryPoint,
+  JitExitStateSnapshot,
+  JitInstructionState,
   JitMaterializationNeed,
   JitObservationPayload,
   JitObservationValue
@@ -62,10 +57,6 @@ export {
   ExitReason,
   buildJitIrBlock,
   buildJitCodegenEmissionPlan,
-  afterOp,
-  beforeOp,
-  instructionEntry,
-  instructionExit,
   planJitCodegen,
   branchValuePathScope,
   rootValuePathScope,
@@ -91,11 +82,11 @@ export type {
   JitCodegenPlan,
   JitExitMaterializationStore,
   JitExitPoint,
-  JitInstructionEntryPoint,
+  JitExitStateSnapshot,
+  JitInstructionState,
   JitMaterializationNeed,
   JitObservationPayload,
   JitObservationValue,
-  JitBoundaryState,
   JitProducedValue,
   JitValue,
   JitIrBlock
@@ -152,8 +143,6 @@ export function exitStoreNeed(
     placement: {
       instructionIndex: exitPoint.instructionIndex,
       opIndex: exitPoint.opIndex,
-      emitBoundary: exitPoint.emitBoundary,
-      observedBoundary: exitPoint.observedBoundary,
       observationIndex: exitPointIndex,
       exitPointIndex,
       exitReason: exitPoint.exitReason,
@@ -167,20 +156,17 @@ export function exitPoint(input: Readonly<{
   instructionIndex: number;
   opIndex: number;
   exitReason: ExitReason;
-  observedState: JitBoundaryState;
+  observedState: JitExitStateSnapshot;
   exitMaterializationIndex: number;
   visibleEip?: JitObservationValue;
   payload?: JitObservationPayload;
   pathScope?: JitExitPoint["pathScope"];
 }>): JitExitPoint {
-  const emitBoundary = beforeOp(input.instructionIndex, input.opIndex);
   const visibleEip = input.visibleEip ?? { kind: "static", value: 0 };
 
   return {
     instructionIndex: input.instructionIndex,
     opIndex: input.opIndex,
-    emitBoundary,
-    observedBoundary: input.observedState.boundary,
     observedState: input.observedState,
     visibleEip,
     exitReason: input.exitReason,
@@ -190,21 +176,34 @@ export function exitPoint(input: Readonly<{
   };
 }
 
-export function instructionEntryPoint(
-  instructionIndex: number,
-  boundaryState: JitBoundaryState
-): JitInstructionEntryPoint {
+export function instructionState(input: Readonly<{
+  instructionId: string;
+  eip: number;
+  nextEip: number;
+  nextMode: "continue" | "exit";
+  instructionCountDelta: number;
+  changedRegs?: readonly Reg32[];
+  controlPathScopes?: JitInstructionState["controlPathScopes"];
+  exitPointCount: number;
+}>): JitInstructionState {
+  const initialState = exitState(input.instructionCountDelta, input.changedRegs ?? []);
+
   return {
-    instructionIndex,
-    boundaryState
+    instructionId: input.instructionId,
+    eip: input.eip,
+    nextEip: input.nextEip,
+    nextMode: input.nextMode,
+    instructionCountDelta: input.instructionCountDelta,
+    initialValueState: initialState.valueState,
+    controlPathScopes: input.controlPathScopes ?? new Map(),
+    exitPointCount: input.exitPointCount
   };
 }
 
-export function boundaryState(
-  boundary: JitBoundaryRef,
+export function exitState(
   instructionCountDelta: number,
   changedRegs: readonly Reg32[] = []
-): JitBoundaryState {
+): JitExitStateSnapshot {
   const valueState = createJitValueState();
 
   for (const reg of changedRegs) {
@@ -212,7 +211,6 @@ export function boundaryState(
   }
 
   return {
-    boundary,
     instructionCountDelta,
     valueState: valueState.snapshot()
   };

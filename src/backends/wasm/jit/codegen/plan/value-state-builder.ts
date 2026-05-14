@@ -89,7 +89,7 @@ export class JitValueStateBuilder {
     }
 
     if (value === undefined) {
-      throw new Error("could not resolve JIT boundary-state register write");
+      throw new Error("could not resolve JIT value-state register write");
     }
 
     return this.#writeReg(access.reg, access.bitOffset, access.width, value);

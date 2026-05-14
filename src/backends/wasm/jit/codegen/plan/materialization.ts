@@ -12,8 +12,6 @@ export function jitMaterializationNeedsForExitStores(
   const placement = {
     instructionIndex: exitPoint.instructionIndex,
     opIndex: exitPoint.opIndex,
-    emitBoundary: exitPoint.emitBoundary,
-    observedBoundary: exitPoint.observedBoundary,
     observationIndex: exitPointIndex,
     exitPointIndex,
     exitReason: exitPoint.exitReason,

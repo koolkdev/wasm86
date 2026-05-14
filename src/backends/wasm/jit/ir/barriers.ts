@@ -1,18 +1,15 @@
 import type { Reg32 } from "#x86/isa/types.js";
-import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import {
   indexJitEffects,
-  jitGuardExitReasonAt,
-  jitPostInstructionExitsAt,
-  jitOpHasPostInstructionExit,
+  jitOpExitsAt,
+  jitOpHasExit,
   jitRegisterWriteRegAt,
   type JitEffectIndex
 } from "#backends/wasm/jit/ir/effects.js";
-import type { JitPostInstructionExit } from "#backends/wasm/jit/ir/effect-primitives.js";
+import type { JitOpExitKind } from "#backends/wasm/jit/ir/effect-primitives.js";
 
 export type JitBarrierReason =
-  | "guardExit"
   | "exit"
   | "write";
 
@@ -20,8 +17,7 @@ export type JitBarrier = Readonly<{
   instructionIndex: number;
   opIndex?: number;
   reason: JitBarrierReason;
-  exitReason?: ExitReasonValue;
-  exits?: readonly JitPostInstructionExit[];
+  exits?: readonly JitOpExitKind[];
   reg?: Reg32;
 }>;
 
@@ -73,14 +69,12 @@ export function analyzeJitBarriers(
         throw new Error(`missing JIT IR op while analyzing JIT barriers: ${instructionIndex}:${opIndex}`);
       }
 
-      const guardExitReason = jitGuardExitReasonAt(effects, instructionIndex, opIndex);
-
-      if (guardExitReason !== undefined) {
+      if (jitOpHasExit(effects, instructionIndex, opIndex)) {
         pushBarrier(barriers, instructionBarriers, {
           instructionIndex,
           opIndex,
-          reason: "guardExit",
-          exitReason: guardExitReason
+          reason: "exit",
+          exits: jitOpExitsAt(effects, instructionIndex, opIndex)
         });
       }
 
@@ -92,15 +86,6 @@ export function analyzeJitBarriers(
           opIndex,
           reason: "write",
           reg: registerWriteReg
-        });
-      }
-
-      if (jitOpHasPostInstructionExit(effects, instructionIndex, opIndex)) {
-        pushBarrier(barriers, instructionBarriers, {
-          instructionIndex,
-          opIndex,
-          reason: "exit",
-          exits: jitPostInstructionExitsAt(effects, instructionIndex, opIndex)
         });
       }
     }
@@ -161,14 +146,14 @@ export function jitOpHasBarrier(
   return jitOpBarriersAt(analysis, instructionIndex, opIndex).some((barrier) => barrier.reason === reason);
 }
 
-export function jitOpGuardExitReasonAt(
+export function jitOpExitsInBarriersAt(
   analysis: JitBarrierAnalysis,
   instructionIndex: number,
   opIndex: number
-): ExitReasonValue | undefined {
+): readonly JitOpExitKind[] {
   return jitOpBarriersAt(analysis, instructionIndex, opIndex)
-    .find((barrier) => barrier.reason === "guardExit")
-    ?.exitReason;
+    .find((barrier) => barrier.reason === "exit")
+    ?.exits ?? [];
 }
 
 function pushBarrier(

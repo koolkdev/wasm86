@@ -184,7 +184,7 @@ function beginInstruction(
   exit: JitExitTarget,
   instruction: JitIrInstructionContext
 ): void {
-  context.state.beginInstruction(exit, instruction.entryPoint, instruction.eip);
+  context.state.beginInstruction(exit, instruction.instructionCountDelta, instruction.eip);
 }
 
 function indexExitPoints(exitPoints: readonly JitExitPoint[]): ReadonlyMap<string, readonly JitExitPoint[]> {
@@ -192,12 +192,12 @@ function indexExitPoints(exitPoints: readonly JitExitPoint[]): ReadonlyMap<strin
 
   for (const exitPoint of exitPoints) {
     const key = exitPointKey(exitPoint.instructionIndex, exitPoint.exitReason);
-    const instructionExitPoints = exitPointsByKey.get(key);
+    const exitPointsForInstruction = exitPointsByKey.get(key);
 
-    if (instructionExitPoints === undefined) {
+    if (exitPointsForInstruction === undefined) {
       exitPointsByKey.set(key, [exitPoint]);
     } else {
-      instructionExitPoints.push(exitPoint);
+      exitPointsForInstruction.push(exitPoint);
     }
   }
 

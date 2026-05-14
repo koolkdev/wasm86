@@ -26,25 +26,12 @@ import {
   c32,
   addValue,
   subValue,
-  beforeOp,
-  afterOp,
-  instructionEntry,
-  instructionExit,
   branchValuePathScope,
   rootValuePathScope,
   type JitValue,
   type JitIrBlock,
 } from "./plan-test-helpers.js";
-test("JIT boundary helpers produce explicit instruction timeline coordinates", () => {
-  const instruction = { ir: [{ op: "first" }, { op: "second" }, { op: "third" }] };
-
-  deepStrictEqual(instructionEntry(4), { instructionIndex: 4, boundaryIndex: 0 });
-  deepStrictEqual(beforeOp(4, 2), { instructionIndex: 4, boundaryIndex: 2 });
-  deepStrictEqual(afterOp(4, 2), { instructionIndex: 4, boundaryIndex: 3 });
-  deepStrictEqual(instructionExit(4, instruction), { instructionIndex: 4, boundaryIndex: 3 });
-});
-
-test("planJitCodegen records post-instruction fallthrough exits", () => {
+test("planJitCodegen records fallthrough exits at terminator ops", () => {
   const instruction = ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([instruction])));
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.FALLTHROUGH);
@@ -55,18 +42,14 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
     { stores: [] },
     { stores: [registerStore("eax", c32(1))] }
   ]);
-  strictEqual(instructionState.entryPoint.instructionIndex, 0);
-  deepStrictEqual(instructionState.entryPoint.boundaryState.boundary, instructionEntry(0));
-  strictEqual("kind" in instructionState.entryPoint.boundaryState, false);
-  strictEqual("eip" in instructionState.entryPoint.boundaryState, false);
+  strictEqual(instructionState.instructionCountDelta, 0);
+  strictEqual("kind" in instructionState.initialValueState, false);
+  strictEqual("eip" in instructionState.initialValueState, false);
   strictEqual(instructionState.exitPointCount, 1);
-  deepStrictEqual(exit.emitBoundary, beforeOp(0, exit.opIndex));
-  deepStrictEqual(exit.observedBoundary, instructionExit(0, codegenPlan.block.instructions[0]!));
-  strictEqual(codegenPlan.boundaryStates[0], exit.observedState);
+  strictEqual(exit.instructionIndex, 0);
   deepStrictEqual(exit.visibleEip, { kind: "static", value: instruction.nextEip });
   deepStrictEqual(exit.payload, { kind: "static", value: instruction.nextEip });
   deepStrictEqual(exit.pathScope, rootValuePathScope());
-  deepStrictEqual(exit.observedState.boundary, instructionExit(0, codegenPlan.block.instructions[0]!));
   strictEqual("kind" in exit.observedState, false);
   strictEqual("eip" in exit.observedState, false);
   strictEqual(exit.observedState.instructionCountDelta, 1);
@@ -77,21 +60,18 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
   ]);
 });
 
-test("planJitCodegen keeps memory guard faults at their op boundary states", () => {
+test("planJitCodegen keeps memory guard faults at their op exit states", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const load = ok(decodeBytes([0x8b, 0x05, 0x00, 0x00, 0x01, 0x00], add.nextEip));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([add, load])));
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
   const loadInstructionState = codegenPlan.instructionStates[1]!;
 
-  strictEqual(loadInstructionState.entryPoint.instructionIndex, 1);
-  deepStrictEqual(loadInstructionState.entryPoint.boundaryState.boundary, instructionEntry(1));
+  strictEqual(loadInstructionState.instructionCountDelta, 1);
   strictEqual(exit.instructionIndex, 1);
-  deepStrictEqual(exit.emitBoundary, beforeOp(1, 1));
-  deepStrictEqual(exit.observedBoundary, beforeOp(1, 1));
+  strictEqual(exit.opIndex, 1);
   deepStrictEqual(exit.visibleEip, { kind: "static", value: add.nextEip });
   deepStrictEqual(exit.payload, { kind: "runtime", source: "memoryAddress" });
-  deepStrictEqual(exit.observedState.boundary, beforeOp(1, 1));
   strictEqual(exit.observedState.instructionCountDelta, 1);
   strictEqual(exit.exitMaterializationIndex, 1);
   const expectedRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
@@ -133,7 +113,7 @@ test("planJitCodegen keeps same-register-set exit materializations separate", ()
   ]);
 });
 
-test("planJitCodegen derives xchg exit stores from value-state boundary states", () => {
+test("planJitCodegen derives xchg exit stores from value-state snapshots", () => {
   const firstSwap = ok(decodeBytes([0x87, 0xd8], startAddress));
   const cancelSwap = ok(decodeBytes([0x87, 0xd8], firstSwap.nextEip));
   const remainingSwap = ok(decodeBytes([0x87, 0xd1], cancelSwap.nextEip));
@@ -158,18 +138,18 @@ test("planJitCodegen derives xchg exit stores from value-state boundary states",
   });
 });
 
-test("planJitCodegen excludes current-instruction speculative writes from memory fault boundary states", () => {
+test("planJitCodegen excludes current-instruction speculative writes from memory fault exit state", () => {
   const instruction = ok(decodeBytes([0x01, 0x18], startAddress));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([instruction])));
   const writeFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_WRITE_FAULT);
 
-  deepStrictEqual(writeFault.observedState.boundary, beforeOp(0, 2));
+  strictEqual(writeFault.opIndex, 2);
   strictEqual(writeFault.observedState.instructionCountDelta, 0);
   strictEqual(writeFault.exitMaterializationIndex, 0);
   deepStrictEqual(writeFault.observedState.valueState.regs.exitStores(), []);
 });
 
-test("planJitCodegen makes guard faults observe the current op boundary state", () => {
+test("planJitCodegen makes guard faults observe current op state", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "write-before-fault",
@@ -199,16 +179,12 @@ test("planJitCodegen makes guard faults observe the current op boundary state", 
   const readFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
 
-  deepStrictEqual(readFault.observedState.boundary, beforeOp(0, 2));
-  deepStrictEqual(readFault.emitBoundary, beforeOp(0, 2));
-  deepStrictEqual(readFault.observedBoundary, beforeOp(0, 2));
+  strictEqual(readFault.opIndex, 2);
   deepStrictEqual(readFault.visibleEip, { kind: "static", value: startAddress });
   deepStrictEqual(readFault.payload, { kind: "runtime", source: "memoryAddress" });
   strictEqual(readFault.exitMaterializationIndex, 1);
   deepStrictEqual(readFault.observedState.valueState.regs.exitStores(), [registerStore("eax", c32(0x1234))]);
-  deepStrictEqual(hostTrap.observedState.boundary, instructionExit(0, codegenPlan.block.instructions[0]!));
-  deepStrictEqual(hostTrap.emitBoundary, beforeOp(0, 3));
-  deepStrictEqual(hostTrap.observedBoundary, instructionExit(0, codegenPlan.block.instructions[0]!));
+  strictEqual(hostTrap.opIndex, 3);
   deepStrictEqual(hostTrap.visibleEip, { kind: "static", value: startAddress + 1 });
   deepStrictEqual(hostTrap.payload, { kind: "runtime", source: "hostTrapVector" });
   strictEqual(hostTrap.exitMaterializationIndex, 2);
@@ -265,10 +241,10 @@ test("planJitCodegen makes guard faults observe current flag state", () => {
     FLAG_PRODUCERS.inc.writtenMask
   );
 
-  deepStrictEqual(readFault.observedState.boundary, beforeOp(0, 3));
+  strictEqual(readFault.opIndex, 3);
   strictEqual(readFault.exitMaterializationIndex, 1);
   deepStrictEqual(readFault.observedState.valueState.flags.exitStores(), [flagStore(expectedFlags)]);
-  deepStrictEqual(hostTrap.observedState.boundary, instructionExit(0, codegenPlan.block.instructions[0]!));
+  strictEqual(hostTrap.opIndex, 4);
   strictEqual(hostTrap.exitMaterializationIndex, 2);
   deepStrictEqual(hostTrap.observedState.valueState.flags.exitStores(), [flagStore(expectedFlags)]);
 });
@@ -287,7 +263,7 @@ test("planJitCodegen records exit materializations only for actual exit points",
   deepStrictEqual(codegenPlan.instructionStates.map((entry) => entry.exitPointCount), [0, 0, 1]);
 });
 
-test("planJitCodegen records boundary-state-derived flag stores for branch exits", () => {
+test("planJitCodegen records value-state-derived flag stores for branch exits", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const jb = ok(decodeBytes([0x72, 0x05], add.nextEip));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([add, jb])));
@@ -303,21 +279,13 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
   strictEqual(branchExits.length, 2);
 
   for (const exit of branchExits) {
-    deepStrictEqual(exit.observedState.boundary, instructionExit(1, codegenPlan.block.instructions[1]!));
-    deepStrictEqual(exit.emitBoundary, beforeOp(1, exit.opIndex));
-    deepStrictEqual(exit.observedBoundary, instructionExit(1, codegenPlan.block.instructions[1]!));
+    strictEqual(exit.instructionIndex, 1);
     deepStrictEqual(exit.observedState.valueState.flags.exitStores(), [
       flagStore(exit.observedState.valueState.flags.readAluFlags())
     ]);
   }
 
-  strictEqual(branchExits[0]!.observedState, branchExits[1]!.observedState);
-  deepStrictEqual(
-    codegenPlan.boundaryStates.map((state) => state.boundary),
-    uniqueObservedBoundaries(codegenPlan.exitPoints)
-  );
-  strictEqual(codegenPlan.boundaryStates.length, 1);
-  strictEqual(codegenPlan.boundaryStates[0], branchExits[0]!.observedState);
+  deepStrictEqual(branchExits[0]!.observedState, branchExits[1]!.observedState);
   deepStrictEqual(branchExits.map((exit) => exit.visibleEip), [
     { kind: "static", value: jb.nextEip + 5 },
     { kind: "static", value: jb.nextEip }
@@ -451,7 +419,7 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from source IR afte
   deepStrictEqual(takenTargetUse.pathScope, takenExitStoreNeed.pathScope);
 });
 
-test("planJitCodegen records full flag producers in value-state boundary states", () => {
+test("planJitCodegen records full flag producers in value-state snapshots", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "full-flags",
@@ -791,7 +759,7 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
 test("planJitCodegen keeps produced values out of observed boundaries before their definitions", () => {
   const block: JitIrBlock = {
     instructions: [{
-      instructionId: "produced-before-observed-boundary",
+      instructionId: "produced-before-exit-observation",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
@@ -822,9 +790,9 @@ test("planJitCodegen keeps produced values out of observed boundaries before the
   const codegenPlan = planJitCodegen(block);
   const readFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
-  const produced = jitProducedValue("load#produced-before-observed-boundary:0:1:0", "i32");
+  const produced = jitProducedValue("load#produced-before-exit-observation:0:1:0", "i32");
 
-  deepStrictEqual(readFault.observedBoundary, beforeOp(0, 0));
+  strictEqual(readFault.opIndex, 0);
   strictEqual(readFault.exitMaterializationIndex, 0);
   deepStrictEqual(readFault.observedState.valueState.exitStores(), []);
   deepStrictEqual(
@@ -833,27 +801,8 @@ test("planJitCodegen keeps produced values out of observed boundaries before the
     ),
     []
   );
-  deepStrictEqual(hostTrap.observedBoundary, instructionExit(0, block.instructions[0]!));
+  strictEqual(hostTrap.opIndex, 3);
   deepStrictEqual(hostTrap.observedState.valueState.regs.exitStores(), [
     registerStore("eax", produced)
   ]);
-  deepStrictEqual(
-    codegenPlan.boundaryStates.map((state) => state.boundary),
-    uniqueObservedBoundaries(codegenPlan.exitPoints)
-  );
 });
-
-function uniqueObservedBoundaries(exitPoints: readonly { observedBoundary: ReturnType<typeof instructionEntry> }[]) {
-  const unique: ReturnType<typeof instructionEntry>[] = [];
-
-  for (const exitPoint of exitPoints) {
-    if (!unique.some((boundary) =>
-      boundary.instructionIndex === exitPoint.observedBoundary.instructionIndex &&
-        boundary.boundaryIndex === exitPoint.observedBoundary.boundaryIndex
-    )) {
-      unique.push(exitPoint.observedBoundary);
-    }
-  }
-
-  return unique;
-}

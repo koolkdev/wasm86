@@ -35,17 +35,10 @@ import { emitJitBlock } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import {
-  instructionEntry,
-  instructionExit
-} from "#backends/wasm/jit/codegen/plan/plan.js";
-import {
   branchValuePathScope,
   rootValuePathScope
 } from "#backends/wasm/jit/codegen/plan/control-paths.js";
-import type {
-  JitBoundaryRef,
-  JitBoundaryState
-} from "#backends/wasm/jit/codegen/plan/types.js";
+import type { JitExitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
@@ -82,8 +75,6 @@ export {
   emitJitBlock,
   planJitExpressionValueCache,
   buildJitInstructionValueTimeline,
-  instructionEntry,
-  instructionExit,
   branchValuePathScope,
   rootValuePathScope,
   createJitIrState,
@@ -98,8 +89,7 @@ export type {
   JitValueCacheRuntime,
   JitValueUseCount,
   JitIrBlock,
-  JitBoundaryRef,
-  JitBoundaryState,
+  JitExitStateSnapshot,
   Reg32
 };
 
@@ -253,12 +243,10 @@ export function countOpcode(opcodes: readonly number[], opcode: number): number 
   return opcodes.filter((entry) => entry === opcode).length;
 }
 
-export function boundaryState(
-  boundary: JitBoundaryRef,
+export function exitState(
   instructionCountDelta: number
-): JitBoundaryState {
+): JitExitStateSnapshot {
   return {
-    boundary,
     instructionCountDelta,
     valueState: createJitValueState().snapshot()
   };

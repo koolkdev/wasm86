@@ -3,10 +3,9 @@ import { u32 } from "#x86/state/cpu-state.js";
 import type { TargetRef } from "#x86/ir/model/types.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import type {
-  JitBoundaryRef,
+  JitExitStateSnapshot,
   JitObservationPayload,
   JitObservationValue,
-  JitBoundaryState,
   JitInstructionState
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
@@ -14,101 +13,64 @@ import {
   type JitValuePathScope
 } from "./control-paths.js";
 import {
-  beforeOp
-} from "./boundaries.js";
-import {
-  type JitEffectIndex,
-  jitGuardExitReasonAt,
-  jitPostInstructionExitsAt
-} from "#backends/wasm/jit/ir/effects.js";
-import type { JitPostInstructionExit } from "#backends/wasm/jit/ir/effect-primitives.js";
+  jitOpExitReason,
+  type JitOpExitKind
+} from "#backends/wasm/jit/ir/effect-primitives.js";
 
 export type JitPlannedObservationPoint = Readonly<{
   instructionIndex: number;
   opIndex: number;
-  emitBoundary: JitBoundaryRef;
-  observedBoundary: JitBoundaryRef;
-  observedState: JitBoundaryState;
+  observedState: JitExitStateSnapshot;
   visibleEip: JitObservationValue;
   exitReason: ExitReasonValue;
   payload: JitObservationPayload;
   pathScope: JitValuePathScope;
 }>;
 
-export function jitGuardObservationForOp(
-  effects: JitEffectIndex,
+export function jitExitObservationForOp(
   instruction: JitIrBlockInstruction,
   instructionIndex: number,
   opIndex: number,
-  observedState: JitBoundaryState
-): JitPlannedObservationPoint | undefined {
-  const faultReason = jitGuardExitReasonAt(effects, instructionIndex, opIndex);
-
-  if (faultReason === undefined) {
-    return undefined;
-  }
-
+  exit: JitOpExitKind,
+  observedState: JitExitStateSnapshot,
+  controlPathScopes: JitInstructionState["controlPathScopes"]
+): JitPlannedObservationPoint {
   return {
     instructionIndex,
     opIndex,
-    emitBoundary: beforeOp(instructionIndex, opIndex),
-    observedBoundary: observedState.boundary,
     observedState,
-    visibleEip: {
-      kind: "static",
-      value: instruction.eip
-    },
-    exitReason: faultReason,
-    payload: {
-      kind: "runtime",
-      source: "memoryAddress"
-    },
-    pathScope: rootValuePathScope()
+    visibleEip: visibleEipForOpExit(instruction, exit, opIndex),
+    exitReason: jitOpExitReason(exit),
+    payload: payloadForOpExit(instruction, exit, opIndex),
+    pathScope: observationPathScope(instructionIndex, opIndex, exit, controlPathScopes)
   };
 }
 
-export function jitPostInstructionObservationsForOp(
-  effects: JitEffectIndex,
+function visibleEipForOpExit(
   instruction: JitIrBlockInstruction,
-  instructionIndex: number,
-  opIndex: number,
-  postState: JitBoundaryState,
-  controlPathScopes: JitInstructionState["controlPathScopes"]
-): readonly JitPlannedObservationPoint[] {
-  const exits = jitPostInstructionExitsAt(effects, instructionIndex, opIndex);
-
-  return exits.map((exit) => ({
-    instructionIndex,
-    opIndex,
-    emitBoundary: beforeOp(instructionIndex, opIndex),
-    observedBoundary: postState.boundary,
-    observedState: postState,
-    visibleEip: visibleEipForPostInstructionExit(instruction, exit, opIndex),
-    exitReason: exit.exitReason,
-    payload: payloadForPostInstructionExit(instruction, exit, opIndex),
-    pathScope: observationPathScope(instructionIndex, opIndex, exit, controlPathScopes)
-  }));
-}
-
-function visibleEipForPostInstructionExit(
-  instruction: JitIrBlockInstruction,
-  exit: JitPostInstructionExit,
+  exit: JitOpExitKind,
   opIndex: number
 ): JitObservationValue {
-  switch (exit.kind) {
+  switch (exit) {
+    case "memoryReadFault":
+    case "memoryWriteFault":
+      return {
+        kind: "static",
+        value: instruction.eip
+      };
     case "hostTrap":
       return {
         kind: "static",
         value: instruction.nextEip
       };
     default:
-      return payloadForPostInstructionExit(instruction, exit, opIndex);
+      return payloadForOpExit(instruction, exit, opIndex);
   }
 }
 
-function payloadForPostInstructionExit(
+function payloadForOpExit(
   instruction: JitIrBlockInstruction,
-  exit: JitPostInstructionExit,
+  exit: JitOpExitKind,
   opIndex: number
 ): JitObservationPayload {
   const op = instruction.ir[opIndex];
@@ -117,7 +79,10 @@ function payloadForPostInstructionExit(
     throw new Error(`missing JIT IR op while planning JIT exit payload: ${instruction.instructionId}:${opIndex}`);
   }
 
-  switch (exit.kind) {
+  switch (exit) {
+    case "memoryReadFault":
+    case "memoryWriteFault":
+      return { kind: "runtime", source: "memoryAddress" };
     case "fallthrough":
       return { kind: "static", value: instruction.nextEip };
     case "jump":
@@ -178,10 +143,10 @@ function staticConstVarValue(varId: number, instruction: JitIrBlockInstruction):
 function observationPathScope(
   instructionIndex: number,
   opIndex: number,
-  exit: JitPostInstructionExit,
+  exit: JitOpExitKind,
   controlPathScopes: JitInstructionState["controlPathScopes"]
 ): JitValuePathScope {
-  switch (exit.kind) {
+  switch (exit) {
     case "branchTaken":
       return requiredBranchPathScopes(
         controlPathScopes,

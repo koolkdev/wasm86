@@ -11,12 +11,10 @@ import {
   emitJitBlock,
   buildJitInstructionValueTimeline,
   createJitIrState,
-  boundaryState,
+  exitState,
   const32,
   xorExpr,
   countOpcode,
-  instructionEntry,
-  instructionExit,
 } from "./value-local-store-test-helpers.js";
 import { rootValuePathScope } from "#backends/wasm/jit/codegen/plan/control-paths.js";
 test("JIT emission consumes prebuilt expression blocks from instruction plans", () => {
@@ -35,8 +33,8 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
     operands: [],
     ir: expressionBlock
   } as const;
-  const entrySnapshot = boundaryState(instructionEntry(0), 0);
-  const postSnapshot = boundaryState(instructionExit(0, instruction), 1);
+  const initialState = exitState(0);
+  const observedState = exitState(1);
 
   emitJitBlock({
     body,
@@ -48,11 +46,8 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
       eip: instruction.eip,
       nextEip: instruction.nextEip,
       nextMode: instruction.nextMode,
-      entryPoint: {
-        instructionIndex: 0,
-        boundaryState: entrySnapshot
-      },
-      postInstructionState: postSnapshot,
+      instructionCountDelta: initialState.instructionCountDelta,
+      initialValueState: initialState.valueState,
       controlPathScopes: new Map(),
       exitPointCount: 1,
       operands: instruction.operands,
@@ -60,7 +55,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
       valueTimeline: buildJitInstructionValueTimeline({
         operands: [],
         expressionBlock,
-        entryValueState: entrySnapshot.valueState
+        entryValueState: initialState.valueState
       }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPathScopes: new Map(),
@@ -70,9 +65,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
     exitPoints: [{
       instructionIndex: 0,
       opIndex: 0,
-      emitBoundary: instructionEntry(0),
-      observedBoundary: postSnapshot.boundary,
-      observedState: postSnapshot,
+      observedState,
       visibleEip: { kind: "static", value: instruction.nextEip },
       exitReason: ExitReason.HOST_TRAP,
       payload: { kind: "runtime", source: "hostTrapVector" },

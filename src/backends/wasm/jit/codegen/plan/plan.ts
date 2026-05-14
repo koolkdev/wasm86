@@ -3,11 +3,9 @@ import { analyzeJitCodegenState } from "./state-plan.js";
 import type { JitCodegenPlan } from "./types.js";
 
 export type {
-  JitBoundaryRef,
-  JitBoundaryState,
-  JitInstructionEntryPoint,
   ExitMaterializationStore,
   JitExitPoint,
+  JitExitStateSnapshot,
   JitObservationPayload,
   JitObservationPoint,
   JitObservationRuntimeSource,
@@ -25,12 +23,6 @@ export type {
   JitControlPathId,
   JitValuePathScope
 } from "./control-paths.js";
-export {
-  afterOp,
-  beforeOp,
-  instructionEntry,
-  instructionExit
-} from "./boundaries.js";
 export type {
   JitInstructionValueTimeline,
   JitInstructionValueTimelineInput,

@@ -12,10 +12,7 @@ import {
   planValueCacheForTest,
   registerStore,
   exitPoint,
-  instructionEntryPoint,
-  boundaryState,
-  instructionEntry,
-  instructionExit,
+  exitState,
   c32,
   addValue,
   type JitCodegenPlan,
@@ -125,8 +122,8 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         eip: startAddress,
         nextEip: startAddress + 1,
         nextMode: "continue",
-        entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0)),
-        postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
+        instructionCountDelta: 0,
+        initialValueState: exitState(0).valueState,
         controlPathScopes: new Map(),
         exitPointCount: 0
       },
@@ -135,20 +132,17 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         eip: startAddress + 1,
         nextEip: startAddress + 2,
         nextMode: "exit",
-        entryPoint: instructionEntryPoint(1, boundaryState(instructionEntry(1), 1, ["eax"])),
-        postInstructionState: boundaryState(instructionExit(1, block.instructions[1]!), 2, ["eax"]),
+        instructionCountDelta: 1,
+        initialValueState: exitState(1, ["eax"]).valueState,
         controlPathScopes: new Map(),
         exitPointCount: 1
       }
-    ],
-    boundaryStates: [
-      boundaryState(instructionExit(1, block.instructions[1]!), 2, ["eax"])
     ],
     exitPoints: [exitPoint({
       instructionIndex: 1,
       opIndex: 1,
       exitReason: ExitReason.HOST_TRAP,
-      observedState: boundaryState(instructionExit(1, block.instructions[1]!), 2, ["eax"]),
+      observedState: exitState(2, ["eax"]),
       exitMaterializationIndex: 1
     })],
     materializationNeeds: [],
@@ -207,19 +201,16 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "continue",
-      entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0, ["eax"])),
-      postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
+      instructionCountDelta: 0,
+      initialValueState: exitState(0, ["eax"]).valueState,
       controlPathScopes: new Map(),
       exitPointCount: 1
     }],
-    boundaryStates: [
-      boundaryState(instructionEntry(0), 0, ["eax"])
-    ],
     exitPoints: [exitPoint({
       instructionIndex: 0,
       opIndex: 0,
       exitReason: ExitReason.MEMORY_READ_FAULT,
-      observedState: boundaryState(instructionEntry(0), 0, ["eax"]),
+      observedState: exitState(0, ["eax"]),
       visibleEip: { kind: "static", value: startAddress },
       payload: { kind: "runtime", source: "memoryAddress" },
       exitMaterializationIndex: 1

@@ -1,6 +1,5 @@
 import type { Reg32 } from "#x86/isa/types.js";
 import type { IrOp, ValueRef } from "#x86/ir/model/types.js";
-import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   analyzeJitConditionUses,
@@ -9,15 +8,13 @@ import {
   type JitConditionUse
 } from "#backends/wasm/jit/ir/condition-uses.js";
 import {
-  jitMemoryFaultReason,
-  jitPostInstructionExits,
-  type JitPostInstructionExit
+  jitOpExits,
+  type JitOpExitKind
 } from "#backends/wasm/jit/ir/effect-primitives.js";
 import { jitStorageReg } from "#backends/wasm/jit/ir/values.js";
 
 export type JitOpEffects = Readonly<{
-  guardExitReason?: ExitReasonValue;
-  postInstructionExits: readonly JitPostInstructionExit[];
+  exits: readonly JitOpExitKind[];
   localConditionValues: readonly ValueRef[];
   exitConditionValues: readonly ValueRef[];
   registerWriteReg?: Reg32;
@@ -54,17 +51,11 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
         throw new Error(`missing JIT IR op while indexing JIT op effects: ${instructionIndex}:${opIndex}`);
       }
 
-      const guardExitReason = jitMemoryFaultReason(op);
-
       let opEffects: JitOpEffects = {
-        postInstructionExits: jitPostInstructionExits(op, instruction),
+        exits: jitOpExits(op, instruction),
         localConditionValues: localConditionValues.get(instructionIndex)?.get(opIndex) ?? [],
         exitConditionValues: exitConditionValues.get(instructionIndex)?.get(opIndex) ?? []
       };
-
-      if (guardExitReason !== undefined) {
-        opEffects = { ...opEffects, guardExitReason };
-      }
 
       const registerWriteReg = jitRegisterWriteReg(op, instruction.operands);
 
@@ -120,28 +111,20 @@ export function jitConditionValuesAt(
     : opEffects.exitConditionValues;
 }
 
-export function jitGuardExitReasonAt(
+export function jitOpExitsAt(
   effects: JitEffectIndex,
   instructionIndex: number,
   opIndex: number
-): ExitReasonValue | undefined {
-  return jitOpEffectsAt(effects, instructionIndex, opIndex).guardExitReason;
+): readonly JitOpExitKind[] {
+  return jitOpEffectsAt(effects, instructionIndex, opIndex).exits;
 }
 
-export function jitPostInstructionExitsAt(
-  effects: JitEffectIndex,
-  instructionIndex: number,
-  opIndex: number
-): readonly JitPostInstructionExit[] {
-  return jitOpEffectsAt(effects, instructionIndex, opIndex).postInstructionExits;
-}
-
-export function jitOpHasPostInstructionExit(
+export function jitOpHasExit(
   effects: JitEffectIndex,
   instructionIndex: number,
   opIndex: number
 ): boolean {
-  return jitPostInstructionExitsAt(effects, instructionIndex, opIndex).length !== 0;
+  return jitOpExitsAt(effects, instructionIndex, opIndex).length !== 0;
 }
 
 export function jitConditionUseAt(

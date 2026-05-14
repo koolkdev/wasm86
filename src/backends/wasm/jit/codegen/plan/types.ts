@@ -15,13 +15,7 @@ import type {
   JitValuePathScope
 } from "./control-paths.js";
 
-export type JitBoundaryRef = Readonly<{
-  instructionIndex: number;
-  boundaryIndex: number;
-}>;
-
-export type JitBoundaryState = Readonly<{
-  boundary: JitBoundaryRef;
+export type JitExitStateSnapshot = Readonly<{
   instructionCountDelta: number;
   valueState: JitValueStateSnapshot;
 }>;
@@ -40,9 +34,7 @@ export type JitObservationPayload = JitObservationValue;
 export type JitObservationPoint = Readonly<{
   instructionIndex: number;
   opIndex: number;
-  emitBoundary: JitBoundaryRef;
-  observedBoundary: JitBoundaryRef;
-  observedState: JitBoundaryState;
+  observedState: JitExitStateSnapshot;
   visibleEip: JitObservationValue;
   exitReason: ExitReasonValue;
   payload: JitObservationPayload;
@@ -55,8 +47,6 @@ export type JitExitPoint = JitObservationPoint;
 export type JitMaterializationPlacement = Readonly<{
   instructionIndex: number;
   opIndex: number;
-  emitBoundary: JitBoundaryRef;
-  observedBoundary: JitBoundaryRef;
   observationIndex: number;
   exitPointIndex: number;
   exitReason: ExitReasonValue;
@@ -75,18 +65,13 @@ export type JitMaterializationNeed = JitExitStoreMaterializationNeed;
 
 export type JitExitMaterializationStore = ExitMaterializationStore;
 
-export type JitInstructionEntryPoint = Readonly<{
-  instructionIndex: number;
-  boundaryState: JitBoundaryState;
-}>;
-
 export type JitInstructionState = Readonly<{
   instructionId: string;
   eip: number;
   nextEip: number;
   nextMode: "continue" | "exit";
-  entryPoint: JitInstructionEntryPoint;
-  postInstructionState: JitBoundaryState;
+  instructionCountDelta: number;
+  initialValueState: JitValueStateSnapshot;
   controlPathScopes: JitControlPathScopesMap;
   exitPointCount: number;
 }>;
@@ -98,7 +83,6 @@ export type JitExitMaterializationPlan = Readonly<{
 export type JitCodegenPlan = Readonly<{
   block: JitIrBlock;
   instructionStates: readonly JitInstructionState[];
-  boundaryStates: readonly JitBoundaryState[];
   exitPoints: readonly JitExitPoint[];
   materializationNeeds: readonly JitMaterializationNeed[];
   exitMaterializations: readonly JitExitMaterializationPlan[];

@@ -5,8 +5,7 @@ import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { emitLoadStateU32, emitStoreStateU32 } from "#backends/wasm/codegen/state.js";
 import type {
   JitExitMaterializationPlan,
-  JitExitPoint,
-  JitInstructionEntryPoint
+  JitExitPoint
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import {
@@ -33,7 +32,7 @@ export type JitIrState = Readonly<{
   instructionCountLocal: number;
   maxExitMaterializationIndex: number;
   emitLoadInstructionCount(): void;
-  beginInstruction(exit: JitExitTarget, entryPoint: JitInstructionEntryPoint, entryEip: number): void;
+  beginInstruction(exit: JitExitTarget, instructionCountDelta: number, entryEip: number): void;
   prepareExitPoint(exitPoint: JitExitPoint, emitRuntimeVisibleEip?: () => void): void;
   commitInstructionExit(exitPoint: JitExitPoint, emitRuntimeVisibleEip?: () => void): void;
   emitExitMaterializationStores(index: number): void;
@@ -59,12 +58,12 @@ export function createJitIrState(
       emitLoadStateU32(body, stateOffset.instructionCount);
       body.localSet(instructionCountLocal);
     },
-    beginInstruction: (exit, entryPoint, entryEip) => {
+    beginInstruction: (exit, instructionCountDelta, entryEip) => {
       activeExit = exit;
       useExitMaterialization(exit, 0);
       installExitMetadataStores(exit, () => {
         body.i32Const(i32(entryEip));
-      }, entryPoint.boundaryState.instructionCountDelta);
+      }, instructionCountDelta);
     },
     prepareExitPoint: (exitPoint, emitRuntimeVisibleEip) => {
       const exit = requiredActiveExit();

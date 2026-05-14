@@ -1,34 +1,12 @@
 import type { IrOp } from "#x86/ir/model/types.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
-import type {
-  JitBoundaryRef,
-  JitBoundaryState
-} from "#backends/wasm/jit/codegen/plan/types.js";
+import type { JitExitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
   JitSourceValueMap,
   JitValueStateBuilder
 } from "./value-state-builder.js";
 
-export function instructionEntry(instructionIndex: number): JitBoundaryRef {
-  return { instructionIndex, boundaryIndex: 0 };
-}
-
-export function beforeOp(instructionIndex: number, opIndex: number): JitBoundaryRef {
-  return { instructionIndex, boundaryIndex: opIndex };
-}
-
-export function afterOp(instructionIndex: number, opIndex: number): JitBoundaryRef {
-  return { instructionIndex, boundaryIndex: opIndex + 1 };
-}
-
-export function instructionExit(
-  instructionIndex: number,
-  instruction: Readonly<{ ir: readonly unknown[] }>
-): JitBoundaryRef {
-  return { instructionIndex, boundaryIndex: instruction.ir.length };
-}
-
-export class JitBoundaryStateBuilder {
+export class JitExitStateBuilder {
   readonly #valueState = new JitValueStateBuilder();
   readonly #values = new JitSourceValueMap();
   #instructionCountDelta = 0;
@@ -37,21 +15,17 @@ export class JitBoundaryStateBuilder {
     this.#values.clear();
   }
 
-  boundaryState(boundary: JitBoundaryRef): JitBoundaryState {
-    return {
-      boundary,
-      instructionCountDelta: this.#instructionCountDelta,
-      valueState: this.#valueState.snapshot()
-    };
+  instructionCountDelta(): number {
+    return this.#instructionCountDelta;
   }
 
-  postInstructionBoundaryState(
-    instructionIndex: number,
-    instruction: JitIrBlockInstruction
-  ): JitBoundaryState {
+  valueStateSnapshot(): JitExitStateSnapshot["valueState"] {
+    return this.#valueState.snapshot();
+  }
+
+  exitStateSnapshot(): JitExitStateSnapshot {
     return {
-      boundary: instructionExit(instructionIndex, instruction),
-      instructionCountDelta: this.#instructionCountDelta + 1,
+      instructionCountDelta: this.#instructionCountDelta,
       valueState: this.#valueState.snapshot()
     };
   }

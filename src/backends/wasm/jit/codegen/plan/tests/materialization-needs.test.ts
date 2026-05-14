@@ -23,10 +23,7 @@ import {
   flagStore,
   exitStoreNeed,
   exitPoint,
-  instructionEntryPoint,
-  boundaryState,
-  instructionEntry,
-  instructionExit,
+  exitState,
   c32,
   addValue,
   type JitCodegenPlan,
@@ -141,8 +138,8 @@ test("planJitCodegen records register and flag exit stores as generic value uses
   strictEqual(needs.some((need) => "consumer" in need), false);
 
   for (const need of needs) {
-    deepStrictEqual(need.placement.emitBoundary, exit.emitBoundary);
-    deepStrictEqual(need.placement.observedBoundary, exit.observedBoundary);
+    strictEqual(need.placement.instructionIndex, exit.instructionIndex);
+    strictEqual(need.placement.opIndex, exit.opIndex);
     strictEqual(need.placement.exitReason, exit.exitReason);
     strictEqual(need.placement.exitMaterializationIndex, exit.exitMaterializationIndex);
   }
@@ -205,7 +202,8 @@ function buildHostTrapEmissionPlanForStores(
       ]
     }]
   };
-  const postSnapshot = boundaryState(instructionExit(0, block.instructions[0]!), 1);
+  const initialState = exitState(0);
+  const postSnapshot = exitState(1);
   const exit = exitPoint({
     instructionIndex: 0,
     opIndex: 0,
@@ -222,12 +220,11 @@ function buildHostTrapEmissionPlanForStores(
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
-      entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0)),
-      postInstructionState: postSnapshot,
+      instructionCountDelta: initialState.instructionCountDelta,
+      initialValueState: initialState.valueState,
       controlPathScopes: new Map(),
       exitPointCount: 1
     }],
-    boundaryStates: [postSnapshot],
     exitPoints: [exit],
     materializationNeeds: stores.map((store) => exitStoreNeed(store, exit, 0)),
     exitMaterializations: [
@@ -390,8 +387,8 @@ test("buildJitCodegenEmissionPlan maps generic exit-store uses at source exit lo
       ]
     }]
   };
-  const entrySnapshot = boundaryState(instructionEntry(0), 0);
-  const postSnapshot = boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]);
+  const entrySnapshot = exitState(0);
+  const postSnapshot = exitState(1, ["eax"]);
   const readFaultExit = exitPoint({
     instructionIndex: 0,
     opIndex: 0,
@@ -419,15 +416,11 @@ test("buildJitCodegenEmissionPlan maps generic exit-store uses at source exit lo
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
-      entryPoint: instructionEntryPoint(0, entrySnapshot),
-      postInstructionState: postSnapshot,
+      instructionCountDelta: entrySnapshot.instructionCountDelta,
+      initialValueState: entrySnapshot.valueState,
       controlPathScopes: new Map(),
       exitPointCount: 2
     }],
-    boundaryStates: [
-      entrySnapshot,
-      postSnapshot
-    ],
     exitPoints: [
       readFaultExit,
       hostTrapExit
@@ -492,8 +485,8 @@ test("buildJitCodegenEmissionPlan walks condition and select dependencies from g
     whenTrue: c32(0x10),
     whenFalse: c32(0x20)
   } as const satisfies JitValue;
-  const entrySnapshot = boundaryState(instructionEntry(0), 0);
-  const postSnapshot = boundaryState(instructionExit(0, block.instructions[0]!), 1);
+  const entrySnapshot = exitState(0);
+  const postSnapshot = exitState(1);
   const hostTrapExit = exitPoint({
     instructionIndex: 0,
     opIndex: 1,
@@ -510,12 +503,11 @@ test("buildJitCodegenEmissionPlan walks condition and select dependencies from g
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
-      entryPoint: instructionEntryPoint(0, entrySnapshot),
-      postInstructionState: postSnapshot,
+      instructionCountDelta: entrySnapshot.instructionCountDelta,
+      initialValueState: entrySnapshot.valueState,
       controlPathScopes: new Map(),
       exitPointCount: 1
     }],
-    boundaryStates: [postSnapshot],
     exitPoints: [hostTrapExit],
     materializationNeeds: [
       exitStoreNeed(flagStore(selectedFlags), hostTrapExit, 0)

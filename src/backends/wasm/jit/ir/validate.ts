@@ -143,12 +143,6 @@ function validateBarrierLocation(block: JitIrBlock, barrier: JitBarrier): void {
 }
 
 function validateBarrierShape(barrier: JitBarrier): void {
-  if (barrier.reason === "guardExit" && barrier.exitReason === undefined) {
-    throw new Error(
-      `guard exit barrier is missing its exit reason at ${barrier.instructionIndex}:${barrier.opIndex}`
-    );
-  }
-
   if (barrier.reason === "exit" && (barrier.exits?.length ?? 0) === 0) {
     throw new Error(`exit barrier is missing exits at ${barrier.instructionIndex}:${barrier.opIndex}`);
   }

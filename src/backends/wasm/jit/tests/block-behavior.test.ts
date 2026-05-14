@@ -1332,7 +1332,7 @@ test("jit IR block freezes cmovcc-selected register values before later full-reg
   deepStrictEqual(result.exit, { exitReason: ExitReason.FALLTHROUGH, payload: startAddress + 8 });
 });
 
-test("jit IR block preserves cmovcc value-state writes on later pre-instruction exits", async () => {
+test("jit IR block preserves cmovcc value-state writes on later guard exits", async () => {
   const result = await runJitIrBlock(
     [
       0x0f, 0x44, 0xd1, // cmove edx, ecx
@@ -1355,7 +1355,7 @@ test("jit IR block preserves cmovcc value-state writes on later pre-instruction 
   deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x10000, detail: 4 });
 });
 
-test("jit IR block preserves a pre-instruction exit before later cmovcc mutation of the same register", async () => {
+test("jit IR block preserves a guard exit before later cmovcc mutation of the same register", async () => {
   const result = await runJitIrBlock(
     [
       0x0f, 0x44, 0xc1, // cmove eax, ecx

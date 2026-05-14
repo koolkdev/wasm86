@@ -1,57 +1,53 @@
 import type { IrOp } from "#x86/ir/model/types.js";
 import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
-  beforeOp,
-  instructionEntry,
-  JitBoundaryStateBuilder
-} from "./boundaries.js";
+  JitExitStateBuilder
+} from "./exit-state.js";
 import {
   indexJitEffects,
   type JitEffectIndex,
-  jitOpHasPostInstructionExit
+  jitOpExitsAt
 } from "#backends/wasm/jit/ir/effects.js";
 import type {
   ExitMaterializationStore,
-  JitBoundaryState,
   JitCodegenPlan,
   JitExitPoint,
   JitExitMaterializationPlan,
+  JitExitStateSnapshot,
   JitInstructionState,
   JitMaterializationNeed
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
-  jitGuardObservationForOp,
-  jitPostInstructionObservationsForOp,
+  jitExitObservationForOp,
   type JitPlannedObservationPoint
 } from "./observations.js";
 import { jitMaterializationNeedsForExitStores } from "./materialization.js";
 import { buildJitInstructionControlPathScopes } from "./control-paths.js";
+import type { JitOpExitKind } from "#backends/wasm/jit/ir/effect-primitives.js";
 
 export function analyzeJitCodegenState(
   block: JitIrBlock,
   effects: JitEffectIndex = indexJitEffects(block)
 ): Omit<JitCodegenPlan, "block"> {
-  const state = new JitBoundaryStateBuilder();
+  const state = new JitExitStateBuilder();
   const instructionStates: JitInstructionState[] = [];
-  const boundaryStates: JitBoundaryState[] = [];
   const exitPoints: JitExitPoint[] = [];
   const materializationNeeds: JitMaterializationNeed[] = [];
   // Non-empty exit materializations stay per-exit because register and flag
   // locals can change before deferred exit blocks are emitted. Empty exits
   // share index 0.
   const exitMaterializations: JitExitMaterializationPlan[] = [{ stores: [] }];
-  let currentPostState: JitBoundaryState | undefined;
 
   for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
     const instruction = block.instructions[instructionIndex];
-    currentPostState = undefined;
 
     if (instruction === undefined) {
       throw new Error(`missing JIT instruction while planning JIT codegen: ${instructionIndex}`);
     }
 
     state.beginInstruction();
-    const entryState = state.boundaryState(instructionEntry(instructionIndex));
+    const instructionCountDelta = state.instructionCountDelta();
+    const initialValueState = state.valueStateSnapshot();
     const controlPathScopes = buildJitInstructionControlPathScopes(
       instruction,
       instructionIndex
@@ -65,24 +61,10 @@ export function analyzeJitCodegenState(
         throw new Error(`missing JIT IR op while planning JIT codegen: ${instructionIndex}:${opIndex}`);
       }
 
-      const guardObservation = jitGuardObservationForOp(
-        effects,
-        instruction,
-        instructionIndex,
-        opIndex,
-        state.boundaryState(beforeOp(instructionIndex, opIndex))
-      );
+      const exits = jitOpExitsAt(effects, instructionIndex, opIndex);
 
-      if (guardObservation !== undefined) {
-        recordObservationPoint(guardObservation);
-      }
-
-      recordOpEffects(op, instruction, instructionIndex, opIndex, controlPathScopes);
+      recordOpEffects(op, instruction, instructionIndex, opIndex, exits, controlPathScopes);
       state.recordOp(op, instruction, instructionIndex, opIndex);
-    }
-
-    if (currentPostState === undefined) {
-      throw new Error(`missing JIT instruction terminator while planning JIT codegen: ${instructionIndex}`);
     }
 
     instructionStates.push({
@@ -90,11 +72,8 @@ export function analyzeJitCodegenState(
       eip: instruction.eip,
       nextEip: instruction.nextEip,
       nextMode: instruction.nextMode,
-      entryPoint: {
-        instructionIndex,
-        boundaryState: entryState
-      },
-      postInstructionState: currentPostState,
+      instructionCountDelta,
+      initialValueState,
       controlPathScopes,
       exitPointCount: exitPoints.length - exitStart
     });
@@ -102,67 +81,70 @@ export function analyzeJitCodegenState(
 
   return {
     instructionStates,
-    boundaryStates,
     exitPoints,
     materializationNeeds,
     exitMaterializations,
     maxExitMaterializationIndex: exitMaterializations.length - 1
   };
 
-  function instructionPostState(
-    instruction: JitIrBlockInstruction,
-    instructionIndex: number
-  ): JitBoundaryState {
-    currentPostState ??= state.postInstructionBoundaryState(instructionIndex, instruction);
-
-    return currentPostState;
-  }
-
   function recordOpEffects(
     op: IrOp,
     instruction: JitIrBlockInstruction,
     instructionIndex: number,
     opIndex: number,
+    exits: readonly JitOpExitKind[],
     controlPathScopes: JitInstructionState["controlPathScopes"]
   ): void {
+    recordExitObservations(
+      instruction,
+      instructionIndex,
+      opIndex,
+      exits,
+      controlPathScopes
+    );
+
     switch (op.op) {
       case "set":
       case "flags.set":
       case "flags.condition":
         return;
       case "next":
-        recordPostInstructionExits(instruction, instructionIndex, opIndex, controlPathScopes);
-
-        if (!jitOpHasPostInstructionExit(effects, instructionIndex, opIndex)) {
+        if (exits.length === 0) {
           state.commitInstruction();
         }
         return;
       case "jump":
       case "conditionalJump":
       case "hostTrap":
-        recordPostInstructionExits(instruction, instructionIndex, opIndex, controlPathScopes);
         return;
       default:
         return;
     }
   }
 
-  function recordPostInstructionExits(
+  function recordExitObservations(
     instruction: JitIrBlockInstruction,
     instructionIndex: number,
     opIndex: number,
+    exits: readonly JitOpExitKind[],
     controlPathScopes: JitInstructionState["controlPathScopes"]
   ): void {
-    const snapshot = instructionPostState(instruction, instructionIndex);
+    if (exits.length === 0) {
+      return;
+    }
 
-    for (const observation of jitPostInstructionObservationsForOp(
-      effects,
-      instruction,
-      instructionIndex,
-      opIndex,
-      snapshot,
-      controlPathScopes
-    )) {
+    const observedState = state.exitStateSnapshot();
+
+    for (const exit of exits) {
+      const observation = jitExitObservationForOp(
+        instruction,
+        instructionIndex,
+        opIndex,
+        exit,
+        exitObservedState(exit, observedState),
+        controlPathScopes
+      );
+
       recordObservationPoint(observation);
     }
   }
@@ -176,7 +158,6 @@ export function analyzeJitCodegenState(
       exitMaterializationIndex
     };
 
-    appendObservedBoundaryState(observation.observedState);
     exitPoints.push(exitPoint);
     materializationNeeds.push(...jitMaterializationNeedsForExitStores(
       exitPoint,
@@ -197,20 +178,20 @@ export function analyzeJitCodegenState(
     });
     return index;
   }
-
-  function appendObservedBoundaryState(boundaryState: JitBoundaryState): void {
-    if (boundaryStates.some((entry) => boundaryRefsEqual(entry.boundary, boundaryState.boundary))) {
-      return;
-    }
-
-    boundaryStates.push(boundaryState);
-  }
 }
 
-function boundaryRefsEqual(
-  left: JitBoundaryState["boundary"],
-  right: JitBoundaryState["boundary"]
-): boolean {
-  return left.instructionIndex === right.instructionIndex &&
-    left.boundaryIndex === right.boundaryIndex;
+function exitObservedState(exit: JitOpExitKind, state: JitExitStateSnapshot): JitExitStateSnapshot {
+  switch (exit) {
+    case "fallthrough":
+    case "jump":
+    case "branchTaken":
+    case "branchNotTaken":
+    case "hostTrap":
+      return {
+        ...state,
+        instructionCountDelta: state.instructionCountDelta + 1
+      };
+    default:
+      return state;
+  }
 }

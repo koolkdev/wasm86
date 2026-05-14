@@ -115,7 +115,7 @@ function prepareJitCodegenInstruction(
   const valueTimeline = buildJitInstructionValueTimeline({
     operands: instruction.operands,
     expressionBlock: expressionPlan.expressionBlock,
-    entryValueState: state.entryPoint.boundaryState.valueState,
+    entryValueState: state.initialValueState,
     producedValuesByVarId
   });
   const expressionPathScopes = buildJitExpressionControlPathScopes(
