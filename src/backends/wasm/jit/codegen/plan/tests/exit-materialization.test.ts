@@ -352,14 +352,15 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
   deepStrictEqual(
     codegenPlan.materializationNeeds
       .filter((need) =>
-        need.consumer === "flagExitStore" &&
+        need.purpose === "exitStore" &&
+        need.target.kind === "aluFlags" &&
         need.placement.exitReason === ExitReason.JUMP &&
         (need.pathScope === "taken" || need.pathScope === "notTaken")
       )
       .map((need) => ({
         value: need.value,
         target: need.target,
-        consumer: need.consumer,
+        purpose: need.purpose,
         pathScope: need.pathScope,
         exitReason: need.placement.exitReason
       })),
@@ -367,14 +368,14 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
       {
         value: branchFlagStore.value,
         target: { kind: "aluFlags" },
-        consumer: "flagExitStore",
+        purpose: "exitStore",
         pathScope: "taken",
         exitReason: ExitReason.JUMP
       },
       {
         value: branchFlagStore.value,
         target: { kind: "aluFlags" },
-        consumer: "flagExitStore",
+        purpose: "exitStore",
         pathScope: "notTaken",
         exitReason: ExitReason.JUMP
       }

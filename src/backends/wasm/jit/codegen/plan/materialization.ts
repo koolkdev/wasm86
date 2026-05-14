@@ -21,7 +21,7 @@ export function jitMaterializationNeedsForExitStores(
   };
 
   return stores.map((store) => ({
-    consumer: store.target.kind === "aluFlags" ? "flagExitStore" : "registerExitStore",
+    purpose: "exitStore",
     target: store.target,
     value: store.value,
     placement,

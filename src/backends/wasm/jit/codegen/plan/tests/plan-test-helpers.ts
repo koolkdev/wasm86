@@ -139,7 +139,7 @@ export function exitStoreNeed(
   exitPointIndex: number
 ): JitMaterializationNeed {
   return {
-    consumer: store.target.kind === "aluFlags" ? "flagExitStore" : "registerExitStore",
+    purpose: "exitStore",
     target: store.target,
     value: store.value,
     placement: {

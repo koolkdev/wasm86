@@ -50,10 +50,6 @@ export type JitObservationPoint = Readonly<{
 
 export type JitExitPoint = JitObservationPoint;
 
-export type JitMaterializationConsumer =
-  | "flagExitStore"
-  | "registerExitStore";
-
 export type JitMaterializationPlacement = Readonly<{
   instructionIndex: number;
   opIndex: number;
@@ -66,7 +62,7 @@ export type JitMaterializationPlacement = Readonly<{
 }>;
 
 export type JitExitStoreMaterializationNeed = Readonly<{
-  consumer: JitMaterializationConsumer;
+  purpose: "exitStore";
   target: MaterializationTarget;
   value: JitValue;
   placement: JitMaterializationPlacement;

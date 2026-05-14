@@ -302,6 +302,36 @@ test("JIT value-cache planning resolves cold partial register reads with shared 
   deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: expectedExpression, useCount: 2 }]);
 });
 
+test("JIT value-cache planning handles current non-store consumers as normal expression uses", () => {
+  const target = {
+    kind: "value.binary",
+    type: "i32",
+    operator: "add",
+    a: {
+      kind: "source",
+      source: { kind: "reg", reg: "eax" },
+      accessWidth: 32
+    },
+    b: { kind: "const", type: "i32", value: 1 }
+  } as const;
+  const expressionBlock = [
+    { op: "jump", target },
+    {
+      op: "conditionalJump",
+      condition: target,
+      taken: target,
+      notTaken: target
+    },
+    { op: "hostTrap", vector: target }
+  ] as const;
+  const expected = addValue(jitInputReg32Value("eax"), c32(1));
+  const cachePlan = planValueCacheForTest({
+    expressionBlock
+  });
+
+  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: expected, useCount: 5 }]);
+});
+
 test("JIT value-cache planning keeps repeated post-write expression uses point-specific", () => {
   const expression = {
     kind: "value.binary",

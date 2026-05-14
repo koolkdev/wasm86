@@ -129,7 +129,10 @@ test("runJitIrOptimizationPipeline leaves overwritten flag producers to value st
   }, { validate: true });
   const codegenPlan = planJitCodegen(result.block);
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
-  const flagNeeds = codegenPlan.materializationNeeds.filter((need) => need.consumer === "flagExitStore");
+  const flagNeeds = codegenPlan.materializationNeeds.filter((need) =>
+    need.purpose === "exitStore" &&
+    need.target.kind === "aluFlags"
+  );
 
   deepStrictEqual(flagProducerNames(result.block), ["add", "sub"]);
   strictEqual(flagNeeds.length, 1);
@@ -148,7 +151,10 @@ test("planJitCodegen keeps branch exit flag materialization separate from direct
   strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
   deepStrictEqual(
     codegenPlan.materializationNeeds
-      .filter((need) => need.consumer === "flagExitStore")
+      .filter((need) =>
+        need.purpose === "exitStore" &&
+        need.target.kind === "aluFlags"
+      )
       .map((need) => need.target),
     [
       { kind: "aluFlags" },
