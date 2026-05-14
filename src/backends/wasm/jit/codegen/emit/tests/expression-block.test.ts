@@ -10,9 +10,14 @@ import { cleanValueWidth } from "#backends/wasm/codegen/value-width.js";
 import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
 import { emitJitExpressionBlock } from "#backends/wasm/jit/codegen/emit/expression-block.js";
+import { emitJitGet } from "#backends/wasm/jit/codegen/emit/operands.js";
+import type { JitInstructionEmitContext } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
-import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import {
+  buildJitInstructionValueTimeline,
+  JitTimelineOpContext
+} from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
@@ -107,6 +112,30 @@ test("JIT expression-block emitter fails loudly when a value has no timeline fac
       }
     ]);
   }, /JIT expression-block value is not available at expression op 0/);
+});
+
+test("JIT operand emission fails when a register read has no planned timeline fact", () => {
+  const expressionBlock = [
+    { op: "let32", dst: v(0), value: c32(1) }
+  ] as const satisfies IrExprBlock;
+  const valueTimeline = buildJitInstructionValueTimeline({
+    operands: [],
+    expressionBlock,
+    entryValueState: createJitValueState().snapshot()
+  });
+
+  throws(() => {
+    emitJitGet(
+      { body: new WasmFunctionBodyEncoder() } as unknown as JitInstructionEmitContext,
+      new JitTimelineOpContext(valueTimeline, 0),
+      reg("eax"),
+      32,
+      {
+        emitValue: () => cleanValueWidth(32),
+        emitMaskedValue: () => cleanValueWidth(32)
+      }
+    );
+  }, /JIT register read eax is not available in the JIT value timeline/);
 });
 
 test("JIT expression-block emitter skips uncached produced definitions with no consumer", () => {

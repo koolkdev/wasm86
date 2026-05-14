@@ -45,6 +45,8 @@ export type JitPlacedStorageRead = Readonly<{
   value?: JitValue;
 }>;
 
+export type JitRegisterStorageReadSource = Extract<IrStorageExpr, { kind: "operand" | "reg" }>;
+
 export type JitValueTimelineWrite = Readonly<{
   expressionOpIndex: number;
   slot: JitArchitecturalSlot;
@@ -108,14 +110,20 @@ export function jitTimelineValueRefValueAt(
   }
 }
 
+export function jitTimelineEffectiveAddressValueAt(
+  timeline: Pick<JitInstructionValueTimeline, "effectiveAddressValuesByExpressionOpIndex">,
+  expressionOpIndex: number,
+  operand: OperandRef
+): JitValue | undefined {
+  return timeline.effectiveAddressValuesByExpressionOpIndex[expressionOpIndex]?.get(operand.index);
+}
+
 export class JitTimelineOpContext {
   readonly #timeline: JitInstructionValueTimeline;
   readonly #expressionOpIndex: number;
-  readonly #resolver: ReturnType<typeof createJitValueResolver>;
 
   constructor(
     timeline: JitInstructionValueTimeline,
-    operands: readonly JitOperandBinding[],
     expressionOpIndex: number
   ) {
     const snapshot = timeline.valueStateSnapshotsByExpressionOpIndex[expressionOpIndex];
@@ -126,24 +134,31 @@ export class JitTimelineOpContext {
 
     this.#timeline = timeline;
     this.#expressionOpIndex = expressionOpIndex;
-    this.#resolver = createJitValueResolver({
-      operands,
-      readReg32: (reg) => snapshot.regs.readReg32(reg),
-      readAluFlags: () => snapshot.flags.readAluFlags(),
-      readValueRef: (value) => jitTimelineValueRefValueAt(timeline, expressionOpIndex, value)
-    });
   }
 
   get expressionOpIndex(): number {
     return this.#expressionOpIndex;
   }
 
-  valueForRegisterAlias(alias: RegisterAlias, signed = false): JitValue {
-    return this.#resolver.valueForRegisterAlias(alias, signed);
+  valueForRegisterStorageRead(
+    source: JitRegisterStorageReadSource,
+    accessWidth: OperandWidth,
+    signed: boolean
+  ): JitValue | undefined {
+    return this.#timeline.placedStorageReads.find((entry) =>
+      entry.expressionOpIndex === this.#expressionOpIndex &&
+        entry.accessWidth === accessWidth &&
+        entry.signed === signed &&
+        registerStorageReadSourcesEqual(entry.source, source)
+    )?.value;
   }
 
   valueForEffectiveAddress(operand: OperandRef): JitValue | undefined {
-    return this.#resolver.valueForEffectiveAddress(operand);
+    return jitTimelineEffectiveAddressValueAt(
+      this.#timeline,
+      this.#expressionOpIndex,
+      operand
+    );
   }
 
   hasRegisterWrite(alias: RegisterAlias): boolean {
@@ -554,6 +569,18 @@ function valueRefKey(value: ValueRef): string {
       return `const:${value.type}:${value.value}`;
     case "nextEip":
       return "nextEip";
+  }
+}
+
+function registerStorageReadSourcesEqual(
+  a: IrStorageExpr,
+  b: JitRegisterStorageReadSource
+): boolean {
+  switch (b.kind) {
+    case "reg":
+      return a.kind === "reg" && a.reg === b.reg;
+    case "operand":
+      return a.kind === "operand" && a.index === b.index;
   }
 }
 

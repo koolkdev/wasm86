@@ -15,16 +15,15 @@ import { reg32, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { jitProducedValueForEffectfulRead } from "#backends/wasm/jit/ir/produced-values.js";
 import {
-  jitValueForEffectiveAddress,
-  jitValueForStorage,
-  jitValueForValue,
   type JitArchitecturalSlot,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
 import {
+  fullRegisterValueForEntry,
   jitStorageRegisterAccess,
   type JitRegisterValueMap
 } from "#backends/wasm/jit/ir/register-prefix-values.js";
+import { createJitValueResolver } from "#backends/wasm/jit/ir/value-resolver.js";
 import type { JitIrLocation } from "#backends/wasm/jit/ir/walk.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import {
@@ -156,7 +155,7 @@ export class JitSourceValueMap {
   }
 
   valueFor(value: ValueRef): JitValue | undefined {
-    return jitValueForValue(value, this.#locals);
+    return this.#resolver([]).valueForValueRef(value);
   }
 
   requiredValueFor(value: ValueRef): JitValue {
@@ -194,15 +193,16 @@ export class JitSourceValueMap {
     options: JitIrLocation | JitSourceValueMapRecordOptions = {}
   ): boolean {
     const recordOptions = normalizeRecordOptions(options);
+    const resolver = this.#resolver(instruction.operands, registerValues);
 
     switch (op.op) {
       case "get":
-        this.record(op.dst.id, this.#getValue(op, instruction, registerValues, recordOptions));
+        this.record(op.dst.id, this.#getValue(op, instruction, resolver, recordOptions));
         return true;
       case "address":
         this.record(
           op.dst.id,
-          jitValueForEffectiveAddress(op.operand, instruction.operands, registerValues)
+          resolver.valueForEffectiveAddress(op.operand)
         );
         return true;
       case "value.const":
@@ -250,19 +250,32 @@ export class JitSourceValueMap {
   #getValue(
     op: Extract<IrOp, { op: "get" }>,
     instruction: JitIrBlockInstruction,
-    registerValues: JitRegisterValueMap,
+    resolver: ReturnType<typeof createJitValueResolver>,
     options: JitSourceValueMapRecordOptions
   ): JitValue | undefined {
     return (options.location === undefined
       ? undefined
       : jitProducedValueForEffectfulRead(instruction, options.location, op)) ??
-      jitValueForStorage(
+      resolver.valueForStorage(
         op.source,
-        instruction.operands,
-        registerValues,
         op.accessWidth ?? 32,
         op.signed === true
       );
+  }
+
+  #resolver(
+    operands: readonly JitOperandBinding[],
+    registerValues: JitRegisterValueMap = new Map()
+  ) {
+    return createJitValueResolver({
+      operands,
+      readReg32: (reg) => fullRegisterValueForEntry(registerValues.get(reg)) ?? {
+        kind: "input",
+        slot: { kind: "reg32", reg }
+      },
+      readValueRef: (value) =>
+        value.kind === "var" ? this.#locals.get(value.id) : undefined
+    });
   }
 }
 

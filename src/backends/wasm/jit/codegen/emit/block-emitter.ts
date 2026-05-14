@@ -103,7 +103,6 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
 
       const timelineOp = new JitTimelineOpContext(
         instruction.valueTimeline,
-        instruction.operands,
         opIndex
       );
 

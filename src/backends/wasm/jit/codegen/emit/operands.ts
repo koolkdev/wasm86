@@ -13,7 +13,10 @@ import {
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import type { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import type {
+  JitRegisterStorageReadSource,
+  JitTimelineOpContext
+} from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitInstructionEmitContext } from "./block-emitter.js";
 import { emitJitValue } from "./jit-values.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
@@ -38,6 +41,8 @@ type NormalizedStorage =
 type NormalizedRegisterStorage = Readonly<{
   kind: "reg";
   alias: RegisterAlias;
+  source: JitRegisterStorageReadSource;
+  accessWidth: OperandWidth;
 }>;
 
 type NormalizedMemoryStorage = Readonly<{
@@ -141,7 +146,9 @@ function normalizeStorage(
     case "reg":
       return {
         kind: "reg",
-        alias: regAccess(storage.reg, accessWidth)
+        alias: regAccess(storage.reg, accessWidth),
+        source: storage,
+        accessWidth
       };
     case "mem":
       return {
@@ -168,7 +175,9 @@ function normalizeOperandStorage(
       assertAccessWidth(accessWidth, binding.alias.width, access);
       return {
         kind: "reg",
-        alias: binding.alias
+        alias: binding.alias,
+        source: operand,
+        accessWidth
       };
     case "static.mem":
       return {
@@ -356,7 +365,10 @@ function emitRegisterStorageValue(
 ): ValueWidth {
   return emitResolvedJitValue(
     context,
-    timelineOp.valueForRegisterAlias(source.alias, options.signed === true),
+    requiredResolvedJitValue(
+      timelineOp.valueForRegisterStorageRead(source.source, source.accessWidth, options.signed === true),
+      `JIT register read ${storageLabel(source.source)}`
+    ),
     options
   );
 }
@@ -390,4 +402,13 @@ function requiredResolvedJitValue(value: JitValue | undefined, context: string):
   }
 
   return value;
+}
+
+function storageLabel(storage: JitRegisterStorageReadSource): string {
+  switch (storage.kind) {
+    case "reg":
+      return storage.reg;
+    case "operand":
+      return `operand ${storage.index}`;
+  }
 }
