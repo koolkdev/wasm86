@@ -22,10 +22,11 @@ import {
   countOpcode,
   repeatedInlineExpressionBlock,
 } from "./value-local-store-test-helpers.js";
-test("JIT expression emission snapshots cached branch-arm expression vars independently", () => {
+test("JIT expression emission captures repeated branch target values before the split", () => {
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitIrBlock([repeatedInlineExpressionBlock()])));
 
-  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 2);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 0);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localSet) > 0, true);
 });
 
 test("JIT expression cache reuses resolved let32-backed JitValues", () => {

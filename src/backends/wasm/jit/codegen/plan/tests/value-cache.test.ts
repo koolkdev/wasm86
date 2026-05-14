@@ -68,8 +68,8 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
   strictEqual(emissionPlan.exitMaterializations, codegenPlan.exitMaterializations);
   strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
   strictEqual(instruction?.valueTimeline.expressionValuesByExpressionOpIndex.length, instruction?.expressionBlock.length);
-  strictEqual((instruction?.valueCachePlan?.selectedUseCounts.length ?? 0) > 0, true);
-  strictEqual((instruction?.valueCachePlan?.selectedConsumerValuesByEpoch.length ?? 0) > 0, true);
+  strictEqual((emissionPlan.valueCachePlan?.selectedUseCounts.length ?? 0) > 0, true);
+  strictEqual((emissionPlan.valueCachePlan?.selectedConsumerValuesByEpoch.length ?? 0) > 0, true);
 });
 
 test("buildJitCodegenEmissionPlan does not count overwritten planned register writes as exit-store uses", () => {

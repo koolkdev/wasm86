@@ -6,7 +6,7 @@ import type { Reg32 } from "#x86/isa/types.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { ExitReason } from "#backends/wasm/exit.js";
-import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
+import type { IrExprBlock, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import {
@@ -80,6 +80,7 @@ export {
 export type {
   Reg32,
   IrExprBlock,
+  IrValueExpr,
   JitOperandBinding,
   JitCodegenPlan,
   JitExitMaterializationStore,
@@ -218,6 +219,24 @@ export function boundaryState(
 
 export function c32(value: number): JitValue {
   return { kind: "const", type: "i32", value };
+}
+
+export function c32Expr(value: number): Extract<IrValueExpr, { kind: "const" }> {
+  return { kind: "const", type: "i32", value };
+}
+
+export function sourceRegExpr(reg: Reg32): IrValueExpr {
+  return { kind: "source", source: { kind: "reg", reg }, accessWidth: 32 };
+}
+
+export function addExpr(reg: Reg32, value: number): IrValueExpr {
+  return {
+    kind: "value.binary",
+    type: "i32",
+    operator: "add",
+    a: sourceRegExpr(reg),
+    b: c32Expr(value)
+  };
 }
 
 export function addValue(a: JitValue, b: JitValue): JitValue {

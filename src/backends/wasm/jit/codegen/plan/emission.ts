@@ -9,10 +9,7 @@ import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/
 import type {
   JitProducedValue
 } from "#backends/wasm/jit/ir/values.js";
-import {
-  planJitExpressionValueCacheForInstructions,
-  type JitExpressionValueCachePlan
-} from "./value-cache.js";
+import type { JitExpressionValueCachePlan } from "./value-cache.js";
 import {
   buildJitInstructionValueTimeline,
   type JitInstructionValueTimeline
@@ -28,18 +25,27 @@ import {
   canInlineJitInstructionGet,
   jitInstructionStorageRefsMayAlias
 } from "./operand-analysis.js";
-import { placeJitValueUsesOnExpressions } from "./expression-uses.js";
+import {
+  planJitValuesForEmission,
+  type JitInstructionWithPlannedValues
+} from "./value-planning.js";
+import type { JitPlannedValueUse } from "./value-uses.js";
+import type {
+  JitPlannedValueCapture
+} from "./value-captures.js";
 
-export type JitCodegenInstructionPlan = JitInstructionState & Pick<
+type JitPreparedCodegenInstruction = JitInstructionState & Pick<
   JitIrBlockInstruction,
   "operands"
 > & Readonly<{
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
-  producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
+  producedValuesByVarId: ReadonlyMap<number, JitProducedValue>;
   valueTimeline: JitInstructionValueTimeline;
-  valueCachePlan?: JitExpressionValueCachePlan;
 }>;
+
+export type JitCodegenInstructionPlan =
+  JitInstructionWithPlannedValues<JitPreparedCodegenInstruction>;
 
 export type JitCodegenEmissionPlan = Readonly<{
   instructions: readonly JitCodegenInstructionPlan[];
@@ -47,7 +53,9 @@ export type JitCodegenEmissionPlan = Readonly<{
   materializationNeeds: readonly JitMaterializationNeed[];
   exitMaterializations: readonly JitExitMaterializationPlan[];
   maxExitMaterializationIndex: number;
-  valueCachePlan?: JitExpressionValueCachePlan;
+  plannedValueUses: readonly JitPlannedValueUse[];
+  plannedValueCaptures: readonly JitPlannedValueCapture[];
+  valueCachePlan: JitExpressionValueCachePlan | undefined;
 }>;
 
 export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCodegenEmissionPlan {
@@ -59,57 +67,74 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     );
   }
 
-  const instructions = block.instructions.map((instruction, index) => {
-    const state = codegenPlan.instructionStates[index];
-
-    if (state === undefined) {
-      throw new Error(`missing JIT instruction state for codegen: ${index}`);
-    }
-
-    const expressionPlan = buildIrExpressionBlockWithSourceMap(
-      instruction.ir,
-      jitExpressionOptions(instruction)
-    );
-    const producedValuesByVarId = indexProducedValuesByVarIdForInstruction(instruction, index);
-    const valueTimeline = buildJitInstructionValueTimeline({
-      operands: instruction.operands,
-      expressionBlock: expressionPlan.expressionBlock,
-      entryValueState: state.entryPoint.boundaryState.valueState,
-      producedValuesByVarId
-    });
-
-    return {
-      ...state,
-      operands: instruction.operands,
-      producedValuesByVarId,
-      valueTimeline,
-      expressionBlock: expressionPlan.expressionBlock,
-      sourceExpressionMap: expressionPlan.sourceMap
-    };
-  });
-  const jitValueUsesByExpression = placeJitValueUsesOnExpressions(
-    instructions,
-    codegenPlan.materializationNeeds
-  );
-  const valueCachePlan = planJitExpressionValueCacheForInstructions(
-    instructions.map((instruction, index) => ({
-      operands: instruction.operands,
-      expressionBlock: instruction.expressionBlock,
-      valueTimeline: instruction.valueTimeline,
-      materializationJitValueUsesByExpressionIndex: jitValueUsesByExpression[index] ?? new Map()
-    }))
-  );
+  const preparedInstructions = prepareJitCodegenInstructions(codegenPlan);
+  const plannedValues = planJitValuesForEmission(preparedInstructions, codegenPlan.materializationNeeds);
 
   return {
-    instructions: valueCachePlan === undefined
-      ? instructions
-      : instructions.map((instruction) => ({ ...instruction, valueCachePlan })),
+    instructions: plannedValues.instructions,
     exitPoints: codegenPlan.exitPoints,
     materializationNeeds: codegenPlan.materializationNeeds,
     exitMaterializations: codegenPlan.exitMaterializations,
     maxExitMaterializationIndex: codegenPlan.maxExitMaterializationIndex,
-    ...(valueCachePlan === undefined ? {} : { valueCachePlan })
+    plannedValueUses: plannedValues.plannedValueUses,
+    plannedValueCaptures: plannedValues.plannedValueCaptures,
+    valueCachePlan: plannedValues.valueCachePlan
   };
+}
+
+function prepareJitCodegenInstructions(
+  codegenPlan: JitCodegenPlan
+): readonly JitPreparedCodegenInstruction[] {
+  return codegenPlan.block.instructions.map((instruction, index) =>
+    prepareJitCodegenInstruction(
+      instruction,
+      index,
+      requiredInstructionState(codegenPlan, index)
+    )
+  );
+}
+
+function prepareJitCodegenInstruction(
+  instruction: JitIrBlockInstruction,
+  instructionIndex: number,
+  state: JitInstructionState
+): JitPreparedCodegenInstruction {
+  const expressionPlan = buildIrExpressionBlockWithSourceMap(
+    instruction.ir,
+    jitExpressionOptions(instruction)
+  );
+  const producedValuesByVarId = indexProducedValuesByVarIdForInstruction(
+    instruction,
+    instructionIndex
+  );
+  const valueTimeline = buildJitInstructionValueTimeline({
+    operands: instruction.operands,
+    expressionBlock: expressionPlan.expressionBlock,
+    entryValueState: state.entryPoint.boundaryState.valueState,
+    producedValuesByVarId
+  });
+
+  return {
+    ...state,
+    operands: instruction.operands,
+    producedValuesByVarId,
+    valueTimeline,
+    expressionBlock: expressionPlan.expressionBlock,
+    sourceExpressionMap: expressionPlan.sourceMap
+  };
+}
+
+function requiredInstructionState(
+  codegenPlan: JitCodegenPlan,
+  instructionIndex: number
+): JitInstructionState {
+  const state = codegenPlan.instructionStates[instructionIndex];
+
+  if (state === undefined) {
+    throw new Error(`missing JIT instruction state for codegen: ${instructionIndex}`);
+  }
+
+  return state;
 }
 
 function jitExpressionOptions(instruction: Pick<JitIrBlockInstruction, "operands">): IrExpressionOptions {

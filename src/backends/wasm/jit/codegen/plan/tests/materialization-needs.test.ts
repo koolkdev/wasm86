@@ -158,7 +158,7 @@ test("buildJitCodegenEmissionPlan accounts repeated register and flag store depe
 
   strictEqual(hostTrapIndex !== -1, true);
   deepStrictEqual(
-    instruction.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
+    emissionPlan.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
     [shared, shared]
   );
   deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
@@ -438,7 +438,7 @@ test("buildJitCodegenEmissionPlan maps generic exit-store uses at source exit lo
 
   strictEqual(hostTrapIndex !== -1, true);
   deepStrictEqual(
-    instruction.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
+    emissionPlan.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
     [produced]
   );
   deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
@@ -520,7 +520,7 @@ test("buildJitCodegenEmissionPlan walks condition and select dependencies from g
 
   strictEqual(hostTrapIndex !== -1, true);
   deepStrictEqual(
-    instruction.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
+    emissionPlan.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
     [selectedFlags]
   );
   deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);

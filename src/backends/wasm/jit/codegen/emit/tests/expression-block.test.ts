@@ -200,7 +200,11 @@ function emitFoundationBlock(
   valueCache?.beginInstruction(0);
   emitJitExpressionBlock({
     body,
-    instruction: { expressionBlock, valueTimeline },
+    instruction: {
+      expressionBlock,
+      valueTimeline,
+      plannedValueCapturesByExpressionIndex: new Map()
+    },
     valueCache,
     emitInput: (slot) => {
       if (slot.kind !== "reg32") {

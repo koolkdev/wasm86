@@ -21,7 +21,22 @@ export function placeJitValueUsesOnExpressions<TUse extends JitPlacedSourceValue
   instructions: readonly JitExpressionUseInstructionInput[],
   uses: readonly TUse[]
 ): readonly ReadonlyMap<number, readonly JitValue[]>[] {
-  const usesByInstruction = instructions.map(() => new Map<number, JitValue[]>());
+  return placeJitValueUseRecordsOnExpressions(instructions, uses).map((usesByExpression) => {
+    const valuesByExpression = new Map<number, JitValue[]>();
+
+    for (const [expressionIndex, expressionUses] of usesByExpression) {
+      valuesByExpression.set(expressionIndex, expressionUses.map((use) => use.value));
+    }
+
+    return valuesByExpression;
+  });
+}
+
+export function placeJitValueUseRecordsOnExpressions<TUse extends JitPlacedSourceValueUse>(
+  instructions: readonly JitExpressionUseInstructionInput[],
+  uses: readonly TUse[]
+): readonly ReadonlyMap<number, readonly TUse[]>[] {
+  const usesByInstruction = instructions.map(() => new Map<number, TUse[]>());
 
   for (const use of uses) {
     appendJitValueUse(usesByInstruction, instructions, use);
@@ -30,10 +45,10 @@ export function placeJitValueUsesOnExpressions<TUse extends JitPlacedSourceValue
   return usesByInstruction;
 }
 
-function appendJitValueUse(
-  usesByInstruction: readonly Map<number, JitValue[]>[],
+function appendJitValueUse<TUse extends JitPlacedSourceValueUse>(
+  usesByInstruction: readonly Map<number, TUse[]>[],
   instructions: readonly JitExpressionUseInstructionInput[],
-  use: JitPlacedSourceValueUse
+  use: TUse
 ): void {
   const instructionIndex = use.placement.instructionIndex;
   const sourceOpIndex = use.placement.opIndex;
@@ -48,7 +63,7 @@ function appendJitValueUse(
       usesByInstruction,
       instructionIndex,
       expressionOpIndex,
-      use.value
+      use
     );
   }
 }
@@ -75,11 +90,11 @@ function expressionUseIndexesForSourceOp(
   return expressionIndexes;
 }
 
-function appendExpressionValueUse(
-  usesByInstruction: readonly Map<number, JitValue[]>[],
+function appendExpressionValueUse<TUse extends JitPlacedSourceValueUse>(
+  usesByInstruction: readonly Map<number, TUse[]>[],
   instructionIndex: number,
   expressionOpIndex: number,
-  value: JitValue
+  use: TUse
 ): void {
   const usesByExpression = usesByInstruction[instructionIndex];
 
@@ -89,5 +104,5 @@ function appendExpressionValueUse(
 
   const uses = usesByExpression.get(expressionOpIndex) ?? [];
 
-  usesByExpression.set(expressionOpIndex, [...uses, value]);
+  usesByExpression.set(expressionOpIndex, [...uses, use]);
 }

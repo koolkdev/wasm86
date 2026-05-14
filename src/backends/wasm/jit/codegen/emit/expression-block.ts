@@ -37,6 +37,9 @@ import {
 import type {
   JitValueCacheRuntime
 } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
+import type {
+  JitPlannedValueCapturesByExpression
+} from "#backends/wasm/jit/codegen/plan/value-captures.js";
 import {
   type JitArchitecturalSlot,
   type JitProducedValue,
@@ -46,6 +49,7 @@ import type { ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import {
   emitJitValue,
+  emitJitValueWithoutRootCache,
   emitMaskedJitValue,
   type JitValueEmitContext
 } from "./jit-values.js";
@@ -53,6 +57,7 @@ import {
 export type JitExpressionBlockInstruction = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: JitInstructionValueTimeline;
+  plannedValueCapturesByExpressionIndex: JitPlannedValueCapturesByExpression;
 }>;
 
 export type JitExpressionBlockEmitContext = Readonly<{
@@ -110,6 +115,7 @@ class JitExpressionBlockEmitter {
 
       this.#currentOpIndex = opIndex;
       this.#beginExpressionOp(opIndex);
+      this.#capturePlannedValues(opIndex);
       this.#emitOp(op);
     }
   }
@@ -187,6 +193,27 @@ class JitExpressionBlockEmitter {
       emitInput: this.#context.emitInput,
       emitInputBits: this.#context.emitInputBits
     };
+  }
+
+  #capturePlannedValues(opIndex: number): void {
+    const captures = this.#context.instruction.plannedValueCapturesByExpressionIndex.get(opIndex) ?? [];
+
+    for (const capture of captures) {
+      if (capture.availabilityScope.kind !== "shared") {
+        continue;
+      }
+
+      if (capture.value.kind === "produced") {
+        throw new Error("produced JIT values are captured at their definition");
+      }
+
+      const captured = this.#context.valueCache?.captureForReuse(
+        capture.value,
+        () => emitJitValueWithoutRootCache(this.#jitValueContext(), capture.value)
+      );
+
+      captured?.release();
+    }
   }
 
   #emitLet32(op: Extract<IrExprOp, { op: "let32" }>): void {

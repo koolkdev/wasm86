@@ -18,10 +18,14 @@ import {
   jitInsertBits,
   jitInsertMaskedBits,
   jitProducedValue,
+  jitValuesEqual,
   type JitArchitecturalSlot,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
-import { emitJitValue } from "#backends/wasm/jit/codegen/emit/jit-values.js";
+import {
+  emitJitValue,
+  emitJitValueWithoutRootCache
+} from "#backends/wasm/jit/codegen/emit/jit-values.js";
 import { emitJitInputSlotBits } from "#backends/wasm/jit/codegen/emit/input-slots.js";
 import {
   JitValueLocalStore,
@@ -305,6 +309,40 @@ test("emitJitValue lowers produced values through retained locals", () => {
 
   strictEqual(valueWidth.cleanWidth, 32);
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localGet]);
+});
+
+test("emitJitValueWithoutRootCache suppresses only the root cache use", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const child = add(jitInputReg32Value("eax"), c32(1));
+  const root = add(child, c32(2));
+  let rootCacheUseCount = 0;
+  let childCacheUseCount = 0;
+
+  emitJitValueWithoutRootCache({
+    ...bodyContext(body),
+    valueCache: passthroughValueCache({
+      emitForUse: (value, emitter) => {
+        if (jitValuesEqual(value, root)) {
+          rootCacheUseCount += 1;
+        }
+
+        if (jitValuesEqual(value, child)) {
+          childCacheUseCount += 1;
+          body.i32Const(0x1234);
+          return { valueWidth: cleanValueWidth(32) };
+        }
+
+        return { valueWidth: emitter() };
+      }
+    })
+  }, root);
+  body.end();
+
+  const opcodes = wasmBodyOpcodes(body.encode());
+
+  strictEqual(rootCacheUseCount, 0);
+  strictEqual(childCacheUseCount, 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Add), 1);
 });
 
 type EmitSymbolicValueOptions = Readonly<{

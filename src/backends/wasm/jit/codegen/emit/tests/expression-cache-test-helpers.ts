@@ -29,7 +29,11 @@ export function emitPlannedExpression(
   valueCache?.beginInstruction(0);
   emitJitExpressionBlock({
     body,
-    instruction: { expressionBlock: block, valueTimeline },
+    instruction: {
+      expressionBlock: block,
+      valueTimeline,
+      plannedValueCapturesByExpressionIndex: new Map()
+    },
     valueCache,
     emitInput: (slot) => {
       if (slot.kind === "aluFlags") {

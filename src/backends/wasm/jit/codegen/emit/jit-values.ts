@@ -58,6 +58,16 @@ export function emitJitValue(
   return applyRequestedValueWidth(context.body, valueWidth, options);
 }
 
+export function emitJitValueWithoutRootCache(
+  context: JitValueEmitContext,
+  value: JitValue,
+  options: WasmIrEmitValueOptions = {}
+): ValueWidth {
+  const valueWidth = emitJitValueUncached(context, simplifyJitValue(value));
+
+  return applyRequestedValueWidth(context.body, valueWidth, options);
+}
+
 export function emitMaskedJitValue(
   context: JitValueEmitContext,
   value: JitValue,

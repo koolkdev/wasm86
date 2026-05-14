@@ -27,7 +27,7 @@ test("buildJitIrBlock does not specialize incoming CF after INC", () => {
   const jc = ok(decodeBytes([0x72, 0x05], inc.nextEip));
   const block = buildJitIrBlock([inc, jc]);
 
-  deepStrictEqual(aluFlagMemoryAccessCounts(block), { loads: 3, stores: 2 });
+  deepStrictEqual(aluFlagMemoryAccessCounts(block), { loads: 2, stores: 2 });
 });
 
 test("jit IR block emits aluFlags memory traffic only for flag reads and observable exits", () => {
