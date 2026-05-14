@@ -91,7 +91,7 @@ test("indexJitEffects indexes observable operation locations", () => {
   deepStrictEqual(jitOpExitsAt(effects, 3, 0), ["fallthrough"]);
 });
 
-test("JIT effect helpers index read and write guard exits at their own ops", () => {
+test("JIT effect index records explicit memory guard exits at their own ops", () => {
   const effects = indexJitEffects({
     instructions: [
       syntheticInstruction([

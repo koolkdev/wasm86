@@ -19,7 +19,7 @@ const zeroFlag = 0x40;
 const preservedEflags = 0xffff_0000;
 const addWraparoundEflags = 0x55;
 
-test("cold final static jmp uses module-local fallback stub", () => {
+test("unlinked final static jmp uses module-local fallback stub", () => {
   const fixture = createLinkingFixture([
     block(aEip, incEaxJmpRel32(aEip, bEip)),
     block(bEip, incEaxHostTrap())
@@ -143,7 +143,7 @@ test("compiled conditional targets patch both branch slots", () => {
   strictEqual(notTakenState.eax, 2);
 });
 
-test("linked conditional branch exits preserve materialized flag values", () => {
+test("linked conditional branch exits preserve exit-store flag values", () => {
   const takenEip = aEip + 0x20;
   const branchBytes = addEaxOneJnzRel8(aEip, takenEip);
   const notTakenEip = aEip + branchBytes.length;

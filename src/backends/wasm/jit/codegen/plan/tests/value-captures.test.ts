@@ -14,11 +14,13 @@ import { planJitValueCaptures } from "#backends/wasm/jit/codegen/plan/value-capt
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
   jitInputReg32Value,
-  jitProducedValue,
-  jitValuesEqual,
-  type JitProducedValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+  jitProducedValue
+} from "#backends/wasm/jit/ir/value-builders.js";
+import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import type {
+  JitProducedValue,
+  JitValue
+} from "#backends/wasm/jit/ir/value-types.js";
 import {
   addExpr,
   addValue,
@@ -149,7 +151,7 @@ test("JIT value-capture planner leaves produced definitions to value-cache", () 
   ]);
 });
 
-test("JIT value-capture planner derives branch sharing from generic exit-store uses", () => {
+test("JIT value-capture planner derives branch sharing from exit-store uses", () => {
   const expressionBlock = [{
     op: "conditionalJump",
     condition: c32Expr(1),

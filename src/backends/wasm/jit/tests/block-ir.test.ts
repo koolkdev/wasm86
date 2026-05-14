@@ -83,7 +83,7 @@ test("buildJitIrBlock keeps overwritten flag producers as value-state writes", (
   deepStrictEqual(flagSets.map((op) => op.op === "flags.set" ? op.producer : undefined), ["sub", "add"]);
 });
 
-test("buildJitIrBlock leaves condition materialization to JIT flag values", () => {
+test("buildJitIrBlock keeps branch conditions as JIT flag values", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const jz = ok(decodeBytes([0x74, 0x05], add.nextEip));
   const branchBlock = optimizeJitIrBlock(buildJitIrBlock([add, jz]));

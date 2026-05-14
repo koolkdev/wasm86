@@ -9,12 +9,12 @@ import {
   jitExtractBits,
   jitFlagConditionValue,
   jitInputAluFlagsValue,
-  jitInputReg32Value,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+  jitInputReg32Value
+} from "#backends/wasm/jit/ir/value-builders.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 
-test("JIT value resolver reads cold register aliases from input full registers", () => {
+test("JIT value resolver reads input register aliases from full-register values", () => {
   const resolver = createJitValueResolver({ operands: [] });
   const eax = jitInputReg32Value("eax");
 

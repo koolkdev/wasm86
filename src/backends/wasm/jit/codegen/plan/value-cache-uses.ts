@@ -1,9 +1,9 @@
 import {
   jitValueCost,
-  jitValueDependencies,
-  simplifyJitValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+  jitValueDependencies
+} from "#backends/wasm/jit/ir/value-analysis.js";
+import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 import type { JitValueSelectionUse } from "./value-cache-selection.js";
 import type { JitPlannedValueUse } from "./value-uses.js";
 

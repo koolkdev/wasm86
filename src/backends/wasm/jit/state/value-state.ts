@@ -9,12 +9,14 @@ import {
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertBits,
-  jitInsertMaskedBits,
-  jitValuesEqual,
-  simplifyJitValue,
-  type JitArchitecturalSlot,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+  jitInsertMaskedBits
+} from "#backends/wasm/jit/ir/value-builders.js";
+import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import type {
+  JitArchitecturalSlot,
+  JitValue
+} from "#backends/wasm/jit/ir/value-types.js";
 
 export type JitValueSlotEntry = Readonly<{
   slot: JitArchitecturalSlot;

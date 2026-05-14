@@ -1,9 +1,7 @@
-import {
-  jitValueCost,
-  jitValuesEqual,
-  simplifyJitValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+import { jitValueCost } from "#backends/wasm/jit/ir/value-analysis.js";
+import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 
 export type JitValueUseCount = Readonly<{
   value: JitValue;

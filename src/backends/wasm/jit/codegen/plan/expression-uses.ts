@@ -2,7 +2,7 @@ import type {
   IrExprBlock,
   IrExpressionSourceMap
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 
 export type JitExpressionUseInstructionInput = Readonly<{
   expressionBlock: IrExprBlock;

@@ -1,6 +1,6 @@
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
 export type {
   ExitMaterializationStore,

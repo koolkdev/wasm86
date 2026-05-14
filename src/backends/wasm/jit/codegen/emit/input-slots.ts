@@ -8,7 +8,7 @@ import {
 } from "#backends/wasm/codegen/state.js";
 import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { JitArchitecturalSlot } from "#backends/wasm/jit/ir/values.js";
+import type { JitArchitecturalSlot } from "#backends/wasm/jit/ir/value-types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 
 export function emitJitInputSlot(body: WasmFunctionBodyEncoder, slot: JitArchitecturalSlot): ValueWidth {

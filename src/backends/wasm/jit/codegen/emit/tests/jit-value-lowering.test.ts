@@ -17,11 +17,13 @@ import {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits,
-  jitProducedValue,
-  jitValuesEqual,
-  type JitArchitecturalSlot,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+  jitProducedValue
+} from "#backends/wasm/jit/ir/value-builders.js";
+import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import type {
+  JitArchitecturalSlot,
+  JitValue
+} from "#backends/wasm/jit/ir/value-types.js";
 import {
   emitJitValue,
   emitJitValueWithoutRootCache

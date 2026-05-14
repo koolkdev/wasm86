@@ -131,7 +131,7 @@ test("jit IR block omits narrow bitwise operand masks", () => {
   assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x0d, 0x32, 0x04]), wasmOpcode.i32Or);
 });
 
-test("jit IR block omits redundant masks before cold narrow add and sub state loads", () => {
+test("jit IR block omits redundant masks before input-state narrow add and sub loads", () => {
   assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x05, 0x01, 0x00]), wasmOpcode.i32Add);
   assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x2d, 0x01, 0x00]), wasmOpcode.i32Sub);
 });
@@ -219,7 +219,7 @@ test("jit IR block uses full-register load and word store when AX also feeds a f
   ]);
 });
 
-test("jit IR block shares cold AH xor result between flags and byte writeback", () => {
+test("jit IR block shares input-state AH xor result between flags and byte writeback", () => {
   const block = buildJitIrBlock([ok(decodeBytes([0x80, 0xf4, 0x05], startAddress))]); // xor ah, 5
 
   deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
@@ -229,7 +229,7 @@ test("jit IR block shares cold AH xor result between flags and byte writeback", 
   strictEqual(countOpcode(jitBlockBodyOpcodes(block), wasmOpcode.localTee), 1);
 });
 
-test("jit IR block shares cold AX xor result between flags and word writeback", () => {
+test("jit IR block shares input-state AX xor result between flags and word writeback", () => {
   const block = buildJitIrBlock([ok(decodeBytes([0x66, 0x35, 0x32, 0x04], startAddress))]); // xor ax, 0x432
 
   deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [

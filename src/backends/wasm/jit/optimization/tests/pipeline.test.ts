@@ -141,7 +141,7 @@ test("runJitIrOptimizationPipeline leaves overwritten flag producers to value st
   strictEqual(flagNeeds[0]?.value.kind === "flagProducer" ? flagNeeds[0].value.producer : undefined, "sub");
 });
 
-test("planJitCodegen keeps branch exit flag materialization separate from direct conditions", () => {
+test("planJitCodegen keeps branch exit flag stores separate from condition consumers", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const inc = ok(decodeBytes([0x40], add.nextEip));
   const je = ok(decodeBytes([0x74, 0x05], inc.nextEip));

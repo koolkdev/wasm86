@@ -11,7 +11,7 @@ import {
   jitOpExits,
   type JitOpExitKind
 } from "#backends/wasm/jit/ir/effect-primitives.js";
-import { jitStorageReg } from "#backends/wasm/jit/ir/values.js";
+import { jitStorageReg } from "#backends/wasm/jit/ir/value-builders.js";
 
 export type JitOpEffects = Readonly<{
   exits: readonly JitOpExitKind[];

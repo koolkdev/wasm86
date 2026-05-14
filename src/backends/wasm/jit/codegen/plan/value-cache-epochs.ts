@@ -3,11 +3,11 @@ import type {
   IrExprOp
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import {
-  jitValuesEqual,
-  type JitProducedValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import type {
+  JitProducedValue,
+  JitValue
+} from "#backends/wasm/jit/ir/value-types.js";
 import type { JitInstructionValueTimeline } from "./value-timeline.js";
 import type { JitValueSelectionUse } from "./value-cache-selection.js";
 import { cacheSelectionUsesForPlannedUse } from "./value-cache-uses.js";

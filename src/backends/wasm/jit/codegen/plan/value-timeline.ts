@@ -6,11 +6,11 @@ import type {
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import { createJitValueResolver } from "#backends/wasm/jit/ir/value-resolver.js";
-import {
-  type JitArchitecturalSlot,
-  type JitProducedValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+import type {
+  JitArchitecturalSlot,
+  JitProducedValue,
+  JitValue
+} from "#backends/wasm/jit/ir/value-types.js";
 import {
   type JitValueStateSnapshot
 } from "#backends/wasm/jit/state/value-state.js";

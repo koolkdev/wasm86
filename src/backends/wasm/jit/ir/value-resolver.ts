@@ -3,10 +3,10 @@ import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.j
 import {
   jitExtractBits,
   jitFlagConditionValue,
-  jitInputReg32Value,
-  simplifyJitValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+  jitInputReg32Value
+} from "#backends/wasm/jit/ir/value-builders.js";
+import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import type { OperandRef, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";

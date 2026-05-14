@@ -1,9 +1,7 @@
-import {
-  jitValueDependencies,
-  jitValuesEqual,
-  simplifyJitValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+import { jitValueDependencies } from "#backends/wasm/jit/ir/value-analysis.js";
+import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 import type { JitValueCachePlan } from "./value-cache.js";
 import {
   cacheSelectionUsesForPlannedUse,

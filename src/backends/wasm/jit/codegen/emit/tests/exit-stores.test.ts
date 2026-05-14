@@ -24,7 +24,7 @@ import {
   localOpcodes,
   countOpcode,
 } from "./value-local-store-test-helpers.js";
-test("JIT generic exit stores capture aluFlags sources before overwriting flags", () => {
+test("JIT exit materialization stores capture aluFlags sources before overwriting flags", () => {
   const body = new WasmFunctionBodyEncoder();
   const captured = captureJitExitMaterializationStores({
     body
@@ -65,7 +65,7 @@ test("JIT generic exit stores capture aluFlags sources before overwriting flags"
   );
 });
 
-test("JIT generic flag exit stores lower planned sources through value cache", () => {
+test("JIT flag exit materialization stores lower planned sources through value cache", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
   const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 2 }]));
@@ -102,7 +102,7 @@ test("JIT generic flag exit stores lower planned sources through value cache", (
   );
 });
 
-test("JIT generic register exit capture reuses pure NEG planned values", () => {
+test("JIT register exit materialization reuses pure NEG planned values", () => {
   const mov = ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress));
   const neg = ok(decodeBytes([0xf7, 0xd8], mov.nextEip));
   const trap = ok(decodeBytes([0xcd, 0x2e], neg.nextEip));

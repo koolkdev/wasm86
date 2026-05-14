@@ -355,7 +355,7 @@ test("jit Wasm register state preserves a chained XCHG register cycle", async ()
   deepStrictEqual(result.exit, { exitReason: ExitReason.FALLTHROUGH, payload: startAddress + bytes.length });
 });
 
-test("jit IR block materializes XCHG state before later memory faults", async () => {
+test("jit IR block uses value-state XCHG snapshot before later memory faults", async () => {
   const bytes = [
     0x87, 0xd8, // xchg eax, ebx
     0x8b, 0x15, 0x00, 0x00, 0x01, 0x00, // mov edx, [0x10000]
@@ -542,7 +542,7 @@ test("jit IR block coalesces independent low-byte register writes correctly", as
   deepStrictEqual(result.exit, { exitReason: ExitReason.FALLTHROUGH, payload: startAddress + 4 });
 });
 
-test("jit IR block materializes partial register writes before full-register copies", async () => {
+test("jit IR block composes partial register value-state before full-register copies", async () => {
   const result = await runJitIrBlock([
     0xb0, 0x05, // mov al, 5
     0x89, 0xc3 // mov ebx, eax
@@ -593,7 +593,7 @@ test("jit IR block composes EAX then AL without loading EAX from CPU state", asy
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block captures produced root exit stores without rematerializing the load", async () => {
+test("jit IR block captures produced root exit stores without replaying the load", async () => {
   const instructionBytes = [
     [0x8b, 0x05, 0x60, 0x00, 0x00, 0x00], // mov eax, [0x60]
     [0xcd, 0x2e] // int 0x2e
@@ -1083,7 +1083,7 @@ test("jit IR block preserves unary ALU flags and memory effects with value timel
   deepStrictEqual(memoryNot.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block shares planned cold AH xor result with narrow writeback", async () => {
+test("jit IR block shares planned input-state AH xor result with narrow writeback", async () => {
   const bytes = [0x80, 0xf4, 0x05]; // xor ah, 5
   const result = await runJitIrBlock(bytes, createCpuState({
     eax: 0x1234_5678,
@@ -1097,7 +1097,7 @@ test("jit IR block shares planned cold AH xor result with narrow writeback", asy
   strictEqual(result.state.instructionCount, 1);
 });
 
-test("jit IR block keeps cold AX xor writeback word-width", async () => {
+test("jit IR block keeps input-state AX xor writeback word-width", async () => {
   const bytes = [0x66, 0x35, 0x32, 0x04]; // xor ax, 0x432
   const result = await runJitIrBlock(bytes, createCpuState({
     eax: 0x1234_5678,
@@ -1111,7 +1111,7 @@ test("jit IR block keeps cold AX xor writeback word-width", async () => {
   strictEqual(result.state.instructionCount, 1);
 });
 
-test("jit IR block materializes a later full read after cold AH xor", async () => {
+test("jit IR block composes a later full read after input-state AH xor", async () => {
   const bytes = [
     0x80, 0xf4, 0x05, // xor ah, 5
     0x89, 0xc3 // mov ebx, eax
@@ -1394,7 +1394,7 @@ test("jit IR block emits leave", async () => {
   strictEqual(result.state.instructionCount, 1);
 });
 
-test("jit IR block folds stack updates after successful memory fault points", async () => {
+test("jit IR block folds stack updates after successful explicit memory guards", async () => {
   const result = await runJitIrBlock([
     0x50, // push eax
     0xcd, 0x2e // int 0x2e
@@ -1428,7 +1428,7 @@ test("jit IR block keeps planned flag values live after memory-store fault branc
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block emits add and materializes flag values", async () => {
+test("jit IR block emits add and stores value-state flag values", async () => {
   const result = await runJitIrBlock([0x83, 0xc0, 0x01], createCpuState({
     eax: 0xffff_ffff,
     eflags: preservedEflags,
@@ -1441,7 +1441,7 @@ test("jit IR block emits add and materializes flag values", async () => {
   strictEqual(result.state.instructionCount, 1);
 });
 
-test("jit IR block emits or and materializes logic flags", async () => {
+test("jit IR block emits or and stores value-state logic flags", async () => {
   const result = await runJitIrBlock([0x0d, 0x00, 0x01, 0x00, 0x00], createCpuState({
     eax: 0x8000_0000,
     eflags: preservedEflags,
@@ -1454,7 +1454,7 @@ test("jit IR block emits or and materializes logic flags", async () => {
   strictEqual(result.state.instructionCount, 1);
 });
 
-test("jit IR block materializes the latest planned flag values on exit", async () => {
+test("jit IR block stores the latest value-state flag values on exit", async () => {
   const result = await runJitIrBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x83, 0xc0, 0x01, // add eax, 1
@@ -1523,7 +1523,7 @@ test("jit IR block folds transient register value calculations", async () => {
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block materializes register values before memory fault exits", async () => {
+test("jit IR block uses value-state register snapshots for memory fault exits", async () => {
   const load = 0x10000;
   const result = await runJitIrBlock([
     0x89, 0xc8, // mov eax, ecx
@@ -1564,7 +1564,7 @@ test("jit IR block preserves register values before source clobbers", async () =
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block materializes repeated register value reads without changing results", async () => {
+test("jit IR block reuses repeated register value reads without changing results", async () => {
   const result = await runJitIrBlock([
     0x89, 0xc8, // mov eax, ecx
     0x83, 0xf0, 0x02, // xor eax, 2
@@ -1627,7 +1627,7 @@ test("jit IR block lowers value timeline register state into effective addresses
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block materializes register values for scaled effective addresses", async () => {
+test("jit IR block uses value timeline register state for scaled effective addresses", async () => {
   const result = await runJitIrBlock([
     0x89, 0xc8, // mov eax, ecx
     0x8d, 0x1c, 0x45, 0x04, 0x00, 0x00, 0x00, // lea ebx, [eax*2+4]
@@ -1795,7 +1795,7 @@ test("jit IR block handles specialized cmp condition branches", async () => {
   }
 });
 
-test("jit IR block materializes planned flag values before condition consumers", async () => {
+test("jit IR block lowers value-state flag values for condition consumers", async () => {
   const result = await runJitIrBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x74, 0x05 // jz +5
@@ -1812,7 +1812,7 @@ test("jit IR block materializes planned flag values before condition consumers",
   deepStrictEqual(result.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 10 });
 });
 
-test("jit IR block materializes planned flag values on both conditional branch exits", async () => {
+test("jit IR block stores value-state flag values on both branch exit observations", async () => {
   const taken = await runJitIrBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x74, 0x05 // jz +5
@@ -1855,7 +1855,7 @@ test("jit IR block emits conditional branches", async () => {
   strictEqual(notTaken.state.instructionCount, 11);
 });
 
-test("jit IR block materializes planned flag values on later fault exits", async () => {
+test("jit IR block stores value-state flag values on later fault exit observations", async () => {
   const result = await runJitIrBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x8b, 0x05, 0x00, 0x00, 0x01, 0x00 // mov eax, [0x10000]

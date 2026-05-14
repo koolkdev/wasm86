@@ -14,15 +14,12 @@ import { i32 } from "#x86/state/cpu-state.js";
 import { reg32, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { jitProducedValueForEffectfulRead } from "#backends/wasm/jit/ir/produced-values.js";
-import {
-  type JitArchitecturalSlot,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
-import {
-  fullRegisterValueForEntry,
-  jitStorageRegisterAccess,
-  type JitRegisterValueMap
-} from "#backends/wasm/jit/ir/register-prefix-values.js";
+import type {
+  JitArchitecturalSlot,
+  JitRegisterValueMap,
+  JitValue
+} from "#backends/wasm/jit/ir/value-types.js";
+import { jitStorageRegisterAccess } from "#backends/wasm/jit/ir/value-builders.js";
 import { createJitValueResolver } from "#backends/wasm/jit/ir/value-resolver.js";
 import type { JitIrLocation } from "#backends/wasm/jit/ir/walk.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
@@ -269,7 +266,7 @@ export class JitSourceValueMap {
   ) {
     return createJitValueResolver({
       operands,
-      readReg32: (reg) => fullRegisterValueForEntry(registerValues.get(reg)) ?? {
+      readReg32: (reg) => registerValues.get(reg) ?? {
         kind: "input",
         slot: { kind: "reg32", reg }
       },

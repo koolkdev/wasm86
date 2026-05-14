@@ -40,11 +40,11 @@ import type {
 import type {
   JitExpressionCaptureMap
 } from "#backends/wasm/jit/codegen/plan/value-captures.js";
-import {
-  type JitArchitecturalSlot,
-  type JitProducedValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+import type {
+  JitArchitecturalSlot,
+  JitProducedValue,
+  JitValue
+} from "#backends/wasm/jit/ir/value-types.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import {

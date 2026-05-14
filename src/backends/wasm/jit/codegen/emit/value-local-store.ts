@@ -3,12 +3,10 @@ import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-bo
 import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
-import {
-  jitValueKey,
-  simplifyJitValue,
-  jitValuesEqual,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+import { jitValueKey } from "#backends/wasm/jit/ir/value-analysis.js";
+import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 import {
   type JitValueCachePlan,
   type JitValueUseCount

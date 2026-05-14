@@ -5,7 +5,7 @@ import type { JitIrBlock } from "./ir/types.js";
 export type {
   JitIrBlock,
   JitIrBlockInstruction
-} from "./types.js";
+} from "./ir/types.js";
 export type { JitLinkResolver } from "./codegen/emit/block-emitter.js";
 export type { EncodeJitIrBlockOptions } from "./block-module.js";
 export { encodeJitIrBlock, jitBlockExportName } from "./block-module.js";

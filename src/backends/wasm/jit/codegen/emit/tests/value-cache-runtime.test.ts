@@ -110,7 +110,7 @@ test("JIT expression cache prefers repeated parent expressions over nested child
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 1);
 });
 
-test("JIT value-cache planning does not treat flags.set as a materialization consumer", () => {
+test("JIT value-cache planning does not treat flags.set as an exit-store consumer", () => {
   const expressionBlock = [
     { op: "let32", dst: { kind: "var", id: 0 }, value: highCostExpr() },
     {

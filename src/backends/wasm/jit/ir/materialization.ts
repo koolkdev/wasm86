@@ -1,5 +1,5 @@
 import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
-import type { JitValue } from "./values.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 
 export type MaterializationTarget =
   | Readonly<{ kind: "reg32"; reg: Reg32 }>

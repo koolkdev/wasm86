@@ -21,14 +21,14 @@ import { flagProducerConditionKind } from "#x86/ir/model/flag-conditions.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import { widthMask, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
 import type { ConditionCode, IrBinaryOperator, IrUnaryOperator } from "#x86/ir/model/types.js";
-import {
-  simplifyJitValue,
-  type JitArchitecturalSlot,
-  type JitFlagProducerValue,
-  type JitInputValue,
-  type JitProducedValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import type {
+  JitArchitecturalSlot,
+  JitFlagProducerValue,
+  JitInputValue,
+  JitProducedValue,
+  JitValue
+} from "#backends/wasm/jit/ir/value-types.js";
 import type { JitValueCacheRuntime } from "./value-local-store.js";
 
 export type JitValueEmitContext = Readonly<{

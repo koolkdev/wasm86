@@ -21,7 +21,8 @@ import {
   wasmBodyInstructions,
   wasmBodyOpcodes
 } from "#backends/wasm/tests/body-opcodes.js";
-import { jitInputAluFlagsValue, type JitValue } from "#backends/wasm/jit/ir/values.js";
+import { jitInputAluFlagsValue } from "#backends/wasm/jit/ir/value-builders.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 import {
   createJitValueCacheRuntime,
   JitValueLocalStore,

@@ -264,8 +264,8 @@ test("JIT value-cache planning retains produced values needed after their defini
   deepStrictEqual(cachePlan?.useCounts, [{ value: produced, useCount: 1 }]);
 });
 
-test("JIT value-cache planning resolves cold partial register reads with common value rules", () => {
-  const coldAl = {
+test("JIT value-cache planning resolves input partial-register reads with common value rules", () => {
+  const inputAl = {
     kind: "source",
     source: { kind: "reg", reg: "eax" },
     accessWidth: 8
@@ -274,7 +274,7 @@ test("JIT value-cache planning resolves cold partial register reads with common 
     kind: "value.binary",
     type: "i32",
     operator: "xor",
-    a: coldAl,
+    a: inputAl,
     b: { kind: "const", type: "i32", value: 0x12 }
   } as const;
   const expressionBlock = [{
@@ -295,7 +295,7 @@ test("JIT value-cache planning resolves cold partial register reads with common 
     b: c32(0x12)
   } as const;
 
-  deepStrictEqual(cachePlan?.instructions[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(coldAl), expectedSource);
+  deepStrictEqual(cachePlan?.instructions[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(inputAl), expectedSource);
   deepStrictEqual(cachePlan?.useCounts, [{ value: expectedExpression, useCount: 2 }]);
 });
 
@@ -489,7 +489,7 @@ test("JIT value-cache planning does not treat logical register writes as produce
   deepStrictEqual(cachePlan.useCounts, []);
 });
 
-test("JIT value-cache planning skips produced values with no emitted or materialized consumer", () => {
+test("JIT value-cache planning skips produced values with no emitted or exit-store consumer", () => {
   const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
   const expressionBlock = [
     {

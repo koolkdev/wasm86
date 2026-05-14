@@ -4,10 +4,8 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import {
-  simplifyJitValue,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
 import {
   rootValuePathScope,
   type JitControlPathScopesMap,

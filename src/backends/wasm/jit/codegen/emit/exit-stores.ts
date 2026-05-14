@@ -19,12 +19,12 @@ import type {
   JitCachedValueHandle,
   JitValueCacheRuntime
 } from "./value-local-store.js";
-import {
-  jitValueMaterializationSlotsForMask,
-  simplifyJitValue,
-  type JitArchitecturalSlot,
-  type JitValue
-} from "#backends/wasm/jit/ir/values.js";
+import { jitValueMaterializationSlotsForMask } from "#backends/wasm/jit/ir/value-analysis.js";
+import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import type {
+  JitArchitecturalSlot,
+  JitValue
+} from "#backends/wasm/jit/ir/value-types.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 
 export type JitCapturedExitMaterializationStore = Readonly<{
