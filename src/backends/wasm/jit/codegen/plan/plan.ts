@@ -19,7 +19,6 @@ export type {
   JitMaterializationNeed,
   JitMaterializationPlacement,
   MaterializationTarget,
-  JitPreInstructionExitPlan,
   JitCodegenPlan
 } from "./types.js";
 export type {

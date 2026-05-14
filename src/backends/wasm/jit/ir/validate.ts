@@ -143,9 +143,9 @@ function validateBarrierLocation(block: JitIrBlock, barrier: JitBarrier): void {
 }
 
 function validateBarrierShape(barrier: JitBarrier): void {
-  if (barrier.reason === "preInstructionExit" && barrier.exitReason === undefined) {
+  if (barrier.reason === "guardExit" && barrier.exitReason === undefined) {
     throw new Error(
-      `pre-instruction exit barrier is missing its exit reason at ${barrier.instructionIndex}:${barrier.opIndex}`
+      `guard exit barrier is missing its exit reason at ${barrier.instructionIndex}:${barrier.opIndex}`
     );
   }
 

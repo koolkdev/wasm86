@@ -18,18 +18,31 @@ test("builder rejects ops after a terminator", () => {
   );
 });
 
-test("builder exposes unknown operand metadata by default", () => {
-  deepStrictEqual(
-    buildIr((s, context) => {
-      const operandInfo = context.operandInfo(0);
+test("builder rejects missing semantic operand metadata", () => {
+  throws(
+    () =>
+      buildIr((_s, context) => {
+        context.operandInfo(0);
+      }),
+    /missing semantic operand metadata for operand 0/
+  );
+});
 
-      s.set(s.reg("eax"), operandInfo.storage === "mem" ? 1 : 0);
-    }),
+test("builder exposes register operand metadata explicitly", () => {
+  deepStrictEqual(
+    buildIr(
+      (s, context) => {
+        const operandInfo = context.operandInfo(0);
+
+        s.set(s.reg("eax"), operandInfo.storage === "reg" ? 1 : 0);
+      },
+      { operandInfo: [{ storage: "reg" }] }
+    ),
     [
       {
         op: "set",
         target: { kind: "reg", reg: "eax" },
-        value: { kind: "const", type: "i32", value: 0 },
+        value: { kind: "const", type: "i32", value: 1 },
         accessWidth: 32
       },
       { op: "next" }

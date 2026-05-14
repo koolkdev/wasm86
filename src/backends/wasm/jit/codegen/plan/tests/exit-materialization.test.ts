@@ -59,7 +59,6 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
   deepStrictEqual(instructionState.entryPoint.boundaryState.boundary, instructionEntry(0));
   strictEqual("kind" in instructionState.entryPoint.boundaryState, false);
   strictEqual("eip" in instructionState.entryPoint.boundaryState, false);
-  strictEqual(instructionState.entryPoint.preInstructionExitPlan, undefined);
   strictEqual(instructionState.exitPointCount, 1);
   deepStrictEqual(exit.emitBoundary, beforeOp(0, exit.opIndex));
   deepStrictEqual(exit.observedBoundary, instructionExit(0, codegenPlan.block.instructions[0]!));
@@ -78,27 +77,21 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
   ]);
 });
 
-test("planJitCodegen keeps memory faults at pre-instruction boundary states", () => {
+test("planJitCodegen keeps memory guard faults at their op boundary states", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const load = ok(decodeBytes([0x8b, 0x05, 0x00, 0x00, 0x01, 0x00], add.nextEip));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([add, load])));
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
   const loadInstructionState = codegenPlan.instructionStates[1]!;
 
-  deepStrictEqual(codegenPlan.instructionStates.map((entry) =>
-    entry.entryPoint.preInstructionExitPlan?.exitPointCount ?? 0
-  ), [0, 1]);
   strictEqual(loadInstructionState.entryPoint.instructionIndex, 1);
   deepStrictEqual(loadInstructionState.entryPoint.boundaryState.boundary, instructionEntry(1));
-  deepStrictEqual(loadInstructionState.entryPoint.preInstructionExitPlan, {
-    exitPointCount: 1
-  });
   strictEqual(exit.instructionIndex, 1);
-  deepStrictEqual(exit.emitBoundary, beforeOp(1, 0));
-  deepStrictEqual(exit.observedBoundary, instructionEntry(1));
+  deepStrictEqual(exit.emitBoundary, beforeOp(1, 1));
+  deepStrictEqual(exit.observedBoundary, beforeOp(1, 1));
   deepStrictEqual(exit.visibleEip, { kind: "static", value: add.nextEip });
   deepStrictEqual(exit.payload, { kind: "runtime", source: "memoryAddress" });
-  deepStrictEqual(exit.observedState.boundary, instructionEntry(1));
+  deepStrictEqual(exit.observedState.boundary, beforeOp(1, 1));
   strictEqual(exit.observedState.instructionCountDelta, 1);
   strictEqual(exit.exitMaterializationIndex, 1);
   const expectedRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
@@ -168,19 +161,15 @@ test("planJitCodegen derives xchg exit stores from value-state boundary states",
 test("planJitCodegen excludes current-instruction speculative writes from memory fault boundary states", () => {
   const instruction = ok(decodeBytes([0x01, 0x18], startAddress));
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([instruction])));
-  const instructionState = codegenPlan.instructionStates[0]!;
   const writeFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_WRITE_FAULT);
 
-  deepStrictEqual(instructionState.entryPoint.preInstructionExitPlan, {
-    exitPointCount: 2
-  });
-  deepStrictEqual(writeFault.observedState.boundary, instructionEntry(0));
+  deepStrictEqual(writeFault.observedState.boundary, beforeOp(0, 2));
   strictEqual(writeFault.observedState.instructionCountDelta, 0);
   strictEqual(writeFault.exitMaterializationIndex, 0);
   deepStrictEqual(writeFault.observedState.valueState.regs.exitStores(), []);
 });
 
-test("planJitCodegen keeps same-instruction writes out of later pre-instruction faults", () => {
+test("planJitCodegen makes guard faults observe the current op boundary state", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "write-before-fault",
@@ -197,10 +186,10 @@ test("planJitCodegen keeps same-instruction writes out of later pre-instruction 
           accessWidth: 32
         },
         {
-          op: "get",
-          dst: { kind: "var", id: 1 },
-          source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x10000 } },
-          accessWidth: 32
+          op: "memory.guard",
+          address: { kind: "const", type: "i32", value: 0x1000 },
+          byteLength: 4,
+          access: "read"
         },
         { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
       ]
@@ -210,23 +199,23 @@ test("planJitCodegen keeps same-instruction writes out of later pre-instruction 
   const readFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
 
-  deepStrictEqual(readFault.observedState.boundary, instructionEntry(0));
+  deepStrictEqual(readFault.observedState.boundary, beforeOp(0, 2));
   deepStrictEqual(readFault.emitBoundary, beforeOp(0, 2));
-  deepStrictEqual(readFault.observedBoundary, instructionEntry(0));
+  deepStrictEqual(readFault.observedBoundary, beforeOp(0, 2));
   deepStrictEqual(readFault.visibleEip, { kind: "static", value: startAddress });
   deepStrictEqual(readFault.payload, { kind: "runtime", source: "memoryAddress" });
-  strictEqual(readFault.exitMaterializationIndex, 0);
-  deepStrictEqual(readFault.observedState.valueState.regs.exitStores(), []);
+  strictEqual(readFault.exitMaterializationIndex, 1);
+  deepStrictEqual(readFault.observedState.valueState.regs.exitStores(), [registerStore("eax", c32(0x1234))]);
   deepStrictEqual(hostTrap.observedState.boundary, instructionExit(0, codegenPlan.block.instructions[0]!));
   deepStrictEqual(hostTrap.emitBoundary, beforeOp(0, 3));
   deepStrictEqual(hostTrap.observedBoundary, instructionExit(0, codegenPlan.block.instructions[0]!));
   deepStrictEqual(hostTrap.visibleEip, { kind: "static", value: startAddress + 1 });
   deepStrictEqual(hostTrap.payload, { kind: "runtime", source: "hostTrapVector" });
-  strictEqual(hostTrap.exitMaterializationIndex, 1);
+  strictEqual(hostTrap.exitMaterializationIndex, 2);
   deepStrictEqual(hostTrap.observedState.valueState.regs.exitStores(), [registerStore("eax", c32(0x1234))]);
 });
 
-test("planJitCodegen keeps same-instruction flag writes out of later pre-instruction faults", () => {
+test("planJitCodegen makes guard faults observe current flag state", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "flag-write-before-fault",
@@ -255,10 +244,10 @@ test("planJitCodegen keeps same-instruction flag writes out of later pre-instruc
           }
         },
         {
-          op: "get",
-          dst: { kind: "var", id: 2 },
-          source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x10000 } },
-          accessWidth: 32
+          op: "memory.guard",
+          address: { kind: "const", type: "i32", value: 0x10000 },
+          byteLength: 4,
+          access: "read"
         },
         { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
       ]
@@ -276,11 +265,11 @@ test("planJitCodegen keeps same-instruction flag writes out of later pre-instruc
     FLAG_PRODUCERS.inc.writtenMask
   );
 
-  deepStrictEqual(readFault.observedState.boundary, instructionEntry(0));
-  strictEqual(readFault.exitMaterializationIndex, 0);
-  deepStrictEqual(readFault.observedState.valueState.flags.exitStores(), []);
+  deepStrictEqual(readFault.observedState.boundary, beforeOp(0, 3));
+  strictEqual(readFault.exitMaterializationIndex, 1);
+  deepStrictEqual(readFault.observedState.valueState.flags.exitStores(), [flagStore(expectedFlags)]);
   deepStrictEqual(hostTrap.observedState.boundary, instructionExit(0, codegenPlan.block.instructions[0]!));
-  strictEqual(hostTrap.exitMaterializationIndex, 1);
+  strictEqual(hostTrap.exitMaterializationIndex, 2);
   deepStrictEqual(hostTrap.observedState.valueState.flags.exitStores(), [flagStore(expectedFlags)]);
 });
 
@@ -295,9 +284,6 @@ test("planJitCodegen records exit materializations only for actual exit points",
     { stores: [] },
     { stores: [registerStore("eax", c32(1)), registerStore("ebx", c32(2))] }
   ]);
-  deepStrictEqual(codegenPlan.instructionStates.map((entry) =>
-    entry.entryPoint.preInstructionExitPlan?.exitPointCount ?? 0
-  ), [0, 0, 0]);
   deepStrictEqual(codegenPlan.instructionStates.map((entry) => entry.exitPointCount), [0, 0, 1]);
 });
 
@@ -591,6 +577,12 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
       operands: [],
       ir: [
         {
+          op: "memory.guard",
+          address: { kind: "const", type: "i32", value: 0x10000 },
+          byteLength: 4,
+          access: "read"
+        },
+        {
           op: "get",
           dst: { kind: "var", id: 0 },
           source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
@@ -624,7 +616,7 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
   const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
-  const produced = jitProducedValue("load#effectful-flag-input:0:0:0", "i32");
+  const produced = jitProducedValue("load#effectful-flag-input:0:1:0", "i32");
   const ebx = jitInputReg32Value("ebx");
   const result = addValue(produced, ebx);
   const expectedFlags = jitFlagProducerValue("add", {
@@ -806,6 +798,12 @@ test("planJitCodegen keeps produced values out of observed boundaries before the
       operands: [],
       ir: [
         {
+          op: "memory.guard",
+          address: { kind: "const", type: "i32", value: 0x10000 },
+          byteLength: 4,
+          access: "read"
+        },
+        {
           op: "get",
           dst: { kind: "var", id: 0 },
           source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x10000 } },
@@ -824,9 +822,9 @@ test("planJitCodegen keeps produced values out of observed boundaries before the
   const codegenPlan = planJitCodegen(block);
   const readFault = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
-  const produced = jitProducedValue("load#produced-before-observed-boundary:0:0:0", "i32");
+  const produced = jitProducedValue("load#produced-before-observed-boundary:0:1:0", "i32");
 
-  deepStrictEqual(readFault.observedBoundary, instructionEntry(0));
+  deepStrictEqual(readFault.observedBoundary, beforeOp(0, 0));
   strictEqual(readFault.exitMaterializationIndex, 0);
   deepStrictEqual(readFault.observedState.valueState.exitStores(), []);
   deepStrictEqual(

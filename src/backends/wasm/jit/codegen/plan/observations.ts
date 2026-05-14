@@ -18,7 +18,7 @@ import {
 } from "./boundaries.js";
 import {
   type JitEffectIndex,
-  jitPreInstructionExitReasonAt,
+  jitGuardExitReasonAt,
   jitPostInstructionExitsAt
 } from "#backends/wasm/jit/ir/effects.js";
 import type { JitPostInstructionExit } from "#backends/wasm/jit/ir/effect-primitives.js";
@@ -35,14 +35,14 @@ export type JitPlannedObservationPoint = Readonly<{
   pathScope: JitValuePathScope;
 }>;
 
-export function jitPreInstructionObservationForOp(
+export function jitGuardObservationForOp(
   effects: JitEffectIndex,
   instruction: JitIrBlockInstruction,
   instructionIndex: number,
   opIndex: number,
-  entryState: JitBoundaryState
+  observedState: JitBoundaryState
 ): JitPlannedObservationPoint | undefined {
-  const faultReason = jitPreInstructionExitReasonAt(effects, instructionIndex, opIndex);
+  const faultReason = jitGuardExitReasonAt(effects, instructionIndex, opIndex);
 
   if (faultReason === undefined) {
     return undefined;
@@ -52,8 +52,8 @@ export function jitPreInstructionObservationForOp(
     instructionIndex,
     opIndex,
     emitBoundary: beforeOp(instructionIndex, opIndex),
-    observedBoundary: entryState.boundary,
-    observedState: entryState,
+    observedBoundary: observedState.boundary,
+    observedState,
     visibleEip: {
       kind: "static",
       value: instruction.eip
@@ -88,23 +88,6 @@ export function jitPostInstructionObservationsForOp(
     payload: payloadForPostInstructionExit(instruction, exit, opIndex),
     pathScope: observationPathScope(instructionIndex, opIndex, exit, controlPathScopes)
   }));
-}
-
-export function countInstructionEntryObservations(
-  observations: readonly Pick<JitPlannedObservationPoint, "observedBoundary">[],
-  startIndex: number
-): number {
-  let count = 0;
-
-  for (let index = startIndex; index < observations.length; index += 1) {
-    const observation = observations[index];
-
-    if (observation?.observedBoundary.boundaryIndex === 0) {
-      count += 1;
-    }
-  }
-
-  return count;
 }
 
 function visibleEipForPostInstructionExit(

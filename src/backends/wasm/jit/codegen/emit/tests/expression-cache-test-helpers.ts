@@ -56,6 +56,10 @@ export function emitPlannedExpression(
       helpers.emitValue(op.value);
       body.localSet(sinkLocal);
     },
+    emitMemoryGuard: (op, helpers) => {
+      helpers.emitValue(op.address);
+      body.localSet(sinkLocal);
+    },
     emitAddress: () => {
       throw new Error("test address emission is not implemented");
     },

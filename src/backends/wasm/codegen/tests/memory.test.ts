@@ -9,42 +9,28 @@ import { decodeExit, ExitReason } from "#backends/wasm/exit.js";
 import { emitWasmIrExitFromI32Stack, type WasmIrExitTarget } from "#backends/wasm/codegen/exit.js";
 import {
   emitWasmIrGuardGuestRange,
-  emitWasmIrLoadGuest,
-  emitWasmIrLoadGuestFromStack,
-  emitWasmIrLoadGuestU32,
-  emitWasmIrLoadGuestU32FromStack,
-  emitWasmIrStoreGuest,
-  emitWasmIrStoreGuestU32
+  emitWasmIrLoadGuestUnchecked,
+  emitWasmIrStoreGuestUnchecked
 } from "#backends/wasm/codegen/memory.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 
-test("guest u32 load helpers return values and fault before out-of-bounds reads", async () => {
-  for (const mode of ["local", "stack"] as const) {
-    const { run, guestView } = await instantiateMemoryModule(encodeGuestLoadModule(mode));
-
-    guestView.setUint32(12, 0x1234_5678, true);
-
-    deepStrictEqual(decodeExit(run(12)), {
-      exitReason: ExitReason.FALLTHROUGH,
-      payload: 0x1234_5678
-    });
-    deepStrictEqual(decodeExit(run(0x1_0000)), {
-      exitReason: ExitReason.MEMORY_READ_FAULT,
-      payload: 0x1_0000,
-      detail: 4
-    });
-  }
-});
-
-test("guest stack load helper consumes the stack address before loaded value use", async () => {
-  const { run, guestView } = await instantiateI32Module(encodeGuestStackLoadConsumedModule());
+test("guest explicit guard plus unchecked u32 load returns values and faults before out-of-bounds reads", async () => {
+  const { run, guestView } = await instantiateMemoryModule(encodeGuestLoadModule());
 
   guestView.setUint32(12, 0x1234_5678, true);
 
-  strictEqual(run(12), 0x1234_5679);
+  deepStrictEqual(decodeExit(run(12)), {
+    exitReason: ExitReason.FALLTHROUGH,
+    payload: 0x1234_5678
+  });
+  deepStrictEqual(decodeExit(run(0x1_0000)), {
+    exitReason: ExitReason.MEMORY_READ_FAULT,
+    payload: 0x1_0000,
+    detail: 4
+  });
 });
 
-test("guest u32 store helper writes values and reports write faults", async () => {
+test("guest explicit guard plus unchecked u32 store writes values and reports write faults", async () => {
   const { run, guestView } = await instantiateMemoryModule(encodeGuestStoreModule());
 
   deepStrictEqual(decodeExit(run(16, 0x89ab_cdef)), {
@@ -66,31 +52,29 @@ test("guest width-aware helpers use 1/2/4-byte bounds", async () => {
     const maxValidAddress = 0x1_0000 - byteLength;
     const faultAddress = maxValidAddress + 1;
 
-    for (const mode of ["local", "stack"] as const) {
-      const { run, guestView } = await instantiateMemoryModule(encodeGuestLoadModule(mode, width));
+    const { run: load, guestView: loadGuestView } = await instantiateMemoryModule(encodeGuestLoadModule(width));
 
-      writeGuestValue(guestView, maxValidAddress, width, 0x1234_5678);
+    writeGuestValue(loadGuestView, maxValidAddress, width, 0x1234_5678);
 
-      deepStrictEqual(decodeExit(run(maxValidAddress)), {
-        exitReason: ExitReason.FALLTHROUGH,
-        payload: expectedGuestValue(width, 0x1234_5678)
-      });
-      deepStrictEqual(decodeExit(run(faultAddress)), {
-        exitReason: ExitReason.MEMORY_READ_FAULT,
-        payload: faultAddress,
-        detail: byteLength
-      });
-    }
+    deepStrictEqual(decodeExit(load(maxValidAddress)), {
+      exitReason: ExitReason.FALLTHROUGH,
+      payload: expectedGuestValue(width, 0x1234_5678)
+    });
+    deepStrictEqual(decodeExit(load(faultAddress)), {
+      exitReason: ExitReason.MEMORY_READ_FAULT,
+      payload: faultAddress,
+      detail: byteLength
+    });
 
-    const { run, guestView } = await instantiateMemoryModule(encodeGuestStoreModule(width));
+    const { run: store, guestView: storeGuestView } = await instantiateMemoryModule(encodeGuestStoreModule(width));
 
-    writeGuestValue(guestView, maxValidAddress, width, 0xffff_ffff);
-    deepStrictEqual(decodeExit(run(maxValidAddress, 0x1234_5678)), {
+    writeGuestValue(storeGuestView, maxValidAddress, width, 0xffff_ffff);
+    deepStrictEqual(decodeExit(store(maxValidAddress, 0x1234_5678)), {
       exitReason: ExitReason.FALLTHROUGH,
       payload: 0
     });
-    strictEqual(readGuestValue(guestView, maxValidAddress, width), expectedGuestValue(width, 0x1234_5678));
-    deepStrictEqual(decodeExit(run(faultAddress, 0)), {
+    strictEqual(readGuestValue(storeGuestView, maxValidAddress, width), expectedGuestValue(width, 0x1234_5678));
+    deepStrictEqual(decodeExit(store(faultAddress, 0)), {
       exitReason: ExitReason.MEMORY_WRITE_FAULT,
       payload: faultAddress,
       detail: byteLength
@@ -145,39 +129,6 @@ async function instantiateMemoryModule(bytes: Uint8Array<ArrayBuffer>): Promise<
   };
 }
 
-async function instantiateI32Module(bytes: Uint8Array<ArrayBuffer>): Promise<{
-  run: (...args: number[]) => number;
-  guestView: DataView;
-}> {
-  const module = await WebAssembly.compile(bytes);
-  const stateMemory = new WebAssembly.Memory({ initial: 1 });
-  const guestMemory = new WebAssembly.Memory({ initial: 1 });
-  const instance = await WebAssembly.instantiate(module, {
-    [wasmImport.moduleName]: {
-      [wasmImport.stateMemoryName]: stateMemory,
-      [wasmImport.guestMemoryName]: guestMemory
-    }
-  });
-  const run = instance.exports.run;
-
-  if (typeof run !== "function") {
-    throw new Error("expected exported function 'run'");
-  }
-
-  return {
-    run: (...args) => {
-      const result = (run as (...callArgs: number[]) => unknown)(...args);
-
-      if (typeof result !== "number") {
-        throw new Error(`expected number result, got ${typeof result}`);
-      }
-
-      return result;
-    },
-    guestView: new DataView(guestMemory.buffer)
-  };
-}
-
 function encodeGuestGuardModule(byteLength: number, access: "read" | "write"): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
 
@@ -204,34 +155,7 @@ function encodeGuestGuardModule(byteLength: number, access: "read" | "write"): U
   return module.encode();
 }
 
-function encodeGuestStackLoadConsumedModule(): Uint8Array<ArrayBuffer> {
-  const module = new WasmModuleEncoder();
-
-  importStateAndGuestMemory(module);
-
-  const typeIndex = module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i32]
-  });
-  const body = new WasmFunctionBodyEncoder(1);
-  const resultLocal = body.addLocal(wasmValueType.i32);
-  const exitLocal = body.addLocal(wasmValueType.i64);
-  const exit: WasmIrExitTarget = { exitLocal, exitLabelDepth: 0 };
-
-  body.block();
-  body.localGet(0);
-  emitWasmIrLoadGuestFromStack({ body, exit }, 0, 32);
-  body.i32Const(1).i32Add().localSet(resultLocal);
-  body.endBlock();
-  body.localGet(resultLocal).end();
-
-  const functionIndex = module.addFunction(typeIndex, body);
-  module.exportFunction("run", functionIndex);
-
-  return module.encode();
-}
-
-function encodeGuestLoadModule(mode: "local" | "stack", width: OperandWidth = 32): Uint8Array<ArrayBuffer> {
+function encodeGuestLoadModule(width: OperandWidth = 32): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
 
   importStateAndGuestMemory(module);
@@ -245,20 +169,8 @@ function encodeGuestLoadModule(mode: "local" | "stack", width: OperandWidth = 32
   const exit: WasmIrExitTarget = { exitLocal, exitLabelDepth: 0 };
 
   body.block();
-  if (mode === "local") {
-    if (width === 32) {
-      emitWasmIrLoadGuestU32({ body, exit }, 0);
-    } else {
-      emitWasmIrLoadGuest({ body, exit }, 0, width);
-    }
-  } else {
-    body.localGet(0);
-    if (width === 32) {
-      emitWasmIrLoadGuestU32FromStack({ body, exit }, 0);
-    } else {
-      emitWasmIrLoadGuestFromStack({ body, exit }, 0, width);
-    }
-  }
+  emitWasmIrGuardGuestRange({ body, exit }, 0, width / 8, "read");
+  emitWasmIrLoadGuestUnchecked(body, () => body.localGet(0), width);
   emitWasmIrExitFromI32Stack(body, exit, ExitReason.FALLTHROUGH);
   body.endBlock();
   body.localGet(exitLocal).end();
@@ -283,11 +195,8 @@ function encodeGuestStoreModule(width: OperandWidth = 32): Uint8Array<ArrayBuffe
   const exit: WasmIrExitTarget = { exitLocal, exitLabelDepth: 0 };
 
   body.block();
-  if (width === 32) {
-    emitWasmIrStoreGuestU32({ body, exit }, 0, 1);
-  } else {
-    emitWasmIrStoreGuest({ body, exit }, 0, 1, width);
-  }
+  emitWasmIrGuardGuestRange({ body, exit }, 0, width / 8, "write");
+  emitWasmIrStoreGuestUnchecked(body, () => body.localGet(0), () => body.localGet(1), width);
   body.i32Const(0);
   emitWasmIrExitFromI32Stack(body, exit, ExitReason.FALLTHROUGH);
   body.endBlock();

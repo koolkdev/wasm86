@@ -1,4 +1,4 @@
-import { deepStrictEqual } from "node:assert";
+import { deepStrictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { operand } from "#x86/ir/build/builder.js";
@@ -73,28 +73,19 @@ test("IrBlockBuilder preserves semantic operand metadata through operand remappi
   ]);
 });
 
-test("IrBlockBuilder does not infer remapped metadata from reconstructed operand refs", () => {
+test("IrBlockBuilder rejects missing metadata for reconstructed operand refs", () => {
   const builder = new IrBlockBuilder();
 
-  builder.appendInstruction({
-    semantics: (s, context) => {
-      s.operand(0);
-
-      const operandInfo = context.operandInfo(operand(3));
-
-      s.set(s.reg("eax"), operandInfo.storage === "mem" ? 1 : 0);
-    },
-    operands: [operand(3)],
-    operandInfo: [{ storage: "mem" }]
-  });
-
-  deepStrictEqual(builder.build(), [
-    {
-      op: "set",
-      target: { kind: "reg", reg: "eax" },
-      value: { kind: "const", type: "i32", value: 0 },
-      accessWidth: 32
-    },
-    { op: "next" }
-  ]);
+  throws(
+    () =>
+      builder.appendInstruction({
+        semantics: (s, context) => {
+          s.operand(0);
+          context.operandInfo(operand(3));
+        },
+        operands: [operand(3)],
+        operandInfo: [{ storage: "mem" }]
+      }),
+    /missing semantic operand metadata for operand 3/
+  );
 });

@@ -21,18 +21,19 @@ test("local-dce removes unused pure local values", () => {
   deepStrictEqual(result.block.instructions[0]?.ir.map((op) => op.op), ["next"]);
 });
 
-test("local-dce keeps dead memory reads because they can fault", () => {
+test("local-dce removes dead memory reads and keeps explicit guards", () => {
   const result = pruneDeadJitLocalValues({
     instructions: [
       syntheticInstruction([
+        { op: "memory.guard", address: c32(0x2000), byteLength: 4, access: "read" },
         { op: "get", dst: v(0), source: { kind: "mem", address: c32(0x2000) } },
         { op: "next" }
       ])
     ]
   });
 
-  strictEqual(result.localDce.removedOpCount, 0);
-  deepStrictEqual(result.block.instructions[0]?.ir.map((op) => op.op), ["get", "next"]);
+  strictEqual(result.localDce.removedOpCount, 1);
+  deepStrictEqual(result.block.instructions[0]?.ir.map((op) => op.op), ["memory.guard", "next"]);
 });
 
 test("local-dce removes dead non-faulting register reads", () => {

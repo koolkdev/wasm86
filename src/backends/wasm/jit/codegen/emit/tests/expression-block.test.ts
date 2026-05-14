@@ -107,7 +107,7 @@ test("JIT expression-block emitter fails loudly when a value has no timeline fac
   }, /JIT expression-block value is not available at expression op 0/);
 });
 
-test("JIT expression-block emitter emits uncached produced let32 definitions at their source point", () => {
+test("JIT expression-block emitter skips uncached produced definitions with no consumer", () => {
   const produced = jitProducedValue("load#uncached-produced:0:0:0", "i32");
   const result = emitFoundationBlock([
     {
@@ -123,7 +123,7 @@ test("JIT expression-block emitter emits uncached produced let32 definitions at 
     producedValuesByVarId: new Map([[0, produced]])
   });
 
-  strictEqual(countOpcode(result.opcodes, wasmOpcode.drop), 1);
+  strictEqual(countOpcode(result.opcodes, wasmOpcode.drop), 0);
   deepStrictEqual(localOpcodes(result.opcodes), []);
 });
 
@@ -160,11 +160,22 @@ test("JIT expression-block emitter routes normal planned effects", () => {
   strictEqual(countOpcode(result.opcodes, wasmOpcode.i32Add), 1);
 });
 
+test("JIT expression-block emitter routes memory guards as planned effects", () => {
+  const result = emitFoundationBlock([
+    { op: "memory.guard", address: addExpr("eax", 1), byteLength: 4, access: "read" }
+  ]);
+
+  strictEqual(result.guardCalls, 1);
+  strictEqual(countOpcode(result.opcodes, wasmOpcode.i32Add), 1);
+  deepStrictEqual(localOpcodes(result.opcodes), [wasmOpcode.localSet]);
+});
+
 type FoundationEmitResult = Readonly<{
   opcodes: readonly number[];
   localCount: number;
   nextCalls: number;
   setCalls: number;
+  guardCalls: number;
   jumpCalls: number;
   conditionalJumpCalls: number;
 }>;
@@ -194,6 +205,7 @@ function emitFoundationBlock(
   const valueCache = createJitValueCacheRuntime(body, cachePlan);
   let nextCalls = 0;
   let setCalls = 0;
+  let guardCalls = 0;
   let jumpCalls = 0;
   let conditionalJumpCalls = 0;
 
@@ -230,6 +242,11 @@ function emitFoundationBlock(
     emitSet: (op, helpers) => {
       setCalls += 1;
       helpers.emitValue(op.value);
+      body.localSet(sinkLocal);
+    },
+    emitMemoryGuard: (op, helpers) => {
+      guardCalls += 1;
+      helpers.emitValue(op.address);
       body.localSet(sinkLocal);
     },
     emitAddress: () => {
@@ -270,6 +287,7 @@ function emitFoundationBlock(
     localCount: wasmBodyLocalCount(encoded),
     nextCalls,
     setCalls,
+    guardCalls,
     jumpCalls,
     conditionalJumpCalls
   };

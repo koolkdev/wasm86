@@ -1,6 +1,10 @@
 import type { IrOp } from "#x86/ir/model/types.js";
 import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
-import { JitBoundaryStateBuilder } from "./boundaries.js";
+import {
+  beforeOp,
+  instructionEntry,
+  JitBoundaryStateBuilder
+} from "./boundaries.js";
 import {
   indexJitEffects,
   type JitEffectIndex,
@@ -16,12 +20,8 @@ import type {
   JitMaterializationNeed
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
-  instructionEntry
-} from "./boundaries.js";
-import {
-  countInstructionEntryObservations,
+  jitGuardObservationForOp,
   jitPostInstructionObservationsForOp,
-  jitPreInstructionObservationForOp,
   type JitPlannedObservationPoint
 } from "./observations.js";
 import { jitMaterializationNeedsForExitStores } from "./materialization.js";
@@ -65,16 +65,16 @@ export function analyzeJitCodegenState(
         throw new Error(`missing JIT IR op while planning JIT codegen: ${instructionIndex}:${opIndex}`);
       }
 
-      const preObservation = jitPreInstructionObservationForOp(
+      const guardObservation = jitGuardObservationForOp(
         effects,
         instruction,
         instructionIndex,
         opIndex,
-        entryState
+        state.boundaryState(beforeOp(instructionIndex, opIndex))
       );
 
-      if (preObservation !== undefined) {
-        recordObservationPoint(preObservation);
+      if (guardObservation !== undefined) {
+        recordObservationPoint(guardObservation);
       }
 
       recordOpEffects(op, instruction, instructionIndex, opIndex, controlPathScopes);
@@ -85,8 +85,6 @@ export function analyzeJitCodegenState(
       throw new Error(`missing JIT instruction terminator while planning JIT codegen: ${instructionIndex}`);
     }
 
-    const preInstructionExitPointCount = countInstructionEntryObservations(exitPoints, exitStart);
-
     instructionStates.push({
       instructionId: instruction.instructionId,
       eip: instruction.eip,
@@ -94,14 +92,7 @@ export function analyzeJitCodegenState(
       nextMode: instruction.nextMode,
       entryPoint: {
         instructionIndex,
-        boundaryState: entryState,
-        ...(preInstructionExitPointCount === 0
-          ? {}
-          : {
-              preInstructionExitPlan: {
-                exitPointCount: preInstructionExitPointCount
-              }
-            })
+        boundaryState: entryState
       },
       postInstructionState: currentPostState,
       controlPathScopes,

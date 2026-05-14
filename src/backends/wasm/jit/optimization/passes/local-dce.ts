@@ -5,11 +5,6 @@ import {
 } from "#x86/ir/model/op-semantics.js";
 import type { IrOp } from "#x86/ir/model/types.js";
 import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
-import {
-  analyzeJitBarriers,
-  jitOpPreInstructionExitReasonAt,
-  type JitBarrierAnalysis
-} from "#backends/wasm/jit/ir/barriers.js";
 import type { JitOptimizationPass } from "#backends/wasm/jit/optimization/pass.js";
 
 export type JitLocalDce = Readonly<{
@@ -29,13 +24,10 @@ export const localDcePass = {
   }
 } satisfies JitOptimizationPass<"localDce">;
 
-export function pruneDeadJitLocalValues(
-  block: JitIrBlock,
-  barriers: JitBarrierAnalysis = analyzeJitBarriers(block)
-): Readonly<{ block: JitIrBlock; localDce: JitLocalDce }> {
+export function pruneDeadJitLocalValues(block: JitIrBlock): Readonly<{ block: JitIrBlock; localDce: JitLocalDce }> {
   let removedOpCount = 0;
   const instructions = block.instructions.map((instruction, instructionIndex) => {
-    const pruned = pruneInstructionDeadLocalValues(instruction, instructionIndex, barriers);
+    const pruned = pruneInstructionDeadLocalValues(instruction, instructionIndex);
 
     removedOpCount += pruned.removedOpCount;
     return pruned.instruction;
@@ -49,8 +41,7 @@ export function pruneDeadJitLocalValues(
 
 function pruneInstructionDeadLocalValues(
   instruction: JitIrBlockInstruction,
-  instructionIndex: number,
-  barriers: JitBarrierAnalysis
+  instructionIndex: number
 ): Readonly<{ instruction: JitIrBlockInstruction; removedOpCount: number }> {
   const liveVars = new Set<number>();
   const ops: IrOp[] = [];
@@ -65,7 +56,7 @@ function pruneInstructionDeadLocalValues(
 
     const dst = irOpDst(op);
 
-    if (dst !== undefined && !liveVars.has(dst.id) && canDropUnusedResult(op, instructionIndex, opIndex, barriers)) {
+    if (dst !== undefined && !liveVars.has(dst.id) && canDropUnusedResult(op)) {
       removedOpCount += 1;
       continue;
     }
@@ -93,10 +84,7 @@ function pruneInstructionDeadLocalValues(
 }
 
 function canDropUnusedResult(
-  op: IrOp,
-  instructionIndex: number,
-  opIndex: number,
-  barriers: JitBarrierAnalysis
+  op: IrOp
 ): boolean {
   const result = irOpResult(op);
 
@@ -108,6 +96,6 @@ function canDropUnusedResult(
     case "none":
       return true;
     case "storageRead":
-      return jitOpPreInstructionExitReasonAt(barriers, instructionIndex, opIndex) === undefined;
+      return true;
   }
 }

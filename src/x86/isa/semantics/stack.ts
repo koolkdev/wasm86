@@ -64,7 +64,7 @@ export function leaveSemantic(): SemanticTemplate {
 }
 
 function popTargetStorage(s: IrBuilder, context: SemanticBuildContext, dst: OperandRef): StorageInput {
-  if (context.memoryGuards && context.operandInfo(dst).storage === "mem") {
+  if (context.operandInfo(dst).storage === "mem") {
     const target = s.mem(s.address(dst));
 
     guardStorageWrite(s, context, target, 32);

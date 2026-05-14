@@ -17,7 +17,6 @@ export type StorageRef = OperandRef | RegRef | MemRef;
 export type TargetRef = ValueRef;
 
 export type SemanticOperandStorageKind =
-  | "unknown"
   | "reg"
   | "mem"
   | "regOrMem"
@@ -136,7 +135,6 @@ export type IrBlock = readonly IrOp[];
 export type SemanticOperandInput = number | OperandRef;
 
 export interface SemanticBuildContext {
-  memoryGuards: boolean;
   operandInfo(operand: SemanticOperandInput): SemanticOperandInfo;
 }
 

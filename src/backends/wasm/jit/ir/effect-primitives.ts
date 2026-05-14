@@ -1,10 +1,5 @@
-import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
-import {
-  irOpStorageReads,
-  irOpStorageWrites
-} from "#x86/ir/model/op-semantics.js";
+import type { IrOp, ValueRef } from "#x86/ir/model/types.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 
 export type JitPostInstructionExitKind =
@@ -19,21 +14,14 @@ export type JitPostInstructionExit = Readonly<{
   exitReason: ExitReasonValue;
 }>;
 
-export function jitMemoryFaultReason(
-  op: IrOp,
-  operands: readonly JitOperandBinding[]
-): ExitReasonValue | undefined {
-  if (irOpStorageReads(op).some((storage) => storageMayAccessMemory(storage, operands))) {
-    return ExitReason.MEMORY_READ_FAULT;
+export function jitMemoryFaultReason(op: IrOp): ExitReasonValue | undefined {
+  if (op.op === "memory.guard") {
+    return op.access === "read"
+      ? ExitReason.MEMORY_READ_FAULT
+      : ExitReason.MEMORY_WRITE_FAULT;
   }
 
-  const writesMemory = irOpStorageWrites(op).some((storage) => storageMayAccessMemory(storage, operands));
-
-  if (!writesMemory) {
-    return undefined;
-  }
-
-  return ExitReason.MEMORY_WRITE_FAULT;
+  return undefined;
 }
 
 export function jitPostInstructionExits(
@@ -81,16 +69,5 @@ export function jitLocalConditionValues(op: IrOp): readonly ValueRef[] {
       return [op.condition];
     default:
       return [];
-  }
-}
-
-function storageMayAccessMemory(storage: StorageRef, operands: readonly JitOperandBinding[]): boolean {
-  switch (storage.kind) {
-    case "mem":
-      return true;
-    case "reg":
-      return false;
-    case "operand":
-      return operands[storage.index]!.kind === "static.mem";
   }
 }

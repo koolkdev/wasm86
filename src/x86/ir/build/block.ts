@@ -13,7 +13,6 @@ export type IrBlockInstruction = Readonly<{
   semantics: SemanticTemplate;
   operands: readonly OperandRef[];
   operandInfo?: readonly (SemanticOperandInfo | undefined)[];
-  memoryGuards?: boolean;
 }>;
 
 export type IrBlockAppendResult = Readonly<{
@@ -31,9 +30,6 @@ export class IrBlockBuilder {
       resolveOperand: (index) => blockOperand(instruction.operands, index),
       ...(instruction.operandInfo !== undefined
         ? { operandInfo: instruction.operandInfo }
-        : {}),
-      ...(instruction.memoryGuards !== undefined
-        ? { memoryGuards: instruction.memoryGuards }
         : {})
     });
 

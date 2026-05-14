@@ -91,6 +91,7 @@ export class JitBoundaryStateBuilder {
       case "jump":
       case "conditionalJump":
       case "hostTrap":
+      case "memory.guard":
         return;
     }
   }

@@ -77,8 +77,7 @@ function emitInstructionHandler(
 ): void {
   const decoded = decodeInstructionOperands(instruction, context, modRmLocal);
   const program = buildIr(instruction.spec.semantics, {
-    operandInfo: decoded.operands.map(interpreterSemanticOperandInfo),
-    memoryGuards: true
+    operandInfo: decoded.operands.map(interpreterSemanticOperandInfo)
   });
 
   try {

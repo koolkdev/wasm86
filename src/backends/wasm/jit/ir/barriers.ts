@@ -3,7 +3,7 @@ import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import {
   indexJitEffects,
-  jitPreInstructionExitReasonAt,
+  jitGuardExitReasonAt,
   jitPostInstructionExitsAt,
   jitOpHasPostInstructionExit,
   jitRegisterWriteRegAt,
@@ -12,7 +12,7 @@ import {
 import type { JitPostInstructionExit } from "#backends/wasm/jit/ir/effect-primitives.js";
 
 export type JitBarrierReason =
-  | "preInstructionExit"
+  | "guardExit"
   | "exit"
   | "write";
 
@@ -73,14 +73,14 @@ export function analyzeJitBarriers(
         throw new Error(`missing JIT IR op while analyzing JIT barriers: ${instructionIndex}:${opIndex}`);
       }
 
-      const preInstructionExitReason = jitPreInstructionExitReasonAt(effects, instructionIndex, opIndex);
+      const guardExitReason = jitGuardExitReasonAt(effects, instructionIndex, opIndex);
 
-      if (preInstructionExitReason !== undefined) {
+      if (guardExitReason !== undefined) {
         pushBarrier(barriers, instructionBarriers, {
           instructionIndex,
           opIndex,
-          reason: "preInstructionExit",
-          exitReason: preInstructionExitReason
+          reason: "guardExit",
+          exitReason: guardExitReason
         });
       }
 
@@ -161,13 +161,13 @@ export function jitOpHasBarrier(
   return jitOpBarriersAt(analysis, instructionIndex, opIndex).some((barrier) => barrier.reason === reason);
 }
 
-export function jitOpPreInstructionExitReasonAt(
+export function jitOpGuardExitReasonAt(
   analysis: JitBarrierAnalysis,
   instructionIndex: number,
   opIndex: number
 ): ExitReasonValue | undefined {
   return jitOpBarriersAt(analysis, instructionIndex, opIndex)
-    .find((barrier) => barrier.reason === "preInstructionExit")
+    .find((barrier) => barrier.reason === "guardExit")
     ?.exitReason;
 }
 

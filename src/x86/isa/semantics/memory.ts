@@ -1,10 +1,9 @@
 import type {
   IrBuilder,
   IrMemoryAccessKind,
-  OperandRef,
   SemanticBuildContext,
-  SemanticOperandStorageKind,
-  StorageInput
+  StorageInput,
+  ValueInput
 } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 
@@ -14,7 +13,7 @@ export function guardStorageRead(
   storage: StorageInput,
   width: OperandWidth
 ): void {
-  guardStorageAccess(s, context, storage, byteLengthForWidth(width), "read");
+  guardStorageAccesses(s, context, storage, byteLengthForWidth(width), ["read"]);
 }
 
 export function guardStorageWrite(
@@ -23,7 +22,7 @@ export function guardStorageWrite(
   storage: StorageInput,
   width: OperandWidth
 ): void {
-  guardStorageAccess(s, context, storage, byteLengthForWidth(width), "write");
+  guardStorageAccesses(s, context, storage, byteLengthForWidth(width), ["write"]);
 }
 
 export function guardStorageReadWrite(
@@ -32,87 +31,49 @@ export function guardStorageReadWrite(
   storage: StorageInput,
   width: OperandWidth
 ): void {
-  if (!context.memoryGuards) {
-    return;
-  }
-
-  const byteLength = byteLengthForWidth(width);
-
-  switch (storage.kind) {
-    case "mem":
-      s.memoryGuard(storage.address, byteLength, "read");
-      s.memoryGuard(storage.address, byteLength, "write");
-      return;
-    case "operand":
-      switch (operandStorageForGuard(context, storage)) {
-        case "mem": {
-          const address = s.address(storage);
-
-          s.memoryGuard(address, byteLength, "read");
-          s.memoryGuard(address, byteLength, "write");
-          return;
-        }
-        case "regOrMem": {
-          const address = s.address(storage);
-
-          s.memoryGuard(address, byteLength, "read");
-          s.memoryGuard(address, byteLength, "write");
-          return;
-        }
-        case "reg":
-        case "imm":
-        case "relTarget":
-          return;
-      }
-      return;
-    case "reg":
-      return;
-  }
+  guardStorageAccesses(s, context, storage, byteLengthForWidth(width), ["read", "write"]);
 }
 
-function guardStorageAccess(
+function guardStorageAccesses(
   s: IrBuilder,
   context: SemanticBuildContext,
   storage: StorageInput,
   byteLength: number,
-  access: IrMemoryAccessKind
+  accesses: readonly IrMemoryAccessKind[]
 ): void {
-  if (!context.memoryGuards) {
+  const address = memoryGuardAddress(s, context, storage);
+
+  if (address === undefined) {
     return;
   }
 
-  switch (storage.kind) {
-    case "mem":
-      s.memoryGuard(storage.address, byteLength, access);
-      return;
-    case "operand":
-      switch (operandStorageForGuard(context, storage)) {
-        case "mem":
-        case "regOrMem":
-          s.memoryGuard(s.address(storage), byteLength, access);
-          return;
-        case "reg":
-        case "imm":
-        case "relTarget":
-          return;
-      }
-      return;
-    case "reg":
-      return;
+  for (const access of accesses) {
+    s.memoryGuard(address, byteLength, access);
   }
 }
 
-function operandStorageForGuard(
+function memoryGuardAddress(
+  s: IrBuilder,
   context: SemanticBuildContext,
-  storage: OperandRef
-): Exclude<SemanticOperandStorageKind, "unknown"> {
-  const kind = context.operandInfo(storage).storage;
-
-  if (kind === "unknown") {
-    throw new Error(`memory guard requires storage metadata for operand ${storage.index}`);
+  storage: StorageInput
+): ValueInput | undefined {
+  switch (storage.kind) {
+    case "mem":
+      return storage.address;
+    case "operand":
+      switch (context.operandInfo(storage).storage) {
+        case "mem":
+        case "regOrMem":
+          return s.address(storage);
+        case "reg":
+        case "imm":
+        case "relTarget":
+          return undefined;
+      }
+      return undefined;
+    case "reg":
+      return undefined;
   }
-
-  return kind;
 }
 
 function byteLengthForWidth(width: OperandWidth): number {

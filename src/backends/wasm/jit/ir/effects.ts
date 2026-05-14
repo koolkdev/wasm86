@@ -16,7 +16,7 @@ import {
 import { jitStorageReg } from "#backends/wasm/jit/ir/values.js";
 
 export type JitOpEffects = Readonly<{
-  preInstructionExitReason?: ExitReasonValue;
+  guardExitReason?: ExitReasonValue;
   postInstructionExits: readonly JitPostInstructionExit[];
   localConditionValues: readonly ValueRef[];
   exitConditionValues: readonly ValueRef[];
@@ -26,8 +26,6 @@ export type JitOpEffects = Readonly<{
 
 export type JitInstructionEffects = Readonly<{
   ops: readonly JitOpEffects[];
-  lastPreInstructionExitOpIndex?: number;
-  firstOpIndexAfterPreInstructionExits: number;
 }>;
 
 export type JitEffectIndex = Readonly<{
@@ -48,7 +46,6 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
     }
 
     const ops: JitOpEffects[] = [];
-    let lastPreInstructionExitOpIndex: number | undefined;
 
     for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
       const op = instruction.ir[opIndex];
@@ -57,11 +54,7 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
         throw new Error(`missing JIT IR op while indexing JIT op effects: ${instructionIndex}:${opIndex}`);
       }
 
-      const preInstructionExitReason = jitMemoryFaultReason(op, instruction.operands);
-
-      if (preInstructionExitReason !== undefined) {
-        lastPreInstructionExitOpIndex = opIndex;
-      }
+      const guardExitReason = jitMemoryFaultReason(op);
 
       let opEffects: JitOpEffects = {
         postInstructionExits: jitPostInstructionExits(op, instruction),
@@ -69,8 +62,8 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
         exitConditionValues: exitConditionValues.get(instructionIndex)?.get(opIndex) ?? []
       };
 
-      if (preInstructionExitReason !== undefined) {
-        opEffects = { ...opEffects, preInstructionExitReason };
+      if (guardExitReason !== undefined) {
+        opEffects = { ...opEffects, guardExitReason };
       }
 
       const registerWriteReg = jitRegisterWriteReg(op, instruction.operands);
@@ -88,16 +81,7 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
       ops.push(opEffects);
     }
 
-    const instructionEffects: JitInstructionEffects = {
-      ops,
-      firstOpIndexAfterPreInstructionExits: lastPreInstructionExitOpIndex === undefined
-        ? 0
-        : lastPreInstructionExitOpIndex + 1
-    };
-
-    instructions.push(lastPreInstructionExitOpIndex === undefined
-      ? instructionEffects
-      : { ...instructionEffects, lastPreInstructionExitOpIndex });
+    instructions.push({ ops });
   }
 
   return { instructions };
@@ -136,12 +120,12 @@ export function jitConditionValuesAt(
     : opEffects.exitConditionValues;
 }
 
-export function jitPreInstructionExitReasonAt(
+export function jitGuardExitReasonAt(
   effects: JitEffectIndex,
   instructionIndex: number,
   opIndex: number
 ): ExitReasonValue | undefined {
-  return jitOpEffectsAt(effects, instructionIndex, opIndex).preInstructionExitReason;
+  return jitOpEffectsAt(effects, instructionIndex, opIndex).guardExitReason;
 }
 
 export function jitPostInstructionExitsAt(
@@ -174,39 +158,6 @@ export function jitRegisterWriteRegAt(
   opIndex: number
 ): Reg32 | undefined {
   return jitOpEffectsAt(effects, instructionIndex, opIndex).registerWriteReg;
-}
-
-export function jitInstructionHasPreInstructionExit(
-  effects: JitEffectIndex,
-  instructionIndex: number
-): boolean {
-  return jitLastPreInstructionExitOpIndex(effects, instructionIndex) !== undefined;
-}
-
-export function jitFirstOpIndexAfterPreInstructionExits(
-  effects: JitEffectIndex,
-  instructionIndex: number
-): number {
-  const instructionEffects = effects.instructions[instructionIndex];
-
-  if (instructionEffects === undefined) {
-    throw new Error(`missing JIT instruction effects: ${instructionIndex}`);
-  }
-
-  return instructionEffects.firstOpIndexAfterPreInstructionExits;
-}
-
-export function jitLastPreInstructionExitOpIndex(
-  effects: JitEffectIndex,
-  instructionIndex: number
-): number | undefined {
-  const instructionEffects = effects.instructions[instructionIndex];
-
-  if (instructionEffects === undefined) {
-    throw new Error(`missing JIT instruction effects: ${instructionIndex}`);
-  }
-
-  return instructionEffects.lastPreInstructionExitOpIndex;
 }
 
 function jitRegisterWriteReg(

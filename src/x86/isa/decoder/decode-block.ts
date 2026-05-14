@@ -1,5 +1,6 @@
 import { u32 } from "#x86/state/cpu-state.js";
 import { buildIr, irBlockTerminator } from "#x86/ir/build/builder.js";
+import type { SemanticOperandInfo } from "#x86/ir/model/types.js";
 import { decodeIsaInstructionFromReader } from "./decode.js";
 import {
   decodeFault,
@@ -9,7 +10,7 @@ import {
   type IsaDecodeFault,
   type IsaDecodeReader
 } from "./reader.js";
-import type { IsaDecodedInstruction } from "./types.js";
+import type { IsaDecodedInstruction, IsaOperandBinding } from "./types.js";
 
 export type IsaDecodedBlock = Readonly<{
   startEip: number;
@@ -107,5 +108,20 @@ function decodeInstruction(
 }
 
 function isBlockTerminator(instruction: IsaDecodedInstruction): boolean {
-  return irBlockTerminator(buildIr(instruction.spec.semantics)) !== "next";
+  return irBlockTerminator(buildIr(instruction.spec.semantics, {
+    operandInfo: instruction.operands.map(semanticOperandInfoForBinding)
+  })) !== "next";
+}
+
+function semanticOperandInfoForBinding(binding: IsaOperandBinding): SemanticOperandInfo {
+  switch (binding.kind) {
+    case "reg":
+      return { storage: "reg" };
+    case "mem":
+      return { storage: "mem" };
+    case "imm":
+      return { storage: "imm" };
+    case "relTarget":
+      return { storage: "relTarget" };
+  }
 }

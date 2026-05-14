@@ -8,12 +8,6 @@ export type WasmIrMemoryAccess = "read" | "write";
 export type WasmIrMemoryAddressEmitter = () => void;
 export type WasmIrMemoryValueEmitter = () => void;
 
-const memoryWidthByteLength = {
-  8: 1,
-  16: 2,
-  32: 4
-} as const satisfies Readonly<Record<OperandWidth, number>>;
-
 const memoryWidthAlign = {
   8: 0,
   16: 1,
@@ -26,69 +20,6 @@ export type WasmIrMemoryContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   exit: WasmIrExitTarget;
 }>;
-
-export function emitWasmIrLoadGuestU32(
-  context: WasmIrMemoryContext,
-  addressLocal: number,
-  faultExtraDepth = 1
-): void {
-  emitWasmIrLoadGuest(context, addressLocal, 32, faultExtraDepth);
-}
-
-export function emitWasmIrLoadGuestU32FromStack(
-  context: WasmIrMemoryContext,
-  addressLocal: number,
-  faultExtraDepth = 1
-): void {
-  emitWasmIrLoadGuestFromStack(context, addressLocal, 32, faultExtraDepth);
-}
-
-export function emitWasmIrStoreGuestU32(
-  context: WasmIrMemoryContext,
-  addressLocal: number,
-  valueLocal: number,
-  faultExtraDepth = 1
-): void {
-  emitWasmIrStoreGuest(context, addressLocal, valueLocal, 32, faultExtraDepth);
-}
-
-export function emitWasmIrLoadGuest(
-  context: WasmIrMemoryContext,
-  addressLocal: number,
-  width: OperandWidth,
-  faultExtraDepth = 1,
-  signed = false
-): void {
-  emitFaultIfOutOfBounds(context, addressLocal, width, "read", faultExtraDepth);
-  emitWasmIrLoadGuestUnchecked(context.body, () => context.body.localGet(addressLocal), width, signed);
-}
-
-export function emitWasmIrLoadGuestFromStack(
-  context: WasmIrMemoryContext,
-  addressLocal: number,
-  width: OperandWidth,
-  faultExtraDepth = 1,
-  signed = false
-): void {
-  emitFaultIfStackOutOfBounds(context, addressLocal, width, "read", faultExtraDepth);
-  emitWasmIrLoadGuestUnchecked(context.body, () => context.body.localGet(addressLocal), width, signed);
-}
-
-export function emitWasmIrStoreGuest(
-  context: WasmIrMemoryContext,
-  addressLocal: number,
-  valueLocal: number,
-  width: OperandWidth,
-  faultExtraDepth = 1
-): void {
-  emitFaultIfOutOfBounds(context, addressLocal, width, "write", faultExtraDepth);
-  emitWasmIrStoreGuestUnchecked(
-    context.body,
-    () => context.body.localGet(addressLocal),
-    () => context.body.localGet(valueLocal),
-    width
-  );
-}
 
 export function emitWasmIrGuardGuestRange(
   context: WasmIrMemoryContext,
@@ -116,39 +47,6 @@ export function emitWasmIrStoreGuestUnchecked(
   width: OperandWidth
 ): void {
   emitGuestStore(body, emitAddress, emitValue, width);
-}
-
-function emitFaultIfOutOfBounds(
-  context: WasmIrMemoryContext,
-  addressLocal: number,
-  width: OperandWidth,
-  access: WasmIrMemoryAccess,
-  faultExtraDepth: number
-): void {
-  emitFaultIfRangeOutOfBounds(
-    context,
-    addressLocal,
-    memoryWidthByteLength[width],
-    access,
-    faultExtraDepth
-  );
-}
-
-function emitFaultIfStackOutOfBounds(
-  context: WasmIrMemoryContext,
-  addressLocal: number,
-  width: OperandWidth,
-  access: WasmIrMemoryAccess,
-  faultExtraDepth: number
-): void {
-  context.body.localSet(addressLocal);
-  emitFaultIfRangeOutOfBounds(
-    context,
-    addressLocal,
-    memoryWidthByteLength[width],
-    access,
-    faultExtraDepth
-  );
 }
 
 function emitFaultIfRangeOutOfBounds(

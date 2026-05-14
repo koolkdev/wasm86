@@ -227,6 +227,9 @@ class JitInstructionValueTimelineBuilder {
       case "set":
         this.#recordSet(op);
         return;
+      case "memory.guard":
+        this.#valueForExpression(op.address);
+        return;
       case "flags.set":
         this.#recordFlagSet(op);
         return;

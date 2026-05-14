@@ -79,6 +79,7 @@ export type JitExpressionBlockEmitContext = Readonly<{
     options?: WasmIrEmitValueOptions
   ): ValueWidth;
   emitSet(op: IrSetExprOp, helpers: WasmIrEmitHelpers): void;
+  emitMemoryGuard(op: Extract<IrExprOp, { op: "memory.guard" }>, helpers: WasmIrEmitHelpers): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
   emitNextEip(): ValueWidth;
   emitNext(): void;
@@ -144,7 +145,8 @@ class JitExpressionBlockEmitter {
         this.#context.emitSet(op, this.#helpers);
         return;
       case "memory.guard":
-        throw new Error("JIT memory.guard emission is owned by Step 9C");
+        this.#context.emitMemoryGuard(op, this.#helpers);
+        return;
       case "flags.set":
         return;
       case "jump":
@@ -239,11 +241,6 @@ class JitExpressionBlockEmitter {
       captured.release();
       return;
     }
-
-    // Until memory guards are explicit IR, an unused produced memory read still
-    // has to execute here so its fault/guard behavior stays ordered.
-    this.#emitDefinitionValue(value);
-    this.#context.body.drop();
   }
 
   #emitDefinitionValue(value: IrValueExpr, options: WasmIrEmitValueOptions = {}): ValueWidth {

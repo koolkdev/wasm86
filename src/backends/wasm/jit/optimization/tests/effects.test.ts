@@ -7,10 +7,7 @@ import {
   indexJitEffects,
   jitConditionUseAt,
   jitConditionValuesAt,
-  jitFirstOpIndexAfterPreInstructionExits,
-  jitInstructionHasPreInstructionExit,
-  jitLastPreInstructionExitOpIndex,
-  jitPreInstructionExitReasonAt,
+  jitGuardExitReasonAt,
   jitPostInstructionExitsAt,
   jitRegisterWriteRegAt
 } from "#backends/wasm/jit/ir/effects.js";
@@ -55,6 +52,7 @@ test("indexJitEffects indexes shared op effects", () => {
         { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
       ]),
       syntheticInstruction([
+        { op: "memory.guard", address: c32(0x2000), byteLength: 4, access: "read" },
         { op: "get", dst: v(0), source: { kind: "mem", address: c32(0x2000) } },
         { op: "next" }
       ], 1)
@@ -69,27 +67,27 @@ test("indexJitEffects indexes shared op effects", () => {
   deepStrictEqual(jitConditionValuesAt(effects, 0, 3, "exitCondition"), [v(0)]);
   strictEqual(jitRegisterWriteRegAt(effects, 0, 2), "ecx");
   strictEqual(jitConditionUseAt(effects, 0, 0), "exitCondition");
-  strictEqual(jitPreInstructionExitReasonAt(effects, 1, 0), ExitReason.MEMORY_READ_FAULT);
-  strictEqual(jitInstructionHasPreInstructionExit(effects, 1), true);
-  strictEqual(jitLastPreInstructionExitOpIndex(effects, 1), 0);
-  strictEqual(jitFirstOpIndexAfterPreInstructionExits(effects, 0), 0);
-  strictEqual(jitFirstOpIndexAfterPreInstructionExits(effects, 1), 1);
+  strictEqual(jitGuardExitReasonAt(effects, 1, 0), ExitReason.MEMORY_READ_FAULT);
+  strictEqual(jitGuardExitReasonAt(effects, 1, 1), undefined);
 });
 
-test("JIT effect helpers find the end of pre-instruction exits", () => {
+test("JIT effect helpers index read and write guard exits at their own ops", () => {
   const effects = indexJitEffects({
     instructions: [
       syntheticInstruction([
+        { op: "memory.guard", address: c32(0x2000), byteLength: 4, access: "read" },
         { op: "get", dst: v(0), source: { kind: "mem", address: c32(0x2000) } },
         { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) },
+        { op: "memory.guard", address: c32(0x2004), byteLength: 4, access: "write" },
         { op: "set", target: { kind: "mem", address: c32(0x2004) }, value: v(1) },
         { op: "next" }
       ])
     ]
   });
 
-  strictEqual(jitLastPreInstructionExitOpIndex(effects, 0), 2);
-  strictEqual(jitFirstOpIndexAfterPreInstructionExits(effects, 0), 3);
+  strictEqual(jitGuardExitReasonAt(effects, 0, 0), ExitReason.MEMORY_READ_FAULT);
+  strictEqual(jitGuardExitReasonAt(effects, 0, 3), ExitReason.MEMORY_WRITE_FAULT);
+  strictEqual(jitGuardExitReasonAt(effects, 0, 1), undefined);
 });
 
 test("JIT condition use analysis rejects ordinary condition value uses", () => {

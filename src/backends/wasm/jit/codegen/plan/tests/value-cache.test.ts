@@ -170,6 +170,12 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       operands: [],
       ir: [
         {
+          op: "memory.guard",
+          address: { kind: "const", type: "i32", value: 0x10000 },
+          byteLength: 4,
+          access: "read"
+        },
+        {
           op: "get",
           dst: { kind: "var", id: 0 },
           source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x10000 } },
@@ -201,11 +207,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "continue",
-      entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0, ["eax"]), {
-        preInstructionExitPlan: {
-          exitPointCount: 1
-        }
-      }),
+      entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0, ["eax"])),
       postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
       controlPathScopes: new Map(),
       exitPointCount: 1
@@ -333,6 +335,29 @@ test("JIT value-cache planning handles current non-store consumers as normal exp
   });
 
   deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: expected, useCount: 5 }]);
+});
+
+test("JIT value-cache planning counts memory guard addresses as normal expression uses", () => {
+  const address = {
+    kind: "value.binary",
+    type: "i32",
+    operator: "add",
+    a: {
+      kind: "source",
+      source: { kind: "reg", reg: "eax" },
+      accessWidth: 32
+    },
+    b: { kind: "const", type: "i32", value: 1 }
+  } as const;
+  const expressionBlock = [
+    { op: "memory.guard", address, byteLength: 4, access: "read" },
+    { op: "memory.guard", address, byteLength: 4, access: "write" }
+  ] as const;
+  const cachePlan = planValueCacheForTest({ expressionBlock });
+
+  deepStrictEqual(cachePlan?.selectedUseCounts, [
+    { value: addValue(jitInputReg32Value("eax"), c32(1)), useCount: 2 }
+  ]);
 });
 
 test("JIT value-cache planning keeps repeated post-write expression uses point-specific", () => {

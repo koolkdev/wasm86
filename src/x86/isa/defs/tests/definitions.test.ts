@@ -7,6 +7,10 @@ import { X86_32_CORE } from "#x86/isa/index.js";
 import { expandInstructionSpec } from "#x86/isa/schema/builders.js";
 import type { InstructionSpec } from "#x86/isa/schema/types.js";
 
+const regOperands = (count: number) => ({
+  operandInfo: Array.from({ length: count }, () => ({ storage: "reg" as const }))
+});
+
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
   strictEqual(X86_32_CORE.instructions.length, 230);
@@ -123,7 +127,7 @@ test("cmovcc forms are concrete specs with select-value semantics", () => {
   ]);
   deepStrictEqual(spec.format, { syntax: "cmove {0}, {1}" });
 
-  const program = buildIr(spec.semantics as SemanticTemplate);
+  const program = buildIr(spec.semantics as SemanticTemplate, regOperands(2));
 
   deepStrictEqual(program[1], { op: "flags.condition", dst: { kind: "var", id: 1 }, cc: "E" });
   deepStrictEqual(program[2], {
@@ -148,7 +152,7 @@ test("cmovcc forms are concrete specs with select-value semantics", () => {
   });
   strictEqual(program.at(-1)?.op, "next");
 
-  const wordProgram = buildIr(word.semantics as SemanticTemplate);
+  const wordProgram = buildIr(word.semantics as SemanticTemplate, regOperands(2));
   deepStrictEqual(wordProgram[0], {
     op: "get",
     dst: { kind: "var", id: 0 },
@@ -185,7 +189,7 @@ test("setcc forms use select-value semantics for register or memory destinations
   deepStrictEqual(spec.operands, [{ kind: "modrm.rm", type: "rm8" }]);
   deepStrictEqual(spec.format, { syntax: "sete {0}" });
 
-  deepStrictEqual(buildIr(spec.semantics as SemanticTemplate), [
+  deepStrictEqual(buildIr(spec.semantics as SemanticTemplate, regOperands(1)), [
     { op: "flags.condition", dst: { kind: "var", id: 0 }, cc: "E" },
     {
       op: "value.select",
@@ -255,7 +259,7 @@ test("xchg slash-r forms allow register or memory r/m operands", () => {
 });
 
 test("xchg semantics read both operands before writing either operand", () => {
-  const program = buildIr(instruction("xchg.rm32_r32").semantics as SemanticTemplate);
+  const program = buildIr(instruction("xchg.rm32_r32").semantics as SemanticTemplate, regOperands(2));
 
   deepStrictEqual(program, [
     { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
@@ -377,8 +381,8 @@ test("width-specific decode forms record operand-size metadata", () => {
 });
 
 test("unary ALU semantics lower to flagless not and sub-flags neg IR", () => {
-  const not = buildIr(instruction("not.rm16").semantics as SemanticTemplate);
-  const neg = buildIr(instruction("neg.rm8").semantics as SemanticTemplate);
+  const not = buildIr(instruction("not.rm16").semantics as SemanticTemplate, regOperands(1));
+  const neg = buildIr(instruction("neg.rm8").semantics as SemanticTemplate, regOperands(1));
 
   deepStrictEqual(not, [
     { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 0 }, accessWidth: 16 },
@@ -441,8 +445,8 @@ test("mov r/m32, imm32 uses C7 slash-zero form", () => {
 });
 
 test("extension move semantics are flagless and encode source and destination widths", () => {
-  const movzx = buildIr(instruction("movzx.r32_rm8").semantics as SemanticTemplate);
-  const movsx = buildIr(instruction("movsx.r16_rm8").semantics as SemanticTemplate);
+  const movzx = buildIr(instruction("movzx.r32_rm8").semantics as SemanticTemplate, regOperands(2));
+  const movsx = buildIr(instruction("movsx.r16_rm8").semantics as SemanticTemplate, regOperands(2));
 
   deepStrictEqual(movzx, [
     { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 1 }, accessWidth: 8 },

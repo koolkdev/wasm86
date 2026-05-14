@@ -13,7 +13,8 @@ import {
 } from "./control.js";
 import {
   emitJitAddress,
-  emitJitGet
+  emitJitGet,
+  emitJitMemoryGuard
 } from "./operands.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitExitTarget, JitIrState } from "#backends/wasm/jit/state/state.js";
@@ -57,7 +58,6 @@ export type JitInstructionEmitContext = Readonly<{
   currentInstruction(): JitIrInstructionContext;
   beginExpressionOp(opIndex: number): JitTimelineOpContext;
   currentExitPoint(exitReason: ExitReasonValue): JitExitPoint;
-  completeExitPoint(exitPoint: JitExitPoint): void;
   advanceInstruction(): void;
   valueCache?: JitValueCacheRuntime | undefined;
   linking?: JitLinkEmitContext | undefined;
@@ -75,7 +75,6 @@ export function emitJitBlock(context: JitBlockEmitContext): void {
 
 function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstructionEmitContext {
   let instructionIndex = 0;
-  let completedPreInstructionExitPointCount = 0;
   const exitPointsByKey = indexExitPoints(context.exitPoints);
   const exitPointUseCounts = new Map<string, number>();
 
@@ -124,29 +123,8 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
       exitPointUseCounts.set(key, useCount + 1);
       return exitPoint;
     },
-    completeExitPoint: (exitPoint) => {
-      if (exitPoint.observedBoundary.boundaryIndex !== 0) {
-        return;
-      }
-
-      completedPreInstructionExitPointCount += 1;
-
-      const instruction = context.instructions[instructionIndex];
-
-      if (instruction === undefined) {
-        throw new Error(`missing JIT IR instruction context: ${instructionIndex}`);
-      }
-
-      const expectedPreInstructionExitPointCount = instruction.entryPoint.preInstructionExitPlan?.exitPointCount ?? 0;
-
-      if (completedPreInstructionExitPointCount > expectedPreInstructionExitPointCount) {
-        throw new Error(`completed too many JIT pre-instruction exit points: ${instructionIndex}`);
-      }
-
-    },
     advanceInstruction: () => {
       instructionIndex += 1;
-      completedPreInstructionExitPointCount = 0;
     }
   };
 }
@@ -173,6 +151,8 @@ function emitJitInstruction(jitContext: JitInstructionEmitContext, instruction: 
       emitJitGet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), source, accessWidth, helpers, options),
     emitSet: (op, helpers) =>
       emitJitSet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), op.target, op.value, op.accessWidth, helpers),
+    emitMemoryGuard: (op, helpers) =>
+      emitJitMemoryGuard(jitContext, op.address, op.byteLength, op.access, helpers),
     emitAddress: (source, helpers) => emitJitAddress(
       jitContext,
       requiredCurrentTimelineOp(currentTimelineOp),

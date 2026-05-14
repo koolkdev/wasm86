@@ -113,7 +113,7 @@ function expressionUsesForOp(
     case "next":
       return [];
     case "memory.guard":
-      throw new Error("JIT memory.guard value-use support is owned by Step 9C");
+      return valueUsesForValue(instruction, op.address, placement, root, "memoryGuardAddress");
     case "set": {
       const stateUpdateOnly = instructionHasLogicalWriteAt(instruction, placement.opIndex);
 

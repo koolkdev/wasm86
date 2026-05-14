@@ -44,7 +44,6 @@ export type IrEmitterOptions = Readonly<{
   allocateVar?: () => VarRef;
   resolveOperand?: (index: number) => OperandRef;
   operandInfo?: readonly (SemanticOperandInfo | undefined)[];
-  memoryGuards?: boolean;
 }>;
 
 export class IrEmitter implements IrBuilder, SemanticBuildContext {
@@ -53,7 +52,6 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
   readonly #resolveOperand: (index: number) => OperandRef;
   readonly #operandInfo: readonly (SemanticOperandInfo | undefined)[];
   readonly #semanticOperandIndexByOperandRef = new WeakMap<OperandRef, number>();
-  readonly memoryGuards: boolean;
   #nextVarId = 0;
   #terminator: IrBlockTerminator | undefined;
 
@@ -62,7 +60,6 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
     this.#allocateVarOverride = options.allocateVar;
     this.#resolveOperand = options.resolveOperand ?? operand;
     this.#operandInfo = options.operandInfo ?? [];
-    this.memoryGuards = options.memoryGuards ?? false;
   }
 
   #allocVar(): VarRef {
@@ -139,8 +136,13 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
     const semanticIndex = typeof operandInput === "number"
       ? operandInput
       : this.#semanticOperandIndexForOperand(operandInput);
+    const info = this.#operandInfo[semanticIndex];
 
-    return this.#operandInfo[semanticIndex] ?? { storage: "unknown" };
+    if (info === undefined) {
+      throw new Error(`missing semantic operand metadata for operand ${semanticIndex}`);
+    }
+
+    return info;
   }
 
   #semanticOperandIndexForOperand(operandRef: OperandRef): number {

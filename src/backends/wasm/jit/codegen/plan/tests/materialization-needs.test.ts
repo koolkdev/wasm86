@@ -44,6 +44,12 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
       operands: [],
       ir: [
         {
+          op: "memory.guard",
+          address: { kind: "const", type: "i32", value: 0x1000 },
+          byteLength: 4,
+          access: "read"
+        },
+        {
           op: "get",
           dst: { kind: "var", id: 0 },
           source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
@@ -75,7 +81,7 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
   const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
-  const produced = jitProducedValue("load#partial-effectful-flag-input:0:0:0", "i32");
+  const produced = jitProducedValue("load#partial-effectful-flag-input:0:1:0", "i32");
   const result = addValue(produced, c32(1));
   const incFlags = jitFlagProducerValue("inc", {
     left: produced,
@@ -244,6 +250,12 @@ test("planJitCodegen feeds produced exit-store values into materialization needs
       operands: [],
       ir: [
         {
+          op: "memory.guard",
+          address: { kind: "const", type: "i32", value: 0x1000 },
+          byteLength: 4,
+          access: "read"
+        },
+        {
           op: "get",
           dst: { kind: "var", id: 0 },
           source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x1000 } },
@@ -272,7 +284,7 @@ test("planJitCodegen feeds produced exit-store values into materialization needs
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
   const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
-  const produced = jitProducedValue("load#produced-exit-store:0:0:0", "i32");
+  const produced = jitProducedValue("load#produced-exit-store:0:1:0", "i32");
   const exitValue = addValue(produced, jitInputReg32Value("ebx"));
 
   deepStrictEqual(codegenPlan.materializationNeeds, [
@@ -348,6 +360,12 @@ test("buildJitCodegenEmissionPlan maps generic exit-store uses at source exit lo
       operands: [],
       ir: [
         {
+          op: "memory.guard",
+          address: { kind: "const", type: "i32", value: 0x10000 },
+          byteLength: 4,
+          access: "read"
+        },
+        {
           op: "get",
           dst: { kind: "var", id: 0 },
           source: { kind: "mem", address: { kind: "const", type: "i32", value: 0x10000 } },
@@ -385,14 +403,14 @@ test("buildJitCodegenEmissionPlan maps generic exit-store uses at source exit lo
   });
   const hostTrapExit = exitPoint({
     instructionIndex: 0,
-    opIndex: 4,
+    opIndex: 5,
     exitReason: ExitReason.HOST_TRAP,
     observedState: postSnapshot,
     visibleEip: { kind: "static", value: startAddress + 1 },
     payload: { kind: "runtime", source: "hostTrapVector" },
     exitMaterializationIndex: 2
   });
-  const produced = jitProducedValue("load#flag-exit-before-register-write:0:0:0", "i32");
+  const produced = jitProducedValue("load#flag-exit-before-register-write:0:1:0", "i32");
   const hostTrapRegisterStore = registerStore("eax", produced);
   const plan: JitCodegenPlan = {
     block,
@@ -401,11 +419,7 @@ test("buildJitCodegenEmissionPlan maps generic exit-store uses at source exit lo
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
-      entryPoint: instructionEntryPoint(0, entrySnapshot, {
-        preInstructionExitPlan: {
-          exitPointCount: 1
-        }
-      }),
+      entryPoint: instructionEntryPoint(0, entrySnapshot),
       postInstructionState: postSnapshot,
       controlPathScopes: new Map(),
       exitPointCount: 2

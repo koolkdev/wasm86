@@ -155,7 +155,7 @@ function valueUsesForOp(
       ];
     }
     case "memory.guard":
-      throw new Error("JIT memory.guard value-cache support is owned by Step 9C");
+      return valueUsesForValue(instruction, op.address, opIndex);
     case "flags.set":
       return [];
     case "jump":

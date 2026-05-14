@@ -11,12 +11,16 @@ import { buildIr, const32, operand, irVar } from "#x86/ir/build/builder.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 import { validateIrBlock } from "#x86/ir/passes/validator.js";
 
+const regOperands = (count: number) => ({
+  operandInfo: Array.from({ length: count }, () => ({ storage: "reg" as const }))
+});
+
 test("validator accepts representative generated semantic templates", () => {
-  doesNotThrow(() => validateIrBlock(buildIr(movSemantic()), { operandCount: 2 }));
-  doesNotThrow(() => validateIrBlock(buildIr(cmovSemantic("E")), { operandCount: 2 }));
+  doesNotThrow(() => validateIrBlock(buildIr(movSemantic(), regOperands(2)), { operandCount: 2 }));
+  doesNotThrow(() => validateIrBlock(buildIr(cmovSemantic("E"), regOperands(2)), { operandCount: 2 }));
   doesNotThrow(() => validateIrBlock(buildIr(leaSemantic()), { operandCount: 2 }));
-  doesNotThrow(() => validateIrBlock(buildIr(aluSemantic("add", 32)), { operandCount: 2 }));
-  doesNotThrow(() => validateIrBlock(buildIr(cmpSemantic()), { operandCount: 2 }));
+  doesNotThrow(() => validateIrBlock(buildIr(aluSemantic("add", 32), regOperands(2)), { operandCount: 2 }));
+  doesNotThrow(() => validateIrBlock(buildIr(cmpSemantic(), regOperands(2)), { operandCount: 2 }));
   doesNotThrow(() => validateIrBlock(buildIr(jccSemantic("NE")), { operandCount: 1 }));
   doesNotThrow(() => validateIrBlock(buildIr(intSemantic()), { operandCount: 1 }));
 });

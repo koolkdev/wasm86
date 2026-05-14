@@ -75,14 +75,9 @@ export type JitMaterializationNeed = JitExitStoreMaterializationNeed;
 
 export type JitExitMaterializationStore = ExitMaterializationStore;
 
-export type JitPreInstructionExitPlan = Readonly<{
-  exitPointCount: number;
-}>;
-
 export type JitInstructionEntryPoint = Readonly<{
   instructionIndex: number;
   boundaryState: JitBoundaryState;
-  preInstructionExitPlan?: JitPreInstructionExitPlan;
 }>;
 
 export type JitInstructionState = Readonly<{

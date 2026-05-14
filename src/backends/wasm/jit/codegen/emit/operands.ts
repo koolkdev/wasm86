@@ -3,8 +3,13 @@ import type { OperandWidth } from "#x86/isa/types.js";
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import type { IrMemoryAccessKind } from "#x86/ir/model/types.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
-import { emitWasmIrLoadGuestFromStack, emitWasmIrStoreGuest } from "#backends/wasm/codegen/memory.js";
+import {
+  emitWasmIrGuardGuestRange,
+  emitWasmIrLoadGuestUnchecked,
+  emitWasmIrStoreGuestUnchecked
+} from "#backends/wasm/codegen/memory.js";
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
@@ -101,6 +106,30 @@ export function emitJitAddress(
   emitMemoryAddress(context, storage.address, helpers);
 }
 
+export function emitJitMemoryGuard(
+  context: JitInstructionEmitContext,
+  address: IrValueExpr,
+  byteLength: number,
+  access: IrMemoryAccessKind,
+  helpers: WasmIrEmitHelpers
+): void {
+  const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
+
+  try {
+    helpers.emitValue(address, { requestedWidth: 32 });
+    context.body.localSet(addressLocal);
+
+    prepareMemoryFaultExit(
+      context,
+      access === "read" ? ExitReason.MEMORY_READ_FAULT : ExitReason.MEMORY_WRITE_FAULT
+    );
+
+    emitWasmIrGuardGuestRange(context, addressLocal, byteLength, access);
+  } finally {
+    context.scratch.freeLocal(addressLocal);
+  }
+}
+
 function normalizeStorage(
   context: JitInstructionEmitContext,
   timelineOp: JitTimelineOpContext,
@@ -181,8 +210,12 @@ function emitNormalizedRead(
     case "reg":
       return emitRegisterStorageValue(context, timelineOp, storage, options);
     case "mem":
-      emitMemoryAddress(context, storage.address, helpers);
-      emitLoadGuestFromStack(context, storage.accessWidth, options.signed === true);
+      emitWasmIrLoadGuestUnchecked(
+        context.body,
+        () => emitMemoryAddress(context, storage.address, helpers),
+        storage.accessWidth,
+        options.signed === true
+      );
       return signedLoadValueWidth(storage.accessWidth, options);
     case "imm":
       return emitImmediateValue(context, storage, options);
@@ -256,23 +289,6 @@ function emitMemoryAddress(
   }
 }
 
-function emitLoadGuestFromStack(
-  context: JitInstructionEmitContext,
-  width: OperandWidth,
-  signed = false
-): void {
-  const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
-
-  try {
-    const exitPoint = prepareMemoryFaultExit(context, ExitReason.MEMORY_READ_FAULT);
-
-    emitWasmIrLoadGuestFromStack(context, addressLocal, width, 1, signed);
-    context.completeExitPoint(exitPoint);
-  } finally {
-    context.scratch.freeLocal(addressLocal);
-  }
-}
-
 function signedLoadValueWidth(width: OperandWidth, options: WasmIrEmitValueOptions): ValueWidth {
   if (options.signed === true && width < 32) {
     return cleanValueWidth(32);
@@ -285,28 +301,20 @@ function emitStoreMem(
   context: JitInstructionEmitContext,
   emitAddress: () => void,
   emitValue: () => ValueWidth,
-  width: OperandWidth,
-  faultExtraDepth = 1
+  width: OperandWidth
 ): void {
-  const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
-  const valueLocal = context.scratch.allocLocal(wasmValueType.i32);
+  emitWasmIrStoreGuestUnchecked(
+    context.body,
+    emitAddress,
+    () => {
+      const valueWidth = emitValue();
 
-  try {
-    emitAddress();
-    context.body.localSet(addressLocal);
-    const valueWidth = emitValue();
-    if (width === 32) {
-      emitCleanValueForFullUse(context.body, valueWidth);
-    }
-    context.body.localSet(valueLocal);
-    const exitPoint = prepareMemoryFaultExit(context, ExitReason.MEMORY_WRITE_FAULT);
-
-    emitWasmIrStoreGuest(context, addressLocal, valueLocal, width, faultExtraDepth);
-    context.completeExitPoint(exitPoint);
-  } finally {
-    context.scratch.freeLocal(valueLocal);
-    context.scratch.freeLocal(addressLocal);
-  }
+      if (width === 32) {
+        emitCleanValueForFullUse(context.body, valueWidth);
+      }
+    },
+    width
+  );
 }
 
 function regAccess(reg: Reg32, width: OperandWidth): RegisterAlias {

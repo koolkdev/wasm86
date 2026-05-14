@@ -192,16 +192,11 @@ export function exitPoint(input: Readonly<{
 
 export function instructionEntryPoint(
   instructionIndex: number,
-  boundaryState: JitBoundaryState,
-  overrides: Partial<Pick<
-    JitInstructionEntryPoint,
-    "preInstructionExitPlan"
-  >> = {}
+  boundaryState: JitBoundaryState
 ): JitInstructionEntryPoint {
   return {
     instructionIndex,
-    boundaryState,
-    ...overrides
+    boundaryState
   };
 }
 

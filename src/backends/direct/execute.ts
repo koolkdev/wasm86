@@ -63,8 +63,7 @@ export function executeDirectInstruction(
 ): RunResult {
   const context: ExecutionContext = { state, instruction, memory: options.memory, vars: new Map() };
   const program = buildIr(instruction.spec.semantics, {
-    operandInfo: instruction.operands.map(semanticOperandInfoForBinding),
-    memoryGuards: true
+    operandInfo: instruction.operands.map(semanticOperandInfoForBinding)
   });
 
   for (const op of program) {
