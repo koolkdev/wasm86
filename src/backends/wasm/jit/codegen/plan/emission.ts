@@ -35,10 +35,17 @@ import {
   buildJitExpressionControlPathScopes,
   type JitControlPathScopesMap
 } from "./control-paths.js";
+import {
+  planJitEffectsForEmission,
+  type JitPlannedEffect
+} from "./effect-plan.js";
+import {
+  indexJitEffects
+} from "#backends/wasm/jit/ir/effects.js";
 
 type JitPreparedCodegenInstruction = JitInstructionState & Pick<
   JitIrBlockInstruction,
-  "operands"
+  "ir" | "operands"
 > & Readonly<{
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
@@ -47,8 +54,10 @@ type JitPreparedCodegenInstruction = JitInstructionState & Pick<
   valueTimeline: JitInstructionValueTimeline;
 }>;
 
+type JitPreparedCodegenInstructionPlan = Omit<JitPreparedCodegenInstruction, "ir">;
+
 export type JitCodegenInstructionPlan =
-  JitInstructionWithPlannedValues<JitPreparedCodegenInstruction>;
+  JitInstructionWithPlannedValues<JitPreparedCodegenInstructionPlan>;
 
 export type JitCodegenEmissionPlan = Readonly<{
   instructions: readonly JitCodegenInstructionPlan[];
@@ -56,6 +65,7 @@ export type JitCodegenEmissionPlan = Readonly<{
   materializationNeeds: readonly JitMaterializationNeed[];
   exitMaterializations: readonly JitExitMaterializationPlan[];
   maxExitMaterializationIndex: number;
+  plannedEffects: readonly JitPlannedEffect[];
   plannedValueUses: readonly JitPlannedValueUse[];
   plannedValueCaptures: readonly JitPlannedValueCapture[];
   valueCachePlan: JitValueCachePlan;
@@ -71,7 +81,15 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
   }
 
   const preparedInstructions = prepareJitCodegenInstructions(codegenPlan);
-  const plannedValues = planJitValuesForEmission(preparedInstructions, codegenPlan.materializationNeeds);
+  const plannedEffects = planJitEffectsForEmission(
+    preparedInstructions,
+    indexJitEffects(block),
+    codegenPlan.materializationNeeds
+  );
+  const plannedValues = planJitValuesForEmission(
+    preparedInstructions,
+    plannedEffects.plannedValueUses
+  );
 
   return {
     instructions: plannedValues.instructions,
@@ -79,6 +97,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     materializationNeeds: codegenPlan.materializationNeeds,
     exitMaterializations: codegenPlan.exitMaterializations,
     maxExitMaterializationIndex: codegenPlan.maxExitMaterializationIndex,
+    plannedEffects: plannedEffects.plannedEffects,
     plannedValueUses: plannedValues.plannedValueUses,
     plannedValueCaptures: plannedValues.plannedValueCaptures,
     valueCachePlan: plannedValues.valueCachePlan
@@ -124,6 +143,7 @@ function prepareJitCodegenInstruction(
 
   return {
     ...state,
+    ir: instruction.ir,
     operands: instruction.operands,
     producedValuesByVarId,
     valueTimeline,

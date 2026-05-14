@@ -5,16 +5,11 @@ import type {
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitControlPathScopesMap } from "./control-paths.js";
 import type { JitInstructionValueTimeline } from "./value-timeline.js";
-import type { JitMaterializationNeed } from "./types.js";
-import {
-  placeJitValueUseRecordsOnExpressions
-} from "./expression-uses.js";
 import {
   planJitValueCacheForInstructions,
   type JitValueCachePlan
 } from "./value-cache.js";
 import {
-  planJitValueUses,
   type JitPlannedValueUse
 } from "./value-uses.js";
 import {
@@ -49,21 +44,8 @@ export type JitPlannedValuesForEmission<
 
 export function planJitValuesForEmission<TInstruction extends JitValuePlanningInstructionInput>(
   instructions: readonly TInstruction[],
-  materializationNeeds: readonly JitMaterializationNeed[]
+  plannedValueUses: readonly JitPlannedValueUse[]
 ): JitPlannedValuesForEmission<TInstruction> {
-  const materializationUses = placeJitValueUseRecordsOnExpressions(
-    instructions,
-    materializationNeeds
-  );
-  const plannedValueUses = planJitValueUses(
-    instructions.map((instruction, index) => ({
-      expressionBlock: instruction.expressionBlock,
-      valueTimeline: instruction.valueTimeline,
-      expressionPathScopes: instruction.expressionPathScopes,
-      materializationUses:
-        materializationUses[index] ?? new Map()
-    }))
-  );
   const cacheInputs = instructions.map((instruction) => ({
     operands: instruction.operands,
     expressionBlock: instruction.expressionBlock,

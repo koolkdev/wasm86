@@ -37,6 +37,24 @@ export type JitValueUseRoot = Readonly<{
   purpose: string;
 }>;
 
+export type JitExpressionValueUseRoot = Readonly<{
+  kind: "expression";
+  value: IrValueExpr;
+  pathScope: JitValuePathScope;
+  purpose: string;
+}>;
+
+export type JitJitValueUseRoot = Readonly<{
+  kind: "jitValue";
+  value: JitValue;
+  pathScope: JitValuePathScope;
+  purpose: string;
+}>;
+
+export type JitPlannedValueRoot =
+  | JitExpressionValueUseRoot
+  | JitJitValueUseRoot;
+
 export type JitValueUseInstructionInput = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: JitInstructionValueTimeline;
@@ -82,6 +100,35 @@ export function planJitValueUses(
   }
 
   return uses;
+}
+
+export function plannedValueUsesForRoots(
+  instruction: Pick<JitValueUseInstructionInput, "valueTimeline">,
+  roots: readonly JitPlannedValueRoot[],
+  placement: JitValueUsePlacement
+): readonly JitPlannedValueUse[] {
+  return roots.flatMap((root) =>
+    plannedValueUsesForRoot(instruction, root, placement)
+  );
+}
+
+export function plannedValueUsesForRoot(
+  instruction: Pick<JitValueUseInstructionInput, "valueTimeline">,
+  root: JitPlannedValueRoot,
+  placement: JitValueUsePlacement
+): readonly JitPlannedValueUse[] {
+  switch (root.kind) {
+    case "jitValue":
+      return [plannedValueUse(root.value, placement, root.pathScope, root.purpose)];
+    case "expression":
+      return valueUsesForValue(
+        instruction,
+        root.value,
+        placement,
+        root.pathScope,
+        root.purpose
+      );
+  }
 }
 
 function plannedValueUsesForOp(
@@ -188,7 +235,7 @@ function materializationUsesForOp(
 }
 
 function valueUsesForStorage(
-  instruction: JitValueUseInstructionInput,
+  instruction: Pick<JitValueUseInstructionInput, "valueTimeline">,
   storage: IrStorageExpr,
   placement: JitValueUsePlacement,
   pathScope: JitValuePathScope,
@@ -200,7 +247,7 @@ function valueUsesForStorage(
 }
 
 function valueUsesForValue(
-  instruction: JitValueUseInstructionInput,
+  instruction: Pick<JitValueUseInstructionInput, "valueTimeline">,
   value: IrValueExpr,
   placement: JitValueUsePlacement,
   pathScope: JitValuePathScope,
@@ -214,7 +261,7 @@ function valueUsesForValue(
 }
 
 function childValueUsesForValue(
-  instruction: JitValueUseInstructionInput,
+  instruction: Pick<JitValueUseInstructionInput, "valueTimeline">,
   value: IrValueExpr,
   placement: JitValueUsePlacement,
   pathScope: JitValuePathScope,
@@ -262,7 +309,7 @@ function plannedValueUse(
 }
 
 function jitValueForValue(
-  instruction: JitValueUseInstructionInput,
+  instruction: Pick<JitValueUseInstructionInput, "valueTimeline">,
   value: IrValueExpr,
   opIndex: number
 ): JitValue | undefined {

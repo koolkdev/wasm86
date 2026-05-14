@@ -58,7 +58,7 @@ function appendJitValueUse<TUse extends JitPlacedSourceValueUse>(
     throw new Error(`missing JIT instruction while placing value uses: ${instructionIndex}`);
   }
 
-  for (const expressionOpIndex of expressionUseIndexesForSourceOp(instruction, sourceOpIndex)) {
+  for (const expressionOpIndex of jitExpressionOpIndexesForSourceOp(instruction, sourceOpIndex)) {
     appendExpressionValueUse(
       usesByInstruction,
       instructionIndex,
@@ -68,7 +68,7 @@ function appendJitValueUse<TUse extends JitPlacedSourceValueUse>(
   }
 }
 
-function expressionUseIndexesForSourceOp(
+export function jitExpressionOpIndexesForSourceOp(
   instruction: JitExpressionUseInstructionInput,
   sourceOpIndex: number
 ): readonly number[] {

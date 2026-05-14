@@ -1,6 +1,7 @@
-import type { IrOp, ValueRef } from "#x86/ir/model/types.js";
+import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitOperandBinding } from "./operand-bindings.js";
 
 export type JitOpExitKind =
   | "memoryReadFault"
@@ -10,6 +11,14 @@ export type JitOpExitKind =
   | "branchTaken"
   | "branchNotTaken"
   | "hostTrap";
+
+export type JitOrderedEffectKind =
+  | "memoryGuard"
+  | "memoryStore"
+  | "controlTransfer"
+  | "hostTrap"
+  | "exitEdge"
+  | "producedValueDefinition";
 
 export function jitOpExits(
   op: IrOp,
@@ -33,6 +42,35 @@ export function jitOpExits(
       return ["hostTrap"];
     default:
       return [];
+  }
+}
+
+export function jitOpOrderedEffectKind(
+  op: IrOp,
+  instruction: JitIrBlockInstruction
+): JitOrderedEffectKind | undefined {
+  switch (op.op) {
+    case "memory.guard":
+      return "memoryGuard";
+    case "set":
+      return jitStorageAccessIsMemory(op.target, instruction.operands)
+        ? "memoryStore"
+        : undefined;
+    case "get":
+      return jitStorageAccessIsMemory(op.source, instruction.operands)
+        ? "producedValueDefinition"
+        : undefined;
+    case "jump":
+    case "conditionalJump":
+      return "controlTransfer";
+    case "hostTrap":
+      return "hostTrap";
+    case "next":
+      return instruction.nextMode === "exit"
+        ? "exitEdge"
+        : undefined;
+    default:
+      return undefined;
   }
 }
 
@@ -66,6 +104,20 @@ export function jitExitConditionValues(
       return [op.condition];
     default:
       return [];
+  }
+}
+
+function jitStorageAccessIsMemory(
+  storage: StorageRef,
+  operands: readonly JitOperandBinding[]
+): boolean {
+  switch (storage.kind) {
+    case "mem":
+      return true;
+    case "operand":
+      return operands[storage.index]?.kind === "static.mem";
+    case "reg":
+      return false;
   }
 }
 

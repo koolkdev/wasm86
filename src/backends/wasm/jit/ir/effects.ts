@@ -9,11 +9,14 @@ import {
 } from "#backends/wasm/jit/ir/condition-uses.js";
 import {
   jitOpExits,
+  jitOpOrderedEffectKind,
+  type JitOrderedEffectKind,
   type JitOpExitKind
 } from "#backends/wasm/jit/ir/effect-primitives.js";
 import { jitStorageReg } from "#backends/wasm/jit/ir/value-builders.js";
 
 export type JitOpEffects = Readonly<{
+  orderedEffectKind?: JitOrderedEffectKind;
   exits: readonly JitOpExitKind[];
   localConditionValues: readonly ValueRef[];
   exitConditionValues: readonly ValueRef[];
@@ -51,7 +54,9 @@ export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
         throw new Error(`missing JIT IR op while indexing JIT op effects: ${instructionIndex}:${opIndex}`);
       }
 
+      const orderedEffectKind = jitOpOrderedEffectKind(op, instruction);
       let opEffects: JitOpEffects = {
+        ...(orderedEffectKind === undefined ? {} : { orderedEffectKind }),
         exits: jitOpExits(op, instruction),
         localConditionValues: localConditionValues.get(instructionIndex)?.get(opIndex) ?? [],
         exitConditionValues: exitConditionValues.get(instructionIndex)?.get(opIndex) ?? []
@@ -96,51 +101,6 @@ export function jitOpEffectsAt(
   }
 
   return opEffects;
-}
-
-export function jitConditionValuesAt(
-  effects: JitEffectIndex,
-  instructionIndex: number,
-  opIndex: number,
-  kind: "localCondition" | "exitCondition"
-): readonly ValueRef[] {
-  const opEffects = jitOpEffectsAt(effects, instructionIndex, opIndex);
-
-  return kind === "localCondition"
-    ? opEffects.localConditionValues
-    : opEffects.exitConditionValues;
-}
-
-export function jitOpExitsAt(
-  effects: JitEffectIndex,
-  instructionIndex: number,
-  opIndex: number
-): readonly JitOpExitKind[] {
-  return jitOpEffectsAt(effects, instructionIndex, opIndex).exits;
-}
-
-export function jitOpHasExit(
-  effects: JitEffectIndex,
-  instructionIndex: number,
-  opIndex: number
-): boolean {
-  return jitOpExitsAt(effects, instructionIndex, opIndex).length !== 0;
-}
-
-export function jitConditionUseAt(
-  effects: JitEffectIndex,
-  instructionIndex: number,
-  opIndex: number
-): JitConditionUse | undefined {
-  return jitOpEffectsAt(effects, instructionIndex, opIndex).conditionUse;
-}
-
-export function jitRegisterWriteRegAt(
-  effects: JitEffectIndex,
-  instructionIndex: number,
-  opIndex: number
-): Reg32 | undefined {
-  return jitOpEffectsAt(effects, instructionIndex, opIndex).registerWriteReg;
 }
 
 function jitRegisterWriteReg(

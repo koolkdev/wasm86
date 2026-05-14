@@ -4,14 +4,12 @@ import { test } from "node:test";
 import { analyzeJitConditionUses } from "#backends/wasm/jit/ir/condition-uses.js";
 import {
   indexJitEffects,
-  jitConditionUseAt,
-  jitConditionValuesAt,
-  jitOpExitsAt,
-  jitRegisterWriteRegAt
+  jitOpEffectsAt
 } from "#backends/wasm/jit/ir/effects.js";
 import {
   jitExitConditionValues,
   jitLocalConditionValues,
+  jitOpOrderedEffectKind,
   jitOpExits
 } from "#backends/wasm/jit/ir/effect-primitives.js";
 import { c32, syntheticInstruction, v } from "./helpers.js";
@@ -31,6 +29,9 @@ test("JIT op effects identify exits and condition values", () => {
   deepStrictEqual(jitOpExits(fallthrough.ir[0]!, fallthrough), ["fallthrough"]);
   deepStrictEqual(jitOpExits(localNext.ir[0]!, localNext), []);
   deepStrictEqual(jitOpExits(branchOp, branch), ["branchTaken", "branchNotTaken"]);
+  strictEqual(jitOpOrderedEffectKind(fallthrough.ir[0]!, fallthrough), "exitEdge");
+  strictEqual(jitOpOrderedEffectKind(localNext.ir[0]!, localNext), undefined);
+  strictEqual(jitOpOrderedEffectKind(branchOp, branch), "controlTransfer");
   deepStrictEqual(jitLocalConditionValues(localCondition.ir[0]!), [v(0)]);
   deepStrictEqual(jitExitConditionValues(branchOp, branch), [v(0)]);
 });
@@ -52,13 +53,16 @@ test("indexJitEffects indexes shared op effects", () => {
     ]
   });
 
-  deepStrictEqual(jitOpExitsAt(effects, 0, 3), ["branchTaken", "branchNotTaken"]);
-  deepStrictEqual(jitConditionValuesAt(effects, 0, 1, "localCondition"), [v(0)]);
-  deepStrictEqual(jitConditionValuesAt(effects, 0, 3, "exitCondition"), [v(0)]);
-  strictEqual(jitRegisterWriteRegAt(effects, 0, 2), "ecx");
-  strictEqual(jitConditionUseAt(effects, 0, 0), "exitCondition");
-  deepStrictEqual(jitOpExitsAt(effects, 1, 0), ["memoryReadFault"]);
-  deepStrictEqual(jitOpExitsAt(effects, 1, 1), []);
+  deepStrictEqual(jitOpEffectsAt(effects, 0, 3).exits, ["branchTaken", "branchNotTaken"]);
+  strictEqual(jitOpEffectsAt(effects, 0, 3).orderedEffectKind, "controlTransfer");
+  deepStrictEqual(jitOpEffectsAt(effects, 0, 1).localConditionValues, [v(0)]);
+  deepStrictEqual(jitOpEffectsAt(effects, 0, 3).exitConditionValues, [v(0)]);
+  strictEqual(jitOpEffectsAt(effects, 0, 2).registerWriteReg, "ecx");
+  strictEqual(jitOpEffectsAt(effects, 0, 0).conditionUse, "exitCondition");
+  deepStrictEqual(jitOpEffectsAt(effects, 1, 0).exits, ["memoryReadFault"]);
+  strictEqual(jitOpEffectsAt(effects, 1, 0).orderedEffectKind, "memoryGuard");
+  strictEqual(jitOpEffectsAt(effects, 1, 1).orderedEffectKind, "producedValueDefinition");
+  deepStrictEqual(jitOpEffectsAt(effects, 1, 1).exits, []);
 });
 
 test("indexJitEffects indexes observable operation locations", () => {
@@ -82,13 +86,20 @@ test("indexJitEffects indexes observable operation locations", () => {
     ]
   });
 
-  deepStrictEqual(jitOpExitsAt(effects, 0, 0), ["memoryReadFault"]);
-  deepStrictEqual(jitOpExitsAt(effects, 0, 1), ["memoryWriteFault"]);
-  strictEqual(jitRegisterWriteRegAt(effects, 0, 2), "ecx");
-  deepStrictEqual(jitOpExitsAt(effects, 0, 3), ["jump"]);
-  deepStrictEqual(jitOpExitsAt(effects, 1, 0), ["branchTaken", "branchNotTaken"]);
-  deepStrictEqual(jitOpExitsAt(effects, 2, 0), ["hostTrap"]);
-  deepStrictEqual(jitOpExitsAt(effects, 3, 0), ["fallthrough"]);
+  deepStrictEqual(jitOpEffectsAt(effects, 0, 0).exits, ["memoryReadFault"]);
+  strictEqual(jitOpEffectsAt(effects, 0, 0).orderedEffectKind, "memoryGuard");
+  deepStrictEqual(jitOpEffectsAt(effects, 0, 1).exits, ["memoryWriteFault"]);
+  strictEqual(jitOpEffectsAt(effects, 0, 1).orderedEffectKind, "memoryGuard");
+  strictEqual(jitOpEffectsAt(effects, 0, 2).registerWriteReg, "ecx");
+  strictEqual(jitOpEffectsAt(effects, 0, 2).orderedEffectKind, undefined);
+  deepStrictEqual(jitOpEffectsAt(effects, 0, 3).exits, ["jump"]);
+  strictEqual(jitOpEffectsAt(effects, 0, 3).orderedEffectKind, "controlTransfer");
+  deepStrictEqual(jitOpEffectsAt(effects, 1, 0).exits, ["branchTaken", "branchNotTaken"]);
+  strictEqual(jitOpEffectsAt(effects, 1, 0).orderedEffectKind, "controlTransfer");
+  deepStrictEqual(jitOpEffectsAt(effects, 2, 0).exits, ["hostTrap"]);
+  strictEqual(jitOpEffectsAt(effects, 2, 0).orderedEffectKind, "hostTrap");
+  deepStrictEqual(jitOpEffectsAt(effects, 3, 0).exits, ["fallthrough"]);
+  strictEqual(jitOpEffectsAt(effects, 3, 0).orderedEffectKind, "exitEdge");
 });
 
 test("JIT effect index records explicit memory guard exits at their own ops", () => {
@@ -105,9 +116,9 @@ test("JIT effect index records explicit memory guard exits at their own ops", ()
     ]
   });
 
-  deepStrictEqual(jitOpExitsAt(effects, 0, 0), ["memoryReadFault"]);
-  deepStrictEqual(jitOpExitsAt(effects, 0, 3), ["memoryWriteFault"]);
-  deepStrictEqual(jitOpExitsAt(effects, 0, 1), []);
+  deepStrictEqual(jitOpEffectsAt(effects, 0, 0).exits, ["memoryReadFault"]);
+  deepStrictEqual(jitOpEffectsAt(effects, 0, 3).exits, ["memoryWriteFault"]);
+  deepStrictEqual(jitOpEffectsAt(effects, 0, 1).exits, []);
 });
 
 test("JIT condition use analysis rejects ordinary condition value uses", () => {

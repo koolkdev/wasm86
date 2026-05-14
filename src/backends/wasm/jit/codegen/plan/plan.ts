@@ -33,6 +33,12 @@ export type {
   JitTimelineProducedValueDefinition,
   JitValueTimelineWrite
 } from "./value-timeline.js";
+export type {
+  JitEffectPlacement,
+  JitEffectValueRoot,
+  JitEffectValueRootPurpose,
+  JitPlannedEffect
+} from "./effect-plan.js";
 export { buildJitInstructionValueTimeline } from "./value-timeline.js";
 
 export function planJitCodegen(optimizedBlock: JitIrBlock): JitCodegenPlan {

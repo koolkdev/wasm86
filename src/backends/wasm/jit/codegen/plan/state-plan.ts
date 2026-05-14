@@ -5,8 +5,8 @@ import {
 } from "./exit-state.js";
 import {
   indexJitEffects,
-  type JitEffectIndex,
-  jitOpExitsAt
+  jitOpEffectsAt,
+  type JitEffectIndex
 } from "#backends/wasm/jit/ir/effects.js";
 import type {
   ExitMaterializationStore,
@@ -61,7 +61,7 @@ export function analyzeJitCodegenState(
         throw new Error(`missing JIT IR op while planning JIT codegen: ${instructionIndex}:${opIndex}`);
       }
 
-      const exits = jitOpExitsAt(effects, instructionIndex, opIndex);
+      const exits = jitOpEffectsAt(effects, instructionIndex, opIndex).exits;
 
       recordOpEffects(op, instruction, instructionIndex, opIndex, exits, controlPathScopes);
       state.recordOp(op, instruction, instructionIndex, opIndex);

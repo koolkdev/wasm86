@@ -85,6 +85,33 @@ export function planJitValueCacheEpochs(
   };
 }
 
+export function jitExpressionOpEpochs(
+  instruction: Pick<JitValueCachePlanInput, "expressionBlock" | "valueTimeline">,
+  startEpoch = 0
+): readonly number[] {
+  const opEpochs: number[] = [];
+  const writeExpressionOpIndexes = new Set(
+    instruction.valueTimeline.logicalWrites.map((write) => write.expressionOpIndex)
+  );
+  let currentEpoch = startEpoch;
+
+  for (let opIndex = 0; opIndex < instruction.expressionBlock.length; opIndex += 1) {
+    const op = instruction.expressionBlock[opIndex];
+
+    if (op === undefined) {
+      throw new Error(`missing JIT value-cache expression op: ${opIndex}`);
+    }
+
+    opEpochs[opIndex] = currentEpoch;
+
+    if (writeExpressionOpIndexes.has(opIndex)) {
+      currentEpoch += 1;
+    }
+  }
+
+  return opEpochs;
+}
+
 function appendProducedDefinitionCapture(
   definitionCaptures: JitValue[][],
   epochIndex: number,
