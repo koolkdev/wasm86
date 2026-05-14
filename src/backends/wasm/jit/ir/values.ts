@@ -101,9 +101,7 @@ export type JitFlagProducerValueFor<Producer extends FlagProducerName> = Readonl
   mask: number;
 }>;
 
-export type JitFlagProducerValue = {
-  readonly [Producer in FlagProducerName]: JitFlagProducerValueFor<Producer>;
-}[FlagProducerName];
+export type JitFlagProducerValue = JitFlagProducerValueFor<FlagProducerName>;
 
 export type JitFlagConditionValue = Readonly<{
   kind: "flagCondition";
@@ -156,7 +154,7 @@ export function jitFlagProducerValue<Producer extends FlagProducerName>(
     ...(normalizedWidth === undefined ? {} : { width: normalizedWidth }),
     inputs: typedInputs,
     mask
-  } as unknown as JitFlagProducerValue);
+  });
 }
 
 export function jitExtractBits(value: JitValue, bitOffset: number, width: OperandWidth): JitValue {
@@ -239,9 +237,8 @@ export function jitValueForEffectiveAddress(
   operands: readonly JitOperandBinding[],
   registerValues: JitRegisterValueMap
 ): JitValue | undefined {
-  // Legacy construction path. New planner/emitter code should use
-  // JitValueResolver so address terms are built from an explicit register-value
-  // reader instead of implicitly falling back to legacy symbolic registers.
+  // Planner/emitter code should use JitValueResolver so address terms are built
+  // from an explicit register-value reader.
   const binding = operands[operand.index]!;
 
   if (binding.kind !== "static.mem") {
