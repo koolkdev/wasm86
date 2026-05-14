@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { StopReason } from "#x86/execution/run-result.js";
-import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
+import { StopReason, type FaultOperation } from "#x86/execution/run-result.js";
+import { ArrayBufferGuestMemory, type MemoryFault } from "#x86/memory/guest-memory.js";
 import { fillGuestMemory, readGuestBytes, writeGuestU32 } from "#x86/memory/tests/helpers.js";
 import { cloneCpuState, createCpuState, getFlag } from "#x86/state/cpu-state.js";
 import { bytes, runIsaBytes, startAddress } from "./helpers.js";
@@ -220,6 +220,27 @@ test("memory ALU fault before write is atomic", () => {
   deepStrictEqual(readGuestBytes(memory, 0, memory.byteLength), beforeBytes);
 });
 
+test("memory ALU write guard faults before flags mutate", () => {
+  const memory = new WriteFaultGuestMemory(0x40, 0x20);
+  const state = createCpuState({ eax: 5, eip: startAddress, eflags: 0x8d5, instructionCount: 7 });
+
+  writeGuestU32(memory, 0x20, 1);
+
+  const beforeState = cloneCpuState(state);
+  const beforeBytes = readGuestBytes(memory, 0, memory.byteLength);
+  const result = run(state, [0x01, 0x05, 0x20, 0x00, 0x00, 0x00], memory);
+
+  strictEqual(result.stopReason, StopReason.MEMORY_FAULT);
+  strictEqual(result.faultAddress, 0x20);
+  strictEqual(result.faultSize, 4);
+  strictEqual(result.faultOperation, "write");
+  strictEqual(state.eax, beforeState.eax);
+  strictEqual(state.eflags, beforeState.eflags);
+  strictEqual(state.eip, beforeState.eip);
+  strictEqual(state.instructionCount, beforeState.instructionCount);
+  deepStrictEqual(readGuestBytes(memory, 0, memory.byteLength), beforeBytes);
+});
+
 test("memory cmp fault does not update flags", () => {
   const memory = new ArrayBufferGuestMemory(0x40);
   const state = createCpuState({ eax: 1, eip: startAddress, eflags: 0x8d5, instructionCount: 7 });
@@ -240,4 +261,18 @@ function run(state: ReturnType<typeof createCpuState>, values: readonly number[]
     baseAddress: startAddress,
     ...(memory === undefined ? {} : { memory })
   });
+}
+
+class WriteFaultGuestMemory extends ArrayBufferGuestMemory {
+  constructor(byteLength: number, readonly faultAddress: number) {
+    super(byteLength);
+  }
+
+  override checkAccess(address: number, byteLength: number, operation: FaultOperation): MemoryFault | undefined {
+    if (operation === "write" && address === this.faultAddress) {
+      return { faultAddress: address, faultSize: byteLength, faultOperation: operation };
+    }
+
+    return super.checkAccess(address, byteLength, operation);
+  }
 }

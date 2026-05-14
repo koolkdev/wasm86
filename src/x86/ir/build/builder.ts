@@ -12,7 +12,7 @@ export {
 export { irBlockTerminator };
 export type { IrBlockTerminator } from "./emitter.js";
 
-export type BuildIrOptions = Pick<IrEmitterOptions, "operandInfo">;
+export type BuildIrOptions = Pick<IrEmitterOptions, "operandInfo" | "memoryGuards">;
 
 export function buildIr(template: SemanticTemplate, options: BuildIrOptions = {}): IrBlock {
   const builder = new IrEmitter(options);

@@ -37,6 +37,7 @@ export function irOpResult(op: IrOp): IrOpResult {
     case "flags.condition":
       return { kind: "value", dst: op.dst, sideEffect: "none" };
     case "set":
+    case "memory.guard":
     case "flags.set":
     case "next":
     case "jump":
@@ -63,6 +64,7 @@ export function irOpIsTerminator(op: IrOp): op is IrTerminatorOp {
       return true;
     case "get":
     case "set":
+    case "memory.guard":
     case "address":
     case "value.const":
     case "value.binary":
@@ -96,6 +98,9 @@ export function visitIrOpValueRefs(
     case "set":
       visitIrStorageValueRefs(op.target, visit);
       visit(op.value, "value");
+      return;
+    case "memory.guard":
+      visit(op.address, "value");
       return;
     case "address":
     case "value.const":
@@ -167,6 +172,8 @@ export function visitIrOpStorageRefs(
       return;
     case "set":
       visit(op.target, "write");
+      return;
+    case "memory.guard":
       return;
     case "address":
     case "value.const":

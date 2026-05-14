@@ -15,6 +15,10 @@ export class WasmGuestMemory implements GuestMemory {
     return this.memory.buffer.byteLength;
   }
 
+  checkAccess(address: number, byteLength: number, operation: FaultOperation): MemoryFault | undefined {
+    return this.#fault(address, byteLength, operation);
+  }
+
   readU8(address: number): MemoryReadResult {
     const fault = this.#fault(address, 1, "read");
 

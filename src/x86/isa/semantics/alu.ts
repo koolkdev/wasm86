@@ -1,13 +1,18 @@
 import type { SemanticTemplate } from "#x86/ir/model/types.js";
 import { widthMask, type OperandWidth } from "#x86/isa/types.js";
+import { guardStorageRead, guardStorageReadWrite } from "./memory.js";
 
 export type AluOp = "add" | "sub" | "xor" | "and" | "or";
 export type UnaryAluOp = "inc" | "dec" | "not" | "neg";
 
 export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
-  return (s) => {
+  return (s, context) => {
     const dst = s.operand(0);
     const src = s.operand(1);
+
+    guardStorageReadWrite(s, context, dst, width);
+    guardStorageRead(s, context, src, width);
+
     const left = s.get(dst, width);
     const right = s.get(src, width);
     let result;
@@ -40,8 +45,11 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
 }
 
 export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticTemplate {
-  return (s) => {
+  return (s, context) => {
     const dst = s.operand(0);
+
+    guardStorageReadWrite(s, context, dst, width);
+
     const value = s.get(dst, width);
     let result;
 

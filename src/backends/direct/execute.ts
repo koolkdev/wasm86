@@ -63,7 +63,8 @@ export function executeDirectInstruction(
 ): RunResult {
   const context: ExecutionContext = { state, instruction, memory: options.memory, vars: new Map() };
   const program = buildIr(instruction.spec.semantics, {
-    operandInfo: instruction.operands.map(semanticOperandInfoForBinding)
+    operandInfo: instruction.operands.map(semanticOperandInfoForBinding),
+    memoryGuards: true
   });
 
   for (const op of program) {
@@ -110,6 +111,11 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
       const write = writeStorage(context, op.target, value, op.accessWidth ?? 32);
 
       return write.kind === "ok" ? undefined : stopFromAccess(context.state, write);
+    }
+    case "memory.guard": {
+      const guard = guardMemory(context, evalValueRef(context, op.address), op.byteLength, op.access);
+
+      return guard.kind === "ok" ? undefined : stopFromAccess(context.state, guard);
     }
     case "address": {
       const binding = context.instruction.operands[op.operand.index];
@@ -257,6 +263,21 @@ function writeMemory(context: ExecutionContext, storage: MemRef, accessWidth: Op
   return writeGuest(context, evalValueRef(context, storage.address), accessWidth, value);
 }
 
+function guardMemory(
+  context: ExecutionContext,
+  address: number,
+  byteLength: number,
+  operation: "read" | "write"
+): WriteResult {
+  const fault = context.memory?.checkAccess(address, byteLength, operation);
+
+  if (fault === undefined) {
+    return context.memory === undefined ? { kind: "unsupported" } : { kind: "ok" };
+  }
+
+  return { kind: "memoryFault", fault };
+}
+
 function readGuest(context: ExecutionContext, address: number, width: OperandWidth): ValueResult {
   switch (width) {
     case 8:
@@ -286,7 +307,7 @@ function readGuestU8(context: ExecutionContext, address: number): ValueResult {
     return { kind: "unsupported" };
   }
 
-  return read.ok ? { kind: "value", value: read.value } : { kind: "memoryFault", fault: read.fault };
+  return read.ok ? { kind: "value", value: read.value } : unguardedMemoryAccess(read.fault);
 }
 
 function readGuestU16(context: ExecutionContext, address: number): ValueResult {
@@ -296,7 +317,7 @@ function readGuestU16(context: ExecutionContext, address: number): ValueResult {
     return { kind: "unsupported" };
   }
 
-  return read.ok ? { kind: "value", value: read.value } : { kind: "memoryFault", fault: read.fault };
+  return read.ok ? { kind: "value", value: read.value } : unguardedMemoryAccess(read.fault);
 }
 
 function readGuestU32(context: ExecutionContext, address: number): ValueResult {
@@ -306,7 +327,7 @@ function readGuestU32(context: ExecutionContext, address: number): ValueResult {
     return { kind: "unsupported" };
   }
 
-  return read.ok ? { kind: "value", value: read.value } : { kind: "memoryFault", fault: read.fault };
+  return read.ok ? { kind: "value", value: read.value } : unguardedMemoryAccess(read.fault);
 }
 
 function writeGuestU32(context: ExecutionContext, address: number, value: number): WriteResult {
@@ -316,7 +337,7 @@ function writeGuestU32(context: ExecutionContext, address: number, value: number
     return { kind: "unsupported" };
   }
 
-  return write.ok ? { kind: "ok" } : { kind: "memoryFault", fault: write.fault };
+  return write.ok ? { kind: "ok" } : unguardedMemoryAccess(write.fault);
 }
 
 function writeGuestU8(context: ExecutionContext, address: number, value: number): WriteResult {
@@ -326,7 +347,7 @@ function writeGuestU8(context: ExecutionContext, address: number, value: number)
     return { kind: "unsupported" };
   }
 
-  return write.ok ? { kind: "ok" } : { kind: "memoryFault", fault: write.fault };
+  return write.ok ? { kind: "ok" } : unguardedMemoryAccess(write.fault);
 }
 
 function writeGuestU16(context: ExecutionContext, address: number, value: number): WriteResult {
@@ -336,7 +357,13 @@ function writeGuestU16(context: ExecutionContext, address: number, value: number
     return { kind: "unsupported" };
   }
 
-  return write.ok ? { kind: "ok" } : { kind: "memoryFault", fault: write.fault };
+  return write.ok ? { kind: "ok" } : unguardedMemoryAccess(write.fault);
+}
+
+function unguardedMemoryAccess(fault: MemoryFault): never {
+  throw new Error(
+    `unguarded memory ${fault.faultOperation} fault at ${fault.faultAddress} (${fault.faultSize} byte access)`
+  );
 }
 
 function setFlags(

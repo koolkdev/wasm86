@@ -107,9 +107,19 @@ export type IrGetOptions = Readonly<{
   signed?: boolean;
 }>;
 
+export type IrMemoryAccessKind = "read" | "write";
+
+export type IrMemoryGuardOp = Readonly<{
+  op: "memory.guard";
+  address: ValueRef;
+  byteLength: number;
+  access: IrMemoryAccessKind;
+}>;
+
 export type IrOp =
   | Readonly<{ op: "get"; dst: VarRef; source: StorageRef; accessWidth?: OperandWidth; signed?: boolean }>
   | Readonly<{ op: "set"; target: StorageRef; value: ValueRef; accessWidth?: OperandWidth }>
+  | IrMemoryGuardOp
   | Readonly<{ op: "address"; dst: VarRef; operand: OperandRef }>
   | Readonly<{ op: "value.const"; type: IrValueType; dst: VarRef; value: number }>
   | IrBinaryValueOp
@@ -126,6 +136,7 @@ export type IrBlock = readonly IrOp[];
 export type SemanticOperandInput = number | OperandRef;
 
 export interface SemanticBuildContext {
+  memoryGuards: boolean;
   operandInfo(operand: SemanticOperandInput): SemanticOperandInfo;
 }
 
@@ -140,6 +151,7 @@ export interface IrBuilder {
 
   get(source: StorageInput, accessWidth?: OperandWidth, options?: IrGetOptions): VarRef;
   set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
+  memoryGuard(address: ValueInput, byteLength: number, access: IrMemoryAccessKind): void;
   address(operand: OperandInput): VarRef;
 
   i32Add(a: ValueInput, b: ValueInput): VarRef;

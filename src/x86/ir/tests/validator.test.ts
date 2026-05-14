@@ -75,6 +75,48 @@ test("validator rejects signed get without byte or word access width", () => {
   );
 });
 
+test("validator accepts memory guards with positive byte lengths", () => {
+  doesNotThrow(() =>
+    validateIrBlock([
+      { op: "value.const", type: "i32", dst: irVar(0), value: 0x1000 },
+      { op: "memory.guard", address: irVar(0), byteLength: 4, access: "read" },
+      { op: "next" }
+    ])
+  );
+});
+
+test("validator rejects memory guards with malformed byte lengths", () => {
+  throws(
+    () =>
+      validateIrBlock([
+        { op: "memory.guard", address: const32(0x1000), byteLength: 0, access: "read" },
+        { op: "next" }
+      ]),
+    /memory\.guard byte length must be a positive integer/
+  );
+
+  throws(
+    () =>
+      validateIrBlock([
+        { op: "memory.guard", address: const32(0x1000), byteLength: 1.5, access: "write" },
+        { op: "next" }
+      ]),
+    /memory\.guard byte length must be a positive integer/
+  );
+});
+
+test("validator rejects memory guards with malformed access", () => {
+  throws(
+    () =>
+      validateIrBlock([
+        // @ts-expect-error Intentionally malformed runtime IR for validator coverage.
+        { op: "memory.guard", address: const32(0x1000), byteLength: 4, access: "execute" },
+        { op: "next" }
+      ]),
+    /memory\.guard access must be "read" or "write"/
+  );
+});
+
 test("validator rejects malformed flag producer inputs", () => {
   throws(
     () =>

@@ -2,7 +2,14 @@ import { assertIrAluFlagMask } from "#x86/ir/model/flag-effects.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import type { OperandWidth } from "#x86/isa/types.js";
-import type { IrFlagSetOp, IrOp, IrBlock, StorageRef, ValueRef } from "#x86/ir/model/types.js";
+import type {
+  IrFlagSetOp,
+  IrMemoryAccessKind,
+  IrOp,
+  IrBlock,
+  StorageRef,
+  ValueRef
+} from "#x86/ir/model/types.js";
 
 export type ValidateIrBlockOptions = Readonly<{
   operandCount?: number;
@@ -64,6 +71,11 @@ function validateOpUses(
       validateAccessWidth(op.accessWidth);
       validateStorageRef(op.target, definedVars, options);
       validateValueRef(op.value, definedVars);
+      break;
+    case "memory.guard":
+      validateValueRef(op.address, definedVars);
+      validateMemoryGuardByteLength(op.byteLength);
+      validateMemoryGuardAccess(op.access);
       break;
     case "address":
       validateOperandIndex(op.operand.index, options);
@@ -164,6 +176,18 @@ function validateSignedGet(op: Extract<IrOp, { op: "get" }>): void {
 
   if (op.accessWidth !== 8 && op.accessWidth !== 16) {
     throw new Error("IR signed get requires access width 8 or 16");
+  }
+}
+
+function validateMemoryGuardByteLength(byteLength: number): void {
+  if (!Number.isInteger(byteLength) || byteLength <= 0) {
+    throw new Error(`IR memory.guard byte length must be a positive integer, got ${byteLength}`);
+  }
+}
+
+function validateMemoryGuardAccess(access: IrMemoryAccessKind): void {
+  if (access !== "read" && access !== "write") {
+    throw new Error(`IR memory.guard access must be "read" or "write", got ${String(access)}`);
   }
 }
 

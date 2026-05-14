@@ -1,9 +1,11 @@
 import {
   ArrayBufferGuestMemory,
   type GuestMemory,
+  type MemoryFault,
   type MemoryReadResult,
   type MemoryWriteResult
 } from "#x86/memory/guest-memory.js";
+import type { FaultOperation } from "#x86/execution/run-result.js";
 import type { CpuState } from "#x86/state/cpu-state.js";
 import { runDirectInterpreter } from "#backends/direct/interpreter.js";
 import { startAddress } from "#x86/isa/decoder/tests/helpers.js";
@@ -48,6 +50,12 @@ class ProgramGuestMemory implements GuestMemory {
 
   get byteLength(): number {
     return Math.max(this.dataMemory.byteLength, this.baseAddress + this.#program.length);
+  }
+
+  checkAccess(address: number, byteLength: number, operation: FaultOperation): MemoryFault | undefined {
+    return this.#containsProgramRange(address, byteLength)
+      ? undefined
+      : this.dataMemory.checkAccess(address, byteLength, operation);
   }
 
   readU8(address: number): MemoryReadResult {

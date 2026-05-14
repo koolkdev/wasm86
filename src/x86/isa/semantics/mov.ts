@@ -1,31 +1,60 @@
 import type { ConditionCode, SemanticTemplate } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
+import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
 export function movSemantic(width: OperandWidth = 32): SemanticTemplate {
-  return (s) => {
-    s.set(s.operand(0), s.get(s.operand(1), width), width);
+  return (s, context) => {
+    const dst = s.operand(0);
+    const src = s.operand(1);
+
+    guardStorageRead(s, context, src, width);
+    const value = s.get(src, width);
+
+    guardStorageWrite(s, context, dst, width);
+    s.set(dst, value, width);
   };
 }
 
 export function movzxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
-  return (s) => {
-    s.set(s.operand(0), s.get(s.operand(1), sourceWidth), destinationWidth);
+  return (s, context) => {
+    const dst = s.operand(0);
+    const src = s.operand(1);
+
+    guardStorageRead(s, context, src, sourceWidth);
+    const value = s.get(src, sourceWidth);
+
+    guardStorageWrite(s, context, dst, destinationWidth);
+    s.set(dst, value, destinationWidth);
   };
 }
 
 export function movsxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
-  return (s) => {
-    s.set(s.operand(0), s.get(s.operand(1), sourceWidth, { signed: true }), destinationWidth);
+  return (s, context) => {
+    const dst = s.operand(0);
+    const src = s.operand(1);
+
+    guardStorageRead(s, context, src, sourceWidth);
+    const value = s.get(src, sourceWidth, { signed: true });
+
+    guardStorageWrite(s, context, dst, destinationWidth);
+    s.set(dst, value, destinationWidth);
   };
 }
 
 export function cmovSemantic(cc: ConditionCode, width: OperandWidth = 32): SemanticTemplate {
-  return (s) => {
-    const value = s.get(s.operand(1), width);
+  return (s, context) => {
+    const dst = s.operand(0);
+    const src = s.operand(1);
+
+    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, context, dst, width);
+
+    const value = s.get(src, width);
     const condition = s.condition(cc);
-    const fallback = s.get(s.operand(0), width);
+    const fallback = s.get(dst, width);
     const selected = s.i32Select(condition, value, fallback);
 
-    s.set(s.operand(0), selected, width);
+    guardStorageWrite(s, context, dst, width);
+    s.set(dst, selected, width);
   };
 }

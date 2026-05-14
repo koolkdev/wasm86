@@ -24,6 +24,7 @@ import type {
   RegRef,
   IrBuilder,
   IrGetOptions,
+  IrMemoryAccessKind,
   IrOp,
   IrBlock,
   SemanticBuildContext,
@@ -43,6 +44,7 @@ export type IrEmitterOptions = Readonly<{
   allocateVar?: () => VarRef;
   resolveOperand?: (index: number) => OperandRef;
   operandInfo?: readonly (SemanticOperandInfo | undefined)[];
+  memoryGuards?: boolean;
 }>;
 
 export class IrEmitter implements IrBuilder, SemanticBuildContext {
@@ -51,6 +53,7 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
   readonly #resolveOperand: (index: number) => OperandRef;
   readonly #operandInfo: readonly (SemanticOperandInfo | undefined)[];
   readonly #semanticOperandIndexByOperandRef = new WeakMap<OperandRef, number>();
+  readonly memoryGuards: boolean;
   #nextVarId = 0;
   #terminator: IrBlockTerminator | undefined;
 
@@ -59,6 +62,7 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
     this.#allocateVarOverride = options.allocateVar;
     this.#resolveOperand = options.resolveOperand ?? operand;
     this.#operandInfo = options.operandInfo ?? [];
+    this.memoryGuards = options.memoryGuards ?? false;
   }
 
   #allocVar(): VarRef {
@@ -125,6 +129,10 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
     const targetRef = toStorageRef(target);
 
     this.#push({ op: "set", target: targetRef, value: toValueRef(value), accessWidth });
+  }
+
+  memoryGuard(address: ValueInput, byteLength: number, access: IrMemoryAccessKind): void {
+    this.#push({ op: "memory.guard", address: toValueRef(address), byteLength, access });
   }
 
   operandInfo(operandInput: SemanticOperandInput): SemanticOperandInfo {

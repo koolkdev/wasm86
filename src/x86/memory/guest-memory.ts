@@ -11,6 +11,7 @@ export type MemoryWriteResult = Readonly<{ ok: true }> | Readonly<{ ok: false; f
 
 export type GuestMemory = Readonly<{
   byteLength: number;
+  checkAccess(address: number, byteLength: number, operation: FaultOperation): MemoryFault | undefined;
   readU8(address: number): MemoryReadResult;
   readU16(address: number): MemoryReadResult;
   readU32(address: number): MemoryReadResult;
@@ -32,6 +33,10 @@ export class ArrayBufferGuestMemory implements GuestMemory {
 
   get byteLength(): number {
     return this.#view.byteLength;
+  }
+
+  checkAccess(address: number, byteLength: number, operation: FaultOperation): MemoryFault | undefined {
+    return this.#fault(address, byteLength, operation);
   }
 
   readU8(address: number): MemoryReadResult {

@@ -5,6 +5,7 @@ import { StopReason } from "#x86/execution/run-result.js";
 import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
 import { createCpuState, getFlag, setFlag } from "#x86/state/cpu-state.js";
 import { executeDirectInstruction } from "#backends/direct/execute.js";
+import type { IsaDecodedInstruction } from "#x86/isa/decoder/types.js";
 import { decodeBytes, ok, startAddress } from "./helpers.js";
 
 test("executes mov r32, imm32", () => {
@@ -546,6 +547,35 @@ test("executes int imm8 as a host trap", () => {
   strictEqual(state.eip, startAddress + 2);
   strictEqual(state.instructionCount, 1);
   strictEqual(state.stopReason, StopReason.HOST_TRAP);
+});
+
+test("direct backend executes successful memory guards", () => {
+  const state = createCpuState({ eip: startAddress });
+  const instruction: IsaDecodedInstruction = {
+    spec: {
+      id: "test.memory_guard_noop",
+      mnemonic: "test",
+      opcode: [],
+      format: { syntax: "test" },
+      semantics: (s) => {
+        s.memoryGuard(s.const32(0x1000), 4, "read");
+        s.set(s.reg("eax"), 1);
+      }
+    },
+    address: startAddress,
+    length: 1,
+    nextEip: startAddress + 1,
+    operands: [],
+    raw: []
+  };
+  const result = executeDirectInstruction(state, instruction, {
+    memory: new ArrayBufferGuestMemory(0x2000)
+  });
+
+  strictEqual(result.stopReason, StopReason.NONE);
+  strictEqual(state.eax, 1);
+  strictEqual(state.eip, startAddress + 1);
+  strictEqual(state.instructionCount, 1);
 });
 
 function execute(state: ReturnType<typeof createCpuState>, values: readonly number[], memory?: ArrayBufferGuestMemory) {
