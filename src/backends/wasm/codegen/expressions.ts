@@ -2,6 +2,7 @@ import type {
   ConditionCode,
   IrBinaryOperator,
   IrFlagSetOp,
+  IrMemoryAccessKind,
   OperandRef,
   RegRef,
   IrOp,
@@ -55,9 +56,17 @@ export type IrSetExprOp = Readonly<{
   accessWidth: OperandWidth;
 }>;
 
+export type IrMemoryGuardExprOp = Readonly<{
+  op: "memory.guard";
+  address: IrValueExpr;
+  byteLength: number;
+  access: IrMemoryAccessKind;
+}>;
+
 export type IrExprOp =
   | Readonly<{ op: "let32"; dst: VarRef; value: IrValueExpr }>
   | IrSetExprOp
+  | IrMemoryGuardExprOp
   | IrFlagSetOp
   | Readonly<{ op: "next" }>
   | Readonly<{ op: "jump"; target: IrValueExpr }>
@@ -99,6 +108,7 @@ export type IrExpressionAliasModel = Readonly<{
 
 export type IrExpressionOptions = Readonly<{
   canInlineGet?: (source: StorageRef) => boolean;
+  canDropUnusedGet?: (source: StorageRef) => boolean;
   alias?: IrExpressionAliasModel;
 }>;
 
@@ -159,6 +169,12 @@ class ExpressionBuilder {
 
       switch (op.op) {
         case "get": {
+          if (remainingUses(this.#useCounts, op.dst.id) === 0 &&
+            this.options.canDropUnusedGet?.(op.source) === true
+          ) {
+            break;
+          }
+
           const source = this.#storageExpr(op.source);
 
           this.#defineValue(
@@ -178,6 +194,17 @@ class ExpressionBuilder {
         case "set":
           this.#pushOp(...this.#setExpr(op));
           break;
+        case "memory.guard": {
+          const address = this.#valueExpr(op.address);
+
+          this.#pushOp({
+            op: "memory.guard",
+            address: address.value,
+            byteLength: op.byteLength,
+            access: op.access
+          }, address.sourceOpIndexes);
+          break;
+        }
         case "address":
           this.#defineValue(op.dst, { kind: "address", operand: op.operand }, [], true);
           break;
@@ -323,7 +350,7 @@ class ExpressionBuilder {
   ): void {
     const origins = uniqueSourceOpIndexes([...sourceOpIndexes, this.#sourceOpIndex]);
 
-    if (inlineable && remainingUses(this.#useCounts, dst.id) <= 1) {
+    if (inlineable && (remainingUses(this.#useCounts, dst.id) <= 1 || value.kind === "address")) {
       this.#bindings.set(dst.id, { value, sourceOpIndexes: origins });
       return;
     }
@@ -391,7 +418,7 @@ class ExpressionBuilder {
       return { value, sourceOpIndexes: [] };
     }
 
-    if (binding.value.kind !== "const") {
+    if (binding.value.kind !== "const" && binding.value.kind !== "address") {
       this.#bindings.delete(value.id);
     }
 

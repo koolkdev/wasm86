@@ -121,6 +121,7 @@ test("emitIrExpressionBlockToWasm keeps let32 local-first in the shared emitter"
     scratch,
     emitGet: () => unsupported("get"),
     emitSet: () => unsupported("set"),
+    emitMemoryGuard: () => unsupported("memory.guard"),
     emitAddress: () => unsupported("address"),
     emitSetFlags: () => unsupported("flags.set"),
     emitFlagsCondition: () => unsupported("flags.condition"),
@@ -192,6 +193,7 @@ function emitTestProgram(program: IrBlock): WasmFunctionBodyEncoder {
     expression: { canInlineGet: () => true },
     emitGet: (source) => emitGet(body, regLocals, source),
     emitSet: (target, value, _accessWidth, helpers) => emitSet(body, regLocals, target, value, helpers),
+    emitMemoryGuard: () => unsupported("memory.guard"),
     emitAddress: (source) => {
       if (source.kind !== "operand") {
         unsupported(`${source.kind} address`);
@@ -243,6 +245,7 @@ function emitWithTrackingScratch(
     expression,
     emitGet: (source) => emitGet(body, regLocals, source),
     emitSet: (target, value, _accessWidth, helpers) => emitSet(body, regLocals, target, value, helpers),
+    emitMemoryGuard: () => unsupported("memory.guard"),
     emitAddress: () => unsupported("address"),
     emitSetFlags: () => unsupported("flags.set"),
     emitFlagsCondition: () => unsupported("flags.condition"),

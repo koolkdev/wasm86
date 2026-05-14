@@ -4,7 +4,9 @@ import { ExitReason } from "#backends/wasm/exit.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import { emitWasmIrExitFromI32Stack, type WasmIrExitTarget } from "./exit.js";
 
-type WasmIrMemoryAccess = "read" | "write";
+export type WasmIrMemoryAccess = "read" | "write";
+export type WasmIrMemoryAddressEmitter = () => void;
+export type WasmIrMemoryValueEmitter = () => void;
 
 const memoryWidthByteLength = {
   8: 1,
@@ -58,7 +60,7 @@ export function emitWasmIrLoadGuest(
   signed = false
 ): void {
   emitFaultIfOutOfBounds(context, addressLocal, width, "read", faultExtraDepth);
-  emitGuestLoad(context.body, addressLocal, width, signed);
+  emitWasmIrLoadGuestUnchecked(context.body, () => context.body.localGet(addressLocal), width, signed);
 }
 
 export function emitWasmIrLoadGuestFromStack(
@@ -69,7 +71,7 @@ export function emitWasmIrLoadGuestFromStack(
   signed = false
 ): void {
   emitFaultIfStackOutOfBounds(context, addressLocal, width, "read", faultExtraDepth);
-  emitGuestLoad(context.body, addressLocal, width, signed);
+  emitWasmIrLoadGuestUnchecked(context.body, () => context.body.localGet(addressLocal), width, signed);
 }
 
 export function emitWasmIrStoreGuest(
@@ -80,7 +82,40 @@ export function emitWasmIrStoreGuest(
   faultExtraDepth = 1
 ): void {
   emitFaultIfOutOfBounds(context, addressLocal, width, "write", faultExtraDepth);
-  emitGuestStore(context.body, addressLocal, valueLocal, width);
+  emitWasmIrStoreGuestUnchecked(
+    context.body,
+    () => context.body.localGet(addressLocal),
+    () => context.body.localGet(valueLocal),
+    width
+  );
+}
+
+export function emitWasmIrGuardGuestRange(
+  context: WasmIrMemoryContext,
+  addressLocal: number,
+  byteLength: number,
+  access: WasmIrMemoryAccess,
+  faultExtraDepth = 1
+): void {
+  emitFaultIfRangeOutOfBounds(context, addressLocal, byteLength, access, faultExtraDepth);
+}
+
+export function emitWasmIrLoadGuestUnchecked(
+  body: WasmFunctionBodyEncoder,
+  emitAddress: WasmIrMemoryAddressEmitter,
+  width: OperandWidth,
+  signed = false
+): void {
+  emitGuestLoad(body, emitAddress, width, signed);
+}
+
+export function emitWasmIrStoreGuestUnchecked(
+  body: WasmFunctionBodyEncoder,
+  emitAddress: WasmIrMemoryAddressEmitter,
+  emitValue: WasmIrMemoryValueEmitter,
+  width: OperandWidth
+): void {
+  emitGuestStore(body, emitAddress, emitValue, width);
 }
 
 function emitFaultIfOutOfBounds(
@@ -90,11 +125,13 @@ function emitFaultIfOutOfBounds(
   access: WasmIrMemoryAccess,
   faultExtraDepth: number
 ): void {
-  emitLastValidGuestAddress(context.body, width);
-  context.body.localGet(addressLocal).i32LtU().ifBlock(wasmBranchHint.unlikely);
-  context.body.localGet(addressLocal);
-  emitWasmIrMemoryFaultExitFromI32Stack(context, access, width, faultExtraDepth);
-  context.body.endBlock();
+  emitFaultIfRangeOutOfBounds(
+    context,
+    addressLocal,
+    memoryWidthByteLength[width],
+    access,
+    faultExtraDepth
+  );
 }
 
 function emitFaultIfStackOutOfBounds(
@@ -104,31 +141,70 @@ function emitFaultIfStackOutOfBounds(
   access: WasmIrMemoryAccess,
   faultExtraDepth: number
 ): void {
-  context.body.localTee(addressLocal);
-  emitLastValidGuestAddress(context.body, width);
+  context.body.localSet(addressLocal);
+  emitFaultIfRangeOutOfBounds(
+    context,
+    addressLocal,
+    memoryWidthByteLength[width],
+    access,
+    faultExtraDepth
+  );
+}
+
+function emitFaultIfRangeOutOfBounds(
+  context: WasmIrMemoryContext,
+  addressLocal: number,
+  byteLength: number,
+  access: WasmIrMemoryAccess,
+  faultExtraDepth: number
+): void {
+  validateGuardByteLength(byteLength);
+
+  emitGuestMemoryByteLength(context.body);
+  context.body.i32Const(byteLength).i32LtU().ifBlock(wasmBranchHint.unlikely);
+  context.body.localGet(addressLocal);
+  emitWasmIrMemoryFaultExitFromI32Stack(context, access, byteLength, faultExtraDepth);
+  context.body.endBlock();
+
+  context.body.localGet(addressLocal);
+  emitLastValidGuestAddress(context.body, byteLength);
   context.body.i32GtU().ifBlock(wasmBranchHint.unlikely);
   context.body.localGet(addressLocal);
-  emitWasmIrMemoryFaultExitFromI32Stack(context, access, width, faultExtraDepth);
+  emitWasmIrMemoryFaultExitFromI32Stack(context, access, byteLength, faultExtraDepth);
   context.body.endBlock();
 }
 
-function emitLastValidGuestAddress(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
+function validateGuardByteLength(byteLength: number): void {
+  if (!Number.isInteger(byteLength) || byteLength <= 0) {
+    throw new Error(`Wasm memory guard byte length must be a positive integer, got ${byteLength}`);
+  }
+}
+
+function emitLastValidGuestAddress(body: WasmFunctionBodyEncoder, byteLength: number): void {
+  emitGuestMemoryByteLength(body);
+  body.i32Const(byteLength).i32Sub();
+}
+
+function emitGuestMemoryByteLength(body: WasmFunctionBodyEncoder): void {
   body
     .memorySize(wasmMemoryIndex.guest)
     .i32Const(wasmPageShift)
-    .i32Shl()
-    .i32Const(memoryWidthByteLength[width])
-    .i32Sub();
+    .i32Shl();
 }
 
-function emitGuestLoad(body: WasmFunctionBodyEncoder, addressLocal: number, width: OperandWidth, signed: boolean): void {
+function emitGuestLoad(
+  body: WasmFunctionBodyEncoder,
+  emitAddress: WasmIrMemoryAddressEmitter,
+  width: OperandWidth,
+  signed: boolean
+): void {
   const immediate = {
     align: memoryWidthAlign[width],
     memoryIndex: wasmMemoryIndex.guest,
     offset: 0
   };
 
-  body.localGet(addressLocal);
+  emitAddress();
 
   switch (width) {
     case 8:
@@ -153,8 +229,8 @@ function emitGuestLoad(body: WasmFunctionBodyEncoder, addressLocal: number, widt
 
 function emitGuestStore(
   body: WasmFunctionBodyEncoder,
-  addressLocal: number,
-  valueLocal: number,
+  emitAddress: WasmIrMemoryAddressEmitter,
+  emitValue: WasmIrMemoryValueEmitter,
   width: OperandWidth
 ): void {
   const immediate = {
@@ -163,7 +239,8 @@ function emitGuestStore(
     offset: 0
   };
 
-  body.localGet(addressLocal).localGet(valueLocal);
+  emitAddress();
+  emitValue();
 
   switch (width) {
     case 8:
@@ -181,7 +258,7 @@ function emitGuestStore(
 function emitWasmIrMemoryFaultExitFromI32Stack(
   context: WasmIrMemoryContext,
   access: WasmIrMemoryAccess,
-  width: OperandWidth,
+  byteLength: number,
   extraDepth: number
 ): void {
   emitWasmIrExitFromI32Stack(
@@ -189,7 +266,7 @@ function emitWasmIrMemoryFaultExitFromI32Stack(
     context.exit,
     memoryFaultExitReason(access),
     extraDepth,
-    memoryWidthByteLength[width]
+    byteLength
   );
 }
 

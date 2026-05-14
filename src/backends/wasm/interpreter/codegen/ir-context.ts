@@ -2,6 +2,8 @@ import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type {
   IrBlock,
+  IrMemoryAccessKind,
+  OperandRef,
   SemanticOperandInfo,
   StorageRef
 } from "#x86/ir/model/types.js";
@@ -11,9 +13,10 @@ import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { wasmIrLocalAluFlagsStorage } from "#backends/wasm/codegen/alu-flags.js";
 import { emitWasmIrExitFromI32Stack, type WasmIrExitTarget } from "#backends/wasm/codegen/exit.js";
 import {
-  emitWasmIrLoadGuest,
-  emitWasmIrLoadGuestFromStack,
-  emitWasmIrStoreGuest
+  emitWasmIrGuardGuestRange,
+  emitWasmIrLoadGuestUnchecked,
+  emitWasmIrStoreGuestUnchecked,
+  type WasmIrMemoryAccess
 } from "#backends/wasm/codegen/memory.js";
 import {
   emitLoadRegAccess,
@@ -32,7 +35,12 @@ import {
   emitStoreRegByIndex
 } from "#backends/wasm/interpreter/dispatch/register-dispatch.js";
 import type { InterpreterStateCache } from "./state-cache.js";
-import { emitIfModRmMemory, emitIfModRmRegister, emitModRmIsRegister, emitModRmRegIndex } from "#backends/wasm/interpreter/decode/modrm-bits.js";
+import {
+  emitIfModRmMemory,
+  emitIfModRmRegister,
+  emitModRmIsRegister,
+  emitModRmRegIndex
+} from "#backends/wasm/interpreter/decode/modrm-bits.js";
 import { emitIrToWasm, type WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import { emitSetFlags } from "#backends/wasm/codegen/flags.js";
 import { emitFlagsCondition } from "#backends/wasm/codegen/conditions.js";
@@ -98,6 +106,7 @@ export function emitInterpreterIrWithContext(block: IrBlock, context: Interprete
     scratch: context.scratch,
     expression: {
       canInlineGet: (source) => canInlineGet(context, source),
+      canDropUnusedGet: () => true,
       alias: {
         storageMayAlias: (write, read) => interpreterStorageRefsMayAlias(context, write, read)
       }
@@ -105,6 +114,8 @@ export function emitInterpreterIrWithContext(block: IrBlock, context: Interprete
     emitGet: (source, accessWidth, helpers, options) => emitGetStorage(context, source, accessWidth, helpers, options),
     emitSet: (target, value, accessWidth, helpers) =>
       emitSetStorage(context, target, value, accessWidth, helpers),
+    emitMemoryGuard: (op, helpers) =>
+      emitMemoryGuard(context, op.address, op.byteLength, op.access, helpers),
     emitAddress: (source) => emitAddress(context, source),
     emitSetFlags: (descriptor, helpers) =>
       emitSetFlags(context.body, aluFlags, descriptor, helpers),
@@ -131,8 +142,14 @@ function emitGetStorage(
     case "reg":
       return emitLoadRegAccess(context.body, context.state.regs, source.reg, accessWidth, options);
     case "mem":
-      helpers.emitValue(source.address, { requestedWidth: 32 });
-      emitLoadGuestFromStack(context, accessWidth, options.signed === true);
+      emitWasmIrLoadGuestUnchecked(
+        context.body,
+        () => {
+          helpers.emitValue(source.address, { requestedWidth: 32 });
+        },
+        accessWidth,
+        options.signed === true
+      );
       return signedLoadValueWidth(accessWidth, options);
   }
 }
@@ -249,6 +266,69 @@ function emitSetStorage(
   }
 }
 
+function emitMemoryGuard(
+  context: InterpreterIrEmitContext,
+  address: IrValueExpr,
+  byteLength: number,
+  access: IrMemoryAccessKind,
+  helpers: WasmIrEmitHelpers
+): void {
+  if (address.kind === "address" && emitOperandMemoryGuard(context, address.operand, byteLength, access)) {
+    return;
+  }
+
+  const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
+
+  try {
+    helpers.emitValue(address, { requestedWidth: 32 });
+    context.body.localSet(addressLocal);
+    emitWasmIrGuardGuestRange(context, addressLocal, byteLength, memoryAccess(access));
+  } finally {
+    context.scratch.freeLocal(addressLocal);
+  }
+}
+
+function emitOperandMemoryGuard(
+  context: InterpreterIrEmitContext,
+  operand: OperandRef,
+  byteLength: number,
+  access: IrMemoryAccessKind
+): boolean {
+  const binding = operandBinding(context, operand.index);
+
+  switch (binding.kind) {
+    case "mem":
+      emitWasmIrGuardGuestRange(
+        context,
+        binding.addressLocal,
+        byteLength,
+        memoryAccess(access)
+      );
+      return true;
+    case "rm":
+      emitIfModRmMemory(context.body, binding.modRmLocal, () => {
+        emitWasmIrGuardGuestRange(
+          context,
+          binding.addressLocal,
+          byteLength,
+          memoryAccess(access),
+          2
+        );
+      });
+      return true;
+    case "opcode.reg":
+    case "modrm.reg":
+    case "implicit.reg":
+    case "imm":
+    case "relTarget":
+      return false;
+  }
+}
+
+function memoryAccess(access: IrMemoryAccessKind): WasmIrMemoryAccess {
+  return access;
+}
+
 function emitAddress(context: InterpreterIrEmitContext, source: IrStorageExpr): void {
   if (source.kind !== "operand") {
     throw new Error(`unsupported address source for Wasm interpreter: ${source.kind}`);
@@ -256,11 +336,18 @@ function emitAddress(context: InterpreterIrEmitContext, source: IrStorageExpr): 
 
   const binding = operandBinding(context, source.index);
 
-  if (binding.kind !== "mem") {
-    throw new Error(`address operand is not memory: ${binding.kind}`);
+  switch (binding.kind) {
+    case "mem":
+    case "rm":
+      context.body.localGet(binding.addressLocal);
+      return;
+    case "opcode.reg":
+    case "modrm.reg":
+    case "implicit.reg":
+    case "imm":
+    case "relTarget":
+      throw new Error(`address operand is not memory: ${binding.kind}`);
   }
-
-  context.body.localGet(binding.addressLocal);
 }
 
 function emitGetOperand(
@@ -279,7 +366,12 @@ function emitGetOperand(
     case "rm":
       return emitGetRm(context, binding, accessWidth, options);
     case "mem":
-      emitWasmIrLoadGuest(context, binding.addressLocal, accessWidth, 1, options.signed === true);
+      emitWasmIrLoadGuestUnchecked(
+        context.body,
+        () => context.body.localGet(binding.addressLocal),
+        accessWidth,
+        options.signed === true
+      );
       return signedLoadValueWidth(accessWidth, options);
     case "implicit.reg":
       return emitLoadRegAlias(context.body, context.state.regs, binding.alias, options);
@@ -410,19 +502,14 @@ function emitGetRm(
     emitModRmRmIndex(context.body, binding.modRmLocal);
   }, options);
   context.body.elseBlock();
-  emitWasmIrLoadGuest(context, binding.addressLocal, accessWidth, 2, options.signed === true);
+  emitWasmIrLoadGuestUnchecked(
+    context.body,
+    () => context.body.localGet(binding.addressLocal),
+    accessWidth,
+    options.signed === true
+  );
   context.body.endBlock();
   return signedLoadValueWidth(accessWidth, options);
-}
-
-function emitLoadGuestFromStack(context: InterpreterIrEmitContext, width: OperandWidth, signed = false): void {
-  const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
-
-  try {
-    emitWasmIrLoadGuestFromStack(context, addressLocal, width, 1, signed);
-  } finally {
-    context.scratch.freeLocal(addressLocal);
-  }
 }
 
 function signedLoadValueWidth(width: OperandWidth, options: WasmIrEmitValueOptions): ValueWidth {
@@ -460,8 +547,7 @@ function emitSetRm(
           context.body.localGet(valueLocal);
           return valueWidth;
         },
-        accessWidth,
-        2
+        accessWidth
       );
     });
   } finally {
@@ -473,25 +559,20 @@ function emitStoreMem(
   context: InterpreterIrEmitContext,
   emitAddress: () => void,
   emitValue: () => ValueWidth,
-  width: OperandWidth,
-  faultExtraDepth = 1
+  width: OperandWidth
 ): void {
-  const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
-  const valueLocal = context.scratch.allocLocal(wasmValueType.i32);
+  emitWasmIrStoreGuestUnchecked(
+    context.body,
+    emitAddress,
+    () => {
+      const valueWidth = emitValue();
 
-  try {
-    emitAddress();
-    context.body.localSet(addressLocal);
-    const valueWidth = emitValue();
-    if (width === 32) {
-      emitCleanValueForFullUse(context.body, valueWidth);
-    }
-    context.body.localSet(valueLocal);
-    emitWasmIrStoreGuest(context, addressLocal, valueLocal, width, faultExtraDepth);
-  } finally {
-    context.scratch.freeLocal(valueLocal);
-    context.scratch.freeLocal(addressLocal);
-  }
+      if (width === 32) {
+        emitCleanValueForFullUse(context.body, valueWidth);
+      }
+    },
+    width
+  );
 }
 
 function operandBinding(context: InterpreterIrEmitContext, index: number): InterpreterOperandBinding {

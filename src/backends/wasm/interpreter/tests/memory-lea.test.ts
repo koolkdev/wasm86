@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
@@ -148,6 +148,52 @@ test("executes MOV r32, [disp32]", async () => {
   assertCompletedInstruction(state, startAddress + 6, 8);
 });
 
+test("memory read guards report 1, 2, and 4 byte fault ranges", async () => {
+  for (const width of [8, 16, 32] as const) {
+    const faultAddress = 0x1_0000 - width / 8 + 1;
+    const initialState = createCpuState({
+      eax: 0xaaaa_aaaa,
+      eip: startAddress,
+      instructionCount: 7
+    });
+
+    const { interpreter, exit } = await executeMemoryInstruction(
+      movReadDisp32Bytes(width, faultAddress),
+      initialState
+    );
+
+    deepStrictEqual(exit, {
+      exitReason: ExitReason.MEMORY_READ_FAULT,
+      payload: faultAddress,
+      detail: width / 8
+    });
+    assertInterpreterStateEquals(interpreter.stateView, initialState);
+  }
+});
+
+test("memory write guards report 1, 2, and 4 byte fault ranges before stores", async () => {
+  for (const width of [8, 16, 32] as const) {
+    const faultAddress = 0x1_0000 - width / 8 + 1;
+    const initialState = createCpuState({
+      eax: 0x1234_5678,
+      eip: startAddress,
+      instructionCount: 7
+    });
+
+    const { interpreter, exit } = await executeMemoryInstruction(
+      movWriteDisp32Bytes(width, faultAddress),
+      initialState
+    );
+
+    deepStrictEqual(exit, {
+      exitReason: ExitReason.MEMORY_WRITE_FAULT,
+      payload: faultAddress,
+      detail: width / 8
+    });
+    assertInterpreterStateEquals(interpreter.stateView, initialState);
+  }
+});
+
 test("executes MOV r32, [index*scale + disp32] through SIB", async () => {
   const initialState = createCpuState({
     ecx: 2,
@@ -178,3 +224,34 @@ test("LEA m32 form rejects register ModRM", async () => {
   strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
+
+function movReadDisp32Bytes(width: 8 | 16 | 32, address: number): readonly number[] {
+  switch (width) {
+    case 8:
+      return [0x8a, 0x05, ...disp32(address)];
+    case 16:
+      return [0x66, 0x8b, 0x05, ...disp32(address)];
+    case 32:
+      return [0x8b, 0x05, ...disp32(address)];
+  }
+}
+
+function movWriteDisp32Bytes(width: 8 | 16 | 32, address: number): readonly number[] {
+  switch (width) {
+    case 8:
+      return [0x88, 0x05, ...disp32(address)];
+    case 16:
+      return [0x66, 0x89, 0x05, ...disp32(address)];
+    case 32:
+      return [0x89, 0x05, ...disp32(address)];
+  }
+}
+
+function disp32(value: number): readonly number[] {
+  return [
+    value & 0xff,
+    (value >>> 8) & 0xff,
+    (value >>> 16) & 0xff,
+    (value >>> 24) & 0xff
+  ];
+}

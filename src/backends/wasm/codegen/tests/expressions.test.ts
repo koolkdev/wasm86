@@ -14,6 +14,7 @@ const op = (index: number) => ({ kind: "operand" as const, index });
 const reg = (reg: "eax" | "ebx") => ({ kind: "reg" as const, reg });
 const c32 = (value: number) => ({ kind: "const" as const, type: "i32" as const, value });
 const mem = (address: ReturnType<typeof v> | ReturnType<typeof c32>) => ({ kind: "mem" as const, address });
+const address = (operand: ReturnType<typeof op>) => ({ kind: "address" as const, operand });
 const sourceValue = (
   source: ReturnType<typeof op> | ReturnType<typeof reg> | ReturnType<typeof mem>,
   accessWidth: 8 | 16 | 32 = 32,
@@ -224,6 +225,26 @@ test("expression selector materializes condition reads before conditional jumps"
     [
       { op: "let32", dst: v(0), value: { kind: "flags.condition", cc: "E" } },
       { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
+    ]
+  );
+});
+
+test("expression selector keeps explicit memory guards and drops unused guarded loads", () => {
+  deepStrictEqual(
+    buildIrExpressionBlock(
+      [
+        { op: "address", dst: v(0), operand: op(0) },
+        { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
+        { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
+        { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
+        { op: "next" }
+      ],
+      { canDropUnusedGet: () => true }
+    ),
+    [
+      { op: "memory.guard", address: address(op(0)), byteLength: 4, access: "read" },
+      { op: "memory.guard", address: address(op(0)), byteLength: 4, access: "write" },
+      { op: "next" }
     ]
   );
 });

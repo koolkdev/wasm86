@@ -143,6 +143,8 @@ class JitExpressionBlockEmitter {
       case "set":
         this.#context.emitSet(op, this.#helpers);
         return;
+      case "memory.guard":
+        throw new Error("JIT memory.guard emission is owned by Step 9C");
       case "flags.set":
         return;
       case "jump":

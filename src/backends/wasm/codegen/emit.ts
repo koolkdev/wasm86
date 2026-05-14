@@ -4,6 +4,7 @@ import {
   type IrExpressionInputBlock,
   type IrExprOp,
   type IrExprBlock,
+  type IrMemoryGuardExprOp,
   type IrSetExprOp,
   type IrStorageExpr,
   type IrValueExpr
@@ -51,6 +52,7 @@ export type WasmIrEmitContext = Readonly<{
     helpers: WasmIrEmitHelpers,
     op: IrSetExprOp
   ): void;
+  emitMemoryGuard(op: IrMemoryGuardExprOp, helpers: WasmIrEmitHelpers): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
   emitSetFlags(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
   emitFlagsCondition(cc: ConditionCode): void;
@@ -140,6 +142,9 @@ class IrExprWasmEmitter {
         return;
       case "set":
         this.#context.emitSet(op.target, op.value, op.accessWidth, this.#helpers, op);
+        return;
+      case "memory.guard":
+        this.#context.emitMemoryGuard(op, this.#helpers);
         return;
       case "flags.set":
         this.#context.emitSetFlags(op, this.#helpers);
