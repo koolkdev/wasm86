@@ -26,7 +26,7 @@ type JitIrStateOptions = Readonly<{
   valueCache?: JitValueCacheRuntime | undefined;
 }>;
 
-type JitExitMaterializationSnapshot = readonly JitCapturedExitMaterializationStore[];
+type JitCapturedExitMaterialization = readonly JitCapturedExitMaterializationStore[];
 
 export type JitIrState = Readonly<{
   eipLocal: number;
@@ -48,7 +48,7 @@ export function createJitIrState(
   const maxExitMaterializationIndex = exitMaterializations.length - 1;
   const eipLocal = body.addLocal(wasmValueType.i32);
   const instructionCountLocal = body.addLocal(wasmValueType.i32);
-  const exitMaterializationSnapshots = new Map<number, JitExitMaterializationSnapshot>();
+  const capturedExitMaterializations = new Map<number, JitCapturedExitMaterialization>();
   let activeExit: JitExitTarget | undefined;
 
   return {
@@ -96,17 +96,17 @@ export function createJitIrState(
         throw new Error(`missing JIT exit materialization: ${index}`);
       }
 
-      const snapshot = exitMaterializationSnapshots.get(index);
+      const capturedStores = capturedExitMaterializations.get(index);
 
       if (plan.stores.length !== 0) {
-        if (snapshot === undefined) {
+        if (capturedStores === undefined) {
           throw new Error(`JIT exit materialization was not captured: ${index}`);
         }
 
         emitJitExitMaterializationStores({
           body,
           valueCache: options.valueCache
-        }, snapshot);
+        }, capturedStores);
       }
     },
     releaseExitMaterialization: (index) => {
@@ -120,15 +120,15 @@ export function createJitIrState(
         return;
       }
 
-      const snapshot = exitMaterializationSnapshots.get(index);
+      const capturedStores = capturedExitMaterializations.get(index);
 
-      if (snapshot === undefined) {
+      if (capturedStores === undefined) {
         throw new Error(`JIT exit materialization was not captured: ${index}`);
       }
 
-      releaseJitExitMaterializationStores(snapshot);
+      releaseJitExitMaterializationStores(capturedStores);
 
-      exitMaterializationSnapshots.delete(index);
+      capturedExitMaterializations.delete(index);
     }
   };
 
@@ -154,33 +154,33 @@ export function createJitIrState(
   }
 
   function captureExitMaterialization(index: number): void {
-    if (exitMaterializationSnapshots.has(index)) {
+    if (capturedExitMaterializations.has(index)) {
       return;
     }
 
-    const snapshot = captureExitMaterializationSnapshot(index);
+    const capturedStores = captureExitMaterializationStoresForIndex(index);
 
-    storeExitMaterializationSnapshot(index, snapshot);
+    storeCapturedExitMaterialization(index, capturedStores);
   }
 
-  function captureExitMaterializationSnapshot(index: number): JitExitMaterializationSnapshot | undefined {
+  function captureExitMaterializationStoresForIndex(index: number): JitCapturedExitMaterialization | undefined {
     const plan = exitMaterializations[index];
 
     if (plan === undefined) {
       throw new Error(`missing JIT exit materialization: ${index}`);
     }
 
-    const storeSnapshot = captureJitExitMaterializationStores({
+    const capturedStores = captureJitExitMaterializationStores({
       body,
       valueCache: options.valueCache
     }, plan.stores);
 
-    return storeSnapshot;
+    return capturedStores;
   }
 
-  function storeExitMaterializationSnapshot(
+  function storeCapturedExitMaterialization(
     index: number,
-    snapshot: JitExitMaterializationSnapshot | undefined
+    capturedStores: JitCapturedExitMaterialization | undefined
   ): void {
     const plan = exitMaterializations[index];
 
@@ -192,11 +192,11 @@ export function createJitIrState(
       return;
     }
 
-    if (snapshot === undefined) {
+    if (capturedStores === undefined) {
       throw new Error(`JIT exit materialization was not captured: ${index}`);
     }
 
-    exitMaterializationSnapshots.set(index, snapshot);
+    capturedExitMaterializations.set(index, capturedStores);
   }
 
   function requiredActiveExit(): JitExitTarget {

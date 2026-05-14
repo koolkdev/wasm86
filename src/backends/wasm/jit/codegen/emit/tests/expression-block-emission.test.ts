@@ -18,6 +18,7 @@ import {
   instructionEntry,
   instructionExit,
 } from "./value-local-store-test-helpers.js";
+import { rootValuePathScope } from "#backends/wasm/jit/codegen/plan/control-paths.js";
 test("JIT emission consumes prebuilt expression blocks from instruction plans", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
@@ -52,6 +53,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
         boundaryState: entrySnapshot
       },
       postInstructionState: postSnapshot,
+      controlPathScopes: new Map(),
       exitPointCount: 1,
       operands: instruction.operands,
       expressionBlock,
@@ -61,6 +63,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
         entryValueState: entrySnapshot.valueState
       }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
+      expressionPathScopes: new Map(),
       producedValuesByVarId: new Map(),
       plannedValueCapturesByExpressionIndex: new Map()
     }],
@@ -73,7 +76,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
       visibleEip: { kind: "static", value: instruction.nextEip },
       exitReason: ExitReason.HOST_TRAP,
       payload: { kind: "runtime", source: "hostTrapVector" },
-      pathScope: "deferredExit",
+      pathScope: rootValuePathScope(),
       exitMaterializationIndex: 0
     }]
   });

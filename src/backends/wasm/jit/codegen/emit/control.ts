@@ -5,6 +5,7 @@ import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/e
 import { emitWasmIrExitFromI32Stack } from "#backends/wasm/codegen/exit.js";
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
+import type { JitValuePathScope } from "#backends/wasm/jit/codegen/plan/control-paths.js";
 import type { JitInstructionEmitContext } from "./block-emitter.js";
 
 export function emitJitNext(context: JitInstructionEmitContext): void {
@@ -67,17 +68,10 @@ export function emitJitConditionalJump(
   const notTakenExitPoint = context.currentExitPoint(ExitReason.JUMP);
 
   helpers.emitValue(condition, { requestedWidth: 32 });
-  const valueCacheAvailability = context.valueCache?.snapshotAvailability();
   context.body.ifBlock();
   emitJitControlTransfer(context, taken, ExitReason.JUMP, helpers, 1, takenExitPoint);
   context.body.elseBlock();
-  if (valueCacheAvailability !== undefined) {
-    context.valueCache?.restoreAvailability(valueCacheAvailability);
-  }
   emitJitControlTransfer(context, notTaken, ExitReason.JUMP, helpers, 1, notTakenExitPoint);
-  if (valueCacheAvailability !== undefined) {
-    context.valueCache?.restoreAvailability(valueCacheAvailability);
-  }
   context.body.endBlock();
 }
 
@@ -89,13 +83,15 @@ export function emitJitHostTrap(
   const vectorLocal = context.scratch.allocLocal(wasmValueType.i32);
 
   try {
-    helpers.emitValue(vector, { requestedWidth: 32 });
-    context.body.localSet(vectorLocal);
     const exitPoint = context.currentExitPoint(ExitReason.HOST_TRAP);
 
-    context.state.commitInstructionExit(exitPoint);
-    context.body.localGet(vectorLocal);
-    emitWasmIrExitFromI32Stack(context.body, context.exit, ExitReason.HOST_TRAP);
+    emitWithValuePathScope(context, exitPoint.pathScope, () => {
+      helpers.emitValue(vector, { requestedWidth: 32 });
+      context.body.localSet(vectorLocal);
+      context.state.commitInstructionExit(exitPoint);
+      context.body.localGet(vectorLocal);
+      emitWasmIrExitFromI32Stack(context.body, context.exit, ExitReason.HOST_TRAP);
+    });
   } finally {
     context.scratch.freeLocal(vectorLocal);
   }
@@ -109,15 +105,31 @@ function emitJitControlTransfer(
   extraDepth = 0,
   exitPoint = context.currentExitPoint(exitReason)
 ): boolean {
-  const targetEip = staticControlTarget(context, target);
+  return emitWithValuePathScope(context, exitPoint.pathScope, () => {
+    const targetEip = staticControlTarget(context, target);
 
-  if (targetEip === undefined) {
-    emitJitControlExit(context, target, exitReason, helpers, extraDepth, exitPoint);
-    return false;
+    if (targetEip === undefined) {
+      emitJitControlExit(context, target, exitReason, helpers, extraDepth, exitPoint);
+      return false;
+    }
+
+    emitJitStaticControlTransfer(context, targetEip, exitReason, extraDepth, exitPoint);
+    return true;
+  });
+}
+
+function emitWithValuePathScope<T>(
+  context: JitInstructionEmitContext,
+  pathScope: JitValuePathScope,
+  emit: () => T
+): T {
+  context.valueCache?.enterPathScope(pathScope);
+
+  try {
+    return emit();
+  } finally {
+    context.valueCache?.leavePathScope();
   }
-
-  emitJitStaticControlTransfer(context, targetEip, exitReason, extraDepth, exitPoint);
-  return true;
 }
 
 function emitJitStaticControlTransfer(

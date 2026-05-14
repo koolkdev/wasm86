@@ -16,6 +16,10 @@ import {
   instructionExit,
   planJitCodegen
 } from "#backends/wasm/jit/codegen/plan/plan.js";
+import {
+  branchValuePathScope,
+  rootValuePathScope
+} from "#backends/wasm/jit/codegen/plan/control-paths.js";
 import { planJitExpressionValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
@@ -63,6 +67,8 @@ export {
   instructionEntry,
   instructionExit,
   planJitCodegen,
+  branchValuePathScope,
+  rootValuePathScope,
   planJitExpressionValueCacheForInstructions,
   buildJitInstructionValueTimeline,
   jitExtractBits,
@@ -179,7 +185,7 @@ export function exitPoint(input: Readonly<{
     visibleEip,
     exitReason: input.exitReason,
     payload: input.payload ?? visibleEip,
-    pathScope: input.pathScope ?? "deferredExit",
+    pathScope: input.pathScope ?? rootValuePathScope(),
     exitMaterializationIndex: input.exitMaterializationIndex
   };
 }

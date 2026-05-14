@@ -7,7 +7,7 @@ import {
 import type { JitExpressionValueCachePlan } from "./value-cache.js";
 import {
   jitValuePathScopesEqual,
-  sharedValuePathScope,
+  rootValuePathScope,
   type JitValuePathScope
 } from "./control-paths.js";
 import type {
@@ -35,7 +35,7 @@ export function planJitValueCaptures(
     return [];
   }
 
-  return planSharedConsumerCaptures(uses, cachePlan);
+  return planRootConsumerCaptures(uses, cachePlan);
 }
 
 export function groupJitPlannedCapturesByInstructionExpression(
@@ -57,7 +57,7 @@ export function groupJitPlannedCapturesByInstructionExpression(
   );
 }
 
-function planSharedConsumerCaptures(
+function planRootConsumerCaptures(
   uses: readonly JitPlannedValueUse[],
   cachePlan: JitExpressionValueCachePlan
 ): readonly JitPlannedValueCapture[] {
@@ -75,7 +75,7 @@ function planSharedConsumerCaptures(
       }
 
       const consumers = epochUses.filter((use) => jitValuesEqual(use.value, selected.value));
-      const capture = sharedCaptureForConsumers(selected.value, consumers);
+      const capture = rootCaptureForConsumers(selected.value, consumers);
 
       if (capture !== undefined) {
         captures.push(capture);
@@ -94,7 +94,7 @@ function jitValueDependsOnProduced(value: JitValue): boolean {
   });
 }
 
-function sharedCaptureForConsumers(
+function rootCaptureForConsumers(
   value: JitValue,
   consumers: readonly JitPlannedValueUse[]
 ): JitPlannedValueCapture | undefined {
@@ -111,11 +111,7 @@ function sharedCaptureForConsumers(
     return undefined;
   }
 
-  const pathIds = new Set(
-    consumers.flatMap((consumer) =>
-      consumer.pathScope.kind === "path" ? [consumer.pathScope.id] : []
-    )
-  );
+  const pathIds = new Set(consumers.map((consumer) => consumer.pathScope.id));
 
   if (pathIds.size < 2) {
     return undefined;
@@ -124,7 +120,7 @@ function sharedCaptureForConsumers(
   return {
     value,
     placement,
-    availabilityScope: sharedValuePathScope(),
+    availabilityScope: rootValuePathScope(),
     consumers
   };
 }

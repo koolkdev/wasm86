@@ -10,10 +10,10 @@ import {
   simplifyJitValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
-import type { JitMaterializationPathScope } from "./types.js";
 import {
-  branchValuePathScope,
-  sharedValuePathScope,
+  rootValuePathScope,
+  type JitControlPathScopesMap,
+  type JitBranchValuePathScopes,
   type JitValuePathScope
 } from "./control-paths.js";
 import {
@@ -37,13 +37,14 @@ export type JitPlannedValueUse = Readonly<{
 
 export type JitPlacedExpressionValueUse = Readonly<{
   value: JitValue;
-  pathScope: JitMaterializationPathScope;
+  pathScope: JitValuePathScope;
   purpose: string;
 }>;
 
 export type JitPlannedValueUseInstructionInput = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: JitInstructionValueTimeline;
+  expressionPathScopes: JitControlPathScopesMap;
   materializationValueUsesByExpressionIndex: ReadonlyMap<
     number,
     readonly JitPlacedExpressionValueUse[]
@@ -92,10 +93,10 @@ function plannedValueUsesForOp(
   op: IrExprOp,
   placement: JitValueUsePlacement
 ): readonly JitPlannedValueUse[] {
-  const shared = sharedValuePathScope();
+  const root = rootValuePathScope();
 
   return [
-    ...expressionUsesForOp(instruction, op, placement, shared),
+    ...expressionUsesForOp(instruction, op, placement, root),
     ...materializationUsesForOp(instruction, placement)
   ];
 }
@@ -104,7 +105,7 @@ function expressionUsesForOp(
   instruction: JitPlannedValueUseInstructionInput,
   op: IrExprOp,
   placement: JitValueUsePlacement,
-  shared: JitValuePathScope
+  root: JitValuePathScope
 ): readonly JitPlannedValueUse[] {
   switch (op.op) {
     case "let32":
@@ -115,35 +116,53 @@ function expressionUsesForOp(
       const stateUpdateOnly = instructionHasLogicalWriteAt(instruction, placement.opIndex);
 
       return [
-        ...valueUsesForStorage(instruction, op.target, placement, shared, "storageAddress"),
+        ...valueUsesForStorage(instruction, op.target, placement, root, "storageAddress"),
         ...(stateUpdateOnly
           ? []
-          : valueUsesForValue(instruction, op.value, placement, shared, "expression"))
+          : valueUsesForValue(instruction, op.value, placement, root, "expression"))
       ];
     }
     case "jump":
-      return valueUsesForValue(instruction, op.target, placement, shared, "controlTarget");
-    case "conditionalJump":
+      return valueUsesForValue(instruction, op.target, placement, root, "controlTarget");
+    case "conditionalJump": {
+      const branchPathScopes = requiredBranchPathScopes(instruction, placement);
+
       return [
-        ...valueUsesForValue(instruction, op.condition, placement, shared, "branchCondition"),
+        ...valueUsesForValue(instruction, op.condition, placement, root, "branchCondition"),
         ...valueUsesForValue(
           instruction,
           op.taken,
           placement,
-          branchValuePathScope(placement.instructionIndex, placement.opIndex, "taken"),
+          branchPathScopes.taken,
           "branchTarget"
         ),
         ...valueUsesForValue(
           instruction,
           op.notTaken,
           placement,
-          branchValuePathScope(placement.instructionIndex, placement.opIndex, "notTaken"),
+          branchPathScopes.notTaken,
           "branchTarget"
         )
       ];
+    }
     case "hostTrap":
-      return valueUsesForValue(instruction, op.vector, placement, shared, "hostTrapVector");
+      return valueUsesForValue(instruction, op.vector, placement, root, "hostTrapVector");
   }
+}
+
+function requiredBranchPathScopes(
+  instruction: JitPlannedValueUseInstructionInput,
+  placement: JitValueUsePlacement
+): JitBranchValuePathScopes {
+  const pathScopes = instruction.expressionPathScopes.get(placement.opIndex);
+
+  if (pathScopes === undefined) {
+    throw new Error(
+      `missing JIT branch path scopes for expression op: ${placement.instructionIndex}:${placement.opIndex}`
+    );
+  }
+
+  return pathScopes;
 }
 
 function instructionHasLogicalWriteAt(
@@ -164,7 +183,7 @@ function materializationUsesForOp(
       valueUseTree(
         use.value,
         placement,
-        materializationPathScope(use.pathScope, placement),
+        use.pathScope,
         use.purpose
       )
     );
@@ -258,9 +277,7 @@ function uniquePlannedUses(uses: readonly JitPlannedValueUse[]): readonly JitPla
         entry.placement.instructionIndex === use.placement.instructionIndex &&
         entry.placement.opIndex === use.placement.opIndex &&
         entry.placement.epoch === use.placement.epoch &&
-        entry.pathScope.kind === use.pathScope.kind &&
-        (entry.pathScope.kind === "shared" ||
-          (use.pathScope.kind === "path" && entry.pathScope.id === use.pathScope.id)) &&
+        entry.pathScope.id === use.pathScope.id &&
         entry.purpose === use.purpose
     )) {
       unique.push(use);
@@ -268,20 +285,6 @@ function uniquePlannedUses(uses: readonly JitPlannedValueUse[]): readonly JitPla
   }
 
   return unique;
-}
-
-function materializationPathScope(
-  scope: JitMaterializationPathScope,
-  placement: JitValueUsePlacement
-): JitValuePathScope {
-  switch (scope) {
-    case "taken":
-      return branchValuePathScope(placement.instructionIndex, placement.opIndex, "taken");
-    case "notTaken":
-      return branchValuePathScope(placement.instructionIndex, placement.opIndex, "notTaken");
-    case "deferredExit":
-      return sharedValuePathScope();
-  }
 }
 
 function jitValueForValue(

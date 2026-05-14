@@ -66,7 +66,7 @@ test("JIT expression cache invalidates cached values across written-register epo
   ), [wasmOpcode.localTee, wasmOpcode.localGet, wasmOpcode.localTee, wasmOpcode.localGet]);
 });
 
-test("JIT value-cache runtime follows planned timeline epoch positions", () => {
+test("JIT value-cache runtime follows planned timeline expression positions", () => {
   const body = new WasmFunctionBodyEncoder();
   const expressionBlock = [
     { op: "hostTrap", vector: addExpr("eax", 1) },
@@ -88,13 +88,16 @@ test("JIT value-cache runtime follows planned timeline epoch positions", () => {
 
   valueCache?.beginInstruction(0);
 
-  const runtimeEpochs = expressionBlock.map((_op, opIndex) => {
+  const runtimeValues = expressionBlock.map((op, opIndex) => {
     valueCache?.beginExpressionOp(opIndex);
-    return valueCache?.snapshotAvailability().currentEpoch;
+    return op.op === "hostTrap"
+      ? valueCache?.valueForExpression(op.vector)
+      : undefined;
   });
 
-  deepStrictEqual(runtimeEpochs, plan?.instructionPlans[0]?.epochByExpressionOpIndex);
-  deepStrictEqual(runtimeEpochs, [0, 0, 0, 1, 1]);
+  deepStrictEqual(runtimeValues[0], runtimeValues[1]);
+  deepStrictEqual(runtimeValues[3], runtimeValues[4]);
+  strictEqual(JSON.stringify(runtimeValues[0]) === JSON.stringify(runtimeValues[3]), false);
 });
 
 test("JIT expression cache prefers repeated parent expressions over nested children", () => {

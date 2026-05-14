@@ -33,6 +33,10 @@ import type { JitPlannedValueUse } from "./value-uses.js";
 import type {
   JitPlannedValueCapture
 } from "./value-captures.js";
+import {
+  buildJitExpressionControlPathScopes,
+  type JitControlPathScopesMap
+} from "./control-paths.js";
 
 type JitPreparedCodegenInstruction = JitInstructionState & Pick<
   JitIrBlockInstruction,
@@ -40,6 +44,7 @@ type JitPreparedCodegenInstruction = JitInstructionState & Pick<
 > & Readonly<{
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
+  expressionPathScopes: JitControlPathScopesMap;
   producedValuesByVarId: ReadonlyMap<number, JitProducedValue>;
   valueTimeline: JitInstructionValueTimeline;
 }>;
@@ -113,6 +118,11 @@ function prepareJitCodegenInstruction(
     entryValueState: state.entryPoint.boundaryState.valueState,
     producedValuesByVarId
   });
+  const expressionPathScopes = buildJitExpressionControlPathScopes(
+    state.controlPathScopes,
+    expressionPlan.sourceMap,
+    instructionIndex
+  );
 
   return {
     ...state,
@@ -120,7 +130,8 @@ function prepareJitCodegenInstruction(
     producedValuesByVarId,
     valueTimeline,
     expressionBlock: expressionPlan.expressionBlock,
-    sourceExpressionMap: expressionPlan.sourceMap
+    sourceExpressionMap: expressionPlan.sourceMap,
+    expressionPathScopes
   };
 }
 

@@ -127,6 +127,7 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         nextMode: "continue",
         entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0)),
         postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
+        controlPathScopes: new Map(),
         exitPointCount: 0
       },
       {
@@ -136,6 +137,7 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         nextMode: "exit",
         entryPoint: instructionEntryPoint(1, boundaryState(instructionEntry(1), 1, ["eax"])),
         postInstructionState: boundaryState(instructionExit(1, block.instructions[1]!), 2, ["eax"]),
+        controlPathScopes: new Map(),
         exitPointCount: 1
       }
     ],
@@ -205,6 +207,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
         }
       }),
       postInstructionState: boundaryState(instructionExit(0, block.instructions[0]!), 1, ["eax"]),
+      controlPathScopes: new Map(),
       exitPointCount: 1
     }],
     boundaryStates: [
@@ -267,7 +270,7 @@ test("JIT value-cache planning retains produced values needed after their defini
   deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 1 }]);
 });
 
-test("JIT value-cache planning resolves cold partial register reads with shared value rules", () => {
+test("JIT value-cache planning resolves cold partial register reads with common value rules", () => {
   const coldAl = {
     kind: "source",
     source: { kind: "reg", reg: "eax" },

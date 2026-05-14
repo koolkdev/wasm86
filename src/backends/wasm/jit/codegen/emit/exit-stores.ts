@@ -38,7 +38,7 @@ type JitCapturedExitStoreSource = Readonly<{
   valueWidth: ValueWidth;
   owner: JitCachedValueHandle;
 }> | Readonly<{
-  kind: "snapshot";
+  kind: "temporary";
   local: number;
   valueWidth: ValueWidth;
 }>;
@@ -117,7 +117,7 @@ function captureJitExitMaterializationStore(
     throw new Error("JIT produced exit store value was not captured before exit materialization");
   }
 
-  if (!exitStoreSourceNeedsSnapshot(value, previousTargets)) {
+  if (!exitStoreSourceNeedsTemporaryLocal(value, previousTargets)) {
     return { store };
   }
 
@@ -128,14 +128,14 @@ function captureJitExitMaterializationStore(
   return {
     store,
     source: {
-      kind: "snapshot",
+      kind: "temporary",
       local,
       valueWidth
     }
   };
 }
 
-function exitStoreSourceNeedsSnapshot(
+function exitStoreSourceNeedsTemporaryLocal(
   value: JitValue,
   previousTargets: readonly MaterializationTarget[]
 ): boolean {

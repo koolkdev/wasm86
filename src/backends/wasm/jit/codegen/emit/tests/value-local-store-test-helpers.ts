@@ -38,6 +38,10 @@ import {
   instructionEntry,
   instructionExit
 } from "#backends/wasm/jit/codegen/plan/plan.js";
+import {
+  branchValuePathScope,
+  rootValuePathScope
+} from "#backends/wasm/jit/codegen/plan/control-paths.js";
 import type {
   JitBoundaryRef,
   JitBoundaryState
@@ -80,6 +84,8 @@ export {
   buildJitInstructionValueTimeline,
   instructionEntry,
   instructionExit,
+  branchValuePathScope,
+  rootValuePathScope,
   createJitIrState,
   createJitValueState,
   emitPlannedExpression
@@ -131,13 +137,8 @@ export function cacheRuntimeForStore(store: JitValueLocalStore): JitValueCacheRu
   return {
     beginInstruction: () => {},
     beginExpressionOp: () => {},
-    snapshotAvailability: () => ({
-      currentEpoch: 0,
-      store: store.snapshotAvailability()
-    }),
-    restoreAvailability: (snapshot) => {
-      store.restoreAvailability(snapshot.store);
-    },
+    enterPathScope: (pathScope) => store.enterPathScope(pathScope),
+    leavePathScope: () => store.leavePathScope(),
     emitForUse: (value, emitter) => store.emitForUseWithLocal(value, emitter),
     captureForReuse: (value, emitter) => store.captureForReuse(value, emitter),
     canEmitInline: () => true,

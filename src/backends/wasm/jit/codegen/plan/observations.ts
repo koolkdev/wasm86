@@ -4,11 +4,15 @@ import type { TargetRef } from "#x86/ir/model/types.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import type {
   JitBoundaryRef,
-  JitMaterializationPathScope,
   JitObservationPayload,
   JitObservationValue,
-  JitBoundaryState
+  JitBoundaryState,
+  JitInstructionState
 } from "#backends/wasm/jit/codegen/plan/types.js";
+import {
+  rootValuePathScope,
+  type JitValuePathScope
+} from "./control-paths.js";
 import {
   beforeOp
 } from "./boundaries.js";
@@ -28,7 +32,7 @@ export type JitPlannedObservationPoint = Readonly<{
   visibleEip: JitObservationValue;
   exitReason: ExitReasonValue;
   payload: JitObservationPayload;
-  pathScope: JitMaterializationPathScope;
+  pathScope: JitValuePathScope;
 }>;
 
 export function jitPreInstructionObservationForOp(
@@ -59,7 +63,7 @@ export function jitPreInstructionObservationForOp(
       kind: "runtime",
       source: "memoryAddress"
     },
-    pathScope: "deferredExit"
+    pathScope: rootValuePathScope()
   };
 }
 
@@ -68,7 +72,8 @@ export function jitPostInstructionObservationsForOp(
   instruction: JitIrBlockInstruction,
   instructionIndex: number,
   opIndex: number,
-  postState: JitBoundaryState
+  postState: JitBoundaryState,
+  controlPathScopes: JitInstructionState["controlPathScopes"]
 ): readonly JitPlannedObservationPoint[] {
   const exits = jitPostInstructionExitsAt(effects, instructionIndex, opIndex);
 
@@ -81,7 +86,7 @@ export function jitPostInstructionObservationsForOp(
     visibleEip: visibleEipForPostInstructionExit(instruction, exit, opIndex),
     exitReason: exit.exitReason,
     payload: payloadForPostInstructionExit(instruction, exit, opIndex),
-    pathScope: exitMaterializationPathScope(exit)
+    pathScope: observationPathScope(instructionIndex, opIndex, exit, controlPathScopes)
   }));
 }
 
@@ -187,13 +192,40 @@ function staticConstVarValue(varId: number, instruction: JitIrBlockInstruction):
   return undefined;
 }
 
-function exitMaterializationPathScope(exit: JitPostInstructionExit): JitMaterializationPathScope {
+function observationPathScope(
+  instructionIndex: number,
+  opIndex: number,
+  exit: JitPostInstructionExit,
+  controlPathScopes: JitInstructionState["controlPathScopes"]
+): JitValuePathScope {
   switch (exit.kind) {
     case "branchTaken":
-      return "taken";
+      return requiredBranchPathScopes(
+        controlPathScopes,
+        instructionIndex,
+        opIndex
+      ).taken;
     case "branchNotTaken":
-      return "notTaken";
+      return requiredBranchPathScopes(
+        controlPathScopes,
+        instructionIndex,
+        opIndex
+      ).notTaken;
     default:
-      return "deferredExit";
+      return rootValuePathScope();
   }
+}
+
+function requiredBranchPathScopes(
+  controlPathScopes: JitInstructionState["controlPathScopes"],
+  instructionIndex: number,
+  opIndex: number
+) {
+  const pathScopes = controlPathScopes.get(opIndex);
+
+  if (pathScopes === undefined) {
+    throw new Error(`missing JIT branch path scopes for source op: ${instructionIndex}:${opIndex}`);
+  }
+
+  return pathScopes;
 }

@@ -30,6 +30,8 @@ import {
   afterOp,
   instructionEntry,
   instructionExit,
+  branchValuePathScope,
+  rootValuePathScope,
   type JitValue,
   type JitIrBlock,
 } from "./plan-test-helpers.js";
@@ -64,7 +66,7 @@ test("planJitCodegen records post-instruction fallthrough exits", () => {
   strictEqual(codegenPlan.boundaryStates[0], exit.observedState);
   deepStrictEqual(exit.visibleEip, { kind: "static", value: instruction.nextEip });
   deepStrictEqual(exit.payload, { kind: "static", value: instruction.nextEip });
-  strictEqual(exit.pathScope, "deferredExit");
+  deepStrictEqual(exit.pathScope, rootValuePathScope());
   deepStrictEqual(exit.observedState.boundary, instructionExit(0, codegenPlan.block.instructions[0]!));
   strictEqual("kind" in exit.observedState, false);
   strictEqual("eip" in exit.observedState, false);
@@ -305,7 +307,7 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
   const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([add, jb])));
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const branchExits = codegenPlan.exitPoints.filter((entry) =>
-    entry.exitReason === ExitReason.JUMP && (entry.pathScope === "taken" || entry.pathScope === "notTaken")
+    entry.exitReason === ExitReason.JUMP && entry.pathScope.id.startsWith("branch:")
   );
   const branchIr = codegenPlan.block.instructions[1]!.ir;
   const branchExpressionBlock = emissionPlan.instructions[1]?.expressionBlock;
@@ -338,7 +340,10 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
     { kind: "static", value: jb.nextEip + 5 },
     { kind: "static", value: jb.nextEip }
   ]);
-  deepStrictEqual(branchExits.map((exit) => exit.pathScope), ["taken", "notTaken"]);
+  deepStrictEqual(branchExits.map((exit) => exit.pathScope), [
+    branchValuePathScope(1, branchExits[0]!.opIndex, "taken"),
+    branchValuePathScope(1, branchExits[1]!.opIndex, "notTaken")
+  ]);
 
   strictEqual(conditionalJumpIndex > 0, true);
   strictEqual(branchExits[0]!.exitMaterializationIndex !== branchExits[1]!.exitMaterializationIndex, true);
@@ -355,7 +360,7 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
         need.purpose === "exitStore" &&
         need.target.kind === "aluFlags" &&
         need.placement.exitReason === ExitReason.JUMP &&
-        (need.pathScope === "taken" || need.pathScope === "notTaken")
+        need.pathScope.id.startsWith("branch:")
       )
       .map((need) => ({
         value: need.value,
@@ -369,18 +374,95 @@ test("planJitCodegen records boundary-state-derived flag stores for branch exits
         value: branchFlagStore.value,
         target: { kind: "aluFlags" },
         purpose: "exitStore",
-        pathScope: "taken",
+        pathScope: branchValuePathScope(1, branchExits[0]!.opIndex, "taken"),
         exitReason: ExitReason.JUMP
       },
       {
         value: branchFlagStore.value,
         target: { kind: "aluFlags" },
         purpose: "exitStore",
-        pathScope: "notTaken",
+        pathScope: branchValuePathScope(1, branchExits[1]!.opIndex, "notTaken"),
         exitReason: ExitReason.JUMP
       }
     ]
   );
+});
+
+test("buildJitCodegenEmissionPlan keeps branch path identity from source IR after expression folding", () => {
+  const sourceBranchOpIndex = 2;
+  const block: JitIrBlock = {
+    instructions: [
+      {
+        instructionId: "seed-eax",
+        eip: startAddress,
+        nextEip: startAddress + 1,
+        nextMode: "continue",
+        operands: [],
+        ir: [
+          {
+            op: "set",
+            target: { kind: "reg", reg: "eax" },
+            value: { kind: "const", type: "i32", value: 0x44 },
+            accessWidth: 32
+          },
+          { op: "next" }
+        ]
+      },
+      {
+        instructionId: "folded-branch-path-scope",
+        eip: startAddress + 1,
+        nextEip: startAddress + 2,
+        nextMode: "exit",
+        operands: [],
+        ir: [
+          { op: "flags.condition", dst: { kind: "var", id: 0 }, cc: "E" },
+          { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "reg", reg: "ecx" }, accessWidth: 32 },
+          {
+            op: "conditionalJump",
+            condition: { kind: "var", id: 0 },
+            taken: { kind: "var", id: 1 },
+            notTaken: { kind: "nextEip" }
+          }
+        ]
+      }
+    ]
+  };
+  const codegenPlan = planJitCodegen(block);
+  const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
+  const branchInstruction = emissionPlan.instructions[1]!;
+  const expressionBranchOpIndex = branchInstruction.expressionBlock.findIndex((op) => op.op === "conditionalJump");
+  const takenPathScope = branchValuePathScope(1, sourceBranchOpIndex, "taken");
+  const takenTargetUse = emissionPlan.plannedValueUses.find((use) =>
+    use.purpose === "branchTarget" &&
+      use.placement.instructionIndex === 1 &&
+      use.value.kind === "input" &&
+      use.value.slot.kind === "reg32" &&
+      use.value.slot.reg === "ecx"
+  );
+  const takenExitStoreNeed = emissionPlan.materializationNeeds.find((need) =>
+    need.placement.instructionIndex === 1 &&
+      need.placement.opIndex === sourceBranchOpIndex &&
+      need.pathScope.debugLabel === "taken"
+  );
+
+  deepStrictEqual(branchInstruction.expressionBlock.map((op) => op.op), ["let32", "conditionalJump"]);
+  strictEqual(expressionBranchOpIndex !== sourceBranchOpIndex, true);
+  strictEqual(expressionBranchOpIndex, 1);
+
+  if (takenTargetUse === undefined) {
+    throw new Error("expected taken branch target use");
+  }
+
+  if (takenExitStoreNeed === undefined) {
+    throw new Error("expected taken branch exit-store materialization need");
+  }
+
+  strictEqual(takenTargetUse.placement.instructionIndex, 1);
+  strictEqual(takenTargetUse.placement.opIndex, expressionBranchOpIndex);
+  strictEqual(takenExitStoreNeed.placement.opIndex, sourceBranchOpIndex);
+  deepStrictEqual(takenTargetUse.pathScope, takenPathScope);
+  deepStrictEqual(takenExitStoreNeed.pathScope, takenPathScope);
+  deepStrictEqual(takenTargetUse.pathScope, takenExitStoreNeed.pathScope);
 });
 
 test("planJitCodegen records full flag producers in value-state boundary states", () => {

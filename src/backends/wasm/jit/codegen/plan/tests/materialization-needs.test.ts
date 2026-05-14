@@ -143,10 +143,10 @@ test("planJitCodegen records register and flag exit stores as generic value uses
 });
 
 test("buildJitCodegenEmissionPlan accounts repeated register and flag store dependencies through generic uses", () => {
-  const shared = addValue(jitInputReg32Value("eax"), c32(1));
+  const commonValue = addValue(jitInputReg32Value("eax"), c32(1));
   const emissionPlan = buildHostTrapEmissionPlanForStores("generic-store-use-counts", [
-    registerStore("ebx", shared),
-    flagStore(shared)
+    registerStore("ebx", commonValue),
+    flagStore(commonValue)
   ]);
   const [instruction] = emissionPlan.instructions;
 
@@ -159,27 +159,27 @@ test("buildJitCodegenEmissionPlan accounts repeated register and flag store depe
   strictEqual(hostTrapIndex !== -1, true);
   deepStrictEqual(
     emissionPlan.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
-    [shared, shared]
+    [commonValue, commonValue]
   );
   deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
-    { value: shared, useCount: 2 }
+    { value: commonValue, useCount: 2 }
   ]);
 });
 
 test("buildJitCodegenEmissionPlan counts flag-producer inputs through the same materialization graph", () => {
-  const shared = addValue(jitInputReg32Value("eax"), c32(1));
-  const result = addValue(shared, c32(1));
+  const commonValue = addValue(jitInputReg32Value("eax"), c32(1));
+  const result = addValue(commonValue, c32(1));
   const flags = jitFlagProducerValue("inc", {
-    left: shared,
+    left: commonValue,
     result
   }, { mask: FLAG_PRODUCERS.inc.writtenMask });
   const emissionPlan = buildHostTrapEmissionPlanForStores("generic-flag-producer-use-counts", [
-    registerStore("ebx", shared),
+    registerStore("ebx", commonValue),
     flagStore(flags)
   ]);
 
   deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
-    { value: shared, useCount: 3 }
+    { value: commonValue, useCount: 3 }
   ]);
 });
 
@@ -218,6 +218,7 @@ function buildHostTrapEmissionPlanForStores(
       nextMode: "exit",
       entryPoint: instructionEntryPoint(0, boundaryState(instructionEntry(0), 0)),
       postInstructionState: postSnapshot,
+      controlPathScopes: new Map(),
       exitPointCount: 1
     }],
     boundaryStates: [postSnapshot],
@@ -406,6 +407,7 @@ test("buildJitCodegenEmissionPlan maps generic exit-store uses at source exit lo
         }
       }),
       postInstructionState: postSnapshot,
+      controlPathScopes: new Map(),
       exitPointCount: 2
     }],
     boundaryStates: [
@@ -496,6 +498,7 @@ test("buildJitCodegenEmissionPlan walks condition and select dependencies from g
       nextMode: "exit",
       entryPoint: instructionEntryPoint(0, entrySnapshot),
       postInstructionState: postSnapshot,
+      controlPathScopes: new Map(),
       exitPointCount: 1
     }],
     boundaryStates: [postSnapshot],

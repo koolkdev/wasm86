@@ -2,6 +2,10 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
+import type {
+  JitBranchValuePathScopes,
+  JitControlPathScopesMap
+} from "#backends/wasm/jit/codegen/plan/control-paths.js";
 import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import { buildJitPlannedValueUsesForInstructions } from "#backends/wasm/jit/codegen/plan/value-uses.js";
@@ -16,8 +20,10 @@ import {
 import {
   addExpr,
   addValue,
+  branchValuePathScope,
   c32,
-  c32Expr
+  c32Expr,
+  rootValuePathScope
 } from "./plan-test-helpers.js";
 
 test("JIT value-capture planner shares pure values needed by both branch paths", () => {
@@ -40,7 +46,7 @@ test("JIT value-capture planner shares pure values needed by both branch paths",
   strictEqual(captures.length, 1);
   strictEqual(jitValuesEqual(captures[0]!.value, expected), true);
   deepStrictEqual(captures[0]!.placement, { instructionIndex: 0, opIndex: 0, epoch: 0 });
-  deepStrictEqual(captures[0]!.availabilityScope, { kind: "shared" });
+  deepStrictEqual(captures[0]!.availabilityScope, rootValuePathScope());
   strictEqual(captures[0]!.consumers.length, 2);
 });
 
@@ -113,8 +119,8 @@ test("JIT value-capture planner derives branch sharing from generic exit-store u
   const materializationValueUsesByExpressionIndex = new Map([[
     0,
     [
-      { value, pathScope: "taken" as const, purpose: "exitStore" },
-      { value, pathScope: "notTaken" as const, purpose: "exitStore" }
+      { value, pathScope: branchValuePathScope(0, 0, "taken"), purpose: "exitStore" },
+      { value, pathScope: branchValuePathScope(0, 0, "notTaken"), purpose: "exitStore" }
     ]
   ]]);
   const cachePlan = planJitExpressionValueCache({
@@ -125,13 +131,14 @@ test("JIT value-capture planner derives branch sharing from generic exit-store u
   const uses = buildJitPlannedValueUsesForInstructions([{
     expressionBlock,
     valueTimeline: timeline,
+    expressionPathScopes: defaultPathScopesByExpressionIndex(expressionBlock),
     materializationValueUsesByExpressionIndex
   }]);
   const captures = planJitValueCaptures(uses, cachePlan);
 
   strictEqual(captures.length, 1);
   strictEqual(jitValuesEqual(captures[0]!.value, value), true);
-  deepStrictEqual(captures[0]!.availabilityScope, { kind: "shared" });
+  deepStrictEqual(captures[0]!.availabilityScope, rootValuePathScope());
   deepStrictEqual(captures[0]!.consumers.map((use) => use.pathScope), [
     { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" },
     { kind: "path", id: "branch:0:0:notTaken", debugLabel: "notTaken" }
@@ -155,8 +162,26 @@ function planCapturesForExpressionBlock(
   const uses = buildJitPlannedValueUsesForInstructions([{
     expressionBlock,
     valueTimeline: timeline,
+    expressionPathScopes: defaultPathScopesByExpressionIndex(expressionBlock),
     materializationValueUsesByExpressionIndex: new Map()
   }]);
 
   return { uses, cachePlan };
+}
+
+function defaultPathScopesByExpressionIndex(
+  expressionBlock: IrExprBlock
+): JitControlPathScopesMap {
+  const pathScopes = new Map<number, JitBranchValuePathScopes>();
+
+  for (let opIndex = 0; opIndex < expressionBlock.length; opIndex += 1) {
+    if (expressionBlock[opIndex]?.op === "conditionalJump") {
+      pathScopes.set(opIndex, {
+        taken: branchValuePathScope(0, opIndex, "taken"),
+        notTaken: branchValuePathScope(0, opIndex, "notTaken")
+      });
+    }
+  }
+
+  return pathScopes;
 }

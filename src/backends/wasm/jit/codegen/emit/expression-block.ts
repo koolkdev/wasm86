@@ -199,10 +199,6 @@ class JitExpressionBlockEmitter {
     const captures = this.#context.instruction.plannedValueCapturesByExpressionIndex.get(opIndex) ?? [];
 
     for (const capture of captures) {
-      if (capture.availabilityScope.kind !== "shared") {
-        continue;
-      }
-
       if (capture.value.kind === "produced") {
         throw new Error("produced JIT values are captured at their definition");
       }

@@ -24,7 +24,7 @@ import {
   localOpcodes,
   countOpcode,
 } from "./value-local-store-test-helpers.js";
-test("JIT generic exit stores snapshot aluFlags sources before overwriting flags", () => {
+test("JIT generic exit stores capture aluFlags sources before overwriting flags", () => {
   const body = new WasmFunctionBodyEncoder();
   const captured = captureJitExitMaterializationStores({
     body

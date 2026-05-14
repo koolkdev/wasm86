@@ -25,6 +25,7 @@ import {
   type JitPlannedObservationPoint
 } from "./observations.js";
 import { jitMaterializationNeedsForExitStores } from "./materialization.js";
+import { buildJitInstructionControlPathScopes } from "./control-paths.js";
 
 export function analyzeJitCodegenState(
   block: JitIrBlock,
@@ -51,6 +52,10 @@ export function analyzeJitCodegenState(
 
     state.beginInstruction();
     const entryState = state.boundaryState(instructionEntry(instructionIndex));
+    const controlPathScopes = buildJitInstructionControlPathScopes(
+      instruction,
+      instructionIndex
+    );
     const exitStart = exitPoints.length;
 
     for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
@@ -72,7 +77,7 @@ export function analyzeJitCodegenState(
         recordObservationPoint(preObservation);
       }
 
-      recordOpEffects(op, instruction, instructionIndex, opIndex);
+      recordOpEffects(op, instruction, instructionIndex, opIndex, controlPathScopes);
       state.recordOp(op, instruction, instructionIndex, opIndex);
     }
 
@@ -99,6 +104,7 @@ export function analyzeJitCodegenState(
             })
       },
       postInstructionState: currentPostState,
+      controlPathScopes,
       exitPointCount: exitPoints.length - exitStart
     });
   }
@@ -125,7 +131,8 @@ export function analyzeJitCodegenState(
     op: IrOp,
     instruction: JitIrBlockInstruction,
     instructionIndex: number,
-    opIndex: number
+    opIndex: number,
+    controlPathScopes: JitInstructionState["controlPathScopes"]
   ): void {
     switch (op.op) {
       case "set":
@@ -133,7 +140,7 @@ export function analyzeJitCodegenState(
       case "flags.condition":
         return;
       case "next":
-        recordPostInstructionExits(instruction, instructionIndex, opIndex);
+        recordPostInstructionExits(instruction, instructionIndex, opIndex, controlPathScopes);
 
         if (!jitOpHasPostInstructionExit(effects, instructionIndex, opIndex)) {
           state.commitInstruction();
@@ -142,7 +149,7 @@ export function analyzeJitCodegenState(
       case "jump":
       case "conditionalJump":
       case "hostTrap":
-        recordPostInstructionExits(instruction, instructionIndex, opIndex);
+        recordPostInstructionExits(instruction, instructionIndex, opIndex, controlPathScopes);
         return;
       default:
         return;
@@ -152,7 +159,8 @@ export function analyzeJitCodegenState(
   function recordPostInstructionExits(
     instruction: JitIrBlockInstruction,
     instructionIndex: number,
-    opIndex: number
+    opIndex: number,
+    controlPathScopes: JitInstructionState["controlPathScopes"]
   ): void {
     const snapshot = instructionPostState(instruction, instructionIndex);
 
@@ -161,7 +169,8 @@ export function analyzeJitCodegenState(
       instruction,
       instructionIndex,
       opIndex,
-      snapshot
+      snapshot,
+      controlPathScopes
     )) {
       recordObservationPoint(observation);
     }

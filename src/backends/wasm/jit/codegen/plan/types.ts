@@ -10,6 +10,10 @@ import type {
   ExitMaterializationStore,
   MaterializationTarget
 } from "#backends/wasm/jit/ir/materialization.js";
+import type {
+  JitControlPathScopesMap,
+  JitValuePathScope
+} from "./control-paths.js";
 
 export type JitBoundaryRef = Readonly<{
   instructionIndex: number;
@@ -33,8 +37,6 @@ export type JitObservationValue =
 
 export type JitObservationPayload = JitObservationValue;
 
-export type JitMaterializationPathScope = "taken" | "notTaken" | "deferredExit";
-
 export type JitObservationPoint = Readonly<{
   instructionIndex: number;
   opIndex: number;
@@ -44,7 +46,7 @@ export type JitObservationPoint = Readonly<{
   visibleEip: JitObservationValue;
   exitReason: ExitReasonValue;
   payload: JitObservationPayload;
-  pathScope: JitMaterializationPathScope;
+  pathScope: JitValuePathScope;
   exitMaterializationIndex: number;
 }>;
 
@@ -66,7 +68,7 @@ export type JitExitStoreMaterializationNeed = Readonly<{
   target: MaterializationTarget;
   value: JitValue;
   placement: JitMaterializationPlacement;
-  pathScope: JitMaterializationPathScope;
+  pathScope: JitValuePathScope;
 }>;
 
 export type JitMaterializationNeed = JitExitStoreMaterializationNeed;
@@ -90,6 +92,7 @@ export type JitInstructionState = Readonly<{
   nextMode: "continue" | "exit";
   entryPoint: JitInstructionEntryPoint;
   postInstructionState: JitBoundaryState;
+  controlPathScopes: JitControlPathScopesMap;
   exitPointCount: number;
 }>;
 

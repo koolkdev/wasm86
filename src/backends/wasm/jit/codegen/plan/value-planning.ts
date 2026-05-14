@@ -4,6 +4,7 @@ import type {
   IrExprBlock,
   IrExpressionSourceMap
 } from "#backends/wasm/codegen/expressions.js";
+import type { JitControlPathScopesMap } from "./control-paths.js";
 import type { JitInstructionValueTimeline } from "./value-timeline.js";
 import type { JitMaterializationNeed } from "./types.js";
 import {
@@ -28,6 +29,7 @@ export type JitValuePlanningInstructionInput = Readonly<{
   operands: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
+  expressionPathScopes: JitControlPathScopesMap;
   valueTimeline: JitInstructionValueTimeline;
 }>;
 
@@ -69,6 +71,7 @@ export function planJitValuesForEmission<TInstruction extends JitValuePlanningIn
     instructions.map((instruction, index) => ({
       expressionBlock: instruction.expressionBlock,
       valueTimeline: instruction.valueTimeline,
+      expressionPathScopes: instruction.expressionPathScopes,
       materializationValueUsesByExpressionIndex:
         materializationUsesByExpression[index] ?? new Map()
     }))

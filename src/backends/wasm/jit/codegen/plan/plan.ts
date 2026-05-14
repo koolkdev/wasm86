@@ -18,11 +18,14 @@ export type {
   JitInstructionState,
   JitMaterializationNeed,
   JitMaterializationPlacement,
-  JitMaterializationPathScope,
   MaterializationTarget,
   JitPreInstructionExitPlan,
   JitCodegenPlan
 } from "./types.js";
+export type {
+  JitControlPathId,
+  JitValuePathScope
+} from "./control-paths.js";
 export {
   afterOp,
   beforeOp,

@@ -18,6 +18,7 @@ import {
   emitConst,
   emitExtend8,
   unexpectedEmitter,
+  branchValuePathScope,
   localOpcodes,
   countOpcode,
   type JitValue,
@@ -274,22 +275,23 @@ test("JitValueLocalStore reuses retired escaped locals after owners release", ()
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
-test("JitValueLocalStore restoreAvailability hides branch-local captures from sibling arms", () => {
+test("JitValueLocalStore path scopes hide branch-local captures from sibling arms", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
   const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
-  const branchAvailability = store.snapshotAvailability();
   let emitted = 0;
 
+  store.enterPathScope(branchValuePathScope(0, 0, "taken"));
   const taken = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+  store.leavePathScope();
 
   if (taken === undefined) {
     throw new Error("expected taken branch materialization");
   }
 
-  store.restoreAvailability(branchAvailability);
-
+  store.enterPathScope(branchValuePathScope(0, 0, "notTaken"));
   const notTaken = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+  store.leavePathScope();
 
   if (notTaken === undefined) {
     throw new Error("expected not-taken branch materialization");
@@ -304,7 +306,7 @@ test("JitValueLocalStore restoreAvailability hides branch-local captures from si
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
-test("JitValueLocalStore restoreAvailability preserves values available before branch split", () => {
+test("JitValueLocalStore path scopes preserve root values available before branch split", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
   const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
@@ -316,12 +318,13 @@ test("JitValueLocalStore restoreAvailability preserves values available before b
     throw new Error("expected pre-branch cached local");
   }
 
-  const branchAvailability = store.snapshotAvailability();
+  store.enterPathScope(branchValuePathScope(0, 0, "taken"));
   const taken = store.captureForReuse(value, unexpectedEmitter);
+  store.leavePathScope();
 
-  store.restoreAvailability(branchAvailability);
-
+  store.enterPathScope(branchValuePathScope(0, 0, "notTaken"));
   const notTaken = store.captureForReuse(value, unexpectedEmitter);
+  store.leavePathScope();
 
   body.end();
 
@@ -331,6 +334,83 @@ test("JitValueLocalStore restoreAvailability preserves values available before b
   strictEqual(notTaken?.local, preBranch.local);
   strictEqual(emitted, 1);
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localTee]);
+});
+
+test("JitValueLocalStore keeps parent path availability alive while child paths exit", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const value = addValue("eax", 1);
+  const parentScope = { kind: "path", id: "parent" } as const;
+  const childScope = { kind: "path", id: "child" } as const;
+  const siblingScope = { kind: "path", id: "sibling" } as const;
+  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  let emitted = 0;
+
+  store.enterPathScope(parentScope);
+  const parent = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+
+  store.enterPathScope(childScope);
+  const child = store.captureForReuse(value, unexpectedEmitter);
+  store.leavePathScope();
+
+  const parentAfterChild = store.captureForReuse(value, unexpectedEmitter);
+
+  if (parent === undefined || child === undefined || parentAfterChild === undefined) {
+    throw new Error("expected parent path materializations");
+  }
+
+  parent.release();
+  child.release();
+  parentAfterChild.release();
+  store.leavePathScope();
+
+  store.enterPathScope(siblingScope);
+  const sibling = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+  store.leavePathScope();
+
+  if (sibling === undefined) {
+    throw new Error("expected sibling path materialization");
+  }
+
+  body.end();
+
+  strictEqual(parent.emitted, true);
+  strictEqual(child.emitted, false);
+  strictEqual(parentAfterChild.emitted, false);
+  strictEqual(sibling.emitted, true);
+  strictEqual(child.local, parent.local);
+  strictEqual(parentAfterChild.local, parent.local);
+  strictEqual(sibling.local, parent.local);
+  strictEqual(emitted, 2);
+  deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
+});
+
+test("JitValueLocalStore reuses released branch-local locals after leaving path scope", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const value = addValue("eax", 1);
+  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+
+  store.enterPathScope(branchValuePathScope(0, 0, "taken"));
+  const taken = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  store.leavePathScope();
+
+  if (taken === undefined) {
+    throw new Error("expected taken branch materialization");
+  }
+
+  taken.release();
+
+  store.enterPathScope(branchValuePathScope(0, 0, "notTaken"));
+  const notTaken = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  store.leavePathScope();
+
+  if (notTaken === undefined) {
+    throw new Error("expected not-taken branch materialization");
+  }
+
+  body.end();
+
+  strictEqual(notTaken.local, taken.local);
+  deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
 test("JitValueLocalStore keeps pinned exit-store locals out of reuse", () => {

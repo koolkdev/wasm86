@@ -17,6 +17,10 @@ import {
   jitTimelineExpressionValueAt,
   jitTimelineValueRefValueAt
 } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import {
+  rootControlPathId,
+  type JitValuePathScope
+} from "#backends/wasm/jit/codegen/plan/control-paths.js";
 
 export type { JitExpressionValueCachePlan, JitValueUseCount } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 
@@ -34,25 +38,12 @@ export type JitCachedValueHandle = Readonly<{
 export type JitCachedValueLocal = JitCachedValueHandle & Readonly<{
   emitted: boolean;
 }>;
-export type JitValueCacheAvailabilitySnapshot = Readonly<{
-  entries: readonly JitValueCacheAvailabilitySnapshotEntry[];
-}>;
-export type JitValueCacheAvailabilitySnapshotEntry = Readonly<{
-  key: string;
-  available: boolean;
-  valueWidth: ValueWidth | undefined;
-  local: number | undefined;
-}>;
-export type JitValueCacheRuntimeAvailabilitySnapshot = Readonly<{
-  currentEpoch: number;
-  store: JitValueCacheAvailabilitySnapshot;
-}>;
 
 export type JitValueCacheRuntime = Readonly<{
   beginInstruction(index: number): void;
   beginExpressionOp(opIndex: number): void;
-  snapshotAvailability(): JitValueCacheRuntimeAvailabilitySnapshot;
-  restoreAvailability(snapshot: JitValueCacheRuntimeAvailabilitySnapshot): void;
+  enterPathScope(pathScope: JitValuePathScope): void;
+  leavePathScope(): void;
   emitForUse(value: JitValue, emitter: () => ValueWidth): JitCachedValueUse;
   captureForReuse(
     value: JitValue,
@@ -65,22 +56,36 @@ export type JitValueCacheRuntime = Readonly<{
 
 type CachedJitValue = {
   readonly value: JitValue;
-  local?: CachedJitLocal | undefined;
-  valueWidth: ValueWidth | undefined;
-  available: boolean;
+  readonly availabilitiesByScope: Map<string, CachedJitAvailability>;
+};
+
+type CachedJitAvailability = {
+  entry: CachedJitValue;
+  pathScopeKey: string;
+  local: CachedJitLocal;
+  valueWidth: ValueWidth;
 };
 
 type CachedJitLocal = {
   local: number;
   ownerCount: number;
-  entry?: CachedJitValue | undefined;
+  availability?: CachedJitAvailability | undefined;
+  free: boolean;
+};
+
+type JitPathScopeFrame = {
+  previousPathScopeKey: string;
+  pathScopeKey: string;
+  clearCreatedAvailabilitiesOnLeave: boolean;
+  createdAvailabilities: Set<CachedJitAvailability>;
 };
 
 export class JitValueLocalStore {
   readonly #body: WasmFunctionBodyEncoder;
   readonly #entries = new Map<string, CachedJitValue>();
   readonly #freeLocals: CachedJitLocal[] = [];
-  readonly #localsByIndex = new Map<number, CachedJitLocal>();
+  #currentPathScopeKey = rootValuePathScopeKey();
+  readonly #pathScopeStack: JitPathScopeFrame[] = [];
 
   constructor(body: WasmFunctionBodyEncoder, useCounts: readonly JitValueUseCount[]) {
     this.#body = body;
@@ -90,14 +95,42 @@ export class JitValueLocalStore {
 
       this.#entries.set(jitValueKey(value), {
         value,
-        valueWidth: undefined,
-        available: false
+        availabilitiesByScope: new Map()
       });
     }
   }
 
   emitForUse(value: JitValue, emitter: () => ValueWidth): ValueWidth {
     return this.emitForUseWithLocal(value, emitter).valueWidth;
+  }
+
+  enterPathScope(pathScope: JitValuePathScope): void {
+    const pathScopeKey = valuePathScopeKey(pathScope);
+
+    this.#pathScopeStack.push({
+      previousPathScopeKey: this.#currentPathScopeKey,
+      pathScopeKey,
+      clearCreatedAvailabilitiesOnLeave: pathScopeKey !== rootValuePathScopeKey() &&
+        pathScopeKey !== this.#currentPathScopeKey,
+      createdAvailabilities: new Set()
+    });
+    this.#currentPathScopeKey = pathScopeKey;
+  }
+
+  leavePathScope(): void {
+    const frame = this.#pathScopeStack.pop();
+
+    if (frame === undefined) {
+      throw new Error("JIT value cache path scope stack underflow");
+    }
+
+    if (frame.clearCreatedAvailabilitiesOnLeave) {
+      for (const availability of frame.createdAvailabilities) {
+        this.#removeAvailability(availability);
+      }
+    }
+
+    this.#currentPathScopeKey = frame.previousPathScopeKey;
   }
 
   emitForUseWithLocal(value: JitValue, emitter: () => ValueWidth): JitCachedValueUse {
@@ -107,19 +140,18 @@ export class JitValueLocalStore {
       return { valueWidth: emitter() };
     }
 
-    const local = this.#localForEntry(entry).local;
+    const availability = this.#visibleAvailability(entry);
 
-    if (entry.available) {
-      this.#body.localGet(local);
-      return { valueWidth: requiredValueWidth(entry), local };
+    if (availability !== undefined) {
+      this.#body.localGet(availability.local.local);
+      return { valueWidth: availability.valueWidth, local: availability.local.local };
     }
 
     const valueWidth = emitter();
+    const newAvailability = this.#availabilityForCurrentPath(entry, valueWidth);
 
-    this.#body.localTee(local);
-    entry.valueWidth = valueWidth;
-    entry.available = true;
-    return { valueWidth, local };
+    this.#body.localTee(newAvailability.local.local);
+    return { valueWidth, local: newAvailability.local.local };
   }
 
   // Pre-fill a selected cache entry for consumers that need the value later,
@@ -132,23 +164,22 @@ export class JitValueLocalStore {
       return undefined;
     }
 
-    const cacheLocal = this.#localForEntry(entry);
+    const availability = this.#visibleAvailability(entry);
 
-    if (entry.available) {
+    if (availability !== undefined) {
       return {
-        ...this.#handleForLocal(cacheLocal, requiredValueWidth(entry)),
-        valueWidth: requiredValueWidth(entry),
+        ...this.#handleForLocal(availability.local, availability.valueWidth),
+        valueWidth: availability.valueWidth,
         emitted: false
       };
     }
 
     const valueWidth = emitter();
+    const newAvailability = this.#availabilityForCurrentPath(entry, valueWidth);
 
-    this.#body.localSet(cacheLocal.local);
-    entry.valueWidth = valueWidth;
-    entry.available = true;
+    this.#body.localSet(newAvailability.local.local);
     return {
-      ...this.#handleForLocal(cacheLocal, valueWidth),
+      ...this.#handleForLocal(newAvailability.local, valueWidth),
       valueWidth,
       emitted: true
     };
@@ -156,92 +187,35 @@ export class JitValueLocalStore {
 
   emitAvailableForUse(value: JitValue): JitCachedValueUse | undefined {
     const entry = this.#entryFor(value);
+    const availability = entry === undefined ? undefined : this.#visibleAvailability(entry);
 
-    if (entry === undefined || !entry.available) {
+    if (availability === undefined) {
       return undefined;
     }
 
-    const local = requiredEntryLocal(entry);
-
-    this.#body.localGet(local.local);
-    return { valueWidth: requiredValueWidth(entry), local: local.local };
+    this.#body.localGet(availability.local.local);
+    return { valueWidth: availability.valueWidth, local: availability.local.local };
   }
 
   captureAvailableForReuse(value: JitValue): JitCachedValueLocal | undefined {
     const entry = this.#entryFor(value);
+    const availability = entry === undefined ? undefined : this.#visibleAvailability(entry);
 
-    if (entry === undefined || !entry.available) {
+    if (availability === undefined) {
       return undefined;
     }
 
-    const local = requiredEntryLocal(entry);
-
     return {
-      ...this.#handleForLocal(local, requiredValueWidth(entry)),
-      valueWidth: requiredValueWidth(entry),
+      ...this.#handleForLocal(availability.local, availability.valueWidth),
+      valueWidth: availability.valueWidth,
       emitted: false
     };
-  }
-
-  snapshotAvailability(): JitValueCacheAvailabilitySnapshot {
-    const entries: JitValueCacheAvailabilitySnapshotEntry[] = [];
-
-    for (const [key, entry] of this.#entries) {
-      entries.push({
-        key,
-        available: entry.available,
-        valueWidth: entry.valueWidth,
-        local: entry.local?.local
-      });
-    }
-
-    return { entries };
-  }
-
-  restoreAvailability(snapshot: JitValueCacheAvailabilitySnapshot): void {
-    const entriesByKey = new Map(snapshot.entries.map((entry) => [entry.key, entry]));
-
-    for (const [key, entry] of this.#entries) {
-      const availability = entriesByKey.get(key);
-
-      if (availability === undefined) {
-        throw new Error(`missing JIT value cache availability snapshot entry: ${key}`);
-      }
-
-      const currentLocal = entry.local;
-      const restoredLocal = availability.local === undefined
-        ? undefined
-        : this.#localSnapshotRef(availability.local);
-
-      if (currentLocal !== undefined && currentLocal !== restoredLocal) {
-        currentLocal.entry = undefined;
-
-        if (currentLocal.ownerCount === 0) {
-          this.#freeLocals.push(currentLocal);
-        }
-      }
-
-      entry.available = availability.available;
-      entry.valueWidth = availability.valueWidth;
-      entry.local = restoredLocal;
-
-      if (entry.local !== undefined) {
-        entry.local.entry = entry;
-      }
-
-      if (!entry.available) {
-        this.#detachUnavailableOwnedLocal(entry);
-      }
-    }
   }
 
   forgetWhere(predicate: (value: JitValue) => boolean): void {
     for (const entry of this.#entries.values()) {
       if (predicate(entry.value)) {
-        entry.available = false;
-        entry.valueWidth = undefined;
-
-        this.#detachUnavailableOwnedLocal(entry);
+        this.#clearAvailabilities(entry);
       }
     }
   }
@@ -253,19 +227,53 @@ export class JitValueLocalStore {
     return entry !== undefined && jitValuesEqual(entry.value, simplified) ? entry : undefined;
   }
 
-  #localForEntry(entry: CachedJitValue): CachedJitLocal {
-    if (entry.local === undefined) {
-      const cacheLocal = this.#freeLocals.pop() ?? {
-        local: this.#body.addLocal(wasmValueType.i32),
-        ownerCount: 0
-      };
+  #visibleAvailability(entry: CachedJitValue): CachedJitAvailability | undefined {
+    for (let index = this.#pathScopeStack.length - 1; index >= 0; index -= 1) {
+      const frame = this.#pathScopeStack[index];
 
-      this.#localsByIndex.set(cacheLocal.local, cacheLocal);
-      cacheLocal.entry = entry;
-      entry.local = cacheLocal;
+      if (frame === undefined) {
+        throw new Error(`missing JIT value cache path scope frame: ${index}`);
+      }
+
+      const availability = entry.availabilitiesByScope.get(frame.pathScopeKey);
+
+      if (availability !== undefined) {
+        return availability;
+      }
     }
 
-    return entry.local;
+    return entry.availabilitiesByScope.get(rootValuePathScopeKey());
+  }
+
+  #availabilityForCurrentPath(entry: CachedJitValue, valueWidth: ValueWidth): CachedJitAvailability {
+    const local = this.#allocLocal();
+    const availability = {
+      entry,
+      pathScopeKey: this.#currentPathScopeKey,
+      local,
+      valueWidth
+    };
+    const oldAvailability = entry.availabilitiesByScope.get(this.#currentPathScopeKey);
+
+    if (oldAvailability !== undefined) {
+      this.#removeAvailability(oldAvailability);
+    }
+
+    local.availability = availability;
+    entry.availabilitiesByScope.set(this.#currentPathScopeKey, availability);
+    this.#currentPathScopeFrame()?.createdAvailabilities.add(availability);
+    return availability;
+  }
+
+  #allocLocal(): CachedJitLocal {
+    const cacheLocal = this.#freeLocals.pop() ?? {
+      local: this.#body.addLocal(wasmValueType.i32),
+      ownerCount: 0,
+      free: false
+    };
+
+    cacheLocal.free = false;
+    return cacheLocal;
   }
 
   #handleForLocal(cacheLocal: CachedJitLocal, valueWidth: ValueWidth): JitCachedValueHandle {
@@ -295,28 +303,46 @@ export class JitValueLocalStore {
           throw new Error("JIT cached value handle owner count became negative");
         }
 
-        if (cacheLocal.ownerCount === 0 && cacheLocal.entry === undefined) {
-          this.#freeLocals.push(cacheLocal);
+        if (cacheLocal.ownerCount === 0 && cacheLocal.availability === undefined) {
+          this.#freeLocal(cacheLocal);
         }
       }
     };
   }
 
-  #detachUnavailableOwnedLocal(entry: CachedJitValue): void {
-    if (entry.local !== undefined && entry.local.ownerCount !== 0) {
-      entry.local.entry = undefined;
-      entry.local = undefined;
+  #clearAvailabilities(entry: CachedJitValue): void {
+    for (const availability of entry.availabilitiesByScope.values()) {
+      this.#removeAvailability(availability);
+    }
+
+    entry.availabilitiesByScope.clear();
+  }
+
+  #removeAvailability(availability: CachedJitAvailability): void {
+    if (availability.entry.availabilitiesByScope.get(availability.pathScopeKey) === availability) {
+      availability.entry.availabilitiesByScope.delete(availability.pathScopeKey);
+    }
+
+    if (availability.local.availability !== availability) {
+      return;
+    }
+
+    availability.local.availability = undefined;
+
+    if (availability.local.ownerCount === 0) {
+      this.#freeLocal(availability.local);
     }
   }
 
-  #localSnapshotRef(local: number): CachedJitLocal {
-    const cacheLocal = this.#localsByIndex.get(local);
+  #currentPathScopeFrame(): JitPathScopeFrame | undefined {
+    return this.#pathScopeStack[this.#pathScopeStack.length - 1];
+  }
 
-    if (cacheLocal === undefined) {
-      throw new Error(`JIT value cache availability snapshot references unknown local: ${local}`);
+  #freeLocal(cacheLocal: CachedJitLocal): void {
+    if (!cacheLocal.free) {
+      cacheLocal.free = true;
+      this.#freeLocals.push(cacheLocal);
     }
-
-    return cacheLocal;
   }
 }
 
@@ -366,13 +392,11 @@ export function createJitValueCacheRuntime(
         ? store.captureForReuse(value, emitter)
         : store.captureAvailableForReuse(value),
     canEmitInline: (value) => !valueRequiresCacheAtCurrentEpoch(value),
-    snapshotAvailability: () => ({
-      currentEpoch,
-      store: store.snapshotAvailability()
-    }),
-    restoreAvailability: (snapshot) => {
-      currentEpoch = snapshot.currentEpoch;
-      store.restoreAvailability(snapshot.store);
+    enterPathScope: (pathScope) => {
+      store.enterPathScope(pathScope);
+    },
+    leavePathScope: () => {
+      store.leavePathScope();
     },
     valueForExpression: (value) => valueForExpressionAtCurrentOp(value),
     valueForValueRef: (value) => jitTimelineValueRefValueAt(
@@ -406,20 +430,12 @@ export function createJitValueCacheRuntime(
   }
 }
 
-function requiredValueWidth(entry: CachedJitValue): ValueWidth {
-  if (entry.valueWidth === undefined) {
-    throw new Error("cached JIT value is available without width metadata");
-  }
-
-  return entry.valueWidth;
+function valuePathScopeKey(pathScope: JitValuePathScope): string {
+  return `path:${pathScope.id}`;
 }
 
-function requiredEntryLocal(entry: CachedJitValue): CachedJitLocal {
-  if (entry.local === undefined) {
-    throw new Error("cached JIT value is available without a local");
-  }
-
-  return entry.local;
+function rootValuePathScopeKey(): string {
+  return `path:${rootControlPathId()}`;
 }
 
 function valueIsSelected(selected: readonly JitValueUseCount[], value: JitValue): boolean {

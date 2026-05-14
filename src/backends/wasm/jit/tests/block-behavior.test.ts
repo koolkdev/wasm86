@@ -153,7 +153,7 @@ test("jit IR block emits register-only xchg forms after reading both operands", 
   }
 });
 
-test("jit IR block snapshots xchg-style parallel exit stores before state writes", async () => {
+test("jit IR block captures xchg-style parallel exit stores before state writes", async () => {
   const result = await runJitIrBlock([
     0x87, 0xd8, // xchg eax, ebx
     0xcd, 0x2e // int 0x2e
