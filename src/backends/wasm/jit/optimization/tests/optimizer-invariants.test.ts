@@ -6,7 +6,7 @@ import type { IrBlock } from "#x86/ir/model/types.js";
 import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { startAddress, v } from "./helpers.js";
 
-test("validateJitIrBlock rejects operand indexes before effect analysis", () => {
+test("validateJitIrBlock rejects invalid operand indexes", () => {
   throws(() => validateJitIrBlock(jitBlock([
     { op: "get", dst: v(0), source: { kind: "operand", index: 0 } },
     { op: "next" }

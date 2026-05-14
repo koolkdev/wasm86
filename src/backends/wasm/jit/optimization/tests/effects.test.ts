@@ -61,6 +61,36 @@ test("indexJitEffects indexes shared op effects", () => {
   deepStrictEqual(jitOpExitsAt(effects, 1, 1), []);
 });
 
+test("indexJitEffects indexes observable operation locations", () => {
+  const effects = indexJitEffects({
+    instructions: [
+      syntheticInstruction([
+        { op: "memory.guard", address: c32(0x2000), byteLength: 4, access: "read" },
+        { op: "memory.guard", address: c32(0x2004), byteLength: 4, access: "write" },
+        { op: "set", target: { kind: "reg", reg: "ecx" }, value: c32(1) },
+        { op: "jump", target: c32(0x3000) }
+      ], 0),
+      syntheticInstruction([
+        { op: "conditionalJump", condition: v(0), taken: c32(0x4000), notTaken: c32(0x4004) }
+      ], 1),
+      syntheticInstruction([
+        { op: "hostTrap", vector: c32(0x2e) }
+      ], 2),
+      syntheticInstruction([
+        { op: "next" }
+      ], 3, "exit")
+    ]
+  });
+
+  deepStrictEqual(jitOpExitsAt(effects, 0, 0), ["memoryReadFault"]);
+  deepStrictEqual(jitOpExitsAt(effects, 0, 1), ["memoryWriteFault"]);
+  strictEqual(jitRegisterWriteRegAt(effects, 0, 2), "ecx");
+  deepStrictEqual(jitOpExitsAt(effects, 0, 3), ["jump"]);
+  deepStrictEqual(jitOpExitsAt(effects, 1, 0), ["branchTaken", "branchNotTaken"]);
+  deepStrictEqual(jitOpExitsAt(effects, 2, 0), ["hostTrap"]);
+  deepStrictEqual(jitOpExitsAt(effects, 3, 0), ["fallthrough"]);
+});
+
 test("JIT effect helpers index read and write guard exits at their own ops", () => {
   const effects = indexJitEffects({
     instructions: [
