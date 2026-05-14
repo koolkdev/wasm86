@@ -10,7 +10,7 @@ import {
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
 import {
-  type JitExpressionValueCachePlan,
+  type JitValueCachePlan,
   type JitValueUseCount
 } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import {
@@ -22,7 +22,7 @@ import {
   type JitValuePathScope
 } from "#backends/wasm/jit/codegen/plan/control-paths.js";
 
-export type { JitExpressionValueCachePlan, JitValueUseCount } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+export type { JitValueCachePlan, JitValueUseCount } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 
 export type JitCachedValueUse = Readonly<{
   valueWidth: ValueWidth;
@@ -348,27 +348,27 @@ export class JitValueLocalStore {
 
 export function createJitValueCacheRuntime(
   body: WasmFunctionBodyEncoder,
-  plan: JitExpressionValueCachePlan | undefined
+  plan: JitValueCachePlan | undefined
 ): JitValueCacheRuntime | undefined {
-  if (plan === undefined || plan.selectedUseCounts.length === 0) {
+  if (plan === undefined || plan.useCounts.length === 0) {
     return undefined;
   }
 
   const cachePlan = plan;
-  const store = new JitValueLocalStore(body, cachePlan.selectedUseCounts);
+  const store = new JitValueLocalStore(body, cachePlan.useCounts);
   let currentEpoch = 0;
   let currentInstructionIndex = 0;
   let currentExpressionOpIndex = 0;
 
   return {
     beginInstruction: (index) => {
-      if (index < 0 || index >= cachePlan.instructionPlans.length) {
+      if (index < 0 || index >= cachePlan.instructions.length) {
         throw new Error(`JIT value cache instruction index out of range: ${index}`);
       }
 
       currentInstructionIndex = index;
       currentExpressionOpIndex = 0;
-      currentEpoch = currentInstructionPlan().epochByExpressionOpIndex[0] ?? currentEpoch;
+      currentEpoch = currentInstructionPlan().opEpochs[0] ?? currentEpoch;
     },
     beginExpressionOp: (opIndex) => {
       const instructionPlan = currentInstructionPlan();
@@ -378,7 +378,7 @@ export function createJitValueCacheRuntime(
       }
 
       currentExpressionOpIndex = opIndex;
-      currentEpoch = instructionPlan.epochByExpressionOpIndex[opIndex] ?? currentEpoch;
+      currentEpoch = instructionPlan.opEpochs[opIndex] ?? currentEpoch;
     },
     emitForUse: (value, emitter) => {
       if (valueRequiresCacheAtCurrentEpoch(value)) {
@@ -407,12 +407,12 @@ export function createJitValueCacheRuntime(
   };
 
   function valueRequiresCacheAtCurrentEpoch(value: JitValue): boolean {
-    return valueIsSelected(cachePlan.selectedConsumerValuesByEpoch[currentEpoch] ?? [], value) ||
-      valueIsCaptureSelected(cachePlan.captureValuesByEpoch[currentEpoch] ?? [], value);
+    return valueIsSelected(cachePlan.consumers[currentEpoch] ?? [], value) ||
+      valueIsCaptureSelected(cachePlan.definitionCaptures[currentEpoch] ?? [], value);
   }
 
   function currentInstructionPlan() {
-    const instructionPlan = cachePlan.instructionPlans[currentInstructionIndex];
+    const instructionPlan = cachePlan.instructions[currentInstructionIndex];
 
     if (instructionPlan === undefined) {
       throw new Error(`missing JIT value cache instruction plan: ${currentInstructionIndex}`);

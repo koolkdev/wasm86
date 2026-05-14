@@ -6,16 +6,18 @@ import type {
   JitBranchValuePathScopes,
   JitControlPathScopesMap
 } from "#backends/wasm/jit/codegen/plan/control-paths.js";
-import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+import { cacheSelectionUsesForPlannedUse } from "#backends/wasm/jit/codegen/plan/value-cache-uses.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
-import { buildJitPlannedValueUsesForInstructions } from "#backends/wasm/jit/codegen/plan/value-uses.js";
+import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 import { planJitValueCaptures } from "#backends/wasm/jit/codegen/plan/value-captures.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
   jitInputReg32Value,
   jitProducedValue,
   jitValuesEqual,
-  type JitProducedValue
+  type JitProducedValue,
+  type JitValue
 } from "#backends/wasm/jit/ir/values.js";
 import {
   addExpr,
@@ -48,6 +50,50 @@ test("JIT value-capture planner shares pure values needed by both branch paths",
   deepStrictEqual(captures[0]!.placement, { instructionIndex: 0, opIndex: 0, epoch: 0 });
   deepStrictEqual(captures[0]!.availabilityScope, rootValuePathScope());
   strictEqual(captures[0]!.consumers.length, 2);
+});
+
+test("JIT cache value uses carry flattened dependency ancestry for cache selection", () => {
+  const target = {
+    kind: "value.binary",
+    type: "i32",
+    operator: "xor",
+    a: addExpr("eax", 1),
+    b: c32Expr(0xff)
+  } as const;
+  const expressionBlock = [{
+    op: "hostTrap",
+    vector: target
+  }] as const satisfies IrExprBlock;
+  const timeline = buildJitInstructionValueTimeline({
+    operands: [],
+    expressionBlock,
+    entryValueState: createJitValueState().snapshot()
+  });
+  const expectedChild = addValue(jitInputReg32Value("eax"), c32(1));
+  const expectedRoot = {
+    kind: "value.binary",
+    type: "i32",
+    operator: "xor",
+    a: expectedChild,
+    b: c32(0xff)
+  } as const satisfies JitValue;
+  const uses = planJitValueUses([{
+    expressionBlock,
+    valueTimeline: timeline,
+    expressionPathScopes: defaultExpressionPathScopes(expressionBlock),
+    materializationUses: new Map()
+  }]);
+  const rootUse = uses.find((use) => jitValuesEqual(use.value, expectedRoot));
+  const cacheUses = uses.flatMap((use) => cacheSelectionUsesForPlannedUse(use));
+  const childUse = cacheUses.find((use) => jitValuesEqual(use.value, expectedChild));
+
+  if (rootUse === undefined || childUse === undefined) {
+    throw new Error("expected planned root and cache child value uses");
+  }
+
+  deepStrictEqual(uses.filter((use) => jitValuesEqual(use.value, expectedChild)), []);
+  deepStrictEqual(childUse.ancestors, [expectedRoot]);
+  strictEqual(childUse.emittedCost > 0, true);
 });
 
 test("JIT value-capture planner keeps one-arm branch values path-scoped", () => {
@@ -95,7 +141,7 @@ test("JIT value-capture planner leaves produced definitions to value-cache", () 
   const captures = planJitValueCaptures(uses, cachePlan);
   const producedUses = uses.filter((use) => jitValuesEqual(use.value, produced));
 
-  deepStrictEqual(cachePlan?.captureValuesByEpoch[0], [produced]);
+  deepStrictEqual(cachePlan?.definitionCaptures[0], [produced]);
   deepStrictEqual(captures, []);
   deepStrictEqual(producedUses.map((use) => use.pathScope), [
     { kind: "path", id: "branch:0:1:taken", debugLabel: "taken" },
@@ -116,24 +162,23 @@ test("JIT value-capture planner derives branch sharing from generic exit-store u
     expressionBlock,
     entryValueState: createJitValueState().snapshot()
   });
-  const materializationValueUsesByExpressionIndex = new Map([[
+  const materializationUses = new Map([[
     0,
     [
       { value, pathScope: branchValuePathScope(0, 0, "taken"), purpose: "exitStore" },
       { value, pathScope: branchValuePathScope(0, 0, "notTaken"), purpose: "exitStore" }
     ]
   ]]);
-  const cachePlan = planJitExpressionValueCache({
-    operands: [],
-    valueTimeline: timeline,
-    materializationJitValueUsesByExpressionIndex: new Map([[0, [value, value]]])
-  }, expressionBlock);
-  const uses = buildJitPlannedValueUsesForInstructions([{
+  const uses = planJitValueUses([{
     expressionBlock,
     valueTimeline: timeline,
-    expressionPathScopes: defaultPathScopesByExpressionIndex(expressionBlock),
-    materializationValueUsesByExpressionIndex
+    expressionPathScopes: defaultExpressionPathScopes(expressionBlock),
+    materializationUses
   }]);
+  const cachePlan = planJitValueCache({
+    operands: [],
+    valueTimeline: timeline
+  }, expressionBlock, uses);
   const captures = planJitValueCaptures(uses, cachePlan);
 
   strictEqual(captures.length, 1);
@@ -155,21 +200,21 @@ function planCapturesForExpressionBlock(
     entryValueState: createJitValueState().snapshot(),
     ...(producedValuesByVarId === undefined ? {} : { producedValuesByVarId })
   });
-  const cachePlan = planJitExpressionValueCache({
-    operands: [],
-    valueTimeline: timeline
-  }, expressionBlock);
-  const uses = buildJitPlannedValueUsesForInstructions([{
+  const uses = planJitValueUses([{
     expressionBlock,
     valueTimeline: timeline,
-    expressionPathScopes: defaultPathScopesByExpressionIndex(expressionBlock),
-    materializationValueUsesByExpressionIndex: new Map()
+    expressionPathScopes: defaultExpressionPathScopes(expressionBlock),
+    materializationUses: new Map()
   }]);
+  const cachePlan = planJitValueCache({
+    operands: [],
+    valueTimeline: timeline
+  }, expressionBlock, uses);
 
   return { uses, cachePlan };
 }
 
-function defaultPathScopesByExpressionIndex(
+function defaultExpressionPathScopes(
   expressionBlock: IrExprBlock
 ): JitControlPathScopesMap {
   const pathScopes = new Map<number, JitBranchValuePathScopes>();

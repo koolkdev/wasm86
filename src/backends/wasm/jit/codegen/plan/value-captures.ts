@@ -4,7 +4,11 @@ import {
   simplifyJitValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
-import type { JitExpressionValueCachePlan } from "./value-cache.js";
+import type { JitValueCachePlan } from "./value-cache.js";
+import {
+  cacheSelectionUsesForPlannedUse,
+  plannedValueUseFromCacheSelectionUse
+} from "./value-cache-uses.js";
 import {
   jitValuePathScopesEqual,
   rootValuePathScope,
@@ -22,26 +26,22 @@ export type JitPlannedValueCapture = Readonly<{
   consumers: readonly JitPlannedValueUse[];
 }>;
 
-export type JitPlannedValueCapturesByExpression = ReadonlyMap<
+export type JitExpressionCaptureMap = ReadonlyMap<
   number,
   readonly JitPlannedValueCapture[]
 >;
 
 export function planJitValueCaptures(
   uses: readonly JitPlannedValueUse[],
-  cachePlan: JitExpressionValueCachePlan | undefined
+  cachePlan: JitValueCachePlan
 ): readonly JitPlannedValueCapture[] {
-  if (cachePlan === undefined) {
-    return [];
-  }
-
   return planRootConsumerCaptures(uses, cachePlan);
 }
 
-export function groupJitPlannedCapturesByInstructionExpression(
+export function groupJitPlannedCaptures(
   captures: readonly JitPlannedValueCapture[],
   instructionCount: number
-): readonly JitPlannedValueCapturesByExpression[] {
+): readonly JitExpressionCaptureMap[] {
   const grouped: Map<number, JitPlannedValueCapture[]>[] = [];
 
   for (const capture of captures) {
@@ -59,14 +59,16 @@ export function groupJitPlannedCapturesByInstructionExpression(
 
 function planRootConsumerCaptures(
   uses: readonly JitPlannedValueUse[],
-  cachePlan: JitExpressionValueCachePlan
+  cachePlan: JitValueCachePlan
 ): readonly JitPlannedValueCapture[] {
   const captures: JitPlannedValueCapture[] = [];
 
-  for (let epoch = 0; epoch < cachePlan.selectedConsumerValuesByEpoch.length; epoch += 1) {
-    const epochUses = uses.filter((use) => use.placement.epoch === epoch);
+  for (let epoch = 0; epoch < cachePlan.consumers.length; epoch += 1) {
+    const epochUses = uses
+      .filter((use) => use.placement.epoch === epoch)
+      .flatMap((use) => cacheSelectionUsesForPlannedUse(use));
 
-    for (const selected of cachePlan.selectedConsumerValuesByEpoch[epoch] ?? []) {
+    for (const selected of cachePlan.consumers[epoch] ?? []) {
       if (
         simplifyJitValue(selected.value).kind === "produced" ||
         jitValueDependsOnProduced(selected.value)
@@ -74,7 +76,9 @@ function planRootConsumerCaptures(
         continue;
       }
 
-      const consumers = epochUses.filter((use) => jitValuesEqual(use.value, selected.value));
+      const consumers = epochUses
+        .filter((use) => jitValuesEqual(use.value, selected.value))
+        .map(plannedValueUseFromCacheSelectionUse);
       const capture = rootCaptureForConsumers(selected.value, consumers);
 
       if (capture !== undefined) {

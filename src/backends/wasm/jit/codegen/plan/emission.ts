@@ -9,7 +9,7 @@ import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/
 import type {
   JitProducedValue
 } from "#backends/wasm/jit/ir/values.js";
-import type { JitExpressionValueCachePlan } from "./value-cache.js";
+import type { JitValueCachePlan } from "./value-cache.js";
 import {
   buildJitInstructionValueTimeline,
   type JitInstructionValueTimeline
@@ -60,7 +60,7 @@ export type JitCodegenEmissionPlan = Readonly<{
   maxExitMaterializationIndex: number;
   plannedValueUses: readonly JitPlannedValueUse[];
   plannedValueCaptures: readonly JitPlannedValueCapture[];
-  valueCachePlan: JitExpressionValueCachePlan | undefined;
+  valueCachePlan: JitValueCachePlan;
 }>;
 
 export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCodegenEmissionPlan {

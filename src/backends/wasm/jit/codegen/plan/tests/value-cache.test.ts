@@ -10,6 +10,7 @@ import {
   jitProducedValue,
   startAddress,
   planValueCacheForTest,
+  materializationUse,
   registerStore,
   exitPoint,
   exitState,
@@ -65,8 +66,8 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
   strictEqual(emissionPlan.exitMaterializations, codegenPlan.exitMaterializations);
   strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
   strictEqual(instruction?.valueTimeline.expressionValuesByExpressionOpIndex.length, instruction?.expressionBlock.length);
-  strictEqual((emissionPlan.valueCachePlan?.selectedUseCounts.length ?? 0) > 0, true);
-  strictEqual((emissionPlan.valueCachePlan?.selectedConsumerValuesByEpoch.length ?? 0) > 0, true);
+  strictEqual((emissionPlan.valueCachePlan?.useCounts.length ?? 0) > 0, true);
+  strictEqual((emissionPlan.valueCachePlan?.consumers.length ?? 0) > 0, true);
 });
 
 test("buildJitCodegenEmissionPlan does not count overwritten planned register writes as exit-store uses", () => {
@@ -151,7 +152,7 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
 
-  strictEqual(emissionPlan.valueCachePlan, undefined);
+  deepStrictEqual(emissionPlan.valueCachePlan.useCounts, []);
 });
 
 test("buildJitCodegenEmissionPlan does not count same-instruction later register writes for earlier exits", () => {
@@ -221,7 +222,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
 
-  strictEqual(emissionPlan.valueCachePlan, undefined);
+  deepStrictEqual(emissionPlan.valueCachePlan.useCounts, []);
 });
 
 test("JIT value-cache planning retains produced values needed after their definition", () => {
@@ -252,15 +253,15 @@ test("JIT value-cache planning retains produced values needed after their defini
   const cachePlan = planValueCacheForTest({
     expressionBlock,
     producedValuesByVarId: new Map([[0, produced]]),
-    materializationJitValueUsesByExpressionIndex: new Map([[2, [produced]]])
+    materializationUses: new Map([[2, [materializationUse(produced)]]])
   });
 
-  deepStrictEqual(cachePlan?.instructionPlans[0]?.valueTimeline.valueRefValuesByExpressionOpIndex[0]?.get(0), produced);
-  deepStrictEqual(cachePlan?.instructionPlans[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(expressionBlock[0].value), produced);
-  deepStrictEqual(cachePlan?.captureValuesByEpoch[0], [produced]);
-  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[0], []);
-  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[1], [{ value: produced, useCount: 1 }]);
-  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 1 }]);
+  deepStrictEqual(cachePlan?.instructions[0]?.valueTimeline.valueRefValuesByExpressionOpIndex[0]?.get(0), produced);
+  deepStrictEqual(cachePlan?.instructions[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(expressionBlock[0].value), produced);
+  deepStrictEqual(cachePlan?.definitionCaptures[0], [produced]);
+  deepStrictEqual(cachePlan?.consumers[0], []);
+  deepStrictEqual(cachePlan?.consumers[1], [{ value: produced, useCount: 1 }]);
+  deepStrictEqual(cachePlan?.useCounts, [{ value: produced, useCount: 1 }]);
 });
 
 test("JIT value-cache planning resolves cold partial register reads with common value rules", () => {
@@ -294,8 +295,8 @@ test("JIT value-cache planning resolves cold partial register reads with common 
     b: c32(0x12)
   } as const;
 
-  deepStrictEqual(cachePlan?.instructionPlans[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(coldAl), expectedSource);
-  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: expectedExpression, useCount: 2 }]);
+  deepStrictEqual(cachePlan?.instructions[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(coldAl), expectedSource);
+  deepStrictEqual(cachePlan?.useCounts, [{ value: expectedExpression, useCount: 2 }]);
 });
 
 test("JIT value-cache planning handles current non-store consumers as normal expression uses", () => {
@@ -325,7 +326,7 @@ test("JIT value-cache planning handles current non-store consumers as normal exp
     expressionBlock
   });
 
-  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: expected, useCount: 5 }]);
+  deepStrictEqual(cachePlan?.useCounts, [{ value: expected, useCount: 5 }]);
 });
 
 test("JIT value-cache planning counts memory guard addresses as normal expression uses", () => {
@@ -346,7 +347,7 @@ test("JIT value-cache planning counts memory guard addresses as normal expressio
   ] as const;
   const cachePlan = planValueCacheForTest({ expressionBlock });
 
-  deepStrictEqual(cachePlan?.selectedUseCounts, [
+  deepStrictEqual(cachePlan?.useCounts, [
     { value: addValue(jitInputReg32Value("eax"), c32(1)), useCount: 2 }
   ]);
 });
@@ -370,7 +371,7 @@ test("JIT value-cache planning keeps repeated post-write expression uses point-s
     { op: "hostTrap", vector: expression }
   ] as const;
   const cachePlan = planValueCacheForTest({ expressionBlock });
-  const instructionPlan = cachePlan?.instructionPlans[0];
+  const instructionPlan = cachePlan?.instructions[0];
   const preWriteValue = addValue(jitInputReg32Value("eax"), c32(1));
   const postWriteValue = addValue(c32(5), c32(1));
 
@@ -382,10 +383,10 @@ test("JIT value-cache planning keeps repeated post-write expression uses point-s
     instructionPlan?.valueTimeline.expressionValuesByExpressionOpIndex[2]?.get(expression),
     postWriteValue
   );
-  deepStrictEqual(instructionPlan?.epochByExpressionOpIndex, [0, 0, 1, 1]);
-  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[0], []);
-  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[1], [{ value: postWriteValue, useCount: 2 }]);
-  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: postWriteValue, useCount: 2 }]);
+  deepStrictEqual(instructionPlan?.opEpochs, [0, 0, 1, 1]);
+  deepStrictEqual(cachePlan?.consumers[0], []);
+  deepStrictEqual(cachePlan?.consumers[1], [{ value: postWriteValue, useCount: 2 }]);
+  deepStrictEqual(cachePlan?.useCounts, [{ value: postWriteValue, useCount: 2 }]);
 });
 
 test("JIT value-cache planning prices emitted var reads as resolved JitValue graph uses", () => {
@@ -423,8 +424,8 @@ test("JIT value-cache planning prices emitted var reads as resolved JitValue gra
   } as const satisfies JitValue;
   const cachePlan = planValueCacheForTest({ expressionBlock });
 
-  deepStrictEqual(cachePlan?.selectedConsumerValuesByEpoch[0], [{ value: expected, useCount: 2 }]);
-  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: expected, useCount: 2 }]);
+  deepStrictEqual(cachePlan?.consumers[0], [{ value: expected, useCount: 2 }]);
+  deepStrictEqual(cachePlan?.useCounts, [{ value: expected, useCount: 2 }]);
 });
 
 test("JIT value-cache planning merges repeated produced-value retained uses", () => {
@@ -455,10 +456,13 @@ test("JIT value-cache planning merges repeated produced-value retained uses", ()
   const cachePlan = planValueCacheForTest({
     expressionBlock,
     producedValuesByVarId: new Map([[0, produced]]),
-    materializationJitValueUsesByExpressionIndex: new Map([[1, [produced]], [2, [produced]]])
+    materializationUses: new Map([
+      [1, [materializationUse(produced)]],
+      [2, [materializationUse(produced)]]
+    ])
   });
 
-  deepStrictEqual(cachePlan?.selectedUseCounts, [{ value: produced, useCount: 2 }]);
+  deepStrictEqual(cachePlan?.useCounts, [{ value: produced, useCount: 2 }]);
 });
 
 test("JIT value-cache planning does not treat logical register writes as produced consumers", () => {
@@ -482,7 +486,7 @@ test("JIT value-cache planning does not treat logical register writes as produce
     producedValuesByVarId: new Map([[0, produced]])
   });
 
-  strictEqual(cachePlan, undefined);
+  deepStrictEqual(cachePlan.useCounts, []);
 });
 
 test("JIT value-cache planning skips produced values with no emitted or materialized consumer", () => {
@@ -507,5 +511,5 @@ test("JIT value-cache planning skips produced values with no emitted or material
     producedValuesByVarId: new Map([[0, produced]])
   });
 
-  strictEqual(cachePlan, undefined);
+  deepStrictEqual(cachePlan.useCounts, []);
 });

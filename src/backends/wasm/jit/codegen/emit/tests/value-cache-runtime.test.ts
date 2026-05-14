@@ -9,7 +9,7 @@ import {
   wasmBodyOpcodes,
   createJitValueCacheRuntime,
   encodeJitIrBlock,
-  planJitExpressionValueCache,
+  planJitValueCache,
   buildJitInstructionValueTimeline,
   createJitValueState,
   emitPlannedExpression,
@@ -80,7 +80,7 @@ test("JIT value-cache runtime follows planned timeline expression positions", ()
     expressionBlock,
     entryValueState: createJitValueState().snapshot()
   });
-  const plan = planJitExpressionValueCache({
+  const plan = planJitValueCache({
     operands: [],
     valueTimeline: timeline
   }, expressionBlock);
@@ -130,8 +130,8 @@ test("JIT value-cache planning does not treat flags.set as a materialization con
     entryValueState: createJitValueState().snapshot()
   });
 
-  strictEqual(planJitExpressionValueCache({
+  deepStrictEqual(planJitValueCache({
     operands: [],
     valueTimeline
-  }, expressionBlock), undefined);
+  }, expressionBlock).useCounts, []);
 });

@@ -10,13 +10,12 @@ export type JitValueUseCount = Readonly<{
   useCount: number;
 }>;
 
-export type JitValueSelectionUse = Readonly<{
-  value: JitValue;
-  emittedCost: number;
-  children: readonly JitValueSelectionUse[];
+export type JitValueCacheSelectionPlan = Readonly<{
+  consumers: readonly (readonly JitValueUseCount[])[];
+  useCounts: readonly JitValueUseCount[];
 }>;
 
-export type FlatJitValueSelectionUse = Readonly<{
+export type JitValueSelectionUse = Readonly<{
   value: JitValue;
   emittedCost: number;
   ancestors: readonly JitValue[];
@@ -26,18 +25,30 @@ const localTeeCost = 1;
 const localSetCost = 1;
 const localGetCost = 1;
 
-export function selectConsumerValuesByEpoch(
-  usesByEpoch: readonly (readonly JitValueSelectionUse[])[]
+export function planJitValueCacheSelection(
+  epochUses: readonly (readonly JitValueSelectionUse[])[]
+): JitValueCacheSelectionPlan {
+  const consumers = selectConsumers(epochUses);
+  const useCounts = mergeSelectedUseCounts(consumers);
+
+  return {
+    consumers,
+    useCounts
+  };
+}
+
+function selectConsumers(
+  epochUses: readonly (readonly JitValueSelectionUse[])[]
 ): readonly (readonly JitValueUseCount[])[] {
-  const selectedByEpoch = usesByEpoch.map(selectEpochValues);
-  const globallySelected = selectEpochValues(usesByEpoch.flat());
+  const epochSelections = epochUses.map(selectEpochValues);
+  const globallySelected = selectEpochValues(epochUses.flat());
 
   if (globallySelected.length === 0) {
-    return selectedByEpoch;
+    return epochSelections;
   }
 
-  return selectedByEpoch.map((epochSelected, epochIndex) => {
-    const epochUses = flattenJitValueSelectionUses(usesByEpoch[epochIndex] ?? []);
+  return epochSelections.map((epochSelected, epochIndex) => {
+    const uses = epochUses[epochIndex] ?? [];
     const selected = [...epochSelected];
 
     for (const globalEntry of globallySelected) {
@@ -46,7 +57,7 @@ export function selectConsumerValuesByEpoch(
       }
 
       const forceSelected = shouldForceSelectValue(globalEntry.value);
-      const epochUseCount = epochUses.filter((use) =>
+      const epochUseCount = uses.filter((use) =>
         jitValuesEqual(use.value, globalEntry.value) &&
           (forceSelected || !hasSelectedAncestor(use, selected))
       ).length;
@@ -60,12 +71,12 @@ export function selectConsumerValuesByEpoch(
   });
 }
 
-export function mergeSelectedUseCounts(
-  selectedByEpoch: readonly (readonly JitValueUseCount[])[]
+function mergeSelectedUseCounts(
+  epochSelections: readonly (readonly JitValueUseCount[])[]
 ): readonly JitValueUseCount[] {
   const merged: JitValueUseCount[] = [];
 
-  for (const selected of selectedByEpoch) {
+  for (const selected of epochSelections) {
     for (const entry of selected) {
       const existingIndex = merged.findIndex((candidate) =>
         jitValuesEqual(candidate.value, entry.value)
@@ -87,22 +98,15 @@ export function mergeSelectedUseCounts(
   return merged;
 }
 
-export function flattenJitValueSelectionUses(
-  uses: readonly JitValueSelectionUse[]
-): readonly FlatJitValueSelectionUse[] {
-  return uses.flatMap((use) => flattenUse(use));
-}
-
 function selectEpochValues(
   uses: readonly JitValueSelectionUse[]
 ): readonly JitValueUseCount[] {
-  const flatUses = flattenJitValueSelectionUses(uses);
-  const candidateValues = [...uniqueValues(flatUses.map((use) => use.value))]
+  const candidateValues = [...uniqueValues(uses.map((use) => use.value))]
     .sort((a, b) => jitValueCost(b) - jitValueCost(a));
   const selected: JitValueUseCount[] = [];
 
   for (const value of candidateValues) {
-    const matchingUses = flatUses.filter((use) => jitValuesEqual(use.value, value));
+    const matchingUses = uses.filter((use) => jitValuesEqual(use.value, value));
     const forceSelected = shouldForceSelectValue(value);
     const usableUses = matchingUses.filter((use) =>
       forceSelected || !hasSelectedAncestor(use, selected)
@@ -121,7 +125,7 @@ function selectEpochValues(
 
 function shouldCacheValueForUses(
   value: JitValue,
-  uses: readonly FlatJitValueSelectionUse[]
+  uses: readonly JitValueSelectionUse[]
 ): boolean {
   if (uses.length === 0) {
     return false;
@@ -157,25 +161,8 @@ function shouldForceSelectValue(value: JitValue): boolean {
   return simplifyJitValue(value).kind === "produced";
 }
 
-function flattenUse(
-  use: JitValueSelectionUse,
-  ancestors: readonly JitValue[] = []
-): readonly FlatJitValueSelectionUse[] {
-  const current = {
-    value: use.value,
-    emittedCost: use.emittedCost,
-    ancestors
-  };
-  const childAncestors = [...ancestors, use.value];
-
-  return [
-    current,
-    ...use.children.flatMap((child) => flattenUse(child, childAncestors))
-  ];
-}
-
 function hasSelectedAncestor(
-  use: FlatJitValueSelectionUse,
+  use: JitValueSelectionUse,
   selected: readonly JitValueUseCount[]
 ): boolean {
   return use.ancestors.some((ancestor) =>

@@ -31,6 +31,7 @@ import {
   type JitValue,
   type JitIrBlock,
 } from "./plan-test-helpers.js";
+import type { JitPlannedValueUse } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 test("planJitCodegen feeds partial flag exit-store inputs through materialization needs", () => {
   const block: JitIrBlock = {
     instructions: [{
@@ -98,8 +99,8 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
   deepStrictEqual(codegenPlan.materializationNeeds, [
     exitStoreNeed(expectedFlagStore, exit, exitPointIndex)
   ]);
-  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
-  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+  deepStrictEqual(emissionPlan.valueCachePlan?.definitionCaptures[0], [produced]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.useCounts, [
     { value: produced, useCount: 2 }
   ]);
 });
@@ -161,10 +162,10 @@ test("buildJitCodegenEmissionPlan accounts repeated register and flag store depe
 
   strictEqual(hostTrapIndex !== -1, true);
   deepStrictEqual(
-    emissionPlan.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
+    plannedRootValues(emissionPlan.plannedValueUses, 0, hostTrapIndex, "exitStore"),
     [commonValue, commonValue]
   );
-  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+  deepStrictEqual(emissionPlan.valueCachePlan?.useCounts, [
     { value: commonValue, useCount: 2 }
   ]);
 });
@@ -181,7 +182,7 @@ test("buildJitCodegenEmissionPlan counts flag-producer inputs through the same m
     flagStore(flags)
   ]);
 
-  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+  deepStrictEqual(emissionPlan.valueCachePlan?.useCounts, [
     { value: commonValue, useCount: 3 }
   ]);
 });
@@ -287,8 +288,8 @@ test("planJitCodegen feeds produced exit-store values into materialization needs
   deepStrictEqual(codegenPlan.materializationNeeds, [
     exitStoreNeed(registerStore("eax", exitValue), exit, exitPointIndex)
   ]);
-  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
-  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+  deepStrictEqual(emissionPlan.valueCachePlan?.definitionCaptures[0], [produced]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.useCounts, [
     { value: produced, useCount: 1 }
   ]);
 });
@@ -447,10 +448,10 @@ test("buildJitCodegenEmissionPlan maps generic exit-store uses at source exit lo
 
   strictEqual(hostTrapIndex !== -1, true);
   deepStrictEqual(
-    emissionPlan.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
+    plannedRootValues(emissionPlan.plannedValueUses, 0, hostTrapIndex, "exitStore"),
     [produced]
   );
-  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.definitionCaptures[0], [produced]);
 });
 
 test("buildJitCodegenEmissionPlan walks condition and select dependencies from generic materialization uses", () => {
@@ -529,11 +530,26 @@ test("buildJitCodegenEmissionPlan walks condition and select dependencies from g
 
   strictEqual(hostTrapIndex !== -1, true);
   deepStrictEqual(
-    emissionPlan.valueCachePlan?.instructionPlans[0]?.materializationJitValueUsesByExpressionIndex?.get(hostTrapIndex),
+    plannedRootValues(emissionPlan.plannedValueUses, 0, hostTrapIndex, "exitStore"),
     [selectedFlags]
   );
-  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
-  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+  deepStrictEqual(emissionPlan.valueCachePlan?.definitionCaptures[0], [produced]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.useCounts, [
     { value: produced, useCount: 1 }
   ]);
 });
+
+function plannedRootValues(
+  uses: readonly JitPlannedValueUse[],
+  instructionIndex: number,
+  opIndex: number,
+  purpose: string
+): readonly JitValue[] {
+  return uses
+    .filter((use) =>
+      use.placement.instructionIndex === instructionIndex &&
+        use.placement.opIndex === opIndex &&
+        use.purpose === purpose
+    )
+    .map((use) => use.value);
+}

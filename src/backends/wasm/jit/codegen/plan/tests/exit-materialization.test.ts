@@ -601,8 +601,8 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
   deepStrictEqual(codegenPlan.materializationNeeds, [
     exitStoreNeed(expectedFlagStore, exit, exitPointIndex)
   ]);
-  deepStrictEqual(emissionPlan.valueCachePlan?.captureValuesByEpoch[0], [produced]);
-  deepStrictEqual(emissionPlan.valueCachePlan?.selectedUseCounts, [
+  deepStrictEqual(emissionPlan.valueCachePlan?.definitionCaptures[0], [produced]);
+  deepStrictEqual(emissionPlan.valueCachePlan?.useCounts, [
     { value: produced, useCount: 2 }
   ]);
 });

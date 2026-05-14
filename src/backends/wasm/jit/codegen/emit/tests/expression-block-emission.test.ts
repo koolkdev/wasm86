@@ -60,7 +60,7 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPathScopes: new Map(),
       producedValuesByVarId: new Map(),
-      plannedValueCapturesByExpressionIndex: new Map()
+      plannedValueCaptures: new Map()
     }],
     exitPoints: [{
       instructionIndex: 0,

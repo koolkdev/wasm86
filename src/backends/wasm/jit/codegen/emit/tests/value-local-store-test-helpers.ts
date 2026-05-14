@@ -8,7 +8,11 @@ import { ExitReason } from "#backends/wasm/exit.js";
 import { stateOffset } from "#backends/wasm/abi.js";
 import { ok, decodeBytes, startAddress } from "#x86/isa/decoder/tests/helpers.js";
 import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
-import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import type {
+  IrExprBlock,
+  IrStorageExpr,
+  IrValueExpr
+} from "#backends/wasm/codegen/expressions.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import {
   extractOnlyWasmFunctionBody,
@@ -32,12 +36,17 @@ import {
 import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { emitJitBlock } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
-import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+import {
+  planJitValueCache as planJitValueCacheFromPlannedUses,
+  type JitValueCacheInstruction
+} from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 import {
   branchValuePathScope,
   rootValuePathScope
 } from "#backends/wasm/jit/codegen/plan/control-paths.js";
+import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
 import type { JitExitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
@@ -73,7 +82,6 @@ export {
   buildJitIrBlock,
   encodeJitIrBlock,
   emitJitBlock,
-  planJitExpressionValueCache,
   buildJitInstructionValueTimeline,
   branchValuePathScope,
   rootValuePathScope,
@@ -121,6 +129,24 @@ export function highCostValue(): JitValue {
 
 export function useCounts(counts: readonly JitValueUseCount[]): readonly JitValueUseCount[] {
   return counts;
+}
+
+export function planJitValueCache(
+  instruction: JitValueCacheInstruction,
+  expressionBlock: IrExprBlock
+) {
+  const plannedValueUses = planJitValueUses([{
+    expressionBlock,
+    valueTimeline: instruction.valueTimeline,
+    expressionPathScopes: rootExpressionPathScopes(expressionBlock),
+    materializationUses: new Map()
+  }]);
+
+  return planJitValueCacheFromPlannedUses(
+    instruction,
+    expressionBlock,
+    plannedValueUses
+  );
 }
 
 export function cacheRuntimeForStore(store: JitValueLocalStore): JitValueCacheRuntime {

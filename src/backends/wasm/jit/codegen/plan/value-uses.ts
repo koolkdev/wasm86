@@ -5,8 +5,6 @@ import type {
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
 import {
-  jitValueDependencies,
-  jitValuesEqual,
   simplifyJitValue,
   type JitValue
 } from "#backends/wasm/jit/ir/values.js";
@@ -35,24 +33,24 @@ export type JitPlannedValueUse = Readonly<{
   purpose: string;
 }>;
 
-export type JitPlacedExpressionValueUse = Readonly<{
+export type JitValueUseRoot = Readonly<{
   value: JitValue;
   pathScope: JitValuePathScope;
   purpose: string;
 }>;
 
-export type JitPlannedValueUseInstructionInput = Readonly<{
+export type JitValueUseInstructionInput = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: JitInstructionValueTimeline;
   expressionPathScopes: JitControlPathScopesMap;
-  materializationValueUsesByExpressionIndex: ReadonlyMap<
+  materializationUses: ReadonlyMap<
     number,
-    readonly JitPlacedExpressionValueUse[]
+    readonly JitValueUseRoot[]
   >;
 }>;
 
-export function buildJitPlannedValueUsesForInstructions(
-  instructions: readonly JitPlannedValueUseInstructionInput[]
+export function planJitValueUses(
+  instructions: readonly JitValueUseInstructionInput[]
 ): readonly JitPlannedValueUse[] {
   const uses: JitPlannedValueUse[] = [];
   let currentEpoch = 0;
@@ -89,7 +87,7 @@ export function buildJitPlannedValueUsesForInstructions(
 }
 
 function plannedValueUsesForOp(
-  instruction: JitPlannedValueUseInstructionInput,
+  instruction: JitValueUseInstructionInput,
   op: IrExprOp,
   placement: JitValueUsePlacement
 ): readonly JitPlannedValueUse[] {
@@ -102,7 +100,7 @@ function plannedValueUsesForOp(
 }
 
 function expressionUsesForOp(
-  instruction: JitPlannedValueUseInstructionInput,
+  instruction: JitValueUseInstructionInput,
   op: IrExprOp,
   placement: JitValueUsePlacement,
   root: JitValuePathScope
@@ -153,7 +151,7 @@ function expressionUsesForOp(
 }
 
 function requiredBranchPathScopes(
-  instruction: JitPlannedValueUseInstructionInput,
+  instruction: JitValueUseInstructionInput,
   placement: JitValueUsePlacement
 ): JitBranchValuePathScopes {
   const pathScopes = instruction.expressionPathScopes.get(placement.opIndex);
@@ -168,7 +166,7 @@ function requiredBranchPathScopes(
 }
 
 function instructionHasLogicalWriteAt(
-  instruction: JitPlannedValueUseInstructionInput,
+  instruction: JitValueUseInstructionInput,
   opIndex: number
 ): boolean {
   return instruction.valueTimeline.logicalWrites.some((write) =>
@@ -177,12 +175,12 @@ function instructionHasLogicalWriteAt(
 }
 
 function materializationUsesForOp(
-  instruction: JitPlannedValueUseInstructionInput,
+  instruction: JitValueUseInstructionInput,
   placement: JitValueUsePlacement
 ): readonly JitPlannedValueUse[] {
-  return (instruction.materializationValueUsesByExpressionIndex.get(placement.opIndex) ?? [])
-    .flatMap((use) =>
-      valueUseTree(
+  return (instruction.materializationUses.get(placement.opIndex) ?? [])
+    .map((use) =>
+      plannedValueUse(
         use.value,
         placement,
         use.pathScope,
@@ -192,7 +190,7 @@ function materializationUsesForOp(
 }
 
 function valueUsesForStorage(
-  instruction: JitPlannedValueUseInstructionInput,
+  instruction: JitValueUseInstructionInput,
   storage: IrStorageExpr,
   placement: JitValueUsePlacement,
   pathScope: JitValuePathScope,
@@ -204,7 +202,7 @@ function valueUsesForStorage(
 }
 
 function valueUsesForValue(
-  instruction: JitPlannedValueUseInstructionInput,
+  instruction: JitValueUseInstructionInput,
   value: IrValueExpr,
   placement: JitValueUsePlacement,
   pathScope: JitValuePathScope,
@@ -214,11 +212,11 @@ function valueUsesForValue(
 
   return jitValue === undefined
     ? childValueUsesForValue(instruction, value, placement, pathScope, purpose)
-    : valueUseTree(jitValue, placement, pathScope, purpose);
+    : [plannedValueUse(jitValue, placement, pathScope, purpose)];
 }
 
 function childValueUsesForValue(
-  instruction: JitPlannedValueUseInstructionInput,
+  instruction: JitValueUseInstructionInput,
   value: IrValueExpr,
   placement: JitValueUsePlacement,
   pathScope: JitValuePathScope,
@@ -249,48 +247,24 @@ function childValueUsesForValue(
   }
 }
 
-function valueUseTree(
+function plannedValueUse(
   value: JitValue,
   placement: JitValueUsePlacement,
   pathScope: JitValuePathScope,
   purpose: string
-): readonly JitPlannedValueUse[] {
+): JitPlannedValueUse {
   const simplified = simplifyJitValue(value);
 
-  return uniquePlannedUses([
-    {
-      value: simplified,
-      placement,
-      pathScope,
-      purpose
-    },
-    ...jitValueDependencies(simplified).flatMap((dependency) =>
-      valueUseTree(dependency, placement, pathScope, purpose)
-    )
-  ]);
-}
-
-function uniquePlannedUses(uses: readonly JitPlannedValueUse[]): readonly JitPlannedValueUse[] {
-  const unique: JitPlannedValueUse[] = [];
-
-  for (const use of uses) {
-    if (!unique.some((entry) =>
-      jitValuesEqual(entry.value, use.value) &&
-        entry.placement.instructionIndex === use.placement.instructionIndex &&
-        entry.placement.opIndex === use.placement.opIndex &&
-        entry.placement.epoch === use.placement.epoch &&
-        entry.pathScope.id === use.pathScope.id &&
-        entry.purpose === use.purpose
-    )) {
-      unique.push(use);
-    }
-  }
-
-  return unique;
+  return {
+    value: simplified,
+    placement,
+    pathScope,
+    purpose
+  };
 }
 
 function jitValueForValue(
-  instruction: JitPlannedValueUseInstructionInput,
+  instruction: JitValueUseInstructionInput,
   value: IrValueExpr,
   opIndex: number
 ): JitValue | undefined {

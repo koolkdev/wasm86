@@ -5,8 +5,10 @@ import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { emitJitExpressionBlock } from "#backends/wasm/jit/codegen/emit/expression-block.js";
 import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
-import { planJitExpressionValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
+import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
 
@@ -20,10 +22,16 @@ export function emitPlannedExpression(
     expressionBlock: block,
     entryValueState: createJitValueState().snapshot()
   });
-  const cachePlan = planJitExpressionValueCache({
+  const plannedValueUses = planJitValueUses([{
+    expressionBlock: block,
+    valueTimeline,
+    expressionPathScopes: rootExpressionPathScopes(block),
+    materializationUses: new Map()
+  }]);
+  const cachePlan = planJitValueCache({
     operands: [],
     valueTimeline
-  }, block);
+  }, block, plannedValueUses);
   const valueCache = createJitValueCacheRuntime(body, cachePlan);
 
   valueCache?.beginInstruction(0);
@@ -32,7 +40,7 @@ export function emitPlannedExpression(
     instruction: {
       expressionBlock: block,
       valueTimeline,
-      plannedValueCapturesByExpressionIndex: new Map()
+      plannedValueCaptures: new Map()
     },
     valueCache,
     emitInput: (slot) => {

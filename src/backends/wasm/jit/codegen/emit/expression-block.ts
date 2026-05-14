@@ -38,7 +38,7 @@ import type {
   JitValueCacheRuntime
 } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import type {
-  JitPlannedValueCapturesByExpression
+  JitExpressionCaptureMap
 } from "#backends/wasm/jit/codegen/plan/value-captures.js";
 import {
   type JitArchitecturalSlot,
@@ -57,7 +57,7 @@ import {
 export type JitExpressionBlockInstruction = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: JitInstructionValueTimeline;
-  plannedValueCapturesByExpressionIndex: JitPlannedValueCapturesByExpression;
+  plannedValueCaptures: JitExpressionCaptureMap;
 }>;
 
 export type JitExpressionBlockEmitContext = Readonly<{
@@ -200,7 +200,7 @@ class JitExpressionBlockEmitter {
   }
 
   #capturePlannedValues(opIndex: number): void {
-    const captures = this.#context.instruction.plannedValueCapturesByExpressionIndex.get(opIndex) ?? [];
+    const captures = this.#context.instruction.plannedValueCaptures.get(opIndex) ?? [];
 
     for (const capture of captures) {
       if (capture.value.kind === "produced") {

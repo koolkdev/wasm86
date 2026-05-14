@@ -16,8 +16,13 @@ import {
   branchValuePathScope,
   rootValuePathScope
 } from "#backends/wasm/jit/codegen/plan/control-paths.js";
-import { planJitExpressionValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+import { planJitValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import {
+  planJitValueUses,
+  type JitValueUseRoot
+} from "#backends/wasm/jit/codegen/plan/value-uses.js";
+import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   JitCodegenPlan,
@@ -60,7 +65,7 @@ export {
   planJitCodegen,
   branchValuePathScope,
   rootValuePathScope,
-  planJitExpressionValueCacheForInstructions,
+  planJitValueCacheForInstructions,
   buildJitInstructionValueTimeline,
   jitExtractBits,
   jitFlagConditionValue,
@@ -96,25 +101,40 @@ export function planValueCacheForTest(input: Readonly<{
   operands?: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
   producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
-  materializationJitValueUsesByExpressionIndex?: ReadonlyMap<number, readonly JitValue[]>;
+  materializationUses?: ReadonlyMap<number, readonly JitValueUseRoot[]>;
 }>) {
   const operands = input.operands ?? [];
-
-  return planJitExpressionValueCacheForInstructions([{
+  const valueTimeline = buildJitInstructionValueTimeline({
     operands,
     expressionBlock: input.expressionBlock,
-    valueTimeline: buildJitInstructionValueTimeline({
-      operands,
-      expressionBlock: input.expressionBlock,
-      entryValueState: createJitValueState().snapshot(),
-      ...(input.producedValuesByVarId === undefined
-        ? {}
-        : { producedValuesByVarId: input.producedValuesByVarId })
-    }),
-    ...(input.materializationJitValueUsesByExpressionIndex === undefined
+    entryValueState: createJitValueState().snapshot(),
+    ...(input.producedValuesByVarId === undefined
       ? {}
-      : { materializationJitValueUsesByExpressionIndex: input.materializationJitValueUsesByExpressionIndex })
+      : { producedValuesByVarId: input.producedValuesByVarId })
+  });
+  const plannedValueUses = planJitValueUses([{
+    expressionBlock: input.expressionBlock,
+    valueTimeline,
+    expressionPathScopes: rootExpressionPathScopes(input.expressionBlock),
+    materializationUses: input.materializationUses ?? new Map()
   }]);
+
+  return planJitValueCacheForInstructions([{
+    operands,
+    expressionBlock: input.expressionBlock,
+    valueTimeline
+  }], plannedValueUses);
+}
+
+export function materializationUse(
+  value: JitValue,
+  purpose = "materialization"
+): JitValueUseRoot {
+  return {
+    value,
+    pathScope: rootValuePathScope(),
+    purpose
+  };
 }
 
 export function registerStore(reg: Reg32, value: JitValue = jitInputReg32Value(reg)): JitExitMaterializationStore {

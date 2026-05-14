@@ -1,5 +1,4 @@
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values.js";
 import type {
   IrExprBlock,
   IrExpressionSourceMap
@@ -11,18 +10,18 @@ import {
   placeJitValueUseRecordsOnExpressions
 } from "./expression-uses.js";
 import {
-  planJitExpressionValueCacheForInstructions,
-  type JitExpressionValueCachePlan
+  planJitValueCacheForInstructions,
+  type JitValueCachePlan
 } from "./value-cache.js";
 import {
-  buildJitPlannedValueUsesForInstructions,
+  planJitValueUses,
   type JitPlannedValueUse
 } from "./value-uses.js";
 import {
-  groupJitPlannedCapturesByInstructionExpression,
+  groupJitPlannedCaptures,
   planJitValueCaptures,
   type JitPlannedValueCapture,
-  type JitPlannedValueCapturesByExpression
+  type JitExpressionCaptureMap
 } from "./value-captures.js";
 
 export type JitValuePlanningInstructionInput = Readonly<{
@@ -36,14 +35,14 @@ export type JitValuePlanningInstructionInput = Readonly<{
 export type JitInstructionWithPlannedValues<
   TInstruction extends JitValuePlanningInstructionInput
 > = TInstruction & Readonly<{
-  plannedValueCapturesByExpressionIndex: JitPlannedValueCapturesByExpression;
+  plannedValueCaptures: JitExpressionCaptureMap;
 }>;
 
 export type JitPlannedValuesForEmission<
   TInstruction extends JitValuePlanningInstructionInput
 > = Readonly<{
   instructions: readonly JitInstructionWithPlannedValues<TInstruction>[];
-  valueCachePlan: JitExpressionValueCachePlan | undefined;
+  valueCachePlan: JitValueCachePlan;
   plannedValueUses: readonly JitPlannedValueUse[];
   plannedValueCaptures: readonly JitPlannedValueCapture[];
 }>;
@@ -52,40 +51,37 @@ export function planJitValuesForEmission<TInstruction extends JitValuePlanningIn
   instructions: readonly TInstruction[],
   materializationNeeds: readonly JitMaterializationNeed[]
 ): JitPlannedValuesForEmission<TInstruction> {
-  const materializationUsesByExpression = placeJitValueUseRecordsOnExpressions(
+  const materializationUses = placeJitValueUseRecordsOnExpressions(
     instructions,
     materializationNeeds
   );
-  const materializationValuesByExpression =
-    valueUseRecordsToValues(materializationUsesByExpression);
-  const valueCachePlan = planJitExpressionValueCacheForInstructions(
-    instructions.map((instruction, index) => ({
-      operands: instruction.operands,
-      expressionBlock: instruction.expressionBlock,
-      valueTimeline: instruction.valueTimeline,
-      materializationJitValueUsesByExpressionIndex:
-        materializationValuesByExpression[index] ?? new Map()
-    }))
-  );
-  const plannedValueUses = buildJitPlannedValueUsesForInstructions(
+  const plannedValueUses = planJitValueUses(
     instructions.map((instruction, index) => ({
       expressionBlock: instruction.expressionBlock,
       valueTimeline: instruction.valueTimeline,
       expressionPathScopes: instruction.expressionPathScopes,
-      materializationValueUsesByExpressionIndex:
-        materializationUsesByExpression[index] ?? new Map()
+      materializationUses:
+        materializationUses[index] ?? new Map()
     }))
   );
+  const cacheInputs = instructions.map((instruction) => ({
+    operands: instruction.operands,
+    expressionBlock: instruction.expressionBlock,
+    valueTimeline: instruction.valueTimeline
+  }));
+  const valueCachePlan = planJitValueCacheForInstructions(
+    cacheInputs,
+    plannedValueUses
+  );
   const plannedValueCaptures = planJitValueCaptures(plannedValueUses, valueCachePlan);
-  const plannedValueCapturesByInstructionExpression =
-    groupJitPlannedCapturesByInstructionExpression(
-      plannedValueCaptures,
-      instructions.length
-    );
+  const captureMaps = groupJitPlannedCaptures(
+    plannedValueCaptures,
+    instructions.length
+  );
   const plannedInstructions = instructions.map((instruction, index) => ({
     ...instruction,
-    plannedValueCapturesByExpressionIndex: requiredPlannedCapturesByExpression(
-      plannedValueCapturesByInstructionExpression,
+    plannedValueCaptures: requiredCaptureMap(
+      captureMaps,
       index
     )
   }));
@@ -98,29 +94,15 @@ export function planJitValuesForEmission<TInstruction extends JitValuePlanningIn
   };
 }
 
-function requiredPlannedCapturesByExpression(
-  plannedCapturesByInstructionExpression: readonly JitPlannedValueCapturesByExpression[],
+function requiredCaptureMap(
+  instructionCaptureMaps: readonly JitExpressionCaptureMap[],
   instructionIndex: number
-): JitPlannedValueCapturesByExpression {
-  const plannedCaptures = plannedCapturesByInstructionExpression[instructionIndex];
+): JitExpressionCaptureMap {
+  const plannedCaptures = instructionCaptureMaps[instructionIndex];
 
   if (plannedCaptures === undefined) {
     throw new Error(`missing planned JIT value captures for instruction ${instructionIndex}`);
   }
 
   return plannedCaptures;
-}
-
-function valueUseRecordsToValues(
-  recordsByExpression: readonly ReadonlyMap<number, readonly JitMaterializationNeed[]>[]
-): readonly ReadonlyMap<number, readonly JitValue[]>[] {
-  return recordsByExpression.map((records) => {
-    const values = new Map<number, JitValue[]>();
-
-    for (const [expressionIndex, uses] of records) {
-      values.set(expressionIndex, uses.map((use) => use.value));
-    }
-
-    return values;
-  });
 }
