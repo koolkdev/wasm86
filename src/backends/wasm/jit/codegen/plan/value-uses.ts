@@ -7,11 +7,10 @@ import type {
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
-  rootValuePathScope,
-  type JitControlPathScopesMap,
-  type JitBranchValuePathScopes,
-  type JitValuePathScope
-} from "./control-paths.js";
+  rootPath,
+  type Path,
+  type PathMap
+} from "#backends/wasm/jit/analysis/paths.js";
 import {
   opView,
   type Timeline
@@ -26,27 +25,27 @@ export type JitValueUsePlacement = Readonly<{
 export type JitPlannedValueUse = Readonly<{
   value: JitValue;
   placement: JitValueUsePlacement;
-  pathScope: JitValuePathScope;
+  path: Path;
   purpose: string;
 }>;
 
 export type JitValueUseRoot = Readonly<{
   value: JitValue;
-  pathScope: JitValuePathScope;
+  path: Path;
   purpose: string;
 }>;
 
 export type JitExpressionValueUseRoot = Readonly<{
   kind: "expression";
   value: IrValueExpr;
-  pathScope: JitValuePathScope;
+  path: Path;
   purpose: string;
 }>;
 
 export type JitJitValueUseRoot = Readonly<{
   kind: "jitValue";
   value: JitValue;
-  pathScope: JitValuePathScope;
+  path: Path;
   purpose: string;
 }>;
 
@@ -57,7 +56,7 @@ export type JitPlannedValueRoot =
 export type JitValueUseInstructionInput = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: Timeline;
-  expressionPathScopes: JitControlPathScopesMap;
+  expressionPaths: PathMap;
   materializationUses: ReadonlyMap<
     number,
     readonly JitValueUseRoot[]
@@ -118,13 +117,13 @@ export function plannedValueUsesForRoot(
 ): readonly JitPlannedValueUse[] {
   switch (root.kind) {
     case "jitValue":
-      return [plannedValueUse(root.value, placement, root.pathScope, root.purpose)];
+      return [plannedValueUse(root.value, placement, root.path, root.purpose)];
     case "expression":
       return valueUsesForValue(
         instruction,
         root.value,
         placement,
-        root.pathScope,
+        root.path,
         root.purpose
       );
   }
@@ -135,7 +134,7 @@ function plannedValueUsesForOp(
   op: IrExprOp,
   placement: JitValueUsePlacement
 ): readonly JitPlannedValueUse[] {
-  const root = rootValuePathScope();
+  const root = rootPath();
 
   return [
     ...expressionUsesForOp(instruction, op, placement, root),
@@ -147,7 +146,7 @@ function expressionUsesForOp(
   instruction: JitValueUseInstructionInput,
   op: IrExprOp,
   placement: JitValueUsePlacement,
-  root: JitValuePathScope
+  root: Path
 ): readonly JitPlannedValueUse[] {
   switch (op.op) {
     case "let32":
@@ -169,7 +168,7 @@ function expressionUsesForOp(
     case "jump":
       return valueUsesForValue(instruction, op.target, placement, root, "controlTarget");
     case "conditionalJump": {
-      const branchPathScopes = requiredBranchPathScopes(instruction, placement);
+      const branchPaths = instruction.expressionPaths.get(placement.opIndex)!;
 
       return [
         ...valueUsesForValue(instruction, op.condition, placement, root, "branchCondition"),
@@ -177,14 +176,14 @@ function expressionUsesForOp(
           instruction,
           op.taken,
           placement,
-          branchPathScopes.taken,
+          branchPaths.taken,
           "branchTarget"
         ),
         ...valueUsesForValue(
           instruction,
           op.notTaken,
           placement,
-          branchPathScopes.notTaken,
+          branchPaths.notTaken,
           "branchTarget"
         )
       ];
@@ -192,21 +191,6 @@ function expressionUsesForOp(
     case "hostTrap":
       return valueUsesForValue(instruction, op.vector, placement, root, "hostTrapVector");
   }
-}
-
-function requiredBranchPathScopes(
-  instruction: JitValueUseInstructionInput,
-  placement: JitValueUsePlacement
-): JitBranchValuePathScopes {
-  const pathScopes = instruction.expressionPathScopes.get(placement.opIndex);
-
-  if (pathScopes === undefined) {
-    throw new Error(
-      `missing JIT branch path scopes for expression op: ${placement.instructionIndex}:${placement.opIndex}`
-    );
-  }
-
-  return pathScopes;
 }
 
 function instructionHasLogicalWriteAt(
@@ -227,7 +211,7 @@ function materializationUsesForOp(
       plannedValueUse(
         use.value,
         placement,
-        use.pathScope,
+        use.path,
         use.purpose
       )
     );
@@ -237,11 +221,11 @@ function valueUsesForStorage(
   instruction: Pick<JitValueUseInstructionInput, "valueTimeline">,
   storage: IrStorageExpr,
   placement: JitValueUsePlacement,
-  pathScope: JitValuePathScope,
+  path: Path,
   purpose: string
 ): readonly JitPlannedValueUse[] {
   return storage.kind === "mem"
-    ? valueUsesForValue(instruction, storage.address, placement, pathScope, purpose)
+    ? valueUsesForValue(instruction, storage.address, placement, path, purpose)
     : [];
 }
 
@@ -249,38 +233,38 @@ function valueUsesForValue(
   instruction: Pick<JitValueUseInstructionInput, "valueTimeline">,
   value: IrValueExpr,
   placement: JitValueUsePlacement,
-  pathScope: JitValuePathScope,
+  path: Path,
   purpose: string
 ): readonly JitPlannedValueUse[] {
   const jitValue = jitValueForValue(instruction, value, placement.opIndex);
 
   return jitValue === undefined
-    ? childValueUsesForValue(instruction, value, placement, pathScope, purpose)
-    : [plannedValueUse(jitValue, placement, pathScope, purpose)];
+    ? childValueUsesForValue(instruction, value, placement, path, purpose)
+    : [plannedValueUse(jitValue, placement, path, purpose)];
 }
 
 function childValueUsesForValue(
   instruction: Pick<JitValueUseInstructionInput, "valueTimeline">,
   value: IrValueExpr,
   placement: JitValueUsePlacement,
-  pathScope: JitValuePathScope,
+  path: Path,
   purpose: string
 ): readonly JitPlannedValueUse[] {
   switch (value.kind) {
     case "source":
-      return valueUsesForStorage(instruction, value.source, placement, pathScope, purpose);
+      return valueUsesForStorage(instruction, value.source, placement, path, purpose);
     case "value.binary":
       return [
-        ...valueUsesForValue(instruction, value.a, placement, pathScope, purpose),
-        ...valueUsesForValue(instruction, value.b, placement, pathScope, purpose)
+        ...valueUsesForValue(instruction, value.a, placement, path, purpose),
+        ...valueUsesForValue(instruction, value.b, placement, path, purpose)
       ];
     case "value.unary":
-      return valueUsesForValue(instruction, value.value, placement, pathScope, purpose);
+      return valueUsesForValue(instruction, value.value, placement, path, purpose);
     case "value.select":
       return [
-        ...valueUsesForValue(instruction, value.condition, placement, pathScope, purpose),
-        ...valueUsesForValue(instruction, value.whenTrue, placement, pathScope, purpose),
-        ...valueUsesForValue(instruction, value.whenFalse, placement, pathScope, purpose)
+        ...valueUsesForValue(instruction, value.condition, placement, path, purpose),
+        ...valueUsesForValue(instruction, value.whenTrue, placement, path, purpose),
+        ...valueUsesForValue(instruction, value.whenFalse, placement, path, purpose)
       ];
     case "var":
     case "const":
@@ -294,7 +278,7 @@ function childValueUsesForValue(
 function plannedValueUse(
   value: JitValue,
   placement: JitValueUsePlacement,
-  pathScope: JitValuePathScope,
+  path: Path,
   purpose: string
 ): JitPlannedValueUse {
   const simplified = simplifyValue(value);
@@ -302,7 +286,7 @@ function plannedValueUse(
   return {
     value: simplified,
     placement,
-    pathScope,
+    path,
     purpose
   };
 }

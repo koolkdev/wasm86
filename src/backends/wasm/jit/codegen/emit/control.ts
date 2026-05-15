@@ -1,18 +1,21 @@
 import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import { i32, u32 } from "#x86/state/cpu-state.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import { emitWasmIrExitFromI32Stack } from "#backends/wasm/codegen/exit.js";
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
-import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
-import type { JitValuePathScope } from "#backends/wasm/jit/codegen/plan/control-paths.js";
+import type { PlannedExit } from "#backends/wasm/jit/codegen/plan/types.js";
+import type { Path } from "#backends/wasm/jit/analysis/paths.js";
+import type { JitPlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import type { JitInstructionEmitContext } from "./block-emitter.js";
 
-export function emitJitNext(context: JitInstructionEmitContext): void {
+export function emitJitNext(
+  context: JitInstructionEmitContext,
+  effect: Extract<JitPlannedEffect, { kind: "fallthrough" }>
+): void {
   const instruction = context.currentInstruction();
 
   if (instruction.nextMode === "exit") {
-    emitJitStaticControlTransfer(context, instruction.nextEip, ExitReason.FALLTHROUGH);
+    emitJitStaticControlTransfer(context, instruction.nextEip, effect.exit);
     return;
   }
 
@@ -26,9 +29,10 @@ export function emitJitNextEip(context: JitInstructionEmitContext): void {
 export function emitJitJump(
   context: JitInstructionEmitContext,
   target: IrValueExpr,
+  effect: Extract<JitPlannedEffect, { kind: "jump" }>,
   helpers: WasmIrEmitHelpers
 ): void {
-  if (emitJitControlTransfer(context, target, ExitReason.JUMP, helpers)) {
+  if (emitJitControlTransfer(context, target, effect.exit, helpers)) {
     return;
   }
 }
@@ -36,10 +40,9 @@ export function emitJitJump(
 export function emitJitControlExit(
   context: JitInstructionEmitContext,
   target: IrValueExpr,
-  exitReason: ExitReason,
+  exit: PlannedExit,
   helpers: WasmIrEmitHelpers,
-  extraDepth = 0,
-  exitPoint = context.currentExitPoint(exitReason)
+  extraDepth = 0
 ): void {
   const targetLocal = context.scratch.allocLocal(wasmValueType.i32);
 
@@ -47,11 +50,11 @@ export function emitJitControlExit(
     helpers.emitValue(target, { requestedWidth: 32 });
     context.body.localSet(targetLocal);
 
-    context.state.commitInstructionExit(exitPoint, () => {
+    context.state.commitInstructionExit(exit, () => {
       context.body.localGet(targetLocal);
     });
     context.body.localGet(targetLocal);
-    emitWasmIrExitFromI32Stack(context.body, context.exit, exitReason, extraDepth);
+    emitWasmIrExitFromI32Stack(context.body, context.exit, exit.reason, extraDepth);
   } finally {
     context.scratch.freeLocal(targetLocal);
   }
@@ -62,35 +65,32 @@ export function emitJitConditionalJump(
   condition: IrValueExpr,
   taken: IrValueExpr,
   notTaken: IrValueExpr,
+  effect: Extract<JitPlannedEffect, { kind: "branch" }>,
   helpers: WasmIrEmitHelpers
 ): void {
-  const takenExitPoint = context.currentExitPoint(ExitReason.JUMP);
-  const notTakenExitPoint = context.currentExitPoint(ExitReason.JUMP);
-
   helpers.emitValue(condition, { requestedWidth: 32 });
   context.body.ifBlock();
-  emitJitControlTransfer(context, taken, ExitReason.JUMP, helpers, 1, takenExitPoint);
+  emitJitControlTransfer(context, taken, effect.taken, helpers, 1);
   context.body.elseBlock();
-  emitJitControlTransfer(context, notTaken, ExitReason.JUMP, helpers, 1, notTakenExitPoint);
+  emitJitControlTransfer(context, notTaken, effect.notTaken, helpers, 1);
   context.body.endBlock();
 }
 
 export function emitJitHostTrap(
   context: JitInstructionEmitContext,
   vector: IrValueExpr,
+  effect: Extract<JitPlannedEffect, { kind: "hostTrap" }>,
   helpers: WasmIrEmitHelpers
 ): void {
   const vectorLocal = context.scratch.allocLocal(wasmValueType.i32);
 
   try {
-    const exitPoint = context.currentExitPoint(ExitReason.HOST_TRAP);
-
-    emitWithValuePathScope(context, exitPoint.pathScope, () => {
+    emitWithValuePath(context, effect.exit.path, () => {
       helpers.emitValue(vector, { requestedWidth: 32 });
       context.body.localSet(vectorLocal);
-      context.state.commitInstructionExit(exitPoint);
+      context.state.commitInstructionExit(effect.exit);
       context.body.localGet(vectorLocal);
-      emitWasmIrExitFromI32Stack(context.body, context.exit, ExitReason.HOST_TRAP);
+      emitWasmIrExitFromI32Stack(context.body, context.exit, effect.exit.reason);
     });
   } finally {
     context.scratch.freeLocal(vectorLocal);
@@ -100,59 +100,57 @@ export function emitJitHostTrap(
 function emitJitControlTransfer(
   context: JitInstructionEmitContext,
   target: IrValueExpr,
-  exitReason: ExitReasonValue,
+  exit: PlannedExit,
   helpers: WasmIrEmitHelpers,
-  extraDepth = 0,
-  exitPoint = context.currentExitPoint(exitReason)
+  extraDepth = 0
 ): boolean {
-  return emitWithValuePathScope(context, exitPoint.pathScope, () => {
+  return emitWithValuePath(context, exit.path, () => {
     const targetEip = staticControlTarget(context, target);
 
     if (targetEip === undefined) {
-      emitJitControlExit(context, target, exitReason, helpers, extraDepth, exitPoint);
+      emitJitControlExit(context, target, exit, helpers, extraDepth);
       return false;
     }
 
-    emitJitStaticControlTransfer(context, targetEip, exitReason, extraDepth, exitPoint);
+    emitJitStaticControlTransfer(context, targetEip, exit, extraDepth);
     return true;
   });
 }
 
-function emitWithValuePathScope<T>(
+function emitWithValuePath<T>(
   context: JitInstructionEmitContext,
-  pathScope: JitValuePathScope,
+  path: Path,
   emit: () => T
 ): T {
-  context.valueCache?.enterPathScope(pathScope);
+  context.valueCache?.enterPath(path);
 
   try {
     return emit();
   } finally {
-    context.valueCache?.leavePathScope();
+    context.valueCache?.leavePath();
   }
 }
 
 function emitJitStaticControlTransfer(
   context: JitInstructionEmitContext,
   targetEip: number,
-  exitReason: ExitReasonValue,
-  extraDepth = 0,
-  exitPoint = context.currentExitPoint(exitReason)
+  exit: PlannedExit,
+  extraDepth = 0
 ): void {
-  context.state.commitInstructionExit(exitPoint);
+  context.state.commitInstructionExit(exit);
 
-  if (emitJitLinkedStaticControlTransfer(context, targetEip, exitPoint)) {
+  if (emitJitLinkedStaticControlTransfer(context, targetEip, exit)) {
     return;
   }
 
   context.body.i32Const(i32(targetEip));
-  emitWasmIrExitFromI32Stack(context.body, context.exit, exitReason, extraDepth);
+  emitWasmIrExitFromI32Stack(context.body, context.exit, exit.reason, extraDepth);
 }
 
 function emitJitLinkedStaticControlTransfer(
   context: JitInstructionEmitContext,
   targetEip: number,
-  exitPoint: JitExitPoint
+  exit: PlannedExit
 ): boolean {
   const linking = context.linking;
 
@@ -163,13 +161,13 @@ function emitJitLinkedStaticControlTransfer(
   const directFunctionIndex = linking.functionIndexForStaticTarget?.(targetEip);
 
   if (directFunctionIndex !== undefined) {
-    emitJitLinkedControlTransferStateStores(context, exitPoint);
+    emitJitLinkedControlTransferStateStores(context, exit);
     context.body.returnCallFunction(directFunctionIndex);
     return true;
   }
 
   if (linking.tableIndex !== undefined && linking.slotForStaticTarget !== undefined) {
-    emitJitLinkedControlTransferStateStores(context, exitPoint);
+    emitJitLinkedControlTransferStateStores(context, exit);
     context.body
       .i32Const(linking.slotForStaticTarget(targetEip))
       .returnCallIndirect(linking.blockTypeIndex, linking.tableIndex);
@@ -181,10 +179,10 @@ function emitJitLinkedStaticControlTransfer(
 
 function emitJitLinkedControlTransferStateStores(
   context: JitInstructionEmitContext,
-  exitPoint: JitExitPoint
+  exit: PlannedExit
 ): void {
   context.exit.emitBeforeExit?.();
-  context.state.emitExitMaterializationStores(exitPoint.exitMaterializationIndex);
+  context.state.emitExitMaterializationStores(exit.exitMaterializationIndex);
 }
 
 function staticControlTarget(context: JitInstructionEmitContext, target: IrValueExpr): number | undefined {

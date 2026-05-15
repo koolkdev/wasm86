@@ -14,10 +14,10 @@ import {
 } from "#backends/wasm/jit/analysis/timeline.js";
 import type {
   JitCodegenPlan,
-  JitExitPoint,
   JitExitMaterializationPlan,
   JitMaterializationNeed,
-  JitInstructionState
+  JitInstructionState,
+  PlannedExit
 } from "./types.js";
 import {
   canInlineJitInstructionGet,
@@ -32,16 +32,13 @@ import type {
   JitPlannedValueCapture
 } from "./value-captures.js";
 import {
-  buildJitExpressionControlPathScopes,
-  type JitControlPathScopesMap
-} from "./control-paths.js";
+  buildExpressionPaths,
+  type PathMap
+} from "#backends/wasm/jit/analysis/paths.js";
 import {
   planJitEffectsForEmission,
   type JitPlannedEffect
 } from "./effect-plan.js";
-import {
-  indexJitEffects
-} from "#backends/wasm/jit/ir/effects.js";
 
 type JitPreparedCodegenInstruction = JitInstructionState & Pick<
   JitInstruction,
@@ -49,7 +46,7 @@ type JitPreparedCodegenInstruction = JitInstructionState & Pick<
 > & Readonly<{
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
-  expressionPathScopes: JitControlPathScopesMap;
+  expressionPaths: PathMap;
   producedByVar: ReadonlyMap<number, JitProducedValue>;
   valueTimeline: Timeline;
 }>;
@@ -61,7 +58,7 @@ export type JitCodegenInstructionPlan =
 
 export type JitCodegenEmissionPlan = Readonly<{
   instructions: readonly JitCodegenInstructionPlan[];
-  exitPoints: readonly JitExitPoint[];
+  exits: readonly PlannedExit[];
   materializationNeeds: readonly JitMaterializationNeed[];
   exitMaterializations: readonly JitExitMaterializationPlan[];
   maxExitMaterializationIndex: number;
@@ -83,7 +80,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
   const preparedInstructions = prepareJitCodegenInstructions(codegenPlan);
   const plannedEffects = planJitEffectsForEmission(
     preparedInstructions,
-    indexJitEffects(block),
+    codegenPlan.effects,
     codegenPlan.materializationNeeds
   );
   const plannedValues = planJitValuesForEmission(
@@ -93,7 +90,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
 
   return {
     instructions: plannedValues.instructions,
-    exitPoints: codegenPlan.exitPoints,
+    exits: codegenPlan.exits,
     materializationNeeds: codegenPlan.materializationNeeds,
     exitMaterializations: codegenPlan.exitMaterializations,
     maxExitMaterializationIndex: codegenPlan.maxExitMaterializationIndex,
@@ -135,8 +132,8 @@ function prepareJitCodegenInstruction(
     entry: state.initialValueState,
     producedByVar
   });
-  const expressionPathScopes = buildJitExpressionControlPathScopes(
-    state.controlPathScopes,
+  const expressionPaths = buildExpressionPaths(
+    state.paths,
     expressionPlan.sourceMap,
     instructionIndex
   );
@@ -149,7 +146,7 @@ function prepareJitCodegenInstruction(
     valueTimeline,
     expressionBlock: expressionPlan.expressionBlock,
     sourceExpressionMap: expressionPlan.sourceMap,
-    expressionPathScopes
+    expressionPaths
   };
 }
 

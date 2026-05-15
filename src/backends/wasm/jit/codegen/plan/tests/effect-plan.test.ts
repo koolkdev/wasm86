@@ -163,7 +163,7 @@ test("JIT effect plan attaches roots for ordered effects and exit stores", () =>
   deepStrictEqual(emissionPlan.plannedEffects.map((effect) => effect.kind), [
     "memoryGuard",
     "memoryStore",
-    "controlTransfer",
+    "branch",
     "hostTrap"
   ]);
   strictEqual(purposes.includes("memoryGuardAddress"), true);
@@ -222,14 +222,14 @@ test("JIT effect plan selects produced values only for later required roots", ()
   const produced = jitProducedValue("load#used-produced:0:0:0", "i32");
 
   deepStrictEqual(unusedPlan.plannedEffects.map((effect) => effect.kind), [
-    "producedValueDefinition"
+    "producedValue"
   ]);
   deepStrictEqual(unusedPlan.plannedValueUses, []);
   deepStrictEqual(unusedPlan.valueCachePlan.useCounts, []);
   deepStrictEqual(unusedPlan.valueCachePlan.definitionCaptures.flat(), []);
 
   deepStrictEqual(usedPlan.plannedEffects.map((effect) => effect.kind), [
-    "producedValueDefinition",
+    "producedValue",
     "hostTrap"
   ]);
   deepStrictEqual(usedPlan.valueCachePlan.useCounts, [

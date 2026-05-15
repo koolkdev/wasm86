@@ -4,14 +4,14 @@ import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressi
 import { i32 } from "#x86/state/cpu-state.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import type { IrMemoryAccessKind } from "#x86/ir/model/types.js";
-import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
+import { ExitReason } from "#backends/wasm/exit.js";
 import {
   emitWasmIrGuardGuestRange,
   emitWasmIrLoadGuestUnchecked,
   emitWasmIrStoreGuestUnchecked
 } from "#backends/wasm/codegen/memory.js";
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
-import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
+import type { PlannedExit } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   OpView,
@@ -116,6 +116,7 @@ export function emitJitMemoryGuard(
   address: IrValueExpr,
   byteLength: number,
   access: IrMemoryAccessKind,
+  faultExit: PlannedExit,
   helpers: WasmIrEmitHelpers
 ): void {
   const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
@@ -124,10 +125,8 @@ export function emitJitMemoryGuard(
     helpers.emitValue(address, { requestedWidth: 32 });
     context.body.localSet(addressLocal);
 
-    prepareMemoryFaultExit(
-      context,
-      access === "read" ? ExitReason.MEMORY_READ_FAULT : ExitReason.MEMORY_WRITE_FAULT
-    );
+    assertMemoryFaultExit(faultExit, access);
+    prepareMemoryFaultExit(context, faultExit);
 
     emitWasmIrGuardGuestRange(context, addressLocal, byteLength, access);
   } finally {
@@ -338,13 +337,21 @@ function assertAccessWidth(actual: OperandWidth, expected: OperandWidth, access:
 
 function prepareMemoryFaultExit(
   context: JitInstructionEmitContext,
-  exitReason: ExitReasonValue
-): JitExitPoint {
-  const exitPoint = context.currentExitPoint(exitReason);
+  exit: PlannedExit
+): PlannedExit {
+  context.state.prepareExitPoint(exit);
 
-  context.state.prepareExitPoint(exitPoint);
+  return exit;
+}
 
-  return exitPoint;
+function assertMemoryFaultExit(exit: PlannedExit, access: IrMemoryAccessKind): void {
+  const expected = access === "read"
+    ? ExitReason.MEMORY_READ_FAULT
+    : ExitReason.MEMORY_WRITE_FAULT;
+
+  if (exit.reason !== expected) {
+    throw new Error(`JIT memory ${access} guard received exit reason ${exit.reason}`);
+  }
 }
 
 function operandBinding(context: JitInstructionEmitContext, index: number): JitOperandBinding {

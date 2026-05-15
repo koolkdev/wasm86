@@ -9,18 +9,21 @@ import type {
 import { cleanValueWidth } from "#backends/wasm/codegen/value-width.js";
 import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
+import { ExitReason } from "#backends/wasm/exit.js";
 import { emitJitExpressionBlock } from "#backends/wasm/jit/codegen/emit/expression-block.js";
 import { emitJitGet } from "#backends/wasm/jit/codegen/emit/operands.js";
 import type { JitInstructionEmitContext } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import type { JitPlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
+import type { PlannedExit } from "#backends/wasm/jit/codegen/plan/types.js";
 import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import {
   buildTimeline,
   opView
 } from "#backends/wasm/jit/analysis/timeline.js";
 import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
-import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
+import { rootExpressionPaths } from "#backends/wasm/jit/codegen/tests/path-test-helpers.js";
+import { branchPath, rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
@@ -90,7 +93,7 @@ test("JIT expression-block emitter fails when a planned produced value has no de
     emitFoundationBlock([
       { op: "let32", dst: v(0), value: c32(1) }
     ], {
-      plannedEffects: [{ opIndex: 0, kind: "producedValueDefinition" }]
+      plannedEffects: [{ opIndex: 0, kind: "producedValue" }]
     });
   }, /JIT planned produced value has no timeline definition at expression op 0/);
 });
@@ -148,7 +151,7 @@ test("JIT expression-block emitter skips uncached produced definitions with no c
     }
   ], {
     producedByVar: new Map([[0, produced]]),
-    plannedEffects: [{ opIndex: 0, kind: "producedValueDefinition" }]
+    plannedEffects: [{ opIndex: 0, kind: "producedValue" }]
   });
 
   strictEqual(countOpcode(result.opcodes, wasmOpcode.drop), 0);
@@ -174,7 +177,7 @@ test("JIT expression-block emitter fails when a produced consumer has no capture
       cache: false,
       producedByVar: new Map([[0, produced]]),
       plannedEffects: [
-        { opIndex: 0, kind: "producedValueDefinition" },
+        { opIndex: 0, kind: "producedValue" },
         { opIndex: 1, kind: "hostTrap" }
       ]
     });
@@ -245,7 +248,7 @@ function emitFoundationBlock(
         planJitValueUses([{
           expressionBlock,
           valueTimeline,
-          expressionPathScopes: rootExpressionPathScopes(expressionBlock),
+          expressionPaths: rootExpressionPaths(expressionBlock),
           materializationUses: new Map()
         }])
       );
@@ -295,7 +298,7 @@ function emitFoundationBlock(
       helpers.emitValue(op.value);
       body.localSet(sinkLocal);
     },
-    emitMemoryGuard: (op, helpers) => {
+    emitMemoryGuard: (op, _effect, helpers) => {
       guardCalls += 1;
       helpers.emitValue(op.address);
       body.localSet(sinkLocal);
@@ -310,12 +313,12 @@ function emitFoundationBlock(
     emitNext: () => {
       nextCalls += 1;
     },
-    emitJump: (target, helpers) => {
+    emitJump: (target, _effect, helpers) => {
       jumpCalls += 1;
       helpers.emitValue(target);
       body.localSet(sinkLocal);
     },
-    emitConditionalJump: (condition, taken, notTaken, helpers) => {
+    emitConditionalJump: (condition, taken, notTaken, _effect, helpers) => {
       conditionalJumpCalls += 1;
       helpers.emitValue(condition);
       body.localSet(sinkLocal);
@@ -324,7 +327,7 @@ function emitFoundationBlock(
       helpers.emitValue(notTaken);
       body.localSet(sinkLocal);
     },
-    emitHostTrap: (vector, helpers) => {
+    emitHostTrap: (vector, _effect, helpers) => {
       helpers.emitValue(vector);
       body.localSet(sinkLocal);
     }
@@ -348,17 +351,42 @@ function buildPlannedEffects(
   expressionBlock: IrExprBlock,
   effects: readonly PlannedEffectInput[] | undefined
 ): readonly JitPlannedEffect[] {
-  return (effects ?? defaultPlannedEffects(expressionBlock)).map((effect) => ({
+  return (effects ?? defaultPlannedEffects(expressionBlock)).map((effect) =>
+    plannedEffect(effect)
+  );
+}
+
+function plannedEffect(input: PlannedEffectInput): JitPlannedEffect {
+  const base = {
     placement: {
       instructionIndex: 0,
-      opIndex: effect.opIndex,
+      opIndex: input.opIndex,
       epoch: 0
     },
-    sourceOpIndex: effect.opIndex,
-    kind: effect.kind,
-    exits: [],
+    sourceOpIndex: input.opIndex,
     valueRoots: []
-  }));
+  };
+
+  switch (input.kind) {
+    case "memoryGuard":
+      return { ...base, kind: input.kind, faultExit: fakeExit(input.opIndex, "memoryReadFault") };
+    case "jump":
+      return { ...base, kind: input.kind, exit: fakeExit(input.opIndex, "jump") };
+    case "branch":
+      return {
+        ...base,
+        kind: input.kind,
+        taken: fakeExit(input.opIndex, "branchTaken"),
+        notTaken: fakeExit(input.opIndex, "branchNotTaken")
+      };
+    case "hostTrap":
+      return { ...base, kind: input.kind, exit: fakeExit(input.opIndex, "hostTrap") };
+    case "fallthrough":
+      return { ...base, kind: input.kind, exit: fakeExit(input.opIndex, "fallthrough") };
+    case "memoryStore":
+    case "producedValue":
+      return { ...base, kind: input.kind };
+  }
 }
 
 function defaultPlannedEffects(expressionBlock: IrExprBlock): readonly PlannedEffectInput[] {
@@ -375,14 +403,16 @@ function defaultPlannedEffects(expressionBlock: IrExprBlock): readonly PlannedEf
         plannedEffects.push({ opIndex, kind: "memoryStore" });
         break;
       case "jump":
+        plannedEffects.push({ opIndex, kind: "jump" });
+        break;
       case "conditionalJump":
-        plannedEffects.push({ opIndex, kind: "controlTransfer" });
+        plannedEffects.push({ opIndex, kind: "branch" });
         break;
       case "hostTrap":
         plannedEffects.push({ opIndex, kind: "hostTrap" });
         break;
       case "next":
-        plannedEffects.push({ opIndex, kind: "exitEdge" });
+        plannedEffects.push({ opIndex, kind: "fallthrough" });
         break;
       case "let32":
       case "flags.set":
@@ -391,6 +421,46 @@ function defaultPlannedEffects(expressionBlock: IrExprBlock): readonly PlannedEf
   }
 
   return plannedEffects;
+}
+
+function fakeExit(opIndex: number, kind: PlannedExit["kind"]): PlannedExit {
+  const path = kind === "branchTaken"
+    ? branchPath(0, opIndex, "taken")
+    : kind === "branchNotTaken"
+      ? branchPath(0, opIndex, "notTaken")
+      : rootPath();
+
+  return {
+    id: `0:${opIndex}:${kind}`,
+    at: { instructionIndex: 0, opIndex },
+    kind,
+    reason: fakeExitReason(kind),
+    snapshot: {
+      instructionCountDelta: 0,
+      valueState: createJitValueState().snapshot()
+    },
+    visibleEip: { kind: "static", value: 0 },
+    payload: { kind: "static", value: 0 },
+    path,
+    exitMaterializationIndex: 0
+  };
+}
+
+function fakeExitReason(kind: PlannedExit["kind"]): ExitReason {
+  switch (kind) {
+    case "memoryReadFault":
+      return ExitReason.MEMORY_READ_FAULT;
+    case "memoryWriteFault":
+      return ExitReason.MEMORY_WRITE_FAULT;
+    case "fallthrough":
+      return ExitReason.FALLTHROUGH;
+    case "jump":
+    case "branchTaken":
+    case "branchNotTaken":
+      return ExitReason.JUMP;
+    case "hostTrap":
+      return ExitReason.HOST_TRAP;
+  }
 }
 
 function v(id: number): Extract<IrValueExpr, { kind: "var" }> {

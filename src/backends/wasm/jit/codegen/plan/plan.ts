@@ -4,12 +4,12 @@ import type { JitCodegenPlan } from "./types.js";
 
 export type {
   ExitMaterializationStore,
-  JitExitPoint,
-  JitExitStateSnapshot,
-  JitObservationPayload,
-  JitObservationPoint,
-  JitObservationRuntimeSource,
-  JitObservationValue,
+  Exit,
+  ExitPayload,
+  ExitRuntimeSource,
+  ExitSnapshot,
+  ExitValue,
+  PlannedExit,
   JitExitMaterializationPlan,
   JitExitMaterializationStore,
   JitExitStoreMaterializationNeed,
@@ -20,9 +20,9 @@ export type {
   JitCodegenPlan
 } from "./types.js";
 export type {
-  JitControlPathId,
-  JitValuePathScope
-} from "./control-paths.js";
+  PathId,
+  Path
+} from "#backends/wasm/jit/analysis/paths.js";
 export type {
   Timeline,
   TimelineInput,

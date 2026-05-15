@@ -4,7 +4,7 @@ import {
   buildTimeline,
   createJitValueState,
   jitProducedValue,
-  rootValuePathScope
+  rootPath
 } from "./plan-test-helpers.js";
 import { planJitValueCacheEpochs } from "#backends/wasm/jit/codegen/plan/value-cache-epochs.js";
 import type { JitPlannedValueUse } from "#backends/wasm/jit/codegen/plan/value-uses.js";
@@ -38,7 +38,7 @@ test("JIT value-cache epoch planning exposes instruction epochs and produced def
   const plannedUse: JitPlannedValueUse = {
     value: produced,
     placement: { instructionIndex: 0, opIndex: 2, epoch: 1 },
-    pathScope: rootValuePathScope(),
+    path: rootPath(),
     purpose: "expression"
   };
   const epoch = planJitValueCacheEpochs([{

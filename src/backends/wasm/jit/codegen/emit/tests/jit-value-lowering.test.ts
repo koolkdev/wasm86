@@ -328,8 +328,8 @@ test("emitJitValue lowers produced values through retained locals", () => {
       canEmitInline: () => true,
       beginInstruction: () => {},
       beginExpressionOp: () => {},
-      enterPathScope: () => {},
-      leavePathScope: () => {}
+      enterPath: () => {},
+      leavePath: () => {}
     },
     emitProduced: () => unexpectedEmitter()
   }, produced);
@@ -477,8 +477,8 @@ function passthroughValueCache(
   return {
     beginInstruction: () => {},
     beginExpressionOp: () => {},
-    enterPathScope: () => {},
-    leavePathScope: () => {},
+    enterPath: () => {},
+    leavePath: () => {},
     emitForUse: (_value, emitter) => ({ valueWidth: emitter() }),
     captureForReuse: () => undefined,
     canEmitInline: () => true,

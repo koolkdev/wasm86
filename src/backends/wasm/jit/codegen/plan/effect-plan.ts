@@ -4,25 +4,18 @@ import type {
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
-  jitOpEffectsAt,
-  type JitEffectIndex
-} from "#backends/wasm/jit/ir/effects.js";
-import type {
-  JitOpExitKind,
-  JitOrderedEffectKind
-} from "#backends/wasm/jit/ir/effect-primitives.js";
-import {
   jitEffectValueRootForMaterializationNeed,
   jitEffectValueRootsForOp,
   type JitEffectValueRoot
 } from "./effect-roots.js";
 import type {
-  JitControlPathScopesMap
-} from "./control-paths.js";
+  Effect
+} from "#backends/wasm/jit/analysis/effects.js";
+import type { PathMap } from "#backends/wasm/jit/analysis/paths.js";
 import {
   jitExpressionOpIndexesForSourceOp
 } from "./expression-uses.js";
-import type { JitMaterializationNeed } from "./types.js";
+import type { JitMaterializationNeed, PlannedExit } from "./types.js";
 import {
   jitExpressionOpEpochs
 } from "./value-cache-epochs.js";
@@ -45,16 +38,22 @@ export type JitEffectPlacement = JitValueUsePlacement;
 export type JitPlannedEffect = Readonly<{
   placement: JitEffectPlacement;
   sourceOpIndex: number;
-  kind: JitOrderedEffectKind;
-  exits: readonly JitOpExitKind[];
   valueRoots: readonly JitEffectValueRoot[];
-}>;
+}> & (
+  | Readonly<{ kind: "memoryGuard"; faultExit: PlannedExit }>
+  | Readonly<{ kind: "memoryStore" }>
+  | Readonly<{ kind: "producedValue" }>
+  | Readonly<{ kind: "jump"; exit: PlannedExit }>
+  | Readonly<{ kind: "branch"; taken: PlannedExit; notTaken: PlannedExit }>
+  | Readonly<{ kind: "hostTrap"; exit: PlannedExit }>
+  | Readonly<{ kind: "fallthrough"; exit: PlannedExit }>
+);
 
 export type JitEffectPlanInstructionInput = Readonly<{
   ir: JitInstruction["ir"];
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
-  expressionPathScopes: JitControlPathScopesMap;
+  expressionPaths: PathMap;
   valueTimeline: Timeline;
 }>;
 
@@ -65,9 +64,10 @@ export type JitEffectPlan = Readonly<{
 
 export function planJitEffectsForEmission(
   instructions: readonly JitEffectPlanInstructionInput[],
-  effects: JitEffectIndex,
+  effects: readonly Effect<PlannedExit>[],
   materializationNeeds: readonly JitMaterializationNeed[]
 ): JitEffectPlan {
+  const effectsMap = groupEffectsMap(effects);
   const materializationNeedsBySourceOp = groupMaterializationNeeds(materializationNeeds);
   const plannedEffects: JitPlannedEffect[] = [];
   const plannedValueUses: JitPlannedValueUse[] = [];
@@ -80,7 +80,7 @@ export function planJitEffectsForEmission(
     for (let sourceOpIndex = 0; sourceOpIndex < instruction.ir.length; sourceOpIndex += 1) {
       const effect = plannedEffectForSourceOp(
         instruction,
-        effects,
+        effectsMap,
         materializationNeedsBySourceOp,
         instructionIndex,
         sourceOpIndex,
@@ -110,22 +110,24 @@ export function planJitEffectsForEmission(
 
 function plannedEffectForSourceOp(
   instruction: JitEffectPlanInstructionInput,
-  effects: JitEffectIndex,
+  effectsMap: JitEffectsMap,
   materializationNeedsBySourceOp: JitMaterializationNeedsBySourceOp,
   instructionIndex: number,
   sourceOpIndex: number,
   opEpochs: readonly number[]
 ): JitPlannedEffect | undefined {
-  const opEffects = jitOpEffectsAt(effects, instructionIndex, sourceOpIndex);
+  const effect = effectsMap
+    .get(instructionIndex)
+    ?.get(sourceOpIndex);
   const materializationRoots = materializationNeedsBySourceOp
     .get(instructionIndex)
     ?.get(sourceOpIndex) ?? [];
 
-  if (opEffects.orderedEffectKind === undefined && materializationRoots.length === 0) {
+  if (effect === undefined && materializationRoots.length === 0) {
     return undefined;
   }
 
-  if (opEffects.orderedEffectKind === undefined) {
+  if (effect === undefined) {
     throw new Error(
       `JIT materialization need is attached to a non-effect op: ${instructionIndex}:${sourceOpIndex}`
     );
@@ -143,15 +145,14 @@ function plannedEffectForSourceOp(
   };
 
   return {
+    ...effect,
     placement,
     sourceOpIndex,
-    kind: opEffects.orderedEffectKind,
-    exits: opEffects.exits,
     valueRoots: [
       ...jitEffectValueRootsForOp(
         instruction,
         expressionOp,
-        opEffects.orderedEffectKind,
+        effect.kind,
         placement
       ),
       ...materializationRoots.map(jitEffectValueRootForMaterializationNeed)
@@ -184,6 +185,32 @@ type JitMaterializationNeedsBySourceOp = ReadonlyMap<
   number,
   ReadonlyMap<number, readonly JitMaterializationNeed[]>
 >;
+
+type JitEffectsMap = ReadonlyMap<
+  number,
+  ReadonlyMap<number, Effect<PlannedExit>>
+>;
+
+function groupEffectsMap(
+  effects: readonly Effect<PlannedExit>[]
+): JitEffectsMap {
+  const byInstruction = new Map<number, Map<number, Effect<PlannedExit>>>();
+
+  for (const effect of effects) {
+    const byOp = byInstruction.get(effect.at.instructionIndex) ?? new Map();
+
+    if (byOp.has(effect.at.opIndex)) {
+      throw new Error(
+        `multiple JIT effects for source op: ${effect.at.instructionIndex}:${effect.at.opIndex}`
+      );
+    }
+
+    byOp.set(effect.at.opIndex, effect);
+    byInstruction.set(effect.at.instructionIndex, byOp);
+  }
+
+  return byInstruction;
+}
 
 function groupMaterializationNeeds(
   needs: readonly JitMaterializationNeed[]

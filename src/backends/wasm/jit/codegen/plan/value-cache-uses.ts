@@ -39,7 +39,7 @@ export function plannedValueUseFromCacheSelectionUse(
   return {
     value: use.value,
     placement: use.placement,
-    pathScope: use.pathScope,
+    path: use.path,
     purpose: use.purpose
   };
 }

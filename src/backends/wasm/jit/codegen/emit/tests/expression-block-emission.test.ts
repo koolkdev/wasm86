@@ -27,7 +27,7 @@ import {
 import { wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
-import { rootValuePathScope } from "#backends/wasm/jit/codegen/plan/control-paths.js";
+import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 
@@ -48,7 +48,18 @@ test("JIT production emission consumes planned effects from instruction plans", 
     ir: expressionBlock
   } as const;
   const initialState = exitState(0);
-  const observedState = exitState(1);
+  const snapshot = exitState(1);
+  const hostTrapExit = {
+    id: "0:0:hostTrap",
+    at: { instructionIndex: 0, opIndex: 0 },
+    kind: "hostTrap",
+    snapshot,
+    visibleEip: { kind: "static", value: instruction.nextEip },
+    reason: ExitReason.HOST_TRAP,
+    payload: { kind: "runtime", source: "hostTrapVector" },
+    path: rootPath(),
+    exitMaterializationIndex: 0
+  } as const;
 
   emitJitBlock({
     body,
@@ -62,8 +73,8 @@ test("JIT production emission consumes planned effects from instruction plans", 
       nextMode: instruction.nextMode,
       instructionCountDelta: initialState.instructionCountDelta,
       initialValueState: initialState.valueState,
-      controlPathScopes: new Map(),
-      exitPointCount: 1,
+      paths: new Map(),
+      exitCount: 1,
       operands: instruction.operands,
       expressionBlock,
       valueTimeline: buildTimeline({
@@ -72,7 +83,7 @@ test("JIT production emission consumes planned effects from instruction plans", 
         entry: initialState.valueState
       }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
-      expressionPathScopes: new Map(),
+      expressionPaths: new Map(),
       producedByVar: new Map(),
       plannedValueCaptures: new Map()
     }],
@@ -84,18 +95,8 @@ test("JIT production emission consumes planned effects from instruction plans", 
       },
       sourceOpIndex: 0,
       kind: "hostTrap",
-      exits: ["hostTrap"],
+      exit: hostTrapExit,
       valueRoots: []
-    }],
-    exitPoints: [{
-      instructionIndex: 0,
-      opIndex: 0,
-      observedState,
-      visibleEip: { kind: "static", value: instruction.nextEip },
-      exitReason: ExitReason.HOST_TRAP,
-      payload: { kind: "runtime", source: "hostTrapVector" },
-      pathScope: rootValuePathScope(),
-      exitMaterializationIndex: 0
     }]
   });
   scratch.assertClear();
@@ -148,8 +149,8 @@ test("JIT production emission does not walk unscheduled expression effects", () 
       nextMode: "continue",
       instructionCountDelta: initialState.instructionCountDelta,
       initialValueState: initialState.valueState,
-      controlPathScopes: new Map(),
-      exitPointCount: 0,
+      paths: new Map(),
+      exitCount: 0,
       operands: [],
       expressionBlock,
       valueTimeline: buildTimeline({
@@ -158,12 +159,11 @@ test("JIT production emission does not walk unscheduled expression effects", () 
         entry: initialState.valueState
       }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
-      expressionPathScopes: new Map(),
+      expressionPaths: new Map(),
       producedByVar: new Map(),
       plannedValueCaptures: new Map()
     }],
-    plannedEffects: [],
-    exitPoints: []
+    plannedEffects: []
   });
   scratch.assertClear();
   body.end();
@@ -188,8 +188,8 @@ test("JIT planned emission keeps a guard but skips an unused produced load", () 
 
   deepStrictEqual(result.emissionPlan.plannedEffects.map((effect) => effect.kind), [
     "memoryGuard",
-    "producedValueDefinition",
-    "exitEdge"
+    "producedValue",
+    "fallthrough"
   ]);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.memorySize), 2);
   strictEqual(guestLoads(result).length, 0);
@@ -217,9 +217,9 @@ test("JIT planned emission keeps a dead produced-load guard before a later used 
 
   deepStrictEqual(result.emissionPlan.plannedEffects.map((effect) => effect.kind), [
     "memoryGuard",
-    "producedValueDefinition",
+    "producedValue",
     "memoryGuard",
-    "producedValueDefinition",
+    "producedValue",
     "hostTrap"
   ]);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.memorySize), 4);
@@ -350,7 +350,7 @@ test("JIT codegen leaves dead pure SSA unpruned and emits no Wasm for it", () =>
     "next"
   ]);
   deepStrictEqual(emissionPlan.plannedEffects.map((effect) => effect.kind), [
-    "exitEdge"
+    "fallthrough"
   ]);
   deepStrictEqual(emissionPlan.plannedValueUses, []);
   deepStrictEqual(emissionPlan.valueCachePlan.useCounts, []);
@@ -415,7 +415,6 @@ function emitPlannedJitBlock(block: JitBlock) {
     state,
     exit,
     instructions: emissionPlan.instructions,
-    exitPoints: emissionPlan.exitPoints,
     plannedEffects: emissionPlan.plannedEffects,
     valueCache
   });

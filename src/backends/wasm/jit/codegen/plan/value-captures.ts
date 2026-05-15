@@ -8,10 +8,10 @@ import {
   plannedValueUseFromCacheSelectionUse
 } from "./value-cache-uses.js";
 import {
-  jitValuePathScopesEqual,
-  rootValuePathScope,
-  type JitValuePathScope
-} from "./control-paths.js";
+  pathsEqual,
+  rootPath,
+  type Path
+} from "#backends/wasm/jit/analysis/paths.js";
 import type {
   JitPlannedValueUse,
   JitValueUsePlacement
@@ -20,7 +20,7 @@ import type {
 export type JitPlannedValueCapture = Readonly<{
   value: JitValue;
   placement: JitValueUsePlacement;
-  availabilityScope: JitValuePathScope;
+  availabilityPath: Path;
   consumers: readonly JitPlannedValueUse[];
 }>;
 
@@ -113,7 +113,7 @@ function rootCaptureForConsumers(
     return undefined;
   }
 
-  const pathIds = new Set(consumers.map((consumer) => consumer.pathScope.id));
+  const pathIds = new Set(consumers.map((consumer) => consumer.path.id));
 
   if (pathIds.size < 2) {
     return undefined;
@@ -122,7 +122,7 @@ function rootCaptureForConsumers(
   return {
     value,
     placement,
-    availabilityScope: rootValuePathScope(),
+    availabilityPath: rootPath(),
     consumers
   };
 }
@@ -136,7 +136,7 @@ function uniqueCaptures(
     if (!unique.some((entry) =>
       valuesEqual(entry.value, capture.value) &&
         placementsEqual(entry.placement, capture.placement) &&
-        jitValuePathScopesEqual(entry.availabilityScope, capture.availabilityScope)
+        pathsEqual(entry.availabilityPath, capture.availabilityPath)
     )) {
       unique.push(capture);
     }

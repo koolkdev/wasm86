@@ -47,11 +47,11 @@ import {
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 import {
-  branchValuePathScope,
-  rootValuePathScope
-} from "#backends/wasm/jit/codegen/plan/control-paths.js";
-import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
-import type { JitExitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
+  branchPath,
+  rootPath
+} from "#backends/wasm/jit/analysis/paths.js";
+import { rootExpressionPaths } from "#backends/wasm/jit/codegen/tests/path-test-helpers.js";
+import type { ExitSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
 import { createJitState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
@@ -87,8 +87,8 @@ export {
   encodeJitBlock,
   emitJitBlock,
   buildTimeline,
-  branchValuePathScope,
-  rootValuePathScope,
+  branchPath,
+  rootPath,
   createJitState,
   createJitValueState
 };
@@ -100,7 +100,7 @@ export type {
   JitValueCacheRuntime,
   JitValueUseCount,
   JitBlock,
-  JitExitStateSnapshot,
+  ExitSnapshot,
   Reg32
 };
 
@@ -141,7 +141,7 @@ export function planJitValueCache(
   const plannedValueUses = planJitValueUses([{
     expressionBlock,
     valueTimeline: instruction.valueTimeline,
-    expressionPathScopes: rootExpressionPathScopes(expressionBlock),
+    expressionPaths: rootExpressionPaths(expressionBlock),
     materializationUses: new Map()
   }]);
 
@@ -156,8 +156,8 @@ export function cacheRuntimeForStore(store: JitValueLocalStore): JitValueCacheRu
   return {
     beginInstruction: () => {},
     beginExpressionOp: () => {},
-    enterPathScope: (pathScope) => store.enterPathScope(pathScope),
-    leavePathScope: () => store.leavePathScope(),
+    enterPath: (path) => store.enterPath(path),
+    leavePath: () => store.leavePath(),
     emitForUse: (value, emitter) => store.emitForUseWithLocal(value, emitter),
     captureForReuse: (value, emitter) => store.captureForReuse(value, emitter),
     canEmitInline: () => true
@@ -272,7 +272,7 @@ export function countOpcode(opcodes: readonly number[], opcode: number): number 
 
 export function exitState(
   instructionCountDelta: number
-): JitExitStateSnapshot {
+): ExitSnapshot {
   return {
     instructionCountDelta,
     valueState: createJitValueState().snapshot()

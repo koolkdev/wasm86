@@ -1,6 +1,5 @@
 import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitModuleLinkTable } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
 import { cleanValueWidth } from "#backends/wasm/codegen/value-width.js";
 import { emitJitExpressionBlock } from "./expression-block.js";
@@ -16,7 +15,6 @@ import {
   emitJitGet,
   emitJitMemoryGuard
 } from "./operands.js";
-import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitExitTarget, JitState } from "#backends/wasm/jit/state/state.js";
 import {
   type JitValueCacheRuntime
@@ -46,7 +44,6 @@ export type JitBlockEmitContext = Readonly<{
   state: JitState;
   exit: JitExitTarget;
   instructions: readonly JitInstructionContext[];
-  exitPoints: readonly JitExitPoint[];
   plannedEffects: readonly JitPlannedEffect[];
   valueCache?: JitValueCacheRuntime | undefined;
   linking?: JitLinkEmitContext | undefined;
@@ -60,7 +57,6 @@ export type JitInstructionEmitContext = Readonly<{
   selectInstruction(index: number): void;
   currentInstruction(): JitInstructionContext;
   beginExpressionOp(opIndex: number): OpView;
-  currentExitPoint(exitReason: ExitReasonValue): JitExitPoint;
   advanceInstruction(): void;
   valueCache?: JitValueCacheRuntime | undefined;
   linking?: JitLinkEmitContext | undefined;
@@ -83,8 +79,6 @@ export function emitJitBlock(context: JitBlockEmitContext): void {
 
 function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstructionEmitContext {
   let instructionIndex = 0;
-  const exitPointsByKey = indexExitPoints(context.exitPoints);
-  const exitPointUseCounts = new Map<string, number>();
 
   return {
     body: context.body,
@@ -121,19 +115,6 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
       context.valueCache?.beginExpressionOp(opIndex);
       return timelineOp;
     },
-    currentExitPoint: (exitReason) => {
-      const key = exitPointKey(instructionIndex, exitReason);
-      const exitPoints = exitPointsByKey.get(key) ?? [];
-      const useCount = exitPointUseCounts.get(key) ?? 0;
-      const exitPoint = exitPoints[useCount];
-
-      if (exitPoint === undefined) {
-        throw new Error(`missing JIT exit point for instruction ${instructionIndex} reason ${exitReason}`);
-      }
-
-      exitPointUseCounts.set(key, useCount + 1);
-      return exitPoint;
-    },
     advanceInstruction: () => {
       instructionIndex += 1;
     }
@@ -169,23 +150,23 @@ function emitJitInstruction(
       emitJitGet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), source, accessWidth, helpers, options),
     emitSet: (op, helpers) =>
       emitJitSet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), op.target, op.value, op.accessWidth, helpers),
-    emitMemoryGuard: (op, helpers) =>
-      emitJitMemoryGuard(jitContext, op.address, op.byteLength, op.access, helpers),
+    emitMemoryGuard: (op, effect, helpers) =>
+      emitJitMemoryGuard(jitContext, op.address, op.byteLength, op.access, effect.faultExit, helpers),
     emitAddress: (source, helpers) => emitJitAddress(
       jitContext,
       requiredCurrentTimelineOp(currentTimelineOp),
       source,
       helpers
     ),
-    emitNext: () => emitJitNext(jitContext),
+    emitNext: (effect) => emitJitNext(jitContext, effect),
     emitNextEip: () => {
       emitJitNextEip(jitContext);
       return cleanValueWidth(32);
     },
-    emitJump: (target, helpers) => emitJitJump(jitContext, target, helpers),
-    emitConditionalJump: (condition, taken, notTaken, helpers) =>
-      emitJitConditionalJump(jitContext, condition, taken, notTaken, helpers),
-    emitHostTrap: (vector, helpers) => emitJitHostTrap(jitContext, vector, helpers)
+    emitJump: (target, effect, helpers) => emitJitJump(jitContext, target, effect, helpers),
+    emitConditionalJump: (condition, taken, notTaken, effect, helpers) =>
+      emitJitConditionalJump(jitContext, condition, taken, notTaken, effect, helpers),
+    emitHostTrap: (vector, effect, helpers) => emitJitHostTrap(jitContext, vector, effect, helpers)
   });
 }
 
@@ -203,27 +184,6 @@ function beginInstruction(
   instruction: JitInstructionContext
 ): void {
   context.state.beginInstruction(exit, instruction.instructionCountDelta, instruction.eip);
-}
-
-function indexExitPoints(exitPoints: readonly JitExitPoint[]): ReadonlyMap<string, readonly JitExitPoint[]> {
-  const exitPointsByKey = new Map<string, JitExitPoint[]>();
-
-  for (const exitPoint of exitPoints) {
-    const key = exitPointKey(exitPoint.instructionIndex, exitPoint.exitReason);
-    const exitPointsForInstruction = exitPointsByKey.get(key);
-
-    if (exitPointsForInstruction === undefined) {
-      exitPointsByKey.set(key, [exitPoint]);
-    } else {
-      exitPointsForInstruction.push(exitPoint);
-    }
-  }
-
-  return exitPointsByKey;
-}
-
-function exitPointKey(instructionIndex: number, exitReason: ExitReasonValue): string {
-  return `${instructionIndex}:${exitReason}`;
 }
 
 function groupPlannedEffectsByInstruction(

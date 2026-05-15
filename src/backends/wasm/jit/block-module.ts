@@ -120,7 +120,6 @@ function encodeJitBlockFunctionBody(
     state,
     exit,
     instructions: emissionPlan.instructions,
-    exitPoints: emissionPlan.exitPoints,
     plannedEffects: emissionPlan.plannedEffects,
     valueCache,
     linking

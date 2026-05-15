@@ -3,13 +3,13 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitOrderedEffectKind } from "#backends/wasm/jit/ir/effect-primitives.js";
+import type { EffectKind } from "#backends/wasm/jit/analysis/effect-classifier.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
-  rootValuePathScope,
-  type JitControlPathScopesMap,
-  type JitValuePathScope
-} from "./control-paths.js";
+  rootPath,
+  type Path,
+  type PathMap
+} from "#backends/wasm/jit/analysis/paths.js";
 import type { JitMaterializationNeed } from "./types.js";
 import {
   opView,
@@ -45,17 +45,17 @@ export type JitEffectValueRoot =
   | JitEffectJitValueRoot;
 
 export type JitEffectRootInstructionInput = Readonly<{
-  expressionPathScopes: JitControlPathScopesMap;
+  expressionPaths: PathMap;
   valueTimeline: Timeline;
 }>;
 
 export function jitEffectValueRootsForOp(
   instruction: JitEffectRootInstructionInput,
   op: IrExprOp,
-  kind: JitOrderedEffectKind,
+  kind: EffectKind,
   placement: JitValueUsePlacement
 ): readonly JitEffectValueRoot[] {
-  const root = rootValuePathScope();
+  const root = rootPath();
 
   switch (kind) {
     case "memoryGuard":
@@ -78,28 +78,29 @@ export function jitEffectValueRootsForOp(
             expressionRoot(op.value, root, "memoryStoreValue")
           ]
         : unexpectedExpressionOp(kind, op);
-    case "controlTransfer":
-      switch (op.op) {
-        case "jump":
-          return [expressionRoot(op.target, root, "controlTarget")];
-        case "conditionalJump": {
-          const branchPathScopes = instruction.expressionPathScopes.get(placement.opIndex)!;
-
-          return [
-            expressionRoot(op.condition, root, "branchCondition"),
-            expressionRoot(op.taken, branchPathScopes.taken, "branchTarget"),
-            expressionRoot(op.notTaken, branchPathScopes.notTaken, "branchTarget")
-          ];
-        }
-        default:
-          return unexpectedExpressionOp(kind, op);
+    case "jump":
+      return op.op === "jump"
+        ? [expressionRoot(op.target, root, "controlTarget")]
+        : unexpectedExpressionOp(kind, op);
+    case "branch": {
+      if (op.op !== "conditionalJump") {
+        return unexpectedExpressionOp(kind, op);
       }
+
+      const branchPaths = instruction.expressionPaths.get(placement.opIndex)!;
+
+      return [
+        expressionRoot(op.condition, root, "branchCondition"),
+        expressionRoot(op.taken, branchPaths.taken, "branchTarget"),
+        expressionRoot(op.notTaken, branchPaths.notTaken, "branchTarget")
+      ];
+    }
     case "hostTrap":
       return op.op === "hostTrap"
         ? [expressionRoot(op.vector, root, "hostTrapVector")]
         : unexpectedExpressionOp(kind, op);
-    case "exitEdge":
-    case "producedValueDefinition":
+    case "fallthrough":
+    case "producedValue":
       return [];
   }
 }
@@ -107,25 +108,25 @@ export function jitEffectValueRootsForOp(
 export function jitEffectValueRootForMaterializationNeed(
   need: JitMaterializationNeed
 ): JitEffectValueRoot {
-  return jitValueRoot(need.value, need.pathScope, "exitStore");
+  return jitValueRoot(need.value, need.path, "exitStore");
 }
 
 function storageAddressRoots(
   instruction: JitEffectRootInstructionInput,
   storage: IrStorageExpr,
   opIndex: number,
-  pathScope: JitValuePathScope,
+  path: Path,
   purpose: JitEffectValueRootPurpose
 ): readonly JitEffectValueRoot[] {
   switch (storage.kind) {
     case "mem":
-      return [expressionRoot(storage.address, pathScope, purpose)];
+      return [expressionRoot(storage.address, path, purpose)];
     case "operand": {
       const value = opView(instruction.valueTimeline, opIndex).address(storage);
 
       return value === undefined
         ? []
-        : [jitValueRoot(value, pathScope, purpose)];
+        : [jitValueRoot(value, path, purpose)];
     }
     case "reg":
       return [];
@@ -134,30 +135,30 @@ function storageAddressRoots(
 
 function expressionRoot(
   value: IrValueExpr,
-  pathScope: JitValuePathScope,
+  path: Path,
   purpose: JitEffectValueRootPurpose
 ): JitEffectValueRoot {
   return {
     kind: "expression",
     value,
-    pathScope,
+    path,
     purpose
   };
 }
 
 function jitValueRoot(
   value: JitValue,
-  pathScope: JitValuePathScope,
+  path: Path,
   purpose: JitEffectValueRootPurpose
 ): JitEffectValueRoot {
   return {
     kind: "jitValue",
     value,
-    pathScope,
+    path,
     purpose
   };
 }
 
-function unexpectedExpressionOp(kind: JitOrderedEffectKind, op: IrExprOp): never {
+function unexpectedExpressionOp(kind: EffectKind, op: IrExprOp): never {
   throw new Error(`JIT effect ${kind} mapped to expression op ${op.op}`);
 }

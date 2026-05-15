@@ -1,7 +1,6 @@
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
-import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
 export type {
   ExitMaterializationStore,
   MaterializationTarget
@@ -11,45 +10,34 @@ import type {
   MaterializationTarget
 } from "#backends/wasm/jit/ir/materialization.js";
 import type {
-  JitControlPathScopesMap,
-  JitValuePathScope
-} from "./control-paths.js";
+  Exit
+} from "#backends/wasm/jit/analysis/exits.js";
+import type {
+  Effect
+} from "#backends/wasm/jit/analysis/effects.js";
+import type {
+  Path,
+  PathMap
+} from "#backends/wasm/jit/analysis/paths.js";
 
-export type JitExitStateSnapshot = Readonly<{
-  instructionCountDelta: number;
-  valueState: JitValueStateSnapshot;
-}>;
+export type {
+  Exit,
+  ExitPayload,
+  ExitRuntimeSource,
+  ExitSnapshot,
+  ExitValue
+} from "#backends/wasm/jit/analysis/exits.js";
 
-export type JitObservationRuntimeSource =
-  | "controlTarget"
-  | "hostTrapVector"
-  | "memoryAddress";
-
-export type JitObservationValue =
-  | Readonly<{ kind: "static"; value: number }>
-  | Readonly<{ kind: "runtime"; source: JitObservationRuntimeSource }>;
-
-export type JitObservationPayload = JitObservationValue;
-
-export type JitObservationPoint = Readonly<{
-  instructionIndex: number;
-  opIndex: number;
-  observedState: JitExitStateSnapshot;
-  visibleEip: JitObservationValue;
-  exitReason: ExitReasonValue;
-  payload: JitObservationPayload;
-  pathScope: JitValuePathScope;
+export type PlannedExit = Exit & Readonly<{
   exitMaterializationIndex: number;
 }>;
-
-export type JitExitPoint = JitObservationPoint;
 
 export type JitMaterializationPlacement = Readonly<{
   instructionIndex: number;
   opIndex: number;
-  observationIndex: number;
-  exitPointIndex: number;
-  exitReason: ExitReasonValue;
+  exitIndex: number;
+  exitId: string;
+  reason: ExitReasonValue;
   exitMaterializationIndex: number;
 }>;
 
@@ -58,7 +46,7 @@ export type JitExitStoreMaterializationNeed = Readonly<{
   target: MaterializationTarget;
   value: JitValue;
   placement: JitMaterializationPlacement;
-  pathScope: JitValuePathScope;
+  path: Path;
 }>;
 
 export type JitMaterializationNeed = JitExitStoreMaterializationNeed;
@@ -71,9 +59,9 @@ export type JitInstructionState = Readonly<{
   nextEip: number;
   nextMode: "continue" | "exit";
   instructionCountDelta: number;
-  initialValueState: JitValueStateSnapshot;
-  controlPathScopes: JitControlPathScopesMap;
-  exitPointCount: number;
+  initialValueState: import("#backends/wasm/jit/state/value-state.js").JitValueStateSnapshot;
+  paths: PathMap;
+  exitCount: number;
 }>;
 
 export type JitExitMaterializationPlan = Readonly<{
@@ -83,7 +71,8 @@ export type JitExitMaterializationPlan = Readonly<{
 export type JitCodegenPlan = Readonly<{
   block: JitBlock;
   instructionStates: readonly JitInstructionState[];
-  exitPoints: readonly JitExitPoint[];
+  effects: readonly Effect<PlannedExit>[];
+  exits: readonly PlannedExit[];
   materializationNeeds: readonly JitMaterializationNeed[];
   exitMaterializations: readonly JitExitMaterializationPlan[];
   maxExitMaterializationIndex: number;

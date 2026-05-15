@@ -62,7 +62,7 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
   const [instruction] = emissionPlan.instructions;
 
   strictEqual(instruction?.instructionId, "cache-plan");
-  strictEqual(emissionPlan.exitPoints, codegenPlan.exitPoints);
+  strictEqual(emissionPlan.exits, codegenPlan.exits);
   strictEqual(emissionPlan.materializationNeeds, codegenPlan.materializationNeeds);
   strictEqual(emissionPlan.exitMaterializations, codegenPlan.exitMaterializations);
   strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
@@ -118,6 +118,7 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
   };
   const plan: JitCodegenPlan = {
     block,
+    effects: [],
     instructionStates: [
       {
         instructionId: "write-before-overwrite",
@@ -126,8 +127,8 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         nextMode: "continue",
         instructionCountDelta: 0,
         initialValueState: exitState(0).valueState,
-        controlPathScopes: new Map(),
-        exitPointCount: 0
+        paths: new Map(),
+        exitCount: 0
       },
       {
         instructionId: "overwrite-before-exit",
@@ -136,15 +137,15 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         nextMode: "exit",
         instructionCountDelta: 1,
         initialValueState: exitState(1, ["eax"]).valueState,
-        controlPathScopes: new Map(),
-        exitPointCount: 1
+        paths: new Map(),
+        exitCount: 1
       }
     ],
-    exitPoints: [exitPoint({
+    exits: [exitPoint({
       instructionIndex: 1,
       opIndex: 1,
-      exitReason: ExitReason.HOST_TRAP,
-      observedState: exitState(2, ["eax"]),
+      reason: ExitReason.HOST_TRAP,
+      snapshot: exitState(2, ["eax"]),
       exitMaterializationIndex: 1
     })],
     materializationNeeds: [],
@@ -198,6 +199,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
   };
   const plan: JitCodegenPlan = {
     block,
+    effects: [],
     instructionStates: [{
       instructionId: "fault-before-register-write",
       eip: startAddress,
@@ -205,14 +207,14 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       nextMode: "continue",
       instructionCountDelta: 0,
       initialValueState: exitState(0, ["eax"]).valueState,
-      controlPathScopes: new Map(),
-      exitPointCount: 1
+      paths: new Map(),
+      exitCount: 1
     }],
-    exitPoints: [exitPoint({
+    exits: [exitPoint({
       instructionIndex: 0,
       opIndex: 0,
-      exitReason: ExitReason.MEMORY_READ_FAULT,
-      observedState: exitState(0, ["eax"]),
+      reason: ExitReason.MEMORY_READ_FAULT,
+      snapshot: exitState(0, ["eax"]),
       visibleEip: { kind: "static", value: startAddress },
       payload: { kind: "runtime", source: "memoryAddress" },
       exitMaterializationIndex: 1

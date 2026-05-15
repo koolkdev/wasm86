@@ -76,8 +76,8 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
   };
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
-  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
-  const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
+  const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
+  const exitIndex = codegenPlan.exits.indexOf(exit);
   const produced = jitProducedValue("load#partial-effectful-flag-input:0:1:0", "i32");
   const result = addValue(produced, c32(1));
   const incFlags = jitFlagProducerValue("inc", {
@@ -91,12 +91,12 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
   );
   const expectedFlagStore = flagStore(expectedFlags);
 
-  deepStrictEqual(exit.observedState.valueState.flags.readAluFlags(), expectedFlags);
+  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
   deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex], {
     stores: [expectedFlagStore]
   });
   deepStrictEqual(codegenPlan.materializationNeeds, [
-    exitStoreNeed(expectedFlagStore, exit, exitPointIndex)
+    exitStoreNeed(expectedFlagStore, exit, exitIndex)
   ]);
   deepStrictEqual(emissionPlan.valueCachePlan?.definitionCaptures[0], [produced]);
   deepStrictEqual(emissionPlan.valueCachePlan?.useCounts, [
@@ -107,7 +107,7 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
 test("planJitCodegen omits materialization needs for empty exits", () => {
   const trap = ok(decodeBytes([0xcd, 0x2e], startAddress));
   const codegenPlan = planJitCodegen(buildBlock([trap]));
-  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
 
   strictEqual(exit.exitMaterializationIndex, 0);
   deepStrictEqual(codegenPlan.exitMaterializations, [{ stores: [] }]);
@@ -118,29 +118,29 @@ test("planJitCodegen records register and flag exit stores as exit-store value u
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const load = ok(decodeBytes([0x8b, 0x05, 0x00, 0x00, 0x01, 0x00], add.nextEip));
   const codegenPlan = planJitCodegen(buildBlock([add, load]));
-  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
-  const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
+  const exit = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
+  const exitIndex = codegenPlan.exits.indexOf(exit);
   const expectedRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
-  const expectedFlagStore = flagStore(exit.observedState.valueState.flags.readAluFlags());
+  const expectedFlagStore = flagStore(exit.snapshot.valueState.flags.readAluFlags());
   const needs = codegenPlan.materializationNeeds.filter((need) =>
-    need.placement.exitPointIndex === exitPointIndex
+    need.placement.exitIndex === exitIndex
   );
 
   deepStrictEqual(needs, [
-    exitStoreNeed(expectedRegisterStore, exit, exitPointIndex),
-    exitStoreNeed(expectedFlagStore, exit, exitPointIndex)
+    exitStoreNeed(expectedRegisterStore, exit, exitIndex),
+    exitStoreNeed(expectedFlagStore, exit, exitIndex)
   ]);
   deepStrictEqual(needs.map((need) => need.purpose), ["exitStore", "exitStore"]);
   deepStrictEqual(needs.map((need) => Object.keys(need).sort()), [
-    ["pathScope", "placement", "purpose", "target", "value"],
-    ["pathScope", "placement", "purpose", "target", "value"]
+    ["path", "placement", "purpose", "target", "value"],
+    ["path", "placement", "purpose", "target", "value"]
   ]);
   strictEqual(needs.some((need) => "consumer" in need), false);
 
   for (const need of needs) {
-    strictEqual(need.placement.instructionIndex, exit.instructionIndex);
-    strictEqual(need.placement.opIndex, exit.opIndex);
-    strictEqual(need.placement.exitReason, exit.exitReason);
+    strictEqual(need.placement.instructionIndex, exit.at.instructionIndex);
+    strictEqual(need.placement.opIndex, exit.at.opIndex);
+    strictEqual(need.placement.reason, exit.reason);
     strictEqual(need.placement.exitMaterializationIndex, exit.exitMaterializationIndex);
   }
 });
@@ -207,14 +207,19 @@ function buildHostTrapEmissionPlanForStores(
   const exit = exitPoint({
     instructionIndex: 0,
     opIndex: 0,
-    exitReason: ExitReason.HOST_TRAP,
-    observedState: postSnapshot,
+    reason: ExitReason.HOST_TRAP,
+    snapshot: postSnapshot,
     visibleEip: { kind: "static", value: startAddress + 1 },
     payload: { kind: "runtime", source: "hostTrapVector" },
     exitMaterializationIndex: 1
   });
   const plan: JitCodegenPlan = {
     block,
+    effects: [{
+      kind: "hostTrap",
+      at: { instructionIndex: 0, opIndex: 0 },
+      exit
+    }],
     instructionStates: [{
       instructionId,
       eip: startAddress,
@@ -222,10 +227,10 @@ function buildHostTrapEmissionPlanForStores(
       nextMode: "exit",
       instructionCountDelta: initialState.instructionCountDelta,
       initialValueState: initialState.valueState,
-      controlPathScopes: new Map(),
-      exitPointCount: 1
+      paths: new Map(),
+      exitCount: 1
     }],
-    exitPoints: [exit],
+    exits: [exit],
     materializationNeeds: stores.map((store) => exitStoreNeed(store, exit, 0)),
     exitMaterializations: [
       { stores: [] },
@@ -279,13 +284,13 @@ test("planJitCodegen feeds produced exit-store values into materialization needs
   };
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
-  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
-  const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
+  const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
+  const exitIndex = codegenPlan.exits.indexOf(exit);
   const produced = jitProducedValue("load#produced-exit-store:0:1:0", "i32");
   const exitValue = addValue(produced, jitInputReg32Value("ebx"));
 
   deepStrictEqual(codegenPlan.materializationNeeds, [
-    exitStoreNeed(registerStore("eax", exitValue), exit, exitPointIndex)
+    exitStoreNeed(registerStore("eax", exitValue), exit, exitIndex)
   ]);
   deepStrictEqual(emissionPlan.valueCachePlan?.definitionCaptures[0], [produced]);
   deepStrictEqual(emissionPlan.valueCachePlan?.useCounts, [
@@ -328,7 +333,7 @@ test("planJitCodegen keeps clobber-sensitive exit-store values symbolic in mater
     }]
   };
   const codegenPlan = planJitCodegen(block);
-  const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
+  const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
   const clobberedInputValue = addValue(jitInputReg32Value("eax"), c32(1));
 
   deepStrictEqual(codegenPlan.exitMaterializations[exit.exitMaterializationIndex]?.stores, [
@@ -392,8 +397,8 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations"
   const readFaultExit = exitPoint({
     instructionIndex: 0,
     opIndex: 0,
-    exitReason: ExitReason.MEMORY_READ_FAULT,
-    observedState: entrySnapshot,
+    reason: ExitReason.MEMORY_READ_FAULT,
+    snapshot: entrySnapshot,
     visibleEip: { kind: "static", value: startAddress },
     payload: { kind: "runtime", source: "memoryAddress" },
     exitMaterializationIndex: 1
@@ -401,8 +406,8 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations"
   const hostTrapExit = exitPoint({
     instructionIndex: 0,
     opIndex: 5,
-    exitReason: ExitReason.HOST_TRAP,
-    observedState: postSnapshot,
+    reason: ExitReason.HOST_TRAP,
+    snapshot: postSnapshot,
     visibleEip: { kind: "static", value: startAddress + 1 },
     payload: { kind: "runtime", source: "hostTrapVector" },
     exitMaterializationIndex: 2
@@ -411,6 +416,18 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations"
   const hostTrapRegisterStore = registerStore("eax", produced);
   const plan: JitCodegenPlan = {
     block,
+    effects: [
+      {
+        kind: "memoryGuard",
+        at: { instructionIndex: 0, opIndex: 0 },
+        faultExit: readFaultExit
+      },
+      {
+        kind: "hostTrap",
+        at: { instructionIndex: 0, opIndex: 5 },
+        exit: hostTrapExit
+      }
+    ],
     instructionStates: [{
       instructionId: "flag-exit-before-register-write",
       eip: startAddress,
@@ -418,10 +435,10 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations"
       nextMode: "exit",
       instructionCountDelta: entrySnapshot.instructionCountDelta,
       initialValueState: entrySnapshot.valueState,
-      controlPathScopes: new Map(),
-      exitPointCount: 2
+      paths: new Map(),
+      exitCount: 2
     }],
-    exitPoints: [
+    exits: [
       readFaultExit,
       hostTrapExit
     ],
@@ -490,14 +507,19 @@ test("buildJitCodegenEmissionPlan walks condition and select dependencies from e
   const hostTrapExit = exitPoint({
     instructionIndex: 0,
     opIndex: 1,
-    exitReason: ExitReason.HOST_TRAP,
-    observedState: postSnapshot,
+    reason: ExitReason.HOST_TRAP,
+    snapshot: postSnapshot,
     visibleEip: { kind: "static", value: startAddress + 1 },
     payload: { kind: "runtime", source: "hostTrapVector" },
     exitMaterializationIndex: 1
   });
   const plan: JitCodegenPlan = {
     block,
+    effects: [{
+      kind: "hostTrap",
+      at: { instructionIndex: 0, opIndex: 1 },
+      exit: hostTrapExit
+    }],
     instructionStates: [{
       instructionId: "generic-select-dependencies",
       eip: startAddress,
@@ -505,10 +527,10 @@ test("buildJitCodegenEmissionPlan walks condition and select dependencies from e
       nextMode: "exit",
       instructionCountDelta: entrySnapshot.instructionCountDelta,
       initialValueState: entrySnapshot.valueState,
-      controlPathScopes: new Map(),
-      exitPointCount: 1
+      paths: new Map(),
+      exitCount: 1
     }],
-    exitPoints: [hostTrapExit],
+    exits: [hostTrapExit],
     materializationNeeds: [
       exitStoreNeed(flagStore(selectedFlags), hostTrapExit, 0)
     ],

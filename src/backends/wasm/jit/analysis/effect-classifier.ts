@@ -1,29 +1,21 @@
 import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
-import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
-import type { JitOperandBinding } from "./operand-bindings.js";
+import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
+import type { ExitKind } from "./exits.js";
 
-export type JitOpExitKind =
-  | "memoryReadFault"
-  | "memoryWriteFault"
-  | "fallthrough"
-  | "jump"
-  | "branchTaken"
-  | "branchNotTaken"
-  | "hostTrap";
-
-export type JitOrderedEffectKind =
+export type EffectKind =
   | "memoryGuard"
   | "memoryStore"
-  | "controlTransfer"
+  | "producedValue"
+  | "jump"
+  | "branch"
   | "hostTrap"
-  | "exitEdge"
-  | "producedValueDefinition";
+  | "fallthrough";
 
-export function jitOpExits(
+export function classifyExits(
   op: IrOp,
   instruction: JitInstruction
-): readonly JitOpExitKind[] {
+): readonly ExitKind[] {
   switch (op.op) {
     case "memory.guard":
       return [op.access === "read" ? "memoryReadFault" : "memoryWriteFault"];
@@ -45,57 +37,41 @@ export function jitOpExits(
   }
 }
 
-export function jitOpOrderedEffectKind(
+export function classifyEffect(
   op: IrOp,
   instruction: JitInstruction
-): JitOrderedEffectKind | undefined {
+): EffectKind | undefined {
   switch (op.op) {
     case "memory.guard":
       return "memoryGuard";
     case "set":
-      return jitStorageAccessIsMemory(op.target, instruction.operands)
+      return storageAccessIsMemory(op.target, instruction.operands)
         ? "memoryStore"
         : undefined;
     case "get":
-      return jitStorageAccessIsMemory(op.source, instruction.operands)
-        ? "producedValueDefinition"
+      return storageAccessIsMemory(op.source, instruction.operands)
+        ? "producedValue"
         : undefined;
     case "jump":
+      return "jump";
     case "conditionalJump":
-      return "controlTransfer";
+      return "branch";
     case "hostTrap":
       return "hostTrap";
     case "next":
       return instruction.nextMode === "exit"
-        ? "exitEdge"
+        ? "fallthrough"
         : undefined;
     default:
       return undefined;
   }
 }
 
-export function jitOpExitReason(exit: JitOpExitKind): ExitReasonValue {
-  switch (exit) {
-    case "memoryReadFault":
-      return ExitReason.MEMORY_READ_FAULT;
-    case "memoryWriteFault":
-      return ExitReason.MEMORY_WRITE_FAULT;
-    case "fallthrough":
-      return ExitReason.FALLTHROUGH;
-    case "jump":
-    case "branchTaken":
-    case "branchNotTaken":
-      return ExitReason.JUMP;
-    case "hostTrap":
-      return ExitReason.HOST_TRAP;
-  }
-}
-
-export function jitExitConditionValues(
+export function exitConditionValues(
   op: IrOp,
   instruction: JitInstruction
 ): readonly ValueRef[] {
-  if (jitOpExits(op, instruction).length === 0) {
+  if (classifyExits(op, instruction).length === 0) {
     return [];
   }
 
@@ -107,7 +83,16 @@ export function jitExitConditionValues(
   }
 }
 
-function jitStorageAccessIsMemory(
+export function localConditionValues(op: IrOp): readonly ValueRef[] {
+  switch (op.op) {
+    case "value.select":
+      return [op.condition];
+    default:
+      return [];
+  }
+}
+
+function storageAccessIsMemory(
   storage: StorageRef,
   operands: readonly JitOperandBinding[]
 ): boolean {
@@ -118,14 +103,5 @@ function jitStorageAccessIsMemory(
       return operands[storage.index]?.kind === "static.mem";
     case "reg":
       return false;
-  }
-}
-
-export function jitLocalConditionValues(op: IrOp): readonly ValueRef[] {
-  switch (op.op) {
-    case "value.select":
-      return [op.condition];
-    default:
-      return [];
   }
 }

@@ -83,7 +83,7 @@ class TimelineBuilder {
     switch (op.op) {
       case "let32":
         if (this.#producedByVar?.has(op.dst.id)) {
-          this.#recordNestedObservations(op.value);
+          this.#recordNestedValues(op.value);
         }
         return;
       case "set":
@@ -337,7 +337,7 @@ class TimelineBuilder {
     }
   }
 
-  #recordNestedObservations(expression: IrValueExpr): void {
+  #recordNestedValues(expression: IrValueExpr): void {
     switch (expression.kind) {
       case "var":
       case "const":
@@ -352,16 +352,16 @@ class TimelineBuilder {
         this.#recordAddress(expression.operand);
         return;
       case "value.binary":
-        this.#recordNestedObservations(expression.a);
-        this.#recordNestedObservations(expression.b);
+        this.#recordNestedValues(expression.a);
+        this.#recordNestedValues(expression.b);
         return;
       case "value.unary":
-        this.#recordNestedObservations(expression.value);
+        this.#recordNestedValues(expression.value);
         return;
       case "value.select":
-        this.#recordNestedObservations(expression.condition);
-        this.#recordNestedObservations(expression.whenTrue);
-        this.#recordNestedObservations(expression.whenFalse);
+        this.#recordNestedValues(expression.condition);
+        this.#recordNestedValues(expression.whenTrue);
+        this.#recordNestedValues(expression.whenFalse);
         return;
       case "flags.condition":
         return;

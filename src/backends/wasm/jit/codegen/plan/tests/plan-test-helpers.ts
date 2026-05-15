@@ -13,26 +13,26 @@ import {
   planJitCodegen
 } from "#backends/wasm/jit/codegen/plan/plan.js";
 import {
-  branchValuePathScope,
-  rootValuePathScope
-} from "#backends/wasm/jit/codegen/plan/control-paths.js";
+  branchPath,
+  rootPath
+} from "#backends/wasm/jit/analysis/paths.js";
 import { planJitValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import {
   planJitValueUses,
   type JitValueUseRoot
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
-import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
+import { rootExpressionPaths } from "#backends/wasm/jit/codegen/tests/path-test-helpers.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   JitCodegenPlan,
   JitExitMaterializationStore,
-  JitExitPoint,
-  JitExitStateSnapshot,
+  PlannedExit,
+  ExitSnapshot,
   JitInstructionState,
   JitMaterializationNeed,
-  JitObservationPayload,
-  JitObservationValue
+  ExitPayload,
+  ExitValue
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
   jitExtractBits,
@@ -65,8 +65,8 @@ export {
   buildBlock,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
-  branchValuePathScope,
-  rootValuePathScope,
+  branchPath,
+  rootPath,
   planJitValueCacheForInstructions,
   buildTimeline,
   jitExtractBits,
@@ -85,19 +85,19 @@ export type {
   JitOperandBinding,
   JitCodegenPlan,
   JitExitMaterializationStore,
-  JitExitPoint,
-  JitExitStateSnapshot,
+  PlannedExit,
+  ExitSnapshot,
   JitInstructionState,
   JitMaterializationNeed,
-  JitObservationPayload,
-  JitObservationValue,
+  ExitPayload,
+  ExitValue,
   JitProducedValue,
   JitValue,
   JitBlock
 };
 
-export function onlyExit(exits: readonly JitExitPoint[], reason: ExitReason): JitExitPoint {
-  const matches = exits.filter((entry) => entry.exitReason === reason);
+export function onlyExit(exits: readonly PlannedExit[], reason: ExitReason): PlannedExit {
+  const matches = exits.filter((entry) => entry.reason === reason);
 
   strictEqual(matches.length, 1);
   return matches[0]!;
@@ -121,7 +121,7 @@ export function planValueCacheForTest(input: Readonly<{
   const plannedValueUses = planJitValueUses([{
     expressionBlock: input.expressionBlock,
     valueTimeline,
-    expressionPathScopes: rootExpressionPathScopes(input.expressionBlock),
+    expressionPaths: rootExpressionPaths(input.expressionBlock),
     materializationUses: input.materializationUses ?? new Map()
   }]);
 
@@ -138,7 +138,7 @@ export function materializationUse(
 ): JitValueUseRoot {
   return {
     value,
-    pathScope: rootValuePathScope(),
+    path: rootPath(),
     purpose
   };
 }
@@ -159,47 +159,79 @@ export function flagStore(value: JitValue): JitExitMaterializationStore {
 
 export function exitStoreNeed(
   store: JitExitMaterializationStore,
-  exitPoint: JitExitPoint,
-  exitPointIndex: number
+  exitPoint: PlannedExit,
+  exitIndex: number
 ): JitMaterializationNeed {
   return {
     purpose: "exitStore",
     target: store.target,
     value: store.value,
     placement: {
-      instructionIndex: exitPoint.instructionIndex,
-      opIndex: exitPoint.opIndex,
-      observationIndex: exitPointIndex,
-      exitPointIndex,
-      exitReason: exitPoint.exitReason,
+      instructionIndex: exitPoint.at.instructionIndex,
+      opIndex: exitPoint.at.opIndex,
+      exitIndex,
+      exitId: exitPoint.id,
+      reason: exitPoint.reason,
       exitMaterializationIndex: exitPoint.exitMaterializationIndex
     },
-    pathScope: exitPoint.pathScope
+    path: exitPoint.path
   };
 }
 
 export function exitPoint(input: Readonly<{
   instructionIndex: number;
   opIndex: number;
-  exitReason: ExitReason;
-  observedState: JitExitStateSnapshot;
+  kind?: PlannedExit["kind"];
+  reason: ExitReason;
+  snapshot: ExitSnapshot;
   exitMaterializationIndex: number;
-  visibleEip?: JitObservationValue;
-  payload?: JitObservationPayload;
-  pathScope?: JitExitPoint["pathScope"];
-}>): JitExitPoint {
+  visibleEip?: ExitValue;
+  payload?: ExitPayload;
+  path?: PlannedExit["path"];
+}>): PlannedExit {
   const visibleEip = input.visibleEip ?? { kind: "static", value: 0 };
+  const kind = input.kind ?? exitKind(input.reason, input.path);
+  const at = {
+    instructionIndex: input.instructionIndex,
+    opIndex: input.opIndex
+  };
 
   return {
-    instructionIndex: input.instructionIndex,
-    opIndex: input.opIndex,
-    observedState: input.observedState,
+    id: `${at.instructionIndex}:${at.opIndex}:${kind}`,
+    at,
+    kind,
+    snapshot: input.snapshot,
     visibleEip,
-    exitReason: input.exitReason,
+    reason: input.reason,
     payload: input.payload ?? visibleEip,
-    pathScope: input.pathScope ?? rootValuePathScope(),
+    path: input.path ?? rootPath(),
     exitMaterializationIndex: input.exitMaterializationIndex
   };
+}
+
+function exitKind(reason: ExitReason, path: PlannedExit["path"] | undefined): PlannedExit["kind"] {
+  switch (reason) {
+    case ExitReason.MEMORY_READ_FAULT:
+      return "memoryReadFault";
+    case ExitReason.MEMORY_WRITE_FAULT:
+      return "memoryWriteFault";
+    case ExitReason.FALLTHROUGH:
+      return "fallthrough";
+    case ExitReason.HOST_TRAP:
+      return "hostTrap";
+    case ExitReason.JUMP:
+      if (path?.debugLabel === "taken") {
+        return "branchTaken";
+      }
+
+      if (path?.debugLabel === "notTaken") {
+        return "branchNotTaken";
+      }
+
+      return "jump";
+    default:
+      throw new Error(`unsupported planned-exit test reason: ${reason}`);
+  }
 }
 
 export function instructionState(input: Readonly<{
@@ -209,8 +241,8 @@ export function instructionState(input: Readonly<{
   nextMode: "continue" | "exit";
   instructionCountDelta: number;
   changedRegs?: readonly Reg32[];
-  controlPathScopes?: JitInstructionState["controlPathScopes"];
-  exitPointCount: number;
+  paths?: JitInstructionState["paths"];
+  exitCount: number;
 }>): JitInstructionState {
   const initialState = exitState(input.instructionCountDelta, input.changedRegs ?? []);
 
@@ -221,15 +253,15 @@ export function instructionState(input: Readonly<{
     nextMode: input.nextMode,
     instructionCountDelta: input.instructionCountDelta,
     initialValueState: initialState.valueState,
-    controlPathScopes: input.controlPathScopes ?? new Map(),
-    exitPointCount: input.exitPointCount
+    paths: input.paths ?? new Map(),
+    exitCount: input.exitCount
   };
 }
 
 export function exitState(
   instructionCountDelta: number,
   changedRegs: readonly Reg32[] = []
-): JitExitStateSnapshot {
+): ExitSnapshot {
   const valueState = createJitValueState();
 
   for (const reg of changedRegs) {

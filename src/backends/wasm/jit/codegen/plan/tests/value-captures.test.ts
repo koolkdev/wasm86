@@ -3,9 +3,9 @@ import { test } from "node:test";
 
 import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 import type {
-  JitBranchValuePathScopes,
-  JitControlPathScopesMap
-} from "#backends/wasm/jit/codegen/plan/control-paths.js";
+  BranchPaths,
+  PathMap
+} from "#backends/wasm/jit/analysis/paths.js";
 import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { cacheSelectionUsesForPlannedUse } from "#backends/wasm/jit/codegen/plan/value-cache-uses.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
@@ -24,10 +24,10 @@ import type {
 import {
   addExpr,
   addValue,
-  branchValuePathScope,
+  branchPath,
   c32,
   c32Expr,
-  rootValuePathScope
+  rootPath
 } from "./plan-test-helpers.js";
 
 test("JIT value-capture planner shares pure values needed by both branch paths", () => {
@@ -43,14 +43,14 @@ test("JIT value-capture planner shares pure values needed by both branch paths",
   const captures = planJitValueCaptures(uses, cachePlan);
   const targetUses = uses.filter((use) => valuesEqual(use.value, expected));
 
-  deepStrictEqual(targetUses.map((use) => use.pathScope), [
+  deepStrictEqual(targetUses.map((use) => use.path), [
     { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" },
     { kind: "path", id: "branch:0:0:notTaken", debugLabel: "notTaken" }
   ]);
   strictEqual(captures.length, 1);
   strictEqual(valuesEqual(captures[0]!.value, expected), true);
   deepStrictEqual(captures[0]!.placement, { instructionIndex: 0, opIndex: 0, epoch: 0 });
-  deepStrictEqual(captures[0]!.availabilityScope, rootValuePathScope());
+  deepStrictEqual(captures[0]!.availabilityPath, rootPath());
   strictEqual(captures[0]!.consumers.length, 2);
 });
 
@@ -82,7 +82,7 @@ test("JIT cache value uses carry flattened dependency ancestry for cache selecti
   const uses = planJitValueUses([{
     expressionBlock,
     valueTimeline: timeline,
-    expressionPathScopes: defaultExpressionPathScopes(expressionBlock),
+    expressionPaths: defaultExpressionPaths(expressionBlock),
     materializationUses: new Map()
   }]);
   const rootUse = uses.find((use) => valuesEqual(use.value, expectedRoot));
@@ -98,7 +98,7 @@ test("JIT cache value uses carry flattened dependency ancestry for cache selecti
   strictEqual(childUse.emittedCost > 0, true);
 });
 
-test("JIT value-capture planner keeps one-arm branch values path-scoped", () => {
+test("JIT value-capture planner keeps one-arm branch values path-specific", () => {
   const target = addExpr("eax", 1);
   const expressionBlock = [{
     op: "conditionalJump",
@@ -111,7 +111,7 @@ test("JIT value-capture planner keeps one-arm branch values path-scoped", () => 
   const captures = planJitValueCaptures(uses, cachePlan);
   const targetUses = uses.filter((use) => valuesEqual(use.value, expected));
 
-  deepStrictEqual(targetUses.map((use) => use.pathScope), [
+  deepStrictEqual(targetUses.map((use) => use.path), [
     { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" }
   ]);
   deepStrictEqual(captures, []);
@@ -145,7 +145,7 @@ test("JIT value-capture planner leaves produced definitions to value-cache", () 
 
   deepStrictEqual(cachePlan?.definitionCaptures[0], [produced]);
   deepStrictEqual(captures, []);
-  deepStrictEqual(producedUses.map((use) => use.pathScope), [
+  deepStrictEqual(producedUses.map((use) => use.path), [
     { kind: "path", id: "branch:0:1:taken", debugLabel: "taken" },
     { kind: "path", id: "branch:0:1:notTaken", debugLabel: "notTaken" }
   ]);
@@ -167,14 +167,14 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
   const materializationUses = new Map([[
     0,
     [
-      { value, pathScope: branchValuePathScope(0, 0, "taken"), purpose: "exitStore" },
-      { value, pathScope: branchValuePathScope(0, 0, "notTaken"), purpose: "exitStore" }
+      { value, path: branchPath(0, 0, "taken"), purpose: "exitStore" },
+      { value, path: branchPath(0, 0, "notTaken"), purpose: "exitStore" }
     ]
   ]]);
   const uses = planJitValueUses([{
     expressionBlock,
     valueTimeline: timeline,
-    expressionPathScopes: defaultExpressionPathScopes(expressionBlock),
+    expressionPaths: defaultExpressionPaths(expressionBlock),
     materializationUses
   }]);
   const cachePlan = planJitValueCache({
@@ -185,8 +185,8 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
 
   strictEqual(captures.length, 1);
   strictEqual(valuesEqual(captures[0]!.value, value), true);
-  deepStrictEqual(captures[0]!.availabilityScope, rootValuePathScope());
-  deepStrictEqual(captures[0]!.consumers.map((use) => use.pathScope), [
+  deepStrictEqual(captures[0]!.availabilityPath, rootPath());
+  deepStrictEqual(captures[0]!.consumers.map((use) => use.path), [
     { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" },
     { kind: "path", id: "branch:0:0:notTaken", debugLabel: "notTaken" }
   ]);
@@ -205,7 +205,7 @@ function planCapturesForExpressionBlock(
   const uses = planJitValueUses([{
     expressionBlock,
     valueTimeline: timeline,
-    expressionPathScopes: defaultExpressionPathScopes(expressionBlock),
+    expressionPaths: defaultExpressionPaths(expressionBlock),
     materializationUses: new Map()
   }]);
   const cachePlan = planJitValueCache({
@@ -216,19 +216,19 @@ function planCapturesForExpressionBlock(
   return { uses, cachePlan };
 }
 
-function defaultExpressionPathScopes(
+function defaultExpressionPaths(
   expressionBlock: IrExprBlock
-): JitControlPathScopesMap {
-  const pathScopes = new Map<number, JitBranchValuePathScopes>();
+): PathMap {
+  const paths = new Map<number, BranchPaths>();
 
   for (let opIndex = 0; opIndex < expressionBlock.length; opIndex += 1) {
     if (expressionBlock[opIndex]?.op === "conditionalJump") {
-      pathScopes.set(opIndex, {
-        taken: branchValuePathScope(0, opIndex, "taken"),
-        notTaken: branchValuePathScope(0, opIndex, "notTaken")
+      paths.set(opIndex, {
+        taken: branchPath(0, opIndex, "taken"),
+        notTaken: branchPath(0, opIndex, "notTaken")
       });
     }
   }
 
-  return pathScopes;
+  return paths;
 }

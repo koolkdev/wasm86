@@ -1812,7 +1812,7 @@ test("jit IR block lowers value-state flag values for condition consumers", asyn
   deepStrictEqual(result.exit, { exitReason: ExitReason.JUMP, payload: startAddress + 10 });
 });
 
-test("jit IR block stores value-state flag values on both branch exit observations", async () => {
+test("jit IR block stores value-state flag values on both branch exits", async () => {
   const taken = await runJitBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x74, 0x05 // jz +5
@@ -1855,7 +1855,7 @@ test("jit IR block emits conditional branches", async () => {
   strictEqual(notTaken.state.instructionCount, 11);
 });
 
-test("jit IR block stores value-state flag values on later fault exit observations", async () => {
+test("jit IR block stores value-state flag values on later fault exits", async () => {
   const result = await runJitBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x8b, 0x05, 0x00, 0x00, 0x01, 0x00 // mov eax, [0x10000]

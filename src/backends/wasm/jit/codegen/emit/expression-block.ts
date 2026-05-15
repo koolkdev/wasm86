@@ -83,13 +83,31 @@ export type JitExpressionBlockEmitContext = Readonly<{
     options?: WasmIrEmitValueOptions
   ): ValueWidth;
   emitSet(op: IrSetExprOp, helpers: WasmIrEmitHelpers): void;
-  emitMemoryGuard(op: Extract<IrExprOp, { op: "memory.guard" }>, helpers: WasmIrEmitHelpers): void;
+  emitMemoryGuard(
+    op: Extract<IrExprOp, { op: "memory.guard" }>,
+    effect: Extract<JitPlannedEffect, { kind: "memoryGuard" }>,
+    helpers: WasmIrEmitHelpers
+  ): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
   emitNextEip(): ValueWidth;
-  emitNext(): void;
-  emitJump(target: IrValueExpr, helpers: WasmIrEmitHelpers): void;
-  emitConditionalJump(condition: IrValueExpr, taken: IrValueExpr, notTaken: IrValueExpr, helpers: WasmIrEmitHelpers): void;
-  emitHostTrap(vector: IrValueExpr, helpers: WasmIrEmitHelpers): void;
+  emitNext(effect: Extract<JitPlannedEffect, { kind: "fallthrough" }>): void;
+  emitJump(
+    target: IrValueExpr,
+    effect: Extract<JitPlannedEffect, { kind: "jump" }>,
+    helpers: WasmIrEmitHelpers
+  ): void;
+  emitConditionalJump(
+    condition: IrValueExpr,
+    taken: IrValueExpr,
+    notTaken: IrValueExpr,
+    effect: Extract<JitPlannedEffect, { kind: "branch" }>,
+    helpers: WasmIrEmitHelpers
+  ): void;
+  emitHostTrap(
+    vector: IrValueExpr,
+    effect: Extract<JitPlannedEffect, { kind: "hostTrap" }>,
+    helpers: WasmIrEmitHelpers
+  ): void;
 }>;
 
 export function emitJitExpressionBlock(context: JitExpressionBlockEmitContext): void {
@@ -141,32 +159,29 @@ class JitExpressionBlockEmitter {
     switch (effect.kind) {
       case "memoryGuard":
         return op.op === "memory.guard"
-          ? this.#context.emitMemoryGuard(op, this.#helpers)
+          ? this.#context.emitMemoryGuard(op, effect, this.#helpers)
           : unexpectedPlannedEffect(effect, op);
       case "memoryStore":
         return op.op === "set"
           ? this.#context.emitSet(op, this.#helpers)
           : unexpectedPlannedEffect(effect, op);
-      case "controlTransfer":
-        switch (op.op) {
-          case "jump":
-            this.#context.emitJump(op.target, this.#helpers);
-            return;
-          case "conditionalJump":
-            this.#context.emitConditionalJump(op.condition, op.taken, op.notTaken, this.#helpers);
-            return;
-          default:
-            return unexpectedPlannedEffect(effect, op);
-        }
+      case "jump":
+        return op.op === "jump"
+          ? this.#context.emitJump(op.target, effect, this.#helpers)
+          : unexpectedPlannedEffect(effect, op);
+      case "branch":
+        return op.op === "conditionalJump"
+          ? this.#context.emitConditionalJump(op.condition, op.taken, op.notTaken, effect, this.#helpers)
+          : unexpectedPlannedEffect(effect, op);
       case "hostTrap":
         return op.op === "hostTrap"
-          ? this.#context.emitHostTrap(op.vector, this.#helpers)
+          ? this.#context.emitHostTrap(op.vector, effect, this.#helpers)
           : unexpectedPlannedEffect(effect, op);
-      case "exitEdge":
+      case "fallthrough":
         return op.op === "next"
-          ? this.#context.emitNext()
+          ? this.#context.emitNext(effect)
           : unexpectedPlannedEffect(effect, op);
-      case "producedValueDefinition":
+      case "producedValue":
         return op.op === "let32"
           ? this.#emitPlannedProducedDefinition(op)
           : unexpectedPlannedEffect(effect, op);

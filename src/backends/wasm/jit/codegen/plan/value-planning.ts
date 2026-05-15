@@ -3,7 +3,7 @@ import type {
   IrExprBlock,
   IrExpressionSourceMap
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitControlPathScopesMap } from "./control-paths.js";
+import type { PathMap } from "#backends/wasm/jit/analysis/paths.js";
 import type { Timeline } from "#backends/wasm/jit/analysis/timeline.js";
 import {
   planJitValueCacheForInstructions,
@@ -23,7 +23,7 @@ export type JitValuePlanningInstructionInput = Readonly<{
   operands: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
-  expressionPathScopes: JitControlPathScopesMap;
+  expressionPaths: PathMap;
   valueTimeline: Timeline;
 }>;
 
