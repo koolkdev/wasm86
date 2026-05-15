@@ -13,6 +13,7 @@ import { emitJitExpressionBlock } from "#backends/wasm/jit/codegen/emit/expressi
 import { emitJitGet } from "#backends/wasm/jit/codegen/emit/operands.js";
 import type { JitInstructionEmitContext } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
+import type { JitPlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import {
   buildJitInstructionValueTimeline,
@@ -27,7 +28,7 @@ import { wasmBodyLocalCount, wasmBodyOpcodes } from "#backends/wasm/tests/body-o
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import type { Reg32 } from "#x86/isa/types.js";
 
-test("JIT expression-block emitter treats let32 as an observation for supported values", () => {
+test("JIT expression-block emitter resolves timeline values for planned effects", () => {
   const result = emitFoundationBlock([
     { op: "let32", dst: v(0), value: addExpr("eax", 1) },
     { op: "hostTrap", vector: v(0) }
@@ -62,7 +63,7 @@ test("JIT expression-block emitter routes repeated expression values through val
   ]);
 });
 
-test("JIT expression-block emitter supports next as a foundation effect", () => {
+test("JIT expression-block emitter supports planned exit edges", () => {
   const result = emitFoundationBlock([{ op: "next" }]);
 
   strictEqual(result.nextCalls, 1);
@@ -84,20 +85,14 @@ test("JIT expression-block emitter treats flags.set as value-state only", () => 
   deepStrictEqual(result.opcodes, [wasmOpcode.end]);
 });
 
-test("JIT expression-block emitter fails loudly for unsupported let32 values", () => {
+test("JIT expression-block emitter fails when a planned produced value has no definition", () => {
   throws(() => {
     emitFoundationBlock([
-      {
-        op: "let32",
-        dst: v(0),
-        value: {
-          kind: "source",
-          source: { kind: "mem", address: c32(0x1000) },
-          accessWidth: 32
-        }
-      }
-    ]);
-  }, /JIT expression-block let32 has no timeline value at expression op 0/);
+      { op: "let32", dst: v(0), value: c32(1) }
+    ], {
+      plannedEffects: [{ opIndex: 0, kind: "producedValueDefinition" }]
+    });
+  }, /JIT planned produced value has no timeline definition at expression op 0/);
 });
 
 test("JIT expression-block emitter fails loudly when a value has no timeline fact", () => {
@@ -152,7 +147,8 @@ test("JIT expression-block emitter skips uncached produced definitions with no c
       }
     }
   ], {
-    producedValuesByVarId: new Map([[0, produced]])
+    producedValuesByVarId: new Map([[0, produced]]),
+    plannedEffects: [{ opIndex: 0, kind: "producedValueDefinition" }]
   });
 
   strictEqual(countOpcode(result.opcodes, wasmOpcode.drop), 0);
@@ -176,14 +172,18 @@ test("JIT expression-block emitter fails when a produced consumer has no capture
       { op: "hostTrap", vector: v(0) }
     ], {
       cache: false,
-      producedValuesByVarId: new Map([[0, produced]])
+      producedValuesByVarId: new Map([[0, produced]]),
+      plannedEffects: [
+        { opIndex: 0, kind: "producedValueDefinition" },
+        { opIndex: 1, kind: "hostTrap" }
+      ]
     });
   }, /produced JIT value is not available for lowering/);
 });
 
 test("JIT expression-block emitter routes normal planned effects", () => {
   const result = emitFoundationBlock([
-    { op: "set", target: reg("ebx"), value: addExpr("eax", 1), accessWidth: 32 },
+    { op: "set", target: { kind: "mem", address: c32(0x1000) }, value: addExpr("eax", 1), accessWidth: 32 },
     { op: "jump", target: c32(0x1000) }
   ]);
 
@@ -215,6 +215,12 @@ type FoundationEmitResult = Readonly<{
 type FoundationEmitOptions = Readonly<{
   cache?: boolean;
   producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
+  plannedEffects?: readonly PlannedEffectInput[];
+}>;
+
+type PlannedEffectInput = Readonly<{
+  opIndex: number;
+  kind: JitPlannedEffect["kind"];
 }>;
 
 function emitFoundationBlock(
@@ -256,7 +262,11 @@ function emitFoundationBlock(
     instruction: {
       expressionBlock,
       valueTimeline,
-      plannedValueCaptures: new Map()
+      plannedValueCaptures: new Map(),
+      plannedEffects: buildPlannedEffects(
+        expressionBlock,
+        options.plannedEffects
+      )
     },
     valueCache,
     emitInput: (slot) => {
@@ -332,6 +342,55 @@ function emitFoundationBlock(
     jumpCalls,
     conditionalJumpCalls
   };
+}
+
+function buildPlannedEffects(
+  expressionBlock: IrExprBlock,
+  effects: readonly PlannedEffectInput[] | undefined
+): readonly JitPlannedEffect[] {
+  return (effects ?? defaultPlannedEffects(expressionBlock)).map((effect) => ({
+    placement: {
+      instructionIndex: 0,
+      opIndex: effect.opIndex,
+      epoch: 0
+    },
+    sourceOpIndex: effect.opIndex,
+    kind: effect.kind,
+    exits: [],
+    valueRoots: []
+  }));
+}
+
+function defaultPlannedEffects(expressionBlock: IrExprBlock): readonly PlannedEffectInput[] {
+  const plannedEffects: PlannedEffectInput[] = [];
+
+  for (let opIndex = 0; opIndex < expressionBlock.length; opIndex += 1) {
+    const op = expressionBlock[opIndex]!;
+
+    switch (op.op) {
+      case "memory.guard":
+        plannedEffects.push({ opIndex, kind: "memoryGuard" });
+        break;
+      case "set":
+        plannedEffects.push({ opIndex, kind: "memoryStore" });
+        break;
+      case "jump":
+      case "conditionalJump":
+        plannedEffects.push({ opIndex, kind: "controlTransfer" });
+        break;
+      case "hostTrap":
+        plannedEffects.push({ opIndex, kind: "hostTrap" });
+        break;
+      case "next":
+        plannedEffects.push({ opIndex, kind: "exitEdge" });
+        break;
+      case "let32":
+      case "flags.set":
+        break;
+    }
+  }
+
+  return plannedEffects;
 }
 
 function v(id: number): Extract<IrValueExpr, { kind: "var" }> {

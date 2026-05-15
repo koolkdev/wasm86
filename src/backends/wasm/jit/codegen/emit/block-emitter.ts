@@ -47,7 +47,7 @@ export type JitBlockEmitContext = Readonly<{
   exit: JitExitTarget;
   instructions: readonly JitIrInstructionContext[];
   exitPoints: readonly JitExitPoint[];
-  plannedEffects?: readonly JitPlannedEffect[] | undefined;
+  plannedEffects: readonly JitPlannedEffect[];
   valueCache?: JitValueCacheRuntime | undefined;
   linking?: JitLinkEmitContext | undefined;
 }>;
@@ -68,18 +68,16 @@ export type JitInstructionEmitContext = Readonly<{
 
 export function emitJitBlock(context: JitBlockEmitContext): void {
   const jitContext = createJitInstructionEmitContext(context);
-  const plannedEffectsByInstruction = context.plannedEffects === undefined
-    ? undefined
-    : groupPlannedEffectsByInstruction(
-        context.plannedEffects,
-        context.instructions.length
-      );
+  const plannedEffectsByInstruction = groupPlannedEffectsByInstruction(
+    context.plannedEffects,
+    context.instructions.length
+  );
 
   for (let index = 0; index < context.instructions.length; index += 1) {
     jitContext.selectInstruction(index);
     jitContext.valueCache?.beginInstruction(index);
     beginInstruction(jitContext, context.exit, jitContext.currentInstruction());
-    emitCurrentInstruction(jitContext, plannedEffectsByInstruction?.[index]);
+    emitCurrentInstruction(jitContext, plannedEffectsByInstruction[index]!);
   }
 }
 
@@ -147,7 +145,7 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
 
 function emitCurrentInstruction(
   jitContext: JitInstructionEmitContext,
-  plannedEffects: readonly JitPlannedEffect[] | undefined
+  plannedEffects: readonly JitPlannedEffect[]
 ): void {
   emitJitInstruction(jitContext, jitContext.currentInstruction(), plannedEffects);
 }
@@ -155,16 +153,14 @@ function emitCurrentInstruction(
 function emitJitInstruction(
   jitContext: JitInstructionEmitContext,
   instruction: JitIrInstructionContext,
-  plannedEffects: readonly JitPlannedEffect[] | undefined
+  plannedEffects: readonly JitPlannedEffect[]
 ): void {
   const valueCache = jitContext.valueCache;
   let currentTimelineOp: JitTimelineOpContext | undefined;
 
   emitJitExpressionBlock({
     body: jitContext.body,
-    instruction: plannedEffects === undefined
-      ? instruction
-      : { ...instruction, plannedEffects },
+    instruction: { ...instruction, plannedEffects },
     valueCache,
     beginExpressionOp: (opIndex) => {
       currentTimelineOp = jitContext.beginExpressionOp(opIndex);

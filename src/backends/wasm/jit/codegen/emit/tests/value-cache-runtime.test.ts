@@ -12,16 +12,15 @@ import {
   planJitValueCache,
   buildJitInstructionValueTimeline,
   createJitValueState,
-  emitPlannedExpression,
   reg,
   const32,
   addExpr,
-  parentExpr,
   highCostExpr,
-  localOpcodes,
   countOpcode,
   repeatedInlineExpressionBlock,
+  type JitIrBlock,
 } from "./value-local-store-test-helpers.js";
+import type { ValueRef } from "#x86/ir/model/types.js";
 test("JIT expression emission captures repeated branch target values before the split", () => {
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitIrBlock([repeatedInlineExpressionBlock()])));
 
@@ -29,41 +28,52 @@ test("JIT expression emission captures repeated branch target values before the 
   strictEqual(countOpcode(opcodes, wasmOpcode.localSet) > 0, true);
 });
 
-test("JIT expression cache reuses resolved let32-backed JitValues", () => {
-  const opcodes = emitPlannedExpression([
-    { op: "let32", dst: { kind: "var", id: 0 }, value: addExpr("eax", 1) },
-    { op: "hostTrap", vector: { kind: "var", id: 0 } },
-    { op: "hostTrap", vector: { kind: "var", id: 0 } }
+test("JIT production emission reuses repeated memory-store values", () => {
+  const opcodes = productionOpcodes([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
+    {
+      op: "value.binary",
+      type: "i32",
+      operator: "add",
+      dst: v(1),
+      a: v(0),
+      b: c32(1)
+    },
+    { op: "set", target: { kind: "mem", address: v(1) }, value: v(1), accessWidth: 32 },
+    { op: "next" }
   ]);
 
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32Add), 1);
   strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 1);
-  strictEqual(countOpcode(opcodes, wasmOpcode.localGet), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localGet) >= 1, true);
 });
 
-test("JIT expression cache does not reuse one-before and one-after clobber", () => {
-  const opcodes = emitPlannedExpression([
-    { op: "set", target: reg("ebx"), value: addExpr("eax", 1), accessWidth: 32 },
-    { op: "set", target: reg("eax"), value: const32(5), accessWidth: 32 },
-    { op: "set", target: reg("ecx"), value: addExpr("eax", 1), accessWidth: 32 }
+test("JIT production emission does not reuse values across register-write epochs", () => {
+  const opcodes = productionOpcodes([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
+    {
+      op: "value.binary",
+      type: "i32",
+      operator: "add",
+      dst: v(1),
+      a: v(0),
+      b: c32(1)
+    },
+    { op: "set", target: { kind: "mem", address: v(1) }, value: v(1), accessWidth: 32 },
+    { op: "set", target: { kind: "reg", reg: "eax" }, value: c32(5), accessWidth: 32 },
+    { op: "get", dst: v(2), source: { kind: "reg", reg: "eax" } },
+    {
+      op: "value.binary",
+      type: "i32",
+      operator: "add",
+      dst: v(3),
+      a: v(2),
+      b: c32(1)
+    },
+    { op: "set", target: { kind: "mem", address: v(3) }, value: v(3), accessWidth: 32 },
+    { op: "next" }
   ]);
 
-  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 0);
-});
-
-test("JIT expression cache invalidates cached values across written-register epochs", () => {
-  const opcodes = emitPlannedExpression([
-    { op: "hostTrap", vector: addExpr("eax", 1) },
-    { op: "hostTrap", vector: addExpr("eax", 1) },
-    { op: "set", target: reg("eax"), value: const32(5), accessWidth: 32 },
-    { op: "hostTrap", vector: addExpr("eax", 1) },
-    { op: "hostTrap", vector: addExpr("eax", 1) }
-  ]);
-
-  deepStrictEqual(localOpcodes(opcodes).filter((opcode) =>
-    opcode === wasmOpcode.localTee ||
-    opcode === wasmOpcode.localGet
-  ), [wasmOpcode.localTee, wasmOpcode.localGet, wasmOpcode.localTee, wasmOpcode.localGet]);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 2);
 });
 
 test("JIT value-cache runtime follows planned timeline expression positions", () => {
@@ -100,10 +110,27 @@ test("JIT value-cache runtime follows planned timeline expression positions", ()
   strictEqual(JSON.stringify(runtimeValues[0]) === JSON.stringify(runtimeValues[3]), false);
 });
 
-test("JIT expression cache prefers repeated parent expressions over nested children", () => {
-  const opcodes = emitPlannedExpression([
-    { op: "hostTrap", vector: parentExpr() },
-    { op: "hostTrap", vector: parentExpr() }
+test("JIT production emission prefers repeated memory-store parent expressions", () => {
+  const opcodes = productionOpcodes([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
+    {
+      op: "value.binary",
+      type: "i32",
+      operator: "add",
+      dst: v(1),
+      a: v(0),
+      b: c32(1)
+    },
+    {
+      op: "value.binary",
+      type: "i32",
+      operator: "xor",
+      dst: v(2),
+      a: v(1),
+      b: c32(0xff)
+    },
+    { op: "set", target: { kind: "mem", address: v(2) }, value: v(2), accessWidth: 32 },
+    { op: "next" }
   ]);
 
   strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 1);
@@ -135,3 +162,30 @@ test("JIT value-cache planning does not treat flags.set as an exit-store consume
     valueTimeline
   }, expressionBlock).useCounts, []);
 });
+
+function productionOpcodes(ir: JitIrBlock["instructions"][number]["ir"]): readonly number[] {
+  return wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitIrBlock([
+    singleInstructionBlock(ir)
+  ])));
+}
+
+function singleInstructionBlock(ir: JitIrBlock["instructions"][number]["ir"]): JitIrBlock {
+  return {
+    instructions: [{
+      instructionId: "value-cache-production-test",
+      eip: 0x1000,
+      nextEip: 0x1001,
+      nextMode: "exit",
+      operands: [],
+      ir
+    }]
+  };
+}
+
+function v(id: number): Extract<ValueRef, { kind: "var" }> {
+  return { kind: "var", id };
+}
+
+function c32(value: number): Extract<ValueRef, { kind: "const" }> {
+  return { kind: "const", type: "i32", value };
+}

@@ -31,7 +31,7 @@ import { rootValuePathScope } from "#backends/wasm/jit/codegen/plan/control-path
 import { jitProducedValue } from "#backends/wasm/jit/ir/value-builders.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 
-test("JIT emission consumes prebuilt expression blocks from instruction plans", () => {
+test("JIT production emission consumes planned effects from instruction plans", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
@@ -76,6 +76,17 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
       producedValuesByVarId: new Map(),
       plannedValueCaptures: new Map()
     }],
+    plannedEffects: [{
+      placement: {
+        instructionIndex: 0,
+        opIndex: 0,
+        epoch: 0
+      },
+      sourceOpIndex: 0,
+      kind: "hostTrap",
+      exits: ["hostTrap"],
+      valueRoots: []
+    }],
     exitPoints: [{
       instructionIndex: 0,
       opIndex: 0,
@@ -113,6 +124,54 @@ test("JIT emission consumes prebuilt expression blocks from instruction plans", 
 
   strictEqual(payloadExtendIndex > vectorStoreIndex, true);
   strictEqual(payloadGetIndex !== -1, true);
+});
+
+test("JIT production emission does not walk unscheduled expression effects", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const scratch = new WasmLocalScratchAllocator(body);
+  const exitLocal = body.addLocal(wasmValueType.i64);
+  const state = createJitIrState(body, [{ stores: [] }]);
+  const expressionBlock = [
+    { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
+  ] as const;
+  const initialState = exitState(0);
+
+  emitJitBlock({
+    body,
+    scratch,
+    state,
+    exit: { exitLocal, exitLabelDepth: 0 },
+    instructions: [{
+      instructionId: "unscheduled-expression-effect",
+      eip: 0x1000,
+      nextEip: 0x1001,
+      nextMode: "continue",
+      instructionCountDelta: initialState.instructionCountDelta,
+      initialValueState: initialState.valueState,
+      controlPathScopes: new Map(),
+      exitPointCount: 0,
+      operands: [],
+      expressionBlock,
+      valueTimeline: buildJitInstructionValueTimeline({
+        operands: [],
+        expressionBlock,
+        entryValueState: initialState.valueState
+      }),
+      sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
+      expressionPathScopes: new Map(),
+      producedValuesByVarId: new Map(),
+      plannedValueCaptures: new Map()
+    }],
+    plannedEffects: [],
+    exitPoints: []
+  });
+  scratch.assertClear();
+  body.end();
+
+  const opcodes = wasmBodyOpcodes(body.encode());
+
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 0);
+  strictEqual(countOpcode(opcodes, wasmOpcode.br), 0);
 });
 
 test("JIT planned emission keeps a guard but skips an unused produced load", () => {
@@ -290,9 +349,13 @@ test("JIT codegen leaves dead pure SSA unpruned and emits no Wasm for it", () =>
     "value.binary",
     "next"
   ]);
+  deepStrictEqual(emissionPlan.plannedEffects.map((effect) => effect.kind), [
+    "exitEdge"
+  ]);
   deepStrictEqual(emissionPlan.plannedValueUses, []);
   deepStrictEqual(emissionPlan.valueCachePlan.useCounts, []);
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 0);
+  strictEqual(countOpcode(opcodes, wasmOpcode.br), 1);
 });
 
 test("JIT codegen preserves guard-before-load ordering without pruning", () => {

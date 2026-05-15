@@ -61,7 +61,7 @@ export type JitExpressionBlockInstruction = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: JitInstructionValueTimeline;
   plannedValueCaptures: JitExpressionCaptureMap;
-  plannedEffects?: readonly JitPlannedEffect[] | undefined;
+  plannedEffects: readonly JitPlannedEffect[];
 }>;
 
 export type JitExpressionBlockEmitContext = Readonly<{
@@ -93,7 +93,9 @@ export type JitExpressionBlockEmitContext = Readonly<{
 }>;
 
 export function emitJitExpressionBlock(context: JitExpressionBlockEmitContext): void {
-  new JitExpressionBlockEmitter(context).emit();
+  new JitExpressionBlockEmitter(context).emit(
+    context.instruction.plannedEffects
+  );
 }
 
 class JitExpressionBlockEmitter {
@@ -108,35 +110,7 @@ class JitExpressionBlockEmitter {
     this.#context = context;
   }
 
-  emit(): void {
-    const plannedEffects = this.#context.instruction.plannedEffects;
-
-    if (plannedEffects !== undefined) {
-      this.#emitPlannedEffects(plannedEffects);
-      return;
-    }
-
-    this.#emitExpressionStream();
-  }
-
-  #emitExpressionStream(): void {
-    const { expressionBlock } = this.#context.instruction;
-
-    for (let opIndex = 0; opIndex < expressionBlock.length; opIndex += 1) {
-      const op = expressionBlock[opIndex];
-
-      if (op === undefined) {
-        throw new Error(`missing JIT expression-block op: ${opIndex}`);
-      }
-
-      this.#currentOpIndex = opIndex;
-      this.#beginExpressionOp(opIndex);
-      this.#capturePlannedValues(opIndex);
-      this.#emitOp(op);
-    }
-  }
-
-  #emitPlannedEffects(plannedEffects: readonly JitPlannedEffect[]): void {
+  emit(plannedEffects: readonly JitPlannedEffect[]): void {
     const { expressionBlock } = this.#context.instruction;
 
     for (const effect of plannedEffects) {
@@ -161,34 +135,6 @@ class JitExpressionBlockEmitter {
     }
 
     this.#context.valueCache?.beginExpressionOp(opIndex);
-  }
-
-  #emitOp(op: IrExprOp): void {
-    switch (op.op) {
-      case "let32":
-        this.#emitLet32(op);
-        return;
-      case "hostTrap":
-        this.#context.emitHostTrap(op.vector, this.#helpers);
-        return;
-      case "next":
-        this.#context.emitNext();
-        return;
-      case "set":
-        this.#context.emitSet(op, this.#helpers);
-        return;
-      case "memory.guard":
-        this.#context.emitMemoryGuard(op, this.#helpers);
-        return;
-      case "flags.set":
-        return;
-      case "jump":
-        this.#context.emitJump(op.target, this.#helpers);
-        return;
-      case "conditionalJump":
-        this.#context.emitConditionalJump(op.condition, op.taken, op.notTaken, this.#helpers);
-        return;
-    }
   }
 
   #emitPlannedEffect(effect: JitPlannedEffect, op: IrExprOp): void {
@@ -282,21 +228,6 @@ class JitExpressionBlockEmitter {
       );
 
       captured?.release();
-    }
-  }
-
-  #emitLet32(op: Extract<IrExprOp, { op: "let32" }>): void {
-    const produced = this.#producedDefinitionForValueRef(op.dst);
-
-    if (produced !== undefined) {
-      this.#emitProducedDefinition(produced, op.value);
-      return;
-    }
-
-    if (this.#valueForValueRef(op.dst) === undefined) {
-      throw new Error(
-        `JIT expression-block let32 has no timeline value at expression op ${this.#currentOpIndex}`
-      );
     }
   }
 

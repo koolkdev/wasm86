@@ -52,7 +52,6 @@ import type { JitExitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types
 import { createJitIrState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
-import { emitPlannedExpression } from "./expression-cache-test-helpers.js";
 
 export {
   deepStrictEqual,
@@ -87,8 +86,7 @@ export {
   branchValuePathScope,
   rootValuePathScope,
   createJitIrState,
-  createJitValueState,
-  emitPlannedExpression
+  createJitValueState
 };
 export type {
   ValueWidth,
