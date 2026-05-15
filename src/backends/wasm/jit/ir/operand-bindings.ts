@@ -8,7 +8,7 @@ export type JitOperandBinding =
   | Readonly<{ kind: "static.imm32"; value: number }>
   | Readonly<{ kind: "static.relTarget"; target: number }>;
 
-export function jitBindingsFromIsaInstruction(instruction: IsaDecodedInstruction): readonly JitOperandBinding[] {
+export function operandBindingsFromInstruction(instruction: IsaDecodedInstruction): readonly JitOperandBinding[] {
   return instruction.operands.map(jitBindingFromIsaOperand);
 }
 

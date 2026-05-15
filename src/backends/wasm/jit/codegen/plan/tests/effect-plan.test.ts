@@ -10,12 +10,12 @@ import {
   planJitCodegen,
   IR_ALU_FLAG_MASK,
   startAddress,
-  type JitIrBlock
+  type JitBlock
 } from "./plan-test-helpers.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 
 test("JIT effect plan leaves pure expressions and state facts out of cache roots", () => {
-  const block: JitIrBlock = {
+  const block: JitBlock = {
     instructions: [{
       instructionId: "state-facts-only",
       eip: startAddress,
@@ -52,7 +52,7 @@ test("JIT effect plan leaves pure expressions and state facts out of cache roots
 });
 
 test("JIT effect plan attaches roots for ordered effects and exit stores", () => {
-  const block: JitIrBlock = {
+  const block: JitBlock = {
     instructions: [
       {
         instructionId: "guard-root",
@@ -181,7 +181,7 @@ test("JIT effect plan attaches roots for ordered effects and exit stores", () =>
 });
 
 test("JIT effect plan selects produced values only for later required roots", () => {
-  const unusedBlock: JitIrBlock = {
+  const unusedBlock: JitBlock = {
     instructions: [{
       instructionId: "unused-produced",
       eip: startAddress,
@@ -199,7 +199,7 @@ test("JIT effect plan selects produced values only for later required roots", ()
       ]
     }]
   };
-  const usedBlock: JitIrBlock = {
+  const usedBlock: JitBlock = {
     instructions: [{
       instructionId: "used-produced",
       eip: startAddress,

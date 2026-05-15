@@ -8,12 +8,12 @@ import { stateOffset, wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { ExitReason } from "#backends/wasm/exit.js";
-import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
-import type { JitIrBlock } from "#backends/wasm/jit/block.js";
+import { buildBlock, encodeJitBlock } from "#backends/wasm/jit/block.js";
+import type { JitBlock } from "#backends/wasm/jit/block.js";
 import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
-import { runJitIrBlock } from "./helpers.js";
+import { runJitBlock } from "./helpers.js";
 
 export {
   deepStrictEqual,
@@ -29,13 +29,13 @@ export {
   wasmSectionId,
   wasmBodyOpcodes,
   ExitReason,
-  buildJitIrBlock,
-  encodeJitIrBlock,
+  buildBlock,
+  encodeJitBlock,
   irOpDst,
   irOpIsTerminator,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
-  runJitIrBlock
+  runJitBlock
 };
 export type { IrOp, StorageRef, ValueRef };
 
@@ -80,11 +80,11 @@ export function arithmeticEflags(flags: ArithmeticFlagExpectations): number {
   ) >>> 0;
 }
 
-export function codegenIr(block: ReturnType<typeof buildJitIrBlock>): readonly IrOp[] {
+export function codegenIr(block: ReturnType<typeof buildBlock>): readonly IrOp[] {
   return blockIr(block);
 }
 
-export function blockIr(block: JitIrBlock): readonly IrOp[] {
+export function blockIr(block: JitBlock): readonly IrOp[] {
   return block.instructions.flatMap((instruction) => instruction.ir);
 }
 
@@ -109,7 +109,7 @@ export function readGuestValue(view: DataView, address: number, width: 8 | 16 | 
   }
 }
 
-export function decodedBlock(instructionBytes: readonly (readonly number[])[]): ReturnType<typeof buildJitIrBlock> {
+export function decodedBlock(instructionBytes: readonly (readonly number[])[]): ReturnType<typeof buildBlock> {
   const instructions = [];
   let decodeEip = startAddress;
 
@@ -120,15 +120,15 @@ export function decodedBlock(instructionBytes: readonly (readonly number[])[]): 
     decodeEip = instruction.nextEip;
   }
 
-  return buildJitIrBlock(instructions);
+  return buildBlock(instructions);
 }
 
 export function singleInstructionBodyOpcodes(bytes: readonly number[]): readonly number[] {
-  return jitBlockBodyOpcodes(buildJitIrBlock([ok(decodeBytes(bytes, startAddress))]));
+  return jitBlockBodyOpcodes(buildBlock([ok(decodeBytes(bytes, startAddress))]));
 }
 
-export function jitBlockBodyOpcodes(block: ReturnType<typeof buildJitIrBlock>): readonly number[] {
-  return wasmBodyOpcodes(extractOnlyFunctionBody(encodeJitIrBlock([block])));
+export function jitBlockBodyOpcodes(block: ReturnType<typeof buildBlock>): readonly number[] {
+  return wasmBodyOpcodes(extractOnlyFunctionBody(encodeJitBlock([block])));
 }
 
 export function assertNoMaskImmediatelyAfter(opcodes: readonly number[], opcode: number): void {
@@ -199,11 +199,11 @@ export function storageOperandIndexes(storage: StorageRef): readonly number[] {
   }
 }
 
-export function aluFlagMemoryAccessCounts(block: ReturnType<typeof buildJitIrBlock>): Readonly<{ loads: number; stores: number }> {
+export function aluFlagMemoryAccessCounts(block: ReturnType<typeof buildBlock>): Readonly<{ loads: number; stores: number }> {
   let loads = 0;
   let stores = 0;
 
-  for (const access of memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))) {
+  for (const access of memoryAccesses(extractOnlyFunctionBody(encodeJitBlock([block])))) {
     if (access.memoryIndex !== 0 || access.offset !== stateOffset.aluFlags) {
       continue;
     }
@@ -218,17 +218,17 @@ export function aluFlagMemoryAccessCounts(block: ReturnType<typeof buildJitIrBlo
   return { loads, stores };
 }
 
-export function stateMemoryLoads(block: ReturnType<typeof buildJitIrBlock>): readonly number[] {
-  return memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))
+export function stateMemoryLoads(block: ReturnType<typeof buildBlock>): readonly number[] {
+  return memoryAccesses(extractOnlyFunctionBody(encodeJitBlock([block])))
     .filter((access) => access.memoryIndex === 0 && access.opcode === wasmOpcode.i32Load)
     .map((access) => access.offset);
 }
 
 export function registerStateMemoryAccesses(
-  block: ReturnType<typeof buildJitIrBlock>,
+  block: ReturnType<typeof buildBlock>,
   regOffset: number
 ): readonly Readonly<{ opcode: number; offset: number }>[] {
-  return memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))
+  return memoryAccesses(extractOnlyFunctionBody(encodeJitBlock([block])))
     .filter((access) =>
       access.memoryIndex === wasmMemoryIndex.state &&
       access.offset >= regOffset &&

@@ -5,22 +5,22 @@ import type { CpuState } from "#x86/state/cpu-state.js";
 import { wasmImport } from "#backends/wasm/abi.js";
 import { decodeExit, type DecodedExit } from "#backends/wasm/exit.js";
 import { readWasmCpuState, writeWasmCpuState } from "#backends/wasm/state-layout.js";
-import { buildJitIrBlock, encodeJitIrBlock, jitBlockExportName } from "#backends/wasm/jit/block.js";
+import { buildBlock, encodeJitBlock, jitBlockExportName } from "#backends/wasm/jit/block.js";
 
-export type JitIrBlockRunResult = Readonly<{
+export type JitBlockRunResult = Readonly<{
   state: CpuState;
   exit: DecodedExit;
   guestView: DataView;
 }>;
 
-export async function runJitIrBlock(
+export async function runJitBlock(
   bytes: readonly number[],
   initialState: CpuState,
   memory: readonly Readonly<{ address: number; bytes: readonly number[] }>[] = []
-): Promise<JitIrBlockRunResult> {
+): Promise<JitBlockRunResult> {
   const instructions = decodeInstructions(bytes, initialState.eip);
-  const block = buildJitIrBlock(instructions);
-  const module = new WebAssembly.Module(encodeJitIrBlock([block]));
+  const block = buildBlock(instructions);
+  const module = new WebAssembly.Module(encodeJitBlock([block]));
   const stateMemory = new WebAssembly.Memory({ initial: 1 });
   const guestMemory = new WebAssembly.Memory({ initial: 1 });
   const stateView = new DataView(stateMemory.buffer);

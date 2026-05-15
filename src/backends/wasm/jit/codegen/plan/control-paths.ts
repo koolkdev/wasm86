@@ -2,7 +2,7 @@ import type {
   IrExpressionSourceMap,
   IrExpressionSourcePlacement
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 
 export type JitControlPathId = string;
 
@@ -46,7 +46,7 @@ export function branchControlPathId(
 }
 
 export function buildJitInstructionControlPathScopes(
-  instruction: JitIrBlockInstruction,
+  instruction: JitInstruction,
   instructionIndex: number
 ): JitControlPathScopesMap {
   const pathScopes = new Map<number, JitBranchValuePathScopes>();

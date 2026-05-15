@@ -1,5 +1,5 @@
 import type { IrOp } from "#x86/ir/model/types.js";
-import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   JitExitStateBuilder
 } from "./exit-state.js";
@@ -26,7 +26,7 @@ import { buildJitInstructionControlPathScopes } from "./control-paths.js";
 import type { JitOpExitKind } from "#backends/wasm/jit/ir/effect-primitives.js";
 
 export function analyzeJitCodegenState(
-  block: JitIrBlock,
+  block: JitBlock,
   effects: JitEffectIndex = indexJitEffects(block)
 ): Omit<JitCodegenPlan, "block"> {
   const state = new JitExitStateBuilder();
@@ -89,7 +89,7 @@ export function analyzeJitCodegenState(
 
   function recordOpEffects(
     op: IrOp,
-    instruction: JitIrBlockInstruction,
+    instruction: JitInstruction,
     instructionIndex: number,
     opIndex: number,
     exits: readonly JitOpExitKind[],
@@ -123,7 +123,7 @@ export function analyzeJitCodegenState(
   }
 
   function recordExitObservations(
-    instruction: JitIrBlockInstruction,
+    instruction: JitInstruction,
     instructionIndex: number,
     opIndex: number,
     exits: readonly JitOpExitKind[],

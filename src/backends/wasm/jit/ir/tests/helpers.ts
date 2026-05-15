@@ -2,13 +2,13 @@ import type { Reg32 } from "#x86/isa/types.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 import type { ConditionCode, IrBlock, IrOp, ValueRef, VarRef } from "#x86/ir/model/types.js";
 import type {
-  JitIrBlock,
-  JitIrBlockInstruction
+  JitBlock,
+  JitInstruction
 } from "#backends/wasm/jit/ir/types.js";
 
 export const startAddress = 0x1000;
 
-export function logic32LocalConditionBlock(cc: ConditionCode): JitIrBlock {
+export function logic32LocalConditionBlock(cc: ConditionCode): JitBlock {
   return {
     instructions: [
       syntheticInstruction([
@@ -43,8 +43,8 @@ export function selectSet(
 export function syntheticInstruction(
   ir: IrBlock,
   index = 0,
-  nextMode: JitIrBlock["instructions"][number]["nextMode"] = "continue"
-): JitIrBlock["instructions"][number] {
+  nextMode: JitBlock["instructions"][number]["nextMode"] = "continue"
+): JitBlock["instructions"][number] {
   return {
     instructionId: `synthetic.${index}`,
     eip: startAddress + index,
@@ -56,7 +56,7 @@ export function syntheticInstruction(
 }
 
 export function setTargetRegs(
-  instructions: readonly JitIrBlockInstruction[]
+  instructions: readonly JitInstruction[]
 ): readonly Reg32[] {
   return instructions.flatMap((instruction) =>
     instructionOps(instruction).flatMap((op) => {
@@ -79,7 +79,7 @@ export function setTargetRegs(
   );
 }
 
-function instructionOps(instruction: JitIrBlockInstruction): IrBlock {
+function instructionOps(instruction: JitInstruction): IrBlock {
   return instruction.ir;
 }
 

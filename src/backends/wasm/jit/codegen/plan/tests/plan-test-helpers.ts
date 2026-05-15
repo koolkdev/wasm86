@@ -7,7 +7,7 @@ import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import type { IrExprBlock, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
-import { buildJitIrBlock } from "#backends/wasm/jit/block.js";
+import { buildBlock } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import {
   planJitCodegen
@@ -47,7 +47,7 @@ import type {
   JitProducedValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
+import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 
 export const startAddress = 0x1000;
@@ -62,7 +62,7 @@ export {
   IR_ALU_FLAG_MASK,
   FLAG_PRODUCERS,
   ExitReason,
-  buildJitIrBlock,
+  buildBlock,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
   branchValuePathScope,
@@ -93,7 +93,7 @@ export type {
   JitObservationValue,
   JitProducedValue,
   JitValue,
-  JitIrBlock
+  JitBlock
 };
 
 export function onlyExit(exits: readonly JitExitPoint[], reason: ExitReason): JitExitPoint {

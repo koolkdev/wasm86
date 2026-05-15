@@ -12,7 +12,7 @@ import type {
 } from "#backends/wasm/codegen/expressions.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import { reg32, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
-import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import { jitProducedValueForEffectfulRead } from "#backends/wasm/jit/ir/produced-values.js";
 import type {
   JitArchitecturalSlot,
@@ -21,7 +21,7 @@ import type {
 } from "#backends/wasm/jit/ir/values/types.js";
 import { jitStorageRegisterAccess } from "#backends/wasm/jit/analysis/storage-registers.js";
 import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
-import type { JitIrLocation } from "#backends/wasm/jit/ir/walk.js";
+import type { JitLocation } from "#backends/wasm/jit/ir/walk.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import {
   createJitValueState,
@@ -41,7 +41,7 @@ export type JitValueStateBuilderWrite = Readonly<{
 }>;
 
 export type JitSourceValueMapRecordOptions = Readonly<{
-  location?: JitIrLocation;
+  location?: JitLocation;
 }>;
 
 export class JitValueStateBuilder {
@@ -75,7 +75,7 @@ export class JitValueStateBuilder {
 
   recordSourceSet(
     op: Extract<IrOp, { op: "set" }>,
-    instruction: JitIrBlockInstruction,
+    instruction: JitInstruction,
     value: JitValue | undefined
   ): JitValueStateBuilderWrite | undefined {
     const access = jitStorageRegisterAccess(op.target, instruction.operands, op.accessWidth ?? 32);
@@ -185,9 +185,9 @@ export class JitSourceValueMap {
 
   recordOp(
     op: IrOp,
-    instruction: JitIrBlockInstruction,
+    instruction: JitInstruction,
     registerValues: JitRegisterValueMap = new Map(),
-    options: JitIrLocation | JitSourceValueMapRecordOptions = {}
+    options: JitLocation | JitSourceValueMapRecordOptions = {}
   ): boolean {
     const recordOptions = normalizeRecordOptions(options);
     const resolver = this.#resolver(instruction.operands, registerValues);
@@ -246,7 +246,7 @@ export class JitSourceValueMap {
 
   #getValue(
     op: Extract<IrOp, { op: "get" }>,
-    instruction: JitIrBlockInstruction,
+    instruction: JitInstruction,
     resolver: ReturnType<typeof createJitValueResolver>,
     options: JitSourceValueMapRecordOptions
   ): JitValue | undefined {
@@ -277,7 +277,7 @@ export class JitSourceValueMap {
 }
 
 function normalizeRecordOptions(
-  options: JitIrLocation | JitSourceValueMapRecordOptions
+  options: JitLocation | JitSourceValueMapRecordOptions
 ): JitSourceValueMapRecordOptions {
   return "instructionIndex" in options
     ? { location: options }

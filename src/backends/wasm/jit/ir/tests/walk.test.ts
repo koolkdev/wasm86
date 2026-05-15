@@ -2,12 +2,12 @@ import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
-  jitIrLocation,
-  walkJitIrOpsBetween
+  jitLocation,
+  walkJitOpsBetween
 } from "#backends/wasm/jit/ir/walk.js";
 import { syntheticInstruction, v } from "./helpers.js";
 
-test("walkJitIrOpsBetween iterates between locations", () => {
+test("walkJitOpsBetween iterates between locations", () => {
   const block = {
     instructions: [
       syntheticInstruction([
@@ -24,7 +24,7 @@ test("walkJitIrOpsBetween iterates between locations", () => {
   };
   const visited: string[] = [];
 
-  walkJitIrOpsBetween(block, jitIrLocation(0, 0), jitIrLocation(1, 1), (_instruction, op, location) => {
+  walkJitOpsBetween(block, jitLocation(0, 0), jitLocation(1, 1), (_instruction, op, location) => {
     visited.push(`${location.instructionIndex}:${location.opIndex}:${op.op}`);
   });
 

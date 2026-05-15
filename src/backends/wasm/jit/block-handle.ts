@@ -4,8 +4,8 @@ import { wasmImport } from "#backends/wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#backends/wasm/errors.js";
 import { decodeExit, type DecodedExit } from "#backends/wasm/exit.js";
 import {
-  buildJitIrBlock,
-  encodeJitIrBlock,
+  buildBlock,
+  encodeJitBlock,
   jitBlockExportName,
   staticJitLinkTargets,
   type JitLinkResolver
@@ -74,11 +74,11 @@ export function compileWasmBlockHandle(
     }
   }
 
-  const jitBlocks = blocks.map((block) => buildJitIrBlock(block.instructions));
+  const jitBlocks = blocks.map((block) => buildBlock(block.instructions));
   const entryEips = blocks.map((block) => u32(block.startEip));
   const moduleLinkTable = createModuleLinkTable(jitBlocks, entryEips);
   const linkResolver = moduleLinkTable === undefined ? undefined : linkResolverForTable(moduleLinkTable);
-  const bytes = encodeJitIrBlock(jitBlocks, linkResolver === undefined ? {} : { linkResolver });
+  const bytes = encodeJitBlock(jitBlocks, linkResolver === undefined ? {} : { linkResolver });
   const compileStart = performance.now();
   const module = new WebAssembly.Module(bytes);
   const compileMs = performance.now() - compileStart;
@@ -124,7 +124,7 @@ function runWasmBlock(exportedBlockFunction: () => unknown): WasmBlockRun {
 }
 
 function createModuleLinkTable(
-  jitBlocks: readonly ReturnType<typeof buildJitIrBlock>[],
+  jitBlocks: readonly ReturnType<typeof buildBlock>[],
   entryEips: readonly number[]
 ): JitModuleLinkTable | undefined {
   const internalEips = new Set(entryEips.map((eip) => u32(eip)));

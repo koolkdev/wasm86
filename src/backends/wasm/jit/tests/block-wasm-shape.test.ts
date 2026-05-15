@@ -7,8 +7,8 @@ import {
   stateOffset,
   wasmMemoryIndex,
   wasmOpcode,
-  buildJitIrBlock,
-  encodeJitIrBlock,
+  buildBlock,
+  encodeJitBlock,
   startAddress,
   decodedBlock,
   singleInstructionBodyOpcodes,
@@ -22,29 +22,29 @@ import {
   memoryAccesses,
   extractOnlyFunctionBody,
 } from "./block-test-helpers.js";
-test("buildJitIrBlock does not specialize incoming CF after INC", () => {
+test("buildBlock does not specialize incoming CF after INC", () => {
   const inc = ok(decodeBytes([0x40], startAddress));
   const jc = ok(decodeBytes([0x72, 0x05], inc.nextEip));
-  const block = buildJitIrBlock([inc, jc]);
+  const block = buildBlock([inc, jc]);
 
   deepStrictEqual(aluFlagMemoryAccessCounts(block), { loads: 2, stores: 2 });
 });
 
 test("jit IR block emits aluFlags memory traffic only for flag reads and observable exits", () => {
-  const flagFreeBlock = buildJitIrBlock([
+  const flagFreeBlock = buildBlock([
     ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress)),
     ok(decodeBytes([0xbb, 0x02, 0x00, 0x00, 0x00], startAddress + 5)),
     ok(decodeBytes([0xcd, 0x2e], startAddress + 10))
   ]);
-  const branchBlock = buildJitIrBlock([ok(decodeBytes([0x74, 0x05], startAddress))]);
+  const branchBlock = buildBlock([ok(decodeBytes([0x74, 0x05], startAddress))]);
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const jnzAfterAdd = ok(decodeBytes([0x75, 0x05], add.nextEip));
-  const branchAfterAddBlock = buildJitIrBlock([add, jnzAfterAdd]);
-  const addTrapBlock = buildJitIrBlock([add, ok(decodeBytes([0xcd, 0x2e], add.nextEip))]);
+  const branchAfterAddBlock = buildBlock([add, jnzAfterAdd]);
+  const addTrapBlock = buildBlock([add, ok(decodeBytes([0xcd, 0x2e], add.nextEip))]);
   const inc = ok(decodeBytes([0x40], startAddress));
-  const incTrapBlock = buildJitIrBlock([inc, ok(decodeBytes([0xcd, 0x2e], inc.nextEip))]);
+  const incTrapBlock = buildBlock([inc, ok(decodeBytes([0xcd, 0x2e], inc.nextEip))]);
   const orAfterInc = ok(decodeBytes([0x09, 0xd8], inc.nextEip));
-  const fullOverwriteAfterIncBlock = buildJitIrBlock([
+  const fullOverwriteAfterIncBlock = buildBlock([
     inc,
     orAfterInc,
     ok(decodeBytes([0xcd, 0x2e], orAfterInc.nextEip))
@@ -73,9 +73,9 @@ test("jit IR block omits redundant masks after byte and word memory loads", () =
 test("jit IR block emits MOVSX with signed loads or sign-extension opcodes", () => {
   const movsxByteMem = singleInstructionBodyOpcodes([0x0f, 0xbe, 0x03]);
   const movsxWordMem = singleInstructionBodyOpcodes([0x0f, 0xbf, 0x03]);
-  const movsxEbxAlBlock = buildJitIrBlock([ok(decodeBytes([0x0f, 0xbe, 0xd8], startAddress))]);
+  const movsxEbxAlBlock = buildBlock([ok(decodeBytes([0x0f, 0xbe, 0xd8], startAddress))]);
   const movsxEbxAl = jitBlockBodyOpcodes(movsxEbxAlBlock);
-  const movsxAfterTrackedRegBlock = buildJitIrBlock([
+  const movsxAfterTrackedRegBlock = buildBlock([
     ok(decodeBytes([0x66, 0x89, 0xd8], startAddress)), // mov ax, bx
     ok(decodeBytes([0x0f, 0xbf, 0xc8], startAddress + 3)) // movsx ecx, ax
   ]);
@@ -108,7 +108,7 @@ test("jit IR block emits MOVSX with signed loads or sign-extension opcodes", () 
 });
 
 test("jit IR block keeps MOVZX on unsigned loads without redundant masks", () => {
-  const movzxBlBlock = buildJitIrBlock([ok(decodeBytes([0x0f, 0xb6, 0xc3], startAddress))]);
+  const movzxBlBlock = buildBlock([ok(decodeBytes([0x0f, 0xb6, 0xc3], startAddress))]);
   const movzxBl = jitBlockBodyOpcodes(movzxBlBlock);
   const movzxWordMem = singleInstructionBodyOpcodes([0x0f, 0xb7, 0x03]);
 
@@ -140,7 +140,7 @@ test("jit IR block keeps mixed partial-register bitwise mask count within budget
   const movAh = ok(decodeBytes([0xb4, 0x07], startAddress));
   const movEbxEax = ok(decodeBytes([0x89, 0xc3], movAh.nextEip));
   const xorAx = ok(decodeBytes([0x66, 0x35, 0x32, 0x04], movEbxEax.nextEip));
-  const opcodes = jitBlockBodyOpcodes(buildJitIrBlock([movAh, movEbxEax, xorAx]));
+  const opcodes = jitBlockBodyOpcodes(buildBlock([movAh, movEbxEax, xorAx]));
 
   // This is an explicit code-shape budget for mixed partial-register bitwise lowering.
   strictEqual(countOpcode(opcodes, wasmOpcode.i32And) <= 11, true);
@@ -176,7 +176,7 @@ test("jit IR block emits one guest load when a produced load feeds an exit store
     [0x8b, 0x05, 0x60, 0x00, 0x00, 0x00], // mov eax, [0x60]
     [0xcd, 0x2e] // int 0x2e
   ]);
-  const guestLoads = memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))
+  const guestLoads = memoryAccesses(extractOnlyFunctionBody(encodeJitBlock([block])))
     .filter((access) => access.memoryIndex === wasmMemoryIndex.guest && access.opcode === wasmOpcode.i32Load);
 
   strictEqual(guestLoads.length, 1);
@@ -220,7 +220,7 @@ test("jit IR block uses full-register load and word store when AX also feeds a f
 });
 
 test("jit IR block shares input-state AH xor result between flags and byte writeback", () => {
-  const block = buildJitIrBlock([ok(decodeBytes([0x80, 0xf4, 0x05], startAddress))]); // xor ah, 5
+  const block = buildBlock([ok(decodeBytes([0x80, 0xf4, 0x05], startAddress))]); // xor ah, 5
 
   deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
     { opcode: wasmOpcode.i32Load8U, offset: stateOffset.eax + 1 },
@@ -230,7 +230,7 @@ test("jit IR block shares input-state AH xor result between flags and byte write
 });
 
 test("jit IR block shares input-state AX xor result between flags and word writeback", () => {
-  const block = buildJitIrBlock([ok(decodeBytes([0x66, 0x35, 0x32, 0x04], startAddress))]); // xor ax, 0x432
+  const block = buildBlock([ok(decodeBytes([0x66, 0x35, 0x32, 0x04], startAddress))]); // xor ax, 0x432
 
   deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
     { opcode: wasmOpcode.i32Load16U, offset: stateOffset.eax },
@@ -246,7 +246,7 @@ test("jit IR block emits one guest load for mixed cached flag inputs", () => {
     [0x40], // inc eax
     [0xcd, 0x2e] // int 0x2e
   ]);
-  const guestLoads = memoryAccesses(extractOnlyFunctionBody(encodeJitIrBlock([block])))
+  const guestLoads = memoryAccesses(extractOnlyFunctionBody(encodeJitBlock([block])))
     .filter((access) => access.memoryIndex === wasmMemoryIndex.guest && access.opcode === wasmOpcode.i32Load);
 
   strictEqual(guestLoads.length, 1);
@@ -254,14 +254,14 @@ test("jit IR block emits one guest load for mixed cached flag inputs", () => {
 
 test("jit IR block emits setcc through a select opcode", () => {
   const instruction = ok(decodeBytes([0x0f, 0x94, 0xc0], startAddress));
-  const opcodes = jitBlockBodyOpcodes(buildJitIrBlock([instruction]));
+  const opcodes = jitBlockBodyOpcodes(buildBlock([instruction]));
 
   strictEqual(opcodes.includes(wasmOpcode.select), true);
 });
 
 test("jit IR block emits cmovcc through a select opcode", () => {
   const instruction = ok(decodeBytes([0x0f, 0x44, 0xd1], startAddress));
-  const block = buildJitIrBlock([instruction]);
+  const block = buildBlock([instruction]);
   const opcodes = jitBlockBodyOpcodes(block);
 
   strictEqual(opcodes.includes(wasmOpcode.select), true);

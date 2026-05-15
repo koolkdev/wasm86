@@ -8,7 +8,7 @@ import {
   extractOnlyWasmFunctionBody,
   wasmBodyOpcodes,
   createJitValueCacheRuntime,
-  encodeJitIrBlock,
+  encodeJitBlock,
   planJitValueCache,
   buildJitInstructionValueTimeline,
   createJitValueState,
@@ -18,11 +18,11 @@ import {
   highCostExpr,
   countOpcode,
   repeatedInlineExpressionBlock,
-  type JitIrBlock,
+  type JitBlock,
 } from "./value-local-store-test-helpers.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 test("JIT expression emission captures repeated branch target values before the split", () => {
-  const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitIrBlock([repeatedInlineExpressionBlock()])));
+  const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitBlock([repeatedInlineExpressionBlock()])));
 
   strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 0);
   strictEqual(countOpcode(opcodes, wasmOpcode.localSet) > 0, true);
@@ -163,13 +163,13 @@ test("JIT value-cache planning does not treat flags.set as an exit-store consume
   }, expressionBlock).useCounts, []);
 });
 
-function productionOpcodes(ir: JitIrBlock["instructions"][number]["ir"]): readonly number[] {
-  return wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitIrBlock([
+function productionOpcodes(ir: JitBlock["instructions"][number]["ir"]): readonly number[] {
+  return wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitBlock([
     singleInstructionBlock(ir)
   ])));
 }
 
-function singleInstructionBlock(ir: JitIrBlock["instructions"][number]["ir"]): JitIrBlock {
+function singleInstructionBlock(ir: JitBlock["instructions"][number]["ir"]): JitBlock {
   return {
     instructions: [{
       instructionId: "value-cache-production-test",

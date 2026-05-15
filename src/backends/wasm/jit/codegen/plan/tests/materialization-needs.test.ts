@@ -7,7 +7,7 @@ import {
   IR_ALU_FLAG_MASK,
   FLAG_PRODUCERS,
   ExitReason,
-  buildJitIrBlock,
+  buildBlock,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
   jitFlagConditionValue,
@@ -28,11 +28,11 @@ import {
   type JitCodegenPlan,
   type JitExitMaterializationStore,
   type JitValue,
-  type JitIrBlock,
+  type JitBlock,
 } from "./plan-test-helpers.js";
 import type { JitPlannedValueUse } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 test("planJitCodegen feeds partial flag exit-store inputs through materialization needs", () => {
-  const block: JitIrBlock = {
+  const block: JitBlock = {
     instructions: [{
       instructionId: "partial-effectful-flag-input",
       eip: startAddress,
@@ -106,7 +106,7 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
 
 test("planJitCodegen omits materialization needs for empty exits", () => {
   const trap = ok(decodeBytes([0xcd, 0x2e], startAddress));
-  const codegenPlan = planJitCodegen(buildJitIrBlock([trap]));
+  const codegenPlan = planJitCodegen(buildBlock([trap]));
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
 
   strictEqual(exit.exitMaterializationIndex, 0);
@@ -117,7 +117,7 @@ test("planJitCodegen omits materialization needs for empty exits", () => {
 test("planJitCodegen records register and flag exit stores as exit-store value uses", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const load = ok(decodeBytes([0x8b, 0x05, 0x00, 0x00, 0x01, 0x00], add.nextEip));
-  const codegenPlan = planJitCodegen(buildJitIrBlock([add, load]));
+  const codegenPlan = planJitCodegen(buildBlock([add, load]));
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
   const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
   const expectedRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
@@ -190,7 +190,7 @@ function buildHostTrapEmissionPlanForStores(
   instructionId: string,
   stores: readonly JitExitMaterializationStore[]
 ) {
-  const block: JitIrBlock = {
+  const block: JitBlock = {
     instructions: [{
       instructionId,
       eip: startAddress,
@@ -238,7 +238,7 @@ function buildHostTrapEmissionPlanForStores(
 }
 
 test("planJitCodegen feeds produced exit-store values into materialization needs", () => {
-  const block: JitIrBlock = {
+  const block: JitBlock = {
     instructions: [{
       instructionId: "produced-exit-store",
       eip: startAddress,
@@ -294,7 +294,7 @@ test("planJitCodegen feeds produced exit-store values into materialization needs
 });
 
 test("planJitCodegen keeps clobber-sensitive exit-store values symbolic in materialization needs", () => {
-  const block: JitIrBlock = {
+  const block: JitBlock = {
     instructions: [{
       instructionId: "clobber-sensitive-exit-store",
       eip: startAddress,
@@ -348,7 +348,7 @@ test("planJitCodegen keeps clobber-sensitive exit-store values symbolic in mater
 });
 
 test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations", () => {
-  const block: JitIrBlock = {
+  const block: JitBlock = {
     instructions: [{
       instructionId: "flag-exit-before-register-write",
       eip: startAddress,
@@ -454,7 +454,7 @@ test("buildJitCodegenEmissionPlan maps exit-store uses at source exit locations"
 });
 
 test("buildJitCodegenEmissionPlan walks condition and select dependencies from exit-store uses", () => {
-  const block: JitIrBlock = {
+  const block: JitBlock = {
     instructions: [{
       instructionId: "generic-select-dependencies",
       eip: startAddress,

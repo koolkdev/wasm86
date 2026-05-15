@@ -31,8 +31,8 @@ import type {
   JitArchitecturalSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/produced-values.js";
-import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
+import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 
 test("JitValue bit simplification preserves exact unsigned bit semantics", () => {
   const eax = jitInputReg32Value("eax");
@@ -280,8 +280,8 @@ test("JIT produced-value indexing assigns ids to effectful get results only", ()
       { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
       { op: "get", dst: { kind: "var", id: 2 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 }
     ]
-  } as const satisfies JitIrBlockInstruction;
-  const producedValues = indexProducedValuesByVarIdForInstruction(instruction, 3);
+  } as const satisfies JitInstruction;
+  const producedValues = indexProducedValues(instruction, 3);
 
   deepStrictEqual([...producedValues.keys()], [1]);
   deepStrictEqual(

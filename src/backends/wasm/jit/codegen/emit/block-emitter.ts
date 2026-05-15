@@ -17,7 +17,7 @@ import {
   emitJitMemoryGuard
 } from "./operands.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
-import type { JitExitTarget, JitIrState } from "#backends/wasm/jit/state/state.js";
+import type { JitExitTarget, JitState } from "#backends/wasm/jit/state/state.js";
 import {
   type JitValueCacheRuntime
 } from "./value-local-store.js";
@@ -27,7 +27,7 @@ import { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-time
 import { emitJitSet } from "./operands.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 
-export type JitIrInstructionContext = JitCodegenInstructionPlan;
+export type JitInstructionContext = JitCodegenInstructionPlan;
 
 export type JitLinkResolver = Readonly<{
   moduleTable?: JitModuleLinkTable;
@@ -43,9 +43,9 @@ export type JitLinkEmitContext = JitLinkResolver & Readonly<{
 export type JitBlockEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  state: JitIrState;
+  state: JitState;
   exit: JitExitTarget;
-  instructions: readonly JitIrInstructionContext[];
+  instructions: readonly JitInstructionContext[];
   exitPoints: readonly JitExitPoint[];
   plannedEffects: readonly JitPlannedEffect[];
   valueCache?: JitValueCacheRuntime | undefined;
@@ -55,10 +55,10 @@ export type JitBlockEmitContext = Readonly<{
 export type JitInstructionEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  state: JitIrState;
+  state: JitState;
   exit: JitExitTarget;
   selectInstruction(index: number): void;
-  currentInstruction(): JitIrInstructionContext;
+  currentInstruction(): JitInstructionContext;
   beginExpressionOp(opIndex: number): JitTimelineOpContext;
   currentExitPoint(exitReason: ExitReasonValue): JitExitPoint;
   advanceInstruction(): void;
@@ -152,7 +152,7 @@ function emitCurrentInstruction(
 
 function emitJitInstruction(
   jitContext: JitInstructionEmitContext,
-  instruction: JitIrInstructionContext,
+  instruction: JitInstructionContext,
   plannedEffects: readonly JitPlannedEffect[]
 ): void {
   const valueCache = jitContext.valueCache;
@@ -203,7 +203,7 @@ function requiredCurrentTimelineOp(timelineOp: JitTimelineOpContext | undefined)
 function beginInstruction(
   context: Pick<JitInstructionEmitContext, "state">,
   exit: JitExitTarget,
-  instruction: JitIrInstructionContext
+  instruction: JitInstructionContext
 ): void {
   context.state.beginInstruction(exit, instruction.instructionCountDelta, instruction.eip);
 }

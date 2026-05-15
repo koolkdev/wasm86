@@ -2,23 +2,23 @@ import type { IsaDecodedInstruction } from "#x86/isa/decoder/types.js";
 import { operand } from "#x86/ir/build/builder.js";
 import { IrBlockBuilder } from "#x86/ir/build/block.js";
 import {
-  jitBindingsFromIsaInstruction,
+  operandBindingsFromInstruction,
   jitSemanticOperandInfo
 } from "#backends/wasm/jit/ir/operand-bindings.js";
-import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
 
-export type AppendJitIrInstructionOptions = Readonly<{
+export type AppendInstructionOptions = Readonly<{
   nextMode: "continue" | "exit";
 }>;
 
-export class JitIrBlockBuilder {
-  readonly #instructions: JitIrBlockInstruction[] = [];
+export class JitBlockBuilder {
+  readonly #instructions: JitInstruction[] = [];
 
   appendInstruction(
     instruction: IsaDecodedInstruction,
-    options: AppendJitIrInstructionOptions
+    options: AppendInstructionOptions
   ): void {
-    const instructionOperands = jitBindingsFromIsaInstruction(instruction);
+    const instructionOperands = operandBindingsFromInstruction(instruction);
     const irBuilder = new IrBlockBuilder();
     const appended = irBuilder.appendInstruction({
       semantics: instruction.spec.semantics,
@@ -40,7 +40,7 @@ export class JitIrBlockBuilder {
     });
   }
 
-  build(): JitIrBlock {
+  build(): JitBlock {
     if (this.#instructions.length === 0) {
       throw new Error("cannot build empty JIT IR block");
     }
@@ -49,4 +49,23 @@ export class JitIrBlockBuilder {
       instructions: [...this.#instructions]
     };
   }
+}
+
+export function buildBlock(instructions: readonly IsaDecodedInstruction[]): JitBlock {
+  if (instructions.length === 0) {
+    throw new Error("cannot build empty JIT IR block");
+  }
+
+  const builder = new JitBlockBuilder();
+
+  for (let index = 0; index < instructions.length; index += 1) {
+    const instruction = instructions[index]!;
+    const isLastInstruction = index === instructions.length - 1;
+
+    builder.appendInstruction(instruction, {
+      nextMode: isLastInstruction ? "exit" : "continue"
+    });
+  }
+
+  return builder.build();
 }

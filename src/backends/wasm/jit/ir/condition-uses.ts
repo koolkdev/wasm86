@@ -1,7 +1,7 @@
 import type { ValueRef } from "#x86/ir/model/types.js";
 import { visitIrOpValueRefs } from "#x86/ir/model/op-semantics.js";
-import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
-import { walkJitIrBlockOps } from "#backends/wasm/jit/ir/walk.js";
+import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import { walkJitBlockOps } from "#backends/wasm/jit/ir/walk.js";
 import { jitExitConditionValues, jitLocalConditionValues } from "#backends/wasm/jit/ir/effect-primitives.js";
 
 export type JitConditionUse = "localCondition" | "exitCondition";
@@ -12,10 +12,10 @@ export type JitConditionUseIndex = JitOpIndex<JitConditionUse>;
 export type JitLocalConditionValueIndex = JitOpIndex<readonly ValueRef[]>;
 export type JitExitConditionValueIndex = JitOpIndex<readonly ValueRef[]>;
 
-export function indexJitLocalConditionValues(block: JitIrBlock): JitLocalConditionValueIndex {
+export function indexJitLocalConditionValues(block: JitBlock): JitLocalConditionValueIndex {
   const byLocation = new Map<number, Map<number, readonly ValueRef[]>>();
 
-  walkJitIrBlockOps(block, (_instruction, op, location) => {
+  walkJitBlockOps(block, (_instruction, op, location) => {
     const values = jitLocalConditionValues(op);
 
     if (values.length !== 0) {
@@ -26,10 +26,10 @@ export function indexJitLocalConditionValues(block: JitIrBlock): JitLocalConditi
   return byLocation;
 }
 
-export function indexJitExitConditionValues(block: JitIrBlock): JitExitConditionValueIndex {
+export function indexJitExitConditionValues(block: JitBlock): JitExitConditionValueIndex {
   const byLocation = new Map<number, Map<number, readonly ValueRef[]>>();
 
-  walkJitIrBlockOps(block, (instruction, op, location) => {
+  walkJitBlockOps(block, (instruction, op, location) => {
     const values = jitExitConditionValues(op, instruction);
 
     if (values.length !== 0) {
@@ -41,7 +41,7 @@ export function indexJitExitConditionValues(block: JitIrBlock): JitExitCondition
 }
 
 export function analyzeJitConditionUses(
-  block: JitIrBlock,
+  block: JitBlock,
   localConditionValues: JitLocalConditionValueIndex = indexJitLocalConditionValues(block),
   exitConditionValues: JitExitConditionValueIndex = indexJitExitConditionValues(block)
 ): JitConditionUseIndex {
@@ -98,7 +98,7 @@ export function analyzeJitConditionUses(
   return byLocation;
 }
 
-function instructionConditionVars(instruction: JitIrBlockInstruction): ReadonlySet<number> {
+function instructionConditionVars(instruction: JitInstruction): ReadonlySet<number> {
   const conditionVars = new Set<number>();
 
   for (const op of instruction.ir) {
@@ -111,7 +111,7 @@ function instructionConditionVars(instruction: JitIrBlockInstruction): ReadonlyS
 }
 
 function validateConditionConsumers(
-  instruction: JitIrBlockInstruction,
+  instruction: JitInstruction,
   instructionIndex: number,
   conditionVars: ReadonlySet<number>,
   localConditionValues: ReadonlyMap<number, readonly ValueRef[]> | undefined,

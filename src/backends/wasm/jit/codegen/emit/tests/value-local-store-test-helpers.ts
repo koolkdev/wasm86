@@ -37,8 +37,8 @@ import {
   emitJitExitMaterializationStores,
   releaseJitExitMaterializationStores
 } from "#backends/wasm/jit/codegen/emit/exit-stores.js";
-import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
-import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
+import { buildBlock, encodeJitBlock } from "#backends/wasm/jit/block.js";
+import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import { emitJitBlock } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import {
   planJitValueCache as planJitValueCacheFromPlannedUses,
@@ -52,7 +52,7 @@ import {
 } from "#backends/wasm/jit/codegen/plan/control-paths.js";
 import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
 import type { JitExitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
-import { createJitIrState } from "#backends/wasm/jit/state/state.js";
+import { createJitState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
 
@@ -83,13 +83,13 @@ export {
   captureJitExitMaterializationStores,
   emitJitExitMaterializationStores,
   releaseJitExitMaterializationStores,
-  buildJitIrBlock,
-  encodeJitIrBlock,
+  buildBlock,
+  encodeJitBlock,
   emitJitBlock,
   buildJitInstructionValueTimeline,
   branchValuePathScope,
   rootValuePathScope,
-  createJitIrState,
+  createJitState,
   createJitValueState
 };
 export type {
@@ -99,7 +99,7 @@ export type {
   JitValue,
   JitValueCacheRuntime,
   JitValueUseCount,
-  JitIrBlock,
+  JitBlock,
   JitExitStateSnapshot,
   Reg32
 };
@@ -281,7 +281,7 @@ export function exitState(
   };
 }
 
-export function repeatedInlineExpressionBlock(): JitIrBlock {
+export function repeatedInlineExpressionBlock(): JitBlock {
   return {
     instructions: [{
       instructionId: "cache-test",

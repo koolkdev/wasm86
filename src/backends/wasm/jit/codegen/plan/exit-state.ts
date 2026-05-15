@@ -1,5 +1,5 @@
 import type { IrOp } from "#x86/ir/model/types.js";
-import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import type { JitExitStateSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
   JitSourceValueMap,
@@ -32,7 +32,7 @@ export class JitExitStateBuilder {
 
   recordOp(
     op: IrOp,
-    instruction: JitIrBlockInstruction,
+    instruction: JitInstruction,
     instructionIndex: number,
     opIndex: number
   ): void {
@@ -76,7 +76,7 @@ export class JitExitStateBuilder {
 
   #recordSet(
     op: Extract<IrOp, { op: "set" }>,
-    instruction: JitIrBlockInstruction
+    instruction: JitInstruction
   ): void {
     this.#valueState.recordSourceSet(op, instruction, this.#values.valueFor(op.value));
   }

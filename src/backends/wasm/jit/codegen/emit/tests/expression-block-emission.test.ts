@@ -16,13 +16,13 @@ import {
   emitJitBlock,
   createJitValueCacheRuntime,
   buildJitInstructionValueTimeline,
-  createJitIrState,
+  createJitState,
   exitState,
   const32,
   xorExpr,
   countOpcode,
-  encodeJitIrBlock,
-  type JitIrBlock,
+  encodeJitBlock,
+  type JitBlock,
 } from "./value-local-store-test-helpers.js";
 import { wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
@@ -35,7 +35,7 @@ test("JIT production emission consumes planned effects from instruction plans", 
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const state = createJitIrState(body, [{ stores: [] }]);
+  const state = createJitState(body, [{ stores: [] }]);
   const expressionBlock = [
     { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
   ] as const;
@@ -130,7 +130,7 @@ test("JIT production emission does not walk unscheduled expression effects", () 
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const state = createJitIrState(body, [{ stores: [] }]);
+  const state = createJitState(body, [{ stores: [] }]);
   const expressionBlock = [
     { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
   ] as const;
@@ -378,7 +378,7 @@ test("JIT codegen preserves guard-before-load ordering without pruning", () => {
     },
     { op: "hostTrap", vector: v(2) }
   ]);
-  const encoded = extractOnlyWasmFunctionBody(encodeJitIrBlock([block]));
+  const encoded = extractOnlyWasmFunctionBody(encodeJitBlock([block]));
   const opcodes = wasmBodyOpcodes(encoded);
   const accesses = wasmBodyMemoryAccesses(encoded);
   const firstGuardCheck = opcodes.indexOf(wasmOpcode.memorySize);
@@ -394,13 +394,13 @@ test("JIT codegen preserves guard-before-load ordering without pruning", () => {
   strictEqual(guestLoads.length, 1);
 });
 
-function emitPlannedJitBlock(block: JitIrBlock) {
+function emitPlannedJitBlock(block: JitBlock) {
   const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
   const valueCache = createJitValueCacheRuntime(body, emissionPlan.valueCachePlan);
-  const state = createJitIrState(body, emissionPlan.exitMaterializations, { valueCache });
+  const state = createJitState(body, emissionPlan.exitMaterializations, { valueCache });
   const exit = { exitLocal, exitLabelDepth: state.maxExitMaterializationIndex };
 
   state.emitLoadInstructionCount();
@@ -441,9 +441,9 @@ function emitPlannedJitBlock(block: JitIrBlock) {
 }
 
 function singleInstructionBlock(
-  ir: JitIrBlock["instructions"][number]["ir"],
+  ir: JitBlock["instructions"][number]["ir"],
   options: Readonly<{ nextMode?: "continue" | "exit" }> = {}
-): JitIrBlock {
+): JitBlock {
   return {
     instructions: [{
       instructionId: "planned-emission-test",
@@ -471,6 +471,6 @@ function guestLoads(result: ReturnType<typeof emitPlannedJitBlock>) {
   );
 }
 
-function jitBlockOpcodes(block: JitIrBlock): readonly number[] {
-  return wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitIrBlock([block])));
+function jitBlockOpcodes(block: JitBlock): readonly number[] {
+  return wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitBlock([block])));
 }

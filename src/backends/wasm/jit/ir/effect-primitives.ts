@@ -1,6 +1,6 @@
 import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import { ExitReason, type ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
-import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import type { JitOperandBinding } from "./operand-bindings.js";
 
 export type JitOpExitKind =
@@ -22,7 +22,7 @@ export type JitOrderedEffectKind =
 
 export function jitOpExits(
   op: IrOp,
-  instruction: JitIrBlockInstruction
+  instruction: JitInstruction
 ): readonly JitOpExitKind[] {
   switch (op.op) {
     case "memory.guard":
@@ -47,7 +47,7 @@ export function jitOpExits(
 
 export function jitOpOrderedEffectKind(
   op: IrOp,
-  instruction: JitIrBlockInstruction
+  instruction: JitInstruction
 ): JitOrderedEffectKind | undefined {
   switch (op.op) {
     case "memory.guard":
@@ -93,7 +93,7 @@ export function jitOpExitReason(exit: JitOpExitKind): ExitReasonValue {
 
 export function jitExitConditionValues(
   op: IrOp,
-  instruction: JitIrBlockInstruction
+  instruction: JitInstruction
 ): readonly ValueRef[] {
   if (jitOpExits(op, instruction).length === 0) {
     return [];

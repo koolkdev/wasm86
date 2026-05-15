@@ -1,6 +1,6 @@
 import type { Reg32 } from "#x86/isa/types.js";
 import type { IrOp, ValueRef } from "#x86/ir/model/types.js";
-import type { JitIrBlock, JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   analyzeJitConditionUses,
   indexJitExitConditionValues,
@@ -32,7 +32,7 @@ export type JitEffectIndex = Readonly<{
   instructions: readonly JitInstructionEffects[];
 }>;
 
-export function indexJitEffects(block: JitIrBlock): JitEffectIndex {
+export function indexJitEffects(block: JitBlock): JitEffectIndex {
   const localConditionValues = indexJitLocalConditionValues(block);
   const exitConditionValues = indexJitExitConditionValues(block);
   const conditionUses = analyzeJitConditionUses(block, localConditionValues, exitConditionValues);
@@ -105,7 +105,7 @@ export function jitOpEffectsAt(
 
 function jitRegisterWriteReg(
   op: IrOp,
-  operands: JitIrBlockInstruction["operands"]
+  operands: JitInstruction["operands"]
 ): Reg32 | undefined {
   if (op.op !== "set") {
     return undefined;

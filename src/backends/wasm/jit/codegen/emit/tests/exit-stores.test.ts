@@ -16,8 +16,8 @@ import {
   captureJitExitMaterializationStores,
   emitJitExitMaterializationStores,
   releaseJitExitMaterializationStores,
-  buildJitIrBlock,
-  encodeJitIrBlock,
+  buildBlock,
+  encodeJitBlock,
   addValue,
   useCounts,
   cacheRuntimeForStore,
@@ -106,7 +106,7 @@ test("JIT register exit materialization reuses pure NEG planned values", () => {
   const mov = ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress));
   const neg = ok(decodeBytes([0xf7, 0xd8], mov.nextEip));
   const trap = ok(decodeBytes([0xcd, 0x2e], neg.nextEip));
-  const body = extractOnlyWasmFunctionBody(encodeJitIrBlock([buildJitIrBlock([mov, neg, trap])]));
+  const body = extractOnlyWasmFunctionBody(encodeJitBlock([buildBlock([mov, neg, trap])]));
   const opcodes = wasmBodyOpcodes(body);
 
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Sub), 1);

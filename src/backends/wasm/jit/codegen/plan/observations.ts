@@ -1,7 +1,7 @@
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import { u32 } from "#x86/state/cpu-state.js";
 import type { TargetRef } from "#x86/ir/model/types.js";
-import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import type {
   JitExitStateSnapshot,
   JitObservationPayload,
@@ -28,7 +28,7 @@ export type JitPlannedObservationPoint = Readonly<{
 }>;
 
 export function jitExitObservationForOp(
-  instruction: JitIrBlockInstruction,
+  instruction: JitInstruction,
   instructionIndex: number,
   opIndex: number,
   exit: JitOpExitKind,
@@ -47,7 +47,7 @@ export function jitExitObservationForOp(
 }
 
 function visibleEipForOpExit(
-  instruction: JitIrBlockInstruction,
+  instruction: JitInstruction,
   exit: JitOpExitKind,
   opIndex: number
 ): JitObservationValue {
@@ -69,7 +69,7 @@ function visibleEipForOpExit(
 }
 
 function payloadForOpExit(
-  instruction: JitIrBlockInstruction,
+  instruction: JitInstruction,
   exit: JitOpExitKind,
   opIndex: number
 ): JitObservationPayload {
@@ -100,7 +100,7 @@ function payloadForOpExit(
 
 function controlTargetObservationValue(
   target: TargetRef | undefined,
-  instruction: JitIrBlockInstruction
+  instruction: JitInstruction
 ): JitObservationValue {
   const staticTarget = target === undefined
     ? undefined
@@ -111,7 +111,7 @@ function controlTargetObservationValue(
     : { kind: "static", value: staticTarget };
 }
 
-function staticControlTarget(target: TargetRef, instruction: JitIrBlockInstruction): number | undefined {
+function staticControlTarget(target: TargetRef, instruction: JitInstruction): number | undefined {
   switch (target.kind) {
     case "const":
       return u32(target.value);
@@ -122,7 +122,7 @@ function staticControlTarget(target: TargetRef, instruction: JitIrBlockInstructi
   }
 }
 
-function staticConstVarValue(varId: number, instruction: JitIrBlockInstruction): number | undefined {
+function staticConstVarValue(varId: number, instruction: JitInstruction): number | undefined {
   for (const op of instruction.ir) {
     if (op.op === "value.const" && op.dst.id === varId) {
       return u32(op.value);

@@ -1,8 +1,8 @@
 import type { ValueRef } from "#x86/ir/model/types.js";
 import { u32 } from "#x86/state/cpu-state.js";
-import type { JitIrBlock } from "./ir/types.js";
+import type { JitBlock } from "./ir/types.js";
 
-export function staticJitLinkTargets(block: JitIrBlock): readonly number[] {
+export function staticJitLinkTargets(block: JitBlock): readonly number[] {
   const instruction = block.instructions[block.instructions.length - 1];
 
   if (instruction === undefined || instruction.nextMode !== "exit") {
@@ -12,7 +12,7 @@ export function staticJitLinkTargets(block: JitIrBlock): readonly number[] {
   return staticTerminatorTargets(instruction);
 }
 
-function staticTerminatorTargets(instruction: JitIrBlock["instructions"][number]): readonly number[] {
+function staticTerminatorTargets(instruction: JitBlock["instructions"][number]): readonly number[] {
   const op = instruction.ir[instruction.ir.length - 1];
 
   switch (op?.op) {
@@ -31,7 +31,7 @@ function staticTerminatorTargets(instruction: JitIrBlock["instructions"][number]
 }
 
 function staticTargetForValue(
-  instruction: JitIrBlock["instructions"][number],
+  instruction: JitBlock["instructions"][number],
   value: ValueRef
 ): number | undefined {
   switch (value.kind) {
@@ -45,7 +45,7 @@ function staticTargetForValue(
 }
 
 function staticTargetForVar(
-  instruction: JitIrBlock["instructions"][number],
+  instruction: JitBlock["instructions"][number],
   value: Extract<ValueRef, { kind: "var" }>
 ): number | undefined {
   const producer = instruction.ir.find((op) =>

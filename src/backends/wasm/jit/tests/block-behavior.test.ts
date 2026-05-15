@@ -5,7 +5,7 @@ import {
   createCpuState,
   getFlag,
   ExitReason,
-  runJitIrBlock,
+  runJitBlock,
   startAddress,
   preservedEflags,
   allArithmeticEflags,
@@ -20,7 +20,7 @@ import {
   type ArithmeticFlagExpectations,
 } from "./block-test-helpers.js";
 test("jit IR block emits mov r32, imm32 with static operands", async () => {
-  const result = await runJitIrBlock([0xb8, 0x78, 0x56, 0x34, 0x12], createCpuState({ eip: startAddress }));
+  const result = await runJitBlock([0xb8, 0x78, 0x56, 0x34, 0x12], createCpuState({ eip: startAddress }));
 
   strictEqual(result.state.eax, 0x1234_5678);
   strictEqual(result.state.eip, startAddress + 5);
@@ -29,7 +29,7 @@ test("jit IR block emits mov r32, imm32 with static operands", async () => {
 });
 
 test("jit IR block continues through fallthrough instructions until a control exit", async () => {
-  const result = await runJitIrBlock(
+  const result = await runJitBlock(
     [
       0xb8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
       0x83, 0xc0, 0x01, // add eax, 1
@@ -46,7 +46,7 @@ test("jit IR block continues through fallthrough instructions until a control ex
 });
 
 test("jit IR block emits memory mov with static effective addresses", async () => {
-  const load = await runJitIrBlock(
+  const load = await runJitBlock(
     [0x8b, 0x43, 0x04],
     createCpuState({ ebx: 0x2000, eip: startAddress }),
     [{ address: 0x2004, bytes: [0x78, 0x56, 0x34, 0x12] }]
@@ -54,14 +54,14 @@ test("jit IR block emits memory mov with static effective addresses", async () =
 
   strictEqual(load.state.eax, 0x1234_5678);
 
-  const store = await runJitIrBlock(
+  const store = await runJitBlock(
     [0x89, 0x43, 0x08],
     createCpuState({ eax: 0xaabb_ccdd, ebx: 0x2000, eip: startAddress })
   );
 
   strictEqual(store.guestView.getUint32(0x2008, true), 0xaabb_ccdd);
 
-  const storeImmediate = await runJitIrBlock(
+  const storeImmediate = await runJitBlock(
     [0xc7, 0x43, 0x0c, 0x78, 0x56, 0x34, 0x12],
     createCpuState({ ebx: 0x2000, eip: startAddress })
   );
@@ -70,15 +70,15 @@ test("jit IR block emits memory mov with static effective addresses", async () =
 });
 
 test("jit IR block handles partial register MOV writes", async () => {
-  const movAl = await runJitIrBlock([0xb0, 0x44], createCpuState({
+  const movAl = await runJitBlock([0xb0, 0x44], createCpuState({
     eax: 0x1122_3300,
     eip: startAddress
   }));
-  const movAh = await runJitIrBlock([0xb4, 0x55], createCpuState({
+  const movAh = await runJitBlock([0xb4, 0x55], createCpuState({
     eax: 0x1122_0033,
     eip: startAddress
   }));
-  const movAx = await runJitIrBlock([0x66, 0xb8, 0x78, 0x56], createCpuState({
+  const movAx = await runJitBlock([0x66, 0xb8, 0x78, 0x56], createCpuState({
     eax: 0x1234_0000,
     eip: startAddress
   }));
@@ -142,7 +142,7 @@ test("jit IR block emits register-only xchg forms after reading both operands", 
   ];
 
   for (const entry of cases) {
-    const result = await runJitIrBlock(entry.bytes, entry.initial);
+    const result = await runJitBlock(entry.bytes, entry.initial);
 
     strictEqual(result.state.eax, entry.expected.eax, entry.name);
     strictEqual(result.state.ebx, entry.expected.ebx, entry.name);
@@ -154,7 +154,7 @@ test("jit IR block emits register-only xchg forms after reading both operands", 
 });
 
 test("jit IR block captures xchg-style parallel exit stores before state writes", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x87, 0xd8, // xchg eax, ebx
     0xcd, 0x2e // int 0x2e
   ], createCpuState({
@@ -187,7 +187,7 @@ test("jit IR block emits same-register xchg forms as flagless no-ops", async () 
       eflags: preservedEflags,
       eip: startAddress
     });
-    const result = await runJitIrBlock(entry.bytes, initial);
+    const result = await runJitBlock(entry.bytes, initial);
 
     strictEqual(result.state.eax, initial.eax, entry.name);
     strictEqual(result.state.ebx, initial.ebx, entry.name);
@@ -237,7 +237,7 @@ test("jit IR block emits memory xchg forms after reading memory and register ope
   ];
 
   for (const entry of cases) {
-    const result = await runJitIrBlock(
+    const result = await runJitBlock(
       entry.bytes,
       entry.initial,
       [{ address: entry.initial.eax, bytes: littleEndianBytes(entry.memoryValue, entry.width) }]
@@ -261,7 +261,7 @@ test("jit IR block exits on XCHG memory read fault before changing registers", a
     eip: startAddress,
     instructionCount: 7
   });
-  const result = await runJitIrBlock([0x87, 0x18], initial);
+  const result = await runJitBlock([0x87, 0x18], initial);
 
   deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x1_0000, detail: 4 });
   strictEqual(result.state.eax, initial.eax);
@@ -277,7 +277,7 @@ test("jit IR block preserves XCHG swap ordering for tracked values", async () =>
     0xbb, 0x22, 0x22, 0x22, 0x22, // mov ebx, 0x22222222
     0x87, 0xd8 // xchg eax, ebx
   ];
-  const result = await runJitIrBlock(bytes, createCpuState({
+  const result = await runJitBlock(bytes, createCpuState({
     eax: 0,
     ebx: 0,
     eip: startAddress
@@ -303,7 +303,7 @@ test("jit IR block preserves chained XCHG register cycles", async () => {
     ecx: 0x3333_3333,
     eip: startAddress
   });
-  const result = await runJitIrBlock(bytes, initial);
+  const result = await runJitBlock(bytes, initial);
 
   strictEqual(result.state.eax, initial.eax);
   strictEqual(result.state.ebx, initial.ebx);
@@ -324,7 +324,7 @@ test("jit IR block preserves value-changing XCHG register cycles", async () => {
     ecx: 0x3333_3333,
     eip: startAddress
   });
-  const result = await runJitIrBlock(bytes, initial);
+  const result = await runJitBlock(bytes, initial);
 
   strictEqual(result.state.eax, initial.ebx);
   strictEqual(result.state.ebx, initial.ecx);
@@ -345,7 +345,7 @@ test("jit Wasm register state preserves a chained XCHG register cycle", async ()
     ecx: 0x3333_3333,
     eip: startAddress
   });
-  const result = await runJitIrBlock(bytes, initial);
+  const result = await runJitBlock(bytes, initial);
 
   strictEqual(result.state.eax, initial.ebx);
   strictEqual(result.state.ebx, initial.ecx);
@@ -367,7 +367,7 @@ test("jit IR block uses value-state XCHG snapshot before later memory faults", a
     edx: 0x3333_3333,
     eip: startAddress
   });
-  const result = await runJitIrBlock(bytes, initial);
+  const result = await runJitBlock(bytes, initial);
 
   strictEqual(result.state.eax, initial.ebx);
   strictEqual(result.state.ebx, initial.eax);
@@ -387,7 +387,7 @@ test("jit IR block keeps partial XCHG before full XCHG conservative", async () =
     ebx: 0x2222_22bb,
     eip: startAddress
   });
-  const result = await runJitIrBlock(bytes, initial);
+  const result = await runJitBlock(bytes, initial);
 
   strictEqual(result.state.eax, 0x2222_22aa);
   strictEqual(result.state.ebx, 0x1111_11bb);
@@ -397,24 +397,24 @@ test("jit IR block keeps partial XCHG before full XCHG conservative", async () =
 });
 
 test("jit IR block emits movzx and movsx without modifying flags", async () => {
-  const movzxByte = await runJitIrBlock([0x0f, 0xb6, 0xc7], createCpuState({
+  const movzxByte = await runJitBlock([0x0f, 0xb6, 0xc7], createCpuState({
     eax: 0xaaaa_aaaa,
     ebx: 0x1234_807f,
     eflags: preservedEflags,
     eip: startAddress
   }));
-  const movsxByte = await runJitIrBlock([0x0f, 0xbe, 0xcf], createCpuState({
+  const movsxByte = await runJitBlock([0x0f, 0xbe, 0xcf], createCpuState({
     ebx: 0x1234_807f,
     eflags: preservedEflags,
     eip: startAddress
   }));
-  const movzxWordDestination = await runJitIrBlock([0x66, 0x0f, 0xb6, 0xc3], createCpuState({
+  const movzxWordDestination = await runJitBlock([0x66, 0x0f, 0xb6, 0xc3], createCpuState({
     eax: 0x1234_0000,
     ebx: 0x80,
     eflags: preservedEflags,
     eip: startAddress
   }));
-  const movsxWordDestination = await runJitIrBlock([0x66, 0x0f, 0xbe, 0xc3], createCpuState({
+  const movsxWordDestination = await runJitBlock([0x66, 0x0f, 0xbe, 0xc3], createCpuState({
     eax: 0x1234_0000,
     ebx: 0x80,
     eflags: preservedEflags,
@@ -449,7 +449,7 @@ test("jit IR block preserves MOVSX r16 result across BL/BX/EBX alias operations"
     0x66, 0x83, 0xc3, 0x01, // add bx, 1
     0x83, 0xc3, 0x01 // add ebx, 1
   ];
-  const result = await runJitIrBlock(bytes, createCpuState({
+  const result = await runJitBlock(bytes, createCpuState({
     eax: 0x80,
     ebx: 0x1122_3344,
     eip: startAddress
@@ -467,7 +467,7 @@ test("jit IR block sign-extends a tracked partial MOV value", async () => {
     0x66, 0x89, 0xd8, // mov ax, bx
     0x0f, 0xbf, 0xc8 // movsx ecx, ax
   ];
-  const result = await runJitIrBlock(bytes, createCpuState({
+  const result = await runJitBlock(bytes, createCpuState({
     eax: 0x1234_0000,
     ebx: 0x0000_8001,
     ecx: 0xcccc_cccc,
@@ -485,22 +485,22 @@ test("jit IR block sign-extends a tracked partial MOV value", async () => {
 });
 
 test("jit IR block emits movzx and movsx memory forms", async () => {
-  const movzxByte = await runJitIrBlock(
+  const movzxByte = await runJitBlock(
     [0x0f, 0xb6, 0x03],
     createCpuState({ eax: 0xffff_ffff, ebx: 0x20, eflags: preservedEflags, eip: startAddress }),
     [{ address: 0x20, bytes: [0xfe] }]
   );
-  const movzxWord = await runJitIrBlock(
+  const movzxWord = await runJitBlock(
     [0x0f, 0xb7, 0x03],
     createCpuState({ eax: 0xffff_ffff, ebx: 0x20, eflags: preservedEflags, eip: startAddress }),
     [{ address: 0x20, bytes: [0xff, 0x80] }]
   );
-  const movsxByte = await runJitIrBlock(
+  const movsxByte = await runJitBlock(
     [0x0f, 0xbe, 0x03],
     createCpuState({ ebx: 0x20, eflags: preservedEflags, eip: startAddress }),
     [{ address: 0x20, bytes: [0x80] }]
   );
-  const movsxWord = await runJitIrBlock(
+  const movsxWord = await runJitBlock(
     [0x0f, 0xbf, 0x03],
     createCpuState({ ebx: 0x20, eflags: preservedEflags, eip: startAddress }),
     [{ address: 0x20, bytes: [0x01, 0x80] }]
@@ -528,7 +528,7 @@ test("jit IR block emits movzx and movsx memory forms", async () => {
 });
 
 test("jit IR block coalesces independent low-byte register writes correctly", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0xb0, 0x05, // mov al, 5
     0xb4, 0x05 // mov ah, 5
   ], createCpuState({
@@ -543,7 +543,7 @@ test("jit IR block coalesces independent low-byte register writes correctly", as
 });
 
 test("jit IR block composes partial register value-state before full-register copies", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0xb0, 0x05, // mov al, 5
     0x89, 0xc3 // mov ebx, eax
   ], createCpuState({
@@ -565,7 +565,7 @@ test("jit IR block composes AX then AL through planned exit store sources", asyn
     [0x88, 0xd0], // mov al, dl
     [0xcd, 0x2e] // int 0x2e
   ];
-  const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
+  const result = await runJitBlock(instructionBytes.flat(), createCpuState({
     eax: 0xaaaa_0000,
     ecx: 0xbbbb_1234,
     edx: 0xcccc_cc56,
@@ -582,7 +582,7 @@ test("jit IR block composes EAX then AL without loading EAX from CPU state", asy
     [0x88, 0xd0], // mov al, dl
     [0xcd, 0x2e] // int 0x2e
   ];
-  const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
+  const result = await runJitBlock(instructionBytes.flat(), createCpuState({
     eax: 0xaaaa_aaaa,
     ecx: 0xbbbb_1234,
     edx: 0xcccc_cc56,
@@ -598,7 +598,7 @@ test("jit IR block captures produced root exit stores without replaying the load
     [0x8b, 0x05, 0x60, 0x00, 0x00, 0x00], // mov eax, [0x60]
     [0xcd, 0x2e] // int 0x2e
   ];
-  const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
+  const result = await runJitBlock(instructionBytes.flat(), createCpuState({
     eax: 0,
     eip: startAddress
   }), [{ address: 0x60, bytes: littleEndianBytes(0x1234_5678, 32) }]);
@@ -615,7 +615,7 @@ test("jit IR block composes EAX then AX without loading EAX from CPU state", asy
     [0x66, 0x89, 0xd0], // mov ax, dx
     [0xcd, 0x2e] // int 0x2e
   ];
-  const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
+  const result = await runJitBlock(instructionBytes.flat(), createCpuState({
     eax: 0xaaaa_aaaa,
     ecx: 0xbbbb_1234,
     edx: 0xcccc_5678,
@@ -627,7 +627,7 @@ test("jit IR block composes EAX then AX without loading EAX from CPU state", asy
 });
 
 test("jit IR block composes AX then AH through value-state writes", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x66, 0x89, 0xc8, // mov ax, cx
     0x88, 0xd4, // mov ah, dl
     0xcd, 0x2e // int 0x2e
@@ -645,8 +645,8 @@ test("jit IR block composes AX then AH through value-state writes", async () => 
 test("jit IR block exit stores AL and AX immediates without full EAX loads", async () => {
   const alBytes = [[0xb0, 0x34], [0xcd, 0x2e]]; // mov al, 0x34; int 0x2e
   const axBytes = [[0x66, 0xb8, 0x34, 0x12], [0xcd, 0x2e]]; // mov ax, 0x1234; int 0x2e
-  const alResult = await runJitIrBlock(alBytes.flat(), createCpuState({ eax: 0xaaaa_aa00, eip: startAddress }));
-  const axResult = await runJitIrBlock(axBytes.flat(), createCpuState({ eax: 0xaaaa_0000, eip: startAddress }));
+  const alResult = await runJitBlock(alBytes.flat(), createCpuState({ eax: 0xaaaa_aa00, eip: startAddress }));
+  const axResult = await runJitBlock(axBytes.flat(), createCpuState({ eax: 0xaaaa_0000, eip: startAddress }));
 
   strictEqual(alResult.state.eax, 0xaaaa_aa34);
   strictEqual(axResult.state.eax, 0xaaaa_1234);
@@ -660,7 +660,7 @@ test("jit IR block keeps AX prefix semantics when a full read also occurs", asyn
     [0x89, 0xc3], // mov ebx, eax
     [0xcd, 0x2e] // int 0x2e
   ];
-  const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
+  const result = await runJitBlock(instructionBytes.flat(), createCpuState({
     eax: 0xaaaa_0000,
     ebx: 0xbbbb_bbbb,
     eip: startAddress
@@ -672,7 +672,7 @@ test("jit IR block keeps AX prefix semantics when a full read also occurs", asyn
 });
 
 test("jit IR block reads known partial register prefixes across instructions", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0xb0, 0x78, // mov al, 0x78
     0x88, 0xc3, // mov bl, al
     0xcd, 0x2e // int 0x2e
@@ -690,7 +690,7 @@ test("jit IR block reads known partial register prefixes across instructions", a
 });
 
 test("jit IR block preserves al, ax, and ah reads from tracked full registers", async () => {
-  const al = await runJitIrBlock([
+  const al = await runJitBlock([
     0xb8, 0x78, 0x56, 0x34, 0x12, // mov eax, 0x12345678
     0x88, 0xc3, // mov bl, al
     0xcd, 0x2e // int 0x2e
@@ -698,7 +698,7 @@ test("jit IR block preserves al, ax, and ah reads from tracked full registers", 
     ebx: 0xaaaa_aa00,
     eip: startAddress
   }));
-  const ax = await runJitIrBlock([
+  const ax = await runJitBlock([
     0xb8, 0x78, 0x56, 0x34, 0x12, // mov eax, 0x12345678
     0x66, 0x89, 0xc3, // mov bx, ax
     0xcd, 0x2e // int 0x2e
@@ -706,7 +706,7 @@ test("jit IR block preserves al, ax, and ah reads from tracked full registers", 
     ebx: 0xaaaa_0000,
     eip: startAddress
   }));
-  const ah = await runJitIrBlock([
+  const ah = await runJitBlock([
     0xb8, 0x78, 0x56, 0x34, 0x12, // mov eax, 0x12345678
     0x88, 0xe3, // mov bl, ah
     0xcd, 0x2e // int 0x2e
@@ -735,7 +735,7 @@ test("jit IR block preserves al, ax, and ah reads from tracked full registers", 
 });
 
 test("jit IR block preserves mixed al, ah, ax, and eax alias interactions", async () => {
-  const alAhToAx = await runJitIrBlock([
+  const alAhToAx = await runJitBlock([
     0xb0, 0x34, // mov al, 0x34
     0xb4, 0x12, // mov ah, 0x12
     0x66, 0x89, 0xc3, // mov bx, ax
@@ -744,7 +744,7 @@ test("jit IR block preserves mixed al, ah, ax, and eax alias interactions", asyn
     ebx: 0,
     eip: startAddress
   }));
-  const axToAh = await runJitIrBlock([
+  const axToAh = await runJitBlock([
     0x66, 0xb8, 0x34, 0x12, // mov ax, 0x1234
     0x88, 0xe3, // mov bl, ah
     0xcd, 0x2e // int 0x2e
@@ -752,7 +752,7 @@ test("jit IR block preserves mixed al, ah, ax, and eax alias interactions", asyn
     ebx: 0,
     eip: startAddress
   }));
-  const alToAxPreservesAh = await runJitIrBlock([
+  const alToAxPreservesAh = await runJitBlock([
     0xb0, 0x34, // mov al, 0x34
     0x66, 0x89, 0xc3, // mov bx, ax
     0xcd, 0x2e // int 0x2e
@@ -761,7 +761,7 @@ test("jit IR block preserves mixed al, ah, ax, and eax alias interactions", asyn
     ebx: 0,
     eip: startAddress
   }));
-  const fullAfterPartial = await runJitIrBlock([
+  const fullAfterPartial = await runJitBlock([
     0xb8, 0x78, 0x56, 0x34, 0x12, // mov eax, 0x12345678
     0xb0, 0xaa, // mov al, 0xaa
     0x89, 0xc3, // mov ebx, eax
@@ -797,12 +797,12 @@ test("jit IR block preserves mixed al, ah, ax, and eax alias interactions", asyn
 });
 
 test("jit IR block handles byte and word memory MOV accesses", async () => {
-  const byteStore = await runJitIrBlock([0x88, 0x03], createCpuState({
+  const byteStore = await runJitBlock([0x88, 0x03], createCpuState({
     eax: 0xaabb_ccdd,
     ebx: 0x40,
     eip: startAddress
   }));
-  const wordLoad = await runJitIrBlock(
+  const wordLoad = await runJitBlock(
     [0x66, 0x8b, 0x03],
     createCpuState({
       eax: 0xffff_0000,
@@ -811,7 +811,7 @@ test("jit IR block handles byte and word memory MOV accesses", async () => {
     }),
     [{ address: 0x40, bytes: [0x34, 0x12] }]
   );
-  const wordStore = await runJitIrBlock([0x66, 0x89, 0x03], createCpuState({
+  const wordStore = await runJitBlock([0x66, 0x89, 0x03], createCpuState({
     eax: 0xaaaa_babe,
     ebx: 0x44,
     eip: startAddress
@@ -824,7 +824,7 @@ test("jit IR block handles byte and word memory MOV accesses", async () => {
 });
 
 test("jit IR block handles partial-width ALU register writeback", async () => {
-  const result = await runJitIrBlock([0x04, 0x01], createCpuState({
+  const result = await runJitBlock([0x04, 0x01], createCpuState({
     eax: 0xffff_ffff,
     eflags: preservedEflags,
     eip: startAddress
@@ -876,7 +876,7 @@ test("jit IR block keeps partial-width immediate ALU inside the destination alia
   ] as const;
 
   for (const testCase of cases) {
-    const result = await runJitIrBlock(testCase.bytes, createCpuState({
+    const result = await runJitBlock(testCase.bytes, createCpuState({
       eax: testCase.eax,
       eflags: preservedEflags,
       eip: startAddress
@@ -951,7 +951,7 @@ test("jit IR block emits NOT register and memory forms without changing flags", 
   ];
 
   for (const entry of cases) {
-    const result = await runJitIrBlock(
+    const result = await runJitBlock(
       entry.bytes,
       createCpuState({ eax: entry.eax, eflags: initialEflags, eip: startAddress }),
       entry.memoryValue === undefined
@@ -998,7 +998,7 @@ test("jit IR block emits NEG register flags for zero, one, min-signed, and wrapa
   ];
 
   for (const entry of cases) {
-    const result = await runJitIrBlock(entry.bytes, createCpuState({
+    const result = await runJitBlock(entry.bytes, createCpuState({
       eax: entry.initialEax,
       eflags: (preservedEflags | allArithmeticEflags) >>> 0,
       eip: startAddress
@@ -1028,7 +1028,7 @@ test("jit IR block emits NEG memory forms for byte, word, and dword operands", a
   ];
 
   for (const entry of cases) {
-    const result = await runJitIrBlock(
+    const result = await runJitBlock(
       entry.bytes,
       createCpuState({
         eax: entry.address,
@@ -1051,7 +1051,7 @@ test("jit IR block emits NEG memory forms for byte, word, and dword operands", a
 test("jit IR block preserves unary ALU flags and memory effects with value timeline lowering", async () => {
   const oneFlags = { CF: true, OF: false, SF: true, ZF: false, PF: true, AF: true };
   const initialEflags = (preservedEflags | allArithmeticEflags) >>> 0;
-  const foldedNeg = await runJitIrBlock([
+  const foldedNeg = await runJitBlock([
     0xb8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
     0xf7, 0xd8, // neg eax
     0xcd, 0x2e // int 0x2e
@@ -1059,7 +1059,7 @@ test("jit IR block preserves unary ALU flags and memory effects with value timel
     eflags: initialEflags,
     eip: startAddress
   }));
-  const memoryNot = await runJitIrBlock([
+  const memoryNot = await runJitBlock([
     0xb8, 0x60, 0x00, 0x00, 0x00, // mov eax, 0x60
     0xf7, 0x10, // not dword [eax]
     0x8b, 0x18, // mov ebx, [eax]
@@ -1085,7 +1085,7 @@ test("jit IR block preserves unary ALU flags and memory effects with value timel
 
 test("jit IR block shares planned input-state AH xor result with narrow writeback", async () => {
   const bytes = [0x80, 0xf4, 0x05]; // xor ah, 5
-  const result = await runJitIrBlock(bytes, createCpuState({
+  const result = await runJitBlock(bytes, createCpuState({
     eax: 0x1234_5678,
     eflags: preservedEflags,
     eip: startAddress
@@ -1099,7 +1099,7 @@ test("jit IR block shares planned input-state AH xor result with narrow writebac
 
 test("jit IR block keeps input-state AX xor writeback word-width", async () => {
   const bytes = [0x66, 0x35, 0x32, 0x04]; // xor ax, 0x432
-  const result = await runJitIrBlock(bytes, createCpuState({
+  const result = await runJitBlock(bytes, createCpuState({
     eax: 0x1234_5678,
     eflags: preservedEflags,
     eip: startAddress
@@ -1116,7 +1116,7 @@ test("jit IR block composes a later full read after input-state AH xor", async (
     0x80, 0xf4, 0x05, // xor ah, 5
     0x89, 0xc3 // mov ebx, eax
   ];
-  const result = await runJitIrBlock(bytes, createCpuState({
+  const result = await runJitBlock(bytes, createCpuState({
     eax: 0x1234_5678,
     ebx: 0xaaaa_aaaa,
     eflags: preservedEflags,
@@ -1131,7 +1131,7 @@ test("jit IR block composes a later full read after input-state AH xor", async (
 });
 
 test("jit IR block updates cmovcc destination when the condition passes", async () => {
-  const taken = await runJitIrBlock(
+  const taken = await runJitBlock(
     [0x0f, 0x44, 0xd1], // cmove edx, ecx
     createCpuState({
       ecx: 0x2222_2222,
@@ -1140,7 +1140,7 @@ test("jit IR block updates cmovcc destination when the condition passes", async 
       eip: startAddress
     })
   );
-  const notTaken = await runJitIrBlock(
+  const notTaken = await runJitBlock(
     [0x0f, 0x44, 0xd1], // cmove edx, ecx
     createCpuState({
       ecx: 0x2222_2222,
@@ -1159,7 +1159,7 @@ test("jit IR block updates cmovcc destination when the condition passes", async 
 });
 
 test("jit IR block updates cmovcc r16 destination when the condition passes", async () => {
-  const taken = await runJitIrBlock(
+  const taken = await runJitBlock(
     [0x66, 0x0f, 0x44, 0xd1], // cmove dx, cx
     createCpuState({
       ecx: 0x3333_2222,
@@ -1168,7 +1168,7 @@ test("jit IR block updates cmovcc r16 destination when the condition passes", as
       eip: startAddress
     })
   );
-  const notTaken = await runJitIrBlock(
+  const notTaken = await runJitBlock(
     [0x66, 0x0f, 0x44, 0xd1], // cmove dx, cx
     createCpuState({
       ecx: 0x3333_2222,
@@ -1187,7 +1187,7 @@ test("jit IR block updates cmovcc r16 destination when the condition passes", as
 });
 
 test("jit IR block keeps cmovcc fallback value after previous high-byte write", async () => {
-  const result = await runJitIrBlock(
+  const result = await runJitBlock(
     [
       0xb4, 0x22, // mov ah, 0x22
       0x0f, 0x45, 0xc1 // cmovne eax, ecx
@@ -1206,7 +1206,7 @@ test("jit IR block keeps cmovcc fallback value after previous high-byte write", 
 });
 
 test("jit IR block keeps cmovcc source memory faults unconditional", async () => {
-  const result = await runJitIrBlock(
+  const result = await runJitBlock(
     [0x0f, 0x45, 0x13], // cmovne edx, [ebx]
     createCpuState({
       ebx: 0x10000,
@@ -1223,7 +1223,7 @@ test("jit IR block keeps cmovcc source memory faults unconditional", async () =>
 });
 
 test("jit IR block keeps cmovcc r16 source memory faults unconditional", async () => {
-  const result = await runJitIrBlock(
+  const result = await runJitBlock(
     [0x66, 0x0f, 0x45, 0x13], // cmovne dx, [ebx]
     createCpuState({
       ebx: 0x10000,
@@ -1240,15 +1240,15 @@ test("jit IR block keeps cmovcc r16 source memory faults unconditional", async (
 });
 
 test("jit IR block emits setcc through a select value and normal write", async () => {
-  const taken = await runJitIrBlock(
+  const taken = await runJitBlock(
     [0x0f, 0x94, 0xc0], // sete al
     createCpuState({ eax: 0x1234_5678, eflags: preservedEflags | zeroFlag, eip: startAddress })
   );
-  const notTaken = await runJitIrBlock(
+  const notTaken = await runJitBlock(
     [0x0f, 0x94, 0xc0], // sete al
     createCpuState({ eax: 0x1234_5678, eflags: preservedEflags, eip: startAddress })
   );
-  const highByte = await runJitIrBlock(
+  const highByte = await runJitBlock(
     [0x0f, 0x95, 0xc4], // setne ah
     createCpuState({ eax: 0x1234_5678, eflags: preservedEflags, eip: startAddress })
   );
@@ -1265,12 +1265,12 @@ test("jit IR block emits setcc through a select value and normal write", async (
 });
 
 test("jit IR block emits memory setcc as a selected byte store", async () => {
-  const taken = await runJitIrBlock(
+  const taken = await runJitBlock(
     [0x0f, 0x94, 0x03], // sete [ebx]
     createCpuState({ ebx: 0x20, eflags: preservedEflags | zeroFlag, eip: startAddress }),
     [{ address: 0x20, bytes: [0xaa] }]
   );
-  const notTaken = await runJitIrBlock(
+  const notTaken = await runJitBlock(
     [0x0f, 0x94, 0x03], // sete [ebx]
     createCpuState({ ebx: 0x20, eflags: preservedEflags, eip: startAddress }),
     [{ address: 0x20, bytes: [0xaa] }]
@@ -1285,14 +1285,14 @@ test("jit IR block emits memory setcc as a selected byte store", async () => {
 });
 
 test("jit IR block lowers setcc conditions from local flag values", async () => {
-  const equal = await runJitIrBlock(
+  const equal = await runJitBlock(
     [
       0x39, 0xd8, // cmp eax, ebx
       0x0f, 0x94, 0xc0 // sete al
     ],
     createCpuState({ eax: 0x1234_5678, ebx: 0x1234_5678, eflags: preservedEflags, eip: startAddress })
   );
-  const notEqual = await runJitIrBlock(
+  const notEqual = await runJitBlock(
     [
       0x39, 0xd8, // cmp eax, ebx
       0x0f, 0x94, 0xc0 // sete al
@@ -1307,7 +1307,7 @@ test("jit IR block lowers setcc conditions from local flag values", async () => 
 });
 
 test("jit IR block freezes cmovcc-selected register values before later full-register copies", async () => {
-  const result = await runJitIrBlock(
+  const result = await runJitBlock(
     [
       0x0f, 0x44, 0xc1, // cmove eax, ecx
       0x89, 0xc3, // mov ebx, eax
@@ -1333,7 +1333,7 @@ test("jit IR block freezes cmovcc-selected register values before later full-reg
 });
 
 test("jit IR block preserves cmovcc value-state writes on later guard exits", async () => {
-  const result = await runJitIrBlock(
+  const result = await runJitBlock(
     [
       0x0f, 0x44, 0xd1, // cmove edx, ecx
       0x8b, 0x03 // mov eax, [ebx]
@@ -1356,7 +1356,7 @@ test("jit IR block preserves cmovcc value-state writes on later guard exits", as
 });
 
 test("jit IR block preserves a guard exit before later cmovcc mutation of the same register", async () => {
-  const result = await runJitIrBlock(
+  const result = await runJitBlock(
     [
       0x0f, 0x44, 0xc1, // cmove eax, ecx
       0x8b, 0x16, // mov edx, [esi]
@@ -1382,7 +1382,7 @@ test("jit IR block preserves a guard exit before later cmovcc mutation of the sa
 });
 
 test("jit IR block emits leave", async () => {
-  const result = await runJitIrBlock(
+  const result = await runJitBlock(
     [0xc9],
     createCpuState({ ebp: 0x20, esp: 0x100, eip: startAddress }),
     [{ address: 0x20, bytes: [0x78, 0x56, 0x34, 0x12] }]
@@ -1395,7 +1395,7 @@ test("jit IR block emits leave", async () => {
 });
 
 test("jit IR block folds stack updates after successful explicit memory guards", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x50, // push eax
     0xcd, 0x2e // int 0x2e
   ], createCpuState({
@@ -1414,7 +1414,7 @@ test("jit IR block folds stack updates after successful explicit memory guards",
 });
 
 test("jit IR block keeps planned flag values live after memory-store fault branch emission", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x01, 0x18, // add [eax], ebx
     0xcd, 0x2e // int 0x2e
   ], createCpuState({
@@ -1429,7 +1429,7 @@ test("jit IR block keeps planned flag values live after memory-store fault branc
 });
 
 test("jit IR block emits add and stores value-state flag values", async () => {
-  const result = await runJitIrBlock([0x83, 0xc0, 0x01], createCpuState({
+  const result = await runJitBlock([0x83, 0xc0, 0x01], createCpuState({
     eax: 0xffff_ffff,
     eflags: preservedEflags,
     eip: startAddress
@@ -1442,7 +1442,7 @@ test("jit IR block emits add and stores value-state flag values", async () => {
 });
 
 test("jit IR block emits or and stores value-state logic flags", async () => {
-  const result = await runJitIrBlock([0x0d, 0x00, 0x01, 0x00, 0x00], createCpuState({
+  const result = await runJitBlock([0x0d, 0x00, 0x01, 0x00, 0x00], createCpuState({
     eax: 0x8000_0000,
     eflags: preservedEflags,
     eip: startAddress
@@ -1455,7 +1455,7 @@ test("jit IR block emits or and stores value-state logic flags", async () => {
 });
 
 test("jit IR block stores the latest value-state flag values on exit", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x83, 0xc0, 0x01, // add eax, 1
     0xcd, 0x2e // int 0x2e
@@ -1487,7 +1487,7 @@ test("jit IR block keeps mixed cached flag inputs stable after invalidation and 
     PF: true,
     AF: true
   };
-  const result = await runJitIrBlock(instructionBytes.flat(), createCpuState({
+  const result = await runJitBlock(instructionBytes.flat(), createCpuState({
     eax: 1,
     eflags: (preservedEflags | allArithmeticEflags) >>> 0,
     eip: startAddress
@@ -1502,7 +1502,7 @@ test("jit IR block keeps mixed cached flag inputs stable after invalidation and 
 });
 
 test("jit IR block folds transient register value calculations", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x89, 0xc8, // mov eax, ecx
     0x83, 0xf0, 0x02, // xor eax, 2
     0x01, 0xc3, // add ebx, eax
@@ -1525,7 +1525,7 @@ test("jit IR block folds transient register value calculations", async () => {
 
 test("jit IR block uses value-state register snapshots for memory fault exits", async () => {
   const load = 0x10000;
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x89, 0xc8, // mov eax, ecx
     0x8b, 0x15, 0x00, 0x00, 0x01, 0x00 // mov edx, [0x10000]
   ], createCpuState({
@@ -1544,7 +1544,7 @@ test("jit IR block uses value-state register snapshots for memory fault exits", 
 });
 
 test("jit IR block preserves register values before source clobbers", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x89, 0xc8, // mov eax, ecx
     0xb9, 0x00, 0x00, 0x00, 0x00, // mov ecx, 0
     0x01, 0xc3, // add ebx, eax
@@ -1565,7 +1565,7 @@ test("jit IR block preserves register values before source clobbers", async () =
 });
 
 test("jit IR block reuses repeated register value reads without changing results", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x89, 0xc8, // mov eax, ecx
     0x83, 0xf0, 0x02, // xor eax, 2
     0x01, 0xc3, // add ebx, eax
@@ -1589,7 +1589,7 @@ test("jit IR block reuses repeated register value reads without changing results
 });
 
 test("jit IR block lowers value timeline register state into indirect jump targets", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x89, 0xc8, // mov eax, ecx
     0x83, 0xf0, 0x02, // xor eax, 2
     0xff, 0xe0 // jmp eax
@@ -1607,7 +1607,7 @@ test("jit IR block lowers value timeline register state into indirect jump targe
 });
 
 test("jit IR block lowers value timeline register state into effective addresses", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x89, 0xc8, // mov eax, ecx
     0x8d, 0x58, 0x04, // lea ebx, [eax+4]
     0xb8, 0x00, 0x00, 0x00, 0x00, // mov eax, 0
@@ -1628,7 +1628,7 @@ test("jit IR block lowers value timeline register state into effective addresses
 });
 
 test("jit IR block uses value timeline register state for scaled effective addresses", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x89, 0xc8, // mov eax, ecx
     0x8d, 0x1c, 0x45, 0x04, 0x00, 0x00, 0x00, // lea ebx, [eax*2+4]
     0xb8, 0x00, 0x00, 0x00, 0x00, // mov eax, 0
@@ -1649,7 +1649,7 @@ test("jit IR block uses value timeline register state for scaled effective addre
 });
 
 test("jit IR block emits lea r16 without reading memory or modifying flags", async () => {
-  const result = await runJitIrBlock([0x66, 0x8d, 0x44, 0xb3, 0x08], createCpuState({
+  const result = await runJitBlock([0x66, 0x8d, 0x44, 0xb3, 0x08], createCpuState({
     eax: 0x1234_0000,
     ebx: 0x100,
     esi: 3,
@@ -1664,12 +1664,12 @@ test("jit IR block emits lea r16 without reading memory or modifying flags", asy
 });
 
 test("jit IR block emits multi-byte nop without reading memory or modifying flags", async () => {
-  const dword = await runJitIrBlock([0x0f, 0x1f, 0x40, 0x00], createCpuState({
+  const dword = await runJitBlock([0x0f, 0x1f, 0x40, 0x00], createCpuState({
     eax: 0x1_0000,
     eflags: preservedEflags,
     eip: startAddress
   }));
-  const word = await runJitIrBlock([0x66, 0x0f, 0x1f, 0x00], createCpuState({
+  const word = await runJitBlock([0x66, 0x0f, 0x1f, 0x00], createCpuState({
     eax: 0x1_0000,
     eflags: preservedEflags,
     eip: startAddress
@@ -1687,7 +1687,7 @@ test("jit IR block emits multi-byte nop without reading memory or modifying flag
 });
 
 test("jit IR block preserves CF across INC partial flag writes", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x40, // inc eax
     0x72, 0x05 // jc +5
@@ -1705,7 +1705,7 @@ test("jit IR block preserves CF across INC partial flag writes", async () => {
 });
 
 test("jit IR block branches on incoming CF after INC", async () => {
-  const taken = await runJitIrBlock([
+  const taken = await runJitBlock([
     0x40, // inc eax
     0x72, 0x05 // jc +5
   ], createCpuState({
@@ -1713,7 +1713,7 @@ test("jit IR block branches on incoming CF after INC", async () => {
     eflags: preservedEflags | 0x01,
     eip: startAddress
   }));
-  const notTaken = await runJitIrBlock([
+  const notTaken = await runJitBlock([
     0x40, // inc eax
     0x72, 0x05 // jc +5
   ], createCpuState({
@@ -1736,7 +1736,7 @@ test("jit IR block branches on incoming CF after INC", async () => {
 });
 
 test("jit IR block keeps not-taken INC exit stores path-local after JC", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x40, // inc eax
     0x72, 0x05 // jc +5
   ], createCpuState({
@@ -1753,7 +1753,7 @@ test("jit IR block keeps not-taken INC exit stores path-local after JC", async (
 });
 
 test("jit IR block emits cmp without writing operands", async () => {
-  const result = await runJitIrBlock([0x39, 0xd8], createCpuState({
+  const result = await runJitBlock([0x39, 0xd8], createCpuState({
     eax: 5,
     ebx: 5,
     eflags: preservedEflags,
@@ -1780,7 +1780,7 @@ test("jit IR block handles specialized cmp condition branches", async () => {
   ] as const;
 
   for (const testCase of takenCases) {
-    const result = await runJitIrBlock([
+    const result = await runJitBlock([
       0x39, 0xd8, // cmp eax, ebx
       testCase.opcode, 0x05
     ], createCpuState({
@@ -1796,7 +1796,7 @@ test("jit IR block handles specialized cmp condition branches", async () => {
 });
 
 test("jit IR block lowers value-state flag values for condition consumers", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x74, 0x05 // jz +5
   ], createCpuState({
@@ -1813,7 +1813,7 @@ test("jit IR block lowers value-state flag values for condition consumers", asyn
 });
 
 test("jit IR block stores value-state flag values on both branch exit observations", async () => {
-  const taken = await runJitIrBlock([
+  const taken = await runJitBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x74, 0x05 // jz +5
   ], createCpuState({
@@ -1821,7 +1821,7 @@ test("jit IR block stores value-state flag values on both branch exit observatio
     eflags: preservedEflags,
     eip: startAddress
   }));
-  const notTaken = await runJitIrBlock([
+  const notTaken = await runJitBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x74, 0x05 // jz +5
   ], createCpuState({
@@ -1837,11 +1837,11 @@ test("jit IR block stores value-state flag values on both branch exit observatio
 });
 
 test("jit IR block emits conditional branches", async () => {
-  const taken = await runJitIrBlock([0x75, 0x05], createCpuState({
+  const taken = await runJitBlock([0x75, 0x05], createCpuState({
     eip: startAddress,
     instructionCount: 10
   }));
-  const notTaken = await runJitIrBlock([0x75, 0x05], createCpuState({
+  const notTaken = await runJitBlock([0x75, 0x05], createCpuState({
     eip: startAddress,
     eflags: zeroFlag,
     instructionCount: 10
@@ -1856,7 +1856,7 @@ test("jit IR block emits conditional branches", async () => {
 });
 
 test("jit IR block stores value-state flag values on later fault exit observations", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x8b, 0x05, 0x00, 0x00, 0x01, 0x00 // mov eax, [0x10000]
   ], createCpuState({
@@ -1873,7 +1873,7 @@ test("jit IR block stores value-state flag values on later fault exit observatio
 });
 
 test("jit IR block preserves incoming CF across INC on later fault exits", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x40, // inc eax (preserves CF, updates the other ALU flags)
     0x8b, 0x05, 0x00, 0x00, 0x01, 0x00 // mov eax, [0x10000]
   ], createCpuState({
@@ -1890,7 +1890,7 @@ test("jit IR block preserves incoming CF across INC on later fault exits", async
 });
 
 test("jit IR block keeps flags live across memory fault exits before later overwrites", async () => {
-  const result = await runJitIrBlock([
+  const result = await runJitBlock([
     0x83, 0xc0, 0x01, // add eax, 1
     0x8b, 0x05, 0x00, 0x00, 0x01, 0x00, // mov eax, [0x10000]
     0x83, 0xc0, 0x01 // add eax, 1

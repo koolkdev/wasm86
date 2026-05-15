@@ -6,7 +6,7 @@ import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { encodeExit, ExitReason } from "#backends/wasm/exit.js";
 import { jitModuleLinkFallbackExportName } from "./compiled-blocks/module-link-table.js";
-import { validateJitIrBlock } from "./ir/validate.js";
+import { validateBlock } from "./ir/validate.js";
 import { buildJitCodegenEmissionPlan } from "./codegen/plan/emission.js";
 import { planJitCodegen } from "./codegen/plan/plan.js";
 import {
@@ -15,16 +15,16 @@ import {
   type JitLinkResolver
 } from "./codegen/emit/block-emitter.js";
 import { createJitValueCacheRuntime } from "./codegen/emit/value-local-store.js";
-import { createJitIrState, type JitExitTarget, type JitIrState } from "./state/state.js";
-import type { JitIrBlock } from "./ir/types.js";
+import { createJitState, type JitExitTarget, type JitState } from "./state/state.js";
+import type { JitBlock } from "./ir/types.js";
 
-export type EncodeJitIrBlockOptions = Readonly<{
+export type EncodeJitBlockOptions = Readonly<{
   linkResolver?: JitLinkResolver;
 }>;
 
-export function encodeJitIrBlock(
-  blocks: readonly JitIrBlock[],
-  options: EncodeJitIrBlockOptions = {}
+export function encodeJitBlock(
+  blocks: readonly JitBlock[],
+  options: EncodeJitBlockOptions = {}
 ): Uint8Array<ArrayBuffer> {
   if (blocks.length === 0) {
     throw new Error("cannot encode empty JIT IR block module");
@@ -69,7 +69,7 @@ export function encodeJitIrBlock(
       throw new Error(`missing function index for JIT block 0x${entry.entryEip.toString(16)}`);
     }
 
-    const body = encodeJitIrBlockFunctionBody(
+    const body = encodeJitBlockFunctionBody(
       entry.block,
       linkingContext(
         {
@@ -96,11 +96,11 @@ export function jitBlockExportName(eip: number): string {
   return `block_${u32(eip).toString(16)}`;
 }
 
-function encodeJitIrBlockFunctionBody(
-  block: JitIrBlock,
+function encodeJitBlockFunctionBody(
+  block: JitBlock,
   linking?: JitLinkEmitContext
 ): WasmFunctionBodyEncoder {
-  validateJitIrBlock(block);
+  validateBlock(block);
 
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
@@ -108,7 +108,7 @@ function encodeJitIrBlockFunctionBody(
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
   const valueCache = createJitValueCacheRuntime(body, emissionPlan.valueCachePlan);
-  const state = createJitIrState(body, emissionPlan.exitMaterializations, { valueCache });
+  const state = createJitState(body, emissionPlan.exitMaterializations, { valueCache });
   const exit: JitExitTarget = { exitLocal, exitLabelDepth: state.maxExitMaterializationIndex };
 
   state.emitLoadInstructionCount();
@@ -156,11 +156,11 @@ function linkingContext(
 }
 
 type JitBlockModuleEntry = Readonly<{
-  block: JitIrBlock;
+  block: JitBlock;
   entryEip: number;
 }>;
 
-function entryEipForBlock(block: JitIrBlock): number {
+function entryEipForBlock(block: JitBlock): number {
   const instruction = block.instructions[0];
 
   if (instruction === undefined) {
@@ -217,7 +217,7 @@ function emitLinkFallbackExports(
 
 function emitExitMaterializationStores(
   body: WasmFunctionBodyEncoder,
-  state: JitIrState,
+  state: JitState,
   exitLocal: number
 ): void {
   for (let index = state.maxExitMaterializationIndex; index >= 0; index -= 1) {

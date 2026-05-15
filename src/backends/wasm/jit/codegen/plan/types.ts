@@ -1,5 +1,5 @@
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
-import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
+import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
 export type {
@@ -81,7 +81,7 @@ export type JitExitMaterializationPlan = Readonly<{
 }>;
 
 export type JitCodegenPlan = Readonly<{
-  block: JitIrBlock;
+  block: JitBlock;
   instructionStates: readonly JitInstructionState[];
   exitPoints: readonly JitExitPoint[];
   materializationNeeds: readonly JitMaterializationNeed[];

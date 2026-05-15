@@ -4,8 +4,8 @@ import {
   type IrExpressionSourceMap,
   buildIrExpressionBlockWithSourceMap
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
-import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/produced-values.js";
+import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
 import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueCachePlan } from "./value-cache.js";
 import {
@@ -44,7 +44,7 @@ import {
 } from "#backends/wasm/jit/ir/effects.js";
 
 type JitPreparedCodegenInstruction = JitInstructionState & Pick<
-  JitIrBlockInstruction,
+  JitInstruction,
   "ir" | "operands"
 > & Readonly<{
   expressionBlock: IrExprBlock;
@@ -117,7 +117,7 @@ function prepareJitCodegenInstructions(
 }
 
 function prepareJitCodegenInstruction(
-  instruction: JitIrBlockInstruction,
+  instruction: JitInstruction,
   instructionIndex: number,
   state: JitInstructionState
 ): JitPreparedCodegenInstruction {
@@ -125,7 +125,7 @@ function prepareJitCodegenInstruction(
     instruction.ir,
     jitExpressionOptions(instruction)
   );
-  const producedValuesByVarId = indexProducedValuesByVarIdForInstruction(
+  const producedValuesByVarId = indexProducedValues(
     instruction,
     instructionIndex
   );
@@ -166,7 +166,7 @@ function requiredInstructionState(
   return state;
 }
 
-function jitExpressionOptions(instruction: Pick<JitIrBlockInstruction, "operands">): IrExpressionOptions {
+function jitExpressionOptions(instruction: Pick<JitInstruction, "operands">): IrExpressionOptions {
   return {
     canInlineGet: (source) => canInlineJitInstructionGet(instruction, source),
     alias: {

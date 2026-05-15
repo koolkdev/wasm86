@@ -2,7 +2,7 @@ import type {
   IrExprBlock,
   IrExpressionSourceMap
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   jitOpEffectsAt,
   type JitEffectIndex
@@ -51,7 +51,7 @@ export type JitPlannedEffect = Readonly<{
 }>;
 
 export type JitEffectPlanInstructionInput = Readonly<{
-  ir: JitIrBlockInstruction["ir"];
+  ir: JitInstruction["ir"];
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
   expressionPathScopes: JitControlPathScopesMap;

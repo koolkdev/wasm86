@@ -21,13 +21,13 @@ export type JitExitTarget = {
   emitBeforeExit?: () => void;
 };
 
-type JitIrStateOptions = Readonly<{
+type JitStateOptions = Readonly<{
   valueCache?: JitValueCacheRuntime | undefined;
 }>;
 
 type JitCapturedExitMaterialization = readonly JitCapturedExitMaterializationStore[];
 
-export type JitIrState = Readonly<{
+export type JitState = Readonly<{
   eipLocal: number;
   instructionCountLocal: number;
   maxExitMaterializationIndex: number;
@@ -39,11 +39,11 @@ export type JitIrState = Readonly<{
   releaseExitMaterialization(index: number): void;
 }>;
 
-export function createJitIrState(
+export function createJitState(
   body: WasmFunctionBodyEncoder,
   exitMaterializations: readonly JitExitMaterializationPlan[],
-  options: JitIrStateOptions = {}
-): JitIrState {
+  options: JitStateOptions = {}
+): JitState {
   const maxExitMaterializationIndex = exitMaterializations.length - 1;
   const eipLocal = body.addLocal(wasmValueType.i32);
   const instructionCountLocal = body.addLocal(wasmValueType.i32);

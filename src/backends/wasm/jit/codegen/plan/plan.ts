@@ -1,4 +1,4 @@
-import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
+import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import { analyzeJitCodegenState } from "./state-plan.js";
 import type { JitCodegenPlan } from "./types.js";
 
@@ -41,7 +41,7 @@ export type {
 } from "./effect-plan.js";
 export { buildJitInstructionValueTimeline } from "./value-timeline.js";
 
-export function planJitCodegen(optimizedBlock: JitIrBlock): JitCodegenPlan {
+export function planJitCodegen(optimizedBlock: JitBlock): JitCodegenPlan {
   const state = analyzeJitCodegenState(optimizedBlock);
 
   return {
