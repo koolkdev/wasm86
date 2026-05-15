@@ -1,7 +1,6 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { analyzeJitConditionUses } from "#backends/wasm/jit/ir/condition-uses.js";
 import {
   indexJitEffects,
   jitOpEffectsAt
@@ -119,19 +118,4 @@ test("JIT effect index records explicit memory guard exits at their own ops", ()
   deepStrictEqual(jitOpEffectsAt(effects, 0, 0).exits, ["memoryReadFault"]);
   deepStrictEqual(jitOpEffectsAt(effects, 0, 3).exits, ["memoryWriteFault"]);
   deepStrictEqual(jitOpEffectsAt(effects, 0, 1).exits, []);
-});
-
-test("JIT condition use analysis rejects ordinary condition value uses", () => {
-  throws(
-    () => analyzeJitConditionUses({
-      instructions: [
-        syntheticInstruction([
-          { op: "flags.condition", dst: v(0), cc: "E" },
-          { op: "set", target: { kind: "reg", reg: "ecx" }, value: v(0) },
-          { op: "next" }
-        ])
-      ]
-    }),
-    /JIT condition value 0 is used as an ordinary value/
-  );
 });

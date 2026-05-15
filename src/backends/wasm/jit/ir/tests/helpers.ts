@@ -1,23 +1,12 @@
-import { strictEqual } from "node:assert";
-
 import type { Reg32 } from "#x86/isa/types.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 import type { ConditionCode, IrBlock, IrOp, ValueRef, VarRef } from "#x86/ir/model/types.js";
-import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
-import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type {
   JitIrBlock,
   JitIrBlockInstruction
 } from "#backends/wasm/jit/ir/types.js";
 
 export const startAddress = 0x1000;
-
-export function onlyExit(exits: readonly JitExitPoint[], reason: ExitReasonValue): JitExitPoint {
-  const matches = exits.filter((entry) => entry.exitReason === reason);
-
-  strictEqual(matches.length, 1);
-  return matches[0]!;
-}
 
 export function logic32LocalConditionBlock(cc: ConditionCode): JitIrBlock {
   return {

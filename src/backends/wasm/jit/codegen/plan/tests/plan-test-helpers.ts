@@ -49,7 +49,8 @@ import type {
 } from "#backends/wasm/jit/ir/value-types.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
-import { onlyExit, startAddress } from "../../../optimization/tests/helpers.js";
+
+export const startAddress = 0x1000;
 
 export {
   deepStrictEqual,
@@ -75,9 +76,7 @@ export {
   jitInputReg32Value,
   jitInsertMaskedBits,
   jitProducedValue,
-  createJitValueState,
-  onlyExit,
-  startAddress
+  createJitValueState
 };
 export type {
   Reg32,
@@ -96,6 +95,13 @@ export type {
   JitValue,
   JitIrBlock
 };
+
+export function onlyExit(exits: readonly JitExitPoint[], reason: ExitReason): JitExitPoint {
+  const matches = exits.filter((entry) => entry.exitReason === reason);
+
+  strictEqual(matches.length, 1);
+  return matches[0]!;
+}
 
 export function planValueCacheForTest(input: Readonly<{
   operands?: readonly JitOperandBinding[];
