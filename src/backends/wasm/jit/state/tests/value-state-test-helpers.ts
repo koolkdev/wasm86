@@ -13,11 +13,11 @@ import {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits
-} from "#backends/wasm/jit/ir/value-builders.js";
+} from "#backends/wasm/jit/ir/values/builders.js";
 import type {
   JitArchitecturalSlot,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import {
   createJitValueState,
   type JitValueSlotEntry

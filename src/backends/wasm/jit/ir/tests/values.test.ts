@@ -8,26 +8,29 @@ import {
 import {
   jitExtractBits,
   jitExtractMaskedBits,
+  jitFlagConditionValue,
   jitFlagProducerValue,
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits,
   jitProducedValue
-} from "#backends/wasm/jit/ir/value-builders.js";
+} from "#backends/wasm/jit/ir/values/builders.js";
 import {
-  jitValueCost,
-  jitValueDependencies,
-  jitValueKey,
-  jitValueMaterializationSlots,
-  jitValueMaterializationSlotsForMask,
-  walkJitValueDependencies
-} from "#backends/wasm/jit/ir/value-analysis.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+  slotsReadByValue,
+  slotsReadByValueForMask
+} from "#backends/wasm/jit/ir/values/slots.js";
+import { valueCost } from "#backends/wasm/jit/ir/values/cost.js";
+import { valueKey } from "#backends/wasm/jit/ir/values/keys.js";
+import {
+  valueChildren,
+  walkValueChildren
+} from "#backends/wasm/jit/ir/values/walk.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type {
   JitArchitecturalSlot,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/produced-values.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 
@@ -96,10 +99,153 @@ test("JitValue equality and cache keys are canonical after simplification", () =
     result: sub(jitInputReg32Value("eax"), c32(1))
   }, { mask: IR_ALU_FLAG_MASKS.ZF });
 
-  strictEqual(jitValuesEqual(first, second), true);
-  strictEqual(jitValueKey(first), jitValueKey(second));
-  strictEqual(jitValuesEqual(left, right), true);
-  strictEqual(jitValueKey(left), jitValueKey(right));
+  strictEqual(valuesEqual(first, second), true);
+  strictEqual(valueKey(first), valueKey(second));
+  strictEqual(valuesEqual(left, right), true);
+  strictEqual(valueKey(left), valueKey(right));
+});
+
+test("JitValue helper contract covers every value kind", () => {
+  const eax = jitInputReg32Value("eax");
+  const ebx = jitInputReg32Value("ebx");
+  const flags = jitInputAluFlagsValue();
+  const binary = add(eax, c32(5));
+  const flagProducer = jitFlagProducerValue("add", {
+    left: eax,
+    right: ebx,
+    result: add(eax, ebx)
+  }, { mask: IR_ALU_FLAG_MASKS.CF | IR_ALU_FLAG_MASKS.ZF });
+  const cases: readonly ValueContractCase[] = [
+    {
+      kind: "const",
+      value: c32(3),
+      same: c32(3),
+      different: c32(4),
+      children: [],
+      slots: []
+    },
+    {
+      kind: "input",
+      value: eax,
+      same: jitInputReg32Value("eax"),
+      different: ebx,
+      children: [],
+      slots: ["reg32:eax"]
+    },
+    {
+      kind: "produced",
+      value: jitProducedValue("load#0", "i32"),
+      same: jitProducedValue("load#0", "i32"),
+      different: jitProducedValue("load#1", "i32"),
+      children: [],
+      slots: []
+    },
+    {
+      kind: "value.binary",
+      value: binary,
+      same: add(jitInputReg32Value("eax"), c32(5)),
+      different: add(eax, c32(6)),
+      children: [eax, c32(5)],
+      slots: ["reg32:eax"]
+    },
+    {
+      kind: "value.unary",
+      value: extend8s(eax),
+      same: extend8s(jitInputReg32Value("eax")),
+      different: extend16s(eax),
+      children: [eax],
+      slots: ["reg32:eax"]
+    },
+    {
+      kind: "value.select",
+      value: select(eax, ebx, c32(7)),
+      same: select(jitInputReg32Value("eax"), jitInputReg32Value("ebx"), c32(7)),
+      different: select(eax, ebx, c32(8)),
+      children: [eax, ebx, c32(7)],
+      slots: ["reg32:eax", "reg32:ebx"]
+    },
+    {
+      kind: "extractBits",
+      value: jitExtractBits(eax, 8, 8),
+      same: jitExtractBits(jitInputReg32Value("eax"), 8, 8),
+      different: jitExtractBits(eax, 16, 8),
+      children: [eax],
+      slots: ["reg32:eax"]
+    },
+    {
+      kind: "insertBits",
+      value: jitInsertBits(eax, ebx, 8, 8),
+      same: jitInsertBits(jitInputReg32Value("eax"), jitInputReg32Value("ebx"), 8, 8),
+      different: jitInsertBits(eax, ebx, 16, 8),
+      children: [eax, ebx],
+      slots: ["reg32:eax", "reg32:ebx"]
+    },
+    {
+      kind: "extractMaskedBits",
+      value: jitExtractMaskedBits(eax, 0xff00),
+      same: jitExtractMaskedBits(jitInputReg32Value("eax"), 0xff00),
+      different: jitExtractMaskedBits(eax, 0xff),
+      children: [eax],
+      slots: ["reg32:eax"]
+    },
+    {
+      kind: "insertMaskedBits",
+      value: jitInsertMaskedBits(eax, ebx, 0xff00),
+      same: jitInsertMaskedBits(jitInputReg32Value("eax"), jitInputReg32Value("ebx"), 0xff00),
+      different: jitInsertMaskedBits(eax, ebx, 0xff),
+      children: [eax, ebx],
+      slots: ["reg32:eax", "reg32:ebx"]
+    },
+    {
+      kind: "flagProducer",
+      value: flagProducer,
+      same: jitFlagProducerValue("add", {
+        left: jitInputReg32Value("eax"),
+        right: jitInputReg32Value("ebx"),
+        result: add(jitInputReg32Value("eax"), jitInputReg32Value("ebx"))
+      }, { mask: IR_ALU_FLAG_MASKS.CF | IR_ALU_FLAG_MASKS.ZF }),
+      different: jitFlagProducerValue("add", {
+        left: eax,
+        right: ebx,
+        result: add(eax, ebx)
+      }, { mask: IR_ALU_FLAG_MASKS.ZF }),
+      children: [eax, ebx, add(eax, ebx)],
+      slots: ["reg32:eax", "reg32:ebx"]
+    },
+    {
+      kind: "flagCondition",
+      value: jitFlagConditionValue(flags, "E"),
+      same: jitFlagConditionValue(jitInputAluFlagsValue(), "E"),
+      different: jitFlagConditionValue(flags, "NE"),
+      children: [flags],
+      slots: ["aluFlags"]
+    }
+  ];
+
+  for (const valueCase of cases) {
+    strictEqual(valueCase.value.kind, valueCase.kind);
+    strictEqual(valuesEqual(valueCase.value, valueCase.same), true, valueCase.kind);
+    strictEqual(valuesEqual(valueCase.value, valueCase.different), false, valueCase.kind);
+    strictEqual(valueKey(valueCase.value), valueKey(valueCase.same), valueCase.kind);
+    strictEqual(valueKey(valueCase.value) === valueKey(valueCase.different), false, valueCase.kind);
+    assertValueListEqual(valueChildren(valueCase.value), valueCase.children, valueCase.kind);
+    deepStrictEqual(slotKeys(slotsReadByValue(valueCase.value)), valueCase.slots);
+    strictEqual(valueCost(valueCase.value), valueCost(valueCase.same), valueCase.kind);
+    strictEqual(valueCost(valueCase.value) >= 1, true, valueCase.kind);
+  }
+});
+
+test("JitValue equality compares simplified structure", () => {
+  const eax = jitInputReg32Value("eax");
+  const rawIdentity = {
+    kind: "insertBits",
+    base: eax,
+    value: jitExtractBits(eax, 0, 8),
+    bitOffset: 0,
+    width: 8
+  } as const satisfies JitValue;
+
+  strictEqual(valuesEqual(rawIdentity, eax), true);
 });
 
 test("JitValue produced nodes are opaque point-bound results", () => {
@@ -108,15 +254,15 @@ test("JitValue produced nodes are opaque point-bound results", () => {
   const other = jitProducedValue("load#0:1:3", "i32");
   const walked: JitValue[] = [];
 
-  walkJitValueDependencies(first, (dependency) => walked.push(dependency));
+  walkValueChildren(first, (dependency) => walked.push(dependency));
 
-  strictEqual(jitValuesEqual(first, same), true);
-  strictEqual(jitValuesEqual(first, other), false);
-  strictEqual(jitValueKey(first), jitValueKey(same));
-  deepStrictEqual(jitValueDependencies(first), []);
+  strictEqual(valuesEqual(first, same), true);
+  strictEqual(valuesEqual(first, other), false);
+  strictEqual(valueKey(first), valueKey(same));
+  deepStrictEqual(valueChildren(first), []);
   deepStrictEqual(walked, []);
-  deepStrictEqual(jitValueMaterializationSlots(first), []);
-  strictEqual(jitValueCost(first), 1);
+  deepStrictEqual(slotsReadByValue(first), []);
+  strictEqual(valueCost(first), 1);
 });
 
 test("JIT produced-value indexing assigns ids to effectful get results only", () => {
@@ -158,17 +304,17 @@ test("JitValue dependency and materialization-slot walking includes nested flag 
   const mergedFlags = jitInsertMaskedBits(jitInputAluFlagsValue(), producer, IR_ALU_FLAG_MASK);
   const walked: JitValue[] = [];
 
-  walkJitValueDependencies(mergedFlags, (dependency) => walked.push(dependency));
+  walkValueChildren(mergedFlags, (dependency) => walked.push(dependency));
 
-  strictEqual(jitValueDependencies(producer).some((value) => jitValuesEqual(value, lea)), true);
+  strictEqual(valueChildren(producer).some((value) => valuesEqual(value, lea)), true);
   strictEqual(walked.some((value) => value.kind === "flagProducer"), true);
-  deepStrictEqual(slotKeys(jitValueMaterializationSlots(mergedFlags)), [
+  deepStrictEqual(slotKeys(slotsReadByValue(mergedFlags)), [
     "aluFlags",
     "reg32:ebx",
     "reg32:ecx",
     "reg32:edx"
   ]);
-  strictEqual(jitValueCost(producer) > jitValueCost(lea), true);
+  strictEqual(valueCost(producer) > valueCost(lea), true);
 });
 
 test("JitValue masked materialization-slot walking follows required bits", () => {
@@ -178,20 +324,20 @@ test("JitValue masked materialization-slot walking follows required bits", () =>
   const insertedByteAt8 = jitInsertBits(eax, ebx, 8, 8);
   const signExtendedLowByte = extend8s(jitInsertBits(eax, ebx, 0, 8));
 
-  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(insertedLowWord, 0xffff)), [
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(insertedLowWord, 0xffff)), [
     "reg32:ebx"
   ]);
-  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(insertedLowWord, 0xffff_0000)), [
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(insertedLowWord, 0xffff_0000)), [
     "reg32:eax"
   ]);
-  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(insertedLowWord, 0xffff_ffff)), [
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(insertedLowWord, 0xffff_ffff)), [
     "reg32:eax",
     "reg32:ebx"
   ]);
-  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(jitExtractBits(insertedByteAt8, 8, 8), 0xff)), [
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(jitExtractBits(insertedByteAt8, 8, 8), 0xff)), [
     "reg32:ebx"
   ]);
-  deepStrictEqual(slotKeys(jitValueMaterializationSlotsForMask(signExtendedLowByte, 0xffff_0000)), [
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(signExtendedLowByte, 0xffff_0000)), [
     "reg32:ebx"
   ]);
 });
@@ -208,10 +354,39 @@ function sub(a: JitValue, b: JitValue): JitValue {
   return { kind: "value.binary", type: "i32", operator: "sub", a, b };
 }
 
+function select(condition: JitValue, whenTrue: JitValue, whenFalse: JitValue): JitValue {
+  return { kind: "value.select", type: "i32", condition, whenTrue, whenFalse };
+}
+
 function extend8s(value: JitValue): JitValue {
   return { kind: "value.unary", type: "i32", operator: "extend8_s", value };
 }
 
+function extend16s(value: JitValue): JitValue {
+  return { kind: "value.unary", type: "i32", operator: "extend16_s", value };
+}
+
 function slotKeys(slots: readonly JitArchitecturalSlot[]): readonly string[] {
   return slots.map((slot) => slot.kind === "aluFlags" ? "aluFlags" : `reg32:${slot.reg}`).sort();
+}
+
+type ValueContractCase = Readonly<{
+  kind: JitValue["kind"];
+  value: JitValue;
+  same: JitValue;
+  different: JitValue;
+  children: readonly JitValue[];
+  slots: readonly string[];
+}>;
+
+function assertValueListEqual(
+  actual: readonly JitValue[],
+  expected: readonly JitValue[],
+  context: string
+): void {
+  strictEqual(actual.length, expected.length, context);
+
+  for (let index = 0; index < actual.length; index += 1) {
+    strictEqual(valuesEqual(actual[index]!, expected[index]!), true, `${context} child ${index}`);
+  }
 }

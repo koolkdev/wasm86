@@ -1,7 +1,7 @@
-import { jitValueDependencies } from "#backends/wasm/jit/ir/value-analysis.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+import { valueChildren } from "#backends/wasm/jit/ir/values/walk.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueCachePlan } from "./value-cache.js";
 import {
   cacheSelectionUsesForPlannedUse,
@@ -68,14 +68,14 @@ function planRootConsumerCaptures(
 
     for (const selected of cachePlan.consumers[epoch] ?? []) {
       if (
-        simplifyJitValue(selected.value).kind === "produced" ||
+        simplifyValue(selected.value).kind === "produced" ||
         jitValueDependsOnProduced(selected.value)
       ) {
         continue;
       }
 
       const consumers = epochUses
-        .filter((use) => jitValuesEqual(use.value, selected.value))
+        .filter((use) => valuesEqual(use.value, selected.value))
         .map(plannedValueUseFromCacheSelectionUse);
       const capture = rootCaptureForConsumers(selected.value, consumers);
 
@@ -89,8 +89,8 @@ function planRootConsumerCaptures(
 }
 
 function jitValueDependsOnProduced(value: JitValue): boolean {
-  return jitValueDependencies(simplifyJitValue(value)).some((dependency) => {
-    const simplified = simplifyJitValue(dependency);
+  return valueChildren(simplifyValue(value)).some((dependency) => {
+    const simplified = simplifyValue(dependency);
 
     return simplified.kind === "produced" || jitValueDependsOnProduced(simplified);
   });
@@ -134,7 +134,7 @@ function uniqueCaptures(
 
   for (const capture of captures) {
     if (!unique.some((entry) =>
-      jitValuesEqual(entry.value, capture.value) &&
+      valuesEqual(entry.value, capture.value) &&
         placementsEqual(entry.placement, capture.placement) &&
         jitValuePathScopesEqual(entry.availabilityScope, capture.availabilityScope)
     )) {

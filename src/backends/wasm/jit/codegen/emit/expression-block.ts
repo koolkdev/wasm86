@@ -47,7 +47,7 @@ import type {
   JitArchitecturalSlot,
   JitProducedValue,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import {

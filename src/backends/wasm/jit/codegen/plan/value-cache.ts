@@ -1,5 +1,5 @@
 import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   planJitValueCacheSelection,
   type JitValueUseCount

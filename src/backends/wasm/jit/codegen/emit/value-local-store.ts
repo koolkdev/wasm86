@@ -3,10 +3,10 @@ import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-bo
 import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
-import { jitValueKey } from "#backends/wasm/jit/ir/value-analysis.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+import { valueKey } from "#backends/wasm/jit/ir/values/keys.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   type JitValueCachePlan,
   type JitValueUseCount
@@ -89,9 +89,9 @@ export class JitValueLocalStore {
     this.#body = body;
 
     for (const useCount of useCounts) {
-      const value = simplifyJitValue(useCount.value);
+      const value = simplifyValue(useCount.value);
 
-      this.#entries.set(jitValueKey(value), {
+      this.#entries.set(valueKey(value), {
         value,
         availabilitiesByScope: new Map()
       });
@@ -219,10 +219,10 @@ export class JitValueLocalStore {
   }
 
   #entryFor(value: JitValue): CachedJitValue | undefined {
-    const simplified = simplifyJitValue(value);
-    const entry = this.#entries.get(jitValueKey(simplified));
+    const simplified = simplifyValue(value);
+    const entry = this.#entries.get(valueKey(simplified));
 
-    return entry !== undefined && jitValuesEqual(entry.value, simplified) ? entry : undefined;
+    return entry !== undefined && valuesEqual(entry.value, simplified) ? entry : undefined;
   }
 
   #visibleAvailability(entry: CachedJitValue): CachedJitAvailability | undefined {
@@ -437,13 +437,13 @@ function rootValuePathScopeKey(): string {
 }
 
 function valueIsSelected(selected: readonly JitValueUseCount[], value: JitValue): boolean {
-  const simplified = simplifyJitValue(value);
+  const simplified = simplifyValue(value);
 
-  return selected.some((entry) => jitValuesEqual(simplifyJitValue(entry.value), simplified));
+  return selected.some((entry) => valuesEqual(simplifyValue(entry.value), simplified));
 }
 
 function valueIsCaptureSelected(selected: readonly JitValue[], value: JitValue): boolean {
-  const simplified = simplifyJitValue(value);
+  const simplified = simplifyValue(value);
 
-  return selected.some((entry) => jitValuesEqual(simplifyJitValue(entry), simplified));
+  return selected.some((entry) => valuesEqual(simplifyValue(entry), simplified));
 }

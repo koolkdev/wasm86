@@ -18,9 +18,9 @@ import type {
   JitArchitecturalSlot,
   JitRegisterValueMap,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
-import { jitStorageRegisterAccess } from "#backends/wasm/jit/ir/value-builders.js";
-import { createJitValueResolver } from "#backends/wasm/jit/ir/value-resolver.js";
+} from "#backends/wasm/jit/ir/values/types.js";
+import { jitStorageRegisterAccess } from "#backends/wasm/jit/analysis/storage-registers.js";
+import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
 import type { JitIrLocation } from "#backends/wasm/jit/ir/walk.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import {

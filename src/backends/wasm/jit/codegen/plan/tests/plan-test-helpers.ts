@@ -42,11 +42,11 @@ import {
   jitInputReg32Value,
   jitInsertMaskedBits,
   jitProducedValue
-} from "#backends/wasm/jit/ir/value-builders.js";
+} from "#backends/wasm/jit/ir/values/builders.js";
 import type {
   JitProducedValue,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 

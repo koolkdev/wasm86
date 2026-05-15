@@ -4,14 +4,14 @@ import { test } from "node:test";
 import { registerAlias } from "#x86/isa/registers.js";
 import type { Reg32 } from "#x86/isa/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import { createJitValueResolver } from "#backends/wasm/jit/ir/value-resolver.js";
+import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
 import {
   jitExtractBits,
   jitFlagConditionValue,
   jitInputAluFlagsValue,
   jitInputReg32Value
-} from "#backends/wasm/jit/ir/value-builders.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/builders.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 
 test("JIT value resolver reads input register aliases from full-register values", () => {

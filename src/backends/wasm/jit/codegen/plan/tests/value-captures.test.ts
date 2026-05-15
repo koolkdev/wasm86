@@ -15,12 +15,12 @@ import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
   jitInputReg32Value,
   jitProducedValue
-} from "#backends/wasm/jit/ir/value-builders.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+} from "#backends/wasm/jit/ir/values/builders.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type {
   JitProducedValue,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import {
   addExpr,
   addValue,
@@ -41,14 +41,14 @@ test("JIT value-capture planner shares pure values needed by both branch paths",
   const expected = addValue(jitInputReg32Value("eax"), c32(1));
   const { uses, cachePlan } = planCapturesForExpressionBlock(expressionBlock);
   const captures = planJitValueCaptures(uses, cachePlan);
-  const targetUses = uses.filter((use) => jitValuesEqual(use.value, expected));
+  const targetUses = uses.filter((use) => valuesEqual(use.value, expected));
 
   deepStrictEqual(targetUses.map((use) => use.pathScope), [
     { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" },
     { kind: "path", id: "branch:0:0:notTaken", debugLabel: "notTaken" }
   ]);
   strictEqual(captures.length, 1);
-  strictEqual(jitValuesEqual(captures[0]!.value, expected), true);
+  strictEqual(valuesEqual(captures[0]!.value, expected), true);
   deepStrictEqual(captures[0]!.placement, { instructionIndex: 0, opIndex: 0, epoch: 0 });
   deepStrictEqual(captures[0]!.availabilityScope, rootValuePathScope());
   strictEqual(captures[0]!.consumers.length, 2);
@@ -85,15 +85,15 @@ test("JIT cache value uses carry flattened dependency ancestry for cache selecti
     expressionPathScopes: defaultExpressionPathScopes(expressionBlock),
     materializationUses: new Map()
   }]);
-  const rootUse = uses.find((use) => jitValuesEqual(use.value, expectedRoot));
+  const rootUse = uses.find((use) => valuesEqual(use.value, expectedRoot));
   const cacheUses = uses.flatMap((use) => cacheSelectionUsesForPlannedUse(use));
-  const childUse = cacheUses.find((use) => jitValuesEqual(use.value, expectedChild));
+  const childUse = cacheUses.find((use) => valuesEqual(use.value, expectedChild));
 
   if (rootUse === undefined || childUse === undefined) {
     throw new Error("expected planned root and cache child value uses");
   }
 
-  deepStrictEqual(uses.filter((use) => jitValuesEqual(use.value, expectedChild)), []);
+  deepStrictEqual(uses.filter((use) => valuesEqual(use.value, expectedChild)), []);
   deepStrictEqual(childUse.ancestors, [expectedRoot]);
   strictEqual(childUse.emittedCost > 0, true);
 });
@@ -109,7 +109,7 @@ test("JIT value-capture planner keeps one-arm branch values path-scoped", () => 
   const expected = addValue(jitInputReg32Value("eax"), c32(1));
   const { uses, cachePlan } = planCapturesForExpressionBlock(expressionBlock);
   const captures = planJitValueCaptures(uses, cachePlan);
-  const targetUses = uses.filter((use) => jitValuesEqual(use.value, expected));
+  const targetUses = uses.filter((use) => valuesEqual(use.value, expected));
 
   deepStrictEqual(targetUses.map((use) => use.pathScope), [
     { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" }
@@ -141,7 +141,7 @@ test("JIT value-capture planner leaves produced definitions to value-cache", () 
     new Map([[0, produced]])
   );
   const captures = planJitValueCaptures(uses, cachePlan);
-  const producedUses = uses.filter((use) => jitValuesEqual(use.value, produced));
+  const producedUses = uses.filter((use) => valuesEqual(use.value, produced));
 
   deepStrictEqual(cachePlan?.definitionCaptures[0], [produced]);
   deepStrictEqual(captures, []);
@@ -184,7 +184,7 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
   const captures = planJitValueCaptures(uses, cachePlan);
 
   strictEqual(captures.length, 1);
-  strictEqual(jitValuesEqual(captures[0]!.value, value), true);
+  strictEqual(valuesEqual(captures[0]!.value, value), true);
   deepStrictEqual(captures[0]!.availabilityScope, rootValuePathScope());
   deepStrictEqual(captures[0]!.consumers.map((use) => use.pathScope), [
     { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" },

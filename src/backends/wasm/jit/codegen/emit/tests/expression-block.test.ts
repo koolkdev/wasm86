@@ -22,8 +22,8 @@ import {
 import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
-import { jitProducedValue } from "#backends/wasm/jit/ir/value-builders.js";
-import type { JitProducedValue } from "#backends/wasm/jit/ir/value-types.js";
+import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
+import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
 import type { Reg32 } from "#x86/isa/types.js";

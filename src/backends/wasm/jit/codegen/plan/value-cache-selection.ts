@@ -1,7 +1,7 @@
-import { jitValueCost } from "#backends/wasm/jit/ir/value-analysis.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+import { valueCost } from "#backends/wasm/jit/ir/values/cost.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 
 export type JitValueUseCount = Readonly<{
   value: JitValue;
@@ -50,13 +50,13 @@ function selectConsumers(
     const selected = [...epochSelected];
 
     for (const globalEntry of globallySelected) {
-      if (selected.some((entry) => jitValuesEqual(entry.value, globalEntry.value))) {
+      if (selected.some((entry) => valuesEqual(entry.value, globalEntry.value))) {
         continue;
       }
 
       const forceSelected = shouldForceSelectValue(globalEntry.value);
       const epochUseCount = uses.filter((use) =>
-        jitValuesEqual(use.value, globalEntry.value) &&
+        valuesEqual(use.value, globalEntry.value) &&
           (forceSelected || !hasSelectedAncestor(use, selected))
       ).length;
 
@@ -77,7 +77,7 @@ function mergeSelectedUseCounts(
   for (const selected of epochSelections) {
     for (const entry of selected) {
       const existingIndex = merged.findIndex((candidate) =>
-        jitValuesEqual(candidate.value, entry.value)
+        valuesEqual(candidate.value, entry.value)
       );
 
       if (existingIndex === -1) {
@@ -100,11 +100,11 @@ function selectEpochValues(
   uses: readonly JitValueSelectionUse[]
 ): readonly JitValueUseCount[] {
   const candidateValues = [...uniqueValues(uses.map((use) => use.value))]
-    .sort((a, b) => jitValueCost(b) - jitValueCost(a));
+    .sort((a, b) => valueCost(b) - valueCost(a));
   const selected: JitValueUseCount[] = [];
 
   for (const value of candidateValues) {
-    const matchingUses = uses.filter((use) => jitValuesEqual(use.value, value));
+    const matchingUses = uses.filter((use) => valuesEqual(use.value, value));
     const forceSelected = shouldForceSelectValue(value);
     const usableUses = matchingUses.filter((use) =>
       forceSelected || !hasSelectedAncestor(use, selected)
@@ -156,7 +156,7 @@ function shouldCacheValueWithCosts(
 }
 
 function shouldForceSelectValue(value: JitValue): boolean {
-  return simplifyJitValue(value).kind === "produced";
+  return simplifyValue(value).kind === "produced";
 }
 
 function hasSelectedAncestor(
@@ -164,7 +164,7 @@ function hasSelectedAncestor(
   selected: readonly JitValueUseCount[]
 ): boolean {
   return use.ancestors.some((ancestor) =>
-    selected.some((entry) => jitValuesEqual(entry.value, ancestor))
+    selected.some((entry) => valuesEqual(entry.value, ancestor))
   );
 }
 
@@ -172,7 +172,7 @@ function uniqueValues(values: readonly JitValue[]): readonly JitValue[] {
   const unique: JitValue[] = [];
 
   for (const value of values) {
-    if (!unique.some((entry) => jitValuesEqual(entry, value))) {
+    if (!unique.some((entry) => valuesEqual(entry, value))) {
       unique.push(value);
     }
   }

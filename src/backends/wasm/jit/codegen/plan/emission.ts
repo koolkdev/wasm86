@@ -6,7 +6,7 @@ import {
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { indexProducedValuesByVarIdForInstruction } from "#backends/wasm/jit/ir/produced-values.js";
-import type { JitProducedValue } from "#backends/wasm/jit/ir/value-types.js";
+import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueCachePlan } from "./value-cache.js";
 import {
   buildJitInstructionValueTimeline,

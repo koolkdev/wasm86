@@ -1,4 +1,4 @@
-import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
+import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
 import type {
   ConditionCode,
   FlagProducerName,
@@ -10,27 +10,17 @@ import {
   flagProducerInputsToRecord,
   type FlagProducerInputs
 } from "#x86/ir/model/flags.js";
-import type { StorageRef } from "#x86/ir/model/types.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import { simplifyValue } from "./simplify.js";
 import {
   normalizeFlagProducerMask,
   normalizeOptionalWidth
-} from "#backends/wasm/jit/ir/value-shared.js";
+} from "./flags.js";
 import type {
   JitInputValue,
   JitProducedValue,
   JitProducedValueId,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
-
-export type JitRegisterAccess = Readonly<{
-  reg: Reg32;
-  width: OperandWidth;
-  bitOffset: RegisterAlias["bitOffset"];
-}>;
-
-const fullWidth = 32;
+} from "./types.js";
 
 export function jitInputReg32Value(reg: Reg32): JitInputValue {
   return { kind: "input", slot: { kind: "reg32", reg } };
@@ -56,7 +46,7 @@ export function jitFlagProducerValue<Producer extends FlagProducerName>(
     flagProducerInputsToRecord(producer, inputs)
   );
 
-  return simplifyJitValue({
+  return simplifyValue({
     kind: "flagProducer",
     producer,
     ...(normalizedWidth === undefined ? {} : { width: normalizedWidth }),
@@ -66,7 +56,7 @@ export function jitFlagProducerValue<Producer extends FlagProducerName>(
 }
 
 export function jitExtractBits(value: JitValue, bitOffset: number, width: OperandWidth): JitValue {
-  return simplifyJitValue({ kind: "extractBits", value, bitOffset, width });
+  return simplifyValue({ kind: "extractBits", value, bitOffset, width });
 }
 
 export function jitInsertBits(
@@ -75,45 +65,17 @@ export function jitInsertBits(
   bitOffset: number,
   width: OperandWidth
 ): JitValue {
-  return simplifyJitValue({ kind: "insertBits", base, value, bitOffset, width });
+  return simplifyValue({ kind: "insertBits", base, value, bitOffset, width });
 }
 
 export function jitExtractMaskedBits(value: JitValue, mask: number): JitValue {
-  return simplifyJitValue({ kind: "extractMaskedBits", value, mask });
+  return simplifyValue({ kind: "extractMaskedBits", value, mask });
 }
 
 export function jitInsertMaskedBits(base: JitValue, value: JitValue, mask: number): JitValue {
-  return simplifyJitValue({ kind: "insertMaskedBits", base, value, mask });
+  return simplifyValue({ kind: "insertMaskedBits", base, value, mask });
 }
 
 export function jitFlagConditionValue(flags: JitValue, cc: ConditionCode): JitValue {
-  return simplifyJitValue({ kind: "flagCondition", flags, cc });
-}
-
-export function jitStorageRegisterAccess(
-  storage: StorageRef,
-  operands: readonly JitOperandBinding[],
-  accessWidth: OperandWidth = fullWidth
-): JitRegisterAccess | undefined {
-  switch (storage.kind) {
-    case "reg":
-      return { reg: storage.reg, width: accessWidth, bitOffset: 0 };
-    case "operand": {
-      const binding = operands[storage.index]!;
-
-      return binding.kind === "static.reg"
-        ? {
-            reg: binding.alias.base,
-            width: binding.alias.width,
-            bitOffset: binding.alias.bitOffset
-          }
-        : undefined;
-    }
-    case "mem":
-      return undefined;
-  }
-}
-
-export function jitStorageReg(storage: StorageRef, operands: readonly JitOperandBinding[]): Reg32 | undefined {
-  return jitStorageRegisterAccess(storage, operands)?.reg;
+  return simplifyValue({ kind: "flagCondition", flags, cc });
 }

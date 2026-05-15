@@ -2,11 +2,11 @@ import type { IrOp, StorageRef } from "#x86/ir/model/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type { JitIrBlockInstruction } from "#backends/wasm/jit/ir/types.js";
 import { walkJitIrInstructionOps, type JitIrLocation } from "#backends/wasm/jit/ir/walk.js";
-import { jitProducedValue } from "#backends/wasm/jit/ir/value-builders.js";
+import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type {
   JitProducedValue,
   JitProducedValueId
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 
 export function indexProducedValuesByVarIdForInstruction(
   instruction: JitIrBlockInstruction,

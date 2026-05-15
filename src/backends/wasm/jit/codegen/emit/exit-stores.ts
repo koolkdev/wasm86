@@ -19,12 +19,12 @@ import type {
   JitCachedValueHandle,
   JitValueCacheRuntime
 } from "./value-local-store.js";
-import { jitValueMaterializationSlotsForMask } from "#backends/wasm/jit/ir/value-analysis.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import { slotsReadByValueForMask } from "#backends/wasm/jit/ir/values/slots.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type {
   JitArchitecturalSlot,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 
 export type JitCapturedExitMaterializationStore = Readonly<{
@@ -107,7 +107,7 @@ function captureJitExitMaterializationStore(
     };
   }
 
-  const value = simplifyJitValue(store.value);
+  const value = simplifyValue(store.value);
 
   if (value.kind === "const") {
     return { store };
@@ -143,7 +143,7 @@ function exitStoreSourceNeedsTemporaryLocal(
     return false;
   }
 
-  const sourceSlots = jitValueMaterializationSlotsForMask(value, 0xffff_ffff);
+  const sourceSlots = slotsReadByValueForMask(value, 0xffff_ffff);
 
   return previousTargets.some((target) => {
     const targetSlot = materializationTargetSlot(target);

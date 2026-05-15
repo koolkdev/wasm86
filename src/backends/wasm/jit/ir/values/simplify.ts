@@ -7,15 +7,17 @@ import {
   type FlagProducerInputs
 } from "#x86/ir/model/flags.js";
 import { i32 } from "#x86/state/cpu-state.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import { valuesEqual } from "./equality.js";
 import {
   assertBitRange,
   bitRangeMask,
   bitRangeRelationship,
-  normalizeFlagProducerMask,
-  normalizeOptionalWidth,
   normalizeU32Mask
-} from "#backends/wasm/jit/ir/value-shared.js";
+} from "./bits.js";
+import {
+  normalizeFlagProducerMask,
+  normalizeOptionalWidth
+} from "./flags.js";
 import type {
   JitBinaryValue,
   JitExtractBitsValue,
@@ -26,16 +28,15 @@ import type {
   JitSelectValue,
   JitUnaryValue,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "./types.js";
 
-export function simplifyJitValue(value: JitValue): JitValue {
+export function simplifyValue(value: JitValue): JitValue {
   switch (value.kind) {
     case "const": {
       const normalized = i32(value.value);
 
       return normalized === value.value ? value : { ...value, value: normalized };
     }
-    case "reg":
     case "produced":
     case "input":
       return value;
@@ -56,7 +57,7 @@ export function simplifyJitValue(value: JitValue): JitValue {
     case "flagProducer":
       return simplifyJitFlagProducerValue(value);
     case "flagCondition": {
-      const flags = simplifyJitValue(value.flags);
+      const flags = simplifyValue(value.flags);
 
       return flags === value.flags ? value : { ...value, flags };
     }
@@ -71,8 +72,8 @@ function signExtendConst(value: number, width: 8 | 16): number {
 }
 
 function simplifyJitBinaryValue(value: JitBinaryValue): JitValue {
-  const a = simplifyJitValue(value.a);
-  const b = simplifyJitValue(value.b);
+  const a = simplifyValue(value.a);
+  const b = simplifyValue(value.b);
 
   if (b.kind === "const") {
     switch (value.operator) {
@@ -156,7 +157,7 @@ function simplifyJitMaskedValue(value: JitValue, maskValue: number): JitValue | 
     const insertedMask = bitRangeMask(value.bitOffset, value.width);
 
     if ((mask & ~insertedMask) === 0) {
-      return simplifyJitValue({
+      return simplifyValue({
         kind: "value.binary",
         type: "i32",
         operator: "and",
@@ -166,7 +167,7 @@ function simplifyJitMaskedValue(value: JitValue, maskValue: number): JitValue | 
     }
 
     if ((mask & insertedMask) === 0) {
-      return simplifyJitValue({
+      return simplifyValue({
         kind: "value.binary",
         type: "i32",
         operator: "and",
@@ -180,7 +181,7 @@ function simplifyJitMaskedValue(value: JitValue, maskValue: number): JitValue | 
     const insertedMask = normalizeU32Mask(value.mask, "insertMaskedBits mask");
 
     if ((mask & ~insertedMask) === 0) {
-      return simplifyJitValue({
+      return simplifyValue({
         kind: "value.binary",
         type: "i32",
         operator: "and",
@@ -190,7 +191,7 @@ function simplifyJitMaskedValue(value: JitValue, maskValue: number): JitValue | 
     }
 
     if ((mask & insertedMask) === 0) {
-      return simplifyJitValue({
+      return simplifyValue({
         kind: "value.binary",
         type: "i32",
         operator: "and",
@@ -204,7 +205,7 @@ function simplifyJitMaskedValue(value: JitValue, maskValue: number): JitValue | 
 }
 
 function simplifyJitUnaryValue(value: JitUnaryValue): JitValue {
-  const inner = simplifyJitValue(value.value);
+  const inner = simplifyValue(value.value);
 
   if (inner.kind === "const") {
     return { kind: "const", type: value.type, value: foldUnaryConst(value.operator, inner.value) };
@@ -214,15 +215,15 @@ function simplifyJitUnaryValue(value: JitUnaryValue): JitValue {
 }
 
 function simplifyJitSelectValue(value: JitSelectValue): JitValue {
-  const condition = simplifyJitValue(value.condition);
-  const whenTrue = simplifyJitValue(value.whenTrue);
-  const whenFalse = simplifyJitValue(value.whenFalse);
+  const condition = simplifyValue(value.condition);
+  const whenTrue = simplifyValue(value.whenTrue);
+  const whenFalse = simplifyValue(value.whenFalse);
 
   if (condition.kind === "const") {
     return condition.value !== 0 ? whenTrue : whenFalse;
   }
 
-  if (jitValuesEqual(whenTrue, whenFalse)) {
+  if (valuesEqual(whenTrue, whenFalse)) {
     return whenTrue;
   }
 
@@ -233,7 +234,7 @@ function simplifyJitSelectValue(value: JitSelectValue): JitValue {
 
 function simplifyJitExtractBitsValue(value: JitExtractBitsValue): JitValue {
   assertBitRange(value.bitOffset, value.width, "extractBits");
-  const source = simplifyJitValue(value.value);
+  const source = simplifyValue(value.value);
 
   if (value.bitOffset === 0 && value.width === 32) {
     return source;
@@ -244,7 +245,7 @@ function simplifyJitExtractBitsValue(value: JitExtractBitsValue): JitValue {
   }
 
   if (source.kind === "extractBits" && value.bitOffset + value.width <= source.width) {
-    return simplifyJitValue({
+    return simplifyValue({
       kind: "extractBits",
       value: source.value,
       bitOffset: source.bitOffset + value.bitOffset,
@@ -261,11 +262,11 @@ function simplifyJitExtractBitsValue(value: JitExtractBitsValue): JitValue {
     );
 
     if (relationship === "same") {
-      return simplifyJitValue({ kind: "extractBits", value: source.value, bitOffset: 0, width: value.width });
+      return simplifyValue({ kind: "extractBits", value: source.value, bitOffset: 0, width: value.width });
     }
 
     if (relationship === "disjoint") {
-      return simplifyJitValue({ ...value, value: source.base });
+      return simplifyValue({ ...value, value: source.base });
     }
   }
 
@@ -274,8 +275,8 @@ function simplifyJitExtractBitsValue(value: JitExtractBitsValue): JitValue {
 
 function simplifyJitInsertBitsValue(value: JitInsertBitsValue): JitValue {
   assertBitRange(value.bitOffset, value.width, "insertBits");
-  const base = simplifyJitValue(value.base);
-  const inserted = simplifyJitValue(value.value);
+  const base = simplifyValue(value.base);
+  const inserted = simplifyValue(value.value);
 
   if (value.bitOffset === 0 && value.width === 32) {
     return inserted;
@@ -292,12 +293,12 @@ function simplifyJitInsertBitsValue(value: JitInsertBitsValue): JitValue {
   if (inserted.kind === "extractBits" &&
     inserted.bitOffset === value.bitOffset &&
     inserted.width === value.width &&
-    jitValuesEqual(inserted.value, base)) {
+    valuesEqual(inserted.value, base)) {
     return base;
   }
 
   if (base.kind === "insertBits" && base.bitOffset === value.bitOffset && base.width === value.width) {
-    return simplifyJitValue({ ...value, base: base.base, value: inserted });
+    return simplifyValue({ ...value, base: base.base, value: inserted });
   }
 
   return base === value.base && inserted === value.value ? value : { ...value, base, value: inserted };
@@ -305,7 +306,7 @@ function simplifyJitInsertBitsValue(value: JitInsertBitsValue): JitValue {
 
 function simplifyJitExtractMaskedBitsValue(value: JitExtractMaskedBitsValue): JitValue {
   const mask = normalizeU32Mask(value.mask, "extractMaskedBits mask");
-  const source = simplifyJitValue(value.value);
+  const source = simplifyValue(value.value);
 
   if (mask === 0) {
     return { kind: "const", type: "i32", value: 0 };
@@ -320,18 +321,18 @@ function simplifyJitExtractMaskedBitsValue(value: JitExtractMaskedBitsValue): Ji
   }
 
   if (source.kind === "extractMaskedBits") {
-    return simplifyJitValue({ ...value, value: source.value, mask: mask & normalizeU32Mask(source.mask, "extractMaskedBits mask") });
+    return simplifyValue({ ...value, value: source.value, mask: mask & normalizeU32Mask(source.mask, "extractMaskedBits mask") });
   }
 
   if (source.kind === "insertMaskedBits") {
     const insertedMask = normalizeU32Mask(source.mask, "insertMaskedBits mask");
 
     if ((mask & ~insertedMask) === 0) {
-      return simplifyJitValue({ ...value, value: source.value, mask });
+      return simplifyValue({ ...value, value: source.value, mask });
     }
 
     if ((mask & insertedMask) === 0) {
-      return simplifyJitValue({ ...value, value: source.base, mask });
+      return simplifyValue({ ...value, value: source.base, mask });
     }
   }
 
@@ -340,8 +341,8 @@ function simplifyJitExtractMaskedBitsValue(value: JitExtractMaskedBitsValue): Ji
 
 function simplifyJitInsertMaskedBitsValue(value: JitInsertMaskedBitsValue): JitValue {
   const mask = normalizeU32Mask(value.mask, "insertMaskedBits mask");
-  const base = simplifyJitValue(value.base);
-  const inserted = simplifyJitValue(value.value);
+  const base = simplifyValue(value.base);
+  const inserted = simplifyValue(value.value);
 
   if (mask === 0) {
     return base;
@@ -361,12 +362,12 @@ function simplifyJitInsertMaskedBitsValue(value: JitInsertMaskedBitsValue): JitV
 
   if (inserted.kind === "extractMaskedBits" &&
     normalizeU32Mask(inserted.mask, "extractMaskedBits mask") === mask &&
-    jitValuesEqual(inserted.value, base)) {
+    valuesEqual(inserted.value, base)) {
     return base;
   }
 
   if (base.kind === "insertMaskedBits" && normalizeU32Mask(base.mask, "insertMaskedBits mask") === mask) {
-    return simplifyJitValue({ ...value, base: base.base, value: inserted, mask });
+    return simplifyValue({ ...value, base: base.base, value: inserted, mask });
   }
 
   return base === value.base && inserted === value.value && mask === value.mask
@@ -421,7 +422,7 @@ function simplifyJitFlagProducerInputs(value: JitFlagProducerValue): FlagProduce
 
   for (const key of flagProducerInputNames(value.producer)) {
     const input = requiredFlagProducerInput(value.producer, value.inputs, key);
-    const simplifiedValue = simplifyJitValue(input);
+    const simplifiedValue = simplifyValue(input);
 
     simplified[key] = simplifiedValue;
     changed ||= simplifiedValue !== input;

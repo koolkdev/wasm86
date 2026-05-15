@@ -13,17 +13,18 @@ import {
   jitFlagConditionValue,
   jitFlagProducerValue,
   jitExtractBits,
+  jitExtractMaskedBits,
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits,
   jitProducedValue
-} from "#backends/wasm/jit/ir/value-builders.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+} from "#backends/wasm/jit/ir/values/builders.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type {
   JitArchitecturalSlot,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import {
   emitJitValue,
   emitJitValueWithoutRootCache
@@ -44,6 +45,34 @@ test("emitJitValue lowers register bit insertion directly to Wasm", () => {
   strictEqual(countOpcode(opcodes, wasmOpcode.i32And) >= 1, true);
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Shl), 1);
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Or), 1);
+});
+
+test("emitJitValue lowers every non-produced JitValue kind", () => {
+  const eax = jitInputReg32Value("eax");
+  const ebx = jitInputReg32Value("ebx");
+  const producer = jitFlagProducerValue("add", {
+    left: eax,
+    right: ebx,
+    result: add(eax, ebx)
+  }, { mask: IR_ALU_FLAG_MASKS.CF | IR_ALU_FLAG_MASKS.ZF });
+  const cases: readonly Readonly<{ kind: Exclude<JitValue["kind"], "produced">; value: JitValue }>[] = [
+    { kind: "const", value: c32(7) },
+    { kind: "input", value: eax },
+    { kind: "value.binary", value: add(eax, ebx) },
+    { kind: "value.unary", value: extend8s(eax) },
+    { kind: "value.select", value: select(eax, ebx, c32(0)) },
+    { kind: "extractBits", value: jitExtractBits(eax, 8, 8) },
+    { kind: "insertBits", value: jitInsertBits(eax, ebx, 8, 8) },
+    { kind: "extractMaskedBits", value: jitExtractMaskedBits(eax, 0xff00) },
+    { kind: "insertMaskedBits", value: jitInsertMaskedBits(eax, ebx, 0xff00) },
+    { kind: "flagProducer", value: producer },
+    { kind: "flagCondition", value: jitFlagConditionValue(jitInputAluFlagsValue(), "E") }
+  ];
+
+  for (const valueCase of cases) {
+    strictEqual(valueCase.value.kind, valueCase.kind);
+    strictEqual(emitSymbolicValue(valueCase.value).length > 0, true, valueCase.kind);
+  }
 });
 
 test("emitJitValue lowers shl binary values to Wasm shift-left", () => {
@@ -324,11 +353,11 @@ test("emitJitValueWithoutRootCache suppresses only the root cache use", () => {
     ...bodyContext(body),
     valueCache: passthroughValueCache({
       emitForUse: (value, emitter) => {
-        if (jitValuesEqual(value, root)) {
+        if (valuesEqual(value, root)) {
           rootCacheUseCount += 1;
         }
 
-        if (jitValuesEqual(value, child)) {
+        if (valuesEqual(value, child)) {
           childCacheUseCount += 1;
           body.i32Const(0x1234);
           return { valueWidth: cleanValueWidth(32) };
@@ -420,6 +449,10 @@ function shl(a: JitValue, b: JitValue): JitValue {
 
 function sub(a: JitValue, b: JitValue): JitValue {
   return { kind: "value.binary", type: "i32", operator: "sub", a, b };
+}
+
+function select(condition: JitValue, whenTrue: JitValue, whenFalse: JitValue): JitValue {
+  return { kind: "value.select", type: "i32", condition, whenTrue, whenFalse };
 }
 
 function extend8s(value: JitValue): JitValue {

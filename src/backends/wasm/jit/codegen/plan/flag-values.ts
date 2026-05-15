@@ -2,8 +2,8 @@ import {
   flagProducerInputsFromRecord
 } from "#x86/ir/model/flags.js";
 import type { IrFlagSetOp } from "#x86/ir/model/types.js";
-import { jitFlagProducerValue } from "#backends/wasm/jit/ir/value-builders.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+import { jitFlagProducerValue } from "#backends/wasm/jit/ir/values/builders.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 
 export function jitFlagSetWrittenMask(op: Pick<IrFlagSetOp, "writtenMask" | "undefMask">): number {
   return (op.writtenMask | op.undefMask) >>> 0;

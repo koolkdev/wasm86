@@ -4,9 +4,9 @@ import {
   jitExtractBits,
   jitFlagConditionValue,
   jitInputReg32Value
-} from "#backends/wasm/jit/ir/value-builders.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/builders.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import type { OperandRef, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
@@ -148,7 +148,7 @@ export class JitValueResolver {
   }
 
   #fullRegValue(reg: Reg32): JitValue {
-    return simplifyJitValue(this.#readReg32(reg));
+    return simplifyValue(this.#readReg32(reg));
   }
 
   #valueForExpressionUnrecorded(expression: IrValueExpr): JitValue | undefined {
@@ -167,14 +167,14 @@ export class JitValueResolver {
 
         return a === undefined || b === undefined
           ? undefined
-          : simplifyJitValue({ kind: expression.kind, type: expression.type, operator: expression.operator, a, b });
+          : simplifyValue({ kind: expression.kind, type: expression.type, operator: expression.operator, a, b });
       }
       case "value.unary": {
         const value = this.#valueForExpressionUnrecorded(expression.value);
 
         return value === undefined
           ? undefined
-          : simplifyJitValue({ kind: expression.kind, type: expression.type, operator: expression.operator, value });
+          : simplifyValue({ kind: expression.kind, type: expression.type, operator: expression.operator, value });
       }
       case "value.select": {
         const condition = this.#valueForExpressionUnrecorded(expression.condition);
@@ -183,7 +183,7 @@ export class JitValueResolver {
 
         return condition === undefined || whenTrue === undefined || whenFalse === undefined
           ? undefined
-          : simplifyJitValue({
+          : simplifyValue({
               kind: expression.kind,
               type: expression.type,
               condition,
@@ -224,11 +224,11 @@ function scaleJitValue(value: JitValue, scale: 1 | 2 | 4 | 8): JitValue {
 }
 
 function addJitValues(a: JitValue, b: JitValue): JitValue {
-  return simplifyJitValue({ kind: "value.binary", type: "i32", operator: "add", a, b });
+  return simplifyValue({ kind: "value.binary", type: "i32", operator: "add", a, b });
 }
 
 function shlJitValue(a: JitValue, shift: 1 | 2 | 3): JitValue {
-  return simplifyJitValue({
+  return simplifyValue({
     kind: "value.binary",
     type: "i32",
     operator: "shl",
@@ -238,7 +238,7 @@ function shlJitValue(a: JitValue, shift: 1 | 2 | 3): JitValue {
 }
 
 function signExtendJitValue(value: JitValue, width: 8 | 16): JitValue {
-  return simplifyJitValue({
+  return simplifyValue({
     kind: "value.unary",
     type: "i32",
     operator: width === 8 ? "extend8_s" : "extend16_s",

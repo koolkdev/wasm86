@@ -5,12 +5,12 @@ import type {
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import { createJitValueResolver } from "#backends/wasm/jit/ir/value-resolver.js";
+import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
 import type {
   JitArchitecturalSlot,
   JitProducedValue,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import {
   type JitValueStateSnapshot
 } from "#backends/wasm/jit/state/value-state.js";

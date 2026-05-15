@@ -9,7 +9,6 @@ import type {
 import type { FlagProducerInputs } from "#x86/ir/model/flags.js";
 
 export type JitConstValue = Readonly<{ kind: "const"; type: IrValueType; value: number }>;
-export type JitRegValue = Readonly<{ kind: "reg"; reg: Reg32 }>;
 export type JitProducedValueId = string;
 export type JitProducedValue = Readonly<{ kind: "produced"; id: JitProducedValueId; type: IrValueType }>;
 
@@ -91,7 +90,6 @@ export type JitFlagConditionValue = Readonly<{
 
 export type JitValue =
   | JitConstValue
-  | JitRegValue
   | JitProducedValue
   | JitUnaryValue
   | JitBinaryValue

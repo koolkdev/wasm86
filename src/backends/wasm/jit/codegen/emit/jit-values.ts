@@ -19,16 +19,17 @@ import { emitFlagProducerBitsFromInputs, type WasmFlagValueEmitHelpers } from "#
 import { conditionFlagReadMask } from "#x86/ir/model/flag-effects.js";
 import { flagProducerConditionKind } from "#x86/ir/model/flag-conditions.js";
 import { i32 } from "#x86/state/cpu-state.js";
-import { widthMask, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
+import type { OperandWidth } from "#x86/isa/types.js";
 import type { ConditionCode, IrBinaryOperator, IrUnaryOperator } from "#x86/ir/model/types.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
+import { bitRangeMask } from "#backends/wasm/jit/ir/values/bits.js";
 import type {
   JitArchitecturalSlot,
   JitFlagProducerValue,
   JitInputValue,
   JitProducedValue,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueCacheRuntime } from "./value-local-store.js";
 
 export type JitValueEmitContext = Readonly<{
@@ -42,7 +43,6 @@ export type JitValueEmitContext = Readonly<{
     signed: boolean
   ) => ValueWidth | undefined) | undefined;
   emitProduced?(value: JitProducedValue): ValueWidth;
-  emitReg?(reg: Reg32): ValueWidth;
 }>;
 
 export function emitJitValue(
@@ -50,7 +50,7 @@ export function emitJitValue(
   value: JitValue,
   options: WasmIrEmitValueOptions = {}
 ): ValueWidth {
-  const simplified = simplifyJitValue(value);
+  const simplified = simplifyValue(value);
   const valueWidth = context.valueCache === undefined
     ? emitJitValueUncached(context, simplified)
     : context.valueCache.emitForUse(simplified, () => emitJitValueUncached(context, simplified)).valueWidth;
@@ -63,7 +63,7 @@ export function emitJitValueWithoutRootCache(
   value: JitValue,
   options: WasmIrEmitValueOptions = {}
 ): ValueWidth {
-  const valueWidth = emitJitValueUncached(context, simplifyJitValue(value));
+  const valueWidth = emitJitValueUncached(context, simplifyValue(value));
 
   return applyRequestedValueWidth(context.body, valueWidth, options);
 }
@@ -81,8 +81,6 @@ function emitJitValueUncached(context: JitValueEmitContext, value: JitValue): Va
     case "const":
       context.body.i32Const(i32(value.value));
       return constValueWidth(value.value);
-    case "reg":
-      return emitJitReg(context, value.reg);
     case "input":
       return emitJitInput(context, value);
     case "produced":
@@ -114,11 +112,6 @@ function emitJitProduced(context: JitValueEmitContext, value: JitProducedValue):
   }
 
   return context.emitProduced(value);
-}
-
-function emitJitReg(context: JitValueEmitContext, reg: Reg32): ValueWidth {
-  return (context.emitReg ?? ((inputReg: Reg32) =>
-    context.emitInput({ kind: "reg32", reg: inputReg })))(reg);
 }
 
 function emitJitInput(context: JitValueEmitContext, value: JitInputValue): ValueWidth {
@@ -193,7 +186,7 @@ function emitInputExtractBits(
   width: OperandWidth,
   signed: boolean
 ): ValueWidth | undefined {
-  const simplified = simplifyJitValue(value);
+  const simplified = simplifyValue(value);
 
   if (
     simplified.kind !== "input" ||
@@ -210,7 +203,7 @@ function emitSignExtendInputExtractBits(
   value: JitValue,
   width: 8 | 16
 ): ValueWidth | undefined {
-  const simplified = simplifyJitValue(value);
+  const simplified = simplifyValue(value);
 
   if (
     simplified.kind !== "extractBits" ||
@@ -278,7 +271,7 @@ function emitFlagConditionValue(
   flags: JitValue,
   cc: ConditionCode
 ): ValueWidth {
-  const simplifiedFlags = simplifyJitValue(flags);
+  const simplifiedFlags = simplifyValue(flags);
 
   if (emitRoutedFlagCondition(context, simplifiedFlags, cc)) {
     return cleanValueWidth(8);
@@ -295,7 +288,7 @@ function emitRoutedFlagCondition(
   flags: JitValue,
   cc: ConditionCode
 ): boolean {
-  const simplifiedFlags = simplifyJitValue(flags);
+  const simplifiedFlags = simplifyValue(flags);
   const readMask = conditionFlagReadMask(cc);
 
   if (simplifiedFlags.kind === "flagProducer" && canEmitDirectFlagProducerCondition(simplifiedFlags, cc, readMask)) {
@@ -343,7 +336,7 @@ function emitFlagBitsForMask(
     return cleanValueWidth(8, 0);
   }
 
-  const simplifiedFlags = simplifyJitValue(flags);
+  const simplifiedFlags = simplifyValue(flags);
 
   if (simplifiedFlags.kind === "insertMaskedBits") {
     const insertedMask = simplifiedFlags.mask >>> 0;
@@ -409,10 +402,6 @@ function jitFlagValueHelpers(context: JitValueEmitContext): WasmFlagValueEmitHel
     emitValue: (value, options) => emitJitValue(context, value, options),
     emitMaskedValue: (value, width) => emitMaskedJitValue(context, value, width)
   };
-}
-
-function bitRangeMask(bitOffset: number, width: OperandWidth): number {
-  return width === 32 ? 0xffff_ffff : ((widthMask(width) << bitOffset) >>> 0);
 }
 
 function cleanValueWidthForMask(mask: number): ValueWidth {

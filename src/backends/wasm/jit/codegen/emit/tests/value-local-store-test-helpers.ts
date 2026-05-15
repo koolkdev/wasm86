@@ -21,8 +21,11 @@ import {
   wasmBodyInstructions,
   wasmBodyOpcodes
 } from "#backends/wasm/tests/body-opcodes.js";
-import { jitInputAluFlagsValue } from "#backends/wasm/jit/ir/value-builders.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+import {
+  jitInputAluFlagsValue,
+  jitInputReg32Value
+} from "#backends/wasm/jit/ir/values/builders.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   createJitValueCacheRuntime,
   JitValueLocalStore,
@@ -74,6 +77,7 @@ export {
   wasmBodyInstructions,
   wasmBodyOpcodes,
   jitInputAluFlagsValue,
+  jitInputReg32Value,
   createJitValueCacheRuntime,
   JitValueLocalStore,
   captureJitExitMaterializationStores,
@@ -105,7 +109,7 @@ export function addValue(reg: "eax" | "ebx", value: number): JitValue {
     kind: "value.binary",
     type: "i32",
     operator: "add",
-    a: { kind: "reg", reg },
+    a: jitInputReg32Value(reg),
     b: { kind: "const", type: "i32", value }
   };
 }
@@ -122,7 +126,7 @@ export function highCostValue(): JitValue {
       a: addValue("eax", 1),
       b: addValue("ebx", 2)
     },
-    b: { kind: "reg", reg: "edx" }
+    b: jitInputReg32Value("edx")
   };
 }
 

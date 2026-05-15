@@ -28,7 +28,7 @@ import { wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import { rootValuePathScope } from "#backends/wasm/jit/codegen/plan/control-paths.js";
-import { jitProducedValue } from "#backends/wasm/jit/ir/value-builders.js";
+import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 
 test("JIT production emission consumes planned effects from instruction plans", () => {

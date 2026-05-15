@@ -10,13 +10,13 @@ import {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits
-} from "#backends/wasm/jit/ir/value-builders.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
+} from "#backends/wasm/jit/ir/values/builders.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type {
   JitArchitecturalSlot,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 
 export type JitValueSlotEntry = Readonly<{
   slot: JitArchitecturalSlot;
@@ -47,7 +47,7 @@ export class JitValueSlots {
   }
 
   write(slot: JitArchitecturalSlot, value: JitValue): void {
-    this.#values.set(jitValueSlotKey(slot), { slot, value: simplifyJitValue(value) });
+    this.#values.set(jitValueSlotKey(slot), { slot, value: simplifyValue(value) });
   }
 
   inputValue(slot: JitArchitecturalSlot): JitValue {
@@ -75,7 +75,7 @@ export class JitValueSlotSnapshot {
   }
 
   differsFromInput(slot: JitArchitecturalSlot): boolean {
-    return !jitValuesEqual(this.read(slot), this.inputValue(slot));
+    return !valuesEqual(this.read(slot), this.inputValue(slot));
   }
 
   changedEntries(): readonly JitValueSlotEntry[] {
@@ -156,7 +156,7 @@ export class JitRegisterValueSnapshotFamily {
   exitStore(reg: Reg32): ExitMaterializationStore | undefined {
     const value = this.readReg32(reg);
 
-    if (jitValuesEqual(value, this.#slots.inputValue(reg32Slot(reg)))) {
+    if (valuesEqual(value, this.#slots.inputValue(reg32Slot(reg)))) {
       return undefined;
     }
 
@@ -236,7 +236,7 @@ export class JitAluFlagValueSnapshotFamily {
   exitStore(): ExitMaterializationStore | undefined {
     const value = this.readAluFlags();
 
-    if (jitValuesEqual(value, this.#slots.inputValue(aluFlagsSlot()))) {
+    if (valuesEqual(value, this.#slots.inputValue(aluFlagsSlot()))) {
       return undefined;
     }
 
@@ -288,7 +288,7 @@ function jitValueSlotKey(slot: JitArchitecturalSlot): string {
 }
 
 function narrowRegisterExitStore(reg: Reg32, value: JitValue): ExitMaterializationStore | undefined {
-  const simplified = simplifyJitValue(value);
+  const simplified = simplifyValue(value);
 
   if (simplified.kind !== "insertBits" || !isInputReg32(simplified.base, reg)) {
     return undefined;
@@ -328,7 +328,7 @@ function isLegalRegPart(bitOffset: number, width: OperandWidth): boolean {
 }
 
 function isInputReg32(value: JitValue, reg: Reg32): boolean {
-  const simplified = simplifyJitValue(value);
+  const simplified = simplifyValue(value);
 
   return simplified.kind === "input" && simplified.slot.kind === "reg32" && simplified.slot.reg === reg;
 }

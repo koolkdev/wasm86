@@ -3,11 +3,11 @@ import type {
   IrExprOp
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type {
   JitProducedValue,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/types.js";
 import type { JitInstructionValueTimeline } from "./value-timeline.js";
 import type { JitValueSelectionUse } from "./value-cache-selection.js";
 import { cacheSelectionUsesForPlannedUse } from "./value-cache-uses.js";
@@ -139,7 +139,7 @@ function appendProducedDefinitionCapture(
 
   const epochCaptures = definitionCaptures[epochIndex] ?? [];
 
-  if (!epochCaptures.some((value) => jitValuesEqual(value, producedValue))) {
+  if (!epochCaptures.some((value) => valuesEqual(value, producedValue))) {
     definitionCaptures[epochIndex] = [...epochCaptures, producedValue];
   }
 }

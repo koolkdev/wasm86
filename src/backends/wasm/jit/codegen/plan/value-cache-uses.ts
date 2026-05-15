@@ -1,9 +1,9 @@
 import {
-  jitValueCost,
-  jitValueDependencies
-} from "#backends/wasm/jit/ir/value-analysis.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+  valueCost
+} from "#backends/wasm/jit/ir/values/cost.js";
+import { valueChildren } from "#backends/wasm/jit/ir/values/walk.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueSelectionUse } from "./value-cache-selection.js";
 import type { JitPlannedValueUse } from "./value-uses.js";
 
@@ -13,18 +13,18 @@ export function cacheSelectionUsesForPlannedUse(
   use: JitPlannedValueUse,
   ancestors: readonly JitValue[] = []
 ): readonly JitCacheSelectionUse[] {
-  const value = simplifyJitValue(use.value);
+  const value = simplifyValue(use.value);
   const cacheUse: JitCacheSelectionUse = {
     ...use,
     value,
-    emittedCost: jitValueCost(value),
+    emittedCost: valueCost(value),
     ancestors
   };
   const childAncestors = [...ancestors, value];
 
   return [
     cacheUse,
-    ...jitValueDependencies(value).flatMap((dependency) =>
+    ...valueChildren(value).flatMap((dependency) =>
       cacheSelectionUsesForPlannedUse(
         { ...use, value: dependency },
         childAncestors

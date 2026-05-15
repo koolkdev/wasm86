@@ -4,7 +4,7 @@ import type {
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitOrderedEffectKind } from "#backends/wasm/jit/ir/effect-primitives.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   rootValuePathScope,
   type JitControlPathScopesMap,

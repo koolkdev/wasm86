@@ -4,10 +4,15 @@ import {
 } from "#x86/ir/model/flags.js";
 import {
   flagProducerWidth,
-  jitArchitecturalSlotsEqual,
-  normalizeFlagProducerMask,
+  normalizeFlagProducerMask
+} from "./flags.js";
+import {
+  jitArchitecturalSlotsEqual
+} from "./slots.js";
+import {
   normalizeU32Mask
-} from "#backends/wasm/jit/ir/value-shared.js";
+} from "./bits.js";
+import { simplifyValue } from "./simplify.js";
 import type {
   JitBinaryValue,
   JitConstValue,
@@ -19,13 +24,16 @@ import type {
   JitInsertBitsValue,
   JitInsertMaskedBitsValue,
   JitProducedValue,
-  JitRegValue,
   JitSelectValue,
   JitUnaryValue,
   JitValue
-} from "#backends/wasm/jit/ir/value-types.js";
+} from "./types.js";
 
-export function jitValuesEqual(a: JitValue, b: JitValue): boolean {
+export function valuesEqual(a: JitValue, b: JitValue): boolean {
+  return valuesEqualStructural(simplifyValue(a), simplifyValue(b));
+}
+
+function valuesEqualStructural(a: JitValue, b: JitValue): boolean {
   if (a.kind !== b.kind) {
     return false;
   }
@@ -36,23 +44,23 @@ export function jitValuesEqual(a: JitValue, b: JitValue): boolean {
 
       return a.type === binary.type &&
         a.operator === binary.operator &&
-        jitValuesEqual(a.a, binary.a) &&
-        jitValuesEqual(a.b, binary.b);
+        valuesEqual(a.a, binary.a) &&
+        valuesEqual(a.b, binary.b);
     }
     case "value.unary": {
       const unary = b as JitUnaryValue;
 
       return a.type === unary.type &&
         a.operator === unary.operator &&
-        jitValuesEqual(a.value, unary.value);
+        valuesEqual(a.value, unary.value);
     }
     case "value.select": {
       const select = b as JitSelectValue;
 
       return a.type === select.type &&
-        jitValuesEqual(a.condition, select.condition) &&
-        jitValuesEqual(a.whenTrue, select.whenTrue) &&
-        jitValuesEqual(a.whenFalse, select.whenFalse);
+        valuesEqual(a.condition, select.condition) &&
+        valuesEqual(a.whenTrue, select.whenTrue) &&
+        valuesEqual(a.whenFalse, select.whenFalse);
     }
     case "const": {
       const constant = b as JitConstValue;
@@ -64,8 +72,6 @@ export function jitValuesEqual(a: JitValue, b: JitValue): boolean {
 
       return a.id === produced.id && a.type === produced.type;
     }
-    case "reg":
-      return a.reg === (b as JitRegValue).reg;
     case "input":
       return jitArchitecturalSlotsEqual(a.slot, (b as JitInputValue).slot);
     case "extractBits": {
@@ -73,30 +79,30 @@ export function jitValuesEqual(a: JitValue, b: JitValue): boolean {
 
       return a.bitOffset === extract.bitOffset &&
         a.width === extract.width &&
-        jitValuesEqual(a.value, extract.value);
+        valuesEqual(a.value, extract.value);
     }
     case "insertBits": {
       const insert = b as JitInsertBitsValue;
 
       return a.bitOffset === insert.bitOffset &&
         a.width === insert.width &&
-        jitValuesEqual(a.base, insert.base) &&
-        jitValuesEqual(a.value, insert.value);
+        valuesEqual(a.base, insert.base) &&
+        valuesEqual(a.value, insert.value);
     }
     case "extractMaskedBits": {
       const extract = b as JitExtractMaskedBitsValue;
 
       return normalizeU32Mask(a.mask, "extractMaskedBits mask") ===
         normalizeU32Mask(extract.mask, "extractMaskedBits mask") &&
-        jitValuesEqual(a.value, extract.value);
+        valuesEqual(a.value, extract.value);
     }
     case "insertMaskedBits": {
       const insert = b as JitInsertMaskedBitsValue;
 
       return normalizeU32Mask(a.mask, "insertMaskedBits mask") ===
         normalizeU32Mask(insert.mask, "insertMaskedBits mask") &&
-        jitValuesEqual(a.base, insert.base) &&
-        jitValuesEqual(a.value, insert.value);
+        valuesEqual(a.base, insert.base) &&
+        valuesEqual(a.value, insert.value);
     }
     case "flagProducer": {
       const producer = b as JitFlagProducerValue;
@@ -109,7 +115,7 @@ export function jitValuesEqual(a: JitValue, b: JitValue): boolean {
     case "flagCondition": {
       const condition = b as JitFlagConditionValue;
 
-      return a.cc === condition.cc && jitValuesEqual(a.flags, condition.flags);
+      return a.cc === condition.cc && valuesEqual(a.flags, condition.flags);
     }
   }
 }
@@ -120,7 +126,7 @@ function jitFlagProducerInputsEqual(left: JitFlagProducerValue, right: JitFlagPr
   }
 
   return flagProducerInputNames(left.producer).every((key) =>
-    jitValuesEqual(
+    valuesEqual(
       requiredFlagProducerInput(left.producer, left.inputs, key),
       requiredFlagProducerInput(right.producer, right.inputs, key)
     )

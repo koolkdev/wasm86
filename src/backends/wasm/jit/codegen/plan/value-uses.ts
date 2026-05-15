@@ -4,8 +4,8 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import { simplifyJitValue } from "#backends/wasm/jit/ir/value-simplify.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   rootValuePathScope,
   type JitControlPathScopesMap,
@@ -298,7 +298,7 @@ function plannedValueUse(
   pathScope: JitValuePathScope,
   purpose: string
 ): JitPlannedValueUse {
-  const simplified = simplifyJitValue(value);
+  const simplified = simplifyValue(value);
 
   return {
     value: simplified,

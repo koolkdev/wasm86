@@ -11,6 +11,7 @@ import {
   releaseJitExitMaterializationStores,
   addValue,
   highCostValue,
+  jitInputReg32Value,
   useCounts,
   emitAdd,
   emitXorOfAdds,
@@ -135,7 +136,7 @@ test("JitValueLocalStore does not cache unselected tied-cost expressions", () =>
     kind: "value.unary",
     type: "i32",
     operator: "extend8_s",
-    value: { kind: "reg", reg: "eax" }
+    value: jitInputReg32Value("eax")
   } as const satisfies JitValue;
   const store = new JitValueLocalStore(body, useCounts([]));
   let emitted = 0;
@@ -466,7 +467,12 @@ test("JitValueLocalStore forgetWhere invalidates only matching values", () => {
 
   store.emitForUse(eax, () => emitAdd(body, () => { eaxEmits += 1; }));
   store.emitForUse(ebx, () => emitAdd(body, () => { ebxEmits += 1; }));
-  store.forgetWhere((value) => value.kind === "value.binary" && value.a.kind === "reg" && value.a.reg === "eax");
+  store.forgetWhere((value) =>
+    value.kind === "value.binary" &&
+    value.a.kind === "input" &&
+    value.a.slot.kind === "reg32" &&
+    value.a.slot.reg === "eax"
+  );
   store.emitForUse(eax, () => emitAdd(body, () => { eaxEmits += 1; }));
   store.emitForUse(ebx, unexpectedEmitter);
   body.end();

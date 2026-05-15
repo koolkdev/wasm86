@@ -12,7 +12,7 @@ import {
   startAddress,
   type JitIrBlock
 } from "./plan-test-helpers.js";
-import { jitValuesEqual } from "#backends/wasm/jit/ir/value-equality.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 
 test("JIT effect plan leaves pure expressions and state facts out of cache roots", () => {
   const block: JitIrBlock = {
@@ -157,7 +157,7 @@ test("JIT effect plan attaches roots for ordered effects and exit stores", () =>
     effect.valueRoots.map((root) => root.purpose)
   );
   const usePurposes = emissionPlan.plannedValueUses
-    .filter((use) => jitValuesEqual(use.value, expectedValue))
+    .filter((use) => valuesEqual(use.value, expectedValue))
     .map((use) => use.purpose);
 
   deepStrictEqual(emissionPlan.plannedEffects.map((effect) => effect.kind), [
@@ -176,7 +176,7 @@ test("JIT effect plan attaches roots for ordered effects and exit stores", () =>
   strictEqual(purposes.includes("exitStore"), true);
   deepStrictEqual(usePurposes.includes("exitStore"), true);
   strictEqual(emissionPlan.valueCachePlan.useCounts.some((entry) =>
-    jitValuesEqual(entry.value, expectedValue)
+    valuesEqual(entry.value, expectedValue)
   ), true);
 });
 

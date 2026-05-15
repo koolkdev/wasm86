@@ -31,7 +31,7 @@ import {
   type WasmIrEmitValueOptions,
   type ValueWidth
 } from "#backends/wasm/codegen/value-width.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 
 type NormalizedStorage =
   | NormalizedRegisterStorage

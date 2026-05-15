@@ -14,8 +14,8 @@ import {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits
-} from "#backends/wasm/jit/ir/value-builders.js";
-import type { JitValue } from "#backends/wasm/jit/ir/value-types.js";
+} from "#backends/wasm/jit/ir/values/builders.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
