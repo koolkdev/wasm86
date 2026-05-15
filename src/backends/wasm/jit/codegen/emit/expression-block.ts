@@ -41,6 +41,9 @@ import type {
   JitExpressionCaptureMap
 } from "#backends/wasm/jit/codegen/plan/value-captures.js";
 import type {
+  JitPlannedEffect
+} from "#backends/wasm/jit/codegen/plan/effect-plan.js";
+import type {
   JitArchitecturalSlot,
   JitProducedValue,
   JitValue
@@ -58,6 +61,7 @@ export type JitExpressionBlockInstruction = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: JitInstructionValueTimeline;
   plannedValueCaptures: JitExpressionCaptureMap;
+  plannedEffects?: readonly JitPlannedEffect[] | undefined;
 }>;
 
 export type JitExpressionBlockEmitContext = Readonly<{
@@ -105,6 +109,17 @@ class JitExpressionBlockEmitter {
   }
 
   emit(): void {
+    const plannedEffects = this.#context.instruction.plannedEffects;
+
+    if (plannedEffects !== undefined) {
+      this.#emitPlannedEffects(plannedEffects);
+      return;
+    }
+
+    this.#emitExpressionStream();
+  }
+
+  #emitExpressionStream(): void {
     const { expressionBlock } = this.#context.instruction;
 
     for (let opIndex = 0; opIndex < expressionBlock.length; opIndex += 1) {
@@ -118,6 +133,24 @@ class JitExpressionBlockEmitter {
       this.#beginExpressionOp(opIndex);
       this.#capturePlannedValues(opIndex);
       this.#emitOp(op);
+    }
+  }
+
+  #emitPlannedEffects(plannedEffects: readonly JitPlannedEffect[]): void {
+    const { expressionBlock } = this.#context.instruction;
+
+    for (const effect of plannedEffects) {
+      const opIndex = effect.placement.opIndex;
+      const op = expressionBlock[opIndex];
+
+      if (op === undefined) {
+        throw new Error(`missing JIT expression-block effect op: ${opIndex}`);
+      }
+
+      this.#currentOpIndex = opIndex;
+      this.#beginExpressionOp(opIndex);
+      this.#capturePlannedValues(opIndex);
+      this.#emitPlannedEffect(effect, op);
     }
   }
 
@@ -155,6 +188,42 @@ class JitExpressionBlockEmitter {
       case "conditionalJump":
         this.#context.emitConditionalJump(op.condition, op.taken, op.notTaken, this.#helpers);
         return;
+    }
+  }
+
+  #emitPlannedEffect(effect: JitPlannedEffect, op: IrExprOp): void {
+    switch (effect.kind) {
+      case "memoryGuard":
+        return op.op === "memory.guard"
+          ? this.#context.emitMemoryGuard(op, this.#helpers)
+          : unexpectedPlannedEffect(effect, op);
+      case "memoryStore":
+        return op.op === "set"
+          ? this.#context.emitSet(op, this.#helpers)
+          : unexpectedPlannedEffect(effect, op);
+      case "controlTransfer":
+        switch (op.op) {
+          case "jump":
+            this.#context.emitJump(op.target, this.#helpers);
+            return;
+          case "conditionalJump":
+            this.#context.emitConditionalJump(op.condition, op.taken, op.notTaken, this.#helpers);
+            return;
+          default:
+            return unexpectedPlannedEffect(effect, op);
+        }
+      case "hostTrap":
+        return op.op === "hostTrap"
+          ? this.#context.emitHostTrap(op.vector, this.#helpers)
+          : unexpectedPlannedEffect(effect, op);
+      case "exitEdge":
+        return op.op === "next"
+          ? this.#context.emitNext()
+          : unexpectedPlannedEffect(effect, op);
+      case "producedValueDefinition":
+        return op.op === "let32"
+          ? this.#emitPlannedProducedDefinition(op)
+          : unexpectedPlannedEffect(effect, op);
     }
   }
 
@@ -229,6 +298,18 @@ class JitExpressionBlockEmitter {
         `JIT expression-block let32 has no timeline value at expression op ${this.#currentOpIndex}`
       );
     }
+  }
+
+  #emitPlannedProducedDefinition(op: Extract<IrExprOp, { op: "let32" }>): void {
+    const produced = this.#producedDefinitionForValueRef(op.dst);
+
+    if (produced === undefined) {
+      throw new Error(
+        `JIT planned produced value has no timeline definition at expression op ${this.#currentOpIndex}`
+      );
+    }
+
+    this.#emitProducedDefinition(produced, op.value);
   }
 
   #emitProducedDefinition(produced: JitProducedValue, value: IrValueExpr): void {
@@ -403,4 +484,8 @@ function valueRefExpression(value: IrValueExpr): ValueRef | undefined {
     case "value.select":
       return undefined;
   }
+}
+
+function unexpectedPlannedEffect(effect: JitPlannedEffect, op: IrExprOp): never {
+  throw new Error(`JIT planned effect ${effect.kind} mapped to expression op ${op.op}`);
 }

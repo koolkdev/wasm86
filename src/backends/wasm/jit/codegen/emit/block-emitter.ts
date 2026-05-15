@@ -22,6 +22,7 @@ import {
   type JitValueCacheRuntime
 } from "./value-local-store.js";
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
+import type { JitPlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import { emitJitSet } from "./operands.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
@@ -46,6 +47,7 @@ export type JitBlockEmitContext = Readonly<{
   exit: JitExitTarget;
   instructions: readonly JitIrInstructionContext[];
   exitPoints: readonly JitExitPoint[];
+  plannedEffects?: readonly JitPlannedEffect[] | undefined;
   valueCache?: JitValueCacheRuntime | undefined;
   linking?: JitLinkEmitContext | undefined;
 }>;
@@ -55,6 +57,7 @@ export type JitInstructionEmitContext = Readonly<{
   scratch: WasmLocalScratchAllocator;
   state: JitIrState;
   exit: JitExitTarget;
+  selectInstruction(index: number): void;
   currentInstruction(): JitIrInstructionContext;
   beginExpressionOp(opIndex: number): JitTimelineOpContext;
   currentExitPoint(exitReason: ExitReasonValue): JitExitPoint;
@@ -65,11 +68,18 @@ export type JitInstructionEmitContext = Readonly<{
 
 export function emitJitBlock(context: JitBlockEmitContext): void {
   const jitContext = createJitInstructionEmitContext(context);
+  const plannedEffectsByInstruction = context.plannedEffects === undefined
+    ? undefined
+    : groupPlannedEffectsByInstruction(
+        context.plannedEffects,
+        context.instructions.length
+      );
 
   for (let index = 0; index < context.instructions.length; index += 1) {
+    jitContext.selectInstruction(index);
     jitContext.valueCache?.beginInstruction(index);
     beginInstruction(jitContext, context.exit, jitContext.currentInstruction());
-    emitCurrentInstruction(jitContext);
+    emitCurrentInstruction(jitContext, plannedEffectsByInstruction?.[index]);
   }
 }
 
@@ -85,6 +95,13 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
     exit: context.exit,
     valueCache: context.valueCache,
     linking: context.linking,
+    selectInstruction: (index) => {
+      if (index < 0 || index >= context.instructions.length) {
+        throw new Error(`JIT instruction index out of range: ${index}`);
+      }
+
+      instructionIndex = index;
+    },
     currentInstruction: () => {
       const instruction = context.instructions[instructionIndex];
 
@@ -128,17 +145,26 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
   };
 }
 
-function emitCurrentInstruction(jitContext: JitInstructionEmitContext): void {
-  emitJitInstruction(jitContext, jitContext.currentInstruction());
+function emitCurrentInstruction(
+  jitContext: JitInstructionEmitContext,
+  plannedEffects: readonly JitPlannedEffect[] | undefined
+): void {
+  emitJitInstruction(jitContext, jitContext.currentInstruction(), plannedEffects);
 }
 
-function emitJitInstruction(jitContext: JitInstructionEmitContext, instruction: JitIrInstructionContext): void {
+function emitJitInstruction(
+  jitContext: JitInstructionEmitContext,
+  instruction: JitIrInstructionContext,
+  plannedEffects: readonly JitPlannedEffect[] | undefined
+): void {
   const valueCache = jitContext.valueCache;
   let currentTimelineOp: JitTimelineOpContext | undefined;
 
   emitJitExpressionBlock({
     body: jitContext.body,
-    instruction,
+    instruction: plannedEffects === undefined
+      ? instruction
+      : { ...instruction, plannedEffects },
     valueCache,
     beginExpressionOp: (opIndex) => {
       currentTimelineOp = jitContext.beginExpressionOp(opIndex);
@@ -205,4 +231,28 @@ function indexExitPoints(exitPoints: readonly JitExitPoint[]): ReadonlyMap<strin
 
 function exitPointKey(instructionIndex: number, exitReason: ExitReasonValue): string {
   return `${instructionIndex}:${exitReason}`;
+}
+
+function groupPlannedEffectsByInstruction(
+  plannedEffects: readonly JitPlannedEffect[],
+  instructionCount: number
+): readonly (readonly JitPlannedEffect[])[] {
+  const grouped: JitPlannedEffect[][] = Array.from(
+    { length: instructionCount },
+    () => []
+  );
+
+  for (const effect of plannedEffects) {
+    const instructionEffects = grouped[effect.placement.instructionIndex];
+
+    if (instructionEffects === undefined) {
+      throw new Error(
+        `JIT planned effect references missing instruction: ${effect.placement.instructionIndex}`
+      );
+    }
+
+    instructionEffects.push(effect);
+  }
+
+  return grouped;
 }

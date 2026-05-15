@@ -124,6 +124,7 @@ function encodeJitIrBlockFunctionBody(
     exit,
     instructions: emissionPlan.instructions,
     exitPoints: emissionPlan.exitPoints,
+    plannedEffects: emissionPlan.plannedEffects,
     valueCache,
     linking
   });
