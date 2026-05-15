@@ -8,7 +8,7 @@ import type {
 } from "#backends/wasm/jit/codegen/plan/control-paths.js";
 import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { cacheSelectionUsesForPlannedUse } from "#backends/wasm/jit/codegen/plan/value-cache-uses.js";
-import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 import { planJitValueCaptures } from "#backends/wasm/jit/codegen/plan/value-captures.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
@@ -66,10 +66,10 @@ test("JIT cache value uses carry flattened dependency ancestry for cache selecti
     op: "hostTrap",
     vector: target
   }] as const satisfies IrExprBlock;
-  const timeline = buildJitInstructionValueTimeline({
+  const timeline = buildTimeline({
     operands: [],
-    expressionBlock,
-    entryValueState: createJitValueState().snapshot()
+    expressions: expressionBlock,
+    entry: createJitValueState().snapshot()
   });
   const expectedChild = addValue(jitInputReg32Value("eax"), c32(1));
   const expectedRoot = {
@@ -159,10 +159,10 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
     notTaken: c32Expr(0x1002)
   }] as const satisfies IrExprBlock;
   const value = addValue(jitInputReg32Value("eax"), c32(1));
-  const timeline = buildJitInstructionValueTimeline({
+  const timeline = buildTimeline({
     operands: [],
-    expressionBlock,
-    entryValueState: createJitValueState().snapshot()
+    expressions: expressionBlock,
+    entry: createJitValueState().snapshot()
   });
   const materializationUses = new Map([[
     0,
@@ -194,13 +194,13 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
 
 function planCapturesForExpressionBlock(
   expressionBlock: IrExprBlock,
-  producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>
+  producedByVar?: ReadonlyMap<number, JitProducedValue>
 ) {
-  const timeline = buildJitInstructionValueTimeline({
+  const timeline = buildTimeline({
     operands: [],
-    expressionBlock,
-    entryValueState: createJitValueState().snapshot(),
-    ...(producedValuesByVarId === undefined ? {} : { producedValuesByVarId })
+    expressions: expressionBlock,
+    entry: createJitValueState().snapshot(),
+    ...(producedByVar === undefined ? {} : { producedByVar })
   });
   const uses = planJitValueUses([{
     expressionBlock,

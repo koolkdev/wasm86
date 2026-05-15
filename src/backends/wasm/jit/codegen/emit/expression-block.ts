@@ -30,10 +30,10 @@ import type {
   IrUnaryOperator
 } from "#x86/ir/model/types.js";
 import {
-  jitTimelineExpressionValueAt,
-  jitTimelineValueRefValueAt,
-  type JitInstructionValueTimeline
-} from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+  opView,
+  type OpView,
+  type Timeline
+} from "#backends/wasm/jit/analysis/timeline.js";
 import type {
   JitValueCacheRuntime
 } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
@@ -59,7 +59,7 @@ import {
 
 export type JitExpressionBlockInstruction = Readonly<{
   expressionBlock: IrExprBlock;
-  valueTimeline: JitInstructionValueTimeline;
+  valueTimeline: Timeline;
   plannedValueCaptures: JitExpressionCaptureMap;
   plannedEffects: readonly JitPlannedEffect[];
 }>;
@@ -339,10 +339,10 @@ class JitExpressionBlockEmitter {
       return undefined;
     }
 
-    return this.#context.instruction.valueTimeline.producedDefinitions.find((definition) =>
-      definition.expressionOpIndex === this.#currentOpIndex &&
-      definition.valueRef.kind === "var" &&
-      definition.valueRef.id === valueRef.id
+    return this.#context.instruction.valueTimeline.produced.find((definition) =>
+      definition.opIndex === this.#currentOpIndex &&
+      definition.ref.kind === "var" &&
+      definition.ref.id === valueRef.id
     )?.value;
   }
 
@@ -363,22 +363,12 @@ class JitExpressionBlockEmitter {
       return undefined;
     }
 
-    const cachedExpressionValue = this.#context.valueCache?.valueForExpression(value);
-
-    if (cachedExpressionValue !== undefined) {
-      return cachedExpressionValue;
-    }
-
     const valueRef = valueRefExpression(value);
     if (valueRef !== undefined) {
       return this.#valueForValueRef(valueRef);
     }
 
-    return jitTimelineExpressionValueAt(
-      this.#context.instruction.valueTimeline,
-      this.#currentOpIndex,
-      value
-    );
+    return this.#currentView().expression(value);
   }
 
   #valueForValueRef(valueRef: ValueRef): JitValue | undefined {
@@ -386,17 +376,11 @@ class JitExpressionBlockEmitter {
       return undefined;
     }
 
-    const cachedValueRefValue = this.#context.valueCache?.valueForValueRef(valueRef);
+    return this.#currentView().ref(valueRef);
+  }
 
-    if (cachedValueRefValue !== undefined) {
-      return cachedValueRefValue;
-    }
-
-    return jitTimelineValueRefValueAt(
-      this.#context.instruction.valueTimeline,
-      this.#currentOpIndex,
-      valueRef
-    );
+  #currentView(): OpView {
+    return opView(this.#context.instruction.valueTimeline, this.#currentOpIndex);
   }
 }
 

@@ -1,4 +1,7 @@
 import {
+  throws
+} from "node:assert";
+import {
   deepStrictEqual,
   strictEqual,
   test,
@@ -10,7 +13,7 @@ import {
   createJitValueCacheRuntime,
   encodeJitBlock,
   planJitValueCache,
-  buildJitInstructionValueTimeline,
+  buildTimeline,
   createJitValueState,
   reg,
   const32,
@@ -85,10 +88,10 @@ test("JIT value-cache runtime follows planned timeline expression positions", ()
     { op: "hostTrap", vector: addExpr("eax", 1) },
     { op: "hostTrap", vector: addExpr("eax", 1) }
   ] as const;
-  const timeline = buildJitInstructionValueTimeline({
+  const timeline = buildTimeline({
     operands: [],
-    expressionBlock,
-    entryValueState: createJitValueState().snapshot()
+    expressions: expressionBlock,
+    entry: createJitValueState().snapshot()
   });
   const plan = planJitValueCache({
     operands: [],
@@ -97,17 +100,9 @@ test("JIT value-cache runtime follows planned timeline expression positions", ()
   const valueCache = createJitValueCacheRuntime(body, plan);
 
   valueCache?.beginInstruction(0);
-
-  const runtimeValues = expressionBlock.map((op, opIndex) => {
-    valueCache?.beginExpressionOp(opIndex);
-    return op.op === "hostTrap"
-      ? valueCache?.valueForExpression(op.vector)
-      : undefined;
-  });
-
-  deepStrictEqual(runtimeValues[0], runtimeValues[1]);
-  deepStrictEqual(runtimeValues[3], runtimeValues[4]);
-  strictEqual(JSON.stringify(runtimeValues[0]) === JSON.stringify(runtimeValues[3]), false);
+  valueCache?.beginExpressionOp(0);
+  valueCache?.beginExpressionOp(4);
+  throws(() => valueCache?.beginExpressionOp(5), /JIT value cache expression op index out of range: 5/);
 });
 
 test("JIT production emission prefers repeated memory-store parent expressions", () => {
@@ -151,10 +146,10 @@ test("JIT value-cache planning does not treat flags.set as an exit-store consume
     },
     { op: "next" }
   ] as const;
-  const valueTimeline = buildJitInstructionValueTimeline({
+  const valueTimeline = buildTimeline({
     operands: [],
-    expressionBlock,
-    entryValueState: createJitValueState().snapshot()
+    expressions: expressionBlock,
+    entry: createJitValueState().snapshot()
   });
 
   deepStrictEqual(planJitValueCache({

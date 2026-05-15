@@ -44,7 +44,7 @@ import {
   planJitValueCache as planJitValueCacheFromPlannedUses,
   type JitValueCacheInstruction
 } from "#backends/wasm/jit/codegen/plan/value-cache.js";
-import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 import {
   branchValuePathScope,
@@ -86,7 +86,7 @@ export {
   buildBlock,
   encodeJitBlock,
   emitJitBlock,
-  buildJitInstructionValueTimeline,
+  buildTimeline,
   branchValuePathScope,
   rootValuePathScope,
   createJitState,
@@ -160,9 +160,7 @@ export function cacheRuntimeForStore(store: JitValueLocalStore): JitValueCacheRu
     leavePathScope: () => store.leavePathScope(),
     emitForUse: (value, emitter) => store.emitForUseWithLocal(value, emitter),
     captureForReuse: (value, emitter) => store.captureForReuse(value, emitter),
-    canEmitInline: () => true,
-    valueForExpression: () => undefined,
-    valueForValueRef: () => undefined
+    canEmitInline: () => true
   };
 }
 

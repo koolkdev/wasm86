@@ -1,7 +1,7 @@
 import {
   deepStrictEqual,
   test,
-  buildJitInstructionValueTimeline,
+  buildTimeline,
   createJitValueState,
   jitProducedValue,
   rootValuePathScope
@@ -29,11 +29,11 @@ test("JIT value-cache epoch planning exposes instruction epochs and produced def
     },
     { op: "hostTrap", vector: { kind: "var", id: 0 } }
   ] as const;
-  const valueTimeline = buildJitInstructionValueTimeline({
+  const valueTimeline = buildTimeline({
     operands: [],
-    expressionBlock,
-    entryValueState: createJitValueState().snapshot(),
-    producedValuesByVarId: new Map([[0, produced]])
+    expressions: expressionBlock,
+    entry: createJitValueState().snapshot(),
+    producedByVar: new Map([[0, produced]])
   });
   const plannedUse: JitPlannedValueUse = {
     value: produced,

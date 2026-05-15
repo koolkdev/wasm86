@@ -15,7 +15,7 @@ import {
   extractOnlyWasmFunctionBody,
   emitJitBlock,
   createJitValueCacheRuntime,
-  buildJitInstructionValueTimeline,
+  buildTimeline,
   createJitState,
   exitState,
   const32,
@@ -66,14 +66,14 @@ test("JIT production emission consumes planned effects from instruction plans", 
       exitPointCount: 1,
       operands: instruction.operands,
       expressionBlock,
-      valueTimeline: buildJitInstructionValueTimeline({
+      valueTimeline: buildTimeline({
         operands: [],
-        expressionBlock,
-        entryValueState: initialState.valueState
+        expressions: expressionBlock,
+        entry: initialState.valueState
       }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPathScopes: new Map(),
-      producedValuesByVarId: new Map(),
+      producedByVar: new Map(),
       plannedValueCaptures: new Map()
     }],
     plannedEffects: [{
@@ -152,14 +152,14 @@ test("JIT production emission does not walk unscheduled expression effects", () 
       exitPointCount: 0,
       operands: [],
       expressionBlock,
-      valueTimeline: buildJitInstructionValueTimeline({
+      valueTimeline: buildTimeline({
         operands: [],
-        expressionBlock,
-        entryValueState: initialState.valueState
+        expressions: expressionBlock,
+        entry: initialState.valueState
       }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPathScopes: new Map(),
-      producedValuesByVarId: new Map(),
+      producedByVar: new Map(),
       plannedValueCaptures: new Map()
     }],
     plannedEffects: [],
@@ -256,7 +256,7 @@ test("JIT planned emission captures a used produced load at its definition", () 
   strictEqual(laterUseIndex !== -1, true);
 });
 
-test("JIT planned emission skips unused arithmetic, register, and flag facts", () => {
+test("JIT planned emission skips unused arithmetic, register, and flag state", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     {

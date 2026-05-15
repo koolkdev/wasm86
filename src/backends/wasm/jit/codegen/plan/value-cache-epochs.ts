@@ -8,14 +8,14 @@ import type {
   JitProducedValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import type { JitInstructionValueTimeline } from "./value-timeline.js";
+import type { Timeline } from "#backends/wasm/jit/analysis/timeline.js";
 import type { JitValueSelectionUse } from "./value-cache-selection.js";
 import { cacheSelectionUsesForPlannedUse } from "./value-cache-uses.js";
 import type { JitPlannedValueUse } from "./value-uses.js";
 
 export type JitValueCacheInstruction = Readonly<{
   operands: readonly JitOperandBinding[];
-  valueTimeline: JitInstructionValueTimeline;
+  valueTimeline: Timeline;
 }>;
 
 export type JitValueCacheInstructionPlan = JitValueCacheInstruction & Readonly<{
@@ -44,7 +44,7 @@ export function planJitValueCacheEpochs(
   for (const instruction of instructions) {
     const opEpochs: number[] = [];
     const writeExpressionOpIndexes = new Set(
-      instruction.valueTimeline.logicalWrites.map((write) => write.expressionOpIndex)
+      instruction.valueTimeline.writes.map((write) => write.opIndex)
     );
 
     for (let opIndex = 0; opIndex < instruction.expressionBlock.length; opIndex += 1) {
@@ -91,7 +91,7 @@ export function jitExpressionOpEpochs(
 ): readonly number[] {
   const opEpochs: number[] = [];
   const writeExpressionOpIndexes = new Set(
-    instruction.valueTimeline.logicalWrites.map((write) => write.expressionOpIndex)
+    instruction.valueTimeline.writes.map((write) => write.opIndex)
   );
   let currentEpoch = startEpoch;
 
@@ -124,10 +124,10 @@ function appendProducedDefinitionCapture(
     return;
   }
 
-  const producedValue = instruction.valueTimeline.producedDefinitions.find((definition) =>
-    definition.expressionOpIndex === opIndex &&
-    definition.valueRef.kind === "var" &&
-    definition.valueRef.id === op.dst.id
+  const producedValue = instruction.valueTimeline.produced.find((definition) =>
+    definition.opIndex === opIndex &&
+    definition.ref.kind === "var" &&
+    definition.ref.id === op.dst.id
   )?.value;
 
   if (

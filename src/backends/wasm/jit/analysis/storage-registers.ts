@@ -1,3 +1,4 @@
+import type { IrStorageExpr } from "#backends/wasm/codegen/expressions.js";
 import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
 import type { StorageRef } from "#x86/ir/model/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
@@ -11,7 +12,7 @@ export type JitRegisterAccess = Readonly<{
 const fullWidth = 32;
 
 export function jitStorageRegisterAccess(
-  storage: StorageRef,
+  storage: StorageRef | IrStorageExpr,
   operands: readonly JitOperandBinding[],
   accessWidth: OperandWidth = fullWidth
 ): JitRegisterAccess | undefined {
@@ -32,8 +33,4 @@ export function jitStorageRegisterAccess(
     case "mem":
       return undefined;
   }
-}
-
-export function jitStorageReg(storage: StorageRef, operands: readonly JitOperandBinding[]): Reg32 | undefined {
-  return jitStorageRegisterAccess(storage, operands)?.reg;
 }

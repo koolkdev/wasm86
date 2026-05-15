@@ -13,10 +13,9 @@ import {
   type JitValuePathScope
 } from "./control-paths.js";
 import {
-  jitTimelineExpressionValueAt,
-  jitTimelineValueRefValueAt,
-  type JitInstructionValueTimeline
-} from "./value-timeline.js";
+  opView,
+  type Timeline
+} from "#backends/wasm/jit/analysis/timeline.js";
 
 export type JitValueUsePlacement = Readonly<{
   instructionIndex: number;
@@ -57,7 +56,7 @@ export type JitPlannedValueRoot =
 
 export type JitValueUseInstructionInput = Readonly<{
   expressionBlock: IrExprBlock;
-  valueTimeline: JitInstructionValueTimeline;
+  valueTimeline: Timeline;
   expressionPathScopes: JitControlPathScopesMap;
   materializationUses: ReadonlyMap<
     number,
@@ -79,7 +78,7 @@ export function planJitValueUses(
     }
 
     const writeExpressionOpIndexes = new Set(
-      instruction.valueTimeline.logicalWrites.map((write) => write.expressionOpIndex)
+      instruction.valueTimeline.writes.map((write) => write.opIndex)
     );
 
     for (let opIndex = 0; opIndex < instruction.expressionBlock.length; opIndex += 1) {
@@ -214,8 +213,8 @@ function instructionHasLogicalWriteAt(
   instruction: JitValueUseInstructionInput,
   opIndex: number
 ): boolean {
-  return instruction.valueTimeline.logicalWrites.some((write) =>
-    write.expressionOpIndex === opIndex
+  return instruction.valueTimeline.writes.some((write) =>
+    write.opIndex === opIndex
   );
 }
 
@@ -313,17 +312,19 @@ function jitValueForValue(
   value: IrValueExpr,
   opIndex: number
 ): JitValue | undefined {
+  const view = opView(instruction.valueTimeline, opIndex);
+
   switch (value.kind) {
     case "var":
     case "const":
     case "nextEip":
-      return jitTimelineValueRefValueAt(instruction.valueTimeline, opIndex, value);
+      return view.ref(value);
     case "source":
     case "address":
     case "flags.condition":
     case "value.binary":
     case "value.unary":
     case "value.select":
-      return jitTimelineExpressionValueAt(instruction.valueTimeline, opIndex, value);
+      return view.expression(value);
   }
 }

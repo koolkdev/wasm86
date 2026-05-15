@@ -16,9 +16,9 @@ import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/valu
 import type { JitPlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import {
-  buildJitInstructionValueTimeline,
-  JitTimelineOpContext
-} from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+  buildTimeline,
+  opView
+} from "#backends/wasm/jit/analysis/timeline.js";
 import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 import { rootExpressionPathScopes } from "#backends/wasm/jit/codegen/tests/path-scope-test-helpers.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
@@ -114,16 +114,16 @@ test("JIT operand emission fails when a register read has no planned timeline fa
   const expressionBlock = [
     { op: "let32", dst: v(0), value: c32(1) }
   ] as const satisfies IrExprBlock;
-  const valueTimeline = buildJitInstructionValueTimeline({
+  const valueTimeline = buildTimeline({
     operands: [],
-    expressionBlock,
-    entryValueState: createJitValueState().snapshot()
+    expressions: expressionBlock,
+    entry: createJitValueState().snapshot()
   });
 
   throws(() => {
     emitJitGet(
       { body: new WasmFunctionBodyEncoder() } as unknown as JitInstructionEmitContext,
-      new JitTimelineOpContext(valueTimeline, 0),
+      opView(valueTimeline, 0),
       reg("eax"),
       32,
       {
@@ -147,7 +147,7 @@ test("JIT expression-block emitter skips uncached produced definitions with no c
       }
     }
   ], {
-    producedValuesByVarId: new Map([[0, produced]]),
+    producedByVar: new Map([[0, produced]]),
     plannedEffects: [{ opIndex: 0, kind: "producedValueDefinition" }]
   });
 
@@ -172,7 +172,7 @@ test("JIT expression-block emitter fails when a produced consumer has no capture
       { op: "hostTrap", vector: v(0) }
     ], {
       cache: false,
-      producedValuesByVarId: new Map([[0, produced]]),
+      producedByVar: new Map([[0, produced]]),
       plannedEffects: [
         { opIndex: 0, kind: "producedValueDefinition" },
         { opIndex: 1, kind: "hostTrap" }
@@ -214,7 +214,7 @@ type FoundationEmitResult = Readonly<{
 
 type FoundationEmitOptions = Readonly<{
   cache?: boolean;
-  producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
+  producedByVar?: ReadonlyMap<number, JitProducedValue>;
   plannedEffects?: readonly PlannedEffectInput[];
 }>;
 
@@ -229,13 +229,13 @@ function emitFoundationBlock(
 ): FoundationEmitResult {
   const body = new WasmFunctionBodyEncoder();
   const sinkLocal = body.addLocal(wasmValueType.i32);
-  const valueTimeline = buildJitInstructionValueTimeline({
+  const valueTimeline = buildTimeline({
     operands: [],
-    expressionBlock,
-    entryValueState: createJitValueState().snapshot(),
-    ...(options.producedValuesByVarId === undefined
+    expressions: expressionBlock,
+    entry: createJitValueState().snapshot(),
+    ...(options.producedByVar === undefined
       ? {}
-      : { producedValuesByVarId: options.producedValuesByVarId })
+      : { producedByVar: options.producedByVar })
   });
   const cachePlan = options.cache === false
     ? undefined

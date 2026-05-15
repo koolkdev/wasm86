@@ -14,9 +14,9 @@ import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import type { JitExitPoint } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
-  JitRegisterStorageReadSource,
-  JitTimelineOpContext
-} from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+  OpView,
+  RegisterStorageReadSource
+} from "#backends/wasm/jit/analysis/timeline.js";
 import type { JitInstructionEmitContext } from "./block-emitter.js";
 import { emitJitValue } from "./jit-values.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
@@ -41,7 +41,7 @@ type NormalizedStorage =
 type NormalizedRegisterStorage = Readonly<{
   kind: "reg";
   alias: RegisterAlias;
-  source: JitRegisterStorageReadSource;
+  source: RegisterStorageReadSource;
   accessWidth: OperandWidth;
 }>;
 
@@ -64,7 +64,7 @@ type NormalizedImmediateStorage = Readonly<{
 
 export function emitJitGet(
   context: JitInstructionEmitContext,
-  timelineOp: JitTimelineOpContext,
+  timelineOp: OpView,
   source: IrStorageExpr,
   accessWidth: OperandWidth,
   helpers: WasmIrEmitHelpers,
@@ -81,7 +81,7 @@ export function emitJitGet(
 
 export function emitJitSet(
   context: JitInstructionEmitContext,
-  timelineOp: JitTimelineOpContext,
+  timelineOp: OpView,
   target: IrStorageExpr,
   value: IrValueExpr,
   accessWidth: OperandWidth,
@@ -98,7 +98,7 @@ export function emitJitSet(
 
 export function emitJitAddress(
   context: JitInstructionEmitContext,
-  timelineOp: JitTimelineOpContext,
+  timelineOp: OpView,
   source: IrStorageExpr,
   helpers: WasmIrEmitHelpers
 ): void {
@@ -137,7 +137,7 @@ export function emitJitMemoryGuard(
 
 function normalizeStorage(
   context: JitInstructionEmitContext,
-  timelineOp: JitTimelineOpContext,
+  timelineOp: OpView,
   storage: IrStorageExpr,
   accessWidth: OperandWidth,
   access: string
@@ -163,7 +163,7 @@ function normalizeStorage(
 
 function normalizeOperandStorage(
   context: JitInstructionEmitContext,
-  timelineOp: JitTimelineOpContext,
+  timelineOp: OpView,
   operand: Readonly<{ kind: "operand"; index: number }>,
   accessWidth: OperandWidth,
   access: string
@@ -185,7 +185,7 @@ function normalizeOperandStorage(
         address: {
           kind: "jitValue",
           value: requiredResolvedJitValue(
-            timelineOp.valueForEffectiveAddress(operand),
+            timelineOp.address(operand),
             `JIT effective address operand ${operand.index}`
           )
         },
@@ -210,7 +210,7 @@ function normalizeOperandStorage(
 
 function emitNormalizedRead(
   context: JitInstructionEmitContext,
-  timelineOp: JitTimelineOpContext,
+  timelineOp: OpView,
   storage: NormalizedStorage,
   helpers: WasmIrEmitHelpers,
   options: WasmIrEmitValueOptions = {}
@@ -233,7 +233,7 @@ function emitNormalizedRead(
 
 function emitNormalizedWrite(
   context: JitInstructionEmitContext,
-  timelineOp: JitTimelineOpContext,
+  timelineOp: OpView,
   storage: NormalizedStorage,
   value: IrValueExpr,
   helpers: WasmIrEmitHelpers
@@ -359,14 +359,18 @@ function operandBinding(context: JitInstructionEmitContext, index: number): JitO
 
 function emitRegisterStorageValue(
   context: JitInstructionEmitContext,
-  timelineOp: JitTimelineOpContext,
+  timelineOp: OpView,
   source: NormalizedRegisterStorage,
   options: WasmIrEmitValueOptions
 ): ValueWidth {
   return emitResolvedJitValue(
     context,
     requiredResolvedJitValue(
-      timelineOp.valueForRegisterStorageRead(source.source, source.accessWidth, options.signed === true),
+      timelineOp.storageRead({
+        source: source.source,
+        accessWidth: source.accessWidth,
+        signed: options.signed === true
+      }),
       `JIT register read ${storageLabel(source.source)}`
     ),
     options
@@ -374,11 +378,11 @@ function emitRegisterStorageValue(
 }
 
 function assertSymbolicRegisterWrite(
-  timelineOp: JitTimelineOpContext,
+  timelineOp: OpView,
   target: RegisterAlias
 ): void {
-  if (!timelineOp.hasRegisterWrite(target)) {
-    throw new Error(`JIT register write has no value-state timeline entry for ${target.name} at expression op ${timelineOp.expressionOpIndex}`);
+  if (!timelineOp.hasWrite({ kind: "reg32", reg: target.base })) {
+    throw new Error(`JIT register write has no value-state timeline entry for ${target.name} at expression op ${timelineOp.opIndex}`);
   }
 }
 
@@ -404,7 +408,7 @@ function requiredResolvedJitValue(value: JitValue | undefined, context: string):
   return value;
 }
 
-function storageLabel(storage: JitRegisterStorageReadSource): string {
+function storageLabel(storage: RegisterStorageReadSource): string {
   switch (storage.kind) {
     case "reg":
       return storage.reg;

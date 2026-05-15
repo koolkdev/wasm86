@@ -1,8 +1,6 @@
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
-import type { ValueRef } from "#x86/ir/model/types.js";
 import { valueKey } from "#backends/wasm/jit/ir/values/keys.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
@@ -11,10 +9,6 @@ import {
   type JitValueCachePlan,
   type JitValueUseCount
 } from "#backends/wasm/jit/codegen/plan/value-cache.js";
-import {
-  jitTimelineExpressionValueAt,
-  jitTimelineValueRefValueAt
-} from "#backends/wasm/jit/codegen/plan/value-timeline.js";
 import {
   rootControlPathId,
   type JitValuePathScope
@@ -48,8 +42,6 @@ export type JitValueCacheRuntime = Readonly<{
     emitter: () => ValueWidth
   ): JitCachedValueLocal | undefined;
   canEmitInline(value: JitValue): boolean;
-  valueForExpression(value: IrValueExpr): JitValue | undefined;
-  valueForValueRef(value: ValueRef): JitValue | undefined;
 }>;
 
 type CachedJitValue = {
@@ -356,7 +348,6 @@ export function createJitValueCacheRuntime(
   const store = new JitValueLocalStore(body, cachePlan.useCounts);
   let currentEpoch = 0;
   let currentInstructionIndex = 0;
-  let currentExpressionOpIndex = 0;
 
   return {
     beginInstruction: (index) => {
@@ -365,17 +356,15 @@ export function createJitValueCacheRuntime(
       }
 
       currentInstructionIndex = index;
-      currentExpressionOpIndex = 0;
       currentEpoch = currentInstructionPlan().opEpochs[0] ?? currentEpoch;
     },
     beginExpressionOp: (opIndex) => {
       const instructionPlan = currentInstructionPlan();
 
-      if (opIndex < 0 || opIndex >= instructionPlan.valueTimeline.expressionValuesByExpressionOpIndex.length) {
+      if (opIndex < 0 || opIndex >= instructionPlan.opEpochs.length) {
         throw new Error(`JIT value cache expression op index out of range: ${opIndex}`);
       }
 
-      currentExpressionOpIndex = opIndex;
       currentEpoch = instructionPlan.opEpochs[opIndex] ?? currentEpoch;
     },
     emitForUse: (value, emitter) => {
@@ -395,13 +384,7 @@ export function createJitValueCacheRuntime(
     },
     leavePathScope: () => {
       store.leavePathScope();
-    },
-    valueForExpression: (value) => valueForExpressionAtCurrentOp(value),
-    valueForValueRef: (value) => jitTimelineValueRefValueAt(
-      currentInstructionPlan().valueTimeline,
-      currentExpressionOpIndex,
-      value
-    )
+    }
   };
 
   function valueRequiresCacheAtCurrentEpoch(value: JitValue): boolean {
@@ -417,14 +400,6 @@ export function createJitValueCacheRuntime(
     }
 
     return instructionPlan;
-  }
-
-  function valueForExpressionAtCurrentOp(value: IrValueExpr): JitValue | undefined {
-    return jitTimelineExpressionValueAt(
-      currentInstructionPlan().valueTimeline,
-      currentExpressionOpIndex,
-      value
-    );
   }
 }
 

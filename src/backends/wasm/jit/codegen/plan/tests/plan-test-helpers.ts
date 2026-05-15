@@ -17,7 +17,7 @@ import {
   rootValuePathScope
 } from "#backends/wasm/jit/codegen/plan/control-paths.js";
 import { planJitValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
-import { buildJitInstructionValueTimeline } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import {
   planJitValueUses,
   type JitValueUseRoot
@@ -68,7 +68,7 @@ export {
   branchValuePathScope,
   rootValuePathScope,
   planJitValueCacheForInstructions,
-  buildJitInstructionValueTimeline,
+  buildTimeline,
   jitExtractBits,
   jitFlagConditionValue,
   jitFlagProducerValue,
@@ -106,17 +106,17 @@ export function onlyExit(exits: readonly JitExitPoint[], reason: ExitReason): Ji
 export function planValueCacheForTest(input: Readonly<{
   operands?: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
-  producedValuesByVarId?: ReadonlyMap<number, JitProducedValue>;
+  producedByVar?: ReadonlyMap<number, JitProducedValue>;
   materializationUses?: ReadonlyMap<number, readonly JitValueUseRoot[]>;
 }>) {
   const operands = input.operands ?? [];
-  const valueTimeline = buildJitInstructionValueTimeline({
+  const valueTimeline = buildTimeline({
     operands,
-    expressionBlock: input.expressionBlock,
-    entryValueState: createJitValueState().snapshot(),
-    ...(input.producedValuesByVarId === undefined
+    expressions: input.expressionBlock,
+    entry: createJitValueState().snapshot(),
+    ...(input.producedByVar === undefined
       ? {}
-      : { producedValuesByVarId: input.producedValuesByVarId })
+      : { producedByVar: input.producedByVar })
   });
   const plannedValueUses = planJitValueUses([{
     expressionBlock: input.expressionBlock,

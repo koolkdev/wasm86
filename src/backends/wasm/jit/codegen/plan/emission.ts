@@ -9,9 +9,9 @@ import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
 import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueCachePlan } from "./value-cache.js";
 import {
-  buildJitInstructionValueTimeline,
-  type JitInstructionValueTimeline
-} from "./value-timeline.js";
+  buildTimeline,
+  type Timeline
+} from "#backends/wasm/jit/analysis/timeline.js";
 import type {
   JitCodegenPlan,
   JitExitPoint,
@@ -50,8 +50,8 @@ type JitPreparedCodegenInstruction = JitInstructionState & Pick<
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
   expressionPathScopes: JitControlPathScopesMap;
-  producedValuesByVarId: ReadonlyMap<number, JitProducedValue>;
-  valueTimeline: JitInstructionValueTimeline;
+  producedByVar: ReadonlyMap<number, JitProducedValue>;
+  valueTimeline: Timeline;
 }>;
 
 type JitPreparedCodegenInstructionPlan = Omit<JitPreparedCodegenInstruction, "ir">;
@@ -125,15 +125,15 @@ function prepareJitCodegenInstruction(
     instruction.ir,
     jitExpressionOptions(instruction)
   );
-  const producedValuesByVarId = indexProducedValues(
+  const producedByVar = indexProducedValues(
     instruction,
     instructionIndex
   );
-  const valueTimeline = buildJitInstructionValueTimeline({
+  const valueTimeline = buildTimeline({
     operands: instruction.operands,
-    expressionBlock: expressionPlan.expressionBlock,
-    entryValueState: state.initialValueState,
-    producedValuesByVarId
+    expressions: expressionPlan.expressionBlock,
+    entry: state.initialValueState,
+    producedByVar
   });
   const expressionPathScopes = buildJitExpressionControlPathScopes(
     state.controlPathScopes,
@@ -145,7 +145,7 @@ function prepareJitCodegenInstruction(
     ...state,
     ir: instruction.ir,
     operands: instruction.operands,
-    producedValuesByVarId,
+    producedByVar,
     valueTimeline,
     expressionBlock: expressionPlan.expressionBlock,
     sourceExpressionMap: expressionPlan.sourceMap,

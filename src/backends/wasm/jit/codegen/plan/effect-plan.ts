@@ -27,8 +27,8 @@ import {
   jitExpressionOpEpochs
 } from "./value-cache-epochs.js";
 import type {
-  JitInstructionValueTimeline
-} from "./value-timeline.js";
+  Timeline
+} from "#backends/wasm/jit/analysis/timeline.js";
 import {
   plannedValueUsesForRoots,
   type JitPlannedValueUse,
@@ -55,7 +55,7 @@ export type JitEffectPlanInstructionInput = Readonly<{
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
   expressionPathScopes: JitControlPathScopesMap;
-  valueTimeline: JitInstructionValueTimeline;
+  valueTimeline: Timeline;
 }>;
 
 export type JitEffectPlan = Readonly<{
@@ -176,7 +176,7 @@ function expressionOpIndexForSourceEffect(
 
 function logicalWriteEpochCount(instruction: JitEffectPlanInstructionInput): number {
   return new Set(
-    instruction.valueTimeline.logicalWrites.map((write) => write.expressionOpIndex)
+    instruction.valueTimeline.writes.map((write) => write.opIndex)
   ).size;
 }
 

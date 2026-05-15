@@ -23,7 +23,7 @@ import {
 } from "./value-local-store.js";
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import type { JitPlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
-import { JitTimelineOpContext } from "#backends/wasm/jit/codegen/plan/value-timeline.js";
+import { opView, type OpView } from "#backends/wasm/jit/analysis/timeline.js";
 import { emitJitSet } from "./operands.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 
@@ -59,7 +59,7 @@ export type JitInstructionEmitContext = Readonly<{
   exit: JitExitTarget;
   selectInstruction(index: number): void;
   currentInstruction(): JitInstructionContext;
-  beginExpressionOp(opIndex: number): JitTimelineOpContext;
+  beginExpressionOp(opIndex: number): OpView;
   currentExitPoint(exitReason: ExitReasonValue): JitExitPoint;
   advanceInstruction(): void;
   valueCache?: JitValueCacheRuntime | undefined;
@@ -116,10 +116,7 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
         throw new Error(`missing JIT IR instruction context: ${instructionIndex}`);
       }
 
-      const timelineOp = new JitTimelineOpContext(
-        instruction.valueTimeline,
-        opIndex
-      );
+      const timelineOp = opView(instruction.valueTimeline, opIndex);
 
       context.valueCache?.beginExpressionOp(opIndex);
       return timelineOp;
@@ -156,7 +153,7 @@ function emitJitInstruction(
   plannedEffects: readonly JitPlannedEffect[]
 ): void {
   const valueCache = jitContext.valueCache;
-  let currentTimelineOp: JitTimelineOpContext | undefined;
+  let currentTimelineOp: OpView | undefined;
 
   emitJitExpressionBlock({
     body: jitContext.body,
@@ -192,7 +189,7 @@ function emitJitInstruction(
   });
 }
 
-function requiredCurrentTimelineOp(timelineOp: JitTimelineOpContext | undefined): JitTimelineOpContext {
+function requiredCurrentTimelineOp(timelineOp: OpView | undefined): OpView {
   if (timelineOp === undefined) {
     throw new Error("JIT expression op context requested before emission started");
   }

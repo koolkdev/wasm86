@@ -20,6 +20,7 @@ import {
   type JitValue,
   type JitBlock,
 } from "./plan-test-helpers.js";
+import { opView } from "#backends/wasm/jit/analysis/timeline.js";
 test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache specs", () => {
   const block: JitBlock = {
     instructions: [{
@@ -65,7 +66,7 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
   strictEqual(emissionPlan.materializationNeeds, codegenPlan.materializationNeeds);
   strictEqual(emissionPlan.exitMaterializations, codegenPlan.exitMaterializations);
   strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
-  strictEqual(instruction?.valueTimeline.expressionValuesByExpressionOpIndex.length, instruction?.expressionBlock.length);
+  strictEqual(instruction?.valueTimeline.snapshots.length, instruction?.expressionBlock.length);
   strictEqual((emissionPlan.valueCachePlan?.useCounts.length ?? 0) > 0, true);
   strictEqual((emissionPlan.valueCachePlan?.consumers.length ?? 0) > 0, true);
 });
@@ -252,12 +253,22 @@ test("JIT value-cache planning retains produced values needed after their defini
   ] as const;
   const cachePlan = planValueCacheForTest({
     expressionBlock,
-    producedValuesByVarId: new Map([[0, produced]]),
+    producedByVar: new Map([[0, produced]]),
     materializationUses: new Map([[2, [materializationUse(produced)]]])
   });
 
-  deepStrictEqual(cachePlan?.instructions[0]?.valueTimeline.valueRefValuesByExpressionOpIndex[0]?.get(0), produced);
-  deepStrictEqual(cachePlan?.instructions[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(expressionBlock[0].value), produced);
+  deepStrictEqual(
+    cachePlan?.instructions[0] === undefined
+      ? undefined
+      : opView(cachePlan.instructions[0].valueTimeline, 0).ref({ kind: "var", id: 0 }),
+    produced
+  );
+  deepStrictEqual(
+    cachePlan?.instructions[0] === undefined
+      ? undefined
+      : opView(cachePlan.instructions[0].valueTimeline, 0).expression(expressionBlock[0].value),
+    produced
+  );
   deepStrictEqual(cachePlan?.definitionCaptures[0], [produced]);
   deepStrictEqual(cachePlan?.consumers[0], []);
   deepStrictEqual(cachePlan?.consumers[1], [{ value: produced, useCount: 1 }]);
@@ -295,7 +306,12 @@ test("JIT value-cache planning resolves input partial-register reads with common
     b: c32(0x12)
   } as const;
 
-  deepStrictEqual(cachePlan?.instructions[0]?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(inputAl), expectedSource);
+  deepStrictEqual(
+    cachePlan?.instructions[0] === undefined
+      ? undefined
+      : opView(cachePlan.instructions[0].valueTimeline, 0).expression(inputAl),
+    expectedSource
+  );
   deepStrictEqual(cachePlan?.useCounts, [{ value: expectedExpression, useCount: 2 }]);
 });
 
@@ -376,11 +392,15 @@ test("JIT value-cache planning keeps repeated post-write expression uses point-s
   const postWriteValue = addValue(c32(5), c32(1));
 
   deepStrictEqual(
-    instructionPlan?.valueTimeline.expressionValuesByExpressionOpIndex[0]?.get(expression),
+    instructionPlan === undefined
+      ? undefined
+      : opView(instructionPlan.valueTimeline, 0).expression(expression),
     preWriteValue
   );
   deepStrictEqual(
-    instructionPlan?.valueTimeline.expressionValuesByExpressionOpIndex[2]?.get(expression),
+    instructionPlan === undefined
+      ? undefined
+      : opView(instructionPlan.valueTimeline, 2).expression(expression),
     postWriteValue
   );
   deepStrictEqual(instructionPlan?.opEpochs, [0, 0, 1, 1]);
@@ -455,7 +475,7 @@ test("JIT value-cache planning merges repeated produced-value retained uses", ()
   ] as const;
   const cachePlan = planValueCacheForTest({
     expressionBlock,
-    producedValuesByVarId: new Map([[0, produced]]),
+    producedByVar: new Map([[0, produced]]),
     materializationUses: new Map([
       [1, [materializationUse(produced)]],
       [2, [materializationUse(produced)]]
@@ -483,7 +503,7 @@ test("JIT value-cache planning does not treat logical register writes as produce
   ] as const;
   const cachePlan = planValueCacheForTest({
     expressionBlock,
-    producedValuesByVarId: new Map([[0, produced]])
+    producedByVar: new Map([[0, produced]])
   });
 
   deepStrictEqual(cachePlan.useCounts, []);
@@ -508,7 +528,7 @@ test("JIT value-cache planning skips produced values with no emitted or exit-sto
   ] as const;
   const cachePlan = planValueCacheForTest({
     expressionBlock,
-    producedValuesByVarId: new Map([[0, produced]])
+    producedByVar: new Map([[0, produced]])
   });
 
   deepStrictEqual(cachePlan.useCounts, []);

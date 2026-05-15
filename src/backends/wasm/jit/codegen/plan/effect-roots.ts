@@ -12,9 +12,9 @@ import {
 } from "./control-paths.js";
 import type { JitMaterializationNeed } from "./types.js";
 import {
-  jitTimelineEffectiveAddressValueAt,
-  type JitInstructionValueTimeline
-} from "./value-timeline.js";
+  opView,
+  type Timeline
+} from "#backends/wasm/jit/analysis/timeline.js";
 import type {
   JitExpressionValueUseRoot,
   JitJitValueUseRoot,
@@ -46,7 +46,7 @@ export type JitEffectValueRoot =
 
 export type JitEffectRootInstructionInput = Readonly<{
   expressionPathScopes: JitControlPathScopesMap;
-  valueTimeline: JitInstructionValueTimeline;
+  valueTimeline: Timeline;
 }>;
 
 export function jitEffectValueRootsForOp(
@@ -121,11 +121,7 @@ function storageAddressRoots(
     case "mem":
       return [expressionRoot(storage.address, pathScope, purpose)];
     case "operand": {
-      const value = jitTimelineEffectiveAddressValueAt(
-        instruction.valueTimeline,
-        opIndex,
-        storage
-      );
+      const value = opView(instruction.valueTimeline, opIndex).address(storage);
 
       return value === undefined
         ? []

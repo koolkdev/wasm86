@@ -1,8 +1,12 @@
+import {
+  buildIrExpressionBlockWithSourceMap,
+  type IrExpressionOptions
+} from "#backends/wasm/codegen/expressions.js";
 import type { IrOp } from "#x86/ir/model/types.js";
 import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
-import {
-  JitExitStateBuilder
-} from "./exit-state.js";
+import { buildTimeline, type Timeline } from "#backends/wasm/jit/analysis/timeline.js";
+import { createJitValueState, type JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
+import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
 import {
   indexJitEffects,
   jitOpEffectsAt,
@@ -24,12 +28,19 @@ import {
 import { jitMaterializationNeedsForExitStores } from "./materialization.js";
 import { buildJitInstructionControlPathScopes } from "./control-paths.js";
 import type { JitOpExitKind } from "#backends/wasm/jit/ir/effect-primitives.js";
+import {
+  jitExpressionOpIndexesForSourceOp,
+  type JitExpressionUseInstructionInput
+} from "./expression-uses.js";
+import {
+  canInlineJitInstructionGet,
+  jitInstructionStorageRefsMayAlias
+} from "./operand-analysis.js";
 
 export function analyzeJitCodegenState(
   block: JitBlock,
   effects: JitEffectIndex = indexJitEffects(block)
 ): Omit<JitCodegenPlan, "block"> {
-  const state = new JitExitStateBuilder();
   const instructionStates: JitInstructionState[] = [];
   const exitPoints: JitExitPoint[] = [];
   const materializationNeeds: JitMaterializationNeed[] = [];
@@ -37,6 +48,8 @@ export function analyzeJitCodegenState(
   // locals can change before deferred exit blocks are emitted. Empty exits
   // share index 0.
   const exitMaterializations: JitExitMaterializationPlan[] = [{ stores: [] }];
+  let instructionCountDelta = 0;
+  let currentValueState = createJitValueState().snapshot();
 
   for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
     const instruction = block.instructions[instructionIndex];
@@ -45,9 +58,18 @@ export function analyzeJitCodegenState(
       throw new Error(`missing JIT instruction while planning JIT codegen: ${instructionIndex}`);
     }
 
-    state.beginInstruction();
-    const instructionCountDelta = state.instructionCountDelta();
-    const initialValueState = state.valueStateSnapshot();
+    const initialInstructionCountDelta = instructionCountDelta;
+    const initialValueState = currentValueState;
+    const expressionPlan = buildIrExpressionBlockWithSourceMap(
+      instruction.ir,
+      jitExpressionOptions(instruction)
+    );
+    const valueTimeline = buildTimeline({
+      operands: instruction.operands,
+      expressions: expressionPlan.expressionBlock,
+      entry: initialValueState,
+      producedByVar: indexProducedValues(instruction, instructionIndex)
+    });
     const controlPathScopes = buildJitInstructionControlPathScopes(
       instruction,
       instructionIndex
@@ -63,8 +85,19 @@ export function analyzeJitCodegenState(
 
       const exits = jitOpEffectsAt(effects, instructionIndex, opIndex).exits;
 
-      recordOpEffects(op, instruction, instructionIndex, opIndex, exits, controlPathScopes);
-      state.recordOp(op, instruction, instructionIndex, opIndex);
+      recordOpEffects(
+        op,
+        instruction,
+        instructionIndex,
+        opIndex,
+        exits,
+        controlPathScopes,
+        {
+          expressionBlock: expressionPlan.expressionBlock,
+          sourceExpressionMap: expressionPlan.sourceMap
+        },
+        valueTimeline
+      );
     }
 
     instructionStates.push({
@@ -72,11 +105,12 @@ export function analyzeJitCodegenState(
       eip: instruction.eip,
       nextEip: instruction.nextEip,
       nextMode: instruction.nextMode,
-      instructionCountDelta,
+      instructionCountDelta: initialInstructionCountDelta,
       initialValueState,
       controlPathScopes,
       exitPointCount: exitPoints.length - exitStart
     });
+    currentValueState = valueTimeline.final;
   }
 
   return {
@@ -93,14 +127,18 @@ export function analyzeJitCodegenState(
     instructionIndex: number,
     opIndex: number,
     exits: readonly JitOpExitKind[],
-    controlPathScopes: JitInstructionState["controlPathScopes"]
+    controlPathScopes: JitInstructionState["controlPathScopes"],
+    expressionPlan: JitExpressionUseInstructionInput,
+    valueTimeline: Timeline
   ): void {
     recordExitObservations(
       instruction,
       instructionIndex,
       opIndex,
       exits,
-      controlPathScopes
+      controlPathScopes,
+      expressionPlan,
+      valueTimeline
     );
 
     switch (op.op) {
@@ -110,7 +148,7 @@ export function analyzeJitCodegenState(
         return;
       case "next":
         if (exits.length === 0) {
-          state.commitInstruction();
+          instructionCountDelta += 1;
         }
         return;
       case "jump":
@@ -127,13 +165,18 @@ export function analyzeJitCodegenState(
     instructionIndex: number,
     opIndex: number,
     exits: readonly JitOpExitKind[],
-    controlPathScopes: JitInstructionState["controlPathScopes"]
+    controlPathScopes: JitInstructionState["controlPathScopes"],
+    expressionPlan: JitExpressionUseInstructionInput,
+    valueTimeline: Timeline
   ): void {
     if (exits.length === 0) {
       return;
     }
 
-    const observedState = state.exitStateSnapshot();
+    const observedState = {
+      instructionCountDelta,
+      valueState: valueStateBeforeSourceOp(opIndex, expressionPlan, valueTimeline)
+    };
 
     for (const exit of exits) {
       const observation = jitExitObservationForOp(
@@ -178,6 +221,37 @@ export function analyzeJitCodegenState(
     });
     return index;
   }
+}
+
+function valueStateBeforeSourceOp(
+  sourceOpIndex: number,
+  expressionPlan: JitExpressionUseInstructionInput,
+  valueTimeline: Timeline
+): JitValueStateSnapshot {
+  const expressionOpIndexes = jitExpressionOpIndexesForSourceOp(expressionPlan, sourceOpIndex);
+
+  if (expressionOpIndexes.length !== 1) {
+    throw new Error(
+      `expected one JIT expression op for source state ${sourceOpIndex}, got ${expressionOpIndexes.length}`
+    );
+  }
+
+  const snapshot = valueTimeline.snapshots[expressionOpIndexes[0]!];
+
+  if (snapshot === undefined) {
+    throw new Error(`missing JIT value-state timeline snapshot for source op ${sourceOpIndex}`);
+  }
+
+  return snapshot;
+}
+
+function jitExpressionOptions(instruction: Pick<JitInstruction, "operands">): IrExpressionOptions {
+  return {
+    canInlineGet: (source) => canInlineJitInstructionGet(instruction, source),
+    alias: {
+      storageMayAlias: (write, read) => jitInstructionStorageRefsMayAlias(instruction, write, read)
+    }
+  };
 }
 
 function exitObservedState(exit: JitOpExitKind, state: JitExitStateSnapshot): JitExitStateSnapshot {

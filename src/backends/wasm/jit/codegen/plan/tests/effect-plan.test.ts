@@ -14,10 +14,10 @@ import {
 } from "./plan-test-helpers.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 
-test("JIT effect plan leaves pure expressions and state facts out of cache roots", () => {
+test("JIT effect plan leaves pure expressions and state updates out of cache roots", () => {
   const block: JitBlock = {
     instructions: [{
-      instructionId: "state-facts-only",
+      instructionId: "state-updates-only",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "continue",

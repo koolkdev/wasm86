@@ -633,7 +633,7 @@ test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () 
 
   throws(
     () => planJitCodegen(block),
-    /could not resolve var 0 as a JIT value/
+    /could not resolve var 0 in JIT timeline/
   );
 });
 

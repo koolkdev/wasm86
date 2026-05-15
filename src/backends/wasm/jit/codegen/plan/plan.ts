@@ -24,22 +24,20 @@ export type {
   JitValuePathScope
 } from "./control-paths.js";
 export type {
-  JitInstructionValueTimeline,
-  JitInstructionValueTimelineInput,
-  JitPlacedEffectiveAddressValue,
-  JitPlacedExpressionValue,
-  JitPlacedStorageRead,
-  JitPlacedValueRefValue,
-  JitTimelineProducedValueDefinition,
-  JitValueTimelineWrite
-} from "./value-timeline.js";
+  Timeline,
+  TimelineInput,
+  PlacedStorageRead,
+  ProducedDefinition,
+  SlotWrite,
+  TimelineLookups
+} from "#backends/wasm/jit/analysis/timeline.js";
 export type {
   JitEffectPlacement,
   JitEffectValueRoot,
   JitEffectValueRootPurpose,
   JitPlannedEffect
 } from "./effect-plan.js";
-export { buildJitInstructionValueTimeline } from "./value-timeline.js";
+export { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 
 export function planJitCodegen(optimizedBlock: JitBlock): JitCodegenPlan {
   const state = analyzeJitCodegenState(optimizedBlock);
