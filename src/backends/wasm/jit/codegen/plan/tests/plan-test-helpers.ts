@@ -48,7 +48,6 @@ import type {
   JitValue
 } from "#backends/wasm/jit/ir/value-types.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
-import { optimizeJitIrBlock } from "#backends/wasm/jit/optimization/optimize.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { onlyExit, startAddress } from "../../../optimization/tests/helpers.js";
 
@@ -76,7 +75,6 @@ export {
   jitInputReg32Value,
   jitInsertMaskedBits,
   jitProducedValue,
-  optimizeJitIrBlock,
   createJitValueState,
   onlyExit,
   startAddress

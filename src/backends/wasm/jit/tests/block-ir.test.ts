@@ -8,7 +8,6 @@ import {
   irOpIsTerminator,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
-  optimizeJitIrBlock,
   startAddress,
   codegenIr,
   blockIr,
@@ -42,14 +41,14 @@ test("buildJitIrBlock builds instruction-local IR bodies", () => {
 test("JIT codegen plan keeps instruction-local operand namespaces", () => {
   const first = ok(decodeBytes([0x89, 0x18], startAddress));
   const second = ok(decodeBytes([0x89, 0x11], first.nextEip));
-  const optimizedBlock = optimizeJitIrBlock(buildJitIrBlock([first, second]));
-  const codegenPlan = planJitCodegen(optimizedBlock);
+  const block = buildJitIrBlock([first, second]);
+  const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
-  const firstIr = optimizedBlock.instructions[0]!.ir;
-  const secondIr = optimizedBlock.instructions[1]!.ir;
+  const firstIr = block.instructions[0]!.ir;
+  const secondIr = block.instructions[1]!.ir;
 
-  strictEqual("ir" in optimizedBlock, false);
-  strictEqual("operands" in optimizedBlock, false);
+  strictEqual("ir" in block, false);
+  strictEqual("operands" in block, false);
   strictEqual(emissionPlan.instructions.length, 2);
   strictEqual(firstIr.filter(irOpIsTerminator).length, 1);
   strictEqual(secondIr.filter(irOpIsTerminator).length, 1);
@@ -86,7 +85,7 @@ test("buildJitIrBlock keeps overwritten flag producers as value-state writes", (
 test("buildJitIrBlock keeps branch conditions as JIT flag values", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const jz = ok(decodeBytes([0x74, 0x05], add.nextEip));
-  const branchBlock = optimizeJitIrBlock(buildJitIrBlock([add, jz]));
+  const branchBlock = buildJitIrBlock([add, jz]);
   const branchIr = blockIr(branchBlock);
   const conditionalJumpOpIndex = branchBlock.instructions[1]!.ir.findIndex((op) => op.op === "conditionalJump");
 
@@ -94,7 +93,7 @@ test("buildJitIrBlock keeps branch conditions as JIT flag values", () => {
   strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
 
   const trap = ok(decodeBytes([0xcd, 0x2e], add.nextEip));
-  const exitBlock = optimizeJitIrBlock(buildJitIrBlock([add, trap]));
+  const exitBlock = buildJitIrBlock([add, trap]);
   const hostTrapOpIndex = exitBlock.instructions[1]!.ir.findIndex((op) => op.op === "hostTrap");
 
   strictEqual(hostTrapOpIndex !== -1, true);

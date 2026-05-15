@@ -12,6 +12,7 @@ import {
   wasmBodyInstructions,
   wasmBodyMemoryAccesses,
   wasmBodyOpcodes,
+  extractOnlyWasmFunctionBody,
   emitJitBlock,
   createJitValueCacheRuntime,
   buildJitInstructionValueTimeline,
@@ -20,12 +21,14 @@ import {
   const32,
   xorExpr,
   countOpcode,
+  encodeJitIrBlock,
   type JitIrBlock,
 } from "./value-local-store-test-helpers.js";
 import { wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import { rootValuePathScope } from "#backends/wasm/jit/codegen/plan/control-paths.js";
+import { jitProducedValue } from "#backends/wasm/jit/ir/value-builders.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 
 test("JIT emission consumes prebuilt expression blocks from instruction plans", () => {
@@ -133,6 +136,41 @@ test("JIT planned emission keeps a guard but skips an unused produced load", () 
   strictEqual(guestLoads(result).length, 0);
 });
 
+test("JIT planned emission keeps a dead produced-load guard before a later used load", () => {
+  const result = emitPlannedJitBlock(singleInstructionBlock([
+    { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
+    {
+      op: "get",
+      dst: v(0),
+      source: { kind: "mem", address: c32(0x60) },
+      accessWidth: 32
+    },
+    { op: "memory.guard", address: c32(0x64), byteLength: 4, access: "read" },
+    {
+      op: "get",
+      dst: v(1),
+      source: { kind: "mem", address: c32(0x64) },
+      accessWidth: 32
+    },
+    { op: "set", target: { kind: "reg", reg: "eax" }, value: v(1), accessWidth: 32 },
+    { op: "hostTrap", vector: c32(0x2e) }
+  ]));
+
+  deepStrictEqual(result.emissionPlan.plannedEffects.map((effect) => effect.kind), [
+    "memoryGuard",
+    "producedValueDefinition",
+    "memoryGuard",
+    "producedValueDefinition",
+    "hostTrap"
+  ]);
+  strictEqual(countOpcode(result.opcodes, wasmOpcode.memorySize), 4);
+  strictEqual(guestLoads(result).length, 1);
+  deepStrictEqual(result.emissionPlan.valueCachePlan.useCounts, [{
+    value: jitProducedValue("load#planned-emission-test:0:3:1", "i32"),
+    useCount: 1
+  }]);
+});
+
 test("JIT planned emission captures a used produced load at its definition", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
@@ -229,6 +267,70 @@ test("JIT planned emission keeps memory store address before value", () => {
   strictEqual(valueIndex < storeIndex, true);
 });
 
+test("JIT codegen leaves dead pure SSA unpruned and emits no Wasm for it", () => {
+  const block = singleInstructionBlock([
+    { op: "value.const", type: "i32", dst: v(0), value: 1 },
+    { op: "value.const", type: "i32", dst: v(1), value: 2 },
+    {
+      op: "value.binary",
+      type: "i32",
+      operator: "xor",
+      dst: v(2),
+      a: v(0),
+      b: v(1)
+    },
+    { op: "next" }
+  ]);
+  const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
+  const opcodes = jitBlockOpcodes(block);
+
+  deepStrictEqual(block.instructions[0]?.ir.map((op) => op.op), [
+    "value.const",
+    "value.const",
+    "value.binary",
+    "next"
+  ]);
+  deepStrictEqual(emissionPlan.plannedValueUses, []);
+  deepStrictEqual(emissionPlan.valueCachePlan.useCounts, []);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 0);
+});
+
+test("JIT codegen preserves guard-before-load ordering without pruning", () => {
+  const block = singleInstructionBlock([
+    { op: "value.const", type: "i32", dst: v(0), value: 0x1234 },
+    { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
+    {
+      op: "get",
+      dst: v(1),
+      source: { kind: "mem", address: c32(0x60) },
+      accessWidth: 32
+    },
+    {
+      op: "value.binary",
+      type: "i32",
+      operator: "add",
+      dst: v(2),
+      a: v(1),
+      b: c32(1)
+    },
+    { op: "hostTrap", vector: v(2) }
+  ]);
+  const encoded = extractOnlyWasmFunctionBody(encodeJitIrBlock([block]));
+  const opcodes = wasmBodyOpcodes(encoded);
+  const accesses = wasmBodyMemoryAccesses(encoded);
+  const firstGuardCheck = opcodes.indexOf(wasmOpcode.memorySize);
+  const firstLoadAfterGuard = opcodes.indexOf(wasmOpcode.i32Load, firstGuardCheck);
+  const guestLoads = accesses.filter((access) =>
+    access.memoryIndex === wasmMemoryIndex.guest &&
+      access.opcode === wasmOpcode.i32Load
+  );
+
+  strictEqual(firstGuardCheck !== -1, true);
+  strictEqual(firstLoadAfterGuard !== -1, true);
+  strictEqual(firstGuardCheck < firstLoadAfterGuard, true);
+  strictEqual(guestLoads.length, 1);
+});
+
 function emitPlannedJitBlock(block: JitIrBlock) {
   const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
   const body = new WasmFunctionBodyEncoder();
@@ -304,4 +406,8 @@ function guestLoads(result: ReturnType<typeof emitPlannedJitBlock>) {
     access.memoryIndex === wasmMemoryIndex.guest &&
       access.opcode === wasmOpcode.i32Load
   );
+}
+
+function jitBlockOpcodes(block: JitIrBlock): readonly number[] {
+  return wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitIrBlock([block])));
 }

@@ -9,10 +9,10 @@ import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { buildJitIrBlock, encodeJitIrBlock } from "#backends/wasm/jit/block.js";
+import type { JitIrBlock } from "#backends/wasm/jit/block.js";
 import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
-import { optimizeJitIrBlock } from "#backends/wasm/jit/optimization/optimize.js";
 import { runJitIrBlock } from "./helpers.js";
 
 export {
@@ -35,7 +35,6 @@ export {
   irOpIsTerminator,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
-  optimizeJitIrBlock,
   runJitIrBlock
 };
 export type { IrOp, StorageRef, ValueRef };
@@ -82,10 +81,10 @@ export function arithmeticEflags(flags: ArithmeticFlagExpectations): number {
 }
 
 export function codegenIr(block: ReturnType<typeof buildJitIrBlock>): readonly IrOp[] {
-  return blockIr(optimizeJitIrBlock(block));
+  return blockIr(block);
 }
 
-export function blockIr(block: ReturnType<typeof optimizeJitIrBlock>): readonly IrOp[] {
+export function blockIr(block: JitIrBlock): readonly IrOp[] {
   return block.instructions.flatMap((instruction) => instruction.ir);
 }
 

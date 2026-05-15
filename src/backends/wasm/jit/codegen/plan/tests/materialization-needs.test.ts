@@ -16,7 +16,6 @@ import {
   jitInputReg32Value,
   jitInsertMaskedBits,
   jitProducedValue,
-  optimizeJitIrBlock,
   onlyExit,
   startAddress,
   registerStore,
@@ -107,7 +106,7 @@ test("planJitCodegen feeds partial flag exit-store inputs through materializatio
 
 test("planJitCodegen omits materialization needs for empty exits", () => {
   const trap = ok(decodeBytes([0xcd, 0x2e], startAddress));
-  const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([trap])));
+  const codegenPlan = planJitCodegen(buildJitIrBlock([trap]));
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.HOST_TRAP);
 
   strictEqual(exit.exitMaterializationIndex, 0);
@@ -118,7 +117,7 @@ test("planJitCodegen omits materialization needs for empty exits", () => {
 test("planJitCodegen records register and flag exit stores as exit-store value uses", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const load = ok(decodeBytes([0x8b, 0x05, 0x00, 0x00, 0x01, 0x00], add.nextEip));
-  const codegenPlan = planJitCodegen(optimizeJitIrBlock(buildJitIrBlock([add, load])));
+  const codegenPlan = planJitCodegen(buildJitIrBlock([add, load]));
   const exit = onlyExit(codegenPlan.exitPoints, ExitReason.MEMORY_READ_FAULT);
   const exitPointIndex = codegenPlan.exitPoints.indexOf(exit);
   const expectedRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));

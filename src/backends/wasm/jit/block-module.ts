@@ -15,7 +15,6 @@ import {
   type JitLinkResolver
 } from "./codegen/emit/block-emitter.js";
 import { createJitValueCacheRuntime } from "./codegen/emit/value-local-store.js";
-import { optimizeJitIrBlock } from "./optimization/optimize.js";
 import { createJitIrState, type JitExitTarget, type JitIrState } from "./state/state.js";
 import type { JitIrBlock } from "./ir/types.js";
 
@@ -101,11 +100,9 @@ function encodeJitIrBlockFunctionBody(
   block: JitIrBlock,
   linking?: JitLinkEmitContext
 ): WasmFunctionBodyEncoder {
-  const optimizedBlock = optimizeJitIrBlock(block);
-  const codegenPlan = planJitCodegen(optimizedBlock);
+  validateJitIrBlock(block);
 
-  validateJitIrBlock(optimizedBlock);
-
+  const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
