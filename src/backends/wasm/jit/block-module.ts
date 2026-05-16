@@ -108,12 +108,12 @@ function encodeJitBlockFunctionBody(
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
   const valueCache = createJitValueCacheRuntime(body, emissionPlan.valueCachePlan);
-  const state = createJitState(body, emissionPlan.exitMaterializations, { valueCache });
-  const exit: JitExitTarget = { exitLocal, exitLabelDepth: state.maxExitMaterializationIndex };
+  const state = createJitState(body, emissionPlan.exitStoreSets, { valueCache });
+  const exit: JitExitTarget = { exitLocal, exitLabelDepth: state.maxExitStoreIndex };
 
   state.emitLoadInstructionCount();
 
-  emitExitMaterializationBlocks(body, state.maxExitMaterializationIndex);
+  emitExitStoreBlocks(body, state.maxExitStoreIndex);
   emitJitBlock({
     body,
     scratch,
@@ -124,7 +124,7 @@ function encodeJitBlockFunctionBody(
     valueCache,
     linking
   });
-  emitExitMaterializationStores(body, state, exitLocal);
+  emitExitStores(body, state, exitLocal);
   scratch.assertClear();
   body.end();
 
@@ -190,8 +190,8 @@ function blockFunctionIndicesForEntries(
   return indices;
 }
 
-function emitExitMaterializationBlocks(body: WasmFunctionBodyEncoder, maxExitMaterializationIndex: number): void {
-  for (let index = 0; index <= maxExitMaterializationIndex; index += 1) {
+function emitExitStoreBlocks(body: WasmFunctionBodyEncoder, maxExitStoreIndex: number): void {
+  for (let index = 0; index <= maxExitStoreIndex; index += 1) {
     void index;
     body.block();
   }
@@ -214,15 +214,15 @@ function emitLinkFallbackExports(
   }
 }
 
-function emitExitMaterializationStores(
+function emitExitStores(
   body: WasmFunctionBodyEncoder,
   state: JitState,
   exitLocal: number
 ): void {
-  for (let index = state.maxExitMaterializationIndex; index >= 0; index -= 1) {
+  for (let index = state.maxExitStoreIndex; index >= 0; index -= 1) {
     body.endBlock();
-    state.emitExitMaterializationStores(index);
-    state.releaseExitMaterialization(index);
+    state.emitExitStores(index);
+    state.releaseExitStores(index);
     body.localGet(exitLocal).returnFromFunction();
   }
 }

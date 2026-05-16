@@ -4,7 +4,7 @@ import type {
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
-  jitEffectValueRootForMaterializationNeed,
+  jitEffectValueRootForExitStoreUse,
   jitEffectValueRootsForOp,
   type JitEffectValueRoot
 } from "./effect-roots.js";
@@ -15,7 +15,7 @@ import type { PathMap } from "#backends/wasm/jit/analysis/paths.js";
 import {
   jitExpressionOpIndexesForSourceOp
 } from "./expression-uses.js";
-import type { JitMaterializationNeed, PlannedExit } from "./types.js";
+import type { PlannedExit } from "./types.js";
 import {
   jitExpressionOpEpochs
 } from "./value-cache-epochs.js";
@@ -24,6 +24,7 @@ import type {
 } from "#backends/wasm/jit/analysis/timeline.js";
 import {
   plannedValueUsesForRoots,
+  type JitExitStoreUse,
   type JitPlannedValueUse,
   type JitValueUsePlacement
 } from "./value-uses.js";
@@ -65,10 +66,10 @@ export type JitEffectPlan = Readonly<{
 export function planJitEffectsForEmission(
   instructions: readonly JitEffectPlanInstructionInput[],
   effects: readonly Effect<PlannedExit>[],
-  materializationNeeds: readonly JitMaterializationNeed[]
+  exitStoreUses: readonly JitExitStoreUse[]
 ): JitEffectPlan {
   const effectsMap = groupEffectsMap(effects);
-  const materializationNeedsBySourceOp = groupMaterializationNeeds(materializationNeeds);
+  const exitStoreUsesBySourceOp = groupExitStoreUses(exitStoreUses);
   const plannedEffects: JitPlannedEffect[] = [];
   const plannedValueUses: JitPlannedValueUse[] = [];
   let currentEpoch = 0;
@@ -81,7 +82,7 @@ export function planJitEffectsForEmission(
       const effect = plannedEffectForSourceOp(
         instruction,
         effectsMap,
-        materializationNeedsBySourceOp,
+        exitStoreUsesBySourceOp,
         instructionIndex,
         sourceOpIndex,
         opEpochs
@@ -111,7 +112,7 @@ export function planJitEffectsForEmission(
 function plannedEffectForSourceOp(
   instruction: JitEffectPlanInstructionInput,
   effectsMap: JitEffectsMap,
-  materializationNeedsBySourceOp: JitMaterializationNeedsBySourceOp,
+  exitStoreUsesBySourceOp: JitExitStoreUsesBySourceOp,
   instructionIndex: number,
   sourceOpIndex: number,
   opEpochs: readonly number[]
@@ -119,17 +120,17 @@ function plannedEffectForSourceOp(
   const effect = effectsMap
     .get(instructionIndex)
     ?.get(sourceOpIndex);
-  const materializationRoots = materializationNeedsBySourceOp
+  const exitStoreRoots = exitStoreUsesBySourceOp
     .get(instructionIndex)
     ?.get(sourceOpIndex) ?? [];
 
-  if (effect === undefined && materializationRoots.length === 0) {
+  if (effect === undefined && exitStoreRoots.length === 0) {
     return undefined;
   }
 
   if (effect === undefined) {
     throw new Error(
-      `JIT materialization need is attached to a non-effect op: ${instructionIndex}:${sourceOpIndex}`
+      `JIT exit store use is attached to a non-effect op: ${instructionIndex}:${sourceOpIndex}`
     );
   }
 
@@ -155,7 +156,7 @@ function plannedEffectForSourceOp(
         effect.kind,
         placement
       ),
-      ...materializationRoots.map(jitEffectValueRootForMaterializationNeed)
+      ...exitStoreRoots.map(jitEffectValueRootForExitStoreUse)
     ]
   };
 }
@@ -181,9 +182,9 @@ function logicalWriteEpochCount(instruction: JitEffectPlanInstructionInput): num
   ).size;
 }
 
-type JitMaterializationNeedsBySourceOp = ReadonlyMap<
+type JitExitStoreUsesBySourceOp = ReadonlyMap<
   number,
-  ReadonlyMap<number, readonly JitMaterializationNeed[]>
+  ReadonlyMap<number, readonly JitExitStoreUse[]>
 >;
 
 type JitEffectsMap = ReadonlyMap<
@@ -212,17 +213,17 @@ function groupEffectsMap(
   return byInstruction;
 }
 
-function groupMaterializationNeeds(
-  needs: readonly JitMaterializationNeed[]
-): JitMaterializationNeedsBySourceOp {
-  const byInstruction = new Map<number, Map<number, JitMaterializationNeed[]>>();
+function groupExitStoreUses(
+  uses: readonly JitExitStoreUse[]
+): JitExitStoreUsesBySourceOp {
+  const byInstruction = new Map<number, Map<number, JitExitStoreUse[]>>();
 
-  for (const need of needs) {
-    const byOp = byInstruction.get(need.placement.instructionIndex) ?? new Map();
-    const opNeeds = byOp.get(need.placement.opIndex) ?? [];
+  for (const use of uses) {
+    const byOp = byInstruction.get(use.placement.instructionIndex) ?? new Map();
+    const opUses = byOp.get(use.placement.opIndex) ?? [];
 
-    byOp.set(need.placement.opIndex, [...opNeeds, need]);
-    byInstruction.set(need.placement.instructionIndex, byOp);
+    byOp.set(use.placement.opIndex, [...opUses, use]);
+    byInstruction.set(use.placement.instructionIndex, byOp);
   }
 
   return byInstruction;

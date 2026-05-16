@@ -1,85 +1,80 @@
-import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 import type {
-  ExitMaterializationStore,
-  JitExitMaterializationPlan,
-  JitMaterializationNeed,
-  PlannedExit
-} from "./types.js";
+  Exit,
+  ExitSnapshot
+} from "#backends/wasm/jit/analysis/exits.js";
+import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import { flagStores } from "./flag-stores.js";
+import { registerStores } from "./register-stores.js";
 
-export type JitExitStorePlan = Readonly<{
-  exits: readonly PlannedExit[];
-  materializationNeeds: readonly JitMaterializationNeed[];
-  exitMaterializations: readonly JitExitMaterializationPlan[];
-  maxExitMaterializationIndex: number;
+export type StoreTarget =
+  | Readonly<{ kind: "reg32"; reg: Reg32 }>
+  | Readonly<{ kind: "regPart"; reg: Reg32; bitOffset: number; width: OperandWidth }>
+  | Readonly<{ kind: "aluFlags" }>;
+
+export type ExitStore = Readonly<{
+  target: StoreTarget;
+  value: JitValue;
 }>;
 
-export function planJitExitStores(
-  exits: readonly Exit[]
-): JitExitStorePlan {
+export type PlannedExit = Exit & Readonly<{
+  stores: readonly ExitStore[];
+  exitStoreIndex: number;
+}>;
+
+export type ExitStoreSet = Readonly<{
+  stores: readonly ExitStore[];
+}>;
+
+export type ExitStorePlan = Readonly<{
+  exits: readonly PlannedExit[];
+  exitStoreSets: readonly ExitStoreSet[];
+  maxExitStoreIndex: number;
+}>;
+
+export function planExitStores(exits: readonly Exit[]): ExitStorePlan {
   const plannedExits: PlannedExit[] = [];
-  const materializationNeeds: JitMaterializationNeed[] = [];
-  const exitMaterializations: JitExitMaterializationPlan[] = [{ stores: [] }];
+  const exitStoreSets: ExitStoreSet[] = [{ stores: [] }];
 
   for (const exit of exits) {
-    const stores = exit.snapshot.valueState.exitStores();
-    const exitMaterializationIndex = appendExitMaterialization(exitMaterializations, stores);
-    const plannedExit: PlannedExit = {
-      ...exit,
-      exitMaterializationIndex
-    };
-    const exitIndex = plannedExits.length;
+    const stores = storesForExit(exit);
+    const exitStoreIndex = appendExitStoreSet(exitStoreSets, stores);
 
-    plannedExits.push(plannedExit);
-    materializationNeeds.push(...materializationNeedsForExitStores(
-      plannedExit,
-      exitIndex,
-      stores
-    ));
+    plannedExits.push({
+      ...exit,
+      stores,
+      exitStoreIndex
+    });
   }
 
   return {
     exits: plannedExits,
-    materializationNeeds,
-    exitMaterializations,
-    maxExitMaterializationIndex: exitMaterializations.length - 1
+    exitStoreSets,
+    maxExitStoreIndex: exitStoreSets.length - 1
   };
 }
 
-function materializationNeedsForExitStores(
-  exit: PlannedExit,
-  exitIndex: number,
-  stores: readonly ExitMaterializationStore[]
-): readonly JitMaterializationNeed[] {
-  const placement = {
-    instructionIndex: exit.at.instructionIndex,
-    opIndex: exit.at.opIndex,
-    exitIndex,
-    exitId: exit.id,
-    reason: exit.reason,
-    exitMaterializationIndex: exit.exitMaterializationIndex
-  };
-
-  return stores.map((store) => ({
-    purpose: "exitStore",
-    target: store.target,
-    value: store.value,
-    placement,
-    path: exit.path
-  }));
+export function storesForExit(exit: Exit): readonly ExitStore[] {
+  return storesForSnapshot(exit.snapshot);
 }
 
-function appendExitMaterialization(
-  exitMaterializations: JitExitMaterializationPlan[],
-  stores: readonly ExitMaterializationStore[]
+export function storesForSnapshot(snapshot: ExitSnapshot): readonly ExitStore[] {
+  return [
+    ...registerStores(snapshot.valueState),
+    ...flagStores(snapshot.valueState)
+  ];
+}
+
+function appendExitStoreSet(
+  exitStoreSets: ExitStoreSet[],
+  stores: readonly ExitStore[]
 ): number {
   if (stores.length === 0) {
     return 0;
   }
 
-  const index = exitMaterializations.length;
+  const index = exitStoreSets.length;
 
-  exitMaterializations.push({
-    stores
-  });
+  exitStoreSets.push({ stores });
   return index;
 }

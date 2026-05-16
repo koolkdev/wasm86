@@ -10,8 +10,9 @@ import {
   jitProducedValue,
   startAddress,
   planValueCacheForTest,
-  materializationUse,
+  extraUse,
   registerStore,
+  exitStoreUse,
   exitPoint,
   exitState,
   c32,
@@ -63,8 +64,8 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
 
   strictEqual(instruction?.instructionId, "cache-plan");
   strictEqual(emissionPlan.exits, codegenPlan.exits);
-  strictEqual(emissionPlan.materializationNeeds, codegenPlan.materializationNeeds);
-  strictEqual(emissionPlan.exitMaterializations, codegenPlan.exitMaterializations);
+  strictEqual(emissionPlan.exitStoreUses, codegenPlan.exitStoreUses);
+  strictEqual(emissionPlan.exitStoreSets, codegenPlan.exitStoreSets);
   strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
   strictEqual(instruction?.valueTimeline.snapshots.length, instruction?.expressionBlock.length);
   strictEqual((emissionPlan.valueCachePlan?.useCounts.length ?? 0) > 0, true);
@@ -116,9 +117,22 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
       }
     ]
   };
+  const stores = [registerStore("eax")];
+  const exit = exitPoint({
+    instructionIndex: 1,
+    opIndex: 1,
+    reason: ExitReason.HOST_TRAP,
+    snapshot: exitState(2, ["eax"]),
+    stores,
+    exitStoreIndex: 1
+  });
   const plan: JitCodegenPlan = {
     block,
-    effects: [],
+    effects: [{
+      kind: "hostTrap",
+      at: { instructionIndex: 1, opIndex: 1 },
+      exit
+    }],
     instructionStates: [
       {
         instructionId: "write-before-overwrite",
@@ -141,16 +155,10 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
         exitCount: 1
       }
     ],
-    exits: [exitPoint({
-      instructionIndex: 1,
-      opIndex: 1,
-      reason: ExitReason.HOST_TRAP,
-      snapshot: exitState(2, ["eax"]),
-      exitMaterializationIndex: 1
-    })],
-    materializationNeeds: [],
-    exitMaterializations: [{ stores: [] }, { stores: [registerStore("eax")] }],
-    maxExitMaterializationIndex: 1
+    exits: [exit],
+    exitStoreUses: stores.map((store) => exitStoreUse(store, exit, 0)),
+    exitStoreSets: [{ stores: [] }, { stores }],
+    maxExitStoreIndex: 1
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
 
@@ -197,9 +205,24 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       ]
     }]
   };
+  const stores = [registerStore("eax")];
+  const exit = exitPoint({
+    instructionIndex: 0,
+    opIndex: 0,
+    reason: ExitReason.MEMORY_READ_FAULT,
+    snapshot: exitState(0, ["eax"]),
+    visibleEip: { kind: "static", value: startAddress },
+    payload: { kind: "runtime", source: "memoryAddress" },
+    stores,
+    exitStoreIndex: 1
+  });
   const plan: JitCodegenPlan = {
     block,
-    effects: [],
+    effects: [{
+      kind: "memoryGuard",
+      at: { instructionIndex: 0, opIndex: 0 },
+      faultExit: exit
+    }],
     instructionStates: [{
       instructionId: "fault-before-register-write",
       eip: startAddress,
@@ -210,18 +233,10 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       paths: new Map(),
       exitCount: 1
     }],
-    exits: [exitPoint({
-      instructionIndex: 0,
-      opIndex: 0,
-      reason: ExitReason.MEMORY_READ_FAULT,
-      snapshot: exitState(0, ["eax"]),
-      visibleEip: { kind: "static", value: startAddress },
-      payload: { kind: "runtime", source: "memoryAddress" },
-      exitMaterializationIndex: 1
-    })],
-    materializationNeeds: [],
-    exitMaterializations: [{ stores: [] }, { stores: [registerStore("eax")] }],
-    maxExitMaterializationIndex: 1
+    exits: [exit],
+    exitStoreUses: stores.map((store) => exitStoreUse(store, exit, 0)),
+    exitStoreSets: [{ stores: [] }, { stores }],
+    maxExitStoreIndex: 1
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
 
@@ -256,7 +271,7 @@ test("JIT value-cache planning retains produced values needed after their defini
   const cachePlan = planValueCacheForTest({
     expressionBlock,
     producedByVar: new Map([[0, produced]]),
-    materializationUses: new Map([[2, [materializationUse(produced)]]])
+    extraUses: new Map([[2, [extraUse(produced)]]])
   });
 
   deepStrictEqual(
@@ -478,9 +493,9 @@ test("JIT value-cache planning merges repeated produced-value retained uses", ()
   const cachePlan = planValueCacheForTest({
     expressionBlock,
     producedByVar: new Map([[0, produced]]),
-    materializationUses: new Map([
-      [1, [materializationUse(produced)]],
-      [2, [materializationUse(produced)]]
+    extraUses: new Map([
+      [1, [extraUse(produced)]],
+      [2, [extraUse(produced)]]
     ])
   });
 

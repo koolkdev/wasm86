@@ -4,15 +4,15 @@ import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-bo
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { emitLoadStateU32, emitStoreStateU32 } from "#backends/wasm/codegen/state.js";
 import type {
-  JitExitMaterializationPlan,
+  ExitStoreSet,
   PlannedExit
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { JitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import {
-  captureJitExitMaterializationStores,
-  emitJitExitMaterializationStores,
-  releaseJitExitMaterializationStores,
-  type JitCapturedExitMaterializationStore
+  captureExitStores,
+  emitExitStores,
+  releaseExitStores,
+  type CapturedExitStore
 } from "#backends/wasm/jit/codegen/emit/exit-stores.js";
 
 export type JitExitTarget = {
@@ -25,42 +25,42 @@ type JitStateOptions = Readonly<{
   valueCache?: JitValueCacheRuntime | undefined;
 }>;
 
-type JitCapturedExitMaterialization = readonly JitCapturedExitMaterializationStore[];
+type JitCapturedExitStoreSet = readonly CapturedExitStore[];
 
 export type JitState = Readonly<{
   eipLocal: number;
   instructionCountLocal: number;
-  maxExitMaterializationIndex: number;
+  maxExitStoreIndex: number;
   emitLoadInstructionCount(): void;
   beginInstruction(exit: JitExitTarget, instructionCountDelta: number, entryEip: number): void;
   prepareExitPoint(exit: PlannedExit, emitRuntimeVisibleEip?: () => void): void;
   commitInstructionExit(exit: PlannedExit, emitRuntimeVisibleEip?: () => void): void;
-  emitExitMaterializationStores(index: number): void;
-  releaseExitMaterialization(index: number): void;
+  emitExitStores(index: number): void;
+  releaseExitStores(index: number): void;
 }>;
 
 export function createJitState(
   body: WasmFunctionBodyEncoder,
-  exitMaterializations: readonly JitExitMaterializationPlan[],
+  exitStoreSets: readonly ExitStoreSet[],
   options: JitStateOptions = {}
 ): JitState {
-  const maxExitMaterializationIndex = exitMaterializations.length - 1;
+  const maxExitStoreIndex = exitStoreSets.length - 1;
   const eipLocal = body.addLocal(wasmValueType.i32);
   const instructionCountLocal = body.addLocal(wasmValueType.i32);
-  const capturedExitMaterializations = new Map<number, JitCapturedExitMaterialization>();
+  const capturedExitStoreSets = new Map<number, JitCapturedExitStoreSet>();
   let activeExit: JitExitTarget | undefined;
 
   return {
     eipLocal,
     instructionCountLocal,
-    maxExitMaterializationIndex,
+    maxExitStoreIndex,
     emitLoadInstructionCount: () => {
       emitLoadStateU32(body, stateOffset.instructionCount);
       body.localSet(instructionCountLocal);
     },
     beginInstruction: (exit, instructionCountDelta, entryEip) => {
       activeExit = exit;
-      useExitMaterialization(exit, 0);
+      useExitStoreSet(exit, 0);
       installExitMetadataStores(exit, () => {
         body.i32Const(i32(entryEip));
       }, instructionCountDelta);
@@ -68,9 +68,9 @@ export function createJitState(
     prepareExitPoint: (plannedExit, emitRuntimeVisibleEip) => {
       const exit = requiredActiveExit();
 
-      captureExitMaterialization(plannedExit.exitMaterializationIndex);
+      captureExitStoreSet(plannedExit.exitStoreIndex);
 
-      useExitMaterialization(exit, plannedExit.exitMaterializationIndex);
+      useExitStoreSet(exit, plannedExit.exitStoreIndex);
       installExitMetadataStores(
         exit,
         () => emitExitVisibleEip(plannedExit, emitRuntimeVisibleEip),
@@ -82,52 +82,52 @@ export function createJitState(
 
       emitExitVisibleEip(plannedExit, emitRuntimeVisibleEip);
       body.localSet(eipLocal);
-      captureExitMaterialization(plannedExit.exitMaterializationIndex);
-      useExitMaterialization(exit, plannedExit.exitMaterializationIndex);
+      captureExitStoreSet(plannedExit.exitStoreIndex);
+      useExitStoreSet(exit, plannedExit.exitStoreIndex);
       installExitMetadataStores(exit, () => {
         body.localGet(eipLocal);
       }, plannedExit.snapshot.instructionCountDelta);
     },
-    emitExitMaterializationStores: (index) => {
-      const plan = exitMaterializations[index];
+    emitExitStores: (index) => {
+      const plan = exitStoreSets[index];
 
       if (plan === undefined) {
-        throw new Error(`missing JIT exit materialization: ${index}`);
+        throw new Error(`missing JIT exit store set: ${index}`);
       }
 
-      const capturedStores = capturedExitMaterializations.get(index);
+      const capturedStores = capturedExitStoreSets.get(index);
 
       if (plan.stores.length !== 0) {
         if (capturedStores === undefined) {
-          throw new Error(`JIT exit materialization was not captured: ${index}`);
+          throw new Error(`JIT exit store set was not captured: ${index}`);
         }
 
-        emitJitExitMaterializationStores({
+        emitExitStores({
           body,
           valueCache: options.valueCache
         }, capturedStores);
       }
     },
-    releaseExitMaterialization: (index) => {
-      const plan = exitMaterializations[index];
+    releaseExitStores: (index) => {
+      const plan = exitStoreSets[index];
 
       if (plan === undefined) {
-        throw new Error(`missing JIT exit materialization: ${index}`);
+        throw new Error(`missing JIT exit store set: ${index}`);
       }
 
       if (plan.stores.length === 0) {
         return;
       }
 
-      const capturedStores = capturedExitMaterializations.get(index);
+      const capturedStores = capturedExitStoreSets.get(index);
 
       if (capturedStores === undefined) {
-        throw new Error(`JIT exit materialization was not captured: ${index}`);
+        throw new Error(`JIT exit store set was not captured: ${index}`);
       }
 
-      releaseJitExitMaterializationStores(capturedStores);
+      releaseExitStores(capturedStores);
 
-      capturedExitMaterializations.delete(index);
+      capturedExitStoreSets.delete(index);
     }
   };
 
@@ -148,28 +148,28 @@ export function createJitState(
     };
   }
 
-  function useExitMaterialization(exit: JitExitTarget, index: number): void {
-    exit.exitLabelDepth = maxExitMaterializationIndex - index;
+  function useExitStoreSet(exit: JitExitTarget, index: number): void {
+    exit.exitLabelDepth = maxExitStoreIndex - index;
   }
 
-  function captureExitMaterialization(index: number): void {
-    if (capturedExitMaterializations.has(index)) {
+  function captureExitStoreSet(index: number): void {
+    if (capturedExitStoreSets.has(index)) {
       return;
     }
 
-    const capturedStores = captureExitMaterializationStoresForIndex(index);
+    const capturedStores = captureExitStoresForIndex(index);
 
-    storeCapturedExitMaterialization(index, capturedStores);
+    storeCapturedExitStores(index, capturedStores);
   }
 
-  function captureExitMaterializationStoresForIndex(index: number): JitCapturedExitMaterialization | undefined {
-    const plan = exitMaterializations[index];
+  function captureExitStoresForIndex(index: number): JitCapturedExitStoreSet | undefined {
+    const plan = exitStoreSets[index];
 
     if (plan === undefined) {
-      throw new Error(`missing JIT exit materialization: ${index}`);
+      throw new Error(`missing JIT exit store set: ${index}`);
     }
 
-    const capturedStores = captureJitExitMaterializationStores({
+    const capturedStores = captureExitStores({
       body,
       valueCache: options.valueCache
     }, plan.stores);
@@ -177,14 +177,14 @@ export function createJitState(
     return capturedStores;
   }
 
-  function storeCapturedExitMaterialization(
+  function storeCapturedExitStores(
     index: number,
-    capturedStores: JitCapturedExitMaterialization | undefined
+    capturedStores: JitCapturedExitStoreSet | undefined
   ): void {
-    const plan = exitMaterializations[index];
+    const plan = exitStoreSets[index];
 
     if (plan === undefined) {
-      throw new Error(`missing JIT exit materialization: ${index}`);
+      throw new Error(`missing JIT exit store set: ${index}`);
     }
 
     if (plan.stores.length === 0) {
@@ -192,10 +192,10 @@ export function createJitState(
     }
 
     if (capturedStores === undefined) {
-      throw new Error(`JIT exit materialization was not captured: ${index}`);
+      throw new Error(`JIT exit store set was not captured: ${index}`);
     }
 
-    capturedExitMaterializations.set(index, capturedStores);
+    capturedExitStoreSets.set(index, capturedStores);
   }
 
   function requiredActiveExit(): JitExitTarget {

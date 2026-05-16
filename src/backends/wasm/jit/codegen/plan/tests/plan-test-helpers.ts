@@ -26,11 +26,11 @@ import { rootExpressionPaths } from "#backends/wasm/jit/codegen/tests/path-test-
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   JitCodegenPlan,
-  JitExitMaterializationStore,
+  ExitStore,
   PlannedExit,
   ExitSnapshot,
   JitInstructionState,
-  JitMaterializationNeed,
+  JitExitStoreUse,
   ExitPayload,
   ExitValue
 } from "#backends/wasm/jit/codegen/plan/types.js";
@@ -84,11 +84,11 @@ export type {
   IrValueExpr,
   JitOperandBinding,
   JitCodegenPlan,
-  JitExitMaterializationStore,
+  ExitStore,
   PlannedExit,
   ExitSnapshot,
   JitInstructionState,
-  JitMaterializationNeed,
+  JitExitStoreUse,
   ExitPayload,
   ExitValue,
   JitProducedValue,
@@ -107,7 +107,7 @@ export function planValueCacheForTest(input: Readonly<{
   operands?: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
   producedByVar?: ReadonlyMap<number, JitProducedValue>;
-  materializationUses?: ReadonlyMap<number, readonly JitValueUseRoot[]>;
+  extraUses?: ReadonlyMap<number, readonly JitValueUseRoot[]>;
 }>) {
   const operands = input.operands ?? [];
   const valueTimeline = buildTimeline({
@@ -122,7 +122,7 @@ export function planValueCacheForTest(input: Readonly<{
     expressionBlock: input.expressionBlock,
     valueTimeline,
     expressionPaths: rootExpressionPaths(input.expressionBlock),
-    materializationUses: input.materializationUses ?? new Map()
+    extraUses: input.extraUses ?? new Map()
   }]);
 
   return planJitValueCacheForInstructions([{
@@ -132,9 +132,9 @@ export function planValueCacheForTest(input: Readonly<{
   }], plannedValueUses);
 }
 
-export function materializationUse(
+export function extraUse(
   value: JitValue,
-  purpose = "materialization"
+  purpose = "exit store"
 ): JitValueUseRoot {
   return {
     value,
@@ -143,25 +143,35 @@ export function materializationUse(
   };
 }
 
-export function registerStore(reg: Reg32, value: JitValue = jitInputReg32Value(reg)): JitExitMaterializationStore {
+export function registerStore(reg: Reg32, value: JitValue = jitInputReg32Value(reg)): ExitStore {
   return {
     target: { kind: "reg32", reg },
     value
   };
 }
 
-export function flagStore(value: JitValue): JitExitMaterializationStore {
+export function flagStore(value: JitValue): ExitStore {
   return {
     target: { kind: "aluFlags" },
     value
   };
 }
 
-export function exitStoreNeed(
-  store: JitExitMaterializationStore,
+export function plannedRegisterStores(exit: PlannedExit): readonly ExitStore[] {
+  return exit.stores.filter((store) =>
+    store.target.kind === "reg32" || store.target.kind === "regPart"
+  );
+}
+
+export function plannedFlagStores(exit: PlannedExit): readonly ExitStore[] {
+  return exit.stores.filter((store) => store.target.kind === "aluFlags");
+}
+
+export function exitStoreUse(
+  store: ExitStore,
   exitPoint: PlannedExit,
   exitIndex: number
-): JitMaterializationNeed {
+): JitExitStoreUse {
   return {
     purpose: "exitStore",
     target: store.target,
@@ -172,7 +182,7 @@ export function exitStoreNeed(
       exitIndex,
       exitId: exitPoint.id,
       reason: exitPoint.reason,
-      exitMaterializationIndex: exitPoint.exitMaterializationIndex
+      exitStoreIndex: exitPoint.exitStoreIndex
     },
     path: exitPoint.path
   };
@@ -184,7 +194,8 @@ export function exitPoint(input: Readonly<{
   kind?: PlannedExit["kind"];
   reason: ExitReason;
   snapshot: ExitSnapshot;
-  exitMaterializationIndex: number;
+  stores?: readonly ExitStore[];
+  exitStoreIndex: number;
   visibleEip?: ExitValue;
   payload?: ExitPayload;
   path?: PlannedExit["path"];
@@ -205,7 +216,8 @@ export function exitPoint(input: Readonly<{
     reason: input.reason,
     payload: input.payload ?? visibleEip,
     path: input.path ?? rootPath(),
-    exitMaterializationIndex: input.exitMaterializationIndex
+    stores: input.stores ?? [],
+    exitStoreIndex: input.exitStoreIndex
   };
 }
 

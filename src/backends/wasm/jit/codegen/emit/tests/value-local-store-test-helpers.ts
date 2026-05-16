@@ -33,9 +33,9 @@ import {
   type JitValueUseCount
 } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
 import {
-  captureJitExitMaterializationStores,
-  emitJitExitMaterializationStores,
-  releaseJitExitMaterializationStores
+  captureExitStores,
+  emitExitStores,
+  releaseExitStores
 } from "#backends/wasm/jit/codegen/emit/exit-stores.js";
 import { buildBlock, encodeJitBlock } from "#backends/wasm/jit/block.js";
 import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
@@ -80,9 +80,9 @@ export {
   jitInputReg32Value,
   createJitValueCacheRuntime,
   JitValueLocalStore,
-  captureJitExitMaterializationStores,
-  emitJitExitMaterializationStores,
-  releaseJitExitMaterializationStores,
+  captureExitStores,
+  emitExitStores,
+  releaseExitStores,
   buildBlock,
   encodeJitBlock,
   emitJitBlock,
@@ -142,7 +142,7 @@ export function planJitValueCache(
     expressionBlock,
     valueTimeline: instruction.valueTimeline,
     expressionPaths: rootExpressionPaths(expressionBlock),
-    materializationUses: new Map()
+    extraUses: new Map()
   }]);
 
   return planJitValueCacheFromPlannedUses(

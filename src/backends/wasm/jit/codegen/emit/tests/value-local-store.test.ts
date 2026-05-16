@@ -7,8 +7,8 @@ import {
   wasmBodyLocalCount,
   wasmBodyOpcodes,
   JitValueLocalStore,
-  captureJitExitMaterializationStores,
-  releaseJitExitMaterializationStores,
+  captureExitStores,
+  releaseExitStores,
   addValue,
   highCostValue,
   jitInputReg32Value,
@@ -176,7 +176,7 @@ test("JitValueLocalStore retires invalidated locals before rematerializing", () 
   const first = store.captureForReuse(value, () => emitAdd(body, () => {}));
 
   if (first === undefined) {
-    throw new Error("expected first materialization");
+    throw new Error("expected first exit store");
   }
 
   store.forgetWhere((candidate) => candidate.kind === "value.binary");
@@ -184,7 +184,7 @@ test("JitValueLocalStore retires invalidated locals before rematerializing", () 
   const second = store.captureForReuse(value, () => emitAdd(body, () => {}));
 
   if (second === undefined) {
-    throw new Error("expected second materialization");
+    throw new Error("expected second exit store");
   }
 
   body.end();
@@ -257,7 +257,7 @@ test("JitValueLocalStore reuses retired escaped locals after owners release", ()
   const first = store.captureForReuse(value, () => emitAdd(body, () => {}));
 
   if (first === undefined) {
-    throw new Error("expected first materialization");
+    throw new Error("expected first exit store");
   }
 
   store.forgetWhere((candidate) => candidate.kind === "value.binary");
@@ -266,7 +266,7 @@ test("JitValueLocalStore reuses retired escaped locals after owners release", ()
   const second = store.captureForReuse(value, () => emitAdd(body, () => {}));
 
   if (second === undefined) {
-    throw new Error("expected second materialization");
+    throw new Error("expected second exit store");
   }
 
   body.end();
@@ -287,7 +287,7 @@ test("JitValueLocalStore paths hide branch-local captures from sibling arms", ()
   store.leavePath();
 
   if (taken === undefined) {
-    throw new Error("expected taken branch materialization");
+    throw new Error("expected taken branch exit store");
   }
 
   store.enterPath(branchPath(0, 0, "notTaken"));
@@ -295,7 +295,7 @@ test("JitValueLocalStore paths hide branch-local captures from sibling arms", ()
   store.leavePath();
 
   if (notTaken === undefined) {
-    throw new Error("expected not-taken branch materialization");
+    throw new Error("expected not-taken branch exit store");
   }
 
   body.end();
@@ -356,7 +356,7 @@ test("JitValueLocalStore keeps parent path availability alive while child paths 
   const parentAfterChild = store.captureForReuse(value, unexpectedEmitter);
 
   if (parent === undefined || child === undefined || parentAfterChild === undefined) {
-    throw new Error("expected parent path materializations");
+    throw new Error("expected parent path exit stores");
   }
 
   parent.release();
@@ -369,7 +369,7 @@ test("JitValueLocalStore keeps parent path availability alive while child paths 
   store.leavePath();
 
   if (sibling === undefined) {
-    throw new Error("expected sibling path materialization");
+    throw new Error("expected sibling path exit store");
   }
 
   body.end();
@@ -395,7 +395,7 @@ test("JitValueLocalStore reuses released branch-local locals after leaving path"
   store.leavePath();
 
   if (taken === undefined) {
-    throw new Error("expected taken branch materialization");
+    throw new Error("expected taken branch exit store");
   }
 
   taken.release();
@@ -405,7 +405,7 @@ test("JitValueLocalStore reuses released branch-local locals after leaving path"
   store.leavePath();
 
   if (notTaken === undefined) {
-    throw new Error("expected not-taken branch materialization");
+    throw new Error("expected not-taken branch exit store");
   }
 
   body.end();
@@ -427,7 +427,7 @@ test("JitValueLocalStore keeps pinned exit-store locals out of reuse", () => {
     throw new Error("expected captured cached local");
   }
 
-  const exitStores = captureJitExitMaterializationStores({
+  const exitStores = captureExitStores({
     body,
     valueCache
   }, [{
@@ -448,7 +448,7 @@ test("JitValueLocalStore keeps pinned exit-store locals out of reuse", () => {
     throw new Error("expected rematerialized cached local");
   }
 
-  releaseJitExitMaterializationStores(exitStores);
+  releaseExitStores(exitStores);
   body.end();
 
   strictEqual(rematerialized.local === captured.local, false);

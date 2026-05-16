@@ -6,6 +6,7 @@ import type {
 } from "#backends/wasm/codegen/expressions.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import {
   rootPath,
   type Path,
@@ -15,6 +16,10 @@ import {
   opView,
   type Timeline
 } from "#backends/wasm/jit/analysis/timeline.js";
+import type {
+  PlannedExit,
+  StoreTarget
+} from "./exit-stores.js";
 
 export type JitValueUsePlacement = Readonly<{
   instructionIndex: number;
@@ -33,6 +38,23 @@ export type JitValueUseRoot = Readonly<{
   value: JitValue;
   path: Path;
   purpose: string;
+}>;
+
+export type JitExitStoreUsePlacement = Readonly<{
+  instructionIndex: number;
+  opIndex: number;
+  exitIndex: number;
+  exitId: string;
+  reason: ExitReasonValue;
+  exitStoreIndex: number;
+}>;
+
+export type JitExitStoreUse = Readonly<{
+  purpose: "exitStore";
+  target: StoreTarget;
+  value: JitValue;
+  placement: JitExitStoreUsePlacement;
+  path: Path;
 }>;
 
 export type JitExpressionValueUseRoot = Readonly<{
@@ -57,11 +79,41 @@ export type JitValueUseInstructionInput = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: Timeline;
   expressionPaths: PathMap;
-  materializationUses: ReadonlyMap<
+  extraUses: ReadonlyMap<
     number,
     readonly JitValueUseRoot[]
   >;
 }>;
+
+export function exitStoreUsesForPlannedExits(
+  exits: readonly PlannedExit[]
+): readonly JitExitStoreUse[] {
+  return exits.flatMap((exit, exitIndex) =>
+    exitStoreUsesForExit(exit, exitIndex)
+  );
+}
+
+export function exitStoreUsesForExit(
+  exit: PlannedExit,
+  exitIndex: number
+): readonly JitExitStoreUse[] {
+  const placement = {
+    instructionIndex: exit.at.instructionIndex,
+    opIndex: exit.at.opIndex,
+    exitIndex,
+    exitId: exit.id,
+    reason: exit.reason,
+    exitStoreIndex: exit.exitStoreIndex
+  };
+
+  return exit.stores.map((store) => ({
+    purpose: "exitStore",
+    target: store.target,
+    value: store.value,
+    placement,
+    path: exit.path
+  }));
+}
 
 export function planJitValueUses(
   instructions: readonly JitValueUseInstructionInput[]
@@ -138,7 +190,7 @@ function plannedValueUsesForOp(
 
   return [
     ...expressionUsesForOp(instruction, op, placement, root),
-    ...materializationUsesForOp(instruction, placement)
+    ...extraUsesForOp(instruction, placement)
   ];
 }
 
@@ -202,11 +254,11 @@ function instructionHasLogicalWriteAt(
   );
 }
 
-function materializationUsesForOp(
+function extraUsesForOp(
   instruction: JitValueUseInstructionInput,
   placement: JitValueUsePlacement
 ): readonly JitPlannedValueUse[] {
-  return (instruction.materializationUses.get(placement.opIndex) ?? [])
+  return (instruction.extraUses.get(placement.opIndex) ?? [])
     .map((use) =>
       plannedValueUse(
         use.value,

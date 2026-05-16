@@ -26,8 +26,6 @@ test("JIT value state omits unchanged input register and flag slots", () => {
   strictEqual(snapshot.regs.differsFromInput("eax"), false);
   strictEqual(snapshot.flags.differsFromInput(), false);
   deepStrictEqual(snapshot.slots.changedEntries(), []);
-  deepStrictEqual(snapshot.flags.exitStores(), []);
-  deepStrictEqual(snapshot.exitStores(), []);
 });
 
 test("JIT register value family models prefixes as bit extraction and insertion", () => {
@@ -47,50 +45,6 @@ test("JIT register value family models prefixes as bit extraction and insertion"
   deepStrictEqual(snapshot.slots.changedEntries()[0]?.value, expected);
 });
 
-test("JIT register value snapshots derive full-register exit stores", () => {
-  const state = createJitValueState();
-
-  state.regs.writeReg32("eax", c32(0x1234_5678));
-
-  deepStrictEqual(state.snapshot().regs.exitStores(), [{
-    target: { kind: "reg32", reg: "eax" },
-    value: c32(0x1234_5678)
-  }]);
-});
-
-test("JIT register value snapshots derive low-byte exit stores", () => {
-  const state = createJitValueState();
-
-  state.regs.writeRegPart("eax", 0, 8, c32(0x7f));
-
-  deepStrictEqual(state.snapshot().regs.exitStores(), [{
-    target: { kind: "regPart", reg: "eax", bitOffset: 0, width: 8 },
-    value: c32(0x7f)
-  }]);
-});
-
-test("JIT register value snapshots derive high-byte exit stores", () => {
-  const state = createJitValueState();
-
-  state.regs.writeRegPart("eax", 8, 8, c32(0x7f));
-
-  deepStrictEqual(state.snapshot().regs.exitStores(), [{
-    target: { kind: "regPart", reg: "eax", bitOffset: 8, width: 8 },
-    value: c32(0x7f)
-  }]);
-});
-
-test("JIT register value snapshots derive word exit stores", () => {
-  const state = createJitValueState();
-
-  state.regs.writeRegPart("eax", 0, 16, c32(0x7788));
-
-  deepStrictEqual(state.snapshot().regs.exitStores(), [{
-    target: { kind: "regPart", reg: "eax", bitOffset: 0, width: 16 },
-    value: c32(0x7788)
-  }]);
-});
-
 test("JIT register value family simplifies prefix identity writes away", () => {
   const state = createJitValueState();
 
@@ -104,7 +58,6 @@ test("JIT register value family simplifies prefix identity writes away", () => {
   deepStrictEqual(snapshot.regs.readReg32("ebx"), jitInputReg32Value("ebx"));
   deepStrictEqual(snapshot.regs.readReg32("ecx"), jitInputReg32Value("ecx"));
   deepStrictEqual(snapshot.slots.changedEntries(), []);
-  deepStrictEqual(snapshot.regs.exitStores(), []);
 });
 
 test("JIT register value family lets later full writes replace prefix merges", () => {

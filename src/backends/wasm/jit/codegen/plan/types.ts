@@ -1,24 +1,15 @@
-import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
-export type {
-  ExitMaterializationStore,
-  MaterializationTarget
-} from "#backends/wasm/jit/ir/materialization.js";
-import type {
-  ExitMaterializationStore,
-  MaterializationTarget
-} from "#backends/wasm/jit/ir/materialization.js";
-import type {
-  Exit
-} from "#backends/wasm/jit/analysis/exits.js";
 import type {
   Effect
 } from "#backends/wasm/jit/analysis/effects.js";
 import type {
-  Path,
   PathMap
 } from "#backends/wasm/jit/analysis/paths.js";
+import type {
+  ExitStoreSet,
+  PlannedExit
+} from "./exit-stores.js";
+import type { JitExitStoreUse } from "./value-uses.js";
 
 export type {
   Exit,
@@ -27,31 +18,17 @@ export type {
   ExitSnapshot,
   ExitValue
 } from "#backends/wasm/jit/analysis/exits.js";
-
-export type PlannedExit = Exit & Readonly<{
-  exitMaterializationIndex: number;
-}>;
-
-export type JitMaterializationPlacement = Readonly<{
-  instructionIndex: number;
-  opIndex: number;
-  exitIndex: number;
-  exitId: string;
-  reason: ExitReasonValue;
-  exitMaterializationIndex: number;
-}>;
-
-export type JitExitStoreMaterializationNeed = Readonly<{
-  purpose: "exitStore";
-  target: MaterializationTarget;
-  value: JitValue;
-  placement: JitMaterializationPlacement;
-  path: Path;
-}>;
-
-export type JitMaterializationNeed = JitExitStoreMaterializationNeed;
-
-export type JitExitMaterializationStore = ExitMaterializationStore;
+export type {
+  ExitStore,
+  ExitStorePlan,
+  ExitStoreSet,
+  PlannedExit,
+  StoreTarget
+} from "./exit-stores.js";
+export type {
+  JitExitStoreUse,
+  JitExitStoreUsePlacement
+} from "./value-uses.js";
 
 export type JitInstructionState = Readonly<{
   instructionId: string;
@@ -64,16 +41,12 @@ export type JitInstructionState = Readonly<{
   exitCount: number;
 }>;
 
-export type JitExitMaterializationPlan = Readonly<{
-  stores: readonly JitExitMaterializationStore[];
-}>;
-
 export type JitCodegenPlan = Readonly<{
   block: JitBlock;
   instructionStates: readonly JitInstructionState[];
   effects: readonly Effect<PlannedExit>[];
   exits: readonly PlannedExit[];
-  materializationNeeds: readonly JitMaterializationNeed[];
-  exitMaterializations: readonly JitExitMaterializationPlan[];
-  maxExitMaterializationIndex: number;
+  exitStoreUses: readonly JitExitStoreUse[];
+  exitStoreSets: readonly ExitStoreSet[];
+  maxExitStoreIndex: number;
 }>;

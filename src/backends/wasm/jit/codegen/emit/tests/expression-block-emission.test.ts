@@ -58,7 +58,8 @@ test("JIT production emission consumes planned effects from instruction plans", 
     reason: ExitReason.HOST_TRAP,
     payload: { kind: "runtime", source: "hostTrapVector" },
     path: rootPath(),
-    exitMaterializationIndex: 0
+    stores: [],
+    exitStoreIndex: 0
   } as const;
 
   emitJitBlock({
@@ -400,12 +401,12 @@ function emitPlannedJitBlock(block: JitBlock) {
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
   const valueCache = createJitValueCacheRuntime(body, emissionPlan.valueCachePlan);
-  const state = createJitState(body, emissionPlan.exitMaterializations, { valueCache });
-  const exit = { exitLocal, exitLabelDepth: state.maxExitMaterializationIndex };
+  const state = createJitState(body, emissionPlan.exitStoreSets, { valueCache });
+  const exit = { exitLocal, exitLabelDepth: state.maxExitStoreIndex };
 
   state.emitLoadInstructionCount();
 
-  for (let index = 0; index <= state.maxExitMaterializationIndex; index += 1) {
+  for (let index = 0; index <= state.maxExitStoreIndex; index += 1) {
     body.block();
   }
 
@@ -419,10 +420,10 @@ function emitPlannedJitBlock(block: JitBlock) {
     valueCache
   });
 
-  for (let index = state.maxExitMaterializationIndex; index >= 0; index -= 1) {
+  for (let index = state.maxExitStoreIndex; index >= 0; index -= 1) {
     body.endBlock();
-    state.emitExitMaterializationStores(index);
-    state.releaseExitMaterialization(index);
+    state.emitExitStores(index);
+    state.releaseExitStores(index);
     body.localGet(exitLocal).returnFromFunction();
   }
 

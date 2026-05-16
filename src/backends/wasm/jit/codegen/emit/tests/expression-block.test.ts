@@ -249,7 +249,7 @@ function emitFoundationBlock(
           expressionBlock,
           valueTimeline,
           expressionPaths: rootExpressionPaths(expressionBlock),
-          materializationUses: new Map()
+          extraUses: new Map()
         }])
       );
   const valueCache = createJitValueCacheRuntime(body, cachePlan);
@@ -442,7 +442,8 @@ function fakeExit(opIndex: number, kind: PlannedExit["kind"]): PlannedExit {
     visibleEip: { kind: "static", value: 0 },
     payload: { kind: "static", value: 0 },
     path,
-    exitMaterializationIndex: 0
+    stores: [],
+    exitStoreIndex: 0
   };
 }
 

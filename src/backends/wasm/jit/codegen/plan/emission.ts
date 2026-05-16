@@ -14,8 +14,8 @@ import {
 } from "#backends/wasm/jit/analysis/timeline.js";
 import type {
   JitCodegenPlan,
-  JitExitMaterializationPlan,
-  JitMaterializationNeed,
+  ExitStoreSet,
+  JitExitStoreUse,
   JitInstructionState,
   PlannedExit
 } from "./types.js";
@@ -59,9 +59,9 @@ export type JitCodegenInstructionPlan =
 export type JitCodegenEmissionPlan = Readonly<{
   instructions: readonly JitCodegenInstructionPlan[];
   exits: readonly PlannedExit[];
-  materializationNeeds: readonly JitMaterializationNeed[];
-  exitMaterializations: readonly JitExitMaterializationPlan[];
-  maxExitMaterializationIndex: number;
+  exitStoreUses: readonly JitExitStoreUse[];
+  exitStoreSets: readonly ExitStoreSet[];
+  maxExitStoreIndex: number;
   plannedEffects: readonly JitPlannedEffect[];
   plannedValueUses: readonly JitPlannedValueUse[];
   plannedValueCaptures: readonly JitPlannedValueCapture[];
@@ -81,7 +81,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
   const plannedEffects = planJitEffectsForEmission(
     preparedInstructions,
     codegenPlan.effects,
-    codegenPlan.materializationNeeds
+    codegenPlan.exitStoreUses
   );
   const plannedValues = planJitValuesForEmission(
     preparedInstructions,
@@ -91,9 +91,9 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
   return {
     instructions: plannedValues.instructions,
     exits: codegenPlan.exits,
-    materializationNeeds: codegenPlan.materializationNeeds,
-    exitMaterializations: codegenPlan.exitMaterializations,
-    maxExitMaterializationIndex: codegenPlan.maxExitMaterializationIndex,
+    exitStoreUses: codegenPlan.exitStoreUses,
+    exitStoreSets: codegenPlan.exitStoreSets,
+    maxExitStoreIndex: codegenPlan.maxExitStoreIndex,
     plannedEffects: plannedEffects.plannedEffects,
     plannedValueUses: plannedValues.plannedValueUses,
     plannedValueCaptures: plannedValues.plannedValueCaptures,

@@ -24,7 +24,7 @@ export function slotsReadByValueForMask(
 
   collectSlotsReadByValueForMask(
     simplifyValue(value),
-    normalizeU32Mask(requiredMask, "required materialization mask"),
+    normalizeU32Mask(requiredMask, "required value mask"),
     slots
   );
   return [...slots.values()];

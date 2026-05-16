@@ -3,20 +3,19 @@ import { analyzeJitCodegenState } from "./state-plan.js";
 import type { JitCodegenPlan } from "./types.js";
 
 export type {
-  ExitMaterializationStore,
   Exit,
   ExitPayload,
   ExitRuntimeSource,
   ExitSnapshot,
   ExitValue,
+  ExitStore,
+  ExitStorePlan,
+  ExitStoreSet,
+  JitExitStoreUse,
+  JitExitStoreUsePlacement,
   PlannedExit,
-  JitExitMaterializationPlan,
-  JitExitMaterializationStore,
-  JitExitStoreMaterializationNeed,
   JitInstructionState,
-  JitMaterializationNeed,
-  JitMaterializationPlacement,
-  MaterializationTarget,
+  StoreTarget,
   JitCodegenPlan
 } from "./types.js";
 export type {

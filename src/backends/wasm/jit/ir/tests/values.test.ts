@@ -290,7 +290,7 @@ test("JIT produced-value indexing assigns ids to effectful get results only", ()
   );
 });
 
-test("JitValue dependency and materialization-slot walking includes nested flag inputs", () => {
+test("JitValue dependency and slot walking includes nested flag inputs", () => {
   const ebx = jitInputReg32Value("ebx");
   const ecx = jitInputReg32Value("ecx");
   const edx = jitInputReg32Value("edx");
@@ -317,7 +317,7 @@ test("JitValue dependency and materialization-slot walking includes nested flag 
   strictEqual(valueCost(producer) > valueCost(lea), true);
 });
 
-test("JitValue masked materialization-slot walking follows required bits", () => {
+test("JitValue masked slot walking follows required bits", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const insertedLowWord = jitInsertBits(eax, ebx, 0, 16);

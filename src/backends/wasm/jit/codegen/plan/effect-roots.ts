@@ -10,13 +10,13 @@ import {
   type Path,
   type PathMap
 } from "#backends/wasm/jit/analysis/paths.js";
-import type { JitMaterializationNeed } from "./types.js";
 import {
   opView,
   type Timeline
 } from "#backends/wasm/jit/analysis/timeline.js";
 import type {
   JitExpressionValueUseRoot,
+  JitExitStoreUse,
   JitJitValueUseRoot,
   JitValueUsePlacement
 } from "./value-uses.js";
@@ -105,10 +105,10 @@ export function jitEffectValueRootsForOp(
   }
 }
 
-export function jitEffectValueRootForMaterializationNeed(
-  need: JitMaterializationNeed
+export function jitEffectValueRootForExitStoreUse(
+  use: JitExitStoreUse
 ): JitEffectValueRoot {
-  return jitValueRoot(need.value, need.path, "exitStore");
+  return jitValueRoot(use.value, use.path, "exitStore");
 }
 
 function storageAddressRoots(

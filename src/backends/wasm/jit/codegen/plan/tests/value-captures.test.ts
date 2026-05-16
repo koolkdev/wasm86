@@ -83,7 +83,7 @@ test("JIT cache value uses carry flattened dependency ancestry for cache selecti
     expressionBlock,
     valueTimeline: timeline,
     expressionPaths: defaultExpressionPaths(expressionBlock),
-    materializationUses: new Map()
+    extraUses: new Map()
   }]);
   const rootUse = uses.find((use) => valuesEqual(use.value, expectedRoot));
   const cacheUses = uses.flatMap((use) => cacheSelectionUsesForPlannedUse(use));
@@ -164,7 +164,7 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
     expressions: expressionBlock,
     entry: createJitValueState().snapshot()
   });
-  const materializationUses = new Map([[
+  const extraUses = new Map([[
     0,
     [
       { value, path: branchPath(0, 0, "taken"), purpose: "exitStore" },
@@ -175,7 +175,7 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
     expressionBlock,
     valueTimeline: timeline,
     expressionPaths: defaultExpressionPaths(expressionBlock),
-    materializationUses
+    extraUses
   }]);
   const cachePlan = planJitValueCache({
     operands: [],
@@ -206,7 +206,7 @@ function planCapturesForExpressionBlock(
     expressionBlock,
     valueTimeline: timeline,
     expressionPaths: defaultExpressionPaths(expressionBlock),
-    materializationUses: new Map()
+    extraUses: new Map()
   }]);
   const cachePlan = planJitValueCache({
     operands: [],

@@ -182,7 +182,7 @@ function emitJitLinkedControlTransferStateStores(
   exit: PlannedExit
 ): void {
   context.exit.emitBeforeExit?.();
-  context.state.emitExitMaterializationStores(exit.exitMaterializationIndex);
+  context.state.emitExitStores(exit.exitStoreIndex);
 }
 
 function staticControlTarget(context: JitInstructionEmitContext, target: IrValueExpr): number | undefined {

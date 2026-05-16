@@ -11,8 +11,8 @@ import {
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import type {
-  JitExitMaterializationStore,
-  MaterializationTarget
+  ExitStore,
+  StoreTarget
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import { emitJitValue } from "./jit-values.js";
 import type {
@@ -27,12 +27,12 @@ import type {
 } from "#backends/wasm/jit/ir/values/types.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 
-export type JitCapturedExitMaterializationStore = Readonly<{
-  store: JitExitMaterializationStore;
-  source?: JitCapturedExitStoreSource;
+export type CapturedExitStore = Readonly<{
+  store: ExitStore;
+  source?: CapturedExitStoreSource;
 }>;
 
-type JitCapturedExitStoreSource = Readonly<{
+type CapturedExitStoreSource = Readonly<{
   kind: "cache";
   local: number;
   valueWidth: ValueWidth;
@@ -48,35 +48,35 @@ export type JitExitStoreEmitContext = Readonly<{
   valueCache?: JitValueCacheRuntime | undefined;
 }>;
 
-export function captureJitExitMaterializationStores(
+export function captureExitStores(
   context: JitExitStoreEmitContext,
-  stores: readonly JitExitMaterializationStore[]
-): readonly JitCapturedExitMaterializationStore[] | undefined {
+  stores: readonly ExitStore[]
+): readonly CapturedExitStore[] | undefined {
   if (stores.length === 0) {
     return undefined;
   }
 
-  const previousTargets: MaterializationTarget[] = [];
+  const previousTargets: StoreTarget[] = [];
 
   return stores.map((store) => {
-    const captured = captureJitExitMaterializationStore(context, store, previousTargets);
+    const captured = captureJitExitStore(context, store, previousTargets);
 
     previousTargets.push(store.target);
     return captured;
   });
 }
 
-export function emitJitExitMaterializationStores(
+export function emitExitStores(
   context: JitExitStoreEmitContext,
-  stores: readonly JitCapturedExitMaterializationStore[]
+  stores: readonly CapturedExitStore[]
 ): void {
   for (const store of stores) {
-    emitJitExitMaterializationStore(context, store);
+    emitJitExitStore(context, store);
   }
 }
 
-export function releaseJitExitMaterializationStores(
-  stores: readonly JitCapturedExitMaterializationStore[]
+export function releaseExitStores(
+  stores: readonly CapturedExitStore[]
 ): void {
   for (const store of stores) {
     if (store.source?.kind === "cache") {
@@ -85,11 +85,11 @@ export function releaseJitExitMaterializationStores(
   }
 }
 
-function captureJitExitMaterializationStore(
+function captureJitExitStore(
   context: JitExitStoreEmitContext,
-  store: JitExitMaterializationStore,
-  previousTargets: readonly MaterializationTarget[]
-): JitCapturedExitMaterializationStore {
+  store: ExitStore,
+  previousTargets: readonly StoreTarget[]
+): CapturedExitStore {
   const captured = context.valueCache?.captureForReuse(
     store.value,
     () => emitJitExitStoreSourceValue(context, store.value)
@@ -114,7 +114,7 @@ function captureJitExitMaterializationStore(
   }
 
   if (value.kind === "produced") {
-    throw new Error("JIT produced exit store value was not captured before exit materialization");
+    throw new Error("JIT produced exit store value was not captured before exit store emission");
   }
 
   if (!exitStoreSourceNeedsTemporaryLocal(value, previousTargets)) {
@@ -137,7 +137,7 @@ function captureJitExitMaterializationStore(
 
 function exitStoreSourceNeedsTemporaryLocal(
   value: JitValue,
-  previousTargets: readonly MaterializationTarget[]
+  previousTargets: readonly StoreTarget[]
 ): boolean {
   if (previousTargets.length === 0) {
     return false;
@@ -146,7 +146,7 @@ function exitStoreSourceNeedsTemporaryLocal(
   const sourceSlots = slotsReadByValueForMask(value, 0xffff_ffff);
 
   return previousTargets.some((target) => {
-    const targetSlot = materializationTargetSlot(target);
+    const targetSlot = storeTargetSlot(target);
 
     return targetSlot !== undefined && sourceSlots.some((slot) =>
       jitArchitecturalSlotsEqual(slot, targetSlot)
@@ -154,7 +154,7 @@ function exitStoreSourceNeedsTemporaryLocal(
   });
 }
 
-function materializationTargetSlot(target: MaterializationTarget): JitArchitecturalSlot | undefined {
+function storeTargetSlot(target: StoreTarget): JitArchitecturalSlot | undefined {
   switch (target.kind) {
     case "reg32":
       return { kind: "reg32", reg: target.reg };
@@ -178,9 +178,9 @@ function jitArchitecturalSlotsEqual(left: JitArchitecturalSlot, right: JitArchit
   }
 }
 
-function emitJitExitMaterializationStore(
+function emitJitExitStore(
   context: JitExitStoreEmitContext,
-  capturedStore: JitCapturedExitMaterializationStore
+  capturedStore: CapturedExitStore
 ): void {
   const { target, value } = capturedStore.store;
 
@@ -195,8 +195,8 @@ function emitJitExitMaterializationStore(
 function emitCapturedOrInlineStoreSource(
   context: JitExitStoreEmitContext,
   value: JitValue,
-  source: JitCapturedExitStoreSource | undefined,
-  target: MaterializationTarget
+  source: CapturedExitStoreSource | undefined,
+  target: StoreTarget
 ): ValueWidth {
   if (source !== undefined) {
     context.body.localGet(source.local);
@@ -229,7 +229,7 @@ function emitJitExitStoreSourceValue(
 
 function emitJitStoreTarget(
   body: WasmFunctionBodyEncoder,
-  target: MaterializationTarget,
+  target: StoreTarget,
   emitValue: () => void
 ): void {
   switch (target.kind) {
