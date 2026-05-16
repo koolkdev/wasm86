@@ -4,8 +4,7 @@ import type { JitModuleLinkTable } from "#backends/wasm/jit/compiled-blocks/modu
 import {
   cleanValueWidth,
   emitCleanValueForFullUse,
-  type ValueWidth,
-  type WasmIrEmitValueOptions
+  type ValueWidth
 } from "#backends/wasm/codegen/value-width.js";
 import {
   emitJitConditionalJump,
@@ -23,12 +22,13 @@ import type {
   EffectsPlan
 } from "#backends/wasm/jit/codegen/plan/effect-types.js";
 import { opView, type OpView } from "#backends/wasm/jit/analysis/timeline.js";
-import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
+import { createInputSlotEmitter } from "./input-slots.js";
 import {
-  emitJitValue,
-  emitJitValueWithoutRootCache,
-  type JitValueEmitContext
-} from "./jit-values.js";
+  createValueEmitter,
+  unavailableProducedEmitter,
+  type ValueEmitOptions,
+  type ValueEmitter
+} from "./values.js";
 import {
   emitWasmIrGuardGuestRange,
   emitWasmIrLoadGuestUnchecked,
@@ -36,6 +36,7 @@ import {
 } from "#backends/wasm/codegen/memory.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { ExitReason } from "#backends/wasm/exit.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 
 export type JitInstructionContext = JitCodegenInstructionPlan;
 
@@ -69,7 +70,7 @@ export type JitInstructionEmitContext = Readonly<{
   selectInstruction(index: number): void;
   currentInstruction(): JitInstructionContext;
   beginOp(opIndex: number): OpView;
-  jitValueEmitContext(): JitValueEmitContext;
+  values: ValueEmitter;
   advanceInstruction(): void;
   valueCache?: ValueCache | undefined;
   linking?: JitLinkEmitContext | undefined;
@@ -92,6 +93,12 @@ export function emitJitBlock(context: JitBlockEmitContext): void {
 
 function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstructionEmitContext {
   let instructionIndex = 0;
+  const values = createValueEmitter({
+    body: context.body,
+    cache: context.valueCache,
+    inputs: createInputSlotEmitter(context.body),
+    produced: unavailableProducedEmitter()
+  });
 
   return {
     body: context.body,
@@ -128,13 +135,7 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
       context.valueCache?.beginOp(opIndex);
       return timelineOp;
     },
-    jitValueEmitContext: () => ({
-      body: context.body,
-      valueCache: context.valueCache,
-      emitInput: (slot) => emitJitInputSlot(context.body, slot),
-      emitInputBits: (slot, bitOffset, width, signed) =>
-        emitJitInputSlotBits(context.body, slot, bitOffset, width, signed)
-    }),
+    values,
     advanceInstruction: () => {
       instructionIndex += 1;
     }
@@ -269,10 +270,10 @@ function signedLoadValueWidth(width: 8 | 16 | 32, signed: boolean): ValueWidth {
 
 function emitEffectValue(
   context: JitInstructionEmitContext,
-  value: Parameters<typeof emitJitValue>[1],
-  options: WasmIrEmitValueOptions = {}
+  value: JitValue,
+  options: ValueEmitOptions = {}
 ): ValueWidth {
-  return emitJitValue(context.jitValueEmitContext(), value, options);
+  return context.values.emit(value, options);
 }
 
 function captureValues(
@@ -288,7 +289,7 @@ function captureValues(
 
     const captured = context.valueCache?.capture(
       capture.value,
-      () => emitJitValueWithoutRootCache(context.jitValueEmitContext(), capture.value)
+      () => context.values.emitInline(capture.value)
     );
 
     captured?.release();

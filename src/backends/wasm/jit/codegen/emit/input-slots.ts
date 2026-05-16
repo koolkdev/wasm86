@@ -13,8 +13,17 @@ import {
   jitRegisterSlotAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
 import type { OperandWidth } from "#x86/isa/types.js";
+import type { InputEmitter } from "./values.js";
 
-export function emitJitInputSlot(body: WasmFunctionBodyEncoder, slot: JitArchitecturalSlot): ValueWidth {
+export function createInputSlotEmitter(body: WasmFunctionBodyEncoder): InputEmitter {
+  return {
+    emit: (slot) => emitInputSlot(body, slot),
+    emitBits: (slot, bitOffset, width, signed) =>
+      emitInputSlotBits(body, slot, bitOffset, width, signed)
+  };
+}
+
+export function emitInputSlot(body: WasmFunctionBodyEncoder, slot: JitArchitecturalSlot): ValueWidth {
   switch (slot.kind) {
     case "reg32":
       emitLoadStateU32(body, stateOffset[slot.reg]);
@@ -37,7 +46,7 @@ export function emitJitInputSlot(body: WasmFunctionBodyEncoder, slot: JitArchite
   }
 }
 
-export function emitJitInputSlotBits(
+export function emitInputSlotBits(
   body: WasmFunctionBodyEncoder,
   slot: JitArchitecturalSlot,
   bitOffset: number,

@@ -6,7 +6,6 @@ import type { Path } from "#backends/wasm/jit/analysis/paths.js";
 import type { Effect } from "#backends/wasm/jit/codegen/plan/effect-types.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitInstructionEmitContext } from "./block-emitter.js";
-import { emitJitValue } from "./jit-values.js";
 
 export function emitJitNext(
   context: JitInstructionEmitContext,
@@ -40,7 +39,7 @@ export function emitJitControlExit(
   const targetLocal = context.scratch.allocLocal(wasmValueType.i32);
 
   try {
-    emitJitValue(context.jitValueEmitContext(), target, { requestedWidth: 32 });
+    context.values.emit(target, { requestedWidth: 32 });
     context.body.localSet(targetLocal);
 
     context.state.commitInstructionExit(exit, () => {
@@ -57,7 +56,7 @@ export function emitJitConditionalJump(
   context: JitInstructionEmitContext,
   effect: Extract<Effect, { kind: "branch" }>
 ): void {
-  emitJitValue(context.jitValueEmitContext(), effect.condition, { requestedWidth: 32 });
+  context.values.emit(effect.condition, { requestedWidth: 32 });
   context.body.ifBlock();
   emitJitControlTransfer(context, effect.takenTarget, effect.taken, 1);
   context.body.elseBlock();
@@ -73,7 +72,7 @@ export function emitJitHostTrap(
 
   try {
     emitWithValuePath(context, effect.exit.path, () => {
-      emitJitValue(context.jitValueEmitContext(), effect.vector, { requestedWidth: 32 });
+      context.values.emit(effect.vector, { requestedWidth: 32 });
       context.body.localSet(vectorLocal);
       context.state.commitInstructionExit(effect.exit);
       context.body.localGet(vectorLocal);

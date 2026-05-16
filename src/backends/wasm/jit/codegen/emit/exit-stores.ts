@@ -11,9 +11,10 @@ import {
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import type { PlannedExitStore } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
-  emitJitValue,
-  emitJitValueWithoutRootCache
-} from "./jit-values.js";
+  createValueEmitter,
+  unavailableProducedEmitter,
+  type ValueEmitter
+} from "./values.js";
 import type {
   CachedHandle,
   ValueCache
@@ -26,7 +27,7 @@ import type {
   JitArchitecturalSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
+import { createInputSlotEmitter } from "./input-slots.js";
 
 export type CapturedExitStore = Readonly<{
   store: PlannedExitStore;
@@ -155,15 +156,19 @@ function emitJitExitStoreSourceValue(
   requireFullWidth = false,
   cacheRoot = true
 ): ValueWidth {
-  const emit = cacheRoot ? emitJitValue : emitJitValueWithoutRootCache;
+  const values = createExitStoreValueEmitter(context);
+  const emit = cacheRoot ? values.emit : values.emitInline;
 
-  return emit({
+  return emit(value, requireFullWidth ? { requestedWidth: 32 } : {});
+}
+
+function createExitStoreValueEmitter(context: JitExitStoreEmitContext): ValueEmitter {
+  return createValueEmitter({
     body: context.body,
-    valueCache: context.valueCache,
-    emitInput: (slot) => emitJitInputSlot(context.body, slot),
-    emitInputBits: (slot, bitOffset, width, signed) =>
-      emitJitInputSlotBits(context.body, slot, bitOffset, width, signed)
-  }, value, requireFullWidth ? { requestedWidth: 32 } : {});
+    cache: context.valueCache,
+    inputs: createInputSlotEmitter(context.body),
+    produced: unavailableProducedEmitter()
+  });
 }
 
 function emitJitStoreTarget(

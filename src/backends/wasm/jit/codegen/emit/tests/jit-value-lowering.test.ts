@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -22,21 +22,22 @@ import {
 } from "#backends/wasm/jit/ir/values/builders.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type {
-  JitCanonicalInputSlot,
+  JitArchitecturalSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import {
-  emitJitValue,
-  emitJitValueWithoutRootCache
-} from "#backends/wasm/jit/codegen/emit/jit-values.js";
+  createValueEmitter,
+  unavailableProducedEmitter,
+  type InputEmitter,
+  type ValueEmitContext
+} from "#backends/wasm/jit/codegen/emit/values.js";
 import {
-  emitJitInputSlot,
-  emitJitInputSlotBits
+  emitInputSlot,
+  emitInputSlotBits
 } from "#backends/wasm/jit/codegen/emit/input-slots.js";
 import {
   jitRegisterSlotAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
-import type { Reg32 } from "#x86/isa/types.js";
 import type { ValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
 import {
   LocalStore,
@@ -44,7 +45,7 @@ import {
   captureWithLocalStore
 } from "./value-local-store-test-helpers.js";
 
-test("emitJitValue lowers register bit insertion directly to Wasm", () => {
+test("ValueEmitter lowers register bit insertion directly to Wasm", () => {
   const opcodes = emitSymbolicValue(
     jitInsertBits(jitInputReg32Value("eax"), c32(0x7f), 8, 8)
   );
@@ -55,7 +56,7 @@ test("emitJitValue lowers register bit insertion directly to Wasm", () => {
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Or), 1);
 });
 
-test("emitJitValue lowers every non-produced JitValue kind", () => {
+test("ValueEmitter lowers every non-produced JitValue kind", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const producer = jitFlagProducerValue("add", {
@@ -83,13 +84,46 @@ test("emitJitValue lowers every non-produced JitValue kind", () => {
   }
 });
 
-test("emitJitValue lowers shl binary values to Wasm shift-left", () => {
+test("ValueEmitter lowers produced values through ProducedEmitter", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const produced = jitProducedValue("load#direct-produced:0:1", "i32");
+  let emitted = false;
+
+  const valueWidth = createValueEmitter({
+    ...bodyContext(body),
+    produced: {
+      emit: (value) => {
+        strictEqual(value, produced);
+        emitted = true;
+        body.i32Const(0x1234);
+        return cleanValueWidth(32);
+      }
+    }
+  }).emit(produced);
+  body.end();
+
+  strictEqual(emitted, true);
+  strictEqual(valueWidth.cleanWidth, 32);
+  strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Const), 1);
+});
+
+test("ValueEmitter fails produced values when unavailable", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const produced = jitProducedValue("load#missing-produced:0:1", "i32");
+
+  throws(
+    () => createValueEmitter(bodyContext(body)).emit(produced),
+    /produced JIT value is not available for lowering: load#missing-produced:0:1/
+  );
+});
+
+test("ValueEmitter lowers shl binary values to Wasm shift-left", () => {
   const opcodes = emitSymbolicValue(shl(jitInputReg32Value("ecx"), c32(2)));
 
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Shl), 1);
 });
 
-test("emitJitValue lowers symbolic flag producers with existing flag-bit logic", () => {
+test("ValueEmitter lowers symbolic flag producers with existing flag-bit logic", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const producer = jitFlagProducerValue("sub", {
@@ -103,7 +137,7 @@ test("emitJitValue lowers symbolic flag producers with existing flag-bit logic",
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Popcnt) >= 1, true);
 });
 
-test("emitJitValue reports flag producer width from its mask", () => {
+test("ValueEmitter reports flag producer width from its mask", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const producer = jitFlagProducerValue("sub", {
@@ -117,14 +151,15 @@ test("emitJitValue reports flag producer width from its mask", () => {
   strictEqual(valueWidth.cleanWidth, cleanWidthForMask(IR_ALU_FLAG_MASK));
 });
 
-test("emitJitValue does not bypass a selected input dependency for direct slice lowering", () => {
+test("ValueEmitter does not bypass a selected input dependency for direct slice lowering", () => {
   const body = new WasmFunctionBodyEncoder();
   const root = jitInputReg32Value("eax");
+  const context = bodyContext(body);
   let selectedRootUseCount = 0;
 
-  emitJitValue({
-    ...bodyContext(body),
-    valueCache: passthroughValueCache({
+  createValueEmitter({
+    ...context,
+    cache: passthroughValueCache({
       emitForUse: (value, emitter) => {
         if (value.kind === "input") {
           selectedRootUseCount += 1;
@@ -134,23 +169,27 @@ test("emitJitValue does not bypass a selected input dependency for direct slice 
       },
       canInline: (value) => value.kind !== "input"
     }),
-    emitInputBits: () => {
-      throw new Error("direct input bits should not bypass selected input dependency");
+    inputs: {
+      ...context.inputs,
+      emitBits: () => {
+        throw new Error("direct input bits should not bypass selected input dependency");
+      }
     }
-  }, jitExtractBits(root, 8, 8));
+  }).emit(jitExtractBits(root, 8, 8));
   body.end();
 
   strictEqual(selectedRootUseCount, 1);
 });
 
-test("emitJitValue does not bypass a selected slice root for signed direct lowering", () => {
+test("ValueEmitter does not bypass a selected slice root for signed direct lowering", () => {
   const body = new WasmFunctionBodyEncoder();
   const root = jitExtractBits(jitInputReg32Value("eax"), 0, 8);
+  const context = bodyContext(body);
   let selectedRootUseCount = 0;
 
-  emitJitValue({
-    ...bodyContext(body),
-    valueCache: passthroughValueCache({
+  createValueEmitter({
+    ...context,
+    cache: passthroughValueCache({
       emitForUse: (value, emitter) => {
         if (value.kind === "extractBits") {
           selectedRootUseCount += 1;
@@ -162,17 +201,20 @@ test("emitJitValue does not bypass a selected slice root for signed direct lower
       },
       canInline: (value) => value.kind !== "extractBits"
     }),
-    emitInputBits: () => {
-      throw new Error("direct input bits should not bypass selected slice root");
+    inputs: {
+      ...context.inputs,
+      emitBits: () => {
+        throw new Error("direct input bits should not bypass selected slice root");
+      }
     }
-  }, extend8s(root));
+  }).emit(extend8s(root));
   body.end();
 
   strictEqual(selectedRootUseCount, 1);
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Extend8S), 1);
 });
 
-test("emitJitValue returns signed direct slices without a second sign extension", () => {
+test("ValueEmitter returns signed direct slices without a second sign extension", () => {
   const opcodes = emitSymbolicValueResult({
     kind: "value.unary",
     type: "i32",
@@ -188,12 +230,12 @@ test("emitJitValue returns signed direct slices without a second sign extension"
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Extend8S), 0);
 });
 
-test("emitJitValue lowers signed input slot slices to signed state loads", () => {
+test("ValueEmitter lowers signed input slot slices to signed state loads", () => {
   const byteOpcodes = emitSymbolicValueResult(extend8s(jitExtractBits(jitInputReg32Value("eax"), 0, 8)), {
-    emitInputBits: emitJitInputSlotBits
+    emitInputBits: emitInputSlotBits
   }).opcodes;
   const wordOpcodes = emitSymbolicValueResult(extend16s(jitExtractBits(jitInputReg32Value("eax"), 0, 16)), {
-    emitInputBits: emitJitInputSlotBits
+    emitInputBits: emitInputSlotBits
   }).opcodes;
 
   strictEqual(countOpcode(byteOpcodes, wasmOpcode.i32Load8S), 1);
@@ -202,11 +244,11 @@ test("emitJitValue lowers signed input slot slices to signed state loads", () =>
   strictEqual(countOpcode(wordOpcodes, wasmOpcode.i32Extend16S), 0);
 });
 
-test("emitJitInputSlot lowers IR register alias slots to narrow state loads", () => {
+test("emitInputSlot lowers IR register alias slots to narrow state loads", () => {
   const body = new WasmFunctionBodyEncoder();
 
-  const wordWidth = emitJitInputSlot(body, { kind: "reg16", reg: "ax" });
-  const byteWidth = emitJitInputSlot(body, { kind: "reg8", reg: "ah" });
+  const wordWidth = emitInputSlot(body, { kind: "reg16", reg: "ax" });
+  const byteWidth = emitInputSlot(body, { kind: "reg8", reg: "ah" });
   body.end();
 
   const opcodes = wasmBodyOpcodes(body.encode());
@@ -217,9 +259,9 @@ test("emitJitInputSlot lowers IR register alias slots to narrow state loads", ()
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Load8U), 1);
 });
 
-test("emitJitInputSlotBits rejects slices that extend past a register slot", () => {
+test("emitInputSlotBits rejects slices that extend past a register slot", () => {
   const body = new WasmFunctionBodyEncoder();
-  const valueWidth = emitJitInputSlotBits(body, { kind: "reg32", reg: "eax" }, 24, 16, false);
+  const valueWidth = emitInputSlotBits(body, { kind: "reg32", reg: "eax" }, 24, 16, false);
 
   body.end();
 
@@ -227,9 +269,9 @@ test("emitJitInputSlotBits rejects slices that extend past a register slot", () 
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Load16U), 0);
 });
 
-test("emitJitInputSlotBits rejects non-register slots for slice access", () => {
+test("emitInputSlotBits rejects non-register slots for slice access", () => {
   const body = new WasmFunctionBodyEncoder();
-  const valueWidth = emitJitInputSlotBits(body, { kind: "aluFlags" }, 0, 8, false);
+  const valueWidth = emitInputSlotBits(body, { kind: "aluFlags" }, 0, 8, false);
 
   body.end();
 
@@ -237,7 +279,7 @@ test("emitJitInputSlotBits rejects non-register slots for slice access", () => {
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Load8U), 0);
 });
 
-test("emitJitValue lowers flag conditions from producer inputs when possible", () => {
+test("ValueEmitter lowers flag conditions from producer inputs when possible", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const producer = jitFlagProducerValue("sub", {
@@ -252,7 +294,7 @@ test("emitJitValue lowers flag conditions from producer inputs when possible", (
   strictEqual(countOpcode(opcodes, wasmOpcode.i32And), 0);
 });
 
-test("emitJitValue routes flag conditions through inserted masked flag bits", () => {
+test("ValueEmitter routes flag conditions through inserted masked flag bits", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const producer = jitFlagProducerValue("sub", {
@@ -268,7 +310,7 @@ test("emitJitValue routes flag conditions through inserted masked flag bits", ()
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Or), 0);
 });
 
-test("emitJitValue routes flag conditions through preserved masked flag bits", () => {
+test("ValueEmitter routes flag conditions through preserved masked flag bits", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const producer = jitFlagProducerValue("sub", {
@@ -284,7 +326,7 @@ test("emitJitValue routes flag conditions through preserved masked flag bits", (
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Or), 0);
 });
 
-test("emitJitValue routes split flag conditions through nested masked producers", () => {
+test("ValueEmitter routes split flag conditions through nested masked producers", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const ecx = jitInputReg32Value("ecx");
@@ -307,7 +349,7 @@ test("emitJitValue routes split flag conditions through nested masked producers"
   strictEqual(countOpcode(opcodes, wasmOpcode.i32LtU), 1);
 });
 
-test("emitJitValue lowers flag conditions from symbolic aluFlags values", () => {
+test("ValueEmitter lowers flag conditions from symbolic aluFlags values", () => {
   const opcodes = emitSymbolicValue(jitFlagConditionValue(jitInputAluFlagsValue(), "E"));
 
   strictEqual(countOpcode(opcodes, wasmOpcode.localGet), 1);
@@ -330,10 +372,11 @@ test("LocalStore cache keys support canonical symbolic nodes", () => {
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localTee, wasmOpcode.localGet]);
 });
 
-test("emitJitValue lowers produced values through retained locals", () => {
+test("ValueEmitter lowers produced values through retained locals", () => {
   const body = new WasmFunctionBodyEncoder();
   const produced = jitProducedValue("load#0:0:1", "i32");
   const store = new LocalStore(body);
+  const context = bodyContext(body);
   const captured = captureWithLocalStore(store, produced, () => {
     body.i32Const(0x1234);
     return cleanValueWidth(32);
@@ -343,9 +386,9 @@ test("emitJitValue lowers produced values through retained locals", () => {
     throw new Error("expected produced value capture");
   }
 
-  const valueWidth = emitJitValue({
-    ...bodyContext(body),
-    valueCache: {
+  const valueWidth = createValueEmitter({
+    ...context,
+    cache: {
       emitForUse: (value, emitter) => emitWithLocalStore(store, value, emitter),
       capture: (value, emitter) => captureWithLocalStore(store, value, emitter),
       canInline: () => true,
@@ -354,8 +397,8 @@ test("emitJitValue lowers produced values through retained locals", () => {
       enterPath: () => {},
       leavePath: () => {}
     },
-    emitProduced: () => unexpectedEmitter()
-  }, produced);
+    produced: { emit: () => unexpectedEmitter() }
+  }).emit(produced);
 
   body.end();
 
@@ -363,16 +406,17 @@ test("emitJitValue lowers produced values through retained locals", () => {
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localGet]);
 });
 
-test("emitJitValueWithoutRootCache suppresses only the root cache use", () => {
+test("ValueEmitter.emitInline suppresses only the root cache use", () => {
   const body = new WasmFunctionBodyEncoder();
   const child = add(jitInputReg32Value("eax"), c32(1));
   const root = add(child, c32(2));
+  const context = bodyContext(body);
   let rootCacheUseCount = 0;
   let childCacheUseCount = 0;
 
-  emitJitValueWithoutRootCache({
-    ...bodyContext(body),
-    valueCache: passthroughValueCache({
+  createValueEmitter({
+    ...context,
+    cache: passthroughValueCache({
       emitForUse: (value, emitter) => {
         if (valuesEqual(value, root)) {
           rootCacheUseCount += 1;
@@ -387,7 +431,7 @@ test("emitJitValueWithoutRootCache suppresses only the root cache use", () => {
         return { valueWidth: emitter() };
       }
     })
-  }, root);
+  }).emitInline(root);
   body.end();
 
   const opcodes = wasmBodyOpcodes(body.encode());
@@ -400,7 +444,7 @@ test("emitJitValueWithoutRootCache suppresses only the root cache use", () => {
 type EmitSymbolicValueOptions = Readonly<{
   emitInputBits?(
     body: WasmFunctionBodyEncoder,
-    slot: JitCanonicalInputSlot,
+    slot: JitArchitecturalSlot,
     bitOffset: number,
     width: 8 | 16 | 32,
     signed: boolean
@@ -416,21 +460,33 @@ function emitSymbolicValueResult(
   options: EmitSymbolicValueOptions = {}
 ): Readonly<{ opcodes: readonly number[]; valueWidth: ValueWidth }> {
   const body = new WasmFunctionBodyEncoder();
-  const valueWidth = emitJitValue({
-    ...bodyContext(body),
-    ...(options.emitInputBits === undefined
-      ? {}
-      : {
-          emitInputBits: (slot, bitOffset, width, signed) =>
-            options.emitInputBits!(body, slot, bitOffset, width, signed)
-        })
-  }, value);
+  const context = bodyContext(body);
+  const valueWidth = createValueEmitter({
+    ...context,
+    inputs: testInputEmitter(body, context.inputs, options)
+  }).emit(value);
 
   body.end();
   return { opcodes: wasmBodyOpcodes(body.encode()), valueWidth };
 }
 
-function bodyContext(body: WasmFunctionBodyEncoder) {
+function testInputEmitter(
+  body: WasmFunctionBodyEncoder,
+  inputs: InputEmitter,
+  options: EmitSymbolicValueOptions
+): InputEmitter {
+  if (options.emitInputBits === undefined) {
+    return inputs;
+  }
+
+  return {
+    ...inputs,
+    emitBits: (slot, bitOffset, width, signed) =>
+      options.emitInputBits!(body, slot, bitOffset, width, signed)
+  };
+}
+
+function bodyContext(body: WasmFunctionBodyEncoder): ValueEmitContext {
   const locals = {
     eax: body.addLocal(wasmValueType.i32),
     ebx: body.addLocal(wasmValueType.i32),
@@ -445,29 +501,28 @@ function bodyContext(body: WasmFunctionBodyEncoder) {
 
   return {
     body,
-    emitInput: (slot: JitCanonicalInputSlot) => {
-      if (slot.kind === "aluFlags") {
-        body.localGet(locals.aluFlags);
-        return cleanValueWidth(32);
-      }
+    inputs: {
+      emit: (slot: JitArchitecturalSlot) => {
+        if (slot.kind === "aluFlags") {
+          body.localGet(locals.aluFlags);
+          return cleanValueWidth(32);
+        }
 
-      const alias = jitRegisterSlotAlias(slot);
+        const alias = jitRegisterSlotAlias(slot);
 
-      body.localGet(locals[alias.base]);
-      if (alias.bitOffset !== 0) {
-        body.i32Const(alias.bitOffset);
-        body.i32ShrU();
+        body.localGet(locals[alias.base]);
+        if (alias.bitOffset !== 0) {
+          body.i32Const(alias.bitOffset);
+          body.i32ShrU();
+        }
+        if (alias.width !== 32) {
+          body.i32Const(alias.width === 16 ? 0xffff : 0xff);
+          body.i32And();
+        }
+        return cleanValueWidth(alias.width);
       }
-      if (alias.width !== 32) {
-        body.i32Const(alias.width === 16 ? 0xffff : 0xff);
-        body.i32And();
-      }
-      return cleanValueWidth(alias.width);
     },
-    emitReg: (reg: Reg32) => {
-      body.localGet(locals[reg]);
-      return cleanValueWidth(32);
-    }
+    produced: unavailableProducedEmitter()
   };
 }
 
