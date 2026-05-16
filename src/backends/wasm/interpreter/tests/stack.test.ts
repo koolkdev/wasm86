@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
@@ -7,9 +7,11 @@ import {
   writeInterpreterState,
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
+import { ExitReason } from "#backends/wasm/exit.js";
 import { startAddress } from "#backends/wasm/tests/helpers.js";
 import {
   assertCompletedInstruction,
+  executeInstruction,
   assertSingleInstructionExit,
   instantiateWasmInterpreter,
   writeGuestBytes
@@ -103,6 +105,66 @@ test("executes POP ESP with popped value as final ESP", async () => {
 
   strictEqual(state.esp, 0x80);
   assertCompletedInstruction(state, startAddress + 1, 8);
+});
+
+test("executes POP r/m32 by writing the popped value to memory", async () => {
+  const initialState = createCpuState({
+    eax: 0x20,
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { interpreter, state } = await executeStackInstruction(
+    [0x8f, 0x00],
+    initialState,
+    (guest) => guest.setUint32(0x40, 0x5566_7788, true)
+  );
+
+  strictEqual(state.eax, initialState.eax);
+  strictEqual(state.esp, 0x44);
+  strictEqual(interpreter.guestView.getUint32(0x20, true), 0x5566_7788);
+  assertCompletedInstruction(state, startAddress + 2, 8);
+});
+
+test("executes POP [ESP] using post-pop ESP for the destination address", async () => {
+  const initialState = createCpuState({
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { interpreter, state } = await executeStackInstruction(
+    [0x8f, 0x04, 0x24],
+    initialState,
+    (guest) => {
+      guest.setUint32(0x40, 0x5566_7788, true);
+      guest.setUint32(0x44, 0xaabb_ccdd, true);
+    }
+  );
+
+  strictEqual(state.esp, 0x44);
+  strictEqual(interpreter.guestView.getUint32(0x40, true), 0x5566_7788);
+  strictEqual(interpreter.guestView.getUint32(0x44, true), 0x5566_7788);
+  assertCompletedInstruction(state, startAddress + 3, 8);
+});
+
+test("rolls back POP [ESP] ESP update when the destination write guard faults", async () => {
+  const initialState = createCpuState({
+    esp: 0xfffc,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const result = await executeInstruction(
+    [0x8f, 0x04, 0x24],
+    initialState,
+    [{ address: 0xfffc, bytes: [0x88, 0x77, 0x66, 0x55] }]
+  );
+
+  deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_WRITE_FAULT, payload: 0x1_0000, detail: 4 });
+  strictEqual(result.state.esp, 0xfffc);
+  strictEqual(result.state.eip, startAddress);
+  strictEqual(result.state.instructionCount, 7);
 });
 
 test("executes LEAVE by restoring EBP and ESP from the frame", async () => {

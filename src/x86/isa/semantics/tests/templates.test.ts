@@ -199,20 +199,26 @@ test("pop semantic expands to generic stack get/set operations", () => {
   );
 });
 
-test("pop semantic captures a memory destination address once", () => {
+test("pop semantic resolves a memory destination after updating esp", () => {
   deepStrictEqual(
     buildIr(popSemantic(), {
       operandInfo: [{ storage: "mem" }]
     }),
     [
-      { op: "address", dst: v(0), operand: op(0) },
-      { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
-      { op: "get", dst: v(1), source: reg("esp"), accessWidth: 32 },
-      { op: "memory.guard", address: v(1), byteLength: 4, access: "read" },
-      { op: "get", dst: v(2), source: mem(v(1)), accessWidth: 32 },
-      { op: "value.binary", type: "i32", operator: "add", dst: v(3), a: v(1), b: c32(4) },
-      { op: "set", target: reg("esp"), value: v(3), accessWidth: 32 },
-      { op: "set", target: mem(v(0)), value: v(2), accessWidth: 32 },
+      { op: "get", dst: v(0), source: reg("esp"), accessWidth: 32 },
+      { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
+      { op: "get", dst: v(1), source: mem(v(0)), accessWidth: 32 },
+      { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(0), b: c32(4) },
+      { op: "set", target: reg("esp"), value: v(2), accessWidth: 32 },
+      { op: "address", dst: v(3), operand: op(0) },
+      {
+        op: "memory.guard",
+        address: v(3),
+        byteLength: 4,
+        access: "write",
+        faultRollback: [{ target: reg("esp"), value: v(0) }]
+      },
+      { op: "set", target: mem(v(3)), value: v(1), accessWidth: 32 },
       { op: "next" }
     ]
   );

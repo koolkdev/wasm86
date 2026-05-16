@@ -616,6 +616,22 @@ test("direct backend applies memory guard rollback on faults", () => {
   strictEqual(state.instructionCount, 0);
 });
 
+test("direct backend rolls back POP memory destination ESP on write guard fault", () => {
+  const memory = new ArrayBufferGuestMemory(0x1_0000);
+  const state = createCpuState({ esp: 0xfffc, eip: startAddress });
+
+  deepStrictEqual(memory.writeU32(0xfffc, 0x5566_7788), { ok: true });
+  const result = execute(state, [0x8f, 0x04, 0x24], memory);
+
+  strictEqual(result.stopReason, StopReason.MEMORY_FAULT);
+  strictEqual(result.faultAddress, 0x1_0000);
+  strictEqual(result.faultSize, 4);
+  strictEqual(result.faultOperation, "write");
+  strictEqual(state.esp, 0xfffc);
+  strictEqual(state.eip, startAddress);
+  strictEqual(state.instructionCount, 0);
+});
+
 function execute(state: ReturnType<typeof createCpuState>, values: readonly number[], memory?: ArrayBufferGuestMemory) {
   return executeAtAddress(state, startAddress, values, memory);
 }

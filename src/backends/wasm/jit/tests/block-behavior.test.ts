@@ -1394,6 +1394,52 @@ test("jit IR block emits leave", async () => {
   strictEqual(result.state.instructionCount, 1);
 });
 
+test("jit IR block resolves POP [ESP] destination after updating ESP", async () => {
+  const result = await runJitBlock(
+    [0x8f, 0x04, 0x24],
+    createCpuState({ esp: 0x40, eip: startAddress }),
+    [
+      { address: 0x40, bytes: littleEndianBytes(0x5566_7788, 32) },
+      { address: 0x44, bytes: littleEndianBytes(0xaabb_ccdd, 32) }
+    ]
+  );
+
+  strictEqual(result.state.esp, 0x44);
+  strictEqual(result.guestView.getUint32(0x40, true), 0x5566_7788);
+  strictEqual(result.guestView.getUint32(0x44, true), 0x5566_7788);
+  strictEqual(result.state.eip, startAddress + 3);
+  strictEqual(result.state.instructionCount, 1);
+  deepStrictEqual(result.exit, { exitReason: ExitReason.FALLTHROUGH, payload: startAddress + 3 });
+});
+
+test("jit IR block rolls back POP [ESP] ESP update on destination write fault", async () => {
+  const result = await runJitBlock(
+    [0x8f, 0x04, 0x24],
+    createCpuState({ esp: 0xfffc, eip: startAddress }),
+    [{ address: 0xfffc, bytes: littleEndianBytes(0x5566_7788, 32) }]
+  );
+
+  strictEqual(result.state.esp, 0xfffc);
+  strictEqual(result.state.eip, startAddress);
+  strictEqual(result.state.instructionCount, 0);
+  deepStrictEqual(result.exit, { exitReason: ExitReason.MEMORY_WRITE_FAULT, payload: 0x1_0000, detail: 4 });
+});
+
+test("jit IR block emits XCHG [ESP], ESP using the original memory address", async () => {
+  const result = await runJitBlock(
+    [0x87, 0x24, 0x24],
+    createCpuState({ esp: 0x20, eflags: preservedEflags, eip: startAddress }),
+    [{ address: 0x20, bytes: littleEndianBytes(0x1122_3344, 32) }]
+  );
+
+  strictEqual(result.state.esp, 0x1122_3344);
+  strictEqual(result.state.eflags, preservedEflags);
+  strictEqual(result.guestView.getUint32(0x20, true), 0x20);
+  strictEqual(result.state.eip, startAddress + 3);
+  strictEqual(result.state.instructionCount, 1);
+  deepStrictEqual(result.exit, { exitReason: ExitReason.FALLTHROUGH, payload: startAddress + 3 });
+});
+
 test("jit IR block folds stack updates after successful explicit memory guards", async () => {
   const result = await runJitBlock([
     0x50, // push eax

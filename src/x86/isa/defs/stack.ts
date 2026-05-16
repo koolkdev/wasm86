@@ -42,6 +42,14 @@ export const POP = mnemonic("pop", [
     operands: [opReg()],
     format: { syntax: "pop {0}" },
     semantics: popSemantic()
+  }),
+  // 8F /0: POP r/m32
+  form("rm32", {
+    opcode: [0x8f],
+    modrm: { match: { reg: 0 } },
+    operands: [modrmRm("rm32")],
+    format: { syntax: "pop {0}" },
+    semantics: popSemantic()
   })
 ]);
 

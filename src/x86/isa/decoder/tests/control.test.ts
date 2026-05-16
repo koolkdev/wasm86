@@ -1,4 +1,14 @@
-import { imm8, imm16, imm32, reg32, relTarget, signImm8, testDecodeFixtures, type DecoderFixture } from "./helpers.js";
+import {
+  imm8,
+  imm16,
+  imm32,
+  mem32,
+  reg32,
+  relTarget,
+  signImm8,
+  testDecodeFixtures,
+  type DecoderFixture
+} from "./helpers.js";
 
 const fixtures: readonly DecoderFixture[] = [
   {
@@ -133,6 +143,13 @@ const fixtures: readonly DecoderFixture[] = [
     mnemonic: "pop",
     operands: [reg32("edi")],
     id: "pop.r32"
+  },
+  {
+    name: "pop [eax]",
+    bytes: [0x8f, 0x00],
+    mnemonic: "pop",
+    operands: [mem32({ base: "eax", scale: 1, disp: 0 })],
+    id: "pop.rm32"
   },
   {
     name: "leave",

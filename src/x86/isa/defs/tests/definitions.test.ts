@@ -13,7 +13,7 @@ const regOperands = (count: number) => ({
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 230);
+  strictEqual(X86_32_CORE.instructions.length, 231);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -72,6 +72,7 @@ test("x86-32 core registers the initial instruction surface", () => {
     "test.rm32_imm32",
     "push.r32",
     "pop.r32",
+    "pop.rm32",
     "leave.near",
     "jmp.rel8",
     "call.rm32",
@@ -287,6 +288,7 @@ test("group opcode forms use modrm.match.reg for Intel slash-digit notation", ()
   const not = instruction("not.rm32");
   const neg = instruction("neg.rm8");
   const call = instruction("call.rm32");
+  const pop = instruction("pop.rm32");
 
   deepStrictEqual(or.opcode, [0x83]);
   deepStrictEqual(or.modrm, { match: { reg: 1 } });
@@ -320,6 +322,10 @@ test("group opcode forms use modrm.match.reg for Intel slash-digit notation", ()
   deepStrictEqual(call.opcode, [0xff]);
   deepStrictEqual(call.modrm, { match: { reg: 2 } });
   deepStrictEqual(call.operands, [{ kind: "modrm.rm", type: "rm32" }]);
+
+  deepStrictEqual(pop.opcode, [0x8f]);
+  deepStrictEqual(pop.modrm, { match: { reg: 0 } });
+  deepStrictEqual(pop.operands, [{ kind: "modrm.rm", type: "rm32" }]);
 });
 
 test("width-specific decode forms record operand-size metadata", () => {

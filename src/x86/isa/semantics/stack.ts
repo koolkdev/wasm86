@@ -2,6 +2,7 @@ import type {
   OperandRef,
   SemanticTemplate,
   IrBuilder,
+  IrRollbackWrite,
   SemanticBuildContext,
   StorageInput,
   ValueInput,
@@ -20,6 +21,13 @@ export function push32(s: IrBuilder, context: SemanticBuildContext, value: Value
 }
 
 export function pop32(s: IrBuilder, context: SemanticBuildContext): VarRef {
+  return pop32WithStackPointer(s, context).value;
+}
+
+function pop32WithStackPointer(
+  s: IrBuilder,
+  context: SemanticBuildContext
+): Readonly<{ value: VarRef; stackPointer: VarRef }> {
   const esp = s.get(s.reg("esp"));
   const stack = s.mem(esp);
 
@@ -28,7 +36,7 @@ export function pop32(s: IrBuilder, context: SemanticBuildContext): VarRef {
   const nextEsp = s.i32Add(esp, 4);
 
   s.set(s.reg("esp"), nextEsp);
-  return value;
+  return { value, stackPointer: esp };
 }
 
 export function pushSemantic(): SemanticTemplate {
@@ -43,9 +51,10 @@ export function pushSemantic(): SemanticTemplate {
 export function popSemantic(): SemanticTemplate {
   return (s, context) => {
     const dst = s.operand(0);
-    const target = popTargetStorage(s, context, dst);
+    const popped = pop32WithStackPointer(s, context);
+    const target = popTargetStorage(s, context, dst, popped.stackPointer);
 
-    s.set(target, pop32(s, context));
+    s.set(target, popped.value);
   };
 }
 
@@ -63,14 +72,32 @@ export function leaveSemantic(): SemanticTemplate {
   };
 }
 
-function popTargetStorage(s: IrBuilder, context: SemanticBuildContext, dst: OperandRef): StorageInput {
-  if (context.operandInfo(dst).storage === "mem") {
-    const target = s.mem(s.address(dst));
+function popTargetStorage(
+  s: IrBuilder,
+  context: SemanticBuildContext,
+  dst: OperandRef,
+  oldEsp: VarRef
+): StorageInput {
+  const rollback: readonly IrRollbackWrite[] = [{ target: s.reg("esp"), value: oldEsp }];
 
-    guardStorageWrite(s, context, target, 32);
-    return target;
+  switch (context.operandInfo(dst).storage) {
+    case "mem": {
+      const address = s.address(dst);
+      const target = s.mem(address);
+
+      s.memoryGuard(address, 4, "write", { faultRollback: rollback });
+      return target;
+    }
+    case "regOrMem": {
+      const address = s.address(dst);
+
+      s.memoryGuard(address, 4, "write", { faultRollback: rollback });
+      return dst;
+    }
+    case "reg":
+    case "imm":
+    case "relTarget":
+      guardStorageWrite(s, context, dst, 32);
+      return dst;
   }
-
-  guardStorageWrite(s, context, dst, 32);
-  return dst;
 }
