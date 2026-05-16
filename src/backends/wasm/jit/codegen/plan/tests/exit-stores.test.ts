@@ -26,7 +26,6 @@ import {
   captureBeforeStores,
   plannedRegisterStores,
   plannedFlagStores,
-  exitStoreUse,
   c32,
   addValue,
   subValue,
@@ -42,6 +41,7 @@ import {
 } from "#backends/wasm/jit/codegen/plan/exit-stores.js";
 import { registerStores } from "#backends/wasm/jit/codegen/plan/register-stores.js";
 import { flagStores } from "#backends/wasm/jit/codegen/plan/flag-stores.js";
+import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 
 test("storesForSnapshot omits unchanged input register and flag stores", () => {
   const state = createJitValueState();
@@ -218,9 +218,6 @@ test("planJitCodegen records fallthrough exits at terminator ops", () => {
   strictEqual(exit.snapshot.instructionCountDelta, 1);
   strictEqual(exit.exitStoreIndex, 1);
   deepStrictEqual(plannedRegisterStores(exit), [registerStore("eax", c32(1))]);
-  deepStrictEqual(codegenPlan.exitStoreUses, [
-    exitStoreUse(registerStore("eax", c32(1)), exit, 0)
-  ]);
 });
 
 test("planJitCodegen keeps memory guard faults at their op exit states", () => {
@@ -245,10 +242,6 @@ test("planJitCodegen keeps memory guard faults at their op exit states", () => {
   deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex], {
     stores: [expectedRegisterStore, captureBeforeStores(expectedFlagStore)]
   });
-  deepStrictEqual(codegenPlan.exitStoreUses.filter((use) => use.placement.exitIndex === 0), [
-    exitStoreUse(expectedRegisterStore, exit, 0),
-    exitStoreUse(expectedFlagStore, exit, 0)
-  ]);
 });
 
 test("planJitCodegen keeps same-register-set exit stores separate", () => {
@@ -471,35 +464,29 @@ test("planJitCodegen records value-state-derived flag stores for branch exits", 
     { stores: [branchRegisterStore, captureBeforeStores(branchFlagStore)] },
     { stores: [branchRegisterStore, captureBeforeStores(branchFlagStore)] }
   ]);
+
   deepStrictEqual(
-    codegenPlan.exitStoreUses
+    emissionPlan.valueUses
       .filter((use) =>
         use.purpose === "exitStore" &&
-        use.target.kind === "aluFlags" &&
-        use.placement.reason === ExitReason.JUMP &&
+        valuesEqual(use.value, branchFlagStore.value) &&
         use.path.id.startsWith("branch:")
       )
       .map((use) => ({
         value: use.value,
-        target: use.target,
         purpose: use.purpose,
-        path: use.path,
-        reason: use.placement.reason
+        path: use.path
       })),
     [
       {
         value: branchFlagStore.value,
-        target: { kind: "aluFlags" },
         purpose: "exitStore",
-        path: branchPath(1, branchExits[0]!.at.opIndex, "taken"),
-        reason: ExitReason.JUMP
+        path: branchPath(1, branchExits[0]!.at.opIndex, "taken")
       },
       {
         value: branchFlagStore.value,
-        target: { kind: "aluFlags" },
         purpose: "exitStore",
-        path: branchPath(1, branchExits[1]!.at.opIndex, "notTaken"),
-        reason: ExitReason.JUMP
+        path: branchPath(1, branchExits[1]!.at.opIndex, "notTaken")
       }
     ]
   );
@@ -549,16 +536,16 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from source IR afte
   const branchInstruction = emissionPlan.instructions[1]!;
   const expressionBranchOpIndex = branchInstruction.expressionBlock.findIndex((op) => op.op === "conditionalJump");
   const takenPath = branchPath(1, sourceBranchOpIndex, "taken");
-  const takenTargetUse = emissionPlan.plannedValueUses.find((use) =>
+  const takenTargetUse = emissionPlan.valueUses.find((use) =>
     use.purpose === "branchTarget" &&
-      use.placement.instructionIndex === 1 &&
+      use.at.instructionIndex === 1 &&
       use.value.kind === "input" &&
       use.value.slot.kind === "reg32" &&
       use.value.slot.reg === "ecx"
   );
-  const takenExitStoreUse = emissionPlan.exitStoreUses.find((use) =>
-    use.placement.instructionIndex === 1 &&
-      use.placement.opIndex === sourceBranchOpIndex &&
+  const takenExitStoreUse = emissionPlan.valueUses.find((use) =>
+    use.purpose === "exitStore" &&
+      use.at.instructionIndex === 1 &&
       use.path.debugLabel === "taken"
   );
 
@@ -574,9 +561,9 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from source IR afte
     throw new Error("expected taken branch exit-store use");
   }
 
-  strictEqual(takenTargetUse.placement.instructionIndex, 1);
-  strictEqual(takenTargetUse.placement.opIndex, expressionBranchOpIndex);
-  strictEqual(takenExitStoreUse.placement.opIndex, sourceBranchOpIndex);
+  strictEqual(takenTargetUse.at.instructionIndex, 1);
+  strictEqual(takenTargetUse.at.opIndex, expressionBranchOpIndex);
+  strictEqual(takenExitStoreUse.at.opIndex, expressionBranchOpIndex);
   deepStrictEqual(takenTargetUse.path, takenPath);
   deepStrictEqual(takenExitStoreUse.path, takenPath);
   deepStrictEqual(takenTargetUse.path, takenExitStoreUse.path);
@@ -746,7 +733,6 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
-  const exitIndex = codegenPlan.exits.indexOf(exit);
   const produced = jitProducedValue("load#effectful-flag-input:0:1:0", "i32");
   const ebx = jitInputReg32Value("ebx");
   const result = addValue(produced, ebx);
@@ -761,9 +747,6 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
   deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex], {
     stores: [expectedFlagStore]
   });
-  deepStrictEqual(codegenPlan.exitStoreUses, [
-    exitStoreUse(expectedFlagStore, exit, exitIndex)
-  ]);
   deepStrictEqual(emissionPlan.valueCachePlan?.definitionCaptures[0], [produced]);
   deepStrictEqual(emissionPlan.valueCachePlan?.useCounts, [
     { value: produced, useCount: 2 }
@@ -958,12 +941,6 @@ test("planJitCodegen keeps produced values out of observed boundaries before the
   strictEqual(readFault.at.opIndex, 0);
   strictEqual(readFault.exitStoreIndex, 0);
   deepStrictEqual(readFault.stores, []);
-  deepStrictEqual(
-    codegenPlan.exitStoreUses.filter((use) =>
-      use.placement.exitIndex === codegenPlan.exits.indexOf(readFault)
-    ),
-    []
-  );
   strictEqual(hostTrap.at.opIndex, 3);
   deepStrictEqual(plannedRegisterStores(hostTrap), [
     registerStore("eax", produced)

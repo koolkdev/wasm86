@@ -10,7 +10,7 @@ import {
   type JitValueCachePlan
 } from "./value-cache.js";
 import {
-  type JitPlannedValueUse
+  type ValueUse
 } from "./value-uses.js";
 import {
   groupJitPlannedCaptures,
@@ -38,13 +38,13 @@ export type JitPlannedValuesForEmission<
 > = Readonly<{
   instructions: readonly JitInstructionWithPlannedValues<TInstruction>[];
   valueCachePlan: JitValueCachePlan;
-  plannedValueUses: readonly JitPlannedValueUse[];
+  valueUses: readonly ValueUse[];
   plannedValueCaptures: readonly JitPlannedValueCapture[];
 }>;
 
 export function planJitValuesForEmission<TInstruction extends JitValuePlanningInstructionInput>(
   instructions: readonly TInstruction[],
-  plannedValueUses: readonly JitPlannedValueUse[]
+  valueUses: readonly ValueUse[]
 ): JitPlannedValuesForEmission<TInstruction> {
   const cacheInputs = instructions.map((instruction) => ({
     operands: instruction.operands,
@@ -53,9 +53,9 @@ export function planJitValuesForEmission<TInstruction extends JitValuePlanningIn
   }));
   const valueCachePlan = planJitValueCacheForInstructions(
     cacheInputs,
-    plannedValueUses
+    valueUses
   );
-  const plannedValueCaptures = planJitValueCaptures(plannedValueUses, valueCachePlan);
+  const plannedValueCaptures = planJitValueCaptures(valueUses, valueCachePlan);
   const captureMaps = groupJitPlannedCaptures(
     plannedValueCaptures,
     instructions.length
@@ -71,7 +71,7 @@ export function planJitValuesForEmission<TInstruction extends JitValuePlanningIn
   return {
     instructions: plannedInstructions,
     valueCachePlan,
-    plannedValueUses,
+    valueUses,
     plannedValueCaptures
   };
 }

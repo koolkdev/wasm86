@@ -353,7 +353,7 @@ test("JIT codegen leaves dead pure SSA unpruned and emits no Wasm for it", () =>
   deepStrictEqual(emissionPlan.plannedEffects.map((effect) => effect.kind), [
     "fallthrough"
   ]);
-  deepStrictEqual(emissionPlan.plannedValueUses, []);
+  deepStrictEqual(emissionPlan.valueUses, []);
   deepStrictEqual(emissionPlan.valueCachePlan.useCounts, []);
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 0);
   strictEqual(countOpcode(opcodes, wasmOpcode.br), 1);

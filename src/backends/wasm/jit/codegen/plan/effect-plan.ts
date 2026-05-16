@@ -4,9 +4,8 @@ import type {
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
-  jitEffectValueRootForExitStoreUse,
-  jitEffectValueRootsForOp,
-  type JitEffectValueRoot
+  effectValueRootsForOp,
+  type EffectValueRoot
 } from "./effect-roots.js";
 import type {
   Effect
@@ -23,23 +22,22 @@ import type {
   Timeline
 } from "#backends/wasm/jit/analysis/timeline.js";
 import {
-  plannedValueUsesForRoots,
-  type JitExitStoreUse,
-  type JitPlannedValueUse,
-  type JitValueUsePlacement
+  collectValueUses,
+  type Placement,
+  type ValueUse
 } from "./value-uses.js";
 
 export type {
-  JitEffectValueRoot,
-  JitEffectValueRootPurpose
+  EffectValueRoot,
+  EffectValueRootPurpose
 } from "./effect-roots.js";
 
-export type JitEffectPlacement = JitValueUsePlacement;
+export type EffectPlacement = Placement;
 
-export type JitPlannedEffect = Readonly<{
-  placement: JitEffectPlacement;
+export type PlannedEffect = Readonly<{
+  placement: EffectPlacement;
   sourceOpIndex: number;
-  valueRoots: readonly JitEffectValueRoot[];
+  valueRoots: readonly EffectValueRoot[];
 }> & (
   | Readonly<{ kind: "memoryGuard"; faultExit: PlannedExit }>
   | Readonly<{ kind: "memoryStore" }>
@@ -59,19 +57,16 @@ export type JitEffectPlanInstructionInput = Readonly<{
 }>;
 
 export type JitEffectPlan = Readonly<{
-  plannedEffects: readonly JitPlannedEffect[];
-  plannedValueUses: readonly JitPlannedValueUse[];
+  plannedEffects: readonly PlannedEffect[];
+  valueUses: readonly ValueUse[];
 }>;
 
 export function planJitEffectsForEmission(
   instructions: readonly JitEffectPlanInstructionInput[],
-  effects: readonly Effect<PlannedExit>[],
-  exitStoreUses: readonly JitExitStoreUse[]
+  effects: readonly Effect<PlannedExit>[]
 ): JitEffectPlan {
   const effectsMap = groupEffectsMap(effects);
-  const exitStoreUsesBySourceOp = groupExitStoreUses(exitStoreUses);
-  const plannedEffects: JitPlannedEffect[] = [];
-  const plannedValueUses: JitPlannedValueUse[] = [];
+  const plannedEffects: PlannedEffect[] = [];
   let currentEpoch = 0;
 
   for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
@@ -82,7 +77,6 @@ export function planJitEffectsForEmission(
       const effect = plannedEffectForSourceOp(
         instruction,
         effectsMap,
-        exitStoreUsesBySourceOp,
         instructionIndex,
         sourceOpIndex,
         opEpochs
@@ -93,11 +87,6 @@ export function planJitEffectsForEmission(
       }
 
       plannedEffects.push(effect);
-      plannedValueUses.push(...plannedValueUsesForRoots(
-        instruction,
-        effect.valueRoots,
-        effect.placement
-      ));
     }
 
     currentEpoch += logicalWriteEpochCount(instruction);
@@ -105,33 +94,23 @@ export function planJitEffectsForEmission(
 
   return {
     plannedEffects,
-    plannedValueUses
+    valueUses: collectValueUses({ effects: plannedEffects })
   };
 }
 
 function plannedEffectForSourceOp(
   instruction: JitEffectPlanInstructionInput,
   effectsMap: JitEffectsMap,
-  exitStoreUsesBySourceOp: JitExitStoreUsesBySourceOp,
   instructionIndex: number,
   sourceOpIndex: number,
   opEpochs: readonly number[]
-): JitPlannedEffect | undefined {
+): PlannedEffect | undefined {
   const effect = effectsMap
     .get(instructionIndex)
     ?.get(sourceOpIndex);
-  const exitStoreRoots = exitStoreUsesBySourceOp
-    .get(instructionIndex)
-    ?.get(sourceOpIndex) ?? [];
-
-  if (effect === undefined && exitStoreRoots.length === 0) {
-    return undefined;
-  }
 
   if (effect === undefined) {
-    throw new Error(
-      `JIT exit store use is attached to a non-effect op: ${instructionIndex}:${sourceOpIndex}`
-    );
+    return undefined;
   }
 
   const expressionOpIndex = expressionOpIndexForSourceEffect(
@@ -150,13 +129,12 @@ function plannedEffectForSourceOp(
     placement,
     sourceOpIndex,
     valueRoots: [
-      ...jitEffectValueRootsForOp(
+      ...effectValueRootsForOp(
         instruction,
         expressionOp,
         effect.kind,
         placement
-      ),
-      ...exitStoreRoots.map(jitEffectValueRootForExitStoreUse)
+      )
     ]
   };
 }
@@ -182,11 +160,6 @@ function logicalWriteEpochCount(instruction: JitEffectPlanInstructionInput): num
   ).size;
 }
 
-type JitExitStoreUsesBySourceOp = ReadonlyMap<
-  number,
-  ReadonlyMap<number, readonly JitExitStoreUse[]>
->;
-
 type JitEffectsMap = ReadonlyMap<
   number,
   ReadonlyMap<number, Effect<PlannedExit>>
@@ -208,22 +181,6 @@ function groupEffectsMap(
 
     byOp.set(effect.at.opIndex, effect);
     byInstruction.set(effect.at.instructionIndex, byOp);
-  }
-
-  return byInstruction;
-}
-
-function groupExitStoreUses(
-  uses: readonly JitExitStoreUse[]
-): JitExitStoreUsesBySourceOp {
-  const byInstruction = new Map<number, Map<number, JitExitStoreUse[]>>();
-
-  for (const use of uses) {
-    const byOp = byInstruction.get(use.placement.instructionIndex) ?? new Map();
-    const opUses = byOp.get(use.placement.opIndex) ?? [];
-
-    byOp.set(use.placement.opIndex, [...opUses, use]);
-    byInstruction.set(use.placement.instructionIndex, byOp);
   }
 
   return byInstruction;

@@ -45,12 +45,11 @@ import {
   type JitValueCacheInstruction
 } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
-import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
+import { valueUsesForExpressionBlock } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
 import {
   branchPath,
   rootPath
 } from "#backends/wasm/jit/analysis/paths.js";
-import { rootExpressionPaths } from "#backends/wasm/jit/codegen/tests/path-test-helpers.js";
 import type { ExitSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
 import { createJitState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
@@ -138,17 +137,15 @@ export function planJitValueCache(
   instruction: JitValueCacheInstruction,
   expressionBlock: IrExprBlock
 ) {
-  const plannedValueUses = planJitValueUses([{
+  const valueUses = valueUsesForExpressionBlock({
     expressionBlock,
-    valueTimeline: instruction.valueTimeline,
-    expressionPaths: rootExpressionPaths(expressionBlock),
-    extraUses: new Map()
-  }]);
+    valueTimeline: instruction.valueTimeline
+  });
 
   return planJitValueCacheFromPlannedUses(
     instruction,
     expressionBlock,
-    plannedValueUses
+    valueUses
   );
 }
 

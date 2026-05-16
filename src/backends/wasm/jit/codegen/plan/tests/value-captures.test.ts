@@ -2,14 +2,13 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
-import type {
-  BranchPaths,
-  PathMap
-} from "#backends/wasm/jit/analysis/paths.js";
 import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
-import { cacheSelectionUsesForPlannedUse } from "#backends/wasm/jit/codegen/plan/value-cache-uses.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
-import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
+import {
+  branchExpressionPaths,
+  valueUsesForExpressionBlock,
+  type TestValueRoot
+} from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
 import { planJitValueCaptures } from "#backends/wasm/jit/codegen/plan/value-captures.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
@@ -79,23 +78,20 @@ test("JIT cache value uses carry flattened dependency ancestry for cache selecti
     a: expectedChild,
     b: c32(0xff)
   } as const satisfies JitValue;
-  const uses = planJitValueUses([{
+  const uses = valueUsesForExpressionBlock({
     expressionBlock,
     valueTimeline: timeline,
-    expressionPaths: defaultExpressionPaths(expressionBlock),
-    extraUses: new Map()
-  }]);
+    expressionPaths: branchExpressionPaths(expressionBlock)
+  });
   const rootUse = uses.find((use) => valuesEqual(use.value, expectedRoot));
-  const cacheUses = uses.flatMap((use) => cacheSelectionUsesForPlannedUse(use));
-  const childUse = cacheUses.find((use) => valuesEqual(use.value, expectedChild));
+  const childUse = uses.find((use) => valuesEqual(use.value, expectedChild));
 
   if (rootUse === undefined || childUse === undefined) {
-    throw new Error("expected planned root and cache child value uses");
+    throw new Error("expected canonical root and child value uses");
   }
 
-  deepStrictEqual(uses.filter((use) => valuesEqual(use.value, expectedChild)), []);
   deepStrictEqual(childUse.ancestors, [expectedRoot]);
-  strictEqual(childUse.emittedCost > 0, true);
+  deepStrictEqual(childUse.root, expectedRoot);
 });
 
 test("JIT value-capture planner keeps one-arm branch values path-specific", () => {
@@ -164,19 +160,19 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
     expressions: expressionBlock,
     entry: createJitValueState().snapshot()
   });
-  const extraUses = new Map([[
+  const extraUses = new Map<number, readonly TestValueRoot[]>([[
     0,
     [
       { value, path: branchPath(0, 0, "taken"), purpose: "exitStore" },
       { value, path: branchPath(0, 0, "notTaken"), purpose: "exitStore" }
     ]
   ]]);
-  const uses = planJitValueUses([{
+  const uses = valueUsesForExpressionBlock({
     expressionBlock,
     valueTimeline: timeline,
-    expressionPaths: defaultExpressionPaths(expressionBlock),
+    expressionPaths: branchExpressionPaths(expressionBlock),
     extraUses
-  }]);
+  });
   const cachePlan = planJitValueCache({
     operands: [],
     valueTimeline: timeline
@@ -202,33 +198,15 @@ function planCapturesForExpressionBlock(
     entry: createJitValueState().snapshot(),
     ...(producedByVar === undefined ? {} : { producedByVar })
   });
-  const uses = planJitValueUses([{
+  const uses = valueUsesForExpressionBlock({
     expressionBlock,
     valueTimeline: timeline,
-    expressionPaths: defaultExpressionPaths(expressionBlock),
-    extraUses: new Map()
-  }]);
+    expressionPaths: branchExpressionPaths(expressionBlock)
+  });
   const cachePlan = planJitValueCache({
     operands: [],
     valueTimeline: timeline
   }, expressionBlock, uses);
 
   return { uses, cachePlan };
-}
-
-function defaultExpressionPaths(
-  expressionBlock: IrExprBlock
-): PathMap {
-  const paths = new Map<number, BranchPaths>();
-
-  for (let opIndex = 0; opIndex < expressionBlock.length; opIndex += 1) {
-    if (expressionBlock[opIndex]?.op === "conditionalJump") {
-      paths.set(opIndex, {
-        taken: branchPath(0, opIndex, "taken"),
-        notTaken: branchPath(0, opIndex, "notTaken")
-      });
-    }
-  }
-
-  return paths;
 }

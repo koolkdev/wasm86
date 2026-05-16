@@ -14,15 +14,14 @@ import { emitJitExpressionBlock } from "#backends/wasm/jit/codegen/emit/expressi
 import { emitJitGet } from "#backends/wasm/jit/codegen/emit/operands.js";
 import type { JitInstructionEmitContext } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
-import type { JitPlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
+import type { PlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import type { PlannedExit } from "#backends/wasm/jit/codegen/plan/types.js";
 import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import {
   buildTimeline,
   opView
 } from "#backends/wasm/jit/analysis/timeline.js";
-import { planJitValueUses } from "#backends/wasm/jit/codegen/plan/value-uses.js";
-import { rootExpressionPaths } from "#backends/wasm/jit/codegen/tests/path-test-helpers.js";
+import { valueUsesForExpressionBlock } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
 import { branchPath, rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
@@ -223,7 +222,7 @@ type FoundationEmitOptions = Readonly<{
 
 type PlannedEffectInput = Readonly<{
   opIndex: number;
-  kind: JitPlannedEffect["kind"];
+  kind: PlannedEffect["kind"];
 }>;
 
 function emitFoundationBlock(
@@ -245,12 +244,10 @@ function emitFoundationBlock(
     : planJitValueCache(
         { operands: [], valueTimeline },
         expressionBlock,
-        planJitValueUses([{
+        valueUsesForExpressionBlock({
           expressionBlock,
-          valueTimeline,
-          expressionPaths: rootExpressionPaths(expressionBlock),
-          extraUses: new Map()
-        }])
+          valueTimeline
+        })
       );
   const valueCache = createJitValueCacheRuntime(body, cachePlan);
   let nextCalls = 0;
@@ -350,13 +347,13 @@ function emitFoundationBlock(
 function buildPlannedEffects(
   expressionBlock: IrExprBlock,
   effects: readonly PlannedEffectInput[] | undefined
-): readonly JitPlannedEffect[] {
+): readonly PlannedEffect[] {
   return (effects ?? defaultPlannedEffects(expressionBlock)).map((effect) =>
     plannedEffect(effect)
   );
 }
 
-function plannedEffect(input: PlannedEffectInput): JitPlannedEffect {
+function plannedEffect(input: PlannedEffectInput): PlannedEffect {
   const base = {
     placement: {
       instructionIndex: 0,

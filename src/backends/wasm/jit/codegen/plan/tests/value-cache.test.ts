@@ -12,7 +12,6 @@ import {
   planValueCacheForTest,
   extraUse,
   registerStore,
-  exitStoreUse,
   exitPoint,
   exitState,
   c32,
@@ -64,7 +63,6 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
 
   strictEqual(instruction?.instructionId, "cache-plan");
   strictEqual(emissionPlan.exits, codegenPlan.exits);
-  strictEqual(emissionPlan.exitStoreUses, codegenPlan.exitStoreUses);
   strictEqual(emissionPlan.exitStoreSets, codegenPlan.exitStoreSets);
   strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
   strictEqual(instruction?.valueTimeline.snapshots.length, instruction?.expressionBlock.length);
@@ -156,7 +154,6 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
       }
     ],
     exits: [exit],
-    exitStoreUses: stores.map((store) => exitStoreUse(store, exit, 0)),
     exitStoreSets: [{ stores: [] }, { stores }],
     maxExitStoreIndex: 1
   };
@@ -234,7 +231,6 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       exitCount: 1
     }],
     exits: [exit],
-    exitStoreUses: stores.map((store) => exitStoreUse(store, exit, 0)),
     exitStoreSets: [{ stores: [] }, { stores }],
     maxExitStoreIndex: 1
   };

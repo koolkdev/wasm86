@@ -5,12 +5,12 @@ import { emitWasmIrExitFromI32Stack } from "#backends/wasm/codegen/exit.js";
 import type { WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import type { PlannedExit } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { Path } from "#backends/wasm/jit/analysis/paths.js";
-import type { JitPlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
+import type { PlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import type { JitInstructionEmitContext } from "./block-emitter.js";
 
 export function emitJitNext(
   context: JitInstructionEmitContext,
-  effect: Extract<JitPlannedEffect, { kind: "fallthrough" }>
+  effect: Extract<PlannedEffect, { kind: "fallthrough" }>
 ): void {
   const instruction = context.currentInstruction();
 
@@ -29,7 +29,7 @@ export function emitJitNextEip(context: JitInstructionEmitContext): void {
 export function emitJitJump(
   context: JitInstructionEmitContext,
   target: IrValueExpr,
-  effect: Extract<JitPlannedEffect, { kind: "jump" }>,
+  effect: Extract<PlannedEffect, { kind: "jump" }>,
   helpers: WasmIrEmitHelpers
 ): void {
   if (emitJitControlTransfer(context, target, effect.exit, helpers)) {
@@ -65,7 +65,7 @@ export function emitJitConditionalJump(
   condition: IrValueExpr,
   taken: IrValueExpr,
   notTaken: IrValueExpr,
-  effect: Extract<JitPlannedEffect, { kind: "branch" }>,
+  effect: Extract<PlannedEffect, { kind: "branch" }>,
   helpers: WasmIrEmitHelpers
 ): void {
   helpers.emitValue(condition, { requestedWidth: 32 });
@@ -79,7 +79,7 @@ export function emitJitConditionalJump(
 export function emitJitHostTrap(
   context: JitInstructionEmitContext,
   vector: IrValueExpr,
-  effect: Extract<JitPlannedEffect, { kind: "hostTrap" }>,
+  effect: Extract<PlannedEffect, { kind: "hostTrap" }>,
   helpers: WasmIrEmitHelpers
 ): void {
   const vectorLocal = context.scratch.allocLocal(wasmValueType.i32);

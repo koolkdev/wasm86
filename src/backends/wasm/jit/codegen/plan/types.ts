@@ -9,7 +9,6 @@ import type {
   ExitStoreSet,
   PlannedExit
 } from "./exit-stores.js";
-import type { JitExitStoreUse } from "./value-uses.js";
 
 export type {
   Exit,
@@ -26,10 +25,6 @@ export type {
   PlannedExitStore,
   PlannedExit
 } from "./exit-stores.js";
-export type {
-  JitExitStoreUse,
-  JitExitStoreUsePlacement
-} from "./value-uses.js";
 
 export type JitInstructionState = Readonly<{
   instructionId: string;
@@ -47,7 +42,6 @@ export type JitCodegenPlan = Readonly<{
   instructionStates: readonly JitInstructionState[];
   effects: readonly Effect<PlannedExit>[];
   exits: readonly PlannedExit[];
-  exitStoreUses: readonly JitExitStoreUse[];
   exitStoreSets: readonly ExitStoreSet[];
   maxExitStoreIndex: number;
 }>;

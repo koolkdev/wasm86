@@ -11,7 +11,7 @@ import {
   type JitValueCachePlanInput
 } from "./value-cache-epochs.js";
 import {
-  type JitPlannedValueUse
+  type ValueUse
 } from "./value-uses.js";
 
 export type { JitValueUseCount } from "./value-cache-selection.js";
@@ -31,19 +31,19 @@ export type JitValueCachePlan = Readonly<{
 export function planJitValueCache(
   instruction: JitValueCacheInstruction,
   expressionBlock: IrExprBlock,
-  plannedValueUses: readonly JitPlannedValueUse[]
+  valueUses: readonly ValueUse[]
 ): JitValueCachePlan {
   return planJitValueCacheForInstructions(
     [{ ...instruction, expressionBlock }],
-    plannedValueUses
+    valueUses
   );
 }
 
 export function planJitValueCacheForInstructions(
   instructions: readonly JitValueCachePlanInput[],
-  plannedValueUses: readonly JitPlannedValueUse[]
+  valueUses: readonly ValueUse[]
 ): JitValueCachePlan {
-  const epoch = planJitValueCacheEpochs(instructions, plannedValueUses);
+  const epoch = planJitValueCacheEpochs(instructions, valueUses);
   const selection = planJitValueCacheSelection(epoch.consumerUses);
 
   return {

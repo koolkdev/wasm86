@@ -22,7 +22,6 @@ import {
   instructionDeltaAfterOp
 } from "#backends/wasm/jit/analysis/instruction-progress.js";
 import { planExitStores } from "./exit-stores.js";
-import { exitStoreUsesForPlannedExits } from "./value-uses.js";
 import {
   canInlineJitInstructionGet,
   jitInstructionStorageRefsMayAlias
@@ -86,7 +85,6 @@ export function analyzeJitCodegenState(
     instructions: instructionAnalyses
   });
   const exitStorePlan = planExitStores(effectAnalysis.exits);
-  const exitStoreUses = exitStoreUsesForPlannedExits(exitStorePlan.exits);
   const effects = reattachEffectExits(
     effectAnalysis.effects,
     exitStorePlan.exits
@@ -100,7 +98,6 @@ export function analyzeJitCodegenState(
     })),
     effects,
     exits: exitStorePlan.exits,
-    exitStoreUses,
     exitStoreSets: exitStorePlan.exitStoreSets,
     maxExitStoreIndex: exitStorePlan.maxExitStoreIndex
   };

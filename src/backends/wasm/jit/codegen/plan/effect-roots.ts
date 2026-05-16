@@ -4,7 +4,6 @@ import type {
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
 import type { EffectKind } from "#backends/wasm/jit/analysis/effect-classifier.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   rootPath,
   type Path,
@@ -14,56 +13,33 @@ import {
   opView,
   type Timeline
 } from "#backends/wasm/jit/analysis/timeline.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type {
-  JitExpressionValueUseRoot,
-  JitExitStoreUse,
-  JitJitValueUseRoot,
-  JitValueUsePlacement
+  Placement,
+  UsePurpose,
+  ValueRoot
 } from "./value-uses.js";
 
-export type JitEffectValueRootPurpose =
-  | "memoryGuardAddress"
-  | "memoryStoreAddress"
-  | "memoryStoreValue"
-  | "branchCondition"
-  | "branchTarget"
-  | "controlTarget"
-  | "hostTrapVector"
-  | "guardFailurePayload"
-  | "exitStore";
+export type EffectValueRootPurpose = UsePurpose;
+export type EffectValueRoot = ValueRoot;
 
-export type JitEffectExpressionValueRoot = Omit<JitExpressionValueUseRoot, "purpose"> & Readonly<{
-  purpose: JitEffectValueRootPurpose;
-}>;
-
-export type JitEffectJitValueRoot = Omit<JitJitValueUseRoot, "purpose"> & Readonly<{
-  purpose: JitEffectValueRootPurpose;
-}>;
-
-export type JitEffectValueRoot =
-  | JitEffectExpressionValueRoot
-  | JitEffectJitValueRoot;
-
-export type JitEffectRootInstructionInput = Readonly<{
+export type EffectRootInstructionInput = Readonly<{
   expressionPaths: PathMap;
   valueTimeline: Timeline;
 }>;
 
-export function jitEffectValueRootsForOp(
-  instruction: JitEffectRootInstructionInput,
+export function effectValueRootsForOp(
+  instruction: EffectRootInstructionInput,
   op: IrExprOp,
   kind: EffectKind,
-  placement: JitValueUsePlacement
-): readonly JitEffectValueRoot[] {
+  placement: Placement
+): readonly EffectValueRoot[] {
   const root = rootPath();
 
   switch (kind) {
     case "memoryGuard":
       return op.op === "memory.guard"
-        ? [
-            expressionRoot(op.address, root, "memoryGuardAddress"),
-            expressionRoot(op.address, root, "guardFailurePayload")
-          ]
+        ? valueRootsForExpression(instruction, op.address, placement, root, "memoryAddress")
         : unexpectedExpressionOp(kind, op);
     case "memoryStore":
       return op.op === "set"
@@ -71,16 +47,16 @@ export function jitEffectValueRootsForOp(
             ...storageAddressRoots(
               instruction,
               op.target,
-              placement.opIndex,
+              placement,
               root,
-              "memoryStoreAddress"
+              "memoryAddress"
             ),
-            expressionRoot(op.value, root, "memoryStoreValue")
+            ...valueRootsForExpression(instruction, op.value, placement, root, "memoryValue")
           ]
         : unexpectedExpressionOp(kind, op);
     case "jump":
       return op.op === "jump"
-        ? [expressionRoot(op.target, root, "controlTarget")]
+        ? valueRootsForExpression(instruction, op.target, placement, root, "controlTarget")
         : unexpectedExpressionOp(kind, op);
     case "branch": {
       if (op.op !== "conditionalJump") {
@@ -90,14 +66,26 @@ export function jitEffectValueRootsForOp(
       const branchPaths = instruction.expressionPaths.get(placement.opIndex)!;
 
       return [
-        expressionRoot(op.condition, root, "branchCondition"),
-        expressionRoot(op.taken, branchPaths.taken, "branchTarget"),
-        expressionRoot(op.notTaken, branchPaths.notTaken, "branchTarget")
+        ...valueRootsForExpression(instruction, op.condition, placement, root, "branchCondition"),
+        ...valueRootsForExpression(
+          instruction,
+          op.taken,
+          placement,
+          branchPaths.taken,
+          "branchTarget"
+        ),
+        ...valueRootsForExpression(
+          instruction,
+          op.notTaken,
+          placement,
+          branchPaths.notTaken,
+          "branchTarget"
+        )
       ];
     }
     case "hostTrap":
       return op.op === "hostTrap"
-        ? [expressionRoot(op.vector, root, "hostTrapVector")]
+        ? valueRootsForExpression(instruction, op.vector, placement, root, "trapVector")
         : unexpectedExpressionOp(kind, op);
     case "fallthrough":
     case "producedValue":
@@ -105,58 +93,114 @@ export function jitEffectValueRootsForOp(
   }
 }
 
-export function jitEffectValueRootForExitStoreUse(
-  use: JitExitStoreUse
-): JitEffectValueRoot {
-  return jitValueRoot(use.value, use.path, "exitStore");
-}
-
 function storageAddressRoots(
-  instruction: JitEffectRootInstructionInput,
+  instruction: EffectRootInstructionInput,
   storage: IrStorageExpr,
-  opIndex: number,
+  placement: Placement,
   path: Path,
-  purpose: JitEffectValueRootPurpose
-): readonly JitEffectValueRoot[] {
+  purpose: UsePurpose
+): readonly EffectValueRoot[] {
   switch (storage.kind) {
     case "mem":
-      return [expressionRoot(storage.address, path, purpose)];
+      return valueRootsForExpression(
+        instruction,
+        storage.address,
+        placement,
+        path,
+        purpose
+      );
     case "operand": {
-      const value = opView(instruction.valueTimeline, opIndex).address(storage);
+      const value = opView(instruction.valueTimeline, placement.opIndex).address(storage);
 
       return value === undefined
         ? []
-        : [jitValueRoot(value, path, purpose)];
+        : [valueRoot(value, placement, path, purpose)];
     }
     case "reg":
       return [];
   }
 }
 
-function expressionRoot(
+function valueRootsForExpression(
+  instruction: EffectRootInstructionInput,
   value: IrValueExpr,
+  placement: Placement,
   path: Path,
-  purpose: JitEffectValueRootPurpose
-): JitEffectValueRoot {
+  purpose: UsePurpose
+): readonly EffectValueRoot[] {
+  const jitValue = jitValueForExpression(instruction, value, placement.opIndex);
+
+  return jitValue === undefined
+    ? childValueRootsForExpression(instruction, value, placement, path, purpose)
+    : [valueRoot(jitValue, placement, path, purpose)];
+}
+
+function childValueRootsForExpression(
+  instruction: EffectRootInstructionInput,
+  value: IrValueExpr,
+  placement: Placement,
+  path: Path,
+  purpose: UsePurpose
+): readonly EffectValueRoot[] {
+  switch (value.kind) {
+    case "source":
+      return storageAddressRoots(instruction, value.source, placement, path, purpose);
+    case "value.binary":
+      return [
+        ...valueRootsForExpression(instruction, value.a, placement, path, purpose),
+        ...valueRootsForExpression(instruction, value.b, placement, path, purpose)
+      ];
+    case "value.unary":
+      return valueRootsForExpression(instruction, value.value, placement, path, purpose);
+    case "value.select":
+      return [
+        ...valueRootsForExpression(instruction, value.condition, placement, path, purpose),
+        ...valueRootsForExpression(instruction, value.whenTrue, placement, path, purpose),
+        ...valueRootsForExpression(instruction, value.whenFalse, placement, path, purpose)
+      ];
+    case "var":
+    case "const":
+    case "nextEip":
+    case "address":
+    case "flags.condition":
+      return [];
+  }
+}
+
+function valueRoot(
+  value: JitValue,
+  at: Placement,
+  path: Path,
+  purpose: UsePurpose
+): EffectValueRoot {
   return {
-    kind: "expression",
     value,
+    at,
     path,
     purpose
   };
 }
 
-function jitValueRoot(
-  value: JitValue,
-  path: Path,
-  purpose: JitEffectValueRootPurpose
-): JitEffectValueRoot {
-  return {
-    kind: "jitValue",
-    value,
-    path,
-    purpose
-  };
+function jitValueForExpression(
+  instruction: EffectRootInstructionInput,
+  value: IrValueExpr,
+  opIndex: number
+): JitValue | undefined {
+  const view = opView(instruction.valueTimeline, opIndex);
+
+  switch (value.kind) {
+    case "var":
+    case "const":
+    case "nextEip":
+      return view.ref(value);
+    case "source":
+    case "address":
+    case "flags.condition":
+    case "value.binary":
+    case "value.unary":
+    case "value.select":
+      return view.expression(value);
+  }
 }
 
 function unexpectedExpressionOp(kind: EffectKind, op: IrExprOp): never {

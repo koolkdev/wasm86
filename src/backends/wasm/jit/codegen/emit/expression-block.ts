@@ -41,7 +41,7 @@ import type {
   JitExpressionCaptureMap
 } from "#backends/wasm/jit/codegen/plan/value-captures.js";
 import type {
-  JitPlannedEffect
+  PlannedEffect
 } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import type {
   JitCanonicalInputSlot,
@@ -61,7 +61,7 @@ export type JitExpressionBlockInstruction = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: Timeline;
   plannedValueCaptures: JitExpressionCaptureMap;
-  plannedEffects: readonly JitPlannedEffect[];
+  plannedEffects: readonly PlannedEffect[];
 }>;
 
 export type JitExpressionBlockEmitContext = Readonly<{
@@ -85,27 +85,27 @@ export type JitExpressionBlockEmitContext = Readonly<{
   emitSet(op: IrSetExprOp, helpers: WasmIrEmitHelpers): void;
   emitMemoryGuard(
     op: Extract<IrExprOp, { op: "memory.guard" }>,
-    effect: Extract<JitPlannedEffect, { kind: "memoryGuard" }>,
+    effect: Extract<PlannedEffect, { kind: "memoryGuard" }>,
     helpers: WasmIrEmitHelpers
   ): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
   emitNextEip(): ValueWidth;
-  emitNext(effect: Extract<JitPlannedEffect, { kind: "fallthrough" }>): void;
+  emitNext(effect: Extract<PlannedEffect, { kind: "fallthrough" }>): void;
   emitJump(
     target: IrValueExpr,
-    effect: Extract<JitPlannedEffect, { kind: "jump" }>,
+    effect: Extract<PlannedEffect, { kind: "jump" }>,
     helpers: WasmIrEmitHelpers
   ): void;
   emitConditionalJump(
     condition: IrValueExpr,
     taken: IrValueExpr,
     notTaken: IrValueExpr,
-    effect: Extract<JitPlannedEffect, { kind: "branch" }>,
+    effect: Extract<PlannedEffect, { kind: "branch" }>,
     helpers: WasmIrEmitHelpers
   ): void;
   emitHostTrap(
     vector: IrValueExpr,
-    effect: Extract<JitPlannedEffect, { kind: "hostTrap" }>,
+    effect: Extract<PlannedEffect, { kind: "hostTrap" }>,
     helpers: WasmIrEmitHelpers
   ): void;
 }>;
@@ -128,7 +128,7 @@ class JitExpressionBlockEmitter {
     this.#context = context;
   }
 
-  emit(plannedEffects: readonly JitPlannedEffect[]): void {
+  emit(plannedEffects: readonly PlannedEffect[]): void {
     const { expressionBlock } = this.#context.instruction;
 
     for (const effect of plannedEffects) {
@@ -155,7 +155,7 @@ class JitExpressionBlockEmitter {
     this.#context.valueCache?.beginExpressionOp(opIndex);
   }
 
-  #emitPlannedEffect(effect: JitPlannedEffect, op: IrExprOp): void {
+  #emitPlannedEffect(effect: PlannedEffect, op: IrExprOp): void {
     switch (effect.kind) {
       case "memoryGuard":
         return op.op === "memory.guard"
@@ -416,6 +416,6 @@ function valueRefExpression(value: IrValueExpr): ValueRef | undefined {
   }
 }
 
-function unexpectedPlannedEffect(effect: JitPlannedEffect, op: IrExprOp): never {
+function unexpectedPlannedEffect(effect: PlannedEffect, op: IrExprOp): never {
   throw new Error(`JIT planned effect ${effect.kind} mapped to expression op ${op.op}`);
 }

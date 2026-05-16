@@ -2,6 +2,7 @@ import { valueCost } from "#backends/wasm/jit/ir/values/cost.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { ValueUse } from "./value-uses.js";
 
 export type JitValueUseCount = Readonly<{
   value: JitValue;
@@ -13,18 +14,12 @@ export type JitValueCacheSelectionPlan = Readonly<{
   useCounts: readonly JitValueUseCount[];
 }>;
 
-export type JitValueSelectionUse = Readonly<{
-  value: JitValue;
-  emittedCost: number;
-  ancestors: readonly JitValue[];
-}>;
-
 const localTeeCost = 1;
 const localSetCost = 1;
 const localGetCost = 1;
 
 export function planJitValueCacheSelection(
-  epochUses: readonly (readonly JitValueSelectionUse[])[]
+  epochUses: readonly (readonly ValueUse[])[]
 ): JitValueCacheSelectionPlan {
   const consumers = selectConsumers(epochUses);
   const useCounts = mergeSelectedUseCounts(consumers);
@@ -36,7 +31,7 @@ export function planJitValueCacheSelection(
 }
 
 function selectConsumers(
-  epochUses: readonly (readonly JitValueSelectionUse[])[]
+  epochUses: readonly (readonly ValueUse[])[]
 ): readonly (readonly JitValueUseCount[])[] {
   const epochSelections = epochUses.map(selectEpochValues);
   const globallySelected = selectEpochValues(epochUses.flat());
@@ -97,7 +92,7 @@ function mergeSelectedUseCounts(
 }
 
 function selectEpochValues(
-  uses: readonly JitValueSelectionUse[]
+  uses: readonly ValueUse[]
 ): readonly JitValueUseCount[] {
   const candidateValues = [...uniqueValues(uses.map((use) => use.value))]
     .sort((a, b) => valueCost(b) - valueCost(a));
@@ -123,14 +118,14 @@ function selectEpochValues(
 
 function shouldCacheValueForUses(
   value: JitValue,
-  uses: readonly JitValueSelectionUse[]
+  uses: readonly ValueUse[]
 ): boolean {
   if (uses.length === 0) {
     return false;
   }
 
-  const firstEmittedCost = uses[0]!.emittedCost;
-  const repeatedEmittedCost = uses.reduce((cost, use) => cost + use.emittedCost, 0);
+  const firstEmittedCost = valueCost(uses[0]!.value);
+  const repeatedEmittedCost = uses.reduce((cost, use) => cost + valueCost(use.value), 0);
 
   return shouldCacheValueWithCosts(value, uses.length, firstEmittedCost, repeatedEmittedCost);
 }
@@ -160,7 +155,7 @@ function shouldForceSelectValue(value: JitValue): boolean {
 }
 
 function hasSelectedAncestor(
-  use: JitValueSelectionUse,
+  use: ValueUse,
   selected: readonly JitValueUseCount[]
 ): boolean {
   return use.ancestors.some((ancestor) =>

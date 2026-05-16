@@ -9,9 +9,7 @@ import type {
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import type { Timeline } from "#backends/wasm/jit/analysis/timeline.js";
-import type { JitValueSelectionUse } from "./value-cache-selection.js";
-import { cacheSelectionUsesForPlannedUse } from "./value-cache-uses.js";
-import type { JitPlannedValueUse } from "./value-uses.js";
+import type { ValueUse } from "./value-uses.js";
 
 export type JitValueCacheInstruction = Readonly<{
   operands: readonly JitOperandBinding[];
@@ -28,17 +26,17 @@ export type JitValueCachePlanInput = JitValueCacheInstruction & Readonly<{
 
 export type JitValueCacheEpochPlan = Readonly<{
   instructions: readonly JitValueCacheInstructionPlan[];
-  consumerUses: readonly (readonly JitValueSelectionUse[])[];
+  consumerUses: readonly (readonly ValueUse[])[];
   definitionCaptures: readonly (readonly JitValue[])[];
 }>;
 
 export function planJitValueCacheEpochs(
   instructions: readonly JitValueCachePlanInput[],
-  plannedValueUses: readonly JitPlannedValueUse[]
+  valueUses: readonly ValueUse[]
 ): JitValueCacheEpochPlan {
   const instructionPlans: JitValueCacheInstructionPlan[] = [];
   const definitionCaptures: JitValue[][] = [];
-  const producedDefinitionCaptures = producedValueKeysNeededByConsumers(plannedValueUses);
+  const producedDefinitionCaptures = producedValueKeysNeededByConsumers(valueUses);
   let currentEpoch = 0;
 
   for (const instruction of instructions) {
@@ -80,7 +78,7 @@ export function planJitValueCacheEpochs(
 
   return {
     instructions: instructionPlans,
-    consumerUses: consumerUses(plannedValueUses, epochCount),
+    consumerUses: consumerUses(valueUses, epochCount),
     definitionCaptures: denseDefinitionCaptures(definitionCaptures, epochCount)
   };
 }
@@ -145,26 +143,22 @@ function appendProducedDefinitionCapture(
 }
 
 function consumerUses(
-  plannedValueUses: readonly JitPlannedValueUse[],
+  valueUses: readonly ValueUse[],
   epochCount: number
-): readonly (readonly JitValueSelectionUse[])[] {
-  const epochUses: JitValueSelectionUse[][] = Array.from(
+): readonly (readonly ValueUse[])[] {
+  const epochUses: ValueUse[][] = Array.from(
     { length: epochCount },
     () => []
   );
 
-  for (const use of plannedValueUses) {
-    const uses = epochUses[use.placement.epoch];
+  for (const use of valueUses) {
+    const uses = epochUses[use.at.epoch];
 
     if (uses === undefined) {
-      throw new Error(`planned JIT value use references missing epoch: ${use.placement.epoch}`);
+      throw new Error(`JIT value use references missing epoch: ${use.at.epoch}`);
     }
 
-    uses.push(...cacheSelectionUsesForPlannedUse(use).map((cacheUse) => ({
-      value: cacheUse.value,
-      emittedCost: cacheUse.emittedCost,
-      ancestors: cacheUse.ancestors
-    })));
+    uses.push(use);
   }
 
   return epochUses;
@@ -180,15 +174,13 @@ function denseDefinitionCaptures(
 }
 
 function producedValueKeysNeededByConsumers(
-  plannedValueUses: readonly JitPlannedValueUse[]
+  valueUses: readonly ValueUse[]
 ): ReadonlySet<string> {
   const produced = new Set<string>();
 
-  for (const use of plannedValueUses) {
-    for (const cacheUse of cacheSelectionUsesForPlannedUse(use)) {
-      if (cacheUse.value.kind === "produced") {
-        produced.add(producedValueKey(cacheUse.value));
-      }
+  for (const use of valueUses) {
+    if (use.value.kind === "produced") {
+      produced.add(producedValueKey(use.value));
     }
   }
 

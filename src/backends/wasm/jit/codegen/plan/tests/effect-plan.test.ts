@@ -47,7 +47,7 @@ test("JIT effect plan leaves pure expressions and state updates out of cache roo
   const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
 
   deepStrictEqual(emissionPlan.plannedEffects, []);
-  deepStrictEqual(emissionPlan.plannedValueUses, []);
+  deepStrictEqual(emissionPlan.valueUses, []);
   deepStrictEqual(emissionPlan.valueCachePlan.useCounts, []);
 });
 
@@ -156,7 +156,7 @@ test("JIT effect plan attaches roots for ordered effects and exit stores", () =>
   const purposes = emissionPlan.plannedEffects.flatMap((effect) =>
     effect.valueRoots.map((root) => root.purpose)
   );
-  const usePurposes = emissionPlan.plannedValueUses
+  const usePurposes = emissionPlan.valueUses
     .filter((use) => valuesEqual(use.value, expectedValue))
     .map((use) => use.purpose);
 
@@ -166,14 +166,11 @@ test("JIT effect plan attaches roots for ordered effects and exit stores", () =>
     "branch",
     "hostTrap"
   ]);
-  strictEqual(purposes.includes("memoryGuardAddress"), true);
-  strictEqual(purposes.includes("guardFailurePayload"), true);
-  strictEqual(purposes.includes("memoryStoreAddress"), true);
-  strictEqual(purposes.includes("memoryStoreValue"), true);
+  strictEqual(purposes.includes("memoryAddress"), true);
+  strictEqual(purposes.includes("memoryValue"), true);
   strictEqual(purposes.includes("branchCondition"), true);
   strictEqual(purposes.includes("branchTarget"), true);
-  strictEqual(purposes.includes("hostTrapVector"), true);
-  strictEqual(purposes.includes("exitStore"), true);
+  strictEqual(purposes.includes("trapVector"), true);
   deepStrictEqual(usePurposes.includes("exitStore"), true);
   strictEqual(emissionPlan.valueCachePlan.useCounts.some((entry) =>
     valuesEqual(entry.value, expectedValue)
@@ -224,7 +221,7 @@ test("JIT effect plan selects produced values only for later required roots", ()
   deepStrictEqual(unusedPlan.plannedEffects.map((effect) => effect.kind), [
     "producedValue"
   ]);
-  deepStrictEqual(unusedPlan.plannedValueUses, []);
+  deepStrictEqual(unusedPlan.valueUses, []);
   deepStrictEqual(unusedPlan.valueCachePlan.useCounts, []);
   deepStrictEqual(unusedPlan.valueCachePlan.definitionCaptures.flat(), []);
 

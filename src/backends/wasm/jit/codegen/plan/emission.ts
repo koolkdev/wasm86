@@ -15,7 +15,6 @@ import {
 import type {
   JitCodegenPlan,
   ExitStoreSet,
-  JitExitStoreUse,
   JitInstructionState,
   PlannedExit
 } from "./types.js";
@@ -27,7 +26,7 @@ import {
   planJitValuesForEmission,
   type JitInstructionWithPlannedValues
 } from "./value-planning.js";
-import type { JitPlannedValueUse } from "./value-uses.js";
+import type { ValueUse } from "./value-uses.js";
 import type {
   JitPlannedValueCapture
 } from "./value-captures.js";
@@ -37,7 +36,7 @@ import {
 } from "#backends/wasm/jit/analysis/paths.js";
 import {
   planJitEffectsForEmission,
-  type JitPlannedEffect
+  type PlannedEffect
 } from "./effect-plan.js";
 
 type JitPreparedCodegenInstruction = JitInstructionState & Pick<
@@ -59,11 +58,10 @@ export type JitCodegenInstructionPlan =
 export type JitCodegenEmissionPlan = Readonly<{
   instructions: readonly JitCodegenInstructionPlan[];
   exits: readonly PlannedExit[];
-  exitStoreUses: readonly JitExitStoreUse[];
   exitStoreSets: readonly ExitStoreSet[];
   maxExitStoreIndex: number;
-  plannedEffects: readonly JitPlannedEffect[];
-  plannedValueUses: readonly JitPlannedValueUse[];
+  plannedEffects: readonly PlannedEffect[];
+  valueUses: readonly ValueUse[];
   plannedValueCaptures: readonly JitPlannedValueCapture[];
   valueCachePlan: JitValueCachePlan;
 }>;
@@ -80,22 +78,20 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
   const preparedInstructions = prepareJitCodegenInstructions(codegenPlan);
   const plannedEffects = planJitEffectsForEmission(
     preparedInstructions,
-    codegenPlan.effects,
-    codegenPlan.exitStoreUses
+    codegenPlan.effects
   );
   const plannedValues = planJitValuesForEmission(
     preparedInstructions,
-    plannedEffects.plannedValueUses
+    plannedEffects.valueUses
   );
 
   return {
     instructions: plannedValues.instructions,
     exits: codegenPlan.exits,
-    exitStoreUses: codegenPlan.exitStoreUses,
     exitStoreSets: codegenPlan.exitStoreSets,
     maxExitStoreIndex: codegenPlan.maxExitStoreIndex,
     plannedEffects: plannedEffects.plannedEffects,
-    plannedValueUses: plannedValues.plannedValueUses,
+    valueUses: plannedValues.valueUses,
     plannedValueCaptures: plannedValues.plannedValueCaptures,
     valueCachePlan: plannedValues.valueCachePlan
   };

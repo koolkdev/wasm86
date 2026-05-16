@@ -11,8 +11,6 @@ export type {
   ExitStore,
   ExitStorePlan,
   ExitStoreSet,
-  JitExitStoreUse,
-  JitExitStoreUsePlacement,
   PlannedExit,
   JitInstructionState,
   JitCodegenPlan
@@ -30,10 +28,10 @@ export type {
   TimelineLookups
 } from "#backends/wasm/jit/analysis/timeline.js";
 export type {
-  JitEffectPlacement,
-  JitEffectValueRoot,
-  JitEffectValueRootPurpose,
-  JitPlannedEffect
+  EffectPlacement,
+  EffectValueRoot,
+  EffectValueRootPurpose,
+  PlannedEffect
 } from "./effect-plan.js";
 export { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 

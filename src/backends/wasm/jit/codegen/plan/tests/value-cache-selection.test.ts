@@ -7,6 +7,8 @@ import {
   jitProducedValue
 } from "./plan-test-helpers.js";
 import { planJitValueCacheSelection } from "#backends/wasm/jit/codegen/plan/value-cache-selection.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { ValueUse } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 
 test("JIT value-cache selection returns an empty total plan when no values are selected", () => {
   const selection = planJitValueCacheSelection([[], []]);
@@ -22,11 +24,11 @@ test("JIT value-cache selection exposes per-epoch consumers and merged use count
   const produced = jitProducedValue("selection:produced", "i32");
   const selection = planJitValueCacheSelection([
     [
-      { value: repeated, emittedCost: 3, ancestors: [] },
-      { value: repeated, emittedCost: 3, ancestors: [] }
+      valueUse(repeated),
+      valueUse(repeated)
     ],
     [
-      { value: produced, emittedCost: 1, ancestors: [] }
+      valueUse(produced)
     ]
   ]);
 
@@ -39,3 +41,17 @@ test("JIT value-cache selection exposes per-epoch consumers and merged use count
     { value: produced, useCount: 1 }
   ]);
 });
+
+function valueUse(
+  value: JitValue,
+  ancestors: readonly JitValue[] = []
+): ValueUse {
+  return {
+    value,
+    at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+    path: { kind: "path", id: "root" },
+    purpose: "trapVector",
+    root: ancestors[0] ?? value,
+    ancestors
+  };
+}

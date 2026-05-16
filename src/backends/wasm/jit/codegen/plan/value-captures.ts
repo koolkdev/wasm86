@@ -4,24 +4,20 @@ import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueCachePlan } from "./value-cache.js";
 import {
-  cacheSelectionUsesForPlannedUse,
-  plannedValueUseFromCacheSelectionUse
-} from "./value-cache-uses.js";
-import {
   pathsEqual,
   rootPath,
   type Path
 } from "#backends/wasm/jit/analysis/paths.js";
 import type {
-  JitPlannedValueUse,
-  JitValueUsePlacement
+  Placement,
+  ValueUse
 } from "./value-uses.js";
 
 export type JitPlannedValueCapture = Readonly<{
   value: JitValue;
-  placement: JitValueUsePlacement;
+  placement: Placement;
   availabilityPath: Path;
-  consumers: readonly JitPlannedValueUse[];
+  consumers: readonly ValueUse[];
 }>;
 
 export type JitExpressionCaptureMap = ReadonlyMap<
@@ -30,7 +26,7 @@ export type JitExpressionCaptureMap = ReadonlyMap<
 >;
 
 export function planJitValueCaptures(
-  uses: readonly JitPlannedValueUse[],
+  uses: readonly ValueUse[],
   cachePlan: JitValueCachePlan
 ): readonly JitPlannedValueCapture[] {
   return planRootConsumerCaptures(uses, cachePlan);
@@ -56,15 +52,14 @@ export function groupJitPlannedCaptures(
 }
 
 function planRootConsumerCaptures(
-  uses: readonly JitPlannedValueUse[],
+  uses: readonly ValueUse[],
   cachePlan: JitValueCachePlan
 ): readonly JitPlannedValueCapture[] {
   const captures: JitPlannedValueCapture[] = [];
 
   for (let epoch = 0; epoch < cachePlan.consumers.length; epoch += 1) {
     const epochUses = uses
-      .filter((use) => use.placement.epoch === epoch)
-      .flatMap((use) => cacheSelectionUsesForPlannedUse(use));
+      .filter((use) => use.at.epoch === epoch);
 
     for (const selected of cachePlan.consumers[epoch] ?? []) {
       if (
@@ -75,8 +70,7 @@ function planRootConsumerCaptures(
       }
 
       const consumers = epochUses
-        .filter((use) => valuesEqual(use.value, selected.value))
-        .map(plannedValueUseFromCacheSelectionUse);
+        .filter((use) => valuesEqual(use.value, selected.value));
       const capture = rootCaptureForConsumers(selected.value, consumers);
 
       if (capture !== undefined) {
@@ -98,17 +92,17 @@ function jitValueDependsOnProduced(value: JitValue): boolean {
 
 function rootCaptureForConsumers(
   value: JitValue,
-  consumers: readonly JitPlannedValueUse[]
+  consumers: readonly ValueUse[]
 ): JitPlannedValueCapture | undefined {
   if (consumers.length === 0) {
     return undefined;
   }
 
-  const placement = consumers[0]?.placement;
+  const placement = consumers[0]?.at;
 
   if (
     placement === undefined ||
-    !consumers.every((consumer) => placementsEqual(consumer.placement, placement))
+    !consumers.every((consumer) => placementsEqual(consumer.at, placement))
   ) {
     return undefined;
   }
@@ -146,8 +140,8 @@ function uniqueCaptures(
 }
 
 function placementsEqual(
-  left: JitValueUsePlacement,
-  right: JitValueUsePlacement
+  left: Placement,
+  right: Placement
 ): boolean {
   return left.instructionIndex === right.instructionIndex &&
     left.opIndex === right.opIndex &&

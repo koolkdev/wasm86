@@ -20,7 +20,7 @@ import {
   type JitValueCacheRuntime
 } from "./value-local-store.js";
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
-import type { JitPlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
+import type { PlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import { opView, type OpView } from "#backends/wasm/jit/analysis/timeline.js";
 import { emitJitSet } from "./operands.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
@@ -44,7 +44,7 @@ export type JitBlockEmitContext = Readonly<{
   state: JitState;
   exit: JitExitTarget;
   instructions: readonly JitInstructionContext[];
-  plannedEffects: readonly JitPlannedEffect[];
+  plannedEffects: readonly PlannedEffect[];
   valueCache?: JitValueCacheRuntime | undefined;
   linking?: JitLinkEmitContext | undefined;
 }>;
@@ -123,7 +123,7 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
 
 function emitCurrentInstruction(
   jitContext: JitInstructionEmitContext,
-  plannedEffects: readonly JitPlannedEffect[]
+  plannedEffects: readonly PlannedEffect[]
 ): void {
   emitJitInstruction(jitContext, jitContext.currentInstruction(), plannedEffects);
 }
@@ -131,7 +131,7 @@ function emitCurrentInstruction(
 function emitJitInstruction(
   jitContext: JitInstructionEmitContext,
   instruction: JitInstructionContext,
-  plannedEffects: readonly JitPlannedEffect[]
+  plannedEffects: readonly PlannedEffect[]
 ): void {
   const valueCache = jitContext.valueCache;
   let currentTimelineOp: OpView | undefined;
@@ -187,10 +187,10 @@ function beginInstruction(
 }
 
 function groupPlannedEffectsByInstruction(
-  plannedEffects: readonly JitPlannedEffect[],
+  plannedEffects: readonly PlannedEffect[],
   instructionCount: number
-): readonly (readonly JitPlannedEffect[])[] {
-  const grouped: JitPlannedEffect[][] = Array.from(
+): readonly (readonly PlannedEffect[])[] {
+  const grouped: PlannedEffect[][] = Array.from(
     { length: instructionCount },
     () => []
   );

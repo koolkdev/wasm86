@@ -19,10 +19,12 @@ import {
 import { planJitValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import {
-  planJitValueUses,
-  type JitValueUseRoot
+  type UsePurpose
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
-import { rootExpressionPaths } from "#backends/wasm/jit/codegen/tests/path-test-helpers.js";
+import {
+  valueUsesForExpressionBlock,
+  type TestValueRoot
+} from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   JitCodegenPlan,
@@ -31,7 +33,6 @@ import type {
   PlannedExit,
   ExitSnapshot,
   JitInstructionState,
-  JitExitStoreUse,
   ExitPayload,
   ExitValue
 } from "#backends/wasm/jit/codegen/plan/types.js";
@@ -94,7 +95,6 @@ export type {
   PlannedExit,
   ExitSnapshot,
   JitInstructionState,
-  JitExitStoreUse,
   ExitPayload,
   ExitValue,
   JitProducedValue,
@@ -113,7 +113,7 @@ export function planValueCacheForTest(input: Readonly<{
   operands?: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
   producedByVar?: ReadonlyMap<number, JitProducedValue>;
-  extraUses?: ReadonlyMap<number, readonly JitValueUseRoot[]>;
+  extraUses?: ReadonlyMap<number, readonly TestValueRoot[]>;
 }>) {
   const operands = input.operands ?? [];
   const valueTimeline = buildTimeline({
@@ -124,24 +124,23 @@ export function planValueCacheForTest(input: Readonly<{
       ? {}
       : { producedByVar: input.producedByVar })
   });
-  const plannedValueUses = planJitValueUses([{
+  const valueUses = valueUsesForExpressionBlock({
     expressionBlock: input.expressionBlock,
     valueTimeline,
-    expressionPaths: rootExpressionPaths(input.expressionBlock),
     extraUses: input.extraUses ?? new Map()
-  }]);
+  });
 
   return planJitValueCacheForInstructions([{
     operands,
     expressionBlock: input.expressionBlock,
     valueTimeline
-  }], plannedValueUses);
+  }], valueUses);
 }
 
 export function extraUse(
   value: JitValue,
-  purpose = "exit store"
-): JitValueUseRoot {
+  purpose: UsePurpose = "exitStore"
+): TestValueRoot {
   return {
     value,
     path: rootPath(),
@@ -181,27 +180,6 @@ export function plannedRegisterStores(exit: PlannedExit): readonly ExitStore[] {
 
 export function plannedFlagStores(exit: PlannedExit): readonly ExitStore[] {
   return exit.stores.filter((store) => store.target.kind === "aluFlags");
-}
-
-export function exitStoreUse(
-  store: ExitStore,
-  exitPoint: PlannedExit,
-  exitIndex: number
-): JitExitStoreUse {
-  return {
-    purpose: "exitStore",
-    target: store.target,
-    value: store.value,
-    placement: {
-      instructionIndex: exitPoint.at.instructionIndex,
-      opIndex: exitPoint.at.opIndex,
-      exitIndex,
-      exitId: exitPoint.id,
-      reason: exitPoint.reason,
-      exitStoreIndex: exitPoint.exitStoreIndex
-    },
-    path: exitPoint.path
-  };
 }
 
 export function exitPoint(input: Readonly<{
