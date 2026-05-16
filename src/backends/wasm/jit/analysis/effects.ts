@@ -24,6 +24,7 @@ import {
 } from "./instruction-progress.js";
 import type { PathMap } from "./paths.js";
 import type { Timeline, TimelineView } from "./timeline-types.js";
+import { ValueStateBuilder } from "./value-state.js";
 
 export type EffectInstructionInput = Readonly<{
   instruction: InstructionMetadata;
@@ -91,10 +92,15 @@ export function analyzeInstructionEffects(
         kind,
         snapshot: snapshotForExit(
           kind,
-          exitSnapshotBeforeOp(
-            instructionAnalysis,
-            opIndex,
-            { instructionCountDelta: currentInstructionCountDelta }
+          snapshotWithFaultRollback(
+            kind,
+            op,
+            view,
+            exitSnapshotBeforeOp(
+              instructionAnalysis,
+              opIndex,
+              { instructionCountDelta: currentInstructionCountDelta }
+            )
           )
         ),
         paths: instructionAnalysis.expressionPaths,
@@ -166,6 +172,39 @@ function exitSnapshotBeforeOp(
     progress,
     valueState: instruction.timeline.snapshotAt(opIndex)
   };
+}
+
+function snapshotWithFaultRollback(
+  kind: ExitKind,
+  op: IrExprOp,
+  view: TimelineView,
+  snapshot: ExitSnapshot
+): ExitSnapshot {
+  if (
+    op.op !== "memory.guard" ||
+    op.faultRollback === undefined ||
+    !exitKindIsMemoryFault(kind)
+  ) {
+    return snapshot;
+  }
+
+  const builder = new ValueStateBuilder(snapshot.valueState);
+
+  for (const write of op.faultRollback) {
+    builder.registers().recordReg32(
+      write.target.reg,
+      view.value(write.value)
+    );
+  }
+
+  return {
+    ...snapshot,
+    valueState: builder.snapshot()
+  };
+}
+
+function exitKindIsMemoryFault(kind: ExitKind): boolean {
+  return kind === "memoryReadFault" || kind === "memoryWriteFault";
 }
 
 function targetValueInput(

@@ -89,6 +89,37 @@ test("validator accepts memory guards with positive byte lengths", () => {
   );
 });
 
+test("validator validates memory guard rollback values", () => {
+  doesNotThrow(() =>
+    validateIrBlock([
+      { op: "value.const", type: "i32", dst: irVar(0), value: 0x1000 },
+      {
+        op: "memory.guard",
+        address: const32(0x2000),
+        byteLength: 4,
+        access: "write",
+        faultRollback: [{ target: { kind: "reg", reg: "esp" }, value: irVar(0) }]
+      },
+      { op: "next" }
+    ])
+  );
+
+  throws(
+    () =>
+      validateIrBlock([
+        {
+          op: "memory.guard",
+          address: const32(0x2000),
+          byteLength: 4,
+          access: "write",
+          faultRollback: [{ target: { kind: "reg", reg: "esp" }, value: irVar(0) }]
+        },
+        { op: "next" }
+      ]),
+    /IR var 0 is used before definition/
+  );
+});
+
 test("validator rejects memory guards with malformed byte lengths", () => {
   throws(
     () =>

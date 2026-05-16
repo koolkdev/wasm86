@@ -1,5 +1,10 @@
 import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
-import { buildIrExpressionBlock, type IrStorageExpr, type IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import {
+  buildIrExpressionBlock,
+  type IrRollbackExprWrite,
+  type IrStorageExpr,
+  type IrValueExpr
+} from "#backends/wasm/codegen/expressions.js";
 import type {
   IrBlock,
   IrMemoryAccessKind,
@@ -114,7 +119,7 @@ export function emitInterpreterIrWithContext(block: IrBlock, context: Interprete
     emitSet: (target, value, accessWidth, helpers) =>
       emitSetStorage(context, target, value, accessWidth, helpers),
     emitMemoryGuard: (op, helpers) =>
-      emitMemoryGuard(context, op.address, op.byteLength, op.access, helpers),
+      emitMemoryGuard(context, op.address, op.byteLength, op.access, op.faultRollback, helpers),
     emitAddress: (source) => emitAddress(context, source),
     emitSetFlags: (descriptor, helpers) =>
       emitSetFlags(context.body, aluFlags, descriptor, helpers),
@@ -270,9 +275,13 @@ function emitMemoryGuard(
   address: IrValueExpr,
   byteLength: number,
   access: IrMemoryAccessKind,
+  faultRollback: readonly IrRollbackExprWrite[] | undefined,
   helpers: WasmIrEmitHelpers
 ): void {
-  if (address.kind === "address" && emitOperandMemoryGuard(context, address.operand, byteLength, access)) {
+  if (
+    address.kind === "address" &&
+    emitOperandMemoryGuard(context, address.operand, byteLength, access, faultRollback, helpers)
+  ) {
     return;
   }
 
@@ -281,9 +290,28 @@ function emitMemoryGuard(
   try {
     helpers.emitValue(address, { requestedWidth: 32 });
     context.body.localSet(addressLocal);
-    emitWasmIrGuardGuestRange(memoryGuardContext(context, access), addressLocal, byteLength);
+    emitWasmIrGuardGuestRange(
+      memoryGuardContext(context, access, faultRollback, helpers),
+      addressLocal,
+      byteLength
+    );
   } finally {
     context.scratch.freeLocal(addressLocal);
+  }
+}
+
+function emitFaultRollback(
+  context: InterpreterIrEmitContext,
+  faultRollback: readonly IrRollbackExprWrite[] | undefined,
+  helpers: WasmIrEmitHelpers
+): void {
+  if (faultRollback === undefined || faultRollback.length === 0) {
+    return;
+  }
+
+  for (const write of faultRollback) {
+    emitStoreRegAccess(context.body, context.state.regs, write.target.reg, 32, () =>
+      helpers.emitValue(write.value, { requestedWidth: 32 }));
   }
 }
 
@@ -291,14 +319,16 @@ function emitOperandMemoryGuard(
   context: InterpreterIrEmitContext,
   operand: OperandRef,
   byteLength: number,
-  access: IrMemoryAccessKind
+  access: IrMemoryAccessKind,
+  faultRollback: readonly IrRollbackExprWrite[] | undefined,
+  helpers: WasmIrEmitHelpers
 ): boolean {
   const binding = operandBinding(context, operand.index);
 
   switch (binding.kind) {
     case "mem":
       emitWasmIrGuardGuestRange(
-        memoryGuardContext(context, access),
+        memoryGuardContext(context, access, faultRollback, helpers),
         binding.addressLocal,
         byteLength
       );
@@ -306,7 +336,7 @@ function emitOperandMemoryGuard(
     case "rm":
       emitIfModRmMemory(context.body, binding.modRmLocal, () => {
         emitWasmIrGuardGuestRange(
-          memoryGuardContext(context, access),
+          memoryGuardContext(context, access, faultRollback, helpers),
           binding.addressLocal,
           byteLength,
           { faultExtraDepth: 2 }
@@ -324,11 +354,14 @@ function emitOperandMemoryGuard(
 
 function memoryGuardContext(
   context: InterpreterIrEmitContext,
-  access: IrMemoryAccessKind
+  access: IrMemoryAccessKind,
+  faultRollback: readonly IrRollbackExprWrite[] | undefined,
+  helpers: WasmIrEmitHelpers
 ): Parameters<typeof emitWasmIrGuardGuestRange>[0] {
   return {
     body: context.body,
     emitFaultExit: (fault) => {
+      emitFaultRollback(context, faultRollback, helpers);
       emitWasmIrExitFromI32Stack(context.body, {
         destination: context.exit,
         reason: memoryFaultExitReason(access),

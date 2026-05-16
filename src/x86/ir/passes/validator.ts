@@ -76,6 +76,9 @@ function validateOpUses(
       validateValueRef(op.address, definedVars);
       validateMemoryGuardByteLength(op.byteLength);
       validateMemoryGuardAccess(op.access);
+      for (const write of op.faultRollback ?? []) {
+        validateValueRef(write.value, definedVars);
+      }
       break;
     case "address":
       validateOperandIndex(op.operand.index, options);

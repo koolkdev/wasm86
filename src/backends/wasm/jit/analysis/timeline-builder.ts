@@ -144,6 +144,9 @@ class TimelineBuilder {
         return;
       case "memory.guard":
         this.#valueForExpression(op.address);
+        for (const write of op.faultRollback ?? []) {
+          this.#valueForExpression(write.value);
+        }
         return;
       case "jump":
         this.#valueForExpression(op.target);

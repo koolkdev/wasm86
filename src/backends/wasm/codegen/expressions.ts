@@ -60,6 +60,12 @@ export type IrMemoryGuardExprOp = Readonly<{
   address: IrValueExpr;
   byteLength: number;
   access: IrMemoryAccessKind;
+  faultRollback?: readonly IrRollbackExprWrite[];
+}>;
+
+export type IrRollbackExprWrite = Readonly<{
+  target: RegRef;
+  value: IrValueExpr;
 }>;
 
 export type IrExprOp =
@@ -139,12 +145,22 @@ class ExpressionBuilder {
           break;
         case "memory.guard": {
           const address = this.#valueExpr(op.address);
+          const faultRollback = (op.faultRollback ?? []).map((write) => ({
+            target: write.target,
+            value: this.#valueExpr(write.value)
+          }));
 
           this.#pushOp({
             op: "memory.guard",
             address: address.value,
             byteLength: op.byteLength,
-            access: op.access
+            access: op.access,
+            ...(faultRollback.length === 0 ? {} : {
+              faultRollback: faultRollback.map((write) => ({
+                target: write.target,
+                value: write.value.value
+              }))
+            })
           });
           break;
         }
