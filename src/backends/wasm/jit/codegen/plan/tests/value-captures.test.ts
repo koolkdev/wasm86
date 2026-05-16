@@ -24,13 +24,19 @@ import {
   addExpr,
   addValue,
   branchPath,
+  buildBlock,
+  buildJitCodegenEmissionPlan,
   c32,
   c32Expr,
+  decodeBytes,
   exitPoint,
   exitState,
   ExitReason,
+  ok,
+  planJitCodegen,
   registerStore,
-  rootPath
+  rootPath,
+  startAddress
 } from "./plan-test-helpers.js";
 
 test("JIT value-capture planner shares pure values needed by both branch paths", () => {
@@ -200,6 +206,40 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
     { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" },
     { kind: "path", id: "branch:0:0:notTaken", debugLabel: "notTaken" }
   ]);
+});
+
+test("JIT value-capture planner does not capture a selected store address without exit need", () => {
+  const store = ok(decodeBytes([0x89, 0x44, 0x08, 0x04], startAddress)); // mov [eax + ecx + 4], eax
+  const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(buildBlock([store])));
+
+  strictEqual(emissionPlan.reusePlan.cache.selected.length > 0, true);
+  deepStrictEqual(emissionPlan.reusePlan.captures.captures, []);
+});
+
+test("JIT value-capture planner explicitly captures selected cmov values for guard exits", () => {
+  const cmove = ok(decodeBytes([0x0f, 0x44, 0xd1], startAddress)); // cmove edx, ecx
+  const load = ok(decodeBytes([0x8b, 0x03], cmove.nextEip)); // mov eax, [ebx]
+  const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(buildBlock([cmove, load])));
+  const selected = emissionPlan.reusePlan.cache.selected
+    .find((entry) => entry.value.kind === "value.select");
+
+  if (selected === undefined) {
+    throw new Error("expected selected cmov value");
+  }
+
+  const [capture] = emissionPlan.reusePlan.captures.captures
+    .filter((candidate) =>
+      candidate.reason === "forced" &&
+        valuesEqual(candidate.value, selected.value)
+    );
+
+  if (capture === undefined) {
+    throw new Error("expected forced cmov capture");
+  }
+
+  deepStrictEqual(capture.at, { instructionIndex: 1, opIndex: 0, epoch: 1 });
+  deepStrictEqual(capture.availability, rootPath());
+  deepStrictEqual(capture.consumers.map((consumer) => consumer.purpose), ["exitStore"]);
 });
 
 test("JIT value-capture planner keeps store-clobber consumers scoped to their exit placement", () => {

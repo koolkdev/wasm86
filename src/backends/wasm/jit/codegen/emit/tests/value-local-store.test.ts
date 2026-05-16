@@ -11,31 +11,30 @@ import {
   releaseExitStores,
   addValue,
   highCostValue,
-  jitInputReg32Value,
-  useCounts,
   emitAdd,
   emitXorOfAdds,
   emitHighCostValue,
-  emitConst,
-  emitExtend8,
   unexpectedEmitter,
   branchPath,
   rootPath,
+  emitWithLocalStore,
+  captureWithLocalStore,
+  cacheRuntimeForStore,
   localOpcodes,
   countOpcode,
   type JitValue,
-  type ValueCache,
 } from "./value-local-store-test-helpers.js";
+import { throws } from "node:assert";
 import type { Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
 test("LocalStore reuses one local for equal non-trivial values", () => {
   const body = new WasmFunctionBodyEncoder();
   const first = addValue("eax", 1);
   const second = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value: first, useCount: 2 }]));
+  const store = new LocalStore(body);
   let emitted = 0;
 
-  store.emitForUse(first, () => emitAdd(body, () => { emitted += 1; }));
-  store.emitForUse(second, unexpectedEmitter);
+  emitWithLocalStore(store, first, () => emitAdd(body, () => { emitted += 1; }));
+  emitWithLocalStore(store, second, unexpectedEmitter);
   body.end();
 
   const opcodes = wasmBodyOpcodes(body.encode());
@@ -62,11 +61,11 @@ test("LocalStore reuses structurally equal binary expressions", () => {
     a: addValue("eax", 1),
     b: addValue("ebx", 2)
   } as const satisfies JitValue;
-  const store = new LocalStore(body, useCounts([{ value: first, useCount: 2 }]));
+  const store = new LocalStore(body);
   let emitted = 0;
 
-  store.emitForUse(first, () => emitXorOfAdds(body, () => { emitted += 1; }));
-  store.emitForUse(second, unexpectedEmitter);
+  emitWithLocalStore(store, first, () => emitXorOfAdds(body, () => { emitted += 1; }));
+  emitWithLocalStore(store, second, unexpectedEmitter);
   body.end();
 
   const opcodes = wasmBodyOpcodes(body.encode());
@@ -81,11 +80,11 @@ test("LocalStore reuses high-cost retained expressions through one local", () =>
   const body = new WasmFunctionBodyEncoder();
   const first = highCostValue();
   const second = highCostValue();
-  const store = new LocalStore(body, useCounts([{ value: first, useCount: 2 }]));
+  const store = new LocalStore(body);
   let emitted = 0;
 
-  store.emitForUse(first, () => emitHighCostValue(body, () => { emitted += 1; }));
-  store.emitForUse(second, unexpectedEmitter);
+  emitWithLocalStore(store, first, () => emitHighCostValue(body, () => { emitted += 1; }));
+  emitWithLocalStore(store, second, unexpectedEmitter);
   body.end();
 
   const opcodes = wasmBodyOpcodes(body.encode());
@@ -96,75 +95,19 @@ test("LocalStore reuses high-cost retained expressions through one local", () =>
   deepStrictEqual(localOpcodes(opcodes), [wasmOpcode.localTee, wasmOpcode.localGet]);
 });
 
-test("LocalStore does not cache unselected high-cost retained expressions", () => {
-  const body = new WasmFunctionBodyEncoder();
-  const value = highCostValue();
-  const store = new LocalStore(body, useCounts([]));
-  let emitted = 0;
-
-  store.emitForUse(value, () => emitHighCostValue(body, () => { emitted += 1; }));
-  body.end();
-
-  const opcodes = wasmBodyOpcodes(body.encode());
-
-  strictEqual(emitted, 1);
-  strictEqual(wasmBodyLocalCount(body.encode()), 0);
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32Or), 1);
-  deepStrictEqual(localOpcodes(opcodes), []);
-});
-
-test("LocalStore does not cache unselected constants", () => {
-  const body = new WasmFunctionBodyEncoder();
-  const value = { kind: "const", type: "i32", value: 7 } as const satisfies JitValue;
-  const store = new LocalStore(body, useCounts([]));
-  let emitted = 0;
-
-  store.emitForUse(value, () => emitConst(body, 7, () => { emitted += 1; }));
-  store.emitForUse(value, () => emitConst(body, 7, () => { emitted += 1; }));
-  store.emitForUse(value, () => emitConst(body, 7, () => { emitted += 1; }));
-  body.end();
-
-  const opcodes = wasmBodyOpcodes(body.encode());
-
-  strictEqual(emitted, 3);
-  strictEqual(wasmBodyLocalCount(body.encode()), 0);
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32Const), 3);
-  deepStrictEqual(localOpcodes(opcodes), []);
-});
-
-test("LocalStore does not cache unselected tied-cost expressions", () => {
-  const body = new WasmFunctionBodyEncoder();
-  const value = {
-    kind: "value.unary",
-    type: "i32",
-    operator: "extend8_s",
-    value: jitInputReg32Value("eax")
-  } as const satisfies JitValue;
-  const store = new LocalStore(body, useCounts([]));
-  let emitted = 0;
-
-  store.emitForUse(value, () => emitExtend8(body, () => { emitted += 1; }));
-  store.emitForUse(value, () => emitExtend8(body, () => { emitted += 1; }));
-  body.end();
-
-  strictEqual(emitted, 2);
-  strictEqual(wasmBodyLocalCount(body.encode()), 0);
-  deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), []);
-});
-
-test("LocalStore captureForReuse reports whether it emitted local.set", () => {
+test("LocalStore retain reports whether it emitted local.set", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 2 }]));
+  const store = new LocalStore(body);
   let emitted = 0;
 
-  const first = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
-  const second = store.captureForReuse(value, unexpectedEmitter);
+  const first = captureWithLocalStore(store, value, () => emitAdd(body, () => { emitted += 1; }));
+  const second = captureWithLocalStore(store, value, unexpectedEmitter);
 
   strictEqual(first?.emitted, true);
   strictEqual(second?.emitted, false);
   strictEqual(second?.local, first?.local);
-  store.emitForUse(value, unexpectedEmitter);
+  emitWithLocalStore(store, value, unexpectedEmitter);
   body.end();
 
   strictEqual(emitted, 1);
@@ -174,8 +117,8 @@ test("LocalStore captureForReuse reports whether it emitted local.set", () => {
 test("LocalStore retires invalidated locals before rematerializing", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
-  const first = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  const store = new LocalStore(body);
+  const first = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (first === undefined) {
     throw new Error("expected first exit store");
@@ -183,7 +126,7 @@ test("LocalStore retires invalidated locals before rematerializing", () => {
 
   store.forgetWhere((candidate) => candidate.kind === "value.binary");
 
-  const second = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  const second = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (second === undefined) {
     throw new Error("expected second exit store");
@@ -198,8 +141,8 @@ test("LocalStore retires invalidated locals before rematerializing", () => {
 test("LocalStore reuses non-escaped locals after invalidation", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
-  const first = store.emitForUseWithLocal(value, () => emitAdd(body, () => {}));
+  const store = new LocalStore(body);
+  const first = emitWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (first.local === undefined) {
     throw new Error("expected first cached local");
@@ -207,7 +150,7 @@ test("LocalStore reuses non-escaped locals after invalidation", () => {
 
   store.forgetWhere((candidate) => candidate.kind === "value.binary");
 
-  const second = store.emitForUseWithLocal(value, () => emitAdd(body, () => {}));
+  const second = emitWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (second.local === undefined) {
     throw new Error("expected second cached local");
@@ -222,14 +165,14 @@ test("LocalStore reuses non-escaped locals after invalidation", () => {
 test("LocalStore retires locals that become escaped while available", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
-  const first = store.emitForUseWithLocal(value, () => emitAdd(body, () => {}));
+  const store = new LocalStore(body);
+  const first = emitWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (first.local === undefined) {
     throw new Error("expected first cached local");
   }
 
-  const escaped = store.captureForReuse(value, unexpectedEmitter);
+  const escaped = captureWithLocalStore(store, value, unexpectedEmitter);
 
   if (escaped === undefined) {
     throw new Error("expected escaped cached local");
@@ -240,7 +183,7 @@ test("LocalStore retires locals that become escaped while available", () => {
 
   store.forgetWhere((candidate) => candidate.kind === "value.binary");
 
-  const rematerialized = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  const rematerialized = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (rematerialized === undefined) {
     throw new Error("expected rematerialized cached local");
@@ -255,8 +198,8 @@ test("LocalStore retires locals that become escaped while available", () => {
 test("LocalStore reuses retired escaped locals after owners release", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
-  const first = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  const store = new LocalStore(body);
+  const first = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (first === undefined) {
     throw new Error("expected first exit store");
@@ -265,7 +208,7 @@ test("LocalStore reuses retired escaped locals after owners release", () => {
   store.forgetWhere((candidate) => candidate.kind === "value.binary");
   first.release();
 
-  const second = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  const second = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (second === undefined) {
     throw new Error("expected second exit store");
@@ -278,14 +221,52 @@ test("LocalStore reuses retired escaped locals after owners release", () => {
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
+test("LocalStore retained handles fail on double release", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const value = addValue("eax", 1);
+  const store = new LocalStore(body);
+  const captured = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
+
+  captured.release();
+
+  throws(
+    () => captured.release(),
+    /JIT cached value handle was released more than once/
+  );
+});
+
+test("LocalStore retained handles fail on retain after release", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const value = addValue("eax", 1);
+  const store = new LocalStore(body);
+  const captured = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
+
+  captured.release();
+
+  throws(
+    () => captured.retain(),
+    /JIT cached value handle was retained after release/
+  );
+});
+
+test("LocalStore path stack underflow fails loudly", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const store = new LocalStore(body);
+
+  throws(
+    () => store.leavePath(),
+    /JIT value cache path stack underflow/
+  );
+});
+
 test("LocalStore paths hide branch-local captures from sibling arms", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body);
   let emitted = 0;
 
   store.enterPath(branchPath(0, 0, "taken"));
-  const taken = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+  const taken = captureWithLocalStore(store, value, () => emitAdd(body, () => { emitted += 1; }));
   store.leavePath();
 
   if (taken === undefined) {
@@ -293,7 +274,7 @@ test("LocalStore paths hide branch-local captures from sibling arms", () => {
   }
 
   store.enterPath(branchPath(0, 0, "notTaken"));
-  const notTaken = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+  const notTaken = captureWithLocalStore(store, value, () => emitAdd(body, () => { emitted += 1; }));
   store.leavePath();
 
   if (notTaken === undefined) {
@@ -312,21 +293,21 @@ test("LocalStore paths hide branch-local captures from sibling arms", () => {
 test("LocalStore paths preserve root values available before branch split", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body);
   let emitted = 0;
 
-  const preBranch = store.emitForUseWithLocal(value, () => emitAdd(body, () => { emitted += 1; }));
+  const preBranch = emitWithLocalStore(store, value, () => emitAdd(body, () => { emitted += 1; }));
 
   if (preBranch.local === undefined) {
     throw new Error("expected pre-branch cached local");
   }
 
   store.enterPath(branchPath(0, 0, "taken"));
-  const taken = store.captureForReuse(value, unexpectedEmitter);
+  const taken = captureWithLocalStore(store, value, unexpectedEmitter);
   store.leavePath();
 
   store.enterPath(branchPath(0, 0, "notTaken"));
-  const notTaken = store.captureForReuse(value, unexpectedEmitter);
+  const notTaken = captureWithLocalStore(store, value, unexpectedEmitter);
   store.leavePath();
 
   body.end();
@@ -345,17 +326,17 @@ test("LocalStore keeps parent path availability alive while child paths exit", (
   const parentPath = { kind: "path", id: "parent" } as const;
   const childPath = { kind: "path", id: "child" } as const;
   const siblingPath = { kind: "path", id: "sibling" } as const;
-  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body);
   let emitted = 0;
 
   store.enterPath(parentPath);
-  const parent = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+  const parent = captureWithLocalStore(store, value, () => emitAdd(body, () => { emitted += 1; }));
 
   store.enterPath(childPath);
-  const child = store.captureForReuse(value, unexpectedEmitter);
+  const child = captureWithLocalStore(store, value, unexpectedEmitter);
   store.leavePath();
 
-  const parentAfterChild = store.captureForReuse(value, unexpectedEmitter);
+  const parentAfterChild = captureWithLocalStore(store, value, unexpectedEmitter);
 
   if (parent === undefined || child === undefined || parentAfterChild === undefined) {
     throw new Error("expected parent path exit stores");
@@ -367,7 +348,7 @@ test("LocalStore keeps parent path availability alive while child paths exit", (
   store.leavePath();
 
   store.enterPath(siblingPath);
-  const sibling = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
+  const sibling = captureWithLocalStore(store, value, () => emitAdd(body, () => { emitted += 1; }));
   store.leavePath();
 
   if (sibling === undefined) {
@@ -390,10 +371,10 @@ test("LocalStore keeps parent path availability alive while child paths exit", (
 test("LocalStore reuses released branch-local locals after leaving path", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body);
 
   store.enterPath(branchPath(0, 0, "taken"));
-  const taken = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  const taken = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
   store.leavePath();
 
   if (taken === undefined) {
@@ -403,7 +384,7 @@ test("LocalStore reuses released branch-local locals after leaving path", () => 
   taken.release();
 
   store.enterPath(branchPath(0, 0, "notTaken"));
-  const notTaken = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  const notTaken = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
   store.leavePath();
 
   if (notTaken === undefined) {
@@ -419,11 +400,9 @@ test("LocalStore reuses released branch-local locals after leaving path", () => 
 test("LocalStore keeps pinned exit-store locals out of reuse", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
-  const valueCache = {
-    captureForReuse: (cachedValue, emitter) => store.captureForReuse(cachedValue, emitter)
-  } as ValueCache;
-  const captured = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  const store = new LocalStore(body);
+  const valueCache = cacheRuntimeForStore(store);
+  const captured = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (captured === undefined) {
     throw new Error("expected captured cached local");
@@ -450,7 +429,7 @@ test("LocalStore keeps pinned exit-store locals out of reuse", () => {
   captured.release();
   store.forgetWhere((candidate) => candidate.kind === "value.binary");
 
-  const rematerialized = store.captureForReuse(value, () => emitAdd(body, () => {}));
+  const rematerialized = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (rematerialized === undefined) {
     throw new Error("expected rematerialized cached local");
@@ -476,23 +455,20 @@ test("LocalStore forgetWhere invalidates only matching values", () => {
   const body = new WasmFunctionBodyEncoder();
   const eax = addValue("eax", 1);
   const ebx = addValue("ebx", 1);
-  const store = new LocalStore(body, useCounts([
-    { value: eax, useCount: 2 },
-    { value: ebx, useCount: 2 }
-  ]));
+  const store = new LocalStore(body);
   let eaxEmits = 0;
   let ebxEmits = 0;
 
-  store.emitForUse(eax, () => emitAdd(body, () => { eaxEmits += 1; }));
-  store.emitForUse(ebx, () => emitAdd(body, () => { ebxEmits += 1; }));
+  emitWithLocalStore(store, eax, () => emitAdd(body, () => { eaxEmits += 1; }));
+  emitWithLocalStore(store, ebx, () => emitAdd(body, () => { ebxEmits += 1; }));
   store.forgetWhere((value) =>
     value.kind === "value.binary" &&
     value.a.kind === "input" &&
     value.a.slot.kind === "reg32" &&
     value.a.slot.reg === "eax"
   );
-  store.emitForUse(eax, () => emitAdd(body, () => { eaxEmits += 1; }));
-  store.emitForUse(ebx, unexpectedEmitter);
+  emitWithLocalStore(store, eax, () => emitAdd(body, () => { eaxEmits += 1; }));
+  emitWithLocalStore(store, ebx, unexpectedEmitter);
   body.end();
 
   strictEqual(eaxEmits, 2);

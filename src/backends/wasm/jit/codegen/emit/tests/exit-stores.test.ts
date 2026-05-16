@@ -20,7 +20,6 @@ import {
   buildBlock,
   encodeJitBlock,
   addValue,
-  useCounts,
   cacheRuntimeForStore,
   countOpcode,
 } from "./value-local-store-test-helpers.js";
@@ -85,7 +84,7 @@ test("JIT exit stores require planned cache captures for aliased register source
 test("JIT flag exit stores lower planned sources through value cache", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new LocalStore(body, useCounts([{ value, useCount: 2 }]));
+  const store = new LocalStore(body);
   const valueCache = cacheRuntimeForStore(store);
   const captured = captureExitStores({
     body,

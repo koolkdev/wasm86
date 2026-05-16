@@ -6,46 +6,41 @@ import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
-  type SelectedValue
-} from "#backends/wasm/jit/codegen/plan/cache.js";
-import {
   rootPathId,
   type Path
 } from "#backends/wasm/jit/analysis/paths.js";
 
-export type { SelectedValue } from "#backends/wasm/jit/codegen/plan/cache.js";
-
-export type CachedValueUse = Readonly<{
+export type CachedUse = Readonly<{
   valueWidth: ValueWidth;
   local?: number;
 }>;
 
-export type CachedValueHandle = Readonly<{
+export type CachedHandle = Readonly<{
   local: number;
   valueWidth: ValueWidth;
-  retain(): CachedValueHandle;
+  retain(): CachedHandle;
   release(): void;
 }>;
-export type CachedValueLocal = CachedValueHandle & Readonly<{
+export type CapturedValue = CachedHandle & Readonly<{
   emitted: boolean;
 }>;
 
-type CachedValueEntry = {
+type CacheEntry = {
   readonly value: JitValue;
-  readonly availabilitiesByPath: Map<string, CachedAvailability>;
+  readonly availabilitiesByPath: Map<string, Availability>;
 };
 
-type CachedAvailability = {
-  entry: CachedValueEntry;
+type Availability = {
+  entry: CacheEntry;
   pathKey: string;
-  local: CacheLocal;
+  local: LocalSlot;
   valueWidth: ValueWidth;
 };
 
-type CacheLocal = {
+type LocalSlot = {
   local: number;
   ownerCount: number;
-  availability?: CachedAvailability | undefined;
+  availability?: Availability | undefined;
   free: boolean;
 };
 
@@ -53,31 +48,18 @@ type PathFrame = {
   previousPathKey: string;
   pathKey: string;
   clearCreatedAvailabilitiesOnLeave: boolean;
-  createdAvailabilities: Set<CachedAvailability>;
+  createdAvailabilities: Set<Availability>;
 };
 
 export class LocalStore {
   readonly #body: WasmFunctionBodyEncoder;
-  readonly #entries = new Map<string, CachedValueEntry>();
-  readonly #freeLocals: CacheLocal[] = [];
+  readonly #entries = new Map<string, CacheEntry>();
+  readonly #freeLocals: LocalSlot[] = [];
   #currentPathKey = rootPathKey();
   readonly #pathStack: PathFrame[] = [];
 
-  constructor(body: WasmFunctionBodyEncoder, selectedValues: readonly SelectedValue[]) {
+  constructor(body: WasmFunctionBodyEncoder) {
     this.#body = body;
-
-    for (const selected of selectedValues) {
-      const value = simplifyValue(selected.value);
-
-      this.#entries.set(valueKey(value), {
-        value,
-        availabilitiesByPath: new Map()
-      });
-    }
-  }
-
-  emitForUse(value: JitValue, emitter: () => ValueWidth): ValueWidth {
-    return this.emitForUseWithLocal(value, emitter).valueWidth;
   }
 
   enterPath(path: Path): void {
@@ -109,50 +91,25 @@ export class LocalStore {
     this.#currentPathKey = frame.previousPathKey;
   }
 
-  emitForUseWithLocal(value: JitValue, emitter: () => ValueWidth): CachedValueUse {
-    const entry = this.#entryFor(value);
-
-    if (entry === undefined) {
-      return { valueWidth: emitter() };
-    }
-
-    const availability = this.#visibleAvailability(entry);
+  get(value: JitValue): CachedUse | undefined {
+    const availability = this.#visibleAvailabilityForValue(value);
 
     if (availability !== undefined) {
       this.#body.localGet(availability.local.local);
       return { valueWidth: availability.valueWidth, local: availability.local.local };
     }
 
-    const valueWidth = emitter();
-    const newAvailability = this.#availabilityForCurrentPath(entry, valueWidth);
+    return undefined;
+  }
 
+  tee(value: JitValue, valueWidth: ValueWidth): CachedUse {
+    const newAvailability = this.#availabilityForCurrentPath(value, valueWidth);
     this.#body.localTee(newAvailability.local.local);
     return { valueWidth, local: newAvailability.local.local };
   }
 
-  // Pre-fill a selected cache entry for consumers that need the value later,
-  // without leaving it on the stack. Returns true only when this call emitted
-  // the expression and stored it with local.set.
-  captureForReuse(value: JitValue, emitter: () => ValueWidth): CachedValueLocal | undefined {
-    const entry = this.#entryFor(value);
-
-    if (entry === undefined) {
-      return undefined;
-    }
-
-    const availability = this.#visibleAvailability(entry);
-
-    if (availability !== undefined) {
-      return {
-        ...this.#handleForLocal(availability.local, availability.valueWidth),
-        valueWidth: availability.valueWidth,
-        emitted: false
-      };
-    }
-
-    const valueWidth = emitter();
-    const newAvailability = this.#availabilityForCurrentPath(entry, valueWidth);
-
+  set(value: JitValue, valueWidth: ValueWidth): CapturedValue {
+    const newAvailability = this.#availabilityForCurrentPath(value, valueWidth);
     this.#body.localSet(newAvailability.local.local);
     return {
       ...this.#handleForLocal(newAvailability.local, valueWidth),
@@ -161,21 +118,8 @@ export class LocalStore {
     };
   }
 
-  emitAvailableForUse(value: JitValue): CachedValueUse | undefined {
-    const entry = this.#entryFor(value);
-    const availability = entry === undefined ? undefined : this.#visibleAvailability(entry);
-
-    if (availability === undefined) {
-      return undefined;
-    }
-
-    this.#body.localGet(availability.local.local);
-    return { valueWidth: availability.valueWidth, local: availability.local.local };
-  }
-
-  captureAvailableForReuse(value: JitValue): CachedValueLocal | undefined {
-    const entry = this.#entryFor(value);
-    const availability = entry === undefined ? undefined : this.#visibleAvailability(entry);
+  retainAvailable(value: JitValue): CapturedValue | undefined {
+    const availability = this.#visibleAvailabilityForValue(value);
 
     if (availability === undefined) {
       return undefined;
@@ -196,14 +140,42 @@ export class LocalStore {
     }
   }
 
-  #entryFor(value: JitValue): CachedValueEntry | undefined {
+  #entryFor(value: JitValue): CacheEntry | undefined {
     const simplified = simplifyValue(value);
     const entry = this.#entries.get(valueKey(simplified));
 
     return entry !== undefined && valuesEqual(entry.value, simplified) ? entry : undefined;
   }
 
-  #visibleAvailability(entry: CachedValueEntry): CachedAvailability | undefined {
+  #entryForStore(value: JitValue): CacheEntry {
+    const simplified = simplifyValue(value);
+    const key = valueKey(simplified);
+    const existing = this.#entries.get(key);
+
+    if (existing !== undefined) {
+      if (!valuesEqual(existing.value, simplified)) {
+        throw new Error("JIT value cache key collision for non-equal values");
+      }
+
+      return existing;
+    }
+
+    const entry = {
+      value: simplified,
+      availabilitiesByPath: new Map()
+    };
+
+    this.#entries.set(key, entry);
+    return entry;
+  }
+
+  #visibleAvailabilityForValue(value: JitValue): Availability | undefined {
+    const entry = this.#entryFor(value);
+
+    return entry === undefined ? undefined : this.#visibleAvailability(entry);
+  }
+
+  #visibleAvailability(entry: CacheEntry): Availability | undefined {
     for (let index = this.#pathStack.length - 1; index >= 0; index -= 1) {
       const frame = this.#pathStack[index];
 
@@ -221,7 +193,8 @@ export class LocalStore {
     return entry.availabilitiesByPath.get(rootPathKey());
   }
 
-  #availabilityForCurrentPath(entry: CachedValueEntry, valueWidth: ValueWidth): CachedAvailability {
+  #availabilityForCurrentPath(value: JitValue, valueWidth: ValueWidth): Availability {
+    const entry = this.#entryForStore(value);
     const local = this.#allocLocal();
     const availability = {
       entry,
@@ -241,7 +214,7 @@ export class LocalStore {
     return availability;
   }
 
-  #allocLocal(): CacheLocal {
+  #allocLocal(): LocalSlot {
     const cacheLocal = this.#freeLocals.pop() ?? {
       local: this.#body.addLocal(wasmValueType.i32),
       ownerCount: 0,
@@ -252,7 +225,7 @@ export class LocalStore {
     return cacheLocal;
   }
 
-  #handleForLocal(cacheLocal: CacheLocal, valueWidth: ValueWidth): CachedValueHandle {
+  #handleForLocal(cacheLocal: LocalSlot, valueWidth: ValueWidth): CachedHandle {
     cacheLocal.ownerCount += 1;
 
     let released = false;
@@ -286,7 +259,7 @@ export class LocalStore {
     };
   }
 
-  #clearAvailabilities(entry: CachedValueEntry): void {
+  #clearAvailabilities(entry: CacheEntry): void {
     for (const availability of entry.availabilitiesByPath.values()) {
       this.#removeAvailability(availability);
     }
@@ -294,7 +267,7 @@ export class LocalStore {
     entry.availabilitiesByPath.clear();
   }
 
-  #removeAvailability(availability: CachedAvailability): void {
+  #removeAvailability(availability: Availability): void {
     if (availability.entry.availabilitiesByPath.get(availability.pathKey) === availability) {
       availability.entry.availabilitiesByPath.delete(availability.pathKey);
     }
@@ -314,7 +287,7 @@ export class LocalStore {
     return this.#pathStack[this.#pathStack.length - 1];
   }
 
-  #freeLocal(cacheLocal: CacheLocal): void {
+  #freeLocal(cacheLocal: LocalSlot): void {
     if (!cacheLocal.free) {
       cacheLocal.free = true;
       this.#freeLocals.push(cacheLocal);

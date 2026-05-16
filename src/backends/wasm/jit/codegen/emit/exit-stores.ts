@@ -15,7 +15,7 @@ import {
   emitJitValueWithoutRootCache
 } from "./jit-values.js";
 import type {
-  CachedValueHandle,
+  CachedHandle,
   ValueCache
 } from "./cache.js";
 import {
@@ -37,7 +37,7 @@ type CapturedExitStoreSource = Readonly<{
   kind: "cache";
   local: number;
   valueWidth: ValueWidth;
-  owner: CachedValueHandle;
+  owner: CachedHandle;
 }>;
 
 export type JitExitStoreEmitContext = Readonly<{
@@ -80,7 +80,7 @@ function captureJitExitStore(
   store: PlannedExitStore
 ): CapturedExitStore {
   const { value } = store.store;
-  const captured = context.valueCache?.captureForReuse(
+  const captured = context.valueCache?.capture(
     store.source.kind === "capture" ? store.source.capture.value : value,
     () => emitJitExitStoreSourceValue(context, value, false, false)
   );

@@ -37,11 +37,12 @@ import {
   jitRegisterSlotAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
 import type { Reg32 } from "#x86/isa/types.js";
+import type { ValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
 import {
   LocalStore,
-  type SelectedValue
-} from "#backends/wasm/jit/codegen/emit/local-store.js";
-import type { ValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
+  emitWithLocalStore,
+  captureWithLocalStore
+} from "./value-local-store-test-helpers.js";
 
 test("emitJitValue lowers register bit insertion directly to Wasm", () => {
   const opcodes = emitSymbolicValue(
@@ -131,7 +132,7 @@ test("emitJitValue does not bypass a selected input dependency for direct slice 
 
         return { valueWidth: emitter() };
       },
-      canEmitInline: (value) => value.kind !== "input"
+      canInline: (value) => value.kind !== "input"
     }),
     emitInputBits: () => {
       throw new Error("direct input bits should not bypass selected input dependency");
@@ -159,7 +160,7 @@ test("emitJitValue does not bypass a selected slice root for signed direct lower
 
         return { valueWidth: emitter() };
       },
-      canEmitInline: (value) => value.kind !== "extractBits"
+      canInline: (value) => value.kind !== "extractBits"
     }),
     emitInputBits: () => {
       throw new Error("direct input bits should not bypass selected slice root");
@@ -318,11 +319,11 @@ test("LocalStore cache keys support canonical symbolic nodes", () => {
   const body = new WasmFunctionBodyEncoder();
   const first = jitInsertBits(jitInputReg32Value("eax"), add(jitInputReg32Value("ebx"), c32(1)), 0, 8);
   const second = jitInsertBits(jitInputReg32Value("eax"), add(jitInputReg32Value("ebx"), c32(1)), 0, 8);
-  const store = new LocalStore(body, useCounts([{ value: first, useCount: 2 }]));
+  const store = new LocalStore(body);
   let emitted = 0;
 
-  store.emitForUse(first, () => emitAdd(body, () => { emitted += 1; }));
-  store.emitForUse(second, unexpectedEmitter);
+  emitWithLocalStore(store, first, () => emitAdd(body, () => { emitted += 1; }));
+  emitWithLocalStore(store, second, unexpectedEmitter);
   body.end();
 
   strictEqual(emitted, 1);
@@ -332,8 +333,8 @@ test("LocalStore cache keys support canonical symbolic nodes", () => {
 test("emitJitValue lowers produced values through retained locals", () => {
   const body = new WasmFunctionBodyEncoder();
   const produced = jitProducedValue("load#0:0:1", "i32");
-  const store = new LocalStore(body, useCounts([{ value: produced, useCount: 1 }]));
-  const captured = store.captureForReuse(produced, () => {
+  const store = new LocalStore(body);
+  const captured = captureWithLocalStore(store, produced, () => {
     body.i32Const(0x1234);
     return cleanValueWidth(32);
   });
@@ -345,11 +346,11 @@ test("emitJitValue lowers produced values through retained locals", () => {
   const valueWidth = emitJitValue({
     ...bodyContext(body),
     valueCache: {
-      emitForUse: (value, emitter) => store.emitForUseWithLocal(value, emitter),
-      captureForReuse: (value, emitter) => store.captureForReuse(value, emitter),
-      canEmitInline: () => true,
+      emitForUse: (value, emitter) => emitWithLocalStore(store, value, emitter),
+      capture: (value, emitter) => captureWithLocalStore(store, value, emitter),
+      canInline: () => true,
       beginInstruction: () => {},
-      beginExpressionOp: () => {},
+      beginOp: () => {},
       enterPath: () => {},
       leavePath: () => {}
     },
@@ -513,18 +514,14 @@ function passthroughValueCache(
 ): ValueCache {
   return {
     beginInstruction: () => {},
-    beginExpressionOp: () => {},
+    beginOp: () => {},
     enterPath: () => {},
     leavePath: () => {},
     emitForUse: (_value, emitter) => ({ valueWidth: emitter() }),
-    captureForReuse: () => undefined,
-    canEmitInline: () => true,
+    capture: () => undefined,
+    canInline: () => true,
     ...overrides
   };
-}
-
-function useCounts(counts: readonly SelectedValue[]): readonly SelectedValue[] {
-  return counts;
 }
 
 function localOpcodes(opcodes: readonly number[]): readonly number[] {

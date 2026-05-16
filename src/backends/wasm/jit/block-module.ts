@@ -107,7 +107,12 @@ function encodeJitBlockFunctionBody(
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const valueCache = createValueCache(body, emissionPlan.reusePlan);
+  const valueCache = createValueCache(
+    body,
+    emissionPlan.reusePlan.cache,
+    emissionPlan.reusePlan.captures,
+    emissionPlan.reusePlan.instructions
+  );
   const state = createJitState(body, emissionPlan.exitStoreSets, { valueCache });
   const exit: JitExitTarget = { exitLocal, exitLabelDepth: state.maxExitStoreIndex };
 

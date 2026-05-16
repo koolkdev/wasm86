@@ -190,7 +190,7 @@ function emitInputExtractBits(
 
   if (
     simplified.kind !== "input" ||
-    context.valueCache?.canEmitInline(simplified) === false
+    context.valueCache?.canInline(simplified) === false
   ) {
     return undefined;
   }
@@ -208,7 +208,7 @@ function emitSignExtendInputExtractBits(
   if (
     simplified.kind !== "extractBits" ||
     simplified.width !== width ||
-    context.valueCache?.canEmitInline(simplified) === false
+    context.valueCache?.canInline(simplified) === false
   ) {
     return undefined;
   }

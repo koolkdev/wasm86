@@ -1,13 +1,17 @@
 import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import {
-  type InstructionReusePlan,
+  type CachePlan,
+  type CapturePlan,
+  type InstructionEpochs,
   type SelectedValue
 } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import type {
   Placement
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 import {
+  pathsEqual,
+  rootPath,
   type Path
 } from "#backends/wasm/jit/analysis/paths.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
@@ -15,46 +19,51 @@ import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   LocalStore,
-  type CachedValueLocal,
-  type CachedValueUse
+  type CapturedValue,
+  type CachedUse
 } from "./local-store.js";
 
 export type {
-  CachedValueHandle,
-  CachedValueLocal,
-  CachedValueUse
+  CachedHandle,
+  CapturedValue,
+  CachedUse
 } from "./local-store.js";
 
 export type ValueCache = Readonly<{
   beginInstruction(index: number): void;
-  beginExpressionOp(opIndex: number): void;
+  beginOp(opIndex: number): void;
   enterPath(path: Path): void;
   leavePath(): void;
-  emitForUse(value: JitValue, emitter: () => ValueWidth): CachedValueUse;
-  captureForReuse(
+  emitForUse(value: JitValue, emitter: () => ValueWidth): CachedUse;
+  capture(
     value: JitValue,
     emitter: () => ValueWidth
-  ): CachedValueLocal | undefined;
-  canEmitInline(value: JitValue): boolean;
+  ): CapturedValue | undefined;
+  canInline(value: JitValue): boolean;
 }>;
 
 export function createValueCache(
   body: WasmFunctionBodyEncoder,
-  plan: InstructionReusePlan | undefined
+  cachePlan: CachePlan | undefined,
+  capturePlan: CapturePlan | undefined,
+  instructions: readonly InstructionEpochs[]
 ): ValueCache | undefined {
-  if (plan === undefined || plan.cache.selected.length === 0) {
+  if (cachePlan === undefined) {
     return undefined;
   }
 
-  const reusePlan = plan;
-  const store = new LocalStore(body, reusePlan.cache.selected);
+  const plan = cachePlan;
+  const store = new LocalStore(body);
+  const captures = capturePlan;
   let currentEpoch = 0;
   let currentInstructionIndex = 0;
   let currentOpIndex = 0;
+  let currentPath = rootPath();
+  const pathStack: Path[] = [];
 
   return {
     beginInstruction: (index) => {
-      if (index < 0 || index >= reusePlan.instructions.length) {
+      if (index < 0 || index >= instructions.length) {
         throw new Error(`JIT value cache instruction index out of range: ${index}`);
       }
 
@@ -62,7 +71,7 @@ export function createValueCache(
       currentOpIndex = 0;
       currentEpoch = currentInstructionPlan().opEpochs[0] ?? currentEpoch;
     },
-    beginExpressionOp: (opIndex) => {
+    beginOp: (opIndex) => {
       const instructionPlan = currentInstructionPlan();
 
       if (opIndex < 0 || opIndex >= instructionPlan.opEpochs.length) {
@@ -74,21 +83,44 @@ export function createValueCache(
     },
     emitForUse: (value, emitter) => {
       if (valueIsConsumerAtCurrentEpoch(value)) {
-        return store.emitForUseWithLocal(value, emitter);
+        const available = store.get(value);
+
+        if (available !== undefined) {
+          return available;
+        }
+
+        return store.tee(value, emitter());
       }
 
-      return store.emitAvailableForUse(value) ?? { valueWidth: emitter() };
+      return store.get(value) ?? { valueWidth: emitter() };
     },
-    captureForReuse: (value, emitter) =>
-      valueIsConsumerAtCurrentEpoch(value) || valueHasCaptureAtCurrentPlacement(value)
-        ? store.captureForReuse(value, emitter)
-        : store.captureAvailableForReuse(value),
-    canEmitInline: (value) => !valueIsConsumerAtCurrentEpoch(value),
+    capture: (value, emitter) => {
+      const available = store.retainAvailable(value);
+
+      if (available !== undefined) {
+        return available;
+      }
+
+      if (!valueHasCaptureAtCurrentPlacement(value)) {
+        return undefined;
+      }
+
+      return store.set(value, emitter());
+    },
+    canInline: (value) => !valueIsConsumerAtCurrentEpoch(value),
     enterPath: (path) => {
+      pathStack.push(currentPath);
+      currentPath = path;
       store.enterPath(path);
     },
     leavePath: () => {
+      const previousPath = pathStack.pop();
+
       store.leavePath();
+
+      if (previousPath !== undefined) {
+        currentPath = previousPath;
+      }
     }
   };
 
@@ -98,19 +130,20 @@ export function createValueCache(
 
   function valueHasCaptureAtCurrentPlacement(value: JitValue): boolean {
     const placement = currentPlacement();
+    const placementCaptures = captures?.byPlacement.get(placementKey(placement)) ?? [];
 
-    return reusePlan.captures.captures.some((capture) =>
-      placementsEqual(capture.at, placement) &&
+    return placementCaptures.some((capture) =>
+      pathsEqual(capture.availability, currentPath) &&
         valuesEqual(simplifyValue(capture.value), simplifyValue(value))
     );
   }
 
   function currentEpochPlan() {
-    return reusePlan.cache.epochs[currentEpoch];
+    return plan.epochs[currentEpoch];
   }
 
   function currentInstructionPlan() {
-    const instructionPlan = reusePlan.instructions[currentInstructionIndex];
+    const instructionPlan = instructions[currentInstructionIndex];
 
     if (instructionPlan === undefined) {
       throw new Error(`missing JIT value cache instruction plan: ${currentInstructionIndex}`);
@@ -134,8 +167,6 @@ function valueIsSelected(selected: readonly SelectedValue[], value: JitValue): b
   return selected.some((entry) => valuesEqual(simplifyValue(entry.value), simplified));
 }
 
-function placementsEqual(left: Placement, right: Placement): boolean {
-  return left.instructionIndex === right.instructionIndex &&
-    left.opIndex === right.opIndex &&
-    left.epoch === right.epoch;
+function placementKey(placement: Placement): string {
+  return `${placement.instructionIndex}:${placement.opIndex}:${placement.epoch}`;
 }

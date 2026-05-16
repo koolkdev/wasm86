@@ -56,10 +56,18 @@ export type CaptureInput = Readonly<{
 export function planCaptures(
   input: CaptureInput
 ): CapturePlan {
+  const producedDefinitionCaptures = planProducedDefinitionCaptures(input);
+  const rootConsumerCaptures = planRootConsumerCaptures(input.uses, input.cache);
+  const storeClobberCaptures = planStoreClobberCaptures(input);
   const captures = uniqueCaptures([
-    ...planProducedDefinitionCaptures(input),
-    ...planRootConsumerCaptures(input.uses, input.cache),
-    ...planStoreClobberCaptures(input)
+    ...producedDefinitionCaptures,
+    ...rootConsumerCaptures,
+    ...storeClobberCaptures,
+    ...planSelectedExitStoreCaptures(input, [
+      ...producedDefinitionCaptures,
+      ...rootConsumerCaptures,
+      ...storeClobberCaptures
+    ])
   ]);
 
   return {
@@ -203,6 +211,57 @@ function planStoreClobberCaptures(input: CaptureInput): readonly Capture[] {
       }];
     })
   );
+}
+
+function planSelectedExitStoreCaptures(
+  input: CaptureInput,
+  existingCaptures: readonly Capture[]
+): readonly Capture[] {
+  const captures: Capture[] = [];
+
+  for (const selected of input.cache.selected) {
+    const value = simplifyValue(selected.value);
+
+    if (value.kind === "produced") {
+      continue;
+    }
+
+    const consumers = consumersForValue(input.uses, value)
+      .filter((use) => use.purpose === "exitStore");
+
+    for (const consumer of consumers) {
+      if (captureExists(existingCaptures, value, consumer.at, consumer.path)) {
+        continue;
+      }
+
+      captures.push({
+        value,
+        at: consumer.at,
+        availability: consumer.path,
+        consumers: [consumer],
+        reason: "forced"
+      });
+    }
+  }
+
+  return captures;
+}
+
+function captureExists(
+  captures: readonly Capture[],
+  value: JitValue,
+  placement: Placement,
+  path: Path
+): boolean {
+  return captures.some((capture) =>
+    valuesEqual(capture.value, value) &&
+      placementsEqual(capture.at, placement) &&
+      captureAvailabilityCoversPath(capture.availability, path)
+  );
+}
+
+function captureAvailabilityCoversPath(availability: Path, path: Path): boolean {
+  return pathsEqual(availability, path) || pathsEqual(availability, rootPath());
 }
 
 function producedDefinitionForValue(

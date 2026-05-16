@@ -68,7 +68,7 @@ export type JitInstructionEmitContext = Readonly<{
   exit: JitExitTarget;
   selectInstruction(index: number): void;
   currentInstruction(): JitInstructionContext;
-  beginExpressionOp(opIndex: number): OpView;
+  beginOp(opIndex: number): OpView;
   jitValueEmitContext(): JitValueEmitContext;
   advanceInstruction(): void;
   valueCache?: ValueCache | undefined;
@@ -116,7 +116,7 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
 
       return instruction;
     },
-    beginExpressionOp: (opIndex) => {
+    beginOp: (opIndex) => {
       const instruction = context.instructions[instructionIndex];
 
       if (instruction === undefined) {
@@ -125,7 +125,7 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
 
       const timelineOp = opView(instruction.valueTimeline, opIndex);
 
-      context.valueCache?.beginExpressionOp(opIndex);
+      context.valueCache?.beginOp(opIndex);
       return timelineOp;
     },
     jitValueEmitContext: () => ({
@@ -156,7 +156,7 @@ function emitJitInstruction(
   void instruction;
 
   for (const effect of effects) {
-    jitContext.beginExpressionOp(effect.at.opIndex);
+    jitContext.beginOp(effect.at.opIndex);
     captureValues(jitContext, effect.at.opIndex);
     emitEffect(jitContext, effect);
   }
@@ -235,7 +235,7 @@ function emitProducedValue(
   context: JitInstructionEmitContext,
   effect: Extract<Effect, { kind: "producedValue" }>
 ): void {
-  const captured = context.valueCache?.captureForReuse(
+  const captured = context.valueCache?.capture(
     effect.value,
     () => emitProducedLoad(context, effect)
   );
@@ -286,7 +286,7 @@ function captureValues(
       throw new Error("produced JIT values are captured at their definition");
     }
 
-    const captured = context.valueCache?.captureForReuse(
+    const captured = context.valueCache?.capture(
       capture.value,
       () => emitJitValueWithoutRootCache(context.jitValueEmitContext(), capture.value)
     );
