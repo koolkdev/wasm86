@@ -6,7 +6,7 @@ import {
   wasmOpcode,
   wasmBodyLocalCount,
   wasmBodyOpcodes,
-  JitValueLocalStore,
+  LocalStore,
   captureExitStores,
   releaseExitStores,
   addValue,
@@ -23,13 +23,13 @@ import {
   localOpcodes,
   countOpcode,
   type JitValue,
-  type JitValueCacheRuntime,
+  type ValueCache,
 } from "./value-local-store-test-helpers.js";
-test("JitValueLocalStore reuses one local for equal non-trivial values", () => {
+test("LocalStore reuses one local for equal non-trivial values", () => {
   const body = new WasmFunctionBodyEncoder();
   const first = addValue("eax", 1);
   const second = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value: first, useCount: 2 }]));
+  const store = new LocalStore(body, useCounts([{ value: first, useCount: 2 }]));
   let emitted = 0;
 
   store.emitForUse(first, () => emitAdd(body, () => { emitted += 1; }));
@@ -44,7 +44,7 @@ test("JitValueLocalStore reuses one local for equal non-trivial values", () => {
   deepStrictEqual(localOpcodes(opcodes), [wasmOpcode.localTee, wasmOpcode.localGet]);
 });
 
-test("JitValueLocalStore reuses structurally equal binary expressions", () => {
+test("LocalStore reuses structurally equal binary expressions", () => {
   const body = new WasmFunctionBodyEncoder();
   const first = {
     kind: "value.binary",
@@ -60,7 +60,7 @@ test("JitValueLocalStore reuses structurally equal binary expressions", () => {
     a: addValue("eax", 1),
     b: addValue("ebx", 2)
   } as const satisfies JitValue;
-  const store = new JitValueLocalStore(body, useCounts([{ value: first, useCount: 2 }]));
+  const store = new LocalStore(body, useCounts([{ value: first, useCount: 2 }]));
   let emitted = 0;
 
   store.emitForUse(first, () => emitXorOfAdds(body, () => { emitted += 1; }));
@@ -75,11 +75,11 @@ test("JitValueLocalStore reuses structurally equal binary expressions", () => {
   deepStrictEqual(localOpcodes(opcodes), [wasmOpcode.localTee, wasmOpcode.localGet]);
 });
 
-test("JitValueLocalStore reuses high-cost retained expressions through one local", () => {
+test("LocalStore reuses high-cost retained expressions through one local", () => {
   const body = new WasmFunctionBodyEncoder();
   const first = highCostValue();
   const second = highCostValue();
-  const store = new JitValueLocalStore(body, useCounts([{ value: first, useCount: 2 }]));
+  const store = new LocalStore(body, useCounts([{ value: first, useCount: 2 }]));
   let emitted = 0;
 
   store.emitForUse(first, () => emitHighCostValue(body, () => { emitted += 1; }));
@@ -94,10 +94,10 @@ test("JitValueLocalStore reuses high-cost retained expressions through one local
   deepStrictEqual(localOpcodes(opcodes), [wasmOpcode.localTee, wasmOpcode.localGet]);
 });
 
-test("JitValueLocalStore does not cache unselected high-cost retained expressions", () => {
+test("LocalStore does not cache unselected high-cost retained expressions", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = highCostValue();
-  const store = new JitValueLocalStore(body, useCounts([]));
+  const store = new LocalStore(body, useCounts([]));
   let emitted = 0;
 
   store.emitForUse(value, () => emitHighCostValue(body, () => { emitted += 1; }));
@@ -111,10 +111,10 @@ test("JitValueLocalStore does not cache unselected high-cost retained expression
   deepStrictEqual(localOpcodes(opcodes), []);
 });
 
-test("JitValueLocalStore does not cache unselected constants", () => {
+test("LocalStore does not cache unselected constants", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = { kind: "const", type: "i32", value: 7 } as const satisfies JitValue;
-  const store = new JitValueLocalStore(body, useCounts([]));
+  const store = new LocalStore(body, useCounts([]));
   let emitted = 0;
 
   store.emitForUse(value, () => emitConst(body, 7, () => { emitted += 1; }));
@@ -130,7 +130,7 @@ test("JitValueLocalStore does not cache unselected constants", () => {
   deepStrictEqual(localOpcodes(opcodes), []);
 });
 
-test("JitValueLocalStore does not cache unselected tied-cost expressions", () => {
+test("LocalStore does not cache unselected tied-cost expressions", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = {
     kind: "value.unary",
@@ -138,7 +138,7 @@ test("JitValueLocalStore does not cache unselected tied-cost expressions", () =>
     operator: "extend8_s",
     value: jitInputReg32Value("eax")
   } as const satisfies JitValue;
-  const store = new JitValueLocalStore(body, useCounts([]));
+  const store = new LocalStore(body, useCounts([]));
   let emitted = 0;
 
   store.emitForUse(value, () => emitExtend8(body, () => { emitted += 1; }));
@@ -150,10 +150,10 @@ test("JitValueLocalStore does not cache unselected tied-cost expressions", () =>
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), []);
 });
 
-test("JitValueLocalStore captureForReuse reports whether it emitted local.set", () => {
+test("LocalStore captureForReuse reports whether it emitted local.set", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 2 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 2 }]));
   let emitted = 0;
 
   const first = store.captureForReuse(value, () => emitAdd(body, () => { emitted += 1; }));
@@ -169,10 +169,10 @@ test("JitValueLocalStore captureForReuse reports whether it emitted local.set", 
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localGet]);
 });
 
-test("JitValueLocalStore retires invalidated locals before rematerializing", () => {
+test("LocalStore retires invalidated locals before rematerializing", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
   const first = store.captureForReuse(value, () => emitAdd(body, () => {}));
 
   if (first === undefined) {
@@ -193,10 +193,10 @@ test("JitValueLocalStore retires invalidated locals before rematerializing", () 
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
-test("JitValueLocalStore reuses non-escaped locals after invalidation", () => {
+test("LocalStore reuses non-escaped locals after invalidation", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
   const first = store.emitForUseWithLocal(value, () => emitAdd(body, () => {}));
 
   if (first.local === undefined) {
@@ -217,10 +217,10 @@ test("JitValueLocalStore reuses non-escaped locals after invalidation", () => {
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localTee, wasmOpcode.localTee]);
 });
 
-test("JitValueLocalStore retires locals that become escaped while available", () => {
+test("LocalStore retires locals that become escaped while available", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
   const first = store.emitForUseWithLocal(value, () => emitAdd(body, () => {}));
 
   if (first.local === undefined) {
@@ -250,10 +250,10 @@ test("JitValueLocalStore retires locals that become escaped while available", ()
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localTee, wasmOpcode.localSet]);
 });
 
-test("JitValueLocalStore reuses retired escaped locals after owners release", () => {
+test("LocalStore reuses retired escaped locals after owners release", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
   const first = store.captureForReuse(value, () => emitAdd(body, () => {}));
 
   if (first === undefined) {
@@ -276,10 +276,10 @@ test("JitValueLocalStore reuses retired escaped locals after owners release", ()
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
-test("JitValueLocalStore paths hide branch-local captures from sibling arms", () => {
+test("LocalStore paths hide branch-local captures from sibling arms", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
   let emitted = 0;
 
   store.enterPath(branchPath(0, 0, "taken"));
@@ -307,10 +307,10 @@ test("JitValueLocalStore paths hide branch-local captures from sibling arms", ()
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
-test("JitValueLocalStore paths preserve root values available before branch split", () => {
+test("LocalStore paths preserve root values available before branch split", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
   let emitted = 0;
 
   const preBranch = store.emitForUseWithLocal(value, () => emitAdd(body, () => { emitted += 1; }));
@@ -337,13 +337,13 @@ test("JitValueLocalStore paths preserve root values available before branch spli
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localTee]);
 });
 
-test("JitValueLocalStore keeps parent path availability alive while child paths exit", () => {
+test("LocalStore keeps parent path availability alive while child paths exit", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
   const parentPath = { kind: "path", id: "parent" } as const;
   const childPath = { kind: "path", id: "child" } as const;
   const siblingPath = { kind: "path", id: "sibling" } as const;
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
   let emitted = 0;
 
   store.enterPath(parentPath);
@@ -385,10 +385,10 @@ test("JitValueLocalStore keeps parent path availability alive while child paths 
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
-test("JitValueLocalStore reuses released branch-local locals after leaving path", () => {
+test("LocalStore reuses released branch-local locals after leaving path", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
 
   store.enterPath(branchPath(0, 0, "taken"));
   const taken = store.captureForReuse(value, () => emitAdd(body, () => {}));
@@ -414,13 +414,13 @@ test("JitValueLocalStore reuses released branch-local locals after leaving path"
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
-test("JitValueLocalStore keeps pinned exit-store locals out of reuse", () => {
+test("LocalStore keeps pinned exit-store locals out of reuse", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 4 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 4 }]));
   const valueCache = {
     captureForReuse: (cachedValue, emitter) => store.captureForReuse(cachedValue, emitter)
-  } as JitValueCacheRuntime;
+  } as ValueCache;
   const captured = store.captureForReuse(value, () => emitAdd(body, () => {}));
 
   if (captured === undefined) {
@@ -454,11 +454,11 @@ test("JitValueLocalStore keeps pinned exit-store locals out of reuse", () => {
   strictEqual(rematerialized.local === captured.local, false);
 });
 
-test("JitValueLocalStore forgetWhere invalidates only matching values", () => {
+test("LocalStore forgetWhere invalidates only matching values", () => {
   const body = new WasmFunctionBodyEncoder();
   const eax = addValue("eax", 1);
   const ebx = addValue("ebx", 1);
-  const store = new JitValueLocalStore(body, useCounts([
+  const store = new LocalStore(body, useCounts([
     { value: eax, useCount: 2 },
     { value: ebx, useCount: 2 }
   ]));

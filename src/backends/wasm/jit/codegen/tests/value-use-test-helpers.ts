@@ -7,7 +7,7 @@ import {
 } from "#backends/wasm/jit/analysis/paths.js";
 import type { Timeline } from "#backends/wasm/jit/analysis/timeline.js";
 import { effectValueRootsForOp } from "#backends/wasm/jit/codegen/plan/effect-roots.js";
-import { jitExpressionOpEpochs } from "#backends/wasm/jit/codegen/plan/value-cache-epochs.js";
+import { jitExpressionOpEpochs } from "#backends/wasm/jit/codegen/plan/epochs.js";
 import {
   expandRootUse,
   type ValueRoot,

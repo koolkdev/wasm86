@@ -17,8 +17,8 @@ import {
 } from "./operands.js";
 import type { JitExitTarget, JitState } from "#backends/wasm/jit/state/state.js";
 import {
-  type JitValueCacheRuntime
-} from "./value-local-store.js";
+  type ValueCache
+} from "./cache.js";
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import type { PlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import { opView, type OpView } from "#backends/wasm/jit/analysis/timeline.js";
@@ -45,7 +45,7 @@ export type JitBlockEmitContext = Readonly<{
   exit: JitExitTarget;
   instructions: readonly JitInstructionContext[];
   plannedEffects: readonly PlannedEffect[];
-  valueCache?: JitValueCacheRuntime | undefined;
+  valueCache?: ValueCache | undefined;
   linking?: JitLinkEmitContext | undefined;
 }>;
 
@@ -58,7 +58,7 @@ export type JitInstructionEmitContext = Readonly<{
   currentInstruction(): JitInstructionContext;
   beginExpressionOp(opIndex: number): OpView;
   advanceInstruction(): void;
-  valueCache?: JitValueCacheRuntime | undefined;
+  valueCache?: ValueCache | undefined;
   linking?: JitLinkEmitContext | undefined;
 }>;
 

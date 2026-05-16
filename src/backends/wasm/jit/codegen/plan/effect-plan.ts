@@ -17,7 +17,7 @@ import {
 import type { PlannedExit } from "./types.js";
 import {
   jitExpressionOpEpochs
-} from "./value-cache-epochs.js";
+} from "./epochs.js";
 import type {
   Timeline
 } from "#backends/wasm/jit/analysis/timeline.js";

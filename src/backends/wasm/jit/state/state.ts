@@ -7,7 +7,7 @@ import type {
   ExitStoreSet,
   PlannedExit
 } from "#backends/wasm/jit/codegen/plan/types.js";
-import type { JitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
+import type { ValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
 import {
   captureExitStores,
   emitExitStores,
@@ -22,7 +22,7 @@ export type JitExitTarget = {
 };
 
 type JitStateOptions = Readonly<{
-  valueCache?: JitValueCacheRuntime | undefined;
+  valueCache?: ValueCache | undefined;
 }>;
 
 type JitCapturedExitStoreSet = readonly CapturedExitStore[];

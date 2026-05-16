@@ -98,7 +98,7 @@ test("buildJitCodegenEmissionPlan counts repeated register and flag store depend
     rootUses(emissionPlan.valueUses, commonValue, "exitStore").map((use) => use.value),
     [commonValue, commonValue]
   );
-  deepStrictEqual(emissionPlan.valueCachePlan.useCounts, [
+  deepStrictEqual(emissionPlan.reusePlan.cache.selected, [
     { value: commonValue, useCount: 2 }
   ]);
 });
@@ -130,8 +130,13 @@ test("buildJitCodegenEmissionPlan expands exit-store dependency trees once with 
     jitFlagConditionValue(conditionFlags, "E"),
     conditionFlags
   ]);
-  deepStrictEqual(emissionPlan.valueCachePlan.definitionCaptures[0], [produced]);
-  deepStrictEqual(emissionPlan.valueCachePlan.useCounts, [
+  deepStrictEqual(
+    emissionPlan.reusePlan.captures.captures
+      .filter((capture) => capture.reason === "producedDefinition")
+      .map((capture) => capture.value),
+    [produced]
+  );
+  deepStrictEqual(emissionPlan.reusePlan.cache.selected, [
     { value: produced, useCount: 1 }
   ]);
 });

@@ -14,7 +14,7 @@ import {
   type JitLinkEmitContext,
   type JitLinkResolver
 } from "./codegen/emit/block-emitter.js";
-import { createJitValueCacheRuntime } from "./codegen/emit/value-local-store.js";
+import { createValueCache } from "./codegen/emit/cache.js";
 import { createJitState, type JitExitTarget, type JitState } from "./state/state.js";
 import type { JitBlock } from "./ir/types.js";
 
@@ -107,7 +107,7 @@ function encodeJitBlockFunctionBody(
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const valueCache = createJitValueCacheRuntime(body, emissionPlan.valueCachePlan);
+  const valueCache = createValueCache(body, emissionPlan.reusePlan);
   const state = createJitState(body, emissionPlan.exitStoreSets, { valueCache });
   const exit: JitExitTarget = { exitLocal, exitLabelDepth: state.maxExitStoreIndex };
 

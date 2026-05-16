@@ -7,7 +7,7 @@ import {
 import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
 import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
-import type { JitValueCachePlan } from "./value-cache.js";
+import type { InstructionReusePlan } from "./reuse.js";
 import {
   buildTimeline,
   type Timeline
@@ -23,13 +23,10 @@ import {
   jitInstructionStorageRefsMayAlias
 } from "./operand-analysis.js";
 import {
-  planJitValuesForEmission,
-  type JitInstructionWithPlannedValues
+  planReuseForEmission,
+  type InstructionWithReusePlan
 } from "./value-planning.js";
 import type { ValueUse } from "./value-uses.js";
-import type {
-  JitPlannedValueCapture
-} from "./value-captures.js";
 import {
   buildExpressionPaths,
   type PathMap
@@ -53,7 +50,7 @@ type JitPreparedCodegenInstruction = JitInstructionState & Pick<
 type JitPreparedCodegenInstructionPlan = Omit<JitPreparedCodegenInstruction, "ir">;
 
 export type JitCodegenInstructionPlan =
-  JitInstructionWithPlannedValues<JitPreparedCodegenInstructionPlan>;
+  InstructionWithReusePlan<JitPreparedCodegenInstructionPlan>;
 
 export type JitCodegenEmissionPlan = Readonly<{
   instructions: readonly JitCodegenInstructionPlan[];
@@ -62,8 +59,7 @@ export type JitCodegenEmissionPlan = Readonly<{
   maxExitStoreIndex: number;
   plannedEffects: readonly PlannedEffect[];
   valueUses: readonly ValueUse[];
-  plannedValueCaptures: readonly JitPlannedValueCapture[];
-  valueCachePlan: JitValueCachePlan;
+  reusePlan: InstructionReusePlan;
 }>;
 
 export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCodegenEmissionPlan {
@@ -80,9 +76,10 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     preparedInstructions,
     codegenPlan.effects
   );
-  const plannedValues = planJitValuesForEmission(
+  const plannedValues = planReuseForEmission(
     preparedInstructions,
-    plannedEffects.valueUses
+    plannedEffects.valueUses,
+    codegenPlan.exits
   );
 
   return {
@@ -92,8 +89,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     maxExitStoreIndex: codegenPlan.maxExitStoreIndex,
     plannedEffects: plannedEffects.plannedEffects,
     valueUses: plannedValues.valueUses,
-    plannedValueCaptures: plannedValues.plannedValueCaptures,
-    valueCachePlan: plannedValues.valueCachePlan
+    reusePlan: plannedValues.reusePlan
   };
 }
 

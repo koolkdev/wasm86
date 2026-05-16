@@ -30,11 +30,11 @@ import type {
   JitProducedValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import type { JitValueCacheRuntime } from "./value-local-store.js";
+import type { ValueCache } from "./cache.js";
 
 export type JitValueEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
-  valueCache?: JitValueCacheRuntime | undefined;
+  valueCache?: ValueCache | undefined;
   emitInput(slot: JitCanonicalInputSlot): ValueWidth;
   emitInputBits?: ((
     slot: JitCanonicalInputSlot,

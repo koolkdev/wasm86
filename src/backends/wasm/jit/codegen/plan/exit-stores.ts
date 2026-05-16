@@ -30,7 +30,7 @@ export type PlannedExitStore = ExitStore & Readonly<{
 }>;
 
 export type PlannedExit = Exit & Readonly<{
-  stores: readonly ExitStore[];
+  stores: readonly PlannedExitStore[];
   exitStoreIndex: number;
 }>;
 
@@ -50,11 +50,12 @@ export function planExitStores(exits: readonly Exit[]): ExitStorePlan {
 
   for (const exit of exits) {
     const stores = storesForExit(exit);
-    const exitStoreIndex = appendExitStoreSet(exitStoreSets, stores);
+    const plannedStores = planExitStoreSourceCaptures(stores);
+    const exitStoreIndex = appendExitStoreSet(exitStoreSets, plannedStores);
 
     plannedExits.push({
       ...exit,
-      stores,
+      stores: plannedStores,
       exitStoreIndex
     });
   }
@@ -100,7 +101,7 @@ export function planExitStoreSourceCaptures(
 
 function appendExitStoreSet(
   exitStoreSets: ExitStoreSet[],
-  stores: readonly ExitStore[]
+  stores: readonly PlannedExitStore[]
 ): number {
   if (stores.length === 0) {
     return 0;
@@ -108,7 +109,7 @@ function appendExitStoreSet(
 
   const index = exitStoreSets.length;
 
-  exitStoreSets.push({ stores: planExitStoreSourceCaptures(stores) });
+  exitStoreSets.push({ stores });
   return index;
 }
 

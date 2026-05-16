@@ -35,11 +35,11 @@ import {
   type Timeline
 } from "#backends/wasm/jit/analysis/timeline.js";
 import type {
-  JitValueCacheRuntime
-} from "#backends/wasm/jit/codegen/emit/value-local-store.js";
+  ValueCache
+} from "#backends/wasm/jit/codegen/emit/cache.js";
 import type {
-  JitExpressionCaptureMap
-} from "#backends/wasm/jit/codegen/plan/value-captures.js";
+  InstructionCaptureMap
+} from "#backends/wasm/jit/codegen/plan/captures.js";
 import type {
   PlannedEffect
 } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
@@ -60,14 +60,14 @@ import {
 export type JitExpressionBlockInstruction = Readonly<{
   expressionBlock: IrExprBlock;
   valueTimeline: Timeline;
-  plannedValueCaptures: JitExpressionCaptureMap;
+  captureMap: InstructionCaptureMap;
   plannedEffects: readonly PlannedEffect[];
 }>;
 
 export type JitExpressionBlockEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   instruction: JitExpressionBlockInstruction;
-  valueCache?: JitValueCacheRuntime | undefined;
+  valueCache?: ValueCache | undefined;
   beginExpressionOp?(opIndex: number): void;
   emitInput(slot: JitCanonicalInputSlot): ValueWidth;
   emitInputBits?(
@@ -230,7 +230,7 @@ class JitExpressionBlockEmitter {
   }
 
   #capturePlannedValues(opIndex: number): void {
-    const captures = this.#context.instruction.plannedValueCaptures.get(opIndex) ?? [];
+    const captures = this.#context.instruction.captureMap.get(opIndex) ?? [];
 
     for (const capture of captures) {
       if (capture.value.kind === "produced") {

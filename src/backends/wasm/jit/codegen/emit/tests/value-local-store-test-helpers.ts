@@ -27,11 +27,13 @@ import {
 } from "#backends/wasm/jit/ir/values/builders.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
-  createJitValueCacheRuntime,
-  JitValueLocalStore,
-  type JitValueCacheRuntime,
-  type JitValueUseCount
-} from "#backends/wasm/jit/codegen/emit/value-local-store.js";
+  LocalStore,
+  type SelectedValue
+} from "#backends/wasm/jit/codegen/emit/local-store.js";
+import {
+  createValueCache,
+  type ValueCache
+} from "#backends/wasm/jit/codegen/emit/cache.js";
 import {
   captureExitStores,
   emitExitStores,
@@ -41,9 +43,9 @@ import { buildBlock, encodeJitBlock } from "#backends/wasm/jit/block.js";
 import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import { emitJitBlock } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import {
-  planJitValueCache as planJitValueCacheFromPlannedUses,
-  type JitValueCacheInstruction
-} from "#backends/wasm/jit/codegen/plan/value-cache.js";
+  planReuseForInstructions,
+  type InstructionEpochSource
+} from "#backends/wasm/jit/codegen/plan/reuse.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import { valueUsesForExpressionBlock } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
 import {
@@ -77,8 +79,8 @@ export {
   wasmBodyOpcodes,
   jitInputAluFlagsValue,
   jitInputReg32Value,
-  createJitValueCacheRuntime,
-  JitValueLocalStore,
+  createValueCache,
+  LocalStore,
   captureExitStores,
   emitExitStores,
   releaseExitStores,
@@ -96,8 +98,8 @@ export type {
   IrStorageExpr,
   IrValueExpr,
   JitValue,
-  JitValueCacheRuntime,
-  JitValueUseCount,
+  ValueCache,
+  SelectedValue,
   JitBlock,
   ExitSnapshot,
   Reg32
@@ -129,12 +131,12 @@ export function highCostValue(): JitValue {
   };
 }
 
-export function useCounts(counts: readonly JitValueUseCount[]): readonly JitValueUseCount[] {
+export function useCounts(counts: readonly SelectedValue[]): readonly SelectedValue[] {
   return counts;
 }
 
-export function planJitValueCache(
-  instruction: JitValueCacheInstruction,
+export function planReuseForInstruction(
+  instruction: InstructionEpochSource,
   expressionBlock: IrExprBlock
 ) {
   const valueUses = valueUsesForExpressionBlock({
@@ -142,14 +144,14 @@ export function planJitValueCache(
     valueTimeline: instruction.valueTimeline
   });
 
-  return planJitValueCacheFromPlannedUses(
-    instruction,
-    expressionBlock,
-    valueUses
+  return planReuseForInstructions(
+    [{ ...instruction, expressionBlock }],
+    valueUses,
+    []
   );
 }
 
-export function cacheRuntimeForStore(store: JitValueLocalStore): JitValueCacheRuntime {
+export function cacheRuntimeForStore(store: LocalStore): ValueCache {
   return {
     beginInstruction: () => {},
     beginExpressionOp: () => {},

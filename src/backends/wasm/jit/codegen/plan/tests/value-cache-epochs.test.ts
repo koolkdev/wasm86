@@ -6,10 +6,10 @@ import {
   jitProducedValue,
   rootPath
 } from "./plan-test-helpers.js";
-import { planJitValueCacheEpochs } from "#backends/wasm/jit/codegen/plan/value-cache-epochs.js";
+import { buildEpochs } from "#backends/wasm/jit/codegen/plan/epochs.js";
 import type { ValueUse } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 
-test("JIT value-cache epoch planning exposes instruction epochs and produced definition captures", () => {
+test("JIT value-cache epoch planning exposes instruction epochs and produced definitions", () => {
   const produced = jitProducedValue("epoch:produced", "i32");
   const expressionBlock = [
     {
@@ -43,13 +43,19 @@ test("JIT value-cache epoch planning exposes instruction epochs and produced def
     root: produced,
     ancestors: []
   };
-  const epoch = planJitValueCacheEpochs([{
+  const epoch = buildEpochs([{
     operands: [],
     expressionBlock,
     valueTimeline
   }], [plannedUse]);
 
   deepStrictEqual(epoch.instructions[0]?.opEpochs, [0, 0, 1]);
-  deepStrictEqual(epoch.definitionCaptures, [[produced], []]);
-  deepStrictEqual(epoch.consumerUses, [[], [plannedUse]]);
+  deepStrictEqual(epoch.produced.map((definition) => ({
+    value: definition.value,
+    at: definition.at
+  })), [{
+    value: produced,
+    at: { instructionIndex: 0, opIndex: 0, epoch: 0 }
+  }]);
+  deepStrictEqual(epoch.epochs.map((entry) => entry.uses), [[], [plannedUse]]);
 });

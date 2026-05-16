@@ -2,39 +2,70 @@ import { valueCost } from "#backends/wasm/jit/ir/values/cost.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { EpochUsePlan } from "./epochs.js";
 import type { ValueUse } from "./value-uses.js";
 
-export type JitValueUseCount = Readonly<{
+export type SelectedValue = Readonly<{
   value: JitValue;
   useCount: number;
 }>;
 
-export type JitValueCacheSelectionPlan = Readonly<{
-  consumers: readonly (readonly JitValueUseCount[])[];
-  useCounts: readonly JitValueUseCount[];
+export type EpochPlan = Readonly<{
+  index: number;
+  consumers: readonly SelectedValue[];
+}>;
+
+export type CachePlan = Readonly<{
+  epochs: readonly EpochPlan[];
+  selected: readonly SelectedValue[];
+}>;
+
+export type CacheSelectionPlan = Readonly<{
+  consumers: readonly (readonly SelectedValue[])[];
+  selected: readonly SelectedValue[];
 }>;
 
 const localTeeCost = 1;
 const localSetCost = 1;
 const localGetCost = 1;
 
-export function planJitValueCacheSelection(
-  epochUses: readonly (readonly ValueUse[])[]
-): JitValueCacheSelectionPlan {
-  const consumers = selectConsumers(epochUses);
-  const useCounts = mergeSelectedUseCounts(consumers);
+export function selectCacheValues(
+  epochUses: readonly (readonly ValueUse[])[],
+  forcedValues: readonly JitValue[] = []
+): CacheSelectionPlan {
+  const consumers = selectConsumers(epochUses, forcedValues);
+  const selected = mergeSelectedUseCounts(consumers);
 
   return {
     consumers,
-    useCounts
+    selected
+  };
+}
+
+export function planCache(
+  epochs: readonly EpochUsePlan[],
+  forcedValues: readonly JitValue[] = []
+): CachePlan {
+  const selection = selectCacheValues(
+    epochs.map((epoch) => epoch.uses),
+    forcedValues
+  );
+
+  return {
+    epochs: epochs.map((epoch, index) => ({
+      index: epoch.index,
+      consumers: selection.consumers[index] ?? []
+    })),
+    selected: selection.selected
   };
 }
 
 function selectConsumers(
-  epochUses: readonly (readonly ValueUse[])[]
-): readonly (readonly JitValueUseCount[])[] {
-  const epochSelections = epochUses.map(selectEpochValues);
-  const globallySelected = selectEpochValues(epochUses.flat());
+  epochUses: readonly (readonly ValueUse[])[],
+  forcedValues: readonly JitValue[]
+): readonly (readonly SelectedValue[])[] {
+  const epochSelections = epochUses.map((uses) => selectEpochValues(uses, forcedValues));
+  const globallySelected = selectEpochValues(epochUses.flat(), forcedValues);
 
   if (globallySelected.length === 0) {
     return epochSelections;
@@ -49,10 +80,10 @@ function selectConsumers(
         continue;
       }
 
-      const forceSelected = shouldForceSelectValue(globalEntry.value);
+      const forceSelected = shouldForceSelectValue(globalEntry.value, forcedValues);
       const epochUseCount = uses.filter((use) =>
         valuesEqual(use.value, globalEntry.value) &&
-          (forceSelected || !hasSelectedAncestor(use, selected))
+          (forceSelected || !hasSelectedAncestor(use, selected, forcedValues))
       ).length;
 
       if (epochUseCount !== 0) {
@@ -65,9 +96,9 @@ function selectConsumers(
 }
 
 function mergeSelectedUseCounts(
-  epochSelections: readonly (readonly JitValueUseCount[])[]
-): readonly JitValueUseCount[] {
-  const merged: JitValueUseCount[] = [];
+  epochSelections: readonly (readonly SelectedValue[])[]
+): readonly SelectedValue[] {
+  const merged: SelectedValue[] = [];
 
   for (const selected of epochSelections) {
     for (const entry of selected) {
@@ -92,20 +123,21 @@ function mergeSelectedUseCounts(
 }
 
 function selectEpochValues(
-  uses: readonly ValueUse[]
-): readonly JitValueUseCount[] {
+  uses: readonly ValueUse[],
+  forcedValues: readonly JitValue[]
+): readonly SelectedValue[] {
   const candidateValues = [...uniqueValues(uses.map((use) => use.value))]
     .sort((a, b) => valueCost(b) - valueCost(a));
-  const selected: JitValueUseCount[] = [];
+  const selected: SelectedValue[] = [];
 
   for (const value of candidateValues) {
     const matchingUses = uses.filter((use) => valuesEqual(use.value, value));
-    const forceSelected = shouldForceSelectValue(value);
+    const forceSelected = shouldForceSelectValue(value, forcedValues);
     const usableUses = matchingUses.filter((use) =>
-      forceSelected || !hasSelectedAncestor(use, selected)
+      forceSelected || !hasSelectedAncestor(use, selected, forcedValues)
     );
 
-    if (shouldCacheValueForUses(value, usableUses)) {
+    if (shouldCacheValueForUses(value, usableUses, forcedValues)) {
       selected.push({
         value,
         useCount: usableUses.length
@@ -118,7 +150,8 @@ function selectEpochValues(
 
 function shouldCacheValueForUses(
   value: JitValue,
-  uses: readonly ValueUse[]
+  uses: readonly ValueUse[],
+  forcedValues: readonly JitValue[]
 ): boolean {
   if (uses.length === 0) {
     return false;
@@ -127,16 +160,23 @@ function shouldCacheValueForUses(
   const firstEmittedCost = valueCost(uses[0]!.value);
   const repeatedEmittedCost = uses.reduce((cost, use) => cost + valueCost(use.value), 0);
 
-  return shouldCacheValueWithCosts(value, uses.length, firstEmittedCost, repeatedEmittedCost);
+  return shouldCacheValueWithCosts(
+    value,
+    uses.length,
+    firstEmittedCost,
+    repeatedEmittedCost,
+    forcedValues
+  );
 }
 
 function shouldCacheValueWithCosts(
   value: JitValue,
   useCount: number,
   firstInlineCost: number,
-  repeatedInlineCost: number
+  repeatedInlineCost: number,
+  forcedValues: readonly JitValue[]
 ): boolean {
-  if (shouldForceSelectValue(value)) {
+  if (shouldForceSelectValue(value, forcedValues)) {
     return useCount > 0;
   }
 
@@ -150,17 +190,30 @@ function shouldCacheValueWithCosts(
   return repeatedInlineCost > Math.min(cachedStackUseCost, materializedCost);
 }
 
-function shouldForceSelectValue(value: JitValue): boolean {
-  return simplifyValue(value).kind === "produced";
+function shouldForceSelectValue(value: JitValue, forcedValues: readonly JitValue[]): boolean {
+  const simplified = simplifyValue(value);
+
+  return simplified.kind === "produced" ||
+    forcedValues.some((forced) => valuesEqual(simplified, simplifyValue(forced)));
 }
 
 function hasSelectedAncestor(
   use: ValueUse,
-  selected: readonly JitValueUseCount[]
+  selected: readonly SelectedValue[],
+  forcedValues: readonly JitValue[]
 ): boolean {
   return use.ancestors.some((ancestor) =>
-    selected.some((entry) => valuesEqual(entry.value, ancestor))
+    selected.some((entry) =>
+      !isForcedValue(entry.value, forcedValues) &&
+        valuesEqual(entry.value, ancestor)
+    )
   );
+}
+
+function isForcedValue(value: JitValue, forcedValues: readonly JitValue[]): boolean {
+  const simplified = simplifyValue(value);
+
+  return forcedValues.some((forced) => valuesEqual(simplified, simplifyValue(forced)));
 }
 
 function uniqueValues(values: readonly JitValue[]): readonly JitValue[] {

@@ -9,13 +9,15 @@ import {
   type ValueWidth
 } from "#backends/wasm/codegen/value-width.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import type { PlannedExitStore } from "#backends/wasm/jit/codegen/plan/types.js";
-import { emitJitValue } from "./jit-values.js";
+import {
+  emitJitValue,
+  emitJitValueWithoutRootCache
+} from "./jit-values.js";
 import type {
-  JitCachedValueHandle,
-  JitValueCacheRuntime
-} from "./value-local-store.js";
+  CachedValueHandle,
+  ValueCache
+} from "./cache.js";
 import {
   jitRegisterSlotAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
@@ -35,16 +37,12 @@ type CapturedExitStoreSource = Readonly<{
   kind: "cache";
   local: number;
   valueWidth: ValueWidth;
-  owner: JitCachedValueHandle;
-}> | Readonly<{
-  kind: "temporary";
-  local: number;
-  valueWidth: ValueWidth;
+  owner: CachedValueHandle;
 }>;
 
 export type JitExitStoreEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
-  valueCache?: JitValueCacheRuntime | undefined;
+  valueCache?: ValueCache | undefined;
 }>;
 
 export function captureExitStores(
@@ -83,7 +81,7 @@ function captureJitExitStore(
 ): CapturedExitStore {
   const captured = context.valueCache?.captureForReuse(
     store.value,
-    () => emitJitExitStoreSourceValue(context, store.value)
+    () => emitJitExitStoreSourceValue(context, store.value, false, false)
   );
 
   if (captured !== undefined) {
@@ -112,18 +110,7 @@ function captureJitExitStore(
     return { store };
   }
 
-  const local = context.body.addLocal(wasmValueType.i32);
-  const valueWidth = emitJitExitStoreSourceValue(context, value);
-
-  context.body.localSet(local);
-  return {
-    store,
-    source: {
-      kind: "temporary",
-      local,
-      valueWidth
-    }
-  };
+  throw new Error("JIT exit-store source capture was not available in the value cache");
 }
 
 function emitJitExitStore(
@@ -168,9 +155,12 @@ function storeTargetUsesFullWidthValue(target: JitArchitecturalSlot): boolean {
 function emitJitExitStoreSourceValue(
   context: JitExitStoreEmitContext,
   value: JitValue,
-  requireFullWidth = false
+  requireFullWidth = false,
+  cacheRoot = true
 ): ValueWidth {
-  return emitJitValue({
+  const emit = cacheRoot ? emitJitValue : emitJitValueWithoutRootCache;
+
+  return emit({
     body: context.body,
     valueCache: context.valueCache,
     emitInput: (slot) => emitJitInputSlot(context.body, slot),

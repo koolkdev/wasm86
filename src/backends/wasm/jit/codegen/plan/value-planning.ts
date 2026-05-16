@@ -6,20 +6,19 @@ import type {
 import type { PathMap } from "#backends/wasm/jit/analysis/paths.js";
 import type { Timeline } from "#backends/wasm/jit/analysis/timeline.js";
 import {
-  planJitValueCacheForInstructions,
-  type JitValueCachePlan
-} from "./value-cache.js";
+  planReuseForInstructions,
+  type InstructionCaptureMap,
+  type InstructionReusePlan
+} from "./reuse.js";
 import {
   type ValueUse
 } from "./value-uses.js";
 import {
-  groupJitPlannedCaptures,
-  planJitValueCaptures,
-  type JitPlannedValueCapture,
-  type JitExpressionCaptureMap
-} from "./value-captures.js";
+  groupCapturesByInstruction
+} from "./captures.js";
+import type { PlannedExit } from "./types.js";
 
-export type JitValuePlanningInstructionInput = Readonly<{
+export type ReusePlanningInstructionInput = Readonly<{
   operands: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
   sourceExpressionMap: IrExpressionSourceMap;
@@ -27,42 +26,42 @@ export type JitValuePlanningInstructionInput = Readonly<{
   valueTimeline: Timeline;
 }>;
 
-export type JitInstructionWithPlannedValues<
-  TInstruction extends JitValuePlanningInstructionInput
+export type InstructionWithReusePlan<
+  TInstruction extends ReusePlanningInstructionInput
 > = TInstruction & Readonly<{
-  plannedValueCaptures: JitExpressionCaptureMap;
+  captureMap: InstructionCaptureMap;
 }>;
 
-export type JitPlannedValuesForEmission<
-  TInstruction extends JitValuePlanningInstructionInput
+export type PlannedReuseForEmission<
+  TInstruction extends ReusePlanningInstructionInput
 > = Readonly<{
-  instructions: readonly JitInstructionWithPlannedValues<TInstruction>[];
-  valueCachePlan: JitValueCachePlan;
+  instructions: readonly InstructionWithReusePlan<TInstruction>[];
   valueUses: readonly ValueUse[];
-  plannedValueCaptures: readonly JitPlannedValueCapture[];
+  reusePlan: InstructionReusePlan;
 }>;
 
-export function planJitValuesForEmission<TInstruction extends JitValuePlanningInstructionInput>(
+export function planReuseForEmission<TInstruction extends ReusePlanningInstructionInput>(
   instructions: readonly TInstruction[],
-  valueUses: readonly ValueUse[]
-): JitPlannedValuesForEmission<TInstruction> {
-  const cacheInputs = instructions.map((instruction) => ({
+  valueUses: readonly ValueUse[],
+  exits: readonly PlannedExit[]
+): PlannedReuseForEmission<TInstruction> {
+  const reuseInputs = instructions.map((instruction) => ({
     operands: instruction.operands,
     expressionBlock: instruction.expressionBlock,
     valueTimeline: instruction.valueTimeline
   }));
-  const valueCachePlan = planJitValueCacheForInstructions(
-    cacheInputs,
-    valueUses
+  const reusePlan = planReuseForInstructions(
+    reuseInputs,
+    valueUses,
+    exits
   );
-  const plannedValueCaptures = planJitValueCaptures(valueUses, valueCachePlan);
-  const captureMaps = groupJitPlannedCaptures(
-    plannedValueCaptures,
+  const captureMaps = groupCapturesByInstruction(
+    reusePlan.captures.captures,
     instructions.length
   );
   const plannedInstructions = instructions.map((instruction, index) => ({
     ...instruction,
-    plannedValueCaptures: requiredCaptureMap(
+    captureMap: requiredCaptureMap(
       captureMaps,
       index
     )
@@ -70,16 +69,15 @@ export function planJitValuesForEmission<TInstruction extends JitValuePlanningIn
 
   return {
     instructions: plannedInstructions,
-    valueCachePlan,
     valueUses,
-    plannedValueCaptures
+    reusePlan
   };
 }
 
 function requiredCaptureMap(
-  instructionCaptureMaps: readonly JitExpressionCaptureMap[],
+  instructionCaptureMaps: readonly InstructionCaptureMap[],
   instructionIndex: number
-): JitExpressionCaptureMap {
+): InstructionCaptureMap {
   const plannedCaptures = instructionCaptureMaps[instructionIndex];
 
   if (plannedCaptures === undefined) {

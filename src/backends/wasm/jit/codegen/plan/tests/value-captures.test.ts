@@ -2,14 +2,14 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
-import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
+import { planCaptures } from "#backends/wasm/jit/codegen/plan/captures.js";
+import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import {
   branchExpressionPaths,
   valueUsesForExpressionBlock,
   type TestValueRoot
 } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
-import { planJitValueCaptures } from "#backends/wasm/jit/codegen/plan/value-captures.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
   jitInputReg32Value,
@@ -26,6 +26,11 @@ import {
   branchPath,
   c32,
   c32Expr,
+  captureBeforeStores,
+  exitPoint,
+  exitState,
+  ExitReason,
+  registerStore,
   rootPath
 } from "./plan-test-helpers.js";
 
@@ -38,8 +43,8 @@ test("JIT value-capture planner shares pure values needed by both branch paths",
     notTaken: target
   }] as const satisfies IrExprBlock;
   const expected = addValue(jitInputReg32Value("eax"), c32(1));
-  const { uses, cachePlan } = planCapturesForExpressionBlock(expressionBlock);
-  const captures = planJitValueCaptures(uses, cachePlan);
+  const { uses, reusePlan } = planCapturesForExpressionBlock(expressionBlock);
+  const captures = reusePlan.captures.captures;
   const targetUses = uses.filter((use) => valuesEqual(use.value, expected));
 
   deepStrictEqual(targetUses.map((use) => use.path), [
@@ -48,8 +53,9 @@ test("JIT value-capture planner shares pure values needed by both branch paths",
   ]);
   strictEqual(captures.length, 1);
   strictEqual(valuesEqual(captures[0]!.value, expected), true);
-  deepStrictEqual(captures[0]!.placement, { instructionIndex: 0, opIndex: 0, epoch: 0 });
-  deepStrictEqual(captures[0]!.availabilityPath, rootPath());
+  deepStrictEqual(captures[0]!.at, { instructionIndex: 0, opIndex: 0, epoch: 0 });
+  deepStrictEqual(captures[0]!.availability, rootPath());
+  strictEqual(captures[0]!.reason, "branchShared");
   strictEqual(captures[0]!.consumers.length, 2);
 });
 
@@ -103,8 +109,8 @@ test("JIT value-capture planner keeps one-arm branch values path-specific", () =
     notTaken: c32Expr(0)
   }] as const satisfies IrExprBlock;
   const expected = addValue(jitInputReg32Value("eax"), c32(1));
-  const { uses, cachePlan } = planCapturesForExpressionBlock(expressionBlock);
-  const captures = planJitValueCaptures(uses, cachePlan);
+  const { uses, reusePlan } = planCapturesForExpressionBlock(expressionBlock);
+  const captures = reusePlan.captures.captures;
   const targetUses = uses.filter((use) => valuesEqual(use.value, expected));
 
   deepStrictEqual(targetUses.map((use) => use.path), [
@@ -113,7 +119,7 @@ test("JIT value-capture planner keeps one-arm branch values path-specific", () =
   deepStrictEqual(captures, []);
 });
 
-test("JIT value-capture planner leaves produced definitions to value-cache", () => {
+test("JIT value-capture planner captures used produced definitions with reason", () => {
   const produced = jitProducedValue("load#branch-capture:0:0:0", "i32");
   const expressionBlock = [
     {
@@ -132,15 +138,22 @@ test("JIT value-capture planner leaves produced definitions to value-cache", () 
       notTaken: { kind: "var", id: 0 }
     }
   ] as const satisfies IrExprBlock;
-  const { uses, cachePlan } = planCapturesForExpressionBlock(
+  const { uses, reusePlan } = planCapturesForExpressionBlock(
     expressionBlock,
     new Map([[0, produced]])
   );
-  const captures = planJitValueCaptures(uses, cachePlan);
+  const captures = reusePlan.captures.captures;
   const producedUses = uses.filter((use) => valuesEqual(use.value, produced));
 
-  deepStrictEqual(cachePlan?.definitionCaptures[0], [produced]);
-  deepStrictEqual(captures, []);
+  deepStrictEqual(captures.map((capture) => ({
+    value: capture.value,
+    at: capture.at,
+    reason: capture.reason
+  })), [{
+    value: produced,
+    at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+    reason: "producedDefinition"
+  }]);
   deepStrictEqual(producedUses.map((use) => use.path), [
     { kind: "path", id: "branch:0:1:taken", debugLabel: "taken" },
     { kind: "path", id: "branch:0:1:notTaken", debugLabel: "notTaken" }
@@ -173,18 +186,90 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
     expressionPaths: branchExpressionPaths(expressionBlock),
     extraUses
   });
-  const cachePlan = planJitValueCache({
+  const reusePlan = planReuseForInstructions([{
     operands: [],
-    valueTimeline: timeline
-  }, expressionBlock, uses);
-  const captures = planJitValueCaptures(uses, cachePlan);
+    valueTimeline: timeline,
+    expressionBlock
+  }], uses, []);
+  const captures = reusePlan.captures.captures;
 
   strictEqual(captures.length, 1);
   strictEqual(valuesEqual(captures[0]!.value, value), true);
-  deepStrictEqual(captures[0]!.availabilityPath, rootPath());
+  deepStrictEqual(captures[0]!.availability, rootPath());
+  strictEqual(captures[0]!.reason, "branchShared");
   deepStrictEqual(captures[0]!.consumers.map((use) => use.path), [
     { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" },
     { kind: "path", id: "branch:0:0:notTaken", debugLabel: "notTaken" }
+  ]);
+});
+
+test("JIT value-capture planner keeps store-clobber consumers scoped to their exit placement", () => {
+  const value = addValue(jitInputReg32Value("eax"), c32(1));
+  const path = rootPath();
+  const store = captureBeforeStores(registerStore("eax", value));
+  const uses = [
+    {
+      value,
+      at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+      path,
+      purpose: "exitStore",
+      root: value,
+      ancestors: []
+    },
+    {
+      value,
+      at: { instructionIndex: 0, opIndex: 1, epoch: 1 },
+      path,
+      purpose: "exitStore",
+      root: value,
+      ancestors: []
+    }
+  ] as const;
+  const exits = [
+    exitPoint({
+      instructionIndex: 0,
+      opIndex: 0,
+      reason: ExitReason.HOST_TRAP,
+      snapshot: exitState(1),
+      stores: [store],
+      exitStoreIndex: 1,
+      path
+    }),
+    exitPoint({
+      instructionIndex: 0,
+      opIndex: 1,
+      reason: ExitReason.HOST_TRAP,
+      snapshot: exitState(1),
+      stores: [store],
+      exitStoreIndex: 2,
+      path
+    })
+  ];
+  const captures = planCaptures({
+    uses,
+    cache: {
+      epochs: [],
+      selected: [{ value, useCount: 2 }]
+    },
+    produced: [],
+    exits
+  }).captures;
+
+  deepStrictEqual(captures.map((capture) => ({
+    at: capture.at,
+    consumers: capture.consumers.map((consumer) => consumer.at),
+    reason: capture.reason
+  })), [
+    {
+      at: uses[0].at,
+      consumers: [uses[0].at],
+      reason: "storeClobber"
+    },
+    {
+      at: uses[1].at,
+      consumers: [uses[1].at],
+      reason: "storeClobber"
+    }
   ]);
 });
 
@@ -203,10 +288,11 @@ function planCapturesForExpressionBlock(
     valueTimeline: timeline,
     expressionPaths: branchExpressionPaths(expressionBlock)
   });
-  const cachePlan = planJitValueCache({
+  const reusePlan = planReuseForInstructions([{
     operands: [],
-    valueTimeline: timeline
-  }, expressionBlock, uses);
+    valueTimeline: timeline,
+    expressionBlock
+  }], uses, []);
 
-  return { uses, cachePlan };
+  return { uses, reusePlan };
 }

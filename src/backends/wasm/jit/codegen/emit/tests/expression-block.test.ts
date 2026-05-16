@@ -13,10 +13,10 @@ import { ExitReason } from "#backends/wasm/exit.js";
 import { emitJitExpressionBlock } from "#backends/wasm/jit/codegen/emit/expression-block.js";
 import { emitJitGet } from "#backends/wasm/jit/codegen/emit/operands.js";
 import type { JitInstructionEmitContext } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
-import { createJitValueCacheRuntime } from "#backends/wasm/jit/codegen/emit/value-local-store.js";
+import { createValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
 import type { PlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import type { PlannedExit } from "#backends/wasm/jit/codegen/plan/types.js";
-import { planJitValueCache } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import {
   buildTimeline,
   opView
@@ -241,15 +241,15 @@ function emitFoundationBlock(
   });
   const cachePlan = options.cache === false
     ? undefined
-    : planJitValueCache(
-        { operands: [], valueTimeline },
-        expressionBlock,
+    : planReuseForInstructions(
+        [{ operands: [], valueTimeline, expressionBlock }],
         valueUsesForExpressionBlock({
           expressionBlock,
           valueTimeline
-        })
+        }),
+        []
       );
-  const valueCache = createJitValueCacheRuntime(body, cachePlan);
+  const valueCache = createValueCache(body, cachePlan);
   let nextCalls = 0;
   let setCalls = 0;
   let guardCalls = 0;
@@ -262,7 +262,7 @@ function emitFoundationBlock(
     instruction: {
       expressionBlock,
       valueTimeline,
-      plannedValueCaptures: new Map(),
+      captureMap: new Map(),
       plannedEffects: buildPlannedEffects(
         expressionBlock,
         options.plannedEffects

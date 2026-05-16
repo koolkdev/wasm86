@@ -221,22 +221,26 @@ test("jit IR block uses full-register load and word store when AX also feeds a f
 
 test("jit IR block shares input-state AH xor result between flags and byte writeback", () => {
   const block = buildBlock([ok(decodeBytes([0x80, 0xf4, 0x05], startAddress))]); // xor ah, 5
+  const opcodes = jitBlockBodyOpcodes(block);
 
   deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
     { opcode: wasmOpcode.i32Load8U, offset: stateOffset.eax + 1 },
     { opcode: wasmOpcode.i32Store8, offset: stateOffset.eax + 1 }
   ]);
-  strictEqual(countOpcode(jitBlockBodyOpcodes(block), wasmOpcode.localTee), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 0);
 });
 
 test("jit IR block shares input-state AX xor result between flags and word writeback", () => {
   const block = buildBlock([ok(decodeBytes([0x66, 0x35, 0x32, 0x04], startAddress))]); // xor ax, 0x432
+  const opcodes = jitBlockBodyOpcodes(block);
 
   deepStrictEqual(registerStateMemoryAccesses(block, stateOffset.eax), [
     { opcode: wasmOpcode.i32Load16U, offset: stateOffset.eax },
     { opcode: wasmOpcode.i32Store16, offset: stateOffset.eax }
   ]);
-  strictEqual(countOpcode(jitBlockBodyOpcodes(block), wasmOpcode.localTee), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.localTee), 0);
 });
 
 test("jit IR block emits one guest load for mixed cached flag inputs", () => {

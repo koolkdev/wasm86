@@ -38,10 +38,10 @@ import {
 } from "#backends/wasm/jit/ir/values/slots.js";
 import type { Reg32 } from "#x86/isa/types.js";
 import {
-  JitValueLocalStore,
-  type JitValueCacheRuntime,
-  type JitValueUseCount
-} from "#backends/wasm/jit/codegen/emit/value-local-store.js";
+  LocalStore,
+  type SelectedValue
+} from "#backends/wasm/jit/codegen/emit/local-store.js";
+import type { ValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
 
 test("emitJitValue lowers register bit insertion directly to Wasm", () => {
   const opcodes = emitSymbolicValue(
@@ -314,11 +314,11 @@ test("emitJitValue lowers flag conditions from symbolic aluFlags values", () => 
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Eqz), 2);
 });
 
-test("JitValueLocalStore cache keys support canonical symbolic nodes", () => {
+test("LocalStore cache keys support canonical symbolic nodes", () => {
   const body = new WasmFunctionBodyEncoder();
   const first = jitInsertBits(jitInputReg32Value("eax"), add(jitInputReg32Value("ebx"), c32(1)), 0, 8);
   const second = jitInsertBits(jitInputReg32Value("eax"), add(jitInputReg32Value("ebx"), c32(1)), 0, 8);
-  const store = new JitValueLocalStore(body, useCounts([{ value: first, useCount: 2 }]));
+  const store = new LocalStore(body, useCounts([{ value: first, useCount: 2 }]));
   let emitted = 0;
 
   store.emitForUse(first, () => emitAdd(body, () => { emitted += 1; }));
@@ -332,7 +332,7 @@ test("JitValueLocalStore cache keys support canonical symbolic nodes", () => {
 test("emitJitValue lowers produced values through retained locals", () => {
   const body = new WasmFunctionBodyEncoder();
   const produced = jitProducedValue("load#0:0:1", "i32");
-  const store = new JitValueLocalStore(body, useCounts([{ value: produced, useCount: 1 }]));
+  const store = new LocalStore(body, useCounts([{ value: produced, useCount: 1 }]));
   const captured = store.captureForReuse(produced, () => {
     body.i32Const(0x1234);
     return cleanValueWidth(32);
@@ -509,8 +509,8 @@ function unexpectedEmitter(): ValueWidth {
 }
 
 function passthroughValueCache(
-  overrides: Partial<JitValueCacheRuntime>
-): JitValueCacheRuntime {
+  overrides: Partial<ValueCache>
+): ValueCache {
   return {
     beginInstruction: () => {},
     beginExpressionOp: () => {},
@@ -523,7 +523,7 @@ function passthroughValueCache(
   };
 }
 
-function useCounts(counts: readonly JitValueUseCount[]): readonly JitValueUseCount[] {
+function useCounts(counts: readonly SelectedValue[]): readonly SelectedValue[] {
   return counts;
 }
 

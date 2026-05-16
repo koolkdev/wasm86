@@ -14,7 +14,7 @@ import {
   wasmBodyOpcodes,
   extractOnlyWasmFunctionBody,
   emitJitBlock,
-  createJitValueCacheRuntime,
+  createValueCache,
   buildTimeline,
   createJitState,
   exitState,
@@ -86,7 +86,7 @@ test("JIT production emission consumes planned effects from instruction plans", 
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPaths: new Map(),
       producedByVar: new Map(),
-      plannedValueCaptures: new Map()
+      captureMap: new Map()
     }],
     plannedEffects: [{
       placement: {
@@ -162,7 +162,7 @@ test("JIT production emission does not walk unscheduled expression effects", () 
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPaths: new Map(),
       producedByVar: new Map(),
-      plannedValueCaptures: new Map()
+      captureMap: new Map()
     }],
     plannedEffects: []
   });
@@ -225,7 +225,7 @@ test("JIT planned emission keeps a dead produced-load guard before a later used 
   ]);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.memorySize), 4);
   strictEqual(guestLoads(result).length, 1);
-  deepStrictEqual(result.emissionPlan.valueCachePlan.useCounts, [{
+  deepStrictEqual(result.emissionPlan.reusePlan.cache.selected, [{
     value: jitProducedValue("load#planned-emission-test:0:3:1", "i32"),
     useCount: 1
   }]);
@@ -354,7 +354,7 @@ test("JIT codegen leaves dead pure SSA unpruned and emits no Wasm for it", () =>
     "fallthrough"
   ]);
   deepStrictEqual(emissionPlan.valueUses, []);
-  deepStrictEqual(emissionPlan.valueCachePlan.useCounts, []);
+  deepStrictEqual(emissionPlan.reusePlan.cache.selected, []);
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 0);
   strictEqual(countOpcode(opcodes, wasmOpcode.br), 1);
 });
@@ -400,7 +400,7 @@ function emitPlannedJitBlock(block: JitBlock) {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const valueCache = createJitValueCacheRuntime(body, emissionPlan.valueCachePlan);
+  const valueCache = createValueCache(body, emissionPlan.reusePlan);
   const state = createJitState(body, emissionPlan.exitStoreSets, { valueCache });
   const exit = { exitLocal, exitLabelDepth: state.maxExitStoreIndex };
 

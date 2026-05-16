@@ -6,23 +6,23 @@ import {
   jitInputReg32Value,
   jitProducedValue
 } from "./plan-test-helpers.js";
-import { planJitValueCacheSelection } from "#backends/wasm/jit/codegen/plan/value-cache-selection.js";
+import { selectCacheValues } from "#backends/wasm/jit/codegen/plan/cache.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { ValueUse } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 
 test("JIT value-cache selection returns an empty total plan when no values are selected", () => {
-  const selection = planJitValueCacheSelection([[], []]);
+  const selection = selectCacheValues([[], []]);
 
   deepStrictEqual(selection, {
     consumers: [[], []],
-    useCounts: []
+    selected: []
   });
 });
 
 test("JIT value-cache selection exposes per-epoch consumers and merged use counts", () => {
   const repeated = addValue(jitInputReg32Value("eax"), c32(1));
   const produced = jitProducedValue("selection:produced", "i32");
-  const selection = planJitValueCacheSelection([
+  const selection = selectCacheValues([
     [
       valueUse(repeated),
       valueUse(repeated)
@@ -36,7 +36,7 @@ test("JIT value-cache selection exposes per-epoch consumers and merged use count
     [{ value: repeated, useCount: 2 }],
     [{ value: produced, useCount: 1 }]
   ]);
-  deepStrictEqual(selection.useCounts, [
+  deepStrictEqual(selection.selected, [
     { value: repeated, useCount: 2 },
     { value: produced, useCount: 1 }
   ]);

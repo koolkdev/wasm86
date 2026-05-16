@@ -10,9 +10,9 @@ import {
   IR_ALU_FLAG_MASK,
   extractOnlyWasmFunctionBody,
   wasmBodyOpcodes,
-  createJitValueCacheRuntime,
+  createValueCache,
   encodeJitBlock,
-  planJitValueCache,
+  planReuseForInstruction,
   buildTimeline,
   createJitValueState,
   reg,
@@ -93,11 +93,11 @@ test("JIT value-cache runtime follows planned timeline expression positions", ()
     expressions: expressionBlock,
     entry: createJitValueState().snapshot()
   });
-  const plan = planJitValueCache({
+  const plan = planReuseForInstruction({
     operands: [],
     valueTimeline: timeline
   }, expressionBlock);
-  const valueCache = createJitValueCacheRuntime(body, plan);
+  const valueCache = createValueCache(body, plan);
 
   valueCache?.beginInstruction(0);
   valueCache?.beginExpressionOp(0);
@@ -152,10 +152,10 @@ test("JIT value-cache planning does not treat flags.set as an exit-store consume
     entry: createJitValueState().snapshot()
   });
 
-  deepStrictEqual(planJitValueCache({
+  deepStrictEqual(planReuseForInstruction({
     operands: [],
     valueTimeline
-  }, expressionBlock).useCounts, []);
+  }, expressionBlock).cache.selected, []);
 });
 
 function productionOpcodes(ir: JitBlock["instructions"][number]["ir"]): readonly number[] {

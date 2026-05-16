@@ -16,7 +16,7 @@ import {
   branchPath,
   rootPath
 } from "#backends/wasm/jit/analysis/paths.js";
-import { planJitValueCacheForInstructions } from "#backends/wasm/jit/codegen/plan/value-cache.js";
+import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import {
   type UsePurpose
@@ -71,7 +71,7 @@ export {
   planJitCodegen,
   branchPath,
   rootPath,
-  planJitValueCacheForInstructions,
+  planReuseForInstructions,
   buildTimeline,
   jitExtractBits,
   jitFlagConditionValue,
@@ -130,11 +130,11 @@ export function planValueCacheForTest(input: Readonly<{
     extraUses: input.extraUses ?? new Map()
   });
 
-  return planJitValueCacheForInstructions([{
+  return planReuseForInstructions([{
     operands,
     expressionBlock: input.expressionBlock,
     valueTimeline
-  }], valueUses);
+  }], valueUses, []);
 }
 
 export function extraUse(
@@ -175,11 +175,13 @@ export function captureBeforeStores(store: ExitStore): PlannedExitStore {
 export function plannedRegisterStores(exit: PlannedExit): readonly ExitStore[] {
   return exit.stores.filter((store) =>
     store.target.kind === "reg32" || store.target.kind === "reg16" || store.target.kind === "reg8"
-  );
+  ).map(({ target, value }) => ({ target, value }));
 }
 
 export function plannedFlagStores(exit: PlannedExit): readonly ExitStore[] {
-  return exit.stores.filter((store) => store.target.kind === "aluFlags");
+  return exit.stores
+    .filter((store) => store.target.kind === "aluFlags")
+    .map(({ target, value }) => ({ target, value }));
 }
 
 export function exitPoint(input: Readonly<{

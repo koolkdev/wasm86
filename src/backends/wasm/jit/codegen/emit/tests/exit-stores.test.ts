@@ -13,7 +13,7 @@ import {
   wasmBodyOpcodes,
   jitInputAluFlagsValue,
   jitInputReg32Value,
-  JitValueLocalStore,
+  LocalStore,
   captureExitStores,
   emitExitStores,
   releaseExitStores,
@@ -22,104 +22,62 @@ import {
   addValue,
   useCounts,
   cacheRuntimeForStore,
-  localOpcodes,
   countOpcode,
 } from "./value-local-store-test-helpers.js";
-test("JIT exit stores capture aluFlags sources before overwriting flags", () => {
+import { throws } from "node:assert";
+
+test("JIT exit stores require planned cache captures for aluFlags source clobbers", () => {
   const body = new WasmFunctionBodyEncoder();
-  const captured = captureExitStores({
-    body
-  }, [
-    {
-      target: { kind: "aluFlags" },
-      value: { kind: "const", type: "i32", value: 0 }
-    },
-    {
-      target: { kind: "reg32", reg: "eax" },
-      value: jitInputAluFlagsValue(),
-      sourceCapture: {
-        kind: "beforeStores",
-        reason: "targetClobber"
+
+  throws(
+    () => captureExitStores({
+      body
+    }, [
+      {
+        target: { kind: "aluFlags" },
+        value: { kind: "const", type: "i32", value: 0 }
+      },
+      {
+        target: { kind: "reg32", reg: "eax" },
+        value: jitInputAluFlagsValue(),
+        sourceCapture: {
+          kind: "beforeStores",
+          reason: "targetClobber"
+        }
       }
-    }
-  ]);
-
-  if (captured === undefined) {
-    throw new Error("expected captured exit stores");
-  }
-
-  emitExitStores({ body }, captured);
-  releaseExitStores(captured);
-  body.end();
-
-  const encoded = body.encode();
-
-  deepStrictEqual(localOpcodes(wasmBodyOpcodes(encoded)), [wasmOpcode.localSet, wasmOpcode.localGet]);
-  deepStrictEqual(
-    wasmBodyMemoryAccesses(encoded)
-      .filter((access) =>
-        access.offset === stateOffset.aluFlags ||
-        access.offset === stateOffset.eax
-      )
-      .map(({ opcode, offset }) => ({ opcode, offset })),
-    [
-      { opcode: wasmOpcode.i32Load, offset: stateOffset.aluFlags },
-      { opcode: wasmOpcode.i32Store, offset: stateOffset.aluFlags },
-      { opcode: wasmOpcode.i32Store, offset: stateOffset.eax }
-    ]
+    ]),
+    /JIT exit-store source capture was not available in the value cache/
   );
 });
 
-test("JIT exit stores capture register sources before overwriting aliased register targets", () => {
+test("JIT exit stores require planned cache captures for aliased register source clobbers", () => {
   const body = new WasmFunctionBodyEncoder();
-  const captured = captureExitStores({
-    body
-  }, [
-    {
-      target: { kind: "reg8", reg: "ah" },
-      value: { kind: "const", type: "i32", value: 0x12 }
-    },
-    {
-      target: { kind: "reg32", reg: "ebx" },
-      value: jitInputReg32Value("eax"),
-      sourceCapture: {
-        kind: "beforeStores",
-        reason: "targetClobber"
+
+  throws(
+    () => captureExitStores({
+      body
+    }, [
+      {
+        target: { kind: "reg8", reg: "ah" },
+        value: { kind: "const", type: "i32", value: 0x12 }
+      },
+      {
+        target: { kind: "reg32", reg: "ebx" },
+        value: jitInputReg32Value("eax"),
+        sourceCapture: {
+          kind: "beforeStores",
+          reason: "targetClobber"
+        }
       }
-    }
-  ]);
-
-  if (captured === undefined) {
-    throw new Error("expected captured exit stores");
-  }
-
-  emitExitStores({ body }, captured);
-  releaseExitStores(captured);
-  body.end();
-
-  const encoded = body.encode();
-
-  deepStrictEqual(localOpcodes(wasmBodyOpcodes(encoded)), [wasmOpcode.localSet, wasmOpcode.localGet]);
-  deepStrictEqual(
-    wasmBodyMemoryAccesses(encoded)
-      .filter((access) =>
-        access.offset === stateOffset.eax ||
-        access.offset === stateOffset.eax + 1 ||
-        access.offset === stateOffset.ebx
-      )
-      .map(({ opcode, offset }) => ({ opcode, offset })),
-    [
-      { opcode: wasmOpcode.i32Load, offset: stateOffset.eax },
-      { opcode: wasmOpcode.i32Store8, offset: stateOffset.eax + 1 },
-      { opcode: wasmOpcode.i32Store, offset: stateOffset.ebx }
-    ]
+    ]),
+    /JIT exit-store source capture was not available in the value cache/
   );
 });
 
 test("JIT flag exit stores lower planned sources through value cache", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const store = new JitValueLocalStore(body, useCounts([{ value, useCount: 2 }]));
+  const store = new LocalStore(body, useCounts([{ value, useCount: 2 }]));
   const valueCache = cacheRuntimeForStore(store);
   const captured = captureExitStores({
     body,

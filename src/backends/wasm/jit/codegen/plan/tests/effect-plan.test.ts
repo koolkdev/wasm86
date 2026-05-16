@@ -48,7 +48,7 @@ test("JIT effect plan leaves pure expressions and state updates out of cache roo
 
   deepStrictEqual(emissionPlan.plannedEffects, []);
   deepStrictEqual(emissionPlan.valueUses, []);
-  deepStrictEqual(emissionPlan.valueCachePlan.useCounts, []);
+  deepStrictEqual(emissionPlan.reusePlan.cache.selected, []);
 });
 
 test("JIT effect plan attaches roots for ordered effects and exit stores", () => {
@@ -172,7 +172,7 @@ test("JIT effect plan attaches roots for ordered effects and exit stores", () =>
   strictEqual(purposes.includes("branchTarget"), true);
   strictEqual(purposes.includes("trapVector"), true);
   deepStrictEqual(usePurposes.includes("exitStore"), true);
-  strictEqual(emissionPlan.valueCachePlan.useCounts.some((entry) =>
+  strictEqual(emissionPlan.reusePlan.cache.selected.some((entry) =>
     valuesEqual(entry.value, expectedValue)
   ), true);
 });
@@ -222,15 +222,20 @@ test("JIT effect plan selects produced values only for later required roots", ()
     "producedValue"
   ]);
   deepStrictEqual(unusedPlan.valueUses, []);
-  deepStrictEqual(unusedPlan.valueCachePlan.useCounts, []);
-  deepStrictEqual(unusedPlan.valueCachePlan.definitionCaptures.flat(), []);
+  deepStrictEqual(unusedPlan.reusePlan.cache.selected, []);
+  deepStrictEqual(unusedPlan.reusePlan.captures.captures, []);
 
   deepStrictEqual(usedPlan.plannedEffects.map((effect) => effect.kind), [
     "producedValue",
     "hostTrap"
   ]);
-  deepStrictEqual(usedPlan.valueCachePlan.useCounts, [
+  deepStrictEqual(usedPlan.reusePlan.cache.selected, [
     { value: produced, useCount: 1 }
   ]);
-  deepStrictEqual(usedPlan.valueCachePlan.definitionCaptures[0], [produced]);
+  deepStrictEqual(
+    usedPlan.reusePlan.captures.captures
+      .filter((capture) => capture.reason === "producedDefinition")
+      .map((capture) => capture.value),
+    [produced]
+  );
 });
