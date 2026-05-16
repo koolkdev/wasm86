@@ -14,16 +14,13 @@ import {
   jitFlagConditionValue,
   jitFlagProducerValue,
   jitInputAluFlagsValue,
-  jitInputReg16Value,
   jitInputReg32Value,
-  jitInputReg8Value,
   jitInsertMaskedBits,
   jitProducedValue,
   onlyExit,
   startAddress,
   registerStore,
   flagStore,
-  captureBeforeStores,
   plannedRegisterStores,
   plannedFlagStores,
   c32,
@@ -35,10 +32,7 @@ import {
   type JitValue,
   type JitBlock,
 } from "./plan-test-helpers.js";
-import {
-  planExitStoreSourceCaptures,
-  storesForSnapshot
-} from "#backends/wasm/jit/codegen/plan/exit-stores.js";
+import { storesForSnapshot } from "#backends/wasm/jit/codegen/plan/exit-stores.js";
 import { registerStores } from "#backends/wasm/jit/codegen/plan/register-stores.js";
 import { flagStores } from "#backends/wasm/jit/codegen/plan/flag-stores.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
@@ -53,52 +47,6 @@ test("storesForSnapshot omits unchanged input register and flag stores", () => {
     instructionCountDelta: 0,
     valueState: state.snapshot()
   }), []);
-});
-
-test("planExitStoreSourceCaptures marks sources clobbered by earlier stores", () => {
-  const clobberedStore = registerStore("ebx", jitInputReg32Value("eax"));
-
-  deepStrictEqual(planExitStoreSourceCaptures([
-    registerStore("eax", c32(0)),
-    clobberedStore
-  ]), [
-    registerStore("eax", c32(0)),
-    captureBeforeStores(clobberedStore)
-  ]);
-});
-
-test("planExitStoreSourceCaptures uses precise source masks for register aliases", () => {
-  const overwriteAh = {
-    target: { kind: "reg8", reg: "ah" },
-    value: c32(0)
-  } as const;
-  const lowByteStore = {
-    target: { kind: "reg8", reg: "bl" },
-    value: jitInputReg32Value("eax")
-  } as const;
-  const wordStore = registerStore("ebx", jitInputReg16Value("ax"));
-
-  deepStrictEqual(planExitStoreSourceCaptures([
-    overwriteAh,
-    lowByteStore
-  ]), [
-    overwriteAh,
-    lowByteStore
-  ]);
-  deepStrictEqual(planExitStoreSourceCaptures([
-    overwriteAh,
-    registerStore("ebx", jitInputReg8Value("al"))
-  ]), [
-    overwriteAh,
-    registerStore("ebx", jitInputReg8Value("al"))
-  ]);
-  deepStrictEqual(planExitStoreSourceCaptures([
-    overwriteAh,
-    wordStore
-  ]), [
-    overwriteAh,
-    captureBeforeStores(wordStore)
-  ]);
 });
 
 test("registerStores derives full-register exit stores", () => {
@@ -240,7 +188,7 @@ test("planJitCodegen keeps memory guard faults at their op exit states", () => {
   deepStrictEqual(plannedRegisterStores(exit), [expectedRegisterStore]);
   deepStrictEqual(plannedFlagStores(exit), [expectedFlagStore]);
   deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex], {
-    stores: [expectedRegisterStore, captureBeforeStores(expectedFlagStore)]
+    stores: [expectedRegisterStore, expectedFlagStore]
   });
 });
 
@@ -289,7 +237,7 @@ test("planJitCodegen derives xchg exit stores from value-state snapshots", () =>
   deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex], {
     stores: [
       registerStore("ecx", jitInputReg32Value("edx")),
-      captureBeforeStores(registerStore("edx", jitInputReg32Value("ecx")))
+      registerStore("edx", jitInputReg32Value("ecx"))
     ]
   });
 });
@@ -461,8 +409,8 @@ test("planJitCodegen records value-state-derived flag stores for branch exits", 
   const branchFlagStore = flagStore(branchExits[0]!.snapshot.valueState.flags.readAluFlags());
 
   deepStrictEqual(branchExits.map((exit) => codegenPlan.exitStoreSets[exit.exitStoreIndex]), [
-    { stores: [branchRegisterStore, captureBeforeStores(branchFlagStore)] },
-    { stores: [branchRegisterStore, captureBeforeStores(branchFlagStore)] }
+    { stores: [branchRegisterStore, branchFlagStore] },
+    { stores: [branchRegisterStore, branchFlagStore] }
   ]);
 
   deepStrictEqual(
@@ -626,7 +574,7 @@ test("planJitCodegen records full flag producers in value-state snapshots", () =
   deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex], {
     stores: [
       registerStore("eax", result),
-      captureBeforeStores(expectedFlagStore)
+      expectedFlagStore
     ]
   });
 });

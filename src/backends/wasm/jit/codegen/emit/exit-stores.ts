@@ -79,9 +79,10 @@ function captureJitExitStore(
   context: JitExitStoreEmitContext,
   store: PlannedExitStore
 ): CapturedExitStore {
+  const { value } = store.store;
   const captured = context.valueCache?.captureForReuse(
-    store.value,
-    () => emitJitExitStoreSourceValue(context, store.value, false, false)
+    store.source.kind === "capture" ? store.source.capture.value : value,
+    () => emitJitExitStoreSourceValue(context, value, false, false)
   );
 
   if (captured !== undefined) {
@@ -96,17 +97,13 @@ function captureJitExitStore(
     };
   }
 
-  const value = simplifyValue(store.value);
+  if (store.source.kind === "inline") {
+    const simplified = simplifyValue(value);
 
-  if (value.kind === "const") {
-    return { store };
-  }
+    if (simplified.kind === "produced") {
+      throw new Error("JIT produced exit store value was not captured before exit store emission");
+    }
 
-  if (value.kind === "produced") {
-    throw new Error("JIT produced exit store value was not captured before exit store emission");
-  }
-
-  if (store.sourceCapture?.kind !== "beforeStores") {
     return { store };
   }
 
@@ -117,7 +114,7 @@ function emitJitExitStore(
   context: JitExitStoreEmitContext,
   capturedStore: CapturedExitStore
 ): void {
-  const { target, value } = capturedStore.store;
+  const { target, value } = capturedStore.store.store;
 
   emitJitStoreTarget(context.body, target, () => emitCapturedOrInlineStoreSource(
     context,

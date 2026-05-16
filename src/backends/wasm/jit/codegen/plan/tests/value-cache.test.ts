@@ -63,7 +63,7 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
 
   strictEqual(instruction?.instructionId, "cache-plan");
   strictEqual(emissionPlan.exits, codegenPlan.exits);
-  strictEqual(emissionPlan.exitStoreSets, codegenPlan.exitStoreSets);
+  strictEqual(emissionPlan.maxExitStoreIndex, codegenPlan.maxExitStoreIndex);
   strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
   strictEqual(instruction?.valueTimeline.snapshots.length, instruction?.expressionBlock.length);
   strictEqual((emissionPlan.reusePlan.cache.selected.length ?? 0) > 0, true);

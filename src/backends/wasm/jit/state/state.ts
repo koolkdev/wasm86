@@ -4,8 +4,8 @@ import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-bo
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { emitLoadStateU32, emitStoreStateU32 } from "#backends/wasm/codegen/state.js";
 import type {
-  ExitStoreSet,
-  PlannedExit
+  PlannedExit,
+  StoreStrategySet
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { ValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
 import {
@@ -41,7 +41,7 @@ export type JitState = Readonly<{
 
 export function createJitState(
   body: WasmFunctionBodyEncoder,
-  exitStoreSets: readonly ExitStoreSet[],
+  exitStoreSets: readonly StoreStrategySet[],
   options: JitStateOptions = {}
 ): JitState {
   const maxExitStoreIndex = exitStoreSets.length - 1;

@@ -4,9 +4,9 @@ import {
 } from "./cache.js";
 import {
   planCaptures,
-  storeClobberValues,
   type CapturePlan
 } from "./captures.js";
+import { storeClobberValues } from "./store-strategy.js";
 import {
   buildEpochs,
   type EpochUsePlan,

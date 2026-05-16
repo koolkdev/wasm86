@@ -6,7 +6,7 @@ import type {
   PathMap
 } from "#backends/wasm/jit/analysis/paths.js";
 import type {
-  ExitStoreSet,
+  ExitStoreSet as SemanticExitStoreSet,
   PlannedExit
 } from "./exit-stores.js";
 
@@ -19,12 +19,17 @@ export type {
 } from "#backends/wasm/jit/analysis/exits.js";
 export type {
   ExitStore,
-  ExitStoreSourceCapture,
   ExitStorePlan,
-  ExitStoreSet,
-  PlannedExitStore,
   PlannedExit
 } from "./exit-stores.js";
+export type {
+  PlannedExitStore,
+  PlannedExitStores,
+  StoreSourceStrategy,
+  StoreStrategyInput,
+  StoreStrategyPlan,
+  StoreStrategySet
+} from "./store-strategy.js";
 
 export type JitInstructionState = Readonly<{
   instructionId: string;
@@ -42,6 +47,6 @@ export type JitCodegenPlan = Readonly<{
   instructionStates: readonly JitInstructionState[];
   effects: readonly Effect<PlannedExit>[];
   exits: readonly PlannedExit[];
-  exitStoreSets: readonly ExitStoreSet[];
+  exitStoreSets: readonly SemanticExitStoreSet[];
   maxExitStoreIndex: number;
 }>;

@@ -16,6 +16,9 @@ import type {
   Placement,
   ValueUse
 } from "./value-uses.js";
+import {
+  storeClobberSourceStores
+} from "./store-strategy.js";
 
 export type CaptureReason =
   | "branchShared"
@@ -178,16 +181,11 @@ function rootCaptureForConsumers(
 
 function planStoreClobberCaptures(input: CaptureInput): readonly Capture[] {
   return input.exits.flatMap((exit) =>
-    exit.stores.flatMap((store) => {
-      if (store.sourceCapture?.kind !== "beforeStores") {
-        return [];
-      }
-
+    storeClobberSourceStores(exit).flatMap((store) => {
       const value = simplifyValue(store.value);
       const consumers = input.uses.filter((use) =>
         use.purpose === "exitStore" &&
-          use.path.id === exit.path.id &&
-          valueUseMatchesExitPlacement(use, exit) &&
+          use.exitId === exit.id &&
           valuesEqual(use.value, value)
       );
       const firstConsumer = consumers[0];
@@ -205,23 +203,6 @@ function planStoreClobberCaptures(input: CaptureInput): readonly Capture[] {
       }];
     })
   );
-}
-
-export function storeClobberValues(exits: readonly PlannedExit[]): readonly JitValue[] {
-  const values: JitValue[] = [];
-
-  for (const exit of exits) {
-    for (const store of exit.stores) {
-      if (
-        store.sourceCapture?.kind === "beforeStores" &&
-        !values.some((value) => valuesEqual(value, store.value))
-      ) {
-        values.push(store.value);
-      }
-    }
-  }
-
-  return values;
 }
 
 function producedDefinitionForValue(
@@ -246,11 +227,6 @@ function valueHasProducedDescendant(
     simplifyValue(use.value).kind === "produced" &&
       use.ancestors.some((ancestor) => valuesEqual(ancestor, value))
   );
-}
-
-function valueUseMatchesExitPlacement(use: ValueUse, exit: PlannedExit): boolean {
-  return use.at.instructionIndex === exit.at.instructionIndex &&
-    use.at.opIndex === exit.at.opIndex;
 }
 
 function uniqueCaptures(

@@ -27,6 +27,7 @@ export type ValueRoot = Readonly<{
   at: Placement;
   path: Path;
   purpose: UsePurpose;
+  exitId?: string;
 }>;
 
 export type ValueUse = Readonly<{
@@ -36,6 +37,7 @@ export type ValueUse = Readonly<{
   purpose: UsePurpose;
   root: JitValue;
   ancestors: readonly JitValue[];
+  exitId?: string;
 }>;
 
 export type ValueUseInput = Readonly<{
@@ -94,7 +96,8 @@ function rootsForExitStore(
     value: store.value,
     at,
     path: exit.path,
-    purpose: "exitStore"
+    purpose: "exitStore",
+    exitId: exit.id
   }));
 }
 
@@ -105,7 +108,7 @@ function usesForValue(
   ancestors: readonly JitValue[]
 ): readonly ValueUse[] {
   const simplified = simplifyValue(value);
-  const use: ValueUse = {
+  const baseUse = {
     value: simplified,
     at: root.at,
     path: root.path,
@@ -113,6 +116,12 @@ function usesForValue(
     root: rootValue,
     ancestors
   };
+  const use: ValueUse = root.exitId === undefined
+    ? baseUse
+    : {
+        ...baseUse,
+        exitId: root.exitId
+      };
   const childAncestors = [...ancestors, simplified];
 
   return [

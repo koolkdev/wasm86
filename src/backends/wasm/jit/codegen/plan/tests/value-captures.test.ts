@@ -26,7 +26,6 @@ import {
   branchPath,
   c32,
   c32Expr,
-  captureBeforeStores,
   exitPoint,
   exitState,
   ExitReason,
@@ -206,7 +205,28 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
 test("JIT value-capture planner keeps store-clobber consumers scoped to their exit placement", () => {
   const value = addValue(jitInputReg32Value("eax"), c32(1));
   const path = rootPath();
-  const store = captureBeforeStores(registerStore("eax", value));
+  const stores = [
+    registerStore("eax", c32(0)),
+    registerStore("ebx", value)
+  ];
+  const firstExit = exitPoint({
+    instructionIndex: 0,
+    opIndex: 0,
+    reason: ExitReason.HOST_TRAP,
+    snapshot: exitState(1),
+    stores,
+    exitStoreIndex: 1,
+    path
+  });
+  const secondExit = exitPoint({
+    instructionIndex: 0,
+    opIndex: 1,
+    reason: ExitReason.HOST_TRAP,
+    snapshot: exitState(1),
+    stores,
+    exitStoreIndex: 2,
+    path
+  });
   const uses = [
     {
       value,
@@ -214,7 +234,8 @@ test("JIT value-capture planner keeps store-clobber consumers scoped to their ex
       path,
       purpose: "exitStore",
       root: value,
-      ancestors: []
+      ancestors: [],
+      exitId: firstExit.id
     },
     {
       value,
@@ -222,28 +243,13 @@ test("JIT value-capture planner keeps store-clobber consumers scoped to their ex
       path,
       purpose: "exitStore",
       root: value,
-      ancestors: []
+      ancestors: [],
+      exitId: secondExit.id
     }
   ] as const;
   const exits = [
-    exitPoint({
-      instructionIndex: 0,
-      opIndex: 0,
-      reason: ExitReason.HOST_TRAP,
-      snapshot: exitState(1),
-      stores: [store],
-      exitStoreIndex: 1,
-      path
-    }),
-    exitPoint({
-      instructionIndex: 0,
-      opIndex: 1,
-      reason: ExitReason.HOST_TRAP,
-      snapshot: exitState(1),
-      stores: [store],
-      exitStoreIndex: 2,
-      path
-    })
+    firstExit,
+    secondExit
   ];
   const captures = planCaptures({
     uses,

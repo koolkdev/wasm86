@@ -162,14 +162,17 @@ export function flagStore(value: JitValue): ExitStore {
   };
 }
 
-export function captureBeforeStores(store: ExitStore): PlannedExitStore {
+export function inlineStore(store: ExitStore): PlannedExitStore {
   return {
-    ...store,
-    sourceCapture: {
-      kind: "beforeStores",
-      reason: "targetClobber"
-    }
+    store,
+    source: { kind: "inline" }
   };
+}
+
+export function plannedStoreSources(
+  stores: readonly PlannedExitStore[]
+): readonly (readonly [ExitStore, PlannedExitStore["source"]["kind"]])[] {
+  return stores.map((store) => [store.store, store.source.kind]);
 }
 
 export function plannedRegisterStores(exit: PlannedExit): readonly ExitStore[] {

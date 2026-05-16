@@ -10,8 +10,13 @@ export type {
   ExitValue,
   ExitStore,
   ExitStorePlan,
-  ExitStoreSet,
   PlannedExit,
+  PlannedExitStore,
+  PlannedExitStores,
+  StoreSourceStrategy,
+  StoreStrategyInput,
+  StoreStrategyPlan,
+  StoreStrategySet,
   JitInstructionState,
   JitCodegenPlan
 } from "./types.js";

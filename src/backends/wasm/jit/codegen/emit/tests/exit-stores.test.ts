@@ -25,25 +25,30 @@ import {
   countOpcode,
 } from "./value-local-store-test-helpers.js";
 import { throws } from "node:assert";
+import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
+import type { Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
 
 test("JIT exit stores require planned cache captures for aluFlags source clobbers", () => {
   const body = new WasmFunctionBodyEncoder();
+  const value = jitInputAluFlagsValue();
 
   throws(
     () => captureExitStores({
       body
     }, [
       {
-        target: { kind: "aluFlags" },
-        value: { kind: "const", type: "i32", value: 0 }
+        store: {
+          target: { kind: "aluFlags" },
+          value: { kind: "const", type: "i32", value: 0 }
+        },
+        source: { kind: "inline" }
       },
       {
-        target: { kind: "reg32", reg: "eax" },
-        value: jitInputAluFlagsValue(),
-        sourceCapture: {
-          kind: "beforeStores",
-          reason: "targetClobber"
-        }
+        store: {
+          target: { kind: "reg32", reg: "eax" },
+          value
+        },
+        source: { kind: "capture", capture: storeClobberCapture(value) }
       }
     ]),
     /JIT exit-store source capture was not available in the value cache/
@@ -52,22 +57,25 @@ test("JIT exit stores require planned cache captures for aluFlags source clobber
 
 test("JIT exit stores require planned cache captures for aliased register source clobbers", () => {
   const body = new WasmFunctionBodyEncoder();
+  const value = jitInputReg32Value("eax");
 
   throws(
     () => captureExitStores({
       body
     }, [
       {
-        target: { kind: "reg8", reg: "ah" },
-        value: { kind: "const", type: "i32", value: 0x12 }
+        store: {
+          target: { kind: "reg8", reg: "ah" },
+          value: { kind: "const", type: "i32", value: 0x12 }
+        },
+        source: { kind: "inline" }
       },
       {
-        target: { kind: "reg32", reg: "ebx" },
-        value: jitInputReg32Value("eax"),
-        sourceCapture: {
-          kind: "beforeStores",
-          reason: "targetClobber"
-        }
+        store: {
+          target: { kind: "reg32", reg: "ebx" },
+          value
+        },
+        source: { kind: "capture", capture: storeClobberCapture(value) }
       }
     ]),
     /JIT exit-store source capture was not available in the value cache/
@@ -83,8 +91,11 @@ test("JIT flag exit stores lower planned sources through value cache", () => {
     body,
     valueCache
   }, [{
-    target: { kind: "aluFlags" },
-    value
+    store: {
+      target: { kind: "aluFlags" },
+      value
+    },
+    source: { kind: "inline" }
   }]);
 
   if (captured === undefined) {
@@ -120,3 +131,13 @@ test("JIT register exit store reuses pure NEG planned values", () => {
 
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Sub), 1);
 });
+
+function storeClobberCapture(value: Capture["value"]): Capture {
+  return {
+    value,
+    at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+    availability: rootPath(),
+    consumers: [],
+    reason: "storeClobber"
+  };
+}

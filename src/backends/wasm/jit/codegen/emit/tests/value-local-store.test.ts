@@ -20,11 +20,13 @@ import {
   emitExtend8,
   unexpectedEmitter,
   branchPath,
+  rootPath,
   localOpcodes,
   countOpcode,
   type JitValue,
   type ValueCache,
 } from "./value-local-store-test-helpers.js";
+import type { Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
 test("LocalStore reuses one local for equal non-trivial values", () => {
   const body = new WasmFunctionBodyEncoder();
   const first = addValue("eax", 1);
@@ -431,8 +433,14 @@ test("LocalStore keeps pinned exit-store locals out of reuse", () => {
     body,
     valueCache
   }, [{
-    target: { kind: "reg32", reg: "eax" },
-    value
+    store: {
+      target: { kind: "reg32", reg: "eax" },
+      value
+    },
+    source: {
+      kind: "capture",
+      capture: storeClobberCapture(value)
+    }
   }]);
 
   if (exitStores === undefined) {
@@ -453,6 +461,16 @@ test("LocalStore keeps pinned exit-store locals out of reuse", () => {
 
   strictEqual(rematerialized.local === captured.local, false);
 });
+
+function storeClobberCapture(value: Capture["value"]): Capture {
+  return {
+    value,
+    at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+    availability: rootPath(),
+    consumers: [],
+    reason: "storeClobber"
+  };
+}
 
 test("LocalStore forgetWhere invalidates only matching values", () => {
   const body = new WasmFunctionBodyEncoder();

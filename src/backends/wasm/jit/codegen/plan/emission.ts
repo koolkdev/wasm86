@@ -14,9 +14,10 @@ import {
 } from "#backends/wasm/jit/analysis/timeline.js";
 import type {
   JitCodegenPlan,
-  ExitStoreSet,
   JitInstructionState,
-  PlannedExit
+  PlannedExit,
+  StoreStrategyPlan,
+  StoreStrategySet
 } from "./types.js";
 import {
   canInlineJitInstructionGet,
@@ -35,6 +36,7 @@ import {
   planJitEffectsForEmission,
   type PlannedEffect
 } from "./effect-plan.js";
+import { planStoreStrategy } from "./store-strategy.js";
 
 type JitPreparedCodegenInstruction = JitInstructionState & Pick<
   JitInstruction,
@@ -55,7 +57,8 @@ export type JitCodegenInstructionPlan =
 export type JitCodegenEmissionPlan = Readonly<{
   instructions: readonly JitCodegenInstructionPlan[];
   exits: readonly PlannedExit[];
-  exitStoreSets: readonly ExitStoreSet[];
+  storeStrategy: StoreStrategyPlan;
+  exitStoreSets: readonly StoreStrategySet[];
   maxExitStoreIndex: number;
   plannedEffects: readonly PlannedEffect[];
   valueUses: readonly ValueUse[];
@@ -81,12 +84,17 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     plannedEffects.valueUses,
     codegenPlan.exits
   );
+  const storeStrategy = planStoreStrategy({
+    exits: codegenPlan.exits,
+    captures: plannedValues.reusePlan.captures
+  });
 
   return {
     instructions: plannedValues.instructions,
     exits: codegenPlan.exits,
-    exitStoreSets: codegenPlan.exitStoreSets,
-    maxExitStoreIndex: codegenPlan.maxExitStoreIndex,
+    storeStrategy,
+    exitStoreSets: storeStrategy.exitStoreSets,
+    maxExitStoreIndex: storeStrategy.maxExitStoreIndex,
     plannedEffects: plannedEffects.plannedEffects,
     valueUses: plannedValues.valueUses,
     reusePlan: plannedValues.reusePlan
