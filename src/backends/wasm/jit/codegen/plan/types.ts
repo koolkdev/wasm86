@@ -1,6 +1,6 @@
 import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import type {
-  Effect
+  EffectInfo
 } from "#backends/wasm/jit/analysis/effects.js";
 import type {
   PathMap
@@ -45,7 +45,7 @@ export type JitInstructionState = Readonly<{
 export type JitCodegenPlan = Readonly<{
   block: JitBlock;
   instructionStates: readonly JitInstructionState[];
-  effects: readonly Effect<PlannedExit>[];
+  effects: readonly EffectInfo<PlannedExit>[];
   exits: readonly PlannedExit[];
   exitStoreSets: readonly SemanticExitStoreSet[];
   maxExitStoreIndex: number;

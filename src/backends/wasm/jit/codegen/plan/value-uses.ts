@@ -1,16 +1,17 @@
 import {
+  rootPath,
   type Path
 } from "#backends/wasm/jit/analysis/paths.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { valueChildren } from "#backends/wasm/jit/ir/values/walk.js";
 import type { PlannedExit } from "./exit-stores.js";
+import type {
+  Effect,
+  EffectPlacement,
+} from "./effect-types.js";
 
-export type Placement = Readonly<{
-  instructionIndex: number;
-  opIndex: number;
-  epoch: number;
-}>;
+export type Placement = EffectPlacement;
 
 export type UsePurpose =
   | "memoryAddress"
@@ -41,21 +42,8 @@ export type ValueUse = Readonly<{
 }>;
 
 export type ValueUseInput = Readonly<{
-  effects: readonly ValueUseEffect[];
+  effects: readonly Effect[];
 }>;
-
-export type ValueUseEffect = Readonly<{
-  placement: Placement;
-  valueRoots: readonly ValueRoot[];
-}> & (
-  | Readonly<{ kind: "memoryGuard"; faultExit: PlannedExit }>
-  | Readonly<{ kind: "memoryStore" }>
-  | Readonly<{ kind: "producedValue" }>
-  | Readonly<{ kind: "jump"; exit: PlannedExit }>
-  | Readonly<{ kind: "branch"; taken: PlannedExit; notTaken: PlannedExit }>
-  | Readonly<{ kind: "hostTrap"; exit: PlannedExit }>
-  | Readonly<{ kind: "fallthrough"; exit: PlannedExit }>
-);
 
 export function collectValueUses(input: ValueUseInput): readonly ValueUse[] {
   const roots = [
@@ -67,17 +55,17 @@ export function collectValueUses(input: ValueUseInput): readonly ValueUse[] {
 }
 
 export function rootsForEffects(
-  effects: readonly ValueUseEffect[]
+  effects: readonly Effect[]
 ): readonly ValueRoot[] {
-  return effects.flatMap((effect) => effect.valueRoots);
+  return effects.flatMap(rootsForEffect);
 }
 
 export function rootsForExitStores(
-  effects: readonly ValueUseEffect[]
+  effects: readonly Effect[]
 ): readonly ValueRoot[] {
   return effects.flatMap((effect) =>
     exitsForEffect(effect).flatMap((exit) =>
-      rootsForExitStore(exit, effect.placement)
+      rootsForExitStore(exit, effect.at)
     )
   );
 }
@@ -99,6 +87,66 @@ function rootsForExitStore(
     purpose: "exitStore",
     exitId: exit.id
   }));
+}
+
+function valueRoot(
+  value: JitValue,
+  at: Placement,
+  path: Path,
+  purpose: UsePurpose
+): ValueRoot {
+  return {
+    value,
+    at,
+    path,
+    purpose
+  };
+}
+
+function rootsForEffect(effect: Effect): readonly ValueRoot[] {
+  switch (effect.kind) {
+    case "memoryGuard":
+      return [
+        valueRoot(effect.address, effect.at, rootPath(), "memoryAddress")
+      ];
+    case "memoryStore":
+      return [
+        valueRoot(effect.address, effect.at, effectPath(effect), "memoryAddress"),
+        valueRoot(effect.value, effect.at, effectPath(effect), "memoryValue")
+      ];
+    case "jump":
+      return [
+        valueRoot(effect.target, effect.at, effect.exit.path, "controlTarget")
+      ];
+    case "branch":
+      return [
+        valueRoot(effect.condition, effect.at, effectPath(effect), "branchCondition"),
+        valueRoot(effect.takenTarget, effect.at, effect.taken.path, "branchTarget"),
+        valueRoot(effect.notTakenTarget, effect.at, effect.notTaken.path, "branchTarget")
+      ];
+    case "hostTrap":
+      return [
+        valueRoot(effect.vector, effect.at, rootPath(), "trapVector")
+      ];
+    case "producedValue":
+    case "fallthrough":
+      return [];
+  }
+}
+
+function effectPath(effect: Effect): Path {
+  switch (effect.kind) {
+    case "memoryGuard":
+      return rootPath();
+    case "jump":
+      return effect.exit.path;
+    case "branch":
+    case "memoryStore":
+    case "producedValue":
+    case "hostTrap":
+    case "fallthrough":
+      return rootPath();
+  }
 }
 
 function usesForValue(
@@ -132,10 +180,10 @@ function usesForValue(
   ];
 }
 
-function exitsForEffect(effect: ValueUseEffect): readonly PlannedExit[] {
+function exitsForEffect(effect: Effect): readonly PlannedExit[] {
   switch (effect.kind) {
     case "memoryGuard":
-      return [effect.faultExit];
+      return [effect.exit];
     case "jump":
     case "hostTrap":
     case "fallthrough":

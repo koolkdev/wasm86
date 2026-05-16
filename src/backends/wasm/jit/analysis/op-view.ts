@@ -3,6 +3,7 @@ import type { JitArchitecturalSlot, JitValue } from "#backends/wasm/jit/ir/value
 import {
   jitArchitecturalSlotsOverlap
 } from "#backends/wasm/jit/ir/values/slots.js";
+import { u32 } from "#x86/state/cpu-state.js";
 import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
 import {
   type StorageReadKey,
@@ -44,8 +45,46 @@ export function requireExpression(view: OpView, value: IrValueExpr, label: strin
   return requireTimelineValue(view.expression(value), label, view.opIndex);
 }
 
+export function requireValueExpr(
+  view: OpView,
+  value: IrValueExpr,
+  options: Readonly<{ nextEip?: number }> = {}
+): JitValue {
+  switch (value.kind) {
+    case "const":
+    case "var":
+      return requireTimelineValue(view.ref(value), "JIT value expression", view.opIndex);
+    case "nextEip":
+      return options.nextEip === undefined
+        ? requireTimelineValue(undefined, "JIT value expression", view.opIndex)
+        : { kind: "const", type: "i32", value: u32(options.nextEip) };
+    case "source":
+    case "address":
+    case "flags.condition":
+    case "value.binary":
+    case "value.unary":
+    case "value.select":
+      return requireTimelineValue(view.expression(value), "JIT value expression", view.opIndex);
+  }
+}
+
 export function requireRef(view: OpView, value: ValueRef, label: string): JitValue {
   return requireTimelineValue(view.ref(value), label, view.opIndex);
+}
+
+export function requireStorageAddress(
+  view: OpView,
+  storage: IrStorageExpr,
+  options: Readonly<{ nextEip?: number }> = {}
+): JitValue {
+  switch (storage.kind) {
+    case "mem":
+      return requireValueExpr(view, storage.address, options);
+    case "operand":
+      return requireTimelineValue(view.address(storage), "JIT storage address", view.opIndex);
+    case "reg":
+      throw new Error(`JIT storage address cannot come from register ${storage.reg}`);
+  }
 }
 
 export function requireStorageRead(view: OpView, read: StorageReadKey): JitValue {

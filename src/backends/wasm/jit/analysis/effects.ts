@@ -35,21 +35,26 @@ export type EffectsInput = Readonly<{
 }>;
 
 export type EffectsAnalysis<TExit extends Exit = Exit> = Readonly<{
-  effects: readonly Effect<TExit>[];
+  effects: readonly EffectInfo<TExit>[];
   exits: readonly TExit[];
 }>;
 
-export type Effect<TExit extends Exit = Exit> =
-  | Readonly<{ kind: "memoryGuard"; at: Placement; faultExit: TExit }>
-  | Readonly<{ kind: "memoryStore"; at: Placement }>
-  | Readonly<{ kind: "producedValue"; at: Placement }>
-  | Readonly<{ kind: "jump"; at: Placement; exit: TExit }>
-  | Readonly<{ kind: "branch"; at: Placement; taken: TExit; notTaken: TExit }>
-  | Readonly<{ kind: "hostTrap"; at: Placement; exit: TExit }>
-  | Readonly<{ kind: "fallthrough"; at: Placement; exit: TExit }>;
+type EffectInfoBase<TKind extends EffectKind> = Readonly<{
+  kind: TKind;
+  at: Placement;
+}>;
+
+export type EffectInfo<TExit extends Exit = Exit> =
+  | EffectInfoBase<"memoryGuard"> & Readonly<{ faultExit: TExit }>
+  | EffectInfoBase<"memoryStore">
+  | EffectInfoBase<"producedValue">
+  | EffectInfoBase<"jump"> & Readonly<{ exit: TExit }>
+  | EffectInfoBase<"branch"> & Readonly<{ taken: TExit; notTaken: TExit }>
+  | EffectInfoBase<"hostTrap"> & Readonly<{ exit: TExit }>
+  | EffectInfoBase<"fallthrough"> & Readonly<{ exit: TExit }>;
 
 export function analyzeEffects(input: EffectsInput): EffectsAnalysis {
-  const effects: Effect[] = [];
+  const effects: EffectInfo[] = [];
   const exits: Exit[] = [];
   let instructionCountDelta = 0;
 
@@ -102,10 +107,10 @@ export function analyzeEffects(input: EffectsInput): EffectsAnalysis {
 }
 
 export function effectAt<TExit extends Exit>(
-  effects: readonly Effect<TExit>[],
+  effects: readonly EffectInfo<TExit>[],
   instructionIndex: number,
   opIndex: number
-): Effect<TExit> | undefined {
+): EffectInfo<TExit> | undefined {
   return effects.find((effect) =>
     effect.at.instructionIndex === instructionIndex &&
     effect.at.opIndex === opIndex
@@ -113,9 +118,9 @@ export function effectAt<TExit extends Exit>(
 }
 
 export function reattachEffectExits<TExit extends Exit>(
-  effects: readonly Effect[],
+  effects: readonly EffectInfo[],
   exits: readonly TExit[]
-): readonly Effect<TExit>[] {
+): readonly EffectInfo<TExit>[] {
   const exitsById = new Map(exits.map((exit) => [exit.id, exit]));
 
   return effects.map((effect) => {
@@ -149,7 +154,7 @@ function effectForOp(
   kind: EffectKind,
   at: Placement,
   exits: readonly Exit[]
-): Effect {
+): EffectInfo {
   switch (kind) {
     case "memoryGuard":
       return { kind, at, faultExit: onlyExit(exits, "memory guard", at) };

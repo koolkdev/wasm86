@@ -33,11 +33,10 @@ export type {
   TimelineLookups
 } from "#backends/wasm/jit/analysis/timeline.js";
 export type {
+  Effect,
   EffectPlacement,
-  EffectValueRoot,
-  EffectValueRootPurpose,
-  PlannedEffect
-} from "./effect-plan.js";
+  EffectsPlan
+} from "./effect-types.js";
 export { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 
 export function planJitCodegen(optimizedBlock: JitBlock): JitCodegenPlan {

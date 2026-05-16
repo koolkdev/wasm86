@@ -23,6 +23,7 @@ import {
   countOpcode,
   encodeJitBlock,
   type JitBlock,
+  type JitValue
 } from "./value-local-store-test-helpers.js";
 import { wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
@@ -31,7 +32,7 @@ import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 
-test("JIT production emission consumes planned effects from instruction plans", () => {
+test("JIT production emission consumes effects plan entries from instruction plans", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
@@ -39,8 +40,15 @@ test("JIT production emission consumes planned effects from instruction plans", 
   const expressionBlock = [
     { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
   ] as const;
+  const vector = {
+    kind: "value.binary",
+    type: "i32",
+    operator: "xor",
+    a: { kind: "const", type: "i32", value: 0x15 },
+    b: { kind: "const", type: "i32", value: 0x3f }
+  } as const satisfies JitValue;
   const instruction = {
-    instructionId: "prebuilt-expression-block",
+    instructionId: "prebuilt-effects-plan",
     eip: 0x1000,
     nextEip: 0x1001,
     nextMode: "continue",
@@ -88,16 +96,15 @@ test("JIT production emission consumes planned effects from instruction plans", 
       producedByVar: new Map(),
       captureMap: new Map()
     }],
-    plannedEffects: [{
-      placement: {
+    effects: [{
+      at: {
         instructionIndex: 0,
         opIndex: 0,
         epoch: 0
       },
-      sourceOpIndex: 0,
       kind: "hostTrap",
-      exit: hostTrapExit,
-      valueRoots: []
+      vector,
+      exit: hostTrapExit
     }]
   });
   scratch.assertClear();
@@ -164,7 +171,7 @@ test("JIT production emission does not walk unscheduled expression effects", () 
       producedByVar: new Map(),
       captureMap: new Map()
     }],
-    plannedEffects: []
+    effects: []
   });
   scratch.assertClear();
   body.end();
@@ -175,7 +182,7 @@ test("JIT production emission does not walk unscheduled expression effects", () 
   strictEqual(countOpcode(opcodes, wasmOpcode.br), 0);
 });
 
-test("JIT planned emission keeps a guard but skips an unused produced load", () => {
+test("JIT effects plan emission keeps a guard but skips an unused produced load", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
     {
@@ -187,7 +194,7 @@ test("JIT planned emission keeps a guard but skips an unused produced load", () 
     { op: "next" }
   ]));
 
-  deepStrictEqual(result.emissionPlan.plannedEffects.map((effect) => effect.kind), [
+  deepStrictEqual(result.emissionPlan.effects.map((effect) => effect.kind), [
     "memoryGuard",
     "producedValue",
     "fallthrough"
@@ -196,7 +203,7 @@ test("JIT planned emission keeps a guard but skips an unused produced load", () 
   strictEqual(guestLoads(result).length, 0);
 });
 
-test("JIT planned emission keeps a dead produced-load guard before a later used load", () => {
+test("JIT effects plan emission keeps a dead produced-load guard before a later used load", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
     {
@@ -216,7 +223,7 @@ test("JIT planned emission keeps a dead produced-load guard before a later used 
     { op: "hostTrap", vector: c32(0x2e) }
   ]));
 
-  deepStrictEqual(result.emissionPlan.plannedEffects.map((effect) => effect.kind), [
+  deepStrictEqual(result.emissionPlan.effects.map((effect) => effect.kind), [
     "memoryGuard",
     "producedValue",
     "memoryGuard",
@@ -231,7 +238,7 @@ test("JIT planned emission keeps a dead produced-load guard before a later used 
   }]);
 });
 
-test("JIT planned emission captures a used produced load at its definition", () => {
+test("JIT effects plan emission captures a used produced load at its definition", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
     {
@@ -257,7 +264,7 @@ test("JIT planned emission captures a used produced load at its definition", () 
   strictEqual(laterUseIndex !== -1, true);
 });
 
-test("JIT planned emission skips unused arithmetic, register, and flag state", () => {
+test("JIT effects plan emission skips unused arithmetic, register, and flag state", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     {
@@ -278,7 +285,7 @@ test("JIT planned emission skips unused arithmetic, register, and flag state", (
     }
   ], { nextMode: "continue" }));
 
-  deepStrictEqual(result.emissionPlan.plannedEffects, []);
+  deepStrictEqual(result.emissionPlan.effects, []);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.i32Add), 0);
   strictEqual(result.memoryAccesses.some((access) =>
     access.memoryIndex === wasmMemoryIndex.state &&
@@ -286,7 +293,7 @@ test("JIT planned emission skips unused arithmetic, register, and flag state", (
   ), false);
 });
 
-test("JIT planned emission keeps memory store address before value", () => {
+test("JIT effects plan emission keeps memory store address before value", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     {
@@ -317,7 +324,7 @@ test("JIT planned emission keeps memory store address before value", () => {
   const valueIndex = result.opcodes.indexOf(wasmOpcode.i32Xor);
   const storeIndex = result.opcodes.indexOf(wasmOpcode.i32Store);
 
-  deepStrictEqual(result.emissionPlan.plannedEffects.map((effect) => effect.kind), [
+  deepStrictEqual(result.emissionPlan.effects.map((effect) => effect.kind), [
     "memoryStore"
   ]);
   strictEqual(addressIndex !== -1, true);
@@ -350,7 +357,7 @@ test("JIT codegen leaves dead pure SSA unpruned and emits no Wasm for it", () =>
     "value.binary",
     "next"
   ]);
-  deepStrictEqual(emissionPlan.plannedEffects.map((effect) => effect.kind), [
+  deepStrictEqual(emissionPlan.effects.map((effect) => effect.kind), [
     "fallthrough"
   ]);
   deepStrictEqual(emissionPlan.valueUses, []);
@@ -416,7 +423,7 @@ function emitPlannedJitBlock(block: JitBlock) {
     state,
     exit,
     instructions: emissionPlan.instructions,
-    plannedEffects: emissionPlan.plannedEffects,
+    effects: emissionPlan.effects,
     valueCache
   });
 

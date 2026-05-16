@@ -1,18 +1,26 @@
-import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
-import type { EffectKind } from "#backends/wasm/jit/analysis/effect-classifier.js";
+import type {
+  IrExprBlock,
+  IrStorageExpr,
+  IrValueExpr
+} from "#backends/wasm/codegen/expressions.js";
 import {
   branchPath,
+  rootPath,
   type BranchPaths,
+  type Path,
   type PathMap
 } from "#backends/wasm/jit/analysis/paths.js";
-import type { Timeline } from "#backends/wasm/jit/analysis/timeline.js";
-import { effectValueRootsForOp } from "#backends/wasm/jit/codegen/plan/effect-roots.js";
+import {
+  opView,
+  type Timeline
+} from "#backends/wasm/jit/analysis/timeline.js";
 import { jitExpressionOpEpochs } from "#backends/wasm/jit/codegen/plan/epochs.js";
 import {
   expandRootUse,
   type ValueRoot,
   type ValueUse
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { rootExpressionPaths } from "./path-test-helpers.js";
 
 export type TestValueRoot = Omit<ValueRoot, "at">;
@@ -45,19 +53,10 @@ export function valueUsesForExpressionBlock(input: Readonly<{
       opIndex,
       epoch: opEpochs[opIndex]!
     };
-    const effectKind = testEffectKindForExpressionOp(op);
-
-    if (effectKind !== undefined) {
-      roots.push(...effectValueRootsForOp(
-        {
-          expressionPaths,
-          valueTimeline: input.valueTimeline
-        },
-        op,
-        effectKind,
-        at
-      ));
-    }
+    roots.push(...valueRootsForTestExpressionOp({
+      expressionPaths,
+      valueTimeline: input.valueTimeline
+    }, op, at));
 
     roots.push(...(input.extraUses?.get(opIndex) ?? []).map((root) => ({
       ...root,
@@ -86,25 +85,149 @@ export function branchExpressionPaths(
   return paths;
 }
 
-function testEffectKindForExpressionOp(
-  op: IrExprBlock[number]
-): EffectKind | undefined {
+function valueRootsForTestExpressionOp(
+  input: Readonly<{
+    expressionPaths: PathMap;
+    valueTimeline: Timeline;
+  }>,
+  op: IrExprBlock[number],
+  at: ValueRoot["at"]
+): readonly ValueRoot[] {
+  const root = rootPath();
+
   switch (op.op) {
     case "memory.guard":
-      return "memoryGuard";
+      return valueRootsForExpression(input, op.address, at, root, "memoryAddress");
     case "set":
-      return op.target.kind === "mem" ? "memoryStore" : undefined;
+      return op.target.kind === "mem"
+        ? [
+            ...valueRootsForExpression(input, op.target.address, at, root, "memoryAddress"),
+            ...valueRootsForExpression(input, op.value, at, root, "memoryValue")
+          ]
+        : [];
     case "jump":
-      return "jump";
-    case "conditionalJump":
-      return "branch";
+      return valueRootsForExpression(input, op.target, at, root, "controlTarget");
+    case "conditionalJump": {
+      const branchPaths = input.expressionPaths.get(at.opIndex);
+
+      if (branchPaths === undefined) {
+        throw new Error(`missing test branch paths for op ${at.opIndex}`);
+      }
+
+      return [
+        ...valueRootsForExpression(input, op.condition, at, root, "branchCondition"),
+        ...valueRootsForExpression(input, op.taken, at, branchPaths.taken, "branchTarget"),
+        ...valueRootsForExpression(input, op.notTaken, at, branchPaths.notTaken, "branchTarget")
+      ];
+    }
     case "hostTrap":
-      return "hostTrap";
+      return valueRootsForExpression(input, op.vector, at, root, "trapVector");
     case "let32":
-      return "producedValue";
     case "next":
-      return "fallthrough";
     case "flags.set":
-      return undefined;
+      return [];
+  }
+}
+
+function valueRootsForExpression(
+  input: Readonly<{
+    valueTimeline: Timeline;
+  }>,
+  value: IrValueExpr,
+  at: ValueRoot["at"],
+  path: Path,
+  purpose: ValueRoot["purpose"]
+): readonly ValueRoot[] {
+  const jitValue = jitValueForExpression(input, value, at.opIndex);
+
+  return jitValue === undefined
+    ? childValueRootsForExpression(input, value, at, path, purpose)
+    : [{
+        value: jitValue,
+        at,
+        path,
+        purpose
+      }];
+}
+
+function childValueRootsForExpression(
+  input: Readonly<{
+    valueTimeline: Timeline;
+  }>,
+  value: IrValueExpr,
+  at: ValueRoot["at"],
+  path: Path,
+  purpose: ValueRoot["purpose"]
+): readonly ValueRoot[] {
+  switch (value.kind) {
+    case "source":
+      return storageAddressRoots(input, value.source, at, path, purpose);
+    case "value.binary":
+      return [
+        ...valueRootsForExpression(input, value.a, at, path, purpose),
+        ...valueRootsForExpression(input, value.b, at, path, purpose)
+      ];
+    case "value.unary":
+      return valueRootsForExpression(input, value.value, at, path, purpose);
+    case "value.select":
+      return [
+        ...valueRootsForExpression(input, value.condition, at, path, purpose),
+        ...valueRootsForExpression(input, value.whenTrue, at, path, purpose),
+        ...valueRootsForExpression(input, value.whenFalse, at, path, purpose)
+      ];
+    case "var":
+    case "const":
+    case "nextEip":
+    case "address":
+    case "flags.condition":
+      return [];
+  }
+}
+
+function storageAddressRoots(
+  input: Readonly<{
+    valueTimeline: Timeline;
+  }>,
+  storage: IrStorageExpr,
+  at: ValueRoot["at"],
+  path: Path,
+  purpose: ValueRoot["purpose"]
+): readonly ValueRoot[] {
+  switch (storage.kind) {
+    case "mem":
+      return valueRootsForExpression(input, storage.address, at, path, purpose);
+    case "operand": {
+      const value = opView(input.valueTimeline, at.opIndex).address(storage);
+
+      return value === undefined
+        ? []
+        : [{ value, at, path, purpose }];
+    }
+    case "reg":
+      return [];
+  }
+}
+
+function jitValueForExpression(
+  input: Readonly<{
+    valueTimeline: Timeline;
+  }>,
+  value: IrValueExpr,
+  opIndex: number
+): JitValue | undefined {
+  const view = opView(input.valueTimeline, opIndex);
+
+  switch (value.kind) {
+    case "var":
+    case "const":
+    case "nextEip":
+      return view.ref(value);
+    case "source":
+    case "address":
+    case "flags.condition":
+    case "value.binary":
+    case "value.unary":
+    case "value.select":
+      return view.expression(value);
   }
 }

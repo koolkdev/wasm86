@@ -1,29 +1,41 @@
 import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import type { JitModuleLinkTable } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
-import { cleanValueWidth } from "#backends/wasm/codegen/value-width.js";
-import { emitJitExpressionBlock } from "./expression-block.js";
+import {
+  cleanValueWidth,
+  emitCleanValueForFullUse,
+  type ValueWidth,
+  type WasmIrEmitValueOptions
+} from "#backends/wasm/codegen/value-width.js";
 import {
   emitJitConditionalJump,
   emitJitHostTrap,
   emitJitJump,
   emitJitNext,
-  emitJitNextEip
 } from "./control.js";
-import {
-  emitJitAddress,
-  emitJitGet,
-  emitJitMemoryGuard
-} from "./operands.js";
 import type { JitExitTarget, JitState } from "#backends/wasm/jit/state/state.js";
 import {
   type ValueCache
 } from "./cache.js";
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
-import type { PlannedEffect } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
+import type {
+  Effect,
+  EffectsPlan
+} from "#backends/wasm/jit/codegen/plan/effect-types.js";
 import { opView, type OpView } from "#backends/wasm/jit/analysis/timeline.js";
-import { emitJitSet } from "./operands.js";
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
+import {
+  emitJitValue,
+  emitJitValueWithoutRootCache,
+  type JitValueEmitContext
+} from "./jit-values.js";
+import {
+  emitWasmIrGuardGuestRange,
+  emitWasmIrLoadGuestUnchecked,
+  emitWasmIrStoreGuestUnchecked
+} from "#backends/wasm/codegen/memory.js";
+import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import { ExitReason } from "#backends/wasm/exit.js";
 
 export type JitInstructionContext = JitCodegenInstructionPlan;
 
@@ -44,7 +56,7 @@ export type JitBlockEmitContext = Readonly<{
   state: JitState;
   exit: JitExitTarget;
   instructions: readonly JitInstructionContext[];
-  plannedEffects: readonly PlannedEffect[];
+  effects: EffectsPlan;
   valueCache?: ValueCache | undefined;
   linking?: JitLinkEmitContext | undefined;
 }>;
@@ -57,6 +69,7 @@ export type JitInstructionEmitContext = Readonly<{
   selectInstruction(index: number): void;
   currentInstruction(): JitInstructionContext;
   beginExpressionOp(opIndex: number): OpView;
+  jitValueEmitContext(): JitValueEmitContext;
   advanceInstruction(): void;
   valueCache?: ValueCache | undefined;
   linking?: JitLinkEmitContext | undefined;
@@ -64,8 +77,8 @@ export type JitInstructionEmitContext = Readonly<{
 
 export function emitJitBlock(context: JitBlockEmitContext): void {
   const jitContext = createJitInstructionEmitContext(context);
-  const plannedEffectsByInstruction = groupPlannedEffectsByInstruction(
-    context.plannedEffects,
+  const effectsByInstruction = groupEffectsByInstruction(
+    context.effects,
     context.instructions.length
   );
 
@@ -73,7 +86,7 @@ export function emitJitBlock(context: JitBlockEmitContext): void {
     jitContext.selectInstruction(index);
     jitContext.valueCache?.beginInstruction(index);
     beginInstruction(jitContext, context.exit, jitContext.currentInstruction());
-    emitCurrentInstruction(jitContext, plannedEffectsByInstruction[index]!);
+    emitCurrentInstruction(jitContext, effectsByInstruction[index]!);
   }
 }
 
@@ -115,6 +128,13 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
       context.valueCache?.beginExpressionOp(opIndex);
       return timelineOp;
     },
+    jitValueEmitContext: () => ({
+      body: context.body,
+      valueCache: context.valueCache,
+      emitInput: (slot) => emitJitInputSlot(context.body, slot),
+      emitInputBits: (slot, bitOffset, width, signed) =>
+        emitJitInputSlotBits(context.body, slot, bitOffset, width, signed)
+    }),
     advanceInstruction: () => {
       instructionIndex += 1;
     }
@@ -123,59 +143,23 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
 
 function emitCurrentInstruction(
   jitContext: JitInstructionEmitContext,
-  plannedEffects: readonly PlannedEffect[]
+  effects: readonly Effect[]
 ): void {
-  emitJitInstruction(jitContext, jitContext.currentInstruction(), plannedEffects);
+  emitJitInstruction(jitContext, jitContext.currentInstruction(), effects);
 }
 
 function emitJitInstruction(
   jitContext: JitInstructionEmitContext,
   instruction: JitInstructionContext,
-  plannedEffects: readonly PlannedEffect[]
+  effects: readonly Effect[]
 ): void {
-  const valueCache = jitContext.valueCache;
-  let currentTimelineOp: OpView | undefined;
+  void instruction;
 
-  emitJitExpressionBlock({
-    body: jitContext.body,
-    instruction: { ...instruction, plannedEffects },
-    valueCache,
-    beginExpressionOp: (opIndex) => {
-      currentTimelineOp = jitContext.beginExpressionOp(opIndex);
-    },
-    emitInput: (slot) => emitJitInputSlot(jitContext.body, slot),
-    emitInputBits: (slot, bitOffset, width, signed) =>
-      emitJitInputSlotBits(jitContext.body, slot, bitOffset, width, signed),
-    emitGet: (source, accessWidth, helpers, options) =>
-      emitJitGet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), source, accessWidth, helpers, options),
-    emitSet: (op, helpers) =>
-      emitJitSet(jitContext, requiredCurrentTimelineOp(currentTimelineOp), op.target, op.value, op.accessWidth, helpers),
-    emitMemoryGuard: (op, effect, helpers) =>
-      emitJitMemoryGuard(jitContext, op.address, op.byteLength, op.access, effect.faultExit, helpers),
-    emitAddress: (source, helpers) => emitJitAddress(
-      jitContext,
-      requiredCurrentTimelineOp(currentTimelineOp),
-      source,
-      helpers
-    ),
-    emitNext: (effect) => emitJitNext(jitContext, effect),
-    emitNextEip: () => {
-      emitJitNextEip(jitContext);
-      return cleanValueWidth(32);
-    },
-    emitJump: (target, effect, helpers) => emitJitJump(jitContext, target, effect, helpers),
-    emitConditionalJump: (condition, taken, notTaken, effect, helpers) =>
-      emitJitConditionalJump(jitContext, condition, taken, notTaken, effect, helpers),
-    emitHostTrap: (vector, effect, helpers) => emitJitHostTrap(jitContext, vector, effect, helpers)
-  });
-}
-
-function requiredCurrentTimelineOp(timelineOp: OpView | undefined): OpView {
-  if (timelineOp === undefined) {
-    throw new Error("JIT expression op context requested before emission started");
+  for (const effect of effects) {
+    jitContext.beginExpressionOp(effect.at.opIndex);
+    captureValues(jitContext, effect.at.opIndex);
+    emitEffect(jitContext, effect);
   }
-
-  return timelineOp;
 }
 
 function beginInstruction(
@@ -186,21 +170,158 @@ function beginInstruction(
   context.state.beginInstruction(exit, instruction.instructionCountDelta, instruction.eip);
 }
 
-function groupPlannedEffectsByInstruction(
-  plannedEffects: readonly PlannedEffect[],
+function emitEffect(
+  context: JitInstructionEmitContext,
+  effect: Effect
+): void {
+  switch (effect.kind) {
+    case "memoryGuard":
+      return emitMemoryGuard(context, effect);
+    case "memoryStore":
+      return emitMemoryStore(context, effect);
+    case "producedValue":
+      return emitProducedValue(context, effect);
+    case "jump":
+      return emitJitJump(context, effect);
+    case "branch":
+      return emitJitConditionalJump(context, effect);
+    case "hostTrap":
+      return emitJitHostTrap(context, effect);
+    case "fallthrough":
+      return emitJitNext(context, effect);
+  }
+}
+
+function emitMemoryGuard(
+  context: JitInstructionEmitContext,
+  effect: Extract<Effect, { kind: "memoryGuard" }>
+): void {
+  const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
+
+  try {
+    emitEffectValue(context, effect.address, { requestedWidth: 32 });
+    context.body.localSet(addressLocal);
+
+    assertMemoryFaultExit(effect);
+    context.state.prepareExitPoint(effect.exit);
+
+    emitWasmIrGuardGuestRange(context, addressLocal, effect.byteLength, effect.access);
+  } finally {
+    context.scratch.freeLocal(addressLocal);
+  }
+}
+
+function emitMemoryStore(
+  context: JitInstructionEmitContext,
+  effect: Extract<Effect, { kind: "memoryStore" }>
+): void {
+  emitWasmIrStoreGuestUnchecked(
+    context.body,
+    () => {
+      emitEffectValue(context, effect.address, { requestedWidth: 32 });
+    },
+    () => {
+      const valueWidth = emitEffectValue(context, effect.value);
+
+      if (effect.accessWidth === 32) {
+        emitCleanValueForFullUse(context.body, valueWidth);
+      }
+    },
+    effect.accessWidth
+  );
+}
+
+function emitProducedValue(
+  context: JitInstructionEmitContext,
+  effect: Extract<Effect, { kind: "producedValue" }>
+): void {
+  const captured = context.valueCache?.captureForReuse(
+    effect.value,
+    () => emitProducedLoad(context, effect)
+  );
+
+  captured?.release();
+}
+
+function emitProducedLoad(
+  context: JitInstructionEmitContext,
+  effect: Extract<Effect, { kind: "producedValue" }>
+): ValueWidth {
+  emitWasmIrLoadGuestUnchecked(
+    context.body,
+    () => {
+      emitEffectValue(context, effect.address, { requestedWidth: 32 });
+    },
+    effect.accessWidth,
+    effect.signed
+  );
+
+  return signedLoadValueWidth(effect.accessWidth, effect.signed);
+}
+
+function signedLoadValueWidth(width: 8 | 16 | 32, signed: boolean): ValueWidth {
+  if (signed && width < 32) {
+    return cleanValueWidth(32);
+  }
+
+  return cleanValueWidth(width);
+}
+
+function emitEffectValue(
+  context: JitInstructionEmitContext,
+  value: Parameters<typeof emitJitValue>[1],
+  options: WasmIrEmitValueOptions = {}
+): ValueWidth {
+  return emitJitValue(context.jitValueEmitContext(), value, options);
+}
+
+function captureValues(
+  context: JitInstructionEmitContext,
+  opIndex: number
+): void {
+  const captures = context.currentInstruction().captureMap.get(opIndex) ?? [];
+
+  for (const capture of captures) {
+    if (capture.value.kind === "produced") {
+      throw new Error("produced JIT values are captured at their definition");
+    }
+
+    const captured = context.valueCache?.captureForReuse(
+      capture.value,
+      () => emitJitValueWithoutRootCache(context.jitValueEmitContext(), capture.value)
+    );
+
+    captured?.release();
+  }
+}
+
+function assertMemoryFaultExit(
+  effect: Extract<Effect, { kind: "memoryGuard" }>
+): void {
+  const expected = effect.access === "read"
+    ? ExitReason.MEMORY_READ_FAULT
+    : ExitReason.MEMORY_WRITE_FAULT;
+
+  if (effect.exit.reason !== expected) {
+    throw new Error(`JIT memory ${effect.access} guard received exit reason ${effect.exit.reason}`);
+  }
+}
+
+function groupEffectsByInstruction(
+  effects: readonly Effect[],
   instructionCount: number
-): readonly (readonly PlannedEffect[])[] {
-  const grouped: PlannedEffect[][] = Array.from(
+): readonly (readonly Effect[])[] {
+  const grouped: Effect[][] = Array.from(
     { length: instructionCount },
     () => []
   );
 
-  for (const effect of plannedEffects) {
-    const instructionEffects = grouped[effect.placement.instructionIndex];
+  for (const effect of effects) {
+    const instructionEffects = grouped[effect.at.instructionIndex];
 
     if (instructionEffects === undefined) {
       throw new Error(
-        `JIT planned effect references missing instruction: ${effect.placement.instructionIndex}`
+        `JIT effects plan references missing instruction: ${effect.at.instructionIndex}`
       );
     }
 

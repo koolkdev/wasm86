@@ -33,10 +33,11 @@ import {
   type PathMap
 } from "#backends/wasm/jit/analysis/paths.js";
 import {
-  planJitEffectsForEmission,
-  type PlannedEffect
-} from "./effect-plan.js";
+  planEffects
+} from "./effects-plan.js";
+import type { EffectsPlan } from "./effect-types.js";
 import { planStoreStrategy } from "./store-strategy.js";
+import { collectValueUses } from "./value-uses.js";
 
 type JitPreparedCodegenInstruction = JitInstructionState & Pick<
   JitInstruction,
@@ -60,7 +61,7 @@ export type JitCodegenEmissionPlan = Readonly<{
   storeStrategy: StoreStrategyPlan;
   exitStoreSets: readonly StoreStrategySet[];
   maxExitStoreIndex: number;
-  plannedEffects: readonly PlannedEffect[];
+  effects: EffectsPlan;
   valueUses: readonly ValueUse[];
   reusePlan: InstructionReusePlan;
 }>;
@@ -75,13 +76,14 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
   }
 
   const preparedInstructions = prepareJitCodegenInstructions(codegenPlan);
-  const plannedEffects = planJitEffectsForEmission(
-    preparedInstructions,
-    codegenPlan.effects
-  );
+  const effects = planEffects({
+    effects: codegenPlan.effects,
+    instructions: preparedInstructions
+  });
+  const valueUses = collectValueUses({ effects });
   const plannedValues = planReuseForEmission(
     preparedInstructions,
-    plannedEffects.valueUses,
+    valueUses,
     codegenPlan.exits
   );
   const storeStrategy = planStoreStrategy({
@@ -95,7 +97,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     storeStrategy,
     exitStoreSets: storeStrategy.exitStoreSets,
     maxExitStoreIndex: storeStrategy.maxExitStoreIndex,
-    plannedEffects: plannedEffects.plannedEffects,
+    effects,
     valueUses: plannedValues.valueUses,
     reusePlan: plannedValues.reusePlan
   };
