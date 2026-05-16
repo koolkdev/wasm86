@@ -25,6 +25,7 @@ import type {
   IrBuilder,
   IrGetOptions,
   IrMemoryAccessKind,
+  IrMemoryGuardOptions,
   IrOp,
   IrBlock,
   SemanticBuildContext,
@@ -128,8 +129,24 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
     this.#push({ op: "set", target: targetRef, value: toValueRef(value), accessWidth });
   }
 
-  memoryGuard(address: ValueInput, byteLength: number, access: IrMemoryAccessKind): void {
-    this.#push({ op: "memory.guard", address: toValueRef(address), byteLength, access });
+  memoryGuard(
+    address: ValueInput,
+    byteLength: number,
+    access: IrMemoryAccessKind,
+    options: IrMemoryGuardOptions = {}
+  ): void {
+    const faultRollback = options.faultRollback?.map((write) => ({
+      target: write.target,
+      value: toValueRef(write.value)
+    }));
+
+    this.#push({
+      op: "memory.guard",
+      address: toValueRef(address),
+      byteLength,
+      access,
+      ...(faultRollback === undefined || faultRollback.length === 0 ? {} : { faultRollback })
+    });
   }
 
   operandInfo(operandInput: SemanticOperandInput): SemanticOperandInfo {

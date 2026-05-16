@@ -19,6 +19,7 @@ import { buildInstructionPaths, branchPath, rootPath } from "#backends/wasm/jit/
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
 import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import { jitInputReg32Value } from "#backends/wasm/jit/ir/values/builders.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { c32, syntheticInstruction, v } from "#backends/wasm/jit/ir/tests/helpers.js";
 
@@ -109,6 +110,31 @@ test("JIT effect analysis owns memory guard exits without making stores exit", (
   deepStrictEqual(guard.faultExit.payload, { kind: "runtime", source: "memoryAddress" });
 });
 
+test("JIT effect analysis applies memory guard rollback to fault snapshots", () => {
+  const instruction = syntheticInstruction([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "esp" } },
+    { op: "set", target: { kind: "reg", reg: "esp" }, value: c32(0x44) },
+    {
+      op: "memory.guard",
+      address: c32(0x1000),
+      byteLength: 4,
+      access: "write",
+      faultRollback: [{ target: { kind: "reg", reg: "esp" }, value: v(0) }]
+    }
+  ]);
+  const analysis = analyze([instruction]);
+  const guard = analysis.effects[0];
+
+  if (guard?.kind !== "memoryGuard") {
+    throw new Error("expected memory guard effect");
+  }
+
+  deepStrictEqual(
+    guard.faultExit.snapshot.valueState.regs.readReg32("esp"),
+    jitInputReg32Value("esp")
+  );
+});
+
 test("JIT effect analysis records host traps with next-EIP visibility", () => {
   const instruction = syntheticInstruction([
     { op: "hostTrap", vector: c32(0x2e) }
@@ -141,6 +167,7 @@ function analyze(instructions: readonly JitInstruction[]): EffectsAnalysis {
     analyses.push({
       instruction,
       instructionIndex,
+      expressionBlock: expressionPlan.expressionBlock,
       sourceMap: expressionPlan.sourceMap,
       valueTimeline,
       paths: buildInstructionPaths(instruction, instructionIndex)

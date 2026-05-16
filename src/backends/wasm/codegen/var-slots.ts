@@ -97,6 +97,9 @@ function collectOpVarUses(op: IrExprOp, visit: (id: number) => void): void {
       return;
     case "memory.guard":
       collectValueVarUses(op.address, visit);
+      for (const write of op.faultRollback ?? []) {
+        collectValueVarUses(write.value, visit);
+      }
       return;
     case "flags.set":
       for (const value of Object.values(op.inputs)) {

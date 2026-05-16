@@ -101,6 +101,9 @@ export function visitIrOpValueRefs(
       return;
     case "memory.guard":
       visit(op.address, "value");
+      for (const write of op.faultRollback ?? []) {
+        visit(write.value, "value");
+      }
       return;
     case "address":
     case "value.const":

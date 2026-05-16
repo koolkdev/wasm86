@@ -578,6 +578,44 @@ test("direct backend executes successful memory guards", () => {
   strictEqual(state.instructionCount, 1);
 });
 
+test("direct backend applies memory guard rollback on faults", () => {
+  const state = createCpuState({ esp: 0x40, eip: startAddress });
+  const instruction: IsaDecodedInstruction = {
+    spec: {
+      id: "test.memory_guard_rollback",
+      mnemonic: "test",
+      opcode: [],
+      format: { syntax: "test" },
+      semantics: (s) => {
+        const oldEsp = s.get(s.reg("esp"));
+
+        s.set(s.reg("esp"), 0x44);
+        s.memoryGuard(s.const32(0x1000), 4, "write", {
+          faultRollback: [{ target: s.reg("esp"), value: oldEsp }]
+        });
+        s.set(s.reg("eax"), 1);
+      }
+    },
+    address: startAddress,
+    length: 1,
+    nextEip: startAddress + 1,
+    operands: [],
+    raw: []
+  };
+  const result = executeDirectInstruction(state, instruction, {
+    memory: new ArrayBufferGuestMemory(0x1000)
+  });
+
+  strictEqual(result.stopReason, StopReason.MEMORY_FAULT);
+  strictEqual(result.faultAddress, 0x1000);
+  strictEqual(result.faultSize, 4);
+  strictEqual(result.faultOperation, "write");
+  strictEqual(state.esp, 0x40);
+  strictEqual(state.eax, 0);
+  strictEqual(state.eip, startAddress);
+  strictEqual(state.instructionCount, 0);
+});
+
 function execute(state: ReturnType<typeof createCpuState>, values: readonly number[], memory?: ArrayBufferGuestMemory) {
   return executeAtAddress(state, startAddress, values, memory);
 }

@@ -62,6 +62,7 @@ export function analyzeJitCodegenState(
     instructionAnalyses.push({
       instruction,
       instructionIndex,
+      expressionBlock: expressionPlan.expressionBlock,
       sourceMap: expressionPlan.sourceMap,
       valueTimeline,
       paths

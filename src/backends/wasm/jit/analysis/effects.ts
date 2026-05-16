@@ -1,13 +1,12 @@
 import type {
-  IrExpressionSourceMap,
-  IrExpressionSourcePlacement
+  IrExprBlock,
+  IrExpressionSourceMap
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import {
   buildExit,
   type Exit,
   type ExitKind,
-  type ExitSnapshot,
   type Placement
 } from "./exits.js";
 import {
@@ -15,16 +14,15 @@ import {
   classifyExits,
   type EffectKind
 } from "./effect-classifier.js";
-import {
-  instructionDeltaAfterOp,
-  snapshotForExit
-} from "./instruction-progress.js";
+import { snapshotForEffectExit } from "./exit-snapshots.js";
+import { instructionDeltaAfterOp } from "./instruction-progress.js";
 import type { PathMap } from "./paths.js";
 import type { Timeline } from "./timeline.js";
 
 export type InstructionAnalysis = Readonly<{
   instruction: JitInstruction;
   instructionIndex: number;
+  expressionBlock: IrExprBlock;
   sourceMap: IrExpressionSourceMap;
   valueTimeline: Timeline;
   paths: PathMap;
@@ -81,10 +79,12 @@ export function analyzeEffects(input: EffectsInput): EffectsAnalysis {
           instruction,
           at,
           kind,
-          snapshot: snapshotForExit(
+          snapshot: snapshotForEffectExit({
             kind,
-            exitSnapshotBeforeOp(instructionAnalysis, opIndex, instructionCountDelta)
-          ),
+            instruction: instructionAnalysis,
+            sourceOpIndex: opIndex,
+            instructionCountDelta
+          }),
           paths: instructionAnalysis.paths
         })
       );
@@ -178,56 +178,6 @@ function effectForOp(
     case "fallthrough":
       return { kind, at, exit: onlyExit(exits, "fallthrough", at) };
   }
-}
-
-function exitSnapshotBeforeOp(
-  instruction: InstructionAnalysis,
-  sourceOpIndex: number,
-  instructionCountDelta: number
-): ExitSnapshot {
-  return {
-    instructionCountDelta,
-    valueState: valueStateBeforeSourceOp(instruction, sourceOpIndex)
-  };
-}
-
-function valueStateBeforeSourceOp(
-  instruction: InstructionAnalysis,
-  sourceOpIndex: number
-) {
-  const expressionOpIndexes = expressionOpIndexesForSourceOp(
-    instruction.sourceMap,
-    sourceOpIndex
-  );
-
-  if (expressionOpIndexes.length !== 1) {
-    throw new Error(
-      `expected one JIT expression op for source state ${sourceOpIndex}, got ${expressionOpIndexes.length}`
-    );
-  }
-
-  const snapshot = instruction.valueTimeline.snapshots[expressionOpIndexes[0]!];
-
-  if (snapshot === undefined) {
-    throw new Error(`missing JIT value-state timeline snapshot for source op ${sourceOpIndex}`);
-  }
-
-  return snapshot;
-}
-
-function expressionOpIndexesForSourceOp(
-  sourceMap: IrExpressionSourceMap,
-  sourceOpIndex: number
-): readonly number[] {
-  return (sourceMap.placementsBySourceOpIndex.get(sourceOpIndex) ?? [])
-    .filter(isEmittedExpressionOp)
-    .map((placement) => placement.expressionOpIndex);
-}
-
-function isEmittedExpressionOp(
-  placement: IrExpressionSourcePlacement
-): boolean {
-  return placement.kind === "emittedOp";
 }
 
 function onlyExit(

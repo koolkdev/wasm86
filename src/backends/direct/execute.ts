@@ -25,6 +25,7 @@ import type {
   IrBinaryOperator,
   IrFlagSetOp,
   IrOp,
+  IrRollbackWrite,
   IrUnaryOperator,
   MemRef,
   SemanticOperandInfo,
@@ -114,7 +115,14 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
     case "memory.guard": {
       const guard = guardMemory(context, evalValueRef(context, op.address), op.byteLength, op.access);
 
-      return guard.kind === "ok" ? undefined : stopFromAccess(context.state, guard);
+      if (guard.kind === "ok") {
+        return undefined;
+      }
+
+      if (guard.kind === "memoryFault") {
+        applyFaultRollback(context, op.faultRollback);
+      }
+      return stopFromAccess(context.state, guard);
     }
     case "address": {
       const binding = context.instruction.operands[op.operand.index];
@@ -161,6 +169,15 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
       );
     case "hostTrap":
       return completeHostTrap(context, evalValueRef(context, op.vector));
+  }
+}
+
+function applyFaultRollback(
+  context: ExecutionContext,
+  writes: readonly IrRollbackWrite[] = []
+): void {
+  for (const write of writes) {
+    setReg32(context.state, write.target.reg, evalValueRef(context, write.value));
   }
 }
 

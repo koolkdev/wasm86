@@ -65,10 +65,14 @@ test("IR memory guards use an address value without storage read or write", () =
     op: "memory.guard",
     address: irVar(0),
     byteLength: 4,
-    access: "write"
+    access: "write",
+    faultRollback: [{ target: { kind: "reg", reg: "esp" }, value: irVar(1) }]
   };
 
-  deepStrictEqual(irOpValueUses(op), [{ value: irVar(0), role: "value" }]);
+  deepStrictEqual(irOpValueUses(op), [
+    { value: irVar(0), role: "value" },
+    { value: irVar(1), role: "value" }
+  ]);
   deepStrictEqual(irOpStorageReads(op), []);
   deepStrictEqual(irOpStorageWrites(op), []);
   deepStrictEqual(irOpResult(op), { kind: "none" });

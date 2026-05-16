@@ -108,11 +108,21 @@ export type IrGetOptions = Readonly<{
 
 export type IrMemoryAccessKind = "read" | "write";
 
+export type IrRollbackWrite = Readonly<{
+  target: RegRef;
+  value: ValueRef;
+}>;
+
+export type IrMemoryGuardOptions = Readonly<{
+  faultRollback?: readonly IrRollbackWrite[];
+}>;
+
 export type IrMemoryGuardOp = Readonly<{
   op: "memory.guard";
   address: ValueRef;
   byteLength: number;
   access: IrMemoryAccessKind;
+  faultRollback?: readonly IrRollbackWrite[];
 }>;
 
 export type IrOp =
@@ -149,7 +159,7 @@ export interface IrBuilder {
 
   get(source: StorageInput, accessWidth?: OperandWidth, options?: IrGetOptions): VarRef;
   set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
-  memoryGuard(address: ValueInput, byteLength: number, access: IrMemoryAccessKind): void;
+  memoryGuard(address: ValueInput, byteLength: number, access: IrMemoryAccessKind, options?: IrMemoryGuardOptions): void;
   address(operand: OperandInput): VarRef;
 
   i32Add(a: ValueInput, b: ValueInput): VarRef;
