@@ -16,6 +16,10 @@ export function flagStores(snapshot: JitValueStateSnapshot): readonly FlagExitSt
   return store === undefined ? [] : [store];
 }
 
+export function flagStoreSourceRequiredMask(_target: JitFlagSlot): number {
+  return 0xffff_ffff;
+}
+
 export function flagStore(snapshot: JitValueStateSnapshot): FlagExitStore | undefined {
   const value = snapshot.flags.readAluFlags();
 

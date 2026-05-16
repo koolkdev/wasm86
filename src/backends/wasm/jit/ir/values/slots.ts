@@ -7,6 +7,7 @@ import { valueChildren } from "./walk.js";
 import type {
   JitArchitecturalSlot,
   JitBinaryValue,
+  JitCanonicalInputSlot,
   JitRegisterSlot,
   JitValue
 } from "./types.js";
@@ -114,6 +115,10 @@ export function jitRegisterSlotForWrite(
   }
 }
 
+export function jitRegisterSlotValueMask(slot: JitRegisterSlot): number {
+  return widthMask(jitRegisterSlotAlias(slot).width);
+}
+
 export function jitArchitecturalSlotKey(slot: JitArchitecturalSlot): string {
   switch (slot.kind) {
     case "reg32":
@@ -158,7 +163,7 @@ function collectSlotsReadByValueForMask(
     case "produced":
       return;
     case "input":
-      slots.set(jitArchitecturalSlotKey(simplified.slot), simplified.slot);
+      collectInputSlotReadByValueForMask(simplified.slot, requiredMask, slots);
       return;
     case "value.unary":
       collectSlotsReadByValueForMask(
@@ -211,6 +216,46 @@ function collectSlotsReadByValueForMask(
     default:
       collectSlotsReadByValue(simplified, slots);
   }
+}
+
+function collectInputSlotReadByValueForMask(
+  slot: JitCanonicalInputSlot,
+  requiredMask: number,
+  slots: Map<string, JitArchitecturalSlot>
+): void {
+  const readSlot = inputSlotReadByMask(slot, requiredMask);
+
+  slots.set(jitArchitecturalSlotKey(readSlot), readSlot);
+}
+
+function inputSlotReadByMask(
+  slot: JitCanonicalInputSlot,
+  requiredMask: number
+): JitArchitecturalSlot {
+  switch (slot.kind) {
+    case "aluFlags":
+      return slot;
+    case "reg32":
+      return narrowestInputRegisterSlotForMask(slot.reg, requiredMask);
+  }
+}
+
+function narrowestInputRegisterSlotForMask(
+  reg: Reg32,
+  requiredMask: number
+): JitRegisterSlot {
+  for (const width of [8, 16] as const) {
+    const alias = registerAliasesByWidth[width].find((candidate) =>
+      candidate.base === reg &&
+      (requiredMask & ~bitRangeMask(candidate.bitOffset, candidate.width)) === 0
+    );
+
+    if (alias !== undefined) {
+      return jitRegisterSlotForAlias(alias);
+    }
+  }
+
+  return { kind: "reg32", reg };
 }
 
 function unaryInputRequiredMask(

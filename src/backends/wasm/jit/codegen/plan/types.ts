@@ -20,8 +20,10 @@ export type {
 } from "#backends/wasm/jit/analysis/exits.js";
 export type {
   ExitStore,
+  ExitStoreSourceCapture,
   ExitStorePlan,
   ExitStoreSet,
+  PlannedExitStore,
   PlannedExit
 } from "./exit-stores.js";
 export type {

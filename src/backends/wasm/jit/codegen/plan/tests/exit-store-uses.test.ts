@@ -20,6 +20,7 @@ import {
   startAddress,
   registerStore,
   flagStore,
+  captureBeforeStores,
   exitStoreUse,
   exitPoint,
   exitState,
@@ -339,7 +340,7 @@ test("planJitCodegen keeps clobber-sensitive exit-store values symbolic in exit 
 
   deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex]?.stores, [
     registerStore("eax", c32(0)),
-    registerStore("ebx", clobberedInputValue)
+    captureBeforeStores(registerStore("ebx", clobberedInputValue))
   ]);
   deepStrictEqual(
     codegenPlan.exitStoreUses.filter((use) =>

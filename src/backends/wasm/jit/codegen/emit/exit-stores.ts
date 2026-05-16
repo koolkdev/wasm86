@@ -10,15 +10,13 @@ import {
 } from "#backends/wasm/codegen/value-width.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import type { ExitStore } from "#backends/wasm/jit/codegen/plan/types.js";
+import type { PlannedExitStore } from "#backends/wasm/jit/codegen/plan/types.js";
 import { emitJitValue } from "./jit-values.js";
 import type {
   JitCachedValueHandle,
   JitValueCacheRuntime
 } from "./value-local-store.js";
 import {
-  jitArchitecturalSlotsOverlap,
-  slotsReadByValueForMask,
   jitRegisterSlotAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
@@ -29,7 +27,7 @@ import type {
 import { emitJitInputSlot, emitJitInputSlotBits } from "./input-slots.js";
 
 export type CapturedExitStore = Readonly<{
-  store: ExitStore;
+  store: PlannedExitStore;
   source?: CapturedExitStoreSource;
 }>;
 
@@ -51,20 +49,13 @@ export type JitExitStoreEmitContext = Readonly<{
 
 export function captureExitStores(
   context: JitExitStoreEmitContext,
-  stores: readonly ExitStore[]
+  stores: readonly PlannedExitStore[]
 ): readonly CapturedExitStore[] | undefined {
   if (stores.length === 0) {
     return undefined;
   }
 
-  const previousTargets: JitArchitecturalSlot[] = [];
-
-  return stores.map((store) => {
-    const captured = captureJitExitStore(context, store, previousTargets);
-
-    previousTargets.push(store.target);
-    return captured;
-  });
+  return stores.map((store) => captureJitExitStore(context, store));
 }
 
 export function emitExitStores(
@@ -88,8 +79,7 @@ export function releaseExitStores(
 
 function captureJitExitStore(
   context: JitExitStoreEmitContext,
-  store: ExitStore,
-  previousTargets: readonly JitArchitecturalSlot[]
+  store: PlannedExitStore
 ): CapturedExitStore {
   const captured = context.valueCache?.captureForReuse(
     store.value,
@@ -118,7 +108,7 @@ function captureJitExitStore(
     throw new Error("JIT produced exit store value was not captured before exit store emission");
   }
 
-  if (!exitStoreSourceNeedsTemporaryLocal(value, previousTargets)) {
+  if (store.sourceCapture?.kind !== "beforeStores") {
     return { store };
   }
 
@@ -134,21 +124,6 @@ function captureJitExitStore(
       valueWidth
     }
   };
-}
-
-function exitStoreSourceNeedsTemporaryLocal(
-  value: JitValue,
-  previousTargets: readonly JitArchitecturalSlot[]
-): boolean {
-  if (previousTargets.length === 0) {
-    return false;
-  }
-
-  const sourceSlots = slotsReadByValueForMask(value, 0xffff_ffff);
-
-  return previousTargets.some((target) =>
-    sourceSlots.some((slot) => jitArchitecturalSlotsOverlap(slot, target))
-  );
 }
 
 function emitJitExitStore(

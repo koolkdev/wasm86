@@ -36,7 +36,11 @@ test("JIT exit stores capture aluFlags sources before overwriting flags", () => 
     },
     {
       target: { kind: "reg32", reg: "eax" },
-      value: jitInputAluFlagsValue()
+      value: jitInputAluFlagsValue(),
+      sourceCapture: {
+        kind: "beforeStores",
+        reason: "targetClobber"
+      }
     }
   ]);
 
@@ -77,7 +81,11 @@ test("JIT exit stores capture register sources before overwriting aliased regist
     },
     {
       target: { kind: "reg32", reg: "ebx" },
-      value: jitInputReg32Value("eax")
+      value: jitInputReg32Value("eax"),
+      sourceCapture: {
+        kind: "beforeStores",
+        reason: "targetClobber"
+      }
     }
   ]);
 

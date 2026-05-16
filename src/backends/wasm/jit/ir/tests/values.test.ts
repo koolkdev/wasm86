@@ -348,21 +348,33 @@ test("JitValue masked slot walking follows required bits", () => {
   const insertedByteAt8 = jitInsertBits(eax, ebx, 8, 8);
   const signExtendedLowByte = extend8s(jitInsertBits(eax, ebx, 0, 8));
 
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(jitInputReg32Value("eax"), 0xff)), [
+    "reg8:al"
+  ]);
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(jitInputReg32Value("eax"), 0xff00)), [
+    "reg8:ah"
+  ]);
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(jitInputReg32Value("eax"), 0xffff)), [
+    "reg16:ax"
+  ]);
   deepStrictEqual(slotKeys(slotsReadByValueForMask(insertedLowWord, 0xffff)), [
-    "reg32:ebx"
+    "reg16:bx"
   ]);
   deepStrictEqual(slotKeys(slotsReadByValueForMask(insertedLowWord, 0xffff_0000)), [
     "reg32:eax"
   ]);
   deepStrictEqual(slotKeys(slotsReadByValueForMask(insertedLowWord, 0xffff_ffff)), [
-    "reg32:eax",
-    "reg32:ebx"
+    "reg16:bx",
+    "reg32:eax"
+  ]);
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(jitInputReg32Value("eax"), 0xffff_0000)), [
+    "reg32:eax"
   ]);
   deepStrictEqual(slotKeys(slotsReadByValueForMask(jitExtractBits(insertedByteAt8, 8, 8), 0xff)), [
-    "reg32:ebx"
+    "reg8:bl"
   ]);
   deepStrictEqual(slotKeys(slotsReadByValueForMask(signExtendedLowByte, 0xffff_0000)), [
-    "reg32:ebx"
+    "reg8:bl"
   ]);
 });
 

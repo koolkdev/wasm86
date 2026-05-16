@@ -27,6 +27,7 @@ import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.j
 import type {
   JitCodegenPlan,
   ExitStore,
+  PlannedExitStore,
   PlannedExit,
   ExitSnapshot,
   JitInstructionState,
@@ -39,7 +40,9 @@ import {
   jitFlagConditionValue,
   jitFlagProducerValue,
   jitInputAluFlagsValue,
+  jitInputReg16Value,
   jitInputReg32Value,
+  jitInputReg8Value,
   jitInsertMaskedBits,
   jitProducedValue
 } from "#backends/wasm/jit/ir/values/builders.js";
@@ -73,7 +76,9 @@ export {
   jitFlagConditionValue,
   jitFlagProducerValue,
   jitInputAluFlagsValue,
+  jitInputReg16Value,
   jitInputReg32Value,
+  jitInputReg8Value,
   jitInsertMaskedBits,
   jitProducedValue,
   createJitValueState
@@ -85,6 +90,7 @@ export type {
   JitOperandBinding,
   JitCodegenPlan,
   ExitStore,
+  PlannedExitStore,
   PlannedExit,
   ExitSnapshot,
   JitInstructionState,
@@ -154,6 +160,16 @@ export function flagStore(value: JitValue): ExitStore {
   return {
     target: { kind: "aluFlags" },
     value
+  };
+}
+
+export function captureBeforeStores(store: ExitStore): PlannedExitStore {
+  return {
+    ...store,
+    sourceCapture: {
+      kind: "beforeStores",
+      reason: "targetClobber"
+    }
   };
 }
 
