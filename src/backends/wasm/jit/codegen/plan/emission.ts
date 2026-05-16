@@ -80,7 +80,10 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     effects: codegenPlan.effects,
     instructions: preparedInstructions
   });
-  const valueUses = collectValueUses({ effects });
+  const valueUses = collectValueUses({
+    effects,
+    exits: codegenPlan.exits
+  });
   const plannedValues = planReuseForEmission(
     preparedInstructions,
     valueUses,

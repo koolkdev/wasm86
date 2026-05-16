@@ -97,10 +97,6 @@ test("JIT flag exit stores lower planned sources through value cache", () => {
     source: { kind: "inline" }
   }]);
 
-  if (captured === undefined) {
-    throw new Error("expected captured flag exit store");
-  }
-
   emitExitStores({
     body,
     valueCache

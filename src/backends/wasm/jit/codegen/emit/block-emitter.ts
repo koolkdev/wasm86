@@ -1,21 +1,30 @@
 import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { JitModuleLinkTable } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
 import {
   cleanValueWidth,
   emitCleanValueForFullUse,
   type ValueWidth
 } from "#backends/wasm/codegen/value-width.js";
 import {
-  emitJitConditionalJump,
-  emitJitHostTrap,
-  emitJitJump,
-  emitJitNext,
-} from "./control.js";
-import type { JitExitTarget, JitState } from "#backends/wasm/jit/state/state.js";
+  emitWasmIrExitFromI32Stack,
+  type WasmIrExitDestination
+} from "#backends/wasm/codegen/exit.js";
 import {
   type ValueCache
 } from "./cache.js";
+import type { ExitMetadataEmitter } from "./exit-metadata.js";
+import {
+  createControlExitEmitter,
+  type ControlExitEmitter,
+  type ControlExitEmitterContext,
+  type JitLinkEmitContext
+} from "./control-exits.js";
+import {
+  createExitFrame,
+  type ExitStoreLayout,
+  type ExitFrame
+} from "./exit-frame.js";
+import type { ExitStoreEmitter } from "./exit-stores.js";
 import type { JitCodegenInstructionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import type {
   Effect,
@@ -40,22 +49,13 @@ import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 
 export type JitInstructionContext = JitCodegenInstructionPlan;
 
-export type JitLinkResolver = Readonly<{
-  moduleTable?: JitModuleLinkTable;
-  functionIndexForStaticTarget?: (eip: number) => number | undefined;
-  slotForStaticTarget?: (eip: number) => number;
-}>;
-
-export type JitLinkEmitContext = JitLinkResolver & Readonly<{
-  blockTypeIndex: number;
-  tableIndex?: number;
-}>;
-
 export type JitBlockEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  state: JitState;
-  exit: JitExitTarget;
+  metadata: ExitMetadataEmitter;
+  stores: ExitStoreEmitter;
+  exitStoreLayout: ExitStoreLayout;
+  exitLocal: number;
   instructions: readonly JitInstructionContext[];
   effects: EffectsPlan;
   valueCache?: ValueCache | undefined;
@@ -65,15 +65,13 @@ export type JitBlockEmitContext = Readonly<{
 export type JitInstructionEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  state: JitState;
-  exit: JitExitTarget;
+  controlExits: ControlExitEmitter;
+  exitFrame: ExitFrame;
   selectInstruction(index: number): void;
   currentInstruction(): JitInstructionContext;
   beginOp(opIndex: number): OpView;
   values: ValueEmitter;
-  advanceInstruction(): void;
   valueCache?: ValueCache | undefined;
-  linking?: JitLinkEmitContext | undefined;
 }>;
 
 export function emitJitBlock(context: JitBlockEmitContext): void {
@@ -83,12 +81,15 @@ export function emitJitBlock(context: JitBlockEmitContext): void {
     context.instructions.length
   );
 
+  jitContext.exitFrame.openDeferredBlocks();
+
   for (let index = 0; index < context.instructions.length; index += 1) {
     jitContext.selectInstruction(index);
     jitContext.valueCache?.beginInstruction(index);
-    beginInstruction(jitContext, context.exit, jitContext.currentInstruction());
     emitCurrentInstruction(jitContext, effectsByInstruction[index]!);
   }
+
+  jitContext.exitFrame.emitDeferredReturns();
 }
 
 function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstructionEmitContext {
@@ -99,14 +100,29 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
     inputs: createInputSlotEmitter(context.body),
     produced: unavailableProducedEmitter()
   });
-
-  return {
+  const frame = createExitFrame({
+    body: context.body,
+    metadata: context.metadata,
+    stores: context.stores,
+    layout: context.exitStoreLayout,
+    exitLocal: context.exitLocal
+  });
+  const exitContext = {
     body: context.body,
     scratch: context.scratch,
-    state: context.state,
-    exit: context.exit,
+    values,
+    frame,
     valueCache: context.valueCache,
-    linking: context.linking,
+    linking: context.linking
+  } satisfies ControlExitEmitterContext;
+  const controlExits = createControlExitEmitter(exitContext);
+
+  return {
+    body: exitContext.body,
+    scratch: exitContext.scratch,
+    controlExits,
+    exitFrame: exitContext.frame,
+    valueCache: exitContext.valueCache,
     selectInstruction: (index) => {
       if (index < 0 || index >= context.instructions.length) {
         throw new Error(`JIT instruction index out of range: ${index}`);
@@ -132,13 +148,10 @@ function createJitInstructionEmitContext(context: JitBlockEmitContext): JitInstr
 
       const timelineOp = opView(instruction.valueTimeline, opIndex);
 
-      context.valueCache?.beginOp(opIndex);
+      exitContext.valueCache?.beginOp(opIndex);
       return timelineOp;
     },
-    values,
-    advanceInstruction: () => {
-      instructionIndex += 1;
-    }
+    values: exitContext.values
   };
 }
 
@@ -163,14 +176,6 @@ function emitJitInstruction(
   }
 }
 
-function beginInstruction(
-  context: Pick<JitInstructionEmitContext, "state">,
-  exit: JitExitTarget,
-  instruction: JitInstructionContext
-): void {
-  context.state.beginInstruction(exit, instruction.instructionCountDelta, instruction.eip);
-}
-
 function emitEffect(
   context: JitInstructionEmitContext,
   effect: Effect
@@ -183,13 +188,17 @@ function emitEffect(
     case "producedValue":
       return emitProducedValue(context, effect);
     case "jump":
-      return emitJitJump(context, effect);
+      return context.controlExits.emitJump(effect.target, effect.exit);
     case "branch":
-      return emitJitConditionalJump(context, effect);
+      return context.controlExits.emitBranch(
+        effect.condition,
+        { target: effect.takenTarget, exit: effect.taken },
+        { target: effect.notTakenTarget, exit: effect.notTaken }
+      );
     case "hostTrap":
-      return emitJitHostTrap(context, effect);
+      return context.controlExits.emitHostTrap(effect.vector, effect.exit);
     case "fallthrough":
-      return emitJitNext(context, effect);
+      return context.controlExits.emitFallthrough(effect.exit);
   }
 }
 
@@ -204,9 +213,35 @@ function emitMemoryGuard(
     context.body.localSet(addressLocal);
 
     assertMemoryFaultExit(effect);
-    context.state.prepareExitPoint(effect.exit);
+    context.valueCache?.enterPath(effect.exit.path);
+    let destination: WasmIrExitDestination | undefined;
 
-    emitWasmIrGuardGuestRange(context, addressLocal, effect.byteLength, effect.access);
+    try {
+      destination = context.exitFrame.captureDestination(effect.exit);
+    } finally {
+      context.valueCache?.leavePath();
+    }
+
+    if (destination === undefined) {
+      throw new Error(`JIT memory fault exit was not prepared: ${effect.exit.id}`);
+    }
+
+    emitWasmIrGuardGuestRange(
+      {
+        body: context.body,
+        emitFaultExit: (fault) => {
+          context.exitFrame.emitMetadata(effect.exit);
+          emitWasmIrExitFromI32Stack(context.body, {
+            destination,
+            reason: effect.exit.reason,
+            extraDepth: fault.extraDepth,
+            detail: fault.byteLength
+          });
+        }
+      },
+      addressLocal,
+      effect.byteLength
+    );
   } finally {
     context.scratch.freeLocal(addressLocal);
   }

@@ -167,7 +167,11 @@ function emitFaultIfInstructionReadTooLong(
 
 function emitInstructionTooLongFault(context: InterpreterHandlerContext, extraDepth: number): void {
   context.body.localGet(context.locals.eip).i32Const(maxX86InstructionLength).i32Add();
-  emitWasmIrExitFromI32Stack(context.body, context.exit, ExitReason.DECODE_FAULT, extraDepth);
+  emitWasmIrExitFromI32Stack(context.body, {
+    destination: context.exit,
+    reason: ExitReason.DECODE_FAULT,
+    extraDepth
+  });
 }
 
 function instructionReadByteLength(width: OperandWidth): 1 | 2 | 4 {

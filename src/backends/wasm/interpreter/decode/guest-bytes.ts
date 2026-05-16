@@ -1,7 +1,7 @@
 import { wasmMemoryIndex } from "#backends/wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { ExitReason } from "#backends/wasm/exit.js";
-import { emitWasmIrExitFromI32Stack, type WasmIrExitTarget } from "#backends/wasm/codegen/exit.js";
+import { emitWasmIrExitFromI32Stack, type WasmIrExitDestination } from "#backends/wasm/codegen/exit.js";
 
 const wasmPageByteShift = 16;
 const accessByteLength = {
@@ -16,7 +16,7 @@ export function emitLoadGuestByte(
   instructionOffset: number,
   addressLocal: number,
   byteLocal: number,
-  exit?: WasmIrExitTarget
+  exit?: WasmIrExitDestination
 ): void {
   body.localGet(eipLocal);
 
@@ -35,7 +35,7 @@ export function emitLoadGuestByteAtDynamicOffset(
   instructionOffsetLocal: number,
   addressLocal: number,
   byteLocal: number,
-  exit?: WasmIrExitTarget
+  exit?: WasmIrExitDestination
 ): void {
   body.localGet(eipLocal).localGet(instructionOffsetLocal).i32Add().localSet(addressLocal);
   emitFaultIfGuestAccessOutOfBounds(body, addressLocal, 8, exit);
@@ -49,7 +49,7 @@ export function emitLoadGuestUnsigned(
   width: 8 | 16 | 32,
   addressLocal: number,
   valueLocal: number,
-  exit?: WasmIrExitTarget
+  exit?: WasmIrExitDestination
 ): void {
   body.localGet(eipLocal);
 
@@ -69,7 +69,7 @@ export function emitLoadGuestUnsignedAtDynamicOffset(
   width: 8 | 16 | 32,
   addressLocal: number,
   valueLocal: number,
-  exit?: WasmIrExitTarget
+  exit?: WasmIrExitDestination
 ): void {
   body.localGet(eipLocal).localGet(instructionOffsetLocal).i32Add().localSet(addressLocal);
   emitFaultIfGuestAccessOutOfBounds(body, addressLocal, width, exit);
@@ -101,7 +101,7 @@ function emitFaultIfGuestAccessOutOfBounds(
   body: WasmFunctionBodyEncoder,
   addressLocal: number,
   width: 8 | 16 | 32,
-  exit?: WasmIrExitTarget
+  exit?: WasmIrExitDestination
 ): void {
   body
     .memorySize(wasmMemoryIndex.guest)
@@ -119,7 +119,7 @@ function emitFaultIfGuestAccessOutOfBounds(
 function emitDecodeFault(
   body: WasmFunctionBodyEncoder,
   addressLocal: number,
-  exit: WasmIrExitTarget | undefined,
+  exit: WasmIrExitDestination | undefined,
   extraDepth: number
 ): void {
   if (exit === undefined) {
@@ -128,5 +128,9 @@ function emitDecodeFault(
   }
 
   body.localGet(addressLocal);
-  emitWasmIrExitFromI32Stack(body, exit, ExitReason.DECODE_FAULT, extraDepth);
+  emitWasmIrExitFromI32Stack(body, {
+    destination: exit,
+    reason: ExitReason.DECODE_FAULT,
+    extraDepth
+  });
 }

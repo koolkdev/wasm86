@@ -5,7 +5,7 @@ import type {
 import type { EffectKind } from "#backends/wasm/jit/analysis/effect-classifier.js";
 import type { IrMemoryAccessKind } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
-import type { PlannedExit } from "./types.js";
+import type { Exit } from "./types.js";
 
 export type EffectPlacement = Readonly<{
   instructionIndex: number;
@@ -23,7 +23,7 @@ export type Effect =
       address: JitValue;
       byteLength: number;
       access: IrMemoryAccessKind;
-      exit: PlannedExit;
+      exit: Exit;
     }>
   | EffectBase<"memoryStore"> & Readonly<{
       address: JitValue;
@@ -38,21 +38,21 @@ export type Effect =
     }>
   | EffectBase<"jump"> & Readonly<{
       target: JitValue;
-      exit: PlannedExit;
+      exit: Exit;
     }>
   | EffectBase<"branch"> & Readonly<{
       condition: JitValue;
       takenTarget: JitValue;
       notTakenTarget: JitValue;
-      taken: PlannedExit;
-      notTaken: PlannedExit;
+      taken: Exit;
+      notTaken: Exit;
     }>
   | EffectBase<"hostTrap"> & Readonly<{
       vector: JitValue;
-      exit: PlannedExit;
+      exit: Exit;
     }>
   | EffectBase<"fallthrough"> & Readonly<{
-      exit: PlannedExit;
+      exit: Exit;
     }>;
 
 export type EffectsPlan = readonly Effect[];

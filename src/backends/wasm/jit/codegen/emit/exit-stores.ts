@@ -34,6 +34,14 @@ export type CapturedExitStore = Readonly<{
   source?: CapturedExitStoreSource;
 }>;
 
+export type CapturedExitStores = readonly CapturedExitStore[];
+
+export type ExitStoreEmitter = Readonly<{
+  captureSources(stores: readonly PlannedExitStore[]): CapturedExitStores;
+  emitStores(stores: CapturedExitStores): void;
+  release(stores: CapturedExitStores): void;
+}>;
+
 type CapturedExitStoreSource = Readonly<{
   kind: "cache";
   local: number;
@@ -46,14 +54,20 @@ export type JitExitStoreEmitContext = Readonly<{
   valueCache?: ValueCache | undefined;
 }>;
 
+export function createExitStoreEmitter(
+  context: JitExitStoreEmitContext
+): ExitStoreEmitter {
+  return {
+    captureSources: (stores) => captureExitStores(context, stores),
+    emitStores: (stores) => emitExitStores(context, stores),
+    release: (stores) => releaseExitStores(stores)
+  };
+}
+
 export function captureExitStores(
   context: JitExitStoreEmitContext,
   stores: readonly PlannedExitStore[]
-): readonly CapturedExitStore[] | undefined {
-  if (stores.length === 0) {
-    return undefined;
-  }
-
+): CapturedExitStores {
   return stores.map((store) => captureJitExitStore(context, store));
 }
 

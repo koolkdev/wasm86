@@ -294,7 +294,12 @@ function emitIfLocalNotEqualsConst(
 
 function emitUnsupportedIfModRmRegister(context: InterpreterHandlerContext, modRmLocal: number): void {
   emitIfModRmRegister(context.body, modRmLocal, () => {
-    emitWasmIrExitConstPayload(context.body, context.exit, ExitReason.UNSUPPORTED, 0, 1);
+    emitWasmIrExitConstPayload(context.body, {
+      destination: context.exit,
+      reason: ExitReason.UNSUPPORTED,
+      payload: 0,
+      extraDepth: 1
+    });
   });
 }
 

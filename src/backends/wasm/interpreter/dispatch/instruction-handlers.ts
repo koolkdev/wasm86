@@ -140,7 +140,7 @@ function bindModRmCases(
           depths: context.depths.caseBranch(index),
           exit: {
             ...context.exit,
-            exitLabelDepth: context.exit.exitLabelDepth + 1 + index
+            labelDepth: context.exit.labelDepth + 1 + index
           }
         },
         modRmLocal

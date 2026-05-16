@@ -36,9 +36,12 @@ import {
 } from "#backends/wasm/jit/codegen/emit/cache.js";
 import {
   captureExitStores,
+  createExitStoreEmitter,
   emitExitStores,
   releaseExitStores
 } from "#backends/wasm/jit/codegen/emit/exit-stores.js";
+import { createExitMetadataEmitter } from "#backends/wasm/jit/codegen/emit/exit-metadata.js";
+import { createExitStoreLayout } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
 import { buildBlock, encodeJitBlock } from "#backends/wasm/jit/block.js";
 import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import { emitJitBlock } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
@@ -54,7 +57,6 @@ import {
   rootPath
 } from "#backends/wasm/jit/analysis/paths.js";
 import type { ExitSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
-import { createJitState } from "#backends/wasm/jit/state/state.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
 
@@ -83,6 +85,9 @@ export {
   createValueCache,
   LocalStore,
   captureExitStores,
+  createExitMetadataEmitter,
+  createExitStoreEmitter,
+  createExitStoreLayout,
   emitExitStores,
   releaseExitStores,
   buildBlock,
@@ -91,7 +96,6 @@ export {
   buildTimeline,
   branchPath,
   rootPath,
-  createJitState,
   createJitValueState
 };
 export type {

@@ -422,10 +422,6 @@ test("LocalStore keeps pinned exit-store locals out of reuse", () => {
     }
   }]);
 
-  if (exitStores === undefined) {
-    throw new Error("expected captured exit store");
-  }
-
   captured.release();
   store.forgetWhere((candidate) => candidate.kind === "value.binary");
 

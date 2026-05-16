@@ -5,7 +5,10 @@ import {
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { valueChildren } from "#backends/wasm/jit/ir/values/walk.js";
-import type { PlannedExit } from "./exit-stores.js";
+import type {
+  Exit,
+  PlannedExit
+} from "./types.js";
 import type {
   Effect,
   EffectPlacement,
@@ -43,12 +46,13 @@ export type ValueUse = Readonly<{
 
 export type ValueUseInput = Readonly<{
   effects: readonly Effect[];
+  exits: readonly PlannedExit[];
 }>;
 
 export function collectValueUses(input: ValueUseInput): readonly ValueUse[] {
   const roots = [
     ...rootsForEffects(input.effects),
-    ...rootsForExitStores(input.effects)
+    ...rootsForExitStores(input.effects, input.exits)
   ];
 
   return roots.flatMap(expandRootUse);
@@ -61,11 +65,14 @@ export function rootsForEffects(
 }
 
 export function rootsForExitStores(
-  effects: readonly Effect[]
+  effects: readonly Effect[],
+  exits: readonly PlannedExit[]
 ): readonly ValueRoot[] {
+  const plannedExits = new Map(exits.map((exit) => [exit.id, exit]));
+
   return effects.flatMap((effect) =>
     exitsForEffect(effect).flatMap((exit) =>
-      rootsForExitStore(exit, effect.at)
+      rootsForExitStore(requiredPlannedExit(plannedExits, exit), effect.at)
     )
   );
 }
@@ -180,7 +187,7 @@ function usesForValue(
   ];
 }
 
-function exitsForEffect(effect: Effect): readonly PlannedExit[] {
+function exitsForEffect(effect: Effect): readonly Exit[] {
   switch (effect.kind) {
     case "memoryGuard":
       return [effect.exit];
@@ -194,4 +201,17 @@ function exitsForEffect(effect: Effect): readonly PlannedExit[] {
     case "producedValue":
       return [];
   }
+}
+
+function requiredPlannedExit(
+  plannedExits: ReadonlyMap<string, PlannedExit>,
+  exit: Exit
+): PlannedExit {
+  const planned = plannedExits.get(exit.id);
+
+  if (planned === undefined) {
+    throw new Error(`missing planned JIT exit for value uses: ${exit.id}`);
+  }
+
+  return planned;
 }

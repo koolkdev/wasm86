@@ -2,7 +2,7 @@ import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scr
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { dispatchBytes, interpreterOpcodeDispatchRoot } from "./dispatch.js";
-import { emitWasmIrExitConstPayload, type WasmIrExitTarget } from "#backends/wasm/codegen/exit.js";
+import { emitWasmIrExitConstPayload, type WasmIrExitDestination } from "#backends/wasm/codegen/exit.js";
 import { emitInstructionHandlerForLeaf } from "./instruction-handlers.js";
 import type { InterpreterStateCache } from "#backends/wasm/interpreter/codegen/state-cache.js";
 import {
@@ -21,7 +21,7 @@ type OpcodeDispatchContext = Readonly<{
   state: InterpreterStateCache;
   locals: InterpreterLocals;
   depths: InterpreterDispatchDepths;
-  exit: WasmIrExitTarget;
+  exit: WasmIrExitDestination;
   opcodeOffset: DecodeReader;
   operandSize: OperandSizePrefixMode;
   scratch: WasmLocalScratchAllocator;
@@ -32,7 +32,7 @@ const operandSizeOverridePrefix = 0x66;
 export function emitOpcodeDispatch(
   body: WasmFunctionBodyEncoder,
   state: InterpreterStateCache,
-  exit: WasmIrExitTarget,
+  exit: WasmIrExitDestination,
   locals: InterpreterLocals,
   scratch: WasmLocalScratchAllocator
 ): void {
@@ -85,7 +85,7 @@ function emitOpcodeDispatchNode(node: typeof interpreterOpcodeDispatchRoot, cont
       depths: context.depths.caseBranch(index),
       exit: {
         ...context.exit,
-        exitLabelDepth: context.exit.exitLabelDepth + 1 + index
+        labelDepth: context.exit.labelDepth + 1 + index
       }
     };
 
@@ -116,7 +116,11 @@ function emitOpcodeDispatchNode(node: typeof interpreterOpcodeDispatchRoot, cont
 }
 
 function emitUnsupportedOpcodeExit(context: OpcodeDispatchContext): void {
-  emitWasmIrExitConstPayload(context.body, context.exit, ExitReason.UNSUPPORTED, 0);
+  emitWasmIrExitConstPayload(context.body, {
+    destination: context.exit,
+    reason: ExitReason.UNSUPPORTED,
+    payload: 0
+  });
 }
 
 function emitOperandSizePrefixCase(context: OpcodeDispatchContext): void {
@@ -141,7 +145,7 @@ function emitOperandSizePrefixCase(context: OpcodeDispatchContext): void {
     ...context,
     exit: {
       ...context.exit,
-      exitLabelDepth: context.exit.exitLabelDepth + 1
+      labelDepth: context.exit.labelDepth + 1
     },
     opcodeOffset: localDecodeReader(context.locals.opcodeOffset),
     operandSize: "override",

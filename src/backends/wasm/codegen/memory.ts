@@ -1,8 +1,6 @@
 import { wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { ExitReason } from "#backends/wasm/exit.js";
 import type { OperandWidth } from "#x86/isa/types.js";
-import { emitWasmIrExitFromI32Stack, type WasmIrExitTarget } from "./exit.js";
 
 export type WasmIrMemoryAccess = "read" | "write";
 export type WasmIrMemoryAddressEmitter = () => void;
@@ -18,17 +16,25 @@ const wasmPageShift = 16;
 
 export type WasmIrMemoryContext = Readonly<{
   body: WasmFunctionBodyEncoder;
-  exit: WasmIrExitTarget;
+  emitFaultExit(fault: WasmIrMemoryFault): void;
+}>;
+
+export type WasmIrMemoryGuardOptions = Readonly<{
+  faultExtraDepth?: number;
+}>;
+
+export type WasmIrMemoryFault = Readonly<{
+  byteLength: number;
+  extraDepth: number;
 }>;
 
 export function emitWasmIrGuardGuestRange(
   context: WasmIrMemoryContext,
   addressLocal: number,
   byteLength: number,
-  access: WasmIrMemoryAccess,
-  faultExtraDepth = 1
+  options: WasmIrMemoryGuardOptions = {}
 ): void {
-  emitFaultIfRangeOutOfBounds(context, addressLocal, byteLength, access, faultExtraDepth);
+  emitFaultIfRangeOutOfBounds(context, addressLocal, byteLength, options);
 }
 
 export function emitWasmIrLoadGuestUnchecked(
@@ -53,22 +59,23 @@ function emitFaultIfRangeOutOfBounds(
   context: WasmIrMemoryContext,
   addressLocal: number,
   byteLength: number,
-  access: WasmIrMemoryAccess,
-  faultExtraDepth: number
+  options: WasmIrMemoryGuardOptions
 ): void {
   validateGuardByteLength(byteLength);
+
+  const { faultExtraDepth = 1 } = options;
 
   emitGuestMemoryByteLength(context.body);
   context.body.i32Const(byteLength).i32LtU().ifBlock(wasmBranchHint.unlikely);
   context.body.localGet(addressLocal);
-  emitWasmIrMemoryFaultExitFromI32Stack(context, access, byteLength, faultExtraDepth);
+  emitMemoryFaultExit(context, byteLength, faultExtraDepth);
   context.body.endBlock();
 
   context.body.localGet(addressLocal);
   emitLastValidGuestAddress(context.body, byteLength);
   context.body.i32GtU().ifBlock(wasmBranchHint.unlikely);
   context.body.localGet(addressLocal);
-  emitWasmIrMemoryFaultExitFromI32Stack(context, access, byteLength, faultExtraDepth);
+  emitMemoryFaultExit(context, byteLength, faultExtraDepth);
   context.body.endBlock();
 }
 
@@ -153,26 +160,13 @@ function emitGuestStore(
   }
 }
 
-function emitWasmIrMemoryFaultExitFromI32Stack(
+function emitMemoryFaultExit(
   context: WasmIrMemoryContext,
-  access: WasmIrMemoryAccess,
   byteLength: number,
   extraDepth: number
 ): void {
-  emitWasmIrExitFromI32Stack(
-    context.body,
-    context.exit,
-    memoryFaultExitReason(access),
-    extraDepth,
-    byteLength
-  );
-}
-
-function memoryFaultExitReason(access: WasmIrMemoryAccess): ExitReason {
-  switch (access) {
-    case "read":
-      return ExitReason.MEMORY_READ_FAULT;
-    case "write":
-      return ExitReason.MEMORY_WRITE_FAULT;
-  }
+  context.emitFaultExit({
+    byteLength,
+    extraDepth
+  });
 }

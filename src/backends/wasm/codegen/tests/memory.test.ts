@@ -6,11 +6,12 @@ import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js
 import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { decodeExit, ExitReason } from "#backends/wasm/exit.js";
-import { emitWasmIrExitFromI32Stack, type WasmIrExitTarget } from "#backends/wasm/codegen/exit.js";
+import { emitWasmIrExitFromI32Stack, type WasmIrExitDestination } from "#backends/wasm/codegen/exit.js";
 import {
   emitWasmIrGuardGuestRange,
   emitWasmIrLoadGuestUnchecked,
-  emitWasmIrStoreGuestUnchecked
+  emitWasmIrStoreGuestUnchecked,
+  type WasmIrMemoryAccess
 } from "#backends/wasm/codegen/memory.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 
@@ -140,12 +141,15 @@ function encodeGuestGuardModule(byteLength: number, access: "read" | "write"): U
   });
   const body = new WasmFunctionBodyEncoder(1);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const exit: WasmIrExitTarget = { exitLocal, exitLabelDepth: 0 };
+  const exit: WasmIrExitDestination = { exitLocal, labelDepth: 0 };
 
   body.block();
-  emitWasmIrGuardGuestRange({ body, exit }, 0, byteLength, access);
+  emitWasmIrGuardGuestRange(memoryGuardContext(body, exit, access), 0, byteLength);
   body.i32Const(0);
-  emitWasmIrExitFromI32Stack(body, exit, ExitReason.FALLTHROUGH);
+  emitWasmIrExitFromI32Stack(body, {
+    destination: exit,
+    reason: ExitReason.FALLTHROUGH
+  });
   body.endBlock();
   body.localGet(exitLocal).end();
 
@@ -166,12 +170,15 @@ function encodeGuestLoadModule(width: OperandWidth = 32): Uint8Array<ArrayBuffer
   });
   const body = new WasmFunctionBodyEncoder(1);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const exit: WasmIrExitTarget = { exitLocal, exitLabelDepth: 0 };
+  const exit: WasmIrExitDestination = { exitLocal, labelDepth: 0 };
 
   body.block();
-  emitWasmIrGuardGuestRange({ body, exit }, 0, width / 8, "read");
+  emitWasmIrGuardGuestRange(memoryGuardContext(body, exit, "read"), 0, width / 8);
   emitWasmIrLoadGuestUnchecked(body, () => body.localGet(0), width);
-  emitWasmIrExitFromI32Stack(body, exit, ExitReason.FALLTHROUGH);
+  emitWasmIrExitFromI32Stack(body, {
+    destination: exit,
+    reason: ExitReason.FALLTHROUGH
+  });
   body.endBlock();
   body.localGet(exitLocal).end();
 
@@ -192,13 +199,16 @@ function encodeGuestStoreModule(width: OperandWidth = 32): Uint8Array<ArrayBuffe
   });
   const body = new WasmFunctionBodyEncoder(2);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const exit: WasmIrExitTarget = { exitLocal, exitLabelDepth: 0 };
+  const exit: WasmIrExitDestination = { exitLocal, labelDepth: 0 };
 
   body.block();
-  emitWasmIrGuardGuestRange({ body, exit }, 0, width / 8, "write");
+  emitWasmIrGuardGuestRange(memoryGuardContext(body, exit, "write"), 0, width / 8);
   emitWasmIrStoreGuestUnchecked(body, () => body.localGet(0), () => body.localGet(1), width);
   body.i32Const(0);
-  emitWasmIrExitFromI32Stack(body, exit, ExitReason.FALLTHROUGH);
+  emitWasmIrExitFromI32Stack(body, {
+    destination: exit,
+    reason: ExitReason.FALLTHROUGH
+  });
   body.endBlock();
   body.localGet(exitLocal).end();
 
@@ -206,6 +216,24 @@ function encodeGuestStoreModule(width: OperandWidth = 32): Uint8Array<ArrayBuffe
   module.exportFunction("run", functionIndex);
 
   return module.encode();
+}
+
+function memoryGuardContext(
+  body: WasmFunctionBodyEncoder,
+  destination: WasmIrExitDestination,
+  access: WasmIrMemoryAccess
+): Parameters<typeof emitWasmIrGuardGuestRange>[0] {
+  return {
+    body,
+    emitFaultExit: (fault) => {
+      emitWasmIrExitFromI32Stack(body, {
+        destination,
+        reason: access === "read" ? ExitReason.MEMORY_READ_FAULT : ExitReason.MEMORY_WRITE_FAULT,
+        extraDepth: fault.extraDepth,
+        detail: fault.byteLength
+      });
+    }
+  };
 }
 
 function writeGuestValue(view: DataView, address: number, width: OperandWidth, value: number): void {

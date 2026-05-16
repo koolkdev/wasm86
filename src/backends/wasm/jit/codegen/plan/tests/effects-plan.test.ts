@@ -16,6 +16,7 @@ import {
   rootPath,
   IR_ALU_FLAG_MASK,
   startAddress,
+  type Exit,
   type PlannedExit,
   type JitBlock
 } from "./plan-test-helpers.js";
@@ -466,7 +467,7 @@ function requireEffect<TKind extends Effect["kind"]>(
 }
 
 function assertExactExit(
-  exit: PlannedExit,
+  exit: Exit,
   exits: readonly PlannedExit[]
 ): void {
   strictEqual(exits.find((entry) => entry.id === exit.id), exit);

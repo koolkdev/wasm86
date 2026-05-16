@@ -11,12 +11,11 @@ import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scr
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { wasmIrLocalAluFlagsStorage } from "#backends/wasm/codegen/alu-flags.js";
-import { emitWasmIrExitFromI32Stack, type WasmIrExitTarget } from "#backends/wasm/codegen/exit.js";
+import { emitWasmIrExitFromI32Stack, type WasmIrExitDestination } from "#backends/wasm/codegen/exit.js";
 import {
   emitWasmIrGuardGuestRange,
   emitWasmIrLoadGuestUnchecked,
-  emitWasmIrStoreGuestUnchecked,
-  type WasmIrMemoryAccess
+  emitWasmIrStoreGuestUnchecked
 } from "#backends/wasm/codegen/memory.js";
 import {
   emitLoadRegAccess,
@@ -92,7 +91,7 @@ export type InterpreterIrEmitContext = Readonly<{
   scratch: WasmLocalScratchAllocator;
   state: InterpreterStateCache;
   locals: InterpreterLocals;
-  exit: WasmIrExitTarget;
+  exit: WasmIrExitDestination;
   depths: InterpreterDispatchDepths;
   instructionLength: InterpreterInstructionLength;
   operands: readonly InterpreterOperandBinding[];
@@ -282,7 +281,7 @@ function emitMemoryGuard(
   try {
     helpers.emitValue(address, { requestedWidth: 32 });
     context.body.localSet(addressLocal);
-    emitWasmIrGuardGuestRange(context, addressLocal, byteLength, memoryAccess(access));
+    emitWasmIrGuardGuestRange(memoryGuardContext(context, access), addressLocal, byteLength);
   } finally {
     context.scratch.freeLocal(addressLocal);
   }
@@ -299,20 +298,18 @@ function emitOperandMemoryGuard(
   switch (binding.kind) {
     case "mem":
       emitWasmIrGuardGuestRange(
-        context,
+        memoryGuardContext(context, access),
         binding.addressLocal,
-        byteLength,
-        memoryAccess(access)
+        byteLength
       );
       return true;
     case "rm":
       emitIfModRmMemory(context.body, binding.modRmLocal, () => {
         emitWasmIrGuardGuestRange(
-          context,
+          memoryGuardContext(context, access),
           binding.addressLocal,
           byteLength,
-          memoryAccess(access),
-          2
+          { faultExtraDepth: 2 }
         );
       });
       return true;
@@ -325,8 +322,30 @@ function emitOperandMemoryGuard(
   }
 }
 
-function memoryAccess(access: IrMemoryAccessKind): WasmIrMemoryAccess {
-  return access;
+function memoryGuardContext(
+  context: InterpreterIrEmitContext,
+  access: IrMemoryAccessKind
+): Parameters<typeof emitWasmIrGuardGuestRange>[0] {
+  return {
+    body: context.body,
+    emitFaultExit: (fault) => {
+      emitWasmIrExitFromI32Stack(context.body, {
+        destination: context.exit,
+        reason: memoryFaultExitReason(access),
+        extraDepth: fault.extraDepth,
+        detail: fault.byteLength
+      });
+    }
+  };
+}
+
+function memoryFaultExitReason(access: IrMemoryAccessKind): ExitReason {
+  switch (access) {
+    case "read":
+      return ExitReason.MEMORY_READ_FAULT;
+    case "write":
+      return ExitReason.MEMORY_WRITE_FAULT;
+  }
 }
 
 function emitAddress(context: InterpreterIrEmitContext, source: IrStorageExpr): void {
@@ -483,7 +502,10 @@ function emitHostTrap(context: InterpreterIrEmitContext, vector: IrValueExpr, he
   }
 
   helpers.emitValue(vector, { requestedWidth: 32 });
-  emitWasmIrExitFromI32Stack(context.body, context.exit, ExitReason.HOST_TRAP);
+  emitWasmIrExitFromI32Stack(context.body, {
+    destination: context.exit,
+    reason: ExitReason.HOST_TRAP
+  });
 }
 
 function emitContinue(context: InterpreterIrEmitContext, extraDepth = 0): void {

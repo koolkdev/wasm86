@@ -9,13 +9,15 @@ import { jitModuleLinkFallbackExportName } from "./compiled-blocks/module-link-t
 import { validateBlock } from "./ir/validate.js";
 import { buildJitCodegenEmissionPlan } from "./codegen/plan/emission.js";
 import { planJitCodegen } from "./codegen/plan/plan.js";
+import { emitJitBlock } from "./codegen/emit/block-emitter.js";
 import {
-  emitJitBlock,
   type JitLinkEmitContext,
   type JitLinkResolver
-} from "./codegen/emit/block-emitter.js";
+} from "./codegen/emit/control-exits.js";
+import { createExitStoreLayout } from "./codegen/emit/exit-frame.js";
+import { createExitMetadataEmitter } from "./codegen/emit/exit-metadata.js";
+import { createExitStoreEmitter } from "./codegen/emit/exit-stores.js";
 import { createValueCache } from "./codegen/emit/cache.js";
-import { createJitState, type JitExitTarget, type JitState } from "./state/state.js";
 import type { JitBlock } from "./ir/types.js";
 
 export type EncodeJitBlockOptions = Readonly<{
@@ -113,23 +115,24 @@ function encodeJitBlockFunctionBody(
     emissionPlan.reusePlan.captures,
     emissionPlan.reusePlan.instructions
   );
-  const state = createJitState(body, emissionPlan.exitStoreSets, { valueCache });
-  const exit: JitExitTarget = { exitLocal, exitLabelDepth: state.maxExitStoreIndex };
+  const metadata = createExitMetadataEmitter(body);
+  const exitStores = createExitStoreEmitter({ body, valueCache });
+  const exitStoreLayout = createExitStoreLayout(emissionPlan.storeStrategy);
 
-  state.emitLoadInstructionCount();
+  metadata.beginBlock();
 
-  emitExitStoreBlocks(body, state.maxExitStoreIndex);
   emitJitBlock({
     body,
     scratch,
-    state,
-    exit,
+    metadata,
+    stores: exitStores,
+    exitStoreLayout,
+    exitLocal,
     instructions: emissionPlan.instructions,
     effects: emissionPlan.effects,
     valueCache,
     linking
   });
-  emitExitStores(body, state, exitLocal);
   scratch.assertClear();
   body.end();
 
@@ -195,13 +198,6 @@ function blockFunctionIndicesForEntries(
   return indices;
 }
 
-function emitExitStoreBlocks(body: WasmFunctionBodyEncoder, maxExitStoreIndex: number): void {
-  for (let index = 0; index <= maxExitStoreIndex; index += 1) {
-    void index;
-    body.block();
-  }
-}
-
 function emitLinkFallbackExports(
   module: WasmModuleEncoder,
   typeIndex: number,
@@ -216,18 +212,5 @@ function emitLinkFallbackExports(
     );
 
     module.exportFunction(jitModuleLinkFallbackExportName(targetEip), fallbackIndex);
-  }
-}
-
-function emitExitStores(
-  body: WasmFunctionBodyEncoder,
-  state: JitState,
-  exitLocal: number
-): void {
-  for (let index = state.maxExitStoreIndex; index >= 0; index -= 1) {
-    body.endBlock();
-    state.emitExitStores(index);
-    state.releaseExitStores(index);
-    body.localGet(exitLocal).returnFromFunction();
   }
 }
