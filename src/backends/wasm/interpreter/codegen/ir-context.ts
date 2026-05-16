@@ -4,7 +4,6 @@ import type {
   IrBlock,
   IrMemoryAccessKind,
   OperandRef,
-  SemanticOperandInfo,
   StorageRef
 } from "#x86/ir/model/types.js";
 import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
@@ -59,32 +58,27 @@ import {
 export type InterpreterOperandBinding =
   | Readonly<{ kind: "opcode.reg"; opcodeLocal: number; width: OperandWidth }>
   | Readonly<{ kind: "modrm.reg"; modRmLocal: number; width: OperandWidth }>
-  | Readonly<{ kind: "rm"; modRmLocal: number; addressLocal: number; width: OperandWidth }>
-  | Readonly<{ kind: "mem"; addressLocal: number; width: OperandWidth }>
+  | Readonly<{ kind: "rm"; modRmLocal: number; address: InterpreterEffectiveAddress; width: OperandWidth }>
+  | Readonly<{ kind: "mem"; address: InterpreterEffectiveAddress; width: OperandWidth }>
   | Readonly<{ kind: "implicit.reg"; alias: RegisterAlias }>
   | Readonly<{ kind: "imm"; local: number }>
   | Readonly<{ kind: "relTarget"; local: number }>;
 
+export type InterpreterEffectiveAddress =
+  | Readonly<{ kind: "eager"; addressLocal: number }>
+  | Readonly<{
+      kind: "deferred";
+      baseLocal: number;
+      indexLocal: number;
+      scaleShiftLocal: number;
+      displacementLocal: number;
+    }>;
+
+export const interpreterNoAddressRegisterIndex = 8;
+
 export type InterpreterInstructionLength =
   | number
   | Readonly<{ kind: "local"; local: number }>;
-
-export function interpreterSemanticOperandInfo(binding: InterpreterOperandBinding): SemanticOperandInfo {
-  switch (binding.kind) {
-    case "opcode.reg":
-    case "modrm.reg":
-    case "implicit.reg":
-      return { storage: "reg" };
-    case "rm":
-      return { storage: "regOrMem" };
-    case "mem":
-      return { storage: "mem" };
-    case "imm":
-      return { storage: "imm" };
-    case "relTarget":
-      return { storage: "relTarget" };
-  }
-}
 
 export type InterpreterIrEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -322,20 +316,11 @@ function emitOperandMemoryGuard(
 
   switch (binding.kind) {
     case "mem":
-      emitWasmIrGuardGuestRange(
-        memoryGuardContext(context, access, faultRollback, helpers),
-        binding.addressLocal,
-        byteLength
-      );
+      emitEffectiveAddressGuard(context, binding.address, byteLength, access, faultRollback, helpers);
       return true;
     case "rm":
       emitIfModRmMemory(context.body, binding.modRmLocal, () => {
-        emitWasmIrGuardGuestRange(
-          memoryGuardContext(context, access, faultRollback, helpers),
-          binding.addressLocal,
-          byteLength,
-          { faultExtraDepth: 2 }
-        );
+        emitEffectiveAddressGuard(context, binding.address, byteLength, access, faultRollback, helpers, 2);
       });
       return true;
     case "opcode.reg":
@@ -376,6 +361,31 @@ function memoryFaultExitReason(access: IrMemoryAccessKind): ExitReason {
   }
 }
 
+function emitEffectiveAddressGuard(
+  context: InterpreterIrEmitContext,
+  address: InterpreterEffectiveAddress,
+  byteLength: number,
+  access: IrMemoryAccessKind,
+  faultRollback: readonly IrRollbackExprWrite[] | undefined,
+  helpers: WasmIrEmitHelpers,
+  faultExtraDepth = 1
+): void {
+  const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
+
+  try {
+    emitEffectiveAddress(context, address);
+    context.body.localSet(addressLocal);
+    emitWasmIrGuardGuestRange(
+      memoryGuardContext(context, access, faultRollback, helpers),
+      addressLocal,
+      byteLength,
+      { faultExtraDepth }
+    );
+  } finally {
+    context.scratch.freeLocal(addressLocal);
+  }
+}
+
 function emitAddress(context: InterpreterIrEmitContext, source: IrStorageExpr): void {
   if (source.kind !== "operand") {
     throw new Error(`unsupported address source for Wasm interpreter: ${source.kind}`);
@@ -386,7 +396,7 @@ function emitAddress(context: InterpreterIrEmitContext, source: IrStorageExpr): 
   switch (binding.kind) {
     case "mem":
     case "rm":
-      context.body.localGet(binding.addressLocal);
+      emitEffectiveAddress(context, binding.address);
       return;
     case "opcode.reg":
     case "modrm.reg":
@@ -415,7 +425,7 @@ function emitGetOperand(
     case "mem":
       emitWasmIrLoadGuestUnchecked(
         context.body,
-        () => context.body.localGet(binding.addressLocal),
+        () => emitEffectiveAddress(context, binding.address),
         accessWidth,
         options.signed === true
       );
@@ -459,7 +469,7 @@ function emitSetOperand(
       emitStoreMem(
         context,
         () => {
-          context.body.localGet(binding.addressLocal);
+          emitEffectiveAddress(context, binding.address);
         },
         () => helpers.emitValue(value),
         accessWidth
@@ -554,12 +564,54 @@ function emitGetRm(
   context.body.elseBlock();
   emitWasmIrLoadGuestUnchecked(
     context.body,
-    () => context.body.localGet(binding.addressLocal),
+    () => emitEffectiveAddress(context, binding.address),
     accessWidth,
     options.signed === true
   );
   context.body.endBlock();
   return signedLoadValueWidth(accessWidth, options);
+}
+
+function emitEffectiveAddress(context: InterpreterIrEmitContext, address: InterpreterEffectiveAddress): void {
+  if (address.kind === "eager") {
+    context.body.localGet(address.addressLocal);
+    return;
+  }
+
+  const valueLocal = context.scratch.allocLocal(wasmValueType.i32);
+
+  try {
+    context.body.localGet(address.displacementLocal).localSet(valueLocal);
+    emitAddAddressRegister(context, valueLocal, address.baseLocal, undefined);
+    emitAddAddressRegister(context, valueLocal, address.indexLocal, address.scaleShiftLocal);
+    context.body.localGet(valueLocal);
+  } finally {
+    context.scratch.freeLocal(valueLocal);
+  }
+}
+
+function emitAddAddressRegister(
+  context: InterpreterIrEmitContext,
+  addressLocal: number,
+  registerIndexLocal: number,
+  scaleShiftLocal: number | undefined
+): void {
+  context.body
+    .localGet(registerIndexLocal)
+    .i32Const(interpreterNoAddressRegisterIndex)
+    .i32Xor()
+    .ifBlock();
+  context.body.localGet(addressLocal);
+  emitLoadRegByIndex(context.body, context.state.regs, 32, () => {
+    context.body.localGet(registerIndexLocal);
+  });
+
+  if (scaleShiftLocal !== undefined) {
+    context.body.localGet(scaleShiftLocal).i32Shl();
+  }
+
+  context.body.i32Add().localSet(addressLocal);
+  context.body.endBlock();
 }
 
 function signedLoadValueWidth(width: OperandWidth, options: WasmIrEmitValueOptions): ValueWidth {
@@ -591,7 +643,7 @@ function emitSetRm(
       emitStoreMem(
         context,
         () => {
-          context.body.localGet(binding.addressLocal);
+          emitEffectiveAddress(context, binding.address);
         },
         () => {
           context.body.localGet(valueLocal);

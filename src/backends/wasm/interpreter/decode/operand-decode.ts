@@ -7,12 +7,14 @@ import type {
 } from "#x86/isa/schema/types.js";
 import { registerAlias } from "#x86/isa/registers.js";
 import type { OperandWidth } from "#x86/isa/types.js";
+import type { SemanticOperandInfo } from "#x86/ir/model/types.js";
 import type {
   InterpreterInstructionLength,
   InterpreterOperandBinding
 } from "#backends/wasm/interpreter/codegen/ir-context.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { decodeModRmRmOperand } from "./address-decode.js";
+import type { InterpreterAddressMode } from "./address-modes.js";
 import {
   advanceDecodeReader,
   emitReadGuestByte,
@@ -32,7 +34,8 @@ export type DecodedInterpreterOperands = Readonly<{
 export function decodeInstructionOperands(
   instruction: ExpandedInstructionSpec<unknown>,
   context: InterpreterHandlerContext,
-  modRmLocal: number | undefined
+  modRmLocal: number | undefined,
+  addressModes: readonly InterpreterAddressMode[] = []
 ): DecodedInterpreterOperands {
   const operands: InterpreterOperandBinding[] = [];
   const scratchLocals: number[] = [];
@@ -42,8 +45,8 @@ export function decodeInstructionOperands(
     reader = advanceDecodeReader(reader, 1, context);
   }
 
-  for (const operand of instruction.spec.operands ?? []) {
-    const decoded = decodeOperand(operand, reader, context, modRmLocal);
+  for (const [index, operand] of (instruction.spec.operands ?? []).entries()) {
+    const decoded = decodeOperand(operand, reader, context, modRmLocal, addressModes[index] ?? "eager");
 
     operands.push(decoded.binding);
     scratchLocals.push(...decoded.scratchLocals);
@@ -71,7 +74,8 @@ function decodeOperand(
   operand: OperandSpec,
   reader: DecodeReader,
   context: InterpreterHandlerContext,
-  modRmLocal: number | undefined
+  modRmLocal: number | undefined,
+  addressMode: InterpreterAddressMode
 ): Readonly<{ binding: InterpreterOperandBinding; nextReader: DecodeReader; scratchLocals: readonly number[] }> {
   switch (operand.kind) {
     case "modrm.reg":
@@ -89,7 +93,7 @@ function decodeOperand(
         throw new Error("missing ModRM local for modrm.rm operand");
       }
 
-      return mapNextReader(decodeModRmRmOperand(operand, reader, context, modRmLocal));
+      return mapNextReader(decodeModRmRmOperand(operand, reader, context, modRmLocal, addressMode));
     case "opcode.reg":
       return {
         binding: { kind: "opcode.reg", opcodeLocal: context.locals.opcode, width: operandTypeWidth(operand.type) },
@@ -122,6 +126,36 @@ function decodeOperand(
         scratchLocals: [local]
       };
     }
+  }
+}
+
+export function interpreterSemanticOperandInfoForSpec(operand: OperandSpec): SemanticOperandInfo {
+  switch (operand.kind) {
+    case "modrm.reg":
+    case "opcode.reg":
+    case "implicit.reg":
+      return { storage: "reg" };
+    case "modrm.rm":
+      return isMemoryOnlyOperandType(operand.type)
+        ? { storage: "mem" }
+        : { storage: "regOrMem" };
+    case "imm":
+      return { storage: "imm" };
+    case "rel":
+      return { storage: "relTarget" };
+  }
+}
+
+function isMemoryOnlyOperandType(type: RmOperandType | MemOperandType): type is MemOperandType {
+  switch (type) {
+    case "m8":
+    case "m16":
+    case "m32":
+      return true;
+    case "rm8":
+    case "rm16":
+    case "rm32":
+      return false;
   }
 }
 

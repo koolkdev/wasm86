@@ -1,6 +1,11 @@
 import type { MemOperandType, OperandSpec, RmOperandType } from "#x86/isa/schema/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
-import type { InterpreterOperandBinding } from "#backends/wasm/interpreter/codegen/ir-context.js";
+import {
+  interpreterNoAddressRegisterIndex,
+  type InterpreterEffectiveAddress,
+  type InterpreterOperandBinding
+} from "#backends/wasm/interpreter/codegen/ir-context.js";
+import type { InterpreterAddressMode } from "./address-modes.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { emitWasmIrExitConstPayload } from "#backends/wasm/codegen/exit.js";
@@ -20,21 +25,22 @@ export function decodeModRmRmOperand(
   operand: Extract<OperandSpec, { kind: "modrm.rm" }>,
   decodeReader: DecodeReader,
   context: InterpreterHandlerContext,
-  modRmLocal: number
+  modRmLocal: number,
+  addressMode: InterpreterAddressMode
 ): Readonly<{ binding: InterpreterOperandBinding; nextDecodeReader: DecodeReader; scratchLocals: readonly number[] }> {
   if (isMemoryOnlyOperand(operand.type)) {
     emitUnsupportedIfModRmRegister(context, modRmLocal);
   }
 
-  const addressLocal = context.scratch.allocLocal(wasmValueType.i32);
-  const decoded = decodeDynamicModRmRmAddress(decodeReader, context, modRmLocal, addressLocal, operand.type);
+  const address = allocateEffectiveAddress(context, addressMode);
+  const decoded = decodeDynamicModRmRmAddress(decodeReader, context, modRmLocal, address, operand.type);
 
   return {
     binding: isMemoryOnlyOperand(operand.type)
-      ? { kind: "mem", addressLocal, width: operandTypeWidth(operand.type) }
-      : { kind: "rm", modRmLocal, addressLocal, width: operandTypeWidth(operand.type) },
+      ? { kind: "mem", address, width: operandTypeWidth(operand.type) }
+      : { kind: "rm", modRmLocal, address, width: operandTypeWidth(operand.type) },
     nextDecodeReader: decoded.nextDecodeReader,
-    scratchLocals: [addressLocal, ...decoded.scratchLocals]
+    scratchLocals: [...effectiveAddressLocals(address), ...decoded.scratchLocals]
   };
 }
 
@@ -42,17 +48,19 @@ function decodeDynamicModRmRmAddress(
   decodeReader: DecodeReader,
   context: InterpreterHandlerContext,
   modRmLocal: number,
-  addressLocal: number,
+  address: InterpreterEffectiveAddress,
   operandType: RmOperandType | MemOperandType
 ): Readonly<{ nextDecodeReader: DecodeReader; scratchLocals: readonly number[] }> {
   const nextDecodeReaderLocal = materializeDecodeReader(decodeReader, context);
 
+  emitResetEffectiveAddress(context, address);
+
   if (isRmOperand(operandType)) {
     emitIfModRmMemory(context.body, modRmLocal, () => {
-      decodeDynamicMemoryAddress(localDecodeReader(nextDecodeReaderLocal), context, modRmLocal, addressLocal);
+      decodeDynamicMemoryAddress(localDecodeReader(nextDecodeReaderLocal), context, modRmLocal, address);
     });
   } else {
-    decodeDynamicMemoryAddress(localDecodeReader(nextDecodeReaderLocal), context, modRmLocal, addressLocal);
+    decodeDynamicMemoryAddress(localDecodeReader(nextDecodeReaderLocal), context, modRmLocal, address);
   }
 
   return {
@@ -101,11 +109,49 @@ function operandTypeWidth(type: RmOperandType | MemOperandType): OperandWidth {
   }
 }
 
+function allocateEffectiveAddress(
+  context: InterpreterHandlerContext,
+  mode: InterpreterAddressMode
+): InterpreterEffectiveAddress {
+  if (mode === "eager") {
+    return { kind: "eager", addressLocal: context.scratch.allocLocal(wasmValueType.i32) };
+  }
+
+  return {
+    kind: "deferred",
+    baseLocal: context.scratch.allocLocal(wasmValueType.i32),
+    indexLocal: context.scratch.allocLocal(wasmValueType.i32),
+    scaleShiftLocal: context.scratch.allocLocal(wasmValueType.i32),
+    displacementLocal: context.scratch.allocLocal(wasmValueType.i32)
+  };
+}
+
+function effectiveAddressLocals(address: InterpreterEffectiveAddress): readonly number[] {
+  switch (address.kind) {
+    case "eager":
+      return [address.addressLocal];
+    case "deferred":
+      return [address.baseLocal, address.indexLocal, address.scaleShiftLocal, address.displacementLocal];
+  }
+}
+
+function emitResetEffectiveAddress(context: InterpreterHandlerContext, address: InterpreterEffectiveAddress): void {
+  if (address.kind === "eager") {
+    context.body.i32Const(0).localSet(address.addressLocal);
+    return;
+  }
+
+  context.body.i32Const(interpreterNoAddressRegisterIndex).localSet(address.baseLocal);
+  context.body.i32Const(interpreterNoAddressRegisterIndex).localSet(address.indexLocal);
+  context.body.i32Const(0).localSet(address.scaleShiftLocal);
+  context.body.i32Const(0).localSet(address.displacementLocal);
+}
+
 function decodeDynamicMemoryAddress(
   decodeReader: DecodeReader,
   context: InterpreterHandlerContext,
   modRmLocal: number,
-  addressLocal: number
+  address: InterpreterEffectiveAddress
 ): void {
   const modLocal = context.scratch.allocLocal(wasmValueType.i32);
   const rmLocal = context.scratch.allocLocal(wasmValueType.i32);
@@ -115,10 +161,18 @@ function decodeDynamicMemoryAddress(
     context.body.localGet(modRmLocal).i32Const(0b111).i32And().localSet(rmLocal);
 
     emitIfLocalEqualsConst(context, rmLocal, 0b100, () => {
-      decodeDynamicSibMemoryAddress(modLocal, decodeReader, context, addressLocal);
+      if (address.kind === "eager") {
+        decodeDynamicSibMemoryAddressEager(modLocal, decodeReader, context, address.addressLocal);
+      } else {
+        decodeDynamicSibMemoryAddressDeferred(modLocal, decodeReader, context, address);
+      }
     });
     emitIfLocalNotEqualsConst(context, rmLocal, 0b100, () => {
-      decodeDynamicNonSibMemoryAddress(modLocal, rmLocal, decodeReader, context, addressLocal);
+      if (address.kind === "eager") {
+        decodeDynamicNonSibMemoryAddressEager(modLocal, rmLocal, decodeReader, context, address.addressLocal);
+      } else {
+        decodeDynamicNonSibMemoryAddressDeferred(modLocal, rmLocal, decodeReader, context, address);
+      }
     });
   } finally {
     context.scratch.freeLocal(rmLocal);
@@ -126,7 +180,7 @@ function decodeDynamicMemoryAddress(
   }
 }
 
-function decodeDynamicNonSibMemoryAddress(
+function decodeDynamicNonSibMemoryAddressEager(
   modLocal: number,
   rmLocal: number,
   decodeReader: DecodeReader,
@@ -135,7 +189,7 @@ function decodeDynamicNonSibMemoryAddress(
 ): void {
   emitIfLocalEqualsConst(context, modLocal, 0, () => {
     emitIfLocalEqualsConst(context, rmLocal, 0b101, () => {
-      loadDisplacementIntoAddress(32, decodeReader, context, addressLocal);
+      emitLoadDisplacement(32, decodeReader, context, addressLocal);
       advanceDecodeReader(decodeReader, 4, context);
     });
     emitIfLocalNotEqualsConst(context, rmLocal, 0b101, () => {
@@ -154,7 +208,35 @@ function decodeDynamicNonSibMemoryAddress(
   });
 }
 
-function decodeDynamicSibMemoryAddress(
+function decodeDynamicNonSibMemoryAddressDeferred(
+  modLocal: number,
+  rmLocal: number,
+  decodeReader: DecodeReader,
+  context: InterpreterHandlerContext,
+  address: Extract<InterpreterEffectiveAddress, { kind: "deferred" }>
+): void {
+  emitIfLocalEqualsConst(context, modLocal, 0, () => {
+    emitIfLocalEqualsConst(context, rmLocal, 0b101, () => {
+      emitLoadDisplacement(32, decodeReader, context, address.displacementLocal);
+      advanceDecodeReader(decodeReader, 4, context);
+    });
+    emitIfLocalNotEqualsConst(context, rmLocal, 0b101, () => {
+      context.body.localGet(rmLocal).localSet(address.baseLocal);
+    });
+  });
+  emitIfLocalEqualsConst(context, modLocal, 1, () => {
+    context.body.localGet(rmLocal).localSet(address.baseLocal);
+    emitLoadDisplacement(8, decodeReader, context, address.displacementLocal);
+    advanceDecodeReader(decodeReader, 1, context);
+  });
+  emitIfLocalEqualsConst(context, modLocal, 2, () => {
+    context.body.localGet(rmLocal).localSet(address.baseLocal);
+    emitLoadDisplacement(32, decodeReader, context, address.displacementLocal);
+    advanceDecodeReader(decodeReader, 4, context);
+  });
+}
+
+function decodeDynamicSibMemoryAddressEager(
   modLocal: number,
   decodeReader: DecodeReader,
   context: InterpreterHandlerContext,
@@ -166,7 +248,6 @@ function decodeDynamicSibMemoryAddress(
   try {
     emitReadGuestByte(context, decodeReader, sibLocal);
     advanceDecodeReader(decodeReader, 1, context);
-    context.body.i32Const(0).localSet(addressLocal);
     addSibIndexToAddress(context, sibLocal, addressLocal);
     context.body.localGet(sibLocal).i32Const(0b111).i32And().localSet(baseLocal);
 
@@ -193,6 +274,58 @@ function decodeDynamicSibMemoryAddress(
     context.scratch.freeLocal(baseLocal);
     context.scratch.freeLocal(sibLocal);
   }
+}
+
+function decodeDynamicSibMemoryAddressDeferred(
+  modLocal: number,
+  decodeReader: DecodeReader,
+  context: InterpreterHandlerContext,
+  address: Extract<InterpreterEffectiveAddress, { kind: "deferred" }>
+): void {
+  const sibLocal = context.scratch.allocLocal(wasmValueType.i32);
+  const baseLocal = context.scratch.allocLocal(wasmValueType.i32);
+
+  try {
+    emitReadGuestByte(context, decodeReader, sibLocal);
+    advanceDecodeReader(decodeReader, 1, context);
+    decodeSibIndex(context, sibLocal, address);
+    context.body.localGet(sibLocal).i32Const(0b111).i32And().localSet(baseLocal);
+
+    emitIfLocalEqualsConst(context, modLocal, 0, () => {
+      emitIfLocalEqualsConst(context, baseLocal, 0b101, () => {
+        emitLoadDisplacement(32, decodeReader, context, address.displacementLocal);
+        advanceDecodeReader(decodeReader, 4, context);
+      });
+      emitIfLocalNotEqualsConst(context, baseLocal, 0b101, () => {
+        context.body.localGet(baseLocal).localSet(address.baseLocal);
+      });
+    });
+    emitIfLocalEqualsConst(context, modLocal, 1, () => {
+      context.body.localGet(baseLocal).localSet(address.baseLocal);
+      emitLoadDisplacement(8, decodeReader, context, address.displacementLocal);
+      advanceDecodeReader(decodeReader, 1, context);
+    });
+    emitIfLocalEqualsConst(context, modLocal, 2, () => {
+      context.body.localGet(baseLocal).localSet(address.baseLocal);
+      emitLoadDisplacement(32, decodeReader, context, address.displacementLocal);
+      advanceDecodeReader(decodeReader, 4, context);
+    });
+  } finally {
+    context.scratch.freeLocal(baseLocal);
+    context.scratch.freeLocal(sibLocal);
+  }
+}
+
+function decodeSibIndex(
+  context: InterpreterHandlerContext,
+  sibLocal: number,
+  address: Extract<InterpreterEffectiveAddress, { kind: "deferred" }>
+): void {
+  context.body.localGet(sibLocal).i32Const(3).i32ShrU().i32Const(0b111).i32And().localSet(address.indexLocal);
+  emitIfLocalEqualsConst(context, address.indexLocal, 0b100, () => {
+    context.body.i32Const(interpreterNoAddressRegisterIndex).localSet(address.indexLocal);
+  });
+  context.body.localGet(sibLocal).i32Const(6).i32ShrU().localSet(address.scaleShiftLocal);
 }
 
 function addSibIndexToAddress(context: InterpreterHandlerContext, sibLocal: number, addressLocal: number): void {
@@ -226,15 +359,6 @@ function addRegIndexLocalToAddress(context: InterpreterHandlerContext, indexLoca
   } finally {
     context.scratch.freeLocal(valueLocal);
   }
-}
-
-function loadDisplacementIntoAddress(
-  width: 8 | 32,
-  decodeReader: DecodeReader,
-  context: InterpreterHandlerContext,
-  addressLocal: number
-): void {
-  emitLoadDisplacement(width, decodeReader, context, addressLocal);
 }
 
 function addDisplacementToAddress(

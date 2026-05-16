@@ -133,6 +133,25 @@ test("executes memory XCHG forms after reading memory and register operands", as
   }
 });
 
+test("executes XCHG [ESP], ESP using the original memory address", async () => {
+  const initial = createCpuState({
+    esp: 0x20,
+    eflags: 0x8d5,
+    eip: startAddress
+  });
+  const { exit, state, guestView } = await executeInstruction(
+    [0x87, 0x24, 0x24],
+    initial,
+    [{ address: initial.esp, bytes: littleEndianBytes(0x1122_3344, 32) }]
+  );
+
+  assertSingleInstructionExit(exit);
+  strictEqual(state.esp, 0x1122_3344);
+  strictEqual(state.eflags, initial.eflags);
+  strictEqual(guestView.getUint32(initial.esp, true), initial.esp);
+  assertCompletedInstruction(state, startAddress + 3, 1);
+});
+
 test("XCHG memory read faults before changing register state", async () => {
   const initial = createCpuState({
     eax: 0x1_0000,
