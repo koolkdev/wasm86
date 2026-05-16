@@ -9,6 +9,9 @@ import {
 import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import type { JitArchitecturalSlot } from "#backends/wasm/jit/ir/values/types.js";
+import {
+  jitRegisterSlotAlias
+} from "#backends/wasm/jit/ir/values/slots.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 
 export function emitJitInputSlot(body: WasmFunctionBodyEncoder, slot: JitArchitecturalSlot): ValueWidth {
@@ -16,6 +19,18 @@ export function emitJitInputSlot(body: WasmFunctionBodyEncoder, slot: JitArchite
     case "reg32":
       emitLoadStateU32(body, stateOffset[slot.reg]);
       return cleanValueWidth(32);
+    case "reg16": {
+      const alias = jitRegisterSlotAlias(slot);
+
+      emitLoadStateU16(body, stateOffset[alias.base] + alias.bitOffset / 8);
+      return cleanValueWidth(16);
+    }
+    case "reg8": {
+      const alias = jitRegisterSlotAlias(slot);
+
+      emitLoadStateU8(body, stateOffset[alias.base] + alias.bitOffset / 8);
+      return cleanValueWidth(8);
+    }
     case "aluFlags":
       emitLoadStateU32(body, stateOffset.aluFlags);
       return cleanValueWidth(32);
@@ -29,17 +44,19 @@ export function emitJitInputSlotBits(
   width: OperandWidth,
   signed: boolean
 ): ValueWidth | undefined {
+  const alias = slot.kind === "aluFlags" ? undefined : jitRegisterSlotAlias(slot);
+
   if (
-    slot.kind !== "reg32" ||
+    alias === undefined ||
     !Number.isInteger(bitOffset) ||
     bitOffset < 0 ||
     bitOffset % 8 !== 0 ||
-    bitOffset + width > 32
+    bitOffset + width > alias.width
   ) {
     return undefined;
   }
 
-  const offset = stateOffset[slot.reg] + bitOffset / 8;
+  const offset = stateOffset[alias.base] + (alias.bitOffset + bitOffset) / 8;
 
   switch (width) {
     case 8:

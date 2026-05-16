@@ -7,9 +7,14 @@ import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.j
 import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
 import type {
   JitArchitecturalSlot,
+  JitRegisterSlot,
   JitProducedValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
+import {
+  jitRegisterSlotForAlias,
+  jitRegisterSlotForWrite
+} from "#backends/wasm/jit/ir/values/slots.js";
 import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
 import {
@@ -20,7 +25,7 @@ import {
   type TimelineInput,
   type ValueSnapshot
 } from "./timeline-internals.js";
-import { ValueStateBuilder } from "./value-state.js";
+import { ValueStateBuilder, type ValueStateWrite } from "./value-state.js";
 
 export function buildTimeline(input: TimelineInput): Timeline {
   return new TimelineBuilder(input).build();
@@ -233,7 +238,7 @@ class TimelineBuilder {
 
     switch (binding.kind) {
       case "static.reg":
-        this.#recordRegisterWrite(binding.alias.base, binding.alias.bitOffset, binding.alias.width, value);
+        this.#recordRegisterSlotWrite(jitRegisterSlotForAlias(binding.alias), value);
         return;
       case "static.mem":
       case "static.imm32":
@@ -252,8 +257,28 @@ class TimelineBuilder {
       throw new Error(`could not resolve JIT timeline register write at expression op ${this.#currentOpIndex}`);
     }
 
-    const write = this.#valueState.registers().recordSet(reg, bitOffset, width, value);
+    this.#recordRegisterSlotWrite(jitRegisterSlotForWrite(reg, bitOffset, width), value);
+  }
+
+  #recordRegisterSlotWrite(slot: JitRegisterSlot, value: JitValue | undefined): void {
+    if (value === undefined) {
+      throw new Error(`could not resolve JIT timeline register write at expression op ${this.#currentOpIndex}`);
+    }
+
+    const write = this.#recordRegisterSlotSet(slot, value);
+
     this.#recordWrite(write.slot, write.value);
+  }
+
+  #recordRegisterSlotSet(slot: JitRegisterSlot, value: JitValue): ValueStateWrite {
+    switch (slot.kind) {
+      case "reg32":
+        return this.#valueState.registers().recordReg32(slot.reg, value);
+      case "reg16":
+        return this.#valueState.registers().recordReg16(slot.reg, value);
+      case "reg8":
+        return this.#valueState.registers().recordReg8(slot.reg, value);
+    }
   }
 
   #recordFlagWrite(op: Extract<IrExprOp, { op: "flags.set" }>): void {

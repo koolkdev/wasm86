@@ -11,7 +11,7 @@ import {
   type JitValueState,
   type JitValueStateSnapshot
 } from "#backends/wasm/jit/state/value-state.js";
-import { type OperandWidth, type Reg32 } from "#x86/isa/types.js";
+import type { Reg16, Reg32, Reg8 } from "#x86/isa/types.js";
 import {
   jitFlagSetProducerValue,
   jitFlagSetWrittenMask
@@ -59,21 +59,27 @@ export class RegisterValueStateBuilder {
     return this.#regs.readReg32(reg);
   }
 
-  recordSet(
-    reg: Reg32,
-    bitOffset: number,
-    width: OperandWidth,
-    value: JitValue
-  ): ValueStateWrite {
-    if (width === 32 && bitOffset === 0) {
-      this.#regs.writeReg32(reg, value);
-    } else {
-      this.#regs.writeRegPart(reg, bitOffset, width, value);
-    }
-
+  recordReg32(reg: Reg32, value: JitValue): ValueStateWrite {
+    this.#regs.writeReg32(reg, value);
     return {
       slot: { kind: "reg32", reg },
       value: this.#regs.readReg32(reg)
+    };
+  }
+
+  recordReg16(reg: Reg16, value: JitValue): ValueStateWrite {
+    this.#regs.writeReg16(reg, value);
+    return {
+      slot: { kind: "reg16", reg },
+      value: this.#regs.readReg16(reg)
+    };
+  }
+
+  recordReg8(reg: Reg8, value: JitValue): ValueStateWrite {
+    this.#regs.writeReg8(reg, value);
+    return {
+      slot: { kind: "reg8", reg },
+      value: this.#regs.readReg8(reg)
     };
   }
 }

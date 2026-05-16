@@ -24,7 +24,7 @@ import type { ConditionCode, IrBinaryOperator, IrUnaryOperator } from "#x86/ir/m
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import { bitRangeMask } from "#backends/wasm/jit/ir/values/bits.js";
 import type {
-  JitArchitecturalSlot,
+  JitCanonicalInputSlot,
   JitFlagProducerValue,
   JitInputValue,
   JitProducedValue,
@@ -35,9 +35,9 @@ import type { JitValueCacheRuntime } from "./value-local-store.js";
 export type JitValueEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   valueCache?: JitValueCacheRuntime | undefined;
-  emitInput(slot: JitArchitecturalSlot): ValueWidth;
+  emitInput(slot: JitCanonicalInputSlot): ValueWidth;
   emitInputBits?: ((
-    slot: JitArchitecturalSlot,
+    slot: JitCanonicalInputSlot,
     bitOffset: number,
     width: OperandWidth,
     signed: boolean

@@ -22,8 +22,7 @@ export type {
   ExitStore,
   ExitStorePlan,
   ExitStoreSet,
-  PlannedExit,
-  StoreTarget
+  PlannedExit
 } from "./exit-stores.js";
 export type {
   JitExitStoreUse,

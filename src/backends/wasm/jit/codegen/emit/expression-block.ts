@@ -44,7 +44,7 @@ import type {
   JitPlannedEffect
 } from "#backends/wasm/jit/codegen/plan/effect-plan.js";
 import type {
-  JitArchitecturalSlot,
+  JitCanonicalInputSlot,
   JitProducedValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
@@ -69,9 +69,9 @@ export type JitExpressionBlockEmitContext = Readonly<{
   instruction: JitExpressionBlockInstruction;
   valueCache?: JitValueCacheRuntime | undefined;
   beginExpressionOp?(opIndex: number): void;
-  emitInput(slot: JitArchitecturalSlot): ValueWidth;
+  emitInput(slot: JitCanonicalInputSlot): ValueWidth;
   emitInputBits?(
-    slot: JitArchitecturalSlot,
+    slot: JitCanonicalInputSlot,
     bitOffset: number,
     width: OperandWidth,
     signed: boolean

@@ -1,4 +1,5 @@
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import type { OperandWidth, Reg16, Reg32, Reg8 } from "#x86/isa/types.js";
+import { registerAlias } from "#x86/isa/registers.js";
 import type {
   ConditionCode,
   FlagProducerName,
@@ -19,11 +20,35 @@ import type {
   JitInputValue,
   JitProducedValue,
   JitProducedValueId,
+  JitRegisterSlot,
   JitValue
 } from "./types.js";
 
 export function jitInputReg32Value(reg: Reg32): JitInputValue {
   return { kind: "input", slot: { kind: "reg32", reg } };
+}
+
+export function jitInputReg16Value(reg: Reg16): JitValue {
+  const alias = registerAlias(reg);
+
+  return jitExtractBits(jitInputReg32Value(alias.base), alias.bitOffset, alias.width);
+}
+
+export function jitInputReg8Value(reg: Reg8): JitValue {
+  const alias = registerAlias(reg);
+
+  return jitExtractBits(jitInputReg32Value(alias.base), alias.bitOffset, alias.width);
+}
+
+export function jitInputRegisterValue(slot: JitRegisterSlot): JitValue {
+  switch (slot.kind) {
+    case "reg32":
+      return jitInputReg32Value(slot.reg);
+    case "reg16":
+      return jitInputReg16Value(slot.reg);
+    case "reg8":
+      return jitInputReg8Value(slot.reg);
+  }
 }
 
 export function jitInputAluFlagsValue(): JitInputValue {

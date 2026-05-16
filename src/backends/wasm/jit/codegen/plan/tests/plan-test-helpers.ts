@@ -159,7 +159,7 @@ export function flagStore(value: JitValue): ExitStore {
 
 export function plannedRegisterStores(exit: PlannedExit): readonly ExitStore[] {
   return exit.stores.filter((store) =>
-    store.target.kind === "reg32" || store.target.kind === "regPart"
+    store.target.kind === "reg32" || store.target.kind === "reg16" || store.target.kind === "reg8"
   );
 }
 

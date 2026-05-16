@@ -1,4 +1,4 @@
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import type { Reg16, Reg32, Reg8 } from "#x86/isa/types.js";
 import type { ConditionCode } from "#x86/ir/model/types.js";
 import { IR_ALU_FLAG_MASK, assertIrAluFlagMask } from "#x86/ir/model/flag-effects.js";
 import {
@@ -12,8 +12,12 @@ import {
 } from "#backends/wasm/jit/ir/values/builders.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
+import {
+  jitRegisterSlotAlias
+} from "#backends/wasm/jit/ir/values/slots.js";
 import type {
   JitArchitecturalSlot,
+  JitRegisterSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 
@@ -42,10 +46,26 @@ export class JitValueSlots {
   readonly #values = new Map<string, JitValueSlotEntry>();
 
   read(slot: JitArchitecturalSlot): JitValue {
+    const alias = slot.kind === "reg16" || slot.kind === "reg8"
+      ? jitRegisterSlotAlias(slot)
+      : undefined;
+
+    if (alias !== undefined) {
+      return jitExtractBits(this.read(reg32Slot(alias.base)), alias.bitOffset, alias.width);
+    }
+
     return this.#values.get(jitValueSlotKey(slot))?.value ?? this.inputValue(slot);
   }
 
   write(slot: JitArchitecturalSlot, value: JitValue): void {
+    if (slot.kind === "reg16" || slot.kind === "reg8") {
+      const alias = jitRegisterSlotAlias(slot);
+      const base = reg32Slot(alias.base);
+
+      this.write(base, jitInsertBits(this.read(base), value, alias.bitOffset, alias.width));
+      return;
+    }
+
     this.#values.set(jitValueSlotKey(slot), { slot, value: simplifyValue(value) });
   }
 
@@ -66,6 +86,14 @@ export class JitValueSlotSnapshot {
   }
 
   read(slot: JitArchitecturalSlot): JitValue {
+    const alias = slot.kind === "reg16" || slot.kind === "reg8"
+      ? jitRegisterSlotAlias(slot)
+      : undefined;
+
+    if (alias !== undefined) {
+      return jitExtractBits(this.read(reg32Slot(alias.base)), alias.bitOffset, alias.width);
+    }
+
     return this.#values.get(jitValueSlotKey(slot))?.value ?? this.inputValue(slot);
   }
 
@@ -109,12 +137,20 @@ export class JitRegisterValueFamily {
     this.#slots.write(reg32Slot(reg), value);
   }
 
-  readRegPart(reg: Reg32, bitOffset: number, width: OperandWidth): JitValue {
-    return jitExtractBits(this.readReg32(reg), bitOffset, width);
+  readReg16(reg: Reg16): JitValue {
+    return this.#slots.read(reg16Slot(reg));
   }
 
-  writeRegPart(reg: Reg32, bitOffset: number, width: OperandWidth, value: JitValue): void {
-    this.writeReg32(reg, jitInsertBits(this.readReg32(reg), value, bitOffset, width));
+  writeReg16(reg: Reg16, value: JitValue): void {
+    this.#slots.write(reg16Slot(reg), value);
+  }
+
+  readReg8(reg: Reg8): JitValue {
+    return this.#slots.read(reg8Slot(reg));
+  }
+
+  writeReg8(reg: Reg8, value: JitValue): void {
+    this.#slots.write(reg8Slot(reg), value);
   }
 }
 
@@ -129,8 +165,12 @@ export class JitRegisterValueSnapshotFamily {
     return this.#slots.read(reg32Slot(reg));
   }
 
-  readRegPart(reg: Reg32, bitOffset: number, width: OperandWidth): JitValue {
-    return jitExtractBits(this.readReg32(reg), bitOffset, width);
+  readReg16(reg: Reg16): JitValue {
+    return this.#slots.read(reg16Slot(reg));
+  }
+
+  readReg8(reg: Reg8): JitValue {
+    return this.#slots.read(reg8Slot(reg));
   }
 
   differsFromInput(reg: Reg32): boolean {
@@ -217,6 +257,14 @@ export function reg32Slot(reg: Reg32): JitArchitecturalSlot {
   return { kind: "reg32", reg };
 }
 
+export function reg16Slot(reg: Reg16): JitArchitecturalSlot {
+  return { kind: "reg16", reg };
+}
+
+export function reg8Slot(reg: Reg8): JitArchitecturalSlot {
+  return { kind: "reg8", reg };
+}
+
 export function aluFlagsSlot(): JitArchitecturalSlot {
   return { kind: "aluFlags" };
 }
@@ -225,15 +273,28 @@ function jitValueInputForSlot(slot: JitArchitecturalSlot): JitValue {
   switch (slot.kind) {
     case "reg32":
       return jitInputReg32Value(slot.reg);
+    case "reg16":
+    case "reg8":
+      return jitInputForRegisterPart(slot);
     case "aluFlags":
       return jitInputAluFlagsValue();
   }
+}
+
+function jitInputForRegisterPart(slot: Extract<JitRegisterSlot, { kind: "reg16" | "reg8" }>): JitValue {
+  const alias = jitRegisterSlotAlias(slot);
+
+  return jitExtractBits(jitInputReg32Value(alias.base), alias.bitOffset, alias.width);
 }
 
 function jitValueSlotKey(slot: JitArchitecturalSlot): string {
   switch (slot.kind) {
     case "reg32":
       return `reg32:${slot.reg}`;
+    case "reg16":
+      return `reg16:${slot.reg}`;
+    case "reg8":
+      return `reg8:${slot.reg}`;
     case "aluFlags":
       return "aluFlags";
   }

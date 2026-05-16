@@ -1,5 +1,8 @@
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { JitArchitecturalSlot, JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import {
+  jitArchitecturalSlotsOverlap
+} from "#backends/wasm/jit/ir/values/slots.js";
 import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
 import {
   type StorageReadKey,
@@ -32,7 +35,7 @@ export function opView(timeline: Timeline, opIndex: number): OpView {
         storageSourcesEqual(entry.source, read.source)
     )?.value,
     hasWrite: (slot) => timeline.writes.some((entry) =>
-      entry.opIndex === opIndex && slotsEqual(entry.slot, slot)
+      entry.opIndex === opIndex && jitArchitecturalSlotsOverlap(entry.slot, slot)
     )
   };
 }
@@ -80,15 +83,6 @@ function storageSourcesEqual(a: IrStorageExpr, b: IrStorageExpr): boolean {
       return b.kind === "operand" && a.index === b.index;
     case "mem":
       return a === b;
-  }
-}
-
-function slotsEqual(a: JitArchitecturalSlot, b: JitArchitecturalSlot): boolean {
-  switch (a.kind) {
-    case "reg32":
-      return b.kind === "reg32" && a.reg === b.reg;
-    case "aluFlags":
-      return b.kind === "aluFlags";
   }
 }
 

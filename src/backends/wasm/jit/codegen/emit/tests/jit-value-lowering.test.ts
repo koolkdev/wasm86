@@ -22,14 +22,21 @@ import {
 } from "#backends/wasm/jit/ir/values/builders.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type {
-  JitArchitecturalSlot,
+  JitCanonicalInputSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import {
   emitJitValue,
   emitJitValueWithoutRootCache
 } from "#backends/wasm/jit/codegen/emit/jit-values.js";
-import { emitJitInputSlotBits } from "#backends/wasm/jit/codegen/emit/input-slots.js";
+import {
+  emitJitInputSlot,
+  emitJitInputSlotBits
+} from "#backends/wasm/jit/codegen/emit/input-slots.js";
+import {
+  jitRegisterSlotAlias
+} from "#backends/wasm/jit/ir/values/slots.js";
+import type { Reg32 } from "#x86/isa/types.js";
 import {
   JitValueLocalStore,
   type JitValueCacheRuntime,
@@ -194,7 +201,22 @@ test("emitJitValue lowers signed input slot slices to signed state loads", () =>
   strictEqual(countOpcode(wordOpcodes, wasmOpcode.i32Extend16S), 0);
 });
 
-test("emitJitInputSlotBits rejects slices that extend past a 32-bit register slot", () => {
+test("emitJitInputSlot lowers IR register alias slots to narrow state loads", () => {
+  const body = new WasmFunctionBodyEncoder();
+
+  const wordWidth = emitJitInputSlot(body, { kind: "reg16", reg: "ax" });
+  const byteWidth = emitJitInputSlot(body, { kind: "reg8", reg: "ah" });
+  body.end();
+
+  const opcodes = wasmBodyOpcodes(body.encode());
+
+  strictEqual(wordWidth.cleanWidth, 16);
+  strictEqual(byteWidth.cleanWidth, 8);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Load16U), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Load8U), 1);
+});
+
+test("emitJitInputSlotBits rejects slices that extend past a register slot", () => {
   const body = new WasmFunctionBodyEncoder();
   const valueWidth = emitJitInputSlotBits(body, { kind: "reg32", reg: "eax" }, 24, 16, false);
 
@@ -377,7 +399,7 @@ test("emitJitValueWithoutRootCache suppresses only the root cache use", () => {
 type EmitSymbolicValueOptions = Readonly<{
   emitInputBits?(
     body: WasmFunctionBodyEncoder,
-    slot: JitArchitecturalSlot,
+    slot: JitCanonicalInputSlot,
     bitOffset: number,
     width: 8 | 16 | 32,
     signed: boolean
@@ -422,11 +444,26 @@ function bodyContext(body: WasmFunctionBodyEncoder) {
 
   return {
     body,
-    emitInput: (slot: JitArchitecturalSlot) => {
-      body.localGet(slot.kind === "aluFlags" ? locals.aluFlags : locals[slot.reg]);
-      return cleanValueWidth(32);
+    emitInput: (slot: JitCanonicalInputSlot) => {
+      if (slot.kind === "aluFlags") {
+        body.localGet(locals.aluFlags);
+        return cleanValueWidth(32);
+      }
+
+      const alias = jitRegisterSlotAlias(slot);
+
+      body.localGet(locals[alias.base]);
+      if (alias.bitOffset !== 0) {
+        body.i32Const(alias.bitOffset);
+        body.i32ShrU();
+      }
+      if (alias.width !== 32) {
+        body.i32Const(alias.width === 16 ? 0xffff : 0xff);
+        body.i32And();
+      }
+      return cleanValueWidth(alias.width);
     },
-    emitReg: (reg: Exclude<JitArchitecturalSlot, { kind: "aluFlags" }>["reg"]) => {
+    emitReg: (reg: Reg32) => {
       body.localGet(locals[reg]);
       return cleanValueWidth(32);
     }

@@ -62,10 +62,10 @@ test("registerStores derives full-register exit stores", () => {
 test("registerStores derives low-byte exit stores", () => {
   const state = createJitValueState();
 
-  state.regs.writeRegPart("eax", 0, 8, c32(0x7f));
+  state.regs.writeReg8("al", c32(0x7f));
 
   deepStrictEqual(registerStores(state.snapshot()), [{
-    target: { kind: "regPart", reg: "eax", bitOffset: 0, width: 8 },
+    target: { kind: "reg8", reg: "al" },
     value: c32(0x7f)
   }]);
 });
@@ -73,10 +73,10 @@ test("registerStores derives low-byte exit stores", () => {
 test("registerStores derives high-byte exit stores", () => {
   const state = createJitValueState();
 
-  state.regs.writeRegPart("eax", 8, 8, c32(0x7f));
+  state.regs.writeReg8("ah", c32(0x7f));
 
   deepStrictEqual(registerStores(state.snapshot()), [{
-    target: { kind: "regPart", reg: "eax", bitOffset: 8, width: 8 },
+    target: { kind: "reg8", reg: "ah" },
     value: c32(0x7f)
   }]);
 });
@@ -84,10 +84,10 @@ test("registerStores derives high-byte exit stores", () => {
 test("registerStores derives word exit stores", () => {
   const state = createJitValueState();
 
-  state.regs.writeRegPart("eax", 0, 16, c32(0x7788));
+  state.regs.writeReg16("ax", c32(0x7788));
 
   deepStrictEqual(registerStores(state.snapshot()), [{
-    target: { kind: "regPart", reg: "eax", bitOffset: 0, width: 16 },
+    target: { kind: "reg16", reg: "ax" },
     value: c32(0x7788)
   }]);
 });
@@ -95,9 +95,9 @@ test("registerStores derives word exit stores", () => {
 test("registerStores omits prefix identity writes", () => {
   const state = createJitValueState();
 
-  state.regs.writeRegPart("eax", 0, 8, state.regs.readRegPart("eax", 0, 8));
-  state.regs.writeRegPart("ebx", 8, 8, state.regs.readRegPart("ebx", 8, 8));
-  state.regs.writeRegPart("ecx", 0, 16, state.regs.readRegPart("ecx", 0, 16));
+  state.regs.writeReg8("al", state.regs.readReg8("al"));
+  state.regs.writeReg8("bh", state.regs.readReg8("bh"));
+  state.regs.writeReg16("cx", state.regs.readReg16("cx"));
 
   deepStrictEqual(registerStores(state.snapshot()), []);
 });

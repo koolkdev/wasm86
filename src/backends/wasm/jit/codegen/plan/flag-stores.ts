@@ -2,16 +2,21 @@ import {
   jitInputAluFlagsValue
 } from "#backends/wasm/jit/ir/values/builders.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
+import type { JitFlagSlot, JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
-import type { ExitStore } from "./exit-stores.js";
 
-export function flagStores(snapshot: JitValueStateSnapshot): readonly ExitStore[] {
+export type FlagExitStore = Readonly<{
+  target: JitFlagSlot;
+  value: JitValue;
+}>;
+
+export function flagStores(snapshot: JitValueStateSnapshot): readonly FlagExitStore[] {
   const store = flagStore(snapshot);
 
   return store === undefined ? [] : [store];
 }
 
-export function flagStore(snapshot: JitValueStateSnapshot): ExitStore | undefined {
+export function flagStore(snapshot: JitValueStateSnapshot): FlagExitStore | undefined {
   const value = snapshot.flags.readAluFlags();
 
   if (valuesEqual(value, jitInputAluFlagsValue())) {

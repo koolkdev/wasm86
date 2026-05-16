@@ -15,7 +15,6 @@ export type {
   JitExitStoreUsePlacement,
   PlannedExit,
   JitInstructionState,
-  StoreTarget,
   JitCodegenPlan
 } from "./types.js";
 export type {

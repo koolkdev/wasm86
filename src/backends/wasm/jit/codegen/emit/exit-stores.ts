@@ -10,16 +10,17 @@ import {
 } from "#backends/wasm/codegen/value-width.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import type {
-  ExitStore,
-  StoreTarget
-} from "#backends/wasm/jit/codegen/plan/types.js";
+import type { ExitStore } from "#backends/wasm/jit/codegen/plan/types.js";
 import { emitJitValue } from "./jit-values.js";
 import type {
   JitCachedValueHandle,
   JitValueCacheRuntime
 } from "./value-local-store.js";
-import { slotsReadByValueForMask } from "#backends/wasm/jit/ir/values/slots.js";
+import {
+  jitArchitecturalSlotsOverlap,
+  slotsReadByValueForMask,
+  jitRegisterSlotAlias
+} from "#backends/wasm/jit/ir/values/slots.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type {
   JitArchitecturalSlot,
@@ -56,7 +57,7 @@ export function captureExitStores(
     return undefined;
   }
 
-  const previousTargets: StoreTarget[] = [];
+  const previousTargets: JitArchitecturalSlot[] = [];
 
   return stores.map((store) => {
     const captured = captureJitExitStore(context, store, previousTargets);
@@ -88,7 +89,7 @@ export function releaseExitStores(
 function captureJitExitStore(
   context: JitExitStoreEmitContext,
   store: ExitStore,
-  previousTargets: readonly StoreTarget[]
+  previousTargets: readonly JitArchitecturalSlot[]
 ): CapturedExitStore {
   const captured = context.valueCache?.captureForReuse(
     store.value,
@@ -137,7 +138,7 @@ function captureJitExitStore(
 
 function exitStoreSourceNeedsTemporaryLocal(
   value: JitValue,
-  previousTargets: readonly StoreTarget[]
+  previousTargets: readonly JitArchitecturalSlot[]
 ): boolean {
   if (previousTargets.length === 0) {
     return false;
@@ -145,37 +146,9 @@ function exitStoreSourceNeedsTemporaryLocal(
 
   const sourceSlots = slotsReadByValueForMask(value, 0xffff_ffff);
 
-  return previousTargets.some((target) => {
-    const targetSlot = storeTargetSlot(target);
-
-    return targetSlot !== undefined && sourceSlots.some((slot) =>
-      jitArchitecturalSlotsEqual(slot, targetSlot)
-    );
-  });
-}
-
-function storeTargetSlot(target: StoreTarget): JitArchitecturalSlot | undefined {
-  switch (target.kind) {
-    case "reg32":
-      return { kind: "reg32", reg: target.reg };
-    case "regPart":
-      return { kind: "reg32", reg: target.reg };
-    case "aluFlags":
-      return { kind: "aluFlags" };
-  }
-}
-
-function jitArchitecturalSlotsEqual(left: JitArchitecturalSlot, right: JitArchitecturalSlot): boolean {
-  if (left.kind !== right.kind) {
-    return false;
-  }
-
-  switch (left.kind) {
-    case "reg32":
-      return right.kind === "reg32" && left.reg === right.reg;
-    case "aluFlags":
-      return true;
-  }
+  return previousTargets.some((target) =>
+    sourceSlots.some((slot) => jitArchitecturalSlotsOverlap(slot, target))
+  );
 }
 
 function emitJitExitStore(
@@ -196,12 +169,12 @@ function emitCapturedOrInlineStoreSource(
   context: JitExitStoreEmitContext,
   value: JitValue,
   source: CapturedExitStoreSource | undefined,
-  target: StoreTarget
+  target: JitArchitecturalSlot
 ): ValueWidth {
   if (source !== undefined) {
     context.body.localGet(source.local);
 
-    return target.kind === "reg32" || target.kind === "aluFlags"
+    return storeTargetUsesFullWidthValue(target)
       ? emitCleanValueForFullUse(context.body, source.valueWidth)
       : source.valueWidth;
   }
@@ -209,8 +182,12 @@ function emitCapturedOrInlineStoreSource(
   return emitJitExitStoreSourceValue(
     context,
     value,
-    target.kind === "reg32" || target.kind === "aluFlags"
+    storeTargetUsesFullWidthValue(target)
   );
+}
+
+function storeTargetUsesFullWidthValue(target: JitArchitecturalSlot): boolean {
+  return target.kind === "reg32" || target.kind === "aluFlags";
 }
 
 function emitJitExitStoreSourceValue(
@@ -229,26 +206,24 @@ function emitJitExitStoreSourceValue(
 
 function emitJitStoreTarget(
   body: WasmFunctionBodyEncoder,
-  target: StoreTarget,
+  target: JitArchitecturalSlot,
   emitValue: () => void
 ): void {
   switch (target.kind) {
     case "reg32":
       emitStoreStateU32(body, stateOffset[target.reg], emitValue);
       return;
-    case "regPart": {
-      const offset = stateOffset[target.reg] + target.bitOffset / 8;
+    case "reg16": {
+      const alias = jitRegisterSlotAlias(target);
 
-      switch (target.width) {
-        case 8:
-          emitStoreStateU8(body, offset, emitValue);
-          return;
-        case 16:
-          emitStoreStateU16(body, offset, emitValue);
-          return;
-        case 32:
-          throw new Error("JIT regPart exit stores cannot use 32-bit width");
-      }
+      emitStoreStateU16(body, stateOffset[alias.base] + alias.bitOffset / 8, emitValue);
+      return;
+    }
+    case "reg8": {
+      const alias = jitRegisterSlotAlias(target);
+
+      emitStoreStateU8(body, stateOffset[alias.base] + alias.bitOffset / 8, emitValue);
+      return;
     }
     case "aluFlags":
       emitStoreStateU32(body, stateOffset.aluFlags, emitValue);

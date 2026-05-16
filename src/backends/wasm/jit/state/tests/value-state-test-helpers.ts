@@ -20,6 +20,8 @@ import type {
 } from "#backends/wasm/jit/ir/values/types.js";
 import {
   createJitValueState,
+  reg16Slot,
+  reg8Slot,
   type JitValueSlotEntry
 } from "#backends/wasm/jit/state/value-state.js";
 
@@ -38,7 +40,9 @@ export {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits,
-  createJitValueState
+  createJitValueState,
+  reg16Slot,
+  reg8Slot
 };
 export type { Reg32, JitArchitecturalSlot, JitValue, JitValueSlotEntry };
 
@@ -70,6 +74,10 @@ export function slotKey(slot: JitArchitecturalSlot): string {
   switch (slot.kind) {
     case "reg32":
       return `reg32:${slot.reg}`;
+    case "reg16":
+      return `reg16:${slot.reg}`;
+    case "reg8":
+      return `reg8:${slot.reg}`;
     case "aluFlags":
       return "aluFlags";
   }

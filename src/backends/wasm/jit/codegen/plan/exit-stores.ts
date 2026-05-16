@@ -2,18 +2,12 @@ import type {
   Exit,
   ExitSnapshot
 } from "#backends/wasm/jit/analysis/exits.js";
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { JitArchitecturalSlot, JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { flagStores } from "./flag-stores.js";
 import { registerStores } from "./register-stores.js";
 
-export type StoreTarget =
-  | Readonly<{ kind: "reg32"; reg: Reg32 }>
-  | Readonly<{ kind: "regPart"; reg: Reg32; bitOffset: number; width: OperandWidth }>
-  | Readonly<{ kind: "aluFlags" }>;
-
 export type ExitStore = Readonly<{
-  target: StoreTarget;
+  target: JitArchitecturalSlot;
   value: JitValue;
 }>;
 

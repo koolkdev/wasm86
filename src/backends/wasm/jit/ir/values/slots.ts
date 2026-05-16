@@ -1,4 +1,5 @@
-import { widthMask, type OperandWidth } from "#x86/isa/types.js";
+import { registerAlias, registerAliasesByWidth } from "#x86/isa/registers.js";
+import { widthMask, type OperandWidth, type Reg32, type RegisterAlias } from "#x86/isa/types.js";
 import type { IrUnaryOperator } from "#x86/ir/model/types.js";
 import { simplifyValue } from "./simplify.js";
 import { bitRangeMask, normalizeU32Mask } from "./bits.js";
@@ -6,6 +7,7 @@ import { valueChildren } from "./walk.js";
 import type {
   JitArchitecturalSlot,
   JitBinaryValue,
+  JitRegisterSlot,
   JitValue
 } from "./types.js";
 
@@ -35,13 +37,91 @@ export function jitArchitecturalSlotsEqual(left: JitArchitecturalSlot, right: Ji
     return false;
   }
 
-  return left.kind === "aluFlags" || right.kind === "aluFlags" || left.reg === right.reg;
+  switch (left.kind) {
+    case "reg32":
+      return right.kind === "reg32" && left.reg === right.reg;
+    case "reg16":
+      return right.kind === "reg16" && left.reg === right.reg;
+    case "reg8":
+      return right.kind === "reg8" && left.reg === right.reg;
+    case "aluFlags":
+      return true;
+  }
+}
+
+export function jitArchitecturalSlotsOverlap(left: JitArchitecturalSlot, right: JitArchitecturalSlot): boolean {
+  if (left.kind === "aluFlags" || right.kind === "aluFlags") {
+    return left.kind === "aluFlags" && right.kind === "aluFlags";
+  }
+
+  return jitRegisterSlotsOverlap(left, right);
+}
+
+export function jitRegisterSlotsOverlap(left: JitRegisterSlot, right: JitRegisterSlot): boolean {
+  const leftAlias = jitRegisterSlotAlias(left);
+  const rightAlias = jitRegisterSlotAlias(right);
+
+  if (leftAlias.base !== rightAlias.base) {
+    return false;
+  }
+
+  return leftAlias.bitOffset < rightAlias.bitOffset + rightAlias.width &&
+    rightAlias.bitOffset < leftAlias.bitOffset + leftAlias.width;
+}
+
+export function jitRegisterSlotAlias(slot: JitRegisterSlot): RegisterAlias {
+  return registerAlias(slot.reg);
+}
+
+export function jitRegisterSlotForAlias(alias: RegisterAlias): JitRegisterSlot {
+  return jitRegisterSlotForWrite(alias.base, alias.bitOffset, alias.width);
+}
+
+export function jitRegisterSlotForWrite(
+  reg: Reg32,
+  bitOffset: number,
+  width: OperandWidth
+): JitRegisterSlot {
+  switch (width) {
+    case 8: {
+      const alias = registerAliasesByWidth[8].find((candidate) =>
+        candidate.base === reg && candidate.bitOffset === bitOffset
+      );
+
+      if (alias === undefined) {
+        throw new Error(`unsupported JIT 8-bit register slot: ${reg}+${bitOffset}`);
+      }
+
+      return { kind: "reg8", reg: alias.name };
+    }
+    case 16: {
+      const alias = registerAliasesByWidth[16].find((candidate) =>
+        candidate.base === reg && candidate.bitOffset === bitOffset
+      );
+
+      if (alias === undefined) {
+        throw new Error(`unsupported JIT 16-bit register slot: ${reg}+${bitOffset}`);
+      }
+
+      return { kind: "reg16", reg: alias.name };
+    }
+    case 32:
+      if (bitOffset !== 0) {
+        throw new Error(`unsupported JIT 32-bit register slot: ${reg}+${bitOffset}`);
+      }
+
+      return { kind: "reg32", reg };
+  }
 }
 
 export function jitArchitecturalSlotKey(slot: JitArchitecturalSlot): string {
   switch (slot.kind) {
     case "reg32":
       return `reg32:${slot.reg}`;
+    case "reg16":
+      return `reg16:${slot.reg}`;
+    case "reg8":
+      return `reg8:${slot.reg}`;
     case "aluFlags":
       return "aluFlags";
   }

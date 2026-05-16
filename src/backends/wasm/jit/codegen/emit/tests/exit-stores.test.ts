@@ -12,6 +12,7 @@ import {
   wasmBodyMemoryAccesses,
   wasmBodyOpcodes,
   jitInputAluFlagsValue,
+  jitInputReg32Value,
   JitValueLocalStore,
   captureExitStores,
   emitExitStores,
@@ -61,6 +62,48 @@ test("JIT exit stores capture aluFlags sources before overwriting flags", () => 
       { opcode: wasmOpcode.i32Load, offset: stateOffset.aluFlags },
       { opcode: wasmOpcode.i32Store, offset: stateOffset.aluFlags },
       { opcode: wasmOpcode.i32Store, offset: stateOffset.eax }
+    ]
+  );
+});
+
+test("JIT exit stores capture register sources before overwriting aliased register targets", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const captured = captureExitStores({
+    body
+  }, [
+    {
+      target: { kind: "reg8", reg: "ah" },
+      value: { kind: "const", type: "i32", value: 0x12 }
+    },
+    {
+      target: { kind: "reg32", reg: "ebx" },
+      value: jitInputReg32Value("eax")
+    }
+  ]);
+
+  if (captured === undefined) {
+    throw new Error("expected captured exit stores");
+  }
+
+  emitExitStores({ body }, captured);
+  releaseExitStores(captured);
+  body.end();
+
+  const encoded = body.encode();
+
+  deepStrictEqual(localOpcodes(wasmBodyOpcodes(encoded)), [wasmOpcode.localSet, wasmOpcode.localGet]);
+  deepStrictEqual(
+    wasmBodyMemoryAccesses(encoded)
+      .filter((access) =>
+        access.offset === stateOffset.eax ||
+        access.offset === stateOffset.eax + 1 ||
+        access.offset === stateOffset.ebx
+      )
+      .map(({ opcode, offset }) => ({ opcode, offset })),
+    [
+      { opcode: wasmOpcode.i32Load, offset: stateOffset.eax },
+      { opcode: wasmOpcode.i32Store8, offset: stateOffset.eax + 1 },
+      { opcode: wasmOpcode.i32Store, offset: stateOffset.ebx }
     ]
   );
 });

@@ -8,6 +8,8 @@ import {
   jitInputReg32Value,
   jitInsertBits,
   createJitValueState,
+  reg16Slot,
+  reg8Slot,
   xchg,
   c32,
   changedSlots,
@@ -32,10 +34,11 @@ test("JIT register value family models prefixes as bit extraction and insertion"
   const state = createJitValueState();
   const inputEax = jitInputReg32Value("eax");
 
-  deepStrictEqual(state.regs.readRegPart("eax", 0, 8), jitExtractBits(inputEax, 0, 8));
-  deepStrictEqual(state.regs.readRegPart("eax", 8, 8), jitExtractBits(inputEax, 8, 8));
+  deepStrictEqual(state.regs.readReg8("al"), jitExtractBits(inputEax, 0, 8));
+  deepStrictEqual(state.regs.readReg8("ah"), jitExtractBits(inputEax, 8, 8));
+  deepStrictEqual(state.regs.readReg16("ax"), jitExtractBits(inputEax, 0, 16));
 
-  state.regs.writeRegPart("eax", 0, 8, c32(0x7f));
+  state.regs.writeReg8("al", c32(0x7f));
 
   const snapshot = state.snapshot();
   const expected = jitInsertBits(inputEax, c32(0x7f), 0, 8);
@@ -45,12 +48,28 @@ test("JIT register value family models prefixes as bit extraction and insertion"
   deepStrictEqual(snapshot.slots.changedEntries()[0]?.value, expected);
 });
 
+test("JIT value slots canonicalize IR register aliases through the 32-bit base", () => {
+  const state = createJitValueState();
+
+  deepStrictEqual(state.slots.read(reg8Slot("al")), jitExtractBits(jitInputReg32Value("eax"), 0, 8));
+  deepStrictEqual(state.slots.read(reg16Slot("ax")), jitExtractBits(jitInputReg32Value("eax"), 0, 16));
+
+  state.slots.write(reg8Slot("ah"), c32(0x12));
+
+  const snapshot = state.snapshot();
+  const expected = jitInsertBits(jitInputReg32Value("eax"), c32(0x12), 8, 8);
+
+  deepStrictEqual(snapshot.regs.readReg32("eax"), expected);
+  deepStrictEqual(snapshot.slots.read(reg8Slot("ah")), c32(0x12));
+  deepStrictEqual(changedSlots(snapshot.slots.changedEntries()), ["reg32:eax"]);
+});
+
 test("JIT register value family simplifies prefix identity writes away", () => {
   const state = createJitValueState();
 
-  state.regs.writeRegPart("eax", 0, 8, state.regs.readRegPart("eax", 0, 8));
-  state.regs.writeRegPart("ebx", 8, 8, state.regs.readRegPart("ebx", 8, 8));
-  state.regs.writeRegPart("ecx", 0, 16, state.regs.readRegPart("ecx", 0, 16));
+  state.regs.writeReg8("al", state.regs.readReg8("al"));
+  state.regs.writeReg8("bh", state.regs.readReg8("bh"));
+  state.regs.writeReg16("cx", state.regs.readReg16("cx"));
 
   const snapshot = state.snapshot();
 
@@ -63,7 +82,7 @@ test("JIT register value family simplifies prefix identity writes away", () => {
 test("JIT register value family lets later full writes replace prefix merges", () => {
   const state = createJitValueState();
 
-  state.regs.writeRegPart("eax", 0, 8, c32(0x7f));
+  state.regs.writeReg8("al", c32(0x7f));
   state.regs.writeReg32("eax", jitInputReg32Value("ebx"));
 
   const snapshot = state.snapshot();

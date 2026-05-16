@@ -5,7 +5,7 @@ import type {
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { JitArchitecturalSlot, JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import {
   rootPath,
@@ -16,10 +16,7 @@ import {
   opView,
   type Timeline
 } from "#backends/wasm/jit/analysis/timeline.js";
-import type {
-  PlannedExit,
-  StoreTarget
-} from "./exit-stores.js";
+import type { PlannedExit } from "./exit-stores.js";
 
 export type JitValueUsePlacement = Readonly<{
   instructionIndex: number;
@@ -51,7 +48,7 @@ export type JitExitStoreUsePlacement = Readonly<{
 
 export type JitExitStoreUse = Readonly<{
   purpose: "exitStore";
-  target: StoreTarget;
+  target: JitArchitecturalSlot;
   value: JitValue;
   placement: JitExitStoreUsePlacement;
   path: Path;

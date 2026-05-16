@@ -11,12 +11,16 @@ import {
   jitFlagConditionValue,
   jitFlagProducerValue,
   jitInputAluFlagsValue,
+  jitInputReg16Value,
   jitInputReg32Value,
+  jitInputReg8Value,
   jitInsertBits,
   jitInsertMaskedBits,
   jitProducedValue
 } from "#backends/wasm/jit/ir/values/builders.js";
 import {
+  jitArchitecturalSlotKey,
+  jitArchitecturalSlotsOverlap,
   slotsReadByValue,
   slotsReadByValueForMask
 } from "#backends/wasm/jit/ir/values/slots.js";
@@ -103,6 +107,26 @@ test("JitValue equality and cache keys are canonical after simplification", () =
   strictEqual(valueKey(first), valueKey(second));
   strictEqual(valuesEqual(left, right), true);
   strictEqual(valueKey(left), valueKey(right));
+});
+
+test("JitValue architectural slots distinguish aliases exactly and detect overlap", () => {
+  const eax = { kind: "reg32", reg: "eax" } as const;
+  const ax = { kind: "reg16", reg: "ax" } as const;
+  const al = { kind: "reg8", reg: "al" } as const;
+  const ah = { kind: "reg8", reg: "ah" } as const;
+  const bl = { kind: "reg8", reg: "bl" } as const;
+  const canonicalAl = jitExtractBits(jitInputReg32Value("eax"), 0, 8);
+
+  strictEqual(valueKey(jitInputReg32Value("eax")), "input:reg32:eax");
+  strictEqual(valueKey(jitInputReg16Value("ax")), "extractBits:0:16:input:reg32:eax");
+  strictEqual(valueKey(jitInputReg8Value("al")), "extractBits:0:8:input:reg32:eax");
+  strictEqual(valuesEqual(jitInputReg32Value("eax"), jitInputReg8Value("al")), false);
+  strictEqual(valuesEqual(jitInputReg8Value("al"), canonicalAl), true);
+  deepStrictEqual(jitInsertBits(jitInputReg32Value("eax"), jitInputReg8Value("al"), 0, 8), jitInputReg32Value("eax"));
+  strictEqual(jitArchitecturalSlotsOverlap(eax, ax), true);
+  strictEqual(jitArchitecturalSlotsOverlap(ax, al), true);
+  strictEqual(jitArchitecturalSlotsOverlap(al, ah), false);
+  strictEqual(jitArchitecturalSlotsOverlap(al, bl), false);
 });
 
 test("JitValue helper contract covers every value kind", () => {
@@ -367,7 +391,7 @@ function extend16s(value: JitValue): JitValue {
 }
 
 function slotKeys(slots: readonly JitArchitecturalSlot[]): readonly string[] {
-  return slots.map((slot) => slot.kind === "aluFlags" ? "aluFlags" : `reg32:${slot.reg}`).sort();
+  return slots.map(jitArchitecturalSlotKey).sort();
 }
 
 type ValueContractCase = Readonly<{

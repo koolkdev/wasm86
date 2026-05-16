@@ -55,7 +55,7 @@ test("JIT value timeline records the same register source expression before and 
   deepStrictEqual(timeline.final.regs.readReg32("eax"), c32(7));
 });
 
-test("JIT value timeline records partial register writes as full-register inserts", () => {
+test("JIT value timeline records partial register writes as named register aliases", () => {
   const expressionBlock = [
     { op: "set", target: reg("eax"), value: c32(0x7f), accessWidth: 8 }
   ] as const satisfies IrExprBlock;
@@ -68,8 +68,8 @@ test("JIT value timeline records partial register writes as full-register insert
 
   deepStrictEqual(timeline.writes, [{
     opIndex: 0,
-    slot: { kind: "reg32", reg: "eax" },
-    value: expected
+    slot: { kind: "reg8", reg: "al" },
+    value: c32(0x7f)
   }]);
   deepStrictEqual(timeline.final.regs.readReg32("eax"), expected);
 });

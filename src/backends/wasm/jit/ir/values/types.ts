@@ -1,4 +1,4 @@
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import type { OperandWidth, Reg16, Reg32, Reg8 } from "#x86/isa/types.js";
 import type {
   ConditionCode,
   FlagProducerName,
@@ -35,13 +35,22 @@ export type JitSelectValue = Readonly<{
   whenFalse: JitValue;
 }>;
 
-export type JitArchitecturalSlot =
+export type JitRegisterSlot =
   | Readonly<{ kind: "reg32"; reg: Reg32 }>
-  | Readonly<{ kind: "aluFlags" }>;
+  | Readonly<{ kind: "reg16"; reg: Reg16 }>
+  | Readonly<{ kind: "reg8"; reg: Reg8 }>;
+
+export type JitFlagSlot = Readonly<{ kind: "aluFlags" }>;
+
+export type JitArchitecturalSlot = JitRegisterSlot | JitFlagSlot;
+
+export type JitCanonicalInputSlot =
+  | Readonly<{ kind: "reg32"; reg: Reg32 }>
+  | JitFlagSlot;
 
 export type JitInputValue = Readonly<{
   kind: "input";
-  slot: JitArchitecturalSlot;
+  slot: JitCanonicalInputSlot;
 }>;
 
 export type JitExtractBitsValue = Readonly<{

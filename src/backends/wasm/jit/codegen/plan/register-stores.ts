@@ -2,16 +2,21 @@ import { reg32, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
 import {
   jitInputReg32Value
 } from "#backends/wasm/jit/ir/values/builders.js";
+import { jitRegisterSlotForWrite } from "#backends/wasm/jit/ir/values/slots.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { JitRegisterSlot, JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
-import type { ExitStore, StoreTarget } from "./exit-stores.js";
+
+export type RegisterExitStore = Readonly<{
+  target: JitRegisterSlot;
+  value: JitValue;
+}>;
 
 export function registerStores(
   snapshot: JitValueStateSnapshot,
   regs: readonly Reg32[] = reg32
-): readonly ExitStore[] {
+): readonly RegisterExitStore[] {
   return regs.flatMap((reg) => {
     const store = registerStore(snapshot, reg);
 
@@ -22,7 +27,7 @@ export function registerStores(
 export function registerStore(
   snapshot: JitValueStateSnapshot,
   reg: Reg32
-): ExitStore | undefined {
+): RegisterExitStore | undefined {
   const value = snapshot.regs.readReg32(reg);
 
   if (valuesEqual(value, jitInputReg32Value(reg))) {
@@ -35,14 +40,14 @@ export function registerStore(
   };
 }
 
-function narrowRegisterStore(reg: Reg32, value: JitValue): ExitStore | undefined {
+function narrowRegisterStore(reg: Reg32, value: JitValue): RegisterExitStore | undefined {
   const simplified = simplifyValue(value);
 
   if (simplified.kind !== "insertBits" || !isInputReg32(simplified.base, reg)) {
     return undefined;
   }
 
-  const target = regPartTarget(reg, simplified.bitOffset, simplified.width);
+  const target = registerStoreTarget(reg, simplified.bitOffset, simplified.width);
 
   return target === undefined
     ? undefined
@@ -52,27 +57,16 @@ function narrowRegisterStore(reg: Reg32, value: JitValue): ExitStore | undefined
       };
 }
 
-function regPartTarget(
+function registerStoreTarget(
   reg: Reg32,
   bitOffset: number,
   width: OperandWidth
-): StoreTarget | undefined {
-  if (!isLegalRegPart(bitOffset, width)) {
+): JitRegisterSlot | undefined {
+  if (width === 32) {
     return undefined;
   }
 
-  return { kind: "regPart", reg, bitOffset, width };
-}
-
-function isLegalRegPart(bitOffset: number, width: OperandWidth): boolean {
-  switch (width) {
-    case 8:
-      return bitOffset === 0 || bitOffset === 8;
-    case 16:
-      return bitOffset === 0;
-    case 32:
-      return false;
-  }
+  return jitRegisterSlotForWrite(reg, bitOffset, width);
 }
 
 function isInputReg32(value: JitValue, reg: Reg32): boolean {
