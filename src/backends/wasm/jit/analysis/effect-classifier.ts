@@ -6,7 +6,7 @@ import type { ExitKind } from "./exits.js";
 export type EffectKind =
   | "memoryGuard"
   | "memoryStore"
-  | "producedValue"
+  | "memoryLoad"
   | "jump"
   | "branch"
   | "hostTrap"
@@ -50,7 +50,7 @@ export function classifyEffect(
         : undefined;
     case "get":
       return storageAccessIsMemory(op.source, instruction.operands)
-        ? "producedValue"
+        ? "memoryLoad"
         : undefined;
     case "jump":
       return "jump";

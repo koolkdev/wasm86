@@ -162,7 +162,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
   deepStrictEqual(effects.map((effect) => effect.kind), [
     "memoryGuard",
     "memoryStore",
-    "producedValue",
+    "memoryLoad",
     "jump",
     "branch",
     "hostTrap",
@@ -178,13 +178,13 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
   const store = requireEffect(effects[1], "memoryStore");
   deepStrictEqual(store.address, c32(0x64));
   deepStrictEqual(store.value, c32(0x55));
-  strictEqual(store.accessWidth, 32);
+  strictEqual(store.width, 32);
 
-  const produced = requireEffect(effects[2], "producedValue");
-  deepStrictEqual(produced.value, jitProducedValue("load#schedule-produced:2:0:0", "i32"));
-  deepStrictEqual(produced.address, c32(0x68));
-  strictEqual(produced.accessWidth, 16);
-  strictEqual(produced.signed, false);
+  const load = requireEffect(effects[2], "memoryLoad");
+  deepStrictEqual(load.result, jitProducedValue("load#schedule-produced:2:0:0", "i32"));
+  deepStrictEqual(load.address, c32(0x68));
+  strictEqual(load.width, 16);
+  strictEqual(load.signed, false);
 
   const jump = requireEffect(effects[3], "jump");
   deepStrictEqual(jump.target, c32(0x2000));
@@ -436,14 +436,14 @@ test("JIT effects plan selects produced values only for later required roots", (
   const produced = jitProducedValue("load#used-produced:0:0:0", "i32");
 
   deepStrictEqual(unusedPlan.effects.map((effect) => effect.kind), [
-    "producedValue"
+    "memoryLoad"
   ]);
   deepStrictEqual(unusedPlan.valueUses, []);
   deepStrictEqual(unusedPlan.reusePlan.cache.selected, []);
   deepStrictEqual(unusedPlan.reusePlan.captures.captures, []);
 
   deepStrictEqual(usedPlan.effects.map((effect) => effect.kind), [
-    "producedValue",
+    "memoryLoad",
     "hostTrap"
   ]);
   deepStrictEqual(usedPlan.reusePlan.cache.selected, [

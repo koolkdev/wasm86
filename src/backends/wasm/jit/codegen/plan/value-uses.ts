@@ -24,7 +24,7 @@ export type UsePurpose =
   | "controlTarget"
   | "trapVector"
   | "exitStore"
-  | "producedValue";
+  | "memoryLoad";
 
 export type ValueRoot = Readonly<{
   value: JitValue;
@@ -135,7 +135,7 @@ function rootsForEffect(effect: Effect): readonly ValueRoot[] {
       return [
         valueRoot(effect.vector, effect.at, rootPath(), "trapVector")
       ];
-    case "producedValue":
+    case "memoryLoad":
     case "fallthrough":
       return [];
   }
@@ -149,7 +149,7 @@ function effectPath(effect: Effect): Path {
       return effect.exit.path;
     case "branch":
     case "memoryStore":
-    case "producedValue":
+    case "memoryLoad":
     case "hostTrap":
     case "fallthrough":
       return rootPath();
@@ -198,7 +198,7 @@ function exitsForEffect(effect: Effect): readonly Exit[] {
     case "branch":
       return [effect.taken, effect.notTaken];
     case "memoryStore":
-    case "producedValue":
+    case "memoryLoad":
       return [];
   }
 }

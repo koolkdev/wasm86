@@ -28,12 +28,12 @@ export type Effect =
   | EffectBase<"memoryStore"> & Readonly<{
       address: JitValue;
       value: JitValue;
-      accessWidth: OperandWidth;
+      width: OperandWidth;
     }>
-  | EffectBase<"producedValue"> & Readonly<{
-      value: JitProducedValue;
+  | EffectBase<"memoryLoad"> & Readonly<{
+      result: JitProducedValue;
       address: JitValue;
-      accessWidth: OperandWidth;
+      width: OperandWidth;
       signed: boolean;
     }>
   | EffectBase<"jump"> & Readonly<{

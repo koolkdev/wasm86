@@ -10,6 +10,7 @@ import type { JitModuleLinkTable } from "#backends/wasm/jit/compiled-blocks/modu
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 import type { Path } from "#backends/wasm/jit/analysis/paths.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { Effect } from "#backends/wasm/jit/codegen/plan/effect-types.js";
 import type { ValueCache } from "./cache.js";
 import type { ValueEmitter } from "./values.js";
 import type { ExitFrame } from "./exit-frame.js";
@@ -25,19 +26,16 @@ export type JitLinkEmitContext = JitLinkResolver & Readonly<{
   tableIndex?: number;
 }>;
 
-export type BranchControlExit = Readonly<{
-  target: JitValue;
-  exit: Exit;
+export type ControlEffect = Extract<
+  Effect,
+  { kind: "jump" | "branch" | "hostTrap" | "fallthrough" }
+>;
+
+export type ControlEffectsEmitter = Readonly<{
+  emit(effect: ControlEffect): void;
 }>;
 
-export type ControlExitEmitter = Readonly<{
-  emitJump(target: JitValue, exit: Exit): void;
-  emitBranch(condition: JitValue, taken: BranchControlExit, notTaken: BranchControlExit): void;
-  emitHostTrap(vector: JitValue, exit: Exit): void;
-  emitFallthrough(exit: Exit): void;
-}>;
-
-export type ControlExitEmitterContext = Readonly<{
+export type ControlEffectsEmitterContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   values: ValueEmitter;
@@ -46,9 +44,9 @@ export type ControlExitEmitterContext = Readonly<{
   linking?: JitLinkEmitContext | undefined;
 }>;
 
-export function createControlExitEmitter(
-  context: ControlExitEmitterContext
-): ControlExitEmitter {
+export function createControlEffectsEmitter(
+  context: ControlEffectsEmitterContext
+): ControlEffectsEmitter {
   const {
     body,
     scratch,
@@ -59,62 +57,80 @@ export function createControlExitEmitter(
   } = context;
 
   return {
-    emitJump: (target, exit) => {
-      emitControlTransfer(target, exit);
-    },
-    emitBranch: (condition, taken, notTaken) => {
-      values.emit(condition, { requestedWidth: 32 });
-      body.ifBlock();
-      emitControlTransfer(taken.target, taken.exit, 1);
-      body.elseBlock();
-      emitControlTransfer(notTaken.target, notTaken.exit, 1);
-      body.endBlock();
-    },
-    emitHostTrap: (vector, exit) => {
-      withValuePath(exit.path, () => {
-        assertRuntimePayload(exit, "hostTrapVector");
-
-        const vectorLocal = scratch.allocLocal(wasmValueType.i32);
-
-        try {
-          values.emit(vector, { requestedWidth: 32 });
-          body.localSet(vectorLocal);
-          const destination = frame.captureDestination(exit);
-
-          body.localGet(vectorLocal);
-          frame.emitMetadata(exit);
-          emitWasmIrExitFromI32Stack(body, {
-            destination,
-            reason: exit.reason
-          });
-        } finally {
-          scratch.freeLocal(vectorLocal);
-        }
-      });
-    },
-    emitFallthrough: (exit) => {
-      withValuePath(exit.path, () => {
-        if (exit.payload.kind !== "static") {
-          throw new Error(`JIT ${exit.kind} exit requires a static payload`);
-        }
-
-        const targetEip = u32(exit.payload.value);
-
-        if (emitLinkedStaticControlTransfer(targetEip, exit)) {
-          return;
-        }
-
-        const destination = frame.captureDestination(exit);
-
-        frame.emitMetadata(exit);
-        emitWasmIrExitConstPayload(body, {
-          destination,
-          reason: exit.reason,
-          payload: targetEip
-        });
-      });
-    }
+    emit: (effect) => emitControlEffect(effect)
   };
+
+  function emitControlEffect(effect: ControlEffect): void {
+    switch (effect.kind) {
+      case "jump":
+        emitControlTransfer(effect.target, effect.exit);
+        return;
+      case "branch":
+        emitBranchEffect(effect);
+        return;
+      case "hostTrap":
+        emitHostTrapEffect(effect);
+        return;
+      case "fallthrough":
+        emitFallthroughEffect(effect);
+        return;
+    }
+  }
+
+  function emitBranchEffect(effect: Extract<ControlEffect, { kind: "branch" }>): void {
+    values.emit(effect.condition, { requestedWidth: 32 });
+    body.ifBlock();
+    emitControlTransfer(effect.takenTarget, effect.taken, 1);
+    body.elseBlock();
+    emitControlTransfer(effect.notTakenTarget, effect.notTaken, 1);
+    body.endBlock();
+  }
+
+  function emitHostTrapEffect(effect: Extract<ControlEffect, { kind: "hostTrap" }>): void {
+    withValuePath(effect.exit.path, () => {
+      assertRuntimePayload(effect.exit, "hostTrapVector");
+
+      const vectorLocal = scratch.allocLocal(wasmValueType.i32);
+
+      try {
+        values.emit(effect.vector, { requestedWidth: 32 });
+        body.localSet(vectorLocal);
+        const destination = frame.captureDestination(effect.exit);
+
+        body.localGet(vectorLocal);
+        frame.emitMetadata(effect.exit);
+        emitWasmIrExitFromI32Stack(body, {
+          destination,
+          reason: effect.exit.reason
+        });
+      } finally {
+        scratch.freeLocal(vectorLocal);
+      }
+    });
+  }
+
+  function emitFallthroughEffect(effect: Extract<ControlEffect, { kind: "fallthrough" }>): void {
+    withValuePath(effect.exit.path, () => {
+      if (effect.exit.payload.kind !== "static") {
+        throw new Error(`JIT ${effect.exit.kind} exit requires a static payload`);
+      }
+
+      const targetEip = u32(effect.exit.payload.value);
+
+      if (emitLinkedStaticControlTransfer(targetEip, effect.exit)) {
+        return;
+      }
+
+      const destination = frame.captureDestination(effect.exit);
+
+      frame.emitMetadata(effect.exit);
+      emitWasmIrExitConstPayload(body, {
+        destination,
+        reason: effect.exit.reason,
+        payload: targetEip
+      });
+    });
+  }
 
   function emitControlTransfer(
     target: JitValue,

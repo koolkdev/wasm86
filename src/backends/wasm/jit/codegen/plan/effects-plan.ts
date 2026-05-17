@@ -87,10 +87,10 @@ function planEffect(
         at,
         address: requireStorageAddress(view, expressionOp.target, valueOptions),
         value: requireValueExpr(view, expressionOp.value, valueOptions),
-        accessWidth: expressionOp.accessWidth
+        width: expressionOp.accessWidth
       };
     }
-    case "producedValue": {
+    case "memoryLoad": {
       if (sourceOp.op !== "get" || expressionOp.op !== "let32") {
         return unexpectedEffectOp(effectInfo, expressionOp.op);
       }
@@ -102,9 +102,9 @@ function planEffect(
       return {
         kind: effectInfo.kind,
         at,
-        value: producedValue(instruction, at.opIndex, expressionOp.dst.id),
+        result: producedValue(instruction, at.opIndex, expressionOp.dst.id),
         address: requireStorageAddress(view, expressionOp.value.source, valueOptions),
-        accessWidth: expressionOp.value.accessWidth,
+        width: expressionOp.value.accessWidth,
         signed: expressionOp.value.signed === true
       };
     }

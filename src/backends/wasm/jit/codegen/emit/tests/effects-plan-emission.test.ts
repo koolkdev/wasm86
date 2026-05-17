@@ -218,7 +218,7 @@ test("JIT effects plan emission keeps a guard but skips an unused produced load"
 
   deepStrictEqual(result.emissionPlan.effects.map((effect) => effect.kind), [
     "memoryGuard",
-    "producedValue",
+    "memoryLoad",
     "fallthrough"
   ]);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.memorySize), 2);
@@ -247,9 +247,9 @@ test("JIT effects plan emission keeps a dead produced-load guard before a later 
 
   deepStrictEqual(result.emissionPlan.effects.map((effect) => effect.kind), [
     "memoryGuard",
-    "producedValue",
+    "memoryLoad",
     "memoryGuard",
-    "producedValue",
+    "memoryLoad",
     "hostTrap"
   ]);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.memorySize), 4);

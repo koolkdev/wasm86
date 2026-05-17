@@ -47,7 +47,7 @@ type EffectInfoBase<TKind extends EffectKind> = Readonly<{
 export type EffectInfo<TExit extends Exit = Exit> =
   | EffectInfoBase<"memoryGuard"> & Readonly<{ faultExit: TExit }>
   | EffectInfoBase<"memoryStore">
-  | EffectInfoBase<"producedValue">
+  | EffectInfoBase<"memoryLoad">
   | EffectInfoBase<"jump"> & Readonly<{ exit: TExit }>
   | EffectInfoBase<"branch"> & Readonly<{ taken: TExit; notTaken: TExit }>
   | EffectInfoBase<"hostTrap"> & Readonly<{ exit: TExit }>
@@ -144,7 +144,7 @@ export function reattachEffectExits<TExit extends Exit>(
           notTaken: exitsById.get(effect.notTaken.id)!
         };
       case "memoryStore":
-      case "producedValue":
+      case "memoryLoad":
         return effect;
     }
   });
@@ -161,7 +161,7 @@ function effectForOp(
     case "memoryStore":
       assertNoExits(exits, kind, at);
       return { kind, at };
-    case "producedValue":
+    case "memoryLoad":
       assertNoExits(exits, kind, at);
       return { kind, at };
     case "jump":

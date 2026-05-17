@@ -13,7 +13,7 @@ import { emitJitBlock } from "./codegen/emit/block-emitter.js";
 import {
   type JitLinkEmitContext,
   type JitLinkResolver
-} from "./codegen/emit/control-exits.js";
+} from "./codegen/emit/control-effects.js";
 import { createExitStoreLayout } from "./codegen/emit/exit-frame.js";
 import { createExitMetadataEmitter } from "./codegen/emit/exit-metadata.js";
 import { createExitStoreEmitter } from "./codegen/emit/exit-stores.js";
