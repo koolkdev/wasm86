@@ -9,15 +9,20 @@ import { jitModuleLinkFallbackExportName } from "./compiled-blocks/module-link-t
 import { validateBlock } from "./ir/validate.js";
 import { buildJitCodegenEmissionPlan } from "./codegen/plan/emission.js";
 import { planJitCodegen } from "./codegen/plan/plan.js";
-import { emitJitBlock } from "./codegen/emit/block-emitter.js";
 import {
   type JitLinkEmitContext,
   type JitLinkResolver
 } from "./codegen/emit/control-effects.js";
-import { createExitStoreLayout } from "./codegen/emit/exit-frame.js";
+import { createExitFrame, createExitStoreLayout } from "./codegen/emit/exit-frame.js";
 import { createExitMetadataEmitter } from "./codegen/emit/exit-metadata.js";
 import { createExitStoreEmitter } from "./codegen/emit/exit-stores.js";
 import { createValueCache } from "./codegen/emit/cache.js";
+import { createEffectEmitter } from "./codegen/emit/effects.js";
+import { createInputSlotEmitter } from "./codegen/emit/input-slots.js";
+import {
+  createValueEmitters,
+  unavailableProducedEmitter
+} from "./codegen/emit/values.js";
 import type { JitBlock } from "./ir/types.js";
 
 export type EncodeJitBlockOptions = Readonly<{
@@ -109,30 +114,48 @@ function encodeJitBlockFunctionBody(
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const valueCache = createValueCache(
+  const valueState = createValueCache(
     body,
     emissionPlan.reusePlan.cache,
-    emissionPlan.reusePlan.captures,
     emissionPlan.reusePlan.instructions
   );
-  const metadata = createExitMetadataEmitter(body);
-  const exitStores = createExitStoreEmitter({ body, valueCache });
-  const exitStoreLayout = createExitStoreLayout(emissionPlan.storeStrategy);
-
-  metadata.beginBlock();
-
-  emitJitBlock({
+  const values = createValueEmitters({
     body,
-    scratch,
+    cache: valueState.cache,
+    scope: valueState.scope,
+    inputs: createInputSlotEmitter(body),
+    produced: unavailableProducedEmitter()
+  });
+  const metadata = createExitMetadataEmitter(body);
+  const exitStores = createExitStoreEmitter({ body });
+  const exitStoreLayout = createExitStoreLayout(emissionPlan.storeStrategy);
+  const exitFrame = createExitFrame({
+    body,
     metadata,
     stores: exitStores,
-    exitStoreLayout,
-    exitLocal,
-    instructions: emissionPlan.instructions,
-    effects: emissionPlan.effects,
-    valueCache,
+    layout: exitStoreLayout,
+    exitLocal
+  });
+
+  metadata.beginBlock();
+  exitFrame.openDeferredBlocks();
+
+  const effects = createEffectEmitter({
+    body,
+    scratch,
+    exitFrame,
+    captures: emissionPlan.reusePlan.captures,
+    values,
     linking
   });
+
+  for (const effect of emissionPlan.effects) {
+    effects.emit(effect);
+  }
+
+  scratch.assertClear();
+
+  exitFrame.emitDeferredReturns();
   scratch.assertClear();
   body.end();
 

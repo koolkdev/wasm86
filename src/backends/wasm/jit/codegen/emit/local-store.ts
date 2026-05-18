@@ -91,6 +91,24 @@ export class LocalStore {
     this.#currentPathKey = frame.previousPathKey;
   }
 
+  withPath<T>(path: Path, emit: () => T): T {
+    if (this.isCurrentPath(path)) {
+      return emit();
+    }
+
+    this.enterPath(path);
+
+    try {
+      return emit();
+    } finally {
+      this.leavePath();
+    }
+  }
+
+  isCurrentPath(path: Path): boolean {
+    return this.#currentPathKey === valuePathKey(path);
+  }
+
   get(value: JitValue): CachedUse | undefined {
     const availability = this.#visibleAvailabilityForValue(value);
 

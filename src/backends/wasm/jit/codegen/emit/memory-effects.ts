@@ -18,12 +18,8 @@ import { ExitReason } from "#backends/wasm/exit.js";
 import type {
   Effect
 } from "#backends/wasm/jit/codegen/plan/effect-types.js";
-import type { ValueCache } from "./cache.js";
 import type { ExitFrame } from "./exit-frame.js";
-import type {
-  ValueEmitOptions,
-  ValueEmitter
-} from "./values.js";
+import type { ValueEmitter } from "./values.js";
 
 export type MemoryGuardEffect = Extract<Effect, { kind: "memoryGuard" }>;
 export type MemoryStoreEffect = Extract<Effect, { kind: "memoryStore" }>;
@@ -31,55 +27,55 @@ export type MemoryLoadEffect = Extract<Effect, { kind: "memoryLoad" }>;
 export type MemoryEffect = MemoryGuardEffect | MemoryStoreEffect | MemoryLoadEffect;
 
 export type MemoryEffectsEmitter = Readonly<{
-  emit(effect: MemoryEffect): void;
+  emit(effect: MemoryEffect, values: ValueEmitter): void;
 }>;
 
 export type MemoryEffectsInput = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  values: ValueEmitter;
   exitFrame: ExitFrame;
-  valueCache?: ValueCache | undefined;
 }>;
 
 export function createMemoryEffectsEmitter(
   input: MemoryEffectsInput
 ): MemoryEffectsEmitter {
   return {
-    emit: (effect) => emitMemoryEffect(input, effect)
+    emit: (effect, values) => emitMemoryEffect(input, effect, values)
   };
 }
 
 function emitMemoryEffect(
   input: MemoryEffectsInput,
-  effect: MemoryEffect
+  effect: MemoryEffect,
+  values: ValueEmitter
 ): void {
   switch (effect.kind) {
     case "memoryGuard":
-      emitGuard(input, effect);
+      emitGuard(input, effect, values);
       return;
     case "memoryStore":
-      emitStore(input, effect);
+      emitStore(input, effect, values);
       return;
     case "memoryLoad":
-      emitMemoryLoad(input, effect);
+      emitMemoryLoad(input, effect, values);
       return;
   }
 }
 
 function emitGuard(
   input: MemoryEffectsInput,
-  effect: MemoryGuardEffect
+  effect: MemoryGuardEffect,
+  values: ValueEmitter
 ): void {
   assertMemoryGuardExitMatchesAccess(effect);
 
   const addressLocal = input.scratch.allocLocal(wasmValueType.i32);
 
   try {
-    emitEffectValue(input, effect.address, { requestedWidth: 32 });
+    values.emit(effect.address, { requestedWidth: 32 });
     input.body.localSet(addressLocal);
 
-    const destination = captureMemoryFaultDestination(input, effect);
+    const destination = captureMemoryFaultDestination(input, effect, values);
 
     emitWasmIrGuardGuestRange(
       {
@@ -104,15 +100,16 @@ function emitGuard(
 
 function emitStore(
   input: MemoryEffectsInput,
-  effect: MemoryStoreEffect
+  effect: MemoryStoreEffect,
+  values: ValueEmitter
 ): void {
   emitWasmIrStoreGuestUnchecked(
     input.body,
     () => {
-      emitEffectValue(input, effect.address, { requestedWidth: 32 });
+      values.emit(effect.address, { requestedWidth: 32 });
     },
     () => {
-      const valueWidth = emitEffectValue(input, effect.value);
+      const valueWidth = values.emit(effect.value);
 
       if (effect.width === 32) {
         emitCleanValueForFullUse(input.body, valueWidth);
@@ -124,20 +121,24 @@ function emitStore(
 
 function emitMemoryLoad(
   input: MemoryEffectsInput,
-  effect: MemoryLoadEffect
+  effect: MemoryLoadEffect,
+  values: ValueEmitter
 ): void {
-  const captured = input.valueCache?.capture(effect.result, () => {
-    emitWasmIrLoadGuestUnchecked(
-      input.body,
-      () => {
-        emitEffectValue(input, effect.address, { requestedWidth: 32 });
-      },
-      effect.width,
-      effect.signed
-    );
+  const captured = values.define(
+    effect.result,
+    () => {
+      emitWasmIrLoadGuestUnchecked(
+        input.body,
+        () => {
+          values.emit(effect.address, { requestedWidth: 32 });
+        },
+        effect.width,
+        effect.signed
+      );
 
-    return signedLoadValueWidth(effect.width, effect.signed);
-  });
+      return signedLoadValueWidth(effect.width, effect.signed);
+    }
+  );
 
   captured?.release();
 }
@@ -150,26 +151,16 @@ function signedLoadValueWidth(width: 8 | 16 | 32, signed: boolean): ValueWidth {
   return cleanValueWidth(width);
 }
 
-function emitEffectValue(
-  input: MemoryEffectsInput,
-  value: Parameters<ValueEmitter["emit"]>[0],
-  options: ValueEmitOptions = {}
-): ValueWidth {
-  return input.values.emit(value, options);
-}
-
 function captureMemoryFaultDestination(
   input: MemoryEffectsInput,
-  effect: MemoryGuardEffect
+  effect: MemoryGuardEffect,
+  values: ValueEmitter
 ): ReturnType<ExitFrame["captureDestination"]> {
   assertRuntimeMemoryAddressPayload(effect);
-  input.valueCache?.enterPath(effect.exit.path);
 
-  try {
-    return input.exitFrame.captureDestination(effect.exit);
-  } finally {
-    input.valueCache?.leavePath();
-  }
+  return values.withPath(effect.exit.path, () =>
+    input.exitFrame.captureDestination(values, effect.exit)
+  );
 }
 
 function assertMemoryGuardExitMatchesAccess(effect: MemoryGuardEffect): void {

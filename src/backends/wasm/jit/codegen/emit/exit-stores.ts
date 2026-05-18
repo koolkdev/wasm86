@@ -10,15 +10,7 @@ import {
 } from "#backends/wasm/codegen/value-width.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import type { PlannedExitStore } from "#backends/wasm/jit/codegen/plan/types.js";
-import {
-  createValueEmitter,
-  unavailableProducedEmitter,
-  type ValueEmitter
-} from "./values.js";
-import type {
-  CachedHandle,
-  ValueCache
-} from "./cache.js";
+import type { ValueCapture, ValueEmitter } from "./values.js";
 import {
   jitRegisterSlotAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
@@ -27,112 +19,138 @@ import type {
   JitArchitecturalSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import { createInputSlotEmitter } from "./input-slots.js";
 
 export type CapturedExitStore = Readonly<{
   store: PlannedExitStore;
   source?: CapturedExitStoreSource;
 }>;
 
-export type CapturedExitStores = readonly CapturedExitStore[];
+export type CapturedExitStores = Readonly<{
+  values: ValueEmitter;
+  stores: readonly CapturedExitStore[];
+}>;
 
 export type ExitStoreEmitter = Readonly<{
-  captureSources(stores: readonly PlannedExitStore[]): CapturedExitStores;
+  captureSources(values: ValueEmitter, stores: readonly PlannedExitStore[]): CapturedExitStores;
   emitStores(stores: CapturedExitStores): void;
   release(stores: CapturedExitStores): void;
 }>;
 
 type CapturedExitStoreSource = Readonly<{
-  kind: "cache";
-  local: number;
-  valueWidth: ValueWidth;
-  owner: CachedHandle;
+  kind: "capture";
+  value: ValueCapture;
 }>;
 
 export type JitExitStoreEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
-  valueCache?: ValueCache | undefined;
 }>;
 
+export type JitExitStoreCaptureContext = JitExitStoreEmitContext;
+
 export function createExitStoreEmitter(
-  context: JitExitStoreEmitContext
+  context: JitExitStoreCaptureContext
 ): ExitStoreEmitter {
   return {
-    captureSources: (stores) => captureExitStores(context, stores),
+    captureSources: (values, stores) => captureExitStores(values, stores),
     emitStores: (stores) => emitExitStores(context, stores),
     release: (stores) => releaseExitStores(stores)
   };
 }
 
 export function captureExitStores(
-  context: JitExitStoreEmitContext,
+  values: ValueEmitter,
   stores: readonly PlannedExitStore[]
 ): CapturedExitStores {
-  return stores.map((store) => captureJitExitStore(context, store));
+  return {
+    values,
+    stores: stores.map((store) => captureJitExitStore(values, store))
+  };
 }
 
 export function emitExitStores(
   context: JitExitStoreEmitContext,
-  stores: readonly CapturedExitStore[]
+  captured: CapturedExitStores
 ): void {
-  for (const store of stores) {
-    emitJitExitStore(context, store);
+  for (const store of captured.stores) {
+    emitJitExitStore(context, captured.values, store);
   }
 }
 
 export function releaseExitStores(
-  stores: readonly CapturedExitStore[]
+  captured: CapturedExitStores
 ): void {
-  for (const store of stores) {
-    if (store.source?.kind === "cache") {
-      store.source.owner.release();
+  for (const store of captured.stores) {
+    if (store.source?.kind === "capture") {
+      store.source.value.release();
     }
   }
 }
 
 function captureJitExitStore(
-  context: JitExitStoreEmitContext,
+  values: ValueEmitter,
   store: PlannedExitStore
 ): CapturedExitStore {
-  const { value } = store.store;
-  const captured = context.valueCache?.capture(
-    store.source.kind === "capture" ? store.source.capture.value : value,
-    () => emitJitExitStoreSourceValue(context, value, false, false)
-  );
+  const captured = captureExitStoreSource(values, store);
 
   if (captured !== undefined) {
-    return {
-      store,
-      source: {
-        kind: "cache",
-        local: captured.local,
-        valueWidth: captured.valueWidth,
-        owner: captured
-      }
-    };
+    return capturedExitStore(store, captured);
   }
 
-  if (store.source.kind === "inline") {
-    const simplified = simplifyValue(value);
+  if (store.source.kind === "capture") {
+    throw new Error("JIT exit-store source capture was not available in the value cache");
+  }
 
-    if (simplified.kind === "produced") {
-      throw new Error("JIT produced exit store value was not captured before exit store emission");
+  const simplified = simplifyValue(store.store.value);
+
+  if (simplified.kind === "produced") {
+    throw new Error("JIT produced exit store value was not captured before exit store emission");
+  }
+
+  return { store };
+}
+
+function captureExitStoreSource(
+  values: ValueEmitter,
+  store: PlannedExitStore
+): ValueCapture | undefined {
+  switch (store.source.kind) {
+    case "capture": {
+      const { capture } = store.source;
+
+      return values.capture(
+        capture,
+        () => emitJitExitStoreSourceValue(values, capture.value, false, false)
+      );
     }
-
-    return { store };
+    case "inline": {
+      return values.retain(store.store.value);
+    }
   }
+}
 
-  throw new Error("JIT exit-store source capture was not available in the value cache");
+function capturedExitStore(
+  store: PlannedExitStore,
+  captured: ValueCapture
+): CapturedExitStore {
+  return {
+    store,
+    source: {
+      kind: "capture",
+      value: captured
+    }
+  };
 }
 
 function emitJitExitStore(
   context: JitExitStoreEmitContext,
+  values: ValueEmitter,
   capturedStore: CapturedExitStore
 ): void {
   const { target, value } = capturedStore.store.store;
 
   emitJitStoreTarget(context.body, target, () => emitCapturedOrInlineStoreSource(
     context,
+    values,
     value,
     capturedStore.source,
     target
@@ -141,20 +159,21 @@ function emitJitExitStore(
 
 function emitCapturedOrInlineStoreSource(
   context: JitExitStoreEmitContext,
+  values: ValueEmitter,
   value: JitValue,
   source: CapturedExitStoreSource | undefined,
   target: JitArchitecturalSlot
 ): ValueWidth {
   if (source !== undefined) {
-    context.body.localGet(source.local);
+    const valueWidth = source.value.emit();
 
     return storeTargetUsesFullWidthValue(target)
-      ? emitCleanValueForFullUse(context.body, source.valueWidth)
-      : source.valueWidth;
+      ? emitCleanValueForFullUse(context.body, valueWidth)
+      : valueWidth;
   }
 
   return emitJitExitStoreSourceValue(
-    context,
+    values,
     value,
     storeTargetUsesFullWidthValue(target)
   );
@@ -165,24 +184,14 @@ function storeTargetUsesFullWidthValue(target: JitArchitecturalSlot): boolean {
 }
 
 function emitJitExitStoreSourceValue(
-  context: JitExitStoreEmitContext,
+  values: ValueEmitter,
   value: JitValue,
   requireFullWidth = false,
   cacheRoot = true
 ): ValueWidth {
-  const values = createExitStoreValueEmitter(context);
   const emit = cacheRoot ? values.emit : values.emitInline;
 
   return emit(value, requireFullWidth ? { requestedWidth: 32 } : {});
-}
-
-function createExitStoreValueEmitter(context: JitExitStoreEmitContext): ValueEmitter {
-  return createValueEmitter({
-    body: context.body,
-    cache: context.valueCache,
-    inputs: createInputSlotEmitter(context.body),
-    produced: unavailableProducedEmitter()
-  });
 }
 
 function emitJitStoreTarget(

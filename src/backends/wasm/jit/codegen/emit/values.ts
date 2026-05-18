@@ -14,30 +14,69 @@ import {
   type ValueWidth,
   type WasmIrEmitValueOptions
 } from "#backends/wasm/codegen/value-width.js";
-import { emitFlagsConditionFromAluFlagsValue, emitFlagProducerConditionFromInputs } from "#backends/wasm/codegen/conditions.js";
-import { emitFlagProducerBitsFromInputs, type WasmFlagValueEmitHelpers } from "#backends/wasm/codegen/flags.js";
-import { conditionFlagReadMask } from "#x86/ir/model/flag-effects.js";
-import { flagProducerConditionKind } from "#x86/ir/model/flag-conditions.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import type { OperandWidth } from "#x86/isa/types.js";
-import type { ConditionCode, IrBinaryOperator, IrUnaryOperator } from "#x86/ir/model/types.js";
+import type { IrBinaryOperator, IrUnaryOperator } from "#x86/ir/model/types.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import { bitRangeMask } from "#backends/wasm/jit/ir/values/bits.js";
 import type {
   JitArchitecturalSlot,
-  JitFlagProducerValue,
   JitInputValue,
   JitProducedValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import type { ValueCache } from "./cache.js";
+import type {
+  Placement
+} from "#backends/wasm/jit/codegen/plan/effect-types.js";
+import type { Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
+import type { Path } from "#backends/wasm/jit/analysis/paths.js";
+import type {
+  CapturedValue,
+  ValueCache,
+  ValueScope
+} from "./cache.js";
+import {
+  emitFlagConditionValue,
+  emitFlagProducerValue,
+  type FlagValueEmitContext
+} from "./flag-values.js";
 
 export type ValueEmitOptions = WasmIrEmitValueOptions;
 
+export type ValueCapture = Readonly<{
+  emit(): ValueWidth;
+  release(): void;
+}>;
+
 export type ValueEmitter = Readonly<{
+  // Emits a normal value use through the reuse cache.
   emit(value: JitValue, options?: ValueEmitOptions): ValueWidth;
+
+  // Emits a normal value use and masks it to the requested operand width.
   emitMasked(value: JitValue, width: OperandWidth): ValueWidth;
+
+  // Emits the root value inline while child values may still use the cache.
   emitInline(value: JitValue, options?: ValueEmitOptions): ValueWidth;
+
+  // Pins an already-materialized value for deferred use.
+  retain(value: JitValue): ValueCapture | undefined;
+
+  // Materializes a concrete planned capture owned by the caller.
+  capture(capture: Capture, emit: () => ValueWidth): ValueCapture;
+
+  // Materializes an effect-produced value only when the reuse plan selected it.
+  define(value: JitProducedValue, emit: () => ValueWidth): ValueCapture | undefined;
+
+  // Emits while a value path is active.
+  withPath<T>(path: Path, emit: () => T): T;
+}>;
+
+export type ValueEmitters = Readonly<{
+  at(placement: Placement): ValueEmitter;
+}>;
+
+export type InlineValueEmitter = Readonly<{
+  emit(value: JitValue, context: InlineValueEmitContext): ValueWidth;
 }>;
 
 export type InputEmitter = Readonly<{
@@ -56,7 +95,8 @@ export type ProducedEmitter = Readonly<{
 
 export type ValueEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
-  cache?: ValueCache | undefined;
+  cache: ValueCache;
+  scope: ValueScope;
   inputs: InputEmitter;
   produced: ProducedEmitter;
 }>;
@@ -69,46 +109,150 @@ export function unavailableProducedEmitter(): ProducedEmitter {
   };
 }
 
-export function createValueEmitter(context: ValueEmitContext): ValueEmitter {
+export function createValueEmitters(context: ValueEmitContext): ValueEmitters {
+  const inline = createInlineValueEmitter(context);
+
   return {
-    emit: (value, options) => emitValue(context, value, options),
-    emitMasked: (value, width) => emitMaskedValue(context, value, width),
-    emitInline: (value, options) => emitInline(context, value, options)
+    at: (placement) => createValueEmitterAt(context, inline, placement)
+  };
+}
+
+function createValueEmitterAt(
+  context: ValueEmitContext,
+  inline: InlineValueEmitter,
+  at: Placement
+): ValueEmitter {
+  const values: ValueEmitter = {
+    emit: (value, options) => emitValue(context, inline, at, values, value, options),
+    emitMasked: (value, width) => emitMaskedValue(context, values, value, width),
+    emitInline: (value, options) => emitInline(context, inline, at, values, value, options),
+    retain: (value) => valueCapture(context, context.cache.retain(value)),
+    capture: (capture, emit) => captureValue(context, at, capture, emit),
+    define: (value, emit) => valueCapture(context, context.cache.define(at, value, emit)),
+    withPath: (path, emit) => context.scope.withPath(path, emit)
+  };
+
+  return values;
+}
+
+function createInlineValueEmitter(context: ValueEmitContext): InlineValueEmitter {
+  return {
+    emit: (value, emitContext) => emitInlineValue(context, emitContext, value)
   };
 }
 
 function emitValue(
   context: ValueEmitContext,
+  inline: InlineValueEmitter,
+  at: Placement,
+  values: ValueEmitter,
   value: JitValue,
   options: ValueEmitOptions = {}
 ): ValueWidth {
   const simplified = simplifyValue(value);
-  const valueWidth = context.cache === undefined
-    ? emitInlineValue(context, simplified)
-    : context.cache.emitForUse(simplified, () => emitInlineValue(context, simplified)).valueWidth;
+  const valueWidth = context.cache.emitForUse(
+    at,
+    simplified,
+    () => inline.emit(simplified, inlineValueContext(context, at, values))
+  ).valueWidth;
 
   return applyRequestedValueWidth(context.body, valueWidth, options);
 }
 
 function emitInline(
   context: ValueEmitContext,
+  inline: InlineValueEmitter,
+  at: Placement,
+  values: ValueEmitter,
   value: JitValue,
   options: ValueEmitOptions = {}
 ): ValueWidth {
-  const valueWidth = emitInlineValue(context, simplifyValue(value));
+  const valueWidth = inline.emit(
+    simplifyValue(value),
+    inlineValueContext(context, at, values)
+  );
 
   return applyRequestedValueWidth(context.body, valueWidth, options);
 }
 
 function emitMaskedValue(
   context: ValueEmitContext,
+  values: ValueEmitter,
   value: JitValue,
   width: OperandWidth
 ): ValueWidth {
-  return emitMaskValueToWidth(context.body, width, emitValue(context, value));
+  return emitMaskValueToWidth(context.body, width, values.emit(value));
 }
 
-function emitInlineValue(context: ValueEmitContext, value: JitValue): ValueWidth {
+function captureValue(
+  context: ValueEmitContext,
+  at: Placement,
+  capture: Capture,
+  emit: () => ValueWidth
+): ValueCapture {
+  if (!placementsEqual(at, capture.at)) {
+    throw new Error("JIT value capture placement does not match value emitter placement");
+  }
+
+  const captured = context.scope.withPath(
+    capture.availability,
+    () => valueCapture(context, context.cache.capture(capture, emit))
+  );
+
+  if (captured === undefined) {
+    throw new Error("JIT planned value capture was not created");
+  }
+
+  return captured;
+}
+
+function valueCapture(
+  context: ValueEmitContext,
+  captured: CapturedValue | undefined
+): ValueCapture | undefined {
+  if (captured === undefined) {
+    return undefined;
+  }
+
+  return {
+    emit: () => {
+      context.body.localGet(captured.local);
+      return captured.valueWidth;
+    },
+    release: () => captured.release()
+  };
+}
+
+type InlineValueEmitContext = Readonly<{
+  values: ValueEmitter;
+  canInline(value: JitValue): boolean;
+}>;
+
+function inlineValueContext(
+  context: ValueEmitContext,
+  at: Placement,
+  values: ValueEmitter
+): InlineValueEmitContext {
+  return {
+    values,
+    canInline: (value) => context.cache.canInline(at, value)
+  };
+}
+
+function placementsEqual(
+  left: Placement,
+  right: Placement
+): boolean {
+  return left.instructionIndex === right.instructionIndex &&
+    left.opIndex === right.opIndex &&
+    left.epoch === right.epoch;
+}
+
+function emitInlineValue(
+  context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
+  value: JitValue
+): ValueWidth {
   switch (value.kind) {
     case "const":
       context.body.i32Const(i32(value.value));
@@ -118,23 +262,23 @@ function emitInlineValue(context: ValueEmitContext, value: JitValue): ValueWidth
     case "produced":
       return emitProduced(context, value);
     case "value.binary":
-      return emitI32Binary(context, value.operator, value.a, value.b);
+      return emitI32Binary(context, emitContext, value.operator, value.a, value.b);
     case "value.unary":
-      return emitI32Unary(context, value.operator, value.value);
+      return emitI32Unary(context, emitContext, value.operator, value.value);
     case "value.select":
-      return emitI32Select(context, value.condition, value.whenTrue, value.whenFalse);
+      return emitI32Select(context, emitContext, value.condition, value.whenTrue, value.whenFalse);
     case "extractBits":
-      return emitExtractBits(context, value.value, value.bitOffset, value.width);
+      return emitExtractBits(context, emitContext, value.value, value.bitOffset, value.width);
     case "insertBits":
-      return emitInsertBits(context, value.base, value.value, value.bitOffset, value.width);
+      return emitInsertBits(context, emitContext, value.base, value.value, value.bitOffset, value.width);
     case "extractMaskedBits":
-      return emitExtractMaskedBits(context, value.value, value.mask);
+      return emitExtractMaskedBits(context, emitContext, value.value, value.mask);
     case "insertMaskedBits":
-      return emitInsertMaskedBits(context, value.base, value.value, value.mask);
+      return emitInsertMaskedBits(context, emitContext, value.base, value.value, value.mask);
     case "flagProducer":
-      return emitFlagProducerValue(context, value);
+      return emitFlagProducerValue(flagValueContext(context, emitContext), value);
     case "flagCondition":
-      return emitFlagConditionValue(context, value.flags, value.cc);
+      return emitFlagConditionValue(flagValueContext(context, emitContext), value.flags, value.cc);
   }
 }
 
@@ -146,39 +290,61 @@ function emitInput(context: ValueEmitContext, value: JitInputValue): ValueWidth 
   return context.inputs.emit(value.slot);
 }
 
-function emitI32Binary(context: ValueEmitContext, operator: IrBinaryOperator, a: JitValue, b: JitValue): ValueWidth {
+function emitI32Binary(
+  context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
+  operator: IrBinaryOperator,
+  a: JitValue,
+  b: JitValue
+): ValueWidth {
   const operandOptions = i32BinaryOperandEmitOptions(operator);
-  const left = emitValue(context, a, operandOptions);
-  const right = emitValue(context, b, operandOptions);
+  const left = emitContext.values.emit(a, operandOptions);
+  const right = emitContext.values.emit(b, operandOptions);
 
   emitI32BinaryInstruction(context.body, operator);
   return i32BinaryResultValueWidth(operator, left, right);
 }
 
-function emitI32Unary(context: ValueEmitContext, operator: IrUnaryOperator, value: JitValue): ValueWidth {
+function emitI32Unary(
+  context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
+  operator: IrUnaryOperator,
+  value: JitValue
+): ValueWidth {
   switch (operator) {
     case "extend8_s":
-      return emitI32SignExtend(context, value, 8);
+      return emitI32SignExtend(context, emitContext, value, 8);
     case "extend16_s":
-      return emitI32SignExtend(context, value, 16);
+      return emitI32SignExtend(context, emitContext, value, 16);
   }
 }
 
-function emitI32SignExtend(context: ValueEmitContext, value: JitValue, width: 8 | 16): ValueWidth {
-  const inputBits = emitSignExtendInputExtractBits(context, value, width);
+function emitI32SignExtend(
+  context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
+  value: JitValue,
+  width: 8 | 16
+): ValueWidth {
+  const inputBits = emitSignExtendInputExtractBits(context, emitContext, value, width);
 
   if (inputBits !== undefined) {
     return inputBits;
   }
 
-  emitValue(context, value, { widthInsensitive: true });
+  emitContext.values.emit(value, { widthInsensitive: true });
   return emitSignExtendValueToWidth(context.body, width);
 }
 
-function emitI32Select(context: ValueEmitContext, condition: JitValue, whenTrue: JitValue, whenFalse: JitValue): ValueWidth {
-  const trueWidth = emitValue(context, whenTrue);
-  const falseWidth = emitValue(context, whenFalse);
-  const conditionWidth = emitValue(context, condition, { requestedWidth: 32 });
+function emitI32Select(
+  context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
+  condition: JitValue,
+  whenTrue: JitValue,
+  whenFalse: JitValue
+): ValueWidth {
+  const trueWidth = emitContext.values.emit(whenTrue);
+  const falseWidth = emitContext.values.emit(whenFalse);
+  const conditionWidth = emitContext.values.emit(condition, { requestedWidth: 32 });
 
   context.body.select();
   return i32SelectResultValueWidth(conditionWidth, trueWidth, falseWidth);
@@ -186,17 +352,21 @@ function emitI32Select(context: ValueEmitContext, condition: JitValue, whenTrue:
 
 function emitExtractBits(
   context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
   value: JitValue,
   bitOffset: number,
   width: OperandWidth
 ): ValueWidth {
-  const inputBits = emitInputExtractBits(context, value, bitOffset, width, false);
+  const inputBits = emitInputExtractBits(context, emitContext, value, bitOffset, width, false);
 
   if (inputBits !== undefined) {
     return inputBits;
   }
 
-  const valueWidth = emitValue(context, value, bitOffset === 0 ? { widthInsensitive: true } : { requestedWidth: 32 });
+  const valueWidth = emitContext.values.emit(
+    value,
+    bitOffset === 0 ? { widthInsensitive: true } : { requestedWidth: 32 }
+  );
 
   if (bitOffset !== 0) {
     context.body.i32Const(bitOffset).i32ShrU();
@@ -209,6 +379,7 @@ function emitExtractBits(
 
 function emitInputExtractBits(
   context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
   value: JitValue,
   bitOffset: number,
   width: OperandWidth,
@@ -218,7 +389,7 @@ function emitInputExtractBits(
 
   if (
     simplified.kind !== "input" ||
-    context.cache?.canInline(simplified) === false
+    emitContext.canInline(simplified) === false
   ) {
     return undefined;
   }
@@ -228,6 +399,7 @@ function emitInputExtractBits(
 
 function emitSignExtendInputExtractBits(
   context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
   value: JitValue,
   width: 8 | 16
 ): ValueWidth | undefined {
@@ -236,30 +408,31 @@ function emitSignExtendInputExtractBits(
   if (
     simplified.kind !== "extractBits" ||
     simplified.width !== width ||
-    context.cache?.canInline(simplified) === false
+    emitContext.canInline(simplified) === false
   ) {
     return undefined;
   }
 
-  return emitInputExtractBits(context, simplified.value, simplified.bitOffset, width, true);
+  return emitInputExtractBits(context, emitContext, simplified.value, simplified.bitOffset, width, true);
 }
 
 function emitInsertBits(
   context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
   base: JitValue,
   value: JitValue,
   bitOffset: number,
   width: OperandWidth
 ): ValueWidth {
   if (bitOffset === 0 && width === 32) {
-    return emitValue(context, value, { requestedWidth: 32 });
+    return emitContext.values.emit(value, { requestedWidth: 32 });
   }
 
   const mask = bitRangeMask(bitOffset, width);
 
-  emitValue(context, base, { requestedWidth: 32 });
+  emitContext.values.emit(base, { requestedWidth: 32 });
   context.body.i32Const(i32(~mask)).i32And();
-  emitMaskedValue(context, value, width);
+  emitContext.values.emitMasked(value, width);
 
   if (bitOffset !== 0) {
     context.body.i32Const(bitOffset).i32Shl();
@@ -269,179 +442,39 @@ function emitInsertBits(
   return cleanValueWidth(32);
 }
 
-function emitExtractMaskedBits(context: ValueEmitContext, value: JitValue, mask: number): ValueWidth {
-  emitValue(context, value, { widthInsensitive: true });
+function emitExtractMaskedBits(
+  context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
+  value: JitValue,
+  mask: number
+): ValueWidth {
+  emitContext.values.emit(value, { widthInsensitive: true });
   context.body.i32Const(i32(mask)).i32And();
   return cleanValueWidth(32);
 }
 
-function emitInsertMaskedBits(context: ValueEmitContext, base: JitValue, value: JitValue, mask: number): ValueWidth {
-  emitValue(context, base, { requestedWidth: 32 });
+function emitInsertMaskedBits(
+  context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
+  base: JitValue,
+  value: JitValue,
+  mask: number
+): ValueWidth {
+  emitContext.values.emit(base, { requestedWidth: 32 });
   context.body.i32Const(i32(~mask)).i32And();
-  emitValue(context, value, { widthInsensitive: true });
+  emitContext.values.emit(value, { widthInsensitive: true });
   context.body.i32Const(i32(mask)).i32And();
   context.body.i32Or();
   return cleanValueWidth(32);
 }
 
-function emitFlagProducerValue(context: ValueEmitContext, value: JitFlagProducerValue): ValueWidth {
-  emitFlagProducerBitsFromInputs(
-    context.body,
-    value,
-    jitFlagValueHelpers(context),
-    value.mask
-  );
-  return cleanValueWidthForMask(value.mask);
-}
-
-function emitFlagConditionValue(
+function flagValueContext(
   context: ValueEmitContext,
-  flags: JitValue,
-  cc: ConditionCode
-): ValueWidth {
-  const simplifiedFlags = simplifyValue(flags);
-
-  if (emitRoutedFlagCondition(context, simplifiedFlags, cc)) {
-    return cleanValueWidth(8);
-  }
-
-  emitFlagsConditionFromAluFlagsValue(context.body, cc, (mask) => {
-    emitFlagBitsForMask(context, simplifiedFlags, mask);
-  });
-  return cleanValueWidth(8);
-}
-
-function emitRoutedFlagCondition(
-  context: ValueEmitContext,
-  flags: JitValue,
-  cc: ConditionCode
-): boolean {
-  const simplifiedFlags = simplifyValue(flags);
-  const readMask = conditionFlagReadMask(cc);
-
-  if (simplifiedFlags.kind === "flagProducer" && canEmitDirectFlagProducerCondition(simplifiedFlags, cc, readMask)) {
-    emitDirectFlagProducerCondition(context, simplifiedFlags, cc);
-    return true;
-  }
-
-  if (simplifiedFlags.kind === "insertMaskedBits") {
-    const insertedMask = simplifiedFlags.mask >>> 0;
-
-    if ((readMask & ~insertedMask) === 0) {
-      return emitRoutedFlagCondition(context, simplifiedFlags.value, cc);
-    }
-
-    if ((readMask & insertedMask) === 0) {
-      return emitRoutedFlagCondition(context, simplifiedFlags.base, cc);
-    }
-  }
-
-  return false;
-}
-
-function canEmitDirectFlagProducerCondition(
-  value: JitFlagProducerValue,
-  cc: ConditionCode,
-  readMask: number
-): boolean {
-  return flagProducerConditionKind({
-    producer: value.producer,
-    width: value.width,
-    cc
-  }) !== undefined && (readMask & ~value.mask) === 0;
-}
-
-function emitFlagBitsForMask(
-  context: ValueEmitContext,
-  flags: JitValue,
-  readMask: number,
-  forceMasked = false
-): ValueWidth {
-  const normalizedReadMask = readMask >>> 0;
-
-  if (normalizedReadMask === 0) {
-    context.body.i32Const(0);
-    return cleanValueWidth(8, 0);
-  }
-
-  const simplifiedFlags = simplifyValue(flags);
-
-  if (simplifiedFlags.kind === "insertMaskedBits") {
-    const insertedMask = simplifiedFlags.mask >>> 0;
-    const insertedReadMask = normalizedReadMask & insertedMask;
-    const baseReadMask = normalizedReadMask & ~insertedMask;
-
-    if (insertedReadMask === 0) {
-      return emitFlagBitsForMask(context, simplifiedFlags.base, normalizedReadMask, forceMasked);
-    }
-
-    if (baseReadMask === 0) {
-      return emitFlagBitsForMask(context, simplifiedFlags.value, normalizedReadMask, forceMasked);
-    }
-
-    emitFlagBitsForMask(context, simplifiedFlags.base, baseReadMask, true);
-    emitFlagBitsForMask(context, simplifiedFlags.value, insertedReadMask, true);
-    context.body.i32Or();
-    return cleanValueWidthForMask(normalizedReadMask);
-  }
-
-  if (simplifiedFlags.kind === "flagProducer") {
-    const producedReadMask = normalizedReadMask & (simplifiedFlags.mask >>> 0);
-
-    if (producedReadMask === 0) {
-      context.body.i32Const(0);
-      return cleanValueWidth(8, 0);
-    }
-
-    return emitFlagProducerValue(context, producedReadMask === simplifiedFlags.mask
-      ? simplifiedFlags
-      : { ...simplifiedFlags, mask: producedReadMask });
-  }
-
-  const valueWidth = emitValue(context, simplifiedFlags, { requestedWidth: 32 });
-
-  if (!forceMasked) {
-    return valueWidth;
-  }
-
-  context.body.i32Const(i32(normalizedReadMask)).i32And();
-  return cleanValueWidthForMask(normalizedReadMask);
-}
-
-function emitDirectFlagProducerCondition(
-  context: ValueEmitContext,
-  value: JitFlagProducerValue,
-  cc: ConditionCode
-): void {
-  emitFlagProducerConditionFromInputs(
-    context.body,
-    {
-      cc,
-      producer: value.producer,
-      ...(value.width === undefined ? {} : { width: value.width }),
-      inputs: value.inputs
-    },
-    jitFlagValueHelpers(context)
-  );
-}
-
-function jitFlagValueHelpers(context: ValueEmitContext): WasmFlagValueEmitHelpers<JitValue> {
+  emitContext: InlineValueEmitContext
+): FlagValueEmitContext {
   return {
-    emitValue: (value, options) => emitValue(context, value, options),
-    emitMaskedValue: (value, width) => emitMaskedValue(context, value, width)
+    body: context.body,
+    emitValue: (value, options) => emitContext.values.emit(value, options),
+    emitMaskedValue: (value, width) => emitContext.values.emitMasked(value, width)
   };
-}
-
-function cleanValueWidthForMask(mask: number): ValueWidth {
-  const normalized = mask >>> 0;
-
-  if (normalized <= 0xff) {
-    return cleanValueWidth(8);
-  }
-
-  if (normalized <= 0xffff) {
-    return cleanValueWidth(16);
-  }
-
-  return cleanValueWidth(32);
 }

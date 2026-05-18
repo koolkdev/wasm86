@@ -13,9 +13,9 @@ import {
 import type { PlacedProducedDefinition } from "./epochs.js";
 import type { PlannedExit } from "./types.js";
 import type {
-  Placement,
   ValueUse
 } from "./value-uses.js";
+import type { Placement } from "./effect-types.js";
 import {
   storeClobberSourceStores
 } from "./store-strategy.js";
@@ -43,7 +43,7 @@ export type InstructionCaptureMap = ReadonlyMap<
 
 export type CapturePlan = Readonly<{
   captures: readonly Capture[];
-  byPlacement: CaptureMap;
+  effectCaptures: CaptureMap;
 }>;
 
 export type CaptureInput = Readonly<{
@@ -59,20 +59,21 @@ export function planCaptures(
   const producedDefinitionCaptures = planProducedDefinitionCaptures(input);
   const rootConsumerCaptures = planRootConsumerCaptures(input.uses, input.cache);
   const storeClobberCaptures = planStoreClobberCaptures(input);
+  const selectedExitStoreCaptures = planSelectedExitStoreCaptures(input, [
+    ...producedDefinitionCaptures,
+    ...rootConsumerCaptures,
+    ...storeClobberCaptures
+  ]);
   const captures = uniqueCaptures([
     ...producedDefinitionCaptures,
     ...rootConsumerCaptures,
-    ...storeClobberCaptures,
-    ...planSelectedExitStoreCaptures(input, [
-      ...producedDefinitionCaptures,
-      ...rootConsumerCaptures,
-      ...storeClobberCaptures
-    ])
+    ...selectedExitStoreCaptures,
+    ...storeClobberCaptures
   ]);
 
   return {
     captures,
-    byPlacement: capturesByPlacement(captures)
+    effectCaptures: capturesByPlacement(captures.filter(isEffectCapture))
   };
 }
 
@@ -83,7 +84,7 @@ export function groupCapturesByInstruction(
   const grouped: Map<number, Capture[]>[] = [];
 
   for (const capture of captures) {
-    if (capture.reason !== "branchShared" && capture.reason !== "forced") {
+    if (!isEffectCapture(capture)) {
       continue;
     }
 
@@ -307,6 +308,20 @@ function uniqueCaptures(
   return unique;
 }
 
+function isEffectCapture(capture: Capture): boolean {
+  switch (capture.reason) {
+    case "branchShared":
+    case "forced":
+      return true;
+    case "producedDefinition":
+    case "storeClobber":
+      return false;
+  }
+
+  const exhaustive: never = capture.reason;
+  return exhaustive;
+}
+
 function placementsEqual(
   left: Placement,
   right: Placement
@@ -317,16 +332,16 @@ function placementsEqual(
 }
 
 function capturesByPlacement(captures: readonly Capture[]): CaptureMap {
-  const byPlacement = new Map<string, Capture[]>();
+  const placementCaptures = new Map<string, Capture[]>();
 
   for (const capture of captures) {
     const key = placementKey(capture.at);
-    const existing = byPlacement.get(key) ?? [];
+    const existing = placementCaptures.get(key) ?? [];
 
-    byPlacement.set(key, [...existing, capture]);
+    placementCaptures.set(key, [...existing, capture]);
   }
 
-  return byPlacement;
+  return placementCaptures;
 }
 
 function placementKey(placement: Placement): string {

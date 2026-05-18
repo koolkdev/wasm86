@@ -20,8 +20,8 @@ import {
 import type { PlannedExit } from "./types.js";
 import type {
   Effect,
-  EffectPlacement,
-  EffectsPlan
+  EffectsPlan,
+  Placement,
 } from "./effect-types.js";
 
 type EffectsPlanInstruction = Pick<
@@ -167,7 +167,7 @@ function effectPlacement(
   instruction: EffectsPlanInstruction,
   effectInfo: EffectInfo<PlannedExit>,
   opEpochs: readonly number[]
-): EffectPlacement {
+): Placement {
   const expressionOpIndex = expressionOpIndexForSourceEffect(
     instruction,
     effectInfo.at.opIndex

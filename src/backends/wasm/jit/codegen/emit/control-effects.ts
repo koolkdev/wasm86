@@ -8,10 +8,8 @@ import {
 } from "#backends/wasm/codegen/exit.js";
 import type { JitModuleLinkTable } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
-import type { Path } from "#backends/wasm/jit/analysis/paths.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { Effect } from "#backends/wasm/jit/codegen/plan/effect-types.js";
-import type { ValueCache } from "./cache.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { ValueEmitter } from "./values.js";
 import type { ExitFrame } from "./exit-frame.js";
 
@@ -32,15 +30,13 @@ export type ControlEffect = Extract<
 >;
 
 export type ControlEffectsEmitter = Readonly<{
-  emit(effect: ControlEffect): void;
+  emit(effect: ControlEffect, values: ValueEmitter): void;
 }>;
 
 export type ControlEffectsEmitterContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  values: ValueEmitter;
   frame: ExitFrame;
-  valueCache?: ValueCache | undefined;
   linking?: JitLinkEmitContext | undefined;
 }>;
 
@@ -50,44 +46,52 @@ export function createControlEffectsEmitter(
   const {
     body,
     scratch,
-    values,
     frame,
-    valueCache,
     linking
   } = context;
 
   return {
-    emit: (effect) => emitControlEffect(effect)
+    emit: (effect, values) => emitControlEffect(effect, values)
   };
 
-  function emitControlEffect(effect: ControlEffect): void {
+  function emitControlEffect(effect: ControlEffect, values: ValueEmitter): void {
     switch (effect.kind) {
       case "jump":
-        emitControlTransfer(effect.target, effect.exit);
+        emitControlTransfer(
+          values,
+          effect.target,
+          effect.exit
+        );
         return;
       case "branch":
-        emitBranchEffect(effect);
+        emitBranchEffect(effect, values);
         return;
       case "hostTrap":
-        emitHostTrapEffect(effect);
+        emitHostTrapEffect(effect, values);
         return;
       case "fallthrough":
-        emitFallthroughEffect(effect);
+        emitFallthroughEffect(effect, values);
         return;
     }
   }
 
-  function emitBranchEffect(effect: Extract<ControlEffect, { kind: "branch" }>): void {
+  function emitBranchEffect(
+    effect: Extract<ControlEffect, { kind: "branch" }>,
+    values: ValueEmitter
+  ): void {
     values.emit(effect.condition, { requestedWidth: 32 });
     body.ifBlock();
-    emitControlTransfer(effect.takenTarget, effect.taken, 1);
+    emitControlTransfer(values, effect.takenTarget, effect.taken, 1);
     body.elseBlock();
-    emitControlTransfer(effect.notTakenTarget, effect.notTaken, 1);
+    emitControlTransfer(values, effect.notTakenTarget, effect.notTaken, 1);
     body.endBlock();
   }
 
-  function emitHostTrapEffect(effect: Extract<ControlEffect, { kind: "hostTrap" }>): void {
-    withValuePath(effect.exit.path, () => {
+  function emitHostTrapEffect(
+    effect: Extract<ControlEffect, { kind: "hostTrap" }>,
+    values: ValueEmitter
+  ): void {
+    values.withPath(effect.exit.path, () => {
       assertRuntimePayload(effect.exit, "hostTrapVector");
 
       const vectorLocal = scratch.allocLocal(wasmValueType.i32);
@@ -95,7 +99,7 @@ export function createControlEffectsEmitter(
       try {
         values.emit(effect.vector, { requestedWidth: 32 });
         body.localSet(vectorLocal);
-        const destination = frame.captureDestination(effect.exit);
+        const destination = frame.captureDestination(values, effect.exit);
 
         body.localGet(vectorLocal);
         frame.emitMetadata(effect.exit);
@@ -109,19 +113,22 @@ export function createControlEffectsEmitter(
     });
   }
 
-  function emitFallthroughEffect(effect: Extract<ControlEffect, { kind: "fallthrough" }>): void {
-    withValuePath(effect.exit.path, () => {
+  function emitFallthroughEffect(
+    effect: Extract<ControlEffect, { kind: "fallthrough" }>,
+    values: ValueEmitter
+  ): void {
+    values.withPath(effect.exit.path, () => {
       if (effect.exit.payload.kind !== "static") {
         throw new Error(`JIT ${effect.exit.kind} exit requires a static payload`);
       }
 
       const targetEip = u32(effect.exit.payload.value);
 
-      if (emitLinkedStaticControlTransfer(targetEip, effect.exit)) {
+      if (emitLinkedStaticControlTransfer(values, targetEip, effect.exit)) {
         return;
       }
 
-      const destination = frame.captureDestination(effect.exit);
+      const destination = frame.captureDestination(values, effect.exit);
 
       frame.emitMetadata(effect.exit);
       emitWasmIrExitConstPayload(body, {
@@ -133,23 +140,25 @@ export function createControlEffectsEmitter(
   }
 
   function emitControlTransfer(
+    transferValues: ValueEmitter,
     target: JitValue,
     exit: Exit,
     extraDepth = 0
   ): void {
-    withValuePath(exit.path, () => {
+    transferValues.withPath(exit.path, () => {
       switch (exit.payload.kind) {
         case "runtime":
-          emitDynamicControlTransfer(target, exit, extraDepth);
+          emitDynamicControlTransfer(transferValues, target, exit, extraDepth);
           return;
         case "static":
-          emitStaticControlTransfer(u32(exit.payload.value), exit, extraDepth);
+          emitStaticControlTransfer(transferValues, u32(exit.payload.value), exit, extraDepth);
           return;
       }
     });
   }
 
   function emitDynamicControlTransfer(
+    transferValues: ValueEmitter,
     target: JitValue,
     exit: Exit,
     extraDepth: number
@@ -159,9 +168,9 @@ export function createControlEffectsEmitter(
     const targetLocal = scratch.allocLocal(wasmValueType.i32);
 
     try {
-      values.emit(target, { requestedWidth: 32 });
+      transferValues.emit(target, { requestedWidth: 32 });
       body.localSet(targetLocal);
-      const destination = frame.captureDestination(exit);
+      const destination = frame.captureDestination(transferValues, exit);
 
       body.localGet(targetLocal);
       frame.emitMetadata(exit, {
@@ -180,15 +189,16 @@ export function createControlEffectsEmitter(
   }
 
   function emitStaticControlTransfer(
+    values: ValueEmitter,
     targetEip: number,
     exit: Exit,
     extraDepth: number
   ): void {
-    if (emitLinkedStaticControlTransfer(targetEip, exit)) {
+    if (emitLinkedStaticControlTransfer(values, targetEip, exit)) {
       return;
     }
 
-    const destination = frame.captureDestination(exit);
+    const destination = frame.captureDestination(values, exit);
 
     frame.emitMetadata(exit);
     emitWasmIrExitConstPayload(body, {
@@ -200,6 +210,7 @@ export function createControlEffectsEmitter(
   }
 
   function emitLinkedStaticControlTransfer(
+    values: ValueEmitter,
     targetEip: number,
     exit: Exit
   ): boolean {
@@ -210,13 +221,13 @@ export function createControlEffectsEmitter(
     const directFunctionIndex = linking.functionIndexForStaticTarget?.(targetEip);
 
     if (directFunctionIndex !== undefined) {
-      frame.emitLinkedStores(exit);
+      frame.emitLinkedStores(values, exit);
       body.returnCallFunction(directFunctionIndex);
       return true;
     }
 
     if (linking.tableIndex !== undefined && linking.slotForStaticTarget !== undefined) {
-      frame.emitLinkedStores(exit);
+      frame.emitLinkedStores(values, exit);
       body
         .i32Const(linking.slotForStaticTarget(targetEip))
         .returnCallIndirect(linking.blockTypeIndex, linking.tableIndex);
@@ -224,19 +235,6 @@ export function createControlEffectsEmitter(
     }
 
     return false;
-  }
-
-  function withValuePath<T>(
-    path: Path,
-    emit: () => T
-  ): T {
-    valueCache?.enterPath(path);
-
-    try {
-      return emit();
-    } finally {
-      valueCache?.leavePath();
-    }
   }
 }
 

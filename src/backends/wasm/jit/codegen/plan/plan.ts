@@ -34,8 +34,8 @@ export type {
 } from "#backends/wasm/jit/analysis/timeline.js";
 export type {
   Effect,
-  EffectPlacement,
-  EffectsPlan
+  EffectsPlan,
+  Placement,
 } from "./effect-types.js";
 export { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 

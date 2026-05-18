@@ -2,21 +2,20 @@ import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import {
   type CachePlan,
-  type CapturePlan,
+  type Capture,
   type InstructionEpochs,
   type SelectedValue
 } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import type {
   Placement
-} from "#backends/wasm/jit/codegen/plan/value-uses.js";
-import {
-  pathsEqual,
-  rootPath,
-  type Path
-} from "#backends/wasm/jit/analysis/paths.js";
+} from "#backends/wasm/jit/codegen/plan/effect-types.js";
+import type { Path } from "#backends/wasm/jit/analysis/paths.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
-import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type {
+  JitProducedValue,
+  JitValue
+} from "#backends/wasm/jit/ir/values/types.js";
 import {
   LocalStore,
   type CapturedValue,
@@ -29,135 +28,132 @@ export type {
   CachedUse
 } from "./local-store.js";
 
+export type ValueScope = Readonly<{
+  withPath<T>(path: Path, emit: () => T): T;
+}>;
+
+export type PlannedValueCapture = Pick<Capture, "at" | "availability" | "value">;
+
 export type ValueCache = Readonly<{
-  beginInstruction(index: number): void;
-  beginOp(opIndex: number): void;
-  enterPath(path: Path): void;
-  leavePath(): void;
-  emitForUse(value: JitValue, emitter: () => ValueWidth): CachedUse;
-  capture(
+  // Emits a normal value use, reusing or teeing locals according to the reuse plan.
+  emitForUse(
+    at: Placement,
     value: JitValue,
     emitter: () => ValueWidth
+  ): CachedUse;
+
+  // Pins an already-materialized value for deferred use.
+  retain(value: JitValue): CapturedValue | undefined;
+
+  // Materializes a concrete planned capture owned by the caller.
+  capture(
+    capture: PlannedValueCapture,
+    emitter: () => ValueWidth
+  ): CapturedValue;
+
+  // Materializes an effect-produced value only when the reuse plan selected it.
+  define(
+    at: Placement,
+    value: JitProducedValue,
+    emitter: () => ValueWidth
   ): CapturedValue | undefined;
-  canInline(value: JitValue): boolean;
+
+  // Reports whether a value can be inlined without hiding a selected cache use.
+  canInline(at: Placement, value: JitValue): boolean;
+}>;
+
+export type ValueCacheState = Readonly<{
+  cache: ValueCache;
+  scope: ValueScope;
 }>;
 
 export function createValueCache(
   body: WasmFunctionBodyEncoder,
-  cachePlan: CachePlan | undefined,
-  capturePlan: CapturePlan | undefined,
+  cachePlan: CachePlan,
   instructions: readonly InstructionEpochs[]
-): ValueCache | undefined {
-  if (cachePlan === undefined) {
-    return undefined;
-  }
-
+): ValueCacheState {
   const plan = cachePlan;
   const store = new LocalStore(body);
-  const captures = capturePlan;
-  let currentEpoch = 0;
-  let currentInstructionIndex = 0;
-  let currentOpIndex = 0;
-  let currentPath = rootPath();
-  const pathStack: Path[] = [];
 
   return {
-    beginInstruction: (index) => {
-      if (index < 0 || index >= instructions.length) {
-        throw new Error(`JIT value cache instruction index out of range: ${index}`);
-      }
+    cache: {
+      emitForUse: (at, value, emitter) => {
+        if (valueIsConsumerAtPlacement(at, value)) {
+          const available = store.get(value);
 
-      currentInstructionIndex = index;
-      currentOpIndex = 0;
-      currentEpoch = currentInstructionPlan().opEpochs[0] ?? currentEpoch;
-    },
-    beginOp: (opIndex) => {
-      const instructionPlan = currentInstructionPlan();
+          if (available !== undefined) {
+            return available;
+          }
 
-      if (opIndex < 0 || opIndex >= instructionPlan.opEpochs.length) {
-        throw new Error(`JIT value cache expression op index out of range: ${opIndex}`);
-      }
+          return store.tee(value, emitter());
+        }
 
-      currentOpIndex = opIndex;
-      currentEpoch = instructionPlan.opEpochs[opIndex] ?? currentEpoch;
-    },
-    emitForUse: (value, emitter) => {
-      if (valueIsConsumerAtCurrentEpoch(value)) {
-        const available = store.get(value);
+        return store.get(value) ?? { valueWidth: emitter() };
+      },
+      retain: (value) => store.retainAvailable(value),
+      capture: (capture, emitter) => {
+        epochForPlacement(capture.at);
+
+        const available = store.retainAvailable(capture.value);
 
         if (available !== undefined) {
           return available;
         }
 
-        return store.tee(value, emitter());
-      }
+        if (!store.isCurrentPath(capture.availability)) {
+          throw new Error("JIT value capture availability path is not active");
+        }
 
-      return store.get(value) ?? { valueWidth: emitter() };
+        return store.set(capture.value, emitter());
+      },
+      define: (at, value, emitter) => {
+        epochForPlacement(at);
+
+        if (!valueIsSelected(plan.selected, value)) {
+          return undefined;
+        }
+
+        const available = store.retainAvailable(value);
+
+        if (available !== undefined) {
+          return available;
+        }
+
+        return store.set(value, emitter());
+      },
+      canInline: (at, value) => !valueIsConsumerAtPlacement(at, value)
     },
-    capture: (value, emitter) => {
-      const available = store.retainAvailable(value);
-
-      if (available !== undefined) {
-        return available;
-      }
-
-      if (!valueHasCaptureAtCurrentPlacement(value)) {
-        return undefined;
-      }
-
-      return store.set(value, emitter());
-    },
-    canInline: (value) => !valueIsConsumerAtCurrentEpoch(value),
-    enterPath: (path) => {
-      pathStack.push(currentPath);
-      currentPath = path;
-      store.enterPath(path);
-    },
-    leavePath: () => {
-      const previousPath = pathStack.pop();
-
-      store.leavePath();
-
-      if (previousPath !== undefined) {
-        currentPath = previousPath;
-      }
+    scope: {
+      withPath: (path, emit) => store.withPath(path, emit)
     }
   };
 
-  function valueIsConsumerAtCurrentEpoch(value: JitValue): boolean {
-    return valueIsSelected(currentEpochPlan()?.consumers ?? [], value);
+  function valueIsConsumerAtPlacement(at: Placement, value: JitValue): boolean {
+    return valueIsSelected(epochPlan(at)?.consumers ?? [], value);
   }
 
-  function valueHasCaptureAtCurrentPlacement(value: JitValue): boolean {
-    const placement = currentPlacement();
-    const placementCaptures = captures?.byPlacement.get(placementKey(placement)) ?? [];
-
-    return placementCaptures.some((capture) =>
-      pathsEqual(capture.availability, currentPath) &&
-        valuesEqual(simplifyValue(capture.value), simplifyValue(value))
-    );
+  function epochPlan(at: Placement) {
+    return plan.epochs[epochForPlacement(at)];
   }
 
-  function currentEpochPlan() {
-    return plan.epochs[currentEpoch];
-  }
-
-  function currentInstructionPlan() {
-    const instructionPlan = instructions[currentInstructionIndex];
+  function epochForPlacement(at: Placement): number {
+    const instructionPlan = instructions[at.instructionIndex];
 
     if (instructionPlan === undefined) {
-      throw new Error(`missing JIT value cache instruction plan: ${currentInstructionIndex}`);
+      throw new Error(`JIT value cache instruction index out of range: ${at.instructionIndex}`);
     }
 
-    return instructionPlan;
-  }
+    const epoch = instructionPlan.opEpochs[at.opIndex];
 
-  function currentPlacement(): Placement {
-    return {
-      instructionIndex: currentInstructionIndex,
-      opIndex: currentOpIndex,
-      epoch: currentEpoch
-    };
+    if (epoch === undefined) {
+      throw new Error(`JIT value cache expression op index out of range: ${at.opIndex}`);
+    }
+
+    if (epoch !== at.epoch) {
+      throw new Error(`JIT value cache placement epoch mismatch: ${placementKey(at)} expected ${epoch}`);
+    }
+
+    return epoch;
   }
 }
 

@@ -29,10 +29,12 @@ import {
   createOneOpValueCache,
   createOneOpSelectedValueCache,
   forcedRootCapture,
+  oneOpPlacement,
   repeatedInlineExpressionBlock,
   type JitBlock,
 } from "./value-local-store-test-helpers.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
+import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
 test("JIT expression emission captures repeated branch target values before the split", () => {
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitBlock([repeatedInlineExpressionBlock()])));
 
@@ -106,22 +108,25 @@ test("JIT value-cache runtime follows planned timeline expression positions", ()
     operands: [],
     valueTimeline: timeline
   }, expressionBlock);
-  const valueCache = createValueCache(body, plan.cache, plan.captures, plan.instructions);
+  const valueState = createValueCache(body, plan.cache, plan.instructions);
+  const value = addValue("eax", 1);
 
-  valueCache?.beginInstruction(0);
-  valueCache?.beginOp(0);
-  valueCache?.beginOp(4);
-  throws(() => valueCache?.beginOp(5), /JIT value cache expression op index out of range: 5/);
+  strictEqual(valueState.cache.canInline({ instructionIndex: 0, opIndex: 0, epoch: 0 }, value), false);
+  strictEqual(valueState.cache.canInline({ instructionIndex: 0, opIndex: 4, epoch: 1 }, value), true);
+  throws(
+    () => valueState.cache.canInline({ instructionIndex: 0, opIndex: 5, epoch: 1 }, value),
+    /JIT value cache expression op index out of range: 5/
+  );
 });
 
 test("JIT value-cache runtime emits unselected values inline when unavailable", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = highCostValue();
-  const valueCache = createOneOpValueCache(body);
+  const valueState = createOneOpValueCache(body);
   let emitted = 0;
 
-  valueCache.emitForUse(value, () => emitHighCostValue(body, () => { emitted += 1; }));
-  valueCache.emitForUse(value, () => emitHighCostValue(body, () => { emitted += 1; }));
+  valueState.cache.emitForUse(oneOpPlacement(), value, () => emitHighCostValue(body, () => { emitted += 1; }));
+  valueState.cache.emitForUse(oneOpPlacement(), value, () => emitHighCostValue(body, () => { emitted += 1; }));
   body.end();
 
   const opcodes = wasmBodyOpcodes(body.encode());
@@ -134,29 +139,31 @@ test("JIT value-cache runtime emits unselected values inline when unavailable", 
 test("JIT value-cache runtime reuses unselected values that are already available", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const valueCache = createOneOpValueCache(body, [forcedRootCapture(value)]);
+  const valueState = createOneOpValueCache(body);
   let emitted = 0;
 
-  valueCache.capture(value, () => emitAdd(body, () => { emitted += 1; }))?.release();
-  valueCache.emitForUse(value, unexpectedEmitter);
+  valueState.cache.capture(forcedRootCapture(value), () => emitAdd(body, () => { emitted += 1; })).release();
+  valueState.cache.emitForUse(oneOpPlacement(), value, unexpectedEmitter);
   body.end();
 
   strictEqual(emitted, 1);
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localGet]);
 });
 
-test("JIT value-cache runtime does not capture selected values without a capture plan", () => {
+test("JIT value-cache runtime defines selected produced values explicitly", () => {
   const body = new WasmFunctionBodyEncoder();
-  const value = addValue("eax", 1);
-  const valueCache = createOneOpSelectedValueCache(body, value);
+  const value = jitProducedValue("load#0:0:0", "i32");
+  const valueState = createOneOpSelectedValueCache(body, value);
   let emitted = 0;
 
-  const captured = valueCache.capture(value, () => emitAdd(body, () => { emitted += 1; }));
+  const captured = valueState.cache.define(oneOpPlacement(), value, () => emitAdd(body, () => { emitted += 1; }));
   body.end();
 
-  strictEqual(captured, undefined);
-  strictEqual(emitted, 0);
-  deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), []);
+  captured?.release();
+
+  strictEqual(captured !== undefined, true);
+  strictEqual(emitted, 1);
+  deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet]);
 });
 
 test("JIT production emission prefers repeated memory-store parent expressions", () => {

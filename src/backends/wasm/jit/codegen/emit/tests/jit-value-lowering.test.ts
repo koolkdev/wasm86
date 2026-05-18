@@ -26,11 +26,12 @@ import type {
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import {
-  createValueEmitter,
+  createValueEmitters,
   unavailableProducedEmitter,
   type InputEmitter,
   type ValueEmitContext
 } from "#backends/wasm/jit/codegen/emit/values.js";
+import type { Placement } from "#backends/wasm/jit/codegen/plan/effect-types.js";
 import {
   emitInputSlot,
   emitInputSlotBits
@@ -38,11 +39,11 @@ import {
 import {
   jitRegisterSlotAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
-import type { ValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
 import {
   LocalStore,
   emitWithLocalStore,
-  captureWithLocalStore
+  captureWithLocalStore,
+  passthroughValueCache
 } from "./value-local-store-test-helpers.js";
 
 test("ValueEmitter lowers register bit insertion directly to Wasm", () => {
@@ -89,7 +90,7 @@ test("ValueEmitter lowers produced values through ProducedEmitter", () => {
   const produced = jitProducedValue("load#direct-produced:0:1", "i32");
   let emitted = false;
 
-  const valueWidth = createValueEmitter({
+  const valueWidth = createValueEmitters({
     ...bodyContext(body),
     produced: {
       emit: (value) => {
@@ -99,7 +100,7 @@ test("ValueEmitter lowers produced values through ProducedEmitter", () => {
         return cleanValueWidth(32);
       }
     }
-  }).emit(produced);
+  }).at(testPlacement()).emit(produced);
   body.end();
 
   strictEqual(emitted, true);
@@ -112,7 +113,7 @@ test("ValueEmitter fails produced values when unavailable", () => {
   const produced = jitProducedValue("load#missing-produced:0:1", "i32");
 
   throws(
-    () => createValueEmitter(bodyContext(body)).emit(produced),
+    () => createValueEmitters(bodyContext(body)).at(testPlacement()).emit(produced),
     /produced JIT value is not available for lowering: load#missing-produced:0:1/
   );
 });
@@ -157,17 +158,17 @@ test("ValueEmitter does not bypass a selected input dependency for direct slice 
   const context = bodyContext(body);
   let selectedRootUseCount = 0;
 
-  createValueEmitter({
+  createValueEmitters({
     ...context,
     cache: passthroughValueCache({
-      emitForUse: (value, emitter) => {
+      emitForUse: (_at, value, emitter) => {
         if (value.kind === "input") {
           selectedRootUseCount += 1;
         }
 
         return { valueWidth: emitter() };
       },
-      canInline: (value) => value.kind !== "input"
+      canInline: (_at, value) => value.kind !== "input"
     }),
     inputs: {
       ...context.inputs,
@@ -175,7 +176,7 @@ test("ValueEmitter does not bypass a selected input dependency for direct slice 
         throw new Error("direct input bits should not bypass selected input dependency");
       }
     }
-  }).emit(jitExtractBits(root, 8, 8));
+  }).at(testPlacement()).emit(jitExtractBits(root, 8, 8));
   body.end();
 
   strictEqual(selectedRootUseCount, 1);
@@ -187,10 +188,10 @@ test("ValueEmitter does not bypass a selected slice root for signed direct lower
   const context = bodyContext(body);
   let selectedRootUseCount = 0;
 
-  createValueEmitter({
+  createValueEmitters({
     ...context,
     cache: passthroughValueCache({
-      emitForUse: (value, emitter) => {
+      emitForUse: (_at, value, emitter) => {
         if (value.kind === "extractBits") {
           selectedRootUseCount += 1;
           body.i32Const(0x7f);
@@ -199,7 +200,7 @@ test("ValueEmitter does not bypass a selected slice root for signed direct lower
 
         return { valueWidth: emitter() };
       },
-      canInline: (value) => value.kind !== "extractBits"
+      canInline: (_at, value) => value.kind !== "extractBits"
     }),
     inputs: {
       ...context.inputs,
@@ -207,7 +208,7 @@ test("ValueEmitter does not bypass a selected slice root for signed direct lower
         throw new Error("direct input bits should not bypass selected slice root");
       }
     }
-  }).emit(extend8s(root));
+  }).at(testPlacement()).emit(extend8s(root));
   body.end();
 
   strictEqual(selectedRootUseCount, 1);
@@ -386,19 +387,17 @@ test("ValueEmitter lowers produced values through retained locals", () => {
     throw new Error("expected produced value capture");
   }
 
-  const valueWidth = createValueEmitter({
+  const valueWidth = createValueEmitters({
     ...context,
     cache: {
-      emitForUse: (value, emitter) => emitWithLocalStore(store, value, emitter),
-      capture: (value, emitter) => captureWithLocalStore(store, value, emitter),
-      canInline: () => true,
-      beginInstruction: () => {},
-      beginOp: () => {},
-      enterPath: () => {},
-      leavePath: () => {}
+      emitForUse: (_at, value, emitter) => emitWithLocalStore(store, value, emitter),
+      retain: (value) => store.retainAvailable(value),
+      capture: (capture, emitter) => captureWithLocalStore(store, capture.value, emitter),
+      define: (_at, value, emitter) => captureWithLocalStore(store, value, emitter),
+      canInline: () => true
     },
     produced: { emit: () => unexpectedEmitter() }
-  }).emit(produced);
+  }).at(testPlacement()).emit(produced);
 
   body.end();
 
@@ -414,10 +413,10 @@ test("ValueEmitter.emitInline suppresses only the root cache use", () => {
   let rootCacheUseCount = 0;
   let childCacheUseCount = 0;
 
-  createValueEmitter({
+  createValueEmitters({
     ...context,
     cache: passthroughValueCache({
-      emitForUse: (value, emitter) => {
+      emitForUse: (_at, value, emitter) => {
         if (valuesEqual(value, root)) {
           rootCacheUseCount += 1;
         }
@@ -431,7 +430,7 @@ test("ValueEmitter.emitInline suppresses only the root cache use", () => {
         return { valueWidth: emitter() };
       }
     })
-  }).emitInline(root);
+  }).at(testPlacement()).emitInline(root);
   body.end();
 
   const opcodes = wasmBodyOpcodes(body.encode());
@@ -461,10 +460,10 @@ function emitSymbolicValueResult(
 ): Readonly<{ opcodes: readonly number[]; valueWidth: ValueWidth }> {
   const body = new WasmFunctionBodyEncoder();
   const context = bodyContext(body);
-  const valueWidth = createValueEmitter({
+  const valueWidth = createValueEmitters({
     ...context,
     inputs: testInputEmitter(body, context.inputs, options)
-  }).emit(value);
+  }).at(testPlacement()).emit(value);
 
   body.end();
   return { opcodes: wasmBodyOpcodes(body.encode()), valueWidth };
@@ -487,6 +486,7 @@ function testInputEmitter(
 }
 
 function bodyContext(body: WasmFunctionBodyEncoder): ValueEmitContext {
+  const cache = passthroughValueCache({});
   const locals = {
     eax: body.addLocal(wasmValueType.i32),
     ebx: body.addLocal(wasmValueType.i32),
@@ -501,6 +501,8 @@ function bodyContext(body: WasmFunctionBodyEncoder): ValueEmitContext {
 
   return {
     body,
+    cache,
+    scope: cache,
     inputs: {
       emit: (slot: JitArchitecturalSlot) => {
         if (slot.kind === "aluFlags") {
@@ -523,6 +525,14 @@ function bodyContext(body: WasmFunctionBodyEncoder): ValueEmitContext {
       }
     },
     produced: unavailableProducedEmitter()
+  };
+}
+
+function testPlacement(): Placement {
+  return {
+    instructionIndex: 0,
+    opIndex: 0,
+    epoch: 0
   };
 }
 
@@ -562,21 +572,6 @@ function emitAdd(body: WasmFunctionBodyEncoder, onEmit: () => void): ValueWidth 
 
 function unexpectedEmitter(): ValueWidth {
   throw new Error("unexpected value emission");
-}
-
-function passthroughValueCache(
-  overrides: Partial<ValueCache>
-): ValueCache {
-  return {
-    beginInstruction: () => {},
-    beginOp: () => {},
-    enterPath: () => {},
-    leavePath: () => {},
-    emitForUse: (_value, emitter) => ({ valueWidth: emitter() }),
-    capture: () => undefined,
-    canInline: () => true,
-    ...overrides
-  };
 }
 
 function localOpcodes(opcodes: readonly number[]): readonly number[] {

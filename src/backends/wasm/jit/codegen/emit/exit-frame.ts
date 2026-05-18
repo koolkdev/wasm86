@@ -6,6 +6,7 @@ import type {
   PlannedExitStores,
   StoreStrategyPlan
 } from "#backends/wasm/jit/codegen/plan/types.js";
+import type { ValueEmitter } from "./values.js";
 import type {
   ExitMetadataEmitter,
   ExitMetadataSelection
@@ -24,9 +25,9 @@ export type ExitStoreLayout = Readonly<{
 export type ExitFrame = Readonly<{
   openDeferredBlocks(): void;
   emitDeferredReturns(): void;
-  captureDestination(exit: Exit): WasmIrExitDestination;
+  captureDestination(values: ValueEmitter, exit: Exit): WasmIrExitDestination;
   emitMetadata(exit: Exit, selection?: ExitMetadataSelection): void;
-  emitLinkedStores(exit: Exit): void;
+  emitLinkedStores(values: ValueEmitter, exit: Exit): void;
 }>;
 
 export type ExitFrameInput = Readonly<{
@@ -98,11 +99,11 @@ export function createExitFrame(input: ExitFrameInput): ExitFrame {
         body.localGet(exitLocal).returnFromFunction();
       }
     },
-    captureDestination: (exit) => {
+    captureDestination: (values, exit) => {
       const planned = layout.storesForExit(exit);
 
       deferredStoreIndexes.add(planned.exit.exitStoreIndex);
-      captureStoreSet(planned);
+      captureStoreSet(values, planned);
       return {
         exitLocal,
         labelDepth: layout.maxStoreIndex - planned.exit.exitStoreIndex
@@ -111,9 +112,9 @@ export function createExitFrame(input: ExitFrameInput): ExitFrame {
     emitMetadata: (exit, selection) => {
       metadata.emit(exit, selection);
     },
-    emitLinkedStores: (exit) => {
+    emitLinkedStores: (values, exit) => {
       const planned = layout.storesForExit(exit);
-      const capturedStores = stores.captureSources(planned.stores);
+      const capturedStores = stores.captureSources(values, planned.stores);
 
       try {
         metadata.emit(exit);
@@ -124,7 +125,10 @@ export function createExitFrame(input: ExitFrameInput): ExitFrame {
     }
   };
 
-  function captureStoreSet(planned: PlannedExitStores): CapturedExitStores {
+  function captureStoreSet(
+    values: ValueEmitter,
+    planned: PlannedExitStores
+  ): CapturedExitStores {
     const index = planned.exit.exitStoreIndex;
     const captured = capturedByStoreIndex.get(index);
 
@@ -132,7 +136,7 @@ export function createExitFrame(input: ExitFrameInput): ExitFrame {
       return captured;
     }
 
-    const next = stores.captureSources(planned.stores);
+    const next = stores.captureSources(values, planned.stores);
 
     capturedByStoreIndex.set(index, next);
     return next;
@@ -150,8 +154,10 @@ export function createExitFrame(input: ExitFrameInput): ExitFrame {
       throw new Error(`JIT exit store set was not captured: ${index}`);
     }
 
-    stores.emitStores(capturedStores ?? []);
-    stores.release(capturedStores ?? []);
+    if (capturedStores !== undefined) {
+      stores.emitStores(capturedStores);
+      stores.release(capturedStores);
+    }
     capturedByStoreIndex.delete(index);
   }
 }

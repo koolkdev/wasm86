@@ -32,8 +32,16 @@ import {
 } from "#backends/wasm/jit/codegen/emit/local-store.js";
 import {
   createValueCache,
-  type ValueCache
+  type ValueCache,
+  type ValueCacheState,
+  type ValueScope
 } from "#backends/wasm/jit/codegen/emit/cache.js";
+import { createInputSlotEmitter } from "#backends/wasm/jit/codegen/emit/input-slots.js";
+import {
+  createValueEmitters,
+  unavailableProducedEmitter,
+  type ValueEmitters
+} from "#backends/wasm/jit/codegen/emit/values.js";
 import {
   captureExitStores,
   createExitStoreEmitter,
@@ -44,7 +52,6 @@ import { createExitMetadataEmitter } from "#backends/wasm/jit/codegen/emit/exit-
 import { createExitStoreLayout } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
 import { buildBlock, encodeJitBlock } from "#backends/wasm/jit/block.js";
 import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
-import { emitJitBlock } from "#backends/wasm/jit/codegen/emit/block-emitter.js";
 import {
   planReuseForInstructions,
   type InstructionEpochSource
@@ -92,7 +99,6 @@ export {
   releaseExitStores,
   buildBlock,
   encodeJitBlock,
-  emitJitBlock,
   buildTimeline,
   branchPath,
   rootPath,
@@ -104,6 +110,9 @@ export type {
   IrValueExpr,
   JitValue,
   ValueCache,
+  ValueCacheState,
+  ValueScope,
+  ValueEmitters,
   JitBlock,
   ExitSnapshot,
   Reg32
@@ -151,15 +160,39 @@ export function planReuseForInstruction(
   );
 }
 
-export function cacheRuntimeForStore(store: LocalStore): ValueCache {
+export function cacheRuntimeForStore(store: LocalStore): ValueCache & ValueScope {
   return {
-    beginInstruction: () => {},
-    beginOp: () => {},
-    enterPath: (path) => store.enterPath(path),
-    leavePath: () => store.leavePath(),
-    emitForUse: (value, emitter) => emitWithLocalStore(store, value, emitter),
-    capture: (value, emitter) => captureWithLocalStore(store, value, emitter),
+    withPath: (path, emit) => store.withPath(path, emit),
+    emitForUse: (_at, value, emitter) => emitWithLocalStore(store, value, emitter),
+    retain: (value) => store.retainAvailable(value),
+    capture: (capture, emitter) => captureWithLocalStore(store, capture.value, emitter),
+    define: (_at, value, emitter) => captureWithLocalStore(store, value, emitter),
     canInline: () => true
+  };
+}
+
+export function valueCacheState(
+  cacheAndScope: ValueCache & ValueScope
+): ValueCacheState {
+  return {
+    cache: cacheAndScope,
+    scope: cacheAndScope
+  };
+}
+
+export function passthroughValueCache(
+  overrides: Partial<ValueCache & ValueScope> = {}
+): ValueCache & ValueScope {
+  return {
+    withPath: (_path, emit) => emit(),
+    emitForUse: (_at, _value, emitter) => ({ valueWidth: emitter() }),
+    retain: () => undefined,
+    capture: () => {
+      throw new Error("unexpected value cache capture");
+    },
+    define: () => undefined,
+    canInline: () => true,
+    ...overrides
   };
 }
 
@@ -191,65 +224,57 @@ export function captureWithLocalStore(
   return store.set(value, emitter());
 }
 
-export function createOneOpValueCache(
+export function createValueEmittersForCache(
   body: WasmFunctionBodyEncoder,
-  captures: readonly Capture[] = []
-): ValueCache {
-  const valueCache = createValueCache(
+  valueState: ValueCacheState | (ValueCache & ValueScope)
+): ValueEmitters {
+  const state = "cache" in valueState
+    ? valueState
+    : valueCacheState(valueState);
+
+  return createValueEmitters({
+    body,
+    cache: state.cache,
+    scope: state.scope,
+    inputs: createInputSlotEmitter(body),
+    produced: unavailableProducedEmitter()
+  });
+}
+
+export function createOneOpValueCache(
+  body: WasmFunctionBodyEncoder
+): ValueCacheState {
+  return createValueCache(
     body,
     { epochs: [{ index: 0, consumers: [] }], selected: [] },
-    {
-      captures,
-      byPlacement: new Map(captures.map((capture) => [
-        placementKey(capture.at),
-        [capture]
-      ]))
-    },
     [{ operands: [], valueTimeline: undefined as never, opEpochs: [0] }]
   );
-
-  if (valueCache === undefined) {
-    throw new Error("expected value cache");
-  }
-
-  valueCache.beginInstruction(0);
-  valueCache.beginOp(0);
-  return valueCache;
 }
 
 export function createOneOpSelectedValueCache(
   body: WasmFunctionBodyEncoder,
   value: JitValue
-): ValueCache {
+): ValueCacheState {
   const selected = { value, useCount: 1 };
-  const valueCache = createValueCache(
+  return createValueCache(
     body,
     { epochs: [{ index: 0, consumers: [selected] }], selected: [selected] },
-    { captures: [], byPlacement: new Map() },
     [{ operands: [], valueTimeline: undefined as never, opEpochs: [0] }]
   );
+}
 
-  if (valueCache === undefined) {
-    throw new Error("expected value cache");
-  }
-
-  valueCache.beginInstruction(0);
-  valueCache.beginOp(0);
-  return valueCache;
+export function oneOpPlacement(): Capture["at"] {
+  return { instructionIndex: 0, opIndex: 0, epoch: 0 };
 }
 
 export function forcedRootCapture(value: JitValue): Capture {
   return {
     value,
-    at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+    at: oneOpPlacement(),
     availability: rootPath(),
     consumers: [],
     reason: "forced"
   };
-}
-
-function placementKey(placement: Capture["at"]): string {
-  return `${placement.instructionIndex}:${placement.opIndex}:${placement.epoch}`;
 }
 
 export function reg(regName: Reg32): IrStorageExpr {

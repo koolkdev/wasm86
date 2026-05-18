@@ -64,7 +64,7 @@ class TimelineBuilder {
         throw new Error(`missing JIT timeline expression op: ${opIndex}`);
       }
 
-      this.#beginOp(opIndex);
+      this.#enterExpressionOp(opIndex);
       this.#recordInputs(op);
       this.#recordMeaning(op);
       this.#recordWrites(op);
@@ -74,7 +74,7 @@ class TimelineBuilder {
     return this.#finish();
   }
 
-  #beginOp(opIndex: number): void {
+  #enterExpressionOp(opIndex: number): void {
     this.#currentOpIndex = opIndex;
     this.#currentSetValue = undefined;
     this.#currentSetValueResolved = false;

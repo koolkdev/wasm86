@@ -67,7 +67,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
   const block: JitBlock = {
     instructions: [
       {
-        instructionId: "schedule-guard",
+        instructionId: "effect-guard",
         eip: startAddress,
         nextEip: startAddress + 1,
         nextMode: "continue",
@@ -78,7 +78,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
         ]
       },
       {
-        instructionId: "schedule-store",
+        instructionId: "effect-store",
         eip: startAddress + 1,
         nextEip: startAddress + 2,
         nextMode: "continue",
@@ -94,7 +94,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
         ]
       },
       {
-        instructionId: "schedule-produced",
+        instructionId: "effect-produced",
         eip: startAddress + 2,
         nextEip: startAddress + 3,
         nextMode: "continue",
@@ -110,7 +110,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
         ]
       },
       {
-        instructionId: "schedule-jump",
+        instructionId: "effect-jump",
         eip: startAddress + 3,
         nextEip: startAddress + 4,
         nextMode: "exit",
@@ -120,7 +120,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
         ]
       },
       {
-        instructionId: "schedule-branch",
+        instructionId: "effect-branch",
         eip: startAddress + 4,
         nextEip: startAddress + 5,
         nextMode: "exit",
@@ -135,7 +135,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
         ]
       },
       {
-        instructionId: "schedule-trap",
+        instructionId: "effect-trap",
         eip: startAddress + 5,
         nextEip: startAddress + 6,
         nextMode: "exit",
@@ -145,7 +145,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
         ]
       },
       {
-        instructionId: "schedule-fallthrough",
+        instructionId: "effect-fallthrough",
         eip: startAddress + 6,
         nextEip: startAddress + 7,
         nextMode: "exit",
@@ -181,7 +181,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
   strictEqual(store.width, 32);
 
   const load = requireEffect(effects[2], "memoryLoad");
-  deepStrictEqual(load.result, jitProducedValue("load#schedule-produced:2:0:0", "i32"));
+  deepStrictEqual(load.result, jitProducedValue("load#effect-produced:2:0:0", "i32"));
   deepStrictEqual(load.address, c32(0x68));
   strictEqual(load.width, 16);
   strictEqual(load.signed, false);

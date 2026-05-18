@@ -9,6 +9,7 @@ import {
   LocalStore,
   captureExitStores,
   releaseExitStores,
+  createValueEmittersForCache,
   addValue,
   highCostValue,
   emitAdd,
@@ -20,6 +21,7 @@ import {
   emitWithLocalStore,
   captureWithLocalStore,
   cacheRuntimeForStore,
+  oneOpPlacement,
   localOpcodes,
   countOpcode,
   type JitValue,
@@ -368,6 +370,39 @@ test("LocalStore keeps parent path availability alive while child paths exit", (
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
 });
 
+test("LocalStore withPath does not hide same-path captures from the outer path frame", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const value = addValue("eax", 1);
+  const path = branchPath(0, 0, "taken");
+  const store = new LocalStore(body);
+
+  store.enterPath(path);
+  const captured = store.withPath(path, () =>
+    captureWithLocalStore(store, value, () => emitAdd(body, () => {}))
+  );
+  store.leavePath();
+
+  if (captured === undefined) {
+    throw new Error("expected same-path capture");
+  }
+
+  captured.release();
+
+  store.enterPath(path);
+  const recaptured = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
+  store.leavePath();
+
+  if (recaptured === undefined) {
+    throw new Error("expected recaptured branch value");
+  }
+
+  body.end();
+
+  strictEqual(recaptured.emitted, true);
+  strictEqual(recaptured.local, captured.local);
+  deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localSet]);
+});
+
 test("LocalStore reuses released branch-local locals after leaving path", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
@@ -402,16 +437,15 @@ test("LocalStore keeps pinned exit-store locals out of reuse", () => {
   const value = addValue("eax", 1);
   const store = new LocalStore(body);
   const valueCache = cacheRuntimeForStore(store);
+  const values = createValueEmittersForCache(body, valueCache);
+  const effectValues = values.at(oneOpPlacement());
   const captured = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
 
   if (captured === undefined) {
     throw new Error("expected captured cached local");
   }
 
-  const exitStores = captureExitStores({
-    body,
-    valueCache
-  }, [{
+  const exitStores = captureExitStores(effectValues, [{
     store: {
       target: { kind: "reg32", reg: "eax" },
       value

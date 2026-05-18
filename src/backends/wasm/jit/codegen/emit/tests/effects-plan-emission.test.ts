@@ -13,8 +13,9 @@ import {
   wasmBodyMemoryAccesses,
   wasmBodyOpcodes,
   extractOnlyWasmFunctionBody,
-  emitJitBlock,
   createValueCache,
+  createValueEmittersForCache,
+  valueCacheState,
   createExitMetadataEmitter,
   createExitStoreEmitter,
   createExitStoreLayout,
@@ -23,6 +24,7 @@ import {
   const32,
   xorExpr,
   countOpcode,
+  passthroughValueCache,
   encodeJitBlock,
   type JitBlock,
   type JitValue
@@ -33,12 +35,18 @@ import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
 import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
+import { createEffectEmitter } from "#backends/wasm/jit/codegen/emit/effects.js";
+import { createExitFrame } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
+import type { CapturePlan } from "#backends/wasm/jit/codegen/plan/captures.js";
+import type { EffectsPlan } from "#backends/wasm/jit/codegen/plan/effect-types.js";
+import type { ValueCacheState } from "#backends/wasm/jit/codegen/emit/cache.js";
 
 test("JIT production emission consumes effects plan entries from instruction plans", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
   const metadata = createExitMetadataEmitter(body);
+  const valueCache = passthroughValueCache();
   const stores = createExitStoreEmitter({ body });
   const expressionBlock = [
     { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
@@ -78,15 +86,15 @@ test("JIT production emission consumes effects plan entries from instruction pla
     maxExitStoreIndex: 0
   });
 
-  metadata.beginBlock();
-
-  emitJitBlock({
+  emitEffectBlock({
     body,
     scratch,
     metadata,
     stores,
     exitStoreLayout,
     exitLocal,
+    captures: emptyCapturePlan(),
+    valueState: valueCacheState(valueCache),
     instructions: [{
       instructionId: instruction.instructionId,
       eip: instruction.eip,
@@ -119,7 +127,6 @@ test("JIT production emission consumes effects plan entries from instruction pla
       exit: hostTrapExit
     }]
   });
-  scratch.assertClear();
   body.end();
 
   const encoded = body.encode();
@@ -147,11 +154,12 @@ test("JIT production emission consumes effects plan entries from instruction pla
   strictEqual(payloadGetIndex !== -1, true);
 });
 
-test("JIT production emission does not walk unscheduled expression effects", () => {
+test("JIT production emission does not walk unplanned expression effects", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
   const metadata = createExitMetadataEmitter(body);
+  const valueCache = passthroughValueCache();
   const stores = createExitStoreEmitter({ body });
   const exitStoreLayout = createExitStoreLayout({
     exits: [],
@@ -163,17 +171,17 @@ test("JIT production emission does not walk unscheduled expression effects", () 
   ] as const;
   const initialState = exitState(0);
 
-  metadata.beginBlock();
-
-  emitJitBlock({
+  emitEffectBlock({
     body,
     scratch,
     metadata,
     stores,
     exitStoreLayout,
     exitLocal,
+    captures: emptyCapturePlan(),
+    valueState: valueCacheState(valueCache),
     instructions: [{
-      instructionId: "unscheduled-expression-effect",
+      instructionId: "unplanned-expression-effect",
       eip: 0x1000,
       nextEip: 0x1001,
       nextMode: "continue",
@@ -195,7 +203,6 @@ test("JIT production emission does not walk unscheduled expression effects", () 
     }],
     effects: []
   });
-  scratch.assertClear();
   body.end();
 
   const opcodes = wasmBodyOpcodes(body.encode());
@@ -429,18 +436,16 @@ function emitPlannedJitBlock(block: JitBlock) {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
-  const valueCache = createValueCache(
+  const valueState = createValueCache(
     body,
     emissionPlan.reusePlan.cache,
-    emissionPlan.reusePlan.captures,
     emissionPlan.reusePlan.instructions
   );
   const metadata = createExitMetadataEmitter(body);
-  const stores = createExitStoreEmitter({ body, valueCache });
+  const stores = createExitStoreEmitter({ body });
   const exitStoreLayout = createExitStoreLayout(emissionPlan.storeStrategy);
 
-  metadata.beginBlock();
-  emitJitBlock({
+  emitEffectBlock({
     body,
     scratch,
     metadata,
@@ -448,11 +453,11 @@ function emitPlannedJitBlock(block: JitBlock) {
     exitStoreLayout,
     exitLocal,
     instructions: emissionPlan.instructions,
+    captures: emissionPlan.reusePlan.captures,
     effects: emissionPlan.effects,
-    valueCache
+    valueState
   });
 
-  scratch.assertClear();
   body.end();
 
   const encoded = body.encode();
@@ -462,6 +467,62 @@ function emitPlannedJitBlock(block: JitBlock) {
     instructions: wasmBodyInstructions(encoded),
     memoryAccesses: wasmBodyMemoryAccesses(encoded),
     opcodes: wasmBodyOpcodes(encoded)
+  };
+}
+
+type EffectBlockInstruction = Readonly<{
+  eip: number;
+  instructionCountDelta: number;
+  expressionBlock: readonly unknown[];
+}> & Readonly<Record<string, unknown>>;
+
+type EffectBlockInput = Readonly<{
+  body: WasmFunctionBodyEncoder;
+  scratch: WasmLocalScratchAllocator;
+  metadata: ReturnType<typeof createExitMetadataEmitter>;
+  stores: ReturnType<typeof createExitStoreEmitter>;
+  exitStoreLayout: ReturnType<typeof createExitStoreLayout>;
+  exitLocal: number;
+  instructions: readonly EffectBlockInstruction[];
+  captures: CapturePlan;
+  effects: EffectsPlan;
+  valueState: ValueCacheState;
+}>;
+
+function emitEffectBlock(input: EffectBlockInput): void {
+  const values = createValueEmittersForCache(input.body, input.valueState);
+  const exitFrame = createExitFrame({
+    body: input.body,
+    metadata: input.metadata,
+    stores: input.stores,
+    layout: input.exitStoreLayout,
+    exitLocal: input.exitLocal
+  });
+
+  input.metadata.beginBlock();
+  exitFrame.openDeferredBlocks();
+
+  const effects = createEffectEmitter({
+    body: input.body,
+    scratch: input.scratch,
+    exitFrame,
+    captures: input.captures,
+    values
+  });
+
+  for (const effect of input.effects) {
+    effects.emit(effect);
+  }
+
+  input.scratch.assertClear();
+  exitFrame.emitDeferredReturns();
+  input.scratch.assertClear();
+}
+
+function emptyCapturePlan(): CapturePlan {
+  return {
+    captures: [],
+    effectCaptures: new Map()
   };
 }
 

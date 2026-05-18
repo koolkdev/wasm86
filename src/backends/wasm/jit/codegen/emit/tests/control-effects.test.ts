@@ -14,8 +14,10 @@ import {
 } from "#backends/wasm/jit/codegen/emit/control-effects.js";
 import type { ExitFrame } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
 import type { ExitMetadataSelection } from "#backends/wasm/jit/codegen/emit/exit-metadata.js";
-import type { ValueEmitter } from "#backends/wasm/jit/codegen/emit/values.js";
-import type { ValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
+import type {
+  ValueEmitter,
+  ValueEmitters
+} from "#backends/wasm/jit/codegen/emit/values.js";
 import {
   branchPath,
   rootPath,
@@ -36,16 +38,15 @@ test("JIT control effects emit branch arms under their exit paths", () => {
   const condition = constValue(1);
   const takenTarget = constValue(0x2000);
   const notTakenTarget = constValue(0x3000);
+  const values = recordingValues(body, events, new Map([
+    [condition, "condition"],
+    [takenTarget, "takenTarget"],
+    [notTakenTarget, "notTakenTarget"]
+  ])).at(placement());
   const control = createControlEffectsEmitter({
     body,
     scratch,
-    values: recordingValues(body, events, new Map([
-      [condition, "condition"],
-      [takenTarget, "takenTarget"],
-      [notTakenTarget, "notTakenTarget"]
-    ])),
-    frame: recordingExitFrame(body, events),
-    valueCache: recordingValueCache(events)
+    frame: recordingExitFrame(body, events)
   });
 
   control.emit({
@@ -56,7 +57,7 @@ test("JIT control effects emit branch arms under their exit paths", () => {
     notTakenTarget,
     taken: controlExit("branchTaken", branchPath(0, 0, "taken")),
     notTaken: controlExit("branchNotTaken", branchPath(0, 0, "notTaken"))
-  });
+  }, values);
   scratch.assertClear();
   body.end();
 
@@ -83,12 +84,11 @@ test("JIT control effects emit host traps through value and exit frame paths", (
   const scratch = new WasmLocalScratchAllocator(body);
   const events: string[] = [];
   const vector = constValue(0x2e);
+  const values = recordingValues(body, events, new Map([[vector, "vector"]])).at(placement());
   const control = createControlEffectsEmitter({
     body,
     scratch,
-    values: recordingValues(body, events, new Map([[vector, "vector"]])),
-    frame: recordingExitFrame(body, events),
-    valueCache: recordingValueCache(events)
+    frame: recordingExitFrame(body, events)
   });
 
   control.emit({
@@ -96,7 +96,7 @@ test("JIT control effects emit host traps through value and exit frame paths", (
     at: placement(),
     vector,
     exit: hostTrapExit()
-  });
+  }, values);
   scratch.assertClear();
   body.end();
 
@@ -121,7 +121,7 @@ function recordingValues(
   body: WasmFunctionBodyEncoder,
   events: string[],
   labels: ReadonlyMap<JitValue, string>
-): ValueEmitter {
+): ValueEmitters {
   const emit = (value: JitValue, options?: Parameters<ValueEmitter["emit"]>[1]): ValueWidth => {
     events.push(`value:${labels.get(value) ?? value.kind}:${options?.requestedWidth ?? "none"}`);
     body.i32Const(value.kind === "const" ? value.value : 0);
@@ -129,9 +129,25 @@ function recordingValues(
   };
 
   return {
-    emit,
-    emitInline: emit,
-    emitMasked: (value) => emit(value)
+    at: () => ({
+      emit,
+      emitInline: emit,
+      emitMasked: (value) => emit(value),
+      retain: () => undefined,
+      capture: () => {
+        throw new Error("unexpected value capture");
+      },
+      define: () => undefined,
+      withPath: (path, emit) => {
+        events.push(`enter:${path.id}`);
+
+        try {
+          return emit();
+        } finally {
+          events.push("leave");
+        }
+      }
+    })
   };
 }
 
@@ -144,7 +160,7 @@ function recordingExitFrame(
   return {
     openDeferredBlocks: () => {},
     emitDeferredReturns: () => {},
-    captureDestination: (exit) => {
+    captureDestination: (_at, exit) => {
       events.push(`capture:${exit.kind}`);
       return {
         exitLocal,
@@ -162,26 +178,6 @@ function recordingExitFrame(
     emitLinkedStores: () => {
       throw new Error("unexpected linked stores");
     }
-  };
-}
-
-function recordingValueCache(events: string[]): ValueCache {
-  return {
-    beginInstruction: () => {},
-    beginOp: () => {},
-    enterPath: (path) => {
-      events.push(`enter:${path.id}`);
-    },
-    leavePath: () => {
-      events.push("leave");
-    },
-    emitForUse: () => {
-      throw new Error("unexpected cache use");
-    },
-    capture: () => {
-      throw new Error("unexpected cache capture");
-    },
-    canInline: () => true
   };
 }
 

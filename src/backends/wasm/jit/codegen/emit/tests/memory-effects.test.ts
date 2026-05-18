@@ -19,9 +19,13 @@ import {
   createMemoryEffectsEmitter,
   type MemoryGuardEffect
 } from "#backends/wasm/jit/codegen/emit/memory-effects.js";
-import type { ValueCache } from "#backends/wasm/jit/codegen/emit/cache.js";
+import type { ValueCache, ValueScope } from "#backends/wasm/jit/codegen/emit/cache.js";
 import type { ExitFrame } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
-import type { ValueEmitter } from "#backends/wasm/jit/codegen/emit/values.js";
+import type {
+  ValueCapture,
+  ValueEmitter,
+  ValueEmitters
+} from "#backends/wasm/jit/codegen/emit/values.js";
 import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
@@ -34,27 +38,30 @@ import {
   wasmBodyMemoryAccesses,
   wasmBodyOpcodes
 } from "#backends/wasm/tests/body-opcodes.js";
+import { passthroughValueCache } from "./value-local-store-test-helpers.js";
 
 test("JIT memory guard emits address once and captures fault destination before guard checks", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const events: string[] = [];
   const address = constValue(0x60);
+  const valueCache = passthroughValueCache();
+  const at = placement();
+  const values = recordingValues(body, events, new Map([[address, "address"]]), new Map(), valueCache).at(at);
   const memory = createMemoryEffectsEmitter({
     body,
     scratch,
-    values: recordingValues(body, events, new Map([[address, "address"]])),
     exitFrame: recordingExitFrame(body, events)
   });
 
   memory.emit({
     kind: "memoryGuard",
-    at: placement(),
+    at,
     address,
     byteLength: 4,
     access: "read",
     exit: memoryExit("read")
-  });
+  }, values);
   scratch.assertClear();
   body.end();
 
@@ -88,22 +95,24 @@ test("JIT memory guard emits address once and captures fault destination before 
 
 test("JIT memory guard requires an exit reason matching read or write access", () => {
   const body = new WasmFunctionBodyEncoder();
+  const valueCache = passthroughValueCache();
+  const at = placement();
+  const values = recordingValues(body, [], new Map(), new Map(), valueCache).at(at);
   const memory = createMemoryEffectsEmitter({
     body,
     scratch: new WasmLocalScratchAllocator(body),
-    values: recordingValues(body, [], new Map()),
     exitFrame: recordingExitFrame(body, [])
   });
 
   throws(
     () => memory.emit({
       kind: "memoryGuard",
-      at: placement(),
+      at,
       address: constValue(0x60),
       byteLength: 4,
       access: "write",
       exit: memoryExit("read")
-    }),
+    }, values),
     /JIT memory write guard received exit reason/
   );
 });
@@ -121,20 +130,22 @@ test("JIT memory store emits address before value and cleans dirty 32-bit stores
   const widths = new Map<JitValue, ValueWidth>([
     [value, dirtyValueWidth(8)]
   ]);
+  const valueCache = passthroughValueCache();
+  const at = placement();
+  const values = recordingValues(body, events, labels, widths, valueCache).at(at);
   const memory = createMemoryEffectsEmitter({
     body,
     scratch,
-    values: recordingValues(body, events, labels, widths),
     exitFrame: recordingExitFrame(body, events)
   });
 
   memory.emit({
     kind: "memoryStore",
-    at: placement(),
+    at,
     address,
     value,
     width: 32
-  });
+  }, values);
   scratch.assertClear();
   body.end();
 
@@ -160,30 +171,31 @@ test("JIT produced memory load is defined through the produced-value path", () =
   const events: string[] = [];
   const address = constValue(0x90);
   let definedWidth: ValueWidth | undefined;
+  const valueCache = capturingValueCache(events, (emit) => {
+    definedWidth = emit();
+    return definedWidth;
+  });
+  const at = placement();
+  const values = recordingValues(body, events, new Map([[address, "address"]]), new Map(), valueCache).at(at);
   const memory = createMemoryEffectsEmitter({
     body,
     scratch,
-    exitFrame: recordingExitFrame(body, events),
-    values: recordingValues(body, events, new Map([[address, "address"]])),
-    valueCache: capturingValueCache(events, (emit) => {
-      definedWidth = emit();
-      return definedWidth;
-    })
+    exitFrame: recordingExitFrame(body, events)
   });
 
   memory.emit({
     kind: "memoryLoad",
-    at: placement(),
+    at,
     result: producedValue("load#memory-effects"),
     address,
     width: 8,
     signed: true
-  });
+  }, values);
   scratch.assertClear();
   body.end();
 
   deepStrictEqual(events, [
-    "capture:load#memory-effects",
+    "define:load#memory-effects",
     "value:address:32"
   ]);
   strictEqual(definedWidth?.cleanWidth, 32);
@@ -198,26 +210,27 @@ test("JIT produced memory load does not emit when the produced path declines it"
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const events: string[] = [];
+  const valueCache = decliningValueCache(events);
+  const at = placement();
+  const values = recordingValues(body, events, new Map(), new Map(), valueCache).at(at);
   const memory = createMemoryEffectsEmitter({
     body,
     scratch,
-    values: recordingValues(body, events, new Map()),
-    exitFrame: recordingExitFrame(body, events),
-    valueCache: decliningValueCache(events)
+    exitFrame: recordingExitFrame(body, events)
   });
 
   memory.emit({
     kind: "memoryLoad",
-    at: placement(),
+    at,
     result: producedValue("load#unused"),
     address: constValue(0xa0),
     width: 32,
     signed: false
-  });
+  }, values);
   scratch.assertClear();
   body.end();
 
-  deepStrictEqual(events, ["capture:load#unused"]);
+  deepStrictEqual(events, ["define:load#unused"]);
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Load), 0);
 });
 
@@ -225,8 +238,9 @@ function recordingValues(
   body: WasmFunctionBodyEncoder,
   events: string[],
   labels: ReadonlyMap<JitValue, string>,
-  widths: ReadonlyMap<JitValue, ValueWidth> = new Map()
-): ValueEmitter {
+  widths: ReadonlyMap<JitValue, ValueWidth> = new Map(),
+  valueCache: ValueCache & ValueScope = passthroughValueCache()
+): ValueEmitters {
   const emit = (value: JitValue, options?: Parameters<ValueEmitter["emit"]>[1]) => {
     events.push(`value:${labels.get(value) ?? value.kind}:${options?.requestedWidth ?? "none"}`);
     body.i32Const(value.kind === "const" ? value.value : 0);
@@ -234,10 +248,53 @@ function recordingValues(
   };
 
   return {
-    emit,
-    emitInline: emit,
-    emitMasked: (value) => emit(value)
+    at: (at) => {
+      const values: ValueEmitter = {
+        emit,
+        emitInline: emit,
+        emitMasked: (value) => emit(value),
+        retain: (value) => recordedValueCapture(body, valueCache.retain(value)),
+        capture: (capture, emit) => requiredRecordedValueCapture(
+          body,
+          valueCache.withPath(capture.availability, () => valueCache.capture(capture, emit))
+        ),
+        define: (value, emit) => recordedValueCapture(body, valueCache.define(at, value, emit)),
+        withPath: (path, emit) => valueCache.withPath(path, emit)
+      };
+
+      return values;
+    }
   };
+}
+
+function recordedValueCapture(
+  body: WasmFunctionBodyEncoder,
+  captured: ReturnType<ValueCache["retain"]>
+): ValueCapture | undefined {
+  if (captured === undefined) {
+    return undefined;
+  }
+
+  return {
+    emit: () => {
+      body.localGet(captured.local);
+      return captured.valueWidth;
+    },
+    release: () => captured.release()
+  };
+}
+
+function requiredRecordedValueCapture(
+  body: WasmFunctionBodyEncoder,
+  captured: ReturnType<ValueCache["capture"]>
+): ValueCapture {
+  const valueCapture = recordedValueCapture(body, captured);
+
+  if (valueCapture === undefined) {
+    throw new Error("expected recorded value capture");
+  }
+
+  return valueCapture;
 }
 
 function recordingExitFrame(
@@ -249,7 +306,7 @@ function recordingExitFrame(
   return {
     openDeferredBlocks: () => {},
     emitDeferredReturns: () => {},
-    captureDestination: (exit) => {
+    captureDestination: (_at, exit) => {
       events.push(`capture:${exit.kind}`);
       return {
         exitLocal,
@@ -268,17 +325,30 @@ function recordingExitFrame(
 function capturingValueCache(
   events: string[],
   capture: (emit: () => ValueWidth) => ValueWidth
-): ValueCache {
+): ValueCache & ValueScope {
   return {
-    beginInstruction: () => {},
-    beginOp: () => {},
-    enterPath: () => {},
-    leavePath: () => {},
+    withPath: (_path, emit) => emit(),
     emitForUse: () => {
       throw new Error("unexpected value cache use");
     },
-    capture: (value, emit) => {
+    retain: () => undefined,
+    capture: (planned, emit) => {
+      const { value } = planned;
       events.push(`capture:${value.kind === "produced" ? value.id : value.kind}`);
+      const valueWidth = capture(emit);
+
+      return {
+        local: 0,
+        valueWidth,
+        emitted: true,
+        retain: () => {
+          throw new Error("unexpected retain");
+        },
+        release: () => {}
+      };
+    },
+    define: (_at, value, emit) => {
+      events.push(`define:${value.id}`);
       const valueWidth = capture(emit);
 
       return {
@@ -295,13 +365,13 @@ function capturingValueCache(
   };
 }
 
-function decliningValueCache(events: string[]): ValueCache {
+function decliningValueCache(events: string[]): ValueCache & ValueScope {
   return {
     ...capturingValueCache(events, () => {
       throw new Error("unexpected value cache capture emission");
     }),
-    capture: (value) => {
-      events.push(`capture:${value.kind === "produced" ? value.id : value.kind}`);
+    define: (_at, value) => {
+      events.push(`define:${value.id}`);
       return undefined;
     }
   };

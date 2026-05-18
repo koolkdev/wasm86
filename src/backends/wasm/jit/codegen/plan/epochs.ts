@@ -7,9 +7,9 @@ import type {
   Timeline
 } from "#backends/wasm/jit/analysis/timeline.js";
 import type {
-  Placement,
   ValueUse
 } from "./value-uses.js";
+import type { Placement } from "./effect-types.js";
 
 export type InstructionEpochSource = Readonly<{
   operands: readonly JitOperandBinding[];

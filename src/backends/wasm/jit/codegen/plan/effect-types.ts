@@ -7,7 +7,7 @@ import type { IrMemoryAccessKind } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import type { Exit } from "./types.js";
 
-export type EffectPlacement = Readonly<{
+export type Placement = Readonly<{
   instructionIndex: number;
   opIndex: number;
   epoch: number;
@@ -15,7 +15,7 @@ export type EffectPlacement = Readonly<{
 
 type EffectBase<TKind extends EffectKind> = Readonly<{
   kind: TKind;
-  at: EffectPlacement;
+  at: Placement;
 }>;
 
 export type Effect =

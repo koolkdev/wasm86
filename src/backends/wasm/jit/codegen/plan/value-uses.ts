@@ -10,11 +10,9 @@ import type {
   PlannedExit
 } from "./types.js";
 import type {
+  Placement,
   Effect,
-  EffectPlacement,
 } from "./effect-types.js";
-
-export type Placement = EffectPlacement;
 
 export type UsePurpose =
   | "memoryAddress"
