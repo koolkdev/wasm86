@@ -16,35 +16,34 @@ export type PlannedExit = Exit & Readonly<{
   exitStoreIndex: number;
 }>;
 
-export type ExitStoreSet = Readonly<{
-  stores: readonly ExitStore[];
-}>;
-
 export type ExitStorePlan = Readonly<{
-  exits: readonly PlannedExit[];
-  exitStoreSets: readonly ExitStoreSet[];
-  maxExitStoreIndex: number;
+  exits: ReadonlyMap<string, PlannedExit>;
 }>;
 
-export function planExitStores(exits: readonly Exit[]): ExitStorePlan {
-  const plannedExits: PlannedExit[] = [];
-  const exitStoreSets: ExitStoreSet[] = [{ stores: [] }];
+export function planExitStores(rawExits: readonly Exit[]): ExitStorePlan {
+  const exits = new Map<string, PlannedExit>();
+  let nextExitStoreIndex = 1;
 
-  for (const exit of exits) {
+  for (const exit of rawExits) {
     const stores = storesForExit(exit);
-    const exitStoreIndex = appendExitStoreSet(exitStoreSets, stores);
-
-    plannedExits.push({
+    const exitStoreIndex = stores.length === 0
+      ? 0
+      : nextExitStoreIndex++;
+    const plannedExit: PlannedExit = {
       ...exit,
       stores,
       exitStoreIndex
-    });
+    };
+
+    if (exits.has(plannedExit.id)) {
+      throw new Error(`duplicate planned JIT exit id: ${plannedExit.id}`);
+    }
+
+    exits.set(plannedExit.id, plannedExit);
   }
 
   return {
-    exits: plannedExits,
-    exitStoreSets,
-    maxExitStoreIndex: exitStoreSets.length - 1
+    exits
   };
 }
 
@@ -57,18 +56,4 @@ export function storesForSnapshot(snapshot: ExitSnapshot): readonly ExitStore[] 
     ...registerStores(snapshot.valueState),
     ...flagStores(snapshot.valueState)
   ];
-}
-
-function appendExitStoreSet(
-  exitStoreSets: ExitStoreSet[],
-  stores: readonly ExitStore[]
-): number {
-  if (stores.length === 0) {
-    return 0;
-  }
-
-  const index = exitStoreSets.length;
-
-  exitStoreSets.push({ stores });
-  return index;
 }

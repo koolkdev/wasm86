@@ -1,22 +1,10 @@
-import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import type {
-  EffectInfo
-} from "#backends/wasm/jit/analysis/effects.js";
-import type {
-  PathMap
-} from "#backends/wasm/jit/analysis/paths.js";
-import type {
-  ExitStoreSet as SemanticExitStoreSet,
-  PlannedExit
-} from "./exit-stores.js";
+  BlockAnalysis,
+  InstructionAnalysis,
+  InstructionFlow
+} from "#backends/wasm/jit/analysis/block.js";
+import type { PlannedExit } from "./exit-stores.js";
 
-export type {
-  Exit,
-  ExitPayload,
-  ExitRuntimeSource,
-  ExitSnapshot,
-  ExitValue
-} from "#backends/wasm/jit/analysis/exits.js";
 export type {
   ExitStore,
   ExitStorePlan,
@@ -31,22 +19,14 @@ export type {
   StoreStrategySet
 } from "./store-strategy.js";
 
-export type JitInstructionState = Readonly<{
-  instructionId: string;
-  eip: number;
-  nextEip: number;
-  nextMode: "continue" | "exit";
-  instructionCountDelta: number;
-  initialValueState: import("#backends/wasm/jit/state/value-state.js").JitValueStateSnapshot;
-  paths: PathMap;
+export type PlannedInstruction = Readonly<{
+  analysis: InstructionAnalysis;
+  flow: InstructionFlow<PlannedExit>;
   exitCount: number;
 }>;
 
 export type JitCodegenPlan = Readonly<{
-  block: JitBlock;
-  instructionStates: readonly JitInstructionState[];
-  effects: readonly EffectInfo<PlannedExit>[];
+  analysis: BlockAnalysis;
+  instructions: readonly PlannedInstruction[];
   exits: readonly PlannedExit[];
-  exitStoreSets: readonly SemanticExitStoreSet[];
-  maxExitStoreIndex: number;
 }>;

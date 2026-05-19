@@ -33,8 +33,8 @@ export function createExitMetadataEmitter(
       emitStoreStateU32(body, stateOffset.instructionCount, () => {
         body.localGet(instructionCountLocal);
 
-        if (exit.snapshot.instructionCountDelta !== 0) {
-          body.i32Const(exit.snapshot.instructionCountDelta).i32Add();
+        if (exit.snapshot.progress.instructionCountDelta !== 0) {
+          body.i32Const(exit.snapshot.progress.instructionCountDelta).i32Add();
         }
       });
     }

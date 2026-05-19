@@ -18,6 +18,8 @@ import {
   exitState,
   c32,
   addValue,
+  analyzeBlockForTest,
+  plannedInstructionsForTest,
   type JitCodegenPlan,
   type ExitStore,
   type JitValue,
@@ -72,7 +74,7 @@ test("planJitCodegen leaves exit-store sources on exits and omits separate exit-
   const produced = jitProducedValue("load#canonical-produced-exit-store:0:1:0", "i32");
   const exitValue = addValue(produced, jitInputReg32Value("ebx"));
   const [exitStoreUse] = rootUses(emissionPlan.valueUses, exitValue, "exitStore");
-  const hostTrapOpIndex = emissionPlan.instructions[0]?.expressionBlock
+  const hostTrapOpIndex = emissionPlan.instructions[0]?.analysis.expressions.block
     .findIndex((op) => op.op === "hostTrap");
 
   deepStrictEqual(exit.stores, [registerStore("eax", exitValue)]);
@@ -163,7 +165,6 @@ function buildHostTrapEmissionPlanForStores(
       ]
     }]
   };
-  const initialState = exitState(0);
   const postSnapshot = exitState(1);
   const exit = exitPoint({
     instructionIndex: 0,
@@ -175,29 +176,11 @@ function buildHostTrapEmissionPlanForStores(
     stores,
     exitStoreIndex: 1
   });
+  const analysis = analyzeBlockForTest(block);
   const plan: JitCodegenPlan = {
-    block,
-    effects: [{
-      kind: "hostTrap",
-      at: { instructionIndex: 0, opIndex: 1 },
-      exit
-    }],
-    instructionStates: [{
-      instructionId,
-      eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      instructionCountDelta: initialState.instructionCountDelta,
-      initialValueState: initialState.valueState,
-      paths: new Map(),
-      exitCount: 1
-    }],
-    exits: [exit],
-    exitStoreSets: [
-      { stores: [] },
-      { stores }
-    ],
-    maxExitStoreIndex: 1
+    analysis,
+    instructions: plannedInstructionsForTest(analysis, [exit]),
+    exits: [exit]
   };
 
   return buildJitCodegenEmissionPlan(plan);

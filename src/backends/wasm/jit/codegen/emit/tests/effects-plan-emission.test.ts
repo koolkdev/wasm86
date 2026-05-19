@@ -100,7 +100,7 @@ test("JIT production emission consumes effects plan entries from instruction pla
       eip: instruction.eip,
       nextEip: instruction.nextEip,
       nextMode: instruction.nextMode,
-      instructionCountDelta: initialState.instructionCountDelta,
+      instructionCountDelta: initialState.progress.instructionCountDelta,
       initialValueState: initialState.valueState,
       paths: new Map(),
       exitCount: 1,
@@ -185,7 +185,7 @@ test("JIT production emission does not walk unplanned expression effects", () =>
       eip: 0x1000,
       nextEip: 0x1001,
       nextMode: "continue",
-      instructionCountDelta: initialState.instructionCountDelta,
+      instructionCountDelta: initialState.progress.instructionCountDelta,
       initialValueState: initialState.valueState,
       paths: new Map(),
       exitCount: 0,
@@ -471,10 +471,8 @@ function emitPlannedJitBlock(block: JitBlock) {
 }
 
 type EffectBlockInstruction = Readonly<{
-  eip: number;
-  instructionCountDelta: number;
-  expressionBlock: readonly unknown[];
-}> & Readonly<Record<string, unknown>>;
+  [key: string]: unknown;
+}>;
 
 type EffectBlockInput = Readonly<{
   body: WasmFunctionBodyEncoder;

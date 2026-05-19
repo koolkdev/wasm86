@@ -9,6 +9,7 @@ import {
   type Path,
   type PathMap
 } from "./paths.js";
+import type { InstructionProgress } from "./instruction-progress.js";
 
 export type Placement = Readonly<{
   instructionIndex: number;
@@ -25,7 +26,7 @@ export type ExitKind =
   | "hostTrap";
 
 export type ExitSnapshot = Readonly<{
-  instructionCountDelta: number;
+  progress: InstructionProgress;
   valueState: JitValueStateSnapshot;
 }>;
 

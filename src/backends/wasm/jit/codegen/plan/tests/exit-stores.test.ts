@@ -44,7 +44,9 @@ test("storesForSnapshot omits unchanged input register and flag stores", () => {
   state.flags.writeAluFlags(jitInputAluFlagsValue());
 
   deepStrictEqual(storesForSnapshot({
-    instructionCountDelta: 0,
+    progress: {
+      instructionCountDelta: 0
+    },
     valueState: state.snapshot()
   }), []);
 });
@@ -145,25 +147,17 @@ test("flagStores lets later full flag writes replace partial merges", () => {
 test("planJitCodegen records fallthrough exits at terminator ops", () => {
   const instruction = ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress));
   const codegenPlan = planJitCodegen(buildBlock([instruction]));
+  const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const exit = onlyExit(codegenPlan.exits, ExitReason.FALLTHROUGH);
-  const instructionState = codegenPlan.instructionStates[0]!;
 
-  strictEqual(codegenPlan.maxExitStoreIndex, 1);
-  deepStrictEqual(codegenPlan.exitStoreSets, [
-    { stores: [] },
-    { stores: [registerStore("eax", c32(1))] }
-  ]);
-  strictEqual(instructionState.instructionCountDelta, 0);
-  strictEqual("kind" in instructionState.initialValueState, false);
-  strictEqual("eip" in instructionState.initialValueState, false);
-  strictEqual(instructionState.exitCount, 1);
+  strictEqual(emissionPlan.instructions[0]?.exitCount, 1);
   strictEqual(exit.at.instructionIndex, 0);
   deepStrictEqual(exit.visibleEip, { kind: "static", value: instruction.nextEip });
   deepStrictEqual(exit.payload, { kind: "static", value: instruction.nextEip });
   deepStrictEqual(exit.path, rootPath());
   strictEqual("kind" in exit.snapshot, false);
   strictEqual("eip" in exit.snapshot, false);
-  strictEqual(exit.snapshot.instructionCountDelta, 1);
+  strictEqual(exit.snapshot.progress.instructionCountDelta, 1);
   strictEqual(exit.exitStoreIndex, 1);
   deepStrictEqual(plannedRegisterStores(exit), [registerStore("eax", c32(1))]);
 });
@@ -173,23 +167,19 @@ test("planJitCodegen keeps memory guard faults at their op exit states", () => {
   const load = ok(decodeBytes([0x8b, 0x05, 0x00, 0x00, 0x01, 0x00], add.nextEip));
   const codegenPlan = planJitCodegen(buildBlock([add, load]));
   const exit = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
-  const loadInstructionState = codegenPlan.instructionStates[1]!;
 
-  strictEqual(loadInstructionState.instructionCountDelta, 1);
   strictEqual(exit.at.instructionIndex, 1);
   strictEqual(exit.at.opIndex, 1);
   deepStrictEqual(exit.visibleEip, { kind: "static", value: add.nextEip });
   deepStrictEqual(exit.payload, { kind: "runtime", source: "memoryAddress" });
-  strictEqual(exit.snapshot.instructionCountDelta, 1);
+  strictEqual(exit.snapshot.progress.instructionCountDelta, 1);
   strictEqual(exit.exitStoreIndex, 1);
   const expectedRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
   const expectedFlagStore = flagStore(exit.snapshot.valueState.flags.readAluFlags());
 
   deepStrictEqual(plannedRegisterStores(exit), [expectedRegisterStore]);
   deepStrictEqual(plannedFlagStores(exit), [expectedFlagStore]);
-  deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex], {
-    stores: [expectedRegisterStore, expectedFlagStore]
-  });
+  deepStrictEqual(exit.stores, [expectedRegisterStore, expectedFlagStore]);
 });
 
 test("planJitCodegen keeps same-register-set exit stores separate", () => {
@@ -211,9 +201,9 @@ test("planJitCodegen keeps same-register-set exit stores separate", () => {
     [registerStore("eax", c32(0x2222_2222))]
   ]);
   strictEqual(writeFaults[0]!.exitStoreIndex !== writeFaults[1]!.exitStoreIndex, true);
-  deepStrictEqual(writeFaults.map((exit) => codegenPlan.exitStoreSets[exit.exitStoreIndex]), [
-    { stores: [registerStore("eax", c32(0x1111_1111))] },
-    { stores: [registerStore("eax", c32(0x2222_2222))] }
+  deepStrictEqual(writeFaults.map((exit) => exit.stores), [
+    [registerStore("eax", c32(0x1111_1111))],
+    [registerStore("eax", c32(0x2222_2222))]
   ]);
 });
 
@@ -234,12 +224,10 @@ test("planJitCodegen derives xchg exit stores from value-state snapshots", () =>
     registerStore("ecx", jitInputReg32Value("edx")),
     registerStore("edx", jitInputReg32Value("ecx"))
   ]);
-  deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex], {
-    stores: [
-      registerStore("ecx", jitInputReg32Value("edx")),
-      registerStore("edx", jitInputReg32Value("ecx"))
-    ]
-  });
+  deepStrictEqual(exit.stores, [
+    registerStore("ecx", jitInputReg32Value("edx")),
+    registerStore("edx", jitInputReg32Value("ecx"))
+  ]);
 });
 
 test("planJitCodegen excludes current-instruction speculative writes from memory fault exit state", () => {
@@ -248,7 +236,7 @@ test("planJitCodegen excludes current-instruction speculative writes from memory
   const writeFault = onlyExit(codegenPlan.exits, ExitReason.MEMORY_WRITE_FAULT);
 
   strictEqual(writeFault.at.opIndex, 2);
-  strictEqual(writeFault.snapshot.instructionCountDelta, 0);
+  strictEqual(writeFault.snapshot.progress.instructionCountDelta, 0);
   strictEqual(writeFault.exitStoreIndex, 0);
   deepStrictEqual(plannedRegisterStores(writeFault), []);
 });
@@ -358,13 +346,17 @@ test("planJitCodegen records exit stores only for actual exit points", () => {
   const movEbx = ok(decodeBytes([0xbb, 0x02, 0x00, 0x00, 0x00], movEax.nextEip));
   const trap = ok(decodeBytes([0xcd, 0x2e], movEbx.nextEip));
   const codegenPlan = planJitCodegen(buildBlock([movEax, movEbx, trap]));
+  const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
 
-  strictEqual(codegenPlan.maxExitStoreIndex, 1);
-  deepStrictEqual(codegenPlan.exitStoreSets, [
-    { stores: [] },
-    { stores: [registerStore("eax", c32(1)), registerStore("ebx", c32(2))] }
+  strictEqual(exit.exitStoreIndex, 1);
+  deepStrictEqual(exit.stores, [
+    registerStore("eax", c32(1)),
+    registerStore("ebx", c32(2))
   ]);
-  deepStrictEqual(codegenPlan.instructionStates.map((entry) => entry.exitCount), [0, 0, 1]);
+  deepStrictEqual(
+    buildJitCodegenEmissionPlan(codegenPlan).instructions.map((entry) => entry.exitCount),
+    [0, 0, 1]
+  );
 });
 
 test("planJitCodegen records value-state-derived flag stores for branch exits", () => {
@@ -375,8 +367,8 @@ test("planJitCodegen records value-state-derived flag stores for branch exits", 
   const branchExits = codegenPlan.exits.filter((entry) =>
     entry.reason === ExitReason.JUMP && entry.path.id.startsWith("branch:")
   );
-  const branchIr = codegenPlan.block.instructions[1]!.ir;
-  const branchExpressionBlock = emissionPlan.instructions[1]?.expressionBlock;
+  const branchIr = codegenPlan.analysis.instructions[1]!.instruction.ir;
+  const branchExpressionBlock = emissionPlan.instructions[1]?.analysis.expressions.block;
   const conditionalJumpIndex = branchExpressionBlock?.findIndex((op) => op.op === "conditionalJump") ?? -1;
 
   strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
@@ -408,9 +400,9 @@ test("planJitCodegen records value-state-derived flag stores for branch exits", 
   const branchRegisterStore = registerStore("eax", addValue(jitInputReg32Value("eax"), c32(1)));
   const branchFlagStore = flagStore(branchExits[0]!.snapshot.valueState.flags.readAluFlags());
 
-  deepStrictEqual(branchExits.map((exit) => codegenPlan.exitStoreSets[exit.exitStoreIndex]), [
-    { stores: [branchRegisterStore, branchFlagStore] },
-    { stores: [branchRegisterStore, branchFlagStore] }
+  deepStrictEqual(branchExits.map((exit) => exit.stores), [
+    [branchRegisterStore, branchFlagStore],
+    [branchRegisterStore, branchFlagStore]
   ]);
 
   deepStrictEqual(
@@ -482,7 +474,9 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from source IR afte
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const branchInstruction = emissionPlan.instructions[1]!;
-  const expressionBranchOpIndex = branchInstruction.expressionBlock.findIndex((op) => op.op === "conditionalJump");
+  const expressionBranchOpIndex = branchInstruction.analysis.expressions.block.findIndex((op) =>
+    op.op === "conditionalJump"
+  );
   const takenPath = branchPath(1, sourceBranchOpIndex, "taken");
   const takenTargetUse = emissionPlan.valueUses.find((use) =>
     use.purpose === "branchTarget" &&
@@ -497,7 +491,7 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from source IR afte
       use.path.debugLabel === "taken"
   );
 
-  deepStrictEqual(branchInstruction.expressionBlock.map((op) => op.op), ["let32", "conditionalJump"]);
+  deepStrictEqual(branchInstruction.analysis.expressions.block.map((op) => op.op), ["let32", "conditionalJump"]);
   strictEqual(expressionBranchOpIndex !== sourceBranchOpIndex, true);
   strictEqual(expressionBranchOpIndex, 1);
 
@@ -571,12 +565,10 @@ test("planJitCodegen records full flag producers in value-state snapshots", () =
 
   deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
   deepStrictEqual(plannedFlagStores(exit), [expectedFlagStore]);
-  deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex], {
-    stores: [
-      registerStore("eax", result),
-      expectedFlagStore
-    ]
-  });
+  deepStrictEqual(exit.stores, [
+    registerStore("eax", result),
+    expectedFlagStore
+  ]);
 });
 
 test("planJitCodegen records partial flag producers as symbolic masked inserts", () => {
@@ -692,9 +684,7 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
   const expectedFlagStore = flagStore(expectedFlags);
 
   deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
-  deepStrictEqual(codegenPlan.exitStoreSets[exit.exitStoreIndex], {
-    stores: [expectedFlagStore]
-  });
+  deepStrictEqual(exit.stores, [expectedFlagStore]);
   deepStrictEqual(
     emissionPlan.reusePlan.captures.captures
       .filter((capture) => capture.reason === "producedDefinition")
@@ -832,8 +822,8 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
   const cmove = ok(decodeBytes([0x0f, 0x44, 0xd1], cmp.nextEip));
   const trap = ok(decodeBytes([0xcd, 0x2e], cmove.nextEip));
   const codegenPlan = planJitCodegen(buildBlock([cmp, cmove, trap]));
-  const cmpInstruction = codegenPlan.block.instructions[0]!;
-  const cmoveInstruction = codegenPlan.block.instructions[1]!;
+  const cmpInstruction = codegenPlan.analysis.instructions[0]!.instruction;
+  const cmoveInstruction = codegenPlan.analysis.instructions[1]!.instruction;
   const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");

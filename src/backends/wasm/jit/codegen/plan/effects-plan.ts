@@ -1,10 +1,4 @@
-import type {
-  IrExprBlock,
-  IrExpressionSourceMap
-} from "#backends/wasm/codegen/expressions.js";
 import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
-import type { InstructionAnalysis } from "#backends/wasm/jit/analysis/effects.js";
-import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   opView,
@@ -17,50 +11,46 @@ import {
 import {
   jitExpressionOpEpochs
 } from "./epochs.js";
-import type { PlannedExit } from "./types.js";
+import type {
+  PlannedExit,
+  PlannedInstruction
+} from "./types.js";
 import type {
   Effect,
   EffectsPlan,
   Placement,
 } from "./effect-types.js";
 
-type EffectsPlanInstruction = Pick<
-  InstructionAnalysis,
-  "valueTimeline"
-> & Readonly<{
-  ir: JitInstruction["ir"];
-  nextEip: number;
-  expressionBlock: IrExprBlock;
-  sourceExpressionMap: IrExpressionSourceMap;
-}>;
+export function planEffects(instructions: readonly PlannedInstruction[]): EffectsPlan {
+  const effects: Effect[] = [];
+  let currentEpoch = 0;
 
-type PlanEffectsInput = Readonly<{
-  effects: readonly EffectInfo<PlannedExit>[];
-  instructions: readonly EffectsPlanInstruction[];
-}>;
+  for (const instruction of instructions) {
+    const opEpochs = jitExpressionOpEpochs({
+      expressionBlock: instruction.analysis.expressions.block,
+      valueTimeline: instruction.analysis.timeline
+    }, currentEpoch);
 
-export function planEffects(input: PlanEffectsInput): EffectsPlan {
-  const epochsByInstruction = effectEpochsByInstruction(input.instructions);
+    for (const effect of instruction.flow.effects) {
+      effects.push(planEffect(effect, instruction, opEpochs));
+    }
 
-  return input.effects.map((effect) =>
-    planEffect(
-      effect,
-      requiredAt(input.instructions, effect.at.instructionIndex),
-      requiredAt(epochsByInstruction, effect.at.instructionIndex)
-    )
-  );
+    currentEpoch += logicalWriteEpochCount(instruction);
+  }
+
+  return effects;
 }
 
 function planEffect(
   effectInfo: EffectInfo<PlannedExit>,
-  instruction: EffectsPlanInstruction,
+  instruction: PlannedInstruction,
   opEpochs: readonly number[]
 ): Effect {
   const at = effectPlacement(instruction, effectInfo, opEpochs);
-  const sourceOp = requiredAt(instruction.ir, effectInfo.at.opIndex);
-  const expressionOp = requiredAt(instruction.expressionBlock, at.opIndex);
-  const view = opView(instruction.valueTimeline, at.opIndex);
-  const valueOptions = { nextEip: instruction.nextEip };
+  const sourceOp = requiredAt(instruction.analysis.instruction.ir, effectInfo.at.opIndex);
+  const expressionOp = requiredAt(instruction.analysis.expressions.block, at.opIndex);
+  const view = opView(instruction.analysis.timeline, at.opIndex);
+  const valueOptions = { nextEip: instruction.analysis.instruction.nextEip };
 
   switch (effectInfo.kind) {
     case "memoryGuard": {
@@ -164,7 +154,7 @@ function planEffect(
 }
 
 function effectPlacement(
-  instruction: EffectsPlanInstruction,
+  instruction: PlannedInstruction,
   effectInfo: EffectInfo<PlannedExit>,
   opEpochs: readonly number[]
 ): Placement {
@@ -185,22 +175,8 @@ function effectPlacement(
   };
 }
 
-function effectEpochsByInstruction(
-  instructions: readonly EffectsPlanInstruction[]
-): readonly (readonly number[])[] {
-  const epochs: (readonly number[])[] = [];
-  let currentEpoch = 0;
-
-  for (const instruction of instructions) {
-    epochs.push(jitExpressionOpEpochs(instruction, currentEpoch));
-    currentEpoch += logicalWriteEpochCount(instruction);
-  }
-
-  return epochs;
-}
-
 function expressionOpIndexForSourceEffect(
-  instruction: EffectsPlanInstruction,
+  instruction: PlannedInstruction,
   sourceOpIndex: number
 ): number {
   const expressionOpIndexes = jitExpressionOpIndexesForSourceOp(instruction, sourceOpIndex);
@@ -214,9 +190,9 @@ function expressionOpIndexForSourceEffect(
   return expressionOpIndexes[0]!;
 }
 
-function logicalWriteEpochCount(instruction: EffectsPlanInstruction): number {
+function logicalWriteEpochCount(instruction: PlannedInstruction): number {
   return new Set(
-    instruction.valueTimeline.writes.map((write) => write.opIndex)
+    instruction.analysis.timeline.writes.map((write) => write.opIndex)
   ).size;
 }
 
@@ -234,11 +210,11 @@ function requiredAt<T>(
 }
 
 function producedValue(
-  instruction: EffectsPlanInstruction,
+  instruction: PlannedInstruction,
   opIndex: number,
   refId: number
 ): JitProducedValue {
-  const produced = instruction.valueTimeline.produced.find((definition) =>
+  const produced = instruction.analysis.timeline.produced.find((definition) =>
     definition.opIndex === opIndex &&
       definition.ref.kind === "var" &&
       definition.ref.id === refId

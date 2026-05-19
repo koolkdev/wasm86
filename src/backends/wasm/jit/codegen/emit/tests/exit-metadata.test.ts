@@ -14,7 +14,7 @@ import {
 import { wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
-import type { Exit } from "#backends/wasm/jit/codegen/plan/types.js";
+import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 
 test("JIT exit metadata applies exact exit instruction-count delta", () => {
   const body = new WasmFunctionBodyEncoder();

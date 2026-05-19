@@ -5,6 +5,10 @@ import type {
   ExitSnapshot
 } from "./exits.js";
 
+export type InstructionProgress = Readonly<{
+  instructionCountDelta: number;
+}>;
+
 export function instructionDeltaAfterOp(
   op: IrOp,
   instruction: JitInstruction
@@ -21,7 +25,9 @@ export function snapshotForExit(
   return exitCommitsInstruction(kind)
     ? {
         ...snapshot,
-        instructionCountDelta: snapshot.instructionCountDelta + 1
+        progress: {
+          instructionCountDelta: snapshot.progress.instructionCountDelta + 1
+        }
       }
     : snapshot;
 }

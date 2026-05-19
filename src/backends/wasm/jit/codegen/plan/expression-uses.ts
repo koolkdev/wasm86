@@ -1,13 +1,7 @@
-import type {
-  IrExprBlock,
-  IrExpressionSourceMap
-} from "#backends/wasm/codegen/expressions.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { PlannedInstruction } from "./types.js";
 
-export type JitExpressionUseInstructionInput = Readonly<{
-  expressionBlock: IrExprBlock;
-  sourceExpressionMap: IrExpressionSourceMap;
-}>;
+export type JitExpressionUseInstructionInput = Pick<PlannedInstruction, "analysis">;
 
 export type JitPlacedSourceValueUse = Readonly<{
   value: JitValue;
@@ -72,7 +66,7 @@ export function jitExpressionOpIndexesForSourceOp(
   instruction: JitExpressionUseInstructionInput,
   sourceOpIndex: number
 ): readonly number[] {
-  const placements = instruction.sourceExpressionMap.placementsBySourceOpIndex.get(sourceOpIndex) ?? [];
+  const placements = instruction.analysis.expressions.sourceMap.placementsBySourceOpIndex.get(sourceOpIndex) ?? [];
   const expressionIndexes = placements.flatMap((placement) =>
     placement.kind === "emittedOp" ? [placement.expressionOpIndex] : []
   );
@@ -82,7 +76,7 @@ export function jitExpressionOpIndexesForSourceOp(
   }
 
   for (const expressionOpIndex of expressionIndexes) {
-    if (instruction.expressionBlock[expressionOpIndex] === undefined) {
+    if (instruction.analysis.expressions.block[expressionOpIndex] === undefined) {
       throw new Error(`missing mapped JIT expression op: ${expressionOpIndex}`);
     }
   }

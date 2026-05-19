@@ -8,6 +8,10 @@ import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import type { IrExprBlock, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import { buildBlock } from "#backends/wasm/jit/block.js";
+import {
+  analyzeBlock,
+  buildBlockExpressions
+} from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import {
   planJitCodegen
@@ -21,6 +25,17 @@ import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
 import {
   type UsePurpose
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
+import type {
+  BlockAnalysis,
+  InstructionFlow
+} from "#backends/wasm/jit/analysis/block.js";
+import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
+import type {
+  Exit,
+  ExitSnapshot,
+  ExitPayload,
+  ExitValue
+} from "#backends/wasm/jit/analysis/exits.js";
 import {
   valueUsesForExpressionBlock,
   type TestValueRoot
@@ -30,12 +45,8 @@ import type {
   JitCodegenPlan,
   ExitStore,
   PlannedExitStore,
-  PlannedExit,
-  Exit,
-  ExitSnapshot,
-  JitInstructionState,
-  ExitPayload,
-  ExitValue
+  PlannedInstruction,
+  PlannedExit
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
   jitExtractBits,
@@ -68,6 +79,8 @@ export {
   FLAG_PRODUCERS,
   ExitReason,
   buildBlock,
+  analyzeBlock,
+  buildBlockExpressions,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
   branchPath,
@@ -93,16 +106,86 @@ export type {
   JitCodegenPlan,
   ExitStore,
   PlannedExitStore,
+  PlannedInstruction,
   PlannedExit,
   Exit,
   ExitSnapshot,
-  JitInstructionState,
   ExitPayload,
   ExitValue,
   JitProducedValue,
   JitValue,
   JitBlock
 };
+
+export function analyzeBlockForTest(block: JitBlock) {
+  return analyzeBlock(buildBlockExpressions(block));
+}
+
+export function plannedInstructionsForTest(
+  analysis: BlockAnalysis,
+  exits: readonly PlannedExit[]
+): readonly PlannedInstruction[] {
+  const exitsById = new Map(exits.map((exit) => [exit.id, exit]));
+
+  return analysis.instructions.map((instruction) => {
+    const flow: InstructionFlow<PlannedExit> = {
+      effects: instruction.flow.effects.map((effect) =>
+        planEffectExitsForTest(effect, exitsById)
+      ),
+      exits: instruction.flow.exits.map((exit) =>
+        requiredPlannedExitForTest(exitsById, exit.id)
+      )
+    };
+
+    return {
+      analysis: instruction,
+      flow,
+      exitCount: flow.exits.length
+    };
+  });
+}
+
+function planEffectExitsForTest(
+  effect: EffectInfo,
+  exitsById: ReadonlyMap<string, PlannedExit>
+): EffectInfo<PlannedExit> {
+  switch (effect.kind) {
+    case "memoryGuard":
+      return {
+        ...effect,
+        faultExit: requiredPlannedExitForTest(exitsById, effect.faultExit.id)
+      };
+    case "jump":
+    case "hostTrap":
+    case "fallthrough":
+      return {
+        ...effect,
+        exit: requiredPlannedExitForTest(exitsById, effect.exit.id)
+      };
+    case "branch":
+      return {
+        ...effect,
+        taken: requiredPlannedExitForTest(exitsById, effect.taken.id),
+        notTaken: requiredPlannedExitForTest(exitsById, effect.notTaken.id)
+      };
+    case "memoryStore":
+    case "memoryLoad":
+      return effect;
+  }
+}
+
+function requiredPlannedExitForTest(
+  exitsById: ReadonlyMap<string, PlannedExit>,
+  exitId: string
+): PlannedExit {
+  const exit = exitsById.get(exitId);
+
+  if (exit === undefined) {
+    throw new Error(`missing planned JIT test exit: ${exitId}`);
+  }
+
+  return exit;
+}
 
 export function onlyExit(exits: readonly PlannedExit[], reason: ExitReason): PlannedExit {
   const matches = exits.filter((entry) => entry.reason === reason);
@@ -247,30 +330,6 @@ function exitKind(reason: ExitReason, path: PlannedExit["path"] | undefined): Pl
   }
 }
 
-export function instructionState(input: Readonly<{
-  instructionId: string;
-  eip: number;
-  nextEip: number;
-  nextMode: "continue" | "exit";
-  instructionCountDelta: number;
-  changedRegs?: readonly Reg32[];
-  paths?: JitInstructionState["paths"];
-  exitCount: number;
-}>): JitInstructionState {
-  const initialState = exitState(input.instructionCountDelta, input.changedRegs ?? []);
-
-  return {
-    instructionId: input.instructionId,
-    eip: input.eip,
-    nextEip: input.nextEip,
-    nextMode: input.nextMode,
-    instructionCountDelta: input.instructionCountDelta,
-    initialValueState: initialState.valueState,
-    paths: input.paths ?? new Map(),
-    exitCount: input.exitCount
-  };
-}
-
 export function exitState(
   instructionCountDelta: number,
   changedRegs: readonly Reg32[] = []
@@ -282,7 +341,9 @@ export function exitState(
   }
 
   return {
-    instructionCountDelta,
+    progress: {
+      instructionCountDelta
+    },
     valueState: valueState.snapshot()
   };
 }

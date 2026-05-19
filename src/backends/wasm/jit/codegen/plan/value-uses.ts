@@ -5,10 +5,8 @@ import {
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { valueChildren } from "#backends/wasm/jit/ir/values/walk.js";
-import type {
-  Exit,
-  PlannedExit
-} from "./types.js";
+import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
+import type { PlannedExit } from "./types.js";
 import type {
   Placement,
   Effect,

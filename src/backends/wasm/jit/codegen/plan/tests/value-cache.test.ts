@@ -16,6 +16,8 @@ import {
   exitState,
   c32,
   addValue,
+  analyzeBlockForTest,
+  plannedInstructionsForTest,
   type JitCodegenPlan,
   type JitValue,
   type JitBlock,
@@ -60,12 +62,24 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const [instruction] = emissionPlan.instructions;
+  const [analysisInstruction] = codegenPlan.analysis.instructions;
+  const analysisExpressions = analysisInstruction?.expressions;
+  const analysisTimeline = analysisInstruction?.timeline;
 
-  strictEqual(instruction?.instructionId, "cache-plan");
+  strictEqual(instruction?.analysis.instruction.instructionId, "cache-plan");
   strictEqual(emissionPlan.exits, codegenPlan.exits);
-  strictEqual(emissionPlan.maxExitStoreIndex, codegenPlan.maxExitStoreIndex);
-  strictEqual(instruction?.expressionBlock.some((op) => op.op === "conditionalJump"), true);
-  strictEqual(instruction?.valueTimeline.snapshots.length, instruction?.expressionBlock.length);
+  strictEqual(
+    emissionPlan.maxExitStoreIndex,
+    Math.max(0, ...codegenPlan.exits.map((exit) => exit.exitStoreIndex))
+  );
+  strictEqual(instruction?.analysis.expressions.block.some((op) => op.op === "conditionalJump"), true);
+  strictEqual(
+    instruction?.analysis.timeline.snapshots.length,
+    instruction?.analysis.expressions.block.length
+  );
+  strictEqual(instruction?.analysis.expressions, analysisExpressions);
+  strictEqual(instruction?.analysis.expressions.block, analysisExpressions?.block);
+  strictEqual(instruction?.analysis.timeline, analysisTimeline);
   strictEqual((emissionPlan.reusePlan.cache.selected.length ?? 0) > 0, true);
   strictEqual((emissionPlan.reusePlan.cache.epochs.length ?? 0) > 0, true);
 });
@@ -124,38 +138,11 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
     stores,
     exitStoreIndex: 1
   });
+  const analysis = analyzeBlockForTest(block);
   const plan: JitCodegenPlan = {
-    block,
-    effects: [{
-      kind: "hostTrap",
-      at: { instructionIndex: 1, opIndex: 1 },
-      exit
-    }],
-    instructionStates: [
-      {
-        instructionId: "write-before-overwrite",
-        eip: startAddress,
-        nextEip: startAddress + 1,
-        nextMode: "continue",
-        instructionCountDelta: 0,
-        initialValueState: exitState(0).valueState,
-        paths: new Map(),
-        exitCount: 0
-      },
-      {
-        instructionId: "overwrite-before-exit",
-        eip: startAddress + 1,
-        nextEip: startAddress + 2,
-        nextMode: "exit",
-        instructionCountDelta: 1,
-        initialValueState: exitState(1, ["eax"]).valueState,
-        paths: new Map(),
-        exitCount: 1
-      }
-    ],
-    exits: [exit],
-    exitStoreSets: [{ stores: [] }, { stores }],
-    maxExitStoreIndex: 1
+    analysis,
+    instructions: plannedInstructionsForTest(analysis, [exit]),
+    exits: [exit]
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
 
@@ -213,26 +200,11 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
     stores,
     exitStoreIndex: 1
   });
+  const analysis = analyzeBlockForTest(block);
   const plan: JitCodegenPlan = {
-    block,
-    effects: [{
-      kind: "memoryGuard",
-      at: { instructionIndex: 0, opIndex: 0 },
-      faultExit: exit
-    }],
-    instructionStates: [{
-      instructionId: "fault-before-register-write",
-      eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "continue",
-      instructionCountDelta: 0,
-      initialValueState: exitState(0, ["eax"]).valueState,
-      paths: new Map(),
-      exitCount: 1
-    }],
-    exits: [exit],
-    exitStoreSets: [{ stores: [] }, { stores }],
-    maxExitStoreIndex: 1
+    analysis,
+    instructions: plannedInstructionsForTest(analysis, [exit]),
+    exits: [exit]
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
 

@@ -63,7 +63,7 @@ import {
   branchPath,
   rootPath
 } from "#backends/wasm/jit/analysis/paths.js";
-import type { ExitSnapshot } from "#backends/wasm/jit/codegen/plan/types.js";
+import type { ExitSnapshot } from "#backends/wasm/jit/analysis/exits.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
 
@@ -387,7 +387,9 @@ export function exitState(
   instructionCountDelta: number
 ): ExitSnapshot {
   return {
-    instructionCountDelta,
+    progress: {
+      instructionCountDelta
+    },
     valueState: createJitValueState().snapshot()
   };
 }

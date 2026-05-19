@@ -1,4 +1,3 @@
-import type { IrExpressionSourceMap } from "#backends/wasm/codegen/expressions.js";
 import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 
 export type PathId = string;
@@ -34,7 +33,7 @@ export function branchPath(
   };
 }
 
-export function branchPathId(
+function branchPathId(
   instructionIndex: number,
   opIndex: number,
   arm: BranchArm
@@ -64,30 +63,6 @@ export function buildInstructionPaths(
   }
 
   return paths;
-}
-
-export function buildExpressionPaths(
-  sourcePaths: PathMap,
-  sourceMap: IrExpressionSourceMap,
-  instructionIndex: number
-): PathMap {
-  const expressionPaths = new Map<number, BranchPaths>();
-
-  for (const [sourceOpIndex, paths] of sourcePaths) {
-    const placements = sourceMap.placementsBySourceOpIndex.get(sourceOpIndex) ?? [];
-    const emittedPlacements = placements.filter((placement) => placement.kind === "emittedOp");
-    const [placement] = emittedPlacements;
-
-    if (placement === undefined || emittedPlacements.length !== 1) {
-      throw new Error(
-        `could not map JIT source path op to expression op: ${instructionIndex}:${sourceOpIndex}`
-      );
-    }
-
-    expressionPaths.set(placement.expressionOpIndex, paths);
-  }
-
-  return expressionPaths;
 }
 
 export function pathsEqual(left: Path, right: Path): boolean {

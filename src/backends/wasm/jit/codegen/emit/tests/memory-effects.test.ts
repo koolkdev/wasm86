@@ -397,7 +397,9 @@ function memoryExit(access: "read" | "write"): Exit {
     kind: read ? "memoryReadFault" : "memoryWriteFault",
     reason: read ? ExitReason.MEMORY_READ_FAULT : ExitReason.MEMORY_WRITE_FAULT,
     snapshot: {
-      instructionCountDelta: 0,
+      progress: {
+        instructionCountDelta: 0
+      },
       valueState: createJitValueState().snapshot()
     },
     visibleEip: {

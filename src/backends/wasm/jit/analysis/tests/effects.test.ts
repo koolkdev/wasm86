@@ -6,9 +6,13 @@ import {
   buildIrExpressionBlockWithSourceMap
 } from "#backends/wasm/codegen/expressions.js";
 import {
-  analyzeEffects,
-  type EffectsAnalysis
+  analyzeInstructionEffects,
+  type EffectInfo,
+  type EffectInstructionInput,
+  type InstructionFlow
 } from "#backends/wasm/jit/analysis/effects.js";
+import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
+import { instructionDeltaAfterOp } from "#backends/wasm/jit/analysis/instruction-progress.js";
 import {
   classifyEffect,
   classifyExits,
@@ -47,8 +51,8 @@ test("JIT effect analysis creates exact final fallthrough exits", () => {
     { op: "next" }
   ], 0, "exit");
   const analysis = analyze([instruction]);
-  const [effect] = analysis.effects;
-  const [exit] = analysis.exits;
+  const [effect] = effects(analysis);
+  const [exit] = exits(analysis);
 
   strictEqual(effect?.kind, "fallthrough");
   strictEqual(exit?.kind, "fallthrough");
@@ -56,7 +60,7 @@ test("JIT effect analysis creates exact final fallthrough exits", () => {
   deepStrictEqual(exit?.payload, { kind: "static", value: instruction.nextEip });
   deepStrictEqual(exit?.visibleEip, { kind: "static", value: instruction.nextEip });
   deepStrictEqual(exit?.path, rootPath());
-  strictEqual(exit?.snapshot.instructionCountDelta, 1);
+  strictEqual(exit?.snapshot.progress.instructionCountDelta, 1);
 });
 
 test("JIT effect analysis attaches exact branch exits with distinct paths", () => {
@@ -64,7 +68,7 @@ test("JIT effect analysis attaches exact branch exits with distinct paths", () =
     { op: "conditionalJump", condition: c32(1), taken: c32(0x2000), notTaken: c32(0x1002) }
   ]);
   const analysis = analyze([instruction]);
-  const [effect] = analysis.effects;
+  const [effect] = effects(analysis);
 
   strictEqual(effect?.kind, "branch");
 
@@ -79,8 +83,8 @@ test("JIT effect analysis attaches exact branch exits with distinct paths", () =
   strictEqual(effect.taken.id !== effect.notTaken.id, true);
   deepStrictEqual(effect.taken.path, branchPath(0, 0, "taken"));
   deepStrictEqual(effect.notTaken.path, branchPath(0, 0, "notTaken"));
-  strictEqual(effect.taken.snapshot.instructionCountDelta, 1);
-  strictEqual(effect.notTaken.snapshot.instructionCountDelta, 1);
+  strictEqual(effect.taken.snapshot.progress.instructionCountDelta, 1);
+  strictEqual(effect.notTaken.snapshot.progress.instructionCountDelta, 1);
 });
 
 test("JIT effect analysis owns memory guard exits without making stores exit", () => {
@@ -90,14 +94,16 @@ test("JIT effect analysis owns memory guard exits without making stores exit", (
     { op: "set", target: { kind: "reg", reg: "ecx" }, value: c32(1) }
   ]);
   const analysis = analyze([instruction]);
+  const instructionEffects = effects(analysis);
+  const instructionExits = exits(analysis);
 
-  deepStrictEqual(analysis.effects.map((effect) => effect.kind), [
+  deepStrictEqual(instructionEffects.map((effect) => effect.kind), [
     "memoryGuard",
     "memoryStore"
   ]);
-  strictEqual(analysis.exits.length, 1);
+  strictEqual(instructionExits.length, 1);
 
-  const guard = analysis.effects[0];
+  const guard = instructionEffects[0];
 
   if (guard?.kind !== "memoryGuard") {
     throw new Error("expected memory guard effect");
@@ -114,19 +120,21 @@ test("JIT effect analysis records host traps with next-EIP visibility", () => {
     { op: "hostTrap", vector: c32(0x2e) }
   ]);
   const analysis = analyze([instruction]);
-  const [exit] = analysis.exits;
+  const instructionEffects = effects(analysis);
+  const [exit] = exits(analysis);
 
-  strictEqual(analysis.effects[0]?.kind, "hostTrap");
+  strictEqual(instructionEffects[0]?.kind, "hostTrap");
   strictEqual(exit?.kind, "hostTrap");
   strictEqual(exit?.reason, ExitReason.HOST_TRAP);
   deepStrictEqual(exit?.visibleEip, { kind: "static", value: instruction.nextEip });
   deepStrictEqual(exit?.payload, { kind: "runtime", source: "hostTrapVector" });
-  strictEqual(exit?.snapshot.instructionCountDelta, 1);
+  strictEqual(exit?.snapshot.progress.instructionCountDelta, 1);
 });
 
-function analyze(instructions: readonly JitInstruction[]): EffectsAnalysis {
-  const analyses = [];
+function analyze(instructions: readonly JitInstruction[]): readonly InstructionFlow[] {
+  const flows: InstructionFlow[] = [];
   let valueState = createJitValueState().snapshot();
+  let instructionCountDelta = 0;
 
   for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
     const instruction = instructions[instructionIndex]!;
@@ -138,15 +146,39 @@ function analyze(instructions: readonly JitInstruction[]): EffectsAnalysis {
       producedByVar: indexProducedValues(instruction, instructionIndex)
     });
 
-    analyses.push({
+    const effectInput: EffectInstructionInput = {
       instruction,
-      instructionIndex,
+      index: instructionIndex,
       sourceMap: expressionPlan.sourceMap,
-      valueTimeline,
-      paths: buildInstructionPaths(instruction, instructionIndex)
-    });
+      timeline: valueTimeline,
+      sourcePaths: buildInstructionPaths(instruction, instructionIndex),
+      progress: {
+        instructionCountDelta
+      }
+    };
+
+    flows.push(analyzeInstructionEffects(effectInput));
+    instructionCountDelta += instructionDeltaForInstruction(instruction);
     valueState = valueTimeline.final;
   }
 
-  return analyzeEffects({ instructions: analyses });
+  return flows;
+}
+
+function instructionDeltaForInstruction(instruction: JitInstruction): number {
+  let delta = 0;
+
+  for (const op of instruction.ir) {
+    delta += instructionDeltaAfterOp(op, instruction);
+  }
+
+  return delta;
+}
+
+function effects(flows: readonly InstructionFlow[]): readonly EffectInfo[] {
+  return flows.flatMap((flow) => flow.effects);
+}
+
+function exits(flows: readonly InstructionFlow[]): readonly Exit[] {
+  return flows.flatMap((flow) => flow.exits);
 }

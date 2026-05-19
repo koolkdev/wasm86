@@ -18,6 +18,7 @@ import {
   startAddress,
   type Exit,
   type PlannedExit,
+  type PlannedInstruction,
   type JitBlock
 } from "./plan-test-helpers.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
@@ -25,6 +26,7 @@ import {
   planEffects
 } from "#backends/wasm/jit/codegen/plan/effects-plan.js";
 import type { Effect } from "#backends/wasm/jit/codegen/plan/effect-types.js";
+import type { IrExpressionSourceMap } from "#backends/wasm/codegen/expressions.js";
 
 test("JIT effects plan leaves pure expressions and state updates out of cache roots", () => {
   const block: JitBlock = {
@@ -234,7 +236,9 @@ test("JIT effects plan fails before emission for unresolved effect values", () =
     kind: "hostTrap",
     reason: ExitReason.HOST_TRAP,
     snapshot: {
-      instructionCountDelta: 0,
+      progress: {
+        instructionCountDelta: 0
+      },
       valueState
     },
     visibleEip: { kind: "static", value: startAddress + 1 },
@@ -244,29 +248,54 @@ test("JIT effects plan fails before emission for unresolved effect values", () =
   });
 
   throws(() => {
-    planEffects({
-      effects: [{
-        kind: "hostTrap",
-        at: { instructionIndex: 0, opIndex: 0 },
-        exit
-      }],
-      instructions: [{
-        ir: expressionBlock,
-        nextEip: startAddress + 1,
-        expressionBlock,
-        sourceExpressionMap: {
-          placementsBySourceOpIndex: new Map([[
-            0,
-            [{ kind: "emittedOp", expressionOpIndex: 0 }]
-          ]])
-        },
-        valueTimeline: buildTimeline({
-          operands: [],
-          expressions: expressionBlock,
-          entry: valueState
-        })
-      }]
+    const instruction = {
+      instructionId: "unresolved-effect-values",
+      eip: startAddress,
+      nextEip: startAddress + 1,
+      nextMode: "continue",
+      operands: [],
+      ir: expressionBlock
+    } as const;
+    const sourceMap: IrExpressionSourceMap = {
+      placementsBySourceOpIndex: new Map([[
+        0,
+        [{ kind: "emittedOp", expressionOpIndex: 0 } as const]
+      ]])
+    };
+    const timeline = buildTimeline({
+      operands: [],
+      expressions: expressionBlock,
+      entry: valueState
     });
+    const effect = {
+      kind: "hostTrap",
+      at: { instructionIndex: 0, opIndex: 0 },
+      exit
+    } as const;
+    const instructionAnalysis = {
+      instruction,
+      index: 0,
+      expressions: {
+        block: expressionBlock,
+        sourceMap,
+        producedValues: new Map()
+      },
+      timeline,
+      flow: {
+        effects: [effect],
+        exits: [exit]
+      }
+    };
+    const plannedInstruction = {
+      analysis: instructionAnalysis,
+      flow: {
+        effects: [effect],
+        exits: [exit]
+      },
+      exitCount: 1
+    } satisfies PlannedInstruction;
+
+    planEffects([plannedInstruction]);
   }, /JIT value expression is not available in the JIT timeline/);
 });
 

@@ -191,7 +191,9 @@ function controlExit(kind: "branchTaken" | "branchNotTaken", path: Path): Exit {
     kind,
     reason: ExitReason.JUMP,
     snapshot: {
-      instructionCountDelta: 0,
+      progress: {
+        instructionCountDelta: 0
+      },
       valueState: createJitValueState().snapshot()
     },
     visibleEip: {
@@ -216,7 +218,9 @@ function hostTrapExit(): Exit {
     kind: "hostTrap",
     reason: ExitReason.HOST_TRAP,
     snapshot: {
-      instructionCountDelta: 0,
+      progress: {
+        instructionCountDelta: 0
+      },
       valueState: createJitValueState().snapshot()
     },
     visibleEip: {

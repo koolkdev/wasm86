@@ -17,26 +17,19 @@ import {
 } from "./effect-classifier.js";
 import {
   instructionDeltaAfterOp,
-  snapshotForExit
+  snapshotForExit,
+  type InstructionProgress
 } from "./instruction-progress.js";
 import type { PathMap } from "./paths.js";
 import type { Timeline } from "./timeline.js";
 
-export type InstructionAnalysis = Readonly<{
+export type EffectInstructionInput = Readonly<{
   instruction: JitInstruction;
-  instructionIndex: number;
+  index: number;
   sourceMap: IrExpressionSourceMap;
-  valueTimeline: Timeline;
-  paths: PathMap;
-}>;
-
-export type EffectsInput = Readonly<{
-  instructions: readonly InstructionAnalysis[];
-}>;
-
-export type EffectsAnalysis<TExit extends Exit = Exit> = Readonly<{
-  effects: readonly EffectInfo<TExit>[];
-  exits: readonly TExit[];
+  timeline: Timeline;
+  sourcePaths: PathMap;
+  progress: InstructionProgress;
 }>;
 
 type EffectInfoBase<TKind extends EffectKind> = Readonly<{
@@ -53,101 +46,69 @@ export type EffectInfo<TExit extends Exit = Exit> =
   | EffectInfoBase<"hostTrap"> & Readonly<{ exit: TExit }>
   | EffectInfoBase<"fallthrough"> & Readonly<{ exit: TExit }>;
 
-export function analyzeEffects(input: EffectsInput): EffectsAnalysis {
-  const effects: EffectInfo[] = [];
-  const exits: Exit[] = [];
-  let instructionCountDelta = 0;
+export type InstructionFlow<TExit extends Exit = Exit> = Readonly<{
+  effects: readonly EffectInfo<TExit>[];
+  exits: readonly TExit[];
+}>;
 
-  for (const instructionAnalysis of input.instructions) {
-    const { instruction, instructionIndex } = instructionAnalysis;
+type MutableInstructionFlow<TExit extends Exit = Exit> = {
+  effects: EffectInfo<TExit>[];
+  exits: TExit[];
+};
 
-    for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
-      const op = instruction.ir[opIndex];
+export function analyzeInstructionEffects(
+  instructionAnalysis: EffectInstructionInput
+): InstructionFlow {
+  const { instruction, index } = instructionAnalysis;
+  const flow: MutableInstructionFlow = {
+    effects: [],
+    exits: []
+  };
+  let currentInstructionCountDelta = instructionAnalysis.progress.instructionCountDelta;
 
-      if (op === undefined) {
-        throw new Error(`missing JIT IR op while analyzing effects: ${instructionIndex}:${opIndex}`);
-      }
+  for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
+    const op = instruction.ir[opIndex];
 
-      const effectKind = classifyEffect(op, instruction);
-      const exitKinds = classifyExits(op, instruction);
-
-      if (effectKind === undefined && exitKinds.length !== 0) {
-        throw new Error(`JIT exits without an owning effect at ${instructionIndex}:${opIndex}`);
-      }
-
-      const at = { instructionIndex, opIndex };
-      const exitRecords = exitKinds.map((kind) =>
-        buildExit({
-          instruction,
-          at,
-          kind,
-          snapshot: snapshotForExit(
-            kind,
-            exitSnapshotBeforeOp(instructionAnalysis, opIndex, instructionCountDelta)
-          ),
-          paths: instructionAnalysis.paths
-        })
-      );
-
-      if (effectKind !== undefined) {
-        effects.push(effectForOp(effectKind, at, exitRecords));
-      }
-
-      exits.push(...exitRecords);
-      instructionCountDelta += instructionDeltaAfterOp(op, instruction);
+    if (op === undefined) {
+      throw new Error(`missing JIT IR op while analyzing effects: ${index}:${opIndex}`);
     }
+
+    const effectKind = classifyEffect(op, instruction);
+    const exitKinds = classifyExits(op, instruction);
+
+    if (effectKind === undefined && exitKinds.length !== 0) {
+      throw new Error(`JIT exits without an owning effect at ${index}:${opIndex}`);
+    }
+
+    const at = { instructionIndex: index, opIndex };
+    const exitRecords = exitKinds.map((kind) =>
+      buildExit({
+        instruction,
+        at,
+        kind,
+        snapshot: snapshotForExit(
+          kind,
+          exitSnapshotBeforeOp(
+            instructionAnalysis,
+            opIndex,
+            { instructionCountDelta: currentInstructionCountDelta }
+          )
+        ),
+        paths: instructionAnalysis.sourcePaths
+      })
+    );
+
+    if (effectKind !== undefined) {
+      const effect = effectForOp(effectKind, at, exitRecords);
+
+      flow.effects.push(effect);
+    }
+
+    flow.exits.push(...exitRecords);
+    currentInstructionCountDelta += instructionDeltaAfterOp(op, instruction);
   }
 
-  assertUniqueExitIds(exits);
-
-  return {
-    effects,
-    exits
-  };
-}
-
-export function effectAt<TExit extends Exit>(
-  effects: readonly EffectInfo<TExit>[],
-  instructionIndex: number,
-  opIndex: number
-): EffectInfo<TExit> | undefined {
-  return effects.find((effect) =>
-    effect.at.instructionIndex === instructionIndex &&
-    effect.at.opIndex === opIndex
-  );
-}
-
-export function reattachEffectExits<TExit extends Exit>(
-  effects: readonly EffectInfo[],
-  exits: readonly TExit[]
-): readonly EffectInfo<TExit>[] {
-  const exitsById = new Map(exits.map((exit) => [exit.id, exit]));
-
-  return effects.map((effect) => {
-    switch (effect.kind) {
-      case "memoryGuard":
-        return {
-          ...effect,
-          faultExit: exitsById.get(effect.faultExit.id)!
-        };
-      case "jump":
-      case "hostTrap":
-      case "fallthrough":
-        return {
-          ...effect,
-          exit: exitsById.get(effect.exit.id)!
-        };
-      case "branch":
-        return {
-          ...effect,
-          taken: exitsById.get(effect.taken.id)!,
-          notTaken: exitsById.get(effect.notTaken.id)!
-        };
-      case "memoryStore":
-      case "memoryLoad":
-        return effect;
-    }
-  });
+  return flow;
 }
 
 function effectForOp(
@@ -181,18 +142,18 @@ function effectForOp(
 }
 
 function exitSnapshotBeforeOp(
-  instruction: InstructionAnalysis,
+  instruction: EffectInstructionInput,
   sourceOpIndex: number,
-  instructionCountDelta: number
+  progress: InstructionProgress
 ): ExitSnapshot {
   return {
-    instructionCountDelta,
+    progress,
     valueState: valueStateBeforeSourceOp(instruction, sourceOpIndex)
   };
 }
 
 function valueStateBeforeSourceOp(
-  instruction: InstructionAnalysis,
+  instruction: EffectInstructionInput,
   sourceOpIndex: number
 ) {
   const expressionOpIndexes = expressionOpIndexesForSourceOp(
@@ -206,7 +167,7 @@ function valueStateBeforeSourceOp(
     );
   }
 
-  const snapshot = instruction.valueTimeline.snapshots[expressionOpIndexes[0]!];
+  const snapshot = instruction.timeline.snapshots[expressionOpIndexes[0]!];
 
   if (snapshot === undefined) {
     throw new Error(`missing JIT value-state timeline snapshot for source op ${sourceOpIndex}`);
@@ -265,17 +226,5 @@ function assertNoExits(
 ): void {
   if (exits.length !== 0) {
     throw new Error(`JIT ${kind} effect at ${at.instructionIndex}:${at.opIndex} must not have exits`);
-  }
-}
-
-function assertUniqueExitIds(exits: readonly Exit[]): void {
-  const ids = new Set<string>();
-
-  for (const exit of exits) {
-    if (ids.has(exit.id)) {
-      throw new Error(`duplicate JIT exit id: ${exit.id}`);
-    }
-
-    ids.add(exit.id);
   }
 }
