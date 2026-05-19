@@ -1,11 +1,10 @@
 import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
-import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import { buildIrExpressionBlock, type IrStorageExpr, type IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type {
   IrBlock,
   IrMemoryAccessKind,
   OperandRef,
-  SemanticOperandInfo,
-  StorageRef
+  SemanticOperandInfo
 } from "#x86/ir/model/types.js";
 import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
@@ -40,7 +39,7 @@ import {
   emitModRmIsRegister,
   emitModRmRegIndex
 } from "#backends/wasm/interpreter/decode/modrm-bits.js";
-import { emitIrToWasm, type WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
+import { emitIrExpressionBlockToWasm, type WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
 import { emitSetFlags } from "#backends/wasm/codegen/flags.js";
 import { emitFlagsCondition } from "#backends/wasm/codegen/conditions.js";
 import { ExitReason } from "#backends/wasm/exit.js";
@@ -55,6 +54,7 @@ import {
   type WasmIrEmitValueOptions,
   type ValueWidth
 } from "#backends/wasm/codegen/value-width.js";
+import { optimizeInterpreterExpressionBlock } from "./expressions.js";
 
 export type InterpreterOperandBinding =
   | Readonly<{ kind: "opcode.reg"; opcodeLocal: number; width: OperandWidth }>
@@ -99,16 +99,17 @@ export type InterpreterIrEmitContext = Readonly<{
 
 export function emitInterpreterIrWithContext(block: IrBlock, context: InterpreterIrEmitContext): void {
   const aluFlags = wasmIrLocalAluFlagsStorage(context.body, context.state.aluFlagsLocal);
+  const expressionBlock = optimizeInterpreterExpressionBlock(
+    buildIrExpressionBlock(block),
+    {
+      canInlineGet: (source) => canInlineGet(context, source),
+      storageMayAlias: (write, read) => interpreterStorageRefsMayAlias(context, write, read)
+    }
+  );
 
-  emitIrToWasm(block, {
+  emitIrExpressionBlockToWasm(expressionBlock, {
     body: context.body,
     scratch: context.scratch,
-    expression: {
-      canInlineGet: (source) => canInlineGet(context, source),
-      alias: {
-        storageMayAlias: (write, read) => interpreterStorageRefsMayAlias(context, write, read)
-      }
-    },
     emitGet: (source, accessWidth, helpers, options) => emitGetStorage(context, source, accessWidth, helpers, options),
     emitSet: (target, value, accessWidth, helpers) =>
       emitSetStorage(context, target, value, accessWidth, helpers),
@@ -152,7 +153,7 @@ function emitGetStorage(
   }
 }
 
-function canInlineGet(context: InterpreterIrEmitContext, source: StorageRef): boolean {
+function canInlineGet(context: InterpreterIrEmitContext, source: IrStorageExpr): boolean {
   switch (source.kind) {
     case "reg":
       return true;
@@ -181,8 +182,8 @@ type InterpreterStorageAlias =
 
 function interpreterStorageRefsMayAlias(
   context: InterpreterIrEmitContext,
-  write: StorageRef,
-  read: StorageRef
+  write: IrStorageExpr,
+  read: IrStorageExpr
 ): boolean {
   const writeAlias = interpreterStorageAlias(context, write);
   const readAlias = interpreterStorageAlias(context, read);
@@ -208,7 +209,7 @@ function interpreterStorageRefsMayAlias(
 
 function interpreterStorageAlias(
   context: InterpreterIrEmitContext,
-  storage: StorageRef
+  storage: IrStorageExpr
 ): InterpreterStorageAlias {
   switch (storage.kind) {
     case "reg":

@@ -13,7 +13,6 @@ import type {
   VarRef
 } from "#x86/ir/model/types.js";
 import {
-  irOpStorageWrites,
   visitIrOpValueRefs
 } from "#x86/ir/model/op-semantics.js";
 import type { OperandWidth } from "#x86/isa/types.js";
@@ -102,27 +101,12 @@ export type IrExpressionInputOp =
   | IrExpressionSetInputOp;
 export type IrExpressionInputBlock = readonly IrExpressionInputOp[];
 
-export type IrExpressionAliasModel = Readonly<{
-  storageMayAlias?: (write: StorageRef, read: StorageRef) => boolean;
-}>;
-
-export type IrExpressionOptions = Readonly<{
-  canInlineGet?: (source: StorageRef) => boolean;
-  alias?: IrExpressionAliasModel;
-}>;
-
-export function buildIrExpressionBlock(
-  block: IrExpressionInputBlock,
-  options: IrExpressionOptions = {}
-): IrExprBlock {
-  return buildIrExpressionBlockWithSourceMap(block, options).expressionBlock;
+export function buildIrExpressionBlock(block: IrExpressionInputBlock): IrExprBlock {
+  return buildIrExpressionBlockWithSourceMap(block).expressionBlock;
 }
 
-export function buildIrExpressionBlockWithSourceMap(
-  block: IrExpressionInputBlock,
-  options: IrExpressionOptions = {}
-): IrExpressionBuildResult {
-  const builder = new ExpressionBuilder(block, options);
+export function buildIrExpressionBlockWithSourceMap(block: IrExpressionInputBlock): IrExpressionBuildResult {
+  const builder = new ExpressionBuilder(block);
 
   return builder.build();
 }
@@ -150,8 +134,7 @@ class ExpressionBuilder {
   #sourceOpIndex = -1;
 
   constructor(
-    readonly block: IrExpressionInputBlock,
-    readonly options: IrExpressionOptions
+    readonly block: IrExpressionInputBlock
   ) {
     this.#useCounts = countVarUses(block);
   }
@@ -179,8 +162,7 @@ class ExpressionBuilder {
               ...(op.signed === true ? { signed: true } : {})
             },
             source.sourceOpIndexes,
-            this.options.canInlineGet?.(op.source) === true &&
-              !this.#inlineGetWouldCrossAliasBarrier(op.dst, op.source, opIndex)
+            false
           );
           break;
         }
@@ -311,28 +293,6 @@ class ExpressionBuilder {
         placementsBySourceOpIndex: this.#placementsBySourceOpIndex
       }
     };
-  }
-
-  #inlineGetWouldCrossAliasBarrier(dst: VarRef, readStorage: StorageRef, opIndex: number): boolean {
-    for (let index = opIndex + 1; index < this.block.length; index += 1) {
-      const op = this.block[index];
-
-      if (op === undefined) {
-        throw new Error(`missing IR expression input op: ${index}`);
-      }
-
-      if (opUsesVar(op, dst.id)) {
-        return false;
-      }
-
-      if (opWriteStorages(op).some((writeStorage) =>
-        storagesMayAlias(writeStorage, readStorage, this.options.alias)
-      )) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   #defineValue(
@@ -470,43 +430,6 @@ function countVarUses(block: IrExpressionInputBlock): Map<number, number> {
   }
 
   return counts;
-}
-
-function opUsesVar(op: IrExpressionInputOp, id: number): boolean {
-  let found = false;
-
-  visitIrOpValueRefs(op, (value) => {
-    found ||= value.kind === "var" && value.id === id;
-  });
-
-  return found;
-}
-
-function opWriteStorages(op: IrExpressionInputOp): readonly StorageRef[] {
-  return irOpStorageWrites(op);
-}
-
-function storagesMayAlias(
-  write: StorageRef,
-  read: StorageRef,
-  alias: IrExpressionAliasModel | undefined
-): boolean {
-  return (alias?.storageMayAlias ?? storageRefsMayOverlap)(write, read);
-}
-
-function storageRefsMayOverlap(left: StorageRef, right: StorageRef): boolean {
-  if (left.kind !== right.kind) {
-    return false;
-  }
-
-  switch (left.kind) {
-    case "reg":
-      return right.kind === "reg" && left.reg === right.reg;
-    case "operand":
-      return right.kind === "operand" && left.index === right.index;
-    case "mem":
-      return true;
-  }
 }
 
 function remainingUses(useCounts: ReadonlyMap<number, number>, id: number): number {

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import type { Reg32 } from "#x86/isa/types.js";
 import { buildIr } from "#x86/ir/build/builder.js";
-import type { IrExpressionOptions, IrExprBlock, IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import type { IrExprBlock, IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { IrBlock } from "#x86/ir/model/types.js";
 import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
@@ -84,8 +84,7 @@ test("emitIrToWasm uses planned slots for non-overlapping IR locals", () => {
 
       s.set(s.reg("ebx"), second);
       s.next();
-    }),
-    { canInlineGet: () => false }
+    })
   );
 
   strictEqual(scratch.maxLive, 1);
@@ -100,8 +99,7 @@ test("emitIrToWasm uses a reused input slot for a materialized let destination",
       s.set(s.reg("eax"), sum);
       s.set(s.reg("ebx"), sum);
       s.next();
-    }),
-    { canInlineGet: () => false }
+    })
   );
 
   strictEqual(scratch.maxLive, 1);
@@ -190,7 +188,6 @@ function emitTestProgram(program: IrBlock): WasmFunctionBodyEncoder {
   emitIrToWasm(program, {
     body,
     scratch,
-    expression: { canInlineGet: () => true },
     emitGet: (source) => emitGet(body, regLocals, source),
     emitSet: (target, value, _accessWidth, helpers) => emitSet(body, regLocals, target, value, helpers),
     emitMemoryGuard: () => unsupported("memory.guard"),
@@ -229,8 +226,7 @@ function emitTestProgram(program: IrBlock): WasmFunctionBodyEncoder {
 }
 
 function emitWithTrackingScratch(
-  program: IrBlock,
-  expression: IrExpressionOptions
+  program: IrBlock
 ): TrackingScratchAllocator {
   const body = new WasmFunctionBodyEncoder(2);
   const scratch = new TrackingScratchAllocator(body);
@@ -242,7 +238,6 @@ function emitWithTrackingScratch(
   emitIrToWasm(program, {
     body,
     scratch,
-    expression,
     emitGet: (source) => emitGet(body, regLocals, source),
     emitSet: (target, value, _accessWidth, helpers) => emitSet(body, regLocals, target, value, helpers),
     emitMemoryGuard: () => unsupported("memory.guard"),

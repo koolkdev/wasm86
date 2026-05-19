@@ -1,6 +1,5 @@
 import {
   buildIrExpressionBlock,
-  type IrExpressionOptions,
   type IrExpressionInputBlock,
   type IrExprOp,
   type IrExprBlock,
@@ -38,7 +37,6 @@ import {
 export type WasmIrEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  expression?: IrExpressionOptions;
   emitGet(
     source: IrStorageExpr,
     accessWidth: OperandWidth,
@@ -69,7 +67,7 @@ export type WasmIrEmitHelpers = Readonly<{
 }>;
 
 export function emitIrToWasm(block: IrExpressionInputBlock, context: WasmIrEmitContext): void {
-  emitIrExpressionBlockToWasm(buildIrExpressionBlock(block, context.expression), context);
+  emitIrExpressionBlockToWasm(buildIrExpressionBlock(block), context);
 }
 
 export function emitIrExpressionBlockToWasm(block: IrExprBlock, context: WasmIrEmitContext): void {

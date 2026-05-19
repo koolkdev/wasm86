@@ -432,7 +432,7 @@ test("planJitCodegen records value-state-derived flag stores for branch exits", 
   );
 });
 
-test("buildJitCodegenEmissionPlan keeps branch path identity from source IR after expression folding", () => {
+test("buildJitCodegenEmissionPlan keeps branch path identity from source IR", () => {
   const sourceBranchOpIndex = 2;
   const block: JitBlock = {
     instructions: [
@@ -491,9 +491,8 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from source IR afte
       use.path.debugLabel === "taken"
   );
 
-  deepStrictEqual(branchInstruction.analysis.expressions.block.map((op) => op.op), ["let32", "conditionalJump"]);
-  strictEqual(expressionBranchOpIndex !== sourceBranchOpIndex, true);
-  strictEqual(expressionBranchOpIndex, 1);
+  deepStrictEqual(branchInstruction.analysis.expressions.block.map((op) => op.op), ["let32", "let32", "conditionalJump"]);
+  strictEqual(expressionBranchOpIndex, sourceBranchOpIndex);
 
   if (takenTargetUse === undefined) {
     throw new Error("expected taken branch target use");
