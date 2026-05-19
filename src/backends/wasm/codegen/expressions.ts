@@ -108,7 +108,6 @@ export type IrExpressionAliasModel = Readonly<{
 
 export type IrExpressionOptions = Readonly<{
   canInlineGet?: (source: StorageRef) => boolean;
-  canDropUnusedGet?: (source: StorageRef) => boolean;
   alias?: IrExpressionAliasModel;
 }>;
 
@@ -169,12 +168,6 @@ class ExpressionBuilder {
 
       switch (op.op) {
         case "get": {
-          if (remainingUses(this.#useCounts, op.dst.id) === 0 &&
-            this.options.canDropUnusedGet?.(op.source) === true
-          ) {
-            break;
-          }
-
           const source = this.#storageExpr(op.source);
 
           this.#defineValue(

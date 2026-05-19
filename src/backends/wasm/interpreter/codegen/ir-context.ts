@@ -105,7 +105,6 @@ export function emitInterpreterIrWithContext(block: IrBlock, context: Interprete
     scratch: context.scratch,
     expression: {
       canInlineGet: (source) => canInlineGet(context, source),
-      canDropUnusedGet: () => true,
       alias: {
         storageMayAlias: (write, read) => interpreterStorageRefsMayAlias(context, write, read)
       }

@@ -229,18 +229,14 @@ test("expression selector materializes condition reads before conditional jumps"
   );
 });
 
-test("expression selector keeps explicit memory guards and drops unused guarded loads", () => {
+test("expression selector keeps explicit memory guards", () => {
   deepStrictEqual(
-    buildIrExpressionBlock(
-      [
-        { op: "address", dst: v(0), operand: op(0) },
-        { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-        { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
-        { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
-        { op: "next" }
-      ],
-      { canDropUnusedGet: () => true }
-    ),
+    buildIrExpressionBlock([
+      { op: "address", dst: v(0), operand: op(0) },
+      { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
+      { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
+      { op: "next" }
+    ]),
     [
       { op: "memory.guard", address: address(op(0)), byteLength: 4, access: "read" },
       { op: "memory.guard", address: address(op(0)), byteLength: 4, access: "write" },
