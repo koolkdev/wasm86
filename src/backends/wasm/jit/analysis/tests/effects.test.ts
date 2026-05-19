@@ -3,11 +3,12 @@ import { test } from "node:test";
 
 import { ExitReason } from "#backends/wasm/exit.js";
 import {
-  buildIrExpressionBlockWithSourceMap
+  buildIrExpressionBlock,
+  type IrExprBlock
 } from "#backends/wasm/codegen/expressions.js";
 import {
   analyzeInstructionEffects,
-  timelineSnapshotPointsForInstruction,
+  timelineSnapshotPointsForExpressions,
   type EffectInfo,
   type EffectInstructionInput,
   type InstructionFlow
@@ -16,14 +17,12 @@ import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 import { instructionDeltaAfterOp } from "#backends/wasm/jit/analysis/instruction-progress.js";
 import {
   classifyEffect,
-  classifyExits,
-  exitConditionValues,
-  localConditionValues
+  classifyExits
 } from "#backends/wasm/jit/analysis/effect-classifier.js";
-import { buildInstructionPaths, branchPath, rootPath } from "#backends/wasm/jit/analysis/paths.js";
+import { buildExpressionPaths, branchPath, rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
-import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { c32, syntheticInstruction, v } from "#backends/wasm/jit/ir/tests/helpers.js";
 
@@ -33,18 +32,16 @@ test("JIT effect classifier separates local state from ordered effects", () => {
   const branch = syntheticInstruction([
     { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
   ]);
-  const select = syntheticInstruction([
-    { op: "value.select", type: "i32", dst: v(1), condition: v(0), whenTrue: c32(1), whenFalse: c32(0) }
-  ]);
+  const localNextExpr = buildIrExpressionBlock(localNext.ir);
+  const finalNextExpr = buildIrExpressionBlock(finalNext.ir);
+  const branchExpr = buildIrExpressionBlock(branch.ir);
 
-  deepStrictEqual(classifyExits(localNext.ir[0]!, localNext), []);
-  strictEqual(classifyEffect(localNext.ir[0]!, localNext), undefined);
-  deepStrictEqual(classifyExits(finalNext.ir[0]!, finalNext), ["fallthrough"]);
-  strictEqual(classifyEffect(finalNext.ir[0]!, finalNext), "fallthrough");
-  deepStrictEqual(classifyExits(branch.ir[0]!, branch), ["branchTaken", "branchNotTaken"]);
-  strictEqual(classifyEffect(branch.ir[0]!, branch), "branch");
-  deepStrictEqual(localConditionValues(select.ir[0]!), [v(0)]);
-  deepStrictEqual(exitConditionValues(branch.ir[0]!, branch), [v(0)]);
+  deepStrictEqual(classifyExits(localNextExpr[0]!, localNext), []);
+  strictEqual(classifyEffect(localNextExpr[0]!, localNext), undefined);
+  deepStrictEqual(classifyExits(finalNextExpr[0]!, finalNext), ["fallthrough"]);
+  strictEqual(classifyEffect(finalNextExpr[0]!, finalNext), "fallthrough");
+  deepStrictEqual(classifyExits(branchExpr[0]!, branch), ["branchTaken", "branchNotTaken"]);
+  strictEqual(classifyEffect(branchExpr[0]!, branch), "branch");
 });
 
 test("JIT effect analysis creates exact final fallthrough exits", () => {
@@ -132,22 +129,19 @@ test("JIT effect analysis records host traps with next-EIP visibility", () => {
   strictEqual(exit?.snapshot.progress.instructionCountDelta, 1);
 });
 
-function analyze(instructions: readonly JitInstruction[]): readonly InstructionFlow[] {
+function analyze(instructions: readonly JitIrInstruction[]): readonly InstructionFlow[] {
   const flows: InstructionFlow[] = [];
   let valueState = createJitValueState().snapshot();
   let instructionCountDelta = 0;
 
   for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
     const instruction = instructions[instructionIndex]!;
-    const expressionPlan = buildIrExpressionBlockWithSourceMap(instruction.ir);
+    const expressions = buildIrExpressionBlock(instruction.ir);
     const valueTimeline = buildTimeline({
       operands: instruction.operands,
-      expressions: expressionPlan.expressionBlock,
+      expressions,
       entry: valueState,
-      snapshotPoints: timelineSnapshotPointsForInstruction(
-        instruction,
-        expressionPlan.sourceMap
-      ),
+      snapshotPoints: timelineSnapshotPointsForExpressions(instruction, expressions),
       nextEip: instruction.nextEip,
       producedByVar: indexProducedValues(instruction, instructionIndex)
     });
@@ -155,26 +149,29 @@ function analyze(instructions: readonly JitInstruction[]): readonly InstructionF
     const effectInput: EffectInstructionInput = {
       instruction,
       index: instructionIndex,
-      sourceMap: expressionPlan.sourceMap,
+      expressions,
       timeline: valueTimeline,
-      sourcePaths: buildInstructionPaths(instruction, instructionIndex),
+      expressionPaths: buildExpressionPaths(expressions, instructionIndex),
       progress: {
         instructionCountDelta
       }
     };
 
     flows.push(analyzeInstructionEffects(effectInput));
-    instructionCountDelta += instructionDeltaForInstruction(instruction);
+    instructionCountDelta += instructionDeltaForExpressions(instruction, expressions);
     valueState = valueTimeline.finalState;
   }
 
   return flows;
 }
 
-function instructionDeltaForInstruction(instruction: JitInstruction): number {
+function instructionDeltaForExpressions(
+  instruction: JitIrInstruction,
+  expressions: IrExprBlock
+): number {
   let delta = 0;
 
-  for (const op of instruction.ir) {
+  for (const op of expressions) {
     delta += instructionDeltaAfterOp(op, instruction);
   }
 

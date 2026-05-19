@@ -14,7 +14,7 @@ import {
 } from "#backends/wasm/jit/block.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import {
-  planJitCodegen
+  planJitCodegen as planExpressionCodegen
 } from "#backends/wasm/jit/codegen/plan/plan.js";
 import {
   branchPath,
@@ -63,7 +63,7 @@ import type {
   JitProducedValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 
 export const startAddress = 0x1000;
@@ -82,7 +82,6 @@ export {
   analyzeBlock,
   buildBlockExpressions,
   buildJitCodegenEmissionPlan,
-  planJitCodegen,
   branchPath,
   rootPath,
   planReuseForInstructions,
@@ -114,11 +113,15 @@ export type {
   ExitValue,
   JitProducedValue,
   JitValue,
-  JitBlock
+  JitIrBlock
 };
 
-export function analyzeBlockForTest(block: JitBlock) {
+export function analyzeBlockForTest(block: JitIrBlock) {
   return analyzeBlock(buildBlockExpressions(block));
+}
+
+export function planJitCodegen(block: JitIrBlock): JitCodegenPlan {
+  return planExpressionCodegen(buildBlockExpressions(block));
 }
 
 export function plannedInstructionsForTest(

@@ -1,7 +1,11 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import type { IrExprBlock, IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import {
+  type IrExprBlock,
+  type IrStorageExpr,
+  type IrValueExpr
+} from "#backends/wasm/codegen/expressions.js";
 import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import {

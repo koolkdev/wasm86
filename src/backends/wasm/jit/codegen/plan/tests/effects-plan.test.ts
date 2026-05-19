@@ -13,13 +13,13 @@ import {
   startAddress,
   type Exit,
   type PlannedExit,
-  type JitBlock
+  type JitIrBlock
 } from "./plan-test-helpers.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type { Effect } from "#backends/wasm/jit/codegen/plan/effect-types.js";
 
 test("JIT effects plan leaves pure expressions and state updates out of cache roots", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "state-updates-only",
       eip: startAddress,
@@ -56,7 +56,7 @@ test("JIT effects plan leaves pure expressions and state updates out of cache ro
 });
 
 test("JIT effects plan resolves operands, preserves order, and carries exact exits", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [
       {
         instructionId: "effect-guard",
@@ -200,7 +200,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
 });
 
 test("JIT effects plan omits local fallthrough effects", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "local-fallthrough",
       eip: startAddress,
@@ -216,7 +216,7 @@ test("JIT effects plan omits local fallthrough effects", () => {
 });
 
 test("JIT effects plan attaches roots for ordered effects and exit stores", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [
       {
         instructionId: "guard-root",
@@ -340,7 +340,7 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
 });
 
 test("JIT effects plan selects produced values only for later required roots", () => {
-  const unusedBlock: JitBlock = {
+  const unusedBlock: JitIrBlock = {
     instructions: [{
       instructionId: "unused-produced",
       eip: startAddress,
@@ -358,7 +358,7 @@ test("JIT effects plan selects produced values only for later required roots", (
       ]
     }]
   };
-  const usedBlock: JitBlock = {
+  const usedBlock: JitIrBlock = {
     instructions: [{
       instructionId: "used-produced",
       eip: startAddress,

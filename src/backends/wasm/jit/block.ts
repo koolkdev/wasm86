@@ -1,6 +1,7 @@
 export type {
-  JitBlock,
-  JitInstruction
+  JitIrBlock,
+  JitIrInstruction,
+  InstructionMetadata
 } from "./ir/types.js";
 export type {
   BlockExpressions,
@@ -15,7 +16,8 @@ export type {
 export type { JitLinkResolver } from "./codegen/emit/control-effects.js";
 export type { EncodeJitBlockOptions } from "./block-module.js";
 export { encodeJitBlock, jitBlockExportName } from "./block-module.js";
-export { staticJitLinkTargets } from "./link-targets.js";
 export { buildBlock } from "./ir/block-builder.js";
 export { buildBlockExpressions } from "./ir/block-expressions.js";
+export { validateBlock } from "./ir/validate.js";
 export { analyzeBlock } from "./analysis/block.js";
+export { planJitCodegen } from "./codegen/plan/plan.js";

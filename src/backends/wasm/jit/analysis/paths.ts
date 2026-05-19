@@ -1,4 +1,4 @@
-import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 
 export type PathId = string;
 
@@ -41,17 +41,17 @@ function branchPathId(
   return `branch:${instructionIndex}:${opIndex}:${arm}`;
 }
 
-export function buildInstructionPaths(
-  instruction: JitInstruction,
+export function buildExpressionPaths(
+  expressions: IrExprBlock,
   instructionIndex: number
 ): PathMap {
   const paths = new Map<number, BranchPaths>();
 
-  for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
-    const op = instruction.ir[opIndex];
+  for (let opIndex = 0; opIndex < expressions.length; opIndex += 1) {
+    const op = expressions[opIndex];
 
     if (op === undefined) {
-      throw new Error(`missing JIT IR op while planning paths: ${instructionIndex}:${opIndex}`);
+      throw new Error(`missing JIT expression op while planning paths: ${instructionIndex}:${opIndex}`);
     }
 
     if (op.op === "conditionalJump") {

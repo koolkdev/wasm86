@@ -1,4 +1,4 @@
-import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
 import type {
   BlockExpressions,
   InstructionExpressions
@@ -6,12 +6,12 @@ import type {
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
   analyzeInstructionEffects,
-  timelineSnapshotPointsForInstruction,
+  timelineSnapshotPointsForExpressions,
   type EffectInstructionInput,
   type InstructionFlow
 } from "./effects.js";
 import type { Exit } from "./exits.js";
-import { buildInstructionPaths } from "./paths.js";
+import { buildExpressionPaths } from "./paths.js";
 import { buildTimeline } from "./timeline-builder.js";
 import type { Timeline } from "./timeline-types.js";
 import { instructionDeltaAfterOp } from "./instruction-progress.js";
@@ -19,7 +19,7 @@ import { instructionDeltaAfterOp } from "./instruction-progress.js";
 export type { InstructionFlow } from "./effects.js";
 
 export type InstructionAnalysis = Readonly<{
-  instruction: JitInstruction;
+  instruction: InstructionMetadata;
   index: number;
   expressions: InstructionExpressions;
   timeline: Timeline;
@@ -43,15 +43,15 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
     }
 
     const { instruction, index, expressions } = entry;
-    const sourcePaths = buildInstructionPaths(instruction, index);
+    const expressionPaths = buildExpressionPaths(expressions.block, index);
     const entryState = currentValueState;
     const timeline = buildTimeline({
       operands: instruction.operands,
       expressions: expressions.block,
       entry: entryState,
-      snapshotPoints: timelineSnapshotPointsForInstruction(
+      snapshotPoints: timelineSnapshotPointsForExpressions(
         instruction,
-        expressions.sourceMap
+        expressions.block
       ),
       nextEip: instruction.nextEip,
       producedByVar: expressions.producedValues
@@ -63,9 +63,9 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
     const effectInput: EffectInstructionInput = {
       instruction,
       index,
-      sourceMap: expressions.sourceMap,
+      expressions: expressions.block,
       timeline,
-      sourcePaths,
+      expressionPaths,
       progress
     };
 
@@ -76,7 +76,7 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
       timeline,
       flow: analyzeInstructionEffects(effectInput)
     });
-    instructionCountDelta += instructionDeltaForInstruction(instruction);
+    instructionCountDelta += instructionDeltaForExpressions(instruction, expressions);
     currentValueState = timeline.finalState;
   }
 
@@ -85,10 +85,13 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
   };
 }
 
-function instructionDeltaForInstruction(instruction: JitInstruction): number {
+function instructionDeltaForExpressions(
+  instruction: InstructionMetadata,
+  expressions: InstructionExpressions
+): number {
   let delta = 0;
 
-  for (const op of instruction.ir) {
+  for (const op of expressions.block) {
     delta += instructionDeltaAfterOp(op, instruction);
   }
 

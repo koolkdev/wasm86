@@ -1,8 +1,10 @@
 import type {
-  IrExpressionSourceMap,
-  IrExpressionSourcePlacement
+  IrExprBlock,
+  IrExprOp,
+  IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   buildExit,
   type Exit,
@@ -21,14 +23,14 @@ import {
   type InstructionProgress
 } from "./instruction-progress.js";
 import type { PathMap } from "./paths.js";
-import type { Timeline } from "./timeline-types.js";
+import type { Timeline, TimelineView } from "./timeline-types.js";
 
 export type EffectInstructionInput = Readonly<{
-  instruction: JitInstruction;
+  instruction: InstructionMetadata;
   index: number;
-  sourceMap: IrExpressionSourceMap;
+  expressions: IrExprBlock;
   timeline: Timeline;
-  sourcePaths: PathMap;
+  expressionPaths: PathMap;
   progress: InstructionProgress;
 }>;
 
@@ -59,18 +61,18 @@ type MutableInstructionFlow<TExit extends Exit = Exit> = {
 export function analyzeInstructionEffects(
   instructionAnalysis: EffectInstructionInput
 ): InstructionFlow {
-  const { instruction, index } = instructionAnalysis;
+  const { instruction, index, expressions } = instructionAnalysis;
   const flow: MutableInstructionFlow = {
     effects: [],
     exits: []
   };
   let currentInstructionCountDelta = instructionAnalysis.progress.instructionCountDelta;
 
-  for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
-    const op = instruction.ir[opIndex];
+  for (let opIndex = 0; opIndex < expressions.length; opIndex += 1) {
+    const op = expressions[opIndex];
 
     if (op === undefined) {
-      throw new Error(`missing JIT IR op while analyzing effects: ${index}:${opIndex}`);
+      throw new Error(`missing JIT expression op while analyzing effects: ${index}:${opIndex}`);
     }
 
     const effectKind = classifyEffect(op, instruction);
@@ -81,6 +83,7 @@ export function analyzeInstructionEffects(
     }
 
     const at = { instructionIndex: index, opIndex };
+    const view = instructionAnalysis.timeline.viewAt(opIndex);
     const exitRecords = exitKinds.map((kind) =>
       buildExit({
         instruction,
@@ -94,7 +97,9 @@ export function analyzeInstructionEffects(
             { instructionCountDelta: currentInstructionCountDelta }
           )
         ),
-        paths: instructionAnalysis.sourcePaths
+        paths: instructionAnalysis.expressionPaths,
+        ...targetValueInput(kind, op, view),
+        ...staticLinkTargetInput(kind, op, instruction, expressions)
       })
     );
 
@@ -111,31 +116,15 @@ export function analyzeInstructionEffects(
   return flow;
 }
 
-export function timelineSnapshotPointsForInstruction(
-  instruction: JitInstruction,
-  sourceMap: IrExpressionSourceMap
+export function timelineSnapshotPointsForExpressions(
+  instruction: InstructionMetadata,
+  expressions: IrExprBlock
 ): ReadonlySet<number> {
-  const points = new Set<number>();
-
-  for (let sourceOpIndex = 0; sourceOpIndex < instruction.ir.length; sourceOpIndex += 1) {
-    const op = instruction.ir[sourceOpIndex];
-
-    if (op === undefined || classifyExits(op, instruction).length === 0) {
-      continue;
-    }
-
-    const expressionOpIndexes = expressionOpIndexesForSourceOp(sourceMap, sourceOpIndex);
-
-    if (expressionOpIndexes.length !== 1) {
-      throw new Error(
-        `expected one JIT expression op for source state ${sourceOpIndex}, got ${expressionOpIndexes.length}`
-      );
-    }
-
-    points.add(expressionOpIndexes[0]!);
-  }
-
-  return points;
+  return new Set(expressions.flatMap((op, opIndex) =>
+    classifyExits(op, instruction).length === 0
+      ? []
+      : [opIndex]
+  ));
 }
 
 function effectForOp(
@@ -170,46 +159,129 @@ function effectForOp(
 
 function exitSnapshotBeforeOp(
   instruction: EffectInstructionInput,
-  sourceOpIndex: number,
+  opIndex: number,
   progress: InstructionProgress
 ): ExitSnapshot {
   return {
     progress,
-    valueState: valueStateBeforeSourceOp(instruction, sourceOpIndex)
+    valueState: instruction.timeline.snapshotAt(opIndex)
   };
 }
 
-function valueStateBeforeSourceOp(
-  instruction: EffectInstructionInput,
-  sourceOpIndex: number
-) {
-  const expressionOpIndexes = expressionOpIndexesForSourceOp(
-    instruction.sourceMap,
-    sourceOpIndex
+function targetValueInput(
+  kind: ExitKind,
+  op: IrExprOp,
+  view: TimelineView
+): Readonly<{ targetValue?: JitValue }> {
+  const target = targetExpressionForExit(kind, op);
+
+  return target === undefined
+    ? {}
+    : { targetValue: view.value(target) };
+}
+
+function targetExpressionForExit(
+  kind: ExitKind,
+  op: IrExprOp
+): IrValueExpr | undefined {
+  switch (kind) {
+    case "jump":
+      return op.op === "jump" ? op.target : undefined;
+    case "branchTaken":
+      return op.op === "conditionalJump" ? op.taken : undefined;
+    case "branchNotTaken":
+      return op.op === "conditionalJump" ? op.notTaken : undefined;
+    case "memoryReadFault":
+    case "memoryWriteFault":
+    case "fallthrough":
+    case "hostTrap":
+      return undefined;
+  }
+}
+
+function staticLinkTargetInput(
+  kind: ExitKind,
+  op: IrExprOp,
+  instruction: InstructionMetadata,
+  expressions: IrExprBlock
+): Readonly<{ staticLinkTarget?: number }> {
+  const target = staticLinkTargetForExit(kind, op, instruction, expressions);
+
+  return target === undefined
+    ? {}
+    : { staticLinkTarget: target };
+}
+
+function staticLinkTargetForExit(
+  kind: ExitKind,
+  op: IrExprOp,
+  instruction: InstructionMetadata,
+  expressions: IrExprBlock
+): number | undefined {
+  switch (kind) {
+    case "fallthrough":
+      return instruction.nextEip;
+    case "jump":
+    case "branchTaken":
+    case "branchNotTaken": {
+      const target = targetExpressionForExit(kind, op);
+
+      return target === undefined
+        ? undefined
+        : staticLinkTargetForExpression(target, instruction, expressions);
+    }
+    case "memoryReadFault":
+    case "memoryWriteFault":
+    case "hostTrap":
+      return undefined;
+  }
+}
+
+function staticLinkTargetForExpression(
+  value: IrValueExpr,
+  instruction: InstructionMetadata,
+  expressions: IrExprBlock
+): number | undefined {
+  switch (value.kind) {
+    case "nextEip":
+      return instruction.nextEip;
+    case "source":
+      return value.source.kind === "operand"
+        ? staticOperandLinkTarget(instruction, value.source.index)
+        : undefined;
+    case "var":
+      return materializedStaticOperandTarget(value.id, instruction, expressions);
+    case "const":
+    case "address":
+    case "flags.condition":
+    case "value.binary":
+    case "value.unary":
+    case "value.select":
+      return undefined;
+  }
+}
+
+function materializedStaticOperandTarget(
+  varId: number,
+  instruction: InstructionMetadata,
+  expressions: IrExprBlock
+): number | undefined {
+  const producer = expressions.find((op): op is Extract<IrExprOp, { op: "let32" }> =>
+    op.op === "let32" && op.dst.id === varId
   );
 
-  if (expressionOpIndexes.length !== 1) {
-    throw new Error(
-      `expected one JIT expression op for source state ${sourceOpIndex}, got ${expressionOpIndexes.length}`
-    );
-  }
-
-  return instruction.timeline.snapshotAt(expressionOpIndexes[0]!);
+  return producer?.value.kind !== "source" || producer.value.source.kind !== "operand"
+    ? undefined
+    : staticOperandLinkTarget(instruction, producer.value.source.index);
 }
 
-function expressionOpIndexesForSourceOp(
-  sourceMap: IrExpressionSourceMap,
-  sourceOpIndex: number
-): readonly number[] {
-  return (sourceMap.placementsBySourceOpIndex.get(sourceOpIndex) ?? [])
-    .filter(isEmittedExpressionOp)
-    .map((placement) => placement.expressionOpIndex);
-}
+function staticOperandLinkTarget(
+  instruction: InstructionMetadata,
+  operandIndex: number
+): number | undefined {
+  const binding = instruction.operands[operandIndex];
 
-function isEmittedExpressionOp(
-  placement: IrExpressionSourcePlacement
-): boolean {
-  return placement.kind === "emittedOp";
+  return binding?.kind === "static.relTarget" ? binding.target : undefined;
 }
 
 function onlyExit(exits: readonly Exit[]): Exit {

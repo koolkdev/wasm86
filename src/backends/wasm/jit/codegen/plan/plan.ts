@@ -1,6 +1,5 @@
-import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
 import { analyzeBlock, type BlockAnalysis } from "#backends/wasm/jit/analysis/block.js";
-import { buildBlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
+import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import type {
   EffectInfo,
   InstructionFlow
@@ -32,11 +31,8 @@ export type {
   Placement,
 } from "./effect-types.js";
 
-export function planJitCodegen(optimizedBlock: JitBlock): JitCodegenPlan {
-  const expressions = buildBlockExpressions(optimizedBlock);
-  const analysis = analyzeBlock(expressions);
-
-  return planBlock(analysis);
+export function planJitCodegen(expressions: BlockExpressions): JitCodegenPlan {
+  return planBlock(analyzeBlock(expressions));
 }
 
 export function planBlock(analysis: BlockAnalysis): JitCodegenPlan {

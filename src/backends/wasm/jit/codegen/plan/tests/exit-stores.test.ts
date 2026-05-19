@@ -30,8 +30,9 @@ import {
   rootPath,
   createJitValueState,
   type JitValue,
-  type JitBlock,
+  type JitIrBlock,
 } from "./plan-test-helpers.js";
+import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
 import { storesForSnapshot } from "#backends/wasm/jit/codegen/plan/exit-stores.js";
 import { registerStores } from "#backends/wasm/jit/codegen/plan/register-stores.js";
 import { flagStores } from "#backends/wasm/jit/codegen/plan/flag-stores.js";
@@ -167,9 +168,13 @@ test("planJitCodegen keeps memory guard faults at their op exit states", () => {
   const load = ok(decodeBytes([0x8b, 0x05, 0x00, 0x00, 0x01, 0x00], add.nextEip));
   const codegenPlan = planJitCodegen(buildBlock([add, load]));
   const exit = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
+  const guardOpIndex = expressionOpIndex(
+    codegenPlan.analysis.instructions[1]!.expressions.block,
+    "memory.guard"
+  );
 
   strictEqual(exit.at.instructionIndex, 1);
-  strictEqual(exit.at.opIndex, 1);
+  strictEqual(exit.at.opIndex, guardOpIndex);
   deepStrictEqual(exit.visibleEip, { kind: "static", value: add.nextEip });
   deepStrictEqual(exit.payload, { kind: "runtime", source: "memoryAddress" });
   strictEqual(exit.snapshot.progress.instructionCountDelta, 1);
@@ -234,15 +239,20 @@ test("planJitCodegen excludes current-instruction speculative writes from memory
   const instruction = ok(decodeBytes([0x01, 0x18], startAddress));
   const codegenPlan = planJitCodegen(buildBlock([instruction]));
   const writeFault = onlyExit(codegenPlan.exits, ExitReason.MEMORY_WRITE_FAULT);
+  const guardOpIndex = expressionOpIndex(
+    codegenPlan.analysis.instructions[0]!.expressions.block,
+    "memory.guard",
+    (op) => op.access === "write"
+  );
 
-  strictEqual(writeFault.at.opIndex, 2);
+  strictEqual(writeFault.at.opIndex, guardOpIndex);
   strictEqual(writeFault.snapshot.progress.instructionCountDelta, 0);
   strictEqual(writeFault.exitStoreIndex, 0);
   deepStrictEqual(plannedRegisterStores(writeFault), []);
 });
 
 test("planJitCodegen makes guard faults observe current op state", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "write-before-fault",
       eip: startAddress,
@@ -270,13 +280,16 @@ test("planJitCodegen makes guard faults observe current op state", () => {
   const codegenPlan = planJitCodegen(block);
   const readFault = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
+  const expressionBlock = codegenPlan.analysis.instructions[0]!.expressions.block;
+  const guardOpIndex = expressionOpIndex(expressionBlock, "memory.guard");
+  const hostTrapOpIndex = expressionOpIndex(expressionBlock, "hostTrap");
 
-  strictEqual(readFault.at.opIndex, 2);
+  strictEqual(readFault.at.opIndex, guardOpIndex);
   deepStrictEqual(readFault.visibleEip, { kind: "static", value: startAddress });
   deepStrictEqual(readFault.payload, { kind: "runtime", source: "memoryAddress" });
   strictEqual(readFault.exitStoreIndex, 1);
   deepStrictEqual(plannedRegisterStores(readFault), [registerStore("eax", c32(0x1234))]);
-  strictEqual(hostTrap.at.opIndex, 3);
+  strictEqual(hostTrap.at.opIndex, hostTrapOpIndex);
   deepStrictEqual(hostTrap.visibleEip, { kind: "static", value: startAddress + 1 });
   deepStrictEqual(hostTrap.payload, { kind: "runtime", source: "hostTrapVector" });
   strictEqual(hostTrap.exitStoreIndex, 2);
@@ -284,7 +297,7 @@ test("planJitCodegen makes guard faults observe current op state", () => {
 });
 
 test("planJitCodegen makes guard faults observe current flag state", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "flag-write-before-fault",
       eip: startAddress,
@@ -324,6 +337,9 @@ test("planJitCodegen makes guard faults observe current flag state", () => {
   const codegenPlan = planJitCodegen(block);
   const readFault = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
+  const expressionBlock = codegenPlan.analysis.instructions[0]!.expressions.block;
+  const guardOpIndex = expressionOpIndex(expressionBlock, "memory.guard");
+  const hostTrapOpIndex = expressionOpIndex(expressionBlock, "hostTrap");
   const expectedFlags = jitInsertMaskedBits(
     jitInputAluFlagsValue(),
     jitFlagProducerValue("inc", {
@@ -333,10 +349,10 @@ test("planJitCodegen makes guard faults observe current flag state", () => {
     FLAG_PRODUCERS.inc.writtenMask
   );
 
-  strictEqual(readFault.at.opIndex, 3);
+  strictEqual(readFault.at.opIndex, guardOpIndex);
   strictEqual(readFault.exitStoreIndex, 1);
   deepStrictEqual(plannedFlagStores(readFault), [flagStore(expectedFlags)]);
-  strictEqual(hostTrap.at.opIndex, 4);
+  strictEqual(hostTrap.at.opIndex, hostTrapOpIndex);
   strictEqual(hostTrap.exitStoreIndex, 2);
   deepStrictEqual(plannedFlagStores(hostTrap), [flagStore(expectedFlags)]);
 });
@@ -367,11 +383,12 @@ test("planJitCodegen records value-state-derived flag stores for branch exits", 
   const branchExits = codegenPlan.exits.filter((entry) =>
     entry.reason === ExitReason.JUMP && entry.path.id.startsWith("branch:")
   );
-  const branchIr = codegenPlan.analysis.instructions[1]!.instruction.ir;
   const branchExpressionBlock = emissionPlan.instructions[1]?.analysis.expressions.block;
   const conditionalJumpIndex = branchExpressionBlock?.findIndex((op) => op.op === "conditionalJump") ?? -1;
 
-  strictEqual(branchIr.some((op) => op.op === "flags.condition"), true);
+  strictEqual(branchExpressionBlock?.some((op) =>
+    op.op === "let32" && op.value.kind === "flags.condition"
+  ), true);
   strictEqual(branchExits.length, 2);
 
   for (const exit of branchExits) {
@@ -432,9 +449,8 @@ test("planJitCodegen records value-state-derived flag stores for branch exits", 
   );
 });
 
-test("buildJitCodegenEmissionPlan keeps branch path identity from source IR", () => {
-  const sourceBranchOpIndex = 2;
-  const block: JitBlock = {
+test("buildJitCodegenEmissionPlan keeps branch path identity from expression IR", () => {
+  const block: JitIrBlock = {
     instructions: [
       {
         instructionId: "seed-eax",
@@ -477,7 +493,7 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from source IR", ()
   const expressionBranchOpIndex = branchInstruction.analysis.expressions.block.findIndex((op) =>
     op.op === "conditionalJump"
   );
-  const takenPath = branchPath(1, sourceBranchOpIndex, "taken");
+  const takenPath = branchPath(1, expressionBranchOpIndex, "taken");
   const takenTargetUse = emissionPlan.valueUses.find((use) =>
     use.purpose === "branchTarget" &&
       use.at.instructionIndex === 1 &&
@@ -492,7 +508,7 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from source IR", ()
   );
 
   deepStrictEqual(branchInstruction.analysis.expressions.block.map((op) => op.op), ["let32", "let32", "conditionalJump"]);
-  strictEqual(expressionBranchOpIndex, sourceBranchOpIndex);
+  strictEqual(expressionBranchOpIndex, 2);
 
   if (takenTargetUse === undefined) {
     throw new Error("expected taken branch target use");
@@ -511,7 +527,7 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from source IR", ()
 });
 
 test("planJitCodegen records full flag producers in value-state snapshots", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "full-flags",
       eip: startAddress,
@@ -571,7 +587,7 @@ test("planJitCodegen records full flag producers in value-state snapshots", () =
 });
 
 test("planJitCodegen records partial flag producers as symbolic masked inserts", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "partial-flags",
       eip: startAddress,
@@ -625,7 +641,7 @@ test("planJitCodegen records partial flag producers as symbolic masked inserts",
 });
 
 test("planJitCodegen records effectful flag producer inputs as produced values", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "effectful-flag-input",
       eip: startAddress,
@@ -696,7 +712,7 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
 });
 
 test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "missing-flag-input",
       eip: startAddress,
@@ -727,7 +743,7 @@ test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () 
 });
 
 test("planJitCodegen lets later full flag producers replace partial merges", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [
       {
         instructionId: "partial-flags",
@@ -821,8 +837,8 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
   const cmove = ok(decodeBytes([0x0f, 0x44, 0xd1], cmp.nextEip));
   const trap = ok(decodeBytes([0xcd, 0x2e], cmove.nextEip));
   const codegenPlan = planJitCodegen(buildBlock([cmp, cmove, trap]));
-  const cmpInstruction = codegenPlan.analysis.instructions[0]!.instruction;
-  const cmoveInstruction = codegenPlan.analysis.instructions[1]!.instruction;
+  const cmpExpressions = codegenPlan.analysis.instructions[0]!.expressions.block;
+  const cmoveExpressions = codegenPlan.analysis.instructions[1]!.expressions.block;
   const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
@@ -839,13 +855,15 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
     whenFalse: jitInputReg32Value("edx")
   } as const satisfies JitValue;
 
-  strictEqual(cmpInstruction.ir.some((op) => op.op === "flags.set"), true);
-  strictEqual(cmoveInstruction.ir.some((op) => op.op === "flags.condition"), true);
+  strictEqual(cmpExpressions.some((op) => op.op === "flags.set"), true);
+  strictEqual(cmoveExpressions.some((op) =>
+    op.op === "let32" && op.value.kind === "flags.condition"
+  ), true);
   deepStrictEqual(plannedRegisterStores(exit), [registerStore("edx", selectedEdx)]);
 });
 
 test("planJitCodegen keeps produced values out of observed boundaries before their definitions", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "produced-before-exit-observation",
       eip: startAddress,
@@ -878,13 +896,32 @@ test("planJitCodegen keeps produced values out of observed boundaries before the
   const codegenPlan = planJitCodegen(block);
   const readFault = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
+  const expressionBlock = codegenPlan.analysis.instructions[0]!.expressions.block;
+  const guardOpIndex = expressionOpIndex(expressionBlock, "memory.guard");
+  const hostTrapOpIndex = expressionOpIndex(expressionBlock, "hostTrap");
   const produced = jitProducedValue("load#produced-before-exit-observation:0:1:0", "i32");
 
-  strictEqual(readFault.at.opIndex, 0);
+  strictEqual(readFault.at.opIndex, guardOpIndex);
   strictEqual(readFault.exitStoreIndex, 0);
   deepStrictEqual(readFault.stores, []);
-  strictEqual(hostTrap.at.opIndex, 3);
+  strictEqual(hostTrap.at.opIndex, hostTrapOpIndex);
   deepStrictEqual(plannedRegisterStores(hostTrap), [
     registerStore("eax", produced)
   ]);
 });
+
+function expressionOpIndex<T extends IrExprBlock[number]["op"]>(
+  block: IrExprBlock,
+  opName: T,
+  matches: (op: Extract<IrExprBlock[number], { op: T }>) => boolean = () => true
+): number {
+  const index = block.findIndex((op) =>
+    op.op === opName && matches(op as Extract<IrExprBlock[number], { op: T }>)
+  );
+
+  if (index < 0) {
+    throw new Error(`missing expression op ${opName}`);
+  }
+
+  return index;
+}

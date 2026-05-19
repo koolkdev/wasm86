@@ -1,5 +1,5 @@
-import type { IrOp } from "#x86/ir/model/types.js";
-import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { IrExprOp } from "#backends/wasm/codegen/expressions.js";
+import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
 import type {
   ExitKind,
   ExitSnapshot
@@ -10,8 +10,8 @@ export type InstructionProgress = Readonly<{
 }>;
 
 export function instructionDeltaAfterOp(
-  op: IrOp,
-  instruction: JitInstruction
+  op: IrExprOp,
+  instruction: InstructionMetadata
 ): number {
   return op.op === "next" && instruction.nextMode === "continue"
     ? 1

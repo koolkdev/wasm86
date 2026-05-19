@@ -6,13 +6,13 @@ export type InstructionMetadata = Readonly<{
   eip: number;
   nextEip: number;
   nextMode: "continue" | "exit";
+  operands: readonly JitOperandBinding[];
 }>;
 
-export type JitInstruction = InstructionMetadata & Readonly<{
-  operands: readonly JitOperandBinding[];
+export type JitIrInstruction = InstructionMetadata & Readonly<{
   ir: IrBlock;
 }>;
 
-export type JitBlock = Readonly<{
-  instructions: readonly JitInstruction[];
+export type JitIrBlock = Readonly<{
+  instructions: readonly JitIrInstruction[];
 }>;

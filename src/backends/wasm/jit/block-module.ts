@@ -6,9 +6,7 @@ import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
 import { encodeExit, ExitReason } from "#backends/wasm/exit.js";
 import { jitModuleLinkFallbackExportName } from "./compiled-blocks/module-link-table.js";
-import { validateBlock } from "./ir/validate.js";
 import { buildJitCodegenEmissionPlan } from "./codegen/plan/emission.js";
-import { planJitCodegen } from "./codegen/plan/plan.js";
 import {
   type JitLinkEmitContext,
   type JitLinkResolver
@@ -23,23 +21,23 @@ import {
   createValueEmitters,
   unavailableProducedEmitter
 } from "./codegen/emit/values.js";
-import type { JitBlock } from "./ir/types.js";
+import type { JitCodegenPlan } from "./codegen/plan/types.js";
 
 export type EncodeJitBlockOptions = Readonly<{
   linkResolver?: JitLinkResolver;
 }>;
 
 export function encodeJitBlock(
-  blocks: readonly JitBlock[],
+  plans: readonly JitCodegenPlan[],
   options: EncodeJitBlockOptions = {}
 ): Uint8Array<ArrayBuffer> {
-  if (blocks.length === 0) {
+  if (plans.length === 0) {
     throw new Error("cannot encode empty JIT IR block module");
   }
 
-  const entries = blocks.map((block) => ({
-    block,
-    entryEip: entryEipForBlock(block)
+  const entries = plans.map((plan) => ({
+    plan,
+    entryEip: entryEipForPlan(plan)
   }));
   const targetEips = options.linkResolver?.moduleTable?.targetEips() ?? [];
   const blockFunctionIndices = blockFunctionIndicesForEntries(entries, targetEips);
@@ -77,7 +75,7 @@ export function encodeJitBlock(
     }
 
     const body = encodeJitBlockFunctionBody(
-      entry.block,
+      entry.plan,
       linkingContext(
         {
           ...(options.linkResolver === undefined ? {} : options.linkResolver),
@@ -104,12 +102,9 @@ export function jitBlockExportName(eip: number): string {
 }
 
 function encodeJitBlockFunctionBody(
-  block: JitBlock,
+  codegenPlan: JitCodegenPlan,
   linking?: JitLinkEmitContext
 ): WasmFunctionBodyEncoder {
-  validateBlock(block);
-
-  const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
@@ -186,15 +181,15 @@ function linkingContext(
 }
 
 type JitBlockModuleEntry = Readonly<{
-  block: JitBlock;
+  plan: JitCodegenPlan;
   entryEip: number;
 }>;
 
-function entryEipForBlock(block: JitBlock): number {
-  const instruction = block.instructions[0];
+function entryEipForPlan(plan: JitCodegenPlan): number {
+  const instruction = plan.analysis.instructions[0]?.instruction;
 
   if (instruction === undefined) {
-    throw new Error("cannot encode empty JIT IR block in module");
+    throw new Error("cannot encode empty JIT block plan in module");
   }
 
   return u32(instruction.eip);

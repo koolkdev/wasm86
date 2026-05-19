@@ -26,12 +26,15 @@ import {
   countOpcode,
   passthroughValueCache,
   encodeJitBlock,
-  type JitBlock,
+  type JitIrBlock,
   type JitValue
 } from "./value-local-store-test-helpers.js";
 import { wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
-import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
+import {
+  buildBlockExpressions,
+  planJitCodegen
+} from "#backends/wasm/jit/block.js";
 import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
@@ -112,7 +115,6 @@ test("JIT production emission consumes effects plan entries from instruction pla
         entry: initialState.valueState,
         snapshotPoints: new Set()
       }),
-      sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPaths: new Map(),
       producedByVar: new Map(),
       captureMap: new Map()
@@ -198,7 +200,6 @@ test("JIT production emission does not walk unplanned expression effects", () =>
         entry: initialState.valueState,
         snapshotPoints: new Set()
       }),
-      sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPaths: new Map(),
       producedByVar: new Map(),
       captureMap: new Map()
@@ -379,7 +380,7 @@ test("JIT codegen leaves dead pure SSA unpruned and emits no Wasm for it", () =>
     },
     { op: "next" }
   ]);
-  const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
+  const emissionPlan = buildJitCodegenEmissionPlan(planBlock(block));
   const opcodes = jitBlockOpcodes(block);
 
   deepStrictEqual(block.instructions[0]?.ir.map((op) => op.op), [
@@ -433,8 +434,8 @@ test("JIT codegen preserves guard-before-load ordering without pruning", () => {
   strictEqual(guestLoads.length, 1);
 });
 
-function emitPlannedJitBlock(block: JitBlock) {
-  const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
+function emitPlannedJitBlock(block: JitIrBlock) {
+  const emissionPlan = buildJitCodegenEmissionPlan(planBlock(block));
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
@@ -527,9 +528,9 @@ function emptyCapturePlan(): CapturePlan {
 }
 
 function singleInstructionBlock(
-  ir: JitBlock["instructions"][number]["ir"],
+  ir: JitIrBlock["instructions"][number]["ir"],
   options: Readonly<{ nextMode?: "continue" | "exit" }> = {}
-): JitBlock {
+): JitIrBlock {
   return {
     instructions: [{
       instructionId: "planned-emission-test",
@@ -557,6 +558,10 @@ function guestLoads(result: ReturnType<typeof emitPlannedJitBlock>) {
   );
 }
 
-function jitBlockOpcodes(block: JitBlock): readonly number[] {
+function jitBlockOpcodes(block: JitIrBlock): readonly number[] {
   return wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitBlock([block])));
+}
+
+function planBlock(block: JitIrBlock) {
+  return planJitCodegen(buildBlockExpressions(block));
 }

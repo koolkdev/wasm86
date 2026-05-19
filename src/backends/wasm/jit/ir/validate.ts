@@ -1,9 +1,9 @@
 import { validateIrBlock } from "#x86/ir/passes/validator.js";
 import { irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import type { IrOp } from "#x86/ir/model/types.js";
-import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 
-export function validateBlock(block: JitBlock): void {
+export function validateBlock(block: JitIrBlock): void {
   if (block.instructions.length === 0) {
     throw new Error("cannot validate empty JIT block");
   }
@@ -27,7 +27,7 @@ export function validateBlock(block: JitBlock): void {
 }
 
 function validateJitInstructionBody(
-  instruction: JitInstruction
+  instruction: JitIrInstruction
 ): void {
   validateIrBlock(instruction.ir, {
     operandCount: instruction.operands.length,
@@ -36,8 +36,8 @@ function validateJitInstructionBody(
 }
 
 function validateInstructionBoundary(
-  block: JitBlock,
-  instruction: JitInstruction,
+  block: JitIrBlock,
+  instruction: JitIrInstruction,
   instructionIndex: number
 ): void {
   const terminator = instruction.ir[instruction.ir.length - 1];

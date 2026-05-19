@@ -31,7 +31,7 @@ import {
   forcedRootCapture,
   oneOpPlacement,
   repeatedInlineExpressionBlock,
-  type JitBlock,
+  type JitIrBlock,
 } from "./value-local-store-test-helpers.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
@@ -221,13 +221,13 @@ test("JIT value-cache planning does not treat flags.set as an exit-store consume
   }, expressionBlock).cache.selected, []);
 });
 
-function productionOpcodes(ir: JitBlock["instructions"][number]["ir"]): readonly number[] {
+function productionOpcodes(ir: JitIrBlock["instructions"][number]["ir"]): readonly number[] {
   return wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitBlock([
     singleInstructionBlock(ir)
   ])));
 }
 
-function singleInstructionBlock(ir: JitBlock["instructions"][number]["ir"]): JitBlock {
+function singleInstructionBlock(ir: JitIrBlock["instructions"][number]["ir"]): JitIrBlock {
   return {
     instructions: [{
       instructionId: "value-cache-production-test",

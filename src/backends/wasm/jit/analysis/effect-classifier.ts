@@ -1,5 +1,8 @@
-import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
-import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type {
+  IrExprOp,
+  IrStorageExpr
+} from "#backends/wasm/codegen/expressions.js";
+import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type { ExitKind } from "./exits.js";
 
@@ -13,8 +16,8 @@ export type EffectKind =
   | "fallthrough";
 
 export function classifyExits(
-  op: IrOp,
-  instruction: JitInstruction
+  op: IrExprOp,
+  instruction: InstructionMetadata
 ): readonly ExitKind[] {
   switch (op.op) {
     case "memory.guard":
@@ -38,8 +41,8 @@ export function classifyExits(
 }
 
 export function classifyEffect(
-  op: IrOp,
-  instruction: JitInstruction
+  op: IrExprOp,
+  instruction: InstructionMetadata
 ): EffectKind | undefined {
   switch (op.op) {
     case "memory.guard":
@@ -48,8 +51,9 @@ export function classifyEffect(
       return storageAccessIsMemory(op.target, instruction.operands)
         ? "memoryStore"
         : undefined;
-    case "get":
-      return storageAccessIsMemory(op.source, instruction.operands)
+    case "let32":
+      return op.value.kind === "source" &&
+        storageAccessIsMemory(op.value.source, instruction.operands)
         ? "memoryLoad"
         : undefined;
     case "jump":
@@ -67,33 +71,8 @@ export function classifyEffect(
   }
 }
 
-export function exitConditionValues(
-  op: IrOp,
-  instruction: JitInstruction
-): readonly ValueRef[] {
-  if (classifyExits(op, instruction).length === 0) {
-    return [];
-  }
-
-  switch (op.op) {
-    case "conditionalJump":
-      return [op.condition];
-    default:
-      return [];
-  }
-}
-
-export function localConditionValues(op: IrOp): readonly ValueRef[] {
-  switch (op.op) {
-    case "value.select":
-      return [op.condition];
-    default:
-      return [];
-  }
-}
-
 function storageAccessIsMemory(
-  storage: StorageRef,
+  storage: IrStorageExpr,
   operands: readonly JitOperandBinding[]
 ): boolean {
   switch (storage.kind) {

@@ -8,11 +8,20 @@ import { stateOffset, wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { ExitReason } from "#backends/wasm/exit.js";
-import { buildBlock, encodeJitBlock } from "#backends/wasm/jit/block.js";
-import type { JitBlock } from "#backends/wasm/jit/block.js";
+import {
+  buildBlock,
+  buildBlockExpressions,
+  encodeJitBlock as encodeJitPlans,
+  planJitCodegen as planExpressionCodegen,
+  validateBlock
+} from "#backends/wasm/jit/block.js";
+import type {
+  EncodeJitBlockOptions,
+  JitIrBlock
+} from "#backends/wasm/jit/block.js";
 import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
-import { planJitCodegen } from "#backends/wasm/jit/codegen/plan/plan.js";
+import type { JitCodegenPlan } from "#backends/wasm/jit/codegen/plan/types.js";
 import { runJitBlock } from "./helpers.js";
 
 export {
@@ -30,11 +39,9 @@ export {
   wasmBodyOpcodes,
   ExitReason,
   buildBlock,
-  encodeJitBlock,
   irOpDst,
   irOpIsTerminator,
   buildJitCodegenEmissionPlan,
-  planJitCodegen,
   runJitBlock
 };
 export type { IrOp, StorageRef, ValueRef };
@@ -84,7 +91,7 @@ export function codegenIr(block: ReturnType<typeof buildBlock>): readonly IrOp[]
   return blockIr(block);
 }
 
-export function blockIr(block: JitBlock): readonly IrOp[] {
+export function blockIr(block: JitIrBlock): readonly IrOp[] {
   return block.instructions.flatMap((instruction) => instruction.ir);
 }
 
@@ -121,6 +128,19 @@ export function decodedBlock(instructionBytes: readonly (readonly number[])[]): 
   }
 
   return buildBlock(instructions);
+}
+
+export function planJitCodegen(block: JitIrBlock): JitCodegenPlan {
+  return planExpressionCodegen(buildBlockExpressions(block));
+}
+
+export function encodeJitBlock(
+  blocks: readonly JitIrBlock[],
+  options?: EncodeJitBlockOptions
+): Uint8Array<ArrayBuffer> {
+  blocks.forEach(validateBlock);
+
+  return encodeJitPlans(blocks.map(planJitCodegen), options);
 }
 
 export function singleInstructionBodyOpcodes(bytes: readonly number[]): readonly number[] {

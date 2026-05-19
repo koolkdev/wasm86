@@ -1,5 +1,5 @@
 import type { IrOp } from "#x86/ir/model/types.js";
-import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 
 export type JitLocation = Readonly<{
   instructionIndex: number;
@@ -7,7 +7,7 @@ export type JitLocation = Readonly<{
 }>;
 
 export type JitOpVisitor = (
-  instruction: JitInstruction,
+  instruction: JitIrInstruction,
   op: IrOp,
   location: JitLocation
 ) => void;
@@ -22,7 +22,7 @@ export function jitLocationBefore(a: JitLocation, b: JitLocation): boolean {
 }
 
 export function walkJitBlockOps(
-  block: JitBlock,
+  block: JitIrBlock,
   visit: JitOpVisitor,
   context = "walking JIT IR block"
 ): void {
@@ -34,7 +34,7 @@ export function walkJitBlockOps(
 }
 
 export function walkJitInstructionOps(
-  instruction: JitInstruction,
+  instruction: JitIrInstruction,
   instructionIndex: number,
   visit: JitOpVisitor,
   context = "walking JIT IR instruction"
@@ -51,7 +51,7 @@ export function walkJitInstructionOps(
 }
 
 export function walkJitOpsBetween(
-  block: JitBlock,
+  block: JitIrBlock,
   after: JitLocation,
   before: JitLocation,
   visit: JitOpVisitor
@@ -78,10 +78,10 @@ export function walkJitOpsBetween(
 }
 
 export function requiredJitInstruction(
-  block: JitBlock,
+  block: JitIrBlock,
   instructionIndex: number,
   context = "reading JIT IR instruction"
-): JitInstruction {
+): JitIrInstruction {
   const instruction = block.instructions[instructionIndex];
 
   if (instruction === undefined) {

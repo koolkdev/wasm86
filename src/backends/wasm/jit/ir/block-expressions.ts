@@ -1,21 +1,23 @@
 import {
-  buildIrExpressionBlockWithSourceMap,
-  type IrExprBlock,
-  type IrExpressionSourceMap
+  buildIrExpressionBlock,
+  type IrExprBlock
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type {
+  JitIrBlock,
+  JitIrInstruction,
+  InstructionMetadata
+} from "#backends/wasm/jit/ir/types.js";
 import { indexProducedValues } from "./produced-values.js";
 import type { JitProducedValue } from "./values/types.js";
 
 export type InstructionExpressions = Readonly<{
   block: IrExprBlock;
-  sourceMap: IrExpressionSourceMap;
-  // Keyed by source IR variable id.
+  // Keyed by original IR variable id.
   producedValues: ReadonlyMap<number, JitProducedValue>;
 }>;
 
 export type BlockExpressionInstruction = Readonly<{
-  instruction: JitInstruction;
+  instruction: InstructionMetadata;
   index: number;
   expressions: InstructionExpressions;
 }>;
@@ -24,7 +26,7 @@ export type BlockExpressions = Readonly<{
   instructions: readonly BlockExpressionInstruction[];
 }>;
 
-export function buildBlockExpressions(block: JitBlock): BlockExpressions {
+export function buildBlockExpressions(block: JitIrBlock): BlockExpressions {
   return {
     instructions: block.instructions.map((instruction, index) =>
       buildInstructionExpressions(instruction, index)
@@ -33,18 +35,25 @@ export function buildBlockExpressions(block: JitBlock): BlockExpressions {
 }
 
 function buildInstructionExpressions(
-  instruction: JitInstruction,
+  instruction: JitIrInstruction,
   index: number
 ): BlockExpressionInstruction {
-  const expressionPlan = buildIrExpressionBlockWithSourceMap(instruction.ir);
-
   return {
-    instruction,
+    instruction: instructionMetadata(instruction),
     index,
     expressions: {
-      block: expressionPlan.expressionBlock,
-      sourceMap: expressionPlan.sourceMap,
+      block: buildIrExpressionBlock(instruction.ir),
       producedValues: indexProducedValues(instruction, index)
     }
+  };
+}
+
+function instructionMetadata(instruction: JitIrInstruction): InstructionMetadata {
+  return {
+    instructionId: instruction.instructionId,
+    eip: instruction.eip,
+    nextEip: instruction.nextEip,
+    nextMode: instruction.nextMode,
+    operands: instruction.operands
   };
 }

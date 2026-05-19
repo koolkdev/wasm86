@@ -1,8 +1,8 @@
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { u32 } from "#x86/state/cpu-state.js";
-import type { TargetRef } from "#x86/ir/model/types.js";
-import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
 import {
   rootPath,
@@ -49,19 +49,22 @@ export type Exit = Readonly<{
   snapshot: ExitSnapshot;
   visibleEip: ExitValue;
   payload: ExitPayload;
+  staticLinkTarget?: number;
   path: Path;
 }>;
 
 export type ExitBuildInput = Readonly<{
-  instruction: JitInstruction;
+  instruction: InstructionMetadata;
   at: Placement;
   kind: ExitKind;
   snapshot: ExitSnapshot;
   paths: PathMap;
+  targetValue?: JitValue;
+  staticLinkTarget?: number;
 }>;
 
 export function buildExit(input: ExitBuildInput): Exit {
-  const { instruction, at, kind, snapshot, paths } = input;
+  const { instruction, at, kind, snapshot, paths, targetValue, staticLinkTarget } = input;
 
   return {
     id: exitId(at, kind),
@@ -69,8 +72,9 @@ export function buildExit(input: ExitBuildInput): Exit {
     kind,
     reason: exitReasonForKind(kind),
     snapshot,
-    visibleEip: visibleEipForExit(instruction, kind, at.opIndex),
-    payload: payloadForExit(instruction, kind, at.opIndex),
+    visibleEip: visibleEipForExit(instruction, kind, targetValue),
+    payload: payloadForExit(instruction, kind, targetValue),
+    ...(staticLinkTarget === undefined ? {} : { staticLinkTarget: u32(staticLinkTarget) }),
     path: pathForExit(kind, paths, at)
   };
 }
@@ -112,9 +116,9 @@ export function pathForExit(
 }
 
 export function visibleEipForExit(
-  instruction: JitInstruction,
+  instruction: InstructionMetadata,
   kind: ExitKind,
-  opIndex: number
+  targetValue?: JitValue
 ): ExitValue {
   switch (kind) {
     case "memoryReadFault":
@@ -129,21 +133,15 @@ export function visibleEipForExit(
         value: instruction.nextEip
       };
     default:
-      return payloadForExit(instruction, kind, opIndex);
+      return payloadForExit(instruction, kind, targetValue);
   }
 }
 
 export function payloadForExit(
-  instruction: JitInstruction,
+  instruction: InstructionMetadata,
   kind: ExitKind,
-  opIndex: number
+  targetValue?: JitValue
 ): ExitPayload {
-  const op = instruction.ir[opIndex];
-
-  if (op === undefined) {
-    throw new Error(`missing JIT IR op while planning JIT exit payload: ${instruction.instructionId}:${opIndex}`);
-  }
-
   switch (kind) {
     case "memoryReadFault":
     case "memoryWriteFault":
@@ -151,54 +149,13 @@ export function payloadForExit(
     case "fallthrough":
       return { kind: "static", value: instruction.nextEip };
     case "jump":
-      return controlTargetExitValue(op.op === "jump" ? op.target : undefined, instruction);
     case "branchTaken":
-      return controlTargetExitValue(op.op === "conditionalJump" ? op.taken : undefined, instruction);
-    case "branchNotTaken":
-      return controlTargetExitValue(op.op === "conditionalJump" ? op.notTaken : undefined, instruction);
+    case "branchNotTaken": {
+      return targetValue?.kind === "const"
+        ? { kind: "static", value: u32(targetValue.value) }
+        : { kind: "runtime", source: "controlTarget" };
+    }
     case "hostTrap":
       return { kind: "runtime", source: "hostTrapVector" };
   }
-}
-
-function controlTargetExitValue(
-  target: TargetRef | undefined,
-  instruction: JitInstruction
-): ExitValue {
-  const staticTarget = target === undefined
-    ? undefined
-    : staticControlTarget(target, instruction);
-
-  return staticTarget === undefined
-    ? { kind: "runtime", source: "controlTarget" }
-    : { kind: "static", value: staticTarget };
-}
-
-function staticControlTarget(target: TargetRef, instruction: JitInstruction): number | undefined {
-  switch (target.kind) {
-    case "const":
-      return u32(target.value);
-    case "nextEip":
-      return u32(instruction.nextEip);
-    case "var":
-      return staticConstVarValue(target.id, instruction);
-  }
-}
-
-function staticConstVarValue(varId: number, instruction: JitInstruction): number | undefined {
-  for (const op of instruction.ir) {
-    if (op.op === "value.const" && op.dst.id === varId) {
-      return u32(op.value);
-    }
-
-    if (op.op === "get" && op.dst.id === varId && op.source.kind === "operand") {
-      const binding = instruction.operands[op.source.index];
-
-      if (binding?.kind === "static.relTarget") {
-        return u32(binding.target);
-      }
-    }
-  }
-
-  return undefined;
 }

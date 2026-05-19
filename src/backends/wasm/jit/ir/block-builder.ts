@@ -5,14 +5,14 @@ import {
   operandBindingsFromInstruction,
   jitSemanticOperandInfo
 } from "#backends/wasm/jit/ir/operand-bindings.js";
-import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 
 export type AppendInstructionOptions = Readonly<{
   nextMode: "continue" | "exit";
 }>;
 
 export class JitBlockBuilder {
-  readonly #instructions: JitInstruction[] = [];
+  readonly #instructions: JitIrInstruction[] = [];
 
   appendInstruction(
     instruction: IsaDecodedInstruction,
@@ -40,7 +40,7 @@ export class JitBlockBuilder {
     });
   }
 
-  build(): JitBlock {
+  build(): JitIrBlock {
     if (this.#instructions.length === 0) {
       throw new Error("cannot build empty JIT IR block");
     }
@@ -51,7 +51,7 @@ export class JitBlockBuilder {
   }
 }
 
-export function buildBlock(instructions: readonly IsaDecodedInstruction[]): JitBlock {
+export function buildBlock(instructions: readonly IsaDecodedInstruction[]): JitIrBlock {
   if (instructions.length === 0) {
     throw new Error("cannot build empty JIT IR block");
   }

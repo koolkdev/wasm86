@@ -1,9 +1,6 @@
 import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
 import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
-  jitExpressionOpIndexesForSourceOp
-} from "./expression-uses.js";
-import {
   jitExpressionOpEpochs
 } from "./epochs.js";
 import type {
@@ -41,14 +38,13 @@ function planEffect(
   instruction: PlannedInstruction,
   opEpochs: readonly number[]
 ): Effect {
-  const at = effectPlacement(instruction, effectInfo, opEpochs);
-  const sourceOp = entryAt(instruction.analysis.instruction.ir, effectInfo.at.opIndex);
+  const at = effectPlacement(effectInfo, opEpochs);
   const expressionOp = entryAt(instruction.analysis.expressions.block, at.opIndex);
   const view = instruction.analysis.timeline.viewAt(at.opIndex);
 
   switch (effectInfo.kind) {
     case "memoryGuard": {
-      if (sourceOp.op !== "memory.guard" || expressionOp.op !== "memory.guard") {
+      if (expressionOp.op !== "memory.guard") {
         return unexpectedEffectOp(effectInfo, expressionOp.op);
       }
 
@@ -62,7 +58,7 @@ function planEffect(
       };
     }
     case "memoryStore": {
-      if (sourceOp.op !== "set" || expressionOp.op !== "set") {
+      if (expressionOp.op !== "set") {
         return unexpectedEffectOp(effectInfo, expressionOp.op);
       }
 
@@ -75,7 +71,7 @@ function planEffect(
       };
     }
     case "memoryLoad": {
-      if (sourceOp.op !== "get" || expressionOp.op !== "let32") {
+      if (expressionOp.op !== "let32") {
         return unexpectedEffectOp(effectInfo, expressionOp.op);
       }
 
@@ -93,7 +89,7 @@ function planEffect(
       };
     }
     case "jump": {
-      if (sourceOp.op !== "jump" || expressionOp.op !== "jump") {
+      if (expressionOp.op !== "jump") {
         return unexpectedEffectOp(effectInfo, expressionOp.op);
       }
 
@@ -105,7 +101,7 @@ function planEffect(
       };
     }
     case "branch": {
-      if (sourceOp.op !== "conditionalJump" || expressionOp.op !== "conditionalJump") {
+      if (expressionOp.op !== "conditionalJump") {
         return unexpectedEffectOp(effectInfo, expressionOp.op);
       }
 
@@ -122,7 +118,7 @@ function planEffect(
       };
     }
     case "hostTrap": {
-      if (sourceOp.op !== "hostTrap" || expressionOp.op !== "hostTrap") {
+      if (expressionOp.op !== "hostTrap") {
         return unexpectedEffectOp(effectInfo, expressionOp.op);
       }
 
@@ -134,7 +130,7 @@ function planEffect(
       };
     }
     case "fallthrough": {
-      if (sourceOp.op !== "next" || expressionOp.op !== "next") {
+      if (expressionOp.op !== "next") {
         return unexpectedEffectOp(effectInfo, expressionOp.op);
       }
 
@@ -148,40 +144,20 @@ function planEffect(
 }
 
 function effectPlacement(
-  instruction: PlannedInstruction,
   effectInfo: EffectInfo<PlannedExit>,
   opEpochs: readonly number[]
 ): Placement {
-  const expressionOpIndex = expressionOpIndexForSourceEffect(
-    instruction,
-    effectInfo.at.opIndex
-  );
-  const epoch = opEpochs[expressionOpIndex];
+  const epoch = opEpochs[effectInfo.at.opIndex];
 
   if (epoch === undefined) {
-    throw new Error(`missing JIT effect epoch for expression op ${expressionOpIndex}`);
+    throw new Error(`missing JIT effect epoch for expression op ${effectInfo.at.opIndex}`);
   }
 
   return {
     instructionIndex: effectInfo.at.instructionIndex,
-    opIndex: expressionOpIndex,
+    opIndex: effectInfo.at.opIndex,
     epoch
   };
-}
-
-function expressionOpIndexForSourceEffect(
-  instruction: PlannedInstruction,
-  sourceOpIndex: number
-): number {
-  const expressionOpIndexes = jitExpressionOpIndexesForSourceOp(instruction, sourceOpIndex);
-
-  if (expressionOpIndexes.length !== 1) {
-    throw new Error(
-      `expected one JIT expression op for source effect ${sourceOpIndex}, got ${expressionOpIndexes.length}`
-    );
-  }
-
-  return expressionOpIndexes[0]!;
 }
 
 function logicalWriteEpochCount(instruction: PlannedInstruction): number {

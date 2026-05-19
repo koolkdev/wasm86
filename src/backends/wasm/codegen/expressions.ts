@@ -74,26 +74,6 @@ export type IrExprOp =
 
 export type IrExprBlock = readonly IrExprOp[];
 
-export type IrExpressionSourcePlacementKind =
-  // The source op emitted this expression op directly.
-  | "emittedOp"
-  // The source op's value was omitted or inlined, and is consumed here.
-  | "valueUse";
-
-export type IrExpressionSourcePlacement = Readonly<{
-  expressionOpIndex: number;
-  kind: IrExpressionSourcePlacementKind;
-}>;
-
-export type IrExpressionSourceMap = Readonly<{
-  placementsBySourceOpIndex: ReadonlyMap<number, readonly IrExpressionSourcePlacement[]>;
-}>;
-
-export type IrExpressionBuildResult = Readonly<{
-  expressionBlock: IrExprBlock;
-  sourceMap: IrExpressionSourceMap;
-}>;
-
 export type IrExpressionSetInputOp = Extract<IrOp, { op: "set" }>;
 
 export type IrExpressionInputOp =
@@ -102,10 +82,6 @@ export type IrExpressionInputOp =
 export type IrExpressionInputBlock = readonly IrExpressionInputOp[];
 
 export function buildIrExpressionBlock(block: IrExpressionInputBlock): IrExprBlock {
-  return buildIrExpressionBlockWithSourceMap(block).expressionBlock;
-}
-
-export function buildIrExpressionBlockWithSourceMap(block: IrExpressionInputBlock): IrExpressionBuildResult {
   const builder = new ExpressionBuilder(block);
 
   return builder.build();
@@ -113,25 +89,20 @@ export function buildIrExpressionBlockWithSourceMap(block: IrExpressionInputBloc
 
 type ExpressionBinding = Readonly<{
   value: IrValueExpr;
-  sourceOpIndexes: readonly number[];
 }>;
 
 type ExpressionValueResult = Readonly<{
   value: IrValueExpr;
-  sourceOpIndexes: readonly number[];
 }>;
 
 type ExpressionStorageResult = Readonly<{
   storage: IrStorageExpr;
-  sourceOpIndexes: readonly number[];
 }>;
 
 class ExpressionBuilder {
   readonly #bindings = new Map<number, ExpressionBinding>();
   readonly #ops: IrExprOp[] = [];
-  readonly #placementsBySourceOpIndex = new Map<number, IrExpressionSourcePlacement[]>();
   readonly #useCounts: ReadonlyMap<number, number>;
-  #sourceOpIndex = -1;
 
   constructor(
     readonly block: IrExpressionInputBlock
@@ -139,15 +110,13 @@ class ExpressionBuilder {
     this.#useCounts = countVarUses(block);
   }
 
-  build(): IrExpressionBuildResult {
+  build(): IrExprBlock {
     for (let opIndex = 0; opIndex < this.block.length; opIndex += 1) {
       const op = this.block[opIndex];
 
       if (op === undefined) {
         throw new Error(`missing IR expression input op: ${opIndex}`);
       }
-
-      this.#sourceOpIndex = opIndex;
 
       switch (op.op) {
         case "get": {
@@ -161,13 +130,12 @@ class ExpressionBuilder {
               accessWidth: op.accessWidth ?? 32,
               ...(op.signed === true ? { signed: true } : {})
             },
-            source.sourceOpIndexes,
             false
           );
           break;
         }
         case "set":
-          this.#pushOp(...this.#setExpr(op));
+          this.#pushOp(this.#setExpr(op));
           break;
         case "memory.guard": {
           const address = this.#valueExpr(op.address);
@@ -177,16 +145,15 @@ class ExpressionBuilder {
             address: address.value,
             byteLength: op.byteLength,
             access: op.access
-          }, address.sourceOpIndexes);
+          });
           break;
         }
         case "address":
-          this.#defineValue(op.dst, { kind: "address", operand: op.operand }, [], true);
+          this.#defineValue(op.dst, { kind: "address", operand: op.operand }, true);
           break;
         case "value.const":
           this.#bindings.set(op.dst.id, {
-            value: { kind: "const", type: op.type, value: op.value },
-            sourceOpIndexes: [opIndex]
+            value: { kind: "const", type: op.type, value: op.value }
           });
           break;
         case "value.binary": {
@@ -199,7 +166,7 @@ class ExpressionBuilder {
             operator: op.operator,
             a: a.value,
             b: b.value
-          }, [...a.sourceOpIndexes, ...b.sourceOpIndexes], true);
+          }, true);
           break;
         }
         case "value.unary": {
@@ -210,7 +177,7 @@ class ExpressionBuilder {
             type: op.type,
             operator: op.operator,
             value: value.value
-          }, value.sourceOpIndexes, true);
+          }, true);
           break;
         }
         case "value.select": {
@@ -224,15 +191,11 @@ class ExpressionBuilder {
             condition: condition.value,
             whenTrue: whenTrue.value,
             whenFalse: whenFalse.value
-          }, [
-            ...condition.sourceOpIndexes,
-            ...whenTrue.sourceOpIndexes,
-            ...whenFalse.sourceOpIndexes
-          ], true);
+          }, true);
           break;
         }
         case "flags.condition":
-          this.#defineValue(op.dst, { kind: "flags.condition", cc: op.cc }, [], false);
+          this.#defineValue(op.dst, { kind: "flags.condition", cc: op.cc }, false);
           break;
         case "flags.set": {
           const inputs = Object.entries(op.inputs).map(([name, value]) => ({
@@ -249,16 +212,16 @@ class ExpressionBuilder {
             inputs: Object.fromEntries(
               inputs.map(({ name, value }) => [name, value.value])
             )
-          }, inputs.flatMap(({ value }) => value.sourceOpIndexes));
+          });
           break;
         }
         case "next":
-          this.#pushOp(op, []);
+          this.#pushOp(op);
           break;
         case "jump": {
           const target = this.#valueExpr(op.target);
 
-          this.#pushOp({ op: "jump", target: target.value }, target.sourceOpIndexes);
+          this.#pushOp({ op: "jump", target: target.value });
           break;
         }
         case "conditionalJump": {
@@ -271,66 +234,52 @@ class ExpressionBuilder {
             condition: condition.value,
             taken: taken.value,
             notTaken: notTaken.value
-          }, [
-            ...condition.sourceOpIndexes,
-            ...taken.sourceOpIndexes,
-            ...notTaken.sourceOpIndexes
-          ]);
+          });
           break;
         }
         case "hostTrap": {
           const vector = this.#valueExpr(op.vector);
 
-          this.#pushOp({ op: "hostTrap", vector: vector.value }, vector.sourceOpIndexes);
+          this.#pushOp({ op: "hostTrap", vector: vector.value });
           break;
         }
       }
     }
 
-    return {
-      expressionBlock: this.#ops,
-      sourceMap: {
-        placementsBySourceOpIndex: this.#placementsBySourceOpIndex
-      }
-    };
+    return this.#ops;
   }
 
   #defineValue(
     dst: VarRef,
     value: IrValueExpr,
-    sourceOpIndexes: readonly number[],
     inlineable: boolean
   ): void {
-    const origins = uniqueSourceOpIndexes([...sourceOpIndexes, this.#sourceOpIndex]);
-
     if (inlineable && (remainingUses(this.#useCounts, dst.id) <= 1 || value.kind === "address")) {
-      this.#bindings.set(dst.id, { value, sourceOpIndexes: origins });
+      this.#bindings.set(dst.id, { value });
       return;
     }
 
-    this.#pushOp({ op: "let32", dst, value }, sourceOpIndexes);
+    this.#pushOp({ op: "let32", dst, value });
   }
 
-  #setExpr(op: Extract<IrExpressionInputOp, { op: "set" }>): readonly [IrSetExprOp, readonly number[]] {
+  #setExpr(op: Extract<IrExpressionInputOp, { op: "set" }>): IrSetExprOp {
     const target = this.#storageExpr(op.target);
     const value = this.#valueExpr(op.value);
-    const expr: IrSetExprOp = {
+
+    return {
       op: "set",
       target: target.storage,
       value: value.value,
       accessWidth: op.accessWidth ?? 32
     };
-    const origins = [...target.sourceOpIndexes, ...value.sourceOpIndexes];
-
-    return [expr, origins];
   }
 
-  #materializedValue(value: ValueRef): Readonly<{ value: ValueRef; sourceOpIndexes: readonly number[] }> {
+  #materializedValue(value: ValueRef): Readonly<{ value: ValueRef }> {
     const expr = this.#valueExpr(value);
     const exprValue = expr.value;
 
     if (exprValue.kind === "var" || exprValue.kind === "const" || exprValue.kind === "nextEip") {
-      return { value: exprValue, sourceOpIndexes: expr.sourceOpIndexes };
+      return { value: exprValue };
     }
 
     const materialized = value.kind === "var" ? value : undefined;
@@ -339,22 +288,21 @@ class ExpressionBuilder {
       throw new Error("cannot materialize non-var IR expression input");
     }
 
-    this.#pushOp({ op: "let32", dst: materialized, value: expr.value }, expr.sourceOpIndexes);
+    this.#pushOp({ op: "let32", dst: materialized, value: expr.value });
     this.#bindings.delete(materialized.id);
-    return { value: materialized, sourceOpIndexes: [] };
+    return { value: materialized };
   }
 
   #storageExpr(storage: StorageRef): ExpressionStorageResult {
     switch (storage.kind) {
       case "operand":
       case "reg":
-        return { storage, sourceOpIndexes: [] };
+        return { storage };
       case "mem": {
         const address = this.#valueExpr(storage.address);
 
         return {
-          storage: { kind: "mem", address: address.value },
-          sourceOpIndexes: address.sourceOpIndexes
+          storage: { kind: "mem", address: address.value }
         };
       }
     }
@@ -362,13 +310,13 @@ class ExpressionBuilder {
 
   #valueExpr(value: ValueRef): ExpressionValueResult {
     if (value.kind !== "var") {
-      return { value, sourceOpIndexes: [] };
+      return { value };
     }
 
     const binding = this.#bindings.get(value.id);
 
     if (binding === undefined) {
-      return { value, sourceOpIndexes: [] };
+      return { value };
     }
 
     if (binding.value.kind !== "const" && binding.value.kind !== "address") {
@@ -378,44 +326,9 @@ class ExpressionBuilder {
     return binding;
   }
 
-  #pushOp(op: IrExprOp, sourceOpIndexes: readonly number[]): void {
-    const expressionOpIndex = this.#ops.length;
-
+  #pushOp(op: IrExprOp): void {
     this.#ops.push(op);
-    this.#recordPlacement(this.#sourceOpIndex, expressionOpIndex, "emittedOp");
-
-    for (const sourceOpIndex of uniqueSourceOpIndexes(sourceOpIndexes)) {
-      this.#recordPlacement(sourceOpIndex, expressionOpIndex, "valueUse");
-    }
   }
-
-  #recordPlacement(
-    sourceOpIndex: number,
-    expressionOpIndex: number,
-    kind: IrExpressionSourcePlacementKind
-  ): void {
-    const placements = this.#placementsBySourceOpIndex.get(sourceOpIndex) ?? [];
-
-    if (!placements.some((placement) =>
-      placement.expressionOpIndex === expressionOpIndex && placement.kind === kind
-    )) {
-      placements.push({ expressionOpIndex, kind });
-    }
-
-    this.#placementsBySourceOpIndex.set(sourceOpIndex, placements);
-  }
-}
-
-function uniqueSourceOpIndexes(indexes: readonly number[]): readonly number[] {
-  const unique: number[] = [];
-
-  for (const index of indexes) {
-    if (index >= 0 && !unique.includes(index)) {
-      unique.push(index);
-    }
-  }
-
-  return unique;
 }
 
 function countVarUses(block: IrExpressionInputBlock): Map<number, number> {

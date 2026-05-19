@@ -18,7 +18,13 @@ import {
 } from "#backends/wasm/tests/helpers.js";
 import { decodeExit, ExitReason } from "#backends/wasm/exit.js";
 import { readWasmCpuState, writeWasmCpuState } from "#backends/wasm/state-layout.js";
-import { buildBlock, encodeJitBlock, jitBlockExportName } from "#backends/wasm/jit/block.js";
+import {
+  buildBlock,
+  buildBlockExpressions,
+  encodeJitBlock,
+  jitBlockExportName,
+  planJitCodegen
+} from "#backends/wasm/jit/block.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
 
@@ -141,7 +147,9 @@ test("same-module final fallthrough uses direct return_call", () => {
   const reader = new GuestMemoryDecodeReader(new ArrayBufferGuestMemory(guestMemory.buffer), regions);
   const firstBlock = decodeIsaBlock(reader, startAddress, { maxInstructions: 1 });
   const secondBlock = decodeIsaBlock(reader, startAddress + 1);
-  const moduleBytes = encodeJitBlock([firstBlock, secondBlock].map((block) => buildBlock(block.instructions)));
+  const moduleBytes = encodeJitBlock(
+    [firstBlock, secondBlock].map((block) => planBlock(buildBlock(block.instructions)))
+  );
   const firstBlockOpcodes = wasmBodyOpcodes(extractFunctionBody(moduleBytes, 0));
   const handle = compileWasmBlockHandle([firstBlock, secondBlock], { stateMemory, guestMemory });
   const stateView = new DataView(stateMemory.buffer);
@@ -267,7 +275,7 @@ async function compileMultiBlockFixture(blocks: readonly TestBlock[]): Promise<R
       block.eip
     )
   );
-  const moduleBytes = encodeJitBlock(decodedBlocks.map((block) => buildBlock(block.instructions)));
+  const moduleBytes = encodeJitBlock(decodedBlocks.map((block) => planBlock(buildBlock(block.instructions))));
   const handle = await compileWasmBlockHandle(decodedBlocks, { stateMemory, guestMemory });
 
   return {
@@ -276,6 +284,10 @@ async function compileMultiBlockFixture(blocks: readonly TestBlock[]): Promise<R
     stateView: new DataView(stateMemory.buffer),
     guestView
   };
+}
+
+function planBlock(block: ReturnType<typeof buildBlock>) {
+  return planJitCodegen(buildBlockExpressions(block));
 }
 
 function writeGuestCode(view: DataView, bytes: readonly number[]): void {

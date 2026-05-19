@@ -5,7 +5,14 @@ import type { CpuState } from "#x86/state/cpu-state.js";
 import { wasmImport } from "#backends/wasm/abi.js";
 import { decodeExit, type DecodedExit } from "#backends/wasm/exit.js";
 import { readWasmCpuState, writeWasmCpuState } from "#backends/wasm/state-layout.js";
-import { buildBlock, encodeJitBlock, jitBlockExportName } from "#backends/wasm/jit/block.js";
+import {
+  buildBlock,
+  buildBlockExpressions,
+  encodeJitBlock,
+  jitBlockExportName,
+  planJitCodegen,
+  validateBlock
+} from "#backends/wasm/jit/block.js";
 
 export type JitBlockRunResult = Readonly<{
   state: CpuState;
@@ -20,7 +27,10 @@ export async function runJitBlock(
 ): Promise<JitBlockRunResult> {
   const instructions = decodeInstructions(bytes, initialState.eip);
   const block = buildBlock(instructions);
-  const module = new WebAssembly.Module(encodeJitBlock([block]));
+  validateBlock(block);
+  const module = new WebAssembly.Module(encodeJitBlock([
+    planJitCodegen(buildBlockExpressions(block))
+  ]));
   const stateMemory = new WebAssembly.Memory({ initial: 1 });
   const guestMemory = new WebAssembly.Memory({ initial: 1 });
   const stateView = new DataView(stateMemory.buffer);

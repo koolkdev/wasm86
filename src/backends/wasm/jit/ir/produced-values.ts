@@ -1,6 +1,6 @@
 import type { IrOp, StorageRef } from "#x86/ir/model/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 import { walkJitInstructionOps, type JitLocation } from "#backends/wasm/jit/ir/walk.js";
 import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type {
@@ -9,7 +9,7 @@ import type {
 } from "#backends/wasm/jit/ir/values/types.js";
 
 export function indexProducedValues(
-  instruction: JitInstruction,
+  instruction: JitIrInstruction,
   instructionIndex: number
 ): ReadonlyMap<number, JitProducedValue> {
   const producedValues = new Map<number, JitProducedValue>();
@@ -35,7 +35,7 @@ export function indexProducedValues(
 }
 
 export function jitProducedValueForEffectfulRead(
-  instruction: Pick<JitInstruction, "instructionId" | "operands">,
+  instruction: Pick<JitIrInstruction, "instructionId" | "operands">,
   location: JitLocation,
   op: Extract<IrOp, { op: "get" }>
 ): JitProducedValue | undefined {
@@ -45,7 +45,7 @@ export function jitProducedValueForEffectfulRead(
 }
 
 export function jitProducedValueIdForEffectfulRead(
-  instruction: Pick<JitInstruction, "instructionId">,
+  instruction: Pick<JitIrInstruction, "instructionId">,
   location: JitLocation,
   op: Extract<IrOp, { op: "get" }>
 ): JitProducedValueId {
@@ -53,7 +53,7 @@ export function jitProducedValueIdForEffectfulRead(
 }
 
 export function jitGetReadsEffectfulSource(
-  instruction: Pick<JitInstruction, "operands">,
+  instruction: Pick<JitIrInstruction, "operands">,
   op: Extract<IrOp, { op: "get" }>
 ): boolean {
   return jitStorageReadIsEffectful(op.source, instruction.operands);

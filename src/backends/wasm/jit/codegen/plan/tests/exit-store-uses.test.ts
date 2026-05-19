@@ -23,13 +23,13 @@ import {
   type JitCodegenPlan,
   type ExitStore,
   type JitValue,
-  type JitBlock
+  type JitIrBlock
 } from "./plan-test-helpers.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type { ValueUse } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 
 test("planJitCodegen leaves exit-store sources on exits and omits separate exit-store-use records", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "canonical-produced-exit-store",
       eip: startAddress,
@@ -147,7 +147,7 @@ function buildHostTrapEmissionPlanForStores(
   instructionId: string,
   stores: readonly ExitStore[]
 ) {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId,
       eip: startAddress,

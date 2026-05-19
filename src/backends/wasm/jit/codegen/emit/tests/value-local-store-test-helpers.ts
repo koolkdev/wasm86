@@ -50,8 +50,15 @@ import {
 } from "#backends/wasm/jit/codegen/emit/exit-stores.js";
 import { createExitMetadataEmitter } from "#backends/wasm/jit/codegen/emit/exit-metadata.js";
 import { createExitStoreLayout } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
-import { buildBlock, encodeJitBlock } from "#backends/wasm/jit/block.js";
-import type { JitBlock } from "#backends/wasm/jit/ir/types.js";
+import {
+  buildBlock,
+  buildBlockExpressions,
+  encodeJitBlock as encodeJitPlans,
+  planJitCodegen,
+  validateBlock,
+  type EncodeJitBlockOptions
+} from "#backends/wasm/jit/block.js";
+import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import {
   planReuseForInstructions,
   type InstructionEpochSource
@@ -98,7 +105,6 @@ export {
   emitExitStores,
   releaseExitStores,
   buildBlock,
-  encodeJitBlock,
   buildTimeline,
   branchPath,
   rootPath,
@@ -113,10 +119,22 @@ export type {
   ValueCacheState,
   ValueScope,
   ValueEmitters,
-  JitBlock,
+  JitIrBlock,
   ExitSnapshot,
   Reg32
 };
+
+export function encodeJitBlock(
+  blocks: readonly JitIrBlock[],
+  options?: EncodeJitBlockOptions
+): Uint8Array<ArrayBuffer> {
+  blocks.forEach(validateBlock);
+
+  return encodeJitPlans(
+    blocks.map((block) => planJitCodegen(buildBlockExpressions(block))),
+    options
+  );
+}
 
 export function addValue(reg: "eax" | "ebx", value: number): JitValue {
   return {
@@ -394,7 +412,7 @@ export function exitState(
   };
 }
 
-export function repeatedInlineExpressionBlock(): JitBlock {
+export function repeatedInlineExpressionBlock(): JitIrBlock {
   return {
     instructions: [{
       instructionId: "cache-test",

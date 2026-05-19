@@ -5,11 +5,14 @@ import { UnsupportedWasmCodegenError } from "#backends/wasm/errors.js";
 import { decodeExit, type DecodedExit } from "#backends/wasm/exit.js";
 import {
   buildBlock,
+  buildBlockExpressions,
   encodeJitBlock,
   jitBlockExportName,
-  staticJitLinkTargets,
+  planJitCodegen,
+  validateBlock,
   type JitLinkResolver
 } from "./block.js";
+import type { JitCodegenPlan } from "./codegen/plan/types.js";
 import {
   jitModuleLinkFallbackExportName,
   JitModuleLinkTable
@@ -75,10 +78,12 @@ export function compileWasmBlockHandle(
   }
 
   const jitBlocks = blocks.map((block) => buildBlock(block.instructions));
+  jitBlocks.forEach(validateBlock);
+  const codegenPlans = jitBlocks.map((block) => planJitCodegen(buildBlockExpressions(block)));
   const entryEips = blocks.map((block) => u32(block.startEip));
-  const moduleLinkTable = createModuleLinkTable(jitBlocks, entryEips);
+  const moduleLinkTable = createModuleLinkTable(codegenPlans, entryEips);
   const linkResolver = moduleLinkTable === undefined ? undefined : linkResolverForTable(moduleLinkTable);
-  const bytes = encodeJitBlock(jitBlocks, linkResolver === undefined ? {} : { linkResolver });
+  const bytes = encodeJitBlock(codegenPlans, linkResolver === undefined ? {} : { linkResolver });
   const compileStart = performance.now();
   const module = new WebAssembly.Module(bytes);
   const compileMs = performance.now() - compileStart;
@@ -124,15 +129,35 @@ function runWasmBlock(exportedBlockFunction: () => unknown): WasmBlockRun {
 }
 
 function createModuleLinkTable(
-  jitBlocks: readonly ReturnType<typeof buildBlock>[],
+  codegenPlans: readonly JitCodegenPlan[],
   entryEips: readonly number[]
 ): JitModuleLinkTable | undefined {
   const internalEips = new Set(entryEips.map((eip) => u32(eip)));
-  const targetEips = jitBlocks.flatMap((jitBlock) =>
-    staticJitLinkTargets(jitBlock).filter((targetEip) => !internalEips.has(u32(targetEip)))
+  const targetEips = codegenPlans.flatMap((plan) =>
+    staticLinkTargets(plan).filter((targetEip) => !internalEips.has(u32(targetEip)))
   );
 
   return targetEips.length === 0 ? undefined : new JitModuleLinkTable({ targetEips });
+}
+
+function staticLinkTargets(plan: JitCodegenPlan): readonly number[] {
+  const unique: number[] = [];
+  const seen = new Set<number>();
+
+  for (const instruction of plan.analysis.instructions) {
+    for (const exit of instruction.flow.exits) {
+      const target = exit.staticLinkTarget;
+
+      if (target === undefined || seen.has(target)) {
+        continue;
+      }
+
+      unique.push(target);
+      seen.add(target);
+    }
+  }
+
+  return unique;
 }
 
 function linkResolverForTable(moduleTable: JitModuleLinkTable): JitLinkResolver {

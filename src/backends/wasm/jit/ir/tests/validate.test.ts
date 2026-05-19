@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { validateBlock } from "#backends/wasm/jit/ir/validate.js";
 import type { IrBlock } from "#x86/ir/model/types.js";
-import type { JitBlock, JitInstruction } from "#backends/wasm/jit/ir/types.js";
+import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 import { startAddress, v } from "./helpers.js";
 
 test("validateBlock rejects empty blocks", () => {
@@ -69,15 +69,15 @@ test("validateBlock rejects ops outside shared x86 IR", () => {
   ] as unknown as IrBlock)), /unhandled IR op semantics/);
 });
 
-function jitBlock(ir: IrBlock, nextMode: JitInstruction["nextMode"] = "continue"): JitBlock {
+function jitBlock(ir: IrBlock, nextMode: JitIrInstruction["nextMode"] = "continue"): JitIrBlock {
   return { instructions: [jitInstruction(ir, 0, nextMode)] };
 }
 
 function jitInstruction(
   ir: IrBlock,
   index = 0,
-  nextMode: JitInstruction["nextMode"] = "continue"
-): JitInstruction {
+  nextMode: JitIrInstruction["nextMode"] = "continue"
+): JitIrInstruction {
   return {
     instructionId: "synthetic.verifier",
     eip: startAddress + index,

@@ -20,10 +20,10 @@ import {
   plannedInstructionsForTest,
   type JitCodegenPlan,
   type JitValue,
-  type JitBlock,
+  type JitIrBlock,
 } from "./plan-test-helpers.js";
 test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache specs", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "cache-plan",
       eip: startAddress,
@@ -81,7 +81,7 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
 });
 
 test("buildJitCodegenEmissionPlan does not count overwritten planned register writes as exit-store uses", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [
       {
         instructionId: "write-before-overwrite",
@@ -146,7 +146,7 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
 });
 
 test("buildJitCodegenEmissionPlan does not count same-instruction later register writes for earlier exits", () => {
-  const block: JitBlock = {
+  const block: JitIrBlock = {
     instructions: [{
       instructionId: "fault-before-register-write",
       eip: startAddress,

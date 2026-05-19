@@ -85,6 +85,27 @@ test("compiled target patches static call through dependent module-local table",
   strictEqual(new DataView(fixture.memories.guestMemory.buffer).getUint32(0x7c, true), returnAddress);
 });
 
+test("constant indirect jump target is not module-linked", () => {
+  const fixture = createLinkingFixture([
+    block(aEip, movEaxJmpEax(bEip)),
+    block(bEip, incEaxHostTrap())
+  ]);
+  const a = compileBlock(fixture, aEip);
+
+  strictEqual(a.moduleLinkTable, undefined);
+  compileBlock(fixture, bEip);
+  strictEqual(a.moduleLinkTable, undefined);
+
+  fixture.memories.state.load({ eip: aEip });
+
+  const run = a.run();
+  const state = fixture.memories.state.snapshot();
+
+  deepStrictEqual(run.exit, { exitReason: ExitReason.JUMP, payload: bEip });
+  strictEqual(state.eax, bEip);
+  strictEqual(state.eip, bEip);
+});
+
 test("final jmp rel8 can link through the module-local table", () => {
   const rel8A = 0x1100;
   const rel8B = 0x1108;
@@ -328,6 +349,17 @@ function incEaxJnzRel8(blockEip: number, targetEip: number): readonly number[] {
   return [
     0x40,
     ...jnzRel8(blockEip + 1, targetEip)
+  ];
+}
+
+function movEaxJmpEax(targetEip: number): readonly number[] {
+  return [
+    0xb8,
+    targetEip & 0xff,
+    (targetEip >>> 8) & 0xff,
+    (targetEip >>> 16) & 0xff,
+    (targetEip >>> 24) & 0xff,
+    0xff, 0xe0
   ];
 }
 
