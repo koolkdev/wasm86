@@ -9,7 +9,7 @@ import {
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertMaskedBits,
-  jitProducedValue,
+  jitLoadResultValue,
   onlyExit,
   startAddress,
   registerStore,
@@ -31,7 +31,7 @@ import type { ValueUse } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 test("planJitCodegen leaves exit-store sources on exits and omits separate exit-store-use records", () => {
   const block: JitIrBlock = {
     instructions: [{
-      instructionId: "canonical-produced-exit-store",
+      instructionId: "canonical-loadResult-exit-store",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
@@ -71,10 +71,10 @@ test("planJitCodegen leaves exit-store sources on exits and omits separate exit-
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
-  const produced = jitProducedValue("load#canonical-produced-exit-store:0:1:0", "i32");
-  const exitValue = addValue(produced, jitInputReg32Value("ebx"));
+  const loadResult = jitLoadResultValue(0, "i32");
+  const exitValue = addValue(loadResult, jitInputReg32Value("ebx"));
   const [exitStoreUse] = rootUses(emissionPlan.valueUses, exitValue, "exitStore");
-  const hostTrapOpIndex = emissionPlan.instructions[0]?.analysis.expressions.block
+  const hostTrapOpIndex = emissionPlan.instructions[0]?.analysis.expressions
     .findIndex((op) => op.op === "hostTrap");
 
   deepStrictEqual(exit.stores, [registerStore("eax", exitValue)]);
@@ -85,7 +85,7 @@ test("planJitCodegen leaves exit-store sources on exits and omits separate exit-
     emissionPlan.valueUses
       .filter((use) => valuesEqual(use.root, exitValue))
       .map((use) => use.value),
-    [exitValue, produced, jitInputReg32Value("ebx")]
+    [exitValue, loadResult, jitInputReg32Value("ebx")]
   );
 });
 
@@ -106,10 +106,10 @@ test("buildJitCodegenEmissionPlan counts repeated register and flag store depend
 });
 
 test("buildJitCodegenEmissionPlan expands exit-store dependency trees once with root ancestry", () => {
-  const produced = jitProducedValue("load#canonical-select-dependencies:0:0:0", "i32");
+  const loadResult = jitLoadResultValue(0, "i32");
   const conditionFlags = jitInsertMaskedBits(
     jitInputAluFlagsValue(),
-    produced,
+    loadResult,
     FLAG_PRODUCERS.inc.writtenMask
   );
   const selectedFlags = {
@@ -122,24 +122,24 @@ test("buildJitCodegenEmissionPlan expands exit-store dependency trees once with 
   const emissionPlan = buildHostTrapEmissionPlanForStores("canonical-select-dependencies", [
     flagStore(selectedFlags)
   ]);
-  const producedUse = emissionPlan.valueUses.find((use) =>
-    valuesEqual(use.value, produced) &&
+  const loadResultUse = emissionPlan.valueUses.find((use) =>
+    valuesEqual(use.value, loadResult) &&
       valuesEqual(use.root, selectedFlags)
   );
 
-  deepStrictEqual(producedUse?.ancestors, [
+  deepStrictEqual(loadResultUse?.ancestors, [
     selectedFlags,
     jitFlagConditionValue(conditionFlags, "E"),
     conditionFlags
   ]);
   deepStrictEqual(
     emissionPlan.reusePlan.captures.captures
-      .filter((capture) => capture.reason === "producedDefinition")
+      .filter((capture) => capture.reason === "loadResultDefinition")
       .map((capture) => capture.value),
-    [produced]
+    [loadResult]
   );
   deepStrictEqual(emissionPlan.reusePlan.cache.selected, [
-    { value: produced, useCount: 1 }
+    { value: loadResult, useCount: 1 }
   ]);
 });
 

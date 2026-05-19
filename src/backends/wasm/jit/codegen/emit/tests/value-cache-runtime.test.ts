@@ -34,7 +34,7 @@ import {
   type JitIrBlock,
 } from "./value-local-store-test-helpers.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
-import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
+import { jitLoadResultValue } from "#backends/wasm/jit/ir/values/builders.js";
 test("JIT expression emission captures repeated branch target values before the split", () => {
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitBlock([repeatedInlineExpressionBlock()])));
 
@@ -151,9 +151,9 @@ test("JIT value-cache runtime reuses unselected values that are already availabl
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localSet, wasmOpcode.localGet]);
 });
 
-test("JIT value-cache runtime defines selected produced values explicitly", () => {
+test("JIT value-cache runtime defines selected load-result values explicitly", () => {
   const body = new WasmFunctionBodyEncoder();
-  const value = jitProducedValue("load#0:0:0", "i32");
+  const value = jitLoadResultValue(0, "i32");
   const valueState = createOneOpSelectedValueCache(body, value);
   let emitted = 0;
 

@@ -20,7 +20,7 @@ export function valueChildren(value: JitValue): readonly JitValue[] {
     case "flagCondition":
       return [value.flags];
     case "const":
-    case "produced":
+    case "loadResult":
     case "input":
       return [];
   }

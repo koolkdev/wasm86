@@ -35,7 +35,7 @@ export function planReuseForEmission<TInstruction extends PlannedInstruction>(
 ): PlannedReuseForEmission<TInstruction> {
   const reuseInputs = instructions.map((instruction) => ({
     operands: instruction.analysis.instruction.operands,
-    expressionBlock: instruction.analysis.expressions.block,
+    expressionBlock: instruction.analysis.expressions,
     valueTimeline: instruction.analysis.timeline
   }));
   const reusePlan = planReuseForInstructions(

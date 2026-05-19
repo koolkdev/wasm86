@@ -37,7 +37,7 @@ export function simplifyValue(value: JitValue): JitValue {
 
       return normalized === value.value ? value : { ...value, value: normalized };
     }
-    case "produced":
+    case "loadResult":
     case "input":
       return value;
     case "value.binary":

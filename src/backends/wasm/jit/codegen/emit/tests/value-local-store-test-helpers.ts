@@ -39,7 +39,7 @@ import {
 import { createInputSlotEmitter } from "#backends/wasm/jit/codegen/emit/input-slots.js";
 import {
   createValueEmitters,
-  unavailableProducedEmitter,
+  unavailableLoadResultEmitter,
   type ValueEmitters
 } from "#backends/wasm/jit/codegen/emit/values.js";
 import {
@@ -64,7 +64,9 @@ import {
   type InstructionEpochSource
 } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import type { Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
-import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
+import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
 import { valueUsesForExpressionBlock } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
 import {
   branchPath,
@@ -73,6 +75,13 @@ import {
 import type { ExitSnapshot } from "#backends/wasm/jit/analysis/exits.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
+
+function buildTimeline(input: Omit<TimelineInput, "loadResultRegistry">) {
+  return buildTimelineWithRegistry({
+    ...input,
+    loadResultRegistry: new LoadResultRegistry()
+  });
+}
 
 export {
   deepStrictEqual,
@@ -255,7 +264,7 @@ export function createValueEmittersForCache(
     cache: state.cache,
     scope: state.scope,
     inputs: createInputSlotEmitter(body),
-    produced: unavailableProducedEmitter()
+    loadResults: unavailableLoadResultEmitter()
   });
 }
 

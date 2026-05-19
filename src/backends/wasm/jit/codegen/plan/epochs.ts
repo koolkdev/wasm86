@@ -3,7 +3,7 @@ import type {
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
-  ProducedDefinition,
+  LoadResultDefinition,
   Timeline
 } from "#backends/wasm/jit/analysis/timeline-types.js";
 import type {
@@ -29,14 +29,14 @@ export type EpochUsePlan = Readonly<{
   uses: readonly ValueUse[];
 }>;
 
-export type PlacedProducedDefinition = ProducedDefinition & Readonly<{
+export type PlacedLoadResultDefinition = LoadResultDefinition & Readonly<{
   at: Placement;
 }>;
 
 export type EpochBuildPlan = Readonly<{
   instructions: readonly InstructionEpochs[];
   epochs: readonly EpochUsePlan[];
-  produced: readonly PlacedProducedDefinition[];
+  loadResults: readonly PlacedLoadResultDefinition[];
 }>;
 
 export function buildEpochs(
@@ -44,7 +44,7 @@ export function buildEpochs(
   valueUses: readonly ValueUse[]
 ): EpochBuildPlan {
   const instructionPlans: InstructionEpochs[] = [];
-  const produced: PlacedProducedDefinition[] = [];
+  const loadResults: PlacedLoadResultDefinition[] = [];
   let currentEpoch = 0;
 
   for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
@@ -68,14 +68,14 @@ export function buildEpochs(
       }
     }
 
-    for (const definition of instruction.valueTimeline.produced) {
+    for (const definition of instruction.valueTimeline.loadResults) {
       const epoch = opEpochs[definition.opIndex];
 
       if (epoch === undefined) {
-        throw new Error(`missing JIT produced definition epoch: ${definition.opIndex}`);
+        throw new Error(`missing JIT load-result definition epoch: ${definition.opIndex}`);
       }
 
-      produced.push({
+      loadResults.push({
         ...definition,
         at: {
           instructionIndex,
@@ -100,7 +100,7 @@ export function buildEpochs(
       index,
       uses
     })),
-    produced
+    loadResults
   };
 }
 

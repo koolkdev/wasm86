@@ -12,7 +12,7 @@ import {
   type EpochUsePlan,
   type InstructionEpochs,
   type InstructionEpochInput,
-  type PlacedProducedDefinition
+  type PlacedLoadResultDefinition
 } from "./epochs.js";
 import {
   type ValueUse
@@ -36,13 +36,13 @@ export type {
   InstructionEpochSource,
   InstructionEpochs,
   InstructionEpochInput,
-  PlacedProducedDefinition
+  PlacedLoadResultDefinition
 } from "./epochs.js";
 
 export type ReuseInput = Readonly<{
   uses: readonly ValueUse[];
   epochs: readonly EpochUsePlan[];
-  produced: readonly PlacedProducedDefinition[];
+  loadResults: readonly PlacedLoadResultDefinition[];
   exits: readonly PlannedExit[];
 }>;
 
@@ -63,7 +63,7 @@ export function planReuse(input: ReuseInput): ReusePlan {
   const captures = planCaptures({
     uses: input.uses,
     cache,
-    produced: input.produced,
+    loadResults: input.loadResults,
     exits: input.exits
   });
 
@@ -82,7 +82,7 @@ export function planReuseForInstructions(
   const reuse = planReuse({
     uses: valueUses,
     epochs: epoch.epochs,
-    produced: epoch.produced,
+    loadResults: epoch.loadResults,
     exits
   });
 

@@ -26,7 +26,7 @@ export function valueCost(value: JitValue): number {
     case "flagProducer":
       return 1 + flagProducerInputValues(value).reduce((cost, input) => cost + valueCost(input), 0);
     case "const":
-    case "produced":
+    case "loadResult":
     case "input":
       return 1;
   }

@@ -13,7 +13,7 @@ import type { Path } from "#backends/wasm/jit/analysis/paths.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type {
-  JitProducedValue,
+  JitLoadResultValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import {
@@ -51,10 +51,10 @@ export type ValueCache = Readonly<{
     emitter: () => ValueWidth
   ): CapturedValue;
 
-  // Materializes an effect-produced value only when the reuse plan selected it.
+  // Materializes a load-result value only when the reuse plan selected it.
   define(
     at: Placement,
-    value: JitProducedValue,
+    value: JitLoadResultValue,
     emitter: () => ValueWidth
   ): CapturedValue | undefined;
 

@@ -1,5 +1,5 @@
 import type {
-  JitProducedValue,
+  JitLoadResultValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import type { EffectKind } from "#backends/wasm/jit/analysis/effect-classifier.js";
@@ -31,7 +31,7 @@ export type Effect =
       width: OperandWidth;
     }>
   | EffectBase<"memoryLoad"> & Readonly<{
-      result: JitProducedValue;
+      result: JitLoadResultValue;
       address: JitValue;
       width: OperandWidth;
       signed: boolean;

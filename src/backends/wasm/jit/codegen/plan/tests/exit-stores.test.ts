@@ -16,7 +16,7 @@ import {
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertMaskedBits,
-  jitProducedValue,
+  jitLoadResultValue,
   onlyExit,
   startAddress,
   registerStore,
@@ -169,7 +169,7 @@ test("planJitCodegen keeps memory guard faults at their op exit states", () => {
   const codegenPlan = planJitCodegen(buildBlock([add, load]));
   const exit = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
   const guardOpIndex = expressionOpIndex(
-    codegenPlan.analysis.instructions[1]!.expressions.block,
+    codegenPlan.analysis.instructions[1]!.expressions,
     "memory.guard"
   );
 
@@ -240,7 +240,7 @@ test("planJitCodegen excludes current-instruction speculative writes from memory
   const codegenPlan = planJitCodegen(buildBlock([instruction]));
   const writeFault = onlyExit(codegenPlan.exits, ExitReason.MEMORY_WRITE_FAULT);
   const guardOpIndex = expressionOpIndex(
-    codegenPlan.analysis.instructions[0]!.expressions.block,
+    codegenPlan.analysis.instructions[0]!.expressions,
     "memory.guard",
     (op) => op.access === "write"
   );
@@ -280,7 +280,7 @@ test("planJitCodegen makes guard faults observe current op state", () => {
   const codegenPlan = planJitCodegen(block);
   const readFault = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
-  const expressionBlock = codegenPlan.analysis.instructions[0]!.expressions.block;
+  const expressionBlock = codegenPlan.analysis.instructions[0]!.expressions;
   const guardOpIndex = expressionOpIndex(expressionBlock, "memory.guard");
   const hostTrapOpIndex = expressionOpIndex(expressionBlock, "hostTrap");
 
@@ -337,7 +337,7 @@ test("planJitCodegen makes guard faults observe current flag state", () => {
   const codegenPlan = planJitCodegen(block);
   const readFault = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
-  const expressionBlock = codegenPlan.analysis.instructions[0]!.expressions.block;
+  const expressionBlock = codegenPlan.analysis.instructions[0]!.expressions;
   const guardOpIndex = expressionOpIndex(expressionBlock, "memory.guard");
   const hostTrapOpIndex = expressionOpIndex(expressionBlock, "hostTrap");
   const expectedFlags = jitInsertMaskedBits(
@@ -383,7 +383,7 @@ test("planJitCodegen records value-state-derived flag stores for branch exits", 
   const branchExits = codegenPlan.exits.filter((entry) =>
     entry.reason === ExitReason.JUMP && entry.path.id.startsWith("branch:")
   );
-  const branchExpressionBlock = emissionPlan.instructions[1]?.analysis.expressions.block;
+  const branchExpressionBlock = emissionPlan.instructions[1]?.analysis.expressions;
   const conditionalJumpIndex = branchExpressionBlock?.findIndex((op) => op.op === "conditionalJump") ?? -1;
 
   strictEqual(branchExpressionBlock?.some((op) =>
@@ -490,7 +490,7 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from expression IR"
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const branchInstruction = emissionPlan.instructions[1]!;
-  const expressionBranchOpIndex = branchInstruction.analysis.expressions.block.findIndex((op) =>
+  const expressionBranchOpIndex = branchInstruction.analysis.expressions.findIndex((op) =>
     op.op === "conditionalJump"
   );
   const takenPath = branchPath(1, expressionBranchOpIndex, "taken");
@@ -507,7 +507,7 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from expression IR"
       use.path.debugLabel === "taken"
   );
 
-  deepStrictEqual(branchInstruction.analysis.expressions.block.map((op) => op.op), ["let32", "let32", "conditionalJump"]);
+  deepStrictEqual(branchInstruction.analysis.expressions.map((op) => op.op), ["let32", "let32", "conditionalJump"]);
   strictEqual(expressionBranchOpIndex, 2);
 
   if (takenTargetUse === undefined) {
@@ -640,7 +640,7 @@ test("planJitCodegen records partial flag producers as symbolic masked inserts",
   ));
 });
 
-test("planJitCodegen records effectful flag producer inputs as produced values", () => {
+test("planJitCodegen records effectful flag producer inputs as load-result values", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "effectful-flag-input",
@@ -688,11 +688,11 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
-  const produced = jitProducedValue("load#effectful-flag-input:0:1:0", "i32");
+  const loadResult = jitLoadResultValue(0, "i32");
   const ebx = jitInputReg32Value("ebx");
-  const result = addValue(produced, ebx);
+  const result = addValue(loadResult, ebx);
   const expectedFlags = jitFlagProducerValue("add", {
-    left: produced,
+    left: loadResult,
     right: ebx,
     result
   }, { mask: IR_ALU_FLAG_MASK });
@@ -702,12 +702,12 @@ test("planJitCodegen records effectful flag producer inputs as produced values",
   deepStrictEqual(exit.stores, [expectedFlagStore]);
   deepStrictEqual(
     emissionPlan.reusePlan.captures.captures
-      .filter((capture) => capture.reason === "producedDefinition")
+      .filter((capture) => capture.reason === "loadResultDefinition")
       .map((capture) => capture.value),
-    [produced]
+    [loadResult]
   );
   deepStrictEqual(emissionPlan.reusePlan.cache.selected, [
-    { value: produced, useCount: 2 }
+    { value: loadResult, useCount: 2 }
   ]);
 });
 
@@ -837,8 +837,8 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
   const cmove = ok(decodeBytes([0x0f, 0x44, 0xd1], cmp.nextEip));
   const trap = ok(decodeBytes([0xcd, 0x2e], cmove.nextEip));
   const codegenPlan = planJitCodegen(buildBlock([cmp, cmove, trap]));
-  const cmpExpressions = codegenPlan.analysis.instructions[0]!.expressions.block;
-  const cmoveExpressions = codegenPlan.analysis.instructions[1]!.expressions.block;
+  const cmpExpressions = codegenPlan.analysis.instructions[0]!.expressions;
+  const cmoveExpressions = codegenPlan.analysis.instructions[1]!.expressions;
   const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
@@ -862,10 +862,10 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
   deepStrictEqual(plannedRegisterStores(exit), [registerStore("edx", selectedEdx)]);
 });
 
-test("planJitCodegen keeps produced values out of observed boundaries before their definitions", () => {
+test("planJitCodegen keeps load-result values out of observed boundaries before their definitions", () => {
   const block: JitIrBlock = {
     instructions: [{
-      instructionId: "produced-before-exit-observation",
+      instructionId: "loadResult-before-exit-observation",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
@@ -896,17 +896,17 @@ test("planJitCodegen keeps produced values out of observed boundaries before the
   const codegenPlan = planJitCodegen(block);
   const readFault = onlyExit(codegenPlan.exits, ExitReason.MEMORY_READ_FAULT);
   const hostTrap = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
-  const expressionBlock = codegenPlan.analysis.instructions[0]!.expressions.block;
+  const expressionBlock = codegenPlan.analysis.instructions[0]!.expressions;
   const guardOpIndex = expressionOpIndex(expressionBlock, "memory.guard");
   const hostTrapOpIndex = expressionOpIndex(expressionBlock, "hostTrap");
-  const produced = jitProducedValue("load#produced-before-exit-observation:0:1:0", "i32");
+  const loadResult = jitLoadResultValue(0, "i32");
 
   strictEqual(readFault.at.opIndex, guardOpIndex);
   strictEqual(readFault.exitStoreIndex, 0);
   deepStrictEqual(readFault.stores, []);
   strictEqual(hostTrap.at.opIndex, hostTrapOpIndex);
   deepStrictEqual(plannedRegisterStores(hostTrap), [
-    registerStore("eax", produced)
+    registerStore("eax", loadResult)
   ]);
 });
 

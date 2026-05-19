@@ -138,7 +138,7 @@ function collectSlotsReadByValue(value: JitValue, slots: Map<string, JitArchitec
       slots.set(jitArchitecturalSlotKey(value.slot), value.slot);
       return;
     case "const":
-    case "produced":
+    case "loadResult":
       return;
     default:
       for (const child of valueChildren(value)) {
@@ -160,7 +160,7 @@ function collectSlotsReadByValueForMask(
 
   switch (simplified.kind) {
     case "const":
-    case "produced":
+    case "loadResult":
       return;
     case "input":
       collectInputSlotReadByValueForMask(simplified.slot, requiredMask, slots);

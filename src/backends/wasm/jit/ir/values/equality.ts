@@ -23,7 +23,7 @@ import type {
   JitInputValue,
   JitInsertBitsValue,
   JitInsertMaskedBitsValue,
-  JitProducedValue,
+  JitLoadResultValue,
   JitSelectValue,
   JitUnaryValue,
   JitValue
@@ -67,10 +67,10 @@ function valuesEqualStructural(a: JitValue, b: JitValue): boolean {
 
       return a.type === constant.type && a.value === constant.value;
     }
-    case "produced": {
-      const produced = b as JitProducedValue;
+    case "loadResult": {
+      const loadResult = b as JitLoadResultValue;
 
-      return a.id === produced.id && a.type === produced.type;
+      return a.id === loadResult.id && a.type === loadResult.type;
     }
     case "input":
       return jitArchitecturalSlotsEqual(a.slot, (b as JitInputValue).slot);

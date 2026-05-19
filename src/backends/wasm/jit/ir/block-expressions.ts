@@ -7,19 +7,11 @@ import type {
   JitIrInstruction,
   InstructionMetadata
 } from "#backends/wasm/jit/ir/types.js";
-import { indexProducedValues } from "./produced-values.js";
-import type { JitProducedValue } from "./values/types.js";
-
-export type InstructionExpressions = Readonly<{
-  block: IrExprBlock;
-  // Keyed by original IR variable id.
-  producedValues: ReadonlyMap<number, JitProducedValue>;
-}>;
 
 export type BlockExpressionInstruction = Readonly<{
   instruction: InstructionMetadata;
   index: number;
-  expressions: InstructionExpressions;
+  expressions: IrExprBlock;
 }>;
 
 export type BlockExpressions = Readonly<{
@@ -29,22 +21,19 @@ export type BlockExpressions = Readonly<{
 export function buildBlockExpressions(block: JitIrBlock): BlockExpressions {
   return {
     instructions: block.instructions.map((instruction, index) =>
-      buildInstructionExpressions(instruction, index)
+      buildBlockExpressionInstruction(instruction, index)
     )
   };
 }
 
-function buildInstructionExpressions(
+function buildBlockExpressionInstruction(
   instruction: JitIrInstruction,
   index: number
 ): BlockExpressionInstruction {
   return {
     instruction: instructionMetadata(instruction),
     index,
-    expressions: {
-      block: buildIrExpressionBlock(instruction.ir),
-      producedValues: indexProducedValues(instruction, index)
-    }
+    expressions: buildIrExpressionBlock(instruction.ir)
   };
 }
 

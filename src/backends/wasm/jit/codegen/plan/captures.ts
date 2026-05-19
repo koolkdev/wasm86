@@ -1,7 +1,7 @@
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type {
-  JitProducedValue,
+  JitLoadResultValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import type { CachePlan } from "./cache.js";
@@ -10,7 +10,7 @@ import {
   rootPath,
   type Path
 } from "#backends/wasm/jit/analysis/paths.js";
-import type { PlacedProducedDefinition } from "./epochs.js";
+import type { PlacedLoadResultDefinition } from "./epochs.js";
 import type { PlannedExit } from "./types.js";
 import type {
   ValueUse
@@ -22,7 +22,7 @@ import {
 
 export type CaptureReason =
   | "branchShared"
-  | "producedDefinition"
+  | "loadResultDefinition"
   | "storeClobber"
   | "forced";
 
@@ -49,23 +49,23 @@ export type CapturePlan = Readonly<{
 export type CaptureInput = Readonly<{
   uses: readonly ValueUse[];
   cache: CachePlan;
-  produced: readonly PlacedProducedDefinition[];
+  loadResults: readonly PlacedLoadResultDefinition[];
   exits: readonly PlannedExit[];
 }>;
 
 export function planCaptures(
   input: CaptureInput
 ): CapturePlan {
-  const producedDefinitionCaptures = planProducedDefinitionCaptures(input);
+  const loadResultDefinitionCaptures = planLoadResultDefinitionCaptures(input);
   const rootConsumerCaptures = planRootConsumerCaptures(input.uses, input.cache);
   const storeClobberCaptures = planStoreClobberCaptures(input);
   const selectedExitStoreCaptures = planSelectedExitStoreCaptures(input, [
-    ...producedDefinitionCaptures,
+    ...loadResultDefinitionCaptures,
     ...rootConsumerCaptures,
     ...storeClobberCaptures
   ]);
   const captures = uniqueCaptures([
-    ...producedDefinitionCaptures,
+    ...loadResultDefinitionCaptures,
     ...rootConsumerCaptures,
     ...selectedExitStoreCaptures,
     ...storeClobberCaptures
@@ -112,8 +112,8 @@ function planRootConsumerCaptures(
 
     for (const selected of epoch.consumers) {
       if (
-        simplifyValue(selected.value).kind === "produced" ||
-        valueHasProducedDescendant(selected.value, uses)
+        simplifyValue(selected.value).kind === "loadResult" ||
+        valueHasLoadResultDescendant(selected.value, uses)
       ) {
         continue;
       }
@@ -131,15 +131,15 @@ function planRootConsumerCaptures(
   return uniqueCaptures(captures);
 }
 
-function planProducedDefinitionCaptures(input: CaptureInput): readonly Capture[] {
+function planLoadResultDefinitionCaptures(input: CaptureInput): readonly Capture[] {
   return input.cache.selected.flatMap((selected) => {
     const value = simplifyValue(selected.value);
 
-    if (value.kind !== "produced") {
+    if (value.kind !== "loadResult") {
       return [];
     }
 
-    const definition = producedDefinitionForValue(value, input.produced);
+    const definition = loadResultDefinitionForValue(value, input.loadResults);
     const consumers = consumersForValue(input.uses, value);
 
     if (definition === undefined || consumers.length === 0) {
@@ -151,7 +151,7 @@ function planProducedDefinitionCaptures(input: CaptureInput): readonly Capture[]
       at: definition.at,
       availability: rootPath(),
       consumers,
-      reason: "producedDefinition"
+      reason: "loadResultDefinition"
     }];
   });
 }
@@ -223,7 +223,7 @@ function planSelectedExitStoreCaptures(
   for (const selected of input.cache.selected) {
     const value = simplifyValue(selected.value);
 
-    if (value.kind === "produced") {
+    if (value.kind === "loadResult") {
       continue;
     }
 
@@ -265,10 +265,10 @@ function captureAvailabilityCoversPath(availability: Path, path: Path): boolean 
   return pathsEqual(availability, path) || pathsEqual(availability, rootPath());
 }
 
-function producedDefinitionForValue(
-  value: JitProducedValue,
-  definitions: readonly PlacedProducedDefinition[]
-): PlacedProducedDefinition | undefined {
+function loadResultDefinitionForValue(
+  value: JitLoadResultValue,
+  definitions: readonly PlacedLoadResultDefinition[]
+): PlacedLoadResultDefinition | undefined {
   return definitions.find((definition) => valuesEqual(definition.value, value));
 }
 
@@ -279,12 +279,12 @@ function consumersForValue(
   return uses.filter((use) => valuesEqual(use.value, value));
 }
 
-function valueHasProducedDescendant(
+function valueHasLoadResultDescendant(
   value: JitValue,
   uses: readonly ValueUse[]
 ): boolean {
   return uses.some((use) =>
-    simplifyValue(use.value).kind === "produced" &&
+    simplifyValue(use.value).kind === "loadResult" &&
       use.ancestors.some((ancestor) => valuesEqual(ancestor, value))
   );
 }
@@ -313,7 +313,7 @@ function isEffectCapture(capture: Capture): boolean {
     case "branchShared":
     case "forced":
       return true;
-    case "producedDefinition":
+    case "loadResultDefinition":
     case "storeClobber":
       return false;
   }

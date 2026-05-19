@@ -6,12 +6,12 @@ import type {
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   JitArchitecturalSlot,
-  JitProducedValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
 import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
+import type { LoadResultRegistry } from "./load-result.js";
 
 export type ValueSnapshot = JitValueStateSnapshot;
 
@@ -31,10 +31,10 @@ export type SlotWrite = Readonly<{
   value: JitValue;
 }>;
 
-export type ProducedDefinition = Readonly<{
+export type LoadResultDefinition = Readonly<{
   opIndex: number;
   ref: ValueRef;
-  value: JitProducedValue;
+  value: Extract<JitValue, { kind: "loadResult" }>;
 }>;
 
 export type TimelineExpressionId = number & { readonly __timelineExpressionId: unique symbol };
@@ -75,7 +75,7 @@ export type TimelineStorage = Readonly<{
 export type Timeline = Readonly<{
   finalState: ValueSnapshot;
   writes: readonly SlotWrite[];
-  produced: readonly ProducedDefinition[];
+  loadResults: readonly LoadResultDefinition[];
   viewAt(opIndex: number): TimelineView;
   snapshotAt(opIndex: number): ValueSnapshot;
 }>;
@@ -86,5 +86,5 @@ export type TimelineInput = Readonly<{
   entry: ValueSnapshot;
   snapshotPoints: ReadonlySet<number>;
   nextEip?: number;
-  producedByVar?: ReadonlyMap<number, JitProducedValue>;
+  loadResultRegistry: LoadResultRegistry;
 }>;

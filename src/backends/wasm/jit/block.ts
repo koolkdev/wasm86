@@ -5,8 +5,7 @@ export type {
 } from "./ir/types.js";
 export type {
   BlockExpressions,
-  BlockExpressionInstruction,
-  InstructionExpressions
+  BlockExpressionInstruction
 } from "./ir/block-expressions.js";
 export type {
   BlockAnalysis,

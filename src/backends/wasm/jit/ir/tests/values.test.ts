@@ -16,7 +16,7 @@ import {
   jitInputReg8Value,
   jitInsertBits,
   jitInsertMaskedBits,
-  jitProducedValue
+  jitLoadResultValue
 } from "#backends/wasm/jit/ir/values/builders.js";
 import {
   jitArchitecturalSlotKey,
@@ -35,8 +35,6 @@ import type {
   JitArchitecturalSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
-import type { JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 
 test("JitValue bit simplification preserves exact unsigned bit semantics", () => {
   const eax = jitInputReg32Value("eax");
@@ -68,7 +66,7 @@ test("JitValue masked-bit simplification models flag preservation", () => {
   );
 });
 
-test("JitValue flagProducer derives metadata and validates produced masks", () => {
+test("JitValue flagProducer derives metadata and validates masks", () => {
   const eax = jitInputReg32Value("eax");
   const result = add(eax, c32(1));
 
@@ -157,10 +155,10 @@ test("JitValue helper contract covers every value kind", () => {
       slots: ["reg32:eax"]
     },
     {
-      kind: "produced",
-      value: jitProducedValue("load#0", "i32"),
-      same: jitProducedValue("load#0", "i32"),
-      different: jitProducedValue("load#1", "i32"),
+      kind: "loadResult",
+      value: jitLoadResultValue(0, "i32"),
+      same: jitLoadResultValue(0, "i32"),
+      different: jitLoadResultValue(1, "i32"),
       children: [],
       slots: []
     },
@@ -272,10 +270,10 @@ test("JitValue equality compares simplified structure", () => {
   strictEqual(valuesEqual(rawIdentity, eax), true);
 });
 
-test("JitValue produced nodes are opaque point-bound results", () => {
-  const first = jitProducedValue("load#0:1:2", "i32");
-  const same = jitProducedValue("load#0:1:2", "i32");
-  const other = jitProducedValue("load#0:1:3", "i32");
+test("JitValue load-result nodes are opaque point-bound results", () => {
+  const first = jitLoadResultValue(0, "i32");
+  const same = jitLoadResultValue(0, "i32");
+  const other = jitLoadResultValue(1, "i32");
   const walked: JitValue[] = [];
 
   walkValueChildren(first, (dependency) => walked.push(dependency));
@@ -287,31 +285,6 @@ test("JitValue produced nodes are opaque point-bound results", () => {
   deepStrictEqual(walked, []);
   deepStrictEqual(slotsReadByValue(first), []);
   strictEqual(valueCost(first), 1);
-});
-
-test("JIT produced-value indexing assigns ids to effectful get results only", () => {
-  const instruction = {
-    instructionId: "mov-r32-rm32",
-    eip: 0x1000,
-    nextEip: 0x1002,
-    nextMode: "exit",
-    operands: [{
-      kind: "static.mem",
-      ea: { kind: "mem", base: "ebx", scale: 1, disp: 0, accessWidth: 32 }
-    }],
-    ir: [
-      { op: "address", dst: { kind: "var", id: 0 }, operand: { kind: "operand", index: 0 } },
-      { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
-      { op: "get", dst: { kind: "var", id: 2 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 }
-    ]
-  } as const satisfies JitIrInstruction;
-  const producedValues = indexProducedValues(instruction, 3);
-
-  deepStrictEqual([...producedValues.keys()], [1]);
-  deepStrictEqual(
-    producedValues.get(1),
-    jitProducedValue("load#mov-r32-rm32:3:1:1", "i32")
-  );
 });
 
 test("JitValue dependency and slot walking includes nested flag inputs", () => {

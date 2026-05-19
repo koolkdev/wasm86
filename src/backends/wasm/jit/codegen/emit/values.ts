@@ -22,7 +22,7 @@ import { bitRangeMask } from "#backends/wasm/jit/ir/values/bits.js";
 import type {
   JitArchitecturalSlot,
   JitInputValue,
-  JitProducedValue,
+  JitLoadResultValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import type {
@@ -64,8 +64,8 @@ export type ValueEmitter = Readonly<{
   // Materializes a concrete planned capture owned by the caller.
   capture(capture: Capture, emit: () => ValueWidth): ValueCapture;
 
-  // Materializes an effect-produced value only when the reuse plan selected it.
-  define(value: JitProducedValue, emit: () => ValueWidth): ValueCapture | undefined;
+  // Materializes a load-result value only when the reuse plan selected it.
+  define(value: JitLoadResultValue, emit: () => ValueWidth): ValueCapture | undefined;
 
   // Emits while a value path is active.
   withPath<T>(path: Path, emit: () => T): T;
@@ -89,8 +89,8 @@ export type InputEmitter = Readonly<{
   ): ValueWidth | undefined;
 }>;
 
-export type ProducedEmitter = Readonly<{
-  emit(value: JitProducedValue): ValueWidth;
+export type LoadResultEmitter = Readonly<{
+  emit(value: JitLoadResultValue): ValueWidth;
 }>;
 
 export type ValueEmitContext = Readonly<{
@@ -98,13 +98,13 @@ export type ValueEmitContext = Readonly<{
   cache: ValueCache;
   scope: ValueScope;
   inputs: InputEmitter;
-  produced: ProducedEmitter;
+  loadResults: LoadResultEmitter;
 }>;
 
-export function unavailableProducedEmitter(): ProducedEmitter {
+export function unavailableLoadResultEmitter(): LoadResultEmitter {
   return {
     emit: (value) => {
-      throw new Error(`produced JIT value is not available for lowering: ${value.id}`);
+      throw new Error(`load-result JIT value is not available for lowering: ${value.id}`);
     }
   };
 }
@@ -259,8 +259,8 @@ function emitInlineValue(
       return constValueWidth(value.value);
     case "input":
       return emitInput(context, value);
-    case "produced":
-      return emitProduced(context, value);
+    case "loadResult":
+      return emitLoadResult(context, value);
     case "value.binary":
       return emitI32Binary(context, emitContext, value.operator, value.a, value.b);
     case "value.unary":
@@ -282,8 +282,8 @@ function emitInlineValue(
   }
 }
 
-function emitProduced(context: ValueEmitContext, value: JitProducedValue): ValueWidth {
-  return context.produced.emit(value);
+function emitLoadResult(context: ValueEmitContext, value: JitLoadResultValue): ValueWidth {
+  return context.loadResults.emit(value);
 }
 
 function emitInput(context: ValueEmitContext, value: JitInputValue): ValueWidth {

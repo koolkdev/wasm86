@@ -2,7 +2,9 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
-import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
+import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
 import { planCaptures } from "#backends/wasm/jit/codegen/plan/captures.js";
 import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import {
@@ -13,13 +15,10 @@ import {
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
   jitInputReg32Value,
-  jitProducedValue
+  jitLoadResultValue
 } from "#backends/wasm/jit/ir/values/builders.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
-import type {
-  JitProducedValue,
-  JitValue
-} from "#backends/wasm/jit/ir/values/types.js";
+import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   addExpr,
   addValue,
@@ -38,6 +37,13 @@ import {
   rootPath,
   startAddress
 } from "./plan-test-helpers.js";
+
+function buildTimeline(input: Omit<TimelineInput, "loadResultRegistry">) {
+  return buildTimelineWithRegistry({
+    ...input,
+    loadResultRegistry: new LoadResultRegistry()
+  });
+}
 
 test("JIT value-capture planner shares pure values needed by both branch paths", () => {
   const target = addExpr("eax", 1);
@@ -125,8 +131,8 @@ test("JIT value-capture planner keeps one-arm branch values path-specific", () =
   deepStrictEqual(captures, []);
 });
 
-test("JIT value-capture planner captures used produced definitions with reason", () => {
-  const produced = jitProducedValue("load#branch-capture:0:0:0", "i32");
+test("JIT value-capture planner captures used load-result definitions with reason", () => {
+  const loadResult = jitLoadResultValue(0, "i32");
   const expressionBlock = [
     {
       op: "let32",
@@ -144,23 +150,20 @@ test("JIT value-capture planner captures used produced definitions with reason",
       notTaken: { kind: "var", id: 0 }
     }
   ] as const satisfies IrExprBlock;
-  const { uses, reusePlan } = planCapturesForExpressionBlock(
-    expressionBlock,
-    new Map([[0, produced]])
-  );
+  const { uses, reusePlan } = planCapturesForExpressionBlock(expressionBlock);
   const captures = reusePlan.captures.captures;
-  const producedUses = uses.filter((use) => valuesEqual(use.value, produced));
+  const loadResultUses = uses.filter((use) => valuesEqual(use.value, loadResult));
 
   deepStrictEqual(captures.map((capture) => ({
     value: capture.value,
     at: capture.at,
     reason: capture.reason
   })), [{
-    value: produced,
+    value: loadResult,
     at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
-    reason: "producedDefinition"
+    reason: "loadResultDefinition"
   }]);
-  deepStrictEqual(producedUses.map((use) => use.path), [
+  deepStrictEqual(loadResultUses.map((use) => use.path), [
     { kind: "path", id: "branch:0:1:taken", debugLabel: "taken" },
     { kind: "path", id: "branch:0:1:notTaken", debugLabel: "notTaken" }
   ]);
@@ -299,7 +302,7 @@ test("JIT value-capture planner keeps store-clobber consumers scoped to their ex
       epochs: [],
       selected: [{ value, useCount: 2 }]
     },
-    produced: [],
+    loadResults: [],
     exits
   }).captures;
 
@@ -322,15 +325,13 @@ test("JIT value-capture planner keeps store-clobber consumers scoped to their ex
 });
 
 function planCapturesForExpressionBlock(
-  expressionBlock: IrExprBlock,
-  producedByVar?: ReadonlyMap<number, JitProducedValue>
+  expressionBlock: IrExprBlock
 ) {
   const timeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
-    snapshotPoints: new Set(),
-    ...(producedByVar === undefined ? {} : { producedByVar })
+    snapshotPoints: new Set()
   });
   const uses = valueUsesForExpressionBlock({
     expressionBlock,

@@ -593,7 +593,7 @@ test("jit IR block composes EAX then AL without loading EAX from CPU state", asy
   deepStrictEqual(result.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
 });
 
-test("jit IR block captures produced root exit stores without replaying the load", async () => {
+test("jit IR block captures load-result root exit stores without replaying the load", async () => {
   const instructionBytes = [
     [0x8b, 0x05, 0x60, 0x00, 0x00, 0x00], // mov eax, [0x60]
     [0xcd, 0x2e] // int 0x2e

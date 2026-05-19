@@ -1,5 +1,5 @@
 import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
-import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { JitLoadResultValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   jitExpressionOpEpochs
 } from "./epochs.js";
@@ -19,7 +19,7 @@ export function planEffects(instructions: readonly PlannedInstruction[]): Effect
 
   for (const instruction of instructions) {
     const opEpochs = jitExpressionOpEpochs({
-      expressionBlock: instruction.analysis.expressions.block,
+      expressionBlock: instruction.analysis.expressions,
       valueTimeline: instruction.analysis.timeline
     }, currentEpoch);
 
@@ -39,7 +39,7 @@ function planEffect(
   opEpochs: readonly number[]
 ): Effect {
   const at = effectPlacement(effectInfo, opEpochs);
-  const expressionOp = entryAt(instruction.analysis.expressions.block, at.opIndex);
+  const expressionOp = entryAt(instruction.analysis.expressions, at.opIndex);
   const view = instruction.analysis.timeline.viewAt(at.opIndex);
 
   switch (effectInfo.kind) {
@@ -76,13 +76,13 @@ function planEffect(
       }
 
       if (expressionOp.value.kind !== "source") {
-        throw new Error(`JIT produced value effect mapped to ${expressionOp.value.kind}`);
+        throw new Error(`JIT load-result value effect mapped to ${expressionOp.value.kind}`);
       }
 
       return {
         kind: effectInfo.kind,
         at,
-        result: producedValue(instruction, at.opIndex, expressionOp.dst.id),
+        result: loadResultValue(instruction, at.opIndex, expressionOp.dst.id),
         address: view.storageAddress(expressionOp.value.source),
         width: expressionOp.value.accessWidth,
         signed: expressionOp.value.signed === true
@@ -179,22 +179,22 @@ function entryAt<T>(
   return entry;
 }
 
-function producedValue(
+function loadResultValue(
   instruction: PlannedInstruction,
   opIndex: number,
   refId: number
-): JitProducedValue {
-  const produced = instruction.analysis.timeline.produced.find((definition) =>
+): JitLoadResultValue {
+  const loadResult = instruction.analysis.timeline.loadResults.find((definition) =>
     definition.opIndex === opIndex &&
       definition.ref.kind === "var" &&
       definition.ref.id === refId
   )?.value;
 
-  if (produced === undefined) {
-    throw new Error(`JIT produced value is not available at expression op ${opIndex}`);
+  if (loadResult === undefined) {
+    throw new Error(`JIT load-result value is not available at expression op ${opIndex}`);
   }
 
-  return produced;
+  return loadResult;
 }
 
 function assertDistinctBranchExits(

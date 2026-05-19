@@ -171,7 +171,7 @@ test("jit IR block stores composed EAX then AL exits without loading EAX", () =>
   ]);
 });
 
-test("jit IR block emits one guest load when a produced load feeds an exit store", () => {
+test("jit IR block emits one guest load when a load-result load feeds an exit store", () => {
   const block = decodedBlock([
     [0x8b, 0x05, 0x60, 0x00, 0x00, 0x00], // mov eax, [0x60]
     [0xcd, 0x2e] // int 0x2e

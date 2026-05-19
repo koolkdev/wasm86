@@ -19,7 +19,7 @@ import { createEffectEmitter } from "./codegen/emit/effects.js";
 import { createInputSlotEmitter } from "./codegen/emit/input-slots.js";
 import {
   createValueEmitters,
-  unavailableProducedEmitter
+  unavailableLoadResultEmitter
 } from "./codegen/emit/values.js";
 import type { JitCodegenPlan } from "./codegen/plan/types.js";
 
@@ -119,7 +119,7 @@ function encodeJitBlockFunctionBody(
     cache: valueState.cache,
     scope: valueState.scope,
     inputs: createInputSlotEmitter(body),
-    produced: unavailableProducedEmitter()
+    loadResults: unavailableLoadResultEmitter()
   });
   const metadata = createExitMetadataEmitter(body);
   const exitStores = createExitStoreEmitter({ body });

@@ -21,7 +21,9 @@ import {
   rootPath
 } from "#backends/wasm/jit/analysis/paths.js";
 import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.js";
-import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
+import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
 import {
   type UsePurpose
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
@@ -57,16 +59,23 @@ import {
   jitInputReg32Value,
   jitInputReg8Value,
   jitInsertMaskedBits,
-  jitProducedValue
+  jitLoadResultValue
 } from "#backends/wasm/jit/ir/values/builders.js";
 import type {
-  JitProducedValue,
+  JitLoadResultValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 
 export const startAddress = 0x1000;
+
+function buildTimeline(input: Omit<TimelineInput, "loadResultRegistry">) {
+  return buildTimelineWithRegistry({
+    ...input,
+    loadResultRegistry: new LoadResultRegistry()
+  });
+}
 
 export {
   deepStrictEqual,
@@ -94,7 +103,7 @@ export {
   jitInputReg32Value,
   jitInputReg8Value,
   jitInsertMaskedBits,
-  jitProducedValue,
+  jitLoadResultValue,
   createJitValueState
 };
 export type {
@@ -111,7 +120,7 @@ export type {
   ExitSnapshot,
   ExitPayload,
   ExitValue,
-  JitProducedValue,
+  JitLoadResultValue,
   JitValue,
   JitIrBlock
 };
@@ -201,7 +210,6 @@ export function planValueCacheForTest(input: Readonly<{
   operands?: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
   nextEip?: number;
-  producedByVar?: ReadonlyMap<number, JitProducedValue>;
   extraUses?: ReadonlyMap<number, readonly TestValueRoot[]>;
 }>) {
   const operands = input.operands ?? [];
@@ -210,10 +218,7 @@ export function planValueCacheForTest(input: Readonly<{
     expressions: input.expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set(),
-    ...(input.nextEip === undefined ? {} : { nextEip: input.nextEip }),
-    ...(input.producedByVar === undefined
-      ? {}
-      : { producedByVar: input.producedByVar })
+    ...(input.nextEip === undefined ? {} : { nextEip: input.nextEip })
   });
   const valueUses = valueUsesForExpressionBlock({
     expressionBlock: input.expressionBlock,

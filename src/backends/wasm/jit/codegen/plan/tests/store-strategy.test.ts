@@ -10,7 +10,7 @@ import {
   jitInputAluFlagsValue,
   jitInputReg16Value,
   jitInputReg32Value,
-  jitProducedValue,
+  jitLoadResultValue,
   plannedStoreSources,
   registerStore,
   flagStore,
@@ -129,12 +129,12 @@ test("JIT store strategy handles register aliases and flag clobbers", () => {
   ]);
 });
 
-test("JIT store strategy ignores target slots, constants, and produced values as source hazards", () => {
-  const produced = jitProducedValue("load#store-strategy:0:0:0", "i32");
+test("JIT store strategy ignores target slots, constants, and load-result values as source hazards", () => {
+  const loadResult = jitLoadResultValue(0, "i32");
   const stores = [
     registerStore("eax", c32(1)),
     registerStore("ebx", c32(2)),
-    registerStore("ecx", produced)
+    registerStore("ecx", loadResult)
   ];
   const exit = testExit(stores);
 

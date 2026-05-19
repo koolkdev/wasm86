@@ -193,7 +193,7 @@ function shouldCacheValueWithCosts(
 function shouldForceSelectValue(value: JitValue, forcedValues: readonly JitValue[]): boolean {
   const simplified = simplifyValue(value);
 
-  return simplified.kind === "produced" ||
+  return simplified.kind === "loadResult" ||
     forcedValues.some((forced) => valuesEqual(simplified, simplifyValue(forced)));
 }
 

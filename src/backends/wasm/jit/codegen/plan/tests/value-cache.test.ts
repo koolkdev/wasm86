@@ -7,7 +7,7 @@ import {
   planJitCodegen,
   jitExtractBits,
   jitInputReg32Value,
-  jitProducedValue,
+  jitLoadResultValue,
   startAddress,
   planValueCacheForTest,
   extraUse,
@@ -71,10 +71,9 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
     emissionPlan.maxExitStoreIndex,
     Math.max(0, ...codegenPlan.exits.map((exit) => exit.exitStoreIndex))
   );
-  strictEqual(instruction?.analysis.expressions.block.some((op) => op.op === "conditionalJump"), true);
+  strictEqual(instruction?.analysis.expressions.some((op) => op.op === "conditionalJump"), true);
   strictEqual(Object.hasOwn(instruction?.analysis.timeline ?? {}, "snapshots"), false);
   strictEqual(instruction?.analysis.expressions, analysisExpressions);
-  strictEqual(instruction?.analysis.expressions.block, analysisExpressions?.block);
   strictEqual(instruction?.analysis.timeline, analysisTimeline);
   strictEqual((emissionPlan.reusePlan.cache.selected.length ?? 0) > 0, true);
   strictEqual((emissionPlan.reusePlan.cache.epochs.length ?? 0) > 0, true);
@@ -207,8 +206,8 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
   deepStrictEqual(emissionPlan.reusePlan.cache.selected, []);
 });
 
-test("JIT value-cache planning retains produced values needed after their definition", () => {
-  const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
+test("JIT value-cache planning retains load-result values needed after their definition", () => {
+  const loadResult = jitLoadResultValue(0, "i32");
   const expressionBlock = [
     {
       op: "let32",
@@ -234,31 +233,30 @@ test("JIT value-cache planning retains produced values needed after their defini
   ] as const;
   const cachePlan = planValueCacheForTest({
     expressionBlock,
-    producedByVar: new Map([[0, produced]]),
-    extraUses: new Map([[2, [extraUse(produced)]]])
+    extraUses: new Map([[2, [extraUse(loadResult)]]])
   });
 
   deepStrictEqual(
     cachePlan?.instructions[0] === undefined
       ? undefined
       : cachePlan.instructions[0].valueTimeline.viewAt(0).ref({ kind: "var", id: 0 }),
-    produced
+    loadResult
   );
   deepStrictEqual(
     cachePlan?.instructions[0] === undefined
       ? undefined
       : cachePlan.instructions[0].valueTimeline.viewAt(0).expression(expressionBlock[0].value),
-    produced
+    loadResult
   );
   deepStrictEqual(
     cachePlan?.captures.captures
-      .filter((capture) => capture.reason === "producedDefinition")
+      .filter((capture) => capture.reason === "loadResultDefinition")
       .map((capture) => capture.value),
-    [produced]
+    [loadResult]
   );
   deepStrictEqual(cachePlan?.cache.epochs[0]?.consumers, []);
-  deepStrictEqual(cachePlan?.cache.epochs[1]?.consumers, [{ value: produced, useCount: 1 }]);
-  deepStrictEqual(cachePlan?.cache.selected, [{ value: produced, useCount: 1 }]);
+  deepStrictEqual(cachePlan?.cache.epochs[1]?.consumers, [{ value: loadResult, useCount: 1 }]);
+  deepStrictEqual(cachePlan?.cache.selected, [{ value: loadResult, useCount: 1 }]);
 });
 
 test("JIT value-cache planning resolves input partial-register reads with common value rules", () => {
@@ -434,8 +432,8 @@ test("JIT value-cache planning prices emitted var reads as resolved JitValue gra
   deepStrictEqual(cachePlan?.cache.selected, [{ value: expected, useCount: 2 }]);
 });
 
-test("JIT value-cache planning merges repeated produced-value retained uses", () => {
-  const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
+test("JIT value-cache planning merges repeated load-result value retained uses", () => {
+  const loadResult = jitLoadResultValue(0, "i32");
   const expressionBlock = [
     {
       op: "let32",
@@ -461,18 +459,16 @@ test("JIT value-cache planning merges repeated produced-value retained uses", ()
   ] as const;
   const cachePlan = planValueCacheForTest({
     expressionBlock,
-    producedByVar: new Map([[0, produced]]),
     extraUses: new Map([
-      [1, [extraUse(produced)]],
-      [2, [extraUse(produced)]]
+      [1, [extraUse(loadResult)]],
+      [2, [extraUse(loadResult)]]
     ])
   });
 
-  deepStrictEqual(cachePlan?.cache.selected, [{ value: produced, useCount: 2 }]);
+  deepStrictEqual(cachePlan?.cache.selected, [{ value: loadResult, useCount: 2 }]);
 });
 
-test("JIT value-cache planning does not treat logical register writes as produced consumers", () => {
-  const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
+test("JIT value-cache planning does not treat logical register writes as loadResult consumers", () => {
   const expressionBlock = [
     {
       op: "let32",
@@ -487,16 +483,12 @@ test("JIT value-cache planning does not treat logical register writes as produce
     { op: "set", target: { kind: "reg", reg: "ecx" }, value: { kind: "var", id: 0 }, accessWidth: 32 },
     { op: "set", target: { kind: "reg", reg: "edx" }, value: { kind: "var", id: 0 }, accessWidth: 32 }
   ] as const;
-  const cachePlan = planValueCacheForTest({
-    expressionBlock,
-    producedByVar: new Map([[0, produced]])
-  });
+  const cachePlan = planValueCacheForTest({ expressionBlock });
 
   deepStrictEqual(cachePlan.cache.selected, []);
 });
 
-test("JIT value-cache planning skips produced values with no emitted or exit-store consumer", () => {
-  const produced = jitProducedValue("load#cache-plan:0:0:0", "i32");
+test("JIT value-cache planning skips load-result values with no emitted or exit-store consumer", () => {
   const expressionBlock = [
     {
       op: "let32",
@@ -512,10 +504,7 @@ test("JIT value-cache planning skips produced values with no emitted or exit-sto
       vector: { kind: "const", type: "i32", value: 0x2e }
     }
   ] as const;
-  const cachePlan = planValueCacheForTest({
-    expressionBlock,
-    producedByVar: new Map([[0, produced]])
-  });
+  const cachePlan = planValueCacheForTest({ expressionBlock });
 
   deepStrictEqual(cachePlan.cache.selected, []);
 });

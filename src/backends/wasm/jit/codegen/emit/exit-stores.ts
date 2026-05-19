@@ -102,8 +102,8 @@ function captureJitExitStore(
 
   const simplified = simplifyValue(store.store.value);
 
-  if (simplified.kind === "produced") {
-    throw new Error("JIT produced exit store value was not captured before exit store emission");
+  if (simplified.kind === "loadResult") {
+    throw new Error("JIT load-result exit store value was not captured before exit store emission");
   }
 
   return { store };

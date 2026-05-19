@@ -19,9 +19,9 @@ import {
   classifyEffect,
   classifyExits
 } from "#backends/wasm/jit/analysis/effect-classifier.js";
+import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { buildExpressionPaths, branchPath, rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
-import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
 import type { JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { c32, syntheticInstruction, v } from "#backends/wasm/jit/ir/tests/helpers.js";
@@ -133,6 +133,7 @@ function analyze(instructions: readonly JitIrInstruction[]): readonly Instructio
   const flows: InstructionFlow[] = [];
   let valueState = createJitValueState().snapshot();
   let instructionCountDelta = 0;
+  const loadResultRegistry = new LoadResultRegistry();
 
   for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
     const instruction = instructions[instructionIndex]!;
@@ -143,7 +144,7 @@ function analyze(instructions: readonly JitIrInstruction[]): readonly Instructio
       entry: valueState,
       snapshotPoints: timelineSnapshotPointsForExpressions(instruction, expressions),
       nextEip: instruction.nextEip,
-      producedByVar: indexProducedValues(instruction, instructionIndex)
+      loadResultRegistry
     });
 
     const effectInput: EffectInstructionInput = {

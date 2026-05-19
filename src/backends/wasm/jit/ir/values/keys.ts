@@ -22,8 +22,8 @@ export function valueKey(value: JitValue): string {
   switch (value.kind) {
     case "const":
       return `const:${value.type}:${i32(value.value)}`;
-    case "produced":
-      return `produced:${value.type}:${value.id}`;
+    case "loadResult":
+      return `loadResult:${value.type}:${value.id}`;
     case "input":
       return `input:${jitArchitecturalSlotKey(value.slot)}`;
     case "value.binary":

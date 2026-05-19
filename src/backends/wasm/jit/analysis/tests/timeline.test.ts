@@ -6,8 +6,12 @@ import {
   type IrStorageExpr,
   type IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
+import { analyzeBlock } from "#backends/wasm/jit/analysis/block.js";
+import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
-import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
+import { buildBlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import {
   jitFlagConditionValue,
   jitFlagProducerValue,
@@ -15,13 +19,21 @@ import {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits,
-  jitProducedValue
+  jitLoadResultValue
 } from "#backends/wasm/jit/ir/values/builders.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
+import { syntheticInstruction } from "#backends/wasm/jit/ir/tests/helpers.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
 import type { Reg32 } from "#x86/isa/types.js";
+
+function buildTimeline(input: Omit<TimelineInput, "loadResultRegistry">) {
+  return buildTimelineWithRegistry({
+    ...input,
+    loadResultRegistry: new LoadResultRegistry()
+  });
+}
 
 test("JIT value timeline records the same register source expression before and after a write", () => {
   const entry = createJitValueState();
@@ -305,8 +317,8 @@ test("JIT timeline op view reads planned register-storage lookups only", () => {
   deepStrictEqual(timeline.viewAt(1).storageRead({ source: reg("eax"), accessWidth: 32 }), c32(3));
 });
 
-test("JIT timeline records produced memory load definitions at one point", () => {
-  const produced = jitProducedValue("load#timeline-test", "i32");
+test("JIT timeline records load-result memory load definitions at one point", () => {
+  const loadResult = jitLoadResultValue(0, "i32");
   const expressionBlock = [
     { op: "let32", dst: v(0), value: source({ kind: "mem", address: c32(0x1000) }, 32) },
     { op: "let32", dst: v(1), value: v(0) }
@@ -315,18 +327,17 @@ test("JIT timeline records produced memory load definitions at one point", () =>
     operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
-    snapshotPoints: new Set(),
-    producedByVar: new Map([[0, produced]])
+    snapshotPoints: new Set()
   });
 
-  deepStrictEqual(timeline.produced, [{
+  deepStrictEqual(timeline.loadResults, [{
     opIndex: 0,
     ref: v(0),
-    value: produced
+    value: loadResult
   }]);
-  deepStrictEqual(timeline.viewAt(0).ref(v(0)), produced);
-  deepStrictEqual(timeline.viewAt(1).ref(v(1)), produced);
-  deepStrictEqual(timeline.viewAt(0).expression(expressionBlock[0].value), produced);
+  deepStrictEqual(timeline.viewAt(0).ref(v(0)), loadResult);
+  deepStrictEqual(timeline.viewAt(1).ref(v(1)), loadResult);
+  deepStrictEqual(timeline.viewAt(0).expression(expressionBlock[0].value), loadResult);
   strictEqual(timeline.viewAt(0).hasStorageRead({
     source: expressionBlock[0].value.source,
     accessWidth: expressionBlock[0].value.accessWidth
@@ -334,7 +345,55 @@ test("JIT timeline records produced memory load definitions at one point", () =>
   deepStrictEqual(timeline.viewAt(0).storageRead({
     source: expressionBlock[0].value.source,
     accessWidth: expressionBlock[0].value.accessWidth
-  }), produced);
+  }), loadResult);
+});
+
+test("JIT timeline records load-result memory operand reads only", () => {
+  const loadResult = jitLoadResultValue(0, "i32");
+  const expressionBlock = [
+    { op: "let32", dst: v(0), value: source(op(0), 32) },
+    { op: "let32", dst: v(1), value: source(reg("eax"), 32) }
+  ] as const satisfies IrExprBlock;
+  const operands = [{
+    kind: "static.mem",
+    ea: { kind: "mem", base: "ebx", scale: 1, disp: 0, accessWidth: 32 }
+  }] as const satisfies readonly JitOperandBinding[];
+  const timeline = buildTimeline({
+    operands,
+    expressions: expressionBlock,
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
+  });
+
+  deepStrictEqual(timeline.loadResults, [{
+    opIndex: 0,
+    ref: v(0),
+    value: loadResult
+  }]);
+  deepStrictEqual(timeline.viewAt(0).ref(v(0)), loadResult);
+  deepStrictEqual(timeline.viewAt(1).ref(v(1)), jitInputReg32Value("eax"));
+});
+
+test("JIT block analysis allocates distinct load-result IDs across memory loads", () => {
+  const block = {
+    instructions: [
+      syntheticInstruction([
+        { op: "get", dst: v(0), source: { kind: "mem", address: c32(0x1000) }, accessWidth: 32 },
+        { op: "next" }
+      ], 0),
+      syntheticInstruction([
+        { op: "get", dst: v(0), source: { kind: "mem", address: c32(0x1004) }, accessWidth: 32 },
+        { op: "next" }
+      ], 1)
+    ]
+  };
+  const analysis = analyzeBlock(buildBlockExpressions(block));
+  const firstLoadResult = analysis.instructions[0]?.timeline.loadResults[0]?.value;
+  const secondLoadResult = analysis.instructions[1]?.timeline.loadResults[0]?.value;
+
+  deepStrictEqual(firstLoadResult, jitLoadResultValue(0, "i32"));
+  deepStrictEqual(secondLoadResult, jitLoadResultValue(1, "i32"));
+  strictEqual(firstLoadResult?.id === secondLoadResult?.id, false);
 });
 
 test("JIT timeline op view fails clearly for invalid op indexes", () => {

@@ -1,5 +1,5 @@
 import type {
-  ProducedDefinition,
+  LoadResultDefinition,
   SlotWrite,
   Timeline,
   TimelineStorage,
@@ -11,14 +11,14 @@ export function createTimeline(input: Readonly<{
   finalState: ValueSnapshot;
   opCount: number;
   writes: readonly SlotWrite[];
-  produced: readonly ProducedDefinition[];
+  loadResults: readonly LoadResultDefinition[];
   snapshots: ReadonlyMap<number, ValueSnapshot>;
   storage: TimelineStorage;
 }>): Timeline {
   return {
     finalState: input.finalState,
     writes: input.writes,
-    produced: input.produced,
+    loadResults: input.loadResults,
     viewAt: (opIndex) => new TimelineOpView(input.storage, input.opCount, opIndex),
     snapshotAt: (opIndex) => {
       const snapshot = input.snapshots.get(opIndex);

@@ -18,7 +18,7 @@ import {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits,
-  jitProducedValue
+  jitLoadResultValue
 } from "#backends/wasm/jit/ir/values/builders.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type {
@@ -27,7 +27,7 @@ import type {
 } from "#backends/wasm/jit/ir/values/types.js";
 import {
   createValueEmitters,
-  unavailableProducedEmitter,
+  unavailableLoadResultEmitter,
   type InputEmitter,
   type ValueEmitContext
 } from "#backends/wasm/jit/codegen/emit/values.js";
@@ -57,7 +57,7 @@ test("ValueEmitter lowers register bit insertion directly to Wasm", () => {
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Or), 1);
 });
 
-test("ValueEmitter lowers every non-produced JitValue kind", () => {
+test("ValueEmitter lowers every non-load-result JitValue kind", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const producer = jitFlagProducerValue("add", {
@@ -65,7 +65,7 @@ test("ValueEmitter lowers every non-produced JitValue kind", () => {
     right: ebx,
     result: add(eax, ebx)
   }, { mask: IR_ALU_FLAG_MASKS.CF | IR_ALU_FLAG_MASKS.ZF });
-  const cases: readonly Readonly<{ kind: Exclude<JitValue["kind"], "produced">; value: JitValue }>[] = [
+  const cases: readonly Readonly<{ kind: Exclude<JitValue["kind"], "loadResult">; value: JitValue }>[] = [
     { kind: "const", value: c32(7) },
     { kind: "input", value: eax },
     { kind: "value.binary", value: add(eax, ebx) },
@@ -85,22 +85,22 @@ test("ValueEmitter lowers every non-produced JitValue kind", () => {
   }
 });
 
-test("ValueEmitter lowers produced values through ProducedEmitter", () => {
+test("ValueEmitter lowers load-result values through LoadResultEmitter", () => {
   const body = new WasmFunctionBodyEncoder();
-  const produced = jitProducedValue("load#direct-produced:0:1", "i32");
+  const loadResult = jitLoadResultValue(0, "i32");
   let emitted = false;
 
   const valueWidth = createValueEmitters({
     ...bodyContext(body),
-    produced: {
+    loadResults: {
       emit: (value) => {
-        strictEqual(value, produced);
+        strictEqual(value, loadResult);
         emitted = true;
         body.i32Const(0x1234);
         return cleanValueWidth(32);
       }
     }
-  }).at(testPlacement()).emit(produced);
+  }).at(testPlacement()).emit(loadResult);
   body.end();
 
   strictEqual(emitted, true);
@@ -108,13 +108,13 @@ test("ValueEmitter lowers produced values through ProducedEmitter", () => {
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Const), 1);
 });
 
-test("ValueEmitter fails produced values when unavailable", () => {
+test("ValueEmitter fails load-result values when unavailable", () => {
   const body = new WasmFunctionBodyEncoder();
-  const produced = jitProducedValue("load#missing-produced:0:1", "i32");
+  const loadResult = jitLoadResultValue(0, "i32");
 
   throws(
-    () => createValueEmitters(bodyContext(body)).at(testPlacement()).emit(produced),
-    /produced JIT value is not available for lowering: load#missing-produced:0:1/
+    () => createValueEmitters(bodyContext(body)).at(testPlacement()).emit(loadResult),
+    /load-result JIT value is not available for lowering: 0/
   );
 });
 
@@ -373,18 +373,18 @@ test("LocalStore cache keys support canonical symbolic nodes", () => {
   deepStrictEqual(localOpcodes(wasmBodyOpcodes(body.encode())), [wasmOpcode.localTee, wasmOpcode.localGet]);
 });
 
-test("ValueEmitter lowers produced values through retained locals", () => {
+test("ValueEmitter lowers load-result values through retained locals", () => {
   const body = new WasmFunctionBodyEncoder();
-  const produced = jitProducedValue("load#0:0:1", "i32");
+  const loadResult = jitLoadResultValue(0, "i32");
   const store = new LocalStore(body);
   const context = bodyContext(body);
-  const captured = captureWithLocalStore(store, produced, () => {
+  const captured = captureWithLocalStore(store, loadResult, () => {
     body.i32Const(0x1234);
     return cleanValueWidth(32);
   });
 
   if (captured === undefined) {
-    throw new Error("expected produced value capture");
+    throw new Error("expected load-result value capture");
   }
 
   const valueWidth = createValueEmitters({
@@ -396,8 +396,8 @@ test("ValueEmitter lowers produced values through retained locals", () => {
       define: (_at, value, emitter) => captureWithLocalStore(store, value, emitter),
       canInline: () => true
     },
-    produced: { emit: () => unexpectedEmitter() }
-  }).at(testPlacement()).emit(produced);
+    loadResults: { emit: () => unexpectedEmitter() }
+  }).at(testPlacement()).emit(loadResult);
 
   body.end();
 
@@ -524,7 +524,7 @@ function bodyContext(body: WasmFunctionBodyEncoder): ValueEmitContext {
         return cleanValueWidth(alias.width);
       }
     },
-    produced: unavailableProducedEmitter()
+    loadResults: unavailableLoadResultEmitter()
   };
 }
 

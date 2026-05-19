@@ -7,7 +7,7 @@ import {
   c32Expr,
   ExitReason,
   jitInputReg32Value,
-  jitProducedValue,
+  jitLoadResultValue,
   planJitCodegen,
   IR_ALU_FLAG_MASK,
   startAddress,
@@ -86,7 +86,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
         ]
       },
       {
-        instructionId: "effect-produced",
+        instructionId: "load-result",
         eip: startAddress + 2,
         nextEip: startAddress + 3,
         nextMode: "continue",
@@ -173,7 +173,7 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
   strictEqual(store.width, 32);
 
   const load = requireEffect(effects[2], "memoryLoad");
-  deepStrictEqual(load.result, jitProducedValue("load#effect-produced:2:0:0", "i32"));
+  deepStrictEqual(load.result, jitLoadResultValue(0, "i32"));
   deepStrictEqual(load.address, c32(0x68));
   strictEqual(load.width, 16);
   strictEqual(load.signed, false);
@@ -339,10 +339,10 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
   ), true);
 });
 
-test("JIT effects plan selects produced values only for later required roots", () => {
+test("JIT effects plan selects load-result values only for later required roots", () => {
   const unusedBlock: JitIrBlock = {
     instructions: [{
-      instructionId: "unused-produced",
+      instructionId: "unused-loadResult",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "continue",
@@ -360,7 +360,7 @@ test("JIT effects plan selects produced values only for later required roots", (
   };
   const usedBlock: JitIrBlock = {
     instructions: [{
-      instructionId: "used-produced",
+      instructionId: "used-loadResult",
       eip: startAddress,
       nextEip: startAddress + 1,
       nextMode: "exit",
@@ -378,7 +378,7 @@ test("JIT effects plan selects produced values only for later required roots", (
   };
   const unusedPlan = buildJitCodegenEmissionPlan(planJitCodegen(unusedBlock));
   const usedPlan = buildJitCodegenEmissionPlan(planJitCodegen(usedBlock));
-  const produced = jitProducedValue("load#used-produced:0:0:0", "i32");
+  const loadResult = jitLoadResultValue(0, "i32");
 
   deepStrictEqual(unusedPlan.effects.map((effect) => effect.kind), [
     "memoryLoad"
@@ -392,13 +392,13 @@ test("JIT effects plan selects produced values only for later required roots", (
     "hostTrap"
   ]);
   deepStrictEqual(usedPlan.reusePlan.cache.selected, [
-    { value: produced, useCount: 1 }
+    { value: loadResult, useCount: 1 }
   ]);
   deepStrictEqual(
     usedPlan.reusePlan.captures.captures
-      .filter((capture) => capture.reason === "producedDefinition")
+      .filter((capture) => capture.reason === "loadResultDefinition")
       .map((capture) => capture.value),
-    [produced]
+    [loadResult]
   );
 });
 

@@ -11,7 +11,7 @@ import {
 import type {
   JitArchitecturalSlot,
   JitRegisterSlot,
-  JitProducedValue,
+  JitLoadResultValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
@@ -22,8 +22,9 @@ import {
 import { u32 } from "#x86/state/cpu-state.js";
 import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import { LoadResultRegistry } from "./load-result.js";
 import {
-  type ProducedDefinition,
+  type LoadResultDefinition,
   type SlotWrite,
   type Timeline,
   type TimelineExpression,
@@ -44,17 +45,18 @@ export function buildTimeline(input: TimelineInput): Timeline {
 class TimelineBuilder {
   readonly #operands: readonly JitOperandBinding[];
   readonly #ops: readonly IrExprOp[];
-  readonly #producedByVar: ReadonlyMap<number, JitProducedValue> | undefined;
+  readonly #loadResultValuesByVar = new Map<number, JitLoadResultValue>();
   readonly #valueState: ValueStateBuilder;
   readonly #resolver: JitValueResolver;
   readonly #ids = new TimelineRegistry();
+  readonly #loadResultRegistry: LoadResultRegistry;
   readonly #valueRefs = new Map<number, JitValue>();
   readonly #expressionsByOp = new Map<number, Map<TimelineExpressionId, JitValue>>();
   readonly #refsByOp = new Map<number, Map<number, JitValue>>();
   readonly #addressesByOp = new Map<number, Map<TimelineStorageId, JitValue>>();
   readonly #storageReadsByOp = new Map<number, Map<TimelineStorageReadId, JitValue>>();
   readonly #writes: SlotWrite[] = [];
-  readonly #produced: ProducedDefinition[] = [];
+  readonly #loadResults: LoadResultDefinition[] = [];
   readonly #snapshotPoints: ReadonlySet<number>;
   readonly #snapshots = new Map<number, ValueSnapshot>();
   #currentOpIndex = -1;
@@ -66,7 +68,7 @@ class TimelineBuilder {
   constructor(input: TimelineInput) {
     this.#operands = input.operands;
     this.#ops = input.expressions;
-    this.#producedByVar = input.producedByVar;
+    this.#loadResultRegistry = input.loadResultRegistry;
     this.#entry = input.entry;
     this.#snapshotPoints = new Set(input.snapshotPoints);
     this.#nextEip = input.nextEip === undefined
@@ -95,7 +97,7 @@ class TimelineBuilder {
       this.#recordInputs(op);
       this.#recordMeaning(op);
       this.#recordWrites(op);
-      this.#recordProduced(op);
+      this.#recordLoadResult(op);
     }
 
     return this.#finish();
@@ -111,10 +113,10 @@ class TimelineBuilder {
     switch (op.op) {
       case "let32":
         {
-          const produced = this.#producedByVar?.get(op.dst.id);
+          const loadResult = this.#loadResultValueForLet(op);
 
-          if (produced !== undefined) {
-            this.#recordProducedExpressionInputs(op.value, produced);
+          if (loadResult !== undefined) {
+            this.#recordLoadResultExpressionInputs(op.value, loadResult);
           }
         }
         return;
@@ -178,21 +180,21 @@ class TimelineBuilder {
     }
   }
 
-  #recordProduced(op: IrExprOp): void {
+  #recordLoadResult(op: IrExprOp): void {
     if (op.op !== "let32") {
       return;
     }
 
-    const produced = this.#producedByVar?.get(op.dst.id);
+    const loadResult = this.#loadResultValueForLet(op);
 
-    if (produced === undefined) {
+    if (loadResult === undefined) {
       return;
     }
 
-    this.#produced.push({
+    this.#loadResults.push({
       opIndex: this.#currentOpIndex,
       ref: op.dst,
-      value: produced
+      value: loadResult
     });
   }
 
@@ -201,7 +203,7 @@ class TimelineBuilder {
       finalState: this.#valueState.snapshot(),
       opCount: this.#ops.length,
       writes: this.#writes,
-      produced: this.#produced,
+      loadResults: this.#loadResults,
       snapshots: this.#snapshots,
       storage: {
         catalog: this.#ids,
@@ -225,19 +227,43 @@ class TimelineBuilder {
   }
 
   #recordLetMeaning(op: Extract<IrExprOp, { op: "let32" }>): void {
-    const produced = this.#producedByVar?.get(op.dst.id);
-    const value = produced ?? this.#valueForExpression(op.value);
+    const loadResult = this.#loadResultValueForLet(op);
+    const value = loadResult ?? this.#valueForExpression(op.value);
 
-    if (produced !== undefined) {
-      if (op.value.kind !== "source") {
-        throw new Error(`JIT produced value for var ${op.dst.id} must come from a storage read`);
-      }
-
-      this.#recordExpressionValue(op.value, produced);
+    if (loadResult !== undefined && op.value.kind === "source") {
+      this.#recordExpressionValue(op.value, loadResult);
     }
 
     this.#valueRefs.set(op.dst.id, value);
     this.#recordRefValue(op.dst, value);
+  }
+
+  #loadResultValueForLet(op: Extract<IrExprOp, { op: "let32" }>): JitLoadResultValue | undefined {
+    if (op.value.kind !== "source" || !this.#storageReadIsEffectful(op.value.source)) {
+      return undefined;
+    }
+
+    const existing = this.#loadResultValuesByVar.get(op.dst.id);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const loadResult = this.#loadResultRegistry.createLoadResultValue("i32");
+
+    this.#loadResultValuesByVar.set(op.dst.id, loadResult);
+    return loadResult;
+  }
+
+  #storageReadIsEffectful(storage: IrStorageExpr): boolean {
+    switch (storage.kind) {
+      case "mem":
+        return true;
+      case "operand":
+        return this.#operands[storage.index]?.kind === "static.mem";
+      case "reg":
+        return false;
+    }
   }
 
   #recordSetWrite(op: Extract<IrExprOp, { op: "set" }>): void {
@@ -419,9 +445,9 @@ class TimelineBuilder {
     }
   }
 
-  #recordProducedExpressionInputs(
+  #recordLoadResultExpressionInputs(
     expression: IrValueExpr,
-    produced?: JitProducedValue
+    loadResult?: JitLoadResultValue
   ): void {
     switch (expression.kind) {
       case "var":
@@ -431,26 +457,26 @@ class TimelineBuilder {
         return;
       case "source":
         this.#recordStorageInputs(expression.source);
-        if (produced === undefined) {
+        if (loadResult === undefined) {
           this.#valueForStorageRead(expression);
         } else {
-          this.#recordStorageReadValue(expression, produced);
+          this.#recordStorageReadValue(expression, loadResult);
         }
         return;
       case "address":
         this.#valueForAddress(expression.operand);
         return;
       case "value.binary":
-        this.#recordProducedExpressionInputs(expression.a);
-        this.#recordProducedExpressionInputs(expression.b);
+        this.#recordLoadResultExpressionInputs(expression.a);
+        this.#recordLoadResultExpressionInputs(expression.b);
         return;
       case "value.unary":
-        this.#recordProducedExpressionInputs(expression.value);
+        this.#recordLoadResultExpressionInputs(expression.value);
         return;
       case "value.select":
-        this.#recordProducedExpressionInputs(expression.condition);
-        this.#recordProducedExpressionInputs(expression.whenTrue);
-        this.#recordProducedExpressionInputs(expression.whenFalse);
+        this.#recordLoadResultExpressionInputs(expression.condition);
+        this.#recordLoadResultExpressionInputs(expression.whenTrue);
+        this.#recordLoadResultExpressionInputs(expression.whenFalse);
         return;
       case "flags.condition":
         return;

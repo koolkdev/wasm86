@@ -36,7 +36,7 @@ import {
   planJitCodegen
 } from "#backends/wasm/jit/block.js";
 import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
-import { jitProducedValue } from "#backends/wasm/jit/ir/values/builders.js";
+import { jitLoadResultValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
 import { createEffectEmitter } from "#backends/wasm/jit/codegen/emit/effects.js";
 import { createExitFrame } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
@@ -116,7 +116,6 @@ test("JIT production emission consumes effects plan entries from instruction pla
         snapshotPoints: new Set()
       }),
       expressionPaths: new Map(),
-      producedByVar: new Map(),
       captureMap: new Map()
     }],
     effects: [{
@@ -201,7 +200,6 @@ test("JIT production emission does not walk unplanned expression effects", () =>
         snapshotPoints: new Set()
       }),
       expressionPaths: new Map(),
-      producedByVar: new Map(),
       captureMap: new Map()
     }],
     effects: []
@@ -214,7 +212,7 @@ test("JIT production emission does not walk unplanned expression effects", () =>
   strictEqual(countOpcode(opcodes, wasmOpcode.br), 0);
 });
 
-test("JIT effects plan emission keeps a guard but skips an unused produced load", () => {
+test("JIT effects plan emission keeps a guard but skips an unused load-result load", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
     {
@@ -235,7 +233,7 @@ test("JIT effects plan emission keeps a guard but skips an unused produced load"
   strictEqual(guestLoads(result).length, 0);
 });
 
-test("JIT effects plan emission keeps a dead produced-load guard before a later used load", () => {
+test("JIT effects plan emission keeps a dead load-result load guard before a later used load", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
     {
@@ -265,12 +263,12 @@ test("JIT effects plan emission keeps a dead produced-load guard before a later 
   strictEqual(countOpcode(result.opcodes, wasmOpcode.memorySize), 4);
   strictEqual(guestLoads(result).length, 1);
   deepStrictEqual(result.emissionPlan.reusePlan.cache.selected, [{
-    value: jitProducedValue("load#planned-emission-test:0:3:1", "i32"),
+    value: jitLoadResultValue(1, "i32"),
     useCount: 1
   }]);
 });
 
-test("JIT effects plan emission captures a used produced load at its definition", () => {
+test("JIT effects plan emission captures a used load-result load at its definition", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
     {

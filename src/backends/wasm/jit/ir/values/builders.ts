@@ -18,8 +18,8 @@ import {
 } from "./flags.js";
 import type {
   JitInputValue,
-  JitProducedValue,
-  JitProducedValueId,
+  JitLoadResultValue,
+  JitLoadResultValueId,
   JitRegisterSlot,
   JitValue
 } from "./types.js";
@@ -55,8 +55,8 @@ export function jitInputAluFlagsValue(): JitInputValue {
   return { kind: "input", slot: { kind: "aluFlags" } };
 }
 
-export function jitProducedValue(id: JitProducedValueId, type: IrValueType): JitProducedValue {
-  return { kind: "produced", id, type };
+export function jitLoadResultValue(id: number, type: IrValueType): JitLoadResultValue {
+  return { kind: "loadResult", id: id as JitLoadResultValueId, type };
 }
 
 export function jitFlagProducerValue<Producer extends FlagProducerName>(

@@ -30,9 +30,10 @@ import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type {
-  JitProducedValue,
+  JitLoadResultValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
+import { jitLoadResultValue } from "#backends/wasm/jit/ir/values/builders.js";
 import {
   wasmBodyInstructions,
   wasmBodyMemoryAccesses,
@@ -165,7 +166,7 @@ test("JIT memory store emits address before value and cleans dirty 32-bit stores
   }]);
 });
 
-test("JIT produced memory load is defined through the produced-value path", () => {
+test("JIT load-result memory load is defined through the load-result value path", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const events: string[] = [];
@@ -186,7 +187,7 @@ test("JIT produced memory load is defined through the produced-value path", () =
   memory.emit({
     kind: "memoryLoad",
     at,
-    result: producedValue("load#memory-effects"),
+    result: loadResultValue(0),
     address,
     width: 8,
     signed: true
@@ -195,7 +196,7 @@ test("JIT produced memory load is defined through the produced-value path", () =
   body.end();
 
   deepStrictEqual(events, [
-    "define:load#memory-effects",
+    "define:0",
     "value:address:32"
   ]);
   strictEqual(definedWidth?.cleanWidth, 32);
@@ -206,7 +207,7 @@ test("JIT produced memory load is defined through the produced-value path", () =
   }]);
 });
 
-test("JIT produced memory load does not emit when the produced path declines it", () => {
+test("JIT load-result memory load does not emit when the loadResult path declines it", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const events: string[] = [];
@@ -222,7 +223,7 @@ test("JIT produced memory load does not emit when the produced path declines it"
   memory.emit({
     kind: "memoryLoad",
     at,
-    result: producedValue("load#unused"),
+    result: loadResultValue(0),
     address: constValue(0xa0),
     width: 32,
     signed: false
@@ -230,7 +231,7 @@ test("JIT produced memory load does not emit when the produced path declines it"
   scratch.assertClear();
   body.end();
 
-  deepStrictEqual(events, ["define:load#unused"]);
+  deepStrictEqual(events, ["define:0"]);
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Load), 0);
 });
 
@@ -334,7 +335,7 @@ function capturingValueCache(
     retain: () => undefined,
     capture: (planned, emit) => {
       const { value } = planned;
-      events.push(`capture:${value.kind === "produced" ? value.id : value.kind}`);
+      events.push(`capture:${value.kind === "loadResult" ? value.id : value.kind}`);
       const valueWidth = capture(emit);
 
       return {
@@ -422,12 +423,8 @@ function constValue(value: number): JitValue {
   };
 }
 
-function producedValue(id: string): JitProducedValue {
-  return {
-    kind: "produced",
-    id,
-    type: "i32"
-  };
+function loadResultValue(id: number): JitLoadResultValue {
+  return jitLoadResultValue(id, "i32");
 }
 
 function countOpcode(opcodes: readonly number[], opcode: number): number {
