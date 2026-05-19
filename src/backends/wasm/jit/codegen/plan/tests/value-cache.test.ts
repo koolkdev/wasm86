@@ -73,10 +73,6 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
   );
   strictEqual(instruction?.analysis.expressions.block.some((op) => op.op === "conditionalJump"), true);
   strictEqual(Object.hasOwn(instruction?.analysis.timeline ?? {}, "snapshots"), false);
-  strictEqual(
-    instruction?.analysis.timeline.snapshotAt(0),
-    instruction?.analysis.timeline.snapshotAt(0)
-  );
   strictEqual(instruction?.analysis.expressions, analysisExpressions);
   strictEqual(instruction?.analysis.expressions.block, analysisExpressions?.block);
   strictEqual(instruction?.analysis.timeline, analysisTimeline);

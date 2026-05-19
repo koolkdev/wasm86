@@ -206,6 +206,7 @@ export function planValueCacheForTest(input: Readonly<{
     operands,
     expressions: input.expressionBlock,
     entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set(),
     ...(input.nextEip === undefined ? {} : { nextEip: input.nextEip }),
     ...(input.producedByVar === undefined
       ? {}

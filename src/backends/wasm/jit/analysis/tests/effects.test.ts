@@ -7,6 +7,7 @@ import {
 } from "#backends/wasm/codegen/expressions.js";
 import {
   analyzeInstructionEffects,
+  timelineSnapshotPointsForInstruction,
   type EffectInfo,
   type EffectInstructionInput,
   type InstructionFlow
@@ -143,6 +144,10 @@ function analyze(instructions: readonly JitInstruction[]): readonly InstructionF
       operands: instruction.operands,
       expressions: expressionPlan.expressionBlock,
       entry: valueState,
+      snapshotPoints: timelineSnapshotPointsForInstruction(
+        instruction,
+        expressionPlan.sourceMap
+      ),
       nextEip: instruction.nextEip,
       producedByVar: indexProducedValues(instruction, instructionIndex)
     });

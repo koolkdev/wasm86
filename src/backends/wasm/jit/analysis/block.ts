@@ -6,6 +6,7 @@ import type {
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
   analyzeInstructionEffects,
+  timelineSnapshotPointsForInstruction,
   type EffectInstructionInput,
   type InstructionFlow
 } from "./effects.js";
@@ -48,6 +49,10 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
       operands: instruction.operands,
       expressions: expressions.block,
       entry: entryState,
+      snapshotPoints: timelineSnapshotPointsForInstruction(
+        instruction,
+        expressions.sourceMap
+      ),
       nextEip: instruction.nextEip,
       producedByVar: expressions.producedValues
     });

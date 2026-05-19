@@ -111,6 +111,33 @@ export function analyzeInstructionEffects(
   return flow;
 }
 
+export function timelineSnapshotPointsForInstruction(
+  instruction: JitInstruction,
+  sourceMap: IrExpressionSourceMap
+): ReadonlySet<number> {
+  const points = new Set<number>();
+
+  for (let sourceOpIndex = 0; sourceOpIndex < instruction.ir.length; sourceOpIndex += 1) {
+    const op = instruction.ir[sourceOpIndex];
+
+    if (op === undefined || classifyExits(op, instruction).length === 0) {
+      continue;
+    }
+
+    const expressionOpIndexes = expressionOpIndexesForSourceOp(sourceMap, sourceOpIndex);
+
+    if (expressionOpIndexes.length !== 1) {
+      throw new Error(
+        `expected one JIT expression op for source state ${sourceOpIndex}, got ${expressionOpIndexes.length}`
+      );
+    }
+
+    points.add(expressionOpIndexes[0]!);
+  }
+
+  return points;
+}
+
 function effectForOp(
   kind: EffectKind,
   at: Placement,

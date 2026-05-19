@@ -84,6 +84,7 @@ export type TimelineInput = Readonly<{
   operands: readonly JitOperandBinding[];
   expressions: IrExprBlock;
   entry: ValueSnapshot;
+  snapshotPoints: ReadonlySet<number>;
   nextEip?: number;
   producedByVar?: ReadonlyMap<number, JitProducedValue>;
 }>;

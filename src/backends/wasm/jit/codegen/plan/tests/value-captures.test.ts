@@ -79,7 +79,8 @@ test("JIT cache value uses carry flattened dependency ancestry for cache selecti
   const timeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot()
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
   });
   const expectedChild = addValue(jitInputReg32Value("eax"), c32(1));
   const expectedRoot = {
@@ -176,7 +177,8 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
   const timeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot()
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
   });
   const extraUses = new Map<number, readonly TestValueRoot[]>([[
     0,
@@ -327,6 +329,7 @@ function planCapturesForExpressionBlock(
     operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set(),
     ...(producedByVar === undefined ? {} : { producedByVar })
   });
   const uses = valueUsesForExpressionBlock({

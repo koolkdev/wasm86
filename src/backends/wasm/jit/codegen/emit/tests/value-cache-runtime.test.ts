@@ -102,7 +102,8 @@ test("JIT value-cache runtime follows planned timeline expression positions", ()
   const timeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot()
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
   });
   const plan = planReuseForInstruction({
     operands: [],
@@ -210,7 +211,8 @@ test("JIT value-cache planning does not treat flags.set as an exit-store consume
   const valueTimeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot()
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
   });
 
   deepStrictEqual(planReuseForInstruction({

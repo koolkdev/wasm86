@@ -55,6 +55,8 @@ class TimelineBuilder {
   readonly #storageReadsByOp = new Map<number, Map<TimelineStorageReadId, JitValue>>();
   readonly #writes: SlotWrite[] = [];
   readonly #produced: ProducedDefinition[] = [];
+  readonly #snapshotPoints: ReadonlySet<number>;
+  readonly #snapshots = new Map<number, ValueSnapshot>();
   #currentOpIndex = -1;
   #currentSetValue: JitValue | undefined;
   #currentSetValueResolved = false;
@@ -66,6 +68,7 @@ class TimelineBuilder {
     this.#ops = input.expressions;
     this.#producedByVar = input.producedByVar;
     this.#entry = input.entry;
+    this.#snapshotPoints = new Set(input.snapshotPoints);
     this.#nextEip = input.nextEip === undefined
       ? undefined
       : { kind: "const", type: "i32", value: u32(input.nextEip) };
@@ -88,6 +91,7 @@ class TimelineBuilder {
       }
 
       this.#enterExpressionOp(opIndex);
+      this.#recordSnapshotPoint();
       this.#recordInputs(op);
       this.#recordMeaning(op);
       this.#recordWrites(op);
@@ -194,11 +198,11 @@ class TimelineBuilder {
 
   #finish(): Timeline {
     return createTimeline({
-      entry: this.#entry,
       finalState: this.#valueState.snapshot(),
       opCount: this.#ops.length,
       writes: this.#writes,
       produced: this.#produced,
+      snapshots: this.#snapshots,
       storage: {
         catalog: this.#ids,
         ...(this.#nextEip === undefined ? {} : { nextEip: this.#nextEip }),
@@ -208,6 +212,16 @@ class TimelineBuilder {
         ...(this.#storageReadsByOp.size === 0 ? {} : { storageReadsByOp: this.#storageReadsByOp })
       }
     });
+  }
+
+  #recordSnapshotPoint(): void {
+    const opIndex = this.#currentOpIndex;
+
+    if (!this.#snapshotPoints.has(opIndex)) {
+      return;
+    }
+
+    this.#snapshots.set(opIndex, this.#valueState.snapshot());
   }
 
   #recordLetMeaning(op: Extract<IrExprOp, { op: "let32" }>): void {

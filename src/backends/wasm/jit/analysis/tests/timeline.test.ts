@@ -33,7 +33,8 @@ test("JIT value timeline records the same register source expression before and 
   const timeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
-    entry: entry.snapshot()
+    entry: entry.snapshot(),
+    snapshotPoints: new Set()
   });
 
   deepStrictEqual(timeline.viewAt(0).expression(eaxSource), c32(3));
@@ -57,7 +58,8 @@ test("JIT value timeline records partial register writes as named register alias
   const timeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot()
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
   });
   const expected = jitInsertBits(jitInputReg32Value("eax"), c32(0x7f), 0, 8);
 
@@ -69,7 +71,7 @@ test("JIT value timeline records partial register writes as named register alias
   deepStrictEqual(timeline.finalState.regs.readReg32("eax"), expected);
 });
 
-test("JIT value timeline snapshots are queried at boundaries", () => {
+test("JIT value timeline snapshots are queried at requested points", () => {
   const entry = createJitValueState();
   const expressionBlock = [
     { op: "let32", dst: v(0), value: source(reg("eax")) },
@@ -82,14 +84,37 @@ test("JIT value timeline snapshots are queried at boundaries", () => {
   const timeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
-    entry: entry.snapshot()
+    entry: entry.snapshot(),
+    snapshotPoints: new Set([0, 2])
   });
 
   strictEqual(Object.hasOwn(timeline, "snapshots"), false);
   deepStrictEqual(timeline.snapshotAt(0).regs.readReg32("eax"), c32(3));
-  deepStrictEqual(timeline.snapshotAt(1).regs.readReg32("eax"), c32(3));
   deepStrictEqual(timeline.snapshotAt(2).regs.readReg32("eax"), c32(7));
-  deepStrictEqual(timeline.snapshotAt(expressionBlock.length).regs.readReg32("eax"), c32(7));
+  deepStrictEqual(timeline.finalState.regs.readReg32("eax"), c32(7));
+  throws(() => timeline.snapshotAt(1), /missing requested JIT timeline snapshot point/);
+  throws(() => timeline.snapshotAt(expressionBlock.length), /missing requested JIT timeline snapshot point/);
+});
+
+test("JIT value timeline does not expose unrequested entry or final snapshots", () => {
+  const entry = createJitValueState();
+  const expressionBlock = [
+    { op: "set", target: reg("eax"), value: c32(7), accessWidth: 32 },
+    { op: "next" }
+  ] as const satisfies IrExprBlock;
+
+  entry.regs.writeReg32("eax", c32(3));
+
+  const timeline = buildTimeline({
+    operands: [],
+    expressions: expressionBlock,
+    entry: entry.snapshot(),
+    snapshotPoints: new Set()
+  });
+
+  deepStrictEqual(timeline.finalState.regs.readReg32("eax"), c32(7));
+  throws(() => timeline.snapshotAt(0), /missing requested JIT timeline snapshot point/);
+  throws(() => timeline.snapshotAt(expressionBlock.length), /missing requested JIT timeline snapshot point/);
 });
 
 test("JIT value timeline records condition reads before and after flag writes", () => {
@@ -124,7 +149,8 @@ test("JIT value timeline records condition reads before and after flag writes", 
   const timeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot()
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
   });
 
   deepStrictEqual(timeline.viewAt(0).expression(condition), jitFlagConditionValue(jitInputAluFlagsValue(), "E"));
@@ -161,7 +187,8 @@ test("JIT value timeline records memory operand effective addresses", () => {
   const timeline = buildTimeline({
     operands,
     expressions: expressionBlock,
-    entry: entry.snapshot()
+    entry: entry.snapshot(),
+    snapshotPoints: new Set()
   });
   const expectedAddress = jitAdd(jitAdd(c32(3), c32(20)), c32(0x20));
 
@@ -209,7 +236,8 @@ test("JIT source-state values and value timeline resolve overlapping values the 
   const timeline = buildTimeline({
     operands,
     expressions: expressionBlock,
-    entry: entry.snapshot()
+    entry: entry.snapshot(),
+    snapshotPoints: new Set()
   });
   const resolver = createJitValueResolver({
     operands,
@@ -240,7 +268,8 @@ test("JIT timeline op view reads planned effective-address lookups only", () => 
   const timeline = buildTimeline({
     operands,
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot()
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
   });
 
   strictEqual(timeline.viewAt(0).hasAddress(op(0)), false);
@@ -262,7 +291,8 @@ test("JIT timeline op view reads planned register-storage lookups only", () => {
   const timeline = buildTimeline({
     operands: [],
     expressions: expressionBlock,
-    entry: entry.snapshot()
+    entry: entry.snapshot(),
+    snapshotPoints: new Set()
   });
 
   strictEqual(timeline.viewAt(0).hasStorageRead({ source: reg("eax"), accessWidth: 32 }), false);
@@ -281,6 +311,7 @@ test("JIT timeline records produced memory load definitions at one point", () =>
     operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set(),
     producedByVar: new Map([[0, produced]])
   });
 
@@ -306,7 +337,8 @@ test("JIT timeline op view fails clearly for invalid op indexes", () => {
   const timeline = buildTimeline({
     operands: [],
     expressions: [{ op: "let32", dst: v(0), value: c32(1) }],
-    entry: createJitValueState().snapshot()
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
   });
 
   throws(() => timeline.viewAt(1));
@@ -317,7 +349,8 @@ test("JIT value timeline fails clearly for unresolved values", () => {
     () => buildTimeline({
       operands: [],
       expressions: [{ op: "hostTrap", vector: v(99) }],
-      entry: createJitValueState().snapshot()
+      entry: createJitValueState().snapshot(),
+      snapshotPoints: new Set()
     }),
     /could not resolve JIT timeline value at expression op 0/
   );
@@ -337,7 +370,8 @@ test("JIT value timeline ignores no-op flag writes before resolving inputs", () 
         result: v(102)
       }
     }],
-    entry: createJitValueState().snapshot()
+    entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set()
   });
 
   deepStrictEqual(timeline.writes, []);

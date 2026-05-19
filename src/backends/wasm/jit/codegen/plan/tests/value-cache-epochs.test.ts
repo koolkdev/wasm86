@@ -33,6 +33,7 @@ test("JIT value-cache epoch planning exposes instruction epochs and produced def
     operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
+    snapshotPoints: new Set(),
     producedByVar: new Map([[0, produced]])
   });
   const plannedUse: ValueUse = {

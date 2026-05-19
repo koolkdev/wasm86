@@ -109,7 +109,8 @@ test("JIT production emission consumes effects plan entries from instruction pla
       valueTimeline: buildTimeline({
         operands: [],
         expressions: expressionBlock,
-        entry: initialState.valueState
+        entry: initialState.valueState,
+        snapshotPoints: new Set()
       }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPaths: new Map(),
@@ -194,7 +195,8 @@ test("JIT production emission does not walk unplanned expression effects", () =>
       valueTimeline: buildTimeline({
         operands: [],
         expressions: expressionBlock,
-        entry: initialState.valueState
+        entry: initialState.valueState,
+        snapshotPoints: new Set()
       }),
       sourceExpressionMap: { placementsBySourceOpIndex: new Map() },
       expressionPaths: new Map(),
