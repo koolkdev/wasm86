@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
-import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
+import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import { planCaptures } from "#backends/wasm/jit/codegen/plan/captures.js";
 import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import {

@@ -5,7 +5,7 @@ import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.j
 import type {
   ProducedDefinition,
   Timeline
-} from "#backends/wasm/jit/analysis/timeline.js";
+} from "#backends/wasm/jit/analysis/timeline-types.js";
 import type {
   ValueUse
 } from "./value-uses.js";

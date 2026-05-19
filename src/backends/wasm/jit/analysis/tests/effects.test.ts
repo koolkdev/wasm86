@@ -20,7 +20,7 @@ import {
   localConditionValues
 } from "#backends/wasm/jit/analysis/effect-classifier.js";
 import { buildInstructionPaths, branchPath, rootPath } from "#backends/wasm/jit/analysis/paths.js";
-import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
+import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import { indexProducedValues } from "#backends/wasm/jit/ir/produced-values.js";
 import type { JitInstruction } from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
@@ -143,6 +143,7 @@ function analyze(instructions: readonly JitInstruction[]): readonly InstructionF
       operands: instruction.operands,
       expressions: expressionPlan.expressionBlock,
       entry: valueState,
+      nextEip: instruction.nextEip,
       producedByVar: indexProducedValues(instruction, instructionIndex)
     });
 
@@ -159,7 +160,7 @@ function analyze(instructions: readonly JitInstruction[]): readonly InstructionF
 
     flows.push(analyzeInstructionEffects(effectInput));
     instructionCountDelta += instructionDeltaForInstruction(instruction);
-    valueState = valueTimeline.final;
+    valueState = valueTimeline.finalState;
   }
 
   return flows;

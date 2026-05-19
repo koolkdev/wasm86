@@ -21,7 +21,7 @@ import {
   type InstructionProgress
 } from "./instruction-progress.js";
 import type { PathMap } from "./paths.js";
-import type { Timeline } from "./timeline.js";
+import type { Timeline } from "./timeline-types.js";
 
 export type EffectInstructionInput = Readonly<{
   instruction: JitInstruction;
@@ -118,7 +118,7 @@ function effectForOp(
 ): EffectInfo {
   switch (kind) {
     case "memoryGuard":
-      return { kind, at, faultExit: onlyExit(exits, "memory guard", at) };
+      return { kind, at, faultExit: onlyExit(exits) };
     case "memoryStore":
       assertNoExits(exits, kind, at);
       return { kind, at };
@@ -126,7 +126,7 @@ function effectForOp(
       assertNoExits(exits, kind, at);
       return { kind, at };
     case "jump":
-      return { kind, at, exit: onlyExit(exits, "jump", at) };
+      return { kind, at, exit: onlyExit(exits) };
     case "branch":
       return {
         kind,
@@ -135,9 +135,9 @@ function effectForOp(
         notTaken: findKindExit(exits, "branchNotTaken", at)
       };
     case "hostTrap":
-      return { kind, at, exit: onlyExit(exits, "host trap", at) };
+      return { kind, at, exit: onlyExit(exits) };
     case "fallthrough":
-      return { kind, at, exit: onlyExit(exits, "fallthrough", at) };
+      return { kind, at, exit: onlyExit(exits) };
   }
 }
 
@@ -167,13 +167,7 @@ function valueStateBeforeSourceOp(
     );
   }
 
-  const snapshot = instruction.timeline.snapshots[expressionOpIndexes[0]!];
-
-  if (snapshot === undefined) {
-    throw new Error(`missing JIT value-state timeline snapshot for source op ${sourceOpIndex}`);
-  }
-
-  return snapshot;
+  return instruction.timeline.snapshotAt(expressionOpIndexes[0]!);
 }
 
 function expressionOpIndexesForSourceOp(
@@ -191,15 +185,11 @@ function isEmittedExpressionOp(
   return placement.kind === "emittedOp";
 }
 
-function onlyExit(
-  exits: readonly Exit[],
-  label: string,
-  at: Placement
-): Exit {
+function onlyExit(exits: readonly Exit[]): Exit {
   const [exit] = exits;
 
   if (exit === undefined || exits.length !== 1) {
-    throw new Error(`JIT ${label} effect at ${at.instructionIndex}:${at.opIndex} must have exactly one exit`);
+    throw new Error("expected one JIT effect exit");
   }
 
   return exit;

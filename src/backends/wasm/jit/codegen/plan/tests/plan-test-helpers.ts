@@ -21,7 +21,7 @@ import {
   rootPath
 } from "#backends/wasm/jit/analysis/paths.js";
 import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.js";
-import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
+import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import {
   type UsePurpose
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
@@ -197,6 +197,7 @@ export function onlyExit(exits: readonly PlannedExit[], reason: ExitReason): Pla
 export function planValueCacheForTest(input: Readonly<{
   operands?: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
+  nextEip?: number;
   producedByVar?: ReadonlyMap<number, JitProducedValue>;
   extraUses?: ReadonlyMap<number, readonly TestValueRoot[]>;
 }>) {
@@ -205,6 +206,7 @@ export function planValueCacheForTest(input: Readonly<{
     operands,
     expressions: input.expressionBlock,
     entry: createJitValueState().snapshot(),
+    ...(input.nextEip === undefined ? {} : { nextEip: input.nextEip }),
     ...(input.producedByVar === undefined
       ? {}
       : { producedByVar: input.producedByVar })

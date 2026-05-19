@@ -11,7 +11,8 @@ import {
 } from "./effects.js";
 import type { Exit } from "./exits.js";
 import { buildInstructionPaths } from "./paths.js";
-import { buildTimeline, type Timeline } from "./timeline.js";
+import { buildTimeline } from "./timeline-builder.js";
+import type { Timeline } from "./timeline-types.js";
 import { instructionDeltaAfterOp } from "./instruction-progress.js";
 
 export type { InstructionFlow } from "./effects.js";
@@ -47,6 +48,7 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
       operands: instruction.operands,
       expressions: expressions.block,
       entry: entryState,
+      nextEip: instruction.nextEip,
       producedByVar: expressions.producedValues
     });
     const progress = {
@@ -70,7 +72,7 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
       flow: analyzeInstructionEffects(effectInput)
     });
     instructionCountDelta += instructionDeltaForInstruction(instruction);
-    currentValueState = timeline.final;
+    currentValueState = timeline.finalState;
   }
 
   return {

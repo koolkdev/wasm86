@@ -22,7 +22,6 @@ import {
   type JitValue,
   type JitBlock,
 } from "./plan-test-helpers.js";
-import { opView } from "#backends/wasm/jit/analysis/timeline.js";
 test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache specs", () => {
   const block: JitBlock = {
     instructions: [{
@@ -73,9 +72,10 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
     Math.max(0, ...codegenPlan.exits.map((exit) => exit.exitStoreIndex))
   );
   strictEqual(instruction?.analysis.expressions.block.some((op) => op.op === "conditionalJump"), true);
+  strictEqual(Object.hasOwn(instruction?.analysis.timeline ?? {}, "snapshots"), false);
   strictEqual(
-    instruction?.analysis.timeline.snapshots.length,
-    instruction?.analysis.expressions.block.length
+    instruction?.analysis.timeline.snapshotAt(0),
+    instruction?.analysis.timeline.snapshotAt(0)
   );
   strictEqual(instruction?.analysis.expressions, analysisExpressions);
   strictEqual(instruction?.analysis.expressions.block, analysisExpressions?.block);
@@ -245,13 +245,13 @@ test("JIT value-cache planning retains produced values needed after their defini
   deepStrictEqual(
     cachePlan?.instructions[0] === undefined
       ? undefined
-      : opView(cachePlan.instructions[0].valueTimeline, 0).ref({ kind: "var", id: 0 }),
+      : cachePlan.instructions[0].valueTimeline.viewAt(0).ref({ kind: "var", id: 0 }),
     produced
   );
   deepStrictEqual(
     cachePlan?.instructions[0] === undefined
       ? undefined
-      : opView(cachePlan.instructions[0].valueTimeline, 0).expression(expressionBlock[0].value),
+      : cachePlan.instructions[0].valueTimeline.viewAt(0).expression(expressionBlock[0].value),
     produced
   );
   deepStrictEqual(
@@ -299,7 +299,7 @@ test("JIT value-cache planning resolves input partial-register reads with common
   deepStrictEqual(
     cachePlan?.instructions[0] === undefined
       ? undefined
-      : opView(cachePlan.instructions[0].valueTimeline, 0).expression(inputAl),
+      : cachePlan.instructions[0].valueTimeline.viewAt(0).expression(inputAl),
     expectedSource
   );
   deepStrictEqual(cachePlan?.cache.selected, [{ value: expectedExpression, useCount: 2 }]);
@@ -384,13 +384,13 @@ test("JIT value-cache planning keeps repeated post-write expression uses point-s
   deepStrictEqual(
     instructionPlan === undefined
       ? undefined
-      : opView(instructionPlan.valueTimeline, 0).expression(expression),
+      : instructionPlan.valueTimeline.viewAt(0).expression(expression),
     preWriteValue
   );
   deepStrictEqual(
     instructionPlan === undefined
       ? undefined
-      : opView(instructionPlan.valueTimeline, 2).expression(expression),
+      : instructionPlan.valueTimeline.viewAt(2).expression(expression),
     postWriteValue
   );
   deepStrictEqual(instructionPlan?.opEpochs, [0, 0, 1, 1]);

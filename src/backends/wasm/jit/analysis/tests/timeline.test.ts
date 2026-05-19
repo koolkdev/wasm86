@@ -1,12 +1,9 @@
-import { deepStrictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import type { IrExprBlock, IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
-import {
-  buildTimeline,
-  opView
-} from "#backends/wasm/jit/analysis/timeline.js";
+import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import {
   jitFlagConditionValue,
   jitFlagProducerValue,
@@ -39,20 +36,18 @@ test("JIT value timeline records the same register source expression before and 
     entry: entry.snapshot()
   });
 
-  deepStrictEqual(opView(timeline, 0).expression(eaxSource), c32(3));
-  deepStrictEqual(opView(timeline, 2).expression(eaxSource), c32(7));
-  deepStrictEqual(opView(timeline, 0).ref(v(0)), c32(3));
-  deepStrictEqual(opView(timeline, 2).ref(v(1)), c32(7));
-  deepStrictEqual(timeline.storageReads, [
-    { opIndex: 0, source: reg("eax"), accessWidth: 32, signed: false, value: c32(3) },
-    { opIndex: 2, source: reg("eax"), accessWidth: 32, signed: false, value: c32(7) }
-  ]);
+  deepStrictEqual(timeline.viewAt(0).expression(eaxSource), c32(3));
+  deepStrictEqual(timeline.viewAt(2).expression(eaxSource), c32(7));
+  deepStrictEqual(timeline.viewAt(0).ref(v(0)), c32(3));
+  deepStrictEqual(timeline.viewAt(2).ref(v(1)), c32(7));
+  deepStrictEqual(timeline.viewAt(0).storageRead({ source: reg("eax"), accessWidth: 32 }), c32(3));
+  deepStrictEqual(timeline.viewAt(2).storageRead({ source: reg("eax"), accessWidth: 32 }), c32(7));
   deepStrictEqual(timeline.writes, [{
     opIndex: 1,
     slot: { kind: "reg32", reg: "eax" },
     value: c32(7)
   }]);
-  deepStrictEqual(timeline.final.regs.readReg32("eax"), c32(7));
+  deepStrictEqual(timeline.finalState.regs.readReg32("eax"), c32(7));
 });
 
 test("JIT value timeline records partial register writes as named register aliases", () => {
@@ -71,7 +66,30 @@ test("JIT value timeline records partial register writes as named register alias
     slot: { kind: "reg8", reg: "al" },
     value: c32(0x7f)
   }]);
-  deepStrictEqual(timeline.final.regs.readReg32("eax"), expected);
+  deepStrictEqual(timeline.finalState.regs.readReg32("eax"), expected);
+});
+
+test("JIT value timeline snapshots are queried at boundaries", () => {
+  const entry = createJitValueState();
+  const expressionBlock = [
+    { op: "let32", dst: v(0), value: source(reg("eax")) },
+    { op: "set", target: reg("eax"), value: c32(7), accessWidth: 32 },
+    { op: "next" }
+  ] as const satisfies IrExprBlock;
+
+  entry.regs.writeReg32("eax", c32(3));
+
+  const timeline = buildTimeline({
+    operands: [],
+    expressions: expressionBlock,
+    entry: entry.snapshot()
+  });
+
+  strictEqual(Object.hasOwn(timeline, "snapshots"), false);
+  deepStrictEqual(timeline.snapshotAt(0).regs.readReg32("eax"), c32(3));
+  deepStrictEqual(timeline.snapshotAt(1).regs.readReg32("eax"), c32(3));
+  deepStrictEqual(timeline.snapshotAt(2).regs.readReg32("eax"), c32(7));
+  deepStrictEqual(timeline.snapshotAt(expressionBlock.length).regs.readReg32("eax"), c32(7));
 });
 
 test("JIT value timeline records condition reads before and after flag writes", () => {
@@ -109,8 +127,8 @@ test("JIT value timeline records condition reads before and after flag writes", 
     entry: createJitValueState().snapshot()
   });
 
-  deepStrictEqual(opView(timeline, 0).expression(condition), jitFlagConditionValue(jitInputAluFlagsValue(), "E"));
-  deepStrictEqual(opView(timeline, 4).expression(condition), jitFlagConditionValue(expectedFlags, "E"));
+  deepStrictEqual(timeline.viewAt(0).expression(condition), jitFlagConditionValue(jitInputAluFlagsValue(), "E"));
+  deepStrictEqual(timeline.viewAt(4).expression(condition), jitFlagConditionValue(expectedFlags, "E"));
   deepStrictEqual(timeline.writes, [{
     opIndex: 3,
     slot: { kind: "aluFlags" },
@@ -133,7 +151,7 @@ test("JIT value timeline records memory operand effective addresses", () => {
     }
   }] as const satisfies readonly JitOperandBinding[];
   const expressionBlock = [
-    { op: "let32", dst: v(0), value: exprAdd(source(memoryOperand), c32(1)) },
+    { op: "let32", dst: v(0), value: { kind: "address", operand: memoryOperand } },
     { op: "set", target: memoryOperand, value: c32(7), accessWidth: 32 }
   ] as const satisfies IrExprBlock;
 
@@ -147,14 +165,12 @@ test("JIT value timeline records memory operand effective addresses", () => {
   });
   const expectedAddress = jitAdd(jitAdd(c32(3), c32(20)), c32(0x20));
 
-  deepStrictEqual(opView(timeline, 0).address(memoryOperand), expectedAddress);
-  deepStrictEqual(opView(timeline, 1).address(memoryOperand), expectedAddress);
-  deepStrictEqual(timeline.storageReads, [{
-    opIndex: 0,
-    source: memoryOperand,
-    accessWidth: 32,
-    signed: false
-  }]);
+  deepStrictEqual(timeline.viewAt(0).address(memoryOperand), expectedAddress);
+  deepStrictEqual(timeline.viewAt(1).address(memoryOperand), expectedAddress);
+  strictEqual(timeline.viewAt(0).hasStorageRead({ source: memoryOperand, accessWidth: 32 }), false);
+  strictEqual(timeline.viewAt(1).hasStorageRead({ source: memoryOperand, accessWidth: 32 }), false);
+  throws(() => timeline.viewAt(0).storageRead({ source: memoryOperand, accessWidth: 32 }));
+  throws(() => timeline.viewAt(1).storageRead({ source: memoryOperand, accessWidth: 32 }));
 });
 
 test("JIT source-state values and value timeline resolve overlapping values the same way", () => {
@@ -201,9 +217,9 @@ test("JIT source-state values and value timeline resolve overlapping values the 
     readAluFlags: () => flags
   });
 
-  deepStrictEqual(resolver.valueForExpression(expressionBlock[0].value), opView(timeline, 0).ref(v(0)));
-  deepStrictEqual(resolver.valueForExpression(expressionBlock[1].value), opView(timeline, 1).ref(v(1)));
-  deepStrictEqual(resolver.valueForExpression(expressionBlock[2].value), opView(timeline, 2).ref(v(2)));
+  deepStrictEqual(resolver.valueForExpression(expressionBlock[0].value), timeline.viewAt(0).ref(v(0)));
+  deepStrictEqual(resolver.valueForExpression(expressionBlock[1].value), timeline.viewAt(1).ref(v(1)));
+  deepStrictEqual(resolver.valueForExpression(expressionBlock[2].value), timeline.viewAt(2).ref(v(2)));
 });
 
 test("JIT timeline op view reads planned effective-address lookups only", () => {
@@ -227,10 +243,12 @@ test("JIT timeline op view reads planned effective-address lookups only", () => 
     entry: createJitValueState().snapshot()
   });
 
-  deepStrictEqual(opView(timeline, 0).address(op(0)), undefined);
+  strictEqual(timeline.viewAt(0).hasAddress(op(0)), false);
+  throws(() => timeline.viewAt(0).address(op(0)));
+  strictEqual(timeline.viewAt(1).hasAddress(op(0)), true);
   deepStrictEqual(
-    opView(timeline, 1).address(op(0)),
-    opView(timeline, 1).expression(expressionBlock[1].value)
+    timeline.viewAt(1).address(op(0)),
+    timeline.viewAt(1).expression(expressionBlock[1].value)
   );
 });
 
@@ -247,8 +265,10 @@ test("JIT timeline op view reads planned register-storage lookups only", () => {
     entry: entry.snapshot()
   });
 
-  deepStrictEqual(opView(timeline, 0).storageRead({ source: reg("eax"), accessWidth: 32 }), undefined);
-  deepStrictEqual(opView(timeline, 1).storageRead({ source: reg("eax"), accessWidth: 32 }), c32(3));
+  strictEqual(timeline.viewAt(0).hasStorageRead({ source: reg("eax"), accessWidth: 32 }), false);
+  throws(() => timeline.viewAt(0).storageRead({ source: reg("eax"), accessWidth: 32 }));
+  strictEqual(timeline.viewAt(1).hasStorageRead({ source: reg("eax"), accessWidth: 32 }), true);
+  deepStrictEqual(timeline.viewAt(1).storageRead({ source: reg("eax"), accessWidth: 32 }), c32(3));
 });
 
 test("JIT timeline records produced memory load definitions at one point", () => {
@@ -269,9 +289,17 @@ test("JIT timeline records produced memory load definitions at one point", () =>
     ref: v(0),
     value: produced
   }]);
-  deepStrictEqual(opView(timeline, 0).ref(v(0)), produced);
-  deepStrictEqual(opView(timeline, 1).ref(v(1)), produced);
-  deepStrictEqual(opView(timeline, 0).expression(expressionBlock[0].value), produced);
+  deepStrictEqual(timeline.viewAt(0).ref(v(0)), produced);
+  deepStrictEqual(timeline.viewAt(1).ref(v(1)), produced);
+  deepStrictEqual(timeline.viewAt(0).expression(expressionBlock[0].value), produced);
+  strictEqual(timeline.viewAt(0).hasStorageRead({
+    source: expressionBlock[0].value.source,
+    accessWidth: expressionBlock[0].value.accessWidth
+  }), true);
+  deepStrictEqual(timeline.viewAt(0).storageRead({
+    source: expressionBlock[0].value.source,
+    accessWidth: expressionBlock[0].value.accessWidth
+  }), produced);
 });
 
 test("JIT timeline op view fails clearly for invalid op indexes", () => {
@@ -281,7 +309,18 @@ test("JIT timeline op view fails clearly for invalid op indexes", () => {
     entry: createJitValueState().snapshot()
   });
 
-  throws(() => opView(timeline, 1), /missing JIT timeline op view for expression op 1/);
+  throws(() => timeline.viewAt(1));
+});
+
+test("JIT value timeline fails clearly for unresolved values", () => {
+  throws(
+    () => buildTimeline({
+      operands: [],
+      expressions: [{ op: "hostTrap", vector: v(99) }],
+      entry: createJitValueState().snapshot()
+    }),
+    /could not resolve JIT timeline value at expression op 0/
+  );
 });
 
 test("JIT value timeline ignores no-op flag writes before resolving inputs", () => {
@@ -302,9 +341,12 @@ test("JIT value timeline ignores no-op flag writes before resolving inputs", () 
   });
 
   deepStrictEqual(timeline.writes, []);
-  deepStrictEqual(opView(timeline, 0).ref(v(100)), undefined);
-  deepStrictEqual(opView(timeline, 0).ref(v(101)), undefined);
-  deepStrictEqual(opView(timeline, 0).ref(v(102)), undefined);
+  strictEqual(timeline.viewAt(0).hasRef(v(100)), false);
+  strictEqual(timeline.viewAt(0).hasRef(v(101)), false);
+  strictEqual(timeline.viewAt(0).hasRef(v(102)), false);
+  throws(() => timeline.viewAt(0).ref(v(100)));
+  throws(() => timeline.viewAt(0).ref(v(101)));
+  throws(() => timeline.viewAt(0).ref(v(102)));
 });
 
 function v(id: number) {

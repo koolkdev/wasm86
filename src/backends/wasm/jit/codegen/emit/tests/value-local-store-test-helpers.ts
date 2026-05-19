@@ -57,7 +57,7 @@ import {
   type InstructionEpochSource
 } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import type { Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
-import { buildTimeline } from "#backends/wasm/jit/analysis/timeline.js";
+import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import { valueUsesForExpressionBlock } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
 import {
   branchPath,

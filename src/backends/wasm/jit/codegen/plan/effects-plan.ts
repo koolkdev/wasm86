@@ -1,11 +1,6 @@
 import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
 import type { JitProducedValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
-  opView,
-  requireStorageAddress,
-  requireValueExpr
-} from "#backends/wasm/jit/analysis/timeline.js";
-import {
   jitExpressionOpIndexesForSourceOp
 } from "./expression-uses.js";
 import {
@@ -47,10 +42,9 @@ function planEffect(
   opEpochs: readonly number[]
 ): Effect {
   const at = effectPlacement(instruction, effectInfo, opEpochs);
-  const sourceOp = requiredAt(instruction.analysis.instruction.ir, effectInfo.at.opIndex);
-  const expressionOp = requiredAt(instruction.analysis.expressions.block, at.opIndex);
-  const view = opView(instruction.analysis.timeline, at.opIndex);
-  const valueOptions = { nextEip: instruction.analysis.instruction.nextEip };
+  const sourceOp = entryAt(instruction.analysis.instruction.ir, effectInfo.at.opIndex);
+  const expressionOp = entryAt(instruction.analysis.expressions.block, at.opIndex);
+  const view = instruction.analysis.timeline.viewAt(at.opIndex);
 
   switch (effectInfo.kind) {
     case "memoryGuard": {
@@ -61,7 +55,7 @@ function planEffect(
       return {
         kind: effectInfo.kind,
         at,
-        address: requireValueExpr(view, expressionOp.address, valueOptions),
+        address: view.value(expressionOp.address),
         byteLength: expressionOp.byteLength,
         access: expressionOp.access,
         exit: effectInfo.faultExit
@@ -75,8 +69,8 @@ function planEffect(
       return {
         kind: effectInfo.kind,
         at,
-        address: requireStorageAddress(view, expressionOp.target, valueOptions),
-        value: requireValueExpr(view, expressionOp.value, valueOptions),
+        address: view.storageAddress(expressionOp.target),
+        value: view.value(expressionOp.value),
         width: expressionOp.accessWidth
       };
     }
@@ -93,7 +87,7 @@ function planEffect(
         kind: effectInfo.kind,
         at,
         result: producedValue(instruction, at.opIndex, expressionOp.dst.id),
-        address: requireStorageAddress(view, expressionOp.value.source, valueOptions),
+        address: view.storageAddress(expressionOp.value.source),
         width: expressionOp.value.accessWidth,
         signed: expressionOp.value.signed === true
       };
@@ -106,7 +100,7 @@ function planEffect(
       return {
         kind: effectInfo.kind,
         at,
-        target: requireValueExpr(view, expressionOp.target, valueOptions),
+        target: view.value(expressionOp.target),
         exit: effectInfo.exit
       };
     }
@@ -120,9 +114,9 @@ function planEffect(
       return {
         kind: effectInfo.kind,
         at,
-        condition: requireValueExpr(view, expressionOp.condition, valueOptions),
-        takenTarget: requireValueExpr(view, expressionOp.taken, valueOptions),
-        notTakenTarget: requireValueExpr(view, expressionOp.notTaken, valueOptions),
+        condition: view.value(expressionOp.condition),
+        takenTarget: view.value(expressionOp.taken),
+        notTakenTarget: view.value(expressionOp.notTaken),
         taken: effectInfo.taken,
         notTaken: effectInfo.notTaken
       };
@@ -135,7 +129,7 @@ function planEffect(
       return {
         kind: effectInfo.kind,
         at,
-        vector: requireValueExpr(view, expressionOp.vector, valueOptions),
+        vector: view.value(expressionOp.vector),
         exit: effectInfo.exit
       };
     }
@@ -196,7 +190,7 @@ function logicalWriteEpochCount(instruction: PlannedInstruction): number {
   ).size;
 }
 
-function requiredAt<T>(
+function entryAt<T>(
   entries: readonly T[],
   index: number
 ): T {

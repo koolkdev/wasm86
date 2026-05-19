@@ -10,10 +10,7 @@ import {
   type Path,
   type PathMap
 } from "#backends/wasm/jit/analysis/paths.js";
-import {
-  opView,
-  type Timeline
-} from "#backends/wasm/jit/analysis/timeline.js";
+import type { Timeline } from "#backends/wasm/jit/analysis/timeline-types.js";
 import { jitExpressionOpEpochs } from "#backends/wasm/jit/codegen/plan/epochs.js";
 import {
   expandRootUse,
@@ -196,15 +193,14 @@ function storageAddressRoots(
   switch (storage.kind) {
     case "mem":
       return valueRootsForExpression(input, storage.address, at, path, purpose);
-    case "operand": {
-      const value = opView(input.valueTimeline, at.opIndex).address(storage);
+    case "operand":
+    case "reg": {
+      const view = input.valueTimeline.viewAt(at.opIndex);
 
-      return value === undefined
-        ? []
-        : [{ value, at, path, purpose }];
+      return view.hasStorageAddress(storage)
+        ? [{ value: view.storageAddress(storage), at, path, purpose }]
+        : [];
     }
-    case "reg":
-      return [];
   }
 }
 
@@ -215,19 +211,7 @@ function jitValueForExpression(
   value: IrValueExpr,
   opIndex: number
 ): JitValue | undefined {
-  const view = opView(input.valueTimeline, opIndex);
+  const view = input.valueTimeline.viewAt(opIndex);
 
-  switch (value.kind) {
-    case "var":
-    case "const":
-    case "nextEip":
-      return view.ref(value);
-    case "source":
-    case "address":
-    case "flags.condition":
-    case "value.binary":
-    case "value.unary":
-    case "value.select":
-      return view.expression(value);
-  }
+  return view.hasValue(value) ? view.value(value) : undefined;
 }

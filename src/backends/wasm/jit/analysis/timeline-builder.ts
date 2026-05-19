@@ -4,27 +4,37 @@ import type {
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
+import {
+  createJitValueResolver,
+  type JitValueResolver
+} from "#backends/wasm/jit/analysis/value-resolver.js";
 import type {
   JitArchitecturalSlot,
   JitRegisterSlot,
   JitProducedValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import {
   jitRegisterSlotForAlias,
   jitRegisterSlotForWrite
 } from "#backends/wasm/jit/ir/values/slots.js";
+import { u32 } from "#x86/state/cpu-state.js";
 import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
 import {
-  type PlacedStorageRead,
   type ProducedDefinition,
   type SlotWrite,
   type Timeline,
+  type TimelineExpression,
+  type TimelineExpressionId,
   type TimelineInput,
+  type TimelineStorageId,
+  type TimelineStorageReadId,
   type ValueSnapshot
-} from "./timeline-internals.js";
+} from "./timeline-types.js";
+import { TimelineRegistry } from "./timeline-registry.js";
+import { createTimeline } from "./timeline.js";
 import { ValueStateBuilder, type ValueStateWrite } from "./value-state.js";
 
 export function buildTimeline(input: TimelineInput): Timeline {
@@ -36,24 +46,37 @@ class TimelineBuilder {
   readonly #ops: readonly IrExprOp[];
   readonly #producedByVar: ReadonlyMap<number, JitProducedValue> | undefined;
   readonly #valueState: ValueStateBuilder;
+  readonly #resolver: JitValueResolver;
+  readonly #ids = new TimelineRegistry();
   readonly #valueRefs = new Map<number, JitValue>();
-  readonly #snapshots: ValueSnapshot[] = [];
-  readonly #expressions: Map<IrValueExpr, JitValue>[] = [];
-  readonly #refs: Map<number, JitValue>[] = [];
-  readonly #addresses: Map<number, JitValue>[] = [];
-  readonly #storageReads: PlacedStorageRead[] = [];
+  readonly #expressionsByOp = new Map<number, Map<TimelineExpressionId, JitValue>>();
+  readonly #refsByOp = new Map<number, Map<number, JitValue>>();
+  readonly #addressesByOp = new Map<number, Map<TimelineStorageId, JitValue>>();
+  readonly #storageReadsByOp = new Map<number, Map<TimelineStorageReadId, JitValue>>();
   readonly #writes: SlotWrite[] = [];
   readonly #produced: ProducedDefinition[] = [];
-  readonly #placedRefKeys = new Set<string>();
   #currentOpIndex = -1;
   #currentSetValue: JitValue | undefined;
   #currentSetValueResolved = false;
+  readonly #entry: ValueSnapshot;
+  readonly #nextEip: JitValue | undefined;
 
   constructor(input: TimelineInput) {
     this.#operands = input.operands;
     this.#ops = input.expressions;
     this.#producedByVar = input.producedByVar;
-    this.#valueState = new ValueStateBuilder(input.entry);
+    this.#entry = input.entry;
+    this.#nextEip = input.nextEip === undefined
+      ? undefined
+      : { kind: "const", type: "i32", value: u32(input.nextEip) };
+    this.#valueState = new ValueStateBuilder(this.#entry);
+    this.#resolver = createJitValueResolver({
+      operands: this.#operands,
+      readReg32: (reg) => this.#valueState.registers().readReg32(reg),
+      readAluFlags: () => this.#valueState.flags().readAluFlags(),
+      readValueRef: (value) =>
+        value.kind === "var" ? this.#valueRefs.get(value.id) : undefined
+    });
   }
 
   build(): Timeline {
@@ -78,17 +101,17 @@ class TimelineBuilder {
     this.#currentOpIndex = opIndex;
     this.#currentSetValue = undefined;
     this.#currentSetValueResolved = false;
-    this.#snapshots[opIndex] = this.#valueState.snapshot();
-    this.#expressions[opIndex] = new Map();
-    this.#refs[opIndex] = new Map();
-    this.#addresses[opIndex] = new Map();
   }
 
   #recordInputs(op: IrExprOp): void {
     switch (op.op) {
       case "let32":
-        if (this.#producedByVar?.has(op.dst.id)) {
-          this.#recordNestedValues(op.value);
+        {
+          const produced = this.#producedByVar?.get(op.dst.id);
+
+          if (produced !== undefined) {
+            this.#recordProducedExpressionInputs(op.value, produced);
+          }
         }
         return;
       case "set":
@@ -170,29 +193,21 @@ class TimelineBuilder {
   }
 
   #finish(): Timeline {
-    for (let opIndex = 0; opIndex < this.#ops.length; opIndex += 1) {
-      if (
-        this.#snapshots[opIndex] === undefined ||
-        this.#expressions[opIndex] === undefined ||
-        this.#refs[opIndex] === undefined ||
-        this.#addresses[opIndex] === undefined
-      ) {
-        throw new Error(`missing JIT timeline data for expression op ${opIndex}`);
+    return createTimeline({
+      entry: this.#entry,
+      finalState: this.#valueState.snapshot(),
+      opCount: this.#ops.length,
+      writes: this.#writes,
+      produced: this.#produced,
+      storage: {
+        catalog: this.#ids,
+        ...(this.#nextEip === undefined ? {} : { nextEip: this.#nextEip }),
+        ...(this.#expressionsByOp.size === 0 ? {} : { expressionsByOp: this.#expressionsByOp }),
+        ...(this.#refsByOp.size === 0 ? {} : { refsByOp: this.#refsByOp }),
+        ...(this.#addressesByOp.size === 0 ? {} : { addressesByOp: this.#addressesByOp }),
+        ...(this.#storageReadsByOp.size === 0 ? {} : { storageReadsByOp: this.#storageReadsByOp })
       }
-    }
-
-    return {
-      snapshots: [...this.#snapshots],
-      final: this.#valueState.snapshot(),
-      storageReads: [...this.#storageReads],
-      writes: [...this.#writes],
-      produced: [...this.#produced],
-      lookups: {
-        expressions: this.#expressions.map((values) => new Map(values)),
-        refs: this.#refs.map((values) => new Map(values)),
-        addresses: this.#addresses.map((values) => new Map(values))
-      }
-    };
+    });
   }
 
   #recordLetMeaning(op: Extract<IrExprOp, { op: "let32" }>): void {
@@ -200,12 +215,11 @@ class TimelineBuilder {
     const value = produced ?? this.#valueForExpression(op.value);
 
     if (produced !== undefined) {
-      this.#recordExpressionValue(op.value, produced);
-    }
+      if (op.value.kind !== "source") {
+        throw new Error(`JIT produced value for var ${op.dst.id} must come from a storage read`);
+      }
 
-    if (value === undefined) {
-      this.#valueRefs.delete(op.dst.id);
-      return;
+      this.#recordExpressionValue(op.value, produced);
     }
 
     this.#valueRefs.set(op.dst.id, value);
@@ -216,6 +230,10 @@ class TimelineBuilder {
     const value = this.#currentSetValueResolved
       ? this.#currentSetValue
       : this.#valueForExpression(op.value);
+
+    if (value === undefined) {
+      throw new Error(`missing current JIT set value at expression op ${this.#currentOpIndex}`);
+    }
 
     switch (op.target.kind) {
       case "mem":
@@ -229,7 +247,7 @@ class TimelineBuilder {
     }
   }
 
-  #recordOperandWrite(operandIndex: number, value: JitValue | undefined): void {
+  #recordOperandWrite(operandIndex: number, value: JitValue): void {
     const binding = this.#operands[operandIndex];
 
     if (binding === undefined) {
@@ -251,20 +269,12 @@ class TimelineBuilder {
     reg: Reg32,
     bitOffset: number,
     width: OperandWidth,
-    value: JitValue | undefined
+    value: JitValue
   ): void {
-    if (value === undefined) {
-      throw new Error(`could not resolve JIT timeline register write at expression op ${this.#currentOpIndex}`);
-    }
-
     this.#recordRegisterSlotWrite(jitRegisterSlotForWrite(reg, bitOffset, width), value);
   }
 
-  #recordRegisterSlotWrite(slot: JitRegisterSlot, value: JitValue | undefined): void {
-    if (value === undefined) {
-      throw new Error(`could not resolve JIT timeline register write at expression op ${this.#currentOpIndex}`);
-    }
-
+  #recordRegisterSlotWrite(slot: JitRegisterSlot, value: JitValue): void {
     const write = this.#recordRegisterSlotSet(slot, value);
 
     this.#recordWrite(write.slot, write.value);
@@ -293,7 +303,7 @@ class TimelineBuilder {
     const resolved: Record<string, JitValue> = {};
 
     for (const [name, value] of Object.entries(inputs)) {
-      resolved[name] = this.#requiredValueForRef(value);
+      resolved[name] = this.#valueForRef(value);
     }
 
     return resolved;
@@ -305,64 +315,100 @@ class TimelineBuilder {
         this.#valueForExpression(storage.address);
         return;
       case "operand":
-        this.#recordAddress(storage);
+        if (this.#operands[storage.index]?.kind === "static.mem") {
+          this.#valueForAddress(storage);
+        }
         return;
       case "reg":
         return;
     }
   }
 
-  #recordAddress(operand: OperandRef): void {
-    const value = this.#resolver().valueForEffectiveAddress(operand);
-
-    if (value === undefined) {
-      return;
-    }
-
-    const values = this.#currentAddressValues();
-
-    if (values.has(operand.index)) {
-      return;
-    }
-
-    values.set(operand.index, value);
-  }
-
-  #valueForExpression(expression: IrValueExpr): JitValue | undefined {
+  #valueForExpression(expression: IrValueExpr): JitValue {
     switch (expression.kind) {
       case "var":
       case "const":
       case "nextEip":
-        return this.#recordResolvedExpression(expression, this.#valueForRef(expression));
+        return this.#valueForRef(expression);
+      case "source":
+      case "address":
+      case "flags.condition":
+      case "value.binary":
+      case "value.unary":
+      case "value.select":
+        break;
+    }
+
+    const id = this.#ids.registerExpression(expression);
+    const values = this.#currentExpressionValues();
+
+    if (values.has(id)) {
+      return values.get(id)!;
+    }
+
+    const value = this.#resolveExpression(expression);
+
+    values.set(id, value);
+    return value;
+  }
+
+  #resolveExpression(expression: IrValueExpr): JitValue {
+    switch (expression.kind) {
       case "source": {
         this.#recordStorageInputs(expression.source);
-        const value = this.#resolver().valueForExpression(expression);
-
-        this.#recordStorageRead(expression, value);
-        return this.#recordResolvedExpression(expression, value);
+        return this.#valueForStorageRead(expression);
       }
       case "address": {
-        this.#recordAddress(expression.operand);
-        return this.#recordResolvedExpression(expression, this.#resolver().valueForExpression(expression));
+        return this.#valueForAddress(expression.operand);
       }
-      case "value.binary":
-        this.#valueForExpression(expression.a);
-        this.#valueForExpression(expression.b);
-        return this.#recordResolvedExpression(expression, this.#resolver().valueForExpression(expression));
-      case "value.unary":
-        this.#valueForExpression(expression.value);
-        return this.#recordResolvedExpression(expression, this.#resolver().valueForExpression(expression));
-      case "value.select":
-        this.#valueForExpression(expression.condition);
-        this.#valueForExpression(expression.whenTrue);
-        this.#valueForExpression(expression.whenFalse);
-        return this.#recordResolvedExpression(expression, this.#resolver().valueForExpression(expression));
+      case "value.binary": {
+        const a = this.#valueForExpression(expression.a);
+        const b = this.#valueForExpression(expression.b);
+
+        return simplifyValue({
+          kind: expression.kind,
+          type: expression.type,
+          operator: expression.operator,
+          a,
+          b
+        });
+      }
+      case "value.unary": {
+        const value = this.#valueForExpression(expression.value);
+
+        return simplifyValue({
+          kind: expression.kind,
+          type: expression.type,
+          operator: expression.operator,
+          value
+        });
+      }
+      case "value.select": {
+        const condition = this.#valueForExpression(expression.condition);
+        const whenTrue = this.#valueForExpression(expression.whenTrue);
+        const whenFalse = this.#valueForExpression(expression.whenFalse);
+
+        return simplifyValue({
+          kind: expression.kind,
+          type: expression.type,
+          condition,
+          whenTrue,
+          whenFalse
+        });
+      }
       case "flags.condition":
-        return this.#recordResolvedExpression(expression, this.#resolver().valueForExpression(expression));
+        return this.#resolvedValue(this.#resolver.valueForExpression(expression));
+      case "var":
+      case "const":
+      case "nextEip":
+        return this.#valueForRef(expression);
     }
   }
 
-  #recordNestedValues(expression: IrValueExpr): void {
+  #recordProducedExpressionInputs(
+    expression: IrValueExpr,
+    produced?: JitProducedValue
+  ): void {
     switch (expression.kind) {
       case "var":
       case "const":
@@ -371,74 +417,63 @@ class TimelineBuilder {
         return;
       case "source":
         this.#recordStorageInputs(expression.source);
-        this.#recordStorageRead(expression, this.#resolver().valueForExpression(expression));
+        if (produced === undefined) {
+          this.#valueForStorageRead(expression);
+        } else {
+          this.#recordStorageReadValue(expression, produced);
+        }
         return;
       case "address":
-        this.#recordAddress(expression.operand);
+        this.#valueForAddress(expression.operand);
         return;
       case "value.binary":
-        this.#recordNestedValues(expression.a);
-        this.#recordNestedValues(expression.b);
+        this.#recordProducedExpressionInputs(expression.a);
+        this.#recordProducedExpressionInputs(expression.b);
         return;
       case "value.unary":
-        this.#recordNestedValues(expression.value);
+        this.#recordProducedExpressionInputs(expression.value);
         return;
       case "value.select":
-        this.#recordNestedValues(expression.condition);
-        this.#recordNestedValues(expression.whenTrue);
-        this.#recordNestedValues(expression.whenFalse);
+        this.#recordProducedExpressionInputs(expression.condition);
+        this.#recordProducedExpressionInputs(expression.whenTrue);
+        this.#recordProducedExpressionInputs(expression.whenFalse);
         return;
       case "flags.condition":
         return;
     }
   }
 
-  #requiredValueForRef(ref: ValueRef): JitValue {
-    const resolved = this.#valueForRef(ref);
+  #valueForRef(ref: ValueRef): JitValue {
+    switch (ref.kind) {
+      case "const":
+        return this.#resolvedValue(this.#resolver.valueForValueRef(ref));
+      case "nextEip":
+        if (this.#nextEip === undefined) {
+          throw new Error(`could not resolve JIT timeline value at expression op ${this.#currentOpIndex}`);
+        }
 
-    if (resolved === undefined) {
-      throw new Error(`could not resolve ${valueRefLabel(ref)} in JIT timeline`);
+        return this.#nextEip;
+      case "var": {
+        const values = this.#currentRefValues();
+
+        if (values.has(ref.id)) {
+          return values.get(ref.id)!;
+        }
+
+        const resolved = this.#valueRefs.get(ref.id);
+
+        if (resolved === undefined) {
+          throw new Error(`could not resolve JIT timeline value at expression op ${this.#currentOpIndex}`);
+        }
+
+        values.set(ref.id, resolved);
+        return resolved;
+      }
     }
-
-    return resolved;
   }
 
-  #valueForRef(ref: ValueRef): JitValue | undefined {
-    const resolved = this.#resolver().valueForValueRef(ref);
-
-    if (resolved !== undefined) {
-      this.#recordRefValue(ref, resolved);
-    }
-
-    return resolved;
-  }
-
-  #resolver() {
-    return createJitValueResolver({
-      operands: this.#operands,
-      readReg32: (reg) => this.#valueState.registers().readReg32(reg),
-      readAluFlags: () => this.#valueState.flags().readAluFlags(),
-      readValueRef: (value) =>
-        value.kind === "var" ? this.#valueRefs.get(value.id) : undefined
-    });
-  }
-
-  #recordResolvedExpression(expression: IrValueExpr, value: JitValue | undefined): JitValue | undefined {
-    if (value !== undefined) {
-      this.#recordExpressionValue(expression, value);
-    }
-
-    return value;
-  }
-
-  #recordExpressionValue(expression: IrValueExpr, value: JitValue): void {
-    const values = this.#currentExpressionValues();
-
-    if (values.has(expression)) {
-      return;
-    }
-
-    values.set(expression, value);
+  #recordExpressionValue(expression: TimelineExpression, value: JitValue): void {
+    this.#currentExpressionValues().set(this.#ids.registerExpression(expression), value);
   }
 
   #recordRefValue(ref: ValueRef, value: JitValue): void {
@@ -446,24 +481,45 @@ class TimelineBuilder {
       return;
     }
 
-    const key = `${this.#currentOpIndex}:${valueRefKey(ref)}`;
-
-    if (this.#placedRefKeys.has(key)) {
-      return;
-    }
-
-    this.#placedRefKeys.add(key);
     this.#currentRefValues().set(ref.id, value);
   }
 
-  #recordStorageRead(expression: Extract<IrValueExpr, { kind: "source" }>, value: JitValue | undefined): void {
-    this.#storageReads.push({
-      opIndex: this.#currentOpIndex,
+  #valueForStorageRead(expression: Extract<IrValueExpr, { kind: "source" }>): JitValue {
+    const id = this.#ids.registerStorageRead({
       source: expression.source,
       accessWidth: expression.accessWidth,
-      signed: expression.signed === true,
-      ...(value === undefined ? {} : { value })
+      signed: expression.signed === true
     });
+    const values = this.#currentStorageReadValues();
+
+    if (values.has(id)) {
+      return values.get(id)!;
+    }
+
+    const value = this.#resolvedValue(this.#resolver.valueForStorage(
+      expression.source,
+      expression.accessWidth,
+      expression.signed === true
+    ));
+
+    values.set(id, value);
+    return value;
+  }
+
+  #recordStorageReadValue(
+    expression: Extract<IrValueExpr, { kind: "source" }>,
+    value: JitValue
+  ): void {
+    const id = this.#ids.registerStorageRead({
+      source: expression.source,
+      accessWidth: expression.accessWidth,
+      signed: expression.signed === true
+    });
+    const values = this.#currentStorageReadValues();
+
+    if (!values.has(id)) {
+      values.set(id, value);
+    }
   }
 
   #recordWrite(slot: JitArchitecturalSlot, value: JitValue): void {
@@ -474,55 +530,58 @@ class TimelineBuilder {
     });
   }
 
-  #currentExpressionValues(): Map<IrValueExpr, JitValue> {
-    const values = this.#expressions[this.#currentOpIndex];
-
-    if (values === undefined) {
-      throw new Error(`missing JIT timeline expression values for op ${this.#currentOpIndex}`);
+  #valueForAddress(operand: OperandRef): JitValue {
+    if (this.#operands[operand.index]?.kind !== "static.mem") {
+      throw new Error(`JIT effective address is not available for operand ${operand.index}`);
     }
 
-    return values;
+    const id = this.#ids.registerStorage(operand);
+    const values = this.#currentAddressValues();
+
+    if (values.has(id)) {
+      return values.get(id)!;
+    }
+
+    const value = this.#resolvedValue(this.#resolver.valueForEffectiveAddress(operand));
+
+    values.set(id, value);
+    return value;
+  }
+
+  #resolvedValue(value: JitValue | undefined): JitValue {
+    if (value === undefined) {
+      throw new Error(`could not resolve JIT timeline value at expression op ${this.#currentOpIndex}`);
+    }
+
+    return value;
+  }
+
+  #currentExpressionValues(): Map<TimelineExpressionId, JitValue> {
+    return this.#currentOpMap(this.#expressionsByOp);
   }
 
   #currentRefValues(): Map<number, JitValue> {
-    const values = this.#refs[this.#currentOpIndex];
+    return this.#currentOpMap(this.#refsByOp);
+  }
+
+  #currentAddressValues(): Map<TimelineStorageId, JitValue> {
+    return this.#currentOpMap(this.#addressesByOp);
+  }
+
+  #currentStorageReadValues(): Map<TimelineStorageReadId, JitValue> {
+    return this.#currentOpMap(this.#storageReadsByOp);
+  }
+
+  #currentOpMap<TId>(
+    maps: Map<number, Map<TId, JitValue>>
+  ): Map<TId, JitValue> {
+    let values = maps.get(this.#currentOpIndex);
 
     if (values === undefined) {
-      throw new Error(`missing JIT timeline value-ref values for op ${this.#currentOpIndex}`);
+      values = new Map();
+      maps.set(this.#currentOpIndex, values);
     }
 
     return values;
-  }
-
-  #currentAddressValues(): Map<number, JitValue> {
-    const values = this.#addresses[this.#currentOpIndex];
-
-    if (values === undefined) {
-      throw new Error(`missing JIT timeline effective-address values for op ${this.#currentOpIndex}`);
-    }
-
-    return values;
-  }
-}
-
-function valueRefKey(ref: ValueRef): string {
-  switch (ref.kind) {
-    case "var":
-      return `var:${ref.id}`;
-    case "const":
-      return `const:${ref.type}:${ref.value}`;
-    case "nextEip":
-      return "nextEip";
-  }
-}
-
-function valueRefLabel(ref: ValueRef): string {
-  switch (ref.kind) {
-    case "var":
-      return `var ${ref.id}`;
-    case "const":
-      return `const ${ref.value}`;
-    case "nextEip":
-      return "nextEip";
   }
 }
