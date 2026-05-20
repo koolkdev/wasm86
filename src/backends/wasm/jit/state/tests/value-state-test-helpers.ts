@@ -14,14 +14,14 @@ import {
   jitInsertBits,
   jitInsertMaskedBits
 } from "#backends/wasm/jit/ir/values/builders.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type {
   JitArchitecturalSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import {
   createJitValueState,
-  reg16Slot,
-  reg8Slot,
+  createJitValueStateFromSnapshot,
   type JitValueSlotEntry
 } from "#backends/wasm/jit/state/value-state.js";
 
@@ -40,9 +40,9 @@ export {
   jitInputReg32Value,
   jitInsertBits,
   jitInsertMaskedBits,
+  simplifyValue,
   createJitValueState,
-  reg16Slot,
-  reg8Slot
+  createJitValueStateFromSnapshot
 };
 export type { Reg32, JitArchitecturalSlot, JitValue, JitValueSlotEntry };
 

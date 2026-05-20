@@ -71,7 +71,7 @@ export class RegisterValueStateBuilder {
     this.#regs.writeReg16(reg, value);
     return {
       slot: { kind: "reg16", reg },
-      value: this.#regs.readReg16(reg)
+      value
     };
   }
 
@@ -79,7 +79,7 @@ export class RegisterValueStateBuilder {
     this.#regs.writeReg8(reg, value);
     return {
       slot: { kind: "reg8", reg },
-      value: this.#regs.readReg8(reg)
+      value
     };
   }
 }

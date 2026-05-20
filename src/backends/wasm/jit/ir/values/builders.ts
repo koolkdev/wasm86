@@ -11,7 +11,10 @@ import {
   flagProducerInputsToRecord,
   type FlagProducerInputs
 } from "#x86/ir/model/flags.js";
-import { simplifyValue } from "./simplify.js";
+import {
+  assertBitRange,
+  normalizeU32Mask
+} from "./bits.js";
 import {
   normalizeFlagProducerMask,
   normalizeOptionalWidth
@@ -71,17 +74,19 @@ export function jitFlagProducerValue<Producer extends FlagProducerName>(
     flagProducerInputsToRecord(producer, inputs)
   );
 
-  return simplifyValue({
+  return {
     kind: "flagProducer",
     producer,
     ...(normalizedWidth === undefined ? {} : { width: normalizedWidth }),
     inputs: typedInputs,
     mask
-  });
+  };
 }
 
 export function jitExtractBits(value: JitValue, bitOffset: number, width: OperandWidth): JitValue {
-  return simplifyValue({ kind: "extractBits", value, bitOffset, width });
+  assertBitRange(bitOffset, width, "extractBits");
+
+  return { kind: "extractBits", value, bitOffset, width };
 }
 
 export function jitInsertBits(
@@ -90,17 +95,19 @@ export function jitInsertBits(
   bitOffset: number,
   width: OperandWidth
 ): JitValue {
-  return simplifyValue({ kind: "insertBits", base, value, bitOffset, width });
+  assertBitRange(bitOffset, width, "insertBits");
+
+  return { kind: "insertBits", base, value, bitOffset, width };
 }
 
 export function jitExtractMaskedBits(value: JitValue, mask: number): JitValue {
-  return simplifyValue({ kind: "extractMaskedBits", value, mask });
+  return { kind: "extractMaskedBits", value, mask: normalizeU32Mask(mask, "extractMaskedBits mask") };
 }
 
 export function jitInsertMaskedBits(base: JitValue, value: JitValue, mask: number): JitValue {
-  return simplifyValue({ kind: "insertMaskedBits", base, value, mask });
+  return { kind: "insertMaskedBits", base, value, mask: normalizeU32Mask(mask, "insertMaskedBits mask") };
 }
 
 export function jitFlagConditionValue(flags: JitValue, cc: ConditionCode): JitValue {
-  return simplifyValue({ kind: "flagCondition", flags, cc });
+  return { kind: "flagCondition", flags, cc };
 }

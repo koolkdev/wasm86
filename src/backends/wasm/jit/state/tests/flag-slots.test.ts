@@ -10,6 +10,7 @@ import {
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertMaskedBits,
+  simplifyValue,
   createJitValueState,
   c32,
   add,
@@ -34,15 +35,32 @@ test("JIT ALU flag value family preserves partial flag writes symbolically", () 
 
   deepStrictEqual(state.flags.readAluFlags(), expected);
   deepStrictEqual(state.flags.readFlagBits(IR_ALU_FLAG_MASKS.CF), jitExtractMaskedBits(
-    jitInputAluFlagsValue(),
+    expected,
     IR_ALU_FLAG_MASKS.CF
   ));
   deepStrictEqual(state.flags.readFlagBits(IR_ALU_FLAG_MASKS.ZF), jitExtractMaskedBits(
+    expected,
+    IR_ALU_FLAG_MASKS.ZF
+  ));
+  deepStrictEqual(simplifyValue(state.flags.readFlagBits(IR_ALU_FLAG_MASKS.CF)), jitExtractMaskedBits(
+    jitInputAluFlagsValue(),
+    IR_ALU_FLAG_MASKS.CF
+  ));
+  deepStrictEqual(simplifyValue(state.flags.readFlagBits(IR_ALU_FLAG_MASKS.ZF)), jitExtractMaskedBits(
     incFlags,
     IR_ALU_FLAG_MASKS.ZF
   ));
   deepStrictEqual(state.flags.condition("E"), jitFlagConditionValue(expected, "E"));
   deepStrictEqual(changedSlots(state.snapshot().slots.changedEntries()), ["aluFlags"]);
+});
+
+test("JIT ALU flag value family tracks exact projected partial writes conservatively", () => {
+  const state = createJitValueState();
+
+  state.flags.writeFlagBits(IR_ALU_FLAG_MASKS.CF, state.flags.readFlagBits(IR_ALU_FLAG_MASKS.CF));
+
+  deepStrictEqual(changedSlots(state.snapshot().slots.changedEntries()), ["aluFlags"]);
+  deepStrictEqual(simplifyValue(state.flags.readAluFlags()), jitInputAluFlagsValue());
 });
 
 test("JIT ALU flag value family lets later full writes replace partial merges", () => {

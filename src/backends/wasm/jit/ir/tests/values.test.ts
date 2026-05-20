@@ -26,6 +26,7 @@ import {
 } from "#backends/wasm/jit/ir/values/slots.js";
 import { valueCost } from "#backends/wasm/jit/ir/values/cost.js";
 import { valueKey } from "#backends/wasm/jit/ir/values/keys.js";
+import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import {
   valueChildren,
   walkValueChildren
@@ -36,32 +37,52 @@ import type {
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 
-test("JitValue bit simplification preserves exact unsigned bit semantics", () => {
+test("JitValue bit constructors are raw and explicit simplification preserves semantics", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
+  const constExtract = jitExtractBits(c32(0x1234_5678), 8, 8);
+  const identityInsert = jitInsertBits(eax, jitExtractBits(eax, 0, 8), 0, 8);
+  const insertedExtract = jitExtractBits(jitInsertBits(eax, ebx, 0, 8), 0, 8);
+  const repeatedInsert = jitInsertBits(jitInsertBits(eax, c32(0x12), 0, 8), c32(0x34), 0, 8);
 
-  deepStrictEqual(jitExtractBits(c32(0x1234_5678), 8, 8), c32(0x56));
-  deepStrictEqual(jitInsertBits(eax, jitExtractBits(eax, 0, 8), 0, 8), eax);
+  deepStrictEqual(constExtract, { kind: "extractBits", value: c32(0x1234_5678), bitOffset: 8, width: 8 });
+  deepStrictEqual(identityInsert, {
+    kind: "insertBits",
+    base: eax,
+    value: jitExtractBits(eax, 0, 8),
+    bitOffset: 0,
+    width: 8
+  });
+  deepStrictEqual(simplifyValue(constExtract), c32(0x56));
+  deepStrictEqual(simplifyValue(identityInsert), eax);
   deepStrictEqual(
-    jitExtractBits(jitInsertBits(eax, ebx, 0, 8), 0, 8),
+    simplifyValue(insertedExtract),
     jitExtractBits(ebx, 0, 8)
   );
   deepStrictEqual(
-    jitInsertBits(jitInsertBits(eax, c32(0x12), 0, 8), c32(0x34), 0, 8),
+    simplifyValue(repeatedInsert),
     jitInsertBits(eax, c32(0x34), 0, 8)
   );
 });
 
-test("JitValue masked-bit simplification models flag preservation", () => {
+test("JitValue masked-bit constructors are raw and explicit simplification models preservation", () => {
   const flags = jitInputAluFlagsValue();
   const cfMask = IR_ALU_FLAG_MASKS.CF;
+  const identityInsert = jitInsertMaskedBits(flags, jitExtractMaskedBits(flags, cfMask), cfMask);
+  const preservedCf = jitExtractMaskedBits(jitInsertMaskedBits(flags, c32(0), IR_ALU_FLAG_MASKS.ZF), cfMask);
 
+  deepStrictEqual(identityInsert, {
+    kind: "insertMaskedBits",
+    base: flags,
+    value: jitExtractMaskedBits(flags, cfMask),
+    mask: cfMask
+  });
   deepStrictEqual(
-    jitInsertMaskedBits(flags, jitExtractMaskedBits(flags, cfMask), cfMask),
+    simplifyValue(identityInsert),
     flags
   );
   deepStrictEqual(
-    jitExtractMaskedBits(jitInsertMaskedBits(flags, c32(0), IR_ALU_FLAG_MASKS.ZF), cfMask),
+    simplifyValue(preservedCf),
     jitExtractMaskedBits(flags, cfMask)
   );
 });
@@ -120,7 +141,10 @@ test("JitValue architectural slots distinguish aliases exactly and detect overla
   strictEqual(valueKey(jitInputReg8Value("al")), "extractBits:0:8:input:reg32:eax");
   strictEqual(valuesEqual(jitInputReg32Value("eax"), jitInputReg8Value("al")), false);
   strictEqual(valuesEqual(jitInputReg8Value("al"), canonicalAl), true);
-  deepStrictEqual(jitInsertBits(jitInputReg32Value("eax"), jitInputReg8Value("al"), 0, 8), jitInputReg32Value("eax"));
+  deepStrictEqual(
+    simplifyValue(jitInsertBits(jitInputReg32Value("eax"), jitInputReg8Value("al"), 0, 8)),
+    jitInputReg32Value("eax")
+  );
   strictEqual(jitArchitecturalSlotsOverlap(eax, ax), true);
   strictEqual(jitArchitecturalSlotsOverlap(ax, al), true);
   strictEqual(jitArchitecturalSlotsOverlap(al, ah), false);

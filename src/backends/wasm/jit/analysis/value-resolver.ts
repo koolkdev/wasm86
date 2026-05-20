@@ -124,9 +124,9 @@ export class JitValueResolver {
           bitOffset: binding.alias.bitOffset
         });
       case "static.imm32":
-        return jitExtractBits(c32(binding.value), 0, accessWidth);
+        return simplifyValue(jitExtractBits(c32(binding.value), 0, accessWidth));
       case "static.relTarget":
-        return jitExtractBits(c32(binding.target), 0, accessWidth);
+        return simplifyValue(jitExtractBits(c32(binding.target), 0, accessWidth));
       case "static.mem":
       case undefined:
         return undefined;
@@ -144,7 +144,7 @@ export class JitValueResolver {
 
     return access.width === 32 && access.bitOffset === 0
       ? full
-      : jitExtractBits(full, access.bitOffset, access.width);
+      : simplifyValue(jitExtractBits(full, access.bitOffset, access.width));
   }
 
   #fullRegValue(reg: Reg32): JitValue {
@@ -196,7 +196,7 @@ export class JitValueResolver {
 
         return flags === undefined
           ? undefined
-          : jitFlagConditionValue(flags, expression.cc);
+          : simplifyValue(jitFlagConditionValue(flags, expression.cc));
       }
     }
   }
