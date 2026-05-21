@@ -24,6 +24,7 @@ import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.
 import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
+import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import {
   type UsePurpose
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
@@ -42,7 +43,6 @@ import {
   valueUsesForExpressionBlock,
   type TestValueRoot
 } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   JitCodegenPlan,
   ExitStore,
@@ -65,10 +65,21 @@ import type {
   JitLoadResultValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
+import type {
+  JitIrBlock as BoundJitIrBlock,
+  JitIrInstruction
+} from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 
 export const startAddress = 0x1000;
+
+type TestJitIrInstruction =
+  Omit<JitIrInstruction, "nextEip"> &
+  Partial<Pick<JitIrInstruction, "nextEip">>;
+
+export type JitIrBlock = Readonly<{
+  instructions: readonly TestJitIrInstruction[];
+}>;
 
 function buildTimeline(input: Omit<TimelineInput, "loadResultRegistry">) {
   return buildTimelineWithRegistry({
@@ -110,7 +121,6 @@ export type {
   Reg32,
   IrExprBlock,
   IrValueExpr,
-  JitOperandBinding,
   JitCodegenPlan,
   ExitStore,
   PlannedExitStore,
@@ -121,16 +131,15 @@ export type {
   ExitPayload,
   ExitValue,
   JitLoadResultValue,
-  JitValue,
-  JitIrBlock
+  JitValue
 };
 
 export function analyzeBlockForTest(block: JitIrBlock) {
-  return analyzeBlock(buildBlockExpressions(block));
+  return analyzeBlock(buildBlockExpressions(bindTestJitBlock(block)));
 }
 
 export function planJitCodegen(block: JitIrBlock): JitCodegenPlan {
-  return planExpressionCodegen(buildBlockExpressions(block));
+  return planExpressionCodegen(buildBlockExpressions(bindTestJitBlock(block)));
 }
 
 export function plannedInstructionsForTest(
@@ -207,18 +216,13 @@ export function onlyExit(exits: readonly PlannedExit[], reason: ExitReason): Pla
 }
 
 export function planValueCacheForTest(input: Readonly<{
-  operands?: readonly JitOperandBinding[];
   expressionBlock: IrExprBlock;
-  nextEip?: number;
   extraUses?: ReadonlyMap<number, readonly TestValueRoot[]>;
 }>) {
-  const operands = input.operands ?? [];
   const valueTimeline = buildTimeline({
-    operands,
     expressions: input.expressionBlock,
     entry: createJitValueState().snapshot(),
-    snapshotPoints: new Set(),
-    ...(input.nextEip === undefined ? {} : { nextEip: input.nextEip })
+    snapshotPoints: new Set()
   });
   const valueUses = valueUsesForExpressionBlock({
     expressionBlock: input.expressionBlock,
@@ -227,10 +231,83 @@ export function planValueCacheForTest(input: Readonly<{
   });
 
   return planReuseForInstructions([{
-    operands,
     expressionBlock: input.expressionBlock,
     valueTimeline
   }], valueUses, []);
+}
+
+function bindTestJitBlock(block: JitIrBlock): BoundJitIrBlock {
+  return {
+    instructions: block.instructions.map((instruction): JitIrInstruction => {
+      const nextEip = instruction.nextEip ?? instruction.eip + 1;
+
+      return {
+        ...instruction,
+        nextEip,
+        ir: bindTestInstructionIr(instruction.ir, nextEip)
+      };
+    })
+  };
+}
+
+function bindTestInstructionIr(ir: readonly IrOp[], nextEip: number): readonly IrOp[] {
+  return ir.map((op) => bindTestInstructionOp(op, nextEip));
+}
+
+function bindTestInstructionOp(op: IrOp, nextEip: number): IrOp {
+  switch (op.op) {
+    case "get":
+      return { ...op, source: bindTestStorage(op.source, nextEip) };
+    case "set":
+      return { ...op, target: bindTestStorage(op.target, nextEip), value: bindTestValue(op.value, nextEip) };
+    case "memory.guard":
+      return { ...op, address: bindTestValue(op.address, nextEip) };
+    case "value.binary":
+      return { ...op, a: bindTestValue(op.a, nextEip), b: bindTestValue(op.b, nextEip) };
+    case "value.unary":
+      return { ...op, value: bindTestValue(op.value, nextEip) };
+    case "value.select":
+      return {
+        ...op,
+        condition: bindTestValue(op.condition, nextEip),
+        whenTrue: bindTestValue(op.whenTrue, nextEip),
+        whenFalse: bindTestValue(op.whenFalse, nextEip)
+      };
+    case "flags.set":
+      return {
+        ...op,
+        inputs: Object.fromEntries(
+          Object.entries(op.inputs).map(([name, value]) => [name, bindTestValue(value, nextEip)])
+        )
+      };
+    case "next":
+      return op;
+    case "jump":
+      return { ...op, target: bindTestValue(op.target, nextEip) };
+    case "conditionalJump":
+      return {
+        ...op,
+        condition: bindTestValue(op.condition, nextEip),
+        taken: bindTestValue(op.taken, nextEip),
+        notTaken: bindTestValue(op.notTaken, nextEip)
+      };
+    case "hostTrap":
+      return { ...op, vector: bindTestValue(op.vector, nextEip) };
+    case "address":
+    case "value.const":
+    case "flags.condition":
+      return op;
+  }
+}
+
+function bindTestStorage(storage: StorageRef, nextEip: number): StorageRef {
+  return storage.kind === "mem"
+    ? { kind: "mem" as const, address: bindTestValue(storage.address, nextEip) }
+    : storage;
+}
+
+function bindTestValue(value: ValueRef, nextEip: number): ValueRef {
+  return value.kind === "nextEip" ? c32Expr(nextEip) : value;
 }
 
 export function extraUse(

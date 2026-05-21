@@ -3,19 +3,16 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   JitArchitecturalSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
-import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
+import type { ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import type { LoadResultRegistry } from "./load-result.js";
 
 export type ValueSnapshot = JitValueStateSnapshot;
-
-export type RegisterStorageReadSource = Extract<IrStorageExpr, { kind: "operand" | "reg" }>;
 
 export type StorageReadRef = Readonly<{
   source: IrStorageExpr;
@@ -53,19 +50,16 @@ export type TimelineView = Readonly<{
   expression(value: TimelineExpression): JitValue;
   ref(value: ValueRef): JitValue;
   storageAddress(storage: IrStorageExpr): JitValue;
-  address(operand: OperandRef): JitValue;
   storageRead(read: StorageReadRef): JitValue;
   hasValue(value: IrValueExpr): boolean;
   hasExpression(value: TimelineExpression): boolean;
   hasRef(value: ValueRef): boolean;
   hasStorageAddress(storage: IrStorageExpr): boolean;
-  hasAddress(operand: OperandRef): boolean;
   hasStorageRead(read: StorageReadRef): boolean;
 }>;
 
 export type TimelineStorage = Readonly<{
   catalog: TimelineIdCatalog;
-  nextEip?: JitValue;
   expressionsByOp?: ReadonlyMap<number, ReadonlyMap<TimelineExpressionId, JitValue>>;
   refsByOp?: ReadonlyMap<number, ReadonlyMap<number, JitValue>>;
   addressesByOp?: ReadonlyMap<number, ReadonlyMap<TimelineStorageId, JitValue>>;
@@ -81,10 +75,8 @@ export type Timeline = Readonly<{
 }>;
 
 export type TimelineInput = Readonly<{
-  operands: readonly JitOperandBinding[];
   expressions: IrExprBlock;
   entry: ValueSnapshot;
   snapshotPoints: ReadonlySet<number>;
-  nextEip?: number;
   loadResultRegistry: LoadResultRegistry;
 }>;

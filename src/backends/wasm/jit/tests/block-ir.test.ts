@@ -31,11 +31,15 @@ test("buildBlock preserves decoded instruction metadata", () => {
   strictEqual(instruction.instructionId, decoded.spec.id);
   strictEqual(instruction.eip, decoded.address);
   strictEqual(instruction.nextEip, decoded.nextEip);
-  strictEqual(instruction.nextMode, "exit");
-  strictEqual(instruction.operands.length, decoded.operands.length);
+  strictEqual("nextMode" in instruction, false);
+  strictEqual("operands" in instruction, false);
+  deepStrictEqual(
+    instruction.ir.find((op) => op.op === "next"),
+    { op: "next" }
+  );
 });
 
-test("buildBlock binds static operand facts", () => {
+test("buildBlock binds decoded operands into concrete IR", () => {
   const movImm = buildBlock([ok(decodeBytes([0xb8, 0x01, 0x00, 0x00, 0x00], startAddress))])
     .instructions[0]!;
   const movMem = buildBlock([ok(decodeBytes([0x8b, 0x03], startAddress))])
@@ -43,10 +47,38 @@ test("buildBlock binds static operand facts", () => {
   const jz = buildBlock([ok(decodeBytes([0x74, 0x05], startAddress))])
     .instructions[0]!;
 
-  deepStrictEqual(movImm.operands.map((operand) => operand.kind), ["static.reg", "static.imm32"]);
-  deepStrictEqual(movMem.operands.map((operand) => operand.kind), ["static.reg", "static.mem"]);
-  deepStrictEqual(jz.operands.map((operand) => operand.kind), ["static.relTarget"]);
-  strictEqual(jz.operands[0]?.kind === "static.relTarget" ? jz.operands[0].target : undefined, startAddress + 7);
+  strictEqual(movImm.ir.some((op) =>
+    op.op === "value.const" &&
+    op.dst.kind === "var" &&
+    op.value === 1
+  ), true);
+  strictEqual(movImm.ir.some((op) =>
+    op.op === "set" &&
+    op.target.kind === "reg" &&
+    op.target.reg === "eax" &&
+    op.value.kind === "var"
+  ), true);
+  strictEqual(movMem.ir.some((op) =>
+    op.op === "get" &&
+    op.source.kind === "mem" &&
+    op.source.address.kind === "var"
+  ), true);
+  strictEqual(movMem.ir.some((op) =>
+    op.op === "get" &&
+    op.source.kind === "reg" &&
+    op.source.reg === "ebx"
+  ), true);
+  deepStrictEqual(jz.ir.find((op) => op.op === "conditionalJump"), {
+    op: "conditionalJump",
+    condition: { kind: "var", id: 0 },
+    taken: { kind: "var", id: 1 },
+    notTaken: { kind: "const", type: "i32", value: startAddress + 2 }
+  });
+  strictEqual(jz.ir.some((op) =>
+    op.op === "value.const" &&
+    op.dst.id === 1 &&
+    op.value === startAddress + 7
+  ), true);
 });
 
 test("buildBlock builds instruction-local IR bodies", () => {
@@ -61,15 +93,13 @@ test("buildBlock builds instruction-local IR bodies", () => {
   strictEqual("ir" in block, false);
   strictEqual("operands" in block, false);
   strictEqual(block.instructions.length, 2);
-  strictEqual(block.instructions[0]!.operands.length, first.operands.length);
-  strictEqual(block.instructions[1]!.operands.length, second.operands.length);
   strictEqual(firstIr.filter((op) => op.op === "next").length, 1);
   strictEqual(secondIr.filter((op) => op.op === "next").length, 1);
-  deepStrictEqual([...new Set(firstIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
-  deepStrictEqual([...new Set(secondIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
+  deepStrictEqual([...new Set(firstIr.flatMap(irOpOperandIndexes))], []);
+  deepStrictEqual([...new Set(secondIr.flatMap(irOpOperandIndexes))], []);
   strictEqual(new Set(firstDefIds).size, firstDefIds.length);
   strictEqual(new Set(secondDefIds).size, secondDefIds.length);
-  strictEqual(Math.min(...secondDefIds), 0);
+  strictEqual(Math.min(...secondDefIds) > Math.max(...firstDefIds), true);
 });
 
 test("JIT codegen plan keeps instruction-local operand namespaces", () => {
@@ -86,8 +116,8 @@ test("JIT codegen plan keeps instruction-local operand namespaces", () => {
   strictEqual(emissionPlan.instructions.length, 2);
   strictEqual(firstIr.filter(irOpIsTerminator).length, 1);
   strictEqual(secondIr.filter(irOpIsTerminator).length, 1);
-  deepStrictEqual([...new Set(firstIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
-  deepStrictEqual([...new Set(secondIr.flatMap(irOpOperandIndexes))].sort((a, b) => a - b), [0, 1]);
+  deepStrictEqual([...new Set(firstIr.flatMap(irOpOperandIndexes))], []);
+  deepStrictEqual([...new Set(secondIr.flatMap(irOpOperandIndexes))], []);
 });
 
 test("buildBlock lowers unary ALU forms with preserved widths", () => {
@@ -156,9 +186,9 @@ test("buildBlock lowers cmovcc through a select value and normal write", () => {
   const ir = buildBlock([instruction]).instructions[0]!.ir;
 
   deepStrictEqual(ir, [
-    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 1 }, accessWidth: 32 },
+    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "ecx" }, accessWidth: 32 },
     { op: "flags.condition", dst: { kind: "var", id: 1 }, cc: "E" },
-    { op: "get", dst: { kind: "var", id: 2 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
+    { op: "get", dst: { kind: "var", id: 2 }, source: { kind: "reg", reg: "edx" }, accessWidth: 32 },
     {
       op: "value.select",
       type: "i32",
@@ -167,7 +197,7 @@ test("buildBlock lowers cmovcc through a select value and normal write", () => {
       whenTrue: { kind: "var", id: 0 },
       whenFalse: { kind: "var", id: 2 }
     },
-    { op: "set", target: { kind: "operand", index: 0 }, value: { kind: "var", id: 3 }, accessWidth: 32 },
+    { op: "set", target: { kind: "reg", reg: "edx" }, value: { kind: "var", id: 3 }, accessWidth: 32 },
     { op: "next" }
   ]);
 });

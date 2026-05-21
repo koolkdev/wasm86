@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { ExitReason } from "#backends/wasm/exit.js";
 import {
   buildIrExpressionBlock,
-  type IrExprBlock
 } from "#backends/wasm/codegen/expressions.js";
 import {
   analyzeInstructionEffects,
@@ -22,9 +21,13 @@ import {
 import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { buildExpressionPaths, branchPath, rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import {
+  buildJitBoundExpressionBlock,
+  type JitBoundExprBlock
+} from "#backends/wasm/jit/ir/bound-expressions.js";
 import type { JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
-import { c32, syntheticInstruction, v } from "#backends/wasm/jit/ir/tests/helpers.js";
+import { c32, startAddress, syntheticInstruction, v } from "#backends/wasm/jit/ir/tests/helpers.js";
 
 test("JIT effect classifier separates local state from ordered effects", () => {
   const localNext = syntheticInstruction([{ op: "next" }]);
@@ -32,16 +35,16 @@ test("JIT effect classifier separates local state from ordered effects", () => {
   const branch = syntheticInstruction([
     { op: "conditionalJump", condition: v(0), taken: c32(0x2000), notTaken: c32(0x1002) }
   ]);
-  const localNextExpr = buildIrExpressionBlock(localNext.ir);
-  const finalNextExpr = buildIrExpressionBlock(finalNext.ir);
-  const branchExpr = buildIrExpressionBlock(branch.ir);
+  const localNextExpr = jitExpressionBlock(localNext);
+  const finalNextExpr = jitExpressionBlock(finalNext);
+  const branchExpr = jitExpressionBlock(branch);
 
-  deepStrictEqual(classifyExits(localNextExpr[0]!, localNext), []);
-  strictEqual(classifyEffect(localNextExpr[0]!, localNext), undefined);
-  deepStrictEqual(classifyExits(finalNextExpr[0]!, finalNext), ["fallthrough"]);
-  strictEqual(classifyEffect(finalNextExpr[0]!, finalNext), "fallthrough");
-  deepStrictEqual(classifyExits(branchExpr[0]!, branch), ["branchTaken", "branchNotTaken"]);
-  strictEqual(classifyEffect(branchExpr[0]!, branch), "branch");
+  deepStrictEqual(classifyExits(localNextExpr[0]!, false), []);
+  strictEqual(classifyEffect(localNextExpr[0]!, false), undefined);
+  deepStrictEqual(classifyExits(finalNextExpr[0]!, true), ["fallthrough"]);
+  strictEqual(classifyEffect(finalNextExpr[0]!, true), "fallthrough");
+  deepStrictEqual(classifyExits(branchExpr[0]!, true), ["branchTaken", "branchNotTaken"]);
+  strictEqual(classifyEffect(branchExpr[0]!, true), "branch");
 });
 
 test("JIT effect analysis creates exact final fallthrough exits", () => {
@@ -55,8 +58,8 @@ test("JIT effect analysis creates exact final fallthrough exits", () => {
   strictEqual(effect?.kind, "fallthrough");
   strictEqual(exit?.kind, "fallthrough");
   strictEqual(exit?.reason, ExitReason.FALLTHROUGH);
-  deepStrictEqual(exit?.payload, { kind: "static", value: instruction.nextEip });
-  deepStrictEqual(exit?.visibleEip, { kind: "static", value: instruction.nextEip });
+  deepStrictEqual(exit?.payload, { kind: "static", value: startAddress + 1 });
+  deepStrictEqual(exit?.visibleEip, { kind: "static", value: startAddress + 1 });
   deepStrictEqual(exit?.path, rootPath());
   strictEqual(exit?.snapshot.progress.instructionCountDelta, 1);
 });
@@ -124,7 +127,7 @@ test("JIT effect analysis records host traps with next-EIP visibility", () => {
   strictEqual(instructionEffects[0]?.kind, "hostTrap");
   strictEqual(exit?.kind, "hostTrap");
   strictEqual(exit?.reason, ExitReason.HOST_TRAP);
-  deepStrictEqual(exit?.visibleEip, { kind: "static", value: instruction.nextEip });
+  deepStrictEqual(exit?.visibleEip, { kind: "static", value: startAddress + 1 });
   deepStrictEqual(exit?.payload, { kind: "runtime", source: "hostTrapVector" });
   strictEqual(exit?.snapshot.progress.instructionCountDelta, 1);
 });
@@ -137,13 +140,12 @@ function analyze(instructions: readonly JitIrInstruction[]): readonly Instructio
 
   for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
     const instruction = instructions[instructionIndex]!;
-    const expressions = buildIrExpressionBlock(instruction.ir);
+    const isFinalInstruction = instructionIndex === instructions.length - 1;
+    const expressions = jitExpressionBlock(instruction);
     const valueTimeline = buildTimeline({
-      operands: instruction.operands,
       expressions,
       entry: valueState,
-      snapshotPoints: timelineSnapshotPointsForExpressions(instruction, expressions),
-      nextEip: instruction.nextEip,
+      snapshotPoints: timelineSnapshotPointsForExpressions(isFinalInstruction, expressions),
       loadResultRegistry
     });
 
@@ -153,13 +155,14 @@ function analyze(instructions: readonly JitIrInstruction[]): readonly Instructio
       expressions,
       timeline: valueTimeline,
       expressionPaths: buildExpressionPaths(expressions, instructionIndex),
+      isFinalInstruction,
       progress: {
         instructionCountDelta
       }
     };
 
     flows.push(analyzeInstructionEffects(effectInput));
-    instructionCountDelta += instructionDeltaForExpressions(instruction, expressions);
+    instructionCountDelta += instructionDeltaForExpressions(isFinalInstruction, expressions);
     valueState = valueTimeline.finalState;
   }
 
@@ -167,16 +170,23 @@ function analyze(instructions: readonly JitIrInstruction[]): readonly Instructio
 }
 
 function instructionDeltaForExpressions(
-  instruction: JitIrInstruction,
-  expressions: IrExprBlock
+  isFinalInstruction: boolean,
+  expressions: JitBoundExprBlock
 ): number {
   let delta = 0;
 
   for (const op of expressions) {
-    delta += instructionDeltaAfterOp(op, instruction);
+    delta += instructionDeltaAfterOp(op, isFinalInstruction);
   }
 
   return delta;
+}
+
+function jitExpressionBlock(instruction: JitIrInstruction): JitBoundExprBlock {
+  return buildJitBoundExpressionBlock(buildIrExpressionBlock(instruction.ir), {
+    eip: instruction.eip,
+    nextEip: instruction.nextEip
+  });
 }
 
 function effects(flows: readonly InstructionFlow[]): readonly EffectInfo[] {

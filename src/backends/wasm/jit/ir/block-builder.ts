@@ -1,11 +1,12 @@
 import type { IsaDecodedInstruction } from "#x86/isa/decoder/types.js";
-import { operand } from "#x86/ir/build/builder.js";
+import { createIrVarAllocator, operand } from "#x86/ir/build/builder.js";
 import { IrBlockBuilder } from "#x86/ir/build/block.js";
 import {
   operandBindingsFromInstruction,
   jitSemanticOperandInfo
 } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
+import { bindInstructionIr } from "./instruction-ir.js";
 
 export type AppendInstructionOptions = Readonly<{
   nextMode: "continue" | "exit";
@@ -13,13 +14,14 @@ export type AppendInstructionOptions = Readonly<{
 
 export class JitBlockBuilder {
   readonly #instructions: JitIrInstruction[] = [];
+  readonly #allocator = createIrVarAllocator();
 
   appendInstruction(
     instruction: IsaDecodedInstruction,
     options: AppendInstructionOptions
   ): void {
     const instructionOperands = operandBindingsFromInstruction(instruction);
-    const irBuilder = new IrBlockBuilder();
+    const irBuilder = new IrBlockBuilder({ allocator: this.#allocator });
     const appended = irBuilder.appendInstruction({
       semantics: instruction.spec.semantics,
       operands: instructionOperands.map((_, index) => operand(index)),
@@ -34,9 +36,12 @@ export class JitBlockBuilder {
       instructionId: instruction.spec.id,
       eip: instruction.address,
       nextEip: instruction.nextEip,
-      nextMode: options.nextMode,
-      operands: instructionOperands,
-      ir: irBuilder.build()
+      ir: bindInstructionIr({
+        ir: irBuilder.build(),
+        operands: instructionOperands,
+        nextEip: instruction.nextEip,
+        allocator: this.#allocator
+      })
     });
   }
 

@@ -83,7 +83,6 @@ test("JIT cache value uses carry flattened dependency ancestry for cache selecti
     vector: target
   }] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
@@ -178,7 +177,6 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
   }] as const satisfies IrExprBlock;
   const value = addValue(jitInputReg32Value("eax"), c32(1));
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
@@ -197,7 +195,6 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
     extraUses
   });
   const reusePlan = planReuseForInstructions([{
-    operands: [],
     valueTimeline: timeline,
     expressionBlock
   }], uses, []);
@@ -242,7 +239,7 @@ test("JIT value-capture planner explicitly captures selected cmov values for gua
     throw new Error("expected forced cmov capture");
   }
 
-  deepStrictEqual(capture.at, { instructionIndex: 1, opIndex: 0, epoch: 1 });
+  deepStrictEqual(capture.at, { instructionIndex: 1, opIndex: 2, epoch: 1 });
   deepStrictEqual(capture.availability, rootPath());
   deepStrictEqual(capture.consumers.map((consumer) => consumer.purpose), ["exitStore"]);
 });
@@ -328,7 +325,6 @@ function planCapturesForExpressionBlock(
   expressionBlock: IrExprBlock
 ) {
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
@@ -339,7 +335,6 @@ function planCapturesForExpressionBlock(
     expressionPaths: branchExpressionPaths(expressionBlock)
   });
   const reusePlan = planReuseForInstructions([{
-    operands: [],
     valueTimeline: timeline,
     expressionBlock
   }], uses, []);

@@ -1,5 +1,4 @@
-import type { IrExprOp } from "#backends/wasm/codegen/expressions.js";
-import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
+import type { JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type {
   ExitKind,
   ExitSnapshot
@@ -10,10 +9,10 @@ export type InstructionProgress = Readonly<{
 }>;
 
 export function instructionDeltaAfterOp(
-  op: IrExprOp,
-  instruction: InstructionMetadata
+  op: JitBoundExprOp,
+  isFinalInstruction: boolean
 ): number {
-  return op.op === "next" && instruction.nextMode === "continue"
+  return op.op === "next" && !isFinalInstruction
     ? 1
     : 0;
 }

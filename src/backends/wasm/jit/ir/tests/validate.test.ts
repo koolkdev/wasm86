@@ -10,24 +10,38 @@ test("validateBlock rejects empty blocks", () => {
   throws(() => validateBlock({ instructions: [] }), /cannot validate empty JIT block/);
 });
 
-test("validateBlock rejects invalid operand indexes", () => {
+test("validateBlock rejects source-local operand storage", () => {
   throws(() => validateBlock(jitBlock([
     { op: "get", dst: v(0), source: { kind: "operand", index: 0 } },
-    { op: "next" }
-  ])), /IR operand 0 does not exist in 0-operand instruction/);
+    nextOp(0)
+  ])), /JIT IR must not contain source-local operand storage/);
 });
 
-test("validateBlock treats value namespaces as instruction-local", () => {
+test("validateBlock rejects source-local address ops", () => {
+  throws(() => validateBlock(jitBlock([
+    { op: "address", dst: v(0), operand: { kind: "operand", index: 0 } },
+    nextOp(0)
+  ])), /JIT IR must not contain source-local address operands/);
+});
+
+test("validateBlock rejects nextEip value refs", () => {
+  throws(() => validateBlock(jitBlock([
+    { op: "set", target: { kind: "reg", reg: "eax" }, value: { kind: "nextEip" } },
+    nextOp(0)
+  ])), /JIT IR must not contain nextEip refs/);
+});
+
+test("validateBlock accepts concrete instruction IR bodies", () => {
   validateBlock({
     instructions: [
       jitInstruction([
         { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
-        { op: "next" }
+        nextOp(0)
       ]),
       jitInstruction([
-        { op: "get", dst: v(0), source: { kind: "reg", reg: "ebx" } },
-        { op: "next" }
-      ], 1, "exit")
+        { op: "get", dst: v(1), source: { kind: "reg", reg: "ebx" } },
+        nextOp(1)
+      ], 1)
     ]
   });
 });
@@ -38,52 +52,50 @@ test("validateBlock rejects non-final non-fallthrough instructions", () => {
       jitInstruction([
         { op: "jump", target: { kind: "const", type: "i32", value: startAddress + 8 } }
       ]),
-      jitInstruction([{ op: "next" }], 1)
+      jitInstruction([nextOp(1)], 1)
     ]
   }), /non-final JIT instruction must fall through/);
 });
 
-test("validateBlock rejects final continuing instructions", () => {
-  throws(() => validateBlock(jitBlock([
-    { op: "next" }
-  ], "continue")), /final JIT instruction must exit/);
-
+test("validateBlock rejects non-final fallthroughs that skip the next instruction", () => {
   throws(() => validateBlock({
     instructions: [
-      jitInstruction([{ op: "next" }]),
-      jitInstruction([{ op: "next" }], 1, "continue")
+      jitInstruction([nextOp(0)], 0, startAddress + 8),
+      jitInstruction([nextOp(1)], 1)
     ]
-  }), /final JIT instruction must exit/);
+  }), /non-final JIT instruction fallthrough target 0x1008 does not match next instruction EIP 0x1001/);
 });
 
 test("validateBlock allows final exiting instructions", () => {
   validateBlock(jitBlock([
     { op: "jump", target: { kind: "const", type: "i32", value: startAddress + 8 } }
-  ], "exit"));
+  ]));
 });
 
 test("validateBlock rejects ops outside shared x86 IR", () => {
   throws(() => validateBlock(jitBlock([
     { op: "jit.cache" },
-    { op: "next" }
+    nextOp(0)
   ] as unknown as IrBlock)), /unhandled IR op semantics/);
 });
 
-function jitBlock(ir: IrBlock, nextMode: JitIrInstruction["nextMode"] = "continue"): JitIrBlock {
-  return { instructions: [jitInstruction(ir, 0, nextMode)] };
+function jitBlock(ir: IrBlock): JitIrBlock {
+  return { instructions: [jitInstruction(ir)] };
 }
 
 function jitInstruction(
   ir: IrBlock,
   index = 0,
-  nextMode: JitIrInstruction["nextMode"] = "continue"
+  nextEip = startAddress + index + 1
 ): JitIrInstruction {
   return {
     instructionId: "synthetic.verifier",
     eip: startAddress + index,
-    nextEip: startAddress + index + 1,
-    nextMode,
-    operands: [],
+    nextEip,
     ir
   };
+}
+
+function nextOp(_index: number): Extract<IrBlock[number], { op: "next" }> {
+  return { op: "next" };
 }

@@ -1,7 +1,6 @@
 import type {
   IrExprBlock,
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import type {
   LoadResultDefinition,
   Timeline
@@ -12,7 +11,6 @@ import type {
 import type { Placement } from "./effect-types.js";
 
 export type InstructionEpochSource = Readonly<{
-  operands: readonly JitOperandBinding[];
   valueTimeline: Timeline;
 }>;
 
@@ -86,7 +84,6 @@ export function buildEpochs(
     }
 
     instructionPlans.push({
-      operands: instruction.operands,
       valueTimeline: instruction.valueTimeline,
       opEpochs
     });

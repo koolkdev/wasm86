@@ -1,4 +1,5 @@
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import type { OperandWidth, RegName } from "#x86/isa/types.js";
+import { createIrVarAllocator, type IrVarAllocator } from "./vars.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 import { irOpIsTerminator, type IrTerminatorOp } from "#x86/ir/model/op-semantics.js";
 import {
@@ -7,7 +8,6 @@ import {
   nextEip,
   operand,
   reg,
-  irVar,
   toStorageRef,
   toTargetRef,
   toValueRef
@@ -41,36 +41,28 @@ export type IrBlockTerminator = IrTerminatorOp["op"];
 
 export type IrEmitterOptions = Readonly<{
   ops?: IrOp[];
-  allocateVar?: () => VarRef;
+  allocator?: IrVarAllocator;
   resolveOperand?: (index: number) => OperandRef;
   operandInfo?: readonly (SemanticOperandInfo | undefined)[];
 }>;
 
 export class IrEmitter implements IrBuilder, SemanticBuildContext {
   readonly #ops: IrOp[];
-  readonly #allocateVarOverride: (() => VarRef) | undefined;
+  readonly #allocator: IrVarAllocator;
   readonly #resolveOperand: (index: number) => OperandRef;
   readonly #operandInfo: readonly (SemanticOperandInfo | undefined)[];
   readonly #semanticOperandIndexByOperandRef = new WeakMap<OperandRef, number>();
-  #nextVarId = 0;
   #terminator: IrBlockTerminator | undefined;
 
   constructor(options: IrEmitterOptions = {}) {
     this.#ops = options.ops ?? [];
-    this.#allocateVarOverride = options.allocateVar;
+    this.#allocator = options.allocator ?? createIrVarAllocator();
     this.#resolveOperand = options.resolveOperand ?? operand;
     this.#operandInfo = options.operandInfo ?? [];
   }
 
   #allocVar(): VarRef {
-    if (this.#allocateVarOverride !== undefined) {
-      return this.#allocateVarOverride();
-    }
-
-    const id = this.#nextVarId;
-
-    this.#nextVarId += 1;
-    return irVar(id);
+    return this.#allocator.allocate();
   }
 
   #push(op: IrOp): void {
@@ -86,7 +78,7 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
   }
 
   operand(index: number): OperandRef {
-    const operandRef = this.#resolveOperand(index);
+    const operandRef: OperandRef = { ...this.#resolveOperand(index) };
 
     this.#semanticOperandIndexByOperandRef.set(operandRef, index);
     return operandRef;
@@ -100,7 +92,7 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
     return nextEip();
   }
 
-  reg(regInput: Reg32): RegRef {
+  reg(regInput: RegName): RegRef {
     return reg(regInput);
   }
 

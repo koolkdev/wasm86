@@ -30,7 +30,6 @@ test("JIT value-cache epoch planning exposes instruction epochs and load-result 
     { op: "hostTrap", vector: { kind: "var", id: 0 } }
   ] as const;
   const valueTimeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
@@ -44,7 +43,6 @@ test("JIT value-cache epoch planning exposes instruction epochs and load-result 
     ancestors: []
   };
   const epoch = buildEpochs([{
-    operands: [],
     expressionBlock,
     valueTimeline
   }], [plannedUse]);

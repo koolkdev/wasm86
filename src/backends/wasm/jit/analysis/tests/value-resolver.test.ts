@@ -1,9 +1,8 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { registerAlias } from "#x86/isa/registers.js";
 import type { Reg32 } from "#x86/isa/types.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
+import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
 import {
   jitExtractBits,
@@ -15,7 +14,7 @@ import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 
 test("JIT value resolver reads input register aliases from full-register values", () => {
-  const resolver = createJitValueResolver({ operands: [] });
+  const resolver = createJitValueResolver({});
   const eax = jitInputReg32Value("eax");
 
   deepStrictEqual(
@@ -41,27 +40,10 @@ test("JIT value resolver gives snapshot and callback readers the same aliases an
     ["eax", currentEax],
     ["ecx", currentEcx]
   ]);
-  const operands = [
-    { kind: "static.reg", alias: registerAlias("ah") },
-    { kind: "static.reg", alias: registerAlias("ax") },
-    {
-      kind: "static.mem",
-      ea: {
-        kind: "mem",
-        base: "eax",
-        index: "ecx",
-        scale: 4,
-        disp: 0x20,
-        accessWidth: 32
-      }
-    }
-  ] as const satisfies readonly JitOperandBinding[];
   const snapshotResolver = createJitValueResolver({
-    operands,
     readReg32: (reg) => snapshot.regs.readReg32(reg)
   });
   const callbackResolver = createJitValueResolver({
-    operands,
     readReg32: (reg) => callbackValues.get(reg) ?? jitInputReg32Value(reg)
   });
 
@@ -71,30 +53,23 @@ test("JIT value resolver gives snapshot and callback readers the same aliases an
       currentEax
     );
     deepStrictEqual(
-      resolver.valueForStorage({ kind: "operand", index: 0 }, 8),
+      resolver.valueForStorage({ kind: "reg", reg: "ah" }, 8),
       jitExtractBits(currentEax, 8, 8)
     );
     deepStrictEqual(
-      resolver.valueForStorage({ kind: "operand", index: 1 }, 16),
+      resolver.valueForStorage({ kind: "reg", reg: "ax" }, 16),
       jitExtractBits(currentEax, 0, 16)
     );
     deepStrictEqual(
-      resolver.valueForEffectiveAddress({ kind: "operand", index: 2 }),
+      resolver.valueForExpression(addExpr(addExpr(sourceReg("eax"), shlExpr(sourceReg("ecx"), c32Expr(2))), c32Expr(0x20))),
       add(add(currentEax, shl(currentEcx, c32(2))), c32(0x20))
     );
   }
 });
 
-test("JIT value resolver resolves immediate and child expression values", () => {
-  const resolver = createJitValueResolver({
-    operands: [{ kind: "static.imm32", value: 0xff }]
-  });
-  const source = {
-    kind: "source",
-    source: { kind: "operand", index: 0 },
-    accessWidth: 8,
-    signed: true
-  } as const;
+test("JIT value resolver resolves constants and child expression values", () => {
+  const resolver = createJitValueResolver({});
+  const source = { kind: "const", type: "i32", value: 0xffff_ffff } as const;
   const expression = {
     kind: "value.binary",
     type: "i32",
@@ -110,7 +85,6 @@ test("JIT value resolver resolves immediate and child expression values", () => 
 test("JIT value resolver resolves value refs inside larger expressions", () => {
   const eax = jitInputReg32Value("eax");
   const resolver = createJitValueResolver({
-    operands: [],
     readValueRef: (value) =>
       value.kind === "var" && value.id === 0 ? eax : undefined
   });
@@ -126,7 +100,7 @@ test("JIT value resolver resolves value refs inside larger expressions", () => {
 });
 
 test("JIT value resolver leaves flag conditions unresolved without a flag reader", () => {
-  const resolver = createJitValueResolver({ operands: [] });
+  const resolver = createJitValueResolver({});
 
   deepStrictEqual(
     resolver.valueForExpression({ kind: "flags.condition", cc: "E" }),
@@ -137,7 +111,6 @@ test("JIT value resolver leaves flag conditions unresolved without a flag reader
 test("JIT value resolver resolves flag conditions from the supplied flag reader", () => {
   const flags = jitInputAluFlagsValue();
   const resolver = createJitValueResolver({
-    operands: [],
     readAluFlags: () => flags
   });
 
@@ -149,6 +122,26 @@ test("JIT value resolver resolves flag conditions from the supplied flag reader"
 
 function c32(value: number): JitValue {
   return { kind: "const", type: "i32", value };
+}
+
+function c32Expr(value: number) {
+  return { kind: "const" as const, type: "i32" as const, value };
+}
+
+function sourceReg(reg: Reg32) {
+  return {
+    kind: "source" as const,
+    source: { kind: "reg" as const, reg },
+    accessWidth: 32 as const
+  };
+}
+
+function addExpr(a: IrValueExpr, b: IrValueExpr): IrValueExpr {
+  return { kind: "value.binary" as const, type: "i32" as const, operator: "add" as const, a, b };
+}
+
+function shlExpr(a: IrValueExpr, b: IrValueExpr): IrValueExpr {
+  return { kind: "value.binary" as const, type: "i32" as const, operator: "shl" as const, a, b };
 }
 
 function add(a: JitValue, b: JitValue): JitValue {

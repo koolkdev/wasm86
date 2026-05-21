@@ -215,9 +215,10 @@ class ExpressionBuilder {
           });
           break;
         }
-        case "next":
+        case "next": {
           this.#pushOp(op);
           break;
+        }
         case "jump": {
           const target = this.#valueExpr(op.target);
 
@@ -240,7 +241,10 @@ class ExpressionBuilder {
         case "hostTrap": {
           const vector = this.#valueExpr(op.vector);
 
-          this.#pushOp({ op: "hostTrap", vector: vector.value });
+          this.#pushOp({
+            op: "hostTrap",
+            vector: vector.value
+          });
           break;
         }
       }

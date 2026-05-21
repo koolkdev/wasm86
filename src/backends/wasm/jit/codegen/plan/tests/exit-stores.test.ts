@@ -256,9 +256,6 @@ test("planJitCodegen makes guard faults observe current op state", () => {
     instructions: [{
       instructionId: "write-before-fault",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         { op: "value.const", type: "i32", dst: { kind: "var", id: 0 }, value: 0x1234 },
         {
@@ -301,9 +298,6 @@ test("planJitCodegen makes guard faults observe current flag state", () => {
     instructions: [{
       instructionId: "flag-write-before-fault",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
         {
@@ -455,9 +449,6 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from expression IR"
       {
         instructionId: "seed-eax",
         eip: startAddress,
-        nextEip: startAddress + 1,
-        nextMode: "continue",
-        operands: [],
         ir: [
           {
             op: "set",
@@ -471,9 +462,6 @@ test("buildJitCodegenEmissionPlan keeps branch path identity from expression IR"
       {
         instructionId: "folded-branch-path",
         eip: startAddress + 1,
-        nextEip: startAddress + 2,
-        nextMode: "exit",
-        operands: [],
         ir: [
           { op: "flags.condition", dst: { kind: "var", id: 0 }, cc: "E" },
           { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "reg", reg: "ecx" }, accessWidth: 32 },
@@ -531,9 +519,6 @@ test("planJitCodegen records full flag producers in value-state snapshots", () =
     instructions: [{
       instructionId: "full-flags",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
         { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "reg", reg: "ebx" }, accessWidth: 32 },
@@ -591,9 +576,6 @@ test("planJitCodegen records partial flag producers as symbolic masked inserts",
     instructions: [{
       instructionId: "partial-flags",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
         {
@@ -645,9 +627,6 @@ test("planJitCodegen records effectful flag producer inputs as load-result value
     instructions: [{
       instructionId: "effectful-flag-input",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         {
           op: "memory.guard",
@@ -716,9 +695,6 @@ test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () 
     instructions: [{
       instructionId: "missing-flag-input",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         {
           op: "flags.set",
@@ -748,9 +724,6 @@ test("planJitCodegen lets later full flag producers replace partial merges", () 
       {
         instructionId: "partial-flags",
         eip: startAddress,
-        nextEip: startAddress + 1,
-        nextMode: "continue",
-        operands: [],
         ir: [
           { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
           {
@@ -783,9 +756,6 @@ test("planJitCodegen lets later full flag producers replace partial merges", () 
       {
         instructionId: "full-flags",
         eip: startAddress + 1,
-        nextEip: startAddress + 2,
-        nextMode: "exit",
-        operands: [],
         ir: [
           { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "ecx" }, accessWidth: 32 },
           { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "reg", reg: "edx" }, accessWidth: 32 },
@@ -867,9 +837,6 @@ test("planJitCodegen keeps load-result values out of observed boundaries before 
     instructions: [{
       instructionId: "loadResult-before-exit-observation",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         {
           op: "memory.guard",

@@ -1,5 +1,4 @@
 import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import {
   jitExtractBits,
   jitFlagConditionValue,
@@ -8,28 +7,26 @@ import {
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { i32 } from "#x86/state/cpu-state.js";
-import type { OperandRef, StorageRef, ValueRef } from "#x86/ir/model/types.js";
+import type { RegRef, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
+import { registerAlias } from "#x86/isa/registers.js";
 
 export type JitValueResolverReadReg32 = (reg: Reg32) => JitValue;
 export type JitValueResolverReadAluFlags = () => JitValue | undefined;
 export type JitValueResolverReadValueRef = (value: ValueRef) => JitValue | undefined;
 
 export type JitValueResolverOptions = Readonly<{
-  operands: readonly JitOperandBinding[];
   readReg32?: JitValueResolverReadReg32;
   readAluFlags?: JitValueResolverReadAluFlags;
   readValueRef?: JitValueResolverReadValueRef;
 }>;
 
 export class JitValueResolver {
-  readonly #operands: readonly JitOperandBinding[];
   readonly #readReg32: JitValueResolverReadReg32;
   readonly #readAluFlags: JitValueResolverReadAluFlags | undefined;
   readonly #readValueRef: JitValueResolverReadValueRef | undefined;
 
   constructor(options: JitValueResolverOptions) {
-    this.#operands = options.operands;
     this.#readReg32 = options.readReg32 ?? jitInputReg32Value;
     this.#readAluFlags = options.readAluFlags;
     this.#readValueRef = options.readValueRef;
@@ -59,30 +56,6 @@ export class JitValueResolver {
       : value;
   }
 
-  valueForEffectiveAddress(operand: OperandRef): JitValue | undefined {
-    const binding = this.#operands[operand.index];
-
-    if (binding?.kind !== "static.mem") {
-      return undefined;
-    }
-
-    const terms: JitValue[] = [];
-
-    if (binding.ea.base !== undefined) {
-      terms.push(this.#fullRegValue(binding.ea.base));
-    }
-
-    if (binding.ea.index !== undefined) {
-      terms.push(scaleJitValue(this.#fullRegValue(binding.ea.index), binding.ea.scale));
-    }
-
-    if (binding.ea.disp !== 0 || terms.length === 0) {
-      terms.push(c32(binding.ea.disp));
-    }
-
-    return terms.reduce((a, b) => addJitValues(a, b));
-  }
-
   valueForValueRef(value: ValueRef): JitValue | undefined {
     switch (value.kind) {
       case "var":
@@ -104,33 +77,22 @@ export class JitValueResolver {
   ): JitValue | undefined {
     switch (storage.kind) {
       case "reg":
-        return this.#valueForRegisterAccess({ reg: storage.reg, width: accessWidth, bitOffset: 0 });
+        return this.#valueForRegRef(storage, accessWidth);
       case "operand":
-        return this.#valueForOperandBinding(this.#operands[storage.index], accessWidth);
+        return undefined;
       case "mem":
         return undefined;
     }
   }
 
-  #valueForOperandBinding(
-    binding: JitOperandBinding | undefined,
-    accessWidth: OperandWidth
-  ): JitValue | undefined {
-    switch (binding?.kind) {
-      case "static.reg":
-        return this.#valueForRegisterAccess({
-          reg: binding.alias.base,
-          width: binding.alias.width,
-          bitOffset: binding.alias.bitOffset
-        });
-      case "static.imm32":
-        return simplifyValue(jitExtractBits(c32(binding.value), 0, accessWidth));
-      case "static.relTarget":
-        return simplifyValue(jitExtractBits(c32(binding.target), 0, accessWidth));
-      case "static.mem":
-      case undefined:
-        return undefined;
-    }
+  #valueForRegRef(storage: RegRef, accessWidth: OperandWidth): JitValue {
+    const alias = registerAlias(storage.reg);
+
+    return this.#valueForRegisterAccess({
+      reg: alias.base,
+      width: alias.width === 32 ? accessWidth : alias.width,
+      bitOffset: alias.bitOffset
+    });
   }
 
   #valueForRegisterAccess(
@@ -160,7 +122,7 @@ export class JitValueResolver {
       case "source":
         return this.valueForStorage(expression.source, expression.accessWidth, expression.signed === true);
       case "address":
-        return this.valueForEffectiveAddress(expression.operand);
+        return undefined;
       case "value.binary": {
         const a = this.#valueForExpressionUnrecorded(expression.a);
         const b = this.#valueForExpressionUnrecorded(expression.b);
@@ -208,33 +170,6 @@ export function createJitValueResolver(options: JitValueResolverOptions): JitVal
 
 function c32(value: number): JitValue {
   return { kind: "const", type: "i32", value: i32(value) };
-}
-
-function scaleJitValue(value: JitValue, scale: 1 | 2 | 4 | 8): JitValue {
-  switch (scale) {
-    case 1:
-      return value;
-    case 2:
-      return shlJitValue(value, 1);
-    case 4:
-      return shlJitValue(value, 2);
-    case 8:
-      return shlJitValue(value, 3);
-  }
-}
-
-function addJitValues(a: JitValue, b: JitValue): JitValue {
-  return simplifyValue({ kind: "value.binary", type: "i32", operator: "add", a, b });
-}
-
-function shlJitValue(a: JitValue, shift: 1 | 2 | 3): JitValue {
-  return simplifyValue({
-    kind: "value.binary",
-    type: "i32",
-    operator: "shl",
-    a,
-    b: c32(shift)
-  });
 }
 
 function signExtendJitValue(value: JitValue, width: 8 | 16): JitValue {

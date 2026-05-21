@@ -1,4 +1,5 @@
-import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
+import type { OperandWidth, RegisterAlias } from "#x86/isa/types.js";
+import { registerAlias } from "#x86/isa/registers.js";
 import { buildIrExpressionBlock, type IrStorageExpr, type IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type {
   IrBlock,
@@ -17,9 +18,7 @@ import {
   emitWasmIrStoreGuestUnchecked
 } from "#backends/wasm/codegen/memory.js";
 import {
-  emitLoadRegAccess,
   emitLoadRegAlias,
-  emitStoreRegAccess,
   emitStoreRegAlias
 } from "#backends/wasm/codegen/registers.js";
 import {
@@ -139,7 +138,7 @@ function emitGetStorage(
     case "operand":
       return emitGetOperand(context, source.index, accessWidth, options);
     case "reg":
-      return emitLoadRegAccess(context.body, context.state.regs, source.reg, accessWidth, options);
+      return emitLoadRegAlias(context.body, context.state.regs, regAccess(source.reg, accessWidth), options);
     case "mem":
       emitWasmIrLoadGuestUnchecked(
         context.body,
@@ -250,7 +249,7 @@ function emitSetStorage(
       emitSetOperand(context, target.index, value, accessWidth, helpers);
       return;
     case "reg":
-      emitStoreRegAccess(context.body, context.state.regs, target.reg, accessWidth, () => helpers.emitValue(value));
+      emitStoreRegAlias(context.body, context.state.regs, regAccess(target.reg, accessWidth), () => helpers.emitValue(value));
       return;
     case "mem":
       emitStoreMem(
@@ -607,8 +606,12 @@ function operandBinding(context: InterpreterIrEmitContext, index: number): Inter
   return binding;
 }
 
-function regAccess(reg: Reg32): RegisterAlias {
-  return { name: reg, base: reg, bitOffset: 0, width: 32 };
+function regAccess(reg: RegisterAlias["name"], accessWidth: OperandWidth = 32): RegisterAlias {
+  const alias = registerAlias(reg);
+
+  return alias.width === 32
+    ? { ...alias, width: accessWidth }
+    : alias;
 }
 
 function registerAliasesMayOverlap(left: RegisterAlias, right: RegisterAlias): boolean {

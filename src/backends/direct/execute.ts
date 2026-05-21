@@ -8,10 +8,10 @@ import {
   hasEvenParityLowByte,
   setFlag,
   setRegisterAlias,
-  setReg32,
   u32,
   type CpuState
 } from "#x86/state/cpu-state.js";
+import { registerAlias } from "#x86/isa/registers.js";
 import { buildIr } from "#x86/ir/build/builder.js";
 import { CONDITIONS, type FlagBoolExpr } from "#x86/ir/model/conditions.js";
 import {
@@ -33,7 +33,7 @@ import type {
   VarRef
 } from "#x86/ir/model/types.js";
 import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/isa/decoder/types.js";
-import { widthMask, type MemOperand, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
+import { widthMask, type MemOperand, type OperandWidth } from "#x86/isa/types.js";
 
 export type DirectExecutionOptions = Readonly<{
   memory?: GuestMemory;
@@ -200,7 +200,7 @@ function readStorage(context: ExecutionContext, storage: StorageRef, accessWidth
       return binding === undefined ? { kind: "unsupported" } : readOperandBinding(context, binding, accessWidth);
     }
     case "reg":
-      return { kind: "value", value: readReg32Access(context.state, storage.reg, accessWidth) };
+      return { kind: "value", value: maskValue(getRegisterAlias(context.state, regAccess(storage.reg, accessWidth)), accessWidth) };
     case "mem":
       return readMemory(context, storage, accessWidth);
   }
@@ -216,7 +216,7 @@ function writeStorage(context: ExecutionContext, storage: StorageRef, value: num
       return binding === undefined ? { kind: "unsupported" } : writeOperandBinding(context, binding, accessWidth, maskedValue);
     }
     case "reg":
-      writeReg32Access(context.state, storage.reg, accessWidth, maskedValue);
+      setRegisterAlias(context.state, regAccess(storage.reg, accessWidth), maskedValue);
       return { kind: "ok" };
     case "mem":
       return writeMemory(context, storage, accessWidth, maskedValue);
@@ -459,20 +459,12 @@ function effectiveAddress(state: CpuState, binding: MemOperand): number {
   return u32(base + index + binding.disp);
 }
 
-function readReg32Access(state: CpuState, reg: Reg32, accessWidth: OperandWidth): number {
-  return maskValue(getReg32(state, reg), accessWidth);
-}
+function regAccess(reg: Parameters<typeof registerAlias>[0], accessWidth: OperandWidth) {
+  const alias = registerAlias(reg);
 
-function writeReg32Access(state: CpuState, reg: Reg32, accessWidth: OperandWidth, value: number): void {
-  if (accessWidth === 32) {
-    setReg32(state, reg, value);
-    return;
-  }
-
-  const mask = widthMask(accessWidth);
-  const base = getReg32(state, reg);
-
-  setReg32(state, reg, (base & ~mask) | (value & mask));
+  return alias.width === 32
+    ? { ...alias, width: accessWidth }
+    : alias;
 }
 
 function maskValue(value: number, width: OperandWidth): number {

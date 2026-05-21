@@ -27,9 +27,6 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
     instructions: [{
       instructionId: "cache-plan",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
         {
@@ -85,9 +82,6 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
       {
         instructionId: "write-before-overwrite",
         eip: startAddress,
-        nextEip: startAddress + 1,
-        nextMode: "continue",
-        operands: [],
         ir: [
           { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
           {
@@ -109,9 +103,6 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
       {
         instructionId: "overwrite-before-exit",
         eip: startAddress + 1,
-        nextEip: startAddress + 2,
-        nextMode: "exit",
-        operands: [],
         ir: [
           {
             op: "set",
@@ -149,9 +140,6 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
     instructions: [{
       instructionId: "fault-before-register-write",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "continue",
-      operands: [],
       ir: [
         {
           op: "memory.guard",
@@ -184,24 +172,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
       ]
     }]
   };
-  const stores = [registerStore("eax")];
-  const exit = exitPoint({
-    instructionIndex: 0,
-    opIndex: 0,
-    reason: ExitReason.MEMORY_READ_FAULT,
-    snapshot: exitState(0, ["eax"]),
-    visibleEip: { kind: "static", value: startAddress },
-    payload: { kind: "runtime", source: "memoryAddress" },
-    stores,
-    exitStoreIndex: 1
-  });
-  const analysis = analyzeBlockForTest(block);
-  const plan: JitCodegenPlan = {
-    analysis,
-    instructions: plannedInstructionsForTest(analysis, [exit]),
-    exits: [exit]
-  };
-  const emissionPlan = buildJitCodegenEmissionPlan(plan);
+  const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
 
   deepStrictEqual(emissionPlan.reusePlan.cache.selected, []);
 });

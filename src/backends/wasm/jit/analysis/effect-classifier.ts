@@ -1,9 +1,4 @@
-import type {
-  IrExprOp,
-  IrStorageExpr
-} from "#backends/wasm/codegen/expressions.js";
-import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
+import type { JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type { ExitKind } from "./exits.js";
 
 export type EffectKind =
@@ -16,14 +11,14 @@ export type EffectKind =
   | "fallthrough";
 
 export function classifyExits(
-  op: IrExprOp,
-  instruction: InstructionMetadata
+  op: JitBoundExprOp,
+  isFinalInstruction: boolean
 ): readonly ExitKind[] {
   switch (op.op) {
     case "memory.guard":
       return [op.access === "read" ? "memoryReadFault" : "memoryWriteFault"];
     case "next":
-      return instruction.nextMode === "exit"
+      return isFinalInstruction
         ? ["fallthrough"]
         : [];
     case "jump":
@@ -41,19 +36,19 @@ export function classifyExits(
 }
 
 export function classifyEffect(
-  op: IrExprOp,
-  instruction: InstructionMetadata
+  op: JitBoundExprOp,
+  isFinalInstruction: boolean
 ): EffectKind | undefined {
   switch (op.op) {
     case "memory.guard":
       return "memoryGuard";
     case "set":
-      return storageAccessIsMemory(op.target, instruction.operands)
+      return op.target.kind === "mem"
         ? "memoryStore"
         : undefined;
     case "let32":
       return op.value.kind === "source" &&
-        storageAccessIsMemory(op.value.source, instruction.operands)
+        op.value.source.kind === "mem"
         ? "memoryLoad"
         : undefined;
     case "jump":
@@ -63,24 +58,10 @@ export function classifyEffect(
     case "hostTrap":
       return "hostTrap";
     case "next":
-      return instruction.nextMode === "exit"
+      return isFinalInstruction
         ? "fallthrough"
         : undefined;
     default:
       return undefined;
-  }
-}
-
-function storageAccessIsMemory(
-  storage: IrStorageExpr,
-  operands: readonly JitOperandBinding[]
-): boolean {
-  switch (storage.kind) {
-    case "mem":
-      return true;
-    case "operand":
-      return operands[storage.index]?.kind === "static.mem";
-    case "reg":
-      return false;
   }
 }

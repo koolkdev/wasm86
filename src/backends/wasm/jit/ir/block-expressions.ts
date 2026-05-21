@@ -1,17 +1,20 @@
 import {
   buildIrExpressionBlock,
-  type IrExprBlock
 } from "#backends/wasm/codegen/expressions.js";
 import type {
   JitIrBlock,
   JitIrInstruction,
   InstructionMetadata
 } from "#backends/wasm/jit/ir/types.js";
+import {
+  buildJitBoundExpressionBlock,
+  type JitBoundExprBlock
+} from "./bound-expressions.js";
 
 export type BlockExpressionInstruction = Readonly<{
   instruction: InstructionMetadata;
   index: number;
-  expressions: IrExprBlock;
+  expressions: JitBoundExprBlock;
 }>;
 
 export type BlockExpressions = Readonly<{
@@ -30,19 +33,24 @@ function buildBlockExpressionInstruction(
   instruction: JitIrInstruction,
   index: number
 ): BlockExpressionInstruction {
+  const expressions = buildJitBoundExpressionBlock(
+    buildIrExpressionBlock(instruction.ir),
+    {
+      eip: instruction.eip,
+      nextEip: instruction.nextEip
+    }
+  );
+
   return {
     instruction: instructionMetadata(instruction),
     index,
-    expressions: buildIrExpressionBlock(instruction.ir)
+    expressions
   };
 }
 
 function instructionMetadata(instruction: JitIrInstruction): InstructionMetadata {
   return {
     instructionId: instruction.instructionId,
-    eip: instruction.eip,
-    nextEip: instruction.nextEip,
-    nextMode: instruction.nextMode,
-    operands: instruction.operands
+    eip: instruction.eip
   };
 }

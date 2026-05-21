@@ -58,7 +58,11 @@ import {
   validateBlock,
   type EncodeJitBlockOptions
 } from "#backends/wasm/jit/block.js";
-import type { JitIrBlock } from "#backends/wasm/jit/ir/types.js";
+import type {
+  JitIrBlock as BoundJitIrBlock,
+  JitIrInstruction
+} from "#backends/wasm/jit/ir/types.js";
+import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import {
   planReuseForInstructions,
   type InstructionEpochSource
@@ -75,6 +79,14 @@ import {
 import type { ExitSnapshot } from "#backends/wasm/jit/analysis/exits.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg32 } from "#x86/isa/types.js";
+
+type TestJitIrInstruction =
+  Omit<JitIrInstruction, "nextEip"> &
+  Partial<Pick<JitIrInstruction, "nextEip">>;
+
+export type JitIrBlock = Readonly<{
+  instructions: readonly TestJitIrInstruction[];
+}>;
 
 function buildTimeline(input: Omit<TimelineInput, "loadResultRegistry">) {
   return buildTimelineWithRegistry({
@@ -128,7 +140,6 @@ export type {
   ValueCacheState,
   ValueScope,
   ValueEmitters,
-  JitIrBlock,
   ExitSnapshot,
   Reg32
 };
@@ -137,12 +148,92 @@ export function encodeJitBlock(
   blocks: readonly JitIrBlock[],
   options?: EncodeJitBlockOptions
 ): Uint8Array<ArrayBuffer> {
-  blocks.forEach(validateBlock);
+  const boundBlocks = blocks.map(bindTestJitBlock);
+
+  boundBlocks.forEach(validateBlock);
 
   return encodeJitPlans(
-    blocks.map((block) => planJitCodegen(buildBlockExpressions(block))),
+    boundBlocks.map((block) => planJitCodegen(buildBlockExpressions(block))),
     options
   );
+}
+
+export function bindTestJitBlock(block: JitIrBlock): BoundJitIrBlock {
+  return {
+    instructions: block.instructions.map((instruction): JitIrInstruction => {
+      const nextEip = instruction.nextEip ?? instruction.eip + 1;
+
+      return {
+        ...instruction,
+        nextEip,
+        ir: bindTestInstructionIr(instruction.ir, nextEip)
+      };
+    })
+  };
+}
+
+function bindTestInstructionIr(ir: readonly IrOp[], nextEip: number): readonly IrOp[] {
+  return ir.map((op) => bindTestInstructionOp(op, nextEip));
+}
+
+function bindTestInstructionOp(op: IrOp, nextEip: number): IrOp {
+  switch (op.op) {
+    case "get":
+      return { ...op, source: bindTestStorage(op.source, nextEip) };
+    case "set":
+      return { ...op, target: bindTestStorage(op.target, nextEip), value: bindTestValue(op.value, nextEip) };
+    case "memory.guard":
+      return { ...op, address: bindTestValue(op.address, nextEip) };
+    case "value.binary":
+      return { ...op, a: bindTestValue(op.a, nextEip), b: bindTestValue(op.b, nextEip) };
+    case "value.unary":
+      return { ...op, value: bindTestValue(op.value, nextEip) };
+    case "value.select":
+      return {
+        ...op,
+        condition: bindTestValue(op.condition, nextEip),
+        whenTrue: bindTestValue(op.whenTrue, nextEip),
+        whenFalse: bindTestValue(op.whenFalse, nextEip)
+      };
+    case "flags.set":
+      return {
+        ...op,
+        inputs: Object.fromEntries(
+          Object.entries(op.inputs).map(([name, value]) => [name, bindTestValue(value, nextEip)])
+        )
+      };
+    case "next":
+      return op;
+    case "jump":
+      return { ...op, target: bindTestValue(op.target, nextEip) };
+    case "conditionalJump":
+      return {
+        ...op,
+        condition: bindTestValue(op.condition, nextEip),
+        taken: bindTestValue(op.taken, nextEip),
+        notTaken: bindTestValue(op.notTaken, nextEip)
+      };
+    case "hostTrap":
+      return { ...op, vector: bindTestValue(op.vector, nextEip) };
+    case "address":
+    case "value.const":
+    case "flags.condition":
+      return op;
+  }
+}
+
+function bindTestStorage(storage: StorageRef, nextEip: number): StorageRef {
+  return storage.kind === "mem"
+    ? { kind: "mem", address: bindTestValue(storage.address, nextEip) }
+    : storage;
+}
+
+function bindTestValue(value: ValueRef, nextEip: number): ValueRef {
+  return value.kind === "nextEip" ? constValueRef(nextEip) : value;
+}
+
+function constValueRef(value: number): Extract<ValueRef, { kind: "const" }> {
+  return { kind: "const", type: "i32", value };
 }
 
 export function addValue(reg: "eax" | "ebx", value: number): JitValue {
@@ -274,7 +365,7 @@ export function createOneOpValueCache(
   return createValueCache(
     body,
     { epochs: [{ index: 0, consumers: [] }], selected: [] },
-    [{ operands: [], valueTimeline: undefined as never, opEpochs: [0] }]
+    [{ valueTimeline: undefined as never, opEpochs: [0] }]
   );
 }
 
@@ -286,7 +377,7 @@ export function createOneOpSelectedValueCache(
   return createValueCache(
     body,
     { epochs: [{ index: 0, consumers: [selected] }], selected: [selected] },
-    [{ operands: [], valueTimeline: undefined as never, opEpochs: [0] }]
+    [{ valueTimeline: undefined as never, opEpochs: [0] }]
   );
 }
 
@@ -426,9 +517,6 @@ export function repeatedInlineExpressionBlock(): JitIrBlock {
     instructions: [{
       instructionId: "cache-test",
       eip: 0x1000,
-      nextEip: 0x1001,
-      nextMode: "exit",
-      operands: [],
       ir: [
         { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" } },
         {

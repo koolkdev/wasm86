@@ -1,12 +1,11 @@
 import { IrEmitter, type IrBlockTerminator } from "./emitter.js";
-import { irVar } from "#x86/ir/model/refs.js";
+import { createIrVarAllocator, type IrVarAllocator } from "./vars.js";
 import type {
   OperandRef,
   SemanticOperandInfo,
   SemanticTemplate,
   IrOp,
-  IrBlock,
-  VarRef
+  IrBlock
 } from "#x86/ir/model/types.js";
 
 export type IrBlockInstruction = Readonly<{
@@ -19,14 +18,22 @@ export type IrBlockAppendResult = Readonly<{
   terminator: IrBlockTerminator;
 }>;
 
+export type IrBlockBuilderOptions = Readonly<{
+  allocator?: IrVarAllocator;
+}>;
+
 export class IrBlockBuilder {
   readonly #ops: IrOp[] = [];
-  #nextVarId = 0;
+  readonly #allocator: IrVarAllocator;
+
+  constructor(options: IrBlockBuilderOptions = {}) {
+    this.#allocator = options.allocator ?? createIrVarAllocator();
+  }
 
   appendInstruction(instruction: IrBlockInstruction): IrBlockAppendResult {
     const emitter = new IrEmitter({
       ops: this.#ops,
-      allocateVar: () => this.#allocVar(),
+      allocator: this.#allocator,
       resolveOperand: (index) => blockOperand(instruction.operands, index),
       ...(instruction.operandInfo !== undefined
         ? { operandInfo: instruction.operandInfo }
@@ -39,13 +46,6 @@ export class IrBlockBuilder {
 
   build(): IrBlock {
     return [...this.#ops];
-  }
-
-  #allocVar(): VarRef {
-    const id = this.#nextVarId;
-
-    this.#nextVarId += 1;
-    return irVar(id);
   }
 }
 

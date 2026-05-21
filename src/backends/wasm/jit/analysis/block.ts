@@ -1,6 +1,6 @@
 import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
 import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
-import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
+import type { JitBoundExprBlock } from "#backends/wasm/jit/ir/bound-expressions.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
   analyzeInstructionEffects,
@@ -20,7 +20,7 @@ export type { InstructionFlow } from "./effects.js";
 export type InstructionAnalysis = Readonly<{
   instruction: InstructionMetadata;
   index: number;
-  expressions: IrExprBlock;
+  expressions: JitBoundExprBlock;
   timeline: Timeline;
   flow: InstructionFlow<Exit>;
 }>;
@@ -43,17 +43,16 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
     }
 
     const { instruction, index, expressions } = entry;
+    const isFinalInstruction = position === blockExpressions.instructions.length - 1;
     const expressionPaths = buildExpressionPaths(expressions, index);
     const entryState = currentValueState;
     const timeline = buildTimeline({
-      operands: instruction.operands,
       expressions,
       entry: entryState,
       snapshotPoints: timelineSnapshotPointsForExpressions(
-        instruction,
+        isFinalInstruction,
         expressions
       ),
-      nextEip: instruction.nextEip,
       loadResultRegistry
     });
     const progress = {
@@ -66,6 +65,7 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
       expressions,
       timeline,
       expressionPaths,
+      isFinalInstruction,
       progress
     };
 
@@ -76,7 +76,7 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
       timeline,
       flow: analyzeInstructionEffects(effectInput)
     });
-    instructionCountDelta += instructionDeltaForExpressions(instruction, expressions);
+    instructionCountDelta += instructionDeltaForExpressions(isFinalInstruction, expressions);
     currentValueState = timeline.finalState;
   }
 
@@ -86,13 +86,13 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
 }
 
 function instructionDeltaForExpressions(
-  instruction: InstructionMetadata,
-  expressions: IrExprBlock
+  isFinalInstruction: boolean,
+  expressions: JitBoundExprBlock
 ): number {
   let delta = 0;
 
   for (const op of expressions) {
-    delta += instructionDeltaAfterOp(op, instruction);
+    delta += instructionDeltaAfterOp(op, isFinalInstruction);
   }
 
   return delta;

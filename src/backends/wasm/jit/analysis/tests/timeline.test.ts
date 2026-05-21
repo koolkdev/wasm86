@@ -22,7 +22,6 @@ import {
   jitLoadResultValue
 } from "#backends/wasm/jit/ir/values/builders.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import { syntheticInstruction } from "#backends/wasm/jit/ir/tests/helpers.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
@@ -47,7 +46,6 @@ test("JIT value timeline records the same register source expression before and 
   entry.regs.writeReg32("eax", c32(3));
 
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: entry.snapshot(),
     snapshotPoints: new Set()
@@ -72,7 +70,6 @@ test("JIT value timeline records partial register writes as named register alias
     { op: "set", target: reg("eax"), value: c32(0x7f), accessWidth: 8 }
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
@@ -98,7 +95,6 @@ test("JIT value timeline snapshots are queried at requested points", () => {
   entry.regs.writeReg32("eax", c32(3));
 
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: entry.snapshot(),
     snapshotPoints: new Set([0, 2])
@@ -122,7 +118,6 @@ test("JIT value timeline does not expose unrequested entry or final snapshots", 
   entry.regs.writeReg32("eax", c32(3));
 
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: entry.snapshot(),
     snapshotPoints: new Set()
@@ -163,7 +158,6 @@ test("JIT value timeline records condition reads before and after flag writes", 
     { op: "let32", dst: v(3), value: condition }
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
@@ -180,40 +174,32 @@ test("JIT value timeline records condition reads before and after flag writes", 
 
 test("JIT value timeline records memory operand effective addresses", () => {
   const entry = createJitValueState();
-  const memoryOperand = op(0);
-  const operands = [{
-    kind: "static.mem",
-    ea: {
-      kind: "mem",
-      base: "eax",
-      index: "ecx",
-      scale: 4,
-      disp: 0x20,
-      accessWidth: 32
-    }
-  }] as const satisfies readonly JitOperandBinding[];
+  const address = exprAdd(
+    exprAdd(source(reg("eax")), exprShl(source(reg("ecx")), c32(2))),
+    c32(0x20)
+  );
+  const memory = { kind: "mem", address } as const satisfies IrStorageExpr;
   const expressionBlock = [
-    { op: "let32", dst: v(0), value: { kind: "address", operand: memoryOperand } },
-    { op: "set", target: memoryOperand, value: c32(7), accessWidth: 32 }
+    { op: "let32", dst: v(0), value: address },
+    { op: "set", target: memory, value: c32(7), accessWidth: 32 }
   ] as const satisfies IrExprBlock;
 
   entry.regs.writeReg32("eax", c32(3));
   entry.regs.writeReg32("ecx", c32(5));
 
   const timeline = buildTimeline({
-    operands,
     expressions: expressionBlock,
     entry: entry.snapshot(),
     snapshotPoints: new Set()
   });
   const expectedAddress = jitAdd(jitAdd(c32(3), c32(20)), c32(0x20));
 
-  deepStrictEqual(timeline.viewAt(0).address(memoryOperand), expectedAddress);
-  deepStrictEqual(timeline.viewAt(1).address(memoryOperand), expectedAddress);
-  strictEqual(timeline.viewAt(0).hasStorageRead({ source: memoryOperand, accessWidth: 32 }), false);
-  strictEqual(timeline.viewAt(1).hasStorageRead({ source: memoryOperand, accessWidth: 32 }), false);
-  throws(() => timeline.viewAt(0).storageRead({ source: memoryOperand, accessWidth: 32 }));
-  throws(() => timeline.viewAt(1).storageRead({ source: memoryOperand, accessWidth: 32 }));
+  deepStrictEqual(timeline.viewAt(0).expression(address), expectedAddress);
+  deepStrictEqual(timeline.viewAt(1).storageAddress(memory), expectedAddress);
+  strictEqual(timeline.viewAt(0).hasStorageRead({ source: memory, accessWidth: 32 }), false);
+  strictEqual(timeline.viewAt(1).hasStorageRead({ source: memory, accessWidth: 32 }), false);
+  throws(() => timeline.viewAt(0).storageRead({ source: memory, accessWidth: 32 }));
+  throws(() => timeline.viewAt(1).storageRead({ source: memory, accessWidth: 32 }));
 });
 
 test("JIT source-state values and value timeline resolve overlapping values the same way", () => {
@@ -224,20 +210,11 @@ test("JIT source-state values and value timeline resolve overlapping values the 
     ["eax", eax],
     ["ecx", ecx]
   ]);
-  const operands = [
-    { kind: "static.reg", alias: { name: "ah", base: "eax", bitOffset: 8, width: 8 } },
-    {
-      kind: "static.mem",
-      ea: {
-        kind: "mem",
-        base: "eax",
-        index: "ecx",
-        scale: 4,
-        disp: 0x20,
-        accessWidth: 32
-      }
-    }
-  ] as const satisfies readonly JitOperandBinding[];
+  const ah = { kind: "reg", reg: "ah" } as const satisfies IrStorageExpr;
+  const address = exprAdd(
+    exprAdd(source(reg("eax")), exprShl(source(reg("ecx")), c32(2))),
+    c32(0x20)
+  );
   const entry = createJitValueState();
   entry.regs.writeReg32("eax", eax);
   entry.regs.writeReg32("ecx", ecx);
@@ -245,18 +222,16 @@ test("JIT source-state values and value timeline resolve overlapping values the 
 
   const condition = { kind: "flags.condition", cc: "E" } as const satisfies IrValueExpr;
   const expressionBlock = [
-    { op: "let32", dst: v(0), value: source(op(0), 8) },
-    { op: "let32", dst: v(1), value: { kind: "address", operand: op(1) } },
+    { op: "let32", dst: v(0), value: source(ah, 8) },
+    { op: "let32", dst: v(1), value: address },
     { op: "let32", dst: v(2), value: condition }
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
-    operands,
     expressions: expressionBlock,
     entry: entry.snapshot(),
     snapshotPoints: new Set()
   });
   const resolver = createJitValueResolver({
-    operands,
     readReg32: (reg) => registerValues.get(reg) ?? jitInputReg32Value(reg),
     readAluFlags: () => flags
   });
@@ -267,33 +242,23 @@ test("JIT source-state values and value timeline resolve overlapping values the 
 });
 
 test("JIT timeline op view reads planned effective-address lookups only", () => {
-  const operands = [{
-    kind: "static.mem",
-    ea: {
-      kind: "mem",
-      base: "eax",
-      scale: 1,
-      disp: 4,
-      accessWidth: 32
-    }
-  }] as const satisfies readonly JitOperandBinding[];
+  const memory = { kind: "mem", address: exprAdd(source(reg("eax")), c32(4)) } as const satisfies IrStorageExpr;
   const expressionBlock = [
     { op: "let32", dst: v(0), value: c32(1) },
-    { op: "let32", dst: v(1), value: { kind: "address", operand: op(0) } }
+    { op: "set", target: memory, value: c32(2), accessWidth: 32 }
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
-    operands,
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
 
-  strictEqual(timeline.viewAt(0).hasAddress(op(0)), false);
-  throws(() => timeline.viewAt(0).address(op(0)));
-  strictEqual(timeline.viewAt(1).hasAddress(op(0)), true);
+  strictEqual(timeline.viewAt(0).hasStorageAddress(memory), false);
+  throws(() => timeline.viewAt(0).storageAddress(memory));
+  strictEqual(timeline.viewAt(1).hasStorageAddress(memory), true);
   deepStrictEqual(
-    timeline.viewAt(1).address(op(0)),
-    timeline.viewAt(1).expression(expressionBlock[1].value)
+    timeline.viewAt(1).storageAddress(memory),
+    timeline.viewAt(1).value(memory.address)
   );
 });
 
@@ -305,7 +270,6 @@ test("JIT timeline op view reads planned register-storage lookups only", () => {
     { op: "let32", dst: v(1), value: source(reg("eax")) }
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: entry.snapshot(),
     snapshotPoints: new Set()
@@ -324,7 +288,6 @@ test("JIT timeline records load-result memory load definitions at one point", ()
     { op: "let32", dst: v(1), value: v(0) }
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
@@ -350,16 +313,12 @@ test("JIT timeline records load-result memory load definitions at one point", ()
 
 test("JIT timeline records load-result memory operand reads only", () => {
   const loadResult = jitLoadResultValue(0, "i32");
+  const memory = { kind: "mem", address: source(reg("ebx"), 32) } as const satisfies IrStorageExpr;
   const expressionBlock = [
-    { op: "let32", dst: v(0), value: source(op(0), 32) },
+    { op: "let32", dst: v(0), value: source(memory, 32) },
     { op: "let32", dst: v(1), value: source(reg("eax"), 32) }
   ] as const satisfies IrExprBlock;
-  const operands = [{
-    kind: "static.mem",
-    ea: { kind: "mem", base: "ebx", scale: 1, disp: 0, accessWidth: 32 }
-  }] as const satisfies readonly JitOperandBinding[];
   const timeline = buildTimeline({
-    operands,
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
@@ -398,7 +357,6 @@ test("JIT block analysis allocates distinct load-result IDs across memory loads"
 
 test("JIT timeline op view fails clearly for invalid op indexes", () => {
   const timeline = buildTimeline({
-    operands: [],
     expressions: [{ op: "let32", dst: v(0), value: c32(1) }],
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
@@ -410,7 +368,6 @@ test("JIT timeline op view fails clearly for invalid op indexes", () => {
 test("JIT value timeline fails clearly for unresolved values", () => {
   throws(
     () => buildTimeline({
-      operands: [],
       expressions: [{ op: "hostTrap", vector: v(99) }],
       entry: createJitValueState().snapshot(),
       snapshotPoints: new Set()
@@ -421,7 +378,6 @@ test("JIT value timeline fails clearly for unresolved values", () => {
 
 test("JIT value timeline ignores no-op flag writes before resolving inputs", () => {
   const timeline = buildTimeline({
-    operands: [],
     expressions: [{
       op: "flags.set",
       producer: "add",
@@ -454,10 +410,6 @@ function reg(name: Reg32) {
   return { kind: "reg" as const, reg: name };
 }
 
-function op(index: number) {
-  return { kind: "operand" as const, index };
-}
-
 function source(sourceRef: IrStorageExpr, accessWidth = 32) {
   return {
     kind: "source" as const,
@@ -476,4 +428,8 @@ function jitAdd(a: JitValue, b: JitValue): JitValue {
 
 function exprAdd(a: IrValueExpr, b: IrValueExpr): Extract<IrValueExpr, { kind: "value.binary" }> {
   return { kind: "value.binary", type: "i32", operator: "add", a, b };
+}
+
+function exprShl(a: IrValueExpr, b: IrValueExpr): Extract<IrValueExpr, { kind: "value.binary" }> {
+  return { kind: "value.binary", type: "i32", operator: "shl", a, b };
 }

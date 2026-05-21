@@ -1,7 +1,8 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { Reg32 } from "#x86/isa/types.js";
+import type { Reg32, RegName } from "#x86/isa/types.js";
+import { registerAlias } from "#x86/isa/registers.js";
 import { buildIr } from "#x86/ir/build/builder.js";
 import type { IrExprBlock, IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { IrBlock } from "#x86/ir/model/types.js";
@@ -300,8 +301,9 @@ function emitSet(
   body.localSet(requireRegLocal(regLocals, target.reg));
 }
 
-function requireRegLocal(regLocals: Partial<Record<Reg32, number>>, reg: Reg32): number {
-  const local = regLocals[reg];
+function requireRegLocal(regLocals: Partial<Record<Reg32, number>>, reg: RegName): number {
+  const base = registerAlias(reg).base;
+  const local = regLocals[base];
 
   if (local === undefined) {
     throw new Error(`missing test register local: ${reg}`);

@@ -34,7 +34,6 @@ export function planReuseForEmission<TInstruction extends PlannedInstruction>(
   exits: readonly PlannedExit[]
 ): PlannedReuseForEmission<TInstruction> {
   const reuseInputs = instructions.map((instruction) => ({
-    operands: instruction.analysis.instruction.operands,
     expressionBlock: instruction.analysis.expressions,
     valueTimeline: instruction.analysis.timeline
   }));

@@ -1,7 +1,13 @@
 import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import { u32 } from "#x86/state/cpu-state.js";
-import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
+import type {
+  JitConditionalJumpExprOp,
+  JitHostTrapExprOp,
+  JitJumpExprOp,
+  JitMemoryGuardExprOp,
+  JitNextExprOp
+} from "#backends/wasm/jit/ir/bound-expressions.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
 import {
@@ -53,18 +59,28 @@ export type Exit = Readonly<{
   path: Path;
 }>;
 
-export type ExitBuildInput = Readonly<{
-  instruction: InstructionMetadata;
+type ExitBuildInputBase<
+  TKind extends ExitKind,
+  TOp
+> = Readonly<{
   at: Placement;
-  kind: ExitKind;
+  kind: TKind;
+  op: TOp;
   snapshot: ExitSnapshot;
   paths: PathMap;
   targetValue?: JitValue;
   staticLinkTarget?: number;
 }>;
 
+export type ExitBuildInput =
+  | ExitBuildInputBase<"memoryReadFault" | "memoryWriteFault", JitMemoryGuardExprOp>
+  | ExitBuildInputBase<"fallthrough", JitNextExprOp>
+  | ExitBuildInputBase<"jump", JitJumpExprOp>
+  | ExitBuildInputBase<"branchTaken" | "branchNotTaken", JitConditionalJumpExprOp>
+  | ExitBuildInputBase<"hostTrap", JitHostTrapExprOp>;
+
 export function buildExit(input: ExitBuildInput): Exit {
-  const { instruction, at, kind, snapshot, paths, targetValue, staticLinkTarget } = input;
+  const { at, kind, snapshot, paths, staticLinkTarget } = input;
 
   return {
     id: exitId(at, kind),
@@ -72,8 +88,8 @@ export function buildExit(input: ExitBuildInput): Exit {
     kind,
     reason: exitReasonForKind(kind),
     snapshot,
-    visibleEip: visibleEipForExit(instruction, kind, targetValue),
-    payload: payloadForExit(instruction, kind, targetValue),
+    visibleEip: visibleEipForExit(input),
+    payload: payloadForExit(input),
     ...(staticLinkTarget === undefined ? {} : { staticLinkTarget: u32(staticLinkTarget) }),
     path: pathForExit(kind, paths, at)
   };
@@ -115,44 +131,30 @@ export function pathForExit(
   }
 }
 
-export function visibleEipForExit(
-  instruction: InstructionMetadata,
-  kind: ExitKind,
-  targetValue?: JitValue
-): ExitValue {
-  switch (kind) {
+export function visibleEipForExit(input: ExitBuildInput): ExitValue {
+  switch (input.kind) {
     case "memoryReadFault":
     case "memoryWriteFault":
-      return {
-        kind: "static",
-        value: instruction.eip
-      };
+      return { kind: "static", value: u32(input.op.faultEip) };
     case "hostTrap":
-      return {
-        kind: "static",
-        value: instruction.nextEip
-      };
+      return { kind: "static", value: u32(input.op.visibleEip) };
     default:
-      return payloadForExit(instruction, kind, targetValue);
+      return payloadForExit(input);
   }
 }
 
-export function payloadForExit(
-  instruction: InstructionMetadata,
-  kind: ExitKind,
-  targetValue?: JitValue
-): ExitPayload {
-  switch (kind) {
+export function payloadForExit(input: ExitBuildInput): ExitPayload {
+  switch (input.kind) {
     case "memoryReadFault":
     case "memoryWriteFault":
       return { kind: "runtime", source: "memoryAddress" };
     case "fallthrough":
-      return { kind: "static", value: instruction.nextEip };
+      return { kind: "static", value: u32(input.op.target.value) };
     case "jump":
     case "branchTaken":
     case "branchNotTaken": {
-      return targetValue?.kind === "const"
-        ? { kind: "static", value: u32(targetValue.value) }
+      return input.targetValue?.kind === "const"
+        ? { kind: "static", value: u32(input.targetValue.value) }
         : { kind: "runtime", source: "controlTarget" };
     }
     case "hostTrap":

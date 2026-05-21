@@ -3,7 +3,6 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
 import {
   createJitValueResolver,
   type JitValueResolver
@@ -16,12 +15,11 @@ import type {
 } from "#backends/wasm/jit/ir/values/types.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import {
-  jitRegisterSlotForAlias,
-  jitRegisterSlotForWrite
+  jitRegisterSlotForAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
-import { u32 } from "#x86/state/cpu-state.js";
-import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import type { ValueRef } from "#x86/ir/model/types.js";
+import { registerAlias } from "#x86/isa/registers.js";
+import type { OperandWidth, RegisterAlias, RegName } from "#x86/isa/types.js";
 import { LoadResultRegistry } from "./load-result.js";
 import {
   type LoadResultDefinition,
@@ -43,7 +41,6 @@ export function buildTimeline(input: TimelineInput): Timeline {
 }
 
 class TimelineBuilder {
-  readonly #operands: readonly JitOperandBinding[];
   readonly #ops: readonly IrExprOp[];
   readonly #loadResultValuesByVar = new Map<number, JitLoadResultValue>();
   readonly #valueState: ValueStateBuilder;
@@ -63,20 +60,14 @@ class TimelineBuilder {
   #currentSetValue: JitValue | undefined;
   #currentSetValueResolved = false;
   readonly #entry: ValueSnapshot;
-  readonly #nextEip: JitValue | undefined;
 
   constructor(input: TimelineInput) {
-    this.#operands = input.operands;
     this.#ops = input.expressions;
     this.#loadResultRegistry = input.loadResultRegistry;
     this.#entry = input.entry;
     this.#snapshotPoints = new Set(input.snapshotPoints);
-    this.#nextEip = input.nextEip === undefined
-      ? undefined
-      : { kind: "const", type: "i32", value: u32(input.nextEip) };
     this.#valueState = new ValueStateBuilder(this.#entry);
     this.#resolver = createJitValueResolver({
-      operands: this.#operands,
       readReg32: (reg) => this.#valueState.registers().readReg32(reg),
       readAluFlags: () => this.#valueState.flags().readAluFlags(),
       readValueRef: (value) =>
@@ -207,7 +198,6 @@ class TimelineBuilder {
       snapshots: this.#snapshots,
       storage: {
         catalog: this.#ids,
-        ...(this.#nextEip === undefined ? {} : { nextEip: this.#nextEip }),
         ...(this.#expressionsByOp.size === 0 ? {} : { expressionsByOp: this.#expressionsByOp }),
         ...(this.#refsByOp.size === 0 ? {} : { refsByOp: this.#refsByOp }),
         ...(this.#addressesByOp.size === 0 ? {} : { addressesByOp: this.#addressesByOp }),
@@ -260,7 +250,7 @@ class TimelineBuilder {
       case "mem":
         return true;
       case "operand":
-        return this.#operands[storage.index]?.kind === "static.mem";
+        throw new Error(`unresolved JIT operand storage ${storage.index}`);
       case "reg":
         return false;
     }
@@ -279,39 +269,11 @@ class TimelineBuilder {
       case "mem":
         return;
       case "reg":
-        this.#recordRegisterWrite(op.target.reg, 0, op.accessWidth, value);
+        this.#recordRegisterSlotWrite(jitRegisterSlotForAlias(registerAccess(op.target.reg, op.accessWidth)), value);
         return;
       case "operand":
-        this.#recordOperandWrite(op.target.index, value);
-        return;
+        throw new Error(`unresolved JIT operand storage ${op.target.index}`);
     }
-  }
-
-  #recordOperandWrite(operandIndex: number, value: JitValue): void {
-    const binding = this.#operands[operandIndex];
-
-    if (binding === undefined) {
-      throw new Error(`missing JIT operand binding for register write at expression op ${this.#currentOpIndex}`);
-    }
-
-    switch (binding.kind) {
-      case "static.reg":
-        this.#recordRegisterSlotWrite(jitRegisterSlotForAlias(binding.alias), value);
-        return;
-      case "static.mem":
-      case "static.imm32":
-      case "static.relTarget":
-        return;
-    }
-  }
-
-  #recordRegisterWrite(
-    reg: Reg32,
-    bitOffset: number,
-    width: OperandWidth,
-    value: JitValue
-  ): void {
-    this.#recordRegisterSlotWrite(jitRegisterSlotForWrite(reg, bitOffset, width), value);
   }
 
   #recordRegisterSlotWrite(slot: JitRegisterSlot, value: JitValue): void {
@@ -355,10 +317,7 @@ class TimelineBuilder {
         this.#valueForExpression(storage.address);
         return;
       case "operand":
-        if (this.#operands[storage.index]?.kind === "static.mem") {
-          this.#valueForAddress(storage);
-        }
-        return;
+        throw new Error(`unresolved JIT operand storage ${storage.index}`);
       case "reg":
         return;
     }
@@ -368,8 +327,9 @@ class TimelineBuilder {
     switch (expression.kind) {
       case "var":
       case "const":
-      case "nextEip":
         return this.#valueForRef(expression);
+      case "nextEip":
+        throw new Error(`unresolved JIT nextEip expression at op ${this.#currentOpIndex}`);
       case "source":
       case "address":
       case "flags.condition":
@@ -398,9 +358,8 @@ class TimelineBuilder {
         this.#recordStorageInputs(expression.source);
         return this.#valueForStorageRead(expression);
       }
-      case "address": {
-        return this.#valueForAddress(expression.operand);
-      }
+      case "address":
+        throw new Error(`unresolved JIT address expression at op ${this.#currentOpIndex}`);
       case "value.binary": {
         const a = this.#valueForExpression(expression.a);
         const b = this.#valueForExpression(expression.b);
@@ -452,9 +411,10 @@ class TimelineBuilder {
     switch (expression.kind) {
       case "var":
       case "const":
-      case "nextEip":
         this.#valueForRef(expression);
         return;
+      case "nextEip":
+        throw new Error(`unresolved JIT nextEip expression at op ${this.#currentOpIndex}`);
       case "source":
         this.#recordStorageInputs(expression.source);
         if (loadResult === undefined) {
@@ -464,8 +424,7 @@ class TimelineBuilder {
         }
         return;
       case "address":
-        this.#valueForAddress(expression.operand);
-        return;
+        throw new Error(`unresolved JIT address expression at op ${this.#currentOpIndex}`);
       case "value.binary":
         this.#recordLoadResultExpressionInputs(expression.a);
         this.#recordLoadResultExpressionInputs(expression.b);
@@ -488,11 +447,7 @@ class TimelineBuilder {
       case "const":
         return this.#resolvedValue(this.#resolver.valueForValueRef(ref));
       case "nextEip":
-        if (this.#nextEip === undefined) {
-          throw new Error(`could not resolve JIT timeline value at expression op ${this.#currentOpIndex}`);
-        }
-
-        return this.#nextEip;
+        throw new Error(`unresolved JIT nextEip ref at expression op ${this.#currentOpIndex}`);
       case "var": {
         const values = this.#currentRefValues();
 
@@ -570,24 +525,6 @@ class TimelineBuilder {
     });
   }
 
-  #valueForAddress(operand: OperandRef): JitValue {
-    if (this.#operands[operand.index]?.kind !== "static.mem") {
-      throw new Error(`JIT effective address is not available for operand ${operand.index}`);
-    }
-
-    const id = this.#ids.registerStorage(operand);
-    const values = this.#currentAddressValues();
-
-    if (values.has(id)) {
-      return values.get(id)!;
-    }
-
-    const value = this.#resolvedValue(this.#resolver.valueForEffectiveAddress(operand));
-
-    values.set(id, value);
-    return value;
-  }
-
   #resolvedValue(value: JitValue | undefined): JitValue {
     if (value === undefined) {
       throw new Error(`could not resolve JIT timeline value at expression op ${this.#currentOpIndex}`);
@@ -602,10 +539,6 @@ class TimelineBuilder {
 
   #currentRefValues(): Map<number, JitValue> {
     return this.#currentOpMap(this.#refsByOp);
-  }
-
-  #currentAddressValues(): Map<TimelineStorageId, JitValue> {
-    return this.#currentOpMap(this.#addressesByOp);
   }
 
   #currentStorageReadValues(): Map<TimelineStorageReadId, JitValue> {
@@ -624,4 +557,12 @@ class TimelineBuilder {
 
     return values;
   }
+}
+
+function registerAccess(reg: RegName, accessWidth: OperandWidth): RegisterAlias {
+  const alias = registerAlias(reg);
+
+  return alias.width === 32
+    ? { ...alias, width: accessWidth }
+    : alias;
 }

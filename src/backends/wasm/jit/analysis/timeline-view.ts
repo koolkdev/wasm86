@@ -3,7 +3,7 @@ import type {
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
-import type { OperandRef, ValueRef } from "#x86/ir/model/types.js";
+import type { ValueRef } from "#x86/ir/model/types.js";
 import type {
   StorageReadRef,
   TimelineExpression,
@@ -28,8 +28,9 @@ export class TimelineOpView implements TimelineView {
     switch (value.kind) {
       case "const":
       case "var":
-      case "nextEip":
         return this.ref(value);
+      case "nextEip":
+        throw new Error("missing JIT timeline value");
       case "source":
       case "address":
       case "flags.condition":
@@ -53,7 +54,7 @@ export class TimelineOpView implements TimelineView {
       case "const":
         return { kind: "const", type: ref.type, value: ref.value };
       case "nextEip":
-        return timelineValue(this.#storage.nextEip);
+        throw new Error("missing JIT timeline value");
       case "var":
         return timelineValue(this.#storage.refsByOp?.get(this.opIndex)?.get(ref.id));
     }
@@ -64,18 +65,10 @@ export class TimelineOpView implements TimelineView {
       case "mem":
         return this.value(target.address);
       case "operand":
-        return this.address(target);
+        throw new Error("missing JIT timeline value");
       case "reg":
         throw new Error("missing JIT timeline value");
     }
-  }
-
-  address(operand: OperandRef): JitValue {
-    return timelineValue(
-      this.#storage.addressesByOp
-        ?.get(this.opIndex)
-        ?.get(timelineId(this.#storage.catalog.storageId(operand)))
-    );
   }
 
   storageRead(read: StorageReadRef): JitValue {
@@ -90,8 +83,9 @@ export class TimelineOpView implements TimelineView {
     switch (value.kind) {
       case "const":
       case "var":
-      case "nextEip":
         return this.hasRef(value);
+      case "nextEip":
+        return false;
       case "source":
       case "address":
       case "flags.condition":
@@ -113,7 +107,7 @@ export class TimelineOpView implements TimelineView {
       case "const":
         return true;
       case "nextEip":
-        return this.#storage.nextEip !== undefined;
+        return false;
       case "var":
         return this.#storage.refsByOp?.get(this.opIndex)?.has(ref.id) === true;
     }
@@ -124,16 +118,10 @@ export class TimelineOpView implements TimelineView {
       case "mem":
         return this.hasValue(target.address);
       case "operand":
-        return this.hasAddress(target);
+        return false;
       case "reg":
         return false;
     }
-  }
-
-  hasAddress(operand: OperandRef): boolean {
-    const id = this.#storage.catalog.storageId(operand);
-
-    return id !== undefined && this.#storage.addressesByOp?.get(this.opIndex)?.has(id) === true;
   }
 
   hasStorageRead(read: StorageReadRef): boolean {

@@ -18,14 +18,11 @@ import {
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import type { Effect } from "#backends/wasm/jit/codegen/plan/effect-types.js";
 
-test("JIT effects plan leaves pure expressions and state updates out of cache roots", () => {
+test("JIT effects plan treats final fallthrough state as exit-store roots", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "state-updates-only",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "continue",
-      operands: [],
       ir: [
         { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
         {
@@ -50,9 +47,11 @@ test("JIT effects plan leaves pure expressions and state updates out of cache ro
   };
   const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
 
-  deepStrictEqual(emissionPlan.effects, []);
-  deepStrictEqual(emissionPlan.valueUses, []);
-  deepStrictEqual(emissionPlan.reusePlan.cache.selected, []);
+  deepStrictEqual(emissionPlan.effects.map((effect) => effect.kind), ["fallthrough"]);
+  strictEqual(emissionPlan.valueUses.every((use) => use.purpose === "exitStore"), true);
+  strictEqual(emissionPlan.reusePlan.cache.selected.some((entry) =>
+    entry.value.kind === "value.binary"
+  ), true);
 });
 
 test("JIT effects plan resolves operands, preserves order, and carries exact exits", () => {
@@ -61,9 +60,6 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
       {
         instructionId: "effect-guard",
         eip: startAddress,
-        nextEip: startAddress + 1,
-        nextMode: "continue",
-        operands: [],
         ir: [
           { op: "memory.guard", address: c32Expr(0x60), byteLength: 4, access: "read" },
           { op: "next" }
@@ -72,9 +68,6 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
       {
         instructionId: "effect-store",
         eip: startAddress + 1,
-        nextEip: startAddress + 2,
-        nextMode: "continue",
-        operands: [],
         ir: [
           {
             op: "set",
@@ -88,9 +81,6 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
       {
         instructionId: "load-result",
         eip: startAddress + 2,
-        nextEip: startAddress + 3,
-        nextMode: "continue",
-        operands: [],
         ir: [
           {
             op: "get",
@@ -104,9 +94,6 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
       {
         instructionId: "effect-jump",
         eip: startAddress + 3,
-        nextEip: startAddress + 4,
-        nextMode: "exit",
-        operands: [],
         ir: [
           { op: "jump", target: c32Expr(0x2000) }
         ]
@@ -114,9 +101,6 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
       {
         instructionId: "effect-branch",
         eip: startAddress + 4,
-        nextEip: startAddress + 5,
-        nextMode: "exit",
-        operands: [],
         ir: [
           {
             op: "conditionalJump",
@@ -129,9 +113,6 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
       {
         instructionId: "effect-trap",
         eip: startAddress + 5,
-        nextEip: startAddress + 6,
-        nextMode: "exit",
-        operands: [],
         ir: [
           { op: "hostTrap", vector: c32Expr(0x2e) }
         ]
@@ -139,9 +120,6 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
       {
         instructionId: "effect-fallthrough",
         eip: startAddress + 6,
-        nextEip: startAddress + 7,
-        nextMode: "exit",
-        operands: [],
         ir: [
           { op: "next" }
         ]
@@ -201,18 +179,22 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
 
 test("JIT effects plan omits local fallthrough effects", () => {
   const block: JitIrBlock = {
-    instructions: [{
-      instructionId: "local-fallthrough",
-      eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "continue",
-      operands: [],
-      ir: [{ op: "next" }]
-    }]
+    instructions: [
+      {
+        instructionId: "local-fallthrough",
+        eip: startAddress,
+        ir: [{ op: "next" }]
+      },
+      {
+        instructionId: "final-jump",
+        eip: startAddress + 1,
+        ir: [{ op: "jump", target: c32Expr(0x2000) }]
+      }
+    ]
   };
   const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
 
-  deepStrictEqual(emissionPlan.effects, []);
+  deepStrictEqual(emissionPlan.effects.map((effect) => effect.kind), ["jump"]);
 });
 
 test("JIT effects plan attaches roots for ordered effects and exit stores", () => {
@@ -221,9 +203,6 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
       {
         instructionId: "guard-root",
         eip: startAddress,
-        nextEip: startAddress + 1,
-        nextMode: "continue",
-        operands: [],
         ir: [
           { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
           {
@@ -241,9 +220,6 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
       {
         instructionId: "store-root",
         eip: startAddress + 1,
-        nextEip: startAddress + 2,
-        nextMode: "continue",
-        operands: [],
         ir: [
           { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
           {
@@ -266,9 +242,6 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
       {
         instructionId: "branch-root",
         eip: startAddress + 2,
-        nextEip: startAddress + 3,
-        nextMode: "exit",
-        operands: [],
         ir: [
           { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
           {
@@ -291,9 +264,6 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
       {
         instructionId: "trap-root",
         eip: startAddress + 3,
-        nextEip: startAddress + 4,
-        nextMode: "exit",
-        operands: [],
         ir: [
           { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
           {
@@ -344,9 +314,6 @@ test("JIT effects plan selects load-result values only for later required roots"
     instructions: [{
       instructionId: "unused-loadResult",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "continue",
-      operands: [],
       ir: [
         {
           op: "get",
@@ -362,9 +329,6 @@ test("JIT effects plan selects load-result values only for later required roots"
     instructions: [{
       instructionId: "used-loadResult",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         {
           op: "get",
@@ -381,7 +345,8 @@ test("JIT effects plan selects load-result values only for later required roots"
   const loadResult = jitLoadResultValue(0, "i32");
 
   deepStrictEqual(unusedPlan.effects.map((effect) => effect.kind), [
-    "memoryLoad"
+    "memoryLoad",
+    "fallthrough"
   ]);
   deepStrictEqual(unusedPlan.valueUses, []);
   deepStrictEqual(unusedPlan.reusePlan.cache.selected, []);

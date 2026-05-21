@@ -1,4 +1,4 @@
-import type { Reg32 } from "#x86/isa/types.js";
+import type { RegName } from "#x86/isa/types.js";
 import type {
   IrConstValueRef,
   MemRef,
@@ -19,7 +19,7 @@ export function operand(index: number): OperandRef {
   return { kind: "operand", index };
 }
 
-export function reg(reg: Reg32): RegRef {
+export function reg(reg: RegName): RegRef {
   return { kind: "reg", reg };
 }
 

@@ -26,6 +26,7 @@ import {
   countOpcode,
   passthroughValueCache,
   encodeJitBlock,
+  bindTestJitBlock,
   type JitIrBlock,
   type JitValue
 } from "./value-local-store-test-helpers.js";
@@ -64,9 +65,6 @@ test("JIT production emission consumes effects plan entries from instruction pla
   const instruction = {
     instructionId: "prebuilt-effects-plan",
     eip: 0x1000,
-    nextEip: 0x1001,
-    nextMode: "continue",
-    operands: [],
     ir: expressionBlock
   } as const;
   const initialState = exitState(0);
@@ -76,7 +74,7 @@ test("JIT production emission consumes effects plan entries from instruction pla
     at: { instructionIndex: 0, opIndex: 0 },
     kind: "hostTrap",
     snapshot,
-    visibleEip: { kind: "static", value: instruction.nextEip },
+    visibleEip: { kind: "static", value: 0x1001 },
     reason: ExitReason.HOST_TRAP,
     payload: { kind: "runtime", source: "hostTrapVector" },
     path: rootPath(),
@@ -101,16 +99,12 @@ test("JIT production emission consumes effects plan entries from instruction pla
     instructions: [{
       instructionId: instruction.instructionId,
       eip: instruction.eip,
-      nextEip: instruction.nextEip,
-      nextMode: instruction.nextMode,
       instructionCountDelta: initialState.progress.instructionCountDelta,
       initialValueState: initialState.valueState,
       paths: new Map(),
       exitCount: 1,
-      operands: instruction.operands,
       expressionBlock,
       valueTimeline: buildTimeline({
-        operands: [],
         expressions: expressionBlock,
         entry: initialState.valueState,
         snapshotPoints: new Set()
@@ -185,16 +179,12 @@ test("JIT production emission does not walk unplanned expression effects", () =>
     instructions: [{
       instructionId: "unplanned-expression-effect",
       eip: 0x1000,
-      nextEip: 0x1001,
-      nextMode: "continue",
       instructionCountDelta: initialState.progress.instructionCountDelta,
       initialValueState: initialState.valueState,
       paths: new Map(),
       exitCount: 0,
-      operands: [],
       expressionBlock,
       valueTimeline: buildTimeline({
-        operands: [],
         expressions: expressionBlock,
         entry: initialState.valueState,
         snapshotPoints: new Set()
@@ -527,15 +517,12 @@ function emptyCapturePlan(): CapturePlan {
 
 function singleInstructionBlock(
   ir: JitIrBlock["instructions"][number]["ir"],
-  options: Readonly<{ nextMode?: "continue" | "exit" }> = {}
+  _options: Readonly<{ nextMode?: "continue" | "exit" }> = {}
 ): JitIrBlock {
   return {
     instructions: [{
       instructionId: "planned-emission-test",
       eip: 0x1000,
-      nextEip: 0x1001,
-      nextMode: options.nextMode ?? "exit",
-      operands: [],
       ir
     }]
   };
@@ -561,5 +548,5 @@ function jitBlockOpcodes(block: JitIrBlock): readonly number[] {
 }
 
 function planBlock(block: JitIrBlock) {
-  return planJitCodegen(buildBlockExpressions(block));
+  return planJitCodegen(buildBlockExpressions(bindTestJitBlock(block)));
 }

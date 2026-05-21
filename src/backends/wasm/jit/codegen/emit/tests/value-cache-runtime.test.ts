@@ -100,13 +100,11 @@ test("JIT value-cache runtime follows planned timeline expression positions", ()
     { op: "hostTrap", vector: addExpr("eax", 1) }
   ] as const;
   const timeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
   const plan = planReuseForInstruction({
-    operands: [],
     valueTimeline: timeline
   }, expressionBlock);
   const valueState = createValueCache(body, plan.cache, plan.instructions);
@@ -209,14 +207,12 @@ test("JIT value-cache planning does not treat flags.set as an exit-store consume
     { op: "next" }
   ] as const;
   const valueTimeline = buildTimeline({
-    operands: [],
     expressions: expressionBlock,
     entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
 
   deepStrictEqual(planReuseForInstruction({
-    operands: [],
     valueTimeline
   }, expressionBlock).cache.selected, []);
 });
@@ -232,9 +228,6 @@ function singleInstructionBlock(ir: JitIrBlock["instructions"][number]["ir"]): J
     instructions: [{
       instructionId: "value-cache-production-test",
       eip: 0x1000,
-      nextEip: 0x1001,
-      nextMode: "exit",
-      operands: [],
       ir
     }]
   };

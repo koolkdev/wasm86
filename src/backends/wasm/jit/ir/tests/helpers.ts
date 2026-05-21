@@ -1,6 +1,7 @@
 import type { Reg32 } from "#x86/isa/types.js";
+import { registerAlias } from "#x86/isa/registers.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
-import type { ConditionCode, IrBlock, IrOp, ValueRef, VarRef } from "#x86/ir/model/types.js";
+import type { ConditionCode, IrBlock, IrOp, StorageRef, ValueRef, VarRef } from "#x86/ir/model/types.js";
 import type {
   JitIrBlock,
   JitIrInstruction
@@ -43,15 +44,16 @@ export function selectSet(
 export function syntheticInstruction(
   ir: IrBlock,
   index = 0,
-  nextMode: JitIrBlock["instructions"][number]["nextMode"] = "continue"
+  _nextMode: "continue" | "exit" = "continue"
 ): JitIrBlock["instructions"][number] {
+  const eip = startAddress + index;
+  const nextEip = startAddress + index + 1;
+
   return {
     instructionId: `synthetic.${index}`,
-    eip: startAddress + index,
-    nextEip: startAddress + index + 1,
-    nextMode,
-    operands: [],
-    ir
+    eip,
+    nextEip,
+    ir: bindTestInstructionIr(ir, nextEip)
   };
 }
 
@@ -66,12 +68,9 @@ export function setTargetRegs(
 
       switch (op.target.kind) {
         case "reg":
-          return [op.target.reg];
-        case "operand": {
-          const binding = instruction.operands[op.target.index];
-
-          return binding?.kind === "static.reg" ? [binding.alias.base] : [];
-        }
+          return [registerAlias(op.target.reg).base];
+        case "operand":
+          return [];
         case "mem":
           return [];
       }
@@ -89,4 +88,64 @@ export function v(id: number): VarRef {
 
 export function c32(value: number): ValueRef {
   return { kind: "const", type: "i32", value };
+}
+
+function bindTestInstructionIr(ir: IrBlock, nextEip: number): IrBlock {
+  return ir.map((op): IrOp => {
+    switch (op.op) {
+      case "get":
+        return { ...op, source: bindTestStorage(op.source, nextEip) };
+      case "set":
+        return { ...op, target: bindTestStorage(op.target, nextEip), value: bindTestValue(op.value, nextEip) };
+      case "memory.guard":
+        return { ...op, address: bindTestValue(op.address, nextEip) };
+      case "value.binary":
+        return { ...op, a: bindTestValue(op.a, nextEip), b: bindTestValue(op.b, nextEip) };
+      case "value.unary":
+        return { ...op, value: bindTestValue(op.value, nextEip) };
+      case "value.select":
+        return {
+          ...op,
+          condition: bindTestValue(op.condition, nextEip),
+          whenTrue: bindTestValue(op.whenTrue, nextEip),
+          whenFalse: bindTestValue(op.whenFalse, nextEip)
+        };
+      case "flags.set":
+        return {
+          ...op,
+          inputs: Object.fromEntries(
+            Object.entries(op.inputs).map(([name, value]) => [name, bindTestValue(value, nextEip)])
+          )
+        };
+      case "hostTrap":
+        return { ...op, vector: bindTestValue(op.vector, nextEip) };
+      case "next":
+        return op;
+      case "jump":
+        return { ...op, target: bindTestValue(op.target, nextEip) };
+      case "conditionalJump":
+        return {
+          ...op,
+          condition: bindTestValue(op.condition, nextEip),
+          taken: bindTestValue(op.taken, nextEip),
+          notTaken: bindTestValue(op.notTaken, nextEip)
+        };
+      case "address":
+      case "value.const":
+      case "flags.condition":
+        return op;
+      default:
+        return op;
+    }
+  });
+}
+
+function bindTestStorage(storage: StorageRef, nextEip: number): StorageRef {
+  return storage.kind === "mem"
+    ? { kind: "mem", address: bindTestValue(storage.address, nextEip) }
+    : storage;
+}
+
+function bindTestValue(value: ValueRef, nextEip: number): ValueRef {
+  return value.kind === "nextEip" ? c32(nextEip) : value;
 }

@@ -1,4 +1,4 @@
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import type { OperandWidth, RegName } from "#x86/isa/types.js";
 
 export type VarId = number;
 
@@ -10,7 +10,7 @@ export type NextEipRef = Readonly<{ kind: "nextEip" }>;
 export type ValueRef = VarRef | IrConstValueRef | NextEipRef;
 
 export type OperandRef = Readonly<{ kind: "operand"; index: number }>;
-export type RegRef = Readonly<{ kind: "reg"; reg: Reg32 }>;
+export type RegRef = Readonly<{ kind: "reg"; reg: RegName }>;
 export type MemRef = Readonly<{ kind: "mem"; address: ValueRef }>;
 export type StorageRef = OperandRef | RegRef | MemRef;
 
@@ -144,7 +144,7 @@ export interface IrBuilder {
   operand(index: number): OperandRef;
   const32(value: number): IrConstValueRef;
   nextEip(): NextEipRef;
-  reg(reg: Reg32): RegRef;
+  reg(reg: RegName): RegRef;
   mem(address: ValueInput): MemRef;
 
   get(source: StorageInput, accessWidth?: OperandWidth, options?: IrGetOptions): VarRef;

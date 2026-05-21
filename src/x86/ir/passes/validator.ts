@@ -110,6 +110,8 @@ function validateOpUses(
     case "hostTrap":
       validateValueRef(op.vector, definedVars);
       break;
+    case "next":
+      break;
   }
 }
 

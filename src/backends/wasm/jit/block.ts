@@ -8,6 +8,13 @@ export type {
   BlockExpressionInstruction
 } from "./ir/block-expressions.js";
 export type {
+  JitBoundExprBlock,
+  JitBoundExprOp,
+  JitMemoryGuardExprOp,
+  JitNextExprOp,
+  JitHostTrapExprOp
+} from "./ir/bound-expressions.js";
+export type {
   BlockAnalysis,
   InstructionFlow,
   InstructionAnalysis

@@ -1,6 +1,10 @@
 import { validateIrBlock } from "#x86/ir/passes/validator.js";
-import { irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
-import type { IrOp } from "#x86/ir/model/types.js";
+import {
+  irOpIsTerminator,
+  visitIrOpStorageRefs,
+  visitIrOpValueRefs
+} from "#x86/ir/model/op-semantics.js";
+import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 
 export function validateBlock(block: JitIrBlock): void {
@@ -30,9 +34,12 @@ function validateJitInstructionBody(
   instruction: JitIrInstruction
 ): void {
   validateIrBlock(instruction.ir, {
-    operandCount: instruction.operands.length,
     terminatorMode: "single"
   });
+
+  for (const op of instruction.ir) {
+    validateJitInstructionOp(op);
+  }
 }
 
 function validateInstructionBoundary(
@@ -47,24 +54,50 @@ function validateInstructionBoundary(
   }
 
   if (instructionIndex === block.instructions.length - 1) {
-    if (instruction.nextMode !== "exit") {
-      throw new Error("final JIT instruction must exit");
-    }
-
     return;
   }
 
   if (instructionIndex < block.instructions.length - 1) {
-    if (instruction.nextMode !== "continue") {
-      throw new Error("non-final JIT instruction must continue");
-    }
-
     if (!isFallthroughTerminator(terminator)) {
       throw new Error(`non-final JIT instruction must fall through, got ${terminator.op}`);
+    }
+
+    const nextInstruction = block.instructions[instructionIndex + 1];
+
+    if (nextInstruction === undefined) {
+      throw new Error(`missing JIT instruction: ${instructionIndex + 1}`);
+    }
+
+    if (instruction.nextEip !== nextInstruction.eip) {
+      throw new Error(
+        `non-final JIT instruction fallthrough target 0x${instruction.nextEip.toString(16)} ` +
+        `does not match next instruction EIP 0x${nextInstruction.eip.toString(16)}`
+      );
     }
   }
 }
 
-function isFallthroughTerminator(op: IrOp): boolean {
+function isFallthroughTerminator(op: IrOp): op is Extract<IrOp, { op: "next" }> {
   return op.op === "next";
+}
+
+function validateJitInstructionOp(op: IrOp): void {
+  visitIrOpStorageRefs(op, (storage) => validateBoundStorage(storage));
+  visitIrOpValueRefs(op, (value) => validateBoundValue(value));
+
+  if (op.op === "address") {
+    throw new Error("JIT IR must not contain source-local address operands");
+  }
+}
+
+function validateBoundStorage(storage: StorageRef): void {
+  if (storage.kind === "operand") {
+    throw new Error("JIT IR must not contain source-local operand storage");
+  }
+}
+
+function validateBoundValue(value: ValueRef): void {
+  if (value.kind === "nextEip") {
+    throw new Error("JIT IR must not contain nextEip refs");
+  }
 }

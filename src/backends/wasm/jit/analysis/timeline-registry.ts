@@ -2,7 +2,8 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
+import type { OperandWidth } from "#x86/isa/types.js";
+import { registerAlias } from "#x86/isa/registers.js";
 import type {
   StorageReadRef,
   TimelineExpression,
@@ -17,7 +18,7 @@ export class TimelineRegistry implements TimelineIdCatalog {
   #nextStorageId = 0;
   #nextStorageReadId = 0;
   readonly #expressionIds = new Map<TimelineExpression, TimelineExpressionId>();
-  readonly #regStorageIds = new Map<Reg32, TimelineStorageId>();
+  readonly #regStorageIds = new Map<string, TimelineStorageId>();
   readonly #operandStorageIds = new Map<number, TimelineStorageId>();
   readonly #memStorageIds = new Map<IrValueExpr, TimelineStorageId>();
   readonly #storageReadIds = new Map<
@@ -32,7 +33,7 @@ export class TimelineRegistry implements TimelineIdCatalog {
   storageId(storage: IrStorageExpr): TimelineStorageId | undefined {
     switch (storage.kind) {
       case "reg":
-        return this.#regStorageIds.get(storage.reg);
+        return this.#regStorageIds.get(regStorageKey(storage));
       case "operand":
         return this.#operandStorageIds.get(storage.index);
       case "mem":
@@ -68,7 +69,7 @@ export class TimelineRegistry implements TimelineIdCatalog {
   registerStorage(storage: IrStorageExpr): TimelineStorageId {
     switch (storage.kind) {
       case "reg":
-        return this.#registerStorageId(this.#regStorageIds, storage.reg);
+        return this.#registerStorageId(this.#regStorageIds, regStorageKey(storage));
       case "operand":
         return this.#registerStorageId(this.#operandStorageIds, storage.index);
       case "mem":
@@ -122,4 +123,8 @@ export class TimelineRegistry implements TimelineIdCatalog {
     ids.set(lookup, id);
     return id;
   }
+}
+
+function regStorageKey(storage: Extract<IrStorageExpr, { kind: "reg" }>): string {
+  return registerAlias(storage.reg).name;
 }

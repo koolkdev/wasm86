@@ -33,9 +33,6 @@ test("planJitCodegen leaves exit-store sources on exits and omits separate exit-
     instructions: [{
       instructionId: "canonical-loadResult-exit-store",
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         {
           op: "memory.guard",
@@ -151,9 +148,6 @@ function buildHostTrapEmissionPlanForStores(
     instructions: [{
       instructionId,
       eip: startAddress,
-      nextEip: startAddress + 1,
-      nextMode: "exit",
-      operands: [],
       ir: [
         {
           op: "get",

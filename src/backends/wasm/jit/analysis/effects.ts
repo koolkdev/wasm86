@@ -1,9 +1,9 @@
-import type {
-  IrExprBlock,
-  IrExprOp,
-  IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
+import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
+import type {
+  JitBoundExprBlock,
+  JitBoundExprOp
+} from "#backends/wasm/jit/ir/bound-expressions.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   buildExit,
@@ -28,9 +28,10 @@ import type { Timeline, TimelineView } from "./timeline-types.js";
 export type EffectInstructionInput = Readonly<{
   instruction: InstructionMetadata;
   index: number;
-  expressions: IrExprBlock;
+  expressions: JitBoundExprBlock;
   timeline: Timeline;
   expressionPaths: PathMap;
+  isFinalInstruction: boolean;
   progress: InstructionProgress;
 }>;
 
@@ -61,7 +62,7 @@ type MutableInstructionFlow<TExit extends Exit = Exit> = {
 export function analyzeInstructionEffects(
   instructionAnalysis: EffectInstructionInput
 ): InstructionFlow {
-  const { instruction, index, expressions } = instructionAnalysis;
+  const { index, expressions } = instructionAnalysis;
   const flow: MutableInstructionFlow = {
     effects: [],
     exits: []
@@ -75,8 +76,8 @@ export function analyzeInstructionEffects(
       throw new Error(`missing JIT expression op while analyzing effects: ${index}:${opIndex}`);
     }
 
-    const effectKind = classifyEffect(op, instruction);
-    const exitKinds = classifyExits(op, instruction);
+    const effectKind = classifyEffect(op, instructionAnalysis.isFinalInstruction);
+    const exitKinds = classifyExits(op, instructionAnalysis.isFinalInstruction);
 
     if (effectKind === undefined && exitKinds.length !== 0) {
       throw new Error(`JIT exits without an owning effect at ${index}:${opIndex}`);
@@ -85,8 +86,7 @@ export function analyzeInstructionEffects(
     const at = { instructionIndex: index, opIndex };
     const view = instructionAnalysis.timeline.viewAt(opIndex);
     const exitRecords = exitKinds.map((kind) =>
-      buildExit({
-        instruction,
+      buildExitForOp({
         at,
         kind,
         snapshot: snapshotForExit(
@@ -98,8 +98,9 @@ export function analyzeInstructionEffects(
           )
         ),
         paths: instructionAnalysis.expressionPaths,
-        ...targetValueInput(kind, op, view),
-        ...staticLinkTargetInput(kind, op, instruction, expressions)
+        op,
+        view,
+        expressions
       })
     );
 
@@ -110,18 +111,18 @@ export function analyzeInstructionEffects(
     }
 
     flow.exits.push(...exitRecords);
-    currentInstructionCountDelta += instructionDeltaAfterOp(op, instruction);
+    currentInstructionCountDelta += instructionDeltaAfterOp(op, instructionAnalysis.isFinalInstruction);
   }
 
   return flow;
 }
 
 export function timelineSnapshotPointsForExpressions(
-  instruction: InstructionMetadata,
-  expressions: IrExprBlock
+  isFinalInstruction: boolean,
+  expressions: JitBoundExprBlock
 ): ReadonlySet<number> {
   return new Set(expressions.flatMap((op, opIndex) =>
-    classifyExits(op, instruction).length === 0
+    classifyExits(op, isFinalInstruction).length === 0
       ? []
       : [opIndex]
   ));
@@ -168,9 +169,78 @@ function exitSnapshotBeforeOp(
   };
 }
 
+function buildExitForOp(input: Readonly<{
+  at: Placement;
+  kind: ExitKind;
+  snapshot: ExitSnapshot;
+  paths: PathMap;
+  op: JitBoundExprOp;
+  view: TimelineView;
+  expressions: JitBoundExprBlock;
+}>): Exit {
+  const { at, kind, snapshot, paths, op, view, expressions } = input;
+  const base = { at, snapshot, paths };
+
+  switch (kind) {
+    case "memoryReadFault":
+    case "memoryWriteFault":
+      if (op.op !== "memory.guard") {
+        return invalidExitKindForOp(kind, op);
+      }
+
+      return buildExit({ ...base, kind, op });
+    case "fallthrough":
+      if (op.op !== "next") {
+        return invalidExitKindForOp(kind, op);
+      }
+
+      return buildExit({
+        ...base,
+        kind,
+        op,
+        ...staticLinkTargetInput(kind, op, expressions)
+      });
+    case "jump":
+      if (op.op !== "jump") {
+        return invalidExitKindForOp(kind, op);
+      }
+
+      return buildExit({
+        ...base,
+        kind,
+        op,
+        ...targetValueInput(kind, op, view),
+        ...staticLinkTargetInput(kind, op, expressions)
+      });
+    case "branchTaken":
+    case "branchNotTaken":
+      if (op.op !== "conditionalJump") {
+        return invalidExitKindForOp(kind, op);
+      }
+
+      return buildExit({
+        ...base,
+        kind,
+        op,
+        ...targetValueInput(kind, op, view),
+        ...staticLinkTargetInput(kind, op, expressions)
+      });
+    case "hostTrap":
+      if (op.op !== "hostTrap") {
+        return invalidExitKindForOp(kind, op);
+      }
+
+      return buildExit({ ...base, kind, op });
+  }
+}
+
+function invalidExitKindForOp(kind: ExitKind, op: JitBoundExprOp): never {
+  throw new Error(`JIT ${kind} exit cannot be built from ${op.op}`);
+}
+
 function targetValueInput(
   kind: ExitKind,
-  op: IrExprOp,
+  op: JitBoundExprOp,
   view: TimelineView
 ): Readonly<{ targetValue?: JitValue }> {
   const target = targetExpressionForExit(kind, op);
@@ -182,7 +252,7 @@ function targetValueInput(
 
 function targetExpressionForExit(
   kind: ExitKind,
-  op: IrExprOp
+  op: JitBoundExprOp
 ): IrValueExpr | undefined {
   switch (kind) {
     case "jump":
@@ -201,11 +271,10 @@ function targetExpressionForExit(
 
 function staticLinkTargetInput(
   kind: ExitKind,
-  op: IrExprOp,
-  instruction: InstructionMetadata,
-  expressions: IrExprBlock
+  op: JitBoundExprOp,
+  expressions: JitBoundExprBlock
 ): Readonly<{ staticLinkTarget?: number }> {
-  const target = staticLinkTargetForExit(kind, op, instruction, expressions);
+  const target = staticLinkTargetForExit(kind, op, expressions);
 
   return target === undefined
     ? {}
@@ -214,13 +283,14 @@ function staticLinkTargetInput(
 
 function staticLinkTargetForExit(
   kind: ExitKind,
-  op: IrExprOp,
-  instruction: InstructionMetadata,
-  expressions: IrExprBlock
+  op: JitBoundExprOp,
+  expressions: JitBoundExprBlock
 ): number | undefined {
   switch (kind) {
     case "fallthrough":
-      return instruction.nextEip;
+      return op.op === "next"
+        ? op.target.value
+        : undefined;
     case "jump":
     case "branchTaken":
     case "branchNotTaken": {
@@ -228,7 +298,7 @@ function staticLinkTargetForExit(
 
       return target === undefined
         ? undefined
-        : staticLinkTargetForExpression(target, instruction, expressions);
+        : staticLinkTargetForExpression(target, expressions);
     }
     case "memoryReadFault":
     case "memoryWriteFault":
@@ -239,19 +309,16 @@ function staticLinkTargetForExit(
 
 function staticLinkTargetForExpression(
   value: IrValueExpr,
-  instruction: InstructionMetadata,
-  expressions: IrExprBlock
+  expressions: JitBoundExprBlock
 ): number | undefined {
   switch (value.kind) {
-    case "nextEip":
-      return instruction.nextEip;
     case "source":
-      return value.source.kind === "operand"
-        ? staticOperandLinkTarget(instruction, value.source.index)
-        : undefined;
+      return undefined;
     case "var":
-      return materializedStaticOperandTarget(value.id, instruction, expressions);
+      return materializedStaticTarget(value.id, expressions);
     case "const":
+      return value.value;
+    case "nextEip":
     case "address":
     case "flags.condition":
     case "value.binary":
@@ -261,27 +328,17 @@ function staticLinkTargetForExpression(
   }
 }
 
-function materializedStaticOperandTarget(
+function materializedStaticTarget(
   varId: number,
-  instruction: InstructionMetadata,
-  expressions: IrExprBlock
+  expressions: JitBoundExprBlock
 ): number | undefined {
-  const producer = expressions.find((op): op is Extract<IrExprOp, { op: "let32" }> =>
+  const producer = expressions.find((op): op is Extract<JitBoundExprOp, { op: "let32" }> =>
     op.op === "let32" && op.dst.id === varId
   );
 
-  return producer?.value.kind !== "source" || producer.value.source.kind !== "operand"
-    ? undefined
-    : staticOperandLinkTarget(instruction, producer.value.source.index);
-}
-
-function staticOperandLinkTarget(
-  instruction: InstructionMetadata,
-  operandIndex: number
-): number | undefined {
-  const binding = instruction.operands[operandIndex];
-
-  return binding?.kind === "static.relTarget" ? binding.target : undefined;
+  return producer?.value.kind === "const"
+    ? producer.value.value
+    : undefined;
 }
 
 function onlyExit(exits: readonly Exit[]): Exit {
