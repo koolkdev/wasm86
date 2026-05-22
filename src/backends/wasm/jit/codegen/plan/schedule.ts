@@ -5,10 +5,7 @@ import type {
   MemoryLoadValue,
   Timeline
 } from "#backends/wasm/jit/analysis/timeline-types.js";
-import {
-  preparedOpsFromBlockExpressions,
-  type BlockExprOp
-} from "#backends/wasm/jit/ir/block-expressions.js";
+import type { BlockExprOp } from "#backends/wasm/jit/ir/block-expressions.js";
 import {
   jitExpressionOpEpochs
 } from "./epochs.js";
@@ -61,7 +58,7 @@ export function scheduleInputForAnalysis(input: ScheduleAnalysisInput): Schedule
     })),
     timeline: analysis.timeline,
     opEpochs: jitExpressionOpEpochs({
-      expressionBlock: preparedOpsFromBlockExpressions(analysis.expressions),
+      expressions: analysis.expressions,
       valueTimeline: analysis.timeline
     }),
     plannedExits

@@ -17,6 +17,10 @@ import {
   type ValueRoot,
   type ValueUse
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
+import type {
+  BlockExpressions
+} from "#backends/wasm/jit/ir/block-expressions.js";
+import type { JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { rootExpressionPaths } from "./path-test-helpers.js";
 
@@ -29,9 +33,10 @@ export function valueUsesForExpressionBlock(input: Readonly<{
   extraUses?: ReadonlyMap<number, readonly TestValueRoot[]>;
   startEpoch?: number;
 }>): readonly ValueUse[] {
+  const expressions = blockExpressionsForTest(input.expressionBlock);
   const expressionPaths = input.expressionPaths ?? rootExpressionPaths(input.expressionBlock);
   const opEpochs = jitExpressionOpEpochs({
-    expressionBlock: input.expressionBlock,
+    expressions,
     valueTimeline: input.valueTimeline
   }, input.startEpoch ?? 0);
   const roots: ValueRoot[] = [];
@@ -59,6 +64,21 @@ export function valueUsesForExpressionBlock(input: Readonly<{
   }
 
   return roots.flatMap(expandRootUse);
+}
+
+export function blockExpressionsForTest(expressionBlock: IrExprBlock): BlockExpressions {
+  return {
+    ops: expressionBlock.map((op, opIndex) => ({
+      opIndex,
+      op: op as JitBoundExprOp,
+      progress: {
+        instructionCountDelta: 0
+      }
+    })),
+    progress: {
+      instructionCountDelta: 0
+    }
+  };
 }
 
 export function branchExpressionPaths(
@@ -192,10 +212,11 @@ function storageAddressRoots(
     case "operand":
     case "reg": {
       const view = input.valueTimeline.viewAt(at.opIndex);
+      const address = timelineLookup(() => view.storageAddress(storage));
 
-      return view.hasStorageAddress(storage)
-        ? [{ value: view.storageAddress(storage), at, path, purpose }]
-        : [];
+      return address === undefined
+        ? []
+        : [{ value: address, at, path, purpose }];
     }
   }
 }
@@ -209,5 +230,17 @@ function jitValueForExpression(
 ): JitValue | undefined {
   const view = input.valueTimeline.viewAt(opIndex);
 
-  return view.hasValue(value) ? view.value(value) : undefined;
+  return timelineLookup(() => view.value(value));
+}
+
+function timelineLookup(read: () => JitValue): JitValue | undefined {
+  try {
+    return read();
+  } catch (error) {
+    if (error instanceof Error && /^missing JIT timeline (id|value)$/.test(error.message)) {
+      return undefined;
+    }
+
+    throw error;
+  }
 }

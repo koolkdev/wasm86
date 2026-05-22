@@ -26,8 +26,7 @@ export type {
 export { encodeJitBlock, jitBlockExportName } from "./block-module.js";
 export { buildBlock } from "./ir/block-builder.js";
 export {
-  buildBlockExpressions,
-  preparedOpsFromBlockExpressions
+  buildBlockExpressions
 } from "./ir/block-expressions.js";
 export { validateBlock } from "./ir/validate.js";
 export { analyzeBlock } from "./analysis/block.js";

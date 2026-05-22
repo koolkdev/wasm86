@@ -1,6 +1,4 @@
-import type {
-  IrExprBlock,
-} from "#backends/wasm/codegen/expressions.js";
+import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import type {
   MemoryLoadValue,
   Timeline
@@ -19,7 +17,7 @@ export type BlockEpochs = BlockEpochSource & Readonly<{
 }>;
 
 export type BlockEpochInput = BlockEpochSource & Readonly<{
-  expressionBlock: IrExprBlock;
+  expressions: BlockExpressions;
 }>;
 
 export type EpochUsePlan = Readonly<{
@@ -48,12 +46,8 @@ export function buildEpochs(
     block.valueTimeline.writes.map((write) => write.opIndex)
   );
 
-  for (let opIndex = 0; opIndex < block.expressionBlock.length; opIndex += 1) {
-    const op = block.expressionBlock[opIndex];
-
-    if (op === undefined) {
-      throw new Error(`missing JIT value-cache expression op: ${opIndex}`);
-    }
+  for (const entry of block.expressions.ops) {
+    const opIndex = entry.opIndex;
 
     opEpochs[opIndex] = currentEpoch;
 
@@ -94,7 +88,7 @@ export function buildEpochs(
 }
 
 export function jitExpressionOpEpochs(
-  block: Pick<BlockEpochInput, "expressionBlock" | "valueTimeline">,
+  block: Pick<BlockEpochInput, "expressions" | "valueTimeline">,
   startEpoch = 0
 ): readonly number[] {
   const opEpochs: number[] = [];
@@ -103,12 +97,8 @@ export function jitExpressionOpEpochs(
   );
   let currentEpoch = startEpoch;
 
-  for (let opIndex = 0; opIndex < block.expressionBlock.length; opIndex += 1) {
-    const op = block.expressionBlock[opIndex];
-
-    if (op === undefined) {
-      throw new Error(`missing JIT value-cache expression op: ${opIndex}`);
-    }
+  for (const entry of block.expressions.ops) {
+    const opIndex = entry.opIndex;
 
     opEpochs[opIndex] = currentEpoch;
 

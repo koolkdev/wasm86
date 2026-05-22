@@ -7,6 +7,7 @@ import {
   createJitValueResolver,
   type JitValueResolver
 } from "#backends/wasm/jit/analysis/value-resolver.js";
+import type { BlockExprOp } from "#backends/wasm/jit/ir/block-expressions.js";
 import type {
   JitArchitecturalSlot,
   JitRegisterSlot,
@@ -41,7 +42,7 @@ export function buildTimeline(input: TimelineInput): Timeline {
 }
 
 class TimelineBuilder {
-  readonly #ops: readonly IrExprOp[];
+  readonly #ops: readonly BlockExprOp[];
   readonly #loadResultValuesByVar = new Map<number, JitLoadResultValue>();
   readonly #valueState: ValueStateBuilder;
   readonly #resolver: JitValueResolver;
@@ -61,7 +62,7 @@ class TimelineBuilder {
   #currentSetValueResolved = false;
 
   constructor(input: TimelineInput) {
-    this.#ops = input.expressions;
+    this.#ops = input.expressions.ops;
     this.#loadResultRegistry = input.loadResultRegistry;
     this.#snapshotPoints = new Set(input.snapshotPoints);
     this.#valueState = new ValueStateBuilder(input.entry);
@@ -74,12 +75,8 @@ class TimelineBuilder {
   }
 
   build(): Timeline {
-    for (let opIndex = 0; opIndex < this.#ops.length; opIndex += 1) {
-      const op = this.#ops[opIndex];
-
-      if (op === undefined) {
-        throw new Error(`missing JIT timeline expression op: ${opIndex}`);
-      }
+    for (const entry of this.#ops) {
+      const { opIndex, op } = entry;
 
       this.#enterExpressionOp(opIndex);
       this.#recordSnapshotPoint();

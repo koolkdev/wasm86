@@ -1,4 +1,3 @@
-import { preparedOpsFromBlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import {
   planReuseForBlock,
   type BlockReusePlan
@@ -40,7 +39,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
   });
   const reusePlan = planReuseForBlock(
     {
-      expressionBlock: preparedOpsFromBlockExpressions(codegenPlan.analysis.expressions),
+      expressions: codegenPlan.analysis.expressions,
       valueTimeline: codegenPlan.analysis.timeline
     },
     valueUses,

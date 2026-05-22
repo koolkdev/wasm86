@@ -78,57 +78,6 @@ export class TimelineOpView implements TimelineView {
         ?.get(timelineId(this.#storage.catalog.storageReadId(read)))
     );
   }
-
-  hasValue(value: IrValueExpr): boolean {
-    switch (value.kind) {
-      case "const":
-      case "var":
-        return this.hasRef(value);
-      case "nextEip":
-        return false;
-      case "source":
-      case "address":
-      case "flags.condition":
-      case "value.binary":
-      case "value.unary":
-      case "value.select":
-        return this.hasExpression(value);
-    }
-  }
-
-  hasExpression(value: TimelineExpression): boolean {
-    const id = this.#storage.catalog.expressionId(value);
-
-    return id !== undefined && this.#storage.expressionsByOp?.get(this.opIndex)?.has(id) === true;
-  }
-
-  hasRef(ref: ValueRef): boolean {
-    switch (ref.kind) {
-      case "const":
-        return true;
-      case "nextEip":
-        return false;
-      case "var":
-        return this.#storage.refsByOp?.get(this.opIndex)?.has(ref.id) === true;
-    }
-  }
-
-  hasStorageAddress(target: IrStorageExpr): boolean {
-    switch (target.kind) {
-      case "mem":
-        return this.hasValue(target.address);
-      case "operand":
-        return false;
-      case "reg":
-        return false;
-    }
-  }
-
-  hasStorageRead(read: StorageReadRef): boolean {
-    const id = this.#storage.catalog.storageReadId(read);
-
-    return id !== undefined && this.#storage.storageReadsByOp?.get(this.opIndex)?.has(id) === true;
-  }
 }
 
 function timelineId<T>(id: T | undefined): T {

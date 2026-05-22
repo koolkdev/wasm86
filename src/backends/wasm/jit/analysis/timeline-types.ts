@@ -1,8 +1,8 @@
 import type {
-  IrExprBlock,
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
+import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import type {
   JitArchitecturalSlot,
   JitValue
@@ -51,11 +51,6 @@ export type TimelineView = Readonly<{
   ref(value: ValueRef): JitValue;
   storageAddress(storage: IrStorageExpr): JitValue;
   storageRead(read: StorageReadRef): JitValue;
-  hasValue(value: IrValueExpr): boolean;
-  hasExpression(value: TimelineExpression): boolean;
-  hasRef(value: ValueRef): boolean;
-  hasStorageAddress(storage: IrStorageExpr): boolean;
-  hasStorageRead(read: StorageReadRef): boolean;
 }>;
 
 export type TimelineStorage = Readonly<{
@@ -75,7 +70,7 @@ export type Timeline = Readonly<{
 }>;
 
 export type TimelineInput = Readonly<{
-  expressions: IrExprBlock;
+  expressions: BlockExpressions;
   entry?: ValueSnapshot;
   snapshotPoints: ReadonlySet<number>;
   loadResultRegistry: LoadResultRegistry;

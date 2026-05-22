@@ -71,7 +71,10 @@ import type { Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
 import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
-import { valueUsesForExpressionBlock } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
+import {
+  blockExpressionsForTest,
+  valueUsesForExpressionBlock
+} from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
 import {
   branchPath,
   rootPath
@@ -88,9 +91,16 @@ export type JitIrBlock = Readonly<{
   instructions: readonly TestJitIrInstruction[];
 }>;
 
-function buildTimeline(input: Omit<TimelineInput, "loadResultRegistry">) {
+type TestTimelineInput = Omit<TimelineInput, "expressions" | "loadResultRegistry"> & Readonly<{
+  expressions: IrExprBlock;
+}>;
+
+function buildTimeline(input: TestTimelineInput) {
+  const { expressions, ...rest } = input;
+
   return buildTimelineWithRegistry({
-    ...input,
+    ...rest,
+    expressions: blockExpressionsForTest(expressions),
     loadResultRegistry: new LoadResultRegistry()
   });
 }
@@ -285,7 +295,7 @@ export function planReuseForBlockTest(
   });
 
   return planReuseForBlock(
-    { ...block, expressionBlock },
+    { ...block, expressions: blockExpressionsForTest(expressionBlock) },
     valueUses,
     []
   );

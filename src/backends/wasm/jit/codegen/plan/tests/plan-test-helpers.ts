@@ -35,6 +35,7 @@ import type {
   ExitValue
 } from "#backends/wasm/jit/analysis/exits.js";
 import {
+  blockExpressionsForTest,
   valueUsesForExpressionBlock,
   type TestValueRoot
 } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
@@ -75,9 +76,16 @@ export type JitIrBlock = Readonly<{
   instructions: readonly TestJitIrInstruction[];
 }>;
 
-function buildTimeline(input: Omit<TimelineInput, "loadResultRegistry">) {
+type TestTimelineInput = Omit<TimelineInput, "expressions" | "loadResultRegistry"> & Readonly<{
+  expressions: IrExprBlock;
+}>;
+
+function buildTimeline(input: TestTimelineInput) {
+  const { expressions, ...rest } = input;
+
   return buildTimelineWithRegistry({
-    ...input,
+    ...rest,
+    expressions: blockExpressionsForTest(expressions),
     loadResultRegistry: new LoadResultRegistry()
   });
 }
@@ -96,6 +104,7 @@ export {
   analyzeBlock,
   buildBlockExpressions,
   buildJitCodegenEmissionPlan,
+  blockExpressionsForTest,
   branchPath,
   rootPath,
   planReuseForBlock,
@@ -157,7 +166,7 @@ export function planValueCacheForTest(input: Readonly<{
   });
 
   return planReuseForBlock({
-    expressionBlock: input.expressionBlock,
+    expressions: blockExpressionsForTest(input.expressionBlock),
     valueTimeline
   }, valueUses, []);
 }

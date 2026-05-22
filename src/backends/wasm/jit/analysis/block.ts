@@ -1,7 +1,4 @@
-import {
-  preparedOpsFromBlockExpressions,
-  type BlockExpressions
-} from "#backends/wasm/jit/ir/block-expressions.js";
+import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import {
   analyzeBlockRuntime,
   timelineSnapshotPointsForExpressions,
@@ -30,10 +27,9 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
     instructionCountDelta: 0
   };
   const loadResultRegistry = new LoadResultRegistry();
-  const expressionOps = preparedOpsFromBlockExpressions(blockExpressions);
   const expressionPaths = buildExpressionPaths(blockExpressions);
   const timeline = buildTimeline({
-    expressions: expressionOps,
+    expressions: blockExpressions,
     snapshotPoints: timelineSnapshotPointsForExpressions(blockExpressions),
     loadResultRegistry
   });

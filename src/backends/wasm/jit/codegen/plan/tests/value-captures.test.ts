@@ -8,6 +8,7 @@ import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.j
 import { planCaptures } from "#backends/wasm/jit/codegen/plan/captures.js";
 import { planReuseForBlock } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import {
+  blockExpressionsForTest,
   branchExpressionPaths,
   valueUsesForExpressionBlock,
   type TestValueRoot
@@ -37,9 +38,16 @@ import {
   startAddress
 } from "./plan-test-helpers.js";
 
-function buildTimeline(input: Omit<TimelineInput, "loadResultRegistry">) {
+type TestTimelineInput = Omit<TimelineInput, "expressions" | "loadResultRegistry"> & Readonly<{
+  expressions: IrExprBlock;
+}>;
+
+function buildTimeline(input: TestTimelineInput) {
+  const { expressions, ...rest } = input;
+
   return buildTimelineWithRegistry({
-    ...input,
+    ...rest,
+    expressions: blockExpressionsForTest(expressions),
     loadResultRegistry: new LoadResultRegistry()
   });
 }
@@ -191,7 +199,10 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
     expressionPaths: branchExpressionPaths(expressionBlock),
     extraUses
   });
-  const reusePlan = planReuseForBlock({ valueTimeline: timeline, expressionBlock }, uses, []);
+  const reusePlan = planReuseForBlock({
+    valueTimeline: timeline,
+    expressions: blockExpressionsForTest(expressionBlock)
+  }, uses, []);
   const captures = reusePlan.captures.captures;
 
   strictEqual(captures.length, 1);
@@ -323,7 +334,10 @@ function planCapturesForExpressionBlock(
     valueTimeline: timeline,
     expressionPaths: branchExpressionPaths(expressionBlock)
   });
-  const reusePlan = planReuseForBlock({ valueTimeline: timeline, expressionBlock }, uses, []);
+  const reusePlan = planReuseForBlock({
+    valueTimeline: timeline,
+    expressions: blockExpressionsForTest(expressionBlock)
+  }, uses, []);
 
   return { uses, reusePlan };
 }

@@ -1,5 +1,6 @@
 import {
   deepStrictEqual,
+  blockExpressionsForTest,
   test,
   buildTimeline,
   jitLoadResultValue,
@@ -41,7 +42,7 @@ test("JIT value-cache epoch planning exposes block epochs and memory-load values
     ancestors: []
   };
   const epoch = buildEpochs({
-    expressionBlock,
+    expressions: blockExpressionsForTest(expressionBlock),
     valueTimeline
   }, [plannedUse]);
 

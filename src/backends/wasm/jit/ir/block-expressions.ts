@@ -58,20 +58,6 @@ export function buildBlockExpressions(block: JitIrBlock): BlockExpressions {
   };
 }
 
-export function preparedOpsFromBlockExpressions(
-  expressions: BlockExpressions
-): JitBoundExprBlock {
-  return expressions.ops.map((entry, position) => {
-    if (entry.opIndex !== position) {
-      throw new Error(
-        `JIT block expression op index mismatch: ${entry.opIndex} !== ${position}`
-      );
-    }
-
-    return entry.op;
-  });
-}
-
 function buildInstructionExpressions(
   instruction: JitIrInstruction
 ): JitBoundExprBlock {
