@@ -195,6 +195,6 @@ function storeClobberCapture(exit: PlannedExit, value: JitValue): Capture {
 function capturePlan(captures: readonly Capture[]): CapturePlan {
   return {
     captures,
-    effectCaptures: new Map()
+    runtimeCaptures: new Map()
   };
 }

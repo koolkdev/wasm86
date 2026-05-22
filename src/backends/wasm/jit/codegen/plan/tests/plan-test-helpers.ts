@@ -28,8 +28,6 @@ import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import {
   type UsePurpose
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
-import type { BlockAnalysis } from "#backends/wasm/jit/analysis/block.js";
-import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
 import type {
   Exit,
   ExitSnapshot,
@@ -135,59 +133,6 @@ export function analyzeBlockForTest(block: JitIrBlock) {
 
 export function planJitCodegen(block: JitIrBlock): JitCodegenPlan {
   return planExpressionCodegen(buildBlockExpressions(bindTestJitBlock(block)));
-}
-
-export function plannedEffectsForTest(
-  analysis: BlockAnalysis,
-  exits: readonly PlannedExit[]
-): readonly EffectInfo<PlannedExit>[] {
-  const exitsById = new Map(exits.map((exit) => [exit.id, exit]));
-
-  return analysis.effectAnalysis.effects.map((effect) =>
-    planEffectExitsForTest(effect, exitsById)
-  );
-}
-
-function planEffectExitsForTest(
-  effect: EffectInfo,
-  exitsById: ReadonlyMap<string, PlannedExit>
-): EffectInfo<PlannedExit> {
-  switch (effect.kind) {
-    case "memoryGuard":
-      return {
-        ...effect,
-        faultExit: requiredPlannedExitForTest(exitsById, effect.faultExit.id)
-      };
-    case "jump":
-    case "hostTrap":
-    case "fallthrough":
-      return {
-        ...effect,
-        exit: requiredPlannedExitForTest(exitsById, effect.exit.id)
-      };
-    case "branch":
-      return {
-        ...effect,
-        taken: requiredPlannedExitForTest(exitsById, effect.taken.id),
-        notTaken: requiredPlannedExitForTest(exitsById, effect.notTaken.id)
-      };
-    case "memoryStore":
-    case "memoryLoad":
-      return effect;
-  }
-}
-
-function requiredPlannedExitForTest(
-  exitsById: ReadonlyMap<string, PlannedExit>,
-  exitId: string
-): PlannedExit {
-  const exit = exitsById.get(exitId);
-
-  if (exit === undefined) {
-    throw new Error(`missing planned JIT test exit: ${exitId}`);
-  }
-
-  return exit;
 }
 
 export function onlyExit(exits: readonly PlannedExit[], reason: ExitReason): PlannedExit {

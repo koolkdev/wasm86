@@ -11,9 +11,10 @@ import type {
 } from "./types.js";
 import type { ValueUse } from "./value-uses.js";
 import {
-  planEffects
-} from "./effects-plan.js";
-import type { EffectsPlan } from "./effect-types.js";
+  planSchedule,
+  scheduleInputForAnalysis
+} from "./schedule.js";
+import type { BlockSchedule } from "./schedule-types.js";
 import { planStoreStrategy } from "./store-strategy.js";
 import { collectValueUses } from "./value-uses.js";
 
@@ -22,15 +23,19 @@ export type JitCodegenEmissionPlan = Readonly<{
   storeStrategy: StoreStrategyPlan;
   exitStoreSets: readonly StoreStrategySet[];
   maxExitStoreIndex: number;
-  effects: EffectsPlan;
+  schedule: BlockSchedule;
   valueUses: readonly ValueUse[];
   reusePlan: BlockReusePlan;
 }>;
 
 export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCodegenEmissionPlan {
-  const effects = planEffects(codegenPlan);
+  const plannedExits = new Map(codegenPlan.exits.map((exit) => [exit.id, exit]));
+  const schedule = planSchedule(scheduleInputForAnalysis({
+    analysis: codegenPlan.analysis,
+    plannedExits
+  }));
   const valueUses = collectValueUses({
-    effects,
+    schedule,
     exits: codegenPlan.exits
   });
   const reusePlan = planReuseForBlock(
@@ -51,7 +56,7 @@ export function buildJitCodegenEmissionPlan(codegenPlan: JitCodegenPlan): JitCod
     storeStrategy,
     exitStoreSets: storeStrategy.exitStoreSets,
     maxExitStoreIndex: storeStrategy.maxExitStoreIndex,
-    effects,
+    schedule,
     valueUses,
     reusePlan
   };

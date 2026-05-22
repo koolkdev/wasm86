@@ -1,10 +1,9 @@
 import type { JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type { ExitKind } from "./exits.js";
 
-export type EffectKind =
+export type RuntimeActionKind =
   | "memoryGuard"
   | "memoryStore"
-  | "memoryLoad"
   | "jump"
   | "branch"
   | "hostTrap"
@@ -35,21 +34,16 @@ export function classifyExits(
   }
 }
 
-export function classifyEffect(
+export function classifyRuntimeAction(
   op: JitBoundExprOp,
   isFinalOp: boolean
-): EffectKind | undefined {
+): RuntimeActionKind | undefined {
   switch (op.op) {
     case "memory.guard":
       return "memoryGuard";
     case "set":
       return op.target.kind === "mem"
         ? "memoryStore"
-        : undefined;
-    case "let32":
-      return op.value.kind === "source" &&
-        op.value.source.kind === "mem"
-        ? "memoryLoad"
         : undefined;
     case "jump":
       return "jump";

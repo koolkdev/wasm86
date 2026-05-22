@@ -10,8 +10,8 @@ import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import {
-  createControlEffectsEmitter
-} from "#backends/wasm/jit/codegen/emit/control-effects.js";
+  createControlActionEmitter
+} from "#backends/wasm/jit/codegen/emit/control-actions.js";
 import type { ExitFrame } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
 import type { ExitMetadataSelection } from "#backends/wasm/jit/codegen/emit/exit-metadata.js";
 import type {
@@ -31,7 +31,7 @@ import {
   wasmBodyOpcodes
 } from "#backends/wasm/tests/body-opcodes.js";
 
-test("JIT control effects emit branch arms under their exit paths", () => {
+test("JIT control actions emit branch arms under their exit paths", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const events: string[] = [];
@@ -43,7 +43,7 @@ test("JIT control effects emit branch arms under their exit paths", () => {
     [takenTarget, "takenTarget"],
     [notTakenTarget, "notTakenTarget"]
   ])).at(placement());
-  const control = createControlEffectsEmitter({
+  const control = createControlActionEmitter({
     body,
     scratch,
     frame: recordingExitFrame(body, events)
@@ -79,13 +79,13 @@ test("JIT control effects emit branch arms under their exit paths", () => {
   strictEqual(wasmBodyOpcodes(body.encode()).includes(wasmOpcode.if), true);
 });
 
-test("JIT control effects emit host traps through value and exit frame paths", () => {
+test("JIT control actions emit host traps through value and exit frame paths", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const events: string[] = [];
   const vector = constValue(0x2e);
   const values = recordingValues(body, events, new Map([[vector, "vector"]])).at(placement());
-  const control = createControlEffectsEmitter({
+  const control = createControlActionEmitter({
     body,
     scratch,
     frame: recordingExitFrame(body, events)

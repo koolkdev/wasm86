@@ -10,12 +10,12 @@ import { buildJitCodegenEmissionPlan } from "./codegen/plan/emission.js";
 import {
   type JitLinkEmitContext,
   type JitLinkResolver
-} from "./codegen/emit/control-effects.js";
+} from "./codegen/emit/control-actions.js";
 import { createExitFrame, createExitStoreLayout } from "./codegen/emit/exit-frame.js";
 import { createExitMetadataEmitter } from "./codegen/emit/exit-metadata.js";
 import { createExitStoreEmitter } from "./codegen/emit/exit-stores.js";
 import { createValueCache } from "./codegen/emit/cache.js";
-import { createEffectEmitter } from "./codegen/emit/effects.js";
+import { createScheduleEmitter } from "./codegen/emit/schedule.js";
 import { createInputSlotEmitter } from "./codegen/emit/input-slots.js";
 import {
   createValueEmitters,
@@ -136,7 +136,7 @@ function encodeJitBlockFunctionBody(
   metadata.beginBlock();
   exitFrame.openDeferredBlocks();
 
-  const effects = createEffectEmitter({
+  const schedule = createScheduleEmitter({
     body,
     scratch,
     exitFrame,
@@ -145,8 +145,8 @@ function encodeJitBlockFunctionBody(
     linking
   });
 
-  for (const effect of emissionPlan.effects) {
-    effects.emit(effect);
+  for (const entry of emissionPlan.schedule) {
+    schedule.emit(entry);
   }
 
   scratch.assertClear();

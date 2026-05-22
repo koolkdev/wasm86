@@ -12,7 +12,7 @@ import {
   type BlockEpochInput,
   type BlockEpochs,
   type EpochUsePlan,
-  type PlacedLoadResultDefinition
+  type PlacedMemoryLoadValue
 } from "./epochs.js";
 import {
   type ValueUse
@@ -35,13 +35,13 @@ export type {
   BlockEpochs,
   BlockEpochInput,
   EpochUsePlan,
-  PlacedLoadResultDefinition
+  PlacedMemoryLoadValue
 } from "./epochs.js";
 
 export type ReuseInput = Readonly<{
   uses: readonly ValueUse[];
   epochs: readonly EpochUsePlan[];
-  loadResults: readonly PlacedLoadResultDefinition[];
+  memoryLoadValues: readonly PlacedMemoryLoadValue[];
   exits: readonly PlannedExit[];
 }>;
 
@@ -62,7 +62,7 @@ export function planReuse(input: ReuseInput): ReusePlan {
   const captures = planCaptures({
     uses: input.uses,
     cache,
-    loadResults: input.loadResults,
+    memoryLoadValues: input.memoryLoadValues,
     exits: input.exits
   });
 
@@ -81,7 +81,7 @@ export function planReuseForBlock(
   const reuse = planReuse({
     uses: valueUses,
     epochs: epoch.epochs,
-    loadResults: epoch.loadResults,
+    memoryLoadValues: epoch.memoryLoadValues,
     exits
   });
 

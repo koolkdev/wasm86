@@ -674,7 +674,7 @@ test("planJitCodegen records effectful flag producer inputs as load-result value
   deepStrictEqual(exit.stores, [expectedFlagStore]);
   deepStrictEqual(
     emissionPlan.reusePlan.captures.captures
-      .filter((capture) => capture.reason === "loadResultDefinition")
+      .filter((capture) => capture.reason === "memoryLoadValue")
       .map((capture) => capture.value),
     [loadResult]
   );
@@ -824,7 +824,7 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
   deepStrictEqual(plannedRegisterStores(exit), [registerStore("edx", selectedEdx)]);
 });
 
-test("planJitCodegen keeps load-result values out of observed boundaries before their definitions", () => {
+test("planJitCodegen keeps load-result values out of observed boundaries before their memory-load values", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "loadResult-before-exit-observation",

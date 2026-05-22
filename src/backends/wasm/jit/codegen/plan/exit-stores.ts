@@ -20,11 +20,11 @@ export type ExitStorePlan = Readonly<{
   exits: ReadonlyMap<string, PlannedExit>;
 }>;
 
-export function planExitStores(rawExits: readonly Exit[]): ExitStorePlan {
+export function planExitStores(analyzedExits: readonly Exit[]): ExitStorePlan {
   const exits = new Map<string, PlannedExit>();
   let nextExitStoreIndex = 1;
 
-  for (const exit of rawExits) {
+  for (const exit of analyzedExits) {
     const stores = storesForExit(exit);
     const exitStoreIndex = stores.length === 0
       ? 0

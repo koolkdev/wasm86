@@ -278,7 +278,7 @@ test("JIT timeline op view reads planned register-storage lookups only", () => {
   deepStrictEqual(timeline.viewAt(1).storageRead({ source: reg("eax"), accessWidth: 32 }), c32(3));
 });
 
-test("JIT timeline records load-result memory load definitions at one point", () => {
+test("JIT timeline records memory-load values at one point", () => {
   const loadResult = jitLoadResultValue(0, "i32");
   const expressionBlock = [
     { op: "let32", dst: v(0), value: source({ kind: "mem", address: c32(0x1000) }, 32) },
@@ -289,7 +289,7 @@ test("JIT timeline records load-result memory load definitions at one point", ()
     snapshotPoints: new Set()
   });
 
-  deepStrictEqual(timeline.loadResults, [{
+  deepStrictEqual(timeline.memoryLoadValues, [{
     opIndex: 0,
     ref: v(0),
     value: loadResult
@@ -307,7 +307,7 @@ test("JIT timeline records load-result memory load definitions at one point", ()
   }), loadResult);
 });
 
-test("JIT timeline records load-result memory operand reads only", () => {
+test("JIT timeline records memory-load values for memory operand reads only", () => {
   const loadResult = jitLoadResultValue(0, "i32");
   const memory = { kind: "mem", address: source(reg("ebx"), 32) } as const satisfies IrStorageExpr;
   const expressionBlock = [
@@ -319,7 +319,7 @@ test("JIT timeline records load-result memory operand reads only", () => {
     snapshotPoints: new Set()
   });
 
-  deepStrictEqual(timeline.loadResults, [{
+  deepStrictEqual(timeline.memoryLoadValues, [{
     opIndex: 0,
     ref: v(0),
     value: loadResult
@@ -342,8 +342,8 @@ test("JIT block analysis allocates distinct load-result IDs across memory loads"
     ]
   };
   const analysis = analyzeBlock(buildBlockExpressions(block));
-  const firstLoadResult = analysis.timeline.loadResults[0]?.value;
-  const secondLoadResult = analysis.timeline.loadResults[1]?.value;
+  const firstLoadResult = analysis.timeline.memoryLoadValues[0]?.value;
+  const secondLoadResult = analysis.timeline.memoryLoadValues[1]?.value;
 
   deepStrictEqual(firstLoadResult, jitLoadResultValue(0, "i32"));
   deepStrictEqual(secondLoadResult, jitLoadResultValue(1, "i32"));

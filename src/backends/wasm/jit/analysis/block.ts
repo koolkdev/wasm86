@@ -3,10 +3,10 @@ import {
   type BlockExpressions
 } from "#backends/wasm/jit/ir/block-expressions.js";
 import {
-  analyzeBlockEffects,
+  analyzeBlockRuntime,
   timelineSnapshotPointsForExpressions,
-  type BlockEffectAnalysis
-} from "./effects.js";
+  type BlockRuntimeAnalysis
+} from "./runtime.js";
 import { LoadResultRegistry } from "./load-result.js";
 import { buildExpressionPaths } from "./paths.js";
 import { buildTimeline } from "./timeline-builder.js";
@@ -16,12 +16,12 @@ import {
   type BlockProgress
 } from "./block-progress.js";
 
-export type { BlockEffectAnalysis } from "./effects.js";
+export type { BlockRuntimeAnalysis } from "./runtime.js";
 
 export type BlockAnalysis = Readonly<{
   expressions: BlockExpressions;
   timeline: Timeline;
-  effectAnalysis: BlockEffectAnalysis;
+  runtime: BlockRuntimeAnalysis;
   progress: BlockProgress;
 }>;
 
@@ -37,7 +37,7 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
     snapshotPoints: timelineSnapshotPointsForExpressions(blockExpressions),
     loadResultRegistry
   });
-  const effectAnalysis = analyzeBlockEffects({
+  const runtime = analyzeBlockRuntime({
     expressions: blockExpressions,
     timeline,
     expressionPaths,
@@ -47,7 +47,7 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
   return {
     expressions: blockExpressions,
     timeline,
-    effectAnalysis,
+    runtime,
     progress: addBlockProgress(entryProgress, blockExpressions.progress)
   };
 }

@@ -16,9 +16,10 @@ import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
 import { ExitReason } from "#backends/wasm/exit.js";
 import {
-  createMemoryEffectsEmitter,
-  type MemoryGuardEffect
-} from "#backends/wasm/jit/codegen/emit/memory-effects.js";
+  createMemoryActionEmitter,
+  type MemoryGuardAction
+} from "#backends/wasm/jit/codegen/emit/memory-actions.js";
+import { createMemoryDefinitionEmitter } from "#backends/wasm/jit/codegen/emit/memory-definitions.js";
 import type { ValueCache, ValueScope } from "#backends/wasm/jit/codegen/emit/cache.js";
 import type { ExitFrame } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
 import type {
@@ -49,7 +50,7 @@ test("JIT memory guard emits address once and captures fault destination before 
   const valueCache = passthroughValueCache();
   const at = placement();
   const values = recordingValues(body, events, new Map([[address, "address"]]), new Map(), valueCache).at(at);
-  const memory = createMemoryEffectsEmitter({
+  const memory = createMemoryActionEmitter({
     body,
     scratch,
     exitFrame: recordingExitFrame(body, events)
@@ -99,7 +100,7 @@ test("JIT memory guard requires an exit reason matching read or write access", (
   const valueCache = passthroughValueCache();
   const at = placement();
   const values = recordingValues(body, [], new Map(), new Map(), valueCache).at(at);
-  const memory = createMemoryEffectsEmitter({
+  const memory = createMemoryActionEmitter({
     body,
     scratch: new WasmLocalScratchAllocator(body),
     exitFrame: recordingExitFrame(body, [])
@@ -134,7 +135,7 @@ test("JIT memory store emits address before value and cleans dirty 32-bit stores
   const valueCache = passthroughValueCache();
   const at = placement();
   const values = recordingValues(body, events, labels, widths, valueCache).at(at);
-  const memory = createMemoryEffectsEmitter({
+  const memory = createMemoryActionEmitter({
     body,
     scratch,
     exitFrame: recordingExitFrame(body, events)
@@ -166,7 +167,7 @@ test("JIT memory store emits address before value and cleans dirty 32-bit stores
   }]);
 });
 
-test("JIT load-result memory load is defined through the load-result value path", () => {
+test("JIT memory-load value emits unchecked memory load through the load-result value path", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const events: string[] = [];
@@ -178,14 +179,10 @@ test("JIT load-result memory load is defined through the load-result value path"
   });
   const at = placement();
   const values = recordingValues(body, events, new Map([[address, "address"]]), new Map(), valueCache).at(at);
-  const memory = createMemoryEffectsEmitter({
-    body,
-    scratch,
-    exitFrame: recordingExitFrame(body, events)
-  });
+  const definitions = createMemoryDefinitionEmitter({ body });
 
-  memory.emit({
-    kind: "memoryLoad",
+  definitions.emit({
+    kind: "defineLoadResult",
     at,
     result: loadResultValue(0),
     address,
@@ -207,21 +204,17 @@ test("JIT load-result memory load is defined through the load-result value path"
   }]);
 });
 
-test("JIT load-result memory load does not emit when the loadResult path declines it", () => {
+test("JIT memory-load value does not emit when the loadResult path declines it", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const events: string[] = [];
   const valueCache = decliningValueCache(events);
   const at = placement();
   const values = recordingValues(body, events, new Map(), new Map(), valueCache).at(at);
-  const memory = createMemoryEffectsEmitter({
-    body,
-    scratch,
-    exitFrame: recordingExitFrame(body, events)
-  });
+  const definitions = createMemoryDefinitionEmitter({ body });
 
-  memory.emit({
-    kind: "memoryLoad",
+  definitions.emit({
+    kind: "defineLoadResult",
     at,
     result: loadResultValue(0),
     address: constValue(0xa0),
@@ -378,7 +371,7 @@ function decliningValueCache(events: string[]): ValueCache & ValueScope {
   };
 }
 
-function placement(): MemoryGuardEffect["at"] {
+function placement(): MemoryGuardAction["at"] {
   return { opIndex: 0,
     epoch: 0
   };

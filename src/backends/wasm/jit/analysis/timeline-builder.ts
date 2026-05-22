@@ -22,7 +22,7 @@ import { registerAlias } from "#x86/isa/registers.js";
 import type { OperandWidth, RegisterAlias, RegName } from "#x86/isa/types.js";
 import { LoadResultRegistry } from "./load-result.js";
 import {
-  type LoadResultDefinition,
+  type MemoryLoadValue,
   type SlotWrite,
   type Timeline,
   type TimelineExpression,
@@ -53,7 +53,7 @@ class TimelineBuilder {
   readonly #addressesByOp = new Map<number, Map<TimelineStorageId, JitValue>>();
   readonly #storageReadsByOp = new Map<number, Map<TimelineStorageReadId, JitValue>>();
   readonly #writes: SlotWrite[] = [];
-  readonly #loadResults: LoadResultDefinition[] = [];
+  readonly #memoryLoadValues: MemoryLoadValue[] = [];
   readonly #snapshotPoints: ReadonlySet<number>;
   readonly #snapshots = new Map<number, ValueSnapshot>();
   #currentOpIndex = -1;
@@ -86,7 +86,7 @@ class TimelineBuilder {
       this.#recordInputs(op);
       this.#recordMeaning(op);
       this.#recordWrites(op);
-      this.#recordLoadResult(op);
+      this.#recordMemoryLoadValue(op);
     }
 
     return this.#finish();
@@ -105,7 +105,7 @@ class TimelineBuilder {
           const loadResult = this.#loadResultValueForLet(op);
 
           if (loadResult !== undefined) {
-            this.#recordLoadResultExpressionInputs(op.value, loadResult);
+            this.#recordMemoryLoadExpressionInputs(op.value, loadResult);
           }
         }
         return;
@@ -169,7 +169,7 @@ class TimelineBuilder {
     }
   }
 
-  #recordLoadResult(op: IrExprOp): void {
+  #recordMemoryLoadValue(op: IrExprOp): void {
     if (op.op !== "let32") {
       return;
     }
@@ -180,7 +180,7 @@ class TimelineBuilder {
       return;
     }
 
-    this.#loadResults.push({
+    this.#memoryLoadValues.push({
       opIndex: this.#currentOpIndex,
       ref: op.dst,
       value: loadResult
@@ -192,7 +192,7 @@ class TimelineBuilder {
       finalState: this.#valueState.snapshot(),
       opCount: this.#ops.length,
       writes: this.#writes,
-      loadResults: this.#loadResults,
+      memoryLoadValues: this.#memoryLoadValues,
       snapshots: this.#snapshots,
       storage: {
         catalog: this.#ids,
@@ -402,7 +402,7 @@ class TimelineBuilder {
     }
   }
 
-  #recordLoadResultExpressionInputs(
+  #recordMemoryLoadExpressionInputs(
     expression: IrValueExpr,
     loadResult?: JitLoadResultValue
   ): void {
@@ -424,16 +424,16 @@ class TimelineBuilder {
       case "address":
         throw new Error(`unresolved JIT address expression at op ${this.#currentOpIndex}`);
       case "value.binary":
-        this.#recordLoadResultExpressionInputs(expression.a);
-        this.#recordLoadResultExpressionInputs(expression.b);
+        this.#recordMemoryLoadExpressionInputs(expression.a);
+        this.#recordMemoryLoadExpressionInputs(expression.b);
         return;
       case "value.unary":
-        this.#recordLoadResultExpressionInputs(expression.value);
+        this.#recordMemoryLoadExpressionInputs(expression.value);
         return;
       case "value.select":
-        this.#recordLoadResultExpressionInputs(expression.condition);
-        this.#recordLoadResultExpressionInputs(expression.whenTrue);
-        this.#recordLoadResultExpressionInputs(expression.whenFalse);
+        this.#recordMemoryLoadExpressionInputs(expression.condition);
+        this.#recordMemoryLoadExpressionInputs(expression.whenTrue);
+        this.#recordMemoryLoadExpressionInputs(expression.whenFalse);
         return;
       case "flags.condition":
         return;

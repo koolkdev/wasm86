@@ -8,7 +8,7 @@ import {
 import { buildEpochs } from "#backends/wasm/jit/codegen/plan/epochs.js";
 import type { ValueUse } from "#backends/wasm/jit/codegen/plan/value-uses.js";
 
-test("JIT value-cache epoch planning exposes block epochs and load-result definitions", () => {
+test("JIT value-cache epoch planning exposes block epochs and memory-load values", () => {
   const loadResult = jitLoadResultValue(0, "i32");
   const expressionBlock = [
     {
@@ -46,9 +46,9 @@ test("JIT value-cache epoch planning exposes block epochs and load-result defini
   }, [plannedUse]);
 
   deepStrictEqual(epoch.block.opEpochs, [0, 0, 1]);
-  deepStrictEqual(epoch.loadResults.map((definition) => ({
-    value: definition.value,
-    at: definition.at
+  deepStrictEqual(epoch.memoryLoadValues.map((memoryLoadValue) => ({
+    value: memoryLoadValue.value,
+    at: memoryLoadValue.at
   })), [{
     value: loadResult,
     at: { opIndex: 0, epoch: 0 }

@@ -10,19 +10,19 @@ import {
   rootPath,
   type Path
 } from "#backends/wasm/jit/analysis/paths.js";
-import type { PlacedLoadResultDefinition } from "./epochs.js";
+import type { PlacedMemoryLoadValue } from "./epochs.js";
 import type { PlannedExit } from "./types.js";
 import type {
   ValueUse
 } from "./value-uses.js";
-import type { Placement } from "./effect-types.js";
+import type { Placement } from "./schedule-types.js";
 import {
   storeClobberSourceStores
 } from "./store-strategy.js";
 
 export type CaptureReason =
   | "branchShared"
-  | "loadResultDefinition"
+  | "memoryLoadValue"
   | "storeClobber"
   | "forced";
 
@@ -38,29 +38,29 @@ export type CaptureMap = ReadonlyMap<string, readonly Capture[]>;
 
 export type CapturePlan = Readonly<{
   captures: readonly Capture[];
-  effectCaptures: CaptureMap;
+  runtimeCaptures: CaptureMap;
 }>;
 
 export type CaptureInput = Readonly<{
   uses: readonly ValueUse[];
   cache: CachePlan;
-  loadResults: readonly PlacedLoadResultDefinition[];
+  memoryLoadValues: readonly PlacedMemoryLoadValue[];
   exits: readonly PlannedExit[];
 }>;
 
 export function planCaptures(
   input: CaptureInput
 ): CapturePlan {
-  const loadResultDefinitionCaptures = planLoadResultDefinitionCaptures(input);
+  const memoryLoadValueCaptures = planMemoryLoadValueCaptures(input);
   const rootConsumerCaptures = planRootConsumerCaptures(input.uses, input.cache);
   const storeClobberCaptures = planStoreClobberCaptures(input);
   const selectedExitStoreCaptures = planSelectedExitStoreCaptures(input, [
-    ...loadResultDefinitionCaptures,
+    ...memoryLoadValueCaptures,
     ...rootConsumerCaptures,
     ...storeClobberCaptures
   ]);
   const captures = uniqueCaptures([
-    ...loadResultDefinitionCaptures,
+    ...memoryLoadValueCaptures,
     ...rootConsumerCaptures,
     ...selectedExitStoreCaptures,
     ...storeClobberCaptures
@@ -68,7 +68,7 @@ export function planCaptures(
 
   return {
     captures,
-    effectCaptures: capturesByPlacement(captures.filter(isEffectCapture))
+    runtimeCaptures: capturesByPlacement(captures.filter(isRuntimeCapture))
   };
 }
 
@@ -103,7 +103,7 @@ function planRootConsumerCaptures(
   return uniqueCaptures(captures);
 }
 
-function planLoadResultDefinitionCaptures(input: CaptureInput): readonly Capture[] {
+function planMemoryLoadValueCaptures(input: CaptureInput): readonly Capture[] {
   return input.cache.selected.flatMap((selected) => {
     const value = simplifyValue(selected.value);
 
@@ -111,19 +111,19 @@ function planLoadResultDefinitionCaptures(input: CaptureInput): readonly Capture
       return [];
     }
 
-    const definition = loadResultDefinitionForValue(value, input.loadResults);
+    const memoryLoadValue = memoryLoadValueForResult(value, input.memoryLoadValues);
     const consumers = consumersForValue(input.uses, value);
 
-    if (definition === undefined || consumers.length === 0) {
+    if (memoryLoadValue === undefined || consumers.length === 0) {
       return [];
     }
 
     return [{
       value,
-      at: definition.at,
+      at: memoryLoadValue.at,
       availability: rootPath(),
       consumers,
-      reason: "loadResultDefinition"
+      reason: "memoryLoadValue"
     }];
   });
 }
@@ -237,11 +237,11 @@ function captureAvailabilityCoversPath(availability: Path, path: Path): boolean 
   return pathsEqual(availability, path) || pathsEqual(availability, rootPath());
 }
 
-function loadResultDefinitionForValue(
+function memoryLoadValueForResult(
   value: JitLoadResultValue,
-  definitions: readonly PlacedLoadResultDefinition[]
-): PlacedLoadResultDefinition | undefined {
-  return definitions.find((definition) => valuesEqual(definition.value, value));
+  memoryLoadValues: readonly PlacedMemoryLoadValue[]
+): PlacedMemoryLoadValue | undefined {
+  return memoryLoadValues.find((memoryLoadValue) => valuesEqual(memoryLoadValue.value, value));
 }
 
 function consumersForValue(
@@ -280,12 +280,12 @@ function uniqueCaptures(
   return unique;
 }
 
-function isEffectCapture(capture: Capture): boolean {
+function isRuntimeCapture(capture: Capture): boolean {
   switch (capture.reason) {
     case "branchShared":
     case "forced":
       return true;
-    case "loadResultDefinition":
+    case "memoryLoadValue":
     case "storeClobber":
       return false;
   }

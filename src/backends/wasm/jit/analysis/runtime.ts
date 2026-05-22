@@ -12,10 +12,10 @@ import {
   type ExitPlacement
 } from "./exits.js";
 import {
-  classifyEffect,
+  classifyRuntimeAction,
   classifyExits,
-  type EffectKind
-} from "./effect-classifier.js";
+  type RuntimeActionKind
+} from "./runtime-classifier.js";
 import {
   addBlockProgress,
   snapshotForExit,
@@ -24,44 +24,43 @@ import {
 import type { PathMap } from "./paths.js";
 import type { Timeline, TimelineView } from "./timeline-types.js";
 
-export type BlockEffectInput = Readonly<{
+export type BlockRuntimeInput = Readonly<{
   expressions: BlockExpressions;
   timeline: Timeline;
   expressionPaths: PathMap;
   progress: BlockProgress;
 }>;
 
-type EffectInfoBase<TKind extends EffectKind> = Readonly<{
+type RuntimeActionBase<TKind extends RuntimeActionKind> = Readonly<{
   kind: TKind;
   at: ExitPlacement;
 }>;
 
-export type EffectInfo<TExit extends Exit = Exit> =
-  | EffectInfoBase<"memoryGuard"> & Readonly<{ faultExit: TExit }>
-  | EffectInfoBase<"memoryStore">
-  | EffectInfoBase<"memoryLoad">
-  | EffectInfoBase<"jump"> & Readonly<{ exit: TExit }>
-  | EffectInfoBase<"branch"> & Readonly<{ taken: TExit; notTaken: TExit }>
-  | EffectInfoBase<"hostTrap"> & Readonly<{ exit: TExit }>
-  | EffectInfoBase<"fallthrough"> & Readonly<{ exit: TExit }>;
+export type AnalyzedRuntimeAction<TExit extends Exit = Exit> =
+  | RuntimeActionBase<"memoryGuard"> & Readonly<{ faultExit: TExit }>
+  | RuntimeActionBase<"memoryStore">
+  | RuntimeActionBase<"jump"> & Readonly<{ exit: TExit }>
+  | RuntimeActionBase<"branch"> & Readonly<{ taken: TExit; notTaken: TExit }>
+  | RuntimeActionBase<"hostTrap"> & Readonly<{ exit: TExit }>
+  | RuntimeActionBase<"fallthrough"> & Readonly<{ exit: TExit }>;
 
-export type BlockEffectAnalysis = Readonly<{
-  effects: readonly EffectInfo[];
+export type BlockRuntimeAnalysis = Readonly<{
+  actions: readonly AnalyzedRuntimeAction[];
   exits: readonly Exit[];
 }>;
 
-export function analyzeBlockEffects(
-  input: BlockEffectInput
-): BlockEffectAnalysis {
+export function analyzeBlockRuntime(
+  input: BlockRuntimeInput
+): BlockRuntimeAnalysis {
   const { expressions } = input;
-  const effects: EffectInfo[] = [];
+  const actions: AnalyzedRuntimeAction[] = [];
   const exits: Exit[] = [];
 
   for (let position = 0; position < expressions.ops.length; position += 1) {
     const entry = expressions.ops[position];
 
     if (entry === undefined) {
-      throw new Error(`missing JIT expression op while analyzing effects: ${position}`);
+      throw new Error(`missing JIT expression op while analyzing runtime: ${position}`);
     }
 
     const { opIndex, op } = entry;
@@ -72,11 +71,11 @@ export function analyzeBlockEffects(
     }
 
     const isFinalOp = position === expressions.ops.length - 1;
-    const effectKind = classifyEffect(op, isFinalOp);
+    const runtimeActionKind = classifyRuntimeAction(op, isFinalOp);
     const exitKinds = classifyExits(op, isFinalOp);
 
-    if (effectKind === undefined && exitKinds.length !== 0) {
-      throw new Error(`JIT exits without an owning effect at ${opIndex}`);
+    if (runtimeActionKind === undefined && exitKinds.length !== 0) {
+      throw new Error(`JIT exits without an owning runtime action at ${opIndex}`);
     }
 
     const at = { opIndex };
@@ -100,17 +99,17 @@ export function analyzeBlockEffects(
       })
     );
 
-    if (effectKind !== undefined) {
-      const effect = effectForOp(effectKind, at, exitRecords);
+    if (runtimeActionKind !== undefined) {
+      const action = runtimeActionForOp(runtimeActionKind, at, exitRecords);
 
-      effects.push(effect);
+      actions.push(action);
     }
 
     exits.push(...exitRecords);
   }
 
   return {
-    effects,
+    actions,
     exits
   };
 }
@@ -125,18 +124,15 @@ export function timelineSnapshotPointsForExpressions(
   ));
 }
 
-function effectForOp(
-  kind: EffectKind,
+function runtimeActionForOp(
+  kind: RuntimeActionKind,
   at: ExitPlacement,
   exits: readonly Exit[]
-): EffectInfo {
+): AnalyzedRuntimeAction {
   switch (kind) {
     case "memoryGuard":
       return { kind, at, faultExit: onlyExit(exits) };
     case "memoryStore":
-      assertNoExits(exits, kind, at);
-      return { kind, at };
-    case "memoryLoad":
       assertNoExits(exits, kind, at);
       return { kind, at };
     case "jump":
@@ -156,7 +152,7 @@ function effectForOp(
 }
 
 function exitSnapshotBeforeOp(
-  input: BlockEffectInput,
+  input: BlockRuntimeInput,
   opIndex: number,
   progress: BlockProgress
 ): ExitSnapshot {
@@ -346,7 +342,7 @@ function onlyExit(exits: readonly Exit[]): Exit {
   const [exit] = exits;
 
   if (exit === undefined || exits.length !== 1) {
-    throw new Error("expected one JIT effect exit");
+    throw new Error("expected one JIT runtime action exit");
   }
 
   return exit;
@@ -368,10 +364,10 @@ function findKindExit(
 
 function assertNoExits(
   exits: readonly Exit[],
-  kind: EffectKind,
+  kind: RuntimeActionKind,
   at: ExitPlacement
 ): void {
   if (exits.length !== 0) {
-    throw new Error(`JIT ${kind} effect at ${at.opIndex} must not have exits`);
+    throw new Error(`JIT ${kind} runtime action at ${at.opIndex} must not have exits`);
   }
 }

@@ -28,7 +28,7 @@ export type SlotWrite = Readonly<{
   value: JitValue;
 }>;
 
-export type LoadResultDefinition = Readonly<{
+export type MemoryLoadValue = Readonly<{
   opIndex: number;
   ref: ValueRef;
   value: Extract<JitValue, { kind: "loadResult" }>;
@@ -69,7 +69,7 @@ export type TimelineStorage = Readonly<{
 export type Timeline = Readonly<{
   finalState: ValueSnapshot;
   writes: readonly SlotWrite[];
-  loadResults: readonly LoadResultDefinition[];
+  memoryLoadValues: readonly MemoryLoadValue[];
   viewAt(opIndex: number): TimelineView;
   snapshotAt(opIndex: number): ValueSnapshot;
 }>;

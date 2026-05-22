@@ -31,7 +31,7 @@ import {
   type InputEmitter,
   type ValueEmitContext
 } from "#backends/wasm/jit/codegen/emit/values.js";
-import type { Placement } from "#backends/wasm/jit/codegen/plan/effect-types.js";
+import type { Placement } from "#backends/wasm/jit/codegen/plan/schedule-types.js";
 import {
   emitInputSlot,
   emitInputSlotBits

@@ -27,7 +27,7 @@ import type {
 } from "#backends/wasm/jit/ir/values/types.js";
 import type {
   Placement
-} from "#backends/wasm/jit/codegen/plan/effect-types.js";
+} from "#backends/wasm/jit/codegen/plan/schedule-types.js";
 import type { Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
 import type { Path } from "#backends/wasm/jit/analysis/paths.js";
 import type {

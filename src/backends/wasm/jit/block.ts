@@ -16,9 +16,9 @@ export type {
 } from "./ir/bound-expressions.js";
 export type {
   BlockAnalysis,
-  BlockEffectAnalysis
+  BlockRuntimeAnalysis
 } from "./analysis/block.js";
-export type { JitLinkResolver } from "./codegen/emit/control-effects.js";
+export type { JitLinkResolver } from "./codegen/emit/control-actions.js";
 export type {
   EncodeJitBlockOptions,
   JitBlockModulePlan

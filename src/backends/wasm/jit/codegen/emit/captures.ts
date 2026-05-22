@@ -1,30 +1,30 @@
 import type { CapturePlan, Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
-import type { Placement } from "#backends/wasm/jit/codegen/plan/effect-types.js";
+import type { Placement } from "#backends/wasm/jit/codegen/plan/schedule-types.js";
 import type { ValueEmitter } from "./values.js";
 
-export type EffectCaptureEmitter = Readonly<{
+export type RuntimeCaptureEmitter = Readonly<{
   emitAt(at: Placement, values: ValueEmitter): void;
 }>;
 
-export type EffectCaptureEmitterInput = Readonly<{
+export type RuntimeCaptureEmitterInput = Readonly<{
   captures: CapturePlan;
 }>;
 
-export function createEffectCaptureEmitter(
-  input: EffectCaptureEmitterInput
-): EffectCaptureEmitter {
+export function createRuntimeCaptureEmitter(
+  input: RuntimeCaptureEmitterInput
+): RuntimeCaptureEmitter {
   return {
     emitAt: (at, values) => {
-      const captures = input.captures.effectCaptures.get(placementKey(at)) ?? [];
+      const captures = input.captures.runtimeCaptures.get(placementKey(at)) ?? [];
 
       for (const capture of captures) {
-        emitEffectCapture(capture, values);
+        emitRuntimeCapture(capture, values);
       }
     }
   };
 }
 
-function emitEffectCapture(
+function emitRuntimeCapture(
   capture: Capture,
   values: ValueEmitter
 ): void {

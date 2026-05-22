@@ -36,13 +36,13 @@ import {
 import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { jitLoadResultValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type { ValueRef } from "#x86/ir/model/types.js";
-import { createEffectEmitter } from "#backends/wasm/jit/codegen/emit/effects.js";
+import { createScheduleEmitter } from "#backends/wasm/jit/codegen/emit/schedule.js";
 import { createExitFrame } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
 import type { CapturePlan } from "#backends/wasm/jit/codegen/plan/captures.js";
-import type { EffectsPlan } from "#backends/wasm/jit/codegen/plan/effect-types.js";
+import type { BlockSchedule } from "#backends/wasm/jit/codegen/plan/schedule-types.js";
 import type { ValueCacheState } from "#backends/wasm/jit/codegen/emit/cache.js";
 
-test("JIT production emission consumes block effects plan entries", () => {
+test("JIT production emission consumes block schedule entries", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
@@ -75,7 +75,7 @@ test("JIT production emission consumes block effects plan entries", () => {
     maxExitStoreIndex: 0
   });
 
-  emitEffectBlock({
+  emitScheduleBlock({
     body,
     scratch,
     metadata,
@@ -84,7 +84,7 @@ test("JIT production emission consumes block effects plan entries", () => {
     exitLocal,
     captures: emptyCapturePlan(),
     valueState: valueCacheState(valueCache),
-    effects: [{
+    schedule: [{
       at: {
         opIndex: 0,
         epoch: 0
@@ -121,7 +121,7 @@ test("JIT production emission consumes block effects plan entries", () => {
   strictEqual(payloadGetIndex !== -1, true);
 });
 
-test("JIT production emission does not walk unplanned expression effects", () => {
+test("JIT production emission does not walk unscheduled expression actions", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
@@ -134,7 +134,7 @@ test("JIT production emission does not walk unplanned expression effects", () =>
     maxExitStoreIndex: 0
   });
 
-  emitEffectBlock({
+  emitScheduleBlock({
     body,
     scratch,
     metadata,
@@ -143,7 +143,7 @@ test("JIT production emission does not walk unplanned expression effects", () =>
     exitLocal,
     captures: emptyCapturePlan(),
     valueState: valueCacheState(valueCache),
-    effects: []
+    schedule: []
   });
   body.end();
 
@@ -153,7 +153,7 @@ test("JIT production emission does not walk unplanned expression effects", () =>
   strictEqual(countOpcode(opcodes, wasmOpcode.br), 0);
 });
 
-test("JIT effects plan emission keeps a guard but skips an unused load-result load", () => {
+test("JIT schedule emission keeps a guard but skips an unused load-result load", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
     {
@@ -165,16 +165,16 @@ test("JIT effects plan emission keeps a guard but skips an unused load-result lo
     { op: "next" }
   ]));
 
-  deepStrictEqual(result.emissionPlan.effects.map((effect) => effect.kind), [
+  deepStrictEqual(result.emissionPlan.schedule.map((entry) => entry.kind), [
     "memoryGuard",
-    "memoryLoad",
+    "defineLoadResult",
     "fallthrough"
   ]);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.memorySize), 2);
   strictEqual(guestLoads(result).length, 0);
 });
 
-test("JIT effects plan emission keeps a dead load-result load guard before a later used load", () => {
+test("JIT schedule emission keeps a dead load-result guard before a later used load", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
     {
@@ -194,11 +194,11 @@ test("JIT effects plan emission keeps a dead load-result load guard before a lat
     { op: "hostTrap", vector: c32(0x2e) }
   ]));
 
-  deepStrictEqual(result.emissionPlan.effects.map((effect) => effect.kind), [
+  deepStrictEqual(result.emissionPlan.schedule.map((entry) => entry.kind), [
     "memoryGuard",
-    "memoryLoad",
+    "defineLoadResult",
     "memoryGuard",
-    "memoryLoad",
+    "defineLoadResult",
     "hostTrap"
   ]);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.memorySize), 4);
@@ -209,7 +209,7 @@ test("JIT effects plan emission keeps a dead load-result load guard before a lat
   }]);
 });
 
-test("JIT effects plan emission captures a used load-result load at its definition", () => {
+test("JIT schedule emission captures a used memory-load value at its placement", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "memory.guard", address: c32(0x60), byteLength: 4, access: "read" },
     {
@@ -235,7 +235,52 @@ test("JIT effects plan emission captures a used load-result load at its definiti
   strictEqual(laterUseIndex !== -1, true);
 });
 
-test("JIT effects plan emission skips unused arithmetic, register, and flag state", () => {
+test("JIT schedule emission can use an earlier load result as a later load address", () => {
+  const result = emitPlannedJitBlock(singleInstructionBlock([
+    {
+      op: "get",
+      dst: v(0),
+      source: { kind: "mem", address: c32(0x60) },
+      accessWidth: 32
+    },
+    {
+      op: "get",
+      dst: v(1),
+      source: { kind: "mem", address: v(0) },
+      accessWidth: 32
+    },
+    { op: "hostTrap", vector: v(1) }
+  ]));
+
+  deepStrictEqual(result.emissionPlan.reusePlan.cache.selected, [
+    { value: jitLoadResultValue(1, "i32"), useCount: 1 },
+    { value: jitLoadResultValue(0, "i32"), useCount: 1 }
+  ]);
+  strictEqual(guestLoads(result).length, 2);
+});
+
+test("JIT schedule emission keeps unused chained memory-load values inert", () => {
+  const result = emitPlannedJitBlock(singleInstructionBlock([
+    {
+      op: "get",
+      dst: v(0),
+      source: { kind: "mem", address: c32(0x60) },
+      accessWidth: 32
+    },
+    {
+      op: "get",
+      dst: v(1),
+      source: { kind: "mem", address: v(0) },
+      accessWidth: 32
+    },
+    { op: "next" }
+  ]));
+
+  deepStrictEqual(result.emissionPlan.reusePlan.cache.selected, []);
+  strictEqual(guestLoads(result).length, 0);
+});
+
+test("JIT schedule emission skips unused arithmetic, register, and flag state", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     {
@@ -256,7 +301,7 @@ test("JIT effects plan emission skips unused arithmetic, register, and flag stat
     }
   ], { nextMode: "continue" }));
 
-  deepStrictEqual(result.emissionPlan.effects, []);
+  deepStrictEqual(result.emissionPlan.schedule, []);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.i32Add), 0);
   strictEqual(result.memoryAccesses.some((access) =>
     access.memoryIndex === wasmMemoryIndex.state &&
@@ -264,7 +309,7 @@ test("JIT effects plan emission skips unused arithmetic, register, and flag stat
   ), false);
 });
 
-test("JIT effects plan emission keeps memory store address before value", () => {
+test("JIT schedule emission keeps memory store address before value", () => {
   const result = emitPlannedJitBlock(singleInstructionBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     {
@@ -295,7 +340,7 @@ test("JIT effects plan emission keeps memory store address before value", () => 
   const valueIndex = result.opcodes.indexOf(wasmOpcode.i32Xor);
   const storeIndex = result.opcodes.indexOf(wasmOpcode.i32Store);
 
-  deepStrictEqual(result.emissionPlan.effects.map((effect) => effect.kind), [
+  deepStrictEqual(result.emissionPlan.schedule.map((entry) => entry.kind), [
     "memoryStore"
   ]);
   strictEqual(addressIndex !== -1, true);
@@ -328,7 +373,7 @@ test("JIT codegen leaves dead pure SSA unpruned and emits no Wasm for it", () =>
     "value.binary",
     "next"
   ]);
-  deepStrictEqual(emissionPlan.effects.map((effect) => effect.kind), [
+  deepStrictEqual(emissionPlan.schedule.map((entry) => entry.kind), [
     "fallthrough"
   ]);
   deepStrictEqual(emissionPlan.valueUses, []);
@@ -387,7 +432,7 @@ function emitPlannedJitBlock(block: JitIrBlock) {
   const stores = createExitStoreEmitter({ body });
   const exitStoreLayout = createExitStoreLayout(emissionPlan.storeStrategy);
 
-  emitEffectBlock({
+  emitScheduleBlock({
     body,
     scratch,
     metadata,
@@ -395,7 +440,7 @@ function emitPlannedJitBlock(block: JitIrBlock) {
     exitStoreLayout,
     exitLocal,
     captures: emissionPlan.reusePlan.captures,
-    effects: emissionPlan.effects,
+    schedule: emissionPlan.schedule,
     valueState
   });
 
@@ -411,7 +456,7 @@ function emitPlannedJitBlock(block: JitIrBlock) {
   };
 }
 
-type EffectBlockInput = Readonly<{
+type ScheduleBlockInput = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   metadata: ReturnType<typeof createExitMetadataEmitter>;
@@ -419,11 +464,11 @@ type EffectBlockInput = Readonly<{
   exitStoreLayout: ReturnType<typeof createExitStoreLayout>;
   exitLocal: number;
   captures: CapturePlan;
-  effects: EffectsPlan;
+  schedule: BlockSchedule;
   valueState: ValueCacheState;
 }>;
 
-function emitEffectBlock(input: EffectBlockInput): void {
+function emitScheduleBlock(input: ScheduleBlockInput): void {
   const values = createValueEmittersForCache(input.body, input.valueState);
   const exitFrame = createExitFrame({
     body: input.body,
@@ -436,7 +481,7 @@ function emitEffectBlock(input: EffectBlockInput): void {
   input.metadata.beginBlock();
   exitFrame.openDeferredBlocks();
 
-  const effects = createEffectEmitter({
+  const schedule = createScheduleEmitter({
     body: input.body,
     scratch: input.scratch,
     exitFrame,
@@ -444,8 +489,8 @@ function emitEffectBlock(input: EffectBlockInput): void {
     values
   });
 
-  for (const effect of input.effects) {
-    effects.emit(effect);
+  for (const entry of input.schedule) {
+    schedule.emit(entry);
   }
 
   input.scratch.assertClear();
@@ -456,7 +501,7 @@ function emitEffectBlock(input: EffectBlockInput): void {
 function emptyCapturePlan(): CapturePlan {
   return {
     captures: [],
-    effectCaptures: new Map()
+    runtimeCaptures: new Map()
   };
 }
 

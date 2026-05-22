@@ -2,13 +2,13 @@ import type {
   IrExprBlock,
 } from "#backends/wasm/codegen/expressions.js";
 import type {
-  LoadResultDefinition,
+  MemoryLoadValue,
   Timeline
 } from "#backends/wasm/jit/analysis/timeline-types.js";
 import type {
   ValueUse
 } from "./value-uses.js";
-import type { Placement } from "./effect-types.js";
+import type { Placement } from "./schedule-types.js";
 
 export type BlockEpochSource = Readonly<{
   valueTimeline: Timeline;
@@ -27,21 +27,21 @@ export type EpochUsePlan = Readonly<{
   uses: readonly ValueUse[];
 }>;
 
-export type PlacedLoadResultDefinition = LoadResultDefinition & Readonly<{
+export type PlacedMemoryLoadValue = MemoryLoadValue & Readonly<{
   at: Placement;
 }>;
 
 export type EpochBuildPlan = Readonly<{
   block: BlockEpochs;
   epochs: readonly EpochUsePlan[];
-  loadResults: readonly PlacedLoadResultDefinition[];
+  memoryLoadValues: readonly PlacedMemoryLoadValue[];
 }>;
 
 export function buildEpochs(
   block: BlockEpochInput,
   valueUses: readonly ValueUse[]
 ): EpochBuildPlan {
-  const loadResults: PlacedLoadResultDefinition[] = [];
+  const memoryLoadValues: PlacedMemoryLoadValue[] = [];
   let currentEpoch = 0;
   const opEpochs: number[] = [];
   const writeExpressionOpIndexes = new Set(
@@ -62,17 +62,17 @@ export function buildEpochs(
     }
   }
 
-  for (const definition of block.valueTimeline.loadResults) {
-    const epoch = opEpochs[definition.opIndex];
+  for (const memoryLoadValue of block.valueTimeline.memoryLoadValues) {
+    const epoch = opEpochs[memoryLoadValue.opIndex];
 
     if (epoch === undefined) {
-      throw new Error(`missing JIT load-result definition epoch: ${definition.opIndex}`);
+      throw new Error(`missing JIT memory-load value epoch: ${memoryLoadValue.opIndex}`);
     }
 
-    loadResults.push({
-      ...definition,
+    memoryLoadValues.push({
+      ...memoryLoadValue,
       at: {
-        opIndex: definition.opIndex,
+        opIndex: memoryLoadValue.opIndex,
         epoch
       }
     });
@@ -89,7 +89,7 @@ export function buildEpochs(
       index,
       uses
     })),
-    loadResults
+    memoryLoadValues
   };
 }
 

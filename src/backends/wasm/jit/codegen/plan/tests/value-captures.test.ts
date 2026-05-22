@@ -128,7 +128,7 @@ test("JIT value-capture planner keeps one-arm branch values path-specific", () =
   deepStrictEqual(captures, []);
 });
 
-test("JIT value-capture planner captures used load-result definitions with reason", () => {
+test("JIT value-capture planner captures used memory-load values with reason", () => {
   const loadResult = jitLoadResultValue(0, "i32");
   const expressionBlock = [
     {
@@ -158,7 +158,7 @@ test("JIT value-capture planner captures used load-result definitions with reaso
   })), [{
     value: loadResult,
     at: { opIndex: 0, epoch: 0 },
-    reason: "loadResultDefinition"
+    reason: "memoryLoadValue"
   }]);
   deepStrictEqual(loadResultUses.map((use) => use.path), [
     { kind: "path", id: "branch:1:taken", debugLabel: "taken" },
@@ -289,7 +289,7 @@ test("JIT value-capture planner keeps store-clobber consumers scoped to their ex
       epochs: [],
       selected: [{ value, useCount: 2 }]
     },
-    loadResults: [],
+    memoryLoadValues: [],
     exits
   }).captures;
 

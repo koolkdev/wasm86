@@ -16,7 +16,6 @@ import {
   c32,
   addValue,
   analyzeBlockForTest,
-  plannedEffectsForTest,
   type JitCodegenPlan,
   type JitValue,
   type JitIrBlock,
@@ -112,21 +111,20 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
   };
   const stores = [registerStore("eax")];
   const analysis = analyzeBlockForTest(block);
-  const rawExit = analysis.effectAnalysis.exits.find((entry) => entry.reason === ExitReason.HOST_TRAP);
+  const analyzedExit = analysis.runtime.exits.find((entry) => entry.reason === ExitReason.HOST_TRAP);
 
-  if (rawExit === undefined) {
+  if (analyzedExit === undefined) {
     throw new Error("expected host-trap exit");
   }
 
   const exit = {
-    ...rawExit,
+    ...analyzedExit,
     snapshot: exitState(2, ["eax"]),
     stores,
     exitStoreIndex: 1
   };
   const plan: JitCodegenPlan = {
     analysis,
-    effects: plannedEffectsForTest(analysis, [exit]),
     exits: [exit]
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
@@ -176,7 +174,7 @@ test("buildJitCodegenEmissionPlan does not count same-instruction later register
   deepStrictEqual(emissionPlan.reusePlan.cache.selected, []);
 });
 
-test("JIT value-cache planning retains load-result values needed after their definition", () => {
+test("JIT value-cache planning retains load-result values needed after their memory-load value", () => {
   const loadResult = jitLoadResultValue(0, "i32");
   const expressionBlock = [
     {
@@ -216,7 +214,7 @@ test("JIT value-cache planning retains load-result values needed after their def
   );
   deepStrictEqual(
     cachePlan?.captures.captures
-      .filter((capture) => capture.reason === "loadResultDefinition")
+      .filter((capture) => capture.reason === "memoryLoadValue")
       .map((capture) => capture.value),
     [loadResult]
   );

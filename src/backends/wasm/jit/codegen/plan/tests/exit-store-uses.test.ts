@@ -19,7 +19,6 @@ import {
   c32,
   addValue,
   analyzeBlockForTest,
-  plannedEffectsForTest,
   type JitCodegenPlan,
   type ExitStore,
   type JitValue,
@@ -131,7 +130,7 @@ test("buildJitCodegenEmissionPlan expands exit-store dependency trees once with 
   ]);
   deepStrictEqual(
     emissionPlan.reusePlan.captures.captures
-      .filter((capture) => capture.reason === "loadResultDefinition")
+      .filter((capture) => capture.reason === "memoryLoadValue")
       .map((capture) => capture.value),
     [loadResult]
   );
@@ -171,7 +170,6 @@ function buildHostTrapEmissionPlanForStores(
   const analysis = analyzeBlockForTest(block);
   const plan: JitCodegenPlan = {
     analysis,
-    effects: plannedEffectsForTest(analysis, [exit]),
     exits: [exit]
   };
 

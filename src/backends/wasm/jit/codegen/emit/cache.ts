@@ -8,7 +8,7 @@ import {
 } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import type {
   Placement
-} from "#backends/wasm/jit/codegen/plan/effect-types.js";
+} from "#backends/wasm/jit/codegen/plan/schedule-types.js";
 import type { Path } from "#backends/wasm/jit/analysis/paths.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";

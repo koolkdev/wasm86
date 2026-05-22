@@ -16,9 +16,9 @@ import {
   type JitIrBlock
 } from "./plan-test-helpers.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
-import type { Effect } from "#backends/wasm/jit/codegen/plan/effect-types.js";
+import type { BlockScheduleEntry } from "#backends/wasm/jit/codegen/plan/schedule-types.js";
 
-test("JIT effects plan treats final fallthrough state as exit-store roots", () => {
+test("JIT schedule treats final fallthrough state as exit-store roots", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "state-updates-only",
@@ -47,14 +47,14 @@ test("JIT effects plan treats final fallthrough state as exit-store roots", () =
   };
   const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
 
-  deepStrictEqual(emissionPlan.effects.map((effect) => effect.kind), ["fallthrough"]);
+  deepStrictEqual(emissionPlan.schedule.map((entry) => entry.kind), ["fallthrough"]);
   strictEqual(emissionPlan.valueUses.every((use) => use.purpose === "exitStore"), true);
   strictEqual(emissionPlan.reusePlan.cache.selected.some((entry) =>
     entry.value.kind === "value.binary"
   ), true);
 });
 
-test("JIT effects plan resolves operands, preserves order, and carries exact exits", () => {
+test("JIT schedule resolves operands, preserves order, and carries exact exits", () => {
   const block: JitIrBlock = {
     instructions: [
       {
@@ -127,40 +127,40 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
     ]
   };
   const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
-  const effects = emissionPlan.effects;
+  const schedule = emissionPlan.schedule;
 
-  deepStrictEqual(effects.map((effect) => effect.kind), [
+  deepStrictEqual(schedule.map((entry) => entry.kind), [
     "memoryGuard",
     "memoryStore",
-    "memoryLoad",
+    "defineLoadResult",
     "jump",
     "branch",
     "hostTrap",
     "fallthrough"
   ]);
 
-  const guard = requireEffect(effects[0], "memoryGuard");
+  const guard = requireScheduleEntry(schedule[0], "memoryGuard");
   deepStrictEqual(guard.address, c32(0x60));
   strictEqual(guard.byteLength, 4);
   strictEqual(guard.access, "read");
   assertExactExit(guard.exit, emissionPlan.exits);
 
-  const store = requireEffect(effects[1], "memoryStore");
+  const store = requireScheduleEntry(schedule[1], "memoryStore");
   deepStrictEqual(store.address, c32(0x64));
   deepStrictEqual(store.value, c32(0x55));
   strictEqual(store.width, 32);
 
-  const load = requireEffect(effects[2], "memoryLoad");
+  const load = requireScheduleEntry(schedule[2], "defineLoadResult");
   deepStrictEqual(load.result, jitLoadResultValue(0, "i32"));
   deepStrictEqual(load.address, c32(0x68));
   strictEqual(load.width, 16);
   strictEqual(load.signed, false);
 
-  const jump = requireEffect(effects[3], "jump");
+  const jump = requireScheduleEntry(schedule[3], "jump");
   deepStrictEqual(jump.target, c32(0x2000));
   assertExactExit(jump.exit, emissionPlan.exits);
 
-  const branch = requireEffect(effects[4], "branch");
+  const branch = requireScheduleEntry(schedule[4], "branch");
   deepStrictEqual(branch.condition, c32(1));
   deepStrictEqual(branch.takenTarget, c32(0x3000));
   deepStrictEqual(branch.notTakenTarget, c32(startAddress + 5));
@@ -168,16 +168,16 @@ test("JIT effects plan resolves operands, preserves order, and carries exact exi
   assertExactExit(branch.notTaken, emissionPlan.exits);
   strictEqual(branch.taken.id !== branch.notTaken.id, true);
 
-  const trap = requireEffect(effects[5], "hostTrap");
+  const trap = requireScheduleEntry(schedule[5], "hostTrap");
   deepStrictEqual(trap.vector, c32(0x2e));
   assertExactExit(trap.exit, emissionPlan.exits);
 
-  const fallthrough = requireEffect(effects[6], "fallthrough");
+  const fallthrough = requireScheduleEntry(schedule[6], "fallthrough");
   assertExactExit(fallthrough.exit, emissionPlan.exits);
   strictEqual(fallthrough.exit.reason, ExitReason.FALLTHROUGH);
 });
 
-test("JIT effects plan omits local fallthrough effects", () => {
+test("JIT schedule omits local fallthrough entries", () => {
   const block: JitIrBlock = {
     instructions: [
       {
@@ -194,10 +194,10 @@ test("JIT effects plan omits local fallthrough effects", () => {
   };
   const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
 
-  deepStrictEqual(emissionPlan.effects.map((effect) => effect.kind), ["jump"]);
+  deepStrictEqual(emissionPlan.schedule.map((entry) => entry.kind), ["jump"]);
 });
 
-test("JIT effects plan attaches roots for ordered effects and exit stores", () => {
+test("JIT schedule attaches roots for ordered runtime actions and exit stores", () => {
   const block: JitIrBlock = {
     instructions: [
       {
@@ -292,7 +292,7 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
     .filter((use) => valuesEqual(use.value, expectedValue))
     .map((use) => use.purpose);
 
-  deepStrictEqual(emissionPlan.effects.map((effect) => effect.kind), [
+  deepStrictEqual(emissionPlan.schedule.map((entry) => entry.kind), [
     "memoryGuard",
     "memoryStore",
     "branch",
@@ -309,7 +309,7 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
   ), true);
 });
 
-test("JIT effects plan selects load-result values only for later required roots", () => {
+test("JIT schedule selects load-result values only for later required roots", () => {
   const unusedBlock: JitIrBlock = {
     instructions: [{
       instructionId: "unused-loadResult",
@@ -344,16 +344,16 @@ test("JIT effects plan selects load-result values only for later required roots"
   const usedPlan = buildJitCodegenEmissionPlan(planJitCodegen(usedBlock));
   const loadResult = jitLoadResultValue(0, "i32");
 
-  deepStrictEqual(unusedPlan.effects.map((effect) => effect.kind), [
-    "memoryLoad",
+  deepStrictEqual(unusedPlan.schedule.map((entry) => entry.kind), [
+    "defineLoadResult",
     "fallthrough"
   ]);
   deepStrictEqual(unusedPlan.valueUses, []);
   deepStrictEqual(unusedPlan.reusePlan.cache.selected, []);
   deepStrictEqual(unusedPlan.reusePlan.captures.captures, []);
 
-  deepStrictEqual(usedPlan.effects.map((effect) => effect.kind), [
-    "memoryLoad",
+  deepStrictEqual(usedPlan.schedule.map((entry) => entry.kind), [
+    "defineLoadResult",
     "hostTrap"
   ]);
   deepStrictEqual(usedPlan.reusePlan.cache.selected, [
@@ -361,19 +361,58 @@ test("JIT effects plan selects load-result values only for later required roots"
   ]);
   deepStrictEqual(
     usedPlan.reusePlan.captures.captures
-      .filter((capture) => capture.reason === "loadResultDefinition")
+      .filter((capture) => capture.reason === "memoryLoadValue")
       .map((capture) => capture.value),
     [loadResult]
   );
 });
 
-function requireEffect<TKind extends Effect["kind"]>(
-  effect: Effect | undefined,
+test("JIT schedule roots live memory-load value addresses transitively", () => {
+  const block: JitIrBlock = {
+    instructions: [{
+      instructionId: "chained-loadResult-address",
+      eip: startAddress,
+      ir: [
+        {
+          op: "get",
+          dst: { kind: "var", id: 0 },
+          source: { kind: "mem", address: c32Expr(0x60) },
+          accessWidth: 32
+        },
+        {
+          op: "get",
+          dst: { kind: "var", id: 1 },
+          source: { kind: "mem", address: { kind: "var", id: 0 } },
+          accessWidth: 32
+        },
+        { op: "hostTrap", vector: { kind: "var", id: 1 } }
+      ]
+    }]
+  };
+  const emissionPlan = buildJitCodegenEmissionPlan(planJitCodegen(block));
+  const firstLoad = jitLoadResultValue(0, "i32");
+  const secondLoad = jitLoadResultValue(1, "i32");
+
+  strictEqual(emissionPlan.reusePlan.cache.selected.some((entry) =>
+    valuesEqual(entry.value, firstLoad)
+  ), true);
+  strictEqual(emissionPlan.reusePlan.cache.selected.some((entry) =>
+    valuesEqual(entry.value, secondLoad)
+  ), true);
+  strictEqual(emissionPlan.valueUses.some((use) =>
+    valuesEqual(use.value, firstLoad) &&
+      valuesEqual(use.root, firstLoad) &&
+      use.purpose === "memoryAddress"
+  ), true);
+});
+
+function requireScheduleEntry<TKind extends BlockScheduleEntry["kind"]>(
+  effect: BlockScheduleEntry | undefined,
   kind: TKind
-): Extract<Effect, { kind: TKind }> {
+): Extract<BlockScheduleEntry, { kind: TKind }> {
   strictEqual(effect?.kind, kind);
 
-  return effect as Extract<Effect, { kind: TKind }>;
+  return effect as Extract<BlockScheduleEntry, { kind: TKind }>;
 }
 
 function assertExactExit(
