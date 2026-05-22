@@ -46,9 +46,7 @@ export function buildEpochs(
     block.valueTimeline.writes.map((write) => write.opIndex)
   );
 
-  for (const entry of block.expressions.ops) {
-    const opIndex = entry.opIndex;
-
+  for (const [opIndex] of block.expressions.ops.entries()) {
     opEpochs[opIndex] = currentEpoch;
 
     if (writeExpressionOpIndexes.has(opIndex)) {
@@ -97,9 +95,7 @@ export function jitExpressionOpEpochs(
   );
   let currentEpoch = startEpoch;
 
-  for (const entry of block.expressions.ops) {
-    const opIndex = entry.opIndex;
-
+  for (const [opIndex] of block.expressions.ops.entries()) {
     opEpochs[opIndex] = currentEpoch;
 
     if (writeExpressionOpIndexes.has(opIndex)) {

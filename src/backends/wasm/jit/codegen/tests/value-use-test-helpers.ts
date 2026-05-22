@@ -68,8 +68,7 @@ export function valueUsesForExpressionBlock(input: Readonly<{
 
 export function blockExpressionsForTest(expressionBlock: IrExprBlock): BlockExpressions {
   return {
-    ops: expressionBlock.map((op, opIndex) => ({
-      opIndex,
+    ops: expressionBlock.map((op) => ({
       op: op as JitBoundExprOp,
       progress: {
         instructionCountDelta: 0

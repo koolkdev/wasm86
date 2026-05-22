@@ -44,12 +44,7 @@ export function buildExpressionPaths(
 ): PathMap {
   const paths = new Map<number, BranchPaths>();
 
-  for (const { opIndex, op } of expressions.ops) {
-
-    if (op === undefined) {
-      throw new Error(`missing JIT expression op while planning paths: ${opIndex}`);
-    }
-
+  for (const [opIndex, { op }] of expressions.ops.entries()) {
     if (op.op === "conditionalJump") {
       paths.set(opIndex, {
         taken: branchPath(opIndex, "taken"),

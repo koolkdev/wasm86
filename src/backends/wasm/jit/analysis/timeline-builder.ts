@@ -75,9 +75,7 @@ class TimelineBuilder {
   }
 
   build(): Timeline {
-    for (const entry of this.#ops) {
-      const { opIndex, op } = entry;
-
+    for (const [opIndex, { op }] of this.#ops.entries()) {
       this.#enterExpressionOp(opIndex);
       this.#recordSnapshotPoint();
       this.#recordInputs(op);

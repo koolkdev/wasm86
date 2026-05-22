@@ -56,21 +56,10 @@ export function analyzeBlockRuntime(
   const actions: AnalyzedRuntimeAction[] = [];
   const exits: Exit[] = [];
 
-  for (let position = 0; position < expressions.ops.length; position += 1) {
-    const entry = expressions.ops[position];
-
-    if (entry === undefined) {
-      throw new Error(`missing JIT expression op while analyzing runtime: ${position}`);
-    }
-
-    const { opIndex, op } = entry;
+  for (const [opIndex, entry] of expressions.ops.entries()) {
+    const { op } = entry;
     const currentProgress = addBlockProgress(input.progress, entry.progress);
-
-    if (opIndex !== position) {
-      throw new Error(`JIT block expression op index mismatch: ${opIndex} !== ${position}`);
-    }
-
-    const isFinalOp = position === expressions.ops.length - 1;
+    const isFinalOp = opIndex === expressions.ops.length - 1;
     const runtimeActionKind = classifyRuntimeAction(op, isFinalOp);
     const exitKinds = classifyExits(op, isFinalOp);
 
@@ -117,8 +106,8 @@ export function analyzeBlockRuntime(
 export function timelineSnapshotPointsForExpressions(
   expressions: BlockExpressions
 ): ReadonlySet<number> {
-  return new Set(expressions.ops.flatMap(({ opIndex, op }, position) =>
-    classifyExits(op, position === expressions.ops.length - 1).length === 0
+  return new Set(expressions.ops.flatMap(({ op }, opIndex) =>
+    classifyExits(op, opIndex === expressions.ops.length - 1).length === 0
       ? []
       : [opIndex]
   ));

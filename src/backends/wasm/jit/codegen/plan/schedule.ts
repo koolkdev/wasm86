@@ -51,10 +51,10 @@ export function scheduleInputForAnalysis(input: ScheduleAnalysisInput): Schedule
   const memoryLoadValuesByOp = entriesByOp(analysis.timeline.memoryLoadValues, (entry) => entry.opIndex);
 
   return {
-    ops: analysis.expressions.ops.map((expression) => ({
+    ops: analysis.expressions.ops.map((expression, opIndex) => ({
       expression,
-      runtimeActions: runtimeActionsByOp.get(expression.opIndex) ?? [],
-      memoryLoadValues: memoryLoadValuesByOp.get(expression.opIndex) ?? []
+      runtimeActions: runtimeActionsByOp.get(opIndex) ?? [],
+      memoryLoadValues: memoryLoadValuesByOp.get(opIndex) ?? []
     })),
     timeline: analysis.timeline,
     opEpochs: jitExpressionOpEpochs({
@@ -100,7 +100,7 @@ function planRuntimeEntry(
 ): RuntimeEntry {
   const { opEpochs, plannedExits, timeline } = input;
   const at = placementForOp(runtimeAction.at.opIndex, opEpochs, "runtime entry");
-  const expressionOp = expressionOpForScheduleOp(op, at.opIndex);
+  const expressionOp = op.expression.op;
   const view = timeline.viewAt(at.opIndex);
 
   switch (runtimeAction.kind) {
@@ -193,7 +193,7 @@ function planMemoryLoadValue(
 ): MemoryLoadValueEntry {
   const { opEpochs, timeline } = input;
   const at = placementForOp(memoryLoadValue.opIndex, opEpochs, "memory-load value");
-  const expressionOp = expressionOpForScheduleOp(op, at.opIndex);
+  const expressionOp = op.expression.op;
   const view = timeline.viewAt(at.opIndex);
 
   if (expressionOp.op !== "let32") {
@@ -236,17 +236,6 @@ function placementForOp(
     opIndex,
     epoch
   };
-}
-
-function expressionOpForScheduleOp(
-  op: ScheduleOp,
-  opIndex: number
-) {
-  if (op.expression.opIndex !== opIndex) {
-    throw new Error(`JIT schedule op index mismatch: ${op.expression.opIndex} !== ${opIndex}`);
-  }
-
-  return op.expression.op;
 }
 
 function assertDistinctBranchExits(

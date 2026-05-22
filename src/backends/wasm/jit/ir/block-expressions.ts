@@ -17,7 +17,6 @@ export type BlockExpressionProgress = Readonly<{
 }>;
 
 export type BlockExprOp = Readonly<{
-  opIndex: number;
   op: JitBoundExprOp;
   progress: BlockExpressionProgress;
 }>;
@@ -39,7 +38,6 @@ export function buildBlockExpressions(block: JitIrBlock): BlockExpressions {
 
     for (const op of buildInstructionExpressions(instruction)) {
       ops.push({
-        opIndex: ops.length,
         op,
         progress
       });
