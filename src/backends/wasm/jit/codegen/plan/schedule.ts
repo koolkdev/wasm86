@@ -5,7 +5,7 @@ import type {
   MemoryLoadValue,
   Timeline
 } from "#backends/wasm/jit/analysis/timeline-types.js";
-import type { BlockExprOp } from "#backends/wasm/jit/ir/block-expressions.js";
+import type { JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
 import {
   jitExpressionOpEpochs
 } from "./epochs.js";
@@ -34,7 +34,7 @@ export type ScheduleAnalysisInput = Readonly<{
 }>;
 
 export type ScheduleOp = Readonly<{
-  expression: BlockExprOp;
+  expression: JitBoundExprOp;
   runtimeActions: readonly AnalyzedRuntimeAction[];
   memoryLoadValues: readonly MemoryLoadValue[];
 }>;
@@ -51,7 +51,7 @@ export function scheduleInputForAnalysis(input: ScheduleAnalysisInput): Schedule
   const memoryLoadValuesByOp = entriesByOp(analysis.timeline.memoryLoadValues, (entry) => entry.opIndex);
 
   return {
-    ops: analysis.expressions.ops.map((expression, opIndex) => ({
+    ops: analysis.expressions.map((expression, opIndex) => ({
       expression,
       runtimeActions: runtimeActionsByOp.get(opIndex) ?? [],
       memoryLoadValues: memoryLoadValuesByOp.get(opIndex) ?? []
@@ -100,7 +100,7 @@ function planRuntimeEntry(
 ): RuntimeEntry {
   const { opEpochs, plannedExits, timeline } = input;
   const at = placementForOp(runtimeAction.at.opIndex, opEpochs, "runtime entry");
-  const expressionOp = op.expression.op;
+  const expressionOp = op.expression;
   const view = timeline.viewAt(at.opIndex);
 
   switch (runtimeAction.kind) {
@@ -193,7 +193,7 @@ function planMemoryLoadValue(
 ): MemoryLoadValueEntry {
   const { opEpochs, timeline } = input;
   const at = placementForOp(memoryLoadValue.opIndex, opEpochs, "memory-load value");
-  const expressionOp = op.expression.op;
+  const expressionOp = op.expression;
   const view = timeline.viewAt(at.opIndex);
 
   if (expressionOp.op !== "let32") {

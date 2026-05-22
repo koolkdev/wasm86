@@ -2,7 +2,7 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
+import type { JitBoundExprBlock } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type {
   JitArchitecturalSlot,
   JitValue
@@ -70,7 +70,7 @@ export type Timeline = Readonly<{
 }>;
 
 export type TimelineInput = Readonly<{
-  expressions: BlockExpressions;
+  expressions: JitBoundExprBlock;
   entry?: ValueSnapshot;
   snapshotPoints: ReadonlySet<number>;
   loadResultRegistry: LoadResultRegistry;

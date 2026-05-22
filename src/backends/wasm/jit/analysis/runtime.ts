@@ -1,8 +1,8 @@
 import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import type {
+  JitBoundExprBlock,
   JitBoundExprOp
 } from "#backends/wasm/jit/ir/bound-expressions.js";
-import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   buildExit,
@@ -16,16 +16,12 @@ import {
   classifyExits,
   type RuntimeActionKind
 } from "./runtime-classifier.js";
-import {
-  addBlockProgress,
-  snapshotForExit,
-  type BlockProgress
-} from "./block-progress.js";
+import type { BlockProgress } from "./block-progress.js";
 import type { PathMap } from "./paths.js";
 import type { Timeline, TimelineView } from "./timeline-types.js";
 
 export type BlockRuntimeInput = Readonly<{
-  expressions: BlockExpressions;
+  expressions: JitBoundExprBlock;
   timeline: Timeline;
   expressionPaths: PathMap;
   progress: BlockProgress;
@@ -47,6 +43,7 @@ export type AnalyzedRuntimeAction<TExit extends Exit = Exit> =
 export type BlockRuntimeAnalysis = Readonly<{
   actions: readonly AnalyzedRuntimeAction[];
   exits: readonly Exit[];
+  progress: BlockProgress;
 }>;
 
 export function analyzeBlockRuntime(
@@ -55,11 +52,11 @@ export function analyzeBlockRuntime(
   const { expressions } = input;
   const actions: AnalyzedRuntimeAction[] = [];
   const exits: Exit[] = [];
+  let instructionCountDelta = input.progress.instructionCountDelta;
 
-  for (const [opIndex, entry] of expressions.ops.entries()) {
-    const { op } = entry;
-    const currentProgress = addBlockProgress(input.progress, entry.progress);
-    const isFinalOp = opIndex === expressions.ops.length - 1;
+  for (const [opIndex, op] of expressions.entries()) {
+    const isFinalOp = opIndex === expressions.length - 1;
+    const progressBeforeOp = { instructionCountDelta };
     const runtimeActionKind = classifyRuntimeAction(op, isFinalOp);
     const exitKinds = classifyExits(op, isFinalOp);
 
@@ -73,13 +70,10 @@ export function analyzeBlockRuntime(
       buildExitForOp({
         at,
         kind,
-        snapshot: snapshotForExit(
-          kind,
-          exitSnapshotBeforeOp(
-            input,
-            opIndex,
-            currentProgress
-          )
+        snapshot: exitSnapshotBeforeOp(
+          input,
+          opIndex,
+          exitProgressForOp(kind, progressBeforeOp)
         ),
         paths: input.expressionPaths,
         op,
@@ -95,19 +89,26 @@ export function analyzeBlockRuntime(
     }
 
     exits.push(...exitRecords);
+
+    if (localFallthroughCommitsInstruction(op, isFinalOp)) {
+      instructionCountDelta += 1;
+    }
   }
 
   return {
     actions,
-    exits
+    exits,
+    progress: {
+      instructionCountDelta
+    }
   };
 }
 
 export function timelineSnapshotPointsForExpressions(
-  expressions: BlockExpressions
+  expressions: JitBoundExprBlock
 ): ReadonlySet<number> {
-  return new Set(expressions.ops.flatMap(({ op }, opIndex) =>
-    classifyExits(op, opIndex === expressions.ops.length - 1).length === 0
+  return new Set(expressions.flatMap((op, opIndex) =>
+    classifyExits(op, opIndex === expressions.length - 1).length === 0
       ? []
       : [opIndex]
   ));
@@ -151,6 +152,31 @@ function exitSnapshotBeforeOp(
   };
 }
 
+function exitProgressForOp(
+  kind: ExitKind,
+  progressBeforeOp: BlockProgress
+): BlockProgress {
+  return exitCommitsInstruction(kind)
+    ? {
+        instructionCountDelta: progressBeforeOp.instructionCountDelta + 1
+      }
+    : progressBeforeOp;
+}
+
+function exitCommitsInstruction(kind: ExitKind): boolean {
+  switch (kind) {
+    case "fallthrough":
+    case "jump":
+    case "branchTaken":
+    case "branchNotTaken":
+    case "hostTrap":
+      return true;
+    case "memoryReadFault":
+    case "memoryWriteFault":
+      return false;
+  }
+}
+
 function buildExitForOp(input: Readonly<{
   at: ExitPlacement;
   kind: ExitKind;
@@ -158,7 +184,7 @@ function buildExitForOp(input: Readonly<{
   paths: PathMap;
   op: JitBoundExprOp;
   view: TimelineView;
-  expressions: BlockExpressions;
+  expressions: JitBoundExprBlock;
 }>): Exit {
   const { at, kind, snapshot, paths, op, view, expressions } = input;
   const base = { at, snapshot, paths };
@@ -254,7 +280,7 @@ function targetExpressionForExit(
 function staticLinkTargetInput(
   kind: ExitKind,
   op: JitBoundExprOp,
-  expressions: BlockExpressions
+  expressions: JitBoundExprBlock
 ): Readonly<{ staticLinkTarget?: number }> {
   const target = staticLinkTargetForExit(kind, op, expressions);
 
@@ -266,7 +292,7 @@ function staticLinkTargetInput(
 function staticLinkTargetForExit(
   kind: ExitKind,
   op: JitBoundExprOp,
-  expressions: BlockExpressions
+  expressions: JitBoundExprBlock
 ): number | undefined {
   switch (kind) {
     case "fallthrough":
@@ -291,7 +317,7 @@ function staticLinkTargetForExit(
 
 function staticLinkTargetForExpression(
   value: IrValueExpr,
-  expressions: BlockExpressions
+  expressions: JitBoundExprBlock
 ): number | undefined {
   switch (value.kind) {
     case "source":
@@ -312,11 +338,9 @@ function staticLinkTargetForExpression(
 
 function materializedStaticTarget(
   varId: number,
-  expressions: BlockExpressions
+  expressions: JitBoundExprBlock
 ): number | undefined {
-  for (const entry of expressions.ops) {
-    const { op } = entry;
-
+  for (const op of expressions) {
     if (op.op === "let32" && op.dst.id === varId) {
       return op.value.kind === "const"
         ? op.value.value
@@ -359,4 +383,11 @@ function assertNoExits(
   if (exits.length !== 0) {
     throw new Error(`JIT ${kind} runtime action at ${at.opIndex} must not have exits`);
   }
+}
+
+function localFallthroughCommitsInstruction(
+  op: JitBoundExprOp,
+  isFinalOp: boolean
+): boolean {
+  return op.op === "next" && !isFinalOp;
 }

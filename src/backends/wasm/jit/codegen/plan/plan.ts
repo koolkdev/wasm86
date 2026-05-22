@@ -1,5 +1,5 @@
 import { analyzeBlock, type BlockAnalysis } from "#backends/wasm/jit/analysis/block.js";
-import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
+import type { JitBoundExprBlock } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 import { planExitStores } from "./exit-stores.js";
 import type {
@@ -37,7 +37,7 @@ export type {
 } from "./schedule.js";
 export { planSchedule, scheduleInputForAnalysis } from "./schedule.js";
 
-export function planJitCodegen(expressions: BlockExpressions): JitCodegenPlan {
+export function planJitCodegen(expressions: JitBoundExprBlock): JitCodegenPlan {
   return planBlock(analyzeBlock(expressions));
 }
 

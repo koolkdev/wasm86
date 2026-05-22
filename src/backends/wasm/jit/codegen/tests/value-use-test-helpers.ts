@@ -17,10 +17,7 @@ import {
   type ValueRoot,
   type ValueUse
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
-import type {
-  BlockExpressions
-} from "#backends/wasm/jit/ir/block-expressions.js";
-import type { JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
+import type { JitBoundExprBlock, JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { rootExpressionPaths } from "./path-test-helpers.js";
 
@@ -66,18 +63,8 @@ export function valueUsesForExpressionBlock(input: Readonly<{
   return roots.flatMap(expandRootUse);
 }
 
-export function blockExpressionsForTest(expressionBlock: IrExprBlock): BlockExpressions {
-  return {
-    ops: expressionBlock.map((op) => ({
-      op: op as JitBoundExprOp,
-      progress: {
-        instructionCountDelta: 0
-      }
-    })),
-    progress: {
-      instructionCountDelta: 0
-    }
-  };
+export function blockExpressionsForTest(expressionBlock: IrExprBlock): JitBoundExprBlock {
+  return expressionBlock.map((op) => op as JitBoundExprOp);
 }
 
 export function branchExpressionPaths(

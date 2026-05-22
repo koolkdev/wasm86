@@ -7,53 +7,24 @@ import type {
 } from "#backends/wasm/jit/ir/types.js";
 import {
   buildJitBoundExpressionBlock,
-  type JitBoundExprBlock,
-  type JitBoundExprOp
+  type JitBoundExprBlock
 } from "./bound-expressions.js";
 import { validateBlockVarNamespace } from "./validate.js";
 
-export type BlockExpressionProgress = Readonly<{
-  instructionCountDelta: number;
-}>;
-
-export type BlockExprOp = Readonly<{
-  op: JitBoundExprOp;
-  progress: BlockExpressionProgress;
-}>;
-
-export type BlockExpressions = Readonly<{
-  ops: readonly BlockExprOp[];
-  progress: BlockExpressionProgress;
-}>;
-
-export function buildBlockExpressions(block: JitIrBlock): BlockExpressions {
+export function buildBlockExpressions(block: JitIrBlock): JitBoundExprBlock {
   validateBlockVarNamespace(block);
 
-  const ops: BlockExprOp[] = [];
-  let instructionCountDelta = 0;
+  const ops: JitBoundExprBlock[number][] = [];
 
   for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
     const instruction = block.instructions[instructionIndex]!;
-    const progress = { instructionCountDelta };
 
     for (const op of buildInstructionExpressions(instruction)) {
-      ops.push({
-        op,
-        progress
-      });
-    }
-
-    if (instructionIndex < block.instructions.length - 1) {
-      instructionCountDelta += 1;
+      ops.push(op);
     }
   }
 
-  return {
-    ops,
-    progress: {
-      instructionCountDelta
-    }
-  };
+  return ops;
 }
 
 function buildInstructionExpressions(

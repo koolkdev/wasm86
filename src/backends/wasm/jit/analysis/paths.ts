@@ -1,4 +1,4 @@
-import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
+import type { JitBoundExprBlock } from "#backends/wasm/jit/ir/bound-expressions.js";
 
 export type PathId = string;
 
@@ -40,11 +40,11 @@ function branchPathId(
 }
 
 export function buildExpressionPaths(
-  expressions: BlockExpressions
+  expressions: JitBoundExprBlock
 ): PathMap {
   const paths = new Map<number, BranchPaths>();
 
-  for (const [opIndex, { op }] of expressions.ops.entries()) {
+  for (const [opIndex, op] of expressions.entries()) {
     if (op.op === "conditionalJump") {
       paths.set(opIndex, {
         taken: branchPath(opIndex, "taken"),

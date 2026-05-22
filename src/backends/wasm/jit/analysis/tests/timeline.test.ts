@@ -12,10 +12,9 @@ import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolv
 import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
 import {
-  buildBlockExpressions,
-  type BlockExpressions
+  buildBlockExpressions
 } from "#backends/wasm/jit/ir/block-expressions.js";
-import type { JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
+import type { JitBoundExprBlock, JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
 import {
   jitFlagConditionValue,
   jitFlagProducerValue,
@@ -45,18 +44,8 @@ function buildTimeline(input: TestTimelineInput) {
   });
 }
 
-function blockExpressionsForTest(expressionBlock: IrExprBlock): BlockExpressions {
-  return {
-    ops: expressionBlock.map((op) => ({
-      op: op as JitBoundExprOp,
-      progress: {
-        instructionCountDelta: 0
-      }
-    })),
-    progress: {
-      instructionCountDelta: 0
-    }
-  };
+function blockExpressionsForTest(expressionBlock: IrExprBlock): JitBoundExprBlock {
+  return expressionBlock.map((op) => op as JitBoundExprOp);
 }
 
 test("JIT value timeline records the same register source expression before and after a write", () => {

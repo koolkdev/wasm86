@@ -1,4 +1,4 @@
-import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
+import type { JitBoundExprBlock } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type {
   MemoryLoadValue,
   Timeline
@@ -17,7 +17,7 @@ export type BlockEpochs = BlockEpochSource & Readonly<{
 }>;
 
 export type BlockEpochInput = BlockEpochSource & Readonly<{
-  expressions: BlockExpressions;
+  expressions: JitBoundExprBlock;
 }>;
 
 export type EpochUsePlan = Readonly<{
@@ -46,7 +46,7 @@ export function buildEpochs(
     block.valueTimeline.writes.map((write) => write.opIndex)
   );
 
-  for (const [opIndex] of block.expressions.ops.entries()) {
+  for (const [opIndex] of block.expressions.entries()) {
     opEpochs[opIndex] = currentEpoch;
 
     if (writeExpressionOpIndexes.has(opIndex)) {
@@ -95,7 +95,7 @@ export function jitExpressionOpEpochs(
   );
   let currentEpoch = startEpoch;
 
-  for (const [opIndex] of block.expressions.ops.entries()) {
+  for (const [opIndex] of block.expressions.entries()) {
     opEpochs[opIndex] = currentEpoch;
 
     if (writeExpressionOpIndexes.has(opIndex)) {

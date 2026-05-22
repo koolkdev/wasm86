@@ -4,10 +4,6 @@ export type {
   InstructionMetadata
 } from "./ir/types.js";
 export type {
-  BlockExpressions,
-  BlockExprOp
-} from "./ir/block-expressions.js";
-export type {
   JitBoundExprBlock,
   JitBoundExprOp,
   JitMemoryGuardExprOp,

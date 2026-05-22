@@ -886,5 +886,5 @@ function expressionOpIndex<T extends IrExprBlock[number]["op"]>(
 }
 
 function expressionBlockForPlan(plan: JitCodegenPlan): IrExprBlock {
-  return plan.analysis.expressions.ops.map((entry) => entry.op);
+  return plan.analysis.expressions;
 }

@@ -1,4 +1,4 @@
-import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
+import type { JitBoundExprBlock } from "#backends/wasm/jit/ir/bound-expressions.js";
 import {
   analyzeBlockRuntime,
   timelineSnapshotPointsForExpressions,
@@ -9,20 +9,19 @@ import { buildExpressionPaths } from "./paths.js";
 import { buildTimeline } from "./timeline-builder.js";
 import type { Timeline } from "./timeline-types.js";
 import {
-  addBlockProgress,
   type BlockProgress
 } from "./block-progress.js";
 
 export type { BlockRuntimeAnalysis } from "./runtime.js";
 
 export type BlockAnalysis = Readonly<{
-  expressions: BlockExpressions;
+  expressions: JitBoundExprBlock;
   timeline: Timeline;
   runtime: BlockRuntimeAnalysis;
   progress: BlockProgress;
 }>;
 
-export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis {
+export function analyzeBlock(blockExpressions: JitBoundExprBlock): BlockAnalysis {
   const entryProgress = {
     instructionCountDelta: 0
   };
@@ -44,6 +43,6 @@ export function analyzeBlock(blockExpressions: BlockExpressions): BlockAnalysis 
     expressions: blockExpressions,
     timeline,
     runtime,
-    progress: addBlockProgress(entryProgress, blockExpressions.progress)
+    progress: runtime.progress
   };
 }

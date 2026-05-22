@@ -62,7 +62,7 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
     Math.max(0, ...codegenPlan.exits.map((exit) => exit.exitStoreIndex))
   );
   strictEqual(
-    codegenPlan.analysis.expressions.ops.some((entry) => entry.op.op === "conditionalJump"),
+    codegenPlan.analysis.expressions.some((op) => op.op === "conditionalJump"),
     true
   );
   strictEqual(Object.hasOwn(codegenPlan.analysis.timeline, "snapshots"), false);

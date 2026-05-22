@@ -70,8 +70,8 @@ test("planJitCodegen leaves exit-store sources on exits and omits separate exit-
   const loadResult = jitLoadResultValue(0, "i32");
   const exitValue = addValue(loadResult, jitInputReg32Value("ebx"));
   const [exitStoreUse] = rootUses(emissionPlan.valueUses, exitValue, "exitStore");
-  const hostTrapOpIndex = codegenPlan.analysis.expressions.ops
-    .findIndex((entry) => entry.op.op === "hostTrap");
+  const hostTrapOpIndex = codegenPlan.analysis.expressions
+    .findIndex((op) => op.op === "hostTrap");
 
   deepStrictEqual(exit.stores, [registerStore("eax", exitValue)]);
   deepStrictEqual(exitStoreUse?.at, { opIndex: hostTrapOpIndex, epoch: 1 });
