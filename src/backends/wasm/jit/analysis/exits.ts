@@ -15,10 +15,9 @@ import {
   type Path,
   type PathMap
 } from "./paths.js";
-import type { InstructionProgress } from "./instruction-progress.js";
+import type { BlockProgress } from "./block-progress.js";
 
-export type Placement = Readonly<{
-  instructionIndex: number;
+export type ExitPlacement = Readonly<{
   opIndex: number;
 }>;
 
@@ -32,7 +31,7 @@ export type ExitKind =
   | "hostTrap";
 
 export type ExitSnapshot = Readonly<{
-  progress: InstructionProgress;
+  progress: BlockProgress;
   valueState: JitValueStateSnapshot;
 }>;
 
@@ -49,7 +48,7 @@ export type ExitPayload = ExitValue;
 
 export type Exit = Readonly<{
   id: string;
-  at: Placement;
+  at: ExitPlacement;
   kind: ExitKind;
   reason: ExitReasonValue;
   snapshot: ExitSnapshot;
@@ -63,7 +62,7 @@ type ExitBuildInputBase<
   TKind extends ExitKind,
   TOp
 > = Readonly<{
-  at: Placement;
+  at: ExitPlacement;
   kind: TKind;
   op: TOp;
   snapshot: ExitSnapshot;
@@ -95,8 +94,8 @@ export function buildExit(input: ExitBuildInput): Exit {
   };
 }
 
-export function exitId(at: Placement, kind: ExitKind): string {
-  return `${at.instructionIndex}:${at.opIndex}:${kind}`;
+export function exitId(at: ExitPlacement, kind: ExitKind): string {
+  return `${at.opIndex}:${kind}`;
 }
 
 export function exitReasonForKind(kind: ExitKind): ExitReasonValue {
@@ -119,7 +118,7 @@ export function exitReasonForKind(kind: ExitKind): ExitReasonValue {
 export function pathForExit(
   kind: ExitKind,
   paths: PathMap,
-  at: Placement
+  at: ExitPlacement
 ): Path {
   switch (kind) {
     case "branchTaken":

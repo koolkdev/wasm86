@@ -140,7 +140,20 @@ export function encodeJitBlock(
 ): Uint8Array<ArrayBuffer> {
   blocks.forEach(validateBlock);
 
-  return encodeJitPlans(blocks.map(planJitCodegen), options);
+  return encodeJitPlans(blocks.map(jitModulePlan), options);
+}
+
+function jitModulePlan(block: JitIrBlock) {
+  const firstInstruction = block.instructions[0];
+
+  if (firstInstruction === undefined) {
+    throw new Error("cannot encode empty JIT test block");
+  }
+
+  return {
+    entryEip: firstInstruction.eip,
+    plan: planJitCodegen(block)
+  };
 }
 
 export function singleInstructionBodyOpcodes(bytes: readonly number[]): readonly number[] {

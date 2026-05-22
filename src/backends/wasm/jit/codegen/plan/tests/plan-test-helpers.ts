@@ -20,7 +20,7 @@ import {
   branchPath,
   rootPath
 } from "#backends/wasm/jit/analysis/paths.js";
-import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.js";
+import { planReuseForBlock } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
@@ -28,10 +28,7 @@ import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import {
   type UsePurpose
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";
-import type {
-  BlockAnalysis,
-  InstructionFlow
-} from "#backends/wasm/jit/analysis/block.js";
+import type { BlockAnalysis } from "#backends/wasm/jit/analysis/block.js";
 import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
 import type {
   Exit,
@@ -47,7 +44,6 @@ import type {
   JitCodegenPlan,
   ExitStore,
   PlannedExitStore,
-  PlannedInstruction,
   PlannedExit
 } from "#backends/wasm/jit/codegen/plan/types.js";
 import {
@@ -104,7 +100,7 @@ export {
   buildJitCodegenEmissionPlan,
   branchPath,
   rootPath,
-  planReuseForInstructions,
+  planReuseForBlock,
   buildTimeline,
   jitExtractBits,
   jitFlagConditionValue,
@@ -124,7 +120,6 @@ export type {
   JitCodegenPlan,
   ExitStore,
   PlannedExitStore,
-  PlannedInstruction,
   PlannedExit,
   Exit,
   ExitSnapshot,
@@ -142,28 +137,15 @@ export function planJitCodegen(block: JitIrBlock): JitCodegenPlan {
   return planExpressionCodegen(buildBlockExpressions(bindTestJitBlock(block)));
 }
 
-export function plannedInstructionsForTest(
+export function plannedEffectsForTest(
   analysis: BlockAnalysis,
   exits: readonly PlannedExit[]
-): readonly PlannedInstruction[] {
+): readonly EffectInfo<PlannedExit>[] {
   const exitsById = new Map(exits.map((exit) => [exit.id, exit]));
 
-  return analysis.instructions.map((instruction) => {
-    const flow: InstructionFlow<PlannedExit> = {
-      effects: instruction.flow.effects.map((effect) =>
-        planEffectExitsForTest(effect, exitsById)
-      ),
-      exits: instruction.flow.exits.map((exit) =>
-        requiredPlannedExitForTest(exitsById, exit.id)
-      )
-    };
-
-    return {
-      analysis: instruction,
-      flow,
-      exitCount: flow.exits.length
-    };
-  });
+  return analysis.effectAnalysis.effects.map((effect) =>
+    planEffectExitsForTest(effect, exitsById)
+  );
 }
 
 function planEffectExitsForTest(
@@ -221,7 +203,6 @@ export function planValueCacheForTest(input: Readonly<{
 }>) {
   const valueTimeline = buildTimeline({
     expressions: input.expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
   const valueUses = valueUsesForExpressionBlock({
@@ -230,10 +211,10 @@ export function planValueCacheForTest(input: Readonly<{
     extraUses: input.extraUses ?? new Map()
   });
 
-  return planReuseForInstructions([{
+  return planReuseForBlock({
     expressionBlock: input.expressionBlock,
     valueTimeline
-  }], valueUses, []);
+  }, valueUses, []);
 }
 
 function bindTestJitBlock(block: JitIrBlock): BoundJitIrBlock {
@@ -361,7 +342,6 @@ export function plannedFlagStores(exit: PlannedExit): readonly ExitStore[] {
 }
 
 export function exitPoint(input: Readonly<{
-  instructionIndex: number;
   opIndex: number;
   kind?: PlannedExit["kind"];
   reason: ExitReason;
@@ -374,13 +354,10 @@ export function exitPoint(input: Readonly<{
 }>): PlannedExit {
   const visibleEip = input.visibleEip ?? { kind: "static", value: 0 };
   const kind = input.kind ?? exitKind(input.reason, input.path);
-  const at = {
-    instructionIndex: input.instructionIndex,
-    opIndex: input.opIndex
-  };
+  const at = { opIndex: input.opIndex };
 
   return {
-    id: `${at.instructionIndex}:${at.opIndex}:${kind}`,
+    id: `${at.opIndex}:${kind}`,
     at,
     kind,
     snapshot: input.snapshot,

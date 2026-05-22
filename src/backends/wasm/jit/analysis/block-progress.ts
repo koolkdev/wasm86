@@ -1,20 +1,20 @@
-import type { JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type {
   ExitKind,
   ExitSnapshot
 } from "./exits.js";
 
-export type InstructionProgress = Readonly<{
+export type BlockProgress = Readonly<{
   instructionCountDelta: number;
 }>;
 
-export function instructionDeltaAfterOp(
-  op: JitBoundExprOp,
-  isFinalInstruction: boolean
-): number {
-  return op.op === "next" && !isFinalInstruction
-    ? 1
-    : 0;
+export function addBlockProgress(
+  left: BlockProgress,
+  right: BlockProgress
+): BlockProgress {
+  return {
+    instructionCountDelta: left.instructionCountDelta +
+      right.instructionCountDelta
+  };
 }
 
 export function snapshotForExit(

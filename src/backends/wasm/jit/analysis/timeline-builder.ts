@@ -59,14 +59,12 @@ class TimelineBuilder {
   #currentOpIndex = -1;
   #currentSetValue: JitValue | undefined;
   #currentSetValueResolved = false;
-  readonly #entry: ValueSnapshot;
 
   constructor(input: TimelineInput) {
     this.#ops = input.expressions;
     this.#loadResultRegistry = input.loadResultRegistry;
-    this.#entry = input.entry;
     this.#snapshotPoints = new Set(input.snapshotPoints);
-    this.#valueState = new ValueStateBuilder(this.#entry);
+    this.#valueState = new ValueStateBuilder(input.entry);
     this.#resolver = createJitValueResolver({
       readReg32: (reg) => this.#valueState.registers().readReg32(reg),
       readAluFlags: () => this.#valueState.flags().readAluFlags(),

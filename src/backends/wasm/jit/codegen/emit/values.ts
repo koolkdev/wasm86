@@ -243,8 +243,7 @@ function placementsEqual(
   left: Placement,
   right: Placement
 ): boolean {
-  return left.instructionIndex === right.instructionIndex &&
-    left.opIndex === right.opIndex &&
+  return left.opIndex === right.opIndex &&
     left.epoch === right.epoch;
 }
 

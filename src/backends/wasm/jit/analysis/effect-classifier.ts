@@ -12,13 +12,13 @@ export type EffectKind =
 
 export function classifyExits(
   op: JitBoundExprOp,
-  isFinalInstruction: boolean
+  isFinalOp: boolean
 ): readonly ExitKind[] {
   switch (op.op) {
     case "memory.guard":
       return [op.access === "read" ? "memoryReadFault" : "memoryWriteFault"];
     case "next":
-      return isFinalInstruction
+      return isFinalOp
         ? ["fallthrough"]
         : [];
     case "jump":
@@ -37,7 +37,7 @@ export function classifyExits(
 
 export function classifyEffect(
   op: JitBoundExprOp,
-  isFinalInstruction: boolean
+  isFinalOp: boolean
 ): EffectKind | undefined {
   switch (op.op) {
     case "memory.guard":
@@ -58,7 +58,7 @@ export function classifyEffect(
     case "hostTrap":
       return "hostTrap";
     case "next":
-      return isFinalInstruction
+      return isFinalOp
         ? "fallthrough"
         : undefined;
     default:

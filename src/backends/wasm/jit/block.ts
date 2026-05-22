@@ -5,7 +5,7 @@ export type {
 } from "./ir/types.js";
 export type {
   BlockExpressions,
-  BlockExpressionInstruction
+  BlockExprOp
 } from "./ir/block-expressions.js";
 export type {
   JitBoundExprBlock,
@@ -16,14 +16,19 @@ export type {
 } from "./ir/bound-expressions.js";
 export type {
   BlockAnalysis,
-  InstructionFlow,
-  InstructionAnalysis
+  BlockEffectAnalysis
 } from "./analysis/block.js";
 export type { JitLinkResolver } from "./codegen/emit/control-effects.js";
-export type { EncodeJitBlockOptions } from "./block-module.js";
+export type {
+  EncodeJitBlockOptions,
+  JitBlockModulePlan
+} from "./block-module.js";
 export { encodeJitBlock, jitBlockExportName } from "./block-module.js";
 export { buildBlock } from "./ir/block-builder.js";
-export { buildBlockExpressions } from "./ir/block-expressions.js";
+export {
+  buildBlockExpressions,
+  preparedOpsFromBlockExpressions
+} from "./ir/block-expressions.js";
 export { validateBlock } from "./ir/validate.js";
 export { analyzeBlock } from "./analysis/block.js";
 export { planJitCodegen } from "./codegen/plan/plan.js";

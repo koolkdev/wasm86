@@ -9,9 +9,9 @@ import {
 import { storeClobberValues } from "./store-strategy.js";
 import {
   buildEpochs,
+  type BlockEpochInput,
+  type BlockEpochs,
   type EpochUsePlan,
-  type InstructionEpochs,
-  type InstructionEpochInput,
   type PlacedLoadResultDefinition
 } from "./epochs.js";
 import {
@@ -28,14 +28,13 @@ export type {
   Capture,
   CaptureMap,
   CapturePlan,
-  CaptureReason,
-  InstructionCaptureMap
+  CaptureReason
 } from "./captures.js";
 export type {
+  BlockEpochSource,
+  BlockEpochs,
+  BlockEpochInput,
   EpochUsePlan,
-  InstructionEpochSource,
-  InstructionEpochs,
-  InstructionEpochInput,
   PlacedLoadResultDefinition
 } from "./epochs.js";
 
@@ -51,8 +50,8 @@ export type ReusePlan = Readonly<{
   captures: CapturePlan;
 }>;
 
-export type InstructionReusePlan = ReusePlan & Readonly<{
-  instructions: readonly InstructionEpochs[];
+export type BlockReusePlan = ReusePlan & Readonly<{
+  block: BlockEpochs;
 }>;
 
 export function planReuse(input: ReuseInput): ReusePlan {
@@ -73,12 +72,12 @@ export function planReuse(input: ReuseInput): ReusePlan {
   };
 }
 
-export function planReuseForInstructions(
-  instructions: readonly InstructionEpochInput[],
+export function planReuseForBlock(
+  block: BlockEpochInput,
   valueUses: readonly ValueUse[],
   exits: readonly PlannedExit[]
-): InstructionReusePlan {
-  const epoch = buildEpochs(instructions, valueUses);
+): BlockReusePlan {
+  const epoch = buildEpochs(block, valueUses);
   const reuse = planReuse({
     uses: valueUses,
     epochs: epoch.epochs,
@@ -87,7 +86,7 @@ export function planReuseForInstructions(
   });
 
   return {
-    instructions: epoch.instructions,
+    block: epoch.block,
     ...reuse
   };
 }

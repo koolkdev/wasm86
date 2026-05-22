@@ -161,9 +161,7 @@ function testExit(
   stores: readonly ExitStore[],
   exitStoreIndex = 1
 ): PlannedExit {
-  return exitPoint({
-    instructionIndex: 0,
-    opIndex: exitStoreIndex,
+  return exitPoint({ opIndex: exitStoreIndex,
     reason: ExitReason.HOST_TRAP,
     snapshot: exitState(0),
     stores,
@@ -175,9 +173,7 @@ function testExit(
 function storeClobberCapture(exit: PlannedExit, value: JitValue): Capture {
   const consumer: ValueUse = {
     value,
-    at: {
-      instructionIndex: exit.at.instructionIndex,
-      opIndex: exit.at.opIndex,
+    at: { opIndex: exit.at.opIndex,
       epoch: 0
     },
     path: exit.path,

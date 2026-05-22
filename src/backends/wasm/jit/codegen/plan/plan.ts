@@ -1,15 +1,11 @@
 import { analyzeBlock, type BlockAnalysis } from "#backends/wasm/jit/analysis/block.js";
 import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
-import type {
-  EffectInfo,
-  InstructionFlow
-} from "#backends/wasm/jit/analysis/effects.js";
+import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 import { planExitStores } from "./exit-stores.js";
 import type {
   JitCodegenPlan,
-  PlannedExit,
-  PlannedInstruction
+  PlannedExit
 } from "./types.js";
 
 export type {
@@ -23,7 +19,6 @@ export type {
   StoreStrategyPlan,
   StoreStrategySet,
   JitCodegenPlan,
-  PlannedInstruction
 } from "./types.js";
 export type {
   Effect,
@@ -38,42 +33,24 @@ export function planJitCodegen(expressions: BlockExpressions): JitCodegenPlan {
 export function planBlock(analysis: BlockAnalysis): JitCodegenPlan {
   const exitStorePlan = planExitStores(blockExits(analysis));
   const exits = Array.from(exitStorePlan.exits.values());
-  const instructions = planInstructions(analysis, exitStorePlan.exits);
+  const effects = planEffectInfos(analysis.effectAnalysis.effects, exitStorePlan.exits);
 
   return {
     analysis,
-    instructions,
+    effects,
     exits
   };
 }
 
 function blockExits(analysis: BlockAnalysis): readonly Exit[] {
-  return analysis.instructions.flatMap((instruction) => instruction.flow.exits);
+  return analysis.effectAnalysis.exits;
 }
 
-function planInstructions(
-  analysis: BlockAnalysis,
+function planEffectInfos(
+  effects: readonly EffectInfo[],
   plannedExits: ReadonlyMap<string, PlannedExit>
-): readonly PlannedInstruction[] {
-  return analysis.instructions.map((instruction) => {
-    const flow = planInstructionFlow(instruction.flow, plannedExits);
-
-    return {
-      analysis: instruction,
-      flow,
-      exitCount: flow.exits.length
-    };
-  });
-}
-
-function planInstructionFlow(
-  flow: InstructionFlow,
-  plannedExits: ReadonlyMap<string, PlannedExit>
-): InstructionFlow<PlannedExit> {
-  return {
-    effects: flow.effects.map((effect) => planEffectExits(effect, plannedExits)),
-    exits: flow.exits.map((exit) => requiredPlannedExit(plannedExits, exit.id))
-  };
+): readonly EffectInfo<PlannedExit>[] {
+  return effects.map((effect) => planEffectExits(effect, plannedExits));
 }
 
 function planEffectExits(

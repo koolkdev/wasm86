@@ -36,11 +36,6 @@ export type Capture = Readonly<{
 
 export type CaptureMap = ReadonlyMap<string, readonly Capture[]>;
 
-export type InstructionCaptureMap = ReadonlyMap<
-  number,
-  readonly Capture[]
->;
-
 export type CapturePlan = Readonly<{
   captures: readonly Capture[];
   effectCaptures: CaptureMap;
@@ -75,29 +70,6 @@ export function planCaptures(
     captures,
     effectCaptures: capturesByPlacement(captures.filter(isEffectCapture))
   };
-}
-
-export function groupCapturesByInstruction(
-  captures: readonly Capture[],
-  instructionCount: number
-): readonly InstructionCaptureMap[] {
-  const grouped: Map<number, Capture[]>[] = [];
-
-  for (const capture of captures) {
-    if (!isEffectCapture(capture)) {
-      continue;
-    }
-
-    const instructionCaptures = grouped[capture.at.instructionIndex] ?? new Map();
-    const expressionCaptures = instructionCaptures.get(capture.at.opIndex) ?? [];
-
-    instructionCaptures.set(capture.at.opIndex, [...expressionCaptures, capture]);
-    grouped[capture.at.instructionIndex] = instructionCaptures;
-  }
-
-  return Array.from({ length: instructionCount }, (_entry, index) =>
-    grouped[index] ?? new Map()
-  );
 }
 
 function planRootConsumerCaptures(
@@ -326,8 +298,7 @@ function placementsEqual(
   left: Placement,
   right: Placement
 ): boolean {
-  return left.instructionIndex === right.instructionIndex &&
-    left.opIndex === right.opIndex &&
+  return left.opIndex === right.opIndex &&
     left.epoch === right.epoch;
 }
 
@@ -345,5 +316,5 @@ function capturesByPlacement(captures: readonly Capture[]): CaptureMap {
 }
 
 function placementKey(placement: Placement): string {
-  return `${placement.instructionIndex}:${placement.opIndex}:${placement.epoch}`;
+  return `${placement.opIndex}:${placement.epoch}`;
 }

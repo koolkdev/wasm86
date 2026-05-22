@@ -1,11 +1,17 @@
 import { validateIrBlock } from "#x86/ir/passes/validator.js";
 import {
+  irOpDst,
   irOpIsTerminator,
   visitIrOpStorageRefs,
   visitIrOpValueRefs
 } from "#x86/ir/model/op-semantics.js";
 import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
+
+type VarDefinition = Readonly<{
+  instructionIndex: number;
+  opIndex: number;
+}>;
 
 export function validateBlock(block: JitIrBlock): void {
   if (block.instructions.length === 0) {
@@ -26,6 +32,45 @@ export function validateBlock(block: JitIrBlock): void {
       const message = error instanceof Error ? error.message : String(error);
 
       throw new Error(`invalid JIT IR at instruction ${instructionIndex}: ${message}`);
+    }
+  }
+
+  validateBlockVarNamespace(block);
+}
+
+export function validateBlockVarNamespace(block: JitIrBlock): void {
+  const definitions = new Map<number, VarDefinition>();
+
+  for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
+    const instruction = block.instructions[instructionIndex];
+
+    if (instruction === undefined) {
+      throw new Error(`missing JIT instruction: ${instructionIndex}`);
+    }
+
+    for (let opIndex = 0; opIndex < instruction.ir.length; opIndex += 1) {
+      const op = instruction.ir[opIndex];
+
+      if (op === undefined) {
+        throw new Error(`missing JIT IR op at instruction ${instructionIndex}:${opIndex}`);
+      }
+
+      const dst = irOpDst(op);
+
+      if (dst === undefined) {
+        continue;
+      }
+
+      const previous = definitions.get(dst.id);
+
+      if (previous !== undefined) {
+        throw new Error(
+          `JIT block var ${dst.id} is assigned more than once ` +
+          `(${varDefinitionLabel(previous)} and ${varDefinitionLabel({ instructionIndex, opIndex })})`
+        );
+      }
+
+      definitions.set(dst.id, { instructionIndex, opIndex });
     }
   }
 }
@@ -100,4 +145,8 @@ function validateBoundValue(value: ValueRef): void {
   if (value.kind === "nextEip") {
     throw new Error("JIT IR must not contain nextEip refs");
   }
+}
+
+function varDefinitionLabel(definition: VarDefinition): string {
+  return `${definition.instructionIndex}:${definition.opIndex}`;
 }

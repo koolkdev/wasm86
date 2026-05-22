@@ -267,7 +267,7 @@ test("LocalStore paths hide branch-local captures from sibling arms", () => {
   const store = new LocalStore(body);
   let emitted = 0;
 
-  store.enterPath(branchPath(0, 0, "taken"));
+  store.enterPath(branchPath(0, "taken"));
   const taken = captureWithLocalStore(store, value, () => emitAdd(body, () => { emitted += 1; }));
   store.leavePath();
 
@@ -275,7 +275,7 @@ test("LocalStore paths hide branch-local captures from sibling arms", () => {
     throw new Error("expected taken branch exit store");
   }
 
-  store.enterPath(branchPath(0, 0, "notTaken"));
+  store.enterPath(branchPath(0, "notTaken"));
   const notTaken = captureWithLocalStore(store, value, () => emitAdd(body, () => { emitted += 1; }));
   store.leavePath();
 
@@ -304,11 +304,11 @@ test("LocalStore paths preserve root values available before branch split", () =
     throw new Error("expected pre-branch cached local");
   }
 
-  store.enterPath(branchPath(0, 0, "taken"));
+  store.enterPath(branchPath(0, "taken"));
   const taken = captureWithLocalStore(store, value, unexpectedEmitter);
   store.leavePath();
 
-  store.enterPath(branchPath(0, 0, "notTaken"));
+  store.enterPath(branchPath(0, "notTaken"));
   const notTaken = captureWithLocalStore(store, value, unexpectedEmitter);
   store.leavePath();
 
@@ -373,7 +373,7 @@ test("LocalStore keeps parent path availability alive while child paths exit", (
 test("LocalStore withPath does not hide same-path captures from the outer path frame", () => {
   const body = new WasmFunctionBodyEncoder();
   const value = addValue("eax", 1);
-  const path = branchPath(0, 0, "taken");
+  const path = branchPath(0, "taken");
   const store = new LocalStore(body);
 
   store.enterPath(path);
@@ -408,7 +408,7 @@ test("LocalStore reuses released branch-local locals after leaving path", () => 
   const value = addValue("eax", 1);
   const store = new LocalStore(body);
 
-  store.enterPath(branchPath(0, 0, "taken"));
+  store.enterPath(branchPath(0, "taken"));
   const taken = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
   store.leavePath();
 
@@ -418,7 +418,7 @@ test("LocalStore reuses released branch-local locals after leaving path", () => 
 
   taken.release();
 
-  store.enterPath(branchPath(0, 0, "notTaken"));
+  store.enterPath(branchPath(0, "notTaken"));
   const notTaken = captureWithLocalStore(store, value, () => emitAdd(body, () => {}));
   store.leavePath();
 
@@ -474,7 +474,7 @@ test("LocalStore keeps pinned exit-store locals out of reuse", () => {
 function storeClobberCapture(value: Capture["value"]): Capture {
   return {
     value,
-    at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+    at: { opIndex: 0, epoch: 0 },
     availability: rootPath(),
     consumers: [],
     reason: "storeClobber"

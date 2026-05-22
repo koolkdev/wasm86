@@ -148,7 +148,7 @@ test("same-module final fallthrough uses direct return_call", () => {
   const firstBlock = decodeIsaBlock(reader, startAddress, { maxInstructions: 1 });
   const secondBlock = decodeIsaBlock(reader, startAddress + 1);
   const moduleBytes = encodeJitBlock(
-    [firstBlock, secondBlock].map((block) => planBlock(buildBlock(block.instructions)))
+    [firstBlock, secondBlock].map((block) => modulePlan(block.startEip, buildBlock(block.instructions)))
   );
   const firstBlockOpcodes = wasmBodyOpcodes(extractFunctionBody(moduleBytes, 0));
   const handle = compileWasmBlockHandle([firstBlock, secondBlock], { stateMemory, guestMemory });
@@ -275,7 +275,9 @@ async function compileMultiBlockFixture(blocks: readonly TestBlock[]): Promise<R
       block.eip
     )
   );
-  const moduleBytes = encodeJitBlock(decodedBlocks.map((block) => planBlock(buildBlock(block.instructions))));
+  const moduleBytes = encodeJitBlock(
+    decodedBlocks.map((block) => modulePlan(block.startEip, buildBlock(block.instructions)))
+  );
   const handle = await compileWasmBlockHandle(decodedBlocks, { stateMemory, guestMemory });
 
   return {
@@ -288,6 +290,13 @@ async function compileMultiBlockFixture(blocks: readonly TestBlock[]): Promise<R
 
 function planBlock(block: ReturnType<typeof buildBlock>) {
   return planJitCodegen(buildBlockExpressions(block));
+}
+
+function modulePlan(entryEip: number, block: ReturnType<typeof buildBlock>) {
+  return {
+    entryEip,
+    plan: planBlock(block)
+  };
 }
 
 function writeGuestCode(view: DataView, bytes: readonly number[]): void {

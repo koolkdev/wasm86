@@ -27,18 +27,19 @@ export type EncodeJitBlockOptions = Readonly<{
   linkResolver?: JitLinkResolver;
 }>;
 
+export type JitBlockModulePlan = Readonly<{
+  entryEip: number;
+  plan: JitCodegenPlan;
+}>;
+
 export function encodeJitBlock(
-  plans: readonly JitCodegenPlan[],
+  entries: readonly JitBlockModulePlan[],
   options: EncodeJitBlockOptions = {}
 ): Uint8Array<ArrayBuffer> {
-  if (plans.length === 0) {
+  if (entries.length === 0) {
     throw new Error("cannot encode empty JIT IR block module");
   }
 
-  const entries = plans.map((plan) => ({
-    plan,
-    entryEip: entryEipForPlan(plan)
-  }));
   const targetEips = options.linkResolver?.moduleTable?.targetEips() ?? [];
   const blockFunctionIndices = blockFunctionIndicesForEntries(entries, targetEips);
   const module = new WasmModuleEncoder();
@@ -112,7 +113,7 @@ function encodeJitBlockFunctionBody(
   const valueState = createValueCache(
     body,
     emissionPlan.reusePlan.cache,
-    emissionPlan.reusePlan.instructions
+    emissionPlan.reusePlan.block
   );
   const values = createValueEmitters({
     body,
@@ -180,23 +181,8 @@ function linkingContext(
   };
 }
 
-type JitBlockModuleEntry = Readonly<{
-  plan: JitCodegenPlan;
-  entryEip: number;
-}>;
-
-function entryEipForPlan(plan: JitCodegenPlan): number {
-  const instruction = plan.analysis.instructions[0]?.instruction;
-
-  if (instruction === undefined) {
-    throw new Error("cannot encode empty JIT block plan in module");
-  }
-
-  return u32(instruction.eip);
-}
-
 function blockFunctionIndicesForEntries(
-  entries: readonly JitBlockModuleEntry[],
+  entries: readonly JitBlockModulePlan[],
   fallbackTargetEips: readonly number[]
 ): ReadonlyMap<number, number> {
   const indices = new Map<number, number>();

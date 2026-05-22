@@ -37,5 +37,5 @@ function emitEffectCapture(
 }
 
 function placementKey(placement: Placement): string {
-  return `${placement.instructionIndex}:${placement.opIndex}:${placement.epoch}`;
+  return `${placement.opIndex}:${placement.epoch}`;
 }

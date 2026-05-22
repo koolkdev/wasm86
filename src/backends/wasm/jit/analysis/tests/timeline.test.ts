@@ -71,7 +71,6 @@ test("JIT value timeline records partial register writes as named register alias
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
   const expected = jitInsertBits(jitInputReg32Value("eax"), c32(0x7f), 0, 8);
@@ -159,7 +158,6 @@ test("JIT value timeline records condition reads before and after flag writes", 
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
 
@@ -249,7 +247,6 @@ test("JIT timeline op view reads planned effective-address lookups only", () => 
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
 
@@ -289,7 +286,6 @@ test("JIT timeline records load-result memory load definitions at one point", ()
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
 
@@ -320,7 +316,6 @@ test("JIT timeline records load-result memory operand reads only", () => {
   ] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
 
@@ -341,14 +336,14 @@ test("JIT block analysis allocates distinct load-result IDs across memory loads"
         { op: "next" }
       ], 0),
       syntheticInstruction([
-        { op: "get", dst: v(0), source: { kind: "mem", address: c32(0x1004) }, accessWidth: 32 },
+        { op: "get", dst: v(1), source: { kind: "mem", address: c32(0x1004) }, accessWidth: 32 },
         { op: "next" }
       ], 1)
     ]
   };
   const analysis = analyzeBlock(buildBlockExpressions(block));
-  const firstLoadResult = analysis.instructions[0]?.timeline.loadResults[0]?.value;
-  const secondLoadResult = analysis.instructions[1]?.timeline.loadResults[0]?.value;
+  const firstLoadResult = analysis.timeline.loadResults[0]?.value;
+  const secondLoadResult = analysis.timeline.loadResults[1]?.value;
 
   deepStrictEqual(firstLoadResult, jitLoadResultValue(0, "i32"));
   deepStrictEqual(secondLoadResult, jitLoadResultValue(1, "i32"));
@@ -358,7 +353,6 @@ test("JIT block analysis allocates distinct load-result IDs across memory loads"
 test("JIT timeline op view fails clearly for invalid op indexes", () => {
   const timeline = buildTimeline({
     expressions: [{ op: "let32", dst: v(0), value: c32(1) }],
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
 
@@ -369,7 +363,6 @@ test("JIT value timeline fails clearly for unresolved values", () => {
   throws(
     () => buildTimeline({
       expressions: [{ op: "hostTrap", vector: v(99) }],
-      entry: createJitValueState().snapshot(),
       snapshotPoints: new Set()
     }),
     /could not resolve JIT timeline value at expression op 0/
@@ -389,7 +382,6 @@ test("JIT value timeline ignores no-op flag writes before resolving inputs", () 
         result: v(102)
       }
     }],
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
 

@@ -19,10 +19,7 @@ import {
   createExitMetadataEmitter,
   createExitStoreEmitter,
   createExitStoreLayout,
-  buildTimeline,
   exitState,
-  const32,
-  xorExpr,
   countOpcode,
   passthroughValueCache,
   encodeJitBlock,
@@ -45,16 +42,13 @@ import type { CapturePlan } from "#backends/wasm/jit/codegen/plan/captures.js";
 import type { EffectsPlan } from "#backends/wasm/jit/codegen/plan/effect-types.js";
 import type { ValueCacheState } from "#backends/wasm/jit/codegen/emit/cache.js";
 
-test("JIT production emission consumes effects plan entries from instruction plans", () => {
+test("JIT production emission consumes block effects plan entries", () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const exitLocal = body.addLocal(wasmValueType.i64);
   const metadata = createExitMetadataEmitter(body);
   const valueCache = passthroughValueCache();
   const stores = createExitStoreEmitter({ body });
-  const expressionBlock = [
-    { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
-  ] as const;
   const vector = {
     kind: "value.binary",
     type: "i32",
@@ -62,16 +56,10 @@ test("JIT production emission consumes effects plan entries from instruction pla
     a: { kind: "const", type: "i32", value: 0x15 },
     b: { kind: "const", type: "i32", value: 0x3f }
   } as const satisfies JitValue;
-  const instruction = {
-    instructionId: "prebuilt-effects-plan",
-    eip: 0x1000,
-    ir: expressionBlock
-  } as const;
-  const initialState = exitState(0);
   const snapshot = exitState(1);
   const hostTrapExit = {
-    id: "0:0:hostTrap",
-    at: { instructionIndex: 0, opIndex: 0 },
+    id: "0:hostTrap",
+    at: { opIndex: 0 },
     kind: "hostTrap",
     snapshot,
     visibleEip: { kind: "static", value: 0x1001 },
@@ -96,25 +84,8 @@ test("JIT production emission consumes effects plan entries from instruction pla
     exitLocal,
     captures: emptyCapturePlan(),
     valueState: valueCacheState(valueCache),
-    instructions: [{
-      instructionId: instruction.instructionId,
-      eip: instruction.eip,
-      instructionCountDelta: initialState.progress.instructionCountDelta,
-      initialValueState: initialState.valueState,
-      paths: new Map(),
-      exitCount: 1,
-      expressionBlock,
-      valueTimeline: buildTimeline({
-        expressions: expressionBlock,
-        entry: initialState.valueState,
-        snapshotPoints: new Set()
-      }),
-      expressionPaths: new Map(),
-      captureMap: new Map()
-    }],
     effects: [{
       at: {
-        instructionIndex: 0,
         opIndex: 0,
         epoch: 0
       },
@@ -162,10 +133,6 @@ test("JIT production emission does not walk unplanned expression effects", () =>
     exitStoreSets: [{ stores: [] }],
     maxExitStoreIndex: 0
   });
-  const expressionBlock = [
-    { op: "hostTrap", vector: xorExpr(const32(0x15), const32(0x3f)) }
-  ] as const;
-  const initialState = exitState(0);
 
   emitEffectBlock({
     body,
@@ -176,22 +143,6 @@ test("JIT production emission does not walk unplanned expression effects", () =>
     exitLocal,
     captures: emptyCapturePlan(),
     valueState: valueCacheState(valueCache),
-    instructions: [{
-      instructionId: "unplanned-expression-effect",
-      eip: 0x1000,
-      instructionCountDelta: initialState.progress.instructionCountDelta,
-      initialValueState: initialState.valueState,
-      paths: new Map(),
-      exitCount: 0,
-      expressionBlock,
-      valueTimeline: buildTimeline({
-        expressions: expressionBlock,
-        entry: initialState.valueState,
-        snapshotPoints: new Set()
-      }),
-      expressionPaths: new Map(),
-      captureMap: new Map()
-    }],
     effects: []
   });
   body.end();
@@ -430,7 +381,7 @@ function emitPlannedJitBlock(block: JitIrBlock) {
   const valueState = createValueCache(
     body,
     emissionPlan.reusePlan.cache,
-    emissionPlan.reusePlan.instructions
+    emissionPlan.reusePlan.block
   );
   const metadata = createExitMetadataEmitter(body);
   const stores = createExitStoreEmitter({ body });
@@ -443,7 +394,6 @@ function emitPlannedJitBlock(block: JitIrBlock) {
     stores,
     exitStoreLayout,
     exitLocal,
-    instructions: emissionPlan.instructions,
     captures: emissionPlan.reusePlan.captures,
     effects: emissionPlan.effects,
     valueState
@@ -461,10 +411,6 @@ function emitPlannedJitBlock(block: JitIrBlock) {
   };
 }
 
-type EffectBlockInstruction = Readonly<{
-  [key: string]: unknown;
-}>;
-
 type EffectBlockInput = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
@@ -472,7 +418,6 @@ type EffectBlockInput = Readonly<{
   stores: ReturnType<typeof createExitStoreEmitter>;
   exitStoreLayout: ReturnType<typeof createExitStoreLayout>;
   exitLocal: number;
-  instructions: readonly EffectBlockInstruction[];
   captures: CapturePlan;
   effects: EffectsPlan;
   valueState: ValueCacheState;

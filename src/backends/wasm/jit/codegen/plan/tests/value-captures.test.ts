@@ -6,13 +6,12 @@ import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
 import { planCaptures } from "#backends/wasm/jit/codegen/plan/captures.js";
-import { planReuseForInstructions } from "#backends/wasm/jit/codegen/plan/reuse.js";
+import { planReuseForBlock } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import {
   branchExpressionPaths,
   valueUsesForExpressionBlock,
   type TestValueRoot
 } from "#backends/wasm/jit/codegen/tests/value-use-test-helpers.js";
-import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import {
   jitInputReg32Value,
   jitLoadResultValue
@@ -59,12 +58,12 @@ test("JIT value-capture planner shares pure values needed by both branch paths",
   const targetUses = uses.filter((use) => valuesEqual(use.value, expected));
 
   deepStrictEqual(targetUses.map((use) => use.path), [
-    { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" },
-    { kind: "path", id: "branch:0:0:notTaken", debugLabel: "notTaken" }
+    { kind: "path", id: "branch:0:taken", debugLabel: "taken" },
+    { kind: "path", id: "branch:0:notTaken", debugLabel: "notTaken" }
   ]);
   strictEqual(captures.length, 1);
   strictEqual(valuesEqual(captures[0]!.value, expected), true);
-  deepStrictEqual(captures[0]!.at, { instructionIndex: 0, opIndex: 0, epoch: 0 });
+  deepStrictEqual(captures[0]!.at, { opIndex: 0, epoch: 0 });
   deepStrictEqual(captures[0]!.availability, rootPath());
   strictEqual(captures[0]!.reason, "branchShared");
   strictEqual(captures[0]!.consumers.length, 2);
@@ -84,7 +83,6 @@ test("JIT cache value uses carry flattened dependency ancestry for cache selecti
   }] as const satisfies IrExprBlock;
   const timeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
   const expectedChild = addValue(jitInputReg32Value("eax"), c32(1));
@@ -125,7 +123,7 @@ test("JIT value-capture planner keeps one-arm branch values path-specific", () =
   const targetUses = uses.filter((use) => valuesEqual(use.value, expected));
 
   deepStrictEqual(targetUses.map((use) => use.path), [
-    { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" }
+    { kind: "path", id: "branch:0:taken", debugLabel: "taken" }
   ]);
   deepStrictEqual(captures, []);
 });
@@ -159,12 +157,12 @@ test("JIT value-capture planner captures used load-result definitions with reaso
     reason: capture.reason
   })), [{
     value: loadResult,
-    at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+    at: { opIndex: 0, epoch: 0 },
     reason: "loadResultDefinition"
   }]);
   deepStrictEqual(loadResultUses.map((use) => use.path), [
-    { kind: "path", id: "branch:0:1:taken", debugLabel: "taken" },
-    { kind: "path", id: "branch:0:1:notTaken", debugLabel: "notTaken" }
+    { kind: "path", id: "branch:1:taken", debugLabel: "taken" },
+    { kind: "path", id: "branch:1:notTaken", debugLabel: "notTaken" }
   ]);
 });
 
@@ -178,14 +176,13 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
   const value = addValue(jitInputReg32Value("eax"), c32(1));
   const timeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
   const extraUses = new Map<number, readonly TestValueRoot[]>([[
     0,
     [
-      { value, path: branchPath(0, 0, "taken"), purpose: "exitStore" },
-      { value, path: branchPath(0, 0, "notTaken"), purpose: "exitStore" }
+      { value, path: branchPath(0, "taken"), purpose: "exitStore" },
+      { value, path: branchPath(0, "notTaken"), purpose: "exitStore" }
     ]
   ]]);
   const uses = valueUsesForExpressionBlock({
@@ -194,10 +191,7 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
     expressionPaths: branchExpressionPaths(expressionBlock),
     extraUses
   });
-  const reusePlan = planReuseForInstructions([{
-    valueTimeline: timeline,
-    expressionBlock
-  }], uses, []);
+  const reusePlan = planReuseForBlock({ valueTimeline: timeline, expressionBlock }, uses, []);
   const captures = reusePlan.captures.captures;
 
   strictEqual(captures.length, 1);
@@ -205,8 +199,8 @@ test("JIT value-capture planner derives branch sharing from exit-store uses", ()
   deepStrictEqual(captures[0]!.availability, rootPath());
   strictEqual(captures[0]!.reason, "branchShared");
   deepStrictEqual(captures[0]!.consumers.map((use) => use.path), [
-    { kind: "path", id: "branch:0:0:taken", debugLabel: "taken" },
-    { kind: "path", id: "branch:0:0:notTaken", debugLabel: "notTaken" }
+    { kind: "path", id: "branch:0:taken", debugLabel: "taken" },
+    { kind: "path", id: "branch:0:notTaken", debugLabel: "notTaken" }
   ]);
 });
 
@@ -239,7 +233,7 @@ test("JIT value-capture planner explicitly captures selected cmov values for gua
     throw new Error("expected forced cmov capture");
   }
 
-  deepStrictEqual(capture.at, { instructionIndex: 1, opIndex: 2, epoch: 1 });
+  deepStrictEqual(capture.at, { opIndex: 7, epoch: 1 });
   deepStrictEqual(capture.availability, rootPath());
   deepStrictEqual(capture.consumers.map((consumer) => consumer.purpose), ["exitStore"]);
 });
@@ -251,18 +245,14 @@ test("JIT value-capture planner keeps store-clobber consumers scoped to their ex
     registerStore("eax", c32(0)),
     registerStore("ebx", value)
   ];
-  const firstExit = exitPoint({
-    instructionIndex: 0,
-    opIndex: 0,
+  const firstExit = exitPoint({ opIndex: 0,
     reason: ExitReason.HOST_TRAP,
     snapshot: exitState(1),
     stores,
     exitStoreIndex: 1,
     path
   });
-  const secondExit = exitPoint({
-    instructionIndex: 0,
-    opIndex: 1,
+  const secondExit = exitPoint({ opIndex: 1,
     reason: ExitReason.HOST_TRAP,
     snapshot: exitState(1),
     stores,
@@ -272,7 +262,7 @@ test("JIT value-capture planner keeps store-clobber consumers scoped to their ex
   const uses = [
     {
       value,
-      at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+      at: { opIndex: 0, epoch: 0 },
       path,
       purpose: "exitStore",
       root: value,
@@ -281,7 +271,7 @@ test("JIT value-capture planner keeps store-clobber consumers scoped to their ex
     },
     {
       value,
-      at: { instructionIndex: 0, opIndex: 1, epoch: 1 },
+      at: { opIndex: 1, epoch: 1 },
       path,
       purpose: "exitStore",
       root: value,
@@ -326,7 +316,6 @@ function planCapturesForExpressionBlock(
 ) {
   const timeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
   const uses = valueUsesForExpressionBlock({
@@ -334,10 +323,7 @@ function planCapturesForExpressionBlock(
     valueTimeline: timeline,
     expressionPaths: branchExpressionPaths(expressionBlock)
   });
-  const reusePlan = planReuseForInstructions([{
-    valueTimeline: timeline,
-    expressionBlock
-  }], uses, []);
+  const reusePlan = planReuseForBlock({ valueTimeline: timeline, expressionBlock }, uses, []);
 
   return { uses, reusePlan };
 }

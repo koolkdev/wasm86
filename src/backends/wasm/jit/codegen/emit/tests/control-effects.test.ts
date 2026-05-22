@@ -55,21 +55,21 @@ test("JIT control effects emit branch arms under their exit paths", () => {
     condition,
     takenTarget,
     notTakenTarget,
-    taken: controlExit("branchTaken", branchPath(0, 0, "taken")),
-    notTaken: controlExit("branchNotTaken", branchPath(0, 0, "notTaken"))
+    taken: controlExit("branchTaken", branchPath(0, "taken")),
+    notTaken: controlExit("branchNotTaken", branchPath(0, "notTaken"))
   }, values);
   scratch.assertClear();
   body.end();
 
   deepStrictEqual(events, [
     "value:condition:32",
-    "enter:branch:0:0:taken",
+    "enter:branch:0:taken",
     "value:takenTarget:32",
     "capture:branchTaken",
     "metadata:branchTaken",
     "runtime-visible",
     "leave",
-    "enter:branch:0:0:notTaken",
+    "enter:branch:0:notTaken",
     "value:notTakenTarget:32",
     "capture:branchNotTaken",
     "metadata:branchNotTaken",
@@ -184,9 +184,7 @@ function recordingExitFrame(
 function controlExit(kind: "branchTaken" | "branchNotTaken", path: Path): Exit {
   return {
     id: kind,
-    at: {
-      instructionIndex: 0,
-      opIndex: 0
+    at: { opIndex: 0
     },
     kind,
     reason: ExitReason.JUMP,
@@ -211,9 +209,7 @@ function controlExit(kind: "branchTaken" | "branchNotTaken", path: Path): Exit {
 function hostTrapExit(): Exit {
   return {
     id: "hostTrap",
-    at: {
-      instructionIndex: 0,
-      opIndex: 0
+    at: { opIndex: 0
     },
     kind: "hostTrap",
     reason: ExitReason.HOST_TRAP,
@@ -236,9 +232,7 @@ function hostTrapExit(): Exit {
 }
 
 function placement() {
-  return {
-    instructionIndex: 0,
-    opIndex: 0,
+  return { opIndex: 0,
     epoch: 0
   };
 }

@@ -141,7 +141,7 @@ test("JIT register exit store reuses pure NEG planned values", () => {
 function storeClobberCapture(value: Capture["value"]): Capture {
   return {
     value,
-    at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+    at: { opIndex: 0, epoch: 0 },
     availability: rootPath(),
     consumers: [],
     reason: "storeClobber"

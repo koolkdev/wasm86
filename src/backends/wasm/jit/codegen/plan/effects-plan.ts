@@ -1,11 +1,16 @@
 import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
 import type { JitLoadResultValue } from "#backends/wasm/jit/ir/values/types.js";
+import type { BlockAnalysis } from "#backends/wasm/jit/analysis/block.js";
+import {
+  preparedOpsFromBlockExpressions,
+  type BlockExpressions
+} from "#backends/wasm/jit/ir/block-expressions.js";
 import {
   jitExpressionOpEpochs
 } from "./epochs.js";
 import type {
-  PlannedExit,
-  PlannedInstruction
+  JitCodegenPlan,
+  PlannedExit
 } from "./types.js";
 import type {
   Effect,
@@ -13,21 +18,15 @@ import type {
   Placement,
 } from "./effect-types.js";
 
-export function planEffects(instructions: readonly PlannedInstruction[]): EffectsPlan {
+export function planEffects(plan: JitCodegenPlan): EffectsPlan {
+  const opEpochs = jitExpressionOpEpochs({
+    expressionBlock: preparedOpsFromBlockExpressions(plan.analysis.expressions),
+    valueTimeline: plan.analysis.timeline
+  });
   const effects: Effect[] = [];
-  let currentEpoch = 0;
 
-  for (const instruction of instructions) {
-    const opEpochs = jitExpressionOpEpochs({
-      expressionBlock: instruction.analysis.expressions,
-      valueTimeline: instruction.analysis.timeline
-    }, currentEpoch);
-
-    for (const effect of instruction.flow.effects) {
-      effects.push(planEffect(effect, instruction, opEpochs));
-    }
-
-    currentEpoch += logicalWriteEpochCount(instruction);
+  for (const effect of plan.effects) {
+    effects.push(planEffect(effect, plan.analysis, opEpochs));
   }
 
   return effects;
@@ -35,12 +34,12 @@ export function planEffects(instructions: readonly PlannedInstruction[]): Effect
 
 function planEffect(
   effectInfo: EffectInfo<PlannedExit>,
-  instruction: PlannedInstruction,
+  analysis: BlockAnalysis,
   opEpochs: readonly number[]
 ): Effect {
   const at = effectPlacement(effectInfo, opEpochs);
-  const expressionOp = entryAt(instruction.analysis.expressions, at.opIndex);
-  const view = instruction.analysis.timeline.viewAt(at.opIndex);
+  const expressionOp = expressionOpAt(analysis.expressions, at.opIndex);
+  const view = analysis.timeline.viewAt(at.opIndex);
 
   switch (effectInfo.kind) {
     case "memoryGuard": {
@@ -82,7 +81,7 @@ function planEffect(
       return {
         kind: effectInfo.kind,
         at,
-        result: loadResultValue(instruction, at.opIndex, expressionOp.dst.id),
+        result: loadResultValue(analysis, at.opIndex, expressionOp.dst.id),
         address: view.storageAddress(expressionOp.value.source),
         width: expressionOp.value.accessWidth,
         signed: expressionOp.value.signed === true
@@ -154,37 +153,34 @@ function effectPlacement(
   }
 
   return {
-    instructionIndex: effectInfo.at.instructionIndex,
     opIndex: effectInfo.at.opIndex,
     epoch
   };
 }
 
-function logicalWriteEpochCount(instruction: PlannedInstruction): number {
-  return new Set(
-    instruction.analysis.timeline.writes.map((write) => write.opIndex)
-  ).size;
-}
-
-function entryAt<T>(
-  entries: readonly T[],
+function expressionOpAt(
+  expressions: BlockExpressions,
   index: number
-): T {
-  const entry = entries[index];
+) {
+  const entry = expressions.ops[index];
 
   if (entry === undefined) {
     throw new Error(`missing JIT effects plan entry: ${index}`);
   }
 
-  return entry;
+  if (entry.opIndex !== index) {
+    throw new Error(`JIT effects plan op index mismatch: ${entry.opIndex} !== ${index}`);
+  }
+
+  return entry.op;
 }
 
 function loadResultValue(
-  instruction: PlannedInstruction,
+  analysis: BlockAnalysis,
   opIndex: number,
   refId: number
 ): JitLoadResultValue {
-  const loadResult = instruction.analysis.timeline.loadResults.find((definition) =>
+  const loadResult = analysis.timeline.loadResults.find((definition) =>
     definition.opIndex === opIndex &&
       definition.ref.kind === "var" &&
       definition.ref.id === refId

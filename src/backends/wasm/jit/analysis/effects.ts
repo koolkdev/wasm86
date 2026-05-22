@@ -1,16 +1,15 @@
 import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
-import type { InstructionMetadata } from "#backends/wasm/jit/ir/types.js";
 import type {
-  JitBoundExprBlock,
   JitBoundExprOp
 } from "#backends/wasm/jit/ir/bound-expressions.js";
+import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   buildExit,
   type Exit,
   type ExitKind,
   type ExitSnapshot,
-  type Placement
+  type ExitPlacement
 } from "./exits.js";
 import {
   classifyEffect,
@@ -18,26 +17,23 @@ import {
   type EffectKind
 } from "./effect-classifier.js";
 import {
-  instructionDeltaAfterOp,
+  addBlockProgress,
   snapshotForExit,
-  type InstructionProgress
-} from "./instruction-progress.js";
+  type BlockProgress
+} from "./block-progress.js";
 import type { PathMap } from "./paths.js";
 import type { Timeline, TimelineView } from "./timeline-types.js";
 
-export type EffectInstructionInput = Readonly<{
-  instruction: InstructionMetadata;
-  index: number;
-  expressions: JitBoundExprBlock;
+export type BlockEffectInput = Readonly<{
+  expressions: BlockExpressions;
   timeline: Timeline;
   expressionPaths: PathMap;
-  isFinalInstruction: boolean;
-  progress: InstructionProgress;
+  progress: BlockProgress;
 }>;
 
 type EffectInfoBase<TKind extends EffectKind> = Readonly<{
   kind: TKind;
-  at: Placement;
+  at: ExitPlacement;
 }>;
 
 export type EffectInfo<TExit extends Exit = Exit> =
@@ -49,42 +45,42 @@ export type EffectInfo<TExit extends Exit = Exit> =
   | EffectInfoBase<"hostTrap"> & Readonly<{ exit: TExit }>
   | EffectInfoBase<"fallthrough"> & Readonly<{ exit: TExit }>;
 
-export type InstructionFlow<TExit extends Exit = Exit> = Readonly<{
-  effects: readonly EffectInfo<TExit>[];
-  exits: readonly TExit[];
+export type BlockEffectAnalysis = Readonly<{
+  effects: readonly EffectInfo[];
+  exits: readonly Exit[];
 }>;
 
-type MutableInstructionFlow<TExit extends Exit = Exit> = {
-  effects: EffectInfo<TExit>[];
-  exits: TExit[];
-};
+export function analyzeBlockEffects(
+  input: BlockEffectInput
+): BlockEffectAnalysis {
+  const { expressions } = input;
+  const effects: EffectInfo[] = [];
+  const exits: Exit[] = [];
 
-export function analyzeInstructionEffects(
-  instructionAnalysis: EffectInstructionInput
-): InstructionFlow {
-  const { index, expressions } = instructionAnalysis;
-  const flow: MutableInstructionFlow = {
-    effects: [],
-    exits: []
-  };
-  let currentInstructionCountDelta = instructionAnalysis.progress.instructionCountDelta;
+  for (let position = 0; position < expressions.ops.length; position += 1) {
+    const entry = expressions.ops[position];
 
-  for (let opIndex = 0; opIndex < expressions.length; opIndex += 1) {
-    const op = expressions[opIndex];
-
-    if (op === undefined) {
-      throw new Error(`missing JIT expression op while analyzing effects: ${index}:${opIndex}`);
+    if (entry === undefined) {
+      throw new Error(`missing JIT expression op while analyzing effects: ${position}`);
     }
 
-    const effectKind = classifyEffect(op, instructionAnalysis.isFinalInstruction);
-    const exitKinds = classifyExits(op, instructionAnalysis.isFinalInstruction);
+    const { opIndex, op } = entry;
+    const currentProgress = addBlockProgress(input.progress, entry.progress);
+
+    if (opIndex !== position) {
+      throw new Error(`JIT block expression op index mismatch: ${opIndex} !== ${position}`);
+    }
+
+    const isFinalOp = position === expressions.ops.length - 1;
+    const effectKind = classifyEffect(op, isFinalOp);
+    const exitKinds = classifyExits(op, isFinalOp);
 
     if (effectKind === undefined && exitKinds.length !== 0) {
-      throw new Error(`JIT exits without an owning effect at ${index}:${opIndex}`);
+      throw new Error(`JIT exits without an owning effect at ${opIndex}`);
     }
 
-    const at = { instructionIndex: index, opIndex };
-    const view = instructionAnalysis.timeline.viewAt(opIndex);
+    const at = { opIndex };
+    const view = input.timeline.viewAt(opIndex);
     const exitRecords = exitKinds.map((kind) =>
       buildExitForOp({
         at,
@@ -92,12 +88,12 @@ export function analyzeInstructionEffects(
         snapshot: snapshotForExit(
           kind,
           exitSnapshotBeforeOp(
-            instructionAnalysis,
+            input,
             opIndex,
-            { instructionCountDelta: currentInstructionCountDelta }
+            currentProgress
           )
         ),
-        paths: instructionAnalysis.expressionPaths,
+        paths: input.expressionPaths,
         op,
         view,
         expressions
@@ -107,22 +103,23 @@ export function analyzeInstructionEffects(
     if (effectKind !== undefined) {
       const effect = effectForOp(effectKind, at, exitRecords);
 
-      flow.effects.push(effect);
+      effects.push(effect);
     }
 
-    flow.exits.push(...exitRecords);
-    currentInstructionCountDelta += instructionDeltaAfterOp(op, instructionAnalysis.isFinalInstruction);
+    exits.push(...exitRecords);
   }
 
-  return flow;
+  return {
+    effects,
+    exits
+  };
 }
 
 export function timelineSnapshotPointsForExpressions(
-  isFinalInstruction: boolean,
-  expressions: JitBoundExprBlock
+  expressions: BlockExpressions
 ): ReadonlySet<number> {
-  return new Set(expressions.flatMap((op, opIndex) =>
-    classifyExits(op, isFinalInstruction).length === 0
+  return new Set(expressions.ops.flatMap(({ opIndex, op }, position) =>
+    classifyExits(op, position === expressions.ops.length - 1).length === 0
       ? []
       : [opIndex]
   ));
@@ -130,7 +127,7 @@ export function timelineSnapshotPointsForExpressions(
 
 function effectForOp(
   kind: EffectKind,
-  at: Placement,
+  at: ExitPlacement,
   exits: readonly Exit[]
 ): EffectInfo {
   switch (kind) {
@@ -159,24 +156,24 @@ function effectForOp(
 }
 
 function exitSnapshotBeforeOp(
-  instruction: EffectInstructionInput,
+  input: BlockEffectInput,
   opIndex: number,
-  progress: InstructionProgress
+  progress: BlockProgress
 ): ExitSnapshot {
   return {
     progress,
-    valueState: instruction.timeline.snapshotAt(opIndex)
+    valueState: input.timeline.snapshotAt(opIndex)
   };
 }
 
 function buildExitForOp(input: Readonly<{
-  at: Placement;
+  at: ExitPlacement;
   kind: ExitKind;
   snapshot: ExitSnapshot;
   paths: PathMap;
   op: JitBoundExprOp;
   view: TimelineView;
-  expressions: JitBoundExprBlock;
+  expressions: BlockExpressions;
 }>): Exit {
   const { at, kind, snapshot, paths, op, view, expressions } = input;
   const base = { at, snapshot, paths };
@@ -272,7 +269,7 @@ function targetExpressionForExit(
 function staticLinkTargetInput(
   kind: ExitKind,
   op: JitBoundExprOp,
-  expressions: JitBoundExprBlock
+  expressions: BlockExpressions
 ): Readonly<{ staticLinkTarget?: number }> {
   const target = staticLinkTargetForExit(kind, op, expressions);
 
@@ -284,7 +281,7 @@ function staticLinkTargetInput(
 function staticLinkTargetForExit(
   kind: ExitKind,
   op: JitBoundExprOp,
-  expressions: JitBoundExprBlock
+  expressions: BlockExpressions
 ): number | undefined {
   switch (kind) {
     case "fallthrough":
@@ -309,7 +306,7 @@ function staticLinkTargetForExit(
 
 function staticLinkTargetForExpression(
   value: IrValueExpr,
-  expressions: JitBoundExprBlock
+  expressions: BlockExpressions
 ): number | undefined {
   switch (value.kind) {
     case "source":
@@ -330,15 +327,19 @@ function staticLinkTargetForExpression(
 
 function materializedStaticTarget(
   varId: number,
-  expressions: JitBoundExprBlock
+  expressions: BlockExpressions
 ): number | undefined {
-  const producer = expressions.find((op): op is Extract<JitBoundExprOp, { op: "let32" }> =>
-    op.op === "let32" && op.dst.id === varId
-  );
+  for (const entry of expressions.ops) {
+    const { op } = entry;
 
-  return producer?.value.kind === "const"
-    ? producer.value.value
-    : undefined;
+    if (op.op === "let32" && op.dst.id === varId) {
+      return op.value.kind === "const"
+        ? op.value.value
+        : undefined;
+    }
+  }
+
+  return undefined;
 }
 
 function onlyExit(exits: readonly Exit[]): Exit {
@@ -354,12 +355,12 @@ function onlyExit(exits: readonly Exit[]): Exit {
 function findKindExit(
   exits: readonly Exit[],
   kind: ExitKind,
-  at: Placement
+  at: ExitPlacement
 ): Exit {
   const exit = exits.find((entry) => entry.kind === kind);
 
   if (exit === undefined) {
-    throw new Error(`missing JIT ${kind} exit at ${at.instructionIndex}:${at.opIndex}`);
+    throw new Error(`missing JIT ${kind} exit at ${at.opIndex}`);
   }
 
   return exit;
@@ -368,9 +369,9 @@ function findKindExit(
 function assertNoExits(
   exits: readonly Exit[],
   kind: EffectKind,
-  at: Placement
+  at: ExitPlacement
 ): void {
   if (exits.length !== 0) {
-    throw new Error(`JIT ${kind} effect at ${at.instructionIndex}:${at.opIndex} must not have exits`);
+    throw new Error(`JIT ${kind} effect at ${at.opIndex} must not have exits`);
   }
 }

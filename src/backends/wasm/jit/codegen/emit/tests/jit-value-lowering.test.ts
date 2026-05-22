@@ -530,7 +530,6 @@ function bodyContext(body: WasmFunctionBodyEncoder): ValueEmitContext {
 
 function testPlacement(): Placement {
   return {
-    instructionIndex: 0,
     opIndex: 0,
     epoch: 0
   };

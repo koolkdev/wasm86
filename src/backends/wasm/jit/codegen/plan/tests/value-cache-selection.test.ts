@@ -48,7 +48,7 @@ function valueUse(
 ): ValueUse {
   return {
     value,
-    at: { instructionIndex: 0, opIndex: 0, epoch: 0 },
+    at: { opIndex: 0, epoch: 0 },
     path: { kind: "path", id: "root" },
     purpose: "trapVector",
     root: ancestors[0] ?? value,

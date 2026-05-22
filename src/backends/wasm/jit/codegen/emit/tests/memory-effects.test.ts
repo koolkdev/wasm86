@@ -379,9 +379,7 @@ function decliningValueCache(events: string[]): ValueCache & ValueScope {
 }
 
 function placement(): MemoryGuardEffect["at"] {
-  return {
-    instructionIndex: 0,
-    opIndex: 0,
+  return { opIndex: 0,
     epoch: 0
   };
 }
@@ -391,9 +389,7 @@ function memoryExit(access: "read" | "write"): Exit {
 
   return {
     id: read ? "memoryReadFault" : "memoryWriteFault",
-    at: {
-      instructionIndex: 0,
-      opIndex: 0
+    at: { opIndex: 0
     },
     kind: read ? "memoryReadFault" : "memoryWriteFault",
     reason: read ? ExitReason.MEMORY_READ_FAULT : ExitReason.MEMORY_WRITE_FAULT,

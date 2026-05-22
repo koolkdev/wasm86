@@ -28,9 +28,10 @@ export async function runJitBlock(
   const instructions = decodeInstructions(bytes, initialState.eip);
   const block = buildBlock(instructions);
   validateBlock(block);
-  const module = new WebAssembly.Module(encodeJitBlock([
-    planJitCodegen(buildBlockExpressions(block))
-  ]));
+  const module = new WebAssembly.Module(encodeJitBlock([{
+    entryEip: initialState.eip,
+    plan: planJitCodegen(buildBlockExpressions(block))
+  }]));
   const stateMemory = new WebAssembly.Memory({ initial: 1 });
   const guestMemory = new WebAssembly.Memory({ initial: 1 });
   const stateView = new DataView(stateMemory.buffer);

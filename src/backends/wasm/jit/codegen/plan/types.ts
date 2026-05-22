@@ -1,8 +1,5 @@
-import type {
-  BlockAnalysis,
-  InstructionAnalysis,
-  InstructionFlow
-} from "#backends/wasm/jit/analysis/block.js";
+import type { BlockAnalysis } from "#backends/wasm/jit/analysis/block.js";
+import type { EffectInfo } from "#backends/wasm/jit/analysis/effects.js";
 import type { PlannedExit } from "./exit-stores.js";
 
 export type {
@@ -19,14 +16,8 @@ export type {
   StoreStrategySet
 } from "./store-strategy.js";
 
-export type PlannedInstruction = Readonly<{
-  analysis: InstructionAnalysis;
-  flow: InstructionFlow<PlannedExit>;
-  exitCount: number;
-}>;
-
 export type JitCodegenPlan = Readonly<{
   analysis: BlockAnalysis;
-  instructions: readonly PlannedInstruction[];
+  effects: readonly EffectInfo<PlannedExit>[];
   exits: readonly PlannedExit[];
 }>;

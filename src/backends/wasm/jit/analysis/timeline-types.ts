@@ -76,7 +76,7 @@ export type Timeline = Readonly<{
 
 export type TimelineInput = Readonly<{
   expressions: IrExprBlock;
-  entry: ValueSnapshot;
+  entry?: ValueSnapshot;
   snapshotPoints: ReadonlySet<number>;
   loadResultRegistry: LoadResultRegistry;
 }>;

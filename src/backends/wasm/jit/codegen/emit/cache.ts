@@ -3,7 +3,7 @@ import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-bo
 import {
   type CachePlan,
   type Capture,
-  type InstructionEpochs,
+  type BlockEpochs,
   type SelectedValue
 } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import type {
@@ -70,7 +70,7 @@ export type ValueCacheState = Readonly<{
 export function createValueCache(
   body: WasmFunctionBodyEncoder,
   cachePlan: CachePlan,
-  instructions: readonly InstructionEpochs[]
+  block: BlockEpochs
 ): ValueCacheState {
   const plan = cachePlan;
   const store = new LocalStore(body);
@@ -137,13 +137,7 @@ export function createValueCache(
   }
 
   function epochForPlacement(at: Placement): number {
-    const instructionPlan = instructions[at.instructionIndex];
-
-    if (instructionPlan === undefined) {
-      throw new Error(`JIT value cache instruction index out of range: ${at.instructionIndex}`);
-    }
-
-    const epoch = instructionPlan.opEpochs[at.opIndex];
+    const epoch = block.opEpochs[at.opIndex];
 
     if (epoch === undefined) {
       throw new Error(`JIT value cache expression op index out of range: ${at.opIndex}`);
@@ -164,5 +158,5 @@ function valueIsSelected(selected: readonly SelectedValue[], value: JitValue): b
 }
 
 function placementKey(placement: Placement): string {
-  return `${placement.instructionIndex}:${placement.opIndex}:${placement.epoch}`;
+  return `${placement.opIndex}:${placement.epoch}`;
 }

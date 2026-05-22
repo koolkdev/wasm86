@@ -12,9 +12,8 @@ import {
   wasmBodyOpcodes,
   createValueCache,
   encodeJitBlock,
-  planReuseForInstruction,
+  planReuseForBlockTest,
   buildTimeline,
-  createJitValueState,
   reg,
   const32,
   addExpr,
@@ -101,19 +100,18 @@ test("JIT value-cache runtime follows planned timeline expression positions", ()
   ] as const;
   const timeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
-  const plan = planReuseForInstruction({
+  const plan = planReuseForBlockTest({
     valueTimeline: timeline
   }, expressionBlock);
-  const valueState = createValueCache(body, plan.cache, plan.instructions);
+  const valueState = createValueCache(body, plan.cache, plan.block);
   const value = addValue("eax", 1);
 
-  strictEqual(valueState.cache.canInline({ instructionIndex: 0, opIndex: 0, epoch: 0 }, value), false);
-  strictEqual(valueState.cache.canInline({ instructionIndex: 0, opIndex: 4, epoch: 1 }, value), true);
+  strictEqual(valueState.cache.canInline({ opIndex: 0, epoch: 0 }, value), false);
+  strictEqual(valueState.cache.canInline({ opIndex: 4, epoch: 1 }, value), true);
   throws(
-    () => valueState.cache.canInline({ instructionIndex: 0, opIndex: 5, epoch: 1 }, value),
+    () => valueState.cache.canInline({ opIndex: 5, epoch: 1 }, value),
     /JIT value cache expression op index out of range: 5/
   );
 });
@@ -208,11 +206,10 @@ test("JIT value-cache planning does not treat flags.set as an exit-store consume
   ] as const;
   const valueTimeline = buildTimeline({
     expressions: expressionBlock,
-    entry: createJitValueState().snapshot(),
     snapshotPoints: new Set()
   });
 
-  deepStrictEqual(planReuseForInstruction({
+  deepStrictEqual(planReuseForBlockTest({
     valueTimeline
   }, expressionBlock).cache.selected, []);
 });

@@ -6,7 +6,6 @@ import {
   decodeBytes,
   buildBlock,
   irOpIsTerminator,
-  buildJitCodegenEmissionPlan,
   planJitCodegen,
   startAddress,
   codegenIr,
@@ -107,13 +106,12 @@ test("JIT codegen plan keeps instruction-local operand namespaces", () => {
   const second = ok(decodeBytes([0x89, 0x11], first.nextEip));
   const block = buildBlock([first, second]);
   const codegenPlan = planJitCodegen(block);
-  const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
   const firstIr = block.instructions[0]!.ir;
   const secondIr = block.instructions[1]!.ir;
 
   strictEqual("ir" in block, false);
   strictEqual("operands" in block, false);
-  strictEqual(emissionPlan.instructions.length, 2);
+  strictEqual("instructions" in codegenPlan.analysis, false);
   strictEqual(firstIr.filter(irOpIsTerminator).length, 1);
   strictEqual(secondIr.filter(irOpIsTerminator).length, 1);
   deepStrictEqual([...new Set(firstIr.flatMap(irOpOperandIndexes))], []);

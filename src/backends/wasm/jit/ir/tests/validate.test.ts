@@ -2,6 +2,7 @@ import { throws } from "node:assert";
 import { test } from "node:test";
 
 import { validateBlock } from "#backends/wasm/jit/ir/validate.js";
+import { buildBlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import type { IrBlock } from "#x86/ir/model/types.js";
 import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 import { startAddress, v } from "./helpers.js";
@@ -46,6 +47,20 @@ test("validateBlock accepts concrete instruction IR bodies", () => {
   });
 });
 
+test("validateBlock rejects duplicate vars across instruction IR bodies", () => {
+  throws(
+    () => validateBlock(duplicateBlockVarDefinitions()),
+    /JIT block var 0 is assigned more than once/
+  );
+});
+
+test("buildBlockExpressions rejects duplicate vars across instruction IR bodies", () => {
+  throws(
+    () => buildBlockExpressions(duplicateBlockVarDefinitions()),
+    /JIT block var 0 is assigned more than once/
+  );
+});
+
 test("validateBlock rejects non-final non-fallthrough instructions", () => {
   throws(() => validateBlock({
     instructions: [
@@ -81,6 +96,21 @@ test("validateBlock rejects ops outside shared x86 IR", () => {
 
 function jitBlock(ir: IrBlock): JitIrBlock {
   return { instructions: [jitInstruction(ir)] };
+}
+
+function duplicateBlockVarDefinitions(): JitIrBlock {
+  return {
+    instructions: [
+      jitInstruction([
+        { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
+        nextOp(0)
+      ]),
+      jitInstruction([
+        { op: "get", dst: v(0), source: { kind: "reg", reg: "ebx" } },
+        nextOp(1)
+      ], 1)
+    ]
+  };
 }
 
 function jitInstruction(

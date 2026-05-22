@@ -86,8 +86,8 @@ function exitWithMetadata(
   }>
 ): Exit {
   return {
-    id: "0:0:jump",
-    at: { instructionIndex: 0, opIndex: 0 },
+    id: "0:jump",
+    at: { opIndex: 0 },
     kind: "jump",
     reason: ExitReason.JUMP,
     snapshot: exitState(input.instructionCountDelta),

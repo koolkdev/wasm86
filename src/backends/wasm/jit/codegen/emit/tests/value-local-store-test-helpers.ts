@@ -64,8 +64,8 @@ import type {
 } from "#backends/wasm/jit/ir/types.js";
 import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import {
-  planReuseForInstructions,
-  type InstructionEpochSource
+  planReuseForBlock,
+  type BlockEpochSource
 } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import type { Capture } from "#backends/wasm/jit/codegen/plan/captures.js";
 import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
@@ -153,9 +153,22 @@ export function encodeJitBlock(
   boundBlocks.forEach(validateBlock);
 
   return encodeJitPlans(
-    boundBlocks.map((block) => planJitCodegen(buildBlockExpressions(block))),
+    boundBlocks.map((block) => ({
+      entryEip: requiredEntryEip(block),
+      plan: planJitCodegen(buildBlockExpressions(block))
+    })),
     options
   );
+}
+
+function requiredEntryEip(block: BoundJitIrBlock): number {
+  const firstInstruction = block.instructions[0];
+
+  if (firstInstruction === undefined) {
+    throw new Error("cannot encode empty JIT test block");
+  }
+
+  return firstInstruction.eip;
 }
 
 export function bindTestJitBlock(block: JitIrBlock): BoundJitIrBlock {
@@ -262,17 +275,17 @@ export function highCostValue(): JitValue {
   };
 }
 
-export function planReuseForInstruction(
-  instruction: InstructionEpochSource,
+export function planReuseForBlockTest(
+  block: BlockEpochSource,
   expressionBlock: IrExprBlock
 ) {
   const valueUses = valueUsesForExpressionBlock({
     expressionBlock,
-    valueTimeline: instruction.valueTimeline
+    valueTimeline: block.valueTimeline
   });
 
-  return planReuseForInstructions(
-    [{ ...instruction, expressionBlock }],
+  return planReuseForBlock(
+    { ...block, expressionBlock },
     valueUses,
     []
   );
@@ -365,7 +378,7 @@ export function createOneOpValueCache(
   return createValueCache(
     body,
     { epochs: [{ index: 0, consumers: [] }], selected: [] },
-    [{ valueTimeline: undefined as never, opEpochs: [0] }]
+    { valueTimeline: undefined as never, opEpochs: [0] }
   );
 }
 
@@ -377,12 +390,12 @@ export function createOneOpSelectedValueCache(
   return createValueCache(
     body,
     { epochs: [{ index: 0, consumers: [selected] }], selected: [selected] },
-    [{ valueTimeline: undefined as never, opEpochs: [0] }]
+    { valueTimeline: undefined as never, opEpochs: [0] }
   );
 }
 
 export function oneOpPlacement(): Capture["at"] {
-  return { instructionIndex: 0, opIndex: 0, epoch: 0 };
+  return { opIndex: 0, epoch: 0 };
 }
 
 export function forcedRootCapture(value: JitValue): Capture {

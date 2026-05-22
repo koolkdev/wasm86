@@ -10,15 +10,15 @@ import type {
 } from "./value-uses.js";
 import type { Placement } from "./effect-types.js";
 
-export type InstructionEpochSource = Readonly<{
+export type BlockEpochSource = Readonly<{
   valueTimeline: Timeline;
 }>;
 
-export type InstructionEpochs = InstructionEpochSource & Readonly<{
+export type BlockEpochs = BlockEpochSource & Readonly<{
   opEpochs: readonly number[];
 }>;
 
-export type InstructionEpochInput = InstructionEpochSource & Readonly<{
+export type BlockEpochInput = BlockEpochSource & Readonly<{
   expressionBlock: IrExprBlock;
 }>;
 
@@ -32,67 +32,59 @@ export type PlacedLoadResultDefinition = LoadResultDefinition & Readonly<{
 }>;
 
 export type EpochBuildPlan = Readonly<{
-  instructions: readonly InstructionEpochs[];
+  block: BlockEpochs;
   epochs: readonly EpochUsePlan[];
   loadResults: readonly PlacedLoadResultDefinition[];
 }>;
 
 export function buildEpochs(
-  instructions: readonly InstructionEpochInput[],
+  block: BlockEpochInput,
   valueUses: readonly ValueUse[]
 ): EpochBuildPlan {
-  const instructionPlans: InstructionEpochs[] = [];
   const loadResults: PlacedLoadResultDefinition[] = [];
   let currentEpoch = 0;
+  const opEpochs: number[] = [];
+  const writeExpressionOpIndexes = new Set(
+    block.valueTimeline.writes.map((write) => write.opIndex)
+  );
 
-  for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
-    const instruction = instructions[instructionIndex]!;
-    const opEpochs: number[] = [];
-    const writeExpressionOpIndexes = new Set(
-      instruction.valueTimeline.writes.map((write) => write.opIndex)
-    );
+  for (let opIndex = 0; opIndex < block.expressionBlock.length; opIndex += 1) {
+    const op = block.expressionBlock[opIndex];
 
-    for (let opIndex = 0; opIndex < instruction.expressionBlock.length; opIndex += 1) {
-      const op = instruction.expressionBlock[opIndex];
-
-      if (op === undefined) {
-        throw new Error(`missing JIT value-cache expression op: ${opIndex}`);
-      }
-
-      opEpochs[opIndex] = currentEpoch;
-
-      if (writeExpressionOpIndexes.has(opIndex)) {
-        currentEpoch += 1;
-      }
+    if (op === undefined) {
+      throw new Error(`missing JIT value-cache expression op: ${opIndex}`);
     }
 
-    for (const definition of instruction.valueTimeline.loadResults) {
-      const epoch = opEpochs[definition.opIndex];
+    opEpochs[opIndex] = currentEpoch;
 
-      if (epoch === undefined) {
-        throw new Error(`missing JIT load-result definition epoch: ${definition.opIndex}`);
-      }
+    if (writeExpressionOpIndexes.has(opIndex)) {
+      currentEpoch += 1;
+    }
+  }
 
-      loadResults.push({
-        ...definition,
-        at: {
-          instructionIndex,
-          opIndex: definition.opIndex,
-          epoch
-        }
-      });
+  for (const definition of block.valueTimeline.loadResults) {
+    const epoch = opEpochs[definition.opIndex];
+
+    if (epoch === undefined) {
+      throw new Error(`missing JIT load-result definition epoch: ${definition.opIndex}`);
     }
 
-    instructionPlans.push({
-      valueTimeline: instruction.valueTimeline,
-      opEpochs
+    loadResults.push({
+      ...definition,
+      at: {
+        opIndex: definition.opIndex,
+        epoch
+      }
     });
   }
 
   const epochCount = currentEpoch + 1;
 
   return {
-    instructions: instructionPlans,
+    block: {
+      valueTimeline: block.valueTimeline,
+      opEpochs
+    },
     epochs: consumerUses(valueUses, epochCount).map((uses, index) => ({
       index,
       uses
@@ -102,17 +94,17 @@ export function buildEpochs(
 }
 
 export function jitExpressionOpEpochs(
-  instruction: Pick<InstructionEpochInput, "expressionBlock" | "valueTimeline">,
+  block: Pick<BlockEpochInput, "expressionBlock" | "valueTimeline">,
   startEpoch = 0
 ): readonly number[] {
   const opEpochs: number[] = [];
   const writeExpressionOpIndexes = new Set(
-    instruction.valueTimeline.writes.map((write) => write.opIndex)
+    block.valueTimeline.writes.map((write) => write.opIndex)
   );
   let currentEpoch = startEpoch;
 
-  for (let opIndex = 0; opIndex < instruction.expressionBlock.length; opIndex += 1) {
-    const op = instruction.expressionBlock[opIndex];
+  for (let opIndex = 0; opIndex < block.expressionBlock.length; opIndex += 1) {
+    const op = block.expressionBlock[opIndex];
 
     if (op === undefined) {
       throw new Error(`missing JIT value-cache expression op: ${opIndex}`);

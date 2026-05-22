@@ -12,12 +12,11 @@ import {
   planValueCacheForTest,
   extraUse,
   registerStore,
-  exitPoint,
   exitState,
   c32,
   addValue,
   analyzeBlockForTest,
-  plannedInstructionsForTest,
+  plannedEffectsForTest,
   type JitCodegenPlan,
   type JitValue,
   type JitIrBlock,
@@ -57,21 +56,17 @@ test("buildJitCodegenEmissionPlan prepares expression blocks and value-cache spe
   };
   const codegenPlan = planJitCodegen(block);
   const emissionPlan = buildJitCodegenEmissionPlan(codegenPlan);
-  const [instruction] = emissionPlan.instructions;
-  const [analysisInstruction] = codegenPlan.analysis.instructions;
-  const analysisExpressions = analysisInstruction?.expressions;
-  const analysisTimeline = analysisInstruction?.timeline;
 
-  strictEqual(instruction?.analysis.instruction.instructionId, "cache-plan");
   strictEqual(emissionPlan.exits, codegenPlan.exits);
   strictEqual(
     emissionPlan.maxExitStoreIndex,
     Math.max(0, ...codegenPlan.exits.map((exit) => exit.exitStoreIndex))
   );
-  strictEqual(instruction?.analysis.expressions.some((op) => op.op === "conditionalJump"), true);
-  strictEqual(Object.hasOwn(instruction?.analysis.timeline ?? {}, "snapshots"), false);
-  strictEqual(instruction?.analysis.expressions, analysisExpressions);
-  strictEqual(instruction?.analysis.timeline, analysisTimeline);
+  strictEqual(
+    codegenPlan.analysis.expressions.ops.some((entry) => entry.op.op === "conditionalJump"),
+    true
+  );
+  strictEqual(Object.hasOwn(codegenPlan.analysis.timeline, "snapshots"), false);
   strictEqual((emissionPlan.reusePlan.cache.selected.length ?? 0) > 0, true);
   strictEqual((emissionPlan.reusePlan.cache.epochs.length ?? 0) > 0, true);
 });
@@ -116,18 +111,22 @@ test("buildJitCodegenEmissionPlan does not count overwritten planned register wr
     ]
   };
   const stores = [registerStore("eax")];
-  const exit = exitPoint({
-    instructionIndex: 1,
-    opIndex: 1,
-    reason: ExitReason.HOST_TRAP,
+  const analysis = analyzeBlockForTest(block);
+  const rawExit = analysis.effectAnalysis.exits.find((entry) => entry.reason === ExitReason.HOST_TRAP);
+
+  if (rawExit === undefined) {
+    throw new Error("expected host-trap exit");
+  }
+
+  const exit = {
+    ...rawExit,
     snapshot: exitState(2, ["eax"]),
     stores,
     exitStoreIndex: 1
-  });
-  const analysis = analyzeBlockForTest(block);
+  };
   const plan: JitCodegenPlan = {
     analysis,
-    instructions: plannedInstructionsForTest(analysis, [exit]),
+    effects: plannedEffectsForTest(analysis, [exit]),
     exits: [exit]
   };
   const emissionPlan = buildJitCodegenEmissionPlan(plan);
@@ -208,15 +207,11 @@ test("JIT value-cache planning retains load-result values needed after their def
   });
 
   deepStrictEqual(
-    cachePlan?.instructions[0] === undefined
-      ? undefined
-      : cachePlan.instructions[0].valueTimeline.viewAt(0).ref({ kind: "var", id: 0 }),
+    cachePlan?.block.valueTimeline.viewAt(0).ref({ kind: "var", id: 0 }),
     loadResult
   );
   deepStrictEqual(
-    cachePlan?.instructions[0] === undefined
-      ? undefined
-      : cachePlan.instructions[0].valueTimeline.viewAt(0).expression(expressionBlock[0].value),
+    cachePlan?.block.valueTimeline.viewAt(0).expression(expressionBlock[0].value),
     loadResult
   );
   deepStrictEqual(
@@ -262,9 +257,7 @@ test("JIT value-cache planning resolves input partial-register reads with common
   } as const;
 
   deepStrictEqual(
-    cachePlan?.instructions[0] === undefined
-      ? undefined
-      : cachePlan.instructions[0].valueTimeline.viewAt(0).expression(inputAl),
+    cachePlan?.block.valueTimeline.viewAt(0).expression(inputAl),
     expectedSource
   );
   deepStrictEqual(cachePlan?.cache.selected, [{ value: expectedExpression, useCount: 2 }]);
@@ -342,23 +335,23 @@ test("JIT value-cache planning keeps repeated post-write expression uses point-s
     { op: "hostTrap", vector: expression }
   ] as const;
   const cachePlan = planValueCacheForTest({ expressionBlock });
-  const instructionPlan = cachePlan?.instructions[0];
+  const blockPlan = cachePlan?.block;
   const preWriteValue = addValue(jitInputReg32Value("eax"), c32(1));
   const postWriteValue = addValue(c32(5), c32(1));
 
   deepStrictEqual(
-    instructionPlan === undefined
+    blockPlan === undefined
       ? undefined
-      : instructionPlan.valueTimeline.viewAt(0).expression(expression),
+      : blockPlan.valueTimeline.viewAt(0).expression(expression),
     preWriteValue
   );
   deepStrictEqual(
-    instructionPlan === undefined
+    blockPlan === undefined
       ? undefined
-      : instructionPlan.valueTimeline.viewAt(2).expression(expression),
+      : blockPlan.valueTimeline.viewAt(2).expression(expression),
     postWriteValue
   );
-  deepStrictEqual(instructionPlan?.opEpochs, [0, 0, 1, 1]);
+  deepStrictEqual(blockPlan?.opEpochs, [0, 0, 1, 1]);
   deepStrictEqual(cachePlan?.cache.epochs[0]?.consumers, []);
   deepStrictEqual(cachePlan?.cache.epochs[1]?.consumers, [{ value: postWriteValue, useCount: 2 }]);
   deepStrictEqual(cachePlan?.cache.selected, [{ value: postWriteValue, useCount: 2 }]);

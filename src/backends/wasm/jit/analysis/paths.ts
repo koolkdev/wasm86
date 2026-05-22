@@ -1,4 +1,4 @@
-import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
+import type { BlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 
 export type PathId = string;
 
@@ -22,42 +22,38 @@ export function rootPathId(): PathId {
 }
 
 export function branchPath(
-  instructionIndex: number,
   opIndex: number,
   arm: BranchArm
 ): Path {
   return {
     kind: "path",
-    id: branchPathId(instructionIndex, opIndex, arm),
+    id: branchPathId(opIndex, arm),
     debugLabel: arm
   };
 }
 
 function branchPathId(
-  instructionIndex: number,
   opIndex: number,
   arm: BranchArm
 ): PathId {
-  return `branch:${instructionIndex}:${opIndex}:${arm}`;
+  return `branch:${opIndex}:${arm}`;
 }
 
 export function buildExpressionPaths(
-  expressions: IrExprBlock,
-  instructionIndex: number
+  expressions: BlockExpressions
 ): PathMap {
   const paths = new Map<number, BranchPaths>();
 
-  for (let opIndex = 0; opIndex < expressions.length; opIndex += 1) {
-    const op = expressions[opIndex];
+  for (const { opIndex, op } of expressions.ops) {
 
     if (op === undefined) {
-      throw new Error(`missing JIT expression op while planning paths: ${instructionIndex}:${opIndex}`);
+      throw new Error(`missing JIT expression op while planning paths: ${opIndex}`);
     }
 
     if (op.op === "conditionalJump") {
       paths.set(opIndex, {
-        taken: branchPath(instructionIndex, opIndex, "taken"),
-        notTaken: branchPath(instructionIndex, opIndex, "notTaken")
+        taken: branchPath(opIndex, "taken"),
+        notTaken: branchPath(opIndex, "notTaken")
       });
     }
   }

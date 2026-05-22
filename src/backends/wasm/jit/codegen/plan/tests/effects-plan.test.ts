@@ -221,19 +221,19 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
         instructionId: "store-root",
         eip: startAddress + 1,
         ir: [
-          { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+          { op: "get", dst: { kind: "var", id: 2 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
           {
             op: "value.binary",
             type: "i32",
             operator: "add",
-            dst: { kind: "var", id: 1 },
-            a: { kind: "var", id: 0 },
+            dst: { kind: "var", id: 3 },
+            a: { kind: "var", id: 2 },
             b: c32Expr(1)
           },
           {
             op: "set",
-            target: { kind: "mem", address: { kind: "var", id: 1 } },
-            value: { kind: "var", id: 1 },
+            target: { kind: "mem", address: { kind: "var", id: 3 } },
+            value: { kind: "var", id: 3 },
             accessWidth: 32
           },
           { op: "next" }
@@ -243,20 +243,20 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
         instructionId: "branch-root",
         eip: startAddress + 2,
         ir: [
-          { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+          { op: "get", dst: { kind: "var", id: 4 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
           {
             op: "value.binary",
             type: "i32",
             operator: "add",
-            dst: { kind: "var", id: 1 },
-            a: { kind: "var", id: 0 },
+            dst: { kind: "var", id: 5 },
+            a: { kind: "var", id: 4 },
             b: c32Expr(1)
           },
-          { op: "set", target: { kind: "reg", reg: "ebx" }, value: { kind: "var", id: 1 }, accessWidth: 32 },
+          { op: "set", target: { kind: "reg", reg: "ebx" }, value: { kind: "var", id: 5 }, accessWidth: 32 },
           {
             op: "conditionalJump",
-            condition: { kind: "var", id: 1 },
-            taken: { kind: "var", id: 1 },
+            condition: { kind: "var", id: 5 },
+            taken: { kind: "var", id: 5 },
             notTaken: { kind: "nextEip" }
           }
         ]
@@ -265,16 +265,16 @@ test("JIT effects plan attaches roots for ordered effects and exit stores", () =
         instructionId: "trap-root",
         eip: startAddress + 3,
         ir: [
-          { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+          { op: "get", dst: { kind: "var", id: 6 }, source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
           {
             op: "value.binary",
             type: "i32",
             operator: "add",
-            dst: { kind: "var", id: 1 },
-            a: { kind: "var", id: 0 },
+            dst: { kind: "var", id: 7 },
+            a: { kind: "var", id: 6 },
             b: c32Expr(1)
           },
-          { op: "hostTrap", vector: { kind: "var", id: 1 } }
+          { op: "hostTrap", vector: { kind: "var", id: 7 } }
         ]
       }
     ]

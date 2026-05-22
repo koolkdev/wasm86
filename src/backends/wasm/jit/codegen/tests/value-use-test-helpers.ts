@@ -27,11 +27,9 @@ export function valueUsesForExpressionBlock(input: Readonly<{
   valueTimeline: Timeline;
   expressionPaths?: PathMap;
   extraUses?: ReadonlyMap<number, readonly TestValueRoot[]>;
-  instructionIndex?: number;
   startEpoch?: number;
 }>): readonly ValueUse[] {
   const expressionPaths = input.expressionPaths ?? rootExpressionPaths(input.expressionBlock);
-  const instructionIndex = input.instructionIndex ?? 0;
   const opEpochs = jitExpressionOpEpochs({
     expressionBlock: input.expressionBlock,
     valueTimeline: input.valueTimeline
@@ -46,7 +44,6 @@ export function valueUsesForExpressionBlock(input: Readonly<{
     }
 
     const at = {
-      instructionIndex,
       opIndex,
       epoch: opEpochs[opIndex]!
     };
@@ -65,16 +62,15 @@ export function valueUsesForExpressionBlock(input: Readonly<{
 }
 
 export function branchExpressionPaths(
-  expressionBlock: IrExprBlock,
-  instructionIndex = 0
+  expressionBlock: IrExprBlock
 ): PathMap {
   const paths = new Map<number, BranchPaths>();
 
   for (let opIndex = 0; opIndex < expressionBlock.length; opIndex += 1) {
     if (expressionBlock[opIndex]?.op === "conditionalJump") {
       paths.set(opIndex, {
-        taken: branchPath(instructionIndex, opIndex, "taken"),
-        notTaken: branchPath(instructionIndex, opIndex, "notTaken")
+        taken: branchPath(opIndex, "taken"),
+        notTaken: branchPath(opIndex, "notTaken")
       });
     }
   }

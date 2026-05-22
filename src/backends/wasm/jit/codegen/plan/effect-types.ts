@@ -8,7 +8,6 @@ import type { OperandWidth } from "#x86/isa/types.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 
 export type Placement = Readonly<{
-  instructionIndex: number;
   opIndex: number;
   epoch: number;
 }>;

@@ -6,27 +6,22 @@ import {
   buildIrExpressionBlock,
 } from "#backends/wasm/codegen/expressions.js";
 import {
-  analyzeInstructionEffects,
-  timelineSnapshotPointsForExpressions,
   type EffectInfo,
-  type EffectInstructionInput,
-  type InstructionFlow
+  type BlockEffectAnalysis
 } from "#backends/wasm/jit/analysis/effects.js";
+import { analyzeBlock } from "#backends/wasm/jit/analysis/block.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
-import { instructionDeltaAfterOp } from "#backends/wasm/jit/analysis/instruction-progress.js";
 import {
   classifyEffect,
   classifyExits
 } from "#backends/wasm/jit/analysis/effect-classifier.js";
-import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
-import { buildExpressionPaths, branchPath, rootPath } from "#backends/wasm/jit/analysis/paths.js";
-import { buildTimeline } from "#backends/wasm/jit/analysis/timeline-builder.js";
+import { branchPath, rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import {
   buildJitBoundExpressionBlock,
   type JitBoundExprBlock
 } from "#backends/wasm/jit/ir/bound-expressions.js";
+import { buildBlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import type { JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
-import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { c32, startAddress, syntheticInstruction, v } from "#backends/wasm/jit/ir/tests/helpers.js";
 
 test("JIT effect classifier separates local state from ordered effects", () => {
@@ -82,8 +77,8 @@ test("JIT effect analysis attaches exact branch exits with distinct paths", () =
   strictEqual(effect.taken.kind, "branchTaken");
   strictEqual(effect.notTaken.kind, "branchNotTaken");
   strictEqual(effect.taken.id !== effect.notTaken.id, true);
-  deepStrictEqual(effect.taken.path, branchPath(0, 0, "taken"));
-  deepStrictEqual(effect.notTaken.path, branchPath(0, 0, "notTaken"));
+  deepStrictEqual(effect.taken.path, branchPath(0, "taken"));
+  deepStrictEqual(effect.notTaken.path, branchPath(0, "notTaken"));
   strictEqual(effect.taken.snapshot.progress.instructionCountDelta, 1);
   strictEqual(effect.notTaken.snapshot.progress.instructionCountDelta, 1);
 });
@@ -132,54 +127,8 @@ test("JIT effect analysis records host traps with next-EIP visibility", () => {
   strictEqual(exit?.snapshot.progress.instructionCountDelta, 1);
 });
 
-function analyze(instructions: readonly JitIrInstruction[]): readonly InstructionFlow[] {
-  const flows: InstructionFlow[] = [];
-  let valueState = createJitValueState().snapshot();
-  let instructionCountDelta = 0;
-  const loadResultRegistry = new LoadResultRegistry();
-
-  for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
-    const instruction = instructions[instructionIndex]!;
-    const isFinalInstruction = instructionIndex === instructions.length - 1;
-    const expressions = jitExpressionBlock(instruction);
-    const valueTimeline = buildTimeline({
-      expressions,
-      entry: valueState,
-      snapshotPoints: timelineSnapshotPointsForExpressions(isFinalInstruction, expressions),
-      loadResultRegistry
-    });
-
-    const effectInput: EffectInstructionInput = {
-      instruction,
-      index: instructionIndex,
-      expressions,
-      timeline: valueTimeline,
-      expressionPaths: buildExpressionPaths(expressions, instructionIndex),
-      isFinalInstruction,
-      progress: {
-        instructionCountDelta
-      }
-    };
-
-    flows.push(analyzeInstructionEffects(effectInput));
-    instructionCountDelta += instructionDeltaForExpressions(isFinalInstruction, expressions);
-    valueState = valueTimeline.finalState;
-  }
-
-  return flows;
-}
-
-function instructionDeltaForExpressions(
-  isFinalInstruction: boolean,
-  expressions: JitBoundExprBlock
-): number {
-  let delta = 0;
-
-  for (const op of expressions) {
-    delta += instructionDeltaAfterOp(op, isFinalInstruction);
-  }
-
-  return delta;
+function analyze(instructions: readonly JitIrInstruction[]): BlockEffectAnalysis {
+  return analyzeBlock(buildBlockExpressions({ instructions })).effectAnalysis;
 }
 
 function jitExpressionBlock(instruction: JitIrInstruction): JitBoundExprBlock {
@@ -189,10 +138,10 @@ function jitExpressionBlock(instruction: JitIrInstruction): JitBoundExprBlock {
   });
 }
 
-function effects(flows: readonly InstructionFlow[]): readonly EffectInfo[] {
-  return flows.flatMap((flow) => flow.effects);
+function effects(analysis: BlockEffectAnalysis): readonly EffectInfo[] {
+  return analysis.effects;
 }
 
-function exits(flows: readonly InstructionFlow[]): readonly Exit[] {
-  return flows.flatMap((flow) => flow.exits);
+function exits(analysis: BlockEffectAnalysis): readonly Exit[] {
+  return analysis.exits;
 }

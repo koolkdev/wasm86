@@ -3,54 +3,83 @@ import {
 } from "#backends/wasm/codegen/expressions.js";
 import type {
   JitIrBlock,
-  JitIrInstruction,
-  InstructionMetadata
+  JitIrInstruction
 } from "#backends/wasm/jit/ir/types.js";
 import {
   buildJitBoundExpressionBlock,
-  type JitBoundExprBlock
+  type JitBoundExprBlock,
+  type JitBoundExprOp
 } from "./bound-expressions.js";
+import { validateBlockVarNamespace } from "./validate.js";
 
-export type BlockExpressionInstruction = Readonly<{
-  instruction: InstructionMetadata;
-  index: number;
-  expressions: JitBoundExprBlock;
+export type BlockExpressionProgress = Readonly<{
+  instructionCountDelta: number;
+}>;
+
+export type BlockExprOp = Readonly<{
+  opIndex: number;
+  op: JitBoundExprOp;
+  progress: BlockExpressionProgress;
 }>;
 
 export type BlockExpressions = Readonly<{
-  instructions: readonly BlockExpressionInstruction[];
+  ops: readonly BlockExprOp[];
+  progress: BlockExpressionProgress;
 }>;
 
 export function buildBlockExpressions(block: JitIrBlock): BlockExpressions {
+  validateBlockVarNamespace(block);
+
+  const ops: BlockExprOp[] = [];
+  let instructionCountDelta = 0;
+
+  for (let instructionIndex = 0; instructionIndex < block.instructions.length; instructionIndex += 1) {
+    const instruction = block.instructions[instructionIndex]!;
+    const progress = { instructionCountDelta };
+
+    for (const op of buildInstructionExpressions(instruction)) {
+      ops.push({
+        opIndex: ops.length,
+        op,
+        progress
+      });
+    }
+
+    if (instructionIndex < block.instructions.length - 1) {
+      instructionCountDelta += 1;
+    }
+  }
+
   return {
-    instructions: block.instructions.map((instruction, index) =>
-      buildBlockExpressionInstruction(instruction, index)
-    )
+    ops,
+    progress: {
+      instructionCountDelta
+    }
   };
 }
 
-function buildBlockExpressionInstruction(
-  instruction: JitIrInstruction,
-  index: number
-): BlockExpressionInstruction {
-  const expressions = buildJitBoundExpressionBlock(
+export function preparedOpsFromBlockExpressions(
+  expressions: BlockExpressions
+): JitBoundExprBlock {
+  return expressions.ops.map((entry, position) => {
+    if (entry.opIndex !== position) {
+      throw new Error(
+        `JIT block expression op index mismatch: ${entry.opIndex} !== ${position}`
+      );
+    }
+
+    return entry.op;
+  });
+}
+
+function buildInstructionExpressions(
+  instruction: JitIrInstruction
+): JitBoundExprBlock {
+  return buildJitBoundExpressionBlock(
     buildIrExpressionBlock(instruction.ir),
     {
       eip: instruction.eip,
       nextEip: instruction.nextEip
     }
   );
-
-  return {
-    instruction: instructionMetadata(instruction),
-    index,
-    expressions
-  };
-}
-
-function instructionMetadata(instruction: JitIrInstruction): InstructionMetadata {
-  return {
-    instructionId: instruction.instructionId,
-    eip: instruction.eip
-  };
 }
