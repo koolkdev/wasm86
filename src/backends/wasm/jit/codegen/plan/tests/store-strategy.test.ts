@@ -19,6 +19,7 @@ import {
   type JitValue,
   type PlannedExit
 } from "./plan-test-helpers.js";
+import { jitExtractMaskedBits } from "#backends/wasm/jit/ir/values/builders.js";
 import type {
   Capture,
   CapturePlan
@@ -127,6 +128,20 @@ test("JIT store strategy handles register aliases and flag clobbers", () => {
       [flagSource, "capture"]
     ]
   ]);
+});
+
+test("JIT store strategy ignores non-overlapping alias source dependencies", () => {
+  const overwriteAh = {
+    target: { kind: "reg8", reg: "ah" },
+    value: c32(0)
+  } as const satisfies ExitStore;
+  const lowByteSource = registerStore(
+    "ebx",
+    jitExtractMaskedBits(jitInputReg32Value("eax"), 0xff)
+  );
+
+  strictEqual(sourceNeedsCapture(lowByteSource, [overwriteAh.target]), false);
+  deepStrictEqual(storeClobberSourceStores(testExit([overwriteAh, lowByteSource])), []);
 });
 
 test("JIT store strategy ignores target slots, constants, and load-result values as source hazards", () => {

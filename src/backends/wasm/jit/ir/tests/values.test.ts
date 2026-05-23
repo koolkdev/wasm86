@@ -375,6 +375,16 @@ test("JitValue masked slot walking follows required bits", () => {
   ]);
 });
 
+test("JitValue masked slot walking ignores disjoint projected bits", () => {
+  const lowByte = jitExtractMaskedBits(jitInputReg32Value("eax"), 0xff);
+
+  deepStrictEqual(simplifyValue(jitExtractMaskedBits(lowByte, 0xff00)), c32(0));
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(lowByte, 0xff00)), []);
+  deepStrictEqual(slotKeys(slotsReadByValueForMask(lowByte, 0xff)), [
+    "reg8:al"
+  ]);
+});
+
 function c32(value: number): JitValue {
   return { kind: "const", type: "i32", value };
 }

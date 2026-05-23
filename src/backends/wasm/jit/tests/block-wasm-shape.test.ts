@@ -131,6 +131,15 @@ test("jit IR block omits narrow bitwise operand masks", () => {
   assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x0d, 0x32, 0x04]), wasmOpcode.i32Or);
 });
 
+test("jit IR block stores tracked low-byte values without a redundant source mask", () => {
+  const opcodes = jitBlockBodyOpcodes(decodedBlock([
+    [0x88, 0xc8], // mov al, cl
+    [0x88, 0x02] // mov [edx], al
+  ]));
+
+  assertNoOperandMaskBefore(opcodes, wasmOpcode.i32Store8);
+});
+
 test("jit IR block omits redundant masks before input-state narrow add and sub loads", () => {
   assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x05, 0x01, 0x00]), wasmOpcode.i32Add);
   assertNoOperandMaskBefore(singleInstructionBodyOpcodes([0x66, 0x2d, 0x01, 0x00]), wasmOpcode.i32Sub);
