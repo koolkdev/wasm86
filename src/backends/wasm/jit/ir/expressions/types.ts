@@ -1,6 +1,9 @@
 import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
 import type { FlagName } from "#x86/ir/model/flags.js";
 
+// Binary expressions are generic 32-bit scalar operations. x86 8/16-bit
+// semantics must be represented with explicit project/bits nodes around
+// operands and results.
 export type ScalarBinaryOp =
   | "add"
   | "sub"
@@ -11,8 +14,6 @@ export type ScalarBinaryOp =
   | "shr_u";
 
 export type ScalarUnaryOp =
-  | "not"
-  | "neg"
   | "extend8_s"
   | "extend16_s";
 
@@ -52,7 +53,13 @@ export type JitInsertBitsExpr = Readonly<{
   width: OperandWidth;
 }>;
 export type JitTestBitExpr = Readonly<{ kind: "testBit"; bit: number; value: ExprRef }>;
-export type JitCompareExpr = Readonly<{ kind: "compare"; op: ScalarCompareOp; left: ExprRef; right: ExprRef }>;
+export type JitCompareExpr = Readonly<{
+  kind: "compare";
+  width: OperandWidth;
+  op: ScalarCompareOp;
+  left: ExprRef;
+  right: ExprRef;
+}>;
 
 export type JitScalarExpr =
   | JitConstExpr

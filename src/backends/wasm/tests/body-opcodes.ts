@@ -96,8 +96,16 @@ export function wasmBodyOpcodes(functionBody: Uint8Array<ArrayBuffer>): readonly
       case wasmOpcode.drop:
       case wasmOpcode.select:
       case wasmOpcode.i32Eqz:
+      case wasmOpcode.i32Eq:
+      case wasmOpcode.i32Ne:
+      case wasmOpcode.i32LtS:
       case wasmOpcode.i32LtU:
+      case wasmOpcode.i32GtS:
       case wasmOpcode.i32GtU:
+      case wasmOpcode.i32LeS:
+      case wasmOpcode.i32LeU:
+      case wasmOpcode.i32GeS:
+      case wasmOpcode.i32GeU:
       case wasmOpcode.i32Popcnt:
       case wasmOpcode.i32Add:
       case wasmOpcode.i32Sub:
@@ -255,8 +263,16 @@ export function wasmBodyMemoryAccesses(functionBody: Uint8Array<ArrayBuffer>): r
       case wasmOpcode.drop:
       case wasmOpcode.select:
       case wasmOpcode.i32Eqz:
+      case wasmOpcode.i32Eq:
+      case wasmOpcode.i32Ne:
+      case wasmOpcode.i32LtS:
       case wasmOpcode.i32LtU:
+      case wasmOpcode.i32GtS:
       case wasmOpcode.i32GtU:
+      case wasmOpcode.i32LeS:
+      case wasmOpcode.i32LeU:
+      case wasmOpcode.i32GeS:
+      case wasmOpcode.i32GeU:
       case wasmOpcode.i32Popcnt:
       case wasmOpcode.i32Add:
       case wasmOpcode.i32Sub:

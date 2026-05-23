@@ -12,7 +12,8 @@ import {
   exprInput,
   exprInsertBits,
   exprProject,
-  exprSelect
+  exprSelect,
+  exprTestBit
 } from "#backends/wasm/jit/ir/expressions/builders.js";
 import { exprDependencies } from "#backends/wasm/jit/ir/expressions/dependencies.js";
 import { canonicalizeExpr } from "#backends/wasm/jit/ir/expressions/canonicalize.js";
@@ -49,6 +50,63 @@ test("JitScalarExpr high-mask demand through low projection observes no input bi
   deepStrictEqual(exprDependencies(projected, bitsUse(0xff00)), []);
 });
 
+test("JitScalarExpr demand dependencies match projection emission uses", () => {
+  const eax = exprInput({ kind: "reg", reg: "eax" });
+  const projected = exprProject(8, eax);
+
+  deepStrictEqual(exprDependencies(projected, bitsUse(0xff)), [
+    { kind: "reg", reg: "eax", mask: 0x00ff }
+  ]);
+  deepStrictEqual(exprDependencies(projected, bitsUse(0xff00)), []);
+  deepStrictEqual(exprDependencies(projected, full32Use()), [
+    { kind: "reg", reg: "eax", mask: 0x00ff }
+  ]);
+});
+
+test("JitScalarExpr byte store and use contracts keep dependency demand precise", () => {
+  const highByte = exprBits(exprInput({ kind: "reg", reg: "eax" }), 8, 8);
+
+  deepStrictEqual(exprDependencies(exprProject(8, exprInput({ kind: "reg", reg: "eax" })), bitsUse(0xff)), [
+    { kind: "reg", reg: "eax", mask: 0x00ff }
+  ]);
+  deepStrictEqual(exprDependencies(highByte, full32Use()), [
+    { kind: "reg", reg: "eax", mask: 0xff00 }
+  ]);
+  strictEqual(exprUseSatisfies(bitsUse(0xff), exactUse()), false);
+});
+
+test("JitScalarExpr high-bit demand through boolean results observes no input bits", () => {
+  const eax = exprInput({ kind: "reg", reg: "eax" });
+  const ebx = exprInput({ kind: "reg", reg: "ebx" });
+
+  deepStrictEqual(exprDependencies(exprCompare(32, "eq", eax, ebx), bitsUse(0xff00)), []);
+  deepStrictEqual(exprDependencies(exprCompare(8, "lt_s", eax, ebx), bitsUse(0xff00)), []);
+  deepStrictEqual(exprDependencies(exprTestBit(eax, 7), bitsUse(0xff00)), []);
+});
+
+test("JitScalarExpr compare dependencies use the explicit operation width", () => {
+  const eax = exprInput({ kind: "reg", reg: "eax" });
+  const ebx = exprInput({ kind: "reg", reg: "ebx" });
+  const cases = [
+    { width: 8, op: "lt_s", mask: 0x0000_00ff },
+    { width: 16, op: "lt_s", mask: 0x0000_ffff },
+    { width: 32, op: "lt_s", mask: 0xffff_ffff },
+    { width: 8, op: "lt_u", mask: 0x0000_00ff },
+    { width: 16, op: "lt_u", mask: 0x0000_ffff },
+    { width: 32, op: "lt_u", mask: 0xffff_ffff },
+    { width: 8, op: "eq", mask: 0x0000_00ff },
+    { width: 16, op: "ne", mask: 0x0000_ffff },
+    { width: 32, op: "eq", mask: 0xffff_ffff }
+  ] as const;
+
+  for (const valueCase of cases) {
+    deepStrictEqual(exprDependencies(exprCompare(valueCase.width, valueCase.op, eax, ebx)), [
+      { kind: "reg", reg: "eax", mask: valueCase.mask },
+      { kind: "reg", reg: "ebx", mask: valueCase.mask }
+    ]);
+  }
+});
+
 test("JitScalarExpr aliases derive from canonical register inputs", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
 
@@ -77,7 +135,7 @@ test("JitScalarExpr canonicalization keeps arithmetic and condition shapes", () 
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const ebx = exprInput({ kind: "reg", reg: "ebx" });
   const addZero = exprBinary("add", eax, exprConst(0));
-  const selfCompare = exprCompare("eq", eax, eax);
+  const selfCompare = exprCompare(32, "eq", eax, eax);
   const constSelect = exprSelect(exprConst(1), eax, ebx);
 
   deepStrictEqual(canonicalizeExpr(addZero), addZero);
@@ -94,7 +152,7 @@ test("JitScalarExpr equality keeps semantic projections separate from partial us
   strictEqual(exprsEqual(canonicalizeExpr(exprBinary("add", eax, exprConst(0))), eax), false);
 });
 
-test("JitScalarExpr partial materialization cannot satisfy full semantic reuse", () => {
+test("JitScalarExpr partial bit use cannot satisfy full semantic reuse", () => {
   strictEqual(exprUseSatisfies(bitsUse(0xff), full32Use()), false);
   strictEqual(exprUseSatisfies(bitsUse(0xff), exactUse()), false);
   strictEqual(exprUseSatisfies(full32Use(), bitsUse(0xff)), true);

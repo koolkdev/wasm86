@@ -57,10 +57,10 @@ export function childUseForExpr(expr: ExprRef, childIndex: number, use: ExprUse)
     }
     case "testBit":
       assertChildIndex(expr.kind, childIndex, 1);
-      return parentUseMask(use) === 0 ? bitsUse(0) : bitsUse((1 << expr.bit) >>> 0);
+      return (parentUseMask(use) & 1) === 0 ? bitsUse(0) : bitsUse((1 << expr.bit) >>> 0);
     case "compare":
       assertChildIndex(expr.kind, childIndex, 2);
-      return parentUseMask(use) === 0 ? bitsUse(0) : full32Use();
+      return (parentUseMask(use) & 1) === 0 ? bitsUse(0) : bitsUse(widthMask(expr.width));
   }
 }
 
@@ -125,10 +125,6 @@ function unaryChildUse(op: Extract<ExprRef, { kind: "unary" }>["op"], use: ExprU
   }
 
   switch (op) {
-    case "not":
-      return bitsUse(mask);
-    case "neg":
-      return bitsUse(carryClosureMask(mask));
     case "extend8_s":
       return bitsUse(0xff);
     case "extend16_s":

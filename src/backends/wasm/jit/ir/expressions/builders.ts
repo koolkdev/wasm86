@@ -57,8 +57,10 @@ export function exprTestBit(value: ExprRef, bit: number): ExprRef {
   return freezeExpr({ kind: "testBit", bit, value });
 }
 
-export function exprCompare(op: ScalarCompareOp, left: ExprRef, right: ExprRef): ExprRef {
-  return freezeExpr({ kind: "compare", op, left, right });
+export function exprCompare(width: OperandWidth, op: ScalarCompareOp, left: ExprRef, right: ExprRef): ExprRef {
+  assertOperandWidth(width, "compare width");
+
+  return freezeExpr({ kind: "compare", width, op, left, right });
 }
 
 export function assertBitRange(bitOffset: number, width: OperandWidth, context: string): void {

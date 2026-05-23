@@ -183,7 +183,7 @@ function canonicalizeCompareExpr(expr: JitCompareExpr): ExprRef {
   const left = canonicalizeExpr(expr.left);
   const right = canonicalizeExpr(expr.right);
 
-  return left === expr.left && right === expr.right ? expr : exprCompare(expr.op, left, right);
+  return left === expr.left && right === expr.right ? expr : exprCompare(expr.width, expr.op, left, right);
 }
 
 function projectConst(value: number, width: OperandWidth): number {

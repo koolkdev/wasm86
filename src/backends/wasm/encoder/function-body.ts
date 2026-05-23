@@ -172,13 +172,53 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i32Eq(): this {
+    this.#writeInstruction(wasmOpcode.i32Eq);
+    return this;
+  }
+
+  i32Ne(): this {
+    this.#writeInstruction(wasmOpcode.i32Ne);
+    return this;
+  }
+
+  i32LtS(): this {
+    this.#writeInstruction(wasmOpcode.i32LtS);
+    return this;
+  }
+
   i32LtU(): this {
     this.#writeInstruction(wasmOpcode.i32LtU);
     return this;
   }
 
+  i32GtS(): this {
+    this.#writeInstruction(wasmOpcode.i32GtS);
+    return this;
+  }
+
   i32GtU(): this {
     this.#writeInstruction(wasmOpcode.i32GtU);
+    return this;
+  }
+
+  i32LeS(): this {
+    this.#writeInstruction(wasmOpcode.i32LeS);
+    return this;
+  }
+
+  i32LeU(): this {
+    this.#writeInstruction(wasmOpcode.i32LeU);
+    return this;
+  }
+
+  i32GeS(): this {
+    this.#writeInstruction(wasmOpcode.i32GeS);
+    return this;
+  }
+
+  i32GeU(): this {
+    this.#writeInstruction(wasmOpcode.i32GeU);
     return this;
   }
 
