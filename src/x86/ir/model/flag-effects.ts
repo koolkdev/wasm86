@@ -83,6 +83,8 @@ export function irOpFlagEffect(op: IrOp): IrFlagOpEffect {
         writes: op.writtenMask,
         undefines: op.undefMask
       };
+    case "flags.write":
+      return flagWriteEffect(op);
     case "flags.condition":
       return {
         reads: conditionFlagReadMask(op.cc),
@@ -96,6 +98,29 @@ export function irOpFlagEffect(op: IrOp): IrFlagOpEffect {
 
 export function analyzeIrFlagEffects(block: IrBlock): readonly IrFlagOpEffect[] {
   return block.map(irOpFlagEffect);
+}
+
+function flagWriteEffect(op: Extract<IrOp, { op: "flags.write" }>): IrFlagOpEffect {
+  let writes = IR_FLAG_MASK_NONE;
+  let undefines = IR_FLAG_MASK_NONE;
+
+  for (const flag of IR_ALU_FLAGS) {
+    const cell = op.cells[flag];
+
+    if (cell === undefined) {
+      continue;
+    }
+
+    const mask = IR_ALU_FLAG_MASKS[flag];
+
+    writes |= mask;
+
+    if (cell.kind === "undef") {
+      undefines |= mask;
+    }
+  }
+
+  return { reads: IR_FLAG_MASK_NONE, writes, undefines };
 }
 
 export function irIndexedFlagPointMasks(

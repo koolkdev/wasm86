@@ -39,6 +39,7 @@ export function irOpResult(op: IrOp): IrOpResult {
     case "set":
     case "memory.guard":
     case "flags.set":
+    case "flags.write":
     case "next":
     case "jump":
     case "conditionalJump":
@@ -71,6 +72,7 @@ export function irOpIsTerminator(op: IrOp): op is IrTerminatorOp {
     case "value.unary":
     case "value.select":
     case "flags.set":
+    case "flags.write":
     case "flags.condition":
       return false;
   }
@@ -120,6 +122,19 @@ export function visitIrOpValueRefs(
     case "flags.set":
       for (const value of Object.values(op.inputs)) {
         visit(value, "value");
+      }
+      return;
+    case "flags.write":
+      for (const cell of Object.values(op.cells)) {
+        if (cell?.kind === "expr") {
+          visit(cell.value, "value");
+        }
+      }
+
+      for (const value of Object.values(op.conditions ?? {})) {
+        if (value !== undefined) {
+          visit(value, "condition");
+        }
       }
       return;
     case "flags.condition":
@@ -181,6 +196,7 @@ export function visitIrOpStorageRefs(
     case "value.unary":
     case "value.select":
     case "flags.set":
+    case "flags.write":
     case "flags.condition":
     case "next":
     case "jump":

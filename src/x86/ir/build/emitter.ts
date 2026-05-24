@@ -27,6 +27,8 @@ import type {
   IrMemoryAccessKind,
   IrOp,
   IrBlock,
+  IrFlagWriteCell,
+  IrFlagWriteInput,
   SemanticBuildContext,
   SemanticOperandInfo,
   SemanticOperandInput,
@@ -220,6 +222,40 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
         width
       )
     );
+  }
+
+  flagExpr(value: ValueInput): IrFlagWriteCell {
+    return { kind: "expr", value: toValueRef(value) };
+  }
+
+  flagUndef(): IrFlagWriteCell {
+    return { kind: "undef" };
+  }
+
+  writeFlags(write: IrFlagWriteInput): void {
+    const cells: IrFlagWriteInput["cells"] = {};
+    const op = {
+      op: "flags.write",
+      cells
+    } as const;
+
+    for (const [flag, cell] of Object.entries(write.cells) as [keyof typeof cells, IrFlagWriteCell][]) {
+      cells[flag] = cell.kind === "expr"
+        ? { kind: "expr", value: toValueRef(cell.value) }
+        : { kind: "undef" };
+    }
+
+    if (write.conditions === undefined) {
+      this.#push(op);
+      return;
+    }
+
+    this.#push({
+      ...op,
+      conditions: Object.fromEntries(
+        Object.entries(write.conditions).map(([cc, value]) => [cc, toValueRef(value)])
+      )
+    });
   }
 
   condition(cc: ConditionCode): VarRef {

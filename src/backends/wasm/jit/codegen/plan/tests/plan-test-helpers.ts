@@ -215,6 +215,23 @@ function bindTestInstructionOp(op: IrOp, nextEip: number): IrOp {
           Object.entries(op.inputs).map(([name, value]) => [name, bindTestValue(value, nextEip)])
         )
       };
+    case "flags.write":
+      return {
+        ...op,
+        cells: Object.fromEntries(
+          Object.entries(op.cells).map(([flag, cell]) => [
+            flag,
+            cell?.kind === "expr" ? { kind: "expr", value: bindTestValue(cell.value, nextEip) } : cell
+          ])
+        ),
+        ...(op.conditions === undefined
+          ? {}
+          : {
+              conditions: Object.fromEntries(
+                Object.entries(op.conditions).map(([cc, value]) => [cc, bindTestValue(value, nextEip)])
+              )
+            })
+      };
     case "next":
       return op;
     case "jump":

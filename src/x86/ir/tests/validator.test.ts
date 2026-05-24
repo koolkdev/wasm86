@@ -10,6 +10,7 @@ import { cmovSemantic, movSemantic } from "#x86/isa/semantics/mov.js";
 import { buildIr, const32, operand, irVar } from "#x86/ir/build/builder.js";
 import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 import { validateIrBlock } from "#x86/ir/passes/validator.js";
+import type { IrBlock } from "#x86/ir/model/types.js";
 
 const regOperands = (count: number) => ({
   operandInfo: Array.from({ length: count }, () => ({ storage: "reg" as const }))
@@ -164,3 +165,112 @@ test("validator rejects flag descriptors that disagree with producer metadata", 
     /flags\.set add undefMask does not match producer metadata/
   );
 });
+
+test("validator accepts semantic flag writes with partial cells and sparse conditions", () => {
+  doesNotThrow(() =>
+    validateIrBlock([
+      { op: "value.const", type: "i32", dst: irVar(0), value: 1 },
+      {
+        op: "flags.write",
+        cells: {
+          ZF: { kind: "expr", value: irVar(0) },
+          AF: { kind: "undef" }
+        },
+        conditions: {
+          E: irVar(0)
+        }
+      },
+      { op: "next" }
+    ])
+  );
+});
+
+test("validator accepts semantic flag writes without direct conditions", () => {
+  doesNotThrow(() =>
+    validateIrBlock([
+      { op: "value.const", type: "i32", dst: irVar(0), value: 1 },
+      {
+        op: "flags.write",
+        cells: {
+          CF: { kind: "expr", value: irVar(0) }
+        }
+      },
+      { op: "next" }
+    ])
+  );
+});
+
+test("validator rejects malformed semantic flag write cells and conditions", () => {
+  throws(
+    () =>
+      validateIrBlock(malformedBlock({
+        op: "flags.write",
+        cells: {
+          IF: { kind: "undef" }
+        }
+      })),
+    /flags\.write has unknown flag 'IF'/
+  );
+
+  throws(
+    () =>
+      validateIrBlock(malformedBlock({
+        op: "flags.write",
+        cells: {
+          ZF: undefined
+        }
+      })),
+    /flags\.write ZF cell must not be undefined/
+  );
+
+  throws(
+    () =>
+      validateIrBlock(malformedBlock({
+        op: "flags.write",
+        cells: {
+          ZF: { kind: "expr", value: undefined }
+        }
+      })),
+    /flags\.write ZF expr cell value must not be undefined/
+  );
+
+  throws(
+    () =>
+      validateIrBlock(malformedBlock({
+        op: "flags.write",
+        cells: {},
+        conditions: {
+          INVALID: const32(1)
+        }
+      })),
+    /flags\.write has unknown condition code 'INVALID'/
+  );
+
+  throws(
+    () =>
+      validateIrBlock(malformedBlock({
+        op: "flags.write",
+        cells: {},
+        conditions: {
+          E: undefined
+        }
+      })),
+    /flags\.write condition E must not be undefined/
+  );
+
+  throws(
+    () =>
+      validateIrBlock(malformedBlock({
+        op: "flags.write",
+        cells: {},
+        conditions: {
+          E: { kind: "undef" }
+        }
+      })),
+    /IR value ref has unknown kind 'undef'/
+  );
+});
+
+function malformedBlock(op: unknown): IrBlock {
+  return [op, { op: "next" }] as IrBlock;
+}

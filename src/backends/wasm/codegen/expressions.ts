@@ -215,6 +215,8 @@ class ExpressionBuilder {
           });
           break;
         }
+        case "flags.write":
+          throw new Error("flags.write is not supported by legacy wasm expression codegen");
         case "next": {
           this.#pushOp(op);
           break;

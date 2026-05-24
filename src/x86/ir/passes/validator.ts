@@ -1,9 +1,13 @@
-import { assertIrAluFlagMask } from "#x86/ir/model/flag-effects.js";
-import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
+import { CONDITIONS } from "#x86/ir/model/conditions.js";
+import { assertIrAluFlagMask, IR_ALU_FLAGS } from "#x86/ir/model/flag-effects.js";
+import { FLAG_PRODUCERS, type FlagName } from "#x86/ir/model/flags.js";
 import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import type {
+  ConditionCode,
   IrFlagSetOp,
+  IrFlagWriteCell,
+  IrFlagWriteOp,
   IrMemoryAccessKind,
   IrOp,
   IrBlock,
@@ -97,7 +101,11 @@ function validateOpUses(
     case "flags.set":
       validateFlagSetDescriptor(op, definedVars);
       break;
+    case "flags.write":
+      validateFlagWrite(op, definedVars);
+      break;
     case "flags.condition":
+      validateConditionCode(op.cc, "flags.condition");
       break;
     case "jump":
       validateValueRef(op.target, definedVars);
@@ -145,8 +153,93 @@ function validateStorageRef(
 }
 
 function validateValueRef(value: ValueRef, definedVars: ReadonlySet<number>): void {
-  if (value.kind === "var" && !definedVars.has(value.id)) {
-    throw new Error(`IR var ${value.id} is used before definition`);
+  if (value === undefined) {
+    throw new Error("IR value ref must not be undefined");
+  }
+
+  switch (value.kind) {
+    case "var":
+      if (!definedVars.has(value.id)) {
+        throw new Error(`IR var ${value.id} is used before definition`);
+      }
+      return;
+    case "const":
+    case "nextEip":
+      return;
+  }
+
+  throw new Error(`IR value ref has unknown kind '${String((value as { kind?: unknown }).kind)}'`);
+}
+
+function validateFlagWrite(
+  op: Pick<IrFlagWriteOp, "cells" | "conditions">,
+  definedVars: ReadonlySet<number>
+): void {
+  validateFlagWriteCells(op.cells, definedVars);
+
+  if (op.conditions === undefined) {
+    return;
+  }
+
+  for (const cc of Object.keys(op.conditions)) {
+    validateConditionCode(cc, "flags.write");
+
+    const value = op.conditions[cc];
+
+    if (value === undefined) {
+      throw new Error(`flags.write condition ${cc} must not be undefined`);
+    }
+
+    validateValueRef(value, definedVars);
+  }
+}
+
+function validateFlagWriteCells(
+  cells: IrFlagWriteOp["cells"],
+  definedVars: ReadonlySet<number>
+): void {
+  for (const flag of Object.keys(cells)) {
+    validateFlagName(flag, "flags.write");
+
+    const cell = cells[flag];
+
+    if (cell === undefined) {
+      throw new Error(`flags.write ${flag} cell must not be undefined`);
+    }
+
+    validateFlagWriteCell(flag, cell, definedVars);
+  }
+}
+
+function validateFlagWriteCell(
+  flag: FlagName,
+  cell: IrFlagWriteCell,
+  definedVars: ReadonlySet<number>
+): void {
+  switch (cell.kind) {
+    case "expr":
+      if (cell.value === undefined) {
+        throw new Error(`flags.write ${flag} expr cell value must not be undefined`);
+      }
+
+      validateValueRef(cell.value, definedVars);
+      return;
+    case "undef":
+      return;
+  }
+
+  throw new Error(`flags.write ${flag} cell has unknown kind '${String((cell as { kind?: unknown }).kind)}'`);
+}
+
+function validateFlagName(flag: string, label: "flags.write"): asserts flag is FlagName {
+  if (!(IR_ALU_FLAGS as readonly string[]).includes(flag)) {
+    throw new Error(`${label} has unknown flag '${flag}'`);
+  }
+}
+
+function validateConditionCode(cc: string, label: "flags.write" | "flags.condition"): asserts cc is ConditionCode {
+  if (!Object.hasOwn(CONDITIONS, cc)) {
+    throw new Error(`${label} has unknown condition code '${cc}'`);
   }
 }
 

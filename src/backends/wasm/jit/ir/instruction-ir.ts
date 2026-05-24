@@ -83,6 +83,24 @@ class InstructionIrBinder {
           )
         });
         return;
+      case "flags.write":
+        this.#ops.push({
+          ...op,
+          cells: Object.fromEntries(
+            Object.entries(op.cells).map(([flag, cell]) => [
+              flag,
+              cell.kind === "expr" ? { kind: "expr", value: this.#value(cell.value) } : cell
+            ])
+          ),
+          ...(op.conditions === undefined
+            ? {}
+            : {
+                conditions: Object.fromEntries(
+                  Object.entries(op.conditions).map(([cc, value]) => [cc, this.#value(value)])
+                )
+              })
+        });
+        return;
       case "flags.condition":
         this.#ops.push(op);
         return;

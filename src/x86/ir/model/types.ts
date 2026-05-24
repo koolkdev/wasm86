@@ -1,4 +1,5 @@
 import type { OperandWidth, RegName } from "#x86/isa/types.js";
+import type { FlagName } from "./flags.js";
 
 export type VarId = number;
 
@@ -61,6 +62,19 @@ export type IrFlagsConditionOp = Readonly<{
   op: "flags.condition";
   dst: VarRef;
   cc: ConditionCode;
+}>;
+
+export type IrFlagWriteCell =
+  | Readonly<{ kind: "expr"; value: ValueRef }>
+  | Readonly<{ kind: "undef" }>;
+
+export type IrFlagWrite = Readonly<{
+  cells: Partial<Record<FlagName, IrFlagWriteCell>>;
+  conditions?: Partial<Record<ConditionCode, ValueRef>>;
+}>;
+
+export type IrFlagWriteOp = IrFlagWrite & Readonly<{
+  op: "flags.write";
 }>;
 
 export type IrBinaryOperator =
@@ -126,6 +140,7 @@ export type IrOp =
   | IrSelectValueOp
   | IrFlagSetOp
   | IrFlagsConditionOp
+  | IrFlagWriteOp
   | Readonly<{ op: "next" }>
   | Readonly<{ op: "jump"; target: TargetRef }>
   | Readonly<{ op: "conditionalJump"; condition: ValueRef; taken: TargetRef; notTaken: TargetRef }>
@@ -164,6 +179,9 @@ export interface IrBuilder {
   i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef;
 
   setFlags(producer: FlagProducerName, inputs: Readonly<Record<string, ValueInput>>, width?: OperandWidth): void;
+  flagExpr(value: ValueInput): IrFlagWriteCell;
+  flagUndef(): IrFlagWriteCell;
+  writeFlags(write: IrFlagWriteInput): void;
   condition(cc: ConditionCode): VarRef;
 
   next(): void;
@@ -176,3 +194,7 @@ export type OperandInput = OperandRef;
 export type StorageInput = StorageRef;
 export type ValueInput = ValueRef | number;
 export type TargetInput = ValueInput;
+export type IrFlagWriteInput = Readonly<{
+  cells: Partial<Record<FlagName, IrFlagWriteCell>>;
+  conditions?: Partial<Record<ConditionCode, ValueInput>>;
+}>;

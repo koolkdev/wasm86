@@ -2,6 +2,7 @@ import { deepStrictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { buildIr } from "#x86/ir/build/builder.js";
+import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
 
 test("builder appends implicit next for fallthrough templates", () => {
   deepStrictEqual(buildIr(() => {}), [{ op: "next" }]);
@@ -104,5 +105,85 @@ test("plain get and set do not emit implicit memory guards", () => {
       s.set(memory, 1);
     }).map((op) => op.op),
     ["get", "set", "next"]
+  );
+});
+
+test("builder creates semantic flag write with one expression cell and no conditions", () => {
+  deepStrictEqual(
+    buildIr((s) => {
+      const value = s.get(s.operand(0));
+
+      s.writeFlags({
+        cells: {
+          ZF: s.flagExpr(value)
+        }
+      });
+    }),
+    [
+      { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
+      {
+        op: "flags.write",
+        cells: {
+          ZF: { kind: "expr", value: { kind: "var", id: 0 } }
+        }
+      },
+      { op: "next" }
+    ]
+  );
+});
+
+test("builder creates partial semantic flag write with undef cell and sparse conditions", () => {
+  deepStrictEqual(
+    buildIr((s) => {
+      const result = s.get(s.operand(0));
+      const eq = s.i32Select(result, 1, 0);
+
+      s.writeFlags({
+        cells: {
+          ZF: s.flagExpr(eq),
+          AF: s.flagUndef()
+        },
+        conditions: {
+          E: eq
+        }
+      });
+    }),
+    [
+      { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
+      {
+        op: "value.select",
+        type: "i32",
+        dst: { kind: "var", id: 1 },
+        condition: { kind: "var", id: 0 },
+        whenTrue: { kind: "const", type: "i32", value: 1 },
+        whenFalse: { kind: "const", type: "i32", value: 0 }
+      },
+      {
+        op: "flags.write",
+        cells: {
+          ZF: { kind: "expr", value: { kind: "var", id: 1 } },
+          AF: { kind: "undef" }
+        },
+        conditions: {
+          E: { kind: "var", id: 1 }
+        }
+      },
+      { op: "next" }
+    ]
+  );
+});
+
+test("builder still creates legacy flag producer writes through setFlags", () => {
+  deepStrictEqual(
+    buildIr((s) => {
+      const result = s.get(s.operand(0));
+
+      s.setFlags("logic", { result }, 8);
+    }),
+    [
+      { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
+      createIrFlagSetOp("logic", { result: { kind: "var", id: 0 } }, 8),
+      { op: "next" }
+    ]
   );
 });

@@ -147,6 +147,8 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
     case "flags.set":
       setFlags(context, op);
       return undefined;
+    case "flags.write":
+      return stop(context.state, StopReason.UNSUPPORTED);
     case "flags.condition":
       setVar(context, op.dst, evalCondition(context, op.cc) ? 1 : 0);
       return undefined;
