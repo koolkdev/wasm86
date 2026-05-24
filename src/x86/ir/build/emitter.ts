@@ -14,6 +14,7 @@ import {
 } from "#x86/ir/model/refs.js";
 import type {
   ConditionCode,
+  IrCompareOperator,
   FlagProducerName,
   IrBinaryOperator,
   IrConstValueRef,
@@ -178,6 +179,20 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
     return dst;
   }
 
+  project(width: OperandWidth, value: ValueInput): VarRef {
+    const dst = this.#allocVar();
+
+    this.#push({ op: "value.project", type: "i32", dst, width, value: toValueRef(value) });
+    return dst;
+  }
+
+  compare(width: OperandWidth, operator: IrCompareOperator, a: ValueInput, b: ValueInput): VarRef {
+    const dst = this.#allocVar();
+
+    this.#push({ op: "value.compare", type: "i32", operator, dst, width, a: toValueRef(a), b: toValueRef(b) });
+    return dst;
+  }
+
   i32Add(a: ValueInput, b: ValueInput): VarRef {
     return this.#binaryValue("add", a, b);
   }
@@ -212,6 +227,10 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
 
   i32Extend16S(value: ValueInput): VarRef {
     return this.#unaryValue("extend16_s", value);
+  }
+
+  i32Popcnt(value: ValueInput): VarRef {
+    return this.#unaryValue("popcnt", value);
   }
 
   setFlags(producer: FlagProducerName, inputs: Readonly<Record<string, ValueInput>>, width?: OperandWidth): void {

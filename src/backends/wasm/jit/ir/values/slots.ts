@@ -267,6 +267,8 @@ function unaryInputRequiredMask(
       return requiredMask === 0 ? 0 : 0xff;
     case "extend16_s":
       return requiredMask === 0 ? 0 : 0xffff;
+    case "popcnt":
+      return requiredMask === 0 ? 0 : 0xffffffff;
   }
 }
 

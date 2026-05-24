@@ -86,9 +86,22 @@ export type IrBinaryOperator =
   | "shl"
   | "shr_u";
 
+export type IrCompareOperator =
+  | "eq"
+  | "ne"
+  | "lt_u"
+  | "le_u"
+  | "gt_u"
+  | "ge_u"
+  | "lt_s"
+  | "le_s"
+  | "gt_s"
+  | "ge_s";
+
 export type IrUnaryOperator =
   | "extend8_s"
-  | "extend16_s";
+  | "extend16_s"
+  | "popcnt";
 
 export type IrBinaryValueOp = Readonly<{
   op: "value.binary";
@@ -116,6 +129,24 @@ export type IrSelectValueOp = Readonly<{
   whenFalse: ValueRef;
 }>;
 
+export type IrProjectValueOp = Readonly<{
+  op: "value.project";
+  type: IrValueType;
+  dst: VarRef;
+  width: OperandWidth;
+  value: ValueRef;
+}>;
+
+export type IrCompareValueOp = Readonly<{
+  op: "value.compare";
+  type: IrValueType;
+  operator: IrCompareOperator;
+  dst: VarRef;
+  width: OperandWidth;
+  a: ValueRef;
+  b: ValueRef;
+}>;
+
 export type IrGetOptions = Readonly<{
   signed?: boolean;
 }>;
@@ -138,6 +169,8 @@ export type IrOp =
   | IrBinaryValueOp
   | IrUnaryValueOp
   | IrSelectValueOp
+  | IrProjectValueOp
+  | IrCompareValueOp
   | IrFlagSetOp
   | IrFlagsConditionOp
   | IrFlagWriteOp
@@ -176,7 +209,10 @@ export interface IrBuilder {
   i32ShrU(a: ValueInput, b: ValueInput): VarRef;
   i32Extend8S(value: ValueInput): VarRef;
   i32Extend16S(value: ValueInput): VarRef;
+  i32Popcnt(value: ValueInput): VarRef;
   i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef;
+  project(width: OperandWidth, value: ValueInput): VarRef;
+  compare(width: OperandWidth, operator: IrCompareOperator, a: ValueInput, b: ValueInput): VarRef;
 
   setFlags(producer: FlagProducerName, inputs: Readonly<Record<string, ValueInput>>, width?: OperandWidth): void;
   flagExpr(value: ValueInput): IrFlagWriteCell;

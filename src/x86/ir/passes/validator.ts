@@ -5,11 +5,13 @@ import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import type {
   ConditionCode,
+  IrCompareOperator,
   IrFlagSetOp,
   IrFlagWriteCell,
   IrFlagWriteOp,
   IrMemoryAccessKind,
   IrOp,
+  IrUnaryOperator,
   IrBlock,
   StorageRef,
   ValueRef
@@ -91,12 +93,23 @@ function validateOpUses(
       validateValueRef(op.b, definedVars);
       break;
     case "value.unary":
+      validateUnaryOperator(op.operator);
       validateValueRef(op.value, definedVars);
       break;
     case "value.select":
       validateValueRef(op.condition, definedVars);
       validateValueRef(op.whenTrue, definedVars);
       validateValueRef(op.whenFalse, definedVars);
+      break;
+    case "value.project":
+      validateAccessWidth(op.width);
+      validateValueRef(op.value, definedVars);
+      break;
+    case "value.compare":
+      validateAccessWidth(op.width);
+      validateCompareOperator(op.operator);
+      validateValueRef(op.a, definedVars);
+      validateValueRef(op.b, definedVars);
       break;
     case "flags.set":
       validateFlagSetDescriptor(op, definedVars);
@@ -262,6 +275,35 @@ function validateAccessWidth(width: OperandWidth | undefined): void {
   if (width !== undefined && width !== 8 && width !== 16 && width !== 32) {
     throw new Error(`IR access width must be 8, 16, or 32, got ${width}`);
   }
+}
+
+function validateCompareOperator(operator: IrCompareOperator): void {
+  switch (operator) {
+    case "eq":
+    case "ne":
+    case "lt_u":
+    case "le_u":
+    case "gt_u":
+    case "ge_u":
+    case "lt_s":
+    case "le_s":
+    case "gt_s":
+    case "ge_s":
+      return;
+  }
+
+  throw new Error(`IR value.compare has unknown operator '${String(operator)}'`);
+}
+
+function validateUnaryOperator(operator: IrUnaryOperator): void {
+  switch (operator) {
+    case "extend8_s":
+    case "extend16_s":
+    case "popcnt":
+      return;
+  }
+
+  throw new Error(`IR value.unary has unknown operator '${String(operator)}'`);
 }
 
 function validateSignedGet(op: Extract<IrOp, { op: "get" }>): void {

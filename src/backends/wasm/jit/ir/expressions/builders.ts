@@ -51,12 +51,6 @@ export function exprSelect(condition: ExprRef, whenTrue: ExprRef, whenFalse: Exp
   return freezeExpr({ kind: "select", condition, whenTrue, whenFalse });
 }
 
-export function exprTestBit(value: ExprRef, bit: number): ExprRef {
-  assertBitIndex(bit, "testBit");
-
-  return freezeExpr({ kind: "testBit", bit, value });
-}
-
 export function exprCompare(width: OperandWidth, op: ScalarCompareOp, left: ExprRef, right: ExprRef): ExprRef {
   assertOperandWidth(width, "compare width");
 

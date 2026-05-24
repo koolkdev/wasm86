@@ -60,7 +60,6 @@ function collectExprDependencies(
       return;
     case "project":
     case "bits":
-    case "testBit":
       collectExprDependencies(expr.value, childUseForExpr(expr, 0, use), deps);
       return;
     case "insertBits":

@@ -15,7 +15,8 @@ export type ScalarBinaryOp =
 
 export type ScalarUnaryOp =
   | "extend8_s"
-  | "extend16_s";
+  | "extend16_s"
+  | "popcnt";
 
 export type ScalarCompareOp =
   | "eq"
@@ -52,7 +53,6 @@ export type JitInsertBitsExpr = Readonly<{
   offset: number;
   width: OperandWidth;
 }>;
-export type JitTestBitExpr = Readonly<{ kind: "testBit"; bit: number; value: ExprRef }>;
 export type JitCompareExpr = Readonly<{
   kind: "compare";
   width: OperandWidth;
@@ -70,7 +70,6 @@ export type JitScalarExpr =
   | JitProjectExpr
   | JitBitsExpr
   | JitInsertBitsExpr
-  | JitTestBitExpr
   | JitCompareExpr;
 
 export type ExprRef = JitScalarExpr;

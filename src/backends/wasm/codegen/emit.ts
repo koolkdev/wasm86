@@ -225,6 +225,10 @@ class IrExprWasmEmitter {
         return this.#emitSignExtend(value, 8, options);
       case "extend16_s":
         return this.#emitSignExtend(value, 16, options);
+      case "popcnt":
+        this.#emitValue(value, { requestedWidth: 32 });
+        this.#context.body.i32Popcnt();
+        return cleanValueWidth(8);
     }
   }
 

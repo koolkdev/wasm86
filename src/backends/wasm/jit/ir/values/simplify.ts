@@ -402,7 +402,21 @@ function foldUnaryConst(operator: IrUnaryOperator, value: number): number {
       return signExtendConst(value, 8);
     case "extend16_s":
       return signExtendConst(value, 16);
+    case "popcnt":
+      return popcnt32(value);
   }
+}
+
+function popcnt32(value: number): number {
+  let remaining = value >>> 0;
+  let count = 0;
+
+  while (remaining !== 0) {
+    remaining &= remaining - 1;
+    count += 1;
+  }
+
+  return count;
 }
 
 function extractConstBits(value: number, bitOffset: number, width: OperandWidth): number {

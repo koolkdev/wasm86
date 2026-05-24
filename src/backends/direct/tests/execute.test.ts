@@ -578,6 +578,37 @@ test("direct backend executes successful memory guards", () => {
   strictEqual(state.instructionCount, 1);
 });
 
+test("direct backend compares 8-bit and 16-bit signed values as signed JS numbers", () => {
+  for (const testCase of [
+    { width: 8, value: 0xff, expected: 1 },
+    { width: 16, value: 0xffff, expected: 1 }
+  ] as const) {
+    const state = createCpuState({ ebx: testCase.value, eip: startAddress });
+    const instruction: IsaDecodedInstruction = {
+      spec: {
+        id: "test.signed_compare",
+        mnemonic: "test",
+        opcode: [],
+        format: { syntax: "test" },
+        semantics: (s) => {
+          const value = s.get(s.reg("ebx"), testCase.width);
+
+          s.set(s.reg("eax"), s.compare(testCase.width, "lt_s", value, 0));
+        }
+      },
+      address: startAddress,
+      length: 1,
+      nextEip: startAddress + 1,
+      operands: [],
+      raw: []
+    };
+    const result = executeDirectInstruction(state, instruction);
+
+    strictEqual(result.stopReason, StopReason.NONE);
+    strictEqual(state.eax, testCase.expected);
+  }
+});
+
 function execute(state: ReturnType<typeof createCpuState>, values: readonly number[], memory?: ArrayBufferGuestMemory) {
   return executeAtAddress(state, startAddress, values, memory);
 }

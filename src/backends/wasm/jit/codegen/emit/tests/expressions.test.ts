@@ -9,9 +9,12 @@ import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
 import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
 import {
   exprBits,
+  exprBinary,
   exprCompare,
+  exprConst,
   exprInput,
-  exprProject
+  exprProject,
+  exprUnary
 } from "#backends/wasm/jit/ir/expressions/builders.js";
 import {
   bitsUse,
@@ -153,6 +156,14 @@ test("ExprEmitter eq compares use direct i32 equality for 32-bit operands", () =
 
   strictEqual(countOpcode(result.opcodes, wasmOpcode.i32And), 0);
   strictEqual(countOpcode(result.opcodes, wasmOpcode.i32Eq), 1);
+});
+
+test("ExprEmitter popcnt emits the Wasm popcnt primitive", () => {
+  const result = emitTestExpr(exprUnary("popcnt", exprBinary("and", eax(), exprConst(0xff))), exactUse());
+
+  strictEqual(result.emitted.valueWidth.cleanWidth, 8);
+  strictEqual(countOpcode(result.opcodes, wasmOpcode.i32Popcnt), 1);
+  strictEqual(countOpcode(result.opcodes, wasmOpcode.i32And), 1);
 });
 
 type TestEmitResult = Readonly<{

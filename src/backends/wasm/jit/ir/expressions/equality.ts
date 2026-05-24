@@ -36,8 +36,6 @@ export function exprsEqual(left: ExprRef, right: ExprRef): boolean {
         left.width === (right as typeof left).width &&
         exprsEqual(left.base, (right as typeof left).base) &&
         exprsEqual(left.value, (right as typeof left).value);
-    case "testBit":
-      return left.bit === (right as typeof left).bit && exprsEqual(left.value, (right as typeof left).value);
     case "compare":
       return left.width === (right as typeof left).width &&
         left.op === (right as typeof left).op &&

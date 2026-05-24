@@ -208,6 +208,10 @@ function bindTestInstructionOp(op: IrOp, nextEip: number): IrOp {
         whenTrue: bindTestValue(op.whenTrue, nextEip),
         whenFalse: bindTestValue(op.whenFalse, nextEip)
       };
+    case "value.project":
+      return { ...op, value: bindTestValue(op.value, nextEip) };
+    case "value.compare":
+      return { ...op, a: bindTestValue(op.a, nextEip), b: bindTestValue(op.b, nextEip) };
     case "flags.set":
       return {
         ...op,

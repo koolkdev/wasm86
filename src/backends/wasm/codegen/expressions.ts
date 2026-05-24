@@ -194,6 +194,9 @@ class ExpressionBuilder {
           }, true);
           break;
         }
+        case "value.project":
+        case "value.compare":
+          throw new Error(`${op.op} is not supported by legacy wasm expression codegen`);
         case "flags.condition":
           this.#defineValue(op.dst, { kind: "flags.condition", cc: op.cc }, false);
           break;

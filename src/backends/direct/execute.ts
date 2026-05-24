@@ -23,6 +23,7 @@ import {
 } from "#x86/ir/model/flags.js";
 import type {
   IrBinaryOperator,
+  IrCompareOperator,
   IrFlagSetOp,
   IrOp,
   IrUnaryOperator,
@@ -144,6 +145,12 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
           : evalValueRef(context, op.whenFalse)
       );
       return undefined;
+    case "value.project":
+      setVar(context, op.dst, maskValue(evalValueRef(context, op.value), op.width));
+      return undefined;
+    case "value.compare":
+      setVar(context, op.dst, evalCompare(op.operator, op.width, evalValueRef(context, op.a), evalValueRef(context, op.b)) ? 1 : 0);
+      return undefined;
     case "flags.set":
       setFlags(context, op);
       return undefined;
@@ -191,6 +198,48 @@ function evalI32Unary(operator: IrUnaryOperator, value: number): number {
       return signExtendValue(value, 8);
     case "extend16_s":
       return signExtendValue(value, 16);
+    case "popcnt":
+      return popcnt32(value);
+  }
+}
+
+function popcnt32(value: number): number {
+  let remaining = value >>> 0;
+  let count = 0;
+
+  while (remaining !== 0) {
+    remaining &= remaining - 1;
+    count += 1;
+  }
+
+  return count;
+}
+
+function evalCompare(operator: IrCompareOperator, width: OperandWidth, a: number, b: number): boolean {
+  const left = maskValue(a, width);
+  const right = maskValue(b, width);
+
+  switch (operator) {
+    case "eq":
+      return left === right;
+    case "ne":
+      return left !== right;
+    case "lt_u":
+      return left < right;
+    case "le_u":
+      return left <= right;
+    case "gt_u":
+      return left > right;
+    case "ge_u":
+      return left >= right;
+    case "lt_s":
+      return signedValue(left, width) < signedValue(right, width);
+    case "le_s":
+      return signedValue(left, width) <= signedValue(right, width);
+    case "gt_s":
+      return signedValue(left, width) > signedValue(right, width);
+    case "ge_s":
+      return signedValue(left, width) >= signedValue(right, width);
   }
 }
 
@@ -481,6 +530,12 @@ function signExtendValue(value: number, width: 8 | 16): number {
   const shift = 32 - width;
 
   return u32((value << shift) >> shift);
+}
+
+function signedValue(value: number, width: OperandWidth): number {
+  const shift = 32 - width;
+
+  return (value << shift) >> shift;
 }
 
 function completeInstruction(context: ExecutionContext, target: number): RunResult {

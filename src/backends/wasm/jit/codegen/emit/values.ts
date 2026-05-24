@@ -315,6 +315,10 @@ function emitI32Unary(
       return emitI32SignExtend(context, emitContext, value, 8);
     case "extend16_s":
       return emitI32SignExtend(context, emitContext, value, 16);
+    case "popcnt":
+      emitContext.values.emit(value, { requestedWidth: 32 });
+      context.body.i32Popcnt();
+      return cleanValueWidth(8);
   }
 }
 

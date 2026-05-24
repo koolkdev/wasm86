@@ -9,9 +9,7 @@ import {
   exprInsertBits,
   exprProject,
   exprSelect,
-  exprTestBit,
   exprUnary,
-  assertBitIndex,
   assertBitRange
 } from "./builders.js";
 import type {
@@ -22,7 +20,6 @@ import type {
   JitInsertBitsExpr,
   JitProjectExpr,
   JitSelectExpr,
-  JitTestBitExpr,
   JitUnaryExpr
 } from "./types.js";
 import { exprsEqual } from "./equality.js";
@@ -47,8 +44,6 @@ export function canonicalizeExpr(expr: ExprRef): ExprRef {
       return canonicalizeUnaryExpr(expr);
     case "select":
       return canonicalizeSelectExpr(expr);
-    case "testBit":
-      return canonicalizeTestBitExpr(expr);
     case "compare":
       return canonicalizeCompareExpr(expr);
   }
@@ -162,21 +157,6 @@ function canonicalizeSelectExpr(expr: JitSelectExpr): ExprRef {
   return condition === expr.condition && whenTrue === expr.whenTrue && whenFalse === expr.whenFalse
     ? expr
     : exprSelect(condition, whenTrue, whenFalse);
-}
-
-function canonicalizeTestBitExpr(expr: JitTestBitExpr): ExprRef {
-  assertBitIndex(expr.bit, "testBit");
-  const value = canonicalizeExpr(expr.value);
-
-  if (value.kind === "const") {
-    return exprConst(((value.value >>> 0) & (1 << expr.bit)) === 0 ? 0 : 1);
-  }
-
-  if (value.kind === "project" && expr.bit >= value.width) {
-    return exprConst(0);
-  }
-
-  return value === expr.value ? expr : exprTestBit(value, expr.bit);
 }
 
 function canonicalizeCompareExpr(expr: JitCompareExpr): ExprRef {

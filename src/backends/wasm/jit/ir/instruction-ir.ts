@@ -75,6 +75,12 @@ class InstructionIrBinder {
           whenFalse: this.#value(op.whenFalse)
         });
         return;
+      case "value.project":
+        this.#ops.push({ ...op, value: this.#value(op.value) });
+        return;
+      case "value.compare":
+        this.#ops.push({ ...op, a: this.#value(op.a), b: this.#value(op.b) });
+        return;
       case "flags.set":
         this.#ops.push({
           ...op,

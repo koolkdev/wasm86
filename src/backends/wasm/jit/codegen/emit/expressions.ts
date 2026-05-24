@@ -74,8 +74,6 @@ function emitExprDirect(context: ExprEmitContext, expr: ExprRef, use: ExprUse): 
       return emitBinaryExpr(context, expr.op, expr.left, expr.right, use);
     case "select":
       return emitSelectExpr(context, expr, use);
-    case "testBit":
-      return emitTestBitExpr(context, expr.value, expr.bit, use);
     case "compare":
       return emitCompareExpr(context, expr, use);
   }
@@ -249,6 +247,10 @@ function emitUnaryExpr(
       emitExpr(context, value, childUseForExpr(expr, 0, use));
       context.body.i32Extend16S();
       return emittedExpr({ logicalWidth: 32, cleanWidth: 32 });
+    case "popcnt":
+      emitExpr(context, value, childUseForExpr(expr, 0, use));
+      context.body.i32Popcnt();
+      return emittedExpr({ logicalWidth: 8, cleanWidth: 8 });
   }
 }
 
@@ -277,22 +279,6 @@ function emitSelectExpr(
   emitExpr(context, expr.condition, childUseForExpr(expr, 0, use));
   context.body.select();
   return emittedExpr();
-}
-
-function emitTestBitExpr(
-  context: ExprEmitContext,
-  value: ExprRef,
-  bit: number,
-  use: ExprUse
-): EmittedExpr {
-  emitExpr(context, value, childUseForExpr({ kind: "testBit", bit, value }, 0, use));
-
-  if (bit !== 0) {
-    context.body.i32Const(bit).i32ShrU();
-  }
-
-  context.body.i32Const(1).i32And();
-  return emittedExpr({ logicalWidth: 8, cleanWidth: 8 });
 }
 
 function emitCompareExpr(

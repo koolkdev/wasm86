@@ -14,7 +14,7 @@ import {
   exprConst,
   exprInput,
   exprProject,
-  exprTestBit
+  exprUnary
 } from "#backends/wasm/jit/ir/expressions/builders.js";
 import { canonicalizeExpr } from "#backends/wasm/jit/ir/expressions/canonicalize.js";
 import { exprDependencies } from "#backends/wasm/jit/ir/expressions/dependencies.js";
@@ -167,12 +167,12 @@ test("sign and overflow formulas consume the operation sign bit", () => {
     const right = project(width, ebx);
     const result = project(width, binary("add", left, right));
     const signBit = width - 1;
-    const overflow = testBit(
+    const overflow = bit(
       binary("and", binary("xor", left, result), binary("xor", right, result)),
       signBit
     );
 
-    deepStrictEqual(exprCellValue(state.read("SF")), testBit(result, signBit));
+    deepStrictEqual(exprCellValue(state.read("SF")), bit(result, signBit));
     deepStrictEqual(exprCellValue(state.read("OF")), overflow);
   }
 });
@@ -385,7 +385,7 @@ function decFlagWrite(width: OperandWidth, input: ExprRef): SemanticFlagWrite {
 function zspCells(width: OperandWidth, result: ExprRef): Partial<Record<FlagName, FlagCell>> {
   return {
     ZF: exprCell(compare(width, "eq", result, exprConst(0))),
-    SF: exprCell(testBit(result, width - 1)),
+    SF: exprCell(bit(result, width - 1)),
     PF: exprCell(parityFlag(result))
   };
 }
@@ -399,7 +399,7 @@ function addCarryCells(
   return {
     CF: exprCell(compare(width, "lt_u", result, left)),
     AF: exprCell(auxCarry(left, right, result)),
-    OF: exprCell(testBit(binary("and", binary("xor", left, result), binary("xor", right, result)), width - 1))
+    OF: exprCell(bit(binary("and", binary("xor", left, result), binary("xor", right, result)), width - 1))
   };
 }
 
@@ -412,22 +412,19 @@ function subCarryCells(
   return {
     CF: exprCell(compare(width, "lt_u", left, right)),
     AF: exprCell(auxCarry(left, right, result)),
-    OF: exprCell(testBit(binary("and", binary("xor", left, right), binary("xor", left, result)), width - 1))
+    OF: exprCell(bit(binary("and", binary("xor", left, right), binary("xor", left, result)), width - 1))
   };
 }
 
 function auxCarry(left: ExprRef, right: ExprRef, result: ExprRef): ExprRef {
-  return testBit(binary("xor", binary("xor", left, right), result), 4);
+  return lowBit(binary("shr_u", binary("xor", binary("xor", left, right), result), exprConst(4)));
 }
 
 function parityFlag(value: ExprRef): ExprRef {
-  let parity = exprConst(1);
+  const lowByte = binary("and", value, exprConst(0xff));
+  const odd = lowBit(unary("popcnt", lowByte));
 
-  for (let bit = 0; bit < 8; bit += 1) {
-    parity = binary("xor", parity, testBit(value, bit));
-  }
-
-  return parity;
+  return compare(32, "eq", odd, exprConst(0));
 }
 
 function boolNot(value: ExprRef): ExprRef {
@@ -438,14 +435,22 @@ function project(width: OperandWidth, value: ExprRef): ExprRef {
   return canonicalizeExpr(exprProject(width, value));
 }
 
-function testBit(value: ExprRef, bit: number): ExprRef {
-  return canonicalizeExpr(exprTestBit(value, bit));
+function bit(value: ExprRef, bitIndex: number): ExprRef {
+  return lowBit(binary("shr_u", value, exprConst(bitIndex)));
 }
 
 function compare(width: OperandWidth, op: ScalarCompareOp, left: ExprRef, right: ExprRef): ExprRef {
   return canonicalizeExpr(exprCompare(width, op, left, right));
 }
 
-function binary(op: "add" | "sub" | "and" | "or" | "xor", left: ExprRef, right: ExprRef): ExprRef {
+function binary(op: "add" | "sub" | "and" | "or" | "xor" | "shr_u", left: ExprRef, right: ExprRef): ExprRef {
   return canonicalizeExpr(exprBinary(op, left, right));
+}
+
+function unary(op: "popcnt", value: ExprRef): ExprRef {
+  return canonicalizeExpr(exprUnary(op, value));
+}
+
+function lowBit(value: ExprRef): ExprRef {
+  return binary("and", value, exprConst(1));
 }

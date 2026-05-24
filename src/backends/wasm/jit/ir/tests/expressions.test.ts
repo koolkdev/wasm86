@@ -13,7 +13,7 @@ import {
   exprInsertBits,
   exprProject,
   exprSelect,
-  exprTestBit
+  exprUnary
 } from "#backends/wasm/jit/ir/expressions/builders.js";
 import { exprDependencies } from "#backends/wasm/jit/ir/expressions/dependencies.js";
 import { canonicalizeExpr } from "#backends/wasm/jit/ir/expressions/canonicalize.js";
@@ -75,13 +75,25 @@ test("JitScalarExpr byte store and use contracts keep dependency demand precise"
   strictEqual(exprUseSatisfies(bitsUse(0xff), exactUse()), false);
 });
 
-test("JitScalarExpr high-bit demand through boolean results observes no input bits", () => {
+test("JitScalarExpr high-bit demand through compare results observes no input bits", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const ebx = exprInput({ kind: "reg", reg: "ebx" });
 
   deepStrictEqual(exprDependencies(exprCompare(32, "eq", eax, ebx), bitsUse(0xff00)), []);
   deepStrictEqual(exprDependencies(exprCompare(8, "lt_s", eax, ebx), bitsUse(0xff00)), []);
-  deepStrictEqual(exprDependencies(exprTestBit(eax, 7), bitsUse(0xff00)), []);
+});
+
+test("JitScalarExpr popcnt dependencies are explicit and can be narrowed by real bitwise ops", () => {
+  const eax = exprInput({ kind: "reg", reg: "eax" });
+  const lowByte = exprBinary("and", eax, exprConst(0xff));
+
+  deepStrictEqual(exprDependencies(exprUnary("popcnt", eax), bitsUse(1)), [
+    { kind: "reg", reg: "eax", mask: 0xffff_ffff }
+  ]);
+  deepStrictEqual(exprDependencies(exprUnary("popcnt", lowByte), bitsUse(1)), [
+    { kind: "reg", reg: "eax", mask: 0xff }
+  ]);
+  deepStrictEqual(canonicalizeExpr(exprUnary("popcnt", exprConst(0b1011))), exprUnary("popcnt", exprConst(0b1011)));
 });
 
 test("JitScalarExpr compare dependencies use the explicit operation width", () => {
