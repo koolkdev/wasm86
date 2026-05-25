@@ -26,16 +26,9 @@ import {
 } from "#x86/isa/registers.js";
 
 export type StorageBinding =
-  | Readonly<{ kind: "fixedReg"; reg: RegisterAlias }>
-  | Readonly<{ kind: "fixedMem"; address: ExprRef; width: OperandWidth }>
+  | Readonly<{ kind: "reg"; reg: RegisterAlias }>
   | Readonly<{ kind: "dynamicReg"; index: ExprRef; width: OperandWidth }>
-  | Readonly<{
-      kind: "dynamicRm";
-      isReg: ExprRef;
-      regIndex: ExprRef;
-      address: ExprRef;
-      width: OperandWidth;
-    }>;
+  | Readonly<{ kind: "mem"; address: ExprRef; width: OperandWidth }>;
 
 export type ValueBinding = Readonly<{ kind: "value"; value: ExprRef }>;
 export type OperandBinding = StorageBinding | ValueBinding;
@@ -48,15 +41,6 @@ export type BindingClobber =
 
 export type BindingDependencies = readonly BindingDependency[];
 export type BindingClobbers = readonly BindingClobber[];
-
-export type BindingReadEffect = Readonly<{
-  dependencies: BindingDependencies;
-}>;
-
-export type BindingWriteEffect = Readonly<{
-  targetDependencies: BindingDependencies;
-  clobbers: BindingClobbers;
-}>;
 
 export type BindingResolverOptions = Readonly<{
   operands?: readonly OperandBinding[];
@@ -102,9 +86,9 @@ export class BindingResolver {
         return binding;
       }
       case "reg":
-        return fixedRegBinding(regAccess(source.reg, accessWidth));
+        return regBinding(regAccess(source.reg, accessWidth));
       case "mem":
-        return fixedMemBinding(this.#resolveValueRef(source.address), accessWidth);
+        return memBinding(this.#resolveValueRef(source.address), accessWidth);
     }
   }
 
@@ -112,26 +96,24 @@ export class BindingResolver {
     const binding = this.storage(source, accessWidth);
 
     switch (binding.kind) {
-      case "fixedMem":
-      case "dynamicRm":
+      case "mem":
         return binding.address;
-      case "fixedReg":
+      case "reg":
       case "dynamicReg":
         throw new Error(`${binding.kind} binding has no address`);
     }
   }
 
-  readEffect(source: OperandBinding, use: ExprUse = exactUse()): BindingReadEffect {
-    return Object.freeze({
-      dependencies: dependencyList(this.#accessesFor(source, "read", use))
-    });
+  readDeps(source: OperandBinding, use: ExprUse = exactUse()): BindingDependencies {
+    return dependencyList(this.#accessesFor(source, "read", use));
   }
 
-  writeEffect(target: StorageBinding, use: ExprUse = exactUse()): BindingWriteEffect {
-    return Object.freeze({
-      targetDependencies: dependencyList(this.#accessesFor(target, "writeTarget", use)),
-      clobbers: clobberList(this.#accessesFor(target, "clobber", use))
-    });
+  writeDeps(target: StorageBinding): BindingDependencies {
+    return dependencyList(this.#accessesFor(target, "address", exactUse()));
+  }
+
+  clobbers(target: StorageBinding, use: ExprUse = exactUse()): BindingClobbers {
+    return clobberList(this.#accessesFor(target, "clobber", use));
   }
 
   #resolveValueRef(value: ValueRef): ExprRef {
@@ -152,20 +134,20 @@ export class BindingResolver {
     switch (binding.kind) {
       case "value":
         if (mode !== "read") {
-          throw new Error("value bindings do not have write effects");
+          throw new Error("value bindings do not have address dependencies or clobbers");
         }
         addExprDependencies(binding.value, use, accesses);
         break;
-      case "fixedReg":
-        if (mode !== "writeTarget") {
+      case "reg":
+        if (mode !== "address") {
           addRegisterAliasAccess(binding.reg, use, accesses);
         }
         break;
-      case "fixedMem":
+      case "mem":
         if (mode !== "clobber") {
           addExprDependencies(binding.address, exactUse(), accesses);
         }
-        if (mode !== "writeTarget") {
+        if (mode !== "address") {
           accesses.memory = true;
         }
         break;
@@ -173,19 +155,8 @@ export class BindingResolver {
         if (mode !== "clobber") {
           addExprDependencies(binding.index, exactUse(), accesses);
         }
-        if (mode !== "writeTarget") {
+        if (mode !== "address") {
           addDynamicRegisterAccesses(binding.width, use, accesses);
-        }
-        break;
-      case "dynamicRm":
-        if (mode !== "clobber") {
-          addExprDependencies(binding.isReg, exactUse(), accesses);
-          addExprDependencies(binding.regIndex, exactUse(), accesses);
-          addExprDependencies(binding.address, exactUse(), accesses);
-        }
-        if (mode !== "writeTarget") {
-          addDynamicRegisterAccesses(binding.width, use, accesses);
-          accesses.memory = true;
         }
         break;
     }
@@ -194,16 +165,16 @@ export class BindingResolver {
   }
 }
 
-export function fixedRegBinding(reg: RegisterAlias): StorageBinding {
+export function regBinding(reg: RegisterAlias): StorageBinding {
   return Object.freeze({
-    kind: "fixedReg",
+    kind: "reg",
     reg: freezeRegisterAlias(reg)
   });
 }
 
-export function fixedMemBinding(address: ExprRef, width: OperandWidth): StorageBinding {
+export function memBinding(address: ExprRef, width: OperandWidth): StorageBinding {
   return Object.freeze({
-    kind: "fixedMem",
+    kind: "mem",
     address: canonicalizeExpr(address),
     width
   });
@@ -213,21 +184,6 @@ export function dynamicRegBinding(index: ExprRef, width: OperandWidth): StorageB
   return Object.freeze({
     kind: "dynamicReg",
     index: canonicalizeExpr(index),
-    width
-  });
-}
-
-export function dynamicRmBinding(
-  isReg: ExprRef,
-  regIndex: ExprRef,
-  address: ExprRef,
-  width: OperandWidth
-): StorageBinding {
-  return Object.freeze({
-    kind: "dynamicRm",
-    isReg: canonicalizeExpr(isReg),
-    regIndex: canonicalizeExpr(regIndex),
-    address: canonicalizeExpr(address),
     width
   });
 }
@@ -260,7 +216,7 @@ function regAccess(reg: RegisterAlias["name"], accessWidth: OperandWidth = 32): 
   return narrowed;
 }
 
-type BindingAccessMode = "read" | "writeTarget" | "clobber";
+type BindingAccessMode = "read" | "address" | "clobber";
 
 type AccessSet = {
   regs: Map<Reg32, number>;
