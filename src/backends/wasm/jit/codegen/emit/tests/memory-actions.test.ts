@@ -186,8 +186,7 @@ test("JIT memory-load value emits unchecked memory load through the load-result 
     at,
     result: loadResultValue(0),
     address,
-    width: 8,
-    signed: true
+    width: 8
   }, values);
   scratch.assertClear();
   body.end();
@@ -196,9 +195,9 @@ test("JIT memory-load value emits unchecked memory load through the load-result 
     "define:0",
     "value:address:32"
   ]);
-  strictEqual(definedWidth?.cleanWidth, 32);
+  strictEqual(definedWidth?.cleanWidth, 8);
   deepStrictEqual(wasmBodyMemoryAccesses(body.encode()), [{
-    opcode: wasmOpcode.i32Load8S,
+    opcode: wasmOpcode.i32Load8U,
     memoryIndex: wasmMemoryIndex.guest,
     offset: 0
   }]);
@@ -218,8 +217,7 @@ test("JIT memory-load value does not emit when the loadResult path declines it",
     at,
     result: loadResultValue(0),
     address: constValue(0xa0),
-    width: 32,
-    signed: false
+    width: 32
   }, values);
   scratch.assertClear();
   body.end();

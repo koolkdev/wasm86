@@ -459,11 +459,18 @@ test("extension move semantics are flagless and encode source and destination wi
     { op: "next" }
   ]);
   deepStrictEqual(movsx, [
-    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 1 }, accessWidth: 8, signed: true },
+    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 1 }, accessWidth: 8 },
+    {
+      op: "value.unary",
+      type: "i32",
+      operator: "extend8_s",
+      dst: { kind: "var", id: 1 },
+      value: { kind: "var", id: 0 }
+    },
     {
       op: "set",
       target: { kind: "operand", index: 0 },
-      value: { kind: "var", id: 0 },
+      value: { kind: "var", id: 1 },
       accessWidth: 16
     },
     { op: "next" }

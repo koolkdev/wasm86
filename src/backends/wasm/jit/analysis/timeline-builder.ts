@@ -494,8 +494,7 @@ class TimelineBuilder {
   #valueForStorageRead(expression: Extract<IrValueExpr, { kind: "source" }>): JitValue {
     const id = this.#ids.registerStorageRead({
       source: expression.source,
-      accessWidth: expression.accessWidth,
-      signed: expression.signed === true
+      accessWidth: expression.accessWidth
     });
     const values = this.#currentStorageReadValues();
 
@@ -505,8 +504,7 @@ class TimelineBuilder {
 
     const value = this.#resolvedValue(this.#resolver.valueForStorage(
       expression.source,
-      expression.accessWidth,
-      expression.signed === true
+      expression.accessWidth
     ));
 
     values.set(id, value);
@@ -519,8 +517,7 @@ class TimelineBuilder {
   ): void {
     const id = this.#ids.registerStorageRead({
       source: expression.source,
-      accessWidth: expression.accessWidth,
-      signed: expression.signed === true
+      accessWidth: expression.accessWidth
     });
     const values = this.#currentStorageReadValues();
 

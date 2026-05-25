@@ -16,14 +16,20 @@ import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 test("JIT value resolver reads input register aliases from full-register values", () => {
   const resolver = createJitValueResolver({});
   const eax = jitInputReg32Value("eax");
+  const lowByte = jitExtractBits(eax, 0, 8);
 
   deepStrictEqual(
     resolver.valueForStorage({ kind: "reg", reg: "eax" }, 8),
-    jitExtractBits(eax, 0, 8)
+    lowByte
   );
   deepStrictEqual(
-    resolver.valueForStorage({ kind: "reg", reg: "eax" }, 8, true),
-    extend8s(jitExtractBits(eax, 0, 8))
+    resolver.valueForExpression({
+      kind: "value.unary",
+      type: "i32",
+      operator: "extend8_s",
+      value: sourceReg("eax", 8)
+    }),
+    extend8s(lowByte)
   );
 });
 
@@ -128,11 +134,11 @@ function c32Expr(value: number) {
   return { kind: "const" as const, type: "i32" as const, value };
 }
 
-function sourceReg(reg: Reg32) {
+function sourceReg(reg: Reg32, accessWidth: 8 | 16 | 32 = 32) {
   return {
     kind: "source" as const,
     source: { kind: "reg" as const, reg },
-    accessWidth: 32 as const
+    accessWidth
   };
 }
 

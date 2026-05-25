@@ -70,7 +70,6 @@ function validateOpUses(
   switch (op.op) {
     case "get":
       validateAccessWidth(op.accessWidth);
-      validateSignedGet(op);
       validateStorageRef(op.source, definedVars, options);
       break;
     case "set":
@@ -304,16 +303,6 @@ function validateUnaryOperator(operator: IrUnaryOperator): void {
   }
 
   throw new Error(`IR value.unary has unknown operator '${String(operator)}'`);
-}
-
-function validateSignedGet(op: Extract<IrOp, { op: "get" }>): void {
-  if (op.signed !== true) {
-    return;
-  }
-
-  if (op.accessWidth !== 8 && op.accessWidth !== 16) {
-    throw new Error("IR signed get requires access width 8 or 16");
-  }
 }
 
 function validateMemoryGuardByteLength(byteLength: number): void {

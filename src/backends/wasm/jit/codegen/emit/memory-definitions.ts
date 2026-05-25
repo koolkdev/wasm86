@@ -1,7 +1,4 @@
-import {
-  cleanValueWidth,
-  type ValueWidth
-} from "#backends/wasm/codegen/value-width.js";
+import { cleanValueWidth } from "#backends/wasm/codegen/value-width.js";
 import {
   emitWasmIrLoadGuestUnchecked
 } from "#backends/wasm/codegen/memory.js";
@@ -53,20 +50,12 @@ function emitMemoryLoadValue(
           values.emit(definition.address, { requestedWidth: 32 });
         },
         definition.width,
-        definition.signed
+        false
       );
 
-      return signedLoadValueWidth(definition.width, definition.signed);
+      return cleanValueWidth(definition.width);
     }
   );
 
   captured?.release();
-}
-
-function signedLoadValueWidth(width: 8 | 16 | 32, signed: boolean): ValueWidth {
-  if (signed && width < 32) {
-    return cleanValueWidth(32);
-  }
-
-  return cleanValueWidth(width);
 }

@@ -161,7 +161,7 @@ export type IrMemoryGuardOp = Readonly<{
 }>;
 
 export type IrOp =
-  | Readonly<{ op: "get"; dst: VarRef; source: StorageRef; accessWidth?: OperandWidth; signed?: boolean }>
+  | Readonly<{ op: "get"; dst: VarRef; source: StorageRef; accessWidth?: OperandWidth }>
   | Readonly<{ op: "set"; target: StorageRef; value: ValueRef; accessWidth?: OperandWidth }>
   | IrMemoryGuardOp
   | Readonly<{ op: "address"; dst: VarRef; operand: OperandRef }>

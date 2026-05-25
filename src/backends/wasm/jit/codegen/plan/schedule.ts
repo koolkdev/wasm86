@@ -216,8 +216,7 @@ function planMemoryLoadValue(
     at,
     result: memoryLoadValue.value,
     address: view.storageAddress(expressionOp.value.source),
-    width: expressionOp.value.accessWidth,
-    signed: expressionOp.value.signed === true
+    width: expressionOp.value.accessWidth
   };
 }
 

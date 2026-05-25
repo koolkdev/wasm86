@@ -14,22 +14,29 @@ const mem = (address: ReturnType<typeof v> | ReturnType<typeof c32>) => ({ kind:
 const address = (operand: ReturnType<typeof op>) => ({ kind: "address" as const, operand });
 const sourceValue = (
   source: ReturnType<typeof op> | ReturnType<typeof reg> | ReturnType<typeof mem>,
-  accessWidth: 8 | 16 | 32 = 32,
-  signed = false
+  accessWidth: 8 | 16 | 32 = 32
 ) => ({
   kind: "source" as const,
   source,
-  accessWidth,
-  ...(signed ? { signed: true as const } : {})
+  accessWidth
+});
+const unaryValue = (
+  operator: "extend8_s" | "extend16_s" | "popcnt",
+  value: ReturnType<typeof v> | ReturnType<typeof c32> | ReturnType<typeof sourceValue>
+) => ({
+  kind: "value.unary" as const,
+  type: "i32" as const,
+  operator,
+  value
 });
 const set = (
   target: ReturnType<typeof op> | ReturnType<typeof reg>,
-  value: ReturnType<typeof v> | ReturnType<typeof c32> | ReturnType<typeof sourceValue> | Readonly<{
+  value: ReturnType<typeof v> | ReturnType<typeof c32> | ReturnType<typeof sourceValue> | ReturnType<typeof unaryValue> | Readonly<{
     kind: "value.binary";
     type: "i32";
     operator: "add" | "sub";
-    a: ReturnType<typeof v> | ReturnType<typeof c32> | ReturnType<typeof sourceValue>;
-    b: ReturnType<typeof v> | ReturnType<typeof c32> | ReturnType<typeof sourceValue>;
+    a: ReturnType<typeof v> | ReturnType<typeof c32> | ReturnType<typeof sourceValue> | ReturnType<typeof unaryValue>;
+    b: ReturnType<typeof v> | ReturnType<typeof c32> | ReturnType<typeof sourceValue> | ReturnType<typeof unaryValue>;
   }>
 ) => ({ op: "set" as const, target, value, accessWidth: 32 as const });
 
@@ -67,16 +74,17 @@ test("expression selector materializes storage reads in source order", () => {
   );
 });
 
-test("expression selector preserves signed source reads", () => {
+test("expression selector preserves explicit sign-extension values", () => {
   deepStrictEqual(
     buildIrExpressionBlock([
-      { op: "get", dst: v(0), source: op(1), accessWidth: 8, signed: true },
-      { op: "set", target: op(0), value: v(0), accessWidth: 32 },
+      { op: "get", dst: v(0), source: op(1), accessWidth: 8 },
+      { op: "value.unary", type: "i32", operator: "extend8_s", dst: v(1), value: v(0) },
+      { op: "set", target: op(0), value: v(1), accessWidth: 32 },
       { op: "next" }
     ]),
     [
-      { op: "let32", dst: v(0), value: sourceValue(op(1), 8, true) },
-      set(op(0), v(0)),
+      { op: "let32", dst: v(0), value: sourceValue(op(1), 8) },
+      set(op(0), unaryValue("extend8_s", v(0))),
       { op: "next" }
     ]
   );

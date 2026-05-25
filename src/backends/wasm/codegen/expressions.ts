@@ -27,7 +27,7 @@ export type IrStorageExpr =
 
 export type IrValueExpr =
   | ValueRef
-  | Readonly<{ kind: "source"; source: IrStorageExpr; accessWidth: OperandWidth; signed?: boolean }>
+  | Readonly<{ kind: "source"; source: IrStorageExpr; accessWidth: OperandWidth }>
   | Readonly<{ kind: "address"; operand: OperandRef }>
   | Readonly<{ kind: "flags.condition"; cc: ConditionCode }>
   | Readonly<{
@@ -155,8 +155,7 @@ class ExpressionBuilder {
             {
               kind: "source",
               source: source.storage,
-              accessWidth: op.accessWidth ?? 32,
-              ...(op.signed === true ? { signed: true } : {})
+              accessWidth: op.accessWidth ?? 32
             },
             false
           );

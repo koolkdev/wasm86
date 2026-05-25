@@ -197,10 +197,7 @@ class IrExprWasmEmitter {
         this.#context.emitNextEip(this.#helpers);
         return untrackedValueWidth();
       case "source":
-        return this.#context.emitGet(value.source, value.accessWidth, this.#helpers, {
-          ...options,
-          signed: options.signed === true || value.signed === true
-        });
+        return this.#context.emitGet(value.source, value.accessWidth, this.#helpers, options);
       case "address":
         this.#context.emitAddress(value.operand, this.#helpers);
         return untrackedValueWidth();

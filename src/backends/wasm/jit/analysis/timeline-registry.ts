@@ -23,7 +23,7 @@ export class TimelineRegistry implements TimelineIdCatalog {
   readonly #memStorageIds = new Map<IrValueExpr, TimelineStorageId>();
   readonly #storageReadIds = new Map<
     TimelineStorageId,
-    Map<OperandWidth, Map<boolean, TimelineStorageReadId>>
+    Map<OperandWidth, TimelineStorageReadId>
   >();
 
   expressionId(value: TimelineExpression): TimelineExpressionId | undefined {
@@ -48,8 +48,7 @@ export class TimelineRegistry implements TimelineIdCatalog {
       ? undefined
       : this.#storageReadIds
           .get(storageId)
-          ?.get(read.accessWidth)
-          ?.get(read.signed === true);
+          ?.get(read.accessWidth);
   }
 
   registerExpression(value: TimelineExpression): TimelineExpressionId {
@@ -86,15 +85,7 @@ export class TimelineRegistry implements TimelineIdCatalog {
       this.#storageReadIds.set(storageId, byWidth);
     }
 
-    let bySigned = byWidth.get(read.accessWidth);
-
-    if (bySigned === undefined) {
-      bySigned = new Map();
-      byWidth.set(read.accessWidth, bySigned);
-    }
-
-    const signed = read.signed === true;
-    const existing = bySigned.get(signed);
+    const existing = byWidth.get(read.accessWidth);
 
     if (existing !== undefined) {
       return existing;
@@ -103,7 +94,7 @@ export class TimelineRegistry implements TimelineIdCatalog {
     const id = this.#nextStorageReadId as TimelineStorageReadId;
 
     this.#nextStorageReadId += 1;
-    bySigned.set(signed, id);
+    byWidth.set(read.accessWidth, id);
     return id;
   }
 

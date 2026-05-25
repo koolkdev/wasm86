@@ -81,12 +81,14 @@ test("jit IR block emits MOVSX with signed loads or sign-extension opcodes", () 
   ]);
   const movsxAfterTrackedReg = jitBlockBodyOpcodes(movsxAfterTrackedRegBlock);
 
-  strictEqual(movsxByteMem.includes(wasmOpcode.i32Load8S), true);
-  strictEqual(movsxByteMem.includes(wasmOpcode.i32Extend8S), false);
+  strictEqual(movsxByteMem.includes(wasmOpcode.i32Load8U), true);
+  strictEqual(movsxByteMem.includes(wasmOpcode.i32Load8S), false);
+  strictEqual(movsxByteMem.includes(wasmOpcode.i32Extend8S), true);
   strictEqual(movsxByteMem.includes(wasmOpcode.i32Xor), false);
 
-  strictEqual(movsxWordMem.includes(wasmOpcode.i32Load16S), true);
-  strictEqual(movsxWordMem.includes(wasmOpcode.i32Extend16S), false);
+  strictEqual(movsxWordMem.includes(wasmOpcode.i32Load16U), true);
+  strictEqual(movsxWordMem.includes(wasmOpcode.i32Load16S), false);
+  strictEqual(movsxWordMem.includes(wasmOpcode.i32Extend16S), true);
   strictEqual(movsxWordMem.includes(wasmOpcode.i32Xor), false);
 
   strictEqual(

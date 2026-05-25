@@ -154,7 +154,6 @@ test("JIT schedule resolves operands, preserves order, and carries exact exits",
   deepStrictEqual(load.result, jitLoadResultValue(0, "i32"));
   deepStrictEqual(load.address, c32(0x68));
   strictEqual(load.width, 16);
-  strictEqual(load.signed, false);
 
   const jump = requireScheduleEntry(schedule[3], "jump");
   deepStrictEqual(jump.target, c32(0x2000));

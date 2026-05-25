@@ -17,7 +17,6 @@ export type ValueSnapshot = JitValueStateSnapshot;
 export type StorageReadRef = Readonly<{
   source: IrStorageExpr;
   accessWidth: OperandWidth;
-  signed?: boolean;
 }>;
 
 export type TimelineExpression = Exclude<IrValueExpr, ValueRef>;

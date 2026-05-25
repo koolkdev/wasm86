@@ -111,10 +111,12 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
       op: "get",
       dst,
       source: sourceRef,
-      accessWidth,
-      ...(options.signed === true ? { signed: true } : {})
+      accessWidth
     });
-    return dst;
+
+    return options.signed === true
+      ? this.#signExtendGet(dst, accessWidth)
+      : dst;
   }
 
   set(target: StorageInput, value: ValueInput, accessWidth: OperandWidth = 32): void {
@@ -163,6 +165,17 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
 
     this.#push({ op: "value.unary", type: "i32", operator, dst, value: toValueRef(value) });
     return dst;
+  }
+
+  #signExtendGet(value: ValueInput, accessWidth: OperandWidth): VarRef {
+    switch (accessWidth) {
+      case 8:
+        return this.#unaryValue("extend8_s", value);
+      case 16:
+        return this.#unaryValue("extend16_s", value);
+      case 32:
+        throw new Error("signed get requires access width 8 or 16");
+    }
   }
 
   i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef {

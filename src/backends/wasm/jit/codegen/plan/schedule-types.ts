@@ -66,7 +66,6 @@ export type MemoryLoadValueEntry = ScheduleEntryBase<"defineLoadResult"> & Reado
   result: JitLoadResultValue;
   address: JitValue;
   width: OperandWidth;
-  signed: boolean;
 }>;
 
 export type DefinitionEntry =

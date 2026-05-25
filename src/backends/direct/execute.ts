@@ -102,9 +102,7 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
         return stopFromAccess(context.state, read);
       }
 
-      setVar(context, op.dst, op.signed === true && accessWidth < 32
-        ? signExtendValue(read.value, accessWidth as 8 | 16)
-        : read.value);
+      setVar(context, op.dst, read.value);
       return undefined;
     }
     case "set": {

@@ -96,6 +96,42 @@ test("builder constructs explicit memory guards with byte lengths", () => {
   );
 });
 
+test("builder lowers signed gets to explicit sign-extension IR", () => {
+  deepStrictEqual(
+    buildIr((s) => {
+      const value = s.get(s.operand(0), 8, { signed: true });
+
+      s.set(s.operand(1), value);
+    }),
+    [
+      { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 0 }, accessWidth: 8 },
+      {
+        op: "value.unary",
+        type: "i32",
+        operator: "extend8_s",
+        dst: { kind: "var", id: 1 },
+        value: { kind: "var", id: 0 }
+      },
+      {
+        op: "set",
+        target: { kind: "operand", index: 1 },
+        value: { kind: "var", id: 1 },
+        accessWidth: 32
+      },
+      { op: "next" }
+    ]
+  );
+});
+
+test("builder rejects signed gets with full-width access", () => {
+  throws(
+    () => buildIr((s) => {
+      s.get(s.operand(0), 32, { signed: true });
+    }),
+    /signed get requires access width 8 or 16/
+  );
+});
+
 test("plain get and set do not emit implicit memory guards", () => {
   deepStrictEqual(
     buildIr((s) => {

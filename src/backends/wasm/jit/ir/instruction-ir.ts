@@ -11,7 +11,7 @@ import type {
   VarRef
 } from "#x86/ir/model/types.js";
 import type { EffectiveAddress, OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
-import { u32, i32 } from "#x86/state/cpu-state.js";
+import { u32 } from "#x86/state/cpu-state.js";
 
 export type BindInstructionIrInput = Readonly<{
   ir: readonly IrOp[];
@@ -163,7 +163,7 @@ class InstructionIrBinder {
           op: "value.const",
           type: "i32",
           dst: op.dst,
-          value: constReadValue(binding.value, op.accessWidth ?? 32, op.signed === true)
+          value: constReadValue(binding.value, op.accessWidth ?? 32)
         });
         return;
       case "static.relTarget":
@@ -171,7 +171,7 @@ class InstructionIrBinder {
           op: "value.const",
           type: "i32",
           dst: op.dst,
-          value: constReadValue(binding.target, op.accessWidth ?? 32, op.signed === true)
+          value: constReadValue(binding.target, op.accessWidth ?? 32)
         });
         return;
     }
@@ -367,22 +367,13 @@ function regRefForAlias(alias: RegisterAlias): RegRef {
   };
 }
 
-function constReadValue(value: number, width: OperandWidth, signed: boolean): number {
+function constReadValue(value: number, width: OperandWidth): number {
   if (width === 32) {
     return u32(value);
   }
 
   const mask = width === 16 ? 0xffff : 0xff;
-  const masked = value & mask;
-
-  if (!signed) {
-    return masked;
-  }
-
-  const signBit = width === 16 ? 0x8000 : 0x80;
-  const signBase = width === 16 ? 0x1_0000 : 0x100;
-
-  return i32((masked & signBit) === 0 ? masked : masked - signBase);
+  return value & mask;
 }
 
 function scaleShift(scale: EffectiveAddress["scale"]): 1 | 2 | 3 {

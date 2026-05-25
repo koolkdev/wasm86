@@ -34,26 +34,17 @@ export class JitValueResolver {
 
   valueForStorage(
     storage: StorageRef | IrStorageExpr,
-    accessWidth: OperandWidth = 32,
-    signed = false
+    accessWidth: OperandWidth = 32
   ): JitValue | undefined {
-    const value = this.#valueForStorageUnsigned(storage, accessWidth);
-
-    return value === undefined || !signed || accessWidth >= 32
-      ? value
-      : signExtendJitValue(value, accessWidth as 8 | 16);
+    return this.#valueForStorageUnsigned(storage, accessWidth);
   }
 
-  valueForRegisterAlias(alias: RegisterAlias, signed = false): JitValue {
-    const value = this.#valueForRegisterAccess({
+  valueForRegisterAlias(alias: RegisterAlias): JitValue {
+    return this.#valueForRegisterAccess({
       reg: alias.base,
       width: alias.width,
       bitOffset: alias.bitOffset
     });
-
-    return signed && alias.width < 32
-      ? signExtendJitValue(value, alias.width as 8 | 16)
-      : value;
   }
 
   valueForValueRef(value: ValueRef): JitValue | undefined {
@@ -120,7 +111,7 @@ export class JitValueResolver {
       case "nextEip":
         return this.valueForValueRef(expression);
       case "source":
-        return this.valueForStorage(expression.source, expression.accessWidth, expression.signed === true);
+        return this.valueForStorage(expression.source, expression.accessWidth);
       case "address":
         return undefined;
       case "value.binary": {
@@ -170,13 +161,4 @@ export function createJitValueResolver(options: JitValueResolverOptions): JitVal
 
 function c32(value: number): JitValue {
   return { kind: "const", type: "i32", value: i32(value) };
-}
-
-function signExtendJitValue(value: JitValue, width: 8 | 16): JitValue {
-  return simplifyValue({
-    kind: "value.unary",
-    type: "i32",
-    operator: width === 8 ? "extend8_s" : "extend16_s",
-    value
-  });
 }
