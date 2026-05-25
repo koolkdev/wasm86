@@ -37,6 +37,8 @@ export class TimelineOpView implements TimelineView {
       case "value.binary":
       case "value.unary":
       case "value.select":
+      case "value.project":
+      case "value.compare":
         return this.expression(value);
     }
   }

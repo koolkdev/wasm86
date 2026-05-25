@@ -9,6 +9,8 @@ import {
   u32
 } from "#x86/state/cpu-state.js";
 import { executeDirectInstruction } from "#backends/direct/execute.js";
+import type { IsaDecodedInstruction } from "#x86/isa/decoder/types.js";
+import type { SemanticTemplate } from "#x86/ir/model/types.js";
 import { decodeBytes, ok, startAddress } from "./helpers.js";
 
 test("add_wrap_sets_cf_zf_af_pf", () => {
@@ -254,8 +256,56 @@ test("test_sets_pf_from_low_byte", () => {
   strictEqual(getFlag(state, "SF"), false);
 });
 
+test("direct executor evaluates synthetic semantic flag writes", () => {
+  const state = createCpuState({
+    eip: startAddress,
+    eflags: controlEflagsMask | supportedEflagsMask
+  });
+  const instruction = syntheticInstruction((s) => {
+    const low = s.project(8, 0x1ff);
+
+    s.writeFlags({
+      cells: {
+        ZF: s.flagExpr(s.compare(8, "eq", low, 0xff)),
+        CF: s.flagExpr(0),
+        AF: s.flagUndef()
+      },
+      conditions: {
+        E: s.compare(8, "eq", low, 0)
+      }
+    });
+  });
+
+  executeDirectInstruction(state, instruction);
+
+  strictEqual(getFlag(state, "ZF"), true);
+  strictEqual(getFlag(state, "CF"), false);
+  strictEqual(getFlag(state, "AF"), false);
+  strictEqual(getFlag(state, "SF"), true);
+  strictEqual(getFlag(state, "PF"), true);
+  strictEqual(getFlag(state, "OF"), true);
+  strictEqual(u32(state.eflags & controlEflagsMask), controlEflagsMask);
+});
+
 function execute(state: ReturnType<typeof createCpuState>, values: readonly number[]): void {
   const decoded = ok(decodeBytes(values, state.eip));
 
   executeDirectInstruction(state, decoded);
+}
+
+function syntheticInstruction(semantics: SemanticTemplate): IsaDecodedInstruction {
+  return {
+    spec: {
+      id: "synthetic.flags-write",
+      mnemonic: "synthetic",
+      opcode: [],
+      format: { syntax: "synthetic" },
+      semantics
+    },
+    address: startAddress,
+    length: 1,
+    nextEip: startAddress + 1,
+    operands: [],
+    raw: []
+  };
 }

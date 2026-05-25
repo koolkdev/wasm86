@@ -1,11 +1,11 @@
-import { throws } from "node:assert";
+import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { validateBlock } from "#backends/wasm/jit/ir/validate.js";
 import { buildBlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
 import type { IrBlock } from "#x86/ir/model/types.js";
 import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
-import { startAddress, v } from "./helpers.js";
+import { c32, startAddress, v } from "./helpers.js";
 
 test("validateBlock rejects empty blocks", () => {
   throws(() => validateBlock({ instructions: [] }), /cannot validate empty JIT block/);
@@ -59,6 +59,25 @@ test("buildBlockExpressions rejects duplicate vars across instruction IR bodies"
     () => buildBlockExpressions(duplicateBlockVarDefinitions()),
     /JIT block var 0 is assigned more than once/
   );
+});
+
+test("buildBlockExpressions keeps semantic flag writes path-neutral", () => {
+  const expressions = buildBlockExpressions(jitBlock([
+    { op: "value.project", type: "i32", dst: v(0), width: 8, value: c32(0x1234) },
+    { op: "value.compare", type: "i32", operator: "eq", dst: v(1), width: 8, a: v(0), b: c32(0x34) },
+    {
+      op: "flags.write",
+      cells: {
+        ZF: { kind: "expr", value: v(1) }
+      },
+      conditions: {
+        E: v(1)
+      }
+    },
+    nextOp(0)
+  ]));
+
+  strictEqual(expressions.some((op) => op.op === "flags.write"), true);
 });
 
 test("validateBlock rejects non-final non-fallthrough instructions", () => {

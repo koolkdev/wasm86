@@ -25,6 +25,7 @@ import type {
   IrBinaryOperator,
   IrCompareOperator,
   IrFlagSetOp,
+  IrFlagWriteOp,
   IrOp,
   IrUnaryOperator,
   MemRef,
@@ -155,7 +156,8 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
       setFlags(context, op);
       return undefined;
     case "flags.write":
-      return stop(context.state, StopReason.UNSUPPORTED);
+      writeFlags(context, op);
+      return undefined;
     case "flags.condition":
       setVar(context, op.dst, evalCondition(context, op.cc) ? 1 : 0);
       return undefined;
@@ -425,6 +427,23 @@ function setFlags(
 
   for (const [flag, expr] of Object.entries(defs) as [FlagName, FlagExpr][]) {
     setFlag(context.state, flag, evalFlagExpr(context, expr));
+  }
+}
+
+function writeFlags(
+  context: ExecutionContext,
+  descriptor: IrFlagWriteOp
+): void {
+  for (const [flag, cell] of Object.entries(descriptor.cells) as [FlagName, IrFlagWriteOp["cells"][FlagName]][]) {
+    if (cell === undefined) {
+      continue;
+    }
+
+    setFlag(
+      context.state,
+      flag,
+      cell.kind === "expr" && evalValueRef(context, cell.value) !== 0
+    );
   }
 }
 

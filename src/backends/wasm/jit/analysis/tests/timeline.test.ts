@@ -395,6 +395,50 @@ test("JIT value timeline ignores no-op flag writes before resolving inputs", () 
   throws(() => timeline.viewAt(0).ref(v(102)));
 });
 
+test("legacy JIT timeline rejects semantic flag writes before consuming direct conditions", () => {
+  throws(
+    () => buildTimeline({
+      expressions: [{
+        op: "flags.write",
+        cells: {
+          ZF: { kind: "expr", value: c32(1) }
+        },
+        conditions: {
+          E: v(99)
+        }
+      }],
+      snapshotPoints: new Set()
+    }),
+    /semantic flags\.write is unsupported by legacy JIT analysis at op 0/
+  );
+});
+
+test("legacy JIT timeline rejects semantic project and compare values", () => {
+  throws(
+    () => buildTimeline({
+      expressions: [{
+        op: "let32",
+        dst: v(0),
+        value: { kind: "value.project", type: "i32", width: 8, value: c32(0x1234) }
+      }],
+      snapshotPoints: new Set()
+    }),
+    /semantic value\.project is unsupported by legacy JIT analysis at op 0/
+  );
+
+  throws(
+    () => buildTimeline({
+      expressions: [{
+        op: "let32",
+        dst: v(0),
+        value: { kind: "value.compare", type: "i32", operator: "eq", width: 8, a: c32(0), b: c32(0) }
+      }],
+      snapshotPoints: new Set()
+    }),
+    /semantic value\.compare is unsupported by legacy JIT analysis at op 0/
+  );
+});
+
 function v(id: number) {
   return { kind: "var" as const, id };
 }

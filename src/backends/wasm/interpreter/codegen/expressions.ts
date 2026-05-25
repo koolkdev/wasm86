@@ -111,6 +111,23 @@ function rewriteOp(
       return { ...op, address: rewriteValue(op.address, bindings) };
     case "flags.set":
       return op;
+    case "flags.write":
+      return {
+        ...op,
+        cells: Object.fromEntries(
+          Object.entries(op.cells).map(([flag, cell]) => [
+            flag,
+            cell?.kind === "expr" ? { kind: "expr", value: rewriteValue(cell.value, bindings) } : cell
+          ])
+        ),
+        ...(op.conditions === undefined
+          ? {}
+          : {
+              conditions: Object.fromEntries(
+                Object.entries(op.conditions).map(([cc, value]) => [cc, rewriteValue(value, bindings)])
+              )
+            })
+      };
     case "jump":
       return { ...op, target: rewriteValue(op.target, bindings) };
     case "conditionalJump":
@@ -158,6 +175,14 @@ function rewriteValue(
         condition: rewriteValue(value.condition, bindings),
         whenTrue: rewriteValue(value.whenTrue, bindings),
         whenFalse: rewriteValue(value.whenFalse, bindings)
+      };
+    case "value.project":
+      return { ...value, value: rewriteValue(value.value, bindings) };
+    case "value.compare":
+      return {
+        ...value,
+        a: rewriteValue(value.a, bindings),
+        b: rewriteValue(value.b, bindings)
       };
     case "const":
     case "nextEip":
@@ -228,6 +253,19 @@ function visitOpValues(
         visitValue(value, visit);
       }
       return;
+    case "flags.write":
+      for (const cell of Object.values(op.cells)) {
+        if (cell?.kind === "expr") {
+          visitValue(cell.value, visit);
+        }
+      }
+
+      for (const value of Object.values(op.conditions ?? {})) {
+        if (value !== undefined) {
+          visitValue(value, visit);
+        }
+      }
+      return;
     case "jump":
       visitValue(op.target, visit);
       return;
@@ -265,6 +303,13 @@ function visitValue(
       visitValue(value.condition, visit);
       visitValue(value.whenTrue, visit);
       visitValue(value.whenFalse, visit);
+      return;
+    case "value.project":
+      visitValue(value.value, visit);
+      return;
+    case "value.compare":
+      visitValue(value.a, visit);
+      visitValue(value.b, visit);
       return;
     case "var":
     case "const":

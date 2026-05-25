@@ -121,6 +121,23 @@ function bindTestInstructionIr(ir: IrBlock, nextEip: number): IrBlock {
             Object.entries(op.inputs).map(([name, value]) => [name, bindTestValue(value, nextEip)])
           )
         };
+      case "flags.write":
+        return {
+          ...op,
+          cells: Object.fromEntries(
+            Object.entries(op.cells).map(([flag, cell]) => [
+              flag,
+              cell?.kind === "expr" ? { kind: "expr", value: bindTestValue(cell.value, nextEip) } : cell
+            ])
+          ),
+          ...(op.conditions === undefined
+            ? {}
+            : {
+                conditions: Object.fromEntries(
+                  Object.entries(op.conditions).map(([cc, value]) => [cc, bindTestValue(value, nextEip)])
+                )
+              })
+        };
       case "hostTrap":
         return { ...op, vector: bindTestValue(op.vector, nextEip) };
       case "next":
@@ -137,8 +154,6 @@ function bindTestInstructionIr(ir: IrBlock, nextEip: number): IrBlock {
       case "address":
       case "value.const":
       case "flags.condition":
-        return op;
-      default:
         return op;
     }
   });

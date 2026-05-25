@@ -103,6 +103,19 @@ function collectOpVarUses(op: IrExprOp, visit: (id: number) => void): void {
         collectValueVarUses(value, visit);
       }
       return;
+    case "flags.write":
+      for (const cell of Object.values(op.cells)) {
+        if (cell?.kind === "expr") {
+          collectValueVarUses(cell.value, visit);
+        }
+      }
+
+      for (const value of Object.values(op.conditions ?? {})) {
+        if (value !== undefined) {
+          collectValueVarUses(value, visit);
+        }
+      }
+      return;
     case "next":
       return;
     case "jump":
@@ -149,6 +162,13 @@ function collectValueVarUses(value: IrValueExpr, visit: (id: number) => void): v
       collectValueVarUses(value.condition, visit);
       collectValueVarUses(value.whenTrue, visit);
       collectValueVarUses(value.whenFalse, visit);
+      return;
+    case "value.project":
+      collectValueVarUses(value.value, visit);
+      return;
+    case "value.compare":
+      collectValueVarUses(value.a, visit);
+      collectValueVarUses(value.b, visit);
       return;
   }
 }

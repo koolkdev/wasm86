@@ -124,6 +124,7 @@ function valueRootsForTestExpressionOp(
     case "let32":
     case "next":
     case "flags.set":
+    case "flags.write":
       return [];
   }
 }
@@ -173,6 +174,13 @@ function childValueRootsForExpression(
         ...valueRootsForExpression(input, value.condition, at, path, purpose),
         ...valueRootsForExpression(input, value.whenTrue, at, path, purpose),
         ...valueRootsForExpression(input, value.whenFalse, at, path, purpose)
+      ];
+    case "value.project":
+      return valueRootsForExpression(input, value.value, at, path, purpose);
+    case "value.compare":
+      return [
+        ...valueRootsForExpression(input, value.a, at, path, purpose),
+        ...valueRootsForExpression(input, value.b, at, path, purpose)
       ];
     case "var":
     case "const":

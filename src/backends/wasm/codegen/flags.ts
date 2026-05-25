@@ -20,6 +20,7 @@ import type { OperandWidth } from "#x86/isa/types.js";
 import { i32 } from "#x86/state/cpu-state.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import type { IrFlagWriteExprOp, IrValueExpr } from "./expressions.js";
 import type { WasmIrAluFlagsStorage } from "./alu-flags.js";
 import {
   emitI32BinaryInstruction,
@@ -76,6 +77,26 @@ export function emitSetFlags(
     aluFlags.emitLoad();
     body.i32Const(i32(x86ArithmeticFlagsMask & ~writeMask)).i32And();
     emitWrittenFlags(body, defs, flagHelpers, writeMask);
+    body.i32Or();
+  });
+}
+
+export function emitWriteFlags(
+  body: WasmFunctionBodyEncoder,
+  aluFlags: WasmIrAluFlagsStorage,
+  descriptor: IrFlagWriteExprOp,
+  helpers: WasmFlagValueEmitHelpers<IrValueExpr>
+): void {
+  const writeMask = flagWriteMask(descriptor);
+
+  if (writeMask === 0) {
+    return;
+  }
+
+  aluFlags.emitStore(() => {
+    aluFlags.emitLoad();
+    body.i32Const(i32(x86ArithmeticFlagsMask & ~writeMask)).i32And();
+    emitFlagWriteCells(body, descriptor, helpers);
     body.i32Or();
   });
 }
@@ -150,6 +171,47 @@ function emitWrittenFlags<T>(
   if (!hasWrittenFlag) {
     body.i32Const(0);
   }
+}
+
+function emitFlagWriteCells(
+  body: WasmFunctionBodyEncoder,
+  descriptor: IrFlagWriteExprOp,
+  helpers: WasmFlagValueEmitHelpers<IrValueExpr>
+): void {
+  let hasWrittenBit = false;
+
+  for (const flag of flagOrder) {
+    const cell = descriptor.cells[flag];
+
+    if (cell === undefined || cell.kind === "undef") {
+      continue;
+    }
+
+    helpers.emitValue(cell.value, { requestedWidth: 32 });
+    body.i32Eqz().i32Eqz().i32Const(flagBit(flag)).i32Shl();
+
+    if (hasWrittenBit) {
+      body.i32Or();
+    } else {
+      hasWrittenBit = true;
+    }
+  }
+
+  if (!hasWrittenBit) {
+    body.i32Const(0);
+  }
+}
+
+function flagWriteMask(descriptor: IrFlagWriteExprOp): number {
+  let mask = 0;
+
+  for (const flag of flagOrder) {
+    if (descriptor.cells[flag] !== undefined) {
+      mask |= x86ArithmeticFlagMask[flag];
+    }
+  }
+
+  return mask;
 }
 
 function emitFlagBit<T>(

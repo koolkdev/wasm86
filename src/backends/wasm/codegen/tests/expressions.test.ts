@@ -142,6 +142,53 @@ test("expression selector materializes flag inputs that still need value refs", 
   );
 });
 
+test("expression selector binds semantic flag write cells and conditions", () => {
+  deepStrictEqual(
+    buildIrExpressionBlock([
+      { op: "get", dst: v(0), source: op(0) },
+      { op: "value.project", type: "i32", dst: v(1), width: 8, value: v(0) },
+      { op: "value.compare", type: "i32", operator: "eq", dst: v(2), width: 8, a: v(1), b: c32(0) },
+      {
+        op: "flags.write",
+        cells: {
+          ZF: { kind: "expr", value: v(2) },
+          AF: { kind: "undef" }
+        },
+        conditions: {
+          E: v(2)
+        }
+      },
+      { op: "next" }
+    ]),
+    [
+      { op: "let32", dst: v(0), value: sourceValue(op(0)) },
+      {
+        op: "let32",
+        dst: v(2),
+        value: {
+          kind: "value.compare",
+          type: "i32",
+          operator: "eq",
+          width: 8,
+          a: { kind: "value.project", type: "i32", width: 8, value: v(0) },
+          b: c32(0)
+        }
+      },
+      {
+        op: "flags.write",
+        cells: {
+          ZF: { kind: "expr", value: v(2) },
+          AF: { kind: "undef" }
+        },
+        conditions: {
+          E: v(2)
+        }
+      },
+      { op: "next" }
+    ]
+  );
+});
+
 test("expression selector inlines select values into writes", () => {
   deepStrictEqual(
     buildIrExpressionBlock([

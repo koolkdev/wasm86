@@ -332,6 +332,8 @@ function staticLinkTargetForExpression(
     case "value.binary":
     case "value.unary":
     case "value.select":
+    case "value.project":
+    case "value.compare":
       return undefined;
   }
 }

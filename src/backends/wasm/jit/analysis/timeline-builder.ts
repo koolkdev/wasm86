@@ -3,6 +3,7 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
+import { UnsupportedWasmCodegenError } from "#backends/wasm/errors.js";
 import {
   createJitValueResolver,
   type JitValueResolver
@@ -114,6 +115,8 @@ class TimelineBuilder {
       case "hostTrap":
       case "next":
         return;
+      case "flags.write":
+        throw new UnsupportedWasmCodegenError(`semantic flags.write is unsupported by legacy JIT analysis at op ${this.#currentOpIndex}`);
     }
   }
 
@@ -143,6 +146,8 @@ class TimelineBuilder {
       case "flags.set":
       case "next":
         return;
+      case "flags.write":
+        throw new UnsupportedWasmCodegenError(`semantic flags.write is unsupported by legacy JIT analysis at op ${this.#currentOpIndex}`);
     }
   }
 
@@ -161,6 +166,8 @@ class TimelineBuilder {
       case "hostTrap":
       case "next":
         return;
+      case "flags.write":
+        throw new UnsupportedWasmCodegenError(`semantic flags.write is unsupported by legacy JIT analysis at op ${this.#currentOpIndex}`);
     }
   }
 
@@ -329,6 +336,8 @@ class TimelineBuilder {
       case "value.binary":
       case "value.unary":
       case "value.select":
+      case "value.project":
+      case "value.compare":
         break;
     }
 
@@ -388,6 +397,9 @@ class TimelineBuilder {
           whenFalse
         });
       }
+      case "value.project":
+      case "value.compare":
+        throw new UnsupportedWasmCodegenError(`semantic ${expression.kind} is unsupported by legacy JIT analysis at op ${this.#currentOpIndex}`);
       case "flags.condition":
         return this.#resolvedValue(this.#resolver.valueForExpression(expression));
       case "var":
@@ -429,6 +441,13 @@ class TimelineBuilder {
         this.#recordMemoryLoadExpressionInputs(expression.condition);
         this.#recordMemoryLoadExpressionInputs(expression.whenTrue);
         this.#recordMemoryLoadExpressionInputs(expression.whenFalse);
+        return;
+      case "value.project":
+        this.#recordMemoryLoadExpressionInputs(expression.value);
+        return;
+      case "value.compare":
+        this.#recordMemoryLoadExpressionInputs(expression.a);
+        this.#recordMemoryLoadExpressionInputs(expression.b);
         return;
       case "flags.condition":
         return;

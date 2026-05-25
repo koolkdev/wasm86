@@ -3,6 +3,7 @@ import {
   type IrExpressionInputBlock,
   type IrExprOp,
   type IrExprBlock,
+  type IrFlagWriteExprOp,
   type IrMemoryGuardExprOp,
   type IrSetExprOp,
   type IrStorageExpr,
@@ -11,6 +12,7 @@ import {
 import type {
   ConditionCode,
   IrBinaryOperator,
+  IrCompareOperator,
   IrFlagSetOp,
   IrUnaryOperator,
 } from "#x86/ir/model/types.js";
@@ -53,6 +55,7 @@ export type WasmIrEmitContext = Readonly<{
   emitMemoryGuard(op: IrMemoryGuardExprOp, helpers: WasmIrEmitHelpers): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
   emitSetFlags(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
+  emitWriteFlags(descriptor: IrFlagWriteExprOp, helpers: WasmIrEmitHelpers): void;
   emitFlagsCondition(cc: ConditionCode): void;
   emitNext(helpers: WasmIrEmitHelpers): void;
   emitNextEip(helpers: WasmIrEmitHelpers): void;
@@ -147,6 +150,9 @@ class IrExprWasmEmitter {
       case "flags.set":
         this.#context.emitSetFlags(op, this.#helpers);
         return;
+      case "flags.write":
+        this.#context.emitWriteFlags(op, this.#helpers);
+        return;
       case "next":
         this.#context.emitNext(this.#helpers);
         return;
@@ -207,6 +213,10 @@ class IrExprWasmEmitter {
         return this.#emitI32Unary(value.operator, value.value, options);
       case "value.select":
         return this.#emitI32Select(value.condition, value.whenTrue, value.whenFalse);
+      case "value.project":
+        return this.#emitProject(value.value, value.width);
+      case "value.compare":
+        return this.#emitCompare(value.operator, value.width, value.a, value.b);
     }
   }
 
@@ -250,6 +260,36 @@ class IrExprWasmEmitter {
     return i32SelectResultValueWidth(conditionWidth, trueWidth, falseWidth);
   }
 
+  #emitProject(value: IrValueExpr, width: OperandWidth): ValueWidth {
+    return emitMaskValueToWidth(
+      this.#context.body,
+      width,
+      this.#emitValue(value, { widthInsensitive: true })
+    );
+  }
+
+  #emitCompare(operator: IrCompareOperator, width: OperandWidth, a: IrValueExpr, b: IrValueExpr): ValueWidth {
+    if (compareUsesSignedOrder(operator)) {
+      this.#emitSignedCompareValue(a, width);
+      this.#emitSignedCompareValue(b, width);
+      emitI32CompareInstruction(this.#context.body, operator);
+    } else {
+      this.#emitMaskedValue(a, width);
+      this.#emitMaskedValue(b, width);
+      emitI32CompareInstruction(this.#context.body, operator);
+    }
+
+    return cleanValueWidth(8);
+  }
+
+  #emitSignedCompareValue(value: IrValueExpr, width: OperandWidth): void {
+    this.#emitMaskedValue(value, width);
+
+    if (width === 8 || width === 16) {
+      emitSignExtendValueToWidth(this.#context.body, width);
+    }
+  }
+
   #freeSlotLocals(): void {
     for (let index = this.#slotLocals.length - 1; index >= 0; index -= 1) {
       this.#context.scratch.freeLocal(this.#slotLocals[index]!);
@@ -270,6 +310,23 @@ class IrExprWasmEmitter {
     }
 
     return local;
+  }
+}
+
+function compareUsesSignedOrder(operator: IrCompareOperator): boolean {
+  switch (operator) {
+    case "lt_s":
+    case "le_s":
+    case "gt_s":
+    case "ge_s":
+      return true;
+    case "eq":
+    case "ne":
+    case "lt_u":
+    case "le_u":
+    case "gt_u":
+    case "ge_u":
+      return false;
   }
 }
 
@@ -295,6 +352,44 @@ export function emitI32BinaryInstruction(body: WasmFunctionBodyEncoder, operator
       return;
     case "shr_u":
       body.i32ShrU();
+      return;
+  }
+}
+
+function emitI32CompareInstruction(
+  body: WasmFunctionBodyEncoder,
+  operator: IrCompareOperator
+): void {
+  switch (operator) {
+    case "eq":
+      body.i32Eq();
+      return;
+    case "ne":
+      body.i32Ne();
+      return;
+    case "lt_u":
+      body.i32LtU();
+      return;
+    case "le_u":
+      body.i32LeU();
+      return;
+    case "gt_u":
+      body.i32GtU();
+      return;
+    case "ge_u":
+      body.i32GeU();
+      return;
+    case "lt_s":
+      body.i32LtS();
+      return;
+    case "le_s":
+      body.i32LeS();
+      return;
+    case "gt_s":
+      body.i32GtS();
+      return;
+    case "ge_s":
+      body.i32GeS();
       return;
   }
 }

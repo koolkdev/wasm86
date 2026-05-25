@@ -82,6 +82,18 @@ function bindJitExpressionOp(
     case "flags.set":
       Object.values(op.inputs).forEach((value) => assertJitBoundValue(value, opIndex));
       return op;
+    case "flags.write":
+      Object.values(op.cells).forEach((cell) => {
+        if (cell?.kind === "expr") {
+          assertJitBoundValue(cell.value, opIndex);
+        }
+      });
+      Object.values(op.conditions ?? {}).forEach((value) => {
+        if (value !== undefined) {
+          assertJitBoundValue(value, opIndex);
+        }
+      });
+      return op;
     case "jump":
       assertJitBoundValue(op.target, opIndex);
       return op;
@@ -112,6 +124,18 @@ function validateJitBoundExpressionOp(op: JitBoundExprOp, opIndex: number): void
       return;
     case "flags.set":
       Object.values(op.inputs).forEach((value) => assertJitBoundValue(value, opIndex));
+      return;
+    case "flags.write":
+      Object.values(op.cells).forEach((cell) => {
+        if (cell?.kind === "expr") {
+          assertJitBoundValue(cell.value, opIndex);
+        }
+      });
+      Object.values(op.conditions ?? {}).forEach((value) => {
+        if (value !== undefined) {
+          assertJitBoundValue(value, opIndex);
+        }
+      });
       return;
     case "jump":
       assertJitBoundValue(op.target, opIndex);
@@ -156,6 +180,13 @@ function assertJitBoundValue(value: IrValueExpr, opIndex: number): void {
       assertJitBoundValue(value.condition, opIndex);
       assertJitBoundValue(value.whenTrue, opIndex);
       assertJitBoundValue(value.whenFalse, opIndex);
+      return;
+    case "value.project":
+      assertJitBoundValue(value.value, opIndex);
+      return;
+    case "value.compare":
+      assertJitBoundValue(value.a, opIndex);
+      assertJitBoundValue(value.b, opIndex);
       return;
     case "var":
     case "const":

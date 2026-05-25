@@ -1,7 +1,9 @@
 import type {
   ConditionCode,
   IrBinaryOperator,
+  IrCompareOperator,
   IrFlagSetOp,
+  IrFlagWriteOp,
   IrMemoryAccessKind,
   OperandRef,
   RegRef,
@@ -12,6 +14,7 @@ import type {
   ValueRef,
   VarRef
 } from "#x86/ir/model/types.js";
+import type { FlagName } from "#x86/ir/model/flags.js";
 import {
   visitIrOpValueRefs
 } from "#x86/ir/model/op-semantics.js";
@@ -46,6 +49,20 @@ export type IrValueExpr =
       condition: IrValueExpr;
       whenTrue: IrValueExpr;
       whenFalse: IrValueExpr;
+    }>
+  | Readonly<{
+      kind: "value.project";
+      type: IrValueType;
+      width: OperandWidth;
+      value: IrValueExpr;
+    }>
+  | Readonly<{
+      kind: "value.compare";
+      type: IrValueType;
+      operator: IrCompareOperator;
+      width: OperandWidth;
+      a: IrValueExpr;
+      b: IrValueExpr;
     }>;
 
 export type IrSetExprOp = Readonly<{
@@ -62,11 +79,22 @@ export type IrMemoryGuardExprOp = Readonly<{
   access: IrMemoryAccessKind;
 }>;
 
+export type IrFlagWriteExprCell =
+  | Readonly<{ kind: "expr"; value: IrValueExpr }>
+  | Readonly<{ kind: "undef" }>;
+
+export type IrFlagWriteExprOp = Readonly<{
+  op: "flags.write";
+  cells: Partial<Record<FlagName, IrFlagWriteExprCell>>;
+  conditions?: Partial<Record<ConditionCode, IrValueExpr>>;
+}>;
+
 export type IrExprOp =
   | Readonly<{ op: "let32"; dst: VarRef; value: IrValueExpr }>
   | IrSetExprOp
   | IrMemoryGuardExprOp
   | IrFlagSetOp
+  | IrFlagWriteExprOp
   | Readonly<{ op: "next" }>
   | Readonly<{ op: "jump"; target: IrValueExpr }>
   | Readonly<{ op: "conditionalJump"; condition: IrValueExpr; taken: IrValueExpr; notTaken: IrValueExpr }>
@@ -194,9 +222,31 @@ class ExpressionBuilder {
           }, true);
           break;
         }
-        case "value.project":
-        case "value.compare":
-          throw new Error(`${op.op} is not supported by legacy wasm expression codegen`);
+        case "value.project": {
+          const value = this.#valueExpr(op.value);
+
+          this.#defineValue(op.dst, {
+            kind: "value.project",
+            type: op.type,
+            width: op.width,
+            value: value.value
+          }, true);
+          break;
+        }
+        case "value.compare": {
+          const a = this.#valueExpr(op.a);
+          const b = this.#valueExpr(op.b);
+
+          this.#defineValue(op.dst, {
+            kind: "value.compare",
+            type: op.type,
+            operator: op.operator,
+            width: op.width,
+            a: a.value,
+            b: b.value
+          }, true);
+          break;
+        }
         case "flags.condition":
           this.#defineValue(op.dst, { kind: "flags.condition", cc: op.cc }, false);
           break;
@@ -219,7 +269,8 @@ class ExpressionBuilder {
           break;
         }
         case "flags.write":
-          throw new Error("flags.write is not supported by legacy wasm expression codegen");
+          this.#pushOp(this.#flagWriteExpr(op));
+          break;
         case "next": {
           this.#pushOp(op);
           break;
@@ -280,6 +331,34 @@ class ExpressionBuilder {
       target: target.storage,
       value: value.value,
       accessWidth: op.accessWidth ?? 32
+    };
+  }
+
+  #flagWriteExpr(op: IrFlagWriteOp): IrFlagWriteExprOp {
+    const cells: IrFlagWriteExprOp["cells"] = {};
+
+    for (const [flag, cell] of Object.entries(op.cells) as [FlagName, IrFlagWriteOp["cells"][FlagName]][]) {
+      if (cell === undefined) {
+        continue;
+      }
+
+      cells[flag] = cell.kind === "expr"
+        ? { kind: "expr", value: this.#valueExpr(cell.value).value }
+        : { kind: "undef" };
+    }
+
+    if (op.conditions === undefined) {
+      return { op: "flags.write", cells };
+    }
+
+    return {
+      op: "flags.write",
+      cells,
+      conditions: Object.fromEntries(
+        Object.entries(op.conditions).flatMap(([cc, value]) =>
+          value === undefined ? [] : [[cc, this.#valueExpr(value).value]]
+        )
+      )
     };
   }
 
