@@ -2,7 +2,7 @@ import {
   flagProducerInputNames,
   requiredFlagProducerInput
 } from "#x86/ir/model/flags.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import { simplifyValue } from "./simplify.js";
 import {
   flagProducerWidth,

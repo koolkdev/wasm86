@@ -8,9 +8,9 @@ import {
   hasEvenParityLowByte,
   setFlag,
   setRegisterAlias,
-  u32,
   type CpuState
 } from "#x86/state/cpu-state.js";
+import { u32 } from "#x86/numeric.js";
 import { registerAlias } from "#x86/isa/registers.js";
 import { buildIr } from "#x86/ir/build/builder.js";
 import { CONDITIONS, type FlagBoolExpr } from "#x86/ir/model/conditions.js";

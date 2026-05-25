@@ -1,5 +1,5 @@
-import { i32 } from "#x86/state/cpu-state.js";
-import type { ExprRef, JitInputSource } from "./types.js";
+import { i32 } from "#x86/numeric.js";
+import type { ExprRef, ExprInputSource } from "./types.js";
 
 export function exprsEqual(left: ExprRef, right: ExprRef): boolean {
   if (left === right) {
@@ -45,8 +45,8 @@ export function exprsEqual(left: ExprRef, right: ExprRef): boolean {
 }
 
 function inputSourcesEqual(
-  left: JitInputSource,
-  right: JitInputSource
+  left: ExprInputSource,
+  right: ExprInputSource
 ): boolean {
   if (left.kind !== right.kind) {
     return false;

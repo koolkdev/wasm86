@@ -11,11 +11,11 @@ import {
   exprInput,
   exprInsertBits,
   exprProject
-} from "#backends/wasm/jit/ir/expressions/builders.js";
-import { RegisterState } from "#backends/wasm/jit/state/register-state.js";
+} from "#x86/expr/builders.js";
+import { RegisterState } from "#x86/block/state/register-state.js";
 import { registerAlias } from "#x86/isa/registers.js";
 
-test("JIT register state returns keyed cells for all base registers", () => {
+test("RegisterState returns keyed cells for all base registers", () => {
   const state = RegisterState.initial();
 
   deepStrictEqual(
@@ -24,7 +24,7 @@ test("JIT register state returns keyed cells for all base registers", () => {
   );
 });
 
-test("JIT register state reads aliases from the base register input", () => {
+test("RegisterState reads aliases from the base register input", () => {
   const state = RegisterState.initial();
   const eax = exprInput({ kind: "reg", reg: "eax" });
 
@@ -35,7 +35,7 @@ test("JIT register state reads aliases from the base register input", () => {
   deepStrictEqual(state.readAlias(registerAlias("ah")), exprBits(eax, 8, 8));
 });
 
-test("JIT register state writes AL while preserving AH and the high word", () => {
+test("RegisterState writes AL while preserving AH and the high word", () => {
   const state = RegisterState.initial();
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const next = state.writeAlias(registerAlias("al"), exprConst(0x12));
@@ -47,7 +47,7 @@ test("JIT register state writes AL while preserving AH and the high word", () =>
   deepStrictEqual(next.readAlias(registerAlias("ah")), exprBits(expectedEax, 8, 8));
 });
 
-test("JIT register state writes AH while preserving AL and the high word", () => {
+test("RegisterState writes AH while preserving AL and the high word", () => {
   const state = RegisterState.initial();
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const next = state.writeAlias(registerAlias("ah"), exprConst(0x34));
@@ -58,7 +58,7 @@ test("JIT register state writes AH while preserving AL and the high word", () =>
   deepStrictEqual(next.readAlias(registerAlias("al")), exprProject(8, expectedEax));
 });
 
-test("JIT register state writes AX while preserving the high word", () => {
+test("RegisterState writes AX while preserving the high word", () => {
   const state = RegisterState.initial();
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const next = state.writeAlias(registerAlias("ax"), exprConst(0x1234));
@@ -69,7 +69,7 @@ test("JIT register state writes AX while preserving the high word", () => {
   deepStrictEqual(next.readAlias(registerAlias("ax")), exprProject(16, expectedEax));
 });
 
-test("JIT register state detects alias no-op writes against the current alias value", () => {
+test("RegisterState detects alias no-op writes against the current alias value", () => {
   const state = RegisterState.initial();
   const narrowedEax = state.write(
     "eax",
@@ -83,7 +83,7 @@ test("JIT register state detects alias no-op writes against the current alias va
   strictEqual(same, narrowedEax);
 });
 
-test("JIT register state detects base register no-op writes", () => {
+test("RegisterState detects base register no-op writes", () => {
   const state = RegisterState.initial();
 
   strictEqual(state.write("eax", exprInput({ kind: "reg", reg: "eax" })), state);
@@ -93,7 +93,7 @@ test("JIT register state detects base register no-op writes", () => {
   );
 });
 
-test("JIT register state full EAX writes replace all aliases", () => {
+test("RegisterState full EAX writes replace all aliases", () => {
   const state = RegisterState.initial();
   const withLowByte = state.writeAlias(registerAlias("al"), exprConst(0x7f));
   const ebx = exprInput({ kind: "reg", reg: "ebx" });
@@ -109,7 +109,7 @@ test("JIT register state full EAX writes replace all aliases", () => {
   deepStrictEqual(replaced.readAlias(registerAlias("ah")), exprBits(ebx, 8, 8));
 });
 
-test("JIT register state cells expose final base-register expressions", () => {
+test("RegisterState cells expose final base-register expressions", () => {
   const state = RegisterState.initial();
   const changed = state.writeAlias(registerAlias("eax"), exprConst(1));
   const restored = changed.write("eax", exprInput({ kind: "reg", reg: "eax" }));
@@ -127,7 +127,7 @@ test("JIT register state cells expose final base-register expressions", () => {
   );
 });
 
-test("JIT register state canonicalizes values at write boundaries", () => {
+test("RegisterState canonicalizes values at write boundaries", () => {
   const state = RegisterState.initial();
   const ebx = exprInput({ kind: "reg", reg: "ebx" });
   const changed = state.write("eax", exprProject(32, ebx));

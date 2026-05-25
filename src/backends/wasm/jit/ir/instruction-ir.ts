@@ -11,7 +11,7 @@ import type {
   VarRef
 } from "#x86/ir/model/types.js";
 import type { EffectiveAddress, OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
-import { u32 } from "#x86/state/cpu-state.js";
+import { u32 } from "#x86/numeric.js";
 
 export type BindInstructionIrInput = Readonly<{
   ir: readonly IrOp[];

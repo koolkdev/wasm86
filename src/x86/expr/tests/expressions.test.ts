@@ -14,26 +14,26 @@ import {
   exprProject,
   exprSelect,
   exprUnary
-} from "#backends/wasm/jit/ir/expressions/builders.js";
-import { exprDependencies } from "#backends/wasm/jit/ir/expressions/dependencies.js";
-import { canonicalizeExpr } from "#backends/wasm/jit/ir/expressions/canonicalize.js";
-import { exprsEqual } from "#backends/wasm/jit/ir/expressions/equality.js";
+} from "#x86/expr/builders.js";
+import { exprDependencies } from "#x86/expr/dependencies.js";
+import { canonicalizeExpr } from "#x86/expr/canonicalize.js";
+import { exprsEqual } from "#x86/expr/equality.js";
 import {
   bitsUse,
   childUseForExpr,
   exactUse,
   exprUseSatisfies,
   full32Use
-} from "#backends/wasm/jit/ir/expressions/uses.js";
+} from "#x86/expr/uses.js";
 
-test("JitScalarExpr semantic projection constants canonicalize without consumer metadata", () => {
+test("ExprRef semantic projection constants canonicalize without consumer metadata", () => {
   deepStrictEqual(
     canonicalizeExpr(exprProject(8, exprConst(0x1234_5678))),
     exprConst(0x78)
   );
 });
 
-test("JitScalarExpr nested projections collapse only to identical semantics", () => {
+test("ExprRef nested projections collapse only to identical semantics", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const nested = exprProject(16, exprProject(8, eax));
   const expected = exprProject(8, eax);
@@ -42,7 +42,7 @@ test("JitScalarExpr nested projections collapse only to identical semantics", ()
   strictEqual(exprsEqual(canonicalizeExpr(nested), expected), true);
 });
 
-test("JitScalarExpr high-mask demand through low projection observes no input bits", () => {
+test("ExprRef high-mask demand through low projection observes no input bits", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const projected = exprProject(8, eax);
 
@@ -50,7 +50,7 @@ test("JitScalarExpr high-mask demand through low projection observes no input bi
   deepStrictEqual(exprDependencies(projected, bitsUse(0xff00)), []);
 });
 
-test("JitScalarExpr demand dependencies match projection emission uses", () => {
+test("ExprRef demand dependencies match projection emission uses", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const projected = exprProject(8, eax);
 
@@ -63,7 +63,7 @@ test("JitScalarExpr demand dependencies match projection emission uses", () => {
   ]);
 });
 
-test("JitScalarExpr byte store and use contracts keep dependency demand precise", () => {
+test("ExprRef byte store and use contracts keep dependency demand precise", () => {
   const highByte = exprBits(exprInput({ kind: "reg", reg: "eax" }), 8, 8);
 
   deepStrictEqual(exprDependencies(exprProject(8, exprInput({ kind: "reg", reg: "eax" })), bitsUse(0xff)), [
@@ -75,7 +75,7 @@ test("JitScalarExpr byte store and use contracts keep dependency demand precise"
   strictEqual(exprUseSatisfies(bitsUse(0xff), exactUse()), false);
 });
 
-test("JitScalarExpr high-bit demand through compare results observes no input bits", () => {
+test("ExprRef high-bit demand through compare results observes no input bits", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const ebx = exprInput({ kind: "reg", reg: "ebx" });
 
@@ -83,7 +83,7 @@ test("JitScalarExpr high-bit demand through compare results observes no input bi
   deepStrictEqual(exprDependencies(exprCompare(8, "lt_s", eax, ebx), bitsUse(0xff00)), []);
 });
 
-test("JitScalarExpr popcnt dependencies are explicit and can be narrowed by real bitwise ops", () => {
+test("ExprRef popcnt dependencies are explicit and can be narrowed by real bitwise ops", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const lowByte = exprBinary("and", eax, exprConst(0xff));
 
@@ -96,7 +96,7 @@ test("JitScalarExpr popcnt dependencies are explicit and can be narrowed by real
   deepStrictEqual(canonicalizeExpr(exprUnary("popcnt", exprConst(0b1011))), exprUnary("popcnt", exprConst(0b1011)));
 });
 
-test("JitScalarExpr compare dependencies use the explicit operation width", () => {
+test("ExprRef compare dependencies use the explicit operation width", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const ebx = exprInput({ kind: "reg", reg: "ebx" });
   const cases = [
@@ -119,7 +119,7 @@ test("JitScalarExpr compare dependencies use the explicit operation width", () =
   }
 });
 
-test("JitScalarExpr aliases derive from canonical register inputs", () => {
+test("ExprRef aliases derive from canonical register inputs", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
 
   deepStrictEqual(canonicalizeExpr(exprBits(eax, 0, 8)), exprProject(8, eax));
@@ -134,7 +134,7 @@ test("JitScalarExpr aliases derive from canonical register inputs", () => {
   ]);
 });
 
-test("JitScalarExpr flag inputs are per-flag cells", () => {
+test("ExprRef flag inputs are per-flag cells", () => {
   const zf = exprInput({ kind: "flag", flag: "ZF" });
 
   deepStrictEqual(exprDependencies(zf), [
@@ -143,7 +143,7 @@ test("JitScalarExpr flag inputs are per-flag cells", () => {
   deepStrictEqual(exprDependencies(zf, bitsUse(0)), []);
 });
 
-test("JitScalarExpr canonicalization keeps arithmetic and condition shapes", () => {
+test("ExprRef canonicalization keeps arithmetic and condition shapes", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const ebx = exprInput({ kind: "reg", reg: "ebx" });
   const addZero = exprBinary("add", eax, exprConst(0));
@@ -155,7 +155,7 @@ test("JitScalarExpr canonicalization keeps arithmetic and condition shapes", () 
   deepStrictEqual(canonicalizeExpr(constSelect), constSelect);
 });
 
-test("JitScalarExpr equality keeps semantic projections separate from partial uses", () => {
+test("ExprRef equality keeps semantic projections separate from partial uses", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const projected = exprProject(8, eax);
 
@@ -164,13 +164,13 @@ test("JitScalarExpr equality keeps semantic projections separate from partial us
   strictEqual(exprsEqual(canonicalizeExpr(exprBinary("add", eax, exprConst(0))), eax), false);
 });
 
-test("JitScalarExpr partial bit use cannot satisfy full semantic reuse", () => {
+test("ExprRef partial bit use cannot satisfy full semantic reuse", () => {
   strictEqual(exprUseSatisfies(bitsUse(0xff), full32Use()), false);
   strictEqual(exprUseSatisfies(bitsUse(0xff), exactUse()), false);
   strictEqual(exprUseSatisfies(full32Use(), bitsUse(0xff)), true);
 });
 
-test("JitScalarExpr insertion demand splits between preserved and inserted bits", () => {
+test("ExprRef insertion demand splits between preserved and inserted bits", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const ebxLow = exprBits(exprInput({ kind: "reg", reg: "ebx" }), 0, 8);
   const inserted = exprInsertBits(eax, ebxLow, 8, 8);
@@ -183,7 +183,7 @@ test("JitScalarExpr insertion demand splits between preserved and inserted bits"
   ]);
 });
 
-test("JitScalarExpr dependencies merge repeated register inputs structurally", () => {
+test("ExprRef dependencies merge repeated register inputs structurally", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const combined = exprBinary("or", exprProject(8, eax), exprBits(eax, 8, 8));
 
@@ -192,7 +192,7 @@ test("JitScalarExpr dependencies merge repeated register inputs structurally", (
   ]);
 });
 
-test("JitScalarExpr canonicalization removes no-op alias insertions", () => {
+test("ExprRef canonicalization removes no-op alias insertions", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
 
   deepStrictEqual(canonicalizeExpr(exprInsertBits(eax, exprProject(8, eax), 0, 8)), eax);

@@ -1,5 +1,5 @@
 import { widthMask, type OperandWidth } from "#x86/isa/types.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import {
   bitRangeMask,
   exprBits,
@@ -14,13 +14,13 @@ import {
 } from "./builders.js";
 import type {
   ExprRef,
-  JitBinaryExpr,
-  JitBitsExpr,
-  JitCompareExpr,
-  JitInsertBitsExpr,
-  JitProjectExpr,
-  JitSelectExpr,
-  JitUnaryExpr
+  BinaryExpr,
+  BitsExpr,
+  CompareExpr,
+  InsertBitsExpr,
+  ProjectExpr,
+  SelectExpr,
+  UnaryExpr
 } from "./types.js";
 import { exprsEqual } from "./equality.js";
 
@@ -49,7 +49,7 @@ export function canonicalizeExpr(expr: ExprRef): ExprRef {
   }
 }
 
-function canonicalizeProjectExpr(expr: JitProjectExpr): ExprRef {
+function canonicalizeProjectExpr(expr: ProjectExpr): ExprRef {
   const value = canonicalizeExpr(expr.value);
 
   if (expr.width === 32) {
@@ -71,7 +71,7 @@ function canonicalizeProjectExpr(expr: JitProjectExpr): ExprRef {
   return value === expr.value ? expr : exprProject(expr.width, value);
 }
 
-function canonicalizeBitsExpr(expr: JitBitsExpr): ExprRef {
+function canonicalizeBitsExpr(expr: BitsExpr): ExprRef {
   assertBitRange(expr.offset, expr.width, "bits");
   const value = canonicalizeExpr(expr.value);
 
@@ -98,7 +98,7 @@ function canonicalizeBitsExpr(expr: JitBitsExpr): ExprRef {
   return value === expr.value ? expr : exprBits(value, expr.offset, expr.width);
 }
 
-function canonicalizeInsertBitsExpr(expr: JitInsertBitsExpr): ExprRef {
+function canonicalizeInsertBitsExpr(expr: InsertBitsExpr): ExprRef {
   assertBitRange(expr.offset, expr.width, "insertBits");
   const base = canonicalizeExpr(expr.base);
   const value = canonicalizeExpr(expr.value);
@@ -136,20 +136,20 @@ function canonicalizeInsertBitsExpr(expr: JitInsertBitsExpr): ExprRef {
   return base === expr.base && value === expr.value ? expr : exprInsertBits(base, value, expr.offset, expr.width);
 }
 
-function canonicalizeBinaryExpr(expr: JitBinaryExpr): ExprRef {
+function canonicalizeBinaryExpr(expr: BinaryExpr): ExprRef {
   const left = canonicalizeExpr(expr.left);
   const right = canonicalizeExpr(expr.right);
 
   return left === expr.left && right === expr.right ? expr : exprBinary(expr.op, left, right);
 }
 
-function canonicalizeUnaryExpr(expr: JitUnaryExpr): ExprRef {
+function canonicalizeUnaryExpr(expr: UnaryExpr): ExprRef {
   const value = canonicalizeExpr(expr.value);
 
   return value === expr.value ? expr : exprUnary(expr.op, value);
 }
 
-function canonicalizeSelectExpr(expr: JitSelectExpr): ExprRef {
+function canonicalizeSelectExpr(expr: SelectExpr): ExprRef {
   const condition = canonicalizeExpr(expr.condition);
   const whenTrue = canonicalizeExpr(expr.whenTrue);
   const whenFalse = canonicalizeExpr(expr.whenFalse);
@@ -159,7 +159,7 @@ function canonicalizeSelectExpr(expr: JitSelectExpr): ExprRef {
     : exprSelect(condition, whenTrue, whenFalse);
 }
 
-function canonicalizeCompareExpr(expr: JitCompareExpr): ExprRef {
+function canonicalizeCompareExpr(expr: CompareExpr): ExprRef {
   const left = canonicalizeExpr(expr.left);
   const right = canonicalizeExpr(expr.right);
 

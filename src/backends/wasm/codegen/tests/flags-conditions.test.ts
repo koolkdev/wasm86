@@ -5,7 +5,7 @@ import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
 import { createIrFlagSetOp, flagProducerInputsFromRecord } from "#x86/ir/model/flags.js";
 import type { ConditionCode, FlagProducerName, ValueRef } from "#x86/ir/model/types.js";
 import { x86ArithmeticFlagMask } from "#x86/isa/flags.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
 import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";

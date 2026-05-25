@@ -14,7 +14,7 @@ import {
   type ValueWidth,
   type WasmIrEmitValueOptions
 } from "#backends/wasm/codegen/value-width.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import type { IrBinaryOperator, IrUnaryOperator } from "#x86/ir/model/types.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";

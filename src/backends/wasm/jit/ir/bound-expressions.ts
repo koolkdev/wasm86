@@ -4,7 +4,7 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#backends/wasm/codegen/expressions.js";
-import { u32 } from "#x86/state/cpu-state.js";
+import { u32 } from "#x86/numeric.js";
 
 export type JitConstExpr = Extract<IrValueExpr, { kind: "const" }>;
 export type JitMemoryGuardExprOp = Extract<IrExprOp, { op: "memory.guard" }> & Readonly<{

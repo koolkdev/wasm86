@@ -1,4 +1,4 @@
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import { stateOffset } from "#backends/wasm/abi.js";
 import { emitLoadStateU32, emitStoreStateU32 } from "#backends/wasm/codegen/state.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";

@@ -30,30 +30,30 @@ export type ScalarCompareOp =
   | "gt_s"
   | "ge_s";
 
-export type JitInputSource =
+export type ExprInputSource =
   | Readonly<{ kind: "reg"; reg: Reg32 }>
   | Readonly<{ kind: "flag"; flag: FlagName }>;
 
-export type JitConstExpr = Readonly<{ kind: "const"; value: number }>;
-export type JitInputExpr = Readonly<{ kind: "input"; source: JitInputSource }>;
-export type JitBinaryExpr = Readonly<{ kind: "binary"; op: ScalarBinaryOp; left: ExprRef; right: ExprRef }>;
-export type JitUnaryExpr = Readonly<{ kind: "unary"; op: ScalarUnaryOp; value: ExprRef }>;
-export type JitSelectExpr = Readonly<{
+export type ConstExpr = Readonly<{ kind: "const"; value: number }>;
+export type InputExpr = Readonly<{ kind: "input"; source: ExprInputSource }>;
+export type BinaryExpr = Readonly<{ kind: "binary"; op: ScalarBinaryOp; left: ExprRef; right: ExprRef }>;
+export type UnaryExpr = Readonly<{ kind: "unary"; op: ScalarUnaryOp; value: ExprRef }>;
+export type SelectExpr = Readonly<{
   kind: "select";
   condition: ExprRef;
   whenTrue: ExprRef;
   whenFalse: ExprRef;
 }>;
-export type JitProjectExpr = Readonly<{ kind: "project"; width: OperandWidth; value: ExprRef }>;
-export type JitBitsExpr = Readonly<{ kind: "bits"; offset: number; width: OperandWidth; value: ExprRef }>;
-export type JitInsertBitsExpr = Readonly<{
+export type ProjectExpr = Readonly<{ kind: "project"; width: OperandWidth; value: ExprRef }>;
+export type BitsExpr = Readonly<{ kind: "bits"; offset: number; width: OperandWidth; value: ExprRef }>;
+export type InsertBitsExpr = Readonly<{
   kind: "insertBits";
   base: ExprRef;
   value: ExprRef;
   offset: number;
   width: OperandWidth;
 }>;
-export type JitCompareExpr = Readonly<{
+export type CompareExpr = Readonly<{
   kind: "compare";
   width: OperandWidth;
   op: ScalarCompareOp;
@@ -61,18 +61,16 @@ export type JitCompareExpr = Readonly<{
   right: ExprRef;
 }>;
 
-export type JitScalarExpr =
-  | JitConstExpr
-  | JitInputExpr
-  | JitBinaryExpr
-  | JitUnaryExpr
-  | JitSelectExpr
-  | JitProjectExpr
-  | JitBitsExpr
-  | JitInsertBitsExpr
-  | JitCompareExpr;
-
-export type ExprRef = JitScalarExpr;
+export type ExprRef =
+  | ConstExpr
+  | InputExpr
+  | BinaryExpr
+  | UnaryExpr
+  | SelectExpr
+  | ProjectExpr
+  | BitsExpr
+  | InsertBitsExpr
+  | CompareExpr;
 
 export type ExprUse =
   | Readonly<{ kind: "exact" }>

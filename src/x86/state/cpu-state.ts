@@ -11,6 +11,7 @@ import {
   type X86EflagsFlag
 } from "#x86/isa/flags.js";
 import { reg32, widthMask, type RegisterAlias, type Reg32 } from "#x86/isa/types.js";
+import { u32 } from "#x86/numeric.js";
 
 export type CpuArithmeticFlag = X86ArithmeticFlag;
 export type CpuControlFlag = X86ControlFlag;
@@ -92,14 +93,6 @@ export function getFlag(state: CpuState, flag: CpuFlag): boolean {
 export function setFlag(state: CpuState, flag: CpuFlag, value: boolean): void {
   const mask = eflagsMask[flag];
   state.eflags = value ? u32(state.eflags | mask) : u32(state.eflags & ~mask);
-}
-
-export function u32(value: number): number {
-  return value >>> 0;
-}
-
-export function i32(value: number): number {
-  return value | 0;
 }
 
 export function hasEvenParityLowByte(value: number): boolean {

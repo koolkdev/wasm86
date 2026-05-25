@@ -9,7 +9,7 @@ import { checkedU32Mask } from "./builders.js";
 import type {
   ExprRef,
   ExprUse,
-  JitInputSource
+  ExprInputSource
 } from "./types.js";
 
 export type ExprDependency =
@@ -74,7 +74,7 @@ function collectExprDependencies(
 }
 
 function addInputDependency(
-  source: JitInputSource,
+  source: ExprInputSource,
   use: ExprUse,
   deps: ExprDependencySet
 ): void {

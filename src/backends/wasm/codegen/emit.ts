@@ -17,7 +17,7 @@ import type {
   IrUnaryOperator,
 } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { wasmValueType } from "#backends/wasm/encoder/types.js";

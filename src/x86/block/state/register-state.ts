@@ -4,10 +4,10 @@ import {
   exprInput,
   exprInsertBits,
   exprProject
-} from "#backends/wasm/jit/ir/expressions/builders.js";
-import { canonicalizeExpr } from "#backends/wasm/jit/ir/expressions/canonicalize.js";
-import { exprsEqual } from "#backends/wasm/jit/ir/expressions/equality.js";
-import type { ExprRef } from "#backends/wasm/jit/ir/expressions/types.js";
+} from "#x86/expr/builders.js";
+import { canonicalizeExpr } from "#x86/expr/canonicalize.js";
+import { exprsEqual } from "#x86/expr/equality.js";
+import type { ExprRef } from "#x86/expr/types.js";
 
 export type RegisterCell = Readonly<{
   reg: Reg32;

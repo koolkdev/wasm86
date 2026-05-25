@@ -1,4 +1,4 @@
-import { u32 } from "#x86/state/cpu-state.js";
+import { u32 } from "#x86/numeric.js";
 import { wasmImport, wasmMemoryIndex } from "#backends/wasm/abi.js";
 import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
 import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";

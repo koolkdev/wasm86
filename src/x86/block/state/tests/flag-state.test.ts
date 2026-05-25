@@ -7,7 +7,7 @@ import { test } from "node:test";
 import type { OperandWidth } from "#x86/isa/types.js";
 import { IR_ALU_FLAGS } from "#x86/ir/model/flag-effects.js";
 import type { FlagName } from "#x86/ir/model/flags.js";
-import type { ScalarCompareOp } from "#backends/wasm/jit/ir/expressions/types.js";
+import type { ScalarCompareOp } from "#x86/expr/types.js";
 import {
   exprBinary,
   exprCompare,
@@ -15,17 +15,17 @@ import {
   exprInput,
   exprProject,
   exprUnary
-} from "#backends/wasm/jit/ir/expressions/builders.js";
-import { canonicalizeExpr } from "#backends/wasm/jit/ir/expressions/canonicalize.js";
-import { exprDependencies } from "#backends/wasm/jit/ir/expressions/dependencies.js";
-import type { ExprRef } from "#backends/wasm/jit/ir/expressions/types.js";
+} from "#x86/expr/builders.js";
+import { canonicalizeExpr } from "#x86/expr/canonicalize.js";
+import { exprDependencies } from "#x86/expr/dependencies.js";
+import type { ExprRef } from "#x86/expr/types.js";
 import {
   FlagState,
   type FlagCell,
-  type SemanticFlagWrite
-} from "#backends/wasm/jit/state/flag-state.js";
+  type FlagWrite
+} from "#x86/block/state/flag-state.js";
 
-test("JIT flag state initializes keyed per-flag input cells", () => {
+test("FlagState initializes keyed per-flag input cells", () => {
   const state = FlagState.initial();
 
   deepStrictEqual(
@@ -36,7 +36,7 @@ test("JIT flag state initializes keyed per-flag input cells", () => {
   deepStrictEqual(state.condition("E"), exprInput({ kind: "flag", flag: "ZF" }));
 });
 
-test("JIT flag state reads written, preserved, input, and undefined cells", () => {
+test("FlagState reads written, preserved, input, and undefined cells", () => {
   const state = FlagState.initial()
     .apply({ cells: { CF: exprCell(exprConst(1)), AF: undefCell() } })
     .apply({ cells: { ZF: exprCell(exprConst(0)) } });
@@ -47,7 +47,7 @@ test("JIT flag state reads written, preserved, input, and undefined cells", () =
   deepStrictEqual(state.read("AF"), undefCell());
 });
 
-test("JIT flag state cells returns keyed entries for all arithmetic flags", () => {
+test("FlagState cells returns keyed entries for all arithmetic flags", () => {
   const state = FlagState.initial().apply({
     cells: {
       CF: exprCell(exprConst(1)),
@@ -68,7 +68,7 @@ test("JIT flag state cells returns keyed entries for all arithmetic flags", () =
   );
 });
 
-test("JIT flag state partial writes preserve unwritten flag cells", () => {
+test("FlagState partial writes preserve unwritten flag cells", () => {
   const initial = FlagState.initial().apply({ cells: { CF: exprCell(exprConst(1)) } });
   const next = initial.apply({ cells: { ZF: exprCell(exprConst(1)) } });
 
@@ -78,7 +78,7 @@ test("JIT flag state partial writes preserve unwritten flag cells", () => {
   deepStrictEqual(initial.read("ZF"), inputCell("ZF"));
 });
 
-test("JIT flag state canonicalizes cell and direct condition expressions", () => {
+test("FlagState canonicalizes cell and direct condition expressions", () => {
   const eax = inputReg("eax");
   const ebx = inputReg("ebx");
   const direct = compare(32, "eq", eax, ebx);
@@ -287,7 +287,7 @@ function inputReg(reg: "eax" | "ebx"): ExprRef {
   return exprInput({ kind: "reg", reg });
 }
 
-function addFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): SemanticFlagWrite {
+function addFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): FlagWrite {
   const leftValue = project(width, left);
   const rightValue = project(width, right);
   const result = project(width, binary("add", leftValue, rightValue));
@@ -300,7 +300,7 @@ function addFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): Seman
   };
 }
 
-function subFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): SemanticFlagWrite {
+function subFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): FlagWrite {
   const leftValue = project(width, left);
   const rightValue = project(width, right);
   const result = project(width, binary("sub", leftValue, rightValue));
@@ -313,7 +313,7 @@ function subFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): Seman
   };
 }
 
-function cmpFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): SemanticFlagWrite {
+function cmpFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): FlagWrite {
   const leftValue = project(width, left);
   const rightValue = project(width, right);
   const write = subFlagWrite(width, leftValue, rightValue);
@@ -335,11 +335,11 @@ function cmpFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): Seman
   };
 }
 
-function testFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): SemanticFlagWrite {
+function testFlagWrite(width: OperandWidth, left: ExprRef, right: ExprRef): FlagWrite {
   return logicFlagWrite(width, binary("and", project(width, left), project(width, right)));
 }
 
-function logicFlagWrite(width: OperandWidth, result: ExprRef): SemanticFlagWrite {
+function logicFlagWrite(width: OperandWidth, result: ExprRef): FlagWrite {
   const projected = project(width, result);
 
   return {
@@ -352,7 +352,7 @@ function logicFlagWrite(width: OperandWidth, result: ExprRef): SemanticFlagWrite
   };
 }
 
-function incFlagWrite(width: OperandWidth, input: ExprRef): SemanticFlagWrite {
+function incFlagWrite(width: OperandWidth, input: ExprRef): FlagWrite {
   const left = project(width, input);
   const one = exprConst(1);
   const result = project(width, binary("add", left, one));
@@ -367,7 +367,7 @@ function incFlagWrite(width: OperandWidth, input: ExprRef): SemanticFlagWrite {
   };
 }
 
-function decFlagWrite(width: OperandWidth, input: ExprRef): SemanticFlagWrite {
+function decFlagWrite(width: OperandWidth, input: ExprRef): FlagWrite {
   const left = project(width, input);
   const one = exprConst(1);
   const result = project(width, binary("sub", left, one));

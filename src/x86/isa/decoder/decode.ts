@@ -1,5 +1,5 @@
 import type { SemanticTemplate } from "#x86/ir/model/types.js";
-import { u32 } from "#x86/state/cpu-state.js";
+import { u32 } from "#x86/numeric.js";
 import { X86_32_CORE } from "#x86/isa/index.js";
 import {
   expandInstructionSpec,

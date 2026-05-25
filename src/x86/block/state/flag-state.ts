@@ -6,9 +6,9 @@ import {
   exprBinary,
   exprConst,
   exprInput
-} from "#backends/wasm/jit/ir/expressions/builders.js";
-import { canonicalizeExpr } from "#backends/wasm/jit/ir/expressions/canonicalize.js";
-import type { ExprRef } from "#backends/wasm/jit/ir/expressions/types.js";
+} from "#x86/expr/builders.js";
+import { canonicalizeExpr } from "#x86/expr/canonicalize.js";
+import type { ExprRef } from "#x86/expr/types.js";
 
 export type X86ConditionCode = ConditionCode;
 
@@ -17,7 +17,7 @@ export type FlagCell =
   | Readonly<{ kind: "input"; flag: FlagName }>
   | Readonly<{ kind: "undef" }>;
 
-export type SemanticFlagWrite = Readonly<{
+export type FlagWrite = Readonly<{
   cells: Partial<Record<FlagName, FlagCell>>;
   conditions?: Partial<Record<X86ConditionCode, ExprRef>>;
 }>;
@@ -58,7 +58,7 @@ export class FlagState {
     return Object.freeze(IR_ALU_FLAGS.map((flag) => Object.freeze({ flag, cell: this.#cellFor(flag) })));
   }
 
-  apply(write: SemanticFlagWrite): FlagState {
+  apply(write: FlagWrite): FlagState {
     const cells = new Map(this.#cells);
 
     for (const flag of IR_ALU_FLAGS) {

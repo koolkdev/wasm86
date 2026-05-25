@@ -5,7 +5,7 @@ import { requiredFlagProducerInput } from "#x86/ir/model/flags.js";
 import type { ConditionCode, FlagProducerName } from "#x86/ir/model/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import { x86ArithmeticFlagMask } from "#x86/isa/flags.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import type { WasmIrAluFlagsStorage } from "./alu-flags.js";
 import type { WasmFlagValueEmitHelpers } from "./flags.js";

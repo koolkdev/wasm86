@@ -1,5 +1,5 @@
 import { widthMask, type OperandWidth, type RegisterAlias, type Reg32 } from "#x86/isa/types.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import {
   cleanValueWidth,

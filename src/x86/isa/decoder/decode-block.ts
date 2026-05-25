@@ -1,4 +1,4 @@
-import { u32 } from "#x86/state/cpu-state.js";
+import { u32 } from "#x86/numeric.js";
 import { buildIr, irBlockTerminator } from "#x86/ir/build/builder.js";
 import type { SemanticOperandInfo } from "#x86/ir/model/types.js";
 import { decodeIsaInstructionFromReader } from "./decode.js";

@@ -1,8 +1,8 @@
 import { widthMask, type OperandWidth } from "#x86/isa/types.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import type {
   ExprRef,
-  JitInputSource,
+  ExprInputSource,
   ScalarBinaryOp,
   ScalarCompareOp,
   ScalarUnaryOp
@@ -12,7 +12,7 @@ export function exprConst(value: number): ExprRef {
   return freezeExpr({ kind: "const", value: i32(value) });
 }
 
-export function exprInput(source: JitInputSource): ExprRef {
+export function exprInput(source: ExprInputSource): ExprRef {
   return freezeExpr({ kind: "input", source: freezeInputSource(source) });
 }
 
@@ -106,7 +106,7 @@ function isOperandWidth(width: number): width is OperandWidth {
   return width === 8 || width === 16 || width === 32;
 }
 
-function freezeInputSource(source: JitInputSource): JitInputSource {
+function freezeInputSource(source: ExprInputSource): ExprInputSource {
   switch (source.kind) {
     case "reg":
       return Object.freeze({ kind: "reg", reg: source.reg });

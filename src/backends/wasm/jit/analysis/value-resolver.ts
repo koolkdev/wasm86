@@ -6,7 +6,7 @@ import {
 } from "#backends/wasm/jit/ir/values/builders.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import type { RegRef, StorageRef, ValueRef } from "#x86/ir/model/types.js";
 import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
 import { registerAlias } from "#x86/isa/registers.js";

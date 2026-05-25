@@ -14,7 +14,7 @@ import {
 } from "#backends/wasm/codegen/flags.js";
 import { conditionFlagReadMask } from "#x86/ir/model/flag-effects.js";
 import { flagProducerConditionKind } from "#x86/ir/model/flag-conditions.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import type { ConditionCode } from "#x86/ir/model/types.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";

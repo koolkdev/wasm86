@@ -19,9 +19,9 @@ import {
   hasEvenParityLowByte,
   setFlag,
   setReg32,
-  supportedEflagsMask,
-  u32
+  supportedEflagsMask
 } from "#x86/state/cpu-state.js";
+import { u32 } from "#x86/numeric.js";
 
 test("initial_state_zeroes_registers", () => {
   const state = createCpuState();

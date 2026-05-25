@@ -4,24 +4,24 @@ import {
 } from "#backends/wasm/codegen/value-width.js";
 import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
 import { widthMask } from "#x86/isa/types.js";
-import { i32 } from "#x86/state/cpu-state.js";
+import { i32 } from "#x86/numeric.js";
 import {
   bitRangeMask,
   checkedU32Mask
-} from "#backends/wasm/jit/ir/expressions/builders.js";
-import { canonicalizeExpr } from "#backends/wasm/jit/ir/expressions/canonicalize.js";
+} from "#x86/expr/builders.js";
+import { canonicalizeExpr } from "#x86/expr/canonicalize.js";
 import {
   bitsUse,
   childUseForExpr
-} from "#backends/wasm/jit/ir/expressions/uses.js";
+} from "#x86/expr/uses.js";
 import type {
   ExprRef,
   ExprUse,
-  JitInputSource,
+  ExprInputSource,
   ScalarBinaryOp,
   ScalarCompareOp,
   ScalarUnaryOp
-} from "#backends/wasm/jit/ir/expressions/types.js";
+} from "#x86/expr/types.js";
 
 export type EmittedValueWidth = ValueWidth;
 
@@ -30,7 +30,7 @@ export type EmittedExpr = Readonly<{
 }>;
 
 export type ExprInputEmitter = Readonly<{
-  emitInput(source: JitInputSource, use: ExprUse): EmittedExpr;
+  emitInput(source: ExprInputSource, use: ExprUse): EmittedExpr;
 }>;
 
 export type ExprEmitContext = Readonly<{
@@ -88,7 +88,7 @@ function emitConstExpr(context: ExprEmitContext, value: number, use: ExprUse): E
   };
 }
 
-function emitInputExpr(context: ExprEmitContext, source: JitInputSource, use: ExprUse): EmittedExpr {
+function emitInputExpr(context: ExprEmitContext, source: ExprInputSource, use: ExprUse): EmittedExpr {
   return context.inputs.emitInput(source, use);
 }
 

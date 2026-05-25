@@ -15,17 +15,17 @@ import {
   exprInput,
   exprProject,
   exprUnary
-} from "#backends/wasm/jit/ir/expressions/builders.js";
+} from "#x86/expr/builders.js";
 import {
   bitsUse,
   exactUse,
   full32Use
-} from "#backends/wasm/jit/ir/expressions/uses.js";
+} from "#x86/expr/uses.js";
 import type {
   ExprRef,
   ExprUse,
-  JitInputSource
-} from "#backends/wasm/jit/ir/expressions/types.js";
+  ExprInputSource
+} from "#x86/expr/types.js";
 import {
   emitExpr,
   type EmittedExpr,
@@ -211,7 +211,7 @@ function testContext(body: WasmFunctionBodyEncoder): ExprEmitContext {
 
 function localForSource(
   locals: Readonly<{ eax: number; ebx: number; ZF: number }>,
-  source: JitInputSource
+  source: ExprInputSource
 ): number {
   switch (source.kind) {
     case "reg":

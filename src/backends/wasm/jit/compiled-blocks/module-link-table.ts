@@ -1,4 +1,4 @@
-import { u32 } from "#x86/state/cpu-state.js";
+import { u32 } from "#x86/numeric.js";
 
 export type JitLinkedBlockFunction = () => unknown;
 export type JitModuleLocalFallbackFunction = JitLinkedBlockFunction;
