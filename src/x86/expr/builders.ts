@@ -112,5 +112,7 @@ function freezeInputSource(source: ExprInputSource): ExprInputSource {
       return Object.freeze({ kind: "reg", reg: source.reg });
     case "flag":
       return Object.freeze({ kind: "flag", flag: source.flag });
+    case "def":
+      return Object.freeze({ kind: "def", id: source.id });
   }
 }

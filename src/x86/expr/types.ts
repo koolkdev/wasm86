@@ -32,7 +32,8 @@ export type ScalarCompareOp =
 
 export type ExprInputSource =
   | Readonly<{ kind: "reg"; reg: Reg32 }>
-  | Readonly<{ kind: "flag"; flag: FlagName }>;
+  | Readonly<{ kind: "flag"; flag: FlagName }>
+  | Readonly<{ kind: "def"; id: number }>;
 
 export type ConstExpr = Readonly<{ kind: "const"; value: number }>;
 export type InputExpr = Readonly<{ kind: "input"; source: ExprInputSource }>;

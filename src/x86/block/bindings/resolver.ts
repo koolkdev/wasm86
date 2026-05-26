@@ -1,6 +1,6 @@
 import { canonicalizeExpr } from "#x86/expr/canonicalize.js";
 import { exprDependencies, type ExprDependency } from "#x86/expr/dependencies.js";
-import { exprInput } from "#x86/expr/builders.js";
+import { exprConst, exprInput } from "#x86/expr/builders.js";
 import type {
   ExprInputSource,
   ExprRef,
@@ -117,6 +117,10 @@ export class BindingResolver {
   }
 
   #resolveValueRef(value: ValueRef): ExprRef {
+    if (value.kind === "const") {
+      return exprConst(value.value);
+    }
+
     if (this.#irValue === undefined) {
       throw new Error(`cannot resolve ${value.kind} address without an IR value resolver`);
     }
@@ -221,6 +225,7 @@ type BindingAccessMode = "read" | "address" | "clobber";
 type AccessSet = {
   regs: Map<Reg32, number>;
   flags: Map<FlagName, true>;
+  defs: Set<number>;
   memory: boolean;
 };
 
@@ -228,6 +233,7 @@ function createAccessSet(): AccessSet {
   return {
     regs: new Map(),
     flags: new Map(),
+    defs: new Set(),
     memory: false
   };
 }
@@ -240,6 +246,9 @@ function addExprDependencies(expr: ExprRef, use: ExprUse, accesses: AccessSet): 
         break;
       case "flag":
         accesses.flags.set(dep.flag, true);
+        break;
+      case "def":
+        accesses.defs.add(dep.id);
         break;
     }
   }
@@ -284,6 +293,10 @@ function dependencyList(accesses: AccessSet): BindingDependencies {
 
   for (const flag of accesses.flags.keys()) {
     result.push(Object.freeze({ kind: "flag", flag }));
+  }
+
+  for (const id of accesses.defs) {
+    result.push(Object.freeze({ kind: "def", id }));
   }
 
   if (accesses.memory) {

@@ -266,14 +266,14 @@ test("xchg semantics read both operands before writing either operand", () => {
     { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "operand", index: 1 }, accessWidth: 32 },
     {
       op: "set",
-      target: { kind: "operand", index: 0 },
-      value: { kind: "var", id: 1 },
+      target: { kind: "operand", index: 1 },
+      value: { kind: "var", id: 0 },
       accessWidth: 32
     },
     {
       op: "set",
-      target: { kind: "operand", index: 1 },
-      value: { kind: "var", id: 0 },
+      target: { kind: "operand", index: 0 },
+      value: { kind: "var", id: 1 },
       accessWidth: 32
     },
     { op: "next" }

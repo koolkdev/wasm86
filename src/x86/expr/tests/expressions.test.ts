@@ -143,6 +143,16 @@ test("ExprRef flag inputs are per-flag cells", () => {
   deepStrictEqual(exprDependencies(zf, bitsUse(0)), []);
 });
 
+test("ExprRef def inputs are dependencies for block-defined values", () => {
+  const loaded = exprInput({ kind: "def", id: 0 });
+  const combined = exprBinary("add", loaded, exprConst(1));
+
+  deepStrictEqual(exprDependencies(combined), [
+    { kind: "def", id: 0 }
+  ]);
+  deepStrictEqual(exprDependencies(combined, bitsUse(0)), []);
+});
+
 test("ExprRef canonicalization keeps arithmetic and condition shapes", () => {
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const ebx = exprInput({ kind: "reg", reg: "ebx" });

@@ -57,5 +57,7 @@ function inputSourcesEqual(
       return right.kind === "reg" && left.reg === right.reg;
     case "flag":
       return right.kind === "flag" && left.flag === right.flag;
+    case "def":
+      return right.kind === "def" && left.id === right.id;
   }
 }

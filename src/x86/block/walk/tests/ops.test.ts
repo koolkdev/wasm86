@@ -1,0 +1,199 @@
+import {
+  deepStrictEqual,
+  strictEqual,
+  throws
+} from "node:assert";
+import { test } from "node:test";
+
+import {
+  BindingResolver,
+  dynamicRegBinding
+} from "#x86/block/bindings/resolver.js";
+import { FlagState } from "#x86/block/state/flag-state.js";
+import { RegisterState } from "#x86/block/state/register-state.js";
+import {
+  blockProgress,
+  BlockState
+} from "#x86/block/walk/index.js";
+import {
+  exprBinary,
+  exprConst
+} from "#x86/expr/builders.js";
+import { canonicalizeExpr } from "#x86/expr/canonicalize.js";
+import type { ExprRef } from "#x86/expr/types.js";
+import type {
+  IrValueType,
+  ValueRef,
+  VarRef
+} from "#x86/ir/model/types.js";
+import { ControlWalkOps } from "../control-ops.js";
+import { DynamicRegisterWalkOps } from "../dynamic-register-ops.js";
+import { FlagWalkOps } from "../flag-ops.js";
+import { MemoryWalkOps } from "../memory-ops.js";
+import { BlockWalkRecorder } from "../recorder.js";
+import { RegisterWalkState } from "../registers.js";
+import type { BlockAction } from "#x86/block/actions.js";
+import type { BlockDefinition } from "#x86/block/definitions.js";
+import { opSite } from "../site.js";
+import { StorageWalkOps } from "../storage-ops.js";
+import { ValueWalkOps } from "../value-ops.js";
+
+test("StorageWalkOps dispatches dynamic register storage through dynamic ops", () => {
+  const harness = storageHarness(new BindingResolver({
+    operands: [dynamicRegBinding(exprConst(2), 32)]
+  }));
+  const loaded = harness.storage.read({ kind: "operand", index: 0 }, 32);
+
+  harness.storage.write({ kind: "operand", index: 0 }, loaded, 32);
+
+  const result = harness.result();
+  const definitions = definitionsOf(result.events);
+  const actions = actionsOf(result.events);
+
+  strictEqual(definitions.length, 1);
+  strictEqual(definitions[0]?.kind, "dynamicRegisterLoad");
+  strictEqual(actions.length, 1);
+  strictEqual(actions[0]?.kind, "dynamicRegisterStore");
+  deepStrictEqual(
+    result.registerAccesses.map((access) => access.kind),
+    ["dynamicRegisterLoad", "dynamicRegisterStore"]
+  );
+});
+
+test("ControlWalkOps records branch continuation and shared snapshots", () => {
+  let site = opSite(3);
+  const recorder = new BlockWalkRecorder();
+  const snapshot = BlockState.initial({ progress: blockProgress(3, "before") });
+  const control = new ControlWalkOps({
+    recorder,
+    site: () => site,
+    snapshot: () => snapshot,
+    continuation: exprConst(0x44),
+    value: constValue
+  });
+
+  control.branch(exprConst(1), exprConst(0x40), { kind: "nextEip" });
+
+  const result = recorder.result(snapshot, []);
+  const action = onlyAction(actionsOf(result.events));
+
+  strictEqual(action.kind, "branch");
+  if (action.kind === "branch") {
+    deepStrictEqual(action.continuation, { kind: "continuation", value: exprConst(0x44) });
+    strictEqual(action.taken.snapshot, snapshot);
+    strictEqual(action.notTaken.snapshot, snapshot);
+  }
+
+  site = opSite(4);
+  control.fallthrough();
+  strictEqual(actionsOf(recorder.result(snapshot, []).events).length, 2);
+});
+
+test("FlagWalkOps lowers flag writes and reports undefined conditions with op index", () => {
+  let opIndex = 7;
+  const flags = new FlagWalkOps({
+    flags: FlagState.initial(),
+    value: constValue,
+    opIndex: () => opIndex
+  });
+
+  flags.write({
+    op: "flags.write",
+    cells: {
+      ZF: { kind: "expr", value: c(1) }
+    },
+    conditions: {
+      E: c(2)
+    }
+  });
+
+  deepStrictEqual(flags.condition("E"), exprConst(2));
+
+  const emptyFlags = new FlagWalkOps({
+    flags: FlagState.initial().apply({ cells: { ZF: { kind: "undef" } } }),
+    value: constValue,
+    opIndex: () => opIndex
+  });
+  opIndex = 8;
+  throws(() => emptyFlags.condition("NE"), /condition NE depends on undefined flags at op 8/);
+});
+
+test("ValueWalkOps owns pure value expression lowering", () => {
+  const values = new ValueWalkOps({
+    values: undefined,
+    value: undefined,
+    opIndex: () => 0
+  });
+
+  values.bind(v(0), values.binary("add", c(1), c(2)));
+
+  deepStrictEqual(
+    values.resolve(v(0)),
+    canonicalizeExpr(exprBinary("add", exprConst(1), exprConst(2)))
+  );
+});
+
+function storageHarness(resolver: BindingResolver): Readonly<{
+  storage: StorageWalkOps;
+  result: () => ReturnType<BlockWalkRecorder["result"]>;
+}> {
+  const recorder = new BlockWalkRecorder();
+  const registers = new RegisterWalkState({
+    registers: RegisterState.initial(),
+    site: () => opSite(0)
+  });
+  const dynamic = new DynamicRegisterWalkOps({
+    recorder,
+    registers,
+    site: () => opSite(0)
+  });
+  const memory = new MemoryWalkOps({
+    recorder,
+    site: () => opSite(0),
+    snapshot: () => BlockState.initial({ registers: registers.state })
+  });
+  const storage = new StorageWalkOps({
+    resolver,
+    registers,
+    dynamic,
+    memory,
+    value: constValue
+  });
+
+  return Object.freeze({
+    storage,
+    result: () => recorder.result(
+      BlockState.initial({ registers: registers.state }),
+      registers.accesses()
+    )
+  });
+}
+
+function actionsOf(events: ReturnType<BlockWalkRecorder["result"]>["events"]): readonly BlockAction[] {
+  return events.flatMap((event) => event.kind === "action" ? [event.action] : []);
+}
+
+function definitionsOf(events: ReturnType<BlockWalkRecorder["result"]>["events"]): readonly BlockDefinition[] {
+  return events.flatMap((event) => event.kind === "definition" ? [event.definition] : []);
+}
+
+function onlyAction(actions: readonly BlockAction[]): BlockAction {
+  strictEqual(actions.length, 1);
+  return actions[0]!;
+}
+
+function constValue(value: ValueRef): ExprRef {
+  if (value.kind !== "const") {
+    throw new Error(`unexpected non-const value ${value.kind}`);
+  }
+
+  return exprConst(value.value);
+}
+
+function v(id: number): VarRef {
+  return { kind: "var", id };
+}
+
+function c(value: number): ValueRef {
+  return { kind: "const", type: "i32" satisfies IrValueType, value };
+}

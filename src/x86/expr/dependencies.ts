@@ -14,17 +14,20 @@ import type {
 
 export type ExprDependency =
   | Readonly<{ kind: "reg"; reg: Reg32; mask: number }>
-  | Readonly<{ kind: "flag"; flag: FlagName }>;
+  | Readonly<{ kind: "flag"; flag: FlagName }>
+  | Readonly<{ kind: "def"; id: number }>;
 
 type ExprDependencySet = Readonly<{
   regs: Map<Reg32, number>;
   flags: Set<FlagName>;
+  defs: Set<number>;
 }>;
 
 export function exprDependencies(expr: ExprRef, use: ExprUse = exactUse()): readonly ExprDependency[] {
   const deps: ExprDependencySet = {
     regs: new Map(),
-    flags: new Set()
+    flags: new Set(),
+    defs: new Set()
   };
 
   collectExprDependencies(expr, canonicalizeUse(use), deps);
@@ -91,6 +94,9 @@ function addInputDependency(
     case "flag":
       mergeFlagDependency(source.flag, deps);
       return;
+    case "def":
+      mergeDefinitionDependency(source.id, deps);
+      return;
   }
 }
 
@@ -106,6 +112,10 @@ function mergeFlagDependency(flag: FlagName, deps: ExprDependencySet): void {
   deps.flags.add(flag);
 }
 
+function mergeDefinitionDependency(id: number, deps: ExprDependencySet): void {
+  deps.defs.add(id);
+}
+
 function dependencyList(deps: ExprDependencySet): readonly ExprDependency[] {
   const result: ExprDependency[] = [];
 
@@ -115,6 +125,10 @@ function dependencyList(deps: ExprDependencySet): readonly ExprDependency[] {
 
   for (const flag of deps.flags) {
     result.push({ kind: "flag", flag });
+  }
+
+  for (const id of deps.defs) {
+    result.push({ kind: "def", id });
   }
 
   return result;

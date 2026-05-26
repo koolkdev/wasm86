@@ -228,6 +228,8 @@ function localForSource(
         throw new Error(`unexpected test flag ${source.flag}`);
       }
       return locals.ZF;
+    case "def":
+      throw new Error(`unexpected test block definition ${source.id}`);
   }
 }
 

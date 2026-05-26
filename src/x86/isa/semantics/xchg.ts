@@ -13,7 +13,7 @@ export function xchgSemantic(width: OperandWidth = 32): SemanticTemplate {
     const left = s.get(leftOperand, width);
     const right = s.get(rightOperand, width);
 
-    s.set(leftOperand, right, width);
     s.set(rightOperand, left, width);
+    s.set(leftOperand, right, width);
   };
 }
