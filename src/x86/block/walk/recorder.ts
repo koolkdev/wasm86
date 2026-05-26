@@ -15,6 +15,8 @@ import type { ExprRef } from "#x86/expr/types.js";
 import type { OperandWidth } from "#x86/isa/types.js";
 import type {
   ActionScheduleEntry,
+  BlockScheduleEntry,
+  BoundaryScheduleEntry,
   BlockRegisterAccess,
   BlockWalkResult,
   DefinitionScheduleEntry,
@@ -26,7 +28,7 @@ import type { BlockState } from "./state.js";
 export class BlockWalkRecorder {
   readonly #definitionIds = new BlockDefinitionIds();
   readonly #exitIds = new BlockExitIds();
-  readonly #schedule: (ActionScheduleEntry | DefinitionScheduleEntry)[] = [];
+  readonly #schedule: BlockScheduleEntry[] = [];
   readonly #epochs = new Map<number, number>();
   readonly #exits: BlockExit[] = [];
 
@@ -90,11 +92,23 @@ export class BlockWalkRecorder {
   }
 
   action(action: BlockAction): void {
+    const at = this.#placement(action.at);
+
     this.#schedule.push(Object.freeze({
       role: "action",
-      at: this.#placement(action.at),
+      at,
       action
     } satisfies ActionScheduleEntry));
+    this.#recordExitBoundaries(action, at);
+  }
+
+  stateSync(at: OpSite, state: BlockState): void {
+    this.#schedule.push(Object.freeze({
+      role: "boundary",
+      kind: "stateSync",
+      at: this.#placement(at),
+      state
+    } satisfies BoundaryScheduleEntry));
   }
 
   #definition(definition: BlockDefinition): void {
@@ -105,10 +119,38 @@ export class BlockWalkRecorder {
     } satisfies DefinitionScheduleEntry));
   }
 
+  #recordExitBoundaries(action: BlockAction, at: Placement): void {
+    for (const exit of exitsForAction(action)) {
+      this.#schedule.push(Object.freeze({
+        role: "boundary",
+        kind: "exitState",
+        at,
+        exit,
+        state: exit.snapshot
+      } satisfies BoundaryScheduleEntry));
+    }
+  }
+
   #placement(at: OpSite): Placement {
     const epoch = this.#epochs.get(at.opIndex) ?? 0;
 
     this.#epochs.set(at.opIndex, epoch + 1);
     return Object.freeze({ opIndex: at.opIndex, epoch });
+  }
+}
+
+function exitsForAction(action: BlockAction): readonly BlockExit[] {
+  switch (action.kind) {
+    case "memoryGuard":
+      return [action.faultExit];
+    case "jump":
+    case "hostTrap":
+    case "fallthrough":
+      return [action.exit];
+    case "branch":
+      return [action.taken, action.notTaken];
+    case "memoryStore":
+    case "dynamicRegisterStore":
+      return [];
   }
 }

@@ -145,7 +145,8 @@ function storageHarness(resolver: BindingResolver): Readonly<{
   const dynamic = new DynamicRegisterWalkOps({
     recorder,
     registers,
-    site: () => opSite(0)
+    site: () => opSite(0),
+    snapshot: () => BlockState.initial({ registers: registers.state })
   });
   const memory = new MemoryWalkOps({
     recorder,

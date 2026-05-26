@@ -78,7 +78,8 @@ class ExpressionBlockWalker {
     this.#dynamic = new DynamicRegisterWalkOps({
       recorder: this.#recorder,
       registers: this.#registers,
-      site: () => this.#site()
+      site: () => this.#site(),
+      snapshot: () => this.#snapshot()
     });
     this.#memory = new MemoryWalkOps({
       recorder: this.#recorder,
@@ -115,7 +116,8 @@ class ExpressionBlockWalker {
       this.#progress = blockProgress(opIndex, "after");
     }
 
-    const result = this.#recorder.result(this.#snapshot(), this.#registers.accesses());
+    const final = this.#snapshot();
+    const result = this.#recorder.result(final, this.#registers.accesses());
 
     validateBlockWalkResult(result);
     return result;

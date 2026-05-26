@@ -20,6 +20,7 @@ export type {
   BlockSchedule,
   BlockScheduleEntry,
   BlockRegisterAccess,
+  BoundaryScheduleEntry,
   DefinitionScheduleEntry,
   Placement,
   BlockWalkResult

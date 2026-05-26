@@ -13,6 +13,7 @@ export class RegisterWalkState {
   readonly #accesses: BlockRegisterAccess[] = [];
   readonly #site: () => OpSite;
   #registers: RegisterState;
+  #revision = 0;
 
   constructor(input: Readonly<{
     registers: RegisterState;
@@ -24,6 +25,10 @@ export class RegisterWalkState {
 
   get state(): RegisterState {
     return this.#registers;
+  }
+
+  get revision(): number {
+    return this.#revision;
   }
 
   accesses(): readonly BlockRegisterAccess[] {
@@ -53,7 +58,13 @@ export class RegisterWalkState {
       }));
     }
 
-    this.#registers = this.#registers.writeAlias(reg, value);
+    const nextRegisters = this.#registers.writeAlias(reg, value);
+
+    if (nextRegisters !== this.#registers) {
+      this.#revision += 1;
+    }
+
+    this.#registers = nextRegisters;
     this.#access(Object.freeze({
       kind: "registerWrite",
       at,

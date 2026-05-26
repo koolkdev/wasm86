@@ -1,33 +1,18 @@
-import type { BlockAction } from "#x86/block/actions.js";
-import type { BlockDefinition } from "#x86/block/definitions.js";
 import type { BlockExit } from "#x86/block/exits.js";
 import type { ExprRef } from "#x86/expr/types.js";
 import type { OperandWidth, RegisterAlias } from "#x86/isa/types.js";
+import type { BlockSchedule } from "../schedule.js";
 import type { BlockState } from "./state.js";
 import type { OpSite } from "./site.js";
 
-export type Placement = Readonly<{
-  opIndex: number;
-  epoch: number;
-}>;
-
-export type ActionScheduleEntry = Readonly<{
-  role: "action";
-  at: Placement;
-  action: BlockAction;
-}>;
-
-export type DefinitionScheduleEntry = Readonly<{
-  role: "definition";
-  at: Placement;
-  definition: BlockDefinition;
-}>;
-
-export type BlockScheduleEntry =
-  | ActionScheduleEntry
-  | DefinitionScheduleEntry;
-
-export type BlockSchedule = readonly BlockScheduleEntry[];
+export type {
+  ActionScheduleEntry,
+  BlockSchedule,
+  BlockScheduleEntry,
+  BoundaryScheduleEntry,
+  DefinitionScheduleEntry,
+  Placement
+} from "../schedule.js";
 
 export type BlockRegisterAccess =
   | Readonly<{

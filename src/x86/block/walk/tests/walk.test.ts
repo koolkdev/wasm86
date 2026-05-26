@@ -34,7 +34,7 @@ import type {
 } from "#x86/ir/model/types.js";
 
 test("shared block walk applies register writes through RegisterState", () => {
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "value.const", type: "i32", dst: v(0), value: 0x12 },
       { op: "set", target: { kind: "reg", reg: "al" }, value: v(0), accessWidth: 8 }
@@ -50,7 +50,7 @@ test("shared block walk applies register writes through RegisterState", () => {
 
 test("shared block walk rejects value bindings as write targets", () => {
   throws(
-    () => walkExpressionBlock({
+    () => walkFragment({
       block: [
         { op: "set", target: { kind: "operand", index: 0 }, value: c(1), accessWidth: 32 }
       ],
@@ -63,7 +63,7 @@ test("shared block walk rejects value bindings as write targets", () => {
 });
 
 test("shared block walk reads value-bound operands as expressions", () => {
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 32 },
       { op: "set", target: { kind: "reg", reg: "eax" }, value: v(0), accessWidth: 32 }
@@ -80,7 +80,7 @@ test("shared block walk reads value-bound operands as expressions", () => {
 });
 
 test("shared block walk writes operand storage using the binding width", () => {
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "set", target: { kind: "operand", index: 0 }, value: c(0xaa), accessWidth: 32 }
     ],
@@ -101,7 +101,7 @@ test("shared block walk writes operand storage using the binding width", () => {
 test("shared block walk keeps dynamic register reads and writes as ordered runtime facts", () => {
   const readIndex = exprInput({ kind: "flag", flag: "ZF" });
   const writeIndex = exprInput({ kind: "reg", reg: "esi" });
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 32 },
       { op: "set", target: { kind: "operand", index: 1 }, value: v(0), accessWidth: 32 }
@@ -143,7 +143,7 @@ test("shared block walk keeps dynamic register reads and writes as ordered runti
 
 test("dynamic register validation requires loads to use the pre-write register state", () => {
   throws(
-    () => walkExpressionBlock({
+    () => walkFragment({
       block: [
         { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x55), accessWidth: 32 },
         { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 32 }
@@ -158,7 +158,7 @@ test("dynamic register validation requires loads to use the pre-write register s
 
 test("dynamic register validation rejects later static register reads", () => {
   throws(
-    () => walkExpressionBlock({
+    () => walkFragment({
       block: [
         { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
         { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 }
@@ -173,7 +173,7 @@ test("dynamic register validation rejects later static register reads", () => {
 
 test("dynamic register validation rejects later static register writes", () => {
   throws(
-    () => walkExpressionBlock({
+    () => walkFragment({
       block: [
         { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
         { op: "set", target: { kind: "reg", reg: "ebx" }, value: c(0x66), accessWidth: 32 }
@@ -187,7 +187,7 @@ test("dynamic register validation rejects later static register writes", () => {
 });
 
 test("dynamic register stores allow earlier static register writes", () => {
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
       { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 }
@@ -202,7 +202,7 @@ test("dynamic register stores allow earlier static register writes", () => {
 });
 
 test("dynamic register stores allow xchg-style tail stores from preloaded values", () => {
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 32 },
       { op: "get", dst: v(1), source: { kind: "operand", index: 1 }, accessWidth: 32 },
@@ -284,7 +284,7 @@ test("shared block walk resolves composed flag conditions from current flag cell
 
 test("shared block walk rejects legacy packed flags.set producers", () => {
   throws(
-    () => walkExpressionBlock({
+    () => walkFragment({
       block: [
         {
           op: "flags.set",
@@ -366,7 +366,7 @@ test("shared block walk emits jump and fallthrough exits carrying current snapsh
 });
 
 test("memory guard fault exits preserve the pre-fault snapshot", () => {
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
       { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0xfeed), accessWidth: 32 }
@@ -386,7 +386,7 @@ test("memory guard fault exits preserve the pre-fault snapshot", () => {
 });
 
 test("memory loads create sequential definitions and later expressions read def inputs", () => {
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "get", dst: v(0), source: { kind: "mem", address: c(0x1000) }, accessWidth: 32 },
       { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(1) },
@@ -419,7 +419,7 @@ test("memory loads create sequential definitions and later expressions read def 
 });
 
 test("walk schedule preserves memory guard, load definition, and store order", () => {
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
       { op: "get", dst: v(0), source: { kind: "mem", address: c(0x1000) }, accessWidth: 32 },
@@ -430,12 +430,12 @@ test("walk schedule preserves memory guard, load definition, and store order", (
 
   deepStrictEqual(
     result.schedule.map(scheduleKind),
-    ["memoryGuard", "memoryLoad", "memoryGuard", "memoryStore"]
+    ["memoryGuard", "exitState", "memoryLoad", "memoryGuard", "exitState", "memoryStore"]
   );
 });
 
 test("memory stores become ordered actions", () => {
-  const result = walkExpressionBlock({
+  const result = walkFragment({
     block: [
       { op: "set", target: { kind: "mem", address: c(0x3000) }, value: c(0xaa), accessWidth: 8 }
     ]
@@ -453,7 +453,7 @@ test("shared block walk throws on unsupported ops without fallback routing", () 
   const unsupported = { op: "unsupported.shared-walk-test" } as unknown as IrOp;
 
   throws(
-    () => walkExpressionBlock({
+    () => walkFragment({
       block: [
         { op: "value.const", type: "i32", dst: v(0), value: 1 },
         unsupported
@@ -486,6 +486,12 @@ function onlyAction<T>(actions: readonly T[]): T {
   return actions[0]!;
 }
 
+function walkFragment(
+  input: Parameters<typeof walkExpressionBlock>[0]
+): ReturnType<typeof walkExpressionBlock> {
+  return walkExpressionBlock(input);
+}
+
 function blockWalkActions(result: ReturnType<typeof walkExpressionBlock>): readonly BlockAction[] {
   return result.schedule.flatMap((entry) => entry.role === "action" ? [entry.action] : []);
 }
@@ -496,10 +502,15 @@ function blockWalkDefinitions(result: ReturnType<typeof walkExpressionBlock>): r
 
 function scheduleKind(
   entry: ReturnType<typeof walkExpressionBlock>["schedule"][number]
-): BlockAction["kind"] | BlockDefinition["kind"] {
-  return entry.role === "action"
-    ? entry.action.kind
-    : entry.definition.kind;
+): string {
+  switch (entry.role) {
+    case "action":
+      return entry.action.kind;
+    case "definition":
+      return entry.definition.kind;
+    case "boundary":
+      return entry.kind;
+  }
 }
 
 function binary(op: "add" | "and" | "xor", left: ExprRef, right: ExprRef): ExprRef {
