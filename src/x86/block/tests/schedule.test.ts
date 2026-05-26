@@ -88,7 +88,7 @@ test("block schedule keeps memory load definitions distinct from memory stores",
   strictEqual(load.definition.width, 16);
   strictEqual(store.action.kind, "memoryStore");
   deepStrictEqual(store.action.address, exprConst(0x2000));
-  deepStrictEqual(store.action.value, exprInput({ kind: "def", id: load.definition.id }));
+  deepStrictEqual(store.action.value, exprInput(load.definition.result));
   strictEqual(store.action.width, 16);
 });
 
@@ -195,7 +195,7 @@ test("block schedule includes dynamic register definitions and actions", () => {
   strictEqual(load.definition.width, 32);
   strictEqual(store.action.kind, "dynamicRegisterStore");
   deepStrictEqual(store.action.index, exprConst(2));
-  deepStrictEqual(store.action.value, exprInput({ kind: "def", id: load.definition.id }));
+  deepStrictEqual(store.action.value, exprInput(load.definition.result));
 });
 
 test("no-explicit-exit blocks expose final state only through walk.final", () => {

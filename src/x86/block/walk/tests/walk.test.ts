@@ -129,7 +129,7 @@ test("shared block walk keeps dynamic register reads and writes as ordered runti
   strictEqual(action.kind, "dynamicRegisterStore");
   if (action.kind === "dynamicRegisterStore") {
     deepStrictEqual(action.index, writeIndex);
-    deepStrictEqual(action.value, exprInput({ kind: "def", id: 0 }));
+    deepStrictEqual(action.value, exprInput(definition.result));
     strictEqual(action.width, 32);
   }
 
@@ -223,11 +223,11 @@ test("dynamic register stores allow xchg-style tail stores from preloaded values
   deepStrictEqual(actions.map((action) => action.kind), ["dynamicRegisterStore", "dynamicRegisterStore"]);
   strictEqual(actions[0]?.kind, "dynamicRegisterStore");
   if (actions[0]?.kind === "dynamicRegisterStore") {
-    deepStrictEqual(actions[0].value, exprInput({ kind: "def", id: 1 }));
+    deepStrictEqual(actions[0].value, exprInput(definitions[1]!.result));
   }
   strictEqual(actions[1]?.kind, "dynamicRegisterStore");
   if (actions[1]?.kind === "dynamicRegisterStore") {
-    deepStrictEqual(actions[1].value, exprInput({ kind: "def", id: 0 }));
+    deepStrictEqual(actions[1].value, exprInput(definitions[0]!.result));
   }
 });
 
@@ -414,7 +414,7 @@ test("memory loads create sequential definitions and later expressions read def 
   deepStrictEqual(result.schedule.map((entry) => entry.role), ["definition", "definition"]);
   deepStrictEqual(
     result.final.registers.read("ebx"),
-    binary("add", exprInput({ kind: "def", id: 0 }), exprConst(1))
+    binary("add", exprInput(definitions[0]!.result), exprConst(1))
   );
 });
 
