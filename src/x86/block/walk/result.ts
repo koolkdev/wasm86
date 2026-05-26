@@ -6,9 +6,28 @@ import type { OperandWidth, RegisterAlias } from "#x86/isa/types.js";
 import type { BlockState } from "./state.js";
 import type { OpSite } from "./site.js";
 
-export type BlockWalkEvent =
-  | Readonly<{ kind: "action"; action: BlockAction }>
-  | Readonly<{ kind: "definition"; definition: BlockDefinition }>;
+export type Placement = Readonly<{
+  opIndex: number;
+  epoch: number;
+}>;
+
+export type ActionScheduleEntry = Readonly<{
+  role: "action";
+  at: Placement;
+  action: BlockAction;
+}>;
+
+export type DefinitionScheduleEntry = Readonly<{
+  role: "definition";
+  at: Placement;
+  definition: BlockDefinition;
+}>;
+
+export type BlockScheduleEntry =
+  | ActionScheduleEntry
+  | DefinitionScheduleEntry;
+
+export type BlockSchedule = readonly BlockScheduleEntry[];
 
 export type BlockRegisterAccess =
   | Readonly<{
@@ -38,7 +57,7 @@ export type BlockRegisterAccess =
 
 export type BlockWalkResult = Readonly<{
   final: BlockState;
-  events: readonly BlockWalkEvent[];
+  schedule: BlockSchedule;
   registerAccesses: readonly BlockRegisterAccess[];
   exits: readonly BlockExit[];
 }>;

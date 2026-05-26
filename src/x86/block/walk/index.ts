@@ -16,8 +16,12 @@ export type {
 } from "./state.js";
 
 export type {
+  ActionScheduleEntry,
+  BlockSchedule,
+  BlockScheduleEntry,
   BlockRegisterAccess,
-  BlockWalkEvent,
+  DefinitionScheduleEntry,
+  Placement,
   BlockWalkResult
 } from "./result.js";
 

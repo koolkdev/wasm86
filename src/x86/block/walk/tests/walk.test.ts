@@ -45,7 +45,7 @@ test("shared block walk applies register writes through RegisterState", () => {
     result.final.registers.read("eax"),
     exprInsertBits(exprInput({ kind: "reg", reg: "eax" }), exprConst(0x12), 0, 8)
   );
-  deepStrictEqual(result.events, []);
+  deepStrictEqual(result.schedule, []);
 });
 
 test("shared block walk rejects value bindings as write targets", () => {
@@ -134,7 +134,7 @@ test("shared block walk keeps dynamic register reads and writes as ordered runti
   }
 
   deepStrictEqual(
-    result.events.map((event) => event.kind === "action" ? event.action.kind : event.definition.kind),
+    result.schedule.map(scheduleKind),
     ["dynamicRegisterLoad", "dynamicRegisterStore"]
   );
   deepStrictEqual(result.final.registers.read("eax"), exprInput({ kind: "reg", reg: "eax" }));
@@ -411,14 +411,14 @@ test("memory loads create sequential definitions and later expressions read def 
   if (definitions[1]!.kind === "memoryLoad") {
     strictEqual(definitions[1]!.width, 16);
   }
-  deepStrictEqual(result.events.map((event) => event.kind), ["definition", "definition"]);
+  deepStrictEqual(result.schedule.map((entry) => entry.role), ["definition", "definition"]);
   deepStrictEqual(
     result.final.registers.read("ebx"),
     binary("add", exprInput({ kind: "def", id: 0 }), exprConst(1))
   );
 });
 
-test("ordered events preserve memory guard, load definition, and store order", () => {
+test("walk schedule preserves memory guard, load definition, and store order", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
@@ -429,7 +429,7 @@ test("ordered events preserve memory guard, load definition, and store order", (
   });
 
   deepStrictEqual(
-    result.events.map((event) => event.kind === "action" ? event.action.kind : event.definition.kind),
+    result.schedule.map(scheduleKind),
     ["memoryGuard", "memoryLoad", "memoryGuard", "memoryStore"]
   );
 });
@@ -487,11 +487,19 @@ function onlyAction<T>(actions: readonly T[]): T {
 }
 
 function blockWalkActions(result: ReturnType<typeof walkExpressionBlock>): readonly BlockAction[] {
-  return result.events.flatMap((event) => event.kind === "action" ? [event.action] : []);
+  return result.schedule.flatMap((entry) => entry.role === "action" ? [entry.action] : []);
 }
 
 function blockWalkDefinitions(result: ReturnType<typeof walkExpressionBlock>): readonly BlockDefinition[] {
-  return result.events.flatMap((event) => event.kind === "definition" ? [event.definition] : []);
+  return result.schedule.flatMap((entry) => entry.role === "definition" ? [entry.definition] : []);
+}
+
+function scheduleKind(
+  entry: ReturnType<typeof walkExpressionBlock>["schedule"][number]
+): BlockAction["kind"] | BlockDefinition["kind"] {
+  return entry.role === "action"
+    ? entry.action.kind
+    : entry.definition.kind;
 }
 
 function binary(op: "add" | "and" | "xor", left: ExprRef, right: ExprRef): ExprRef {

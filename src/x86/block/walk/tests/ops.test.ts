@@ -47,8 +47,8 @@ test("StorageWalkOps dispatches dynamic register storage through dynamic ops", (
   harness.storage.write({ kind: "operand", index: 0 }, loaded, 32);
 
   const result = harness.result();
-  const definitions = definitionsOf(result.events);
-  const actions = actionsOf(result.events);
+  const definitions = definitionsOf(result.schedule);
+  const actions = actionsOf(result.schedule);
 
   strictEqual(definitions.length, 1);
   strictEqual(definitions[0]?.kind, "dynamicRegisterLoad");
@@ -75,7 +75,7 @@ test("ControlWalkOps records branch continuation and shared snapshots", () => {
   control.branch(exprConst(1), exprConst(0x40), { kind: "nextEip" });
 
   const result = recorder.result(snapshot, []);
-  const action = onlyAction(actionsOf(result.events));
+  const action = onlyAction(actionsOf(result.schedule));
 
   strictEqual(action.kind, "branch");
   if (action.kind === "branch") {
@@ -86,7 +86,7 @@ test("ControlWalkOps records branch continuation and shared snapshots", () => {
 
   site = opSite(4);
   control.fallthrough();
-  strictEqual(actionsOf(recorder.result(snapshot, []).events).length, 2);
+  strictEqual(actionsOf(recorder.result(snapshot, []).schedule).length, 2);
 });
 
 test("FlagWalkOps lowers flag writes and reports undefined conditions with op index", () => {
@@ -169,12 +169,12 @@ function storageHarness(resolver: BindingResolver): Readonly<{
   });
 }
 
-function actionsOf(events: ReturnType<BlockWalkRecorder["result"]>["events"]): readonly BlockAction[] {
-  return events.flatMap((event) => event.kind === "action" ? [event.action] : []);
+function actionsOf(schedule: ReturnType<BlockWalkRecorder["result"]>["schedule"]): readonly BlockAction[] {
+  return schedule.flatMap((entry) => entry.role === "action" ? [entry.action] : []);
 }
 
-function definitionsOf(events: ReturnType<BlockWalkRecorder["result"]>["events"]): readonly BlockDefinition[] {
-  return events.flatMap((event) => event.kind === "definition" ? [event.definition] : []);
+function definitionsOf(schedule: ReturnType<BlockWalkRecorder["result"]>["schedule"]): readonly BlockDefinition[] {
+  return schedule.flatMap((entry) => entry.role === "definition" ? [entry.definition] : []);
 }
 
 function onlyAction(actions: readonly BlockAction[]): BlockAction {
