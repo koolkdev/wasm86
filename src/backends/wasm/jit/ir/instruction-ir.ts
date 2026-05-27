@@ -1,6 +1,6 @@
 import type { JitOperandBinding } from "./operand-bindings.js";
-import type { IrVarAllocator } from "#x86/ir/build/builder.js";
-import { const32 } from "#x86/ir/build/builder.js";
+import type { IrVarAllocator } from "#ir/build/builder.js";
+import { const32 } from "#ir/build/builder.js";
 import type {
   IrBinaryOperator,
   IrOp,
@@ -9,8 +9,8 @@ import type {
   StorageRef,
   ValueRef,
   VarRef
-} from "#x86/ir/model/types.js";
-import type { EffectiveAddress, OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
+} from "#ir/model/types.js";
+import type { EffectiveAddress, OperandWidth, RegisterAlias, Reg32 } from "#x86/types.js";
 import { u32 } from "#x86/numeric.js";
 
 export type BindInstructionIrInput = Readonly<{

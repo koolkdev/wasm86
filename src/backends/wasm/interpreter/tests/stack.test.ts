@@ -7,7 +7,7 @@ import {
   writeInterpreterState,
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
-import { startAddress } from "#backends/wasm/tests/helpers.js";
+import { startAddress } from "#wasm/tests/helpers.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,

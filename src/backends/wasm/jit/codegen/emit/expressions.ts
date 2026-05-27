@@ -1,19 +1,19 @@
 import {
   emitMaskValueToWidth,
   type ValueWidth
-} from "#backends/wasm/codegen/value-width.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { widthMask } from "#x86/isa/types.js";
+} from "#wasm/codegen/value-width.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { widthMask } from "#x86/types.js";
 import { i32 } from "#x86/numeric.js";
 import {
   bitRangeMask,
   checkedU32Mask
-} from "#x86/expr/builders.js";
-import { canonicalizeExpr } from "#x86/expr/canonicalize.js";
+} from "#ir/expr/builders.js";
+import { canonicalizeExpr } from "#ir/expr/canonicalize.js";
 import {
   bitsUse,
   childUseForExpr
-} from "#x86/expr/uses.js";
+} from "#ir/expr/uses.js";
 import type {
   ExprRef,
   ExprUse,
@@ -21,7 +21,7 @@ import type {
   ScalarBinaryOp,
   ScalarCompareOp,
   ScalarUnaryOp
-} from "#x86/expr/types.js";
+} from "#ir/expr/types.js";
 
 export type EmittedValueWidth = ValueWidth;
 

@@ -6,8 +6,8 @@ import {
   assertInterpreterStateEquals,
   writeInterpreterState
 } from "./interpreter-helpers.js";
-import { startAddress } from "#backends/wasm/tests/helpers.js";
-import { ExitReason } from "#backends/wasm/exit.js";
+import { startAddress } from "#wasm/tests/helpers.js";
+import { ExitReason } from "#wasm/exit.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,

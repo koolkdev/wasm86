@@ -1,7 +1,7 @@
 import {
   flagProducerInputsFromRecord
-} from "#x86/ir/model/flags.js";
-import type { IrFlagSetOp } from "#x86/ir/model/types.js";
+} from "#ir/model/flags.js";
+import type { IrFlagSetOp } from "#ir/model/types.js";
 import { jitFlagProducerValue } from "#backends/wasm/jit/ir/values/builders.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";

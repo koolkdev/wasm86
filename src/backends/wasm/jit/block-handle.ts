@@ -1,8 +1,8 @@
-import type { IsaDecodedBlock } from "#x86/isa/decoder/decode-block.js";
+import type { IsaDecodedBlock } from "#x86/decoder/decode-block.js";
 import { u32 } from "#x86/numeric.js";
-import { wasmImport } from "#backends/wasm/abi.js";
-import { UnsupportedWasmCodegenError } from "#backends/wasm/errors.js";
-import { decodeExit, type DecodedExit } from "#backends/wasm/exit.js";
+import { wasmImport } from "#wasm/abi.js";
+import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
+import { decodeExit, type DecodedExit } from "#wasm/exit.js";
 import {
   buildBlock,
   buildBlockExpressions,

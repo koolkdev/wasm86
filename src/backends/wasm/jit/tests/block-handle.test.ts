@@ -1,8 +1,8 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { decodeIsaBlock } from "#x86/isa/decoder/decode-block.js";
-import { GuestMemoryDecodeReader } from "#x86/isa/decoder/guest-memory-reader.js";
+import { decodeIsaBlock } from "#x86/decoder/decode-block.js";
+import { GuestMemoryDecodeReader } from "#x86/decoder/guest-memory-reader.js";
 import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
 import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
 import {
@@ -15,9 +15,9 @@ import {
   createGuestMemory,
   readViewBytes,
   startAddress,
-} from "#backends/wasm/tests/helpers.js";
-import { decodeExit, ExitReason } from "#backends/wasm/exit.js";
-import { readWasmCpuState, writeWasmCpuState } from "#backends/wasm/state-layout.js";
+} from "#wasm/tests/helpers.js";
+import { decodeExit, ExitReason } from "#wasm/exit.js";
+import { readWasmCpuState, writeWasmCpuState } from "#wasm/state-layout.js";
 import {
   buildBlock,
   buildBlockExpressions,
@@ -25,8 +25,8 @@ import {
   jitBlockExportName,
   planJitCodegen
 } from "#backends/wasm/jit/block.js";
-import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
-import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
+import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { wasmOpcode, wasmSectionId } from "#wasm/encoder/types.js";
 
 const movAddJumpFixture = [
   0xb8, 0x01, 0x00, 0x00, 0x00,

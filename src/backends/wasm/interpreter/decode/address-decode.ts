@@ -1,9 +1,9 @@
-import type { MemOperandType, OperandSpec, RmOperandType } from "#x86/isa/schema/types.js";
-import type { OperandWidth } from "#x86/isa/types.js";
+import type { MemOperandType, OperandSpec, RmOperandType } from "#x86/schema/types.js";
+import type { OperandWidth } from "#x86/types.js";
 import type { InterpreterOperandBinding } from "#backends/wasm/interpreter/codegen/ir-context.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import { ExitReason } from "#backends/wasm/exit.js";
-import { emitWasmIrExitConstPayload } from "#backends/wasm/codegen/exit.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
+import { ExitReason } from "#wasm/exit.js";
+import { emitWasmIrExitConstPayload } from "#wasm/codegen/exit.js";
 import {
   advanceDecodeReader,
   emitReadGuestByte,

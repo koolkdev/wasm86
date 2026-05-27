@@ -8,9 +8,9 @@ import {
 import type { FaultOperation } from "#x86/execution/run-result.js";
 import type { CpuState } from "#x86/state/cpu-state.js";
 import { runDirectInterpreter } from "#backends/direct/interpreter.js";
-import { startAddress } from "#x86/isa/decoder/tests/helpers.js";
+import { startAddress } from "#x86/decoder/tests/helpers.js";
 
-export { bytes, decodeBytes, ok, startAddress } from "#x86/isa/decoder/tests/helpers.js";
+export { bytes, decodeBytes, ok, startAddress } from "#x86/decoder/tests/helpers.js";
 
 export type RunIsaBytesOptions = Readonly<{
   baseAddress?: number;

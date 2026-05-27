@@ -11,16 +11,16 @@ import {
   type CpuState
 } from "#x86/state/cpu-state.js";
 import { u32 } from "#x86/numeric.js";
-import { registerAlias } from "#x86/isa/registers.js";
-import { buildIr } from "#x86/ir/build/builder.js";
-import { CONDITIONS, type FlagBoolExpr } from "#x86/ir/model/conditions.js";
+import { registerAlias } from "#x86/registers.js";
+import { buildIr } from "#ir/build/builder.js";
+import { CONDITIONS, type FlagBoolExpr } from "#ir/model/conditions.js";
 import {
   defineFlagProducer,
   flagProducerInputsFromRecord,
   type FlagExpr,
   type FlagName,
   type ValueExpr
-} from "#x86/ir/model/flags.js";
+} from "#ir/model/flags.js";
 import type {
   IrBinaryOperator,
   IrCompareOperator,
@@ -33,9 +33,9 @@ import type {
   StorageRef,
   ValueRef,
   VarRef
-} from "#x86/ir/model/types.js";
-import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/isa/decoder/types.js";
-import { widthMask, type MemOperand, type OperandWidth } from "#x86/isa/types.js";
+} from "#ir/model/types.js";
+import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/decoder/types.js";
+import { widthMask, type MemOperand, type OperandWidth } from "#x86/types.js";
 
 export type DirectExecutionOptions = Readonly<{
   memory?: GuestMemory;

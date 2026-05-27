@@ -1,10 +1,10 @@
-import { decodeIsaInstructionFromReader } from "#x86/isa/decoder/decode.js";
-import { ByteArrayDecodeReader } from "#x86/isa/decoder/tests/helpers.js";
-import type { IsaDecodedInstruction } from "#x86/isa/decoder/types.js";
+import { decodeIsaInstructionFromReader } from "#x86/decoder/decode.js";
+import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
+import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import type { CpuState } from "#x86/state/cpu-state.js";
-import { wasmImport } from "#backends/wasm/abi.js";
-import { decodeExit, type DecodedExit } from "#backends/wasm/exit.js";
-import { readWasmCpuState, writeWasmCpuState } from "#backends/wasm/state-layout.js";
+import { wasmImport } from "#wasm/abi.js";
+import { decodeExit, type DecodedExit } from "#wasm/exit.js";
+import { readWasmCpuState, writeWasmCpuState } from "#wasm/state-layout.js";
 import {
   buildBlock,
   buildBlockExpressions,

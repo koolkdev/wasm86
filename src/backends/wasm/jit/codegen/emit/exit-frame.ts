@@ -1,5 +1,5 @@
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { WasmIrExitDestination } from "#backends/wasm/codegen/exit.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import type { WasmIrExitDestination } from "#wasm/codegen/exit.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 import type {
   PlannedExitStore,

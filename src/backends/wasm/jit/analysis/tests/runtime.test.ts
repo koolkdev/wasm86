@@ -1,10 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ExitReason } from "#backends/wasm/exit.js";
+import { ExitReason } from "#wasm/exit.js";
 import {
   buildIrExpressionBlock,
-} from "#backends/wasm/codegen/expressions.js";
+} from "#wasm/codegen/expressions.js";
 import {
   type AnalyzedRuntimeAction,
   type BlockRuntimeAnalysis

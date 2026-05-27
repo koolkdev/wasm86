@@ -5,7 +5,7 @@ import { StopReason } from "#x86/execution/run-result.js";
 import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
 import { createCpuState, getFlag, setFlag } from "#x86/state/cpu-state.js";
 import { executeDirectInstruction } from "#backends/direct/execute.js";
-import type { IsaDecodedInstruction } from "#x86/isa/decoder/types.js";
+import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { decodeBytes, ok, startAddress } from "./helpers.js";
 
 test("executes mov r32, imm32", () => {

@@ -1,7 +1,7 @@
 import { deepStrictEqual, rejects, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ExitReason } from "#backends/wasm/exit.js";
+import { ExitReason } from "#wasm/exit.js";
 import { createCpuState } from "#x86/state/cpu-state.js";
 import { startAddress } from "./block-test-helpers.js";
 import { assertBlockResult } from "./block-result-helpers.js";

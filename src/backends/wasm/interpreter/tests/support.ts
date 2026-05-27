@@ -7,7 +7,7 @@ import {
   writeInterpreterState,
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
-import { ExitReason, type DecodedExit } from "#backends/wasm/exit.js";
+import { ExitReason, type DecodedExit } from "#wasm/exit.js";
 import { readInterpreterWasmArtifact } from "#backends/wasm/interpreter/artifact.js";
 
 export type ExecutedInstruction = Readonly<{

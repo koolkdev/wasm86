@@ -1,5 +1,5 @@
-import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
+import type { ValueWidth } from "#wasm/codegen/value-width.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import {
   type CachePlan,
   type Capture,

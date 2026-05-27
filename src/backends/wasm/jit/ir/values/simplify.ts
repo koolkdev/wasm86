@@ -1,11 +1,11 @@
-import { widthMask, type OperandWidth } from "#x86/isa/types.js";
-import type { IrUnaryOperator } from "#x86/ir/model/types.js";
+import { widthMask, type OperandWidth } from "#x86/types.js";
+import type { IrUnaryOperator } from "#ir/model/types.js";
 import {
   flagProducerInputNames,
   flagProducerInputsFromRecord,
   requiredFlagProducerInput,
   type FlagProducerInputs
-} from "#x86/ir/model/flags.js";
+} from "#ir/model/flags.js";
 import { i32 } from "#x86/numeric.js";
 import { valuesEqual } from "./equality.js";
 import {

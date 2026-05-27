@@ -5,13 +5,13 @@ import { emitInterpreterIrWithContext } from "#backends/wasm/interpreter/codegen
 import { InterpreterDispatchDepths } from "#backends/wasm/interpreter/codegen/depths.js";
 import type { InterpreterStateCache } from "#backends/wasm/interpreter/codegen/state-cache.js";
 import { InterpreterLocals } from "#backends/wasm/interpreter/codegen/locals.js";
-import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
-import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import { x86ArithmeticFlagMask } from "#x86/isa/flags.js";
-import { reg32, type Reg32 } from "#x86/isa/types.js";
-import type { IrBlock } from "#x86/ir/model/types.js";
+import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import { WasmModuleEncoder } from "#wasm/encoder/module.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
+import { x86ArithmeticFlagMask } from "#x86/flags.js";
+import { reg32, type Reg32 } from "#x86/types.js";
+import type { IrBlock } from "#ir/model/types.js";
 
 test("Wasm interpreter IR generation lowers semantic flag writes", async () => {
   const run = await instantiateFlagWriteInterpreterIr();

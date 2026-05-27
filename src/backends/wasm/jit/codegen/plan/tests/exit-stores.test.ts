@@ -33,7 +33,7 @@ import {
   type JitIrBlock,
   type JitCodegenPlan,
 } from "./plan-test-helpers.js";
-import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
+import type { IrExprBlock } from "#wasm/codegen/expressions.js";
 import { storesForSnapshot } from "#backends/wasm/jit/codegen/plan/exit-stores.js";
 import { registerStores } from "#backends/wasm/jit/codegen/plan/register-stores.js";
 import { flagStores } from "#backends/wasm/jit/codegen/plan/flag-stores.js";

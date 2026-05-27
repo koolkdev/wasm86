@@ -3,9 +3,9 @@ import { test } from "node:test";
 
 import { bindInstructionIr } from "#backends/wasm/jit/ir/instruction-ir.js";
 import type { JitOperandBinding } from "#backends/wasm/jit/ir/operand-bindings.js";
-import { IrBlockBuilder } from "#x86/ir/build/block.js";
-import { createIrVarAllocator, operand } from "#x86/ir/build/builder.js";
-import type { IrBlock, IrOp } from "#x86/ir/model/types.js";
+import { IrBlockBuilder } from "#ir/build/block.js";
+import { createIrVarAllocator, operand } from "#ir/build/builder.js";
+import type { IrBlock, IrOp } from "#ir/model/types.js";
 
 const espMemoryOperand: JitOperandBinding = {
   kind: "static.mem",

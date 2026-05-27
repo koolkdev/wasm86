@@ -1,11 +1,11 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { decodeIsaInstructionFromReader } from "#x86/isa/decoder/decode.js";
+import { decodeIsaInstructionFromReader } from "#x86/decoder/decode.js";
 import { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import { loadProgramRegions } from "#runtime/program/loader.js";
 import { codeRegionsFromProgram, normalizeProgramRegions, requiredProgramByteLength } from "#runtime/program/regions.js";
-import { createWasmHostMemories } from "#backends/wasm/host/memories.js";
+import { createWasmHostMemories } from "#wasm/host/memories.js";
 
 const startAddress = 0x1000;
 

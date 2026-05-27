@@ -1,11 +1,11 @@
-import { validateIrBlock } from "#x86/ir/passes/validator.js";
+import { validateIrBlock } from "#ir/passes/validator.js";
 import {
   irOpDst,
   irOpIsTerminator,
   visitIrOpStorageRefs,
   visitIrOpValueRefs
-} from "#x86/ir/model/op-semantics.js";
-import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
+} from "#ir/model/op-semantics.js";
+import type { IrOp, StorageRef, ValueRef } from "#ir/model/types.js";
 import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 
 type VarDefinition = Readonly<{

@@ -1,9 +1,9 @@
-import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/isa/decoder/decode-block.js";
-import type { IsaDecodeFault } from "#x86/isa/decoder/reader.js";
+import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
+import type { IsaDecodeFault } from "#x86/decoder/reader.js";
 import { u32 } from "#x86/numeric.js";
-import { UnsupportedWasmCodegenError } from "#backends/wasm/errors.js";
+import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import { compileWasmBlockHandle, type WasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
-import type { WasmHostMemories } from "#backends/wasm/host/memories.js";
+import type { WasmHostMemories } from "#wasm/host/memories.js";
 import type { CompiledBlockCache, CompiledBlockHandle, WasmCompiledBlockCodeMap } from "./block-cache.js";
 import type { JitModuleLinkTable, JitLinkedBlockFunction } from "./module-link-table.js";
 

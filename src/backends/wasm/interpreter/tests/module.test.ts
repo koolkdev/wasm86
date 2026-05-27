@@ -7,15 +7,15 @@ import {
   readInterpreterState,
   writeInterpreterState
 } from "./interpreter-helpers.js";
-import { assertMemoryImports, startAddress } from "#backends/wasm/tests/helpers.js";
-import { wasmImport, wasmMemoryIndex } from "#backends/wasm/abi.js";
-import { wasmOpcode } from "#backends/wasm/encoder/types.js";
+import { assertMemoryImports, startAddress } from "#wasm/tests/helpers.js";
+import { wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { wasmOpcode } from "#wasm/encoder/types.js";
 import {
   extractOnlyWasmFunctionBody,
   wasmBodyOpcodes,
   wasmBodyMemoryAccesses
-} from "#backends/wasm/tests/body-opcodes.js";
-import { ExitReason } from "#backends/wasm/exit.js";
+} from "#wasm/tests/body-opcodes.js";
+import { ExitReason } from "#wasm/exit.js";
 import { readInterpreterWasmArtifact } from "#backends/wasm/interpreter/artifact.js";
 import { encodeInterpreterModule } from "#backends/wasm/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";

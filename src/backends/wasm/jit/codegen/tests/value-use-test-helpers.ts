@@ -2,7 +2,7 @@ import type {
   IrExprBlock,
   IrStorageExpr,
   IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
+} from "#wasm/codegen/expressions.js";
 import {
   branchPath,
   rootPath,

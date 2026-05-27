@@ -1,18 +1,18 @@
-import type { OperandWidth, Reg32 } from "#x86/isa/types.js";
-import { reg32 } from "#x86/isa/types.js";
-import { registerAliasByIndex } from "#x86/isa/registers.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { wasmValueType, type WasmValueType } from "#backends/wasm/encoder/types.js";
+import type { OperandWidth, Reg32 } from "#x86/types.js";
+import { reg32 } from "#x86/types.js";
+import { registerAliasByIndex } from "#x86/registers.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 import {
   emitLoadRegAlias,
   emitStoreRegAlias
-} from "#backends/wasm/codegen/registers.js";
+} from "#wasm/codegen/registers.js";
 import {
   cleanValueWidth,
   dirtyValueWidth,
   type WasmIrEmitValueOptions,
   type ValueWidth
-} from "#backends/wasm/codegen/value-width.js";
+} from "#wasm/codegen/value-width.js";
 
 type Reg32Locals = Readonly<Record<Reg32, number>>;
 type EmitIndex = () => void;

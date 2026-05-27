@@ -1,26 +1,26 @@
-import type { OperandWidth, RegisterAlias } from "#x86/isa/types.js";
-import { registerAlias } from "#x86/isa/registers.js";
-import { buildIrExpressionBlock, type IrStorageExpr, type IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import type { OperandWidth, RegisterAlias } from "#x86/types.js";
+import { registerAlias } from "#x86/registers.js";
+import { buildIrExpressionBlock, type IrStorageExpr, type IrValueExpr } from "#wasm/codegen/expressions.js";
 import type {
   IrBlock,
   IrMemoryAccessKind,
   OperandRef,
   SemanticOperandInfo
-} from "#x86/ir/model/types.js";
-import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import { wasmIrLocalAluFlagsStorage } from "#backends/wasm/codegen/alu-flags.js";
-import { emitWasmIrExitFromI32Stack, type WasmIrExitDestination } from "#backends/wasm/codegen/exit.js";
+} from "#ir/model/types.js";
+import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
+import { wasmIrLocalAluFlagsStorage } from "#wasm/codegen/alu-flags.js";
+import { emitWasmIrExitFromI32Stack, type WasmIrExitDestination } from "#wasm/codegen/exit.js";
 import {
   emitWasmIrGuardGuestRange,
   emitWasmIrLoadGuestUnchecked,
   emitWasmIrStoreGuestUnchecked
-} from "#backends/wasm/codegen/memory.js";
+} from "#wasm/codegen/memory.js";
 import {
   emitLoadRegAlias,
   emitStoreRegAlias
-} from "#backends/wasm/codegen/registers.js";
+} from "#wasm/codegen/registers.js";
 import {
   emitCompleteInstruction,
   emitCompleteInstructionWithTarget
@@ -38,10 +38,10 @@ import {
   emitModRmIsRegister,
   emitModRmRegIndex
 } from "#backends/wasm/interpreter/decode/modrm-bits.js";
-import { emitIrExpressionBlockToWasm, type WasmIrEmitHelpers } from "#backends/wasm/codegen/emit.js";
-import { emitSetFlags, emitWriteFlags } from "#backends/wasm/codegen/flags.js";
-import { emitFlagsCondition } from "#backends/wasm/codegen/conditions.js";
-import { ExitReason } from "#backends/wasm/exit.js";
+import { emitIrExpressionBlockToWasm, type WasmIrEmitHelpers } from "#wasm/codegen/emit.js";
+import { emitSetFlags, emitWriteFlags } from "#wasm/codegen/flags.js";
+import { emitFlagsCondition } from "#wasm/codegen/conditions.js";
+import { ExitReason } from "#wasm/exit.js";
 import type { InterpreterLocals } from "./locals.js";
 import type { InterpreterDispatchDepths } from "./depths.js";
 import {
@@ -52,7 +52,7 @@ import {
   emitSignExtendValueToWidth,
   type WasmIrEmitValueOptions,
   type ValueWidth
-} from "#backends/wasm/codegen/value-width.js";
+} from "#wasm/codegen/value-width.js";
 import { optimizeInterpreterExpressionBlock } from "./expressions.js";
 
 export type InterpreterOperandBinding =

@@ -1,8 +1,8 @@
-import { cleanValueWidth } from "#backends/wasm/codegen/value-width.js";
+import { cleanValueWidth } from "#wasm/codegen/value-width.js";
 import {
   emitWasmIrLoadGuestUnchecked
-} from "#backends/wasm/codegen/memory.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
+} from "#wasm/codegen/memory.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type {
   DefinitionEntry
 } from "#backends/wasm/jit/codegen/plan/schedule-types.js";

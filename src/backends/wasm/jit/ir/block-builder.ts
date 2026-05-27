@@ -1,6 +1,6 @@
-import type { IsaDecodedInstruction } from "#x86/isa/decoder/types.js";
-import { createIrVarAllocator, operand } from "#x86/ir/build/builder.js";
-import { IrBlockBuilder } from "#x86/ir/build/block.js";
+import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
+import { createIrVarAllocator, operand } from "#ir/build/builder.js";
+import { IrBlockBuilder } from "#ir/build/block.js";
 import {
   operandBindingsFromInstruction,
   jitSemanticOperandInfo

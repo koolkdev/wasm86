@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
+import type { IrExprBlock } from "#wasm/codegen/expressions.js";
 import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";

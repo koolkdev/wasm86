@@ -5,10 +5,10 @@ import {
   instantiateWasmInterpreter,
   writeGuestBytes
 } from "#backends/wasm/interpreter/tests/support.js";
-import { ExitReason, type DecodedExit } from "#backends/wasm/exit.js";
-import { readWasmCpuState, writeWasmCpuState } from "#backends/wasm/state-layout.js";
+import { ExitReason, type DecodedExit } from "#wasm/exit.js";
+import { readWasmCpuState, writeWasmCpuState } from "#wasm/state-layout.js";
 import { StopReason, type RunResult } from "#x86/execution/run-result.js";
-import { decodeBytes, ok } from "#x86/isa/decoder/tests/helpers.js";
+import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
 import {
   cloneCpuState,

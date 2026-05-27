@@ -1,9 +1,9 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ExitReason } from "#backends/wasm/exit.js";
-import { startAddress } from "#backends/wasm/tests/helpers.js";
-import { maxX86InstructionLength } from "#x86/isa/decoder/reader.js";
+import { ExitReason } from "#wasm/exit.js";
+import { startAddress } from "#wasm/tests/helpers.js";
+import { maxX86InstructionLength } from "#x86/decoder/reader.js";
 import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
 import {
   assertInterpreterStateEquals,

@@ -1,6 +1,6 @@
-import type { MemOperand, RegisterAlias } from "#x86/isa/types.js";
-import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/isa/decoder/types.js";
-import type { SemanticOperandInfo } from "#x86/ir/model/types.js";
+import type { MemOperand, RegisterAlias } from "#x86/types.js";
+import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/decoder/types.js";
+import type { SemanticOperandInfo } from "#ir/model/types.js";
 
 export type JitOperandBinding =
   | Readonly<{ kind: "static.reg"; alias: RegisterAlias }>

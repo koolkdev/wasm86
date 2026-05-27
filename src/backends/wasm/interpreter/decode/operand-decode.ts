@@ -4,14 +4,14 @@ import type {
   OperandSpec,
   RegOperandType,
   RmOperandType
-} from "#x86/isa/schema/types.js";
-import { registerAlias } from "#x86/isa/registers.js";
-import type { OperandWidth } from "#x86/isa/types.js";
+} from "#x86/schema/types.js";
+import { registerAlias } from "#x86/registers.js";
+import type { OperandWidth } from "#x86/types.js";
 import type {
   InterpreterInstructionLength,
   InterpreterOperandBinding
 } from "#backends/wasm/interpreter/codegen/ir-context.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
 import { decodeModRmRmOperand } from "./address-decode.js";
 import {
   advanceDecodeReader,

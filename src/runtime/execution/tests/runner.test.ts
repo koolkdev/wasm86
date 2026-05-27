@@ -12,7 +12,7 @@ import {
   prepareEngineFixture
 } from "#runtime/tests/fixtures/helpers.js";
 import { ENGINE_PROGRAM_FIXTURES, MOV_ADD_TRAP } from "#runtime/tests/fixtures/programs.js";
-import { createWasmHostMemories } from "#backends/wasm/host/memories.js";
+import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { createInstructionBudget } from "#runtime/execution/budget.js";
 import { engineDone, engineUnavailable, type RuntimeEngineResult } from "#runtime/execution/engine-result.js";
 import { RuntimeMode } from "#runtime/execution/mode.js";

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { validateBlock } from "#backends/wasm/jit/ir/validate.js";
 import { buildBlockExpressions } from "#backends/wasm/jit/ir/block-expressions.js";
-import type { IrBlock } from "#x86/ir/model/types.js";
+import type { IrBlock } from "#ir/model/types.js";
 import type { JitIrBlock, JitIrInstruction } from "#backends/wasm/jit/ir/types.js";
 import { c32, startAddress, v } from "./helpers.js";
 

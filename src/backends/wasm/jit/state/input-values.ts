@@ -2,7 +2,7 @@ import {
   jitInputAluFlagsValue,
   jitInputReg32Value
 } from "#backends/wasm/jit/ir/values/builders.js";
-import type { Reg32 } from "#x86/isa/types.js";
+import type { Reg32 } from "#x86/types.js";
 import type {
   JitCanonicalInputSlot,
   JitInputValue

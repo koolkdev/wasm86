@@ -1,4 +1,4 @@
-import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import type { IrValueExpr } from "#wasm/codegen/expressions.js";
 import type {
   JitBoundExprBlock,
   JitBoundExprOp

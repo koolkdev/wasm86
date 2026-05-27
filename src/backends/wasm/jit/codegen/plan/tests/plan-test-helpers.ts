@@ -1,12 +1,12 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
-import type { Reg32 } from "#x86/isa/types.js";
-import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
-import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
-import { ExitReason } from "#backends/wasm/exit.js";
-import type { IrExprBlock, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import { ok, decodeBytes } from "#x86/decoder/tests/helpers.js";
+import type { Reg32 } from "#x86/types.js";
+import { IR_ALU_FLAG_MASK } from "#ir/model/flag-effects.js";
+import { FLAG_PRODUCERS } from "#ir/model/flags.js";
+import { ExitReason } from "#wasm/exit.js";
+import type { IrExprBlock, IrValueExpr } from "#wasm/codegen/expressions.js";
 import { buildBlock } from "#backends/wasm/jit/block.js";
 import {
   analyzeBlock,
@@ -24,7 +24,7 @@ import { planReuseForBlock } from "#backends/wasm/jit/codegen/plan/reuse.js";
 import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { buildTimeline as buildTimelineWithRegistry } from "#backends/wasm/jit/analysis/timeline-builder.js";
 import type { TimelineInput } from "#backends/wasm/jit/analysis/timeline-types.js";
-import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
+import type { IrOp, StorageRef, ValueRef } from "#ir/model/types.js";
 import {
   type UsePurpose
 } from "#backends/wasm/jit/codegen/plan/value-uses.js";

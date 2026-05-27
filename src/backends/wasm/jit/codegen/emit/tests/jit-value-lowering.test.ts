@@ -4,11 +4,11 @@ import { test } from "node:test";
 import {
   IR_ALU_FLAG_MASK,
   IR_ALU_FLAG_MASKS
-} from "#x86/ir/model/flag-effects.js";
-import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
-import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
-import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
+} from "#ir/model/flag-effects.js";
+import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
+import { cleanValueWidth, type ValueWidth } from "#wasm/codegen/value-width.js";
+import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import {
   jitFlagConditionValue,
   jitFlagProducerValue,

@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { reg32 } from "#x86/isa/types.js";
+import { reg32 } from "#x86/types.js";
 import {
   arithmeticEflagsMask,
   controlEflagsMask,

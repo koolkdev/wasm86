@@ -3,8 +3,8 @@ import type {
   IrExprOp,
   IrStorageExpr,
   IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
-import type { VarRef } from "#x86/ir/model/types.js";
+} from "#wasm/codegen/expressions.js";
+import type { VarRef } from "#ir/model/types.js";
 
 export type InterpreterExpressionOptimizerOptions = Readonly<{
   canInlineGet(source: IrStorageExpr): boolean;

@@ -1,6 +1,6 @@
 import {
   buildIrExpressionBlock,
-} from "#backends/wasm/codegen/expressions.js";
+} from "#wasm/codegen/expressions.js";
 import type {
   JitIrBlock,
   JitIrInstruction

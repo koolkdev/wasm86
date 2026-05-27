@@ -1,22 +1,22 @@
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import {
   cleanValueWidth,
   type ValueWidth,
   type WasmIrEmitValueOptions
-} from "#backends/wasm/codegen/value-width.js";
+} from "#wasm/codegen/value-width.js";
 import {
   emitFlagsConditionFromAluFlagsValue,
   emitFlagProducerConditionFromInputs
-} from "#backends/wasm/codegen/conditions.js";
+} from "#wasm/codegen/conditions.js";
 import {
   emitFlagProducerBitsFromInputs,
   type WasmFlagValueEmitHelpers
-} from "#backends/wasm/codegen/flags.js";
-import { conditionFlagReadMask } from "#x86/ir/model/flag-effects.js";
-import { flagProducerConditionKind } from "#x86/ir/model/flag-conditions.js";
+} from "#wasm/codegen/flags.js";
+import { conditionFlagReadMask } from "#ir/model/flag-effects.js";
+import { flagProducerConditionKind } from "#ir/model/flag-conditions.js";
 import { i32 } from "#x86/numeric.js";
-import type { OperandWidth } from "#x86/isa/types.js";
-import type { ConditionCode } from "#x86/ir/model/types.js";
+import type { OperandWidth } from "#x86/types.js";
+import type { ConditionCode } from "#ir/model/types.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type {
   JitFlagProducerValue,

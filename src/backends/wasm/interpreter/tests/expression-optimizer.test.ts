@@ -1,9 +1,9 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { IrExprBlock, IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import type { IrExprBlock, IrStorageExpr, IrValueExpr } from "#wasm/codegen/expressions.js";
 import { optimizeInterpreterExpressionBlock } from "#backends/wasm/interpreter/codegen/expressions.js";
-import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
+import { createIrFlagSetOp } from "#ir/model/flags.js";
 
 const v = (id: number) => ({ kind: "var" as const, id });
 const op = (index: number) => ({ kind: "operand" as const, index });

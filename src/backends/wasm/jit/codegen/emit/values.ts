@@ -1,9 +1,9 @@
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import {
   applyRequestedValueWidth,
   emitI32BinaryInstruction,
   i32BinaryOperandEmitOptions
-} from "#backends/wasm/codegen/emit.js";
+} from "#wasm/codegen/emit.js";
 import {
   cleanValueWidth,
   constValueWidth,
@@ -13,10 +13,10 @@ import {
   i32SelectResultValueWidth,
   type ValueWidth,
   type WasmIrEmitValueOptions
-} from "#backends/wasm/codegen/value-width.js";
+} from "#wasm/codegen/value-width.js";
 import { i32 } from "#x86/numeric.js";
-import type { OperandWidth } from "#x86/isa/types.js";
-import type { IrBinaryOperator, IrUnaryOperator } from "#x86/ir/model/types.js";
+import type { OperandWidth } from "#x86/types.js";
+import type { IrBinaryOperator, IrUnaryOperator } from "#ir/model/types.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import { bitRangeMask } from "#backends/wasm/jit/ir/values/bits.js";
 import type {

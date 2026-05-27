@@ -1,10 +1,10 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { reg32, type Reg32 } from "#x86/isa/types.js";
-import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import { reg32, type Reg32 } from "#x86/types.js";
+import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { WasmModuleEncoder } from "#wasm/encoder/module.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
 import { emitLoadRegByIndex } from "#backends/wasm/interpreter/dispatch/register-dispatch.js";
 
 test("register dispatch can leave the selected register value on the stack", async () => {

@@ -1,8 +1,8 @@
-import type { ConditionCode } from "#x86/ir/model/types.js";
+import type { ConditionCode } from "#ir/model/types.js";
 import {
   assertIrAluFlagMask,
   IR_ALU_FLAG_MASK
-} from "#x86/ir/model/flag-effects.js";
+} from "#ir/model/flag-effects.js";
 import {
   jitExtractMaskedBits,
   jitFlagConditionValue,

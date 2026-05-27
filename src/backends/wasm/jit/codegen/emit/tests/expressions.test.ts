@@ -3,10 +3,10 @@ import {
 } from "node:assert";
 import { test } from "node:test";
 
-import { emitWasmIrStoreGuestUnchecked } from "#backends/wasm/codegen/memory.js";
-import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
-import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
+import { emitWasmIrStoreGuestUnchecked } from "#wasm/codegen/memory.js";
+import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
+import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import {
   exprBits,
   exprBinary,
@@ -15,17 +15,17 @@ import {
   exprInput,
   exprProject,
   exprUnary
-} from "#x86/expr/builders.js";
+} from "#ir/expr/builders.js";
 import {
   bitsUse,
   exactUse,
   full32Use
-} from "#x86/expr/uses.js";
+} from "#ir/expr/uses.js";
 import type {
   ExprRef,
   ExprUse,
   ExprInputSource
-} from "#x86/expr/types.js";
+} from "#ir/expr/types.js";
 import {
   emitExpr,
   type EmittedExpr,

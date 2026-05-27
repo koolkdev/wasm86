@@ -1,18 +1,18 @@
-import { stateOffset } from "#backends/wasm/abi.js";
+import { stateOffset } from "#wasm/abi.js";
 import {
   emitLoadStateS8,
   emitLoadStateS16,
   emitLoadStateU8,
   emitLoadStateU16,
   emitLoadStateU32
-} from "#backends/wasm/codegen/state.js";
-import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
+} from "#wasm/codegen/state.js";
+import { cleanValueWidth, type ValueWidth } from "#wasm/codegen/value-width.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { JitArchitecturalSlot } from "#backends/wasm/jit/ir/values/types.js";
 import {
   jitRegisterSlotAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
-import type { OperandWidth } from "#x86/isa/types.js";
+import type { OperandWidth } from "#x86/types.js";
 import type { InputEmitter } from "./values.js";
 
 export function createInputSlotEmitter(body: WasmFunctionBodyEncoder): InputEmitter {

@@ -1,8 +1,8 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { ExitReason } from "#backends/wasm/exit.js";
-import { createWasmHostMemories, type WasmHostMemories } from "#backends/wasm/host/memories.js";
+import { ExitReason } from "#wasm/exit.js";
+import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
 import { jitModuleLinkFallbackExportName } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
 import type { WasmCompiledBlockCodeMap } from "#backends/wasm/jit/compiled-blocks/block-cache.js";
 import { WasmCompiledBlockCache } from "#backends/wasm/jit/compiled-blocks/wasm-cache.js";
@@ -10,7 +10,7 @@ import type { WasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
 import {
   GuestMemoryDecodeReader,
   type GuestMemoryDecodeRegion
-} from "#x86/isa/decoder/guest-memory-reader.js";
+} from "#x86/decoder/guest-memory-reader.js";
 
 const aEip = 0x1000;
 const bEip = 0x2000;

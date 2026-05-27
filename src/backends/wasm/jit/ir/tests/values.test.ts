@@ -4,7 +4,7 @@ import { test } from "node:test";
 import {
   IR_ALU_FLAG_MASK,
   IR_ALU_FLAG_MASKS
-} from "#x86/ir/model/flag-effects.js";
+} from "#ir/model/flag-effects.js";
 import {
   jitExtractBits,
   jitExtractMaskedBits,

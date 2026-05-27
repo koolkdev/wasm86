@@ -1,8 +1,8 @@
-import { buildIr } from "#x86/ir/build/builder.js";
-import type { ExpandedInstructionSpec, ModRmMatch, Reg3 } from "#x86/isa/schema/types.js";
-import type { OpcodeDispatchCandidateSet, OpcodeDispatchLeaf } from "#x86/isa/decoder/opcode-dispatch.js";
-import type { SemanticTemplate } from "#x86/ir/model/types.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import { buildIr } from "#ir/build/builder.js";
+import type { ExpandedInstructionSpec, ModRmMatch, Reg3 } from "#x86/schema/types.js";
+import type { OpcodeDispatchCandidateSet, OpcodeDispatchLeaf } from "#x86/decoder/opcode-dispatch.js";
+import type { SemanticTemplate } from "#ir/model/types.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
 import {
   emitInterpreterIrWithContext,
   interpreterSemanticOperandInfo

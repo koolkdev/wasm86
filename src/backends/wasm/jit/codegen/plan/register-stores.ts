@@ -1,4 +1,4 @@
-import { reg32, type OperandWidth, type Reg32 } from "#x86/isa/types.js";
+import { reg32, type OperandWidth, type Reg32 } from "#x86/types.js";
 import {
   jitInputReg32Value
 } from "#backends/wasm/jit/ir/values/builders.js";

@@ -1,9 +1,9 @@
 import type {
   IrStorageExpr,
   IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
+} from "#wasm/codegen/expressions.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
-import type { ValueRef } from "#x86/ir/model/types.js";
+import type { ValueRef } from "#ir/model/types.js";
 import type {
   StorageReadRef,
   TimelineExpression,

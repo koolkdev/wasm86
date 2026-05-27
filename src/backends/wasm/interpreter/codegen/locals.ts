@@ -1,5 +1,5 @@
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 
 export class InterpreterLocals {
   readonly eip: number;

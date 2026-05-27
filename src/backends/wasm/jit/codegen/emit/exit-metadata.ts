@@ -1,8 +1,8 @@
 import { i32 } from "#x86/numeric.js";
-import { stateOffset } from "#backends/wasm/abi.js";
-import { emitLoadStateU32, emitStoreStateU32 } from "#backends/wasm/codegen/state.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import { stateOffset } from "#wasm/abi.js";
+import { emitLoadStateU32, emitStoreStateU32 } from "#wasm/codegen/state.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 
 export type ExitMetadataEmitter = Readonly<{

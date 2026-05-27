@@ -1,15 +1,15 @@
 import type {
   IrStorageExpr,
   IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
+} from "#wasm/codegen/expressions.js";
 import type { JitBoundExprBlock } from "#backends/wasm/jit/ir/bound-expressions.js";
 import type {
   JitArchitecturalSlot,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
 import type { JitValueStateSnapshot } from "#backends/wasm/jit/state/value-state.js";
-import type { ValueRef } from "#x86/ir/model/types.js";
-import type { OperandWidth } from "#x86/isa/types.js";
+import type { ValueRef } from "#ir/model/types.js";
+import type { OperandWidth } from "#x86/types.js";
 import type { LoadResultRegistry } from "./load-result.js";
 
 export type ValueSnapshot = JitValueStateSnapshot;

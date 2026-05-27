@@ -2,8 +2,8 @@ import type {
   IrExprOp,
   IrStorageExpr,
   IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
-import { UnsupportedWasmCodegenError } from "#backends/wasm/errors.js";
+} from "#wasm/codegen/expressions.js";
+import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import {
   createJitValueResolver,
   type JitValueResolver
@@ -19,9 +19,9 @@ import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import {
   jitRegisterSlotForAlias
 } from "#backends/wasm/jit/ir/values/slots.js";
-import type { ValueRef } from "#x86/ir/model/types.js";
-import { registerAlias } from "#x86/isa/registers.js";
-import type { OperandWidth, RegisterAlias, RegName } from "#x86/isa/types.js";
+import type { ValueRef } from "#ir/model/types.js";
+import { registerAlias } from "#x86/registers.js";
+import type { OperandWidth, RegisterAlias, RegName } from "#x86/types.js";
 import { LoadResultRegistry } from "./load-result.js";
 import {
   type MemoryLoadValue,

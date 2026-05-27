@@ -1,6 +1,6 @@
 import { jitLoadResultValue } from "#backends/wasm/jit/ir/values/builders.js";
 import type { JitLoadResultValue } from "#backends/wasm/jit/ir/values/types.js";
-import type { IrValueType } from "#x86/ir/model/types.js";
+import type { IrValueType } from "#ir/model/types.js";
 
 export class LoadResultRegistry {
   #nextId = 0;

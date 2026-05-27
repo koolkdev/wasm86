@@ -1,7 +1,7 @@
-import type { IrStorageExpr } from "#backends/wasm/codegen/expressions.js";
-import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
-import type { StorageRef } from "#x86/ir/model/types.js";
-import { registerAlias } from "#x86/isa/registers.js";
+import type { IrStorageExpr } from "#wasm/codegen/expressions.js";
+import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/types.js";
+import type { StorageRef } from "#ir/model/types.js";
+import { registerAlias } from "#x86/registers.js";
 
 export type JitRegisterAccess = Readonly<{
   reg: Reg32;

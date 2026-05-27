@@ -1,4 +1,4 @@
-import type { Reg16, Reg32, Reg8 } from "#x86/isa/types.js";
+import type { Reg16, Reg32, Reg8 } from "#x86/types.js";
 import {
   jitExtractBits,
   jitInsertBits

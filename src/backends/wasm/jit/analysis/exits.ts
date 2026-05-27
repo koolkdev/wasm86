@@ -1,5 +1,5 @@
-import type { ExitReason as ExitReasonValue } from "#backends/wasm/exit.js";
-import { ExitReason } from "#backends/wasm/exit.js";
+import type { ExitReason as ExitReasonValue } from "#wasm/exit.js";
+import { ExitReason } from "#wasm/exit.js";
 import { u32 } from "#x86/numeric.js";
 import type {
   JitConditionalJumpExprOp,

@@ -1,6 +1,6 @@
 import type { BlockScheduleEntry } from "#backends/wasm/jit/codegen/plan/schedule-types.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { CapturePlan } from "#backends/wasm/jit/codegen/plan/captures.js";
 import {
   createControlActionEmitter,

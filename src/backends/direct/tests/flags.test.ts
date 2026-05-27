@@ -9,8 +9,8 @@ import {
 } from "#x86/state/cpu-state.js";
 import { u32 } from "#x86/numeric.js";
 import { executeDirectInstruction } from "#backends/direct/execute.js";
-import type { IsaDecodedInstruction } from "#x86/isa/decoder/types.js";
-import type { SemanticTemplate } from "#x86/ir/model/types.js";
+import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
+import type { SemanticTemplate } from "#ir/model/types.js";
 import { decodeBytes, ok, startAddress } from "./helpers.js";
 
 test("add_wrap_sets_cf_zf_af_pf", () => {

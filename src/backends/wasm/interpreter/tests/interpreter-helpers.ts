@@ -1,10 +1,10 @@
 import { strictEqual } from "node:assert";
 
 import { type CpuState } from "#x86/state/cpu-state.js";
-import { wasmBlockExportName, wasmImport } from "#backends/wasm/abi.js";
-import { decodeExit, type DecodedExit } from "#backends/wasm/exit.js";
-import { readWasmCpuState, readWasmStateField, WASM_STATE_FIELDS, writeWasmCpuState } from "#backends/wasm/state-layout.js";
-import { createGuestMemory } from "#backends/wasm/tests/helpers.js";
+import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
+import { decodeExit, type DecodedExit } from "#wasm/exit.js";
+import { readWasmCpuState, readWasmStateField, WASM_STATE_FIELDS, writeWasmCpuState } from "#wasm/state-layout.js";
+import { createGuestMemory } from "#wasm/tests/helpers.js";
 
 export type InterpreterModuleInstance = Readonly<{
   module: WebAssembly.Module;

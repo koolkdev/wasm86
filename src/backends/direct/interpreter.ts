@@ -1,14 +1,14 @@
 import { runResultFromState, StopReason, type RunResult } from "#x86/execution/run-result.js";
 import type { GuestMemory } from "#x86/memory/guest-memory.js";
 import type { CpuState } from "#x86/state/cpu-state.js";
-import { decodeIsaInstructionFromReader } from "#x86/isa/decoder/decode.js";
+import { decodeIsaInstructionFromReader } from "#x86/decoder/decode.js";
 import {
   IsaDecodeError,
   maxX86InstructionLength,
   readAvailableBytes
-} from "#x86/isa/decoder/reader.js";
-import type { IsaDecodedInstruction } from "#x86/isa/decoder/types.js";
-import { GuestMemoryDecodeReader, type RegionedDecodeReader } from "#x86/isa/decoder/guest-memory-reader.js";
+} from "#x86/decoder/reader.js";
+import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
+import { GuestMemoryDecodeReader, type RegionedDecodeReader } from "#x86/decoder/guest-memory-reader.js";
 import { executeDirectInstruction } from "./execute.js";
 
 const defaultInstructionLimit = 10_000;

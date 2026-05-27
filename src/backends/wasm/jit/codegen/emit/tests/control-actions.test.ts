@@ -4,11 +4,11 @@ import {
 } from "node:assert";
 import { test } from "node:test";
 
-import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
-import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
-import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
-import { ExitReason } from "#backends/wasm/exit.js";
+import { cleanValueWidth, type ValueWidth } from "#wasm/codegen/value-width.js";
+import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
+import { ExitReason } from "#wasm/exit.js";
 import {
   createControlActionEmitter
 } from "#backends/wasm/jit/codegen/emit/control-actions.js";
@@ -29,7 +29,7 @@ import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import {
   wasmBodyInstructions,
   wasmBodyOpcodes
-} from "#backends/wasm/tests/body-opcodes.js";
+} from "#wasm/tests/body-opcodes.js";
 
 test("JIT control actions emit branch arms under their exit paths", () => {
   const body = new WasmFunctionBodyEncoder();

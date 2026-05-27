@@ -1,6 +1,6 @@
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { ValueWidth } from "#backends/wasm/codegen/value-width.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import type { ValueWidth } from "#wasm/codegen/value-width.js";
 import { valueKey } from "#backends/wasm/jit/ir/values/keys.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";

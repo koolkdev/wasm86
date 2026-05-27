@@ -27,7 +27,7 @@ import {
   type JitIrBlock,
   type JitValue
 } from "./value-local-store-test-helpers.js";
-import { wasmMemoryIndex } from "#backends/wasm/abi.js";
+import { wasmMemoryIndex } from "#wasm/abi.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import {
   buildBlockExpressions,
@@ -35,7 +35,7 @@ import {
 } from "#backends/wasm/jit/block.js";
 import { rootPath } from "#backends/wasm/jit/analysis/paths.js";
 import { jitLoadResultValue } from "#backends/wasm/jit/ir/values/builders.js";
-import type { ValueRef } from "#x86/ir/model/types.js";
+import type { ValueRef } from "#ir/model/types.js";
 import { createScheduleEmitter } from "#backends/wasm/jit/codegen/emit/schedule.js";
 import { createExitFrame } from "#backends/wasm/jit/codegen/emit/exit-frame.js";
 import type { CapturePlan } from "#backends/wasm/jit/codegen/plan/captures.js";

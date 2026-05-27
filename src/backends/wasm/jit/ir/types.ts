@@ -1,4 +1,4 @@
-import type { IrBlock } from "#x86/ir/model/types.js";
+import type { IrBlock } from "#ir/model/types.js";
 
 export type InstructionMetadata = Readonly<{
   instructionId: string;

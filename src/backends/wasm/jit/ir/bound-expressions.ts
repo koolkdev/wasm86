@@ -3,7 +3,7 @@ import type {
   IrExprOp,
   IrStorageExpr,
   IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
+} from "#wasm/codegen/expressions.js";
 import { u32 } from "#x86/numeric.js";
 
 export type JitConstExpr = Extract<IrValueExpr, { kind: "const" }>;

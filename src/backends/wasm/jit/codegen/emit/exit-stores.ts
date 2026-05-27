@@ -1,14 +1,14 @@
-import { stateOffset } from "#backends/wasm/abi.js";
+import { stateOffset } from "#wasm/abi.js";
 import {
   emitStoreStateU16,
   emitStoreStateU32,
   emitStoreStateU8
-} from "#backends/wasm/codegen/state.js";
+} from "#wasm/codegen/state.js";
 import {
   emitCleanValueForFullUse,
   type ValueWidth
-} from "#backends/wasm/codegen/value-width.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
+} from "#wasm/codegen/value-width.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { PlannedExitStore } from "#backends/wasm/jit/codegen/plan/types.js";
 import type { ValueCapture, ValueEmitter } from "./values.js";
 import {

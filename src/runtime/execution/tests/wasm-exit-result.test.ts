@@ -1,8 +1,8 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ExitReason, type DecodedExit } from "#backends/wasm/exit.js";
-import { createWasmHostMemories } from "#backends/wasm/host/memories.js";
+import { ExitReason, type DecodedExit } from "#wasm/exit.js";
+import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { StopReason } from "#x86/execution/run-result.js";
 import { runResultFromWasmExit } from "#runtime/execution/wasm-exit-result.js";
 

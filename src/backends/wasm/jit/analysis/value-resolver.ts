@@ -1,4 +1,4 @@
-import type { IrStorageExpr, IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import type { IrStorageExpr, IrValueExpr } from "#wasm/codegen/expressions.js";
 import {
   jitExtractBits,
   jitFlagConditionValue,
@@ -7,9 +7,9 @@ import {
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { i32 } from "#x86/numeric.js";
-import type { RegRef, StorageRef, ValueRef } from "#x86/ir/model/types.js";
-import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/isa/types.js";
-import { registerAlias } from "#x86/isa/registers.js";
+import type { RegRef, StorageRef, ValueRef } from "#ir/model/types.js";
+import type { OperandWidth, RegisterAlias, Reg32 } from "#x86/types.js";
+import { registerAlias } from "#x86/registers.js";
 
 export type JitValueResolverReadReg32 = (reg: Reg32) => JitValue;
 export type JitValueResolverReadAluFlags = () => JitValue | undefined;

@@ -1,6 +1,6 @@
-import { registerAlias, registerAliasesByWidth } from "#x86/isa/registers.js";
-import { widthMask, type OperandWidth, type Reg32, type RegisterAlias } from "#x86/isa/types.js";
-import type { IrUnaryOperator } from "#x86/ir/model/types.js";
+import { registerAlias, registerAliasesByWidth } from "#x86/registers.js";
+import { widthMask, type OperandWidth, type Reg32, type RegisterAlias } from "#x86/types.js";
+import type { IrUnaryOperator } from "#ir/model/types.js";
 import { simplifyValue } from "./simplify.js";
 import { bitRangeMask, normalizeU32Mask } from "./bits.js";
 import { valueChildren } from "./walk.js";

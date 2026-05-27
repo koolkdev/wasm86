@@ -1,4 +1,4 @@
-import type { IrExprOp } from "#backends/wasm/codegen/expressions.js";
+import type { IrExprOp } from "#wasm/codegen/expressions.js";
 import type {
   JitArchitecturalSlot,
   JitValue
@@ -11,7 +11,7 @@ import {
   type JitValueState,
   type JitValueStateSnapshot
 } from "#backends/wasm/jit/state/value-state.js";
-import type { Reg16, Reg32, Reg8 } from "#x86/isa/types.js";
+import type { Reg16, Reg32, Reg8 } from "#x86/types.js";
 import {
   jitFlagSetProducerValue,
   jitFlagSetWrittenMask

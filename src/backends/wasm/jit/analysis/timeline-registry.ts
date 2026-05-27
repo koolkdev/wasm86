@@ -1,9 +1,9 @@
 import type {
   IrStorageExpr,
   IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
-import type { OperandWidth } from "#x86/isa/types.js";
-import { registerAlias } from "#x86/isa/registers.js";
+} from "#wasm/codegen/expressions.js";
+import type { OperandWidth } from "#x86/types.js";
+import { registerAlias } from "#x86/registers.js";
 import type {
   StorageReadRef,
   TimelineExpression,

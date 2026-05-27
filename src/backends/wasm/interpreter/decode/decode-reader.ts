@@ -1,5 +1,5 @@
 import type { InterpreterInstructionLength } from "#backends/wasm/interpreter/codegen/ir-context.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
 import {
   emitLoadGuestByte,
   emitLoadGuestByteAtDynamicOffset,
@@ -7,10 +7,10 @@ import {
   emitLoadGuestUnsignedAtDynamicOffset
 } from "./guest-bytes.js";
 import type { InterpreterHandlerContext } from "#backends/wasm/interpreter/codegen/handler-context.js";
-import type { OperandWidth } from "#x86/isa/types.js";
-import { maxX86InstructionLength } from "#x86/isa/decoder/reader.js";
-import { ExitReason } from "#backends/wasm/exit.js";
-import { emitWasmIrExitFromI32Stack } from "#backends/wasm/codegen/exit.js";
+import type { OperandWidth } from "#x86/types.js";
+import { maxX86InstructionLength } from "#x86/decoder/reader.js";
+import { ExitReason } from "#wasm/exit.js";
+import { emitWasmIrExitFromI32Stack } from "#wasm/codegen/exit.js";
 
 export type DecodeReader =
   | Readonly<{ kind: "static"; value: number }>

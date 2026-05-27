@@ -5,16 +5,16 @@ import {
 } from "node:assert";
 import { test } from "node:test";
 
-import { wasmMemoryIndex } from "#backends/wasm/abi.js";
+import { wasmMemoryIndex } from "#wasm/abi.js";
 import {
   cleanValueWidth,
   dirtyValueWidth,
   type ValueWidth
-} from "#backends/wasm/codegen/value-width.js";
-import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
-import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
-import { ExitReason } from "#backends/wasm/exit.js";
+} from "#wasm/codegen/value-width.js";
+import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
+import { ExitReason } from "#wasm/exit.js";
 import {
   createMemoryActionEmitter,
   type MemoryGuardAction
@@ -39,7 +39,7 @@ import {
   wasmBodyInstructions,
   wasmBodyMemoryAccesses,
   wasmBodyOpcodes
-} from "#backends/wasm/tests/body-opcodes.js";
+} from "#wasm/tests/body-opcodes.js";
 import { passthroughValueCache } from "./value-local-store-test-helpers.js";
 
 test("JIT memory guard emits address once and captures fault destination before guard checks", () => {

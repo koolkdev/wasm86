@@ -1,10 +1,10 @@
 import { u32 } from "#x86/numeric.js";
-import { wasmImport, wasmMemoryIndex } from "#backends/wasm/abi.js";
-import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
-import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { WasmModuleEncoder } from "#backends/wasm/encoder/module.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import { encodeExit, ExitReason } from "#backends/wasm/exit.js";
+import { wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { WasmModuleEncoder } from "#wasm/encoder/module.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
+import { encodeExit, ExitReason } from "#wasm/exit.js";
 import { jitModuleLinkFallbackExportName } from "./compiled-blocks/module-link-table.js";
 import { buildJitCodegenEmissionPlan } from "./codegen/plan/emission.js";
 import {

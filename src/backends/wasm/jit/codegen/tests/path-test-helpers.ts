@@ -1,4 +1,4 @@
-import type { IrExprBlock } from "#backends/wasm/codegen/expressions.js";
+import type { IrExprBlock } from "#wasm/codegen/expressions.js";
 import {
   rootPath,
   type BranchPaths,

@@ -1,11 +1,11 @@
 import { u32 } from "#x86/numeric.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import {
   emitWasmIrExitConstPayload,
   emitWasmIrExitFromI32Stack
-} from "#backends/wasm/codegen/exit.js";
+} from "#wasm/codegen/exit.js";
 import type { JitModuleLinkTable } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 import type { RuntimeEntry } from "#backends/wasm/jit/codegen/plan/schedule-types.js";

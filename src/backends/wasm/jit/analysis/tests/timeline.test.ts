@@ -5,7 +5,7 @@ import {
   type IrExprBlock,
   type IrStorageExpr,
   type IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
+} from "#wasm/codegen/expressions.js";
 import { analyzeBlock } from "#backends/wasm/jit/analysis/block.js";
 import { LoadResultRegistry } from "#backends/wasm/jit/analysis/load-result.js";
 import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
@@ -27,8 +27,8 @@ import {
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { syntheticInstruction } from "#backends/wasm/jit/ir/tests/helpers.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
-import { FLAG_PRODUCERS } from "#x86/ir/model/flags.js";
-import type { Reg32 } from "#x86/isa/types.js";
+import { FLAG_PRODUCERS } from "#ir/model/flags.js";
+import type { Reg32 } from "#x86/types.js";
 
 type TestTimelineInput = Omit<TimelineInput, "expressions" | "loadResultRegistry"> & Readonly<{
   expressions: IrExprBlock;

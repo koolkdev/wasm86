@@ -1,7 +1,7 @@
 import type { CpuState } from "#x86/state/cpu-state.js";
-import { wasmBlockExportName, wasmImport } from "#backends/wasm/abi.js";
-import { decodeExit, type DecodedExit } from "#backends/wasm/exit.js";
-import { readWasmCpuState, writeWasmCpuState } from "#backends/wasm/state-layout.js";
+import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
+import { decodeExit, type DecodedExit } from "#wasm/exit.js";
+import { readWasmCpuState, writeWasmCpuState } from "#wasm/state-layout.js";
 import { readInterpreterWasmArtifact } from "./artifact.js";
 
 let compiledInterpreterModule: WebAssembly.Module | undefined;

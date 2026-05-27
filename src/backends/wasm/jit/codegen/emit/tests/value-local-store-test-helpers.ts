@@ -1,26 +1,26 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
-import { wasmOpcode, wasmValueType } from "#backends/wasm/encoder/types.js";
-import { ExitReason } from "#backends/wasm/exit.js";
-import { stateOffset } from "#backends/wasm/abi.js";
-import { ok, decodeBytes, startAddress } from "#x86/isa/decoder/tests/helpers.js";
-import { cleanValueWidth, type ValueWidth } from "#backends/wasm/codegen/value-width.js";
+import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
+import { ExitReason } from "#wasm/exit.js";
+import { stateOffset } from "#wasm/abi.js";
+import { ok, decodeBytes, startAddress } from "#x86/decoder/tests/helpers.js";
+import { cleanValueWidth, type ValueWidth } from "#wasm/codegen/value-width.js";
 import type {
   IrExprBlock,
   IrStorageExpr,
   IrValueExpr
-} from "#backends/wasm/codegen/expressions.js";
-import { IR_ALU_FLAG_MASK } from "#x86/ir/model/flag-effects.js";
+} from "#wasm/codegen/expressions.js";
+import { IR_ALU_FLAG_MASK } from "#ir/model/flag-effects.js";
 import {
   extractOnlyWasmFunctionBody,
   wasmBodyMemoryAccesses,
   wasmBodyLocalCount,
   wasmBodyInstructions,
   wasmBodyOpcodes
-} from "#backends/wasm/tests/body-opcodes.js";
+} from "#wasm/tests/body-opcodes.js";
 import {
   jitInputAluFlagsValue,
   jitInputReg32Value
@@ -62,7 +62,7 @@ import type {
   JitIrBlock as BoundJitIrBlock,
   JitIrInstruction
 } from "#backends/wasm/jit/ir/types.js";
-import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
+import type { IrOp, StorageRef, ValueRef } from "#ir/model/types.js";
 import {
   planReuseForBlock,
   type BlockEpochSource
@@ -81,7 +81,7 @@ import {
 } from "#backends/wasm/jit/analysis/paths.js";
 import type { ExitSnapshot } from "#backends/wasm/jit/analysis/exits.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
-import type { Reg32 } from "#x86/isa/types.js";
+import type { Reg32 } from "#x86/types.js";
 
 type TestJitIrInstruction =
   Omit<JitIrInstruction, "nextEip"> &

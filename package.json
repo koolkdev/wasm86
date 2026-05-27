@@ -13,6 +13,14 @@
       "types": "./src/runtime/*",
       "default": "./dist/src/runtime/*"
     },
+    "#ir/*": {
+      "types": "./src/ir/*",
+      "default": "./dist/src/ir/*"
+    },
+    "#wasm/*": {
+      "types": "./src/wasm/*",
+      "default": "./dist/src/wasm/*"
+    },
     "#x86/*": {
       "types": "./src/x86/*",
       "default": "./dist/src/x86/*"

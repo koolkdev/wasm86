@@ -32,7 +32,7 @@ import {
   repeatedInlineExpressionBlock,
   type JitIrBlock,
 } from "./value-local-store-test-helpers.js";
-import type { ValueRef } from "#x86/ir/model/types.js";
+import type { ValueRef } from "#ir/model/types.js";
 import { jitLoadResultValue } from "#backends/wasm/jit/ir/values/builders.js";
 test("JIT expression emission captures repeated branch target values before the split", () => {
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(encodeJitBlock([repeatedInlineExpressionBlock()])));

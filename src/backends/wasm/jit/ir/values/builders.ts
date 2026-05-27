@@ -1,16 +1,16 @@
-import type { OperandWidth, Reg16, Reg32, Reg8 } from "#x86/isa/types.js";
-import { registerAlias } from "#x86/isa/registers.js";
+import type { OperandWidth, Reg16, Reg32, Reg8 } from "#x86/types.js";
+import { registerAlias } from "#x86/registers.js";
 import type {
   ConditionCode,
   FlagProducerName,
   IrValueType
-} from "#x86/ir/model/types.js";
+} from "#ir/model/types.js";
 import {
   FLAG_PRODUCERS,
   flagProducerInputsFromRecord,
   flagProducerInputsToRecord,
   type FlagProducerInputs
-} from "#x86/ir/model/flags.js";
+} from "#ir/model/flags.js";
 import {
   assertBitRange,
   normalizeU32Mask

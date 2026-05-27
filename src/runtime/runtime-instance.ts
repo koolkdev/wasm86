@@ -20,7 +20,7 @@ import {
   type RuntimeProgramInput,
   type RuntimeProgramRegion
 } from "./program/regions.js";
-import { createWasmHostMemories, type WasmHostMemories } from "#backends/wasm/host/memories.js";
+import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
 
 export type RuntimeInstanceOptions = Readonly<{
   program?: RuntimeProgramInput;

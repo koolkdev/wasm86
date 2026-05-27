@@ -1,7 +1,7 @@
 import {
   flagProducerInputNames,
   requiredFlagProducerInput
-} from "#x86/ir/model/flags.js";
+} from "#ir/model/flags.js";
 import {
   flagProducerWidth,
   normalizeFlagProducerMask

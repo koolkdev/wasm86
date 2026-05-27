@@ -1,11 +1,11 @@
 import { strictEqual } from "node:assert";
 
-import { decodeIsaBlock } from "#x86/isa/decoder/decode-block.js";
+import { decodeIsaBlock } from "#x86/decoder/decode-block.js";
 import type { RunResult } from "#x86/execution/run-result.js";
 import type { CpuStateField } from "#x86/state/cpu-state.js";
-import { wasmBlockExportName, wasmImport } from "#backends/wasm/abi.js";
-import { UnsupportedWasmCodegenError } from "#backends/wasm/errors.js";
-import { decodeExit } from "#backends/wasm/exit.js";
+import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
+import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
+import { decodeExit } from "#wasm/exit.js";
 import { readInterpreterWasmArtifact } from "#backends/wasm/interpreter/artifact.js";
 import type { CompiledBlockCache } from "#backends/wasm/jit/compiled-blocks/block-cache.js";
 import { WasmBlocksEngine } from "#runtime/engines/wasm-blocks.js";
@@ -16,8 +16,8 @@ import { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import { loadProgramRegions } from "#runtime/program/loader.js";
 import { codeRegionsFromProgram, type RuntimeProgramRegion } from "#runtime/program/regions.js";
 import { compileWasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
-import type { WasmHostMemories } from "#backends/wasm/host/memories.js";
-import { createWasmHostMemories } from "#backends/wasm/host/memories.js";
+import type { WasmHostMemories } from "#wasm/host/memories.js";
+import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { engineFixtureStartAddress } from "./programs.js";
 import type { EngineFixture, MemoryPatch } from "./types.js";
 

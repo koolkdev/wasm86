@@ -9,7 +9,7 @@ import {
   createFixtureCompiledBlockCache,
   prepareEngineFixture
 } from "#runtime/tests/fixtures/helpers.js";
-import { createWasmHostMemories } from "#backends/wasm/host/memories.js";
+import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { WasmBlocksEngine } from "#runtime/engines/wasm-blocks.js";
 
 test("wasm blocks engine reports unavailable when no compiled block exists", () => {

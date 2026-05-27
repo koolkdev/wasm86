@@ -1,8 +1,8 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { Reg32 } from "#x86/isa/types.js";
-import type { IrValueExpr } from "#backends/wasm/codegen/expressions.js";
+import type { Reg32 } from "#x86/types.js";
+import type { IrValueExpr } from "#wasm/codegen/expressions.js";
 import { createJitValueResolver } from "#backends/wasm/jit/analysis/value-resolver.js";
 import {
   jitExtractBits,

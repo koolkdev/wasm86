@@ -1,13 +1,13 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ok, decodeBytes } from "#x86/isa/decoder/tests/helpers.js";
-import type { IrOp, StorageRef, ValueRef } from "#x86/ir/model/types.js";
+import { ok, decodeBytes } from "#x86/decoder/tests/helpers.js";
+import type { IrOp, StorageRef, ValueRef } from "#ir/model/types.js";
 import { createCpuState, getFlag } from "#x86/state/cpu-state.js";
-import { stateOffset, wasmMemoryIndex } from "#backends/wasm/abi.js";
-import { wasmOpcode, wasmSectionId } from "#backends/wasm/encoder/types.js";
-import { wasmBodyOpcodes } from "#backends/wasm/tests/body-opcodes.js";
-import { ExitReason } from "#backends/wasm/exit.js";
+import { stateOffset, wasmMemoryIndex } from "#wasm/abi.js";
+import { wasmOpcode, wasmSectionId } from "#wasm/encoder/types.js";
+import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { ExitReason } from "#wasm/exit.js";
 import {
   buildBlock,
   buildBlockExpressions,
@@ -19,7 +19,7 @@ import type {
   EncodeJitBlockOptions,
   JitIrBlock
 } from "#backends/wasm/jit/block.js";
-import { irOpDst, irOpIsTerminator } from "#x86/ir/model/op-semantics.js";
+import { irOpDst, irOpIsTerminator } from "#ir/model/op-semantics.js";
 import { buildJitCodegenEmissionPlan } from "#backends/wasm/jit/codegen/plan/emission.js";
 import type { JitCodegenPlan } from "#backends/wasm/jit/codegen/plan/types.js";
 import { runJitBlock } from "./helpers.js";

@@ -1,11 +1,11 @@
-import { type OperandWidth } from "#x86/isa/types.js";
-import type { FlagProducerName } from "#x86/ir/model/types.js";
+import { type OperandWidth } from "#x86/types.js";
+import type { FlagProducerName } from "#ir/model/types.js";
 import {
   FLAG_PRODUCERS,
   flagProducerInputNames,
   requiredFlagProducerInput
-} from "#x86/ir/model/flags.js";
-import { IR_ALU_FLAG_MASK, assertIrAluFlagMask } from "#x86/ir/model/flag-effects.js";
+} from "#ir/model/flags.js";
+import { IR_ALU_FLAG_MASK, assertIrAluFlagMask } from "#ir/model/flag-effects.js";
 import type {
   JitFlagProducerValue,
   JitValue

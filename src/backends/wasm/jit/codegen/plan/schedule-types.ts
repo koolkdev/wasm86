@@ -2,8 +2,8 @@ import type {
   JitLoadResultValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-import type { IrMemoryAccessKind } from "#x86/ir/model/types.js";
-import type { OperandWidth } from "#x86/isa/types.js";
+import type { IrMemoryAccessKind } from "#ir/model/types.js";
+import type { OperandWidth } from "#x86/types.js";
 import type { Exit } from "#backends/wasm/jit/analysis/exits.js";
 
 export type Placement = Readonly<{

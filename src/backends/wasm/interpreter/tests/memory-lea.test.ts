@@ -8,8 +8,8 @@ import {
   writeInterpreterState,
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
-import { startAddress } from "#backends/wasm/tests/helpers.js";
-import { ExitReason, type DecodedExit } from "#backends/wasm/exit.js";
+import { startAddress } from "#wasm/tests/helpers.js";
+import { ExitReason, type DecodedExit } from "#wasm/exit.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,

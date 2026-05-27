@@ -1,17 +1,17 @@
 import {
   emitCleanValueForFullUse,
-} from "#backends/wasm/codegen/value-width.js";
+} from "#wasm/codegen/value-width.js";
 import {
   emitWasmIrGuardGuestRange,
   emitWasmIrStoreGuestUnchecked
-} from "#backends/wasm/codegen/memory.js";
+} from "#wasm/codegen/memory.js";
 import {
   emitWasmIrExitFromI32Stack
-} from "#backends/wasm/codegen/exit.js";
-import type { WasmFunctionBodyEncoder } from "#backends/wasm/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#backends/wasm/encoder/local-scratch.js";
-import { wasmValueType } from "#backends/wasm/encoder/types.js";
-import { ExitReason } from "#backends/wasm/exit.js";
+} from "#wasm/codegen/exit.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
+import { ExitReason } from "#wasm/exit.js";
 import type {
   MemoryGuardEntry,
   MemoryStoreEntry

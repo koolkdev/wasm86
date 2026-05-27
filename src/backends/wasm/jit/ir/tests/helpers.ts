@@ -1,7 +1,7 @@
-import type { Reg32 } from "#x86/isa/types.js";
-import { registerAlias } from "#x86/isa/registers.js";
-import { createIrFlagSetOp } from "#x86/ir/model/flags.js";
-import type { ConditionCode, IrBlock, IrOp, StorageRef, ValueRef, VarRef } from "#x86/ir/model/types.js";
+import type { Reg32 } from "#x86/types.js";
+import { registerAlias } from "#x86/registers.js";
+import { createIrFlagSetOp } from "#ir/model/flags.js";
+import type { ConditionCode, IrBlock, IrOp, StorageRef, ValueRef, VarRef } from "#ir/model/types.js";
 import type {
   JitIrBlock,
   JitIrInstruction

@@ -1,12 +1,12 @@
-import type { OperandWidth, Reg16, Reg32, Reg8 } from "#x86/isa/types.js";
+import type { OperandWidth, Reg16, Reg32, Reg8 } from "#x86/types.js";
 import type {
   ConditionCode,
   FlagProducerName,
   IrBinaryOperator,
   IrUnaryOperator,
   IrValueType
-} from "#x86/ir/model/types.js";
-import type { FlagProducerInputs } from "#x86/ir/model/flags.js";
+} from "#ir/model/types.js";
+import type { FlagProducerInputs } from "#ir/model/flags.js";
 
 export type JitConstValue = Readonly<{ kind: "const"; type: IrValueType; value: number }>;
 export type JitLoadResultValueId = number & { readonly __jitLoadResultValueId: unique symbol };

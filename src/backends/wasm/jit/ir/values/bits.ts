@@ -1,4 +1,4 @@
-import { widthMask, type OperandWidth } from "#x86/isa/types.js";
+import { widthMask, type OperandWidth } from "#x86/types.js";
 
 export function bitRangeMask(bitOffset: number, width: OperandWidth): number {
   return width === 32 ? 0xffff_ffff : ((widthMask(width) << bitOffset) >>> 0);
