@@ -170,6 +170,7 @@ test("rootsForSchedule projects boundary state roots from scheduled boundaries",
   const syncResult = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
+      { op: "flags.write", cells: { ZF: { kind: "expr", value: c(1) } } },
       { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 }
     ],
     resolver: new BindingResolver({
@@ -184,8 +185,64 @@ test("rootsForSchedule projects boundary state roots from scheduled boundaries",
   deepStrictEqual(boundaryRegister(roots, "exitState", "eax")?.expr, exprConst(0x11));
   deepStrictEqual(boundaryFlag(roots, "exitState", "ZF")?.expr, exprConst(1));
   deepStrictEqual(boundaryRegister(roots, "stateSync", "esp")?.expr, exprConst(0x44));
+  deepStrictEqual(boundaryFlag(roots, "stateSync", "ZF")?.expr, exprConst(1));
   deepStrictEqual(boundaryFlag(roots, "exitState", "ZF")?.use, bitsUse(1));
   deepStrictEqual(boundaryRegister(roots, "exitState", "eax")?.use, full32Use());
+});
+
+test("rootsForSchedule projects reset register roots for exits after dynamic register stores", () => {
+  const result = walkExpressionBlock({
+    block: [
+      { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
+      { op: "flags.write", cells: { ZF: { kind: "expr", value: c(1) } } },
+      { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
+      { op: "next" }
+    ],
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(exprConst(4), 32)]
+    })
+  });
+  const roots = rootsForSchedule(result.schedule);
+  const exit = boundaryEntry(result.schedule, "exitState");
+
+  deepStrictEqual(boundaryRegister(roots, "stateSync", "esp")?.expr, exprConst(0x44));
+  deepStrictEqual(
+    boundaryRegisterRootsForEntry(roots, exit).find((root) =>
+      root.purpose.kind === "boundaryCell" &&
+        root.purpose.cell.kind === "reg" &&
+        root.purpose.cell.reg === "esp"
+    )?.expr,
+    exprInput({ kind: "reg", reg: "esp" })
+  );
+  deepStrictEqual(boundaryFlag(roots, "exitState", "ZF")?.expr, exprConst(1));
+});
+
+test("rootsForSchedule projects reset register roots after unsynced dynamic register stores", () => {
+  const result = walkExpressionBlock({
+    block: [
+      { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
+      { op: "next" }
+    ],
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(exprConst(4), 32)]
+    })
+  });
+  const roots = rootsForSchedule(result.schedule);
+  const exit = boundaryEntry(result.schedule, "exitState");
+
+  strictEqual(result.schedule.some((entry) =>
+    entry.role === "boundary" && entry.kind === "stateSync"
+  ), false);
+  deepStrictEqual(
+    boundaryRegisterRootsForEntry(roots, exit).find((root) =>
+      root.purpose.kind === "boundaryCell" &&
+        root.purpose.cell.kind === "reg" &&
+        root.purpose.cell.reg === "esp"
+    )?.expr,
+    exprInput({ kind: "reg", reg: "esp" })
+  );
+  deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "index").expr, exprConst(4));
+  deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "value").expr, exprConst(0x55));
 });
 
 test("rootsForSchedule validates block-defined value ordering and missing producers", () => {
@@ -224,6 +281,18 @@ test("root projection remains block-owned and independent of target modules", ()
   strictEqual(source.includes("#backends/"), false);
   strictEqual(source.includes("interpreter"), false);
   strictEqual(source.includes("walkExpressionBlock"), false);
+});
+
+test("dynamic register state reset does not leak into expression identity", () => {
+  const sources = [
+    readFileSync(new URL("../../expr/types.js", import.meta.url), "utf8"),
+    readFileSync(new URL("../../expr/graph/graph.js", import.meta.url), "utf8")
+  ].join("\n");
+
+  strictEqual(sources.includes("runtimeMask"), false);
+  strictEqual(sources.includes("runtimeOwned"), false);
+  strictEqual(sources.includes("runtimeBacked"), false);
+  strictEqual(sources.includes("dynamicRegisterStore"), false);
 });
 
 function onlyDefinition(schedule: BlockSchedule): BlockDefinition {
@@ -303,6 +372,32 @@ function boundaryFlag(
       root.purpose.cell.kind === "flag" &&
       root.purpose.cell.flag === flag
   );
+}
+
+function boundaryRegisterRootsForEntry(
+  roots: readonly BlockRoot[],
+  boundary: Extract<BlockScheduleEntry, { role: "boundary" }>
+): readonly BlockRoot[] {
+  return roots.filter((root) =>
+    root.entry === boundary &&
+      root.purpose.kind === "boundaryCell" &&
+      root.purpose.cell.kind === "reg"
+  );
+}
+
+function boundaryEntry<TKind extends Extract<BlockScheduleEntry, { role: "boundary" }>["kind"]>(
+  schedule: BlockSchedule,
+  kind: TKind
+): Extract<Extract<BlockScheduleEntry, { role: "boundary" }>, { kind: TKind }> {
+  const entry = schedule.find((item) =>
+    item.role === "boundary" && item.kind === kind
+  );
+
+  if (entry === undefined || entry.role !== "boundary" || entry.kind !== kind) {
+    throw new Error(`missing boundary ${kind}`);
+  }
+
+  return entry as Extract<Extract<BlockScheduleEntry, { role: "boundary" }>, { kind: TKind }>;
 }
 
 function definitionEntry<TKind extends BlockDefinition["kind"]>(

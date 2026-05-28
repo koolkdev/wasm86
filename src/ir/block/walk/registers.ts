@@ -1,4 +1,4 @@
-import type { RegisterState } from "#ir/block/state/register-state.js";
+import { RegisterState } from "#ir/block/state/register-state.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import type { OperandWidth, RegisterAlias } from "#x86/types.js";
 import type { BlockRegisterAccess } from "./result.js";
@@ -89,6 +89,7 @@ export class RegisterWalkState {
       value,
       width
     }));
+    this.#registers = RegisterState.initial();
   }
 
   #access(access: BlockRegisterAccess): void {

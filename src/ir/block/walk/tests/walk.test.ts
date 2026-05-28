@@ -198,7 +198,12 @@ test("dynamic register stores allow earlier static register writes", () => {
   });
 
   strictEqual(onlyAction(blockWalkActions(result)).kind, "dynamicRegisterStore");
-  deepStrictEqual(result.final.registers.read("esp"), exprConst(0x44));
+  deepStrictEqual(result.schedule.map(scheduleKind), ["stateSync", "dynamicRegisterStore"]);
+  strictEqual(result.schedule[0]?.role, "boundary");
+  if (result.schedule[0]?.role === "boundary") {
+    deepStrictEqual(result.schedule[0].state.registers.read("esp"), exprConst(0x44));
+  }
+  deepStrictEqual(result.final.registers.read("esp"), exprInput({ kind: "reg", reg: "esp" }));
 });
 
 test("dynamic register stores allow xchg-style tail stores from preloaded values", () => {

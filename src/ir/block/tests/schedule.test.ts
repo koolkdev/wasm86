@@ -209,7 +209,7 @@ test("no-explicit-exit blocks expose final state only through walk.final", () =>
   deepStrictEqual(result.final.registers.read("eax"), exprConst(0x55));
 });
 
-test("dynamic register stores sync prior static register state before the runtime store", () => {
+test("dynamic register stores sync prior static register state before the dynamic store", () => {
   const result = walkFragment({
     block: [
       { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
@@ -226,6 +226,50 @@ test("dynamic register stores sync prior static register state before the runtim
   deepStrictEqual(store.at, { opIndex: 1, epoch: 1 });
   deepStrictEqual(sync.state.registers.read("esp"), exprConst(0x44));
   strictEqual(store.action.kind, "dynamicRegisterStore");
+});
+
+test("dynamic register stores reset later boundary register state", () => {
+  const result = walkFragment({
+    block: [
+      { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
+      { op: "flags.write", cells: { ZF: { kind: "expr", value: c(1) } } },
+      { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
+      { op: "next" }
+    ],
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(exprConst(4), 32)]
+    })
+  });
+  requireBoundaryEntry(result.schedule[0], "stateSync");
+  const store = requireActionEntry(result.schedule[1], "dynamicRegisterStore");
+  const fallthrough = requireActionEntry(result.schedule[2], "fallthrough");
+  const exit = requireBoundaryEntry(result.schedule[3], "exitState");
+
+  strictEqual(store.action.kind, "dynamicRegisterStore");
+  strictEqual(fallthrough.action.kind, "fallthrough");
+  deepStrictEqual(exit.state.registers.read("esp"), exprInput({ kind: "reg", reg: "esp" }));
+});
+
+test("dynamic register stores without preceding sync keep later register state reset", () => {
+  const result = walkFragment({
+    block: [
+      { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
+      { op: "next" }
+    ],
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(exprConst(4), 32)]
+    })
+  });
+  const store = requireActionEntry(result.schedule[0], "dynamicRegisterStore");
+  const exit = requireBoundaryEntry(result.schedule[2], "exitState");
+
+  deepStrictEqual(result.schedule.map(scheduleKind), [
+    "dynamicRegisterStore",
+    "fallthrough",
+    "exitState"
+  ]);
+  strictEqual(store.action.kind, "dynamicRegisterStore");
+  deepStrictEqual(exit.state.registers.read("esp"), exprInput({ kind: "reg", reg: "esp" }));
 });
 
 test("boundary entries carry state snapshots without concrete write plans or backend policy", () => {
