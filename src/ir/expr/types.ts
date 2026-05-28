@@ -72,8 +72,3 @@ export type ExprRef =
   | BitsExpr
   | InsertBitsExpr
   | CompareExpr;
-
-export type ExprUse =
-  | Readonly<{ kind: "exact" }>
-  | Readonly<{ kind: "full32" }>
-  | Readonly<{ kind: "bits"; mask: number }>;

@@ -5,9 +5,11 @@ import {
 import { test } from "node:test";
 
 import type { OperandWidth } from "#x86/types.js";
+import { registerAlias } from "#x86/registers.js";
 import { IR_ALU_FLAGS } from "#ir/model/flag-effects.js";
 import type { FlagName } from "#ir/model/flags.js";
 import type { ScalarCompareOp } from "#ir/expr/types.js";
+import { sourceCellsForExpr } from "#ir/block/source-cells.js";
 import {
   exprBinary,
   exprCompare,
@@ -17,7 +19,6 @@ import {
   exprUnary
 } from "#ir/expr/builders.js";
 import { canonicalizeExpr } from "#ir/expr/canonicalize.js";
-import { exprDependencies } from "#ir/expr/dependencies.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import {
   FlagState,
@@ -146,14 +147,14 @@ test("INC and DEC semantic writes preserve CF", () => {
   }
 });
 
-test("parity flag formulas consume only the low byte", () => {
+test("source-cell analysis conservatively reports parity formula sources", () => {
   const eax = inputReg("eax");
   const ebx = inputReg("ebx");
   const state = FlagState.initial().apply(testFlagWrite(32, eax, ebx));
 
-  deepStrictEqual(exprDependencies(exprCellValue(state.read("PF"))), [
-    { kind: "reg", reg: "eax", mask: 0xff },
-    { kind: "reg", reg: "ebx", mask: 0xff }
+  deepStrictEqual(sourceCellsForExpr(exprCellValue(state.read("PF"))).sources, [
+    { kind: "reg", reg: registerAlias("eax") },
+    { kind: "reg", reg: registerAlias("ebx") }
   ]);
 });
 
@@ -219,11 +220,11 @@ test("missing direct conditions fall back to current flag-cell composition", () 
 test("condition composition reads only the required flag cells", () => {
   const state = FlagState.initial();
 
-  deepStrictEqual(exprDependencies(definedExpr(state.condition("A"))), [
+  deepStrictEqual(sourceCellsForExpr(definedExpr(state.condition("A"))).sources, [
     { kind: "flag", flag: "CF" },
     { kind: "flag", flag: "ZF" }
   ]);
-  deepStrictEqual(exprDependencies(definedExpr(state.condition("L"))), [
+  deepStrictEqual(sourceCellsForExpr(definedExpr(state.condition("L"))).sources, [
     { kind: "flag", flag: "SF" },
     { kind: "flag", flag: "OF" }
   ]);

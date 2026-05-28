@@ -17,7 +17,6 @@ import {
   exprConst,
   exprInput
 } from "#ir/expr/builders.js";
-import { bitsUse } from "#ir/expr/uses.js";
 import { registerAlias, registerAliasByIndex } from "#x86/registers.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { StorageRef } from "#ir/model/types.js";
@@ -28,13 +27,6 @@ test("expanded +r opcode operands bind to the selected register without rereadin
 
   deepStrictEqual(resolver.operand(0), regBinding(registerAlias("eax")));
   deepStrictEqual(resolver.storage({ kind: "operand", index: 0 }), regBinding(registerAlias("eax")));
-  deepStrictEqual(resolver.readDeps(eaxOperand, bitsUse(0xff)), [
-    { kind: "reg", reg: "eax", mask: 0xff }
-  ]);
-  deepStrictEqual(resolver.writeDeps(eaxOperand), []);
-  deepStrictEqual(resolver.clobbers(eaxOperand), [
-    { kind: "reg", reg: "eax", mask: 0xffff_ffff }
-  ]);
 });
 
 test("explicit base-register storage narrows to canonical register aliases", () => {
@@ -55,30 +47,6 @@ test("dynamic ModRM register operands preserve the runtime register-index expres
 
   deepStrictEqual(resolver.operand(0), binding);
   deepStrictEqual(resolver.storage({ kind: "operand", index: 0 }), binding);
-  deepStrictEqual(resolver.readDeps(binding), [
-    { kind: "reg", reg: "eax", mask: 0xffff },
-    { kind: "reg", reg: "ecx", mask: 0xffff },
-    { kind: "reg", reg: "edx", mask: 0xffff },
-    { kind: "reg", reg: "ebx", mask: 0xffff },
-    { kind: "reg", reg: "esp", mask: 0xffff },
-    { kind: "reg", reg: "ebp", mask: 0xffff },
-    { kind: "reg", reg: "esi", mask: 0xffff },
-    { kind: "reg", reg: "edi", mask: 0xffff },
-    { kind: "flag", flag: "ZF" }
-  ]);
-  deepStrictEqual(resolver.writeDeps(binding), [
-    { kind: "flag", flag: "ZF" }
-  ]);
-  deepStrictEqual(resolver.clobbers(binding), [
-    { kind: "reg", reg: "eax", mask: 0xffff },
-    { kind: "reg", reg: "ecx", mask: 0xffff },
-    { kind: "reg", reg: "edx", mask: 0xffff },
-    { kind: "reg", reg: "ebx", mask: 0xffff },
-    { kind: "reg", reg: "esp", mask: 0xffff },
-    { kind: "reg", reg: "ebp", mask: 0xffff },
-    { kind: "reg", reg: "esi", mask: 0xffff },
-    { kind: "reg", reg: "edi", mask: 0xffff }
-  ]);
 });
 
 test("ModRM r/m register and memory paths use separate storage bindings", () => {
@@ -93,31 +61,6 @@ test("ModRM r/m register and memory paths use separate storage bindings", () => 
     /dynamicReg binding has no address/
   );
   deepStrictEqual(memoryResolver.address({ kind: "operand", index: 0 }), address);
-
-  deepStrictEqual(registerResolver.readDeps(registerPath, bitsUse(0xff)), [
-    { kind: "reg", reg: "eax", mask: 0xffff },
-    { kind: "reg", reg: "ecx", mask: 0xffff },
-    { kind: "reg", reg: "edx", mask: 0xffff },
-    { kind: "reg", reg: "ebx", mask: 0xffff }
-  ]);
-  deepStrictEqual(registerResolver.writeDeps(registerPath), []);
-  deepStrictEqual(registerResolver.clobbers(registerPath, bitsUse(0x0f)), [
-    { kind: "reg", reg: "eax", mask: 0x0f0f },
-    { kind: "reg", reg: "ecx", mask: 0x0f0f },
-    { kind: "reg", reg: "edx", mask: 0x0f0f },
-    { kind: "reg", reg: "ebx", mask: 0x0f0f }
-  ]);
-
-  deepStrictEqual(memoryResolver.readDeps(memoryPath), [
-    { kind: "reg", reg: "esi", mask: 0xffff_ffff },
-    { kind: "memory" }
-  ]);
-  deepStrictEqual(memoryResolver.writeDeps(memoryPath), [
-    { kind: "reg", reg: "esi", mask: 0xffff_ffff }
-  ]);
-  deepStrictEqual(memoryResolver.clobbers(memoryPath, bitsUse(0x0f)), [
-    { kind: "memory" }
-  ]);
 });
 
 test("immediate and relative target operands are read-only value bindings", () => {
@@ -132,31 +75,11 @@ test("immediate and relative target operands are read-only value bindings", () =
   });
 
   deepStrictEqual(resolver.operand(0), immediate);
-  deepStrictEqual(resolver.readDeps(immediate), []);
-  deepStrictEqual(resolver.readDeps(relativeTarget), [
-    { kind: "reg", reg: "eax", mask: 0xffff_ffff }
-  ]);
+  deepStrictEqual(resolver.operand(1), relativeTarget);
   throws(
     () => resolver.storage({ kind: "operand", index: 0 }),
     /operand 0 is a value binding, not storage/
   );
-});
-
-test("memory bindings read through address plus memory and write by clobbering memory", () => {
-  const address = exprInput({ kind: "reg", reg: "esi" });
-  const binding = memBinding(address, 32);
-  const resolver = new BindingResolver();
-
-  deepStrictEqual(resolver.readDeps(binding), [
-    { kind: "reg", reg: "esi", mask: 0xffff_ffff },
-    { kind: "memory" }
-  ]);
-  deepStrictEqual(resolver.writeDeps(binding), [
-    { kind: "reg", reg: "esi", mask: 0xffff_ffff }
-  ]);
-  deepStrictEqual(resolver.clobbers(binding), [
-    { kind: "memory" }
-  ]);
 });
 
 test("a neutral block-style storage read can use bindings without importing interpreter or JIT modules", () => {

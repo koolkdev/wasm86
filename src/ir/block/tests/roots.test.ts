@@ -1,17 +1,13 @@
 import {
   deepStrictEqual,
-  doesNotThrow,
-  strictEqual,
-  throws
+  strictEqual
 } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import type { BlockAction } from "#ir/block/actions.js";
 import {
-  definitionValueSource,
-  type BlockDefinition,
-  type BlockDefinitionId
+  type BlockDefinition
 } from "#ir/block/definitions.js";
 import {
   rootsForSchedule,
@@ -26,7 +22,6 @@ import {
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
 import {
-  opSite,
   walkExpressionBlock
 } from "#ir/block/walk/index.js";
 import {
@@ -34,14 +29,7 @@ import {
   exprInput,
   exprUnary
 } from "#ir/expr/builders.js";
-import {
-  bitsUse,
-  full32Use
-} from "#ir/expr/uses.js";
-import type {
-  ExprRef,
-  ExprUse
-} from "#ir/expr/types.js";
+import type { ExprRef } from "#ir/expr/types.js";
 import type {
   IrValueType,
   ValueRef,
@@ -68,7 +56,7 @@ test("memory load definitions expose raw block-defined sources and signed uses s
   );
 });
 
-test("rootsForSchedule projects memory roots and closes over block-defined values", () => {
+test("rootsForSchedule projects memory roots and block-defined value observations", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 2, access: "read" },
@@ -79,20 +67,11 @@ test("rootsForSchedule projects memory roots and closes over block-defined value
   const roots = rootsForSchedule(result.schedule);
   const load = definitionEntry(result.schedule, "memoryLoad");
   const storeValue = actionRoot(roots, "memoryStore", "value");
-  const closure = definitionRoot(roots, "memoryLoad", "address", "closure");
 
   deepStrictEqual(actionRoot(roots, "memoryGuard", "address").expr, exprConst(0x1000));
-  deepStrictEqual(definitionRoot(roots, "memoryLoad", "address", "schedule").expr, exprConst(0x2000));
+  deepStrictEqual(definitionRoot(roots, "memoryLoad", "address").expr, exprConst(0x2000));
   deepStrictEqual(actionRoot(roots, "memoryStore", "address").expr, exprConst(0x3000));
   deepStrictEqual(storeValue.expr, exprInput(load.definition.result));
-  deepStrictEqual(storeValue.use, bitsUse(0xffff));
-  deepStrictEqual(closure.expr, exprConst(0x2000));
-  deepStrictEqual(closure.at, load.at);
-  deepStrictEqual(closure.purpose, {
-    kind: "definitionInput",
-    input: "address",
-    source: "closure"
-  });
 });
 
 test("rootsForSchedule projects dynamic register roots and producer indices", () => {
@@ -111,15 +90,9 @@ test("rootsForSchedule projects dynamic register roots and producer indices", ()
   const roots = rootsForSchedule(result.schedule);
   const load = definitionEntry(result.schedule, "dynamicRegisterLoad");
 
-  deepStrictEqual(definitionRoot(roots, "dynamicRegisterLoad", "index", "schedule").expr, exprConst(1));
+  deepStrictEqual(definitionRoot(roots, "dynamicRegisterLoad", "index").expr, exprConst(1));
   deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "index").expr, exprConst(2));
   deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "value").expr, exprInput(load.definition.result));
-  deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "value").use, bitsUse(0xffff_ffff));
-  deepStrictEqual(definitionRoot(roots, "dynamicRegisterLoad", "index", "closure").purpose, {
-    kind: "definitionInput",
-    input: "index",
-    source: "closure"
-  });
 });
 
 test("rootsForSchedule projects branch, jump, fallthrough, and host trap roots", () => {
@@ -186,8 +159,6 @@ test("rootsForSchedule projects boundary state roots from scheduled boundaries",
   deepStrictEqual(boundaryFlag(roots, "exitState", "ZF")?.expr, exprConst(1));
   deepStrictEqual(boundaryRegister(roots, "stateSync", "esp")?.expr, exprConst(0x44));
   deepStrictEqual(boundaryFlag(roots, "stateSync", "ZF")?.expr, exprConst(1));
-  deepStrictEqual(boundaryFlag(roots, "exitState", "ZF")?.use, bitsUse(1));
-  deepStrictEqual(boundaryRegister(roots, "exitState", "eax")?.use, full32Use());
 });
 
 test("rootsForSchedule projects reset register roots for exits after dynamic register stores", () => {
@@ -245,36 +216,6 @@ test("rootsForSchedule projects reset register roots after unsynced dynamic regi
   deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "value").expr, exprConst(0x55));
 });
 
-test("rootsForSchedule validates block-defined value ordering and missing producers", () => {
-  const id = 0 as BlockDefinitionId;
-  const source = definitionValueSource(id);
-  const definition = memoryLoadDefinition(id, exprConst(0x2000), 32);
-  const storeBeforeDefinition = actionEntry(0, {
-    kind: "memoryStore",
-    at: opSite(0),
-    address: exprConst(0x3000),
-    value: exprInput(source),
-    width: 32
-  });
-  const storeAfterDefinition = actionEntry(2, {
-    ...storeBeforeDefinition.action,
-    at: opSite(2)
-  });
-  const definitionScheduleEntry = definitionEntryFromDefinition(definition, 1);
-
-  throws(
-    () => rootsForSchedule([storeBeforeDefinition, definitionScheduleEntry]),
-    /observed before its definition placement/
-  );
-  throws(
-    () => rootsForSchedule([storeBeforeDefinition]),
-    /not present in the schedule/
-  );
-  doesNotThrow(
-    () => rootsForSchedule([definitionScheduleEntry, storeAfterDefinition])
-  );
-});
-
 test("root projection remains block-owned and independent of target modules", () => {
   const source = readFileSync(new URL("../roots.js", import.meta.url), "utf8");
 
@@ -328,19 +269,17 @@ function actionRoot(
 function definitionRoot<TKind extends BlockDefinition["kind"]>(
   roots: readonly BlockRoot[],
   kind: TKind,
-  input: Extract<BlockRoot["purpose"], { kind: "definitionInput" }>["input"],
-  source: Extract<BlockRoot["purpose"], { kind: "definitionInput" }>["source"]
+  input: Extract<BlockRoot["purpose"], { kind: "definitionInput" }>["input"]
 ): BlockRoot {
   const root = roots.find((entry) =>
     entry.entry.role === "definition" &&
       entry.entry.definition.kind === kind &&
       entry.purpose.kind === "definitionInput" &&
-      entry.purpose.input === input &&
-      entry.purpose.source === source
+      entry.purpose.input === input
   );
 
   if (root === undefined) {
-    throw new Error(`missing ${kind} ${input} ${source} root`);
+    throw new Error(`missing ${kind} ${input} root`);
   }
 
   return root;
@@ -350,7 +289,7 @@ function boundaryRegister(
   roots: readonly BlockRoot[],
   boundary: "exitState" | "stateSync",
   reg: string
-): Readonly<{ expr: ExprRef; use: ExprUse }> | undefined {
+): Readonly<{ expr: ExprRef }> | undefined {
   return roots.find((root) =>
     root.entry.role === "boundary" &&
       root.entry.kind === boundary &&
@@ -364,7 +303,7 @@ function boundaryFlag(
   roots: readonly BlockRoot[],
   boundary: "exitState" | "stateSync",
   flag: string
-): Readonly<{ expr: ExprRef; use: ExprUse }> | undefined {
+): Readonly<{ expr: ExprRef }> | undefined {
   return roots.find((root) =>
     root.entry.role === "boundary" &&
       root.entry.kind === boundary &&
@@ -415,40 +354,6 @@ function definitionEntry<TKind extends BlockDefinition["kind"]>(
 
   return entry as Extract<BlockScheduleEntry, { role: "definition" }> &
     Readonly<{ definition: Extract<BlockDefinition, { kind: TKind }> }>;
-}
-
-function actionEntry(opIndex: number, action: BlockAction): Extract<BlockScheduleEntry, { role: "action" }> {
-  return Object.freeze({
-    role: "action",
-    at: Object.freeze({ opIndex, epoch: 0 }),
-    action
-  });
-}
-
-function definitionEntryFromDefinition(
-  definition: BlockDefinition,
-  opIndex: number
-): Extract<BlockScheduleEntry, { role: "definition" }> {
-  return Object.freeze({
-    role: "definition",
-    at: Object.freeze({ opIndex, epoch: 0 }),
-    definition
-  });
-}
-
-function memoryLoadDefinition(
-  id: BlockDefinitionId,
-  address: ExprRef,
-  width: 32
-): BlockDefinition {
-  return Object.freeze({
-    kind: "memoryLoad",
-    id,
-    at: opSite(1),
-    result: definitionValueSource(id),
-    address,
-    width
-  });
 }
 
 function v(id: number): VarRef {
