@@ -225,7 +225,7 @@ type BindingAccessMode = "read" | "address" | "clobber";
 type AccessSet = {
   regs: Map<Reg32, number>;
   flags: Map<FlagName, true>;
-  defs: Set<number>;
+  defs: Extract<ExprDependency, Readonly<{ kind: "def" }>>[];
   memory: boolean;
 };
 
@@ -233,7 +233,7 @@ function createAccessSet(): AccessSet {
   return {
     regs: new Map(),
     flags: new Map(),
-    defs: new Set(),
+    defs: [],
     memory: false
   };
 }
@@ -248,7 +248,7 @@ function addExprDependencies(expr: ExprRef, use: ExprUse, accesses: AccessSet): 
         accesses.flags.set(dep.flag, true);
         break;
       case "def":
-        accesses.defs.add(dep.id);
+        accesses.defs.push(dep);
         break;
     }
   }
@@ -295,8 +295,8 @@ function dependencyList(accesses: AccessSet): BindingDependencies {
     result.push(Object.freeze({ kind: "flag", flag }));
   }
 
-  for (const id of accesses.defs) {
-    result.push(Object.freeze({ kind: "def", id }));
+  for (const dep of accesses.defs) {
+    result.push(Object.freeze({ kind: "def", id: dep.id, use: dep.use }));
   }
 
   if (accesses.memory) {

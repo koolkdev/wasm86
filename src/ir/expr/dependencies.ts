@@ -12,22 +12,24 @@ import type {
   ExprInputSource
 } from "./types.js";
 
+type ExprDefinitionId = Extract<ExprInputSource, Readonly<{ kind: "def" }>>["id"];
+
 export type ExprDependency =
   | Readonly<{ kind: "reg"; reg: Reg32; mask: number }>
   | Readonly<{ kind: "flag"; flag: FlagName }>
-  | Readonly<{ kind: "def"; id: number }>;
+  | Readonly<{ kind: "def"; id: ExprDefinitionId; use: ExprUse }>;
 
 type ExprDependencySet = Readonly<{
   regs: Map<Reg32, number>;
   flags: Set<FlagName>;
-  defs: Set<number>;
+  defs: Map<ExprDefinitionId, ExprUse[]>;
 }>;
 
 export function exprDependencies(expr: ExprRef, use: ExprUse = exactUse()): readonly ExprDependency[] {
   const deps: ExprDependencySet = {
     regs: new Map(),
     flags: new Set(),
-    defs: new Set()
+    defs: new Map()
   };
 
   collectExprDependencies(expr, canonicalizeUse(use), deps);
@@ -95,7 +97,7 @@ function addInputDependency(
       mergeFlagDependency(source.flag, deps);
       return;
     case "def":
-      mergeDefinitionDependency(source.id, deps);
+      mergeDefinitionDependency(source.id, use, deps);
       return;
   }
 }
@@ -112,8 +114,16 @@ function mergeFlagDependency(flag: FlagName, deps: ExprDependencySet): void {
   deps.flags.add(flag);
 }
 
-function mergeDefinitionDependency(id: number, deps: ExprDependencySet): void {
-  deps.defs.add(id);
+function mergeDefinitionDependency(
+  id: ExprDefinitionId,
+  use: ExprUse,
+  deps: ExprDependencySet
+): void {
+  const requested = canonicalizeUse(use);
+  const existing = deps.defs.get(id) ?? [];
+  const next = mergeDefinitionUses(existing, requested);
+
+  deps.defs.set(id, next);
 }
 
 function dependencyList(deps: ExprDependencySet): readonly ExprDependency[] {
@@ -127,11 +137,47 @@ function dependencyList(deps: ExprDependencySet): readonly ExprDependency[] {
     result.push({ kind: "flag", flag });
   }
 
-  for (const id of deps.defs) {
-    result.push({ kind: "def", id });
+  for (const [id, uses] of deps.defs) {
+    for (const use of uses) {
+      result.push({ kind: "def", id, use });
+    }
   }
 
   return result;
+}
+
+function mergeDefinitionUses(existing: readonly ExprUse[], requested: ExprUse): ExprUse[] {
+  if (requested.kind === "bits") {
+    return mergeDefinitionBitsUse(existing, requested);
+  }
+
+  if (existing.some((use) => use.kind === requested.kind)) {
+    return [...existing];
+  }
+
+  return [
+    ...existing.filter((use) => use.kind !== "bits"),
+    requested
+  ];
+}
+
+function mergeDefinitionBitsUse(
+  existing: readonly ExprUse[],
+  requested: Extract<ExprUse, Readonly<{ kind: "bits" }>>
+): ExprUse[] {
+  if (existing.some((use) => use.kind === "exact" || use.kind === "full32")) {
+    return [...existing];
+  }
+
+  const mask = existing.reduce(
+    (merged, use) => use.kind === "bits" ? ((merged | use.mask) >>> 0) : merged,
+    requested.mask
+  );
+
+  return [
+    ...existing.filter((use) => use.kind !== "bits"),
+    bitsUse(mask)
+  ];
 }
 
 function canonicalizeUse(use: ExprUse): ExprUse {

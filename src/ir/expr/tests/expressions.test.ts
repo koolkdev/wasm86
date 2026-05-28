@@ -147,10 +147,45 @@ test("ExprRef def inputs are dependencies for block-defined values", () => {
   const loaded = exprInput({ kind: "def", id: 0 });
   const combined = exprBinary("add", loaded, exprConst(1));
 
+  deepStrictEqual(exprDependencies(loaded), [
+    { kind: "def", id: 0, use: exactUse() }
+  ]);
   deepStrictEqual(exprDependencies(combined), [
-    { kind: "def", id: 0 }
+    { kind: "def", id: 0, use: bitsUse(0xffff_ffff) }
   ]);
   deepStrictEqual(exprDependencies(combined, bitsUse(0)), []);
+});
+
+test("ExprRef dependency transfer preserves narrowed block-defined uses", () => {
+  const loaded = exprInput({ kind: "def", id: 0 });
+  const extended = exprUnary("extend8_s", loaded);
+  const selected = exprProject(8, loaded);
+
+  deepStrictEqual(exprDependencies(extended), [
+    { kind: "def", id: 0, use: bitsUse(0xff) }
+  ]);
+  deepStrictEqual(exprDependencies(selected), [
+    { kind: "def", id: 0, use: bitsUse(0xff) }
+  ]);
+});
+
+test("ExprRef def dependencies preserve distinct exact and full32 demands", () => {
+  const loaded = exprInput({ kind: "def", id: 0 });
+  const selected = exprSelect(loaded, loaded, exprConst(0));
+
+  deepStrictEqual(exprDependencies(selected), [
+    { kind: "def", id: 0, use: full32Use() },
+    { kind: "def", id: 0, use: exactUse() }
+  ]);
+});
+
+test("ExprRef def dependencies merge compatible bit demands only", () => {
+  const loaded = exprInput({ kind: "def", id: 0 });
+  const combined = exprBinary("or", exprProject(8, loaded), exprBits(loaded, 8, 8));
+
+  deepStrictEqual(exprDependencies(combined), [
+    { kind: "def", id: 0, use: bitsUse(0xffff) }
+  ]);
 });
 
 test("ExprRef canonicalization keeps arithmetic and condition shapes", () => {
