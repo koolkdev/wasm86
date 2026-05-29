@@ -9,7 +9,7 @@ import { registerAlias } from "#x86/registers.js";
 import { IR_ALU_FLAGS } from "#ir/model/flag-effects.js";
 import type { FlagName } from "#ir/model/flags.js";
 import type { ScalarCompareOp } from "#ir/expr/types.js";
-import { sourceCellsForExpr } from "#ir/block/source-cells.js";
+import { exprDepsForExpr } from "#ir/block/expr-deps.js";
 import {
   exprBinary,
   exprCompare,
@@ -152,7 +152,7 @@ test("source-cell analysis conservatively reports parity formula sources", () =>
   const ebx = inputReg("ebx");
   const state = FlagState.initial().apply(testFlagWrite(32, eax, ebx));
 
-  deepStrictEqual(sourceCellsForExpr(exprCellValue(state.read("PF"))).sources, [
+  deepStrictEqual(exprDepsForExpr(exprCellValue(state.read("PF"))).sourceCells, [
     { kind: "reg", reg: registerAlias("eax") },
     { kind: "reg", reg: registerAlias("ebx") }
   ]);
@@ -220,11 +220,11 @@ test("missing direct conditions fall back to current flag-cell composition", () 
 test("condition composition reads only the required flag cells", () => {
   const state = FlagState.initial();
 
-  deepStrictEqual(sourceCellsForExpr(definedExpr(state.condition("A"))).sources, [
+  deepStrictEqual(exprDepsForExpr(definedExpr(state.condition("A"))).sourceCells, [
     { kind: "flag", flag: "CF" },
     { kind: "flag", flag: "ZF" }
   ]);
-  deepStrictEqual(sourceCellsForExpr(definedExpr(state.condition("L"))).sources, [
+  deepStrictEqual(exprDepsForExpr(definedExpr(state.condition("L"))).sourceCells, [
     { kind: "flag", flag: "SF" },
     { kind: "flag", flag: "OF" }
   ]);
