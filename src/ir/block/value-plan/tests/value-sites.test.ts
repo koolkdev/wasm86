@@ -62,7 +62,7 @@ test("every non-passthrough root becomes one value site", () => {
   deepStrictEqual(sites.map(siteSummary), [
     {
       kind: "actionInput",
-      order: 0,
+      entryIndex: 0,
       at: { opIndex: 0, epoch: 0 },
       action: "memoryGuard",
       input: "address"
@@ -196,14 +196,14 @@ test("changed boundary cells become BoundaryCellValueSites", () => {
   deepStrictEqual(sites.map(siteSummary), [
     {
       kind: "boundaryCell",
-      order: 0,
+      entryIndex: 0,
       at: { opIndex: 4, epoch: 0 },
       boundary: "stateSync",
       cell: { kind: "reg", reg: "eax" }
     },
     {
       kind: "boundaryCell",
-      order: 0,
+      entryIndex: 0,
       at: { opIndex: 4, epoch: 0 },
       boundary: "stateSync",
       cell: { kind: "flag", flag: "CF" }
@@ -221,20 +221,20 @@ test("definition entries become ProducedValues without dependency fields", () =>
   deepStrictEqual(produced.map(producedSummary), [
     {
       id: schedule[0]!.definition.id,
-      order: 0,
+      entryIndex: 0,
       at: { opIndex: 0, epoch: 0 },
       definition: "memoryLoad"
     },
     {
       id: schedule[1]!.definition.id,
-      order: 1,
+      entryIndex: 1,
       at: { opIndex: 1, epoch: 0 },
       definition: "dynamicRegisterLoad"
     }
   ]);
 
   for (const value of produced) {
-    deepStrictEqual(Object.keys(value), ["id", "order", "at", "entry"]);
+    deepStrictEqual(Object.keys(value), ["id", "entryIndex", "at", "entry"]);
     strictEqual(Object.hasOwn(value, "key"), false);
     strictEqual(Object.hasOwn(value, "expr"), false);
     strictEqual(Object.hasOwn(value, "sourceCells"), false);
@@ -408,7 +408,7 @@ function requireBoundarySite(
 function siteSummary(site: ValueSite): object {
   const base = {
     kind: site.kind,
-    order: site.order,
+    entryIndex: site.entryIndex,
     at: site.at
   };
 
@@ -438,7 +438,7 @@ function siteSummary(site: ValueSite): object {
 function producedSummary(value: ProducedValue): object {
   return {
     id: value.id,
-    order: value.order,
+    entryIndex: value.entryIndex,
     at: value.at,
     definition: value.entry.definition.kind
   };

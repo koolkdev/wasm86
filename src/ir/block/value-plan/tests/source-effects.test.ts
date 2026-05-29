@@ -32,13 +32,13 @@ test("changed state-sync register and flag cells produce source writes", () => {
   deepStrictEqual(sourceEffectsForSchedule([entry]).map(effectSummary), [
     {
       kind: "write",
-      order: 0,
+      entryIndex: 0,
       at: { opIndex: 2, epoch: 0 },
       source: { kind: "reg", reg: registerAlias("eax") }
     },
     {
       kind: "write",
-      order: 0,
+      entryIndex: 0,
       at: { opIndex: 2, epoch: 0 },
       source: { kind: "flag", flag: "ZF" }
     }
@@ -58,7 +58,7 @@ test("dynamic-register store produces one register barrier", () => {
   deepStrictEqual(effects.map(effectSummary), [
     {
       kind: "barrier",
-      order: 0,
+      entryIndex: 0,
       at: { opIndex: 3, epoch: 1 },
       scope: "registers"
     }
@@ -97,7 +97,7 @@ test("source-effect extraction does not walk expressions", () => {
   deepStrictEqual(sourceEffectsForSchedule([entry]).map(effectSummary), [
     {
       kind: "write",
-      order: 0,
+      entryIndex: 0,
       at: { opIndex: 4, epoch: 0 },
       source: { kind: "reg", reg: registerAlias("eax") }
     }
@@ -168,14 +168,14 @@ function effectSummary(effect: ReturnType<typeof sourceEffectsForSchedule>[numbe
     case "write":
       return {
         kind: effect.kind,
-        order: effect.order,
+        entryIndex: effect.entryIndex,
         at: effect.at,
         source: effect.source
       };
     case "barrier":
       return {
         kind: effect.kind,
-        order: effect.order,
+        entryIndex: effect.entryIndex,
         at: effect.at,
         scope: effect.scope
       };

@@ -8,6 +8,7 @@ import type {
 } from "#ir/block/roots.js";
 import type {
   BlockSchedule,
+  BlockScheduleEntryIndex,
   BlockScheduleEntry,
   DefinitionScheduleEntry,
   Placement
@@ -28,7 +29,7 @@ export type BaseValueSite = Readonly<{
   key: ExprNodeId;
   expr: ExprRef;
   root: BlockRoot;
-  order: number;
+  entryIndex: BlockScheduleEntryIndex;
   at: Placement;
   deps: ExprDeps;
 }>;
@@ -59,17 +60,17 @@ export type ValueSite =
   | BoundaryCellValueSite;
 
 export function valueSitesForRoots(input: ValueSiteInput): readonly ValueSite[] {
-  const orderByEntry = entryOrderMap(input.schedule);
+  const entryIndexByEntry = entryIndexMap(input.schedule);
   const sites: ValueSite[] = [];
 
   for (const root of input.roots) {
-    const order = entryOrderFor(orderByEntry, root.entry);
+    const entryIndex = entryIndexFor(entryIndexByEntry, root.entry);
 
     if (boundaryRootIsPassthrough(root)) {
       continue;
     }
 
-    sites.push(valueSiteForRoot(input.graph, root, order));
+    sites.push(valueSiteForRoot(input.graph, root, entryIndex));
   }
 
   return Object.freeze(sites);
@@ -78,9 +79,9 @@ export function valueSitesForRoots(input: ValueSiteInput): readonly ValueSite[] 
 function valueSiteForRoot(
   graph: ExprGraph,
   root: BlockRoot,
-  order: number
+  entryIndex: BlockScheduleEntryIndex
 ): ValueSite {
-  const base = baseValueSite(graph, root, order);
+  const base = baseValueSite(graph, root, entryIndex);
 
   switch (root.purpose.kind) {
     case "actionInput": {
@@ -127,13 +128,13 @@ function valueSiteForRoot(
 function baseValueSite(
   graph: ExprGraph,
   root: BlockRoot,
-  order: number
+  entryIndex: BlockScheduleEntryIndex
 ): BaseValueSite {
   return Object.freeze({
     key: graph.node(root.expr).id,
     expr: root.expr,
     root,
-    order,
+    entryIndex,
     at: root.at,
     deps: exprDepsForRoot(root)
   });
@@ -163,27 +164,27 @@ function boundaryRootIsPassthrough(root: BlockRoot): boolean {
   }
 }
 
-function entryOrderMap(schedule: BlockSchedule): ReadonlyMap<BlockScheduleEntry, number> {
-  const orderByEntry = new Map<BlockScheduleEntry, number>();
+function entryIndexMap(schedule: BlockSchedule): ReadonlyMap<BlockScheduleEntry, BlockScheduleEntryIndex> {
+  const entryIndexByEntry = new Map<BlockScheduleEntry, BlockScheduleEntryIndex>();
 
-  for (const [order, entry] of schedule.entries()) {
-    if (!orderByEntry.has(entry)) {
-      orderByEntry.set(entry, order);
+  for (const [index, entry] of schedule.entries()) {
+    if (!entryIndexByEntry.has(entry)) {
+      entryIndexByEntry.set(entry, index as BlockScheduleEntryIndex);
     }
   }
 
-  return orderByEntry;
+  return entryIndexByEntry;
 }
 
-function entryOrderFor(
-  orderByEntry: ReadonlyMap<BlockScheduleEntry, number>,
+function entryIndexFor(
+  entryIndexByEntry: ReadonlyMap<BlockScheduleEntry, BlockScheduleEntryIndex>,
   entry: BlockScheduleEntry
-): number {
-  const order = orderByEntry.get(entry);
+): BlockScheduleEntryIndex {
+  const entryIndex = entryIndexByEntry.get(entry);
 
-  if (order === undefined) {
+  if (entryIndex === undefined) {
     throw new Error("value site root entry is not present in the schedule");
   }
 
-  return order;
+  return entryIndex;
 }

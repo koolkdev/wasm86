@@ -8,6 +8,10 @@ export type Placement = Readonly<{
   epoch: number;
 }>;
 
+export type BlockScheduleEntryIndex = number & {
+  readonly __blockScheduleEntryIndex: unique symbol;
+};
+
 export type ActionScheduleEntry = Readonly<{
   role: "action";
   at: Placement;
