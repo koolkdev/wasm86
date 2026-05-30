@@ -16,14 +16,8 @@ export type {
 } from "./state.js";
 
 export type {
-  ActionScheduleEntry,
-  BlockSchedule,
-  BlockScheduleEntry,
-  BoundaryScheduleEntry,
-  DefinitionScheduleEntry,
-  Placement,
   BlockWalkResult
-} from "./result.js";
+} from "./types.js";
 
 export {
   walkExpressionBlock

@@ -14,27 +14,27 @@ import {
 import type { ExprRef } from "#ir/expr/types.js";
 import type { OperandWidth } from "#x86/types.js";
 import type {
-  ActionScheduleEntry,
-  BlockScheduleEntry,
-  BoundaryScheduleEntry,
-  BlockWalkResult,
-  DefinitionScheduleEntry,
+  BlockActionSite,
+  BlockTimelineSite,
+  BlockBoundarySite,
+  BlockDefinitionSite,
   Placement
-} from "./result.js";
+} from "#ir/block/timeline.js";
+import type { BlockWalkResult } from "./types.js";
 import type { OpSite } from "./site.js";
 import type { BlockState } from "./state.js";
 
 export class BlockWalkRecorder {
   readonly #definitionIds = new BlockDefinitionIds();
   readonly #exitIds = new BlockExitIds();
-  readonly #schedule: BlockScheduleEntry[] = [];
+  readonly #timeline: BlockTimelineSite[] = [];
   readonly #epochs = new Map<number, number>();
   readonly #exits: BlockExit[] = [];
 
   result(final: BlockState): BlockWalkResult {
     return Object.freeze({
       final,
-      schedule: Object.freeze([...this.#schedule]),
+      timeline: Object.freeze([...this.#timeline]),
       exits: Object.freeze([...this.#exits])
     });
   }
@@ -92,40 +92,44 @@ export class BlockWalkRecorder {
   action(action: BlockAction): void {
     const at = this.#placement(action.at);
 
-    this.#schedule.push(Object.freeze({
-      role: "action",
+    this.#timeline.push(Object.freeze({
+      kind: "action",
       at,
       action
-    } satisfies ActionScheduleEntry));
+    } satisfies BlockActionSite));
     this.#recordExitBoundaries(action, at);
   }
 
   stateSync(at: OpSite, state: BlockState): void {
-    this.#schedule.push(Object.freeze({
-      role: "boundary",
-      kind: "stateSync",
+    this.#timeline.push(Object.freeze({
+      kind: "boundary",
       at: this.#placement(at),
-      state
-    } satisfies BoundaryScheduleEntry));
+      boundary: Object.freeze({
+        kind: "stateSync",
+        state
+      })
+    } satisfies BlockBoundarySite));
   }
 
   #definition(definition: BlockDefinition): void {
-    this.#schedule.push(Object.freeze({
-      role: "definition",
+    this.#timeline.push(Object.freeze({
+      kind: "definition",
       at: this.#placement(definition.at),
       definition
-    } satisfies DefinitionScheduleEntry));
+    } satisfies BlockDefinitionSite));
   }
 
   #recordExitBoundaries(action: BlockAction, at: Placement): void {
     for (const exit of exitsForAction(action)) {
-      this.#schedule.push(Object.freeze({
-        role: "boundary",
-        kind: "exitState",
+      this.#timeline.push(Object.freeze({
+        kind: "boundary",
         at,
-        exit,
-        state: exit.snapshot
-      } satisfies BoundaryScheduleEntry));
+        boundary: Object.freeze({
+          kind: "exitState",
+          exit,
+          state: exit.snapshot
+        })
+      } satisfies BlockBoundarySite));
     }
   }
 

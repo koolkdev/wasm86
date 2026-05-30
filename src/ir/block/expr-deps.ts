@@ -192,20 +192,20 @@ function addDefinitionDeps(id: BlockDefinitionId, deps: ExprDepsSet): void {
 }
 
 function rootOutputWidth(root: BlockRoot): number | undefined {
-  const { entry, purpose } = root;
+  const { site, purpose } = root;
 
   if (purpose.kind === "boundaryCell" && purpose.cell.kind === "flag") {
     return 1;
   }
 
-  if (purpose.kind !== "actionInput" || purpose.input !== "value" || entry.role !== "action") {
+  if (purpose.kind !== "actionInput" || purpose.input !== "value" || site.kind !== "action") {
     return undefined;
   }
 
-  switch (entry.action.kind) {
+  switch (site.action.kind) {
     case "memoryStore":
     case "dynamicRegisterStore":
-      return entry.action.width;
+      return site.action.width;
     case "memoryGuard":
     case "jump":
     case "branch":

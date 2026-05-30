@@ -10,13 +10,14 @@ import {
   type BlockDefinition
 } from "#ir/block/definitions.js";
 import {
-  rootsForSchedule,
+  rootsForBlockSites,
   type BlockRoot
 } from "#ir/block/roots.js";
 import type {
-  BlockSchedule,
-  BlockScheduleEntry
-} from "#ir/block/schedule.js";
+  BlockBoundarySite,
+  BlockTimeline,
+  BlockTimelineSite
+} from "#ir/block/timeline.js";
 import {
   BindingResolver,
   dynamicRegBinding
@@ -44,7 +45,7 @@ test("memory load definitions expose raw block-defined sources and signed uses s
       { op: "set", target: { kind: "reg", reg: "eax" }, value: v(1), accessWidth: 32 }
     ]
   });
-  const definition = onlyDefinition(result.schedule);
+  const definition = onlyDefinition(result.timeline);
 
   strictEqual(definition.kind, "memoryLoad");
   strictEqual(definition.width, 8);
@@ -56,7 +57,7 @@ test("memory load definitions expose raw block-defined sources and signed uses s
   );
 });
 
-test("rootsForSchedule projects memory roots and block-defined value observations", () => {
+test("rootsForBlockSites projects memory roots and block-defined value observations", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 2, access: "read" },
@@ -64,8 +65,8 @@ test("rootsForSchedule projects memory roots and block-defined value observation
       { op: "set", target: { kind: "mem", address: c(0x3000) }, value: v(0), accessWidth: 16 }
     ]
   });
-  const roots = rootsForSchedule(result.schedule);
-  const load = definitionEntry(result.schedule, "memoryLoad");
+  const roots = rootsForBlockSites({ timeline: result.timeline });
+  const load = definitionEntry(result.timeline, "memoryLoad");
   const storeValue = actionRoot(roots, "memoryStore", "value");
 
   deepStrictEqual(actionRoot(roots, "memoryGuard", "address").expr, exprConst(0x1000));
@@ -74,7 +75,7 @@ test("rootsForSchedule projects memory roots and block-defined value observation
   deepStrictEqual(storeValue.expr, exprInput(load.definition.result));
 });
 
-test("rootsForSchedule projects dynamic register roots and producer indices", () => {
+test("rootsForBlockSites projects dynamic register roots and producer indices", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 32 },
@@ -87,37 +88,37 @@ test("rootsForSchedule projects dynamic register roots and producer indices", ()
       ]
     })
   });
-  const roots = rootsForSchedule(result.schedule);
-  const load = definitionEntry(result.schedule, "dynamicRegisterLoad");
+  const roots = rootsForBlockSites({ timeline: result.timeline });
+  const load = definitionEntry(result.timeline, "dynamicRegisterLoad");
 
   deepStrictEqual(definitionRoot(roots, "dynamicRegisterLoad", "index").expr, exprConst(1));
   deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "index").expr, exprConst(2));
   deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "value").expr, exprInput(load.definition.result));
 });
 
-test("rootsForSchedule projects branch, jump, fallthrough, and host trap roots", () => {
-  const branch = rootsForSchedule(walkExpressionBlock({
+test("rootsForBlockSites projects branch, jump, fallthrough, and host trap roots", () => {
+  const branch = rootsForBlockSites({ timeline: walkExpressionBlock({
     block: [
       { op: "conditionalJump", condition: c(1), taken: c(0x40), notTaken: c(0x44) }
     ],
     continuation: exprConst(0x48)
-  }).schedule);
-  const jump = rootsForSchedule(walkExpressionBlock({
+  }).timeline });
+  const jump = rootsForBlockSites({ timeline: walkExpressionBlock({
     block: [
       { op: "jump", target: c(0x80) }
     ]
-  }).schedule);
-  const trap = rootsForSchedule(walkExpressionBlock({
+  }).timeline });
+  const trap = rootsForBlockSites({ timeline: walkExpressionBlock({
     block: [
       { op: "hostTrap", vector: c(7) }
     ]
-  }).schedule);
-  const fallthrough = rootsForSchedule(walkExpressionBlock({
+  }).timeline });
+  const fallthrough = rootsForBlockSites({ timeline: walkExpressionBlock({
     block: [
       { op: "next" }
     ],
     continuation: exprConst(0x90)
-  }).schedule);
+  }).timeline });
 
   deepStrictEqual(actionRoot(branch, "branch", "condition").expr, exprConst(1));
   deepStrictEqual(
@@ -132,7 +133,7 @@ test("rootsForSchedule projects branch, jump, fallthrough, and host trap roots",
   deepStrictEqual(actionRoot(trap, "hostTrap", "vector").expr, exprConst(7));
 });
 
-test("rootsForSchedule projects boundary state roots from scheduled boundaries", () => {
+test("rootsForBlockSites projects boundary state roots from scheduled boundaries", () => {
   const exitResult = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
@@ -150,10 +151,12 @@ test("rootsForSchedule projects boundary state roots from scheduled boundaries",
       operands: [dynamicRegBinding(exprConst(4), 32)]
     })
   });
-  const roots = rootsForSchedule([
-    ...exitResult.schedule,
-    ...syncResult.schedule
-  ]);
+  const roots = rootsForBlockSites({
+    timeline: [
+      ...exitResult.timeline,
+      ...syncResult.timeline
+    ]
+  });
 
   deepStrictEqual(boundaryRegister(roots, "exitState", "eax")?.expr, exprConst(0x11));
   deepStrictEqual(boundaryFlag(roots, "exitState", "ZF")?.expr, exprConst(1));
@@ -161,7 +164,7 @@ test("rootsForSchedule projects boundary state roots from scheduled boundaries",
   deepStrictEqual(boundaryFlag(roots, "stateSync", "ZF")?.expr, exprConst(1));
 });
 
-test("rootsForSchedule projects reset register roots for exits after dynamic register stores", () => {
+test("rootsForBlockSites projects reset register roots for exits after dynamic register stores", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
@@ -173,8 +176,8 @@ test("rootsForSchedule projects reset register roots for exits after dynamic reg
       operands: [dynamicRegBinding(exprConst(4), 32)]
     })
   });
-  const roots = rootsForSchedule(result.schedule);
-  const exit = boundaryEntry(result.schedule, "exitState");
+  const roots = rootsForBlockSites({ timeline: result.timeline });
+  const exit = boundaryEntry(result.timeline, "exitState");
 
   deepStrictEqual(boundaryRegister(roots, "stateSync", "esp")?.expr, exprConst(0x44));
   deepStrictEqual(
@@ -188,7 +191,7 @@ test("rootsForSchedule projects reset register roots for exits after dynamic reg
   deepStrictEqual(boundaryFlag(roots, "exitState", "ZF")?.expr, exprConst(1));
 });
 
-test("rootsForSchedule projects reset register roots after unsynced dynamic register stores", () => {
+test("rootsForBlockSites projects reset register roots after unsynced dynamic register stores", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
@@ -198,11 +201,11 @@ test("rootsForSchedule projects reset register roots after unsynced dynamic regi
       operands: [dynamicRegBinding(exprConst(4), 32)]
     })
   });
-  const roots = rootsForSchedule(result.schedule);
-  const exit = boundaryEntry(result.schedule, "exitState");
+  const roots = rootsForBlockSites({ timeline: result.timeline });
+  const exit = boundaryEntry(result.timeline, "exitState");
 
-  strictEqual(result.schedule.some((entry) =>
-    entry.role === "boundary" && entry.kind === "stateSync"
+  strictEqual(result.timeline.some((site) =>
+    site.kind === "boundary" && site.boundary.kind === "stateSync"
   ), false);
   deepStrictEqual(
     boundaryRegisterRootsForEntry(roots, exit).find((root) =>
@@ -236,9 +239,9 @@ test("dynamic register state reset does not leak into expression identity", () =
   strictEqual(sources.includes("dynamicRegisterStore"), false);
 });
 
-function onlyDefinition(schedule: BlockSchedule): BlockDefinition {
-  const definitions = schedule.flatMap((entry) =>
-    entry.role === "definition" ? [entry.definition] : []
+function onlyDefinition(timeline: BlockTimeline): BlockDefinition {
+  const definitions = timeline.flatMap((site) =>
+    site.kind === "definition" ? [site.definition] : []
   );
 
   strictEqual(definitions.length, 1);
@@ -251,12 +254,12 @@ function actionRoot(
   input: Extract<BlockRoot["purpose"], { kind: "actionInput" }>["input"],
   direction?: "taken" | "notTaken"
 ): BlockRoot {
-  const root = roots.find((entry) =>
-    entry.entry.role === "action" &&
-      entry.entry.action.kind === kind &&
-      entry.purpose.kind === "actionInput" &&
-      entry.purpose.input === input &&
-      entry.purpose.direction === direction
+  const root = roots.find((candidate) =>
+    candidate.site.kind === "action" &&
+      candidate.site.action.kind === kind &&
+      candidate.purpose.kind === "actionInput" &&
+      candidate.purpose.input === input &&
+      candidate.purpose.direction === direction
   );
 
   if (root === undefined) {
@@ -271,11 +274,11 @@ function definitionRoot<TKind extends BlockDefinition["kind"]>(
   kind: TKind,
   input: Extract<BlockRoot["purpose"], { kind: "definitionInput" }>["input"]
 ): BlockRoot {
-  const root = roots.find((entry) =>
-    entry.entry.role === "definition" &&
-      entry.entry.definition.kind === kind &&
-      entry.purpose.kind === "definitionInput" &&
-      entry.purpose.input === input
+  const root = roots.find((candidate) =>
+    candidate.site.kind === "definition" &&
+      candidate.site.definition.kind === kind &&
+      candidate.purpose.kind === "definitionInput" &&
+      candidate.purpose.input === input
   );
 
   if (root === undefined) {
@@ -291,8 +294,8 @@ function boundaryRegister(
   reg: string
 ): Readonly<{ expr: ExprRef }> | undefined {
   return roots.find((root) =>
-    root.entry.role === "boundary" &&
-      root.entry.kind === boundary &&
+    root.site.kind === "boundary" &&
+      root.site.boundary.kind === boundary &&
       root.purpose.kind === "boundaryCell" &&
       root.purpose.cell.kind === "reg" &&
       root.purpose.cell.reg === reg
@@ -305,8 +308,8 @@ function boundaryFlag(
   flag: string
 ): Readonly<{ expr: ExprRef }> | undefined {
   return roots.find((root) =>
-    root.entry.role === "boundary" &&
-      root.entry.kind === boundary &&
+    root.site.kind === "boundary" &&
+      root.site.boundary.kind === boundary &&
       root.purpose.kind === "boundaryCell" &&
       root.purpose.cell.kind === "flag" &&
       root.purpose.cell.flag === flag
@@ -315,44 +318,49 @@ function boundaryFlag(
 
 function boundaryRegisterRootsForEntry(
   roots: readonly BlockRoot[],
-  boundary: Extract<BlockScheduleEntry, { role: "boundary" }>
+  boundary: BlockBoundarySite
 ): readonly BlockRoot[] {
   return roots.filter((root) =>
-    root.entry === boundary &&
+    root.site === boundary &&
       root.purpose.kind === "boundaryCell" &&
       root.purpose.cell.kind === "reg"
   );
 }
 
-function boundaryEntry<TKind extends Extract<BlockScheduleEntry, { role: "boundary" }>["kind"]>(
-  schedule: BlockSchedule,
+type BoundarySiteFor<TKind extends BlockBoundarySite["boundary"]["kind"]> =
+  BlockBoundarySite & Readonly<{
+    boundary: Extract<BlockBoundarySite["boundary"], { kind: TKind }>;
+  }>;
+
+function boundaryEntry<TKind extends BlockBoundarySite["boundary"]["kind"]>(
+  timeline: BlockTimeline,
   kind: TKind
-): Extract<Extract<BlockScheduleEntry, { role: "boundary" }>, { kind: TKind }> {
-  const entry = schedule.find((item) =>
-    item.role === "boundary" && item.kind === kind
+): BoundarySiteFor<TKind> {
+  const site = timeline.find((item) =>
+    item.kind === "boundary" && item.boundary.kind === kind
   );
 
-  if (entry === undefined || entry.role !== "boundary" || entry.kind !== kind) {
+  if (site === undefined || site.kind !== "boundary" || site.boundary.kind !== kind) {
     throw new Error(`missing boundary ${kind}`);
   }
 
-  return entry as Extract<Extract<BlockScheduleEntry, { role: "boundary" }>, { kind: TKind }>;
+  return site as BoundarySiteFor<TKind>;
 }
 
 function definitionEntry<TKind extends BlockDefinition["kind"]>(
-  schedule: BlockSchedule,
+  timeline: BlockTimeline,
   kind: TKind
-): Extract<BlockScheduleEntry, { role: "definition" }> &
+): Extract<BlockTimelineSite, { kind: "definition" }> &
   Readonly<{ definition: Extract<BlockDefinition, { kind: TKind }> }> {
-  const entry = schedule.find((item) =>
-    item.role === "definition" && item.definition.kind === kind
+  const site = timeline.find((item) =>
+    item.kind === "definition" && item.definition.kind === kind
   );
 
-  if (entry === undefined || entry.role !== "definition" || entry.definition.kind !== kind) {
+  if (site === undefined || site.kind !== "definition" || site.definition.kind !== kind) {
     throw new Error(`missing definition ${kind}`);
   }
 
-  return entry as Extract<BlockScheduleEntry, { role: "definition" }> &
+  return site as Extract<BlockTimelineSite, { kind: "definition" }> &
     Readonly<{ definition: Extract<BlockDefinition, { kind: TKind }> }>;
 }
 

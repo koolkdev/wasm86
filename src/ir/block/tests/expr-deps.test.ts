@@ -14,7 +14,7 @@ import type {
   BlockRoot,
   BlockRootPurpose
 } from "#ir/block/roots.js";
-import type { BlockScheduleEntry } from "#ir/block/schedule.js";
+import type { BlockTimelineSite } from "#ir/block/timeline.js";
 import { opSite } from "#ir/block/walk/index.js";
 import {
   exprBinary,
@@ -152,9 +152,9 @@ function actionValueRoot(
   const actionAt = opSite(0);
   const at = Object.freeze({ opIndex: 0, epoch: 0 });
   const purpose: BlockRootPurpose = Object.freeze({ kind: "actionInput", input: "value" });
-  const entry: BlockScheduleEntry = kind === "memoryStore"
+  const site: BlockTimelineSite = kind === "memoryStore"
     ? Object.freeze({
-        role: "action",
+        kind: "action",
         at,
         action: Object.freeze({
           kind,
@@ -165,7 +165,7 @@ function actionValueRoot(
         })
       })
     : Object.freeze({
-        role: "action",
+        kind: "action",
         at,
         action: Object.freeze({
           kind,
@@ -180,6 +180,6 @@ function actionValueRoot(
     expr,
     at,
     purpose,
-    entry
+    site
   });
 }

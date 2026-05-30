@@ -10,13 +10,15 @@ import type {
   BlockDefinitionId
 } from "#ir/block/definitions.js";
 import {
-  rootsForSchedule
+  rootsForBlockSites
 } from "#ir/block/roots.js";
 import type {
-  BlockScheduleEntry,
-  BlockScheduleEntryIndex,
+  BlockActionSite,
+  BlockBoundarySite,
+  BlockDefinitionSite,
+  BlockTimelineSite,
   Placement
-} from "#ir/block/schedule.js";
+} from "#ir/block/timeline.js";
 import {
   sourceCellForFlag,
   sourceCellForRegisterAlias,
@@ -44,8 +46,8 @@ import {
 } from "#ir/block/value-plan/value-sites.js";
 
 test("repeated sites with the same graph key produce one planned value", () => {
-  const left = valueSite({ key: 7, entryIndex: 1 });
-  const right = valueSite({ key: 7, entryIndex: 4 });
+  const left = valueSite({ key: 7, opIndex: 1 });
+  const right = valueSite({ key: 7, opIndex: 4 });
   const plan = planBlockValues({
     sites: [left, right],
     producedValues: [],
@@ -55,14 +57,14 @@ test("repeated sites with the same graph key produce one planned value", () => {
   strictEqual(plan.values.length, 1);
   deepStrictEqual(plan.values[0]?.sites, [left, right]);
   deepStrictEqual(plan.values[0]?.lifetime, {
-    firstEntry: 1,
-    lastEntry: 4
+    start: { opIndex: 1, epoch: 0 },
+    end: { opIndex: 4, epoch: 0 }
   });
 });
 
-test("duplicate sites at the same entry are preserved", () => {
-  const site = valueSite({ key: 3, entryIndex: 2 });
-  const duplicate = valueSite({ key: 3, entryIndex: 2 });
+test("duplicate sites at the same placement are preserved", () => {
+  const site = valueSite({ key: 3, opIndex: 2 });
+  const duplicate = valueSite({ key: 3, opIndex: 2 });
   const plan = planBlockValues({
     sites: [site, duplicate],
     producedValues: [],
@@ -73,8 +75,8 @@ test("duplicate sites at the same entry are preserved", () => {
   strictEqual(plan.values[0]?.sites[0], site);
   strictEqual(plan.values[0]?.sites[1], duplicate);
   deepStrictEqual(plan.values[0]?.lifetime, {
-    firstEntry: 2,
-    lastEntry: 2
+    start: { opIndex: 2, epoch: 0 },
+    end: { opIndex: 2, epoch: 0 }
   });
 });
 
@@ -82,8 +84,8 @@ test("source effects do not split planned values by themselves", () => {
   const source = sourceCellForRegisterAlias(registerAlias("eax"));
   const plan = planBlockValues({
     sites: [
-      valueSite({ key: 1, entryIndex: 0, sourceCells: [source] }),
-      valueSite({ key: 1, entryIndex: 3, sourceCells: [source] })
+      valueSite({ key: 1, opIndex: 0, sourceCells: [source] }),
+      valueSite({ key: 1, opIndex: 3, sourceCells: [source] })
     ],
     producedValues: [],
     sourceEffects: [sourceWrite(1, source)]
@@ -97,7 +99,7 @@ test("source write before first site creates a capture", () => {
   const source = sourceCellForRegisterAlias(registerAlias("eax"));
   const effect = sourceWrite(1, source);
   const plan = planBlockValues({
-    sites: [valueSite({ key: 1, entryIndex: 2, sourceCells: [source] })],
+    sites: [valueSite({ key: 1, opIndex: 2, sourceCells: [source] })],
     producedValues: [],
     sourceEffects: [effect]
   });
@@ -108,13 +110,33 @@ test("source write before first site creates a capture", () => {
   strictEqual(capture?.value, value?.id);
   deepStrictEqual(capture?.source, source);
   strictEqual(capture?.before, effect);
-  strictEqual(capture?.entryIndex, 1);
+  deepStrictEqual(capture?.at, { opIndex: 1, epoch: 0 });
 });
 
-test("source write at first site entry does not create a capture", () => {
+test("source captures use the first required placement before first site", () => {
+  const source = sourceCellForRegisterAlias(registerAlias("eax"));
+  const firstWrite = sourceWrite(1, source);
+  const laterWrite = sourceWrite(2, source);
+  const afterFirstSite = sourceWrite(4, source);
+  const plan = planBlockValues({
+    sites: [valueSite({ key: 1, opIndex: 3, sourceCells: [source] })],
+    producedValues: [],
+    sourceEffects: [
+      firstWrite,
+      laterWrite,
+      afterFirstSite
+    ]
+  });
+
+  strictEqual(plan.captures.length, 1);
+  strictEqual(plan.captures[0]?.before, firstWrite);
+  deepStrictEqual(plan.captures[0]?.at, { opIndex: 1, epoch: 0 });
+});
+
+test("source write at first site placement does not create a capture", () => {
   const source = sourceCellForRegisterAlias(registerAlias("eax"));
   const plan = planBlockValues({
-    sites: [valueSite({ key: 1, entryIndex: 2, sourceCells: [source] })],
+    sites: [valueSite({ key: 1, opIndex: 2, sourceCells: [source] })],
     producedValues: [],
     sourceEffects: [sourceWrite(2, source)]
   });
@@ -125,7 +147,7 @@ test("source write at first site entry does not create a capture", () => {
 test("source write after first site does not create a capture", () => {
   const source = sourceCellForRegisterAlias(registerAlias("eax"));
   const plan = planBlockValues({
-    sites: [valueSite({ key: 1, entryIndex: 2, sourceCells: [source] })],
+    sites: [valueSite({ key: 1, opIndex: 2, sourceCells: [source] })],
     producedValues: [],
     sourceEffects: [sourceWrite(3, source)]
   });
@@ -138,8 +160,8 @@ test("register barrier before first site captures register-backed values", () =>
   const flagSource = sourceCellForFlag("ZF");
   const plan = planBlockValues({
     sites: [
-      valueSite({ key: 1, entryIndex: 2, sourceCells: [regSource] }),
-      valueSite({ key: 2, entryIndex: 2, sourceCells: [flagSource] })
+      valueSite({ key: 1, opIndex: 2, sourceCells: [regSource] }),
+      valueSite({ key: 2, opIndex: 2, sourceCells: [flagSource] })
     ],
     producedValues: [],
     sourceEffects: [registerBarrier(1)]
@@ -152,7 +174,7 @@ test("flag writes capture the same flag source once before first site", () => {
   const source = sourceCellForFlag("ZF");
   const firstWrite = sourceWrite(1, source);
   const plan = planBlockValues({
-    sites: [valueSite({ key: 1, entryIndex: 3, sourceCells: [source] })],
+    sites: [valueSite({ key: 1, opIndex: 3, sourceCells: [source] })],
     producedValues: [],
     sourceEffects: [
       firstWrite,
@@ -171,7 +193,7 @@ test("first source capture for a value removes all remaining source waits", () =
   const ebx = sourceCellForRegisterAlias(registerAlias("ebx"));
   const firstWrite = sourceWrite(1, eax);
   const plan = planBlockValues({
-    sites: [valueSite({ key: 1, entryIndex: 4, sourceCells: [eax, ebx] })],
+    sites: [valueSite({ key: 1, opIndex: 4, sourceCells: [eax, ebx] })],
     producedValues: [],
     sourceEffects: [
       firstWrite,
@@ -186,7 +208,7 @@ test("first source capture for a value removes all remaining source waits", () =
 test("non-overlapping alias write does not capture", () => {
   const source = sourceCellForRegisterAlias(registerAlias("ah"));
   const plan = planBlockValues({
-    sites: [valueSite({ key: 1, entryIndex: 2, sourceCells: [source] })],
+    sites: [valueSite({ key: 1, opIndex: 2, sourceCells: [source] })],
     producedValues: [],
     sourceEffects: [sourceWrite(1, sourceCellForRegisterAlias(registerAlias("al")))]
   });
@@ -199,12 +221,12 @@ test("mixed al and eax sites merge source cells to eax", () => {
     sites: [
       valueSite({
         key: 1,
-        entryIndex: 1,
+        opIndex: 1,
         sourceCells: [sourceCellForRegisterAlias(registerAlias("al"))]
       }),
       valueSite({
         key: 1,
-        entryIndex: 3,
+        opIndex: 3,
         sourceCells: [sourceCellForRegisterAlias(registerAlias("eax"))]
       })
     ],
@@ -222,7 +244,7 @@ test("produced value consumers are found through definitionIds", () => {
   const unusedId = 5 as BlockDefinitionId;
   const produced = producedValue(id, 1);
   const unusedProduced = producedValue(unusedId, 2);
-  const consumer = valueSite({ key: 1, entryIndex: 5, definitionIds: [id] });
+  const consumer = valueSite({ key: 1, opIndex: 5, definitionIds: [id] });
   const plan = planBlockValues({
     sites: [consumer],
     producedValues: [produced, unusedProduced],
@@ -230,17 +252,17 @@ test("produced value consumers are found through definitionIds", () => {
   });
 
   strictEqual(plan.produced.length, 1);
-  deepStrictEqual(plan.produced.map((entry) => ({
-    produced: entry.produced,
-    consumers: entry.consumers,
-    lifetime: entry.lifetime
+  deepStrictEqual(plan.produced.map((planned) => ({
+    produced: planned.produced,
+    consumers: planned.consumers,
+    lifetime: planned.lifetime
   })), [
     {
       produced,
       consumers: [consumer],
       lifetime: {
-        firstEntry: 1,
-        lastEntry: 5
+        start: { opIndex: 1, epoch: 0 },
+        end: { opIndex: 5, epoch: 0 }
       }
     }
   ]);
@@ -250,7 +272,7 @@ test("produced values do not receive source captures", () => {
   const id = 8 as BlockDefinitionId;
   const produced = producedValue(id, 0);
   const plan = planBlockValues({
-    sites: [valueSite({ key: 1, entryIndex: 3, definitionIds: [id] })],
+    sites: [valueSite({ key: 1, opIndex: 3, definitionIds: [id] })],
     producedValues: [produced],
     sourceEffects: [sourceWrite(1, sourceCellForRegisterAlias(registerAlias("eax")))]
   });
@@ -260,10 +282,10 @@ test("produced values do not receive source captures", () => {
 });
 
 test("boundary views contain only non-passthrough boundary sites", () => {
-  const entry = stateSyncEntry({ opIndex: 3, epoch: 0 }, BlockState.initial({
+  const site = stateSyncSite({ opIndex: 3, epoch: 0 }, BlockState.initial({
     registers: RegisterState.initial().write("eax", exprConst(0x11))
   }));
-  const sites = valueSitesForRoots(valueSiteInput([entry]));
+  const sites = valueSitesForRoots(valueSiteInput([site]));
   const plan = planBlockValues({
     sites,
     producedValues: [],
@@ -273,13 +295,11 @@ test("boundary views contain only non-passthrough boundary sites", () => {
   strictEqual(sites.length, 1);
   deepStrictEqual(plan.boundaries.map((boundary) => ({
     boundary: boundary.boundary,
-    entryIndex: boundary.entryIndex,
     at: boundary.at,
     sites: boundary.sites.map((site) => site.cell)
   })), [
     {
       boundary: "stateSync",
-      entryIndex: 0,
       at: { opIndex: 3, epoch: 0 },
       sites: [{ kind: "reg", reg: "eax" }]
     }
@@ -288,20 +308,19 @@ test("boundary views contain only non-passthrough boundary sites", () => {
 
 function valueSite(input: {
   key: number;
-  entryIndex: number;
+  opIndex: number;
   expr?: ExprRef;
   sourceCells?: readonly SourceCell[];
   definitionIds?: readonly BlockDefinitionId[];
 }): ValueSite {
-  const entryIndex = input.entryIndex as BlockScheduleEntryIndex;
-  const at = { opIndex: input.entryIndex, epoch: 0 };
+  const at = { opIndex: input.opIndex, epoch: 0 };
   const expr = input.expr ?? exprInput({ kind: "reg", reg: "eax" });
-  const entry = memoryStoreEntry(at, expr);
+  const site = memoryStoreSite(at, expr);
   const root = Object.freeze({
     expr,
     at,
     purpose: Object.freeze({ kind: "actionInput", input: "value" }),
-    entry
+    site
   });
 
   return Object.freeze({
@@ -309,24 +328,22 @@ function valueSite(input: {
     key: input.key,
     expr,
     root,
-    entryIndex,
     at,
     deps: Object.freeze({
       sourceCells: Object.freeze([...(input.sourceCells ?? [])]),
       definitionIds: Object.freeze([...(input.definitionIds ?? [])])
     }),
-    entry,
+    site,
     input: "value"
   });
 }
 
 function valueSiteInput(
-  schedule: readonly BlockScheduleEntry[]
+  timeline: readonly BlockTimelineSite[]
 ): ValueSiteInput {
-  const roots = rootsForSchedule(schedule);
+  const roots = rootsForBlockSites({ timeline });
 
   return {
-    schedule,
     graph: buildExprGraph(roots.map((root) => root.expr)),
     roots
   };
@@ -334,13 +351,12 @@ function valueSiteInput(
 
 function producedValue(id: BlockDefinitionId, index: number): ProducedValue {
   const at = { opIndex: index, epoch: 0 };
-  const entry = memoryLoadEntry(at, id);
+  const site = memoryLoadSite(at, id);
 
   return Object.freeze({
     id,
-    entryIndex: index as BlockScheduleEntryIndex,
     at,
-    entry
+    site
   });
 }
 
@@ -349,10 +365,9 @@ function sourceWrite(index: number, source: SourceCell): SourceEffect {
 
   return Object.freeze({
     kind: "write",
-    entryIndex: index as BlockScheduleEntryIndex,
     at,
     source,
-    entry: stateSyncEntry(at, BlockState.initial())
+    site: stateSyncSite(at, BlockState.initial())
   });
 }
 
@@ -361,32 +376,33 @@ function registerBarrier(index: number): SourceEffect {
 
   return Object.freeze({
     kind: "barrier",
-    entryIndex: index as BlockScheduleEntryIndex,
     at,
     scope: "registers",
-    entry: dynamicRegisterStoreEntry(at)
+    site: dynamicRegisterStoreSite(at)
   });
 }
 
-function stateSyncEntry(
+function stateSyncSite(
   at: Placement,
   state: BlockState
-): Extract<BlockScheduleEntry, { role: "boundary"; kind: "stateSync" }> {
+): BlockBoundarySite {
   return Object.freeze({
-    role: "boundary",
-    kind: "stateSync",
+    kind: "boundary",
     at,
-    state
+    boundary: Object.freeze({
+      kind: "stateSync",
+      state
+    })
   });
 }
 
-function memoryLoadEntry(
+function memoryLoadSite(
   at: Placement,
   id: BlockDefinitionId
-): Extract<BlockScheduleEntry, { role: "definition" }> &
+): BlockDefinitionSite &
   Readonly<{ definition: Extract<BlockDefinition, { kind: "memoryLoad" }> }> {
   return Object.freeze({
-    role: "definition",
+    kind: "definition",
     at,
     definition: Object.freeze({
       kind: "memoryLoad",
@@ -399,13 +415,13 @@ function memoryLoadEntry(
   });
 }
 
-function memoryStoreEntry(
+function memoryStoreSite(
   at: Placement,
   value: ExprRef
-): Extract<BlockScheduleEntry, { role: "action" }> &
+): BlockActionSite &
   Readonly<{ action: Extract<BlockAction, { kind: "memoryStore" }> }> {
   return Object.freeze({
-    role: "action",
+    kind: "action",
     at,
     action: Object.freeze({
       kind: "memoryStore",
@@ -417,12 +433,12 @@ function memoryStoreEntry(
   });
 }
 
-function dynamicRegisterStoreEntry(
+function dynamicRegisterStoreSite(
   at: Placement
-): Extract<BlockScheduleEntry, { role: "action" }> &
+): BlockActionSite &
   Readonly<{ action: Extract<BlockAction, { kind: "dynamicRegisterStore" }> }> {
   return Object.freeze({
-    role: "action",
+    kind: "action",
     at,
     action: Object.freeze({
       kind: "dynamicRegisterStore",

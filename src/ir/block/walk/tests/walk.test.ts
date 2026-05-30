@@ -17,6 +17,7 @@ import {
 } from "#ir/block/walk/index.js";
 import type { BlockAction } from "#ir/block/actions.js";
 import type { BlockDefinition } from "#ir/block/definitions.js";
+import type { BlockTimelineSite } from "#ir/block/timeline.js";
 import {
   exprBinary,
   exprCompare,
@@ -45,7 +46,7 @@ test("shared block walk applies register writes through RegisterState", () => {
     result.final.registers.read("eax"),
     exprInsertBits(exprInput({ kind: "reg", reg: "eax" }), exprConst(0x12), 0, 8)
   );
-  deepStrictEqual(result.schedule, []);
+  deepStrictEqual(result.timeline, []);
 });
 
 test("shared block walk rejects value bindings as write targets", () => {
@@ -134,7 +135,7 @@ test("shared block walk keeps dynamic register reads and writes as ordered runti
   }
 
   deepStrictEqual(
-    result.schedule.map(scheduleKind),
+    result.timeline.map(timelineSiteKind),
     ["dynamicRegisterLoad", "dynamicRegisterStore"]
   );
   deepStrictEqual(result.final.registers.read("eax"), exprInput({ kind: "reg", reg: "eax" }));
@@ -231,10 +232,10 @@ test("dynamic register stores allow earlier static register writes", () => {
   });
 
   strictEqual(onlyAction(blockWalkActions(result)).kind, "dynamicRegisterStore");
-  deepStrictEqual(result.schedule.map(scheduleKind), ["stateSync", "dynamicRegisterStore"]);
-  strictEqual(result.schedule[0]?.role, "boundary");
-  if (result.schedule[0]?.role === "boundary") {
-    deepStrictEqual(result.schedule[0].state.registers.read("esp"), exprConst(0x44));
+  deepStrictEqual(result.timeline.map(timelineSiteKind), ["stateSync", "dynamicRegisterStore"]);
+  strictEqual(result.timeline[0]?.kind, "boundary");
+  if (result.timeline[0]?.kind === "boundary") {
+    deepStrictEqual(result.timeline[0].boundary.state.registers.read("esp"), exprConst(0x44));
   }
   deepStrictEqual(result.final.registers.read("esp"), exprInput({ kind: "reg", reg: "esp" }));
 });
@@ -449,14 +450,14 @@ test("memory loads create sequential definitions and later expressions read def 
   if (definitions[1]!.kind === "memoryLoad") {
     strictEqual(definitions[1]!.width, 16);
   }
-  deepStrictEqual(result.schedule.map((entry) => entry.role), ["definition", "definition"]);
+  deepStrictEqual(result.timeline.map((site) => site.kind), ["definition", "definition"]);
   deepStrictEqual(
     result.final.registers.read("ebx"),
     binary("add", exprInput(definitions[0]!.result), exprConst(1))
   );
 });
 
-test("walk schedule preserves memory guard, load definition, and store order", () => {
+test("walk timeline preserves memory guard, load definition, and store order", () => {
   const result = walkFragment({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
@@ -467,7 +468,7 @@ test("walk schedule preserves memory guard, load definition, and store order", (
   });
 
   deepStrictEqual(
-    result.schedule.map(scheduleKind),
+    result.timeline.map(timelineSiteKind),
     ["memoryGuard", "exitState", "memoryLoad", "memoryGuard", "exitState", "memoryStore"]
   );
 });
@@ -531,23 +532,23 @@ function walkFragment(
 }
 
 function blockWalkActions(result: ReturnType<typeof walkExpressionBlock>): readonly BlockAction[] {
-  return result.schedule.flatMap((entry) => entry.role === "action" ? [entry.action] : []);
+  return result.timeline.flatMap((site) => site.kind === "action" ? [site.action] : []);
 }
 
 function blockWalkDefinitions(result: ReturnType<typeof walkExpressionBlock>): readonly BlockDefinition[] {
-  return result.schedule.flatMap((entry) => entry.role === "definition" ? [entry.definition] : []);
+  return result.timeline.flatMap((site) => site.kind === "definition" ? [site.definition] : []);
 }
 
-function scheduleKind(
-  entry: ReturnType<typeof walkExpressionBlock>["schedule"][number]
+function timelineSiteKind(
+  site: BlockTimelineSite
 ): string {
-  switch (entry.role) {
+  switch (site.kind) {
     case "action":
-      return entry.action.kind;
+      return site.action.kind;
     case "definition":
-      return entry.definition.kind;
+      return site.definition.kind;
     case "boundary":
-      return entry.kind;
+      return site.boundary.kind;
   }
 }
 

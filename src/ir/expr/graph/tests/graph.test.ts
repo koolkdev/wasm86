@@ -6,7 +6,7 @@ import {
 } from "node:assert";
 import { test } from "node:test";
 
-import { rootsForSchedule } from "#ir/block/roots.js";
+import { rootsForBlockSites } from "#ir/block/roots.js";
 import { walkExpressionBlock } from "#ir/block/walk/index.js";
 import type { BlockDefinition } from "#ir/block/definitions.js";
 import {
@@ -75,7 +75,7 @@ test("ExprGraph keeps block-defined value sources stable across BlockRoots", () 
       { op: "set", target: { kind: "mem", address: c(0x3000) }, value: v(0), accessWidth: 32 }
     ]
   });
-  const roots = rootsForSchedule(result.schedule);
+  const roots = rootsForBlockSites({ timeline: result.timeline });
   const graph = buildExprGraph(roots.map((root) => root.expr));
   const definition = memoryLoadDefinition(result);
   const definitionExpr = exprInput(definition.result);
@@ -108,7 +108,7 @@ test("ExprGraph child links are stable for every expression kind", () => {
     { expr: exprInsertBits(eax, ebx, 8, 8), children: [eax, ebx] },
     { expr: exprCompare(16, "eq", eax, ebx), children: [eax, ebx] }
   ];
-  const graph = buildExprGraph([leaf, zf, ...cases.map((entry) => entry.expr)]);
+  const graph = buildExprGraph([leaf, zf, ...cases.map((valueCase) => valueCase.expr)]);
 
   deepStrictEqual(graph.node(leaf).children, []);
   deepStrictEqual(graph.node(zf).children, []);
@@ -161,15 +161,15 @@ test("ExprGraph builds and traverses deep chains without recursive stack growth"
 function memoryLoadDefinition(
   result: ReturnType<typeof walkExpressionBlock>
 ): Extract<BlockDefinition, { kind: "memoryLoad" }> {
-  const entry = result.schedule.find((item) =>
-    item.role === "definition" && item.definition.kind === "memoryLoad"
+  const site = result.timeline.find((item) =>
+    item.kind === "definition" && item.definition.kind === "memoryLoad"
   );
 
-  if (entry === undefined || entry.role !== "definition" || entry.definition.kind !== "memoryLoad") {
+  if (site === undefined || site.kind !== "definition" || site.definition.kind !== "memoryLoad") {
     throw new Error("missing memory load definition");
   }
 
-  return entry.definition;
+  return site.definition;
 }
 
 function v(id: number): VarRef {

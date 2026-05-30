@@ -1,10 +1,9 @@
 import type { BlockDefinitionId } from "#ir/block/definitions.js";
 import type {
-  BlockSchedule,
-  BlockScheduleEntryIndex,
-  DefinitionScheduleEntry,
+  BlockDefinitionSite,
   Placement
-} from "#ir/block/schedule.js";
+} from "#ir/block/timeline.js";
+import { placementAfter } from "#ir/block/timeline.js";
 import type { ValueSite } from "./value-sites.js";
 import type {
   PlannedLifetime,
@@ -13,30 +12,24 @@ import type {
 
 export type ProducedValue = Readonly<{
   id: BlockDefinitionId;
-  entryIndex: BlockScheduleEntryIndex;
   at: Placement;
-  entry: DefinitionScheduleEntry;
+  site: BlockDefinitionSite;
 }>;
 
 export type {
   PlannedProducedValue
 } from "./types.js";
 
-export function producedValuesForSchedule(input: {
-  schedule: BlockSchedule;
+export function producedValuesForDefinitions(input: {
+  definitions: readonly BlockDefinitionSite[];
 }): readonly ProducedValue[] {
   const produced: ProducedValue[] = [];
 
-  for (const [index, entry] of input.schedule.entries()) {
-    if (entry.role !== "definition") {
-      continue;
-    }
-
+  for (const site of input.definitions) {
     produced.push(Object.freeze({
-      id: entry.definition.id,
-      entryIndex: index as BlockScheduleEntryIndex,
-      at: entry.at,
-      entry
+      id: site.definition.id,
+      at: site.at,
+      site
     }));
   }
 
@@ -98,16 +91,16 @@ function producedLifetime(
   produced: ProducedValue,
   consumers: readonly ValueSite[]
 ): PlannedLifetime {
-  let lastEntry = produced.entryIndex;
+  let end = produced.at;
 
   for (const consumer of consumers) {
-    if (consumer.entryIndex > lastEntry) {
-      lastEntry = consumer.entryIndex;
+    if (placementAfter(consumer.at, end)) {
+      end = consumer.at;
     }
   }
 
   return Object.freeze({
-    firstEntry: produced.entryIndex,
-    lastEntry
+    start: produced.at,
+    end
   });
 }

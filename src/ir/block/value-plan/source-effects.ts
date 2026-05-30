@@ -1,10 +1,9 @@
-import type { BlockAction } from "#ir/block/actions.js";
 import type {
-  BlockSchedule,
-  BlockScheduleEntryIndex,
-  BlockScheduleEntry,
+  BlockActionSite,
+  BlockBoundarySite,
+  BlockTimelineSite,
   Placement
-} from "#ir/block/schedule.js";
+} from "#ir/block/timeline.js";
 import {
   sourceCellForFlag,
   sourceCellForRegisterAlias,
@@ -17,43 +16,35 @@ import { registerAlias } from "#x86/registers.js";
 
 export type SourceWrite = Readonly<{
   kind: "write";
-  entryIndex: BlockScheduleEntryIndex;
   at: Placement;
   source: SourceCell;
-  entry: Extract<BlockScheduleEntry, { role: "boundary"; kind: "stateSync" }>;
+  site: BlockBoundarySite;
 }>;
 
 export type SourceBarrier = Readonly<{
   kind: "barrier";
-  entryIndex: BlockScheduleEntryIndex;
   at: Placement;
   scope: "registers";
-  entry: DynamicRegisterStoreEntry;
+  site: BlockActionSite;
 }>;
 
 export type SourceEffect = SourceWrite | SourceBarrier;
 
-type DynamicRegisterStoreEntry = Extract<BlockScheduleEntry, { role: "action" }> & Readonly<{
-  action: Extract<BlockAction, { kind: "dynamicRegisterStore" }>;
-}>;
-
-type StateSyncEntry = Extract<BlockScheduleEntry, { role: "boundary"; kind: "stateSync" }>;
-
-export function sourceEffectsForSchedule(schedule: BlockSchedule): readonly SourceEffect[] {
+export function sourceEffectsForBlockSites(input: {
+  timeline: readonly BlockTimelineSite[];
+}): readonly SourceEffect[] {
   const effects: SourceEffect[] = [];
 
-  for (const [index, entry] of schedule.entries()) {
-    const entryIndex = index as BlockScheduleEntryIndex;
-
-    switch (entry.role) {
+  for (const site of input.timeline) {
+    switch (site.kind) {
       case "boundary":
-        if (entry.kind === "stateSync") {
-          appendStateSyncEffects(effects, entryIndex, entry);
+        if (site.boundary.kind === "stateSync") {
+          appendStateSyncEffects(effects, site);
         }
         break;
       case "action":
-        if (entry.action.kind === "dynamicRegisterStore") {
-          effects.push(sourceBarrier(entryIndex, entry as DynamicRegisterStoreEntry));
+        if (site.action.kind === "dynamicRegisterStore") {
+          effects.push(sourceBarrier(site));
         }
         break;
       case "definition":
@@ -66,46 +57,41 @@ export function sourceEffectsForSchedule(schedule: BlockSchedule): readonly Sour
 
 function appendStateSyncEffects(
   effects: SourceEffect[],
-  entryIndex: BlockScheduleEntryIndex,
-  entry: StateSyncEntry
+  site: BlockBoundarySite
 ): void {
-  for (const cell of entry.state.registers.cells()) {
+  for (const cell of site.boundary.state.registers.cells()) {
     if (!registerCellIsPassthrough(cell)) {
-      effects.push(sourceWrite(entryIndex, entry, sourceCellForRegisterAlias(registerAlias(cell.reg))));
+      effects.push(sourceWrite(site, sourceCellForRegisterAlias(registerAlias(cell.reg))));
     }
   }
 
-  for (const { flag, cell } of entry.state.flags.cells()) {
+  for (const { flag, cell } of site.boundary.state.flags.cells()) {
     if (!flagCellIsPassthrough(flag, cell)) {
-      effects.push(sourceWrite(entryIndex, entry, sourceCellForFlag(flag)));
+      effects.push(sourceWrite(site, sourceCellForFlag(flag)));
     }
   }
 }
 
 function sourceWrite(
-  entryIndex: BlockScheduleEntryIndex,
-  entry: StateSyncEntry,
+  site: BlockBoundarySite,
   source: SourceCell
 ): SourceWrite {
   return Object.freeze({
     kind: "write",
-    entryIndex,
-    at: entry.at,
+    at: site.at,
     source,
-    entry
+    site
   });
 }
 
 function sourceBarrier(
-  entryIndex: BlockScheduleEntryIndex,
-  entry: DynamicRegisterStoreEntry
+  site: BlockActionSite
 ): SourceBarrier {
   return Object.freeze({
     kind: "barrier",
-    entryIndex,
-    at: entry.at,
+    at: site.at,
     scope: "registers",
-    entry
+    site
   });
 }
 

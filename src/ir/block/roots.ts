@@ -1,10 +1,10 @@
 import type {
-  BoundaryScheduleEntry,
-  BlockSchedule,
-  BlockScheduleEntry,
-  DefinitionScheduleEntry,
+  BlockBoundarySite,
+  BlockTimeline,
+  BlockTimelineSite,
+  BlockDefinitionSite,
   Placement
-} from "#ir/block/schedule.js";
+} from "#ir/block/timeline.js";
 import { exprInput } from "#ir/expr/builders.js";
 import type {
   ExprInputSource,
@@ -32,60 +32,62 @@ export type BlockRoot = Readonly<{
   expr: ExprRef;
   at: Placement;
   purpose: BlockRootPurpose;
-  entry: BlockScheduleEntry;
+  site: BlockTimelineSite;
 }>;
 
 export type BlockRoots = readonly BlockRoot[];
 
-export function rootsForSchedule(schedule: BlockSchedule): BlockRoots {
-  return Object.freeze(schedule.flatMap(rootsForScheduleEntry));
+export function rootsForBlockSites(input: {
+  timeline: BlockTimeline;
+}): BlockRoots {
+  return Object.freeze(input.timeline.flatMap(rootsForTimelineSite));
 }
 
-function rootsForScheduleEntry(entry: BlockScheduleEntry): readonly BlockRoot[] {
-  switch (entry.role) {
+function rootsForTimelineSite(site: BlockTimelineSite): readonly BlockRoot[] {
+  switch (site.kind) {
     case "action":
-      return rootsForActionEntry(entry);
+      return rootsForActionSite(site);
     case "definition":
-      return rootsForDefinitionEntry(entry);
+      return rootsForDefinitionSite(site);
     case "boundary":
-      return rootsForBoundaryEntry(entry);
+      return rootsForBoundarySite(site);
   }
 }
 
-function rootsForActionEntry(
-  entry: Extract<BlockScheduleEntry, { role: "action" }>
+function rootsForActionSite(
+  site: Extract<BlockTimelineSite, { kind: "action" }>
 ): readonly BlockRoot[] {
-  switch (entry.action.kind) {
+  switch (site.action.kind) {
     case "memoryGuard":
       return [
-        root(entry.action.address, entry, { kind: "actionInput", input: "address" })
+        root(site.action.address, site, { kind: "actionInput", input: "address" })
       ];
     case "memoryStore":
       return [
-        root(entry.action.address, entry, { kind: "actionInput", input: "address" }),
-        root(entry.action.value, entry, { kind: "actionInput", input: "value" })
+        root(site.action.address, site, { kind: "actionInput", input: "address" }),
+        root(site.action.value, site, { kind: "actionInput", input: "value" })
       ];
     case "dynamicRegisterStore":
       return [
-        root(entry.action.index, entry, { kind: "actionInput", input: "index" }),
-        root(entry.action.value, entry, { kind: "actionInput", input: "value" })
+        root(site.action.index, site, { kind: "actionInput", input: "index" }),
+        root(site.action.value, site, { kind: "actionInput", input: "value" })
       ];
     case "jump":
       return [
-        root(entry.action.target, entry, { kind: "actionInput", input: "target" })
+        root(site.action.target, site, { kind: "actionInput", input: "target" })
       ];
     case "branch": {
       const roots = [
-        root(entry.action.condition, entry, { kind: "actionInput", input: "condition" }),
-        root(entry.action.takenTarget, entry, {
+        root(site.action.condition, site, { kind: "actionInput", input: "condition" }),
+        root(site.action.takenTarget, site, {
           kind: "actionInput",
           input: "target",
           direction: "taken"
         })
       ];
 
-      if (entry.action.continuation.value !== undefined) {
-        roots.push(root(entry.action.continuation.value, entry, {
+      if (site.action.continuation.value !== undefined) {
+        roots.push(root(site.action.continuation.value, site, {
           kind: "actionInput",
           input: "target",
           direction: "notTaken"
@@ -96,13 +98,13 @@ function rootsForActionEntry(
     }
     case "hostTrap":
       return [
-        root(entry.action.vector, entry, { kind: "actionInput", input: "vector" })
+        root(site.action.vector, site, { kind: "actionInput", input: "vector" })
       ];
     case "fallthrough":
-      return entry.action.continuation.value === undefined
+      return site.action.continuation.value === undefined
         ? []
         : [
-            root(entry.action.continuation.value, entry, {
+            root(site.action.continuation.value, site, {
               kind: "actionInput",
               input: "target"
             })
@@ -110,18 +112,18 @@ function rootsForActionEntry(
   }
 }
 
-function rootsForDefinitionEntry(entry: DefinitionScheduleEntry): readonly BlockRoot[] {
-  switch (entry.definition.kind) {
+function rootsForDefinitionSite(site: BlockDefinitionSite): readonly BlockRoot[] {
+  switch (site.definition.kind) {
     case "memoryLoad":
       return [
-        root(entry.definition.address, entry, {
+        root(site.definition.address, site, {
           kind: "definitionInput",
           input: "address"
         })
       ];
     case "dynamicRegisterLoad":
       return [
-        root(entry.definition.index, entry, {
+        root(site.definition.index, site, {
           kind: "definitionInput",
           input: "index"
         })
@@ -129,26 +131,27 @@ function rootsForDefinitionEntry(entry: DefinitionScheduleEntry): readonly Block
   }
 }
 
-function rootsForBoundaryEntry(entry: BoundaryScheduleEntry): readonly BlockRoot[] {
+function rootsForBoundarySite(site: BlockBoundarySite): readonly BlockRoot[] {
   const roots: BlockRoot[] = [];
+  const state = site.boundary.state;
 
-  for (const cell of entry.state.registers.cells()) {
-    roots.push(root(cell.value, entry, {
+  for (const cell of state.registers.cells()) {
+    roots.push(root(cell.value, site, {
       kind: "boundaryCell",
       cell: { kind: "reg", reg: cell.reg }
     }));
   }
 
-  for (const { flag, cell } of entry.state.flags.cells()) {
+  for (const { flag, cell } of state.flags.cells()) {
     switch (cell.kind) {
       case "expr":
-        roots.push(root(cell.value, entry, {
+        roots.push(root(cell.value, site, {
           kind: "boundaryCell",
           cell: { kind: "flag", flag }
         }));
         break;
       case "input":
-        roots.push(root(exprInput({ kind: "flag", flag: cell.flag }), entry, {
+        roots.push(root(exprInput({ kind: "flag", flag: cell.flag }), site, {
           kind: "boundaryCell",
           cell: { kind: "flag", flag }
         }));
@@ -163,13 +166,13 @@ function rootsForBoundaryEntry(entry: BoundaryScheduleEntry): readonly BlockRoot
 
 function root(
   expr: ExprRef,
-  entry: BlockScheduleEntry,
+  site: BlockTimelineSite,
   purpose: BlockRootPurpose
 ): BlockRoot {
   return Object.freeze({
     expr,
-    at: entry.at,
+    at: site.at,
     purpose: Object.freeze(purpose),
-    entry
+    site
   });
 }

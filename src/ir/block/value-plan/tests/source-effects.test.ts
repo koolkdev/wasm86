@@ -9,14 +9,16 @@ import type {
   BlockDefinitionId
 } from "#ir/block/definitions.js";
 import type {
-  BlockScheduleEntry,
+  BlockActionSite,
+  BlockBoundarySite,
+  BlockDefinitionSite,
   Placement
-} from "#ir/block/schedule.js";
+} from "#ir/block/timeline.js";
 import { FlagState } from "#ir/block/state/flag-state.js";
 import { RegisterState } from "#ir/block/state/register-state.js";
 import { BlockState } from "#ir/block/walk/state.js";
 import { opSite } from "#ir/block/walk/site.js";
-import { sourceEffectsForSchedule } from "#ir/block/value-plan/source-effects.js";
+import { sourceEffectsForBlockSites } from "#ir/block/value-plan/source-effects.js";
 import {
   exprConst
 } from "#ir/expr/builders.js";
@@ -24,21 +26,19 @@ import type { ExprRef } from "#ir/expr/types.js";
 import { registerAlias } from "#x86/registers.js";
 
 test("changed state-sync register and flag cells produce source writes", () => {
-  const entry = stateSyncEntry({ opIndex: 2, epoch: 0 }, BlockState.initial({
+  const site = stateSyncSite({ opIndex: 2, epoch: 0 }, BlockState.initial({
     registers: RegisterState.initial().write("eax", exprConst(0x11)),
     flags: FlagState.initial().apply({ cells: { ZF: { kind: "expr", value: exprConst(1) } } })
   }));
 
-  deepStrictEqual(sourceEffectsForSchedule([entry]).map(effectSummary), [
+  deepStrictEqual(sourceEffectsForBlockSites({ timeline: [site] }).map(effectSummary), [
     {
       kind: "write",
-      entryIndex: 0,
       at: { opIndex: 2, epoch: 0 },
       source: { kind: "reg", reg: registerAlias("eax") }
     },
     {
       kind: "write",
-      entryIndex: 0,
       at: { opIndex: 2, epoch: 0 },
       source: { kind: "flag", flag: "ZF" }
     }
@@ -46,32 +46,33 @@ test("changed state-sync register and flag cells produce source writes", () => {
 });
 
 test("unchanged state-sync cells produce no writes", () => {
-  const entry = stateSyncEntry({ opIndex: 1, epoch: 0 }, BlockState.initial());
+  const site = stateSyncSite({ opIndex: 1, epoch: 0 }, BlockState.initial());
 
-  deepStrictEqual(sourceEffectsForSchedule([entry]), []);
+  deepStrictEqual(sourceEffectsForBlockSites({ timeline: [site] }), []);
 });
 
 test("dynamic-register store produces one register barrier", () => {
-  const entry = dynamicRegisterStoreEntry({ opIndex: 3, epoch: 1 });
-  const effects = sourceEffectsForSchedule([entry]);
+  const site = dynamicRegisterStoreSite({ opIndex: 3, epoch: 1 });
+  const [effect] = sourceEffectsForBlockSites({ timeline: [site] });
 
-  deepStrictEqual(effects.map(effectSummary), [
+  deepStrictEqual(effect === undefined ? [] : [effectSummary(effect)], [
     {
       kind: "barrier",
-      entryIndex: 0,
       at: { opIndex: 3, epoch: 1 },
       scope: "registers"
     }
   ]);
-  strictEqual(effects[0]?.entry, entry);
+  strictEqual(effect?.site, site);
 });
 
 test("definitions and ordinary actions do not produce source effects", () => {
   deepStrictEqual(
-    sourceEffectsForSchedule([
-      memoryLoadEntry({ opIndex: 0, epoch: 0 }),
-      memoryStoreEntry({ opIndex: 1, epoch: 0 })
-    ]),
+    sourceEffectsForBlockSites({
+      timeline: [
+        memoryLoadSite({ opIndex: 0, epoch: 0 }),
+        memoryStoreSite({ opIndex: 1, epoch: 0 })
+      ]
+    }),
     []
   );
 });
@@ -87,40 +88,45 @@ test("source-effect extraction does not walk expressions", () => {
       cells: () => []
     }
   };
-  const entry = {
-    role: "boundary",
-    kind: "stateSync",
+  const site = {
+    kind: "boundary",
     at: { opIndex: 4, epoch: 0 },
-    state
-  } as unknown as Extract<BlockScheduleEntry, { role: "boundary"; kind: "stateSync" }>;
+    boundary: {
+      kind: "stateSync",
+      state
+    }
+  } as unknown as BlockBoundarySite;
 
-  deepStrictEqual(sourceEffectsForSchedule([entry]).map(effectSummary), [
+  deepStrictEqual(sourceEffectsForBlockSites({ timeline: [site] }).map(effectSummary), [
     {
       kind: "write",
-      entryIndex: 0,
       at: { opIndex: 4, epoch: 0 },
       source: { kind: "reg", reg: registerAlias("eax") }
     }
   ]);
 });
 
-function stateSyncEntry(
+function stateSyncSite(
   at: Placement,
   state: BlockState
-): Extract<BlockScheduleEntry, { role: "boundary"; kind: "stateSync" }> {
+): BlockBoundarySite & Readonly<{
+  boundary: Readonly<{ kind: "stateSync"; state: BlockState }>;
+}> {
   return Object.freeze({
-    role: "boundary",
-    kind: "stateSync",
+    kind: "boundary",
     at,
-    state
+    boundary: Object.freeze({
+      kind: "stateSync",
+      state
+    })
   });
 }
 
-function dynamicRegisterStoreEntry(
+function dynamicRegisterStoreSite(
   at: Placement
-): Extract<BlockScheduleEntry, { role: "action" }> {
+): BlockActionSite {
   return Object.freeze({
-    role: "action",
+    kind: "action",
     at,
     action: Object.freeze({
       kind: "dynamicRegisterStore",
@@ -132,9 +138,9 @@ function dynamicRegisterStoreEntry(
   });
 }
 
-function memoryStoreEntry(at: Placement): Extract<BlockScheduleEntry, { role: "action" }> {
+function memoryStoreSite(at: Placement): BlockActionSite {
   return Object.freeze({
-    role: "action",
+    kind: "action",
     at,
     action: Object.freeze({
       kind: "memoryStore",
@@ -146,11 +152,11 @@ function memoryStoreEntry(at: Placement): Extract<BlockScheduleEntry, { role: "a
   });
 }
 
-function memoryLoadEntry(at: Placement): Extract<BlockScheduleEntry, { role: "definition" }> {
+function memoryLoadSite(at: Placement): BlockDefinitionSite {
   const id = 0 as BlockDefinitionId;
 
   return Object.freeze({
-    role: "definition",
+    kind: "definition",
     at,
     definition: Object.freeze({
       kind: "memoryLoad",
@@ -163,19 +169,17 @@ function memoryLoadEntry(at: Placement): Extract<BlockScheduleEntry, { role: "de
   });
 }
 
-function effectSummary(effect: ReturnType<typeof sourceEffectsForSchedule>[number]): object {
+function effectSummary(effect: ReturnType<typeof sourceEffectsForBlockSites>[number]): object {
   switch (effect.kind) {
     case "write":
       return {
         kind: effect.kind,
-        entryIndex: effect.entryIndex,
         at: effect.at,
         source: effect.source
       };
     case "barrier":
       return {
         kind: effect.kind,
-        entryIndex: effect.entryIndex,
         at: effect.at,
         scope: effect.scope
       };

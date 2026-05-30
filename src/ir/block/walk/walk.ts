@@ -14,7 +14,7 @@ import {
   type BlockProgress
 } from "./state.js";
 import { opSite, type OpSite } from "./site.js";
-import type { BlockWalkResult } from "./result.js";
+import type { BlockWalkResult } from "./types.js";
 import { ControlWalkOps } from "./control-ops.js";
 import { DynamicRegisterWalkOps } from "./dynamic-register-ops.js";
 import { FlagWalkOps } from "./flag-ops.js";

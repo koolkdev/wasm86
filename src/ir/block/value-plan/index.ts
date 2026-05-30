@@ -4,7 +4,7 @@ export type {
 } from "./produced-values.js";
 export {
   planProducedValues,
-  producedValuesForSchedule
+  producedValuesForDefinitions
 } from "./produced-values.js";
 export type {
   BlockValuePlan,
@@ -24,7 +24,7 @@ export type {
   SourceWrite
 } from "./source-effects.js";
 export {
-  sourceEffectsForSchedule
+  sourceEffectsForBlockSites
 } from "./source-effects.js";
 export type {
   ActionInputValueSite,

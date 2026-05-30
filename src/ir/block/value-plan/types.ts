@@ -1,9 +1,8 @@
 import type { ExprDeps } from "#ir/block/expr-deps.js";
 import type {
-  BlockScheduleEntry,
-  BlockScheduleEntryIndex,
+  BlockBoundarySite,
   Placement
-} from "#ir/block/schedule.js";
+} from "#ir/block/timeline.js";
 import type { SourceCell } from "#ir/block/source-cells.js";
 import type { ExprNodeId } from "#ir/expr/graph/index.js";
 import type { ExprRef } from "#ir/expr/types.js";
@@ -32,8 +31,8 @@ export type PlannedValueId = number & {
 };
 
 export type PlannedLifetime = Readonly<{
-  firstEntry: BlockScheduleEntryIndex;
-  lastEntry: BlockScheduleEntryIndex;
+  start: Placement;
+  end: Placement;
 }>;
 
 export type PlannedValue = Readonly<{
@@ -55,14 +54,12 @@ export type PlannedCapture = Readonly<{
   value: PlannedValueId;
   source: SourceCell;
   before: SourceEffect;
-  entryIndex: BlockScheduleEntryIndex;
   at: Placement;
 }>;
 
 export type PlannedBoundary = Readonly<{
-  entry: Extract<BlockScheduleEntry, { role: "boundary" }>;
+  site: BlockBoundarySite;
   boundary: "stateSync" | "exitState";
-  entryIndex: BlockScheduleEntryIndex;
   at: Placement;
   sites: readonly BoundaryCellValueSite[];
 }>;

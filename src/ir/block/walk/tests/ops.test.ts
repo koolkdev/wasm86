@@ -35,6 +35,7 @@ import { RegisterAccessValidator } from "../register-access-validator.js";
 import { RegisterWalkState } from "../registers.js";
 import type { BlockAction } from "#ir/block/actions.js";
 import type { BlockDefinition } from "#ir/block/definitions.js";
+import type { BlockTimelineSite } from "#ir/block/timeline.js";
 import { opSite } from "../site.js";
 import { StorageWalkOps } from "../storage-ops.js";
 import { ValueWalkOps } from "../value-ops.js";
@@ -48,8 +49,8 @@ test("StorageWalkOps dispatches dynamic register storage through dynamic ops", (
   harness.storage.write({ kind: "operand", index: 0 }, loaded, 32);
 
   const result = harness.result();
-  const definitions = definitionsOf(result.schedule);
-  const actions = actionsOf(result.schedule);
+  const definitions = definitionsOf(result.timeline);
+  const actions = actionsOf(result.timeline);
 
   strictEqual(definitions.length, 1);
   strictEqual(definitions[0]?.kind, "dynamicRegisterLoad");
@@ -72,7 +73,7 @@ test("ControlWalkOps records branch continuation and shared snapshots", () => {
   control.branch(exprConst(1), exprConst(0x40), { kind: "nextEip" });
 
   const result = recorder.result(snapshot);
-  const action = onlyAction(actionsOf(result.schedule));
+  const action = onlyAction(actionsOf(result.timeline));
 
   strictEqual(action.kind, "branch");
   if (action.kind === "branch") {
@@ -83,7 +84,7 @@ test("ControlWalkOps records branch continuation and shared snapshots", () => {
 
   site = opSite(4);
   control.fallthrough();
-  strictEqual(actionsOf(recorder.result(snapshot).schedule).length, 2);
+  strictEqual(actionsOf(recorder.result(snapshot).timeline).length, 2);
 });
 
 test("FlagWalkOps lowers flag writes and reports undefined conditions with op index", () => {
@@ -167,12 +168,12 @@ function storageHarness(resolver: BindingResolver): Readonly<{
   });
 }
 
-function actionsOf(schedule: ReturnType<BlockWalkRecorder["result"]>["schedule"]): readonly BlockAction[] {
-  return schedule.flatMap((entry) => entry.role === "action" ? [entry.action] : []);
+function actionsOf(timeline: readonly BlockTimelineSite[]): readonly BlockAction[] {
+  return timeline.flatMap((site) => site.kind === "action" ? [site.action] : []);
 }
 
-function definitionsOf(schedule: ReturnType<BlockWalkRecorder["result"]>["schedule"]): readonly BlockDefinition[] {
-  return schedule.flatMap((entry) => entry.role === "definition" ? [entry.definition] : []);
+function definitionsOf(timeline: readonly BlockTimelineSite[]): readonly BlockDefinition[] {
+  return timeline.flatMap((site) => site.kind === "definition" ? [site.definition] : []);
 }
 
 function onlyAction(actions: readonly BlockAction[]): BlockAction {

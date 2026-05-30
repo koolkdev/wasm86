@@ -1,4 +1,5 @@
 import type { SourceCell } from "#ir/block/source-cells.js";
+import { placementBefore } from "#ir/block/timeline.js";
 import type { FlagName } from "#ir/model/flags.js";
 import {
   addRegisterWait,
@@ -32,22 +33,18 @@ type RegisterWaitingSourceEdge = WaitingSourceEdge & Readonly<{
 
 export function planSourceCaptures(
   values: readonly PlannedValue[],
-  sourceEffects: readonly SourceEffect[]
+  effects: readonly SourceEffect[]
 ): readonly PlannedCapture[] {
   const captures: PlannedCapture[] = [];
   const indexes = waitingSourceIndexes(values);
-  const valuesByFirstEntry = [...values].sort((left, right) =>
-    left.lifetime.firstEntry - right.lifetime.firstEntry || left.id - right.id
-  );
-  const effects = [...sourceEffects].sort((left, right) => left.entryIndex - right.entryIndex);
   let nextMaterializedValue = 0;
 
   for (const effect of effects) {
     while (
-      nextMaterializedValue < valuesByFirstEntry.length &&
-      valuesByFirstEntry[nextMaterializedValue]!.lifetime.firstEntry <= effect.entryIndex
+      nextMaterializedValue < values.length &&
+      !placementBefore(effect.at, values[nextMaterializedValue]!.lifetime.start)
     ) {
-      removeWaitingValue(indexes, valuesByFirstEntry[nextMaterializedValue]!);
+      removeWaitingValue(indexes, values[nextMaterializedValue]!);
       nextMaterializedValue += 1;
     }
 
@@ -218,7 +215,6 @@ function captureWaitingSourceEdge(
     value: edge.value.id,
     source: edge.source,
     before: effect,
-    entryIndex: effect.entryIndex,
     at: effect.at
   }));
   removeWaitingValue(indexes, edge.value);

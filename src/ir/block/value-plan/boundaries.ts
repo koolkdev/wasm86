@@ -1,4 +1,4 @@
-import type { BlockScheduleEntry } from "#ir/block/schedule.js";
+import type { BlockBoundarySite } from "#ir/block/timeline.js";
 import type {
   BoundaryCellValueSite,
   ValueSite
@@ -6,28 +6,26 @@ import type {
 import type { PlannedBoundary } from "./types.js";
 
 type BoundaryBuilder = {
-  entry: Extract<BlockScheduleEntry, { role: "boundary" }>;
+  site: BlockBoundarySite;
   boundary: "stateSync" | "exitState";
-  entryIndex: BoundaryCellValueSite["entryIndex"];
   at: BoundaryCellValueSite["at"];
   sites: BoundaryCellValueSite[];
 };
 
 export function planBoundaries(sites: readonly ValueSite[]): readonly PlannedBoundary[] {
-  const boundaries = new Map<Extract<BlockScheduleEntry, { role: "boundary" }>, BoundaryBuilder>();
+  const boundaries = new Map<BlockBoundarySite, BoundaryBuilder>();
 
   for (const site of sites) {
     if (site.kind !== "boundaryCell") {
       continue;
     }
 
-    const existing = boundaries.get(site.entry);
+    const existing = boundaries.get(site.site);
 
     if (existing === undefined) {
-      boundaries.set(site.entry, {
-        entry: site.entry,
+      boundaries.set(site.site, {
+        site: site.site,
         boundary: site.boundary,
-        entryIndex: site.entryIndex,
         at: site.at,
         sites: [site]
       });
@@ -37,9 +35,8 @@ export function planBoundaries(sites: readonly ValueSite[]): readonly PlannedBou
   }
 
   return Object.freeze([...boundaries.values()].map((boundary) => Object.freeze({
-    entry: boundary.entry,
+    site: boundary.site,
     boundary: boundary.boundary,
-    entryIndex: boundary.entryIndex,
     at: boundary.at,
     sites: Object.freeze(boundary.sites)
   } satisfies PlannedBoundary)));

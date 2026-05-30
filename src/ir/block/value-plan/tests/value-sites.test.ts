@@ -10,13 +10,15 @@ import {
   type BlockDefinitionId
 } from "#ir/block/definitions.js";
 import {
-  rootsForSchedule
+  rootsForBlockSites
 } from "#ir/block/roots.js";
 import type {
-  BlockSchedule,
-  BlockScheduleEntry,
+  BlockActionSite,
+  BlockBoundarySite,
+  BlockDefinitionSite,
+  BlockTimeline,
   Placement
-} from "#ir/block/schedule.js";
+} from "#ir/block/timeline.js";
 import { FlagState } from "#ir/block/state/flag-state.js";
 import { RegisterState } from "#ir/block/state/register-state.js";
 import { BlockState } from "#ir/block/walk/state.js";
@@ -40,7 +42,7 @@ import type {
 } from "#ir/model/types.js";
 import { registerAlias } from "#x86/registers.js";
 import {
-  producedValuesForSchedule,
+  producedValuesForDefinitions,
   type ProducedValue
 } from "#ir/block/value-plan/produced-values.js";
 import {
@@ -55,14 +57,13 @@ test("every non-passthrough root becomes one value site", () => {
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" }
     ]
   });
-  const roots = rootsForSchedule(result.schedule);
-  const sites = valueSitesForRoots(valueSiteInput(result.schedule, roots));
+  const roots = rootsForBlockSites({ timeline: result.timeline });
+  const sites = valueSitesForRoots(valueSiteInput(result.timeline, roots));
 
   strictEqual(sites.length, roots.filter((root) => root.purpose.kind !== "boundaryCell").length);
   deepStrictEqual(sites.map(siteSummary), [
     {
       kind: "actionInput",
-      entryIndex: 0,
       at: { opIndex: 0, epoch: 0 },
       action: "memoryGuard",
       input: "address"
@@ -76,15 +77,15 @@ test("duplicate roots remain duplicate value sites", () => {
       { op: "set", target: { kind: "mem", address: c(0x1000) }, value: c(0x55), accessWidth: 32 }
     ]
   });
-  const root = rootsForSchedule(result.schedule).find((entry) =>
-    entry.purpose.kind === "actionInput" && entry.purpose.input === "value"
+  const root = rootsForBlockSites({ timeline: result.timeline }).find((candidate) =>
+    candidate.purpose.kind === "actionInput" && candidate.purpose.input === "value"
   );
 
   if (root === undefined) {
     throw new Error("missing memory-store value root");
   }
 
-  const sites = valueSitesForRoots(valueSiteInput(result.schedule, [root, root]));
+  const sites = valueSitesForRoots(valueSiteInput(result.timeline, [root, root]));
 
   strictEqual(sites.length, 2);
   strictEqual(sites[0]?.root, root);
@@ -128,21 +129,21 @@ test("root purpose maps to the correct site variant", () => {
     ],
     continuation: exprConst(0x90)
   });
-  const changedBoundary = stateSyncEntry(
+  const changedBoundary = stateSyncSite(
     { opIndex: 10, epoch: 0 },
     BlockState.initial({
       registers: RegisterState.initial().write("eax", exprConst(0x11))
     })
   );
-  const schedule = [
-    ...memory.schedule,
-    ...dynamic.schedule,
-    ...branch.schedule,
-    ...trap.schedule,
-    ...fallthrough.schedule,
+  const timeline = [
+    ...memory.timeline,
+    ...dynamic.timeline,
+    ...branch.timeline,
+    ...trap.timeline,
+    ...fallthrough.timeline,
     changedBoundary
   ];
-  const sites = valueSitesForRoots(valueSiteInput(schedule));
+  const sites = valueSitesForRoots(valueSiteInput(timeline));
 
   requireActionSite(sites, "memoryGuard", "address");
   requireDefinitionSite(sites, "memoryLoad", "address");
@@ -160,11 +161,11 @@ test("root purpose maps to the correct site variant", () => {
 });
 
 test("passthrough state-sync register and flag cells are skipped", () => {
-  const schedule = [
-    stateSyncEntry({ opIndex: 0, epoch: 0 }, BlockState.initial())
+  const timeline = [
+    stateSyncSite({ opIndex: 0, epoch: 0 }, BlockState.initial())
   ];
 
-  deepStrictEqual(valueSitesForRoots(valueSiteInput(schedule)), []);
+  deepStrictEqual(valueSitesForRoots(valueSiteInput(timeline)), []);
 });
 
 test("passthrough exit-state register and flag cells are skipped", () => {
@@ -173,11 +174,11 @@ test("passthrough exit-state register and flag cells are skipped", () => {
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" }
     ]
   });
-  const boundaryRoots = rootsForSchedule(result.schedule).filter((root) =>
+  const boundaryRoots = rootsForBlockSites({ timeline: result.timeline }).filter((root) =>
     root.purpose.kind === "boundaryCell"
   );
 
-  deepStrictEqual(valueSitesForRoots(valueSiteInput(result.schedule, boundaryRoots)), []);
+  deepStrictEqual(valueSitesForRoots(valueSiteInput(result.timeline, boundaryRoots)), []);
 });
 
 test("changed boundary cells become BoundaryCellValueSites", () => {
@@ -190,20 +191,18 @@ test("changed boundary cells become BoundaryCellValueSites", () => {
       cells: { CF: { kind: "expr", value: exprConst(1) } }
     })
   });
-  const schedule = [stateSyncEntry({ opIndex: 4, epoch: 0 }, state)];
-  const sites = valueSitesForRoots(valueSiteInput(schedule));
+  const timeline = [stateSyncSite({ opIndex: 4, epoch: 0 }, state)];
+  const sites = valueSitesForRoots(valueSiteInput(timeline));
 
   deepStrictEqual(sites.map(siteSummary), [
     {
       kind: "boundaryCell",
-      entryIndex: 0,
       at: { opIndex: 4, epoch: 0 },
       boundary: "stateSync",
       cell: { kind: "reg", reg: "eax" }
     },
     {
       kind: "boundaryCell",
-      entryIndex: 0,
       at: { opIndex: 4, epoch: 0 },
       boundary: "stateSync",
       cell: { kind: "flag", flag: "CF" }
@@ -211,30 +210,28 @@ test("changed boundary cells become BoundaryCellValueSites", () => {
   ]);
 });
 
-test("definition entries become ProducedValues without dependency fields", () => {
-  const schedule = [
-    memoryLoadEntry({ opIndex: 0, epoch: 0 }, 0 as BlockDefinitionId),
-    dynamicRegisterLoadEntry({ opIndex: 1, epoch: 0 }, 1 as BlockDefinitionId)
+test("definition sites become ProducedValues without dependency fields", () => {
+  const timeline = [
+    memoryLoadSite({ opIndex: 0, epoch: 0 }, 0 as BlockDefinitionId),
+    dynamicRegisterLoadSite({ opIndex: 1, epoch: 0 }, 1 as BlockDefinitionId)
   ];
-  const produced = producedValuesForSchedule({ schedule });
+  const produced = producedValuesForDefinitions({ definitions: timeline });
 
   deepStrictEqual(produced.map(producedSummary), [
     {
-      id: schedule[0]!.definition.id,
-      entryIndex: 0,
+      id: timeline[0]!.definition.id,
       at: { opIndex: 0, epoch: 0 },
       definition: "memoryLoad"
     },
     {
-      id: schedule[1]!.definition.id,
-      entryIndex: 1,
+      id: timeline[1]!.definition.id,
       at: { opIndex: 1, epoch: 0 },
       definition: "dynamicRegisterLoad"
     }
   ]);
 
   for (const value of produced) {
-    deepStrictEqual(Object.keys(value), ["id", "entryIndex", "at", "entry"]);
+    deepStrictEqual(Object.keys(value), ["id", "at", "site"]);
     strictEqual(Object.hasOwn(value, "key"), false);
     strictEqual(Object.hasOwn(value, "expr"), false);
     strictEqual(Object.hasOwn(value, "sourceCells"), false);
@@ -250,11 +247,11 @@ test("value sites carry ExprDeps", () => {
     exprInput({ kind: "def", id }),
     exprInput({ kind: "reg", reg: "eax" })
   );
-  const schedule = [
-    memoryLoadEntry({ opIndex: 0, epoch: 0 }, id),
-    memoryStoreEntry({ opIndex: 1, epoch: 0 }, storeValue)
+  const timeline = [
+    memoryLoadSite({ opIndex: 0, epoch: 0 }, id),
+    memoryStoreSite({ opIndex: 1, epoch: 0 }, storeValue)
   ];
-  const input = valueSiteInput(schedule);
+  const input = valueSiteInput(timeline);
   const site = requireActionSite(
     valueSitesForRoots(input),
     "memoryStore",
@@ -269,35 +266,36 @@ test("value sites carry ExprDeps", () => {
 });
 
 function valueSiteInput(
-  schedule: BlockSchedule,
-  roots = rootsForSchedule(schedule)
+  timeline: BlockTimeline,
+  roots = rootsForBlockSites({ timeline })
 ): ValueSiteInput {
   return {
-    schedule,
     graph: buildExprGraph(roots.map((root) => root.expr)),
     roots
   };
 }
 
-function stateSyncEntry(
+function stateSyncSite(
   at: Placement,
   state: BlockState
-): Extract<BlockScheduleEntry, { role: "boundary"; kind: "stateSync" }> {
+): BlockBoundarySite {
   return Object.freeze({
-    role: "boundary",
-    kind: "stateSync",
+    kind: "boundary",
     at,
-    state
+    boundary: Object.freeze({
+      kind: "stateSync",
+      state
+    })
   });
 }
 
-function memoryLoadEntry(
+function memoryLoadSite(
   at: Placement,
   id: BlockDefinitionId
-): Extract<BlockScheduleEntry, { role: "definition" }> &
+): BlockDefinitionSite &
   Readonly<{ definition: Extract<BlockDefinition, { kind: "memoryLoad" }> }> {
   return Object.freeze({
-    role: "definition",
+    kind: "definition",
     at,
     definition: Object.freeze({
       kind: "memoryLoad",
@@ -310,13 +308,13 @@ function memoryLoadEntry(
   });
 }
 
-function dynamicRegisterLoadEntry(
+function dynamicRegisterLoadSite(
   at: Placement,
   id: BlockDefinitionId
-): Extract<BlockScheduleEntry, { role: "definition" }> &
+): BlockDefinitionSite &
   Readonly<{ definition: Extract<BlockDefinition, { kind: "dynamicRegisterLoad" }> }> {
   return Object.freeze({
-    role: "definition",
+    kind: "definition",
     at,
     definition: Object.freeze({
       kind: "dynamicRegisterLoad",
@@ -329,13 +327,13 @@ function dynamicRegisterLoadEntry(
   });
 }
 
-function memoryStoreEntry(
+function memoryStoreSite(
   at: Placement,
   value: ExprRef
-): Extract<BlockScheduleEntry, { role: "action" }> &
+): BlockActionSite &
   Readonly<{ action: Extract<BlockAction, { kind: "memoryStore" }> }> {
   return Object.freeze({
-    role: "action",
+    kind: "action",
     at,
     action: Object.freeze({
       kind: "memoryStore",
@@ -353,11 +351,11 @@ function requireActionSite(
   input: Extract<ValueSite, { kind: "actionInput" }>["input"],
   direction?: "taken" | "notTaken"
 ): Extract<ValueSite, { kind: "actionInput" }> {
-  const site = sites.find((entry) =>
-    entry.kind === "actionInput" &&
-      entry.entry.action.kind === action &&
-      entry.input === input &&
-      entry.direction === direction
+  const site = sites.find((candidate) =>
+    candidate.kind === "actionInput" &&
+      candidate.site.action.kind === action &&
+      candidate.input === input &&
+      candidate.direction === direction
   );
 
   if (site === undefined || site.kind !== "actionInput") {
@@ -372,10 +370,10 @@ function requireDefinitionSite(
   definition: BlockDefinition["kind"],
   input: Extract<ValueSite, { kind: "definitionInput" }>["input"]
 ): Extract<ValueSite, { kind: "definitionInput" }> {
-  const site = sites.find((entry) =>
-    entry.kind === "definitionInput" &&
-      entry.entry.definition.kind === definition &&
-      entry.input === input
+  const site = sites.find((candidate) =>
+    candidate.kind === "definitionInput" &&
+      candidate.site.definition.kind === definition &&
+      candidate.input === input
   );
 
   if (site === undefined || site.kind !== "definitionInput") {
@@ -391,11 +389,11 @@ function requireBoundarySite(
   kind: "reg" | "flag",
   name: string
 ): Extract<ValueSite, { kind: "boundaryCell" }> {
-  const site = sites.find((entry) =>
-    entry.kind === "boundaryCell" &&
-      entry.boundary === boundary &&
-      entry.cell.kind === kind &&
-      (entry.cell.kind === "reg" ? entry.cell.reg : entry.cell.flag) === name
+  const site = sites.find((candidate) =>
+    candidate.kind === "boundaryCell" &&
+      candidate.boundary === boundary &&
+      candidate.cell.kind === kind &&
+      (candidate.cell.kind === "reg" ? candidate.cell.reg : candidate.cell.flag) === name
   );
 
   if (site === undefined || site.kind !== "boundaryCell") {
@@ -408,7 +406,6 @@ function requireBoundarySite(
 function siteSummary(site: ValueSite): object {
   const base = {
     kind: site.kind,
-    entryIndex: site.entryIndex,
     at: site.at
   };
 
@@ -416,14 +413,14 @@ function siteSummary(site: ValueSite): object {
     case "actionInput":
       return {
         ...base,
-        action: site.entry.action.kind,
+        action: site.site.action.kind,
         input: site.input,
         ...(site.direction === undefined ? {} : { direction: site.direction })
       };
     case "definitionInput":
       return {
         ...base,
-        definition: site.entry.definition.kind,
+        definition: site.site.definition.kind,
         input: site.input
       };
     case "boundaryCell":
@@ -438,9 +435,8 @@ function siteSummary(site: ValueSite): object {
 function producedSummary(value: ProducedValue): object {
   return {
     id: value.id,
-    entryIndex: value.entryIndex,
     at: value.at,
-    definition: value.entry.definition.kind
+    definition: value.site.definition.kind
   };
 }
 

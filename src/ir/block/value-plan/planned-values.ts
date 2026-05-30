@@ -3,6 +3,10 @@ import type { ExprDeps } from "#ir/block/expr-deps.js";
 import {
   mergeSourceCells
 } from "#ir/block/source-cells.js";
+import {
+  placementAfter,
+  placementBefore
+} from "#ir/block/timeline.js";
 import type { ExprNodeId } from "#ir/expr/graph/index.js";
 import type { ValueSite } from "./value-sites.js";
 import type {
@@ -71,28 +75,28 @@ function dedupeDefinitionIds(sites: readonly ValueSite[]): readonly BlockDefinit
 }
 
 function lifetimeForSites(sites: readonly ValueSite[]): PlannedLifetime {
-  const firstSite = sites[0];
+  const first = sites[0];
 
-  if (firstSite === undefined) {
+  if (first === undefined) {
     throw new Error("planned value lifetime requires at least one site");
   }
 
-  let firstEntry = firstSite.entryIndex;
-  let lastEntry = firstSite.entryIndex;
+  let start = first.at;
+  let end = first.at;
 
   for (const site of sites) {
-    if (site.entryIndex < firstEntry) {
-      firstEntry = site.entryIndex;
+    if (placementBefore(site.at, start)) {
+      start = site.at;
     }
 
-    if (site.entryIndex > lastEntry) {
-      lastEntry = site.entryIndex;
+    if (placementAfter(site.at, end)) {
+      end = site.at;
     }
   }
 
   return Object.freeze({
-    firstEntry,
-    lastEntry
+    start,
+    end
   });
 }
 
