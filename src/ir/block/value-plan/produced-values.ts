@@ -48,16 +48,23 @@ export function planProducedValues(
   sites: readonly ValueSite[]
 ): readonly PlannedProducedValue[] {
   const consumersByDefinition = indexSitesByDefinition(sites);
+  const planned: PlannedProducedValue[] = [];
 
-  return Object.freeze(producedValues.map((produced) => {
-    const consumers = consumersByDefinition.get(produced.id) ?? Object.freeze([]);
+  for (const produced of producedValues) {
+    const consumers = consumersByDefinition.get(produced.id);
 
-    return Object.freeze({
+    if (consumers === undefined || consumers.length === 0) {
+      continue;
+    }
+
+    planned.push(Object.freeze({
       produced,
-      consumers: Object.freeze(consumers),
+      consumers,
       lifetime: producedLifetime(produced, consumers)
-    } satisfies PlannedProducedValue);
-  }));
+    } satisfies PlannedProducedValue));
+  }
+
+  return Object.freeze(planned);
 }
 
 function indexSitesByDefinition(

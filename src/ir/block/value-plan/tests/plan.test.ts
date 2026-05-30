@@ -219,14 +219,17 @@ test("mixed al and eax sites merge source cells to eax", () => {
 
 test("produced value consumers are found through definitionIds", () => {
   const id = 4 as BlockDefinitionId;
+  const unusedId = 5 as BlockDefinitionId;
   const produced = producedValue(id, 1);
+  const unusedProduced = producedValue(unusedId, 2);
   const consumer = valueSite({ key: 1, entryIndex: 5, definitionIds: [id] });
   const plan = planBlockValues({
     sites: [consumer],
-    producedValues: [produced],
+    producedValues: [produced, unusedProduced],
     sourceEffects: []
   });
 
+  strictEqual(plan.produced.length, 1);
   deepStrictEqual(plan.produced.map((entry) => ({
     produced: entry.produced,
     consumers: entry.consumers,
