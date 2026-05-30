@@ -1,4 +1,7 @@
 import {
+  readFileSync
+} from "node:fs";
+import {
   deepStrictEqual,
   strictEqual
 } from "node:assert";
@@ -20,16 +23,12 @@ import type {
   Placement
 } from "#ir/block/timeline.js";
 import {
-  sourceCellForFlag,
-  sourceCellForRegisterAlias,
-  type SourceCell
+  sourceCellForRegisterAlias
 } from "#ir/block/source-cells.js";
 import { RegisterState } from "#ir/block/state/register-state.js";
 import { BlockState } from "#ir/block/walk/state.js";
 import { opSite } from "#ir/block/walk/site.js";
 import {
-  exprBinary,
-  exprBits,
   exprConst,
   exprInput
 } from "#ir/expr/builders.js";
@@ -39,8 +38,10 @@ import { registerAlias } from "#x86/registers.js";
 import {
   planBlockValues
 } from "#ir/block/value-plan/plan.js";
-import type { ProducedValue } from "#ir/block/value-plan/produced-values.js";
-import type { SourceEffect } from "#ir/block/value-plan/source-effects.js";
+import {
+  producedValuesForDefinitions,
+  type ProducedValue
+} from "#ir/block/value-plan/produced-values.js";
 import {
   valueRootsForRoots,
   type ValueRoot
@@ -75,168 +76,6 @@ test("duplicate roots at the same placement are preserved", () => {
   });
 });
 
-test("source effects do not split planned values by themselves", () => {
-  const source = sourceCellForRegisterAlias(registerAlias("eax"));
-  const expr = exprInput({ kind: "reg", reg: "eax" });
-  const roots = valueRootsForRoots({
-    roots: [
-      blockRoot({ expr, opIndex: 0 }),
-      blockRoot({ expr, opIndex: 3 })
-    ]
-  });
-  const plan = planForRoots(roots, {
-    sourceEffects: [sourceWrite(1, source)]
-  });
-
-  strictEqual(plan.values.length, 1);
-  strictEqual(plan.captures.length, 0);
-});
-
-test("source write before first root creates a capture", () => {
-  const source = sourceCellForRegisterAlias(registerAlias("eax"));
-  const effect = sourceWrite(1, source);
-  const roots = valueRootsForRoots({
-    roots: [blockRoot({ expr: exprInput({ kind: "reg", reg: "eax" }), opIndex: 2 })]
-  });
-  const plan = planForRoots(roots, {
-    sourceEffects: [effect]
-  });
-  const value = plan.values[0];
-  const capture = plan.captures[0];
-
-  strictEqual(plan.captures.length, 1);
-  strictEqual(capture?.value, value?.id);
-  deepStrictEqual(capture?.source, source);
-  strictEqual(capture?.before, effect);
-  deepStrictEqual(capture?.at, { opIndex: 1, epoch: 0 });
-});
-
-test("source captures use the first required placement before first root", () => {
-  const source = sourceCellForRegisterAlias(registerAlias("eax"));
-  const firstWrite = sourceWrite(1, source);
-  const laterWrite = sourceWrite(2, source);
-  const afterFirstRoot = sourceWrite(4, source);
-  const roots = valueRootsForRoots({
-    roots: [blockRoot({ expr: exprInput({ kind: "reg", reg: "eax" }), opIndex: 3 })]
-  });
-  const plan = planForRoots(roots, {
-    sourceEffects: [
-      firstWrite,
-      laterWrite,
-      afterFirstRoot
-    ]
-  });
-
-  strictEqual(plan.captures.length, 1);
-  strictEqual(plan.captures[0]?.before, firstWrite);
-  deepStrictEqual(plan.captures[0]?.at, { opIndex: 1, epoch: 0 });
-});
-
-test("source write at first root placement does not create a capture", () => {
-  const source = sourceCellForRegisterAlias(registerAlias("eax"));
-  const roots = valueRootsForRoots({
-    roots: [blockRoot({ expr: exprInput({ kind: "reg", reg: "eax" }), opIndex: 2 })]
-  });
-  const plan = planForRoots(roots, {
-    sourceEffects: [sourceWrite(2, source)]
-  });
-
-  strictEqual(plan.captures.length, 0);
-});
-
-test("source write after first root does not create a capture", () => {
-  const source = sourceCellForRegisterAlias(registerAlias("eax"));
-  const roots = valueRootsForRoots({
-    roots: [blockRoot({ expr: exprInput({ kind: "reg", reg: "eax" }), opIndex: 2 })]
-  });
-  const plan = planForRoots(roots, {
-    sourceEffects: [sourceWrite(3, source)]
-  });
-
-  strictEqual(plan.captures.length, 0);
-});
-
-test("register barrier before first root captures register-backed values", () => {
-  const regSource = sourceCellForRegisterAlias(registerAlias("eax"));
-  const flagSource = sourceCellForFlag("ZF");
-  const roots = valueRootsForRoots({
-    roots: [
-      blockRoot({ expr: exprInput({ kind: "reg", reg: "eax" }), opIndex: 2 }),
-      blockRoot({ expr: exprInput({ kind: "flag", flag: "ZF" }), opIndex: 2 })
-    ]
-  });
-  const plan = planForRoots(roots, {
-    sourceEffects: [registerBarrier(1)]
-  });
-
-  deepStrictEqual(plan.captures.map((capture) => capture.source), [regSource]);
-  strictEqual(flagSource.kind, "flag");
-});
-
-test("flag writes capture the same flag source once before first root", () => {
-  const source = sourceCellForFlag("ZF");
-  const firstWrite = sourceWrite(1, source);
-  const roots = valueRootsForRoots({
-    roots: [blockRoot({ expr: exprInput({ kind: "flag", flag: "ZF" }), opIndex: 3 })]
-  });
-  const plan = planForRoots(roots, {
-    sourceEffects: [
-      firstWrite,
-      sourceWrite(2, source),
-      sourceWrite(2, sourceCellForFlag("CF"))
-    ]
-  });
-
-  strictEqual(plan.captures.length, 1);
-  deepStrictEqual(plan.captures[0]?.source, source);
-  strictEqual(plan.captures[0]?.before, firstWrite);
-});
-
-test("first source capture for a value removes all remaining source waits", () => {
-  const eax = sourceCellForRegisterAlias(registerAlias("eax"));
-  const ebx = sourceCellForRegisterAlias(registerAlias("ebx"));
-  const firstWrite = sourceWrite(1, eax);
-  const roots = valueRootsForRoots({
-    roots: [
-      blockRoot({
-        expr: exprBinary(
-          "add",
-          exprInput({ kind: "reg", reg: "eax" }),
-          exprInput({ kind: "reg", reg: "ebx" })
-        ),
-        opIndex: 4
-      })
-    ]
-  });
-  const plan = planForRoots(roots, {
-    sourceEffects: [
-      firstWrite,
-      sourceWrite(2, ebx)
-    ]
-  });
-
-  strictEqual(plan.captures.length, 1);
-  strictEqual(plan.captures[0]?.before, firstWrite);
-});
-
-test("non-overlapping alias write does not capture", () => {
-  const source = sourceCellForRegisterAlias(registerAlias("ah"));
-  const roots = valueRootsForRoots({
-    roots: [
-      blockRoot({
-        expr: exprBits(exprInput({ kind: "reg", reg: "eax" }), 8, 8),
-        opIndex: 2
-      })
-    ]
-  });
-  const plan = planForRoots(roots, {
-    sourceEffects: [sourceWrite(1, sourceCellForRegisterAlias(registerAlias("al")))]
-  });
-
-  deepStrictEqual(plan.values[0]?.deps.sourceCells, [source]);
-  strictEqual(plan.captures.length, 0);
-});
-
 test("mixed al and eax roots merge source cells to eax", () => {
   const expr = exprInput({ kind: "reg", reg: "eax" });
   const roots = valueRootsForRoots({
@@ -267,11 +106,13 @@ test("produced value consumers are found through definitionIds", () => {
   strictEqual(plan.produced.length, 1);
   deepStrictEqual(plan.produced.map((planned) => ({
     produced: planned.produced,
+    inputs: planned.inputs,
     consumers: planned.consumers,
     lifetime: planned.lifetime
   })), [
     {
       produced,
+      inputs: [],
       consumers: [consumer],
       lifetime: {
         start: { opIndex: 1, epoch: 0 },
@@ -281,19 +122,43 @@ test("produced value consumers are found through definitionIds", () => {
   ]);
 });
 
-test("produced values do not receive source captures", () => {
+test("produced value input roots are retained for consumed produced values", () => {
   const id = 8 as BlockDefinitionId;
-  const produced = producedValue(id, 0);
-  const roots = valueRootsForRoots({
-    roots: [blockRoot({ expr: exprInput({ kind: "def", id }), opIndex: 3 })]
-  });
-  const plan = planForRoots(roots, {
-    producedValues: [produced],
-    sourceEffects: [sourceWrite(1, sourceCellForRegisterAlias(registerAlias("eax")))]
+  const site = memoryLoadSite({ opIndex: 1, epoch: 0 }, id);
+  const produced = producedValuesForDefinitions({ definitions: [site] })[0]!;
+  const input = valueRootsForRoots({ roots: rootsForBlockSites({ timeline: [site] }) })[0]!;
+  const consumer = valueRootsForRoots({
+    roots: [blockRoot({ expr: exprInput({ kind: "def", id }), opIndex: 4 })]
+  })[0]!;
+  const plan = planForRoots([input, consumer], {
+    producedValues: [produced]
   });
 
-  strictEqual(plan.captures.length, 0);
-  strictEqual(Object.hasOwn(plan.produced[0]!, "captures"), false);
+  strictEqual(plan.produced.length, 1);
+  deepStrictEqual(plan.produced[0]?.inputs, [input]);
+  deepStrictEqual(plan.produced[0]?.consumers, [consumer]);
+});
+
+test("produced values without consumers are omitted", () => {
+  const id = 9 as BlockDefinitionId;
+  const site = memoryLoadSite({ opIndex: 1, epoch: 0 }, id);
+  const produced = producedValuesForDefinitions({ definitions: [site] })[0]!;
+  const input = valueRootsForRoots({ roots: rootsForBlockSites({ timeline: [site] }) })[0]!;
+  const plan = planForRoots([input], {
+    producedValues: [produced]
+  });
+
+  deepStrictEqual(plan.produced, []);
+});
+
+test("BlockValuePlan has no captures field", () => {
+  const roots = valueRootsForRoots({
+    roots: [blockRoot({ expr: exprConst(3), opIndex: 2 })]
+  });
+  const plan = planForRoots(roots);
+
+  deepStrictEqual(Object.keys(plan), ["values", "produced", "boundaries"]);
+  strictEqual(Object.hasOwn(plan, "captures"), false);
 });
 
 test("boundary views contain only non-passthrough boundary roots", () => {
@@ -319,18 +184,29 @@ test("boundary views contain only non-passthrough boundary roots", () => {
   ]);
 });
 
+test("planBlockValues does not extract source effects", () => {
+  const source = readFileSync(new URL("../plan.js", import.meta.url), "utf8");
+  const forbidden = [
+    ["plan", "Source", "Captures"].join(""),
+    ["source", "Effects", "For", "Block", "Sites"].join(""),
+    ["source", "Effects"].join("")
+  ];
+
+  for (const needle of forbidden) {
+    strictEqual(source.includes(needle), false);
+  }
+});
+
 function planForRoots(
   valueRoots: readonly ValueRoot[],
   input: Partial<{
     producedValues: readonly ProducedValue[];
-    sourceEffects: readonly SourceEffect[];
   }> = {}
 ) {
   return planBlockValues({
     graph: buildExprGraph(valueRoots.map((root) => root.root.expr)),
     valueRoots,
-    producedValues: input.producedValues ?? [],
-    sourceEffects: input.sourceEffects ?? []
+    producedValues: input.producedValues ?? []
   });
 }
 
@@ -358,28 +234,6 @@ function producedValue(id: BlockDefinitionId, index: number): ProducedValue {
     id,
     at,
     site
-  });
-}
-
-function sourceWrite(index: number, source: SourceCell): SourceEffect {
-  const at = { opIndex: index, epoch: 0 };
-
-  return Object.freeze({
-    kind: "write",
-    at,
-    source,
-    site: stateSyncSite(at, BlockState.initial())
-  });
-}
-
-function registerBarrier(index: number): SourceEffect {
-  const at = { opIndex: index, epoch: 0 };
-
-  return Object.freeze({
-    kind: "barrier",
-    at,
-    scope: "registers",
-    site: dynamicRegisterStoreSite(at)
   });
 }
 
@@ -432,22 +286,5 @@ function memoryStoreSite(
       value,
       width
     } satisfies Extract<BlockAction, { kind: "memoryStore" }>)
-  });
-}
-
-function dynamicRegisterStoreSite(
-  at: Placement
-): BlockActionSite &
-  Readonly<{ action: Extract<BlockAction, { kind: "dynamicRegisterStore" }> }> {
-  return Object.freeze({
-    kind: "action",
-    at,
-    action: Object.freeze({
-      kind: "dynamicRegisterStore",
-      at: opSite(at.opIndex),
-      index: exprConst(0),
-      value: exprConst(0x55),
-      width: 32
-    } satisfies Extract<BlockAction, { kind: "dynamicRegisterStore" }>)
   });
 }

@@ -3,7 +3,6 @@ import type {
   BlockBoundarySite,
   Placement
 } from "#ir/block/timeline.js";
-import type { SourceCell } from "#ir/block/source-cells.js";
 import type {
   ExprGraph,
   ExprNodeId
@@ -11,19 +10,16 @@ import type {
 import type { ExprRef } from "#ir/expr/types.js";
 import type { ValueRoot } from "./value-roots.js";
 import type { ProducedValue } from "./produced-values.js";
-import type { SourceEffect } from "./source-effects.js";
 
 export type BlockValuePlanInput = Readonly<{
   graph: ExprGraph;
   valueRoots: readonly ValueRoot[];
   producedValues: readonly ProducedValue[];
-  sourceEffects: readonly SourceEffect[];
 }>;
 
 export type BlockValuePlan = Readonly<{
   values: readonly PlannedValue[];
   produced: readonly PlannedProducedValue[];
-  captures: readonly PlannedCapture[];
   boundaries: readonly PlannedBoundary[];
 }>;
 
@@ -47,15 +43,9 @@ export type PlannedValue = Readonly<{
 
 export type PlannedProducedValue = Readonly<{
   produced: ProducedValue;
+  inputs: readonly ValueRoot[];
   consumers: readonly ValueRoot[];
   lifetime: PlannedLifetime;
-}>;
-
-export type PlannedCapture = Readonly<{
-  value: PlannedValueId;
-  source: SourceCell;
-  before: SourceEffect;
-  at: Placement;
 }>;
 
 export type PlannedBoundary = Readonly<{

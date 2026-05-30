@@ -31,7 +31,7 @@ export function planValues(analyses: readonly RootValueAnalysis[]): readonly Pla
     values.push(Object.freeze({
       id: plannedValueId(values.length),
       key,
-      expr: firstAnalysis.expr,
+      expr: firstAnalysis.valueRoot.root.expr,
       roots: Object.freeze(rootAnalyses.map((analysis) => analysis.valueRoot)),
       deps: depsForAnalyses(rootAnalyses),
       lifetime: lifetimeForAnalyses(rootAnalyses)

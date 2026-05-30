@@ -10,7 +10,6 @@ export type {
   BlockValuePlan,
   BlockValuePlanInput,
   PlannedBoundary,
-  PlannedCapture,
   PlannedLifetime,
   PlannedValue,
   PlannedValueId

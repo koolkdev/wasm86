@@ -41,11 +41,11 @@ export function planProducedValues(
   producedValues: readonly ProducedValue[],
   analyses: readonly RootValueAnalysis[]
 ): readonly PlannedProducedValue[] {
-  const consumersByDefinition = indexRootsByDefinition(analyses);
+  const indexes = indexProducedRoots(analyses);
   const planned: PlannedProducedValue[] = [];
 
   for (const produced of producedValues) {
-    const consumers = consumersByDefinition.get(produced.id);
+    const consumers = indexes.consumersByDefinition.get(produced.id);
 
     if (consumers === undefined || consumers.length === 0) {
       continue;
@@ -53,6 +53,7 @@ export function planProducedValues(
 
     planned.push(Object.freeze({
       produced,
+      inputs: indexes.inputsByDefinitionSite.get(produced.site) ?? Object.freeze([]),
       consumers,
       lifetime: producedLifetime(produced, consumers)
     } satisfies PlannedProducedValue));
@@ -61,28 +62,66 @@ export function planProducedValues(
   return Object.freeze(planned);
 }
 
-function indexRootsByDefinition(
+type ProducedRootIndexes = Readonly<{
+  inputsByDefinitionSite: ReadonlyMap<BlockDefinitionSite, readonly ValueRoot[]>;
+  consumersByDefinition: ReadonlyMap<BlockDefinitionId, readonly ValueRoot[]>;
+}>;
+
+function indexProducedRoots(
   analyses: readonly RootValueAnalysis[]
-): ReadonlyMap<BlockDefinitionId, readonly ValueRoot[]> {
-  const mutableIndex = new Map<BlockDefinitionId, ValueRoot[]>();
+): ProducedRootIndexes {
+  const inputsByDefinitionSite = new Map<BlockDefinitionSite, ValueRoot[]>();
+  const consumersByDefinition = new Map<BlockDefinitionId, ValueRoot[]>();
 
   for (const analysis of analyses) {
-    for (const definitionId of new Set(analysis.deps.definitionIds)) {
-      let indexedRoots = mutableIndex.get(definitionId);
+    indexDefinitionInputRoot(inputsByDefinitionSite, analysis.valueRoot);
+
+    for (const definitionId of analysis.deps.definitionIds) {
+      let indexedRoots = consumersByDefinition.get(definitionId);
 
       if (indexedRoots === undefined) {
         indexedRoots = [];
-        mutableIndex.set(definitionId, indexedRoots);
+        consumersByDefinition.set(definitionId, indexedRoots);
       }
 
       indexedRoots.push(analysis.valueRoot);
     }
   }
 
-  const index = new Map<BlockDefinitionId, readonly ValueRoot[]>();
+  return Object.freeze({
+    inputsByDefinitionSite: freezeRootIndex(inputsByDefinitionSite),
+    consumersByDefinition: freezeRootIndex(consumersByDefinition)
+  });
+}
 
-  for (const [definitionId, indexedRoots] of mutableIndex.entries()) {
-    index.set(definitionId, Object.freeze(indexedRoots));
+function indexDefinitionInputRoot(
+  inputsByDefinitionSite: Map<BlockDefinitionSite, ValueRoot[]>,
+  root: ValueRoot
+): void {
+  if (root.root.purpose.kind !== "definitionInput") {
+    return;
+  }
+
+  if (root.root.site.kind !== "definition") {
+    throw new Error("definition-input value root must reference a definition site");
+  }
+
+  const roots = inputsByDefinitionSite.get(root.root.site);
+
+  if (roots === undefined) {
+    inputsByDefinitionSite.set(root.root.site, [root]);
+  } else {
+    roots.push(root);
+  }
+}
+
+function freezeRootIndex<Key>(
+  mutableIndex: ReadonlyMap<Key, readonly ValueRoot[]>
+): ReadonlyMap<Key, readonly ValueRoot[]> {
+  const index = new Map<Key, readonly ValueRoot[]>();
+
+  for (const [key, roots] of mutableIndex.entries()) {
+    index.set(key, Object.freeze([...roots]));
   }
 
   return index;
