@@ -156,6 +156,24 @@ test("dynamic register validation requires loads to use the pre-write register s
   );
 });
 
+test("dynamic register validation rejects loads after dynamic register stores", () => {
+  throws(
+    () => walkFragment({
+      block: [
+        { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
+        { op: "get", dst: v(0), source: { kind: "operand", index: 1 }, accessWidth: 32 }
+      ],
+      resolver: new BindingResolver({
+        operands: [
+          dynamicRegBinding(exprConst(1), 32),
+          dynamicRegBinding(exprConst(2), 32)
+        ]
+      })
+    }),
+    /dynamic register load after register write/
+  );
+});
+
 test("dynamic register validation rejects later static register reads", () => {
   throws(
     () => walkFragment({
@@ -168,6 +186,21 @@ test("dynamic register validation rejects later static register reads", () => {
       })
     }),
     /register read after dynamic register store/
+  );
+});
+
+test("dynamic register validation rejects partial static register writes after dynamic register stores", () => {
+  throws(
+    () => walkFragment({
+      block: [
+        { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
+        { op: "set", target: { kind: "reg", reg: "al" }, value: c(0x66), accessWidth: 8 }
+      ],
+      resolver: new BindingResolver({
+        operands: [dynamicRegBinding(exprConst(1), 32)]
+      })
+    }),
+    /partial register write after dynamic register store/
   );
 });
 

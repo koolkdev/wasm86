@@ -20,12 +20,12 @@ import { DynamicRegisterWalkOps } from "./dynamic-register-ops.js";
 import { FlagWalkOps } from "./flag-ops.js";
 import { MemoryWalkOps } from "./memory-ops.js";
 import { BlockWalkRecorder } from "./recorder.js";
+import { RegisterAccessValidator } from "./register-access-validator.js";
 import { RegisterWalkState } from "./registers.js";
 import { StorageWalkOps } from "./storage-ops.js";
 import {
   ValueWalkOps
 } from "./value-ops.js";
-import { validateBlockWalkResult } from "../validate.js";
 import type {
   BlockExternalValueResolver,
   BlockValueBindings
@@ -71,13 +71,16 @@ class ExpressionBlockWalker {
       opIndex: () => this.#opIndex
     });
     this.#recorder = new BlockWalkRecorder();
+    const registerValidator = new RegisterAccessValidator();
     this.#registers = new RegisterWalkState({
       registers: entry.registers,
-      site: () => this.#site()
+      site: () => this.#site(),
+      validator: registerValidator
     });
     this.#dynamic = new DynamicRegisterWalkOps({
       recorder: this.#recorder,
       registers: this.#registers,
+      validator: registerValidator,
       site: () => this.#site(),
       snapshot: () => this.#snapshot()
     });
@@ -117,10 +120,7 @@ class ExpressionBlockWalker {
     }
 
     const final = this.#snapshot();
-    const result = this.#recorder.result(final, this.#registers.accesses());
-
-    validateBlockWalkResult(result);
-    return result;
+    return this.#recorder.result(final);
   }
 
   #walkOp(op: IrOp): void {

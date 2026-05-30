@@ -31,6 +31,7 @@ import { DynamicRegisterWalkOps } from "../dynamic-register-ops.js";
 import { FlagWalkOps } from "../flag-ops.js";
 import { MemoryWalkOps } from "../memory-ops.js";
 import { BlockWalkRecorder } from "../recorder.js";
+import { RegisterAccessValidator } from "../register-access-validator.js";
 import { RegisterWalkState } from "../registers.js";
 import type { BlockAction } from "#ir/block/actions.js";
 import type { BlockDefinition } from "#ir/block/definitions.js";
@@ -54,10 +55,6 @@ test("StorageWalkOps dispatches dynamic register storage through dynamic ops", (
   strictEqual(definitions[0]?.kind, "dynamicRegisterLoad");
   strictEqual(actions.length, 1);
   strictEqual(actions[0]?.kind, "dynamicRegisterStore");
-  deepStrictEqual(
-    result.registerAccesses.map((access) => access.kind),
-    ["dynamicRegisterLoad", "dynamicRegisterStore"]
-  );
 });
 
 test("ControlWalkOps records branch continuation and shared snapshots", () => {
@@ -74,7 +71,7 @@ test("ControlWalkOps records branch continuation and shared snapshots", () => {
 
   control.branch(exprConst(1), exprConst(0x40), { kind: "nextEip" });
 
-  const result = recorder.result(snapshot, []);
+  const result = recorder.result(snapshot);
   const action = onlyAction(actionsOf(result.schedule));
 
   strictEqual(action.kind, "branch");
@@ -86,7 +83,7 @@ test("ControlWalkOps records branch continuation and shared snapshots", () => {
 
   site = opSite(4);
   control.fallthrough();
-  strictEqual(actionsOf(recorder.result(snapshot, []).schedule).length, 2);
+  strictEqual(actionsOf(recorder.result(snapshot).schedule).length, 2);
 });
 
 test("FlagWalkOps lowers flag writes and reports undefined conditions with op index", () => {
@@ -138,13 +135,16 @@ function storageHarness(resolver: BindingResolver): Readonly<{
   result: () => ReturnType<BlockWalkRecorder["result"]>;
 }> {
   const recorder = new BlockWalkRecorder();
+  const registerValidator = new RegisterAccessValidator();
   const registers = new RegisterWalkState({
     registers: RegisterState.initial(),
-    site: () => opSite(0)
+    site: () => opSite(0),
+    validator: registerValidator
   });
   const dynamic = new DynamicRegisterWalkOps({
     recorder,
     registers,
+    validator: registerValidator,
     site: () => opSite(0),
     snapshot: () => BlockState.initial({ registers: registers.state })
   });
@@ -163,10 +163,7 @@ function storageHarness(resolver: BindingResolver): Readonly<{
 
   return Object.freeze({
     storage,
-    result: () => recorder.result(
-      BlockState.initial({ registers: registers.state }),
-      registers.accesses()
-    )
+    result: () => recorder.result(BlockState.initial({ registers: registers.state }))
   });
 }
 

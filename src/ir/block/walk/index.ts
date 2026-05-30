@@ -19,7 +19,6 @@ export type {
   ActionScheduleEntry,
   BlockSchedule,
   BlockScheduleEntry,
-  BlockRegisterAccess,
   BoundaryScheduleEntry,
   DefinitionScheduleEntry,
   Placement,

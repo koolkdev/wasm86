@@ -17,7 +17,6 @@ import type {
   ActionScheduleEntry,
   BlockScheduleEntry,
   BoundaryScheduleEntry,
-  BlockRegisterAccess,
   BlockWalkResult,
   DefinitionScheduleEntry,
   Placement
@@ -32,11 +31,10 @@ export class BlockWalkRecorder {
   readonly #epochs = new Map<number, number>();
   readonly #exits: BlockExit[] = [];
 
-  result(final: BlockState, registerAccesses: readonly BlockRegisterAccess[]): BlockWalkResult {
+  result(final: BlockState): BlockWalkResult {
     return Object.freeze({
       final,
       schedule: Object.freeze([...this.#schedule]),
-      registerAccesses: Object.freeze([...registerAccesses]),
       exits: Object.freeze([...this.#exits])
     });
   }

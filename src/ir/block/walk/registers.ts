@@ -1,26 +1,26 @@
 import { RegisterState } from "#ir/block/state/register-state.js";
 import type { ExprRef } from "#ir/expr/types.js";
-import type { OperandWidth, RegisterAlias } from "#x86/types.js";
-import type { BlockRegisterAccess } from "./result.js";
+import type { RegisterAlias } from "#x86/types.js";
+import type {
+  RegisterAccessValidator,
+  StaticRegisterReadReason
+} from "./register-access-validator.js";
 import type { OpSite } from "./site.js";
 
-type RegisterReadReason = Extract<
-  BlockRegisterAccess,
-  Readonly<{ kind: "registerRead" }>
->["reason"];
-
 export class RegisterWalkState {
-  readonly #accesses: BlockRegisterAccess[] = [];
   readonly #site: () => OpSite;
+  readonly #validator: RegisterAccessValidator;
   #registers: RegisterState;
   #revision = 0;
 
   constructor(input: Readonly<{
     registers: RegisterState;
     site: () => OpSite;
+    validator: RegisterAccessValidator;
   }>) {
     this.#registers = input.registers;
     this.#site = input.site;
+    this.#validator = input.validator;
   }
 
   get state(): RegisterState {
@@ -31,17 +31,8 @@ export class RegisterWalkState {
     return this.#revision;
   }
 
-  accesses(): readonly BlockRegisterAccess[] {
-    return Object.freeze([...this.#accesses]);
-  }
-
-  readAlias(reg: RegisterAlias, reason: RegisterReadReason): ExprRef {
-    this.#access(Object.freeze({
-      kind: "registerRead",
-      at: this.#site(),
-      reg,
-      reason
-    }));
+  readAlias(reg: RegisterAlias, reason: StaticRegisterReadReason): ExprRef {
+    this.#validator.staticRead(this.#site(), reason);
 
     return this.#registers.readAlias(reg);
   }
@@ -50,13 +41,10 @@ export class RegisterWalkState {
     const at = this.#site();
 
     if (reg.width !== 32) {
-      this.#access(Object.freeze({
-        kind: "registerRead",
-        at,
-        reg,
-        reason: "partialRegisterWrite"
-      }));
+      this.#validator.staticRead(at, "partialRegisterWrite");
     }
+
+    this.#validator.staticWrite(at);
 
     const nextRegisters = this.#registers.writeAlias(reg, value);
 
@@ -65,34 +53,9 @@ export class RegisterWalkState {
     }
 
     this.#registers = nextRegisters;
-    this.#access(Object.freeze({
-      kind: "registerWrite",
-      at,
-      reg
-    }));
   }
 
-  dynamicLoad(index: ExprRef, width: OperandWidth): void {
-    this.#access(Object.freeze({
-      kind: "dynamicRegisterLoad",
-      at: this.#site(),
-      index,
-      width
-    }));
-  }
-
-  dynamicStore(index: ExprRef, value: ExprRef, width: OperandWidth): void {
-    this.#access(Object.freeze({
-      kind: "dynamicRegisterStore",
-      at: this.#site(),
-      index,
-      value,
-      width
-    }));
+  resetForDynamicRegisterStore(): void {
     this.#registers = RegisterState.initial();
-  }
-
-  #access(access: BlockRegisterAccess): void {
-    this.#accesses.push(access);
   }
 }

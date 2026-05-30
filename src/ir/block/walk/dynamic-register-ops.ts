@@ -1,6 +1,7 @@
 import type { ExprRef } from "#ir/expr/types.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { BlockWalkRecorder } from "./recorder.js";
+import type { RegisterAccessValidator } from "./register-access-validator.js";
 import type { RegisterWalkState } from "./registers.js";
 import type { OpSite } from "./site.js";
 import type { BlockState } from "./state.js";
@@ -8,6 +9,7 @@ import type { BlockState } from "./state.js";
 export class DynamicRegisterWalkOps {
   readonly #recorder: BlockWalkRecorder;
   readonly #registers: RegisterWalkState;
+  readonly #validator: RegisterAccessValidator;
   readonly #site: () => OpSite;
   readonly #snapshot: () => BlockState;
   #syncedRevision: number;
@@ -15,21 +17,23 @@ export class DynamicRegisterWalkOps {
   constructor(input: Readonly<{
     recorder: BlockWalkRecorder;
     registers: RegisterWalkState;
+    validator: RegisterAccessValidator;
     site: () => OpSite;
     snapshot: () => BlockState;
   }>) {
     this.#recorder = input.recorder;
     this.#registers = input.registers;
+    this.#validator = input.validator;
     this.#site = input.site;
     this.#snapshot = input.snapshot;
     this.#syncedRevision = input.registers.revision;
   }
 
   load(index: ExprRef, width: OperandWidth): ExprRef {
-    const result = this.#recorder.dynamicRegisterLoad(this.#site(), index, width);
+    const at = this.#site();
+    this.#validator.dynamicLoad(at);
 
-    this.#registers.dynamicLoad(index, width);
-    return result;
+    return this.#recorder.dynamicRegisterLoad(at, index, width);
   }
 
   store(index: ExprRef, value: ExprRef, width: OperandWidth): void {
@@ -40,6 +44,7 @@ export class DynamicRegisterWalkOps {
       this.#syncedRevision = this.#registers.revision;
     }
 
+    this.#validator.dynamicStore(at);
     this.#recorder.action(Object.freeze({
       kind: "dynamicRegisterStore",
       at,
@@ -47,6 +52,6 @@ export class DynamicRegisterWalkOps {
       value,
       width
     }));
-    this.#registers.dynamicStore(index, value, width);
+    this.#registers.resetForDynamicRegisterStore();
   }
 }
