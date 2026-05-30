@@ -221,5 +221,5 @@ function captureWaitingSourceEdge(
     entryIndex: effect.entryIndex,
     at: effect.at
   }));
-  removeWaitingSourceEdge(indexes, edge);
+  removeWaitingValue(indexes, edge.value);
 }

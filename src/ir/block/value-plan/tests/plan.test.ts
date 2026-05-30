@@ -166,6 +166,23 @@ test("flag writes capture the same flag source once before first site", () => {
   strictEqual(plan.captures[0]?.before, firstWrite);
 });
 
+test("first source capture for a value removes all remaining source waits", () => {
+  const eax = sourceCellForRegisterAlias(registerAlias("eax"));
+  const ebx = sourceCellForRegisterAlias(registerAlias("ebx"));
+  const firstWrite = sourceWrite(1, eax);
+  const plan = planBlockValues({
+    sites: [valueSite({ key: 1, entryIndex: 4, sourceCells: [eax, ebx] })],
+    producedValues: [],
+    sourceEffects: [
+      firstWrite,
+      sourceWrite(2, ebx)
+    ]
+  });
+
+  strictEqual(plan.captures.length, 1);
+  strictEqual(plan.captures[0]?.before, firstWrite);
+});
+
 test("non-overlapping alias write does not capture", () => {
   const source = sourceCellForRegisterAlias(registerAlias("ah"));
   const plan = planBlockValues({
