@@ -27,13 +27,16 @@ export {
   sourceEffectsForBlockSites
 } from "./source-effects.js";
 export type {
-  ActionInputValueSite,
-  BaseValueSite,
-  BoundaryCellValueSite,
-  DefinitionInputValueSite,
-  ValueSite,
-  ValueSiteInput
-} from "./value-sites.js";
+  ValueRoot,
+  ValueRootId,
+  ValueRootInput
+} from "./value-roots.js";
 export {
-  valueSitesForRoots
-} from "./value-sites.js";
+  isActionInputValueRoot,
+  isBoundaryCellValueRoot,
+  isDefinitionInputValueRoot,
+  valueRootExpr,
+  valueRootPlacement,
+  valueRootPurpose,
+  valueRootsForRoots
+} from "./value-roots.js";

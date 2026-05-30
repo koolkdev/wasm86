@@ -8,65 +8,69 @@ import {
   placementBefore
 } from "#ir/block/timeline.js";
 import type { ExprNodeId } from "#ir/expr/graph/index.js";
-import type { ValueSite } from "./value-sites.js";
+import type {
+  RootValueAnalysis
+} from "./root-analysis.js";
 import type {
   PlannedLifetime,
   PlannedValue,
   PlannedValueId
 } from "./types.js";
 
-export function planValues(sites: readonly ValueSite[]): readonly PlannedValue[] {
-  const sitesByKey = groupSitesByKey(sites);
+export function planValues(analyses: readonly RootValueAnalysis[]): readonly PlannedValue[] {
+  const rootsByKey = groupAnalysesByKey(analyses);
   const values: PlannedValue[] = [];
 
-  for (const [key, valueSites] of sitesByKey) {
-    const firstSite = valueSites[0];
+  for (const [key, rootAnalyses] of rootsByKey) {
+    const firstAnalysis = rootAnalyses[0];
 
-    if (firstSite === undefined) {
+    if (firstAnalysis === undefined) {
       throw new Error(`planned value group is empty: ${key}`);
     }
 
     values.push(Object.freeze({
       id: plannedValueId(values.length),
       key,
-      expr: firstSite.expr,
-      sites: Object.freeze([...valueSites]),
-      deps: depsForSites(valueSites),
-      lifetime: lifetimeForSites(valueSites)
+      expr: firstAnalysis.expr,
+      roots: Object.freeze(rootAnalyses.map((analysis) => analysis.valueRoot)),
+      deps: depsForAnalyses(rootAnalyses),
+      lifetime: lifetimeForAnalyses(rootAnalyses)
     }));
   }
 
   return Object.freeze(values);
 }
 
-function groupSitesByKey(sites: readonly ValueSite[]): ReadonlyMap<ExprNodeId, ValueSite[]> {
-  const groups = new Map<ExprNodeId, ValueSite[]>();
+function groupAnalysesByKey(
+  analyses: readonly RootValueAnalysis[]
+): ReadonlyMap<ExprNodeId, RootValueAnalysis[]> {
+  const groups = new Map<ExprNodeId, RootValueAnalysis[]>();
 
-  for (const site of sites) {
-    const group = groups.get(site.key);
+  for (const analysis of analyses) {
+    const group = groups.get(analysis.key);
 
     if (group === undefined) {
-      groups.set(site.key, [site]);
+      groups.set(analysis.key, [analysis]);
     } else {
-      group.push(site);
+      group.push(analysis);
     }
   }
 
   return groups;
 }
 
-function depsForSites(sites: readonly ValueSite[]): ExprDeps {
+function depsForAnalyses(analyses: readonly RootValueAnalysis[]): ExprDeps {
   return Object.freeze({
-    sourceCells: mergeSourceCells(sites.flatMap((site) => site.deps.sourceCells)),
-    definitionIds: dedupeDefinitionIds(sites)
+    sourceCells: mergeSourceCells(analyses.flatMap((analysis) => analysis.deps.sourceCells)),
+    definitionIds: dedupeDefinitionIds(analyses)
   });
 }
 
-function dedupeDefinitionIds(sites: readonly ValueSite[]): readonly BlockDefinitionId[] {
+function dedupeDefinitionIds(analyses: readonly RootValueAnalysis[]): readonly BlockDefinitionId[] {
   const ids = new Set<BlockDefinitionId>();
 
-  for (const site of sites) {
-    for (const id of site.deps.definitionIds) {
+  for (const analysis of analyses) {
+    for (const id of analysis.deps.definitionIds) {
       ids.add(id);
     }
   }
@@ -74,23 +78,25 @@ function dedupeDefinitionIds(sites: readonly ValueSite[]): readonly BlockDefinit
   return Object.freeze([...ids]);
 }
 
-function lifetimeForSites(sites: readonly ValueSite[]): PlannedLifetime {
-  const first = sites[0];
+function lifetimeForAnalyses(analyses: readonly RootValueAnalysis[]): PlannedLifetime {
+  const first = analyses[0];
 
   if (first === undefined) {
-    throw new Error("planned value lifetime requires at least one site");
+    throw new Error("planned value lifetime requires at least one root");
   }
 
-  let start = first.at;
-  let end = first.at;
+  let start = first.valueRoot.root.at;
+  let end = first.valueRoot.root.at;
 
-  for (const site of sites) {
-    if (placementBefore(site.at, start)) {
-      start = site.at;
+  for (const analysis of analyses) {
+    const at = analysis.valueRoot.root.at;
+
+    if (placementBefore(at, start)) {
+      start = at;
     }
 
-    if (placementAfter(site.at, end)) {
-      end = site.at;
+    if (placementAfter(at, end)) {
+      end = at;
     }
   }
 

@@ -10,10 +10,10 @@ import {
   type BlockDefinitionId
 } from "#ir/block/definitions.js";
 import {
+  type BlockRoot,
   rootsForBlockSites
 } from "#ir/block/roots.js";
 import type {
-  BlockActionSite,
   BlockBoundarySite,
   BlockDefinitionSite,
   BlockTimeline,
@@ -33,36 +33,40 @@ import {
   exprConst,
   exprInput
 } from "#ir/expr/builders.js";
-import { buildExprGraph } from "#ir/expr/graph/index.js";
-import type { ExprRef } from "#ir/expr/types.js";
 import type {
   IrValueType,
   ValueRef,
   VarRef
 } from "#ir/model/types.js";
-import { registerAlias } from "#x86/registers.js";
 import {
   producedValuesForDefinitions,
   type ProducedValue
 } from "#ir/block/value-plan/produced-values.js";
 import {
-  valueSitesForRoots,
-  type ValueSite,
-  type ValueSiteInput
-} from "#ir/block/value-plan/value-sites.js";
+  isActionInputValueRoot,
+  isBoundaryCellValueRoot,
+  isDefinitionInputValueRoot,
+  valueRootExpr,
+  valueRootPlacement,
+  valueRootPurpose,
+  valueRootsForRoots,
+  type ValueRoot,
+  type ValueRootInput
+} from "#ir/block/value-plan/value-roots.js";
 
-test("every non-passthrough root becomes one value site", () => {
+test("every non-passthrough root becomes one value root", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" }
     ]
   });
   const roots = rootsForBlockSites({ timeline: result.timeline });
-  const sites = valueSitesForRoots(valueSiteInput(result.timeline, roots));
+  const valueRoots = valueRootsForRoots(valueRootInput(result.timeline, roots));
 
-  strictEqual(sites.length, roots.filter((root) => root.purpose.kind !== "boundaryCell").length);
-  deepStrictEqual(sites.map(siteSummary), [
+  strictEqual(valueRoots.length, roots.filter((root) => root.purpose.kind !== "boundaryCell").length);
+  deepStrictEqual(valueRoots.map(rootSummary), [
     {
+      id: 0,
       kind: "actionInput",
       at: { opIndex: 0, epoch: 0 },
       action: "memoryGuard",
@@ -71,7 +75,7 @@ test("every non-passthrough root becomes one value site", () => {
   ]);
 });
 
-test("duplicate roots remain duplicate value sites", () => {
+test("duplicate roots remain duplicate value roots", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "mem", address: c(0x1000) }, value: c(0x55), accessWidth: 32 }
@@ -85,15 +89,16 @@ test("duplicate roots remain duplicate value sites", () => {
     throw new Error("missing memory-store value root");
   }
 
-  const sites = valueSitesForRoots(valueSiteInput(result.timeline, [root, root]));
+  const valueRoots = valueRootsForRoots(valueRootInput(result.timeline, [root, root]));
 
-  strictEqual(sites.length, 2);
-  strictEqual(sites[0]?.root, root);
-  strictEqual(sites[1]?.root, root);
-  strictEqual(sites[0]?.key, sites[1]?.key);
+  strictEqual(valueRoots.length, 2);
+  strictEqual(valueRoots[0]?.id, 0);
+  strictEqual(valueRoots[1]?.id, 1);
+  strictEqual(valueRoots[0]?.root, root);
+  strictEqual(valueRoots[1]?.root, root);
 });
 
-test("root purpose maps to the correct site variant", () => {
+test("root purpose maps through the value-root helpers", () => {
   const memory = walkExpressionBlock({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
@@ -143,21 +148,25 @@ test("root purpose maps to the correct site variant", () => {
     ...fallthrough.timeline,
     changedBoundary
   ];
-  const sites = valueSitesForRoots(valueSiteInput(timeline));
+  const valueRoots = valueRootsForRoots(valueRootInput(timeline));
 
-  requireActionSite(sites, "memoryGuard", "address");
-  requireDefinitionSite(sites, "memoryLoad", "address");
-  requireActionSite(sites, "memoryStore", "address");
-  requireActionSite(sites, "memoryStore", "value");
-  requireDefinitionSite(sites, "dynamicRegisterLoad", "index");
-  requireActionSite(sites, "dynamicRegisterStore", "index");
-  requireActionSite(sites, "dynamicRegisterStore", "value");
-  requireActionSite(sites, "branch", "condition");
-  requireActionSite(sites, "branch", "target", "taken");
-  requireActionSite(sites, "branch", "target", "notTaken");
-  requireActionSite(sites, "hostTrap", "vector");
-  requireActionSite(sites, "fallthrough", "target");
-  requireBoundarySite(sites, "stateSync", "reg", "eax");
+  requireActionRoot(valueRoots, "memoryGuard", "address");
+  requireDefinitionRoot(valueRoots, "memoryLoad", "address");
+  requireActionRoot(valueRoots, "memoryStore", "address");
+  requireActionRoot(valueRoots, "memoryStore", "value");
+  requireDefinitionRoot(valueRoots, "dynamicRegisterLoad", "index");
+  requireActionRoot(valueRoots, "dynamicRegisterStore", "index");
+  requireActionRoot(valueRoots, "dynamicRegisterStore", "value");
+  requireActionRoot(valueRoots, "branch", "condition");
+  requireActionRoot(valueRoots, "branch", "target", "taken");
+  requireActionRoot(valueRoots, "branch", "target", "notTaken");
+  requireActionRoot(valueRoots, "hostTrap", "vector");
+  requireActionRoot(valueRoots, "fallthrough", "target");
+  requireBoundaryRoot(valueRoots, "stateSync", "reg", "eax");
+
+  strictEqual(isActionInputValueRoot(valueRoots[0]!), true);
+  strictEqual(isDefinitionInputValueRoot(requireDefinitionRoot(valueRoots, "memoryLoad", "address")), true);
+  strictEqual(isBoundaryCellValueRoot(requireBoundaryRoot(valueRoots, "stateSync", "reg", "eax")), true);
 });
 
 test("passthrough state-sync register and flag cells are skipped", () => {
@@ -165,7 +174,7 @@ test("passthrough state-sync register and flag cells are skipped", () => {
     stateSyncSite({ opIndex: 0, epoch: 0 }, BlockState.initial())
   ];
 
-  deepStrictEqual(valueSitesForRoots(valueSiteInput(timeline)), []);
+  deepStrictEqual(valueRootsForRoots(valueRootInput(timeline)), []);
 });
 
 test("passthrough exit-state register and flag cells are skipped", () => {
@@ -178,10 +187,10 @@ test("passthrough exit-state register and flag cells are skipped", () => {
     root.purpose.kind === "boundaryCell"
   );
 
-  deepStrictEqual(valueSitesForRoots(valueSiteInput(result.timeline, boundaryRoots)), []);
+  deepStrictEqual(valueRootsForRoots(valueRootInput(result.timeline, boundaryRoots)), []);
 });
 
-test("changed boundary cells become BoundaryCellValueSites", () => {
+test("changed boundary cells become value roots", () => {
   const state = BlockState.initial({
     registers: RegisterState.initial().write(
       "eax",
@@ -192,22 +201,44 @@ test("changed boundary cells become BoundaryCellValueSites", () => {
     })
   });
   const timeline = [stateSyncSite({ opIndex: 4, epoch: 0 }, state)];
-  const sites = valueSitesForRoots(valueSiteInput(timeline));
+  const valueRoots = valueRootsForRoots(valueRootInput(timeline));
 
-  deepStrictEqual(sites.map(siteSummary), [
+  deepStrictEqual(valueRoots.map(rootSummary), [
     {
+      id: 0,
       kind: "boundaryCell",
       at: { opIndex: 4, epoch: 0 },
       boundary: "stateSync",
       cell: { kind: "reg", reg: "eax" }
     },
     {
+      id: 1,
       kind: "boundaryCell",
       at: { opIndex: 4, epoch: 0 },
       boundary: "stateSync",
       cell: { kind: "flag", flag: "CF" }
     }
   ]);
+});
+
+test("value roots do not duplicate graph keys, deps, purpose, or placement", () => {
+  const result = walkExpressionBlock({
+    block: [
+      { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" }
+    ]
+  });
+  const root = rootsForBlockSites({ timeline: result.timeline })[0]!;
+  const valueRoot = valueRootsForRoots({ roots: [root] })[0]!;
+
+  deepStrictEqual(Object.keys(valueRoot), ["id", "root"]);
+  strictEqual(Object.hasOwn(valueRoot, "key"), false);
+  strictEqual(Object.hasOwn(valueRoot, "expr"), false);
+  strictEqual(Object.hasOwn(valueRoot, "deps"), false);
+  strictEqual(Object.hasOwn(valueRoot, "at"), false);
+  strictEqual(Object.hasOwn(valueRoot, "purpose"), false);
+  strictEqual(valueRootExpr(valueRoot), root.expr);
+  strictEqual(valueRootPlacement(valueRoot), root.at);
+  strictEqual(valueRootPurpose(valueRoot), root.purpose);
 });
 
 test("definition sites become ProducedValues without dependency fields", () => {
@@ -240,39 +271,11 @@ test("definition sites become ProducedValues without dependency fields", () => {
   }
 });
 
-test("value sites carry ExprDeps", () => {
-  const id = 3 as BlockDefinitionId;
-  const storeValue = exprBinary(
-    "add",
-    exprInput({ kind: "def", id }),
-    exprInput({ kind: "reg", reg: "eax" })
-  );
-  const timeline = [
-    memoryLoadSite({ opIndex: 0, epoch: 0 }, id),
-    memoryStoreSite({ opIndex: 1, epoch: 0 }, storeValue)
-  ];
-  const input = valueSiteInput(timeline);
-  const site = requireActionSite(
-    valueSitesForRoots(input),
-    "memoryStore",
-    "value"
-  );
-
-  deepStrictEqual(site.deps.definitionIds, [id]);
-  deepStrictEqual(site.deps.sourceCells, [
-    { kind: "reg", reg: registerAlias("eax") }
-  ]);
-  strictEqual(site.key, input.graph.node(site.expr).id);
-});
-
-function valueSiteInput(
+function valueRootInput(
   timeline: BlockTimeline,
   roots = rootsForBlockSites({ timeline })
-): ValueSiteInput {
-  return {
-    graph: buildExprGraph(roots.map((root) => root.expr)),
-    roots
-  };
+): ValueRootInput {
+  return { roots };
 }
 
 function stateSyncSite(
@@ -327,107 +330,108 @@ function dynamicRegisterLoadSite(
   });
 }
 
-function memoryStoreSite(
-  at: Placement,
-  value: ExprRef
-): BlockActionSite &
-  Readonly<{ action: Extract<BlockAction, { kind: "memoryStore" }> }> {
-  return Object.freeze({
-    kind: "action",
-    at,
-    action: Object.freeze({
-      kind: "memoryStore",
-      at: opSite(at.opIndex),
-      address: exprConst(0x2000),
-      value,
-      width: 32
-    } satisfies Extract<BlockAction, { kind: "memoryStore" }>)
-  });
-}
-
-function requireActionSite(
-  sites: readonly ValueSite[],
+function requireActionRoot(
+  roots: readonly ValueRoot[],
   action: BlockAction["kind"],
-  input: Extract<ValueSite, { kind: "actionInput" }>["input"],
+  input: Extract<BlockRoot["purpose"], { kind: "actionInput" }>["input"],
   direction?: "taken" | "notTaken"
-): Extract<ValueSite, { kind: "actionInput" }> {
-  const site = sites.find((candidate) =>
-    candidate.kind === "actionInput" &&
-      candidate.site.action.kind === action &&
-      candidate.input === input &&
-      candidate.direction === direction
+): ValueRoot {
+  const root = roots.find((candidate) =>
+    candidate.root.purpose.kind === "actionInput" &&
+      candidate.root.site.kind === "action" &&
+      candidate.root.site.action.kind === action &&
+      candidate.root.purpose.input === input &&
+      candidate.root.purpose.direction === direction
   );
 
-  if (site === undefined || site.kind !== "actionInput") {
-    throw new Error(`missing ${action} ${input} action value site`);
+  if (root === undefined) {
+    throw new Error(`missing ${action} ${input} action value root`);
   }
 
-  return site;
+  return root;
 }
 
-function requireDefinitionSite(
-  sites: readonly ValueSite[],
+function requireDefinitionRoot(
+  roots: readonly ValueRoot[],
   definition: BlockDefinition["kind"],
-  input: Extract<ValueSite, { kind: "definitionInput" }>["input"]
-): Extract<ValueSite, { kind: "definitionInput" }> {
-  const site = sites.find((candidate) =>
-    candidate.kind === "definitionInput" &&
-      candidate.site.definition.kind === definition &&
-      candidate.input === input
+  input: Extract<BlockRoot["purpose"], { kind: "definitionInput" }>["input"]
+): ValueRoot {
+  const root = roots.find((candidate) =>
+    candidate.root.purpose.kind === "definitionInput" &&
+      candidate.root.site.kind === "definition" &&
+      candidate.root.site.definition.kind === definition &&
+      candidate.root.purpose.input === input
   );
 
-  if (site === undefined || site.kind !== "definitionInput") {
-    throw new Error(`missing ${definition} ${input} definition value site`);
+  if (root === undefined) {
+    throw new Error(`missing ${definition} ${input} definition value root`);
   }
 
-  return site;
+  return root;
 }
 
-function requireBoundarySite(
-  sites: readonly ValueSite[],
+function requireBoundaryRoot(
+  roots: readonly ValueRoot[],
   boundary: "stateSync" | "exitState",
   kind: "reg" | "flag",
   name: string
-): Extract<ValueSite, { kind: "boundaryCell" }> {
-  const site = sites.find((candidate) =>
-    candidate.kind === "boundaryCell" &&
-      candidate.boundary === boundary &&
-      candidate.cell.kind === kind &&
-      (candidate.cell.kind === "reg" ? candidate.cell.reg : candidate.cell.flag) === name
+): ValueRoot {
+  const root = roots.find((candidate) =>
+    candidate.root.purpose.kind === "boundaryCell" &&
+      candidate.root.site.kind === "boundary" &&
+      candidate.root.site.boundary.kind === boundary &&
+      candidate.root.purpose.cell.kind === kind &&
+      (candidate.root.purpose.cell.kind === "reg"
+        ? candidate.root.purpose.cell.reg
+        : candidate.root.purpose.cell.flag) === name
   );
 
-  if (site === undefined || site.kind !== "boundaryCell") {
-    throw new Error(`missing ${boundary} ${kind} ${name} boundary value site`);
+  if (root === undefined) {
+    throw new Error(`missing ${boundary} ${kind} ${name} boundary value root`);
   }
 
-  return site;
+  return root;
 }
 
-function siteSummary(site: ValueSite): object {
+function rootSummary(root: ValueRoot): object {
+  const blockRoot = root.root;
   const base = {
-    kind: site.kind,
-    at: site.at
+    id: root.id,
+    kind: blockRoot.purpose.kind,
+    at: blockRoot.at
   };
 
-  switch (site.kind) {
+  switch (blockRoot.purpose.kind) {
     case "actionInput":
+      if (blockRoot.site.kind !== "action") {
+        throw new Error("action-input root must reference an action site");
+      }
+
       return {
         ...base,
-        action: site.site.action.kind,
-        input: site.input,
-        ...(site.direction === undefined ? {} : { direction: site.direction })
+        action: blockRoot.site.action.kind,
+        input: blockRoot.purpose.input,
+        ...(blockRoot.purpose.direction === undefined ? {} : { direction: blockRoot.purpose.direction })
       };
     case "definitionInput":
+      if (blockRoot.site.kind !== "definition") {
+        throw new Error("definition-input root must reference a definition site");
+      }
+
       return {
         ...base,
-        definition: site.site.definition.kind,
-        input: site.input
+        definition: blockRoot.site.definition.kind,
+        input: blockRoot.purpose.input
       };
     case "boundaryCell":
+      if (blockRoot.site.kind !== "boundary") {
+        throw new Error("boundary-cell root must reference a boundary site");
+      }
+
       return {
         ...base,
-        boundary: site.boundary,
-        cell: site.cell
+        boundary: blockRoot.site.boundary.kind,
+        cell: blockRoot.purpose.cell
       };
   }
 }

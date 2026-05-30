@@ -4,7 +4,8 @@ import type {
   Placement
 } from "#ir/block/timeline.js";
 import { placementAfter } from "#ir/block/timeline.js";
-import type { ValueSite } from "./value-sites.js";
+import type { RootValueAnalysis } from "./root-analysis.js";
+import type { ValueRoot } from "./value-roots.js";
 import type {
   PlannedLifetime,
   PlannedProducedValue
@@ -38,9 +39,9 @@ export function producedValuesForDefinitions(input: {
 
 export function planProducedValues(
   producedValues: readonly ProducedValue[],
-  sites: readonly ValueSite[]
+  analyses: readonly RootValueAnalysis[]
 ): readonly PlannedProducedValue[] {
-  const consumersByDefinition = indexSitesByDefinition(sites);
+  const consumersByDefinition = indexRootsByDefinition(analyses);
   const planned: PlannedProducedValue[] = [];
 
   for (const produced of producedValues) {
@@ -60,28 +61,28 @@ export function planProducedValues(
   return Object.freeze(planned);
 }
 
-function indexSitesByDefinition(
-  sites: readonly ValueSite[]
-): ReadonlyMap<BlockDefinitionId, readonly ValueSite[]> {
-  const mutableIndex = new Map<BlockDefinitionId, ValueSite[]>();
+function indexRootsByDefinition(
+  analyses: readonly RootValueAnalysis[]
+): ReadonlyMap<BlockDefinitionId, readonly ValueRoot[]> {
+  const mutableIndex = new Map<BlockDefinitionId, ValueRoot[]>();
 
-  for (const site of sites) {
-    for (const definitionId of new Set(site.deps.definitionIds)) {
-      let indexedSites = mutableIndex.get(definitionId);
+  for (const analysis of analyses) {
+    for (const definitionId of new Set(analysis.deps.definitionIds)) {
+      let indexedRoots = mutableIndex.get(definitionId);
 
-      if (indexedSites === undefined) {
-        indexedSites = [];
-        mutableIndex.set(definitionId, indexedSites);
+      if (indexedRoots === undefined) {
+        indexedRoots = [];
+        mutableIndex.set(definitionId, indexedRoots);
       }
 
-      indexedSites.push(site);
+      indexedRoots.push(analysis.valueRoot);
     }
   }
 
-  const index = new Map<BlockDefinitionId, readonly ValueSite[]>();
+  const index = new Map<BlockDefinitionId, readonly ValueRoot[]>();
 
-  for (const [definitionId, indexedSites] of mutableIndex.entries()) {
-    index.set(definitionId, Object.freeze(indexedSites));
+  for (const [definitionId, indexedRoots] of mutableIndex.entries()) {
+    index.set(definitionId, Object.freeze(indexedRoots));
   }
 
   return index;
@@ -89,13 +90,13 @@ function indexSitesByDefinition(
 
 function producedLifetime(
   produced: ProducedValue,
-  consumers: readonly ValueSite[]
+  consumers: readonly ValueRoot[]
 ): PlannedLifetime {
   let end = produced.at;
 
   for (const consumer of consumers) {
-    if (placementAfter(consumer.at, end)) {
-      end = consumer.at;
+    if (placementAfter(consumer.root.at, end)) {
+      end = consumer.root.at;
     }
   }
 

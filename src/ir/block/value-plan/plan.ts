@@ -2,6 +2,7 @@ import { planBoundaries } from "./boundaries.js";
 import { planSourceCaptures } from "./captures.js";
 import { planValues } from "./planned-values.js";
 import { planProducedValues } from "./produced-values.js";
+import { analyzeValueRoots } from "./root-analysis.js";
 import type {
   BlockValuePlan,
   BlockValuePlanInput
@@ -19,12 +20,13 @@ export type {
 } from "./types.js";
 
 export function planBlockValues(input: BlockValuePlanInput): BlockValuePlan {
-  const values = planValues(input.sites);
+  const analyses = analyzeValueRoots(input.graph, input.valueRoots);
+  const values = planValues(analyses);
 
   return Object.freeze({
     values,
-    produced: planProducedValues(input.producedValues, input.sites),
+    produced: planProducedValues(input.producedValues, analyses),
     captures: planSourceCaptures(values, input.sourceEffects),
-    boundaries: planBoundaries(input.sites)
+    boundaries: planBoundaries(input.valueRoots)
   });
 }

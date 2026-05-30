@@ -4,17 +4,18 @@ import type {
   Placement
 } from "#ir/block/timeline.js";
 import type { SourceCell } from "#ir/block/source-cells.js";
-import type { ExprNodeId } from "#ir/expr/graph/index.js";
-import type { ExprRef } from "#ir/expr/types.js";
 import type {
-  BoundaryCellValueSite,
-  ValueSite
-} from "./value-sites.js";
+  ExprGraph,
+  ExprNodeId
+} from "#ir/expr/graph/index.js";
+import type { ExprRef } from "#ir/expr/types.js";
+import type { ValueRoot } from "./value-roots.js";
 import type { ProducedValue } from "./produced-values.js";
 import type { SourceEffect } from "./source-effects.js";
 
 export type BlockValuePlanInput = Readonly<{
-  sites: readonly ValueSite[];
+  graph: ExprGraph;
+  valueRoots: readonly ValueRoot[];
   producedValues: readonly ProducedValue[];
   sourceEffects: readonly SourceEffect[];
 }>;
@@ -39,14 +40,14 @@ export type PlannedValue = Readonly<{
   id: PlannedValueId;
   key: ExprNodeId;
   expr: ExprRef;
-  sites: readonly ValueSite[];
+  roots: readonly ValueRoot[];
   deps: ExprDeps;
   lifetime: PlannedLifetime;
 }>;
 
 export type PlannedProducedValue = Readonly<{
   produced: ProducedValue;
-  consumers: readonly ValueSite[];
+  consumers: readonly ValueRoot[];
   lifetime: PlannedLifetime;
 }>;
 
@@ -61,5 +62,5 @@ export type PlannedBoundary = Readonly<{
   site: BlockBoundarySite;
   boundary: "stateSync" | "exitState";
   at: Placement;
-  sites: readonly BoundaryCellValueSite[];
+  roots: readonly ValueRoot[];
 }>;
