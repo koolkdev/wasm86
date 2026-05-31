@@ -3,18 +3,25 @@ import type {
   BlockDefinitionSite,
   Placement
 } from "#ir/block/timeline.js";
+import type { ExprRef } from "#ir/expr/types.js";
 import { placementAfter } from "#ir/block/timeline.js";
-import type { RootValueAnalysis } from "./root-analysis.js";
-import type { ValueRoot } from "./value-roots.js";
+import type { RootValueAnalysis } from "./analysis.js";
+import type { ValueRoot } from "./roots.js";
 import type {
   PlannedLifetime,
   PlannedProducedValue
 } from "./types.js";
 
+export type ProducedValueAccess = Readonly<{
+  barrierDomain: "memory" | "registers";
+  input: ExprRef;
+}>;
+
 export type ProducedValue = Readonly<{
   id: BlockDefinitionId;
   at: Placement;
   site: BlockDefinitionSite;
+  access: ProducedValueAccess;
 }>;
 
 export type {
@@ -27,14 +34,38 @@ export function producedValuesForDefinitions(input: {
   const produced: ProducedValue[] = [];
 
   for (const site of input.definitions) {
-    produced.push(Object.freeze({
-      id: site.definition.id,
-      at: site.at,
-      site
-    }));
+    produced.push(producedValueForDefinitionSite(site));
   }
 
   return Object.freeze(produced);
+}
+
+export function producedValueForDefinitionSite(
+  site: BlockDefinitionSite
+): ProducedValue {
+  return Object.freeze({
+    id: site.definition.id,
+    at: site.at,
+    site,
+    access: producedValueAccessForDefinitionSite(site)
+  });
+}
+
+function producedValueAccessForDefinitionSite(
+  site: BlockDefinitionSite
+): ProducedValueAccess {
+  switch (site.definition.kind) {
+    case "memoryLoad":
+      return Object.freeze({
+        barrierDomain: "memory",
+        input: site.definition.address
+      });
+    case "dynamicRegisterLoad":
+      return Object.freeze({
+        barrierDomain: "registers",
+        input: site.definition.index
+      });
+  }
 }
 
 export function planProducedValues(

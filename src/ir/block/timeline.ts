@@ -1,7 +1,5 @@
 import type { BlockAction } from "#ir/block/actions.js";
 import type { BlockDefinition } from "#ir/block/definitions.js";
-import type { BlockExit } from "#ir/block/exits.js";
-import type { BlockState } from "#ir/block/walk/state.js";
 
 export type Placement = Readonly<{
   opIndex: number;
@@ -20,27 +18,9 @@ export type BlockDefinitionSite = Readonly<{
   definition: BlockDefinition;
 }>;
 
-export type BlockBoundary =
-  | Readonly<{
-      kind: "exitState";
-      exit: BlockExit;
-      state: BlockState;
-    }>
-  | Readonly<{
-      kind: "stateSync";
-      state: BlockState;
-    }>;
-
-export type BlockBoundarySite = Readonly<{
-  kind: "boundary";
-  at: Placement;
-  boundary: BlockBoundary;
-}>;
-
 export type BlockTimelineSite =
   | BlockActionSite
-  | BlockDefinitionSite
-  | BlockBoundarySite;
+  | BlockDefinitionSite;
 
 export type BlockTimeline = readonly BlockTimelineSite[];
 
@@ -56,13 +36,7 @@ export function definitionSites(timeline: readonly BlockTimelineSite[]): readonl
   ));
 }
 
-export function boundarySites(timeline: readonly BlockTimelineSite[]): readonly BlockBoundarySite[] {
-  return Object.freeze(timeline.filter((site): site is BlockBoundarySite =>
-    site.kind === "boundary"
-  ));
-}
-
-function comparePlacement(left: Placement, right: Placement): number {
+export function comparePlacement(left: Placement, right: Placement): number {
   const opOrder = left.opIndex - right.opIndex;
 
   return opOrder === 0

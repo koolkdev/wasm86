@@ -14,7 +14,6 @@ import {
   type BlockRoot
 } from "#ir/block/roots.js";
 import type {
-  BlockBoundarySite,
   BlockTimeline,
   BlockTimelineSite
 } from "#ir/block/timeline.js";
@@ -30,7 +29,6 @@ import {
   exprInput,
   exprUnary
 } from "#ir/expr/builders.js";
-import type { ExprRef } from "#ir/expr/types.js";
 import type {
   IrValueType,
   ValueRef,
@@ -133,65 +131,7 @@ test("rootsForBlockSites projects branch, jump, fallthrough, and host trap roots
   deepStrictEqual(actionRoot(trap, "hostTrap", "vector").expr, exprConst(7));
 });
 
-test("rootsForBlockSites projects boundary state roots from scheduled boundaries", () => {
-  const exitResult = walkExpressionBlock({
-    block: [
-      { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
-      { op: "flags.write", cells: { ZF: { kind: "expr", value: c(1) } } },
-      { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" }
-    ]
-  });
-  const syncResult = walkExpressionBlock({
-    block: [
-      { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
-      { op: "flags.write", cells: { ZF: { kind: "expr", value: c(1) } } },
-      { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 }
-    ],
-    resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(4), 32)]
-    })
-  });
-  const roots = rootsForBlockSites({
-    timeline: [
-      ...exitResult.timeline,
-      ...syncResult.timeline
-    ]
-  });
-
-  deepStrictEqual(boundaryRegister(roots, "exitState", "eax")?.expr, exprConst(0x11));
-  deepStrictEqual(boundaryFlag(roots, "exitState", "ZF")?.expr, exprConst(1));
-  deepStrictEqual(boundaryRegister(roots, "stateSync", "esp")?.expr, exprConst(0x44));
-  deepStrictEqual(boundaryFlag(roots, "stateSync", "ZF")?.expr, exprConst(1));
-});
-
-test("rootsForBlockSites projects reset register roots for exits after dynamic register stores", () => {
-  const result = walkExpressionBlock({
-    block: [
-      { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
-      { op: "flags.write", cells: { ZF: { kind: "expr", value: c(1) } } },
-      { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
-      { op: "next" }
-    ],
-    resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(4), 32)]
-    })
-  });
-  const roots = rootsForBlockSites({ timeline: result.timeline });
-  const exit = boundaryEntry(result.timeline, "exitState");
-
-  deepStrictEqual(boundaryRegister(roots, "stateSync", "esp")?.expr, exprConst(0x44));
-  deepStrictEqual(
-    boundaryRegisterRootsForEntry(roots, exit).find((root) =>
-      root.purpose.kind === "boundaryCell" &&
-        root.purpose.cell.kind === "reg" &&
-        root.purpose.cell.reg === "esp"
-    )?.expr,
-    exprInput({ kind: "reg", reg: "esp" })
-  );
-  deepStrictEqual(boundaryFlag(roots, "exitState", "ZF")?.expr, exprConst(1));
-});
-
-test("rootsForBlockSites projects reset register roots after unsynced dynamic register stores", () => {
+test("rootsForBlockSites does not project exit observation roots", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
@@ -202,19 +142,7 @@ test("rootsForBlockSites projects reset register roots after unsynced dynamic re
     })
   });
   const roots = rootsForBlockSites({ timeline: result.timeline });
-  const exit = boundaryEntry(result.timeline, "exitState");
 
-  strictEqual(result.timeline.some((site) =>
-    site.kind === "boundary" && site.boundary.kind === "stateSync"
-  ), false);
-  deepStrictEqual(
-    boundaryRegisterRootsForEntry(roots, exit).find((root) =>
-      root.purpose.kind === "boundaryCell" &&
-        root.purpose.cell.kind === "reg" &&
-        root.purpose.cell.reg === "esp"
-    )?.expr,
-    exprInput({ kind: "reg", reg: "esp" })
-  );
   deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "index").expr, exprConst(4));
   deepStrictEqual(actionRoot(roots, "dynamicRegisterStore", "value").expr, exprConst(0x55));
 });
@@ -286,65 +214,6 @@ function definitionRoot<TKind extends BlockDefinition["kind"]>(
   }
 
   return root;
-}
-
-function boundaryRegister(
-  roots: readonly BlockRoot[],
-  boundary: "exitState" | "stateSync",
-  reg: string
-): Readonly<{ expr: ExprRef }> | undefined {
-  return roots.find((root) =>
-    root.site.kind === "boundary" &&
-      root.site.boundary.kind === boundary &&
-      root.purpose.kind === "boundaryCell" &&
-      root.purpose.cell.kind === "reg" &&
-      root.purpose.cell.reg === reg
-  );
-}
-
-function boundaryFlag(
-  roots: readonly BlockRoot[],
-  boundary: "exitState" | "stateSync",
-  flag: string
-): Readonly<{ expr: ExprRef }> | undefined {
-  return roots.find((root) =>
-    root.site.kind === "boundary" &&
-      root.site.boundary.kind === boundary &&
-      root.purpose.kind === "boundaryCell" &&
-      root.purpose.cell.kind === "flag" &&
-      root.purpose.cell.flag === flag
-  );
-}
-
-function boundaryRegisterRootsForEntry(
-  roots: readonly BlockRoot[],
-  boundary: BlockBoundarySite
-): readonly BlockRoot[] {
-  return roots.filter((root) =>
-    root.site === boundary &&
-      root.purpose.kind === "boundaryCell" &&
-      root.purpose.cell.kind === "reg"
-  );
-}
-
-type BoundarySiteFor<TKind extends BlockBoundarySite["boundary"]["kind"]> =
-  BlockBoundarySite & Readonly<{
-    boundary: Extract<BlockBoundarySite["boundary"], { kind: TKind }>;
-  }>;
-
-function boundaryEntry<TKind extends BlockBoundarySite["boundary"]["kind"]>(
-  timeline: BlockTimeline,
-  kind: TKind
-): BoundarySiteFor<TKind> {
-  const site = timeline.find((item) =>
-    item.kind === "boundary" && item.boundary.kind === kind
-  );
-
-  if (site === undefined || site.kind !== "boundary" || site.boundary.kind !== kind) {
-    throw new Error(`missing boundary ${kind}`);
-  }
-
-  return site as BoundarySiteFor<TKind>;
 }
 
 function definitionEntry<TKind extends BlockDefinition["kind"]>(

@@ -1,20 +1,10 @@
 import type {
-  BlockBoundarySite,
   BlockTimeline,
   BlockTimelineSite,
   BlockDefinitionSite,
   Placement
 } from "#ir/block/timeline.js";
-import { exprInput } from "#ir/expr/builders.js";
-import type {
-  ExprInputSource,
-  ExprRef
-} from "#ir/expr/types.js";
-
-export type BoundaryRootCellSource = Extract<
-  ExprInputSource,
-  Readonly<{ kind: "reg" | "flag" }>
->;
+import type { ExprRef } from "#ir/expr/types.js";
 
 export type BlockRootPurpose =
   | Readonly<{
@@ -25,8 +15,7 @@ export type BlockRootPurpose =
   | Readonly<{
       kind: "definitionInput";
       input: "address" | "index";
-    }>
-  | Readonly<{ kind: "boundaryCell"; cell: BoundaryRootCellSource }>;
+    }>;
 
 export type BlockRoot = Readonly<{
   expr: ExprRef;
@@ -49,8 +38,6 @@ function rootsForTimelineSite(site: BlockTimelineSite): readonly BlockRoot[] {
       return rootsForActionSite(site);
     case "definition":
       return rootsForDefinitionSite(site);
-    case "boundary":
-      return rootsForBoundarySite(site);
   }
 }
 
@@ -129,39 +116,6 @@ function rootsForDefinitionSite(site: BlockDefinitionSite): readonly BlockRoot[]
         })
       ];
   }
-}
-
-function rootsForBoundarySite(site: BlockBoundarySite): readonly BlockRoot[] {
-  const roots: BlockRoot[] = [];
-  const state = site.boundary.state;
-
-  for (const cell of state.registers.cells()) {
-    roots.push(root(cell.value, site, {
-      kind: "boundaryCell",
-      cell: { kind: "reg", reg: cell.reg }
-    }));
-  }
-
-  for (const { flag, cell } of state.flags.cells()) {
-    switch (cell.kind) {
-      case "expr":
-        roots.push(root(cell.value, site, {
-          kind: "boundaryCell",
-          cell: { kind: "flag", flag }
-        }));
-        break;
-      case "input":
-        roots.push(root(exprInput({ kind: "flag", flag: cell.flag }), site, {
-          kind: "boundaryCell",
-          cell: { kind: "flag", flag }
-        }));
-        break;
-      case "undef":
-        break;
-    }
-  }
-
-  return roots;
 }
 
 function root(

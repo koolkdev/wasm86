@@ -231,11 +231,12 @@ test("dynamic register stores allow earlier static register writes", () => {
     })
   });
 
-  strictEqual(onlyAction(blockWalkActions(result)).kind, "dynamicRegisterStore");
-  deepStrictEqual(result.timeline.map(timelineSiteKind), ["stateSync", "dynamicRegisterStore"]);
-  strictEqual(result.timeline[0]?.kind, "boundary");
-  if (result.timeline[0]?.kind === "boundary") {
-    deepStrictEqual(result.timeline[0].boundary.state.registers.read("esp"), exprConst(0x44));
+  const action = onlyAction(blockWalkActions(result));
+
+  strictEqual(action.kind, "dynamicRegisterStore");
+  deepStrictEqual(result.timeline.map(timelineSiteKind), ["dynamicRegisterStore"]);
+  if (action.kind === "dynamicRegisterStore") {
+    deepStrictEqual(action.stateBefore.registers.read("esp"), exprConst(0x44));
   }
   deepStrictEqual(result.final.registers.read("esp"), exprInput({ kind: "reg", reg: "esp" }));
 });
@@ -467,10 +468,10 @@ test("walk timeline preserves memory guard, load definition, and store order", (
     ]
   });
 
-  deepStrictEqual(
-    result.timeline.map(timelineSiteKind),
-    ["memoryGuard", "exitState", "memoryLoad", "memoryGuard", "exitState", "memoryStore"]
-  );
+	  deepStrictEqual(
+	    result.timeline.map(timelineSiteKind),
+	    ["memoryGuard", "memoryLoad", "memoryGuard", "memoryStore"]
+	  );
 });
 
 test("memory stores become ordered actions", () => {
@@ -547,8 +548,6 @@ function timelineSiteKind(
       return site.action.kind;
     case "definition":
       return site.definition.kind;
-    case "boundary":
-      return site.boundary.kind;
   }
 }
 

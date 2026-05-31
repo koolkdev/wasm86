@@ -15,6 +15,7 @@ import type {
   BlockRootPurpose
 } from "#ir/block/roots.js";
 import type { BlockTimelineSite } from "#ir/block/timeline.js";
+import { BlockState } from "#ir/block/walk/state.js";
 import { opSite } from "#ir/block/walk/index.js";
 import {
   exprBinary,
@@ -167,14 +168,15 @@ function actionValueRoot(
     : Object.freeze({
         kind: "action",
         at,
-        action: Object.freeze({
-          kind,
-          at: actionAt,
-          index: exprConst(0),
-          value: expr,
-          width
-        })
-      });
+	        action: Object.freeze({
+	          kind,
+	          at: actionAt,
+	          index: exprConst(0),
+	          value: expr,
+	          width,
+	          stateBefore: BlockState.initial()
+	        })
+	      });
 
   return Object.freeze({
     expr,

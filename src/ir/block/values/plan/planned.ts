@@ -10,7 +10,7 @@ import {
 import type { ExprNodeId } from "#ir/expr/graph/index.js";
 import type {
   RootValueAnalysis
-} from "./root-analysis.js";
+} from "./analysis.js";
 import type {
   PlannedLifetime,
   PlannedValue,

@@ -6,7 +6,7 @@ import type {
   ExprGraph,
   ExprNodeId
 } from "#ir/expr/graph/index.js";
-import type { ValueRoot } from "./value-roots.js";
+import type { ValueRoot } from "./roots.js";
 
 export type RootValueAnalysis = Readonly<{
   valueRoot: ValueRoot;

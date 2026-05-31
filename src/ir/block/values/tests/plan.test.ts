@@ -1,7 +1,4 @@
 import {
-  readFileSync
-} from "node:fs";
-import {
   deepStrictEqual,
   strictEqual
 } from "node:assert";
@@ -18,15 +15,12 @@ import {
 } from "#ir/block/roots.js";
 import type {
   BlockActionSite,
-  BlockBoundarySite,
   BlockDefinitionSite,
   Placement
 } from "#ir/block/timeline.js";
 import {
   sourceCellForRegisterAlias
 } from "#ir/block/source-cells.js";
-import { RegisterState } from "#ir/block/state/register-state.js";
-import { BlockState } from "#ir/block/walk/state.js";
 import { opSite } from "#ir/block/walk/site.js";
 import {
   exprConst,
@@ -37,15 +31,16 @@ import type { ExprRef } from "#ir/expr/types.js";
 import { registerAlias } from "#x86/registers.js";
 import {
   planBlockValues
-} from "#ir/block/value-plan/plan.js";
+} from "#ir/block/values/plan/plan.js";
 import {
+  producedValueForDefinitionSite,
   producedValuesForDefinitions,
   type ProducedValue
-} from "#ir/block/value-plan/produced-values.js";
+} from "#ir/block/values/plan/produced.js";
 import {
   valueRootsForRoots,
   type ValueRoot
-} from "#ir/block/value-plan/value-roots.js";
+} from "#ir/block/values/plan/roots.js";
 
 test("repeated roots with the same graph key produce one planned value", () => {
   const expr = exprConst(7);
@@ -151,52 +146,6 @@ test("produced values without consumers are omitted", () => {
   deepStrictEqual(plan.produced, []);
 });
 
-test("BlockValuePlan has no captures field", () => {
-  const roots = valueRootsForRoots({
-    roots: [blockRoot({ expr: exprConst(3), opIndex: 2 })]
-  });
-  const plan = planForRoots(roots);
-
-  deepStrictEqual(Object.keys(plan), ["values", "produced", "boundaries"]);
-  strictEqual(Object.hasOwn(plan, "captures"), false);
-});
-
-test("boundary views contain only non-passthrough boundary roots", () => {
-  const site = stateSyncSite({ opIndex: 3, epoch: 0 }, BlockState.initial({
-    registers: RegisterState.initial().write("eax", exprConst(0x11))
-  }));
-  const roots = valueRootsForRoots({ roots: rootsForBlockSites({ timeline: [site] }) });
-  const plan = planForRoots(roots);
-
-  strictEqual(roots.length, 1);
-  deepStrictEqual(plan.boundaries.map((boundary) => ({
-    boundary: boundary.boundary,
-    at: boundary.at,
-    roots: boundary.roots.map((root) =>
-      root.root.purpose.kind === "boundaryCell" ? root.root.purpose.cell : undefined
-    )
-  })), [
-    {
-      boundary: "stateSync",
-      at: { opIndex: 3, epoch: 0 },
-      roots: [{ kind: "reg", reg: "eax" }]
-    }
-  ]);
-});
-
-test("planBlockValues does not extract source effects", () => {
-  const source = readFileSync(new URL("../plan.js", import.meta.url), "utf8");
-  const forbidden = [
-    ["plan", "Source", "Captures"].join(""),
-    ["source", "Effects", "For", "Block", "Sites"].join(""),
-    ["source", "Effects"].join("")
-  ];
-
-  for (const needle of forbidden) {
-    strictEqual(source.includes(needle), false);
-  }
-});
-
 function planForRoots(
   valueRoots: readonly ValueRoot[],
   input: Partial<{
@@ -230,25 +179,7 @@ function producedValue(id: BlockDefinitionId, index: number): ProducedValue {
   const at = { opIndex: index, epoch: 0 };
   const site = memoryLoadSite(at, id);
 
-  return Object.freeze({
-    id,
-    at,
-    site
-  });
-}
-
-function stateSyncSite(
-  at: Placement,
-  state: BlockState
-): BlockBoundarySite {
-  return Object.freeze({
-    kind: "boundary",
-    at,
-    boundary: Object.freeze({
-      kind: "stateSync",
-      state
-    })
-  });
+  return producedValueForDefinitionSite(site);
 }
 
 function memoryLoadSite(

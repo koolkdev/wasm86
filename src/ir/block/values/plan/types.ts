@@ -1,15 +1,12 @@
 import type { ExprDeps } from "#ir/block/expr-deps.js";
-import type {
-  BlockBoundarySite,
-  Placement
-} from "#ir/block/timeline.js";
+import type { Placement } from "#ir/block/timeline.js";
 import type {
   ExprGraph,
   ExprNodeId
 } from "#ir/expr/graph/index.js";
 import type { ExprRef } from "#ir/expr/types.js";
-import type { ValueRoot } from "./value-roots.js";
-import type { ProducedValue } from "./produced-values.js";
+import type { ProducedValue } from "./produced.js";
+import type { ValueRoot } from "./roots.js";
 
 export type BlockValuePlanInput = Readonly<{
   graph: ExprGraph;
@@ -20,7 +17,6 @@ export type BlockValuePlanInput = Readonly<{
 export type BlockValuePlan = Readonly<{
   values: readonly PlannedValue[];
   produced: readonly PlannedProducedValue[];
-  boundaries: readonly PlannedBoundary[];
 }>;
 
 export type PlannedValueId = number & {
@@ -46,11 +42,4 @@ export type PlannedProducedValue = Readonly<{
   inputs: readonly ValueRoot[];
   consumers: readonly ValueRoot[];
   lifetime: PlannedLifetime;
-}>;
-
-export type PlannedBoundary = Readonly<{
-  site: BlockBoundarySite;
-  boundary: "stateSync" | "exitState";
-  at: Placement;
-  roots: readonly ValueRoot[];
 }>;

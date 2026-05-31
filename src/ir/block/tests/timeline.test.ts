@@ -8,16 +8,17 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
-import type { BlockAction } from "#ir/block/actions.js";
+import {
+  exitsForAction,
+  type BlockAction
+} from "#ir/block/actions.js";
 import type { BlockDefinition } from "#ir/block/definitions.js";
 import {
   walkExpressionBlock
 } from "#ir/block/walk/index.js";
 import {
   actionSites,
-  boundarySites,
   definitionSites,
-  type BlockBoundarySite,
   type BlockTimelineSite
 } from "#ir/block/timeline.js";
 import {
@@ -30,7 +31,7 @@ import type {
   VarRef
 } from "#ir/model/types.js";
 
-test("block timeline preserves walk action, definition, and boundary order", () => {
+test("block timeline preserves real action and definition order", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
@@ -45,32 +46,23 @@ test("block timeline preserves walk action, definition, and boundary order", () 
 
   deepStrictEqual(timeline.map(timelineSiteKind), [
     "memoryGuard",
-    "exitState",
     "memoryLoad",
     "memoryGuard",
-    "exitState",
     "memoryStore",
-    "fallthrough",
-    "exitState"
+    "fallthrough"
   ]);
   deepStrictEqual(timeline.map((site) => site.kind), [
     "action",
-    "boundary",
     "definition",
     "action",
-    "boundary",
     "action",
-    "action",
-    "boundary"
+    "action"
   ]);
   deepStrictEqual(timeline.map((site) => site.at), [
     { opIndex: 0, epoch: 0 },
-    { opIndex: 0, epoch: 0 },
     { opIndex: 1, epoch: 0 },
     { opIndex: 2, epoch: 0 },
-    { opIndex: 2, epoch: 0 },
     { opIndex: 3, epoch: 0 },
-    { opIndex: 4, epoch: 0 },
     { opIndex: 4, epoch: 0 }
   ]);
 });
@@ -93,10 +85,6 @@ test("typed timeline selectors preserve order and separate site categories", () 
   ]);
   deepStrictEqual(definitionSites(result.timeline).map((site) => site.definition.kind), [
     "memoryLoad"
-  ]);
-  deepStrictEqual(boundarySites(result.timeline).map((site) => site.boundary.kind), [
-    "exitState",
-    "exitState"
   ]);
 });
 
@@ -130,8 +118,6 @@ test("block timeline carries branch and fallthrough exits", () => {
     ]
   });
   const branch = requireActionSite(branchResult.timeline[0], "branch");
-  const takenBoundary = requireBoundarySite(branchResult.timeline[1], "exitState");
-  const notTakenBoundary = requireBoundarySite(branchResult.timeline[2], "exitState");
 
   strictEqual(branch.kind, "action");
   strictEqual(branch.action.kind, "branch");
@@ -146,12 +132,7 @@ test("block timeline carries branch and fallthrough exits", () => {
     kind: "branch",
     direction: "notTaken"
   });
-  strictEqual(takenBoundary.boundary.exit, branch.action.taken);
-  strictEqual(takenBoundary.boundary.state, branch.action.taken.snapshot);
-  strictEqual(takenBoundary.at, branch.at);
-  strictEqual(notTakenBoundary.boundary.exit, branch.action.notTaken);
-  strictEqual(notTakenBoundary.boundary.state, branch.action.notTaken.snapshot);
-  strictEqual(notTakenBoundary.at, branch.at);
+  deepStrictEqual(exitsForAction(branch.action), [branch.action.taken, branch.action.notTaken]);
 
   const fallthroughResult = walkExpressionBlock({
     block: [
@@ -160,7 +141,6 @@ test("block timeline carries branch and fallthrough exits", () => {
     continuation: exprConst(0x80)
   });
   const fallthrough = requireActionSite(fallthroughResult.timeline[0], "fallthrough");
-  const boundary = requireBoundarySite(fallthroughResult.timeline[1], "exitState");
 
   strictEqual(fallthrough.action.kind, "fallthrough");
   strictEqual(fallthrough.action.exit.kind, "fallthrough");
@@ -168,12 +148,10 @@ test("block timeline carries branch and fallthrough exits", () => {
     kind: "continuation",
     value: exprConst(0x80)
   });
-  strictEqual(boundary.boundary.exit, fallthrough.action.exit);
-  strictEqual(boundary.boundary.state, fallthrough.action.exit.snapshot);
-  strictEqual(boundary.at, fallthrough.at);
+  deepStrictEqual(exitsForAction(fallthrough.action), [fallthrough.action.exit]);
 });
 
-test("exit-producing actions append exitState boundaries from their snapshots", () => {
+test("exit-producing actions expose exit snapshots through action exits", () => {
   const memoryFault = walkFragment({
     block: [
       { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
@@ -181,12 +159,9 @@ test("exit-producing actions append exitState boundaries from their snapshots", 
     ]
   });
   const guard = requireActionSite(memoryFault.timeline[0], "memoryGuard");
-  const guardBoundary = requireBoundarySite(memoryFault.timeline[1], "exitState");
 
-  strictEqual(guardBoundary.boundary.exit, guard.action.faultExit);
-  strictEqual(guardBoundary.boundary.state, guard.action.faultExit.snapshot);
-  strictEqual(guardBoundary.at, guard.at);
-  deepStrictEqual(guardBoundary.boundary.state.registers.read("eax"), exprConst(0x11));
+  deepStrictEqual(exitsForAction(guard.action), [guard.action.faultExit]);
+  deepStrictEqual(guard.action.faultExit.snapshot.registers.read("eax"), exprConst(0x11));
 
   const jumpResult = walkExpressionBlock({
     block: [
@@ -194,11 +169,8 @@ test("exit-producing actions append exitState boundaries from their snapshots", 
     ]
   });
   const jump = requireActionSite(jumpResult.timeline[0], "jump");
-  const jumpBoundary = requireBoundarySite(jumpResult.timeline[1], "exitState");
 
-  strictEqual(jumpBoundary.boundary.exit, jump.action.exit);
-  strictEqual(jumpBoundary.boundary.state, jump.action.exit.snapshot);
-  strictEqual(jumpBoundary.at, jump.at);
+  deepStrictEqual(exitsForAction(jump.action), [jump.action.exit]);
 });
 
 test("block timeline includes dynamic register definitions and actions", () => {
@@ -239,7 +211,7 @@ test("no-explicit-exit blocks expose final state only through walk.final", () =>
   deepStrictEqual(result.final.registers.read("eax"), exprConst(0x55));
 });
 
-test("dynamic register stores sync prior static register state before the dynamic store", () => {
+test("dynamic register stores carry prior static register state on the real action", () => {
   const result = walkFragment({
     block: [
       { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
@@ -249,16 +221,15 @@ test("dynamic register stores sync prior static register state before the dynami
       operands: [dynamicRegBinding(exprConst(4), 32)]
     })
   });
-  const sync = requireBoundarySite(result.timeline[0], "stateSync");
-  const store = requireActionSite(result.timeline[1], "dynamicRegisterStore");
+  const store = requireActionSite(result.timeline[0], "dynamicRegisterStore");
 
-  deepStrictEqual(sync.at, { opIndex: 1, epoch: 0 });
-  deepStrictEqual(store.at, { opIndex: 1, epoch: 1 });
-  deepStrictEqual(sync.boundary.state.registers.read("esp"), exprConst(0x44));
+  deepStrictEqual(result.timeline.map(timelineSiteKind), ["dynamicRegisterStore"]);
+  deepStrictEqual(store.at, { opIndex: 1, epoch: 0 });
+  deepStrictEqual(store.action.stateBefore.registers.read("esp"), exprConst(0x44));
   strictEqual(store.action.kind, "dynamicRegisterStore");
 });
 
-test("dynamic register stores reset later boundary register state", () => {
+test("dynamic register stores reset later exit register state", () => {
   const result = walkFragment({
     block: [
       { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
@@ -270,14 +241,13 @@ test("dynamic register stores reset later boundary register state", () => {
       operands: [dynamicRegBinding(exprConst(4), 32)]
     })
   });
-  requireBoundarySite(result.timeline[0], "stateSync");
-  const store = requireActionSite(result.timeline[1], "dynamicRegisterStore");
-  const fallthrough = requireActionSite(result.timeline[2], "fallthrough");
-  const exit = requireBoundarySite(result.timeline[3], "exitState");
+  const store = requireActionSite(result.timeline[0], "dynamicRegisterStore");
+  const fallthrough = requireActionSite(result.timeline[1], "fallthrough");
 
   strictEqual(store.action.kind, "dynamicRegisterStore");
+  deepStrictEqual(store.action.stateBefore.registers.read("esp"), exprConst(0x44));
   strictEqual(fallthrough.action.kind, "fallthrough");
-  deepStrictEqual(exit.boundary.state.registers.read("esp"), exprInput({ kind: "reg", reg: "esp" }));
+  deepStrictEqual(fallthrough.action.exit.snapshot.registers.read("esp"), exprInput({ kind: "reg", reg: "esp" }));
 });
 
 test("dynamic register stores without preceding sync keep later register state reset", () => {
@@ -291,44 +261,14 @@ test("dynamic register stores without preceding sync keep later register state r
     })
   });
   const store = requireActionSite(result.timeline[0], "dynamicRegisterStore");
-  const exit = requireBoundarySite(result.timeline[2], "exitState");
+  const fallthrough = requireActionSite(result.timeline[1], "fallthrough");
 
   deepStrictEqual(result.timeline.map(timelineSiteKind), [
     "dynamicRegisterStore",
-    "fallthrough",
-    "exitState"
+    "fallthrough"
   ]);
   strictEqual(store.action.kind, "dynamicRegisterStore");
-  deepStrictEqual(exit.boundary.state.registers.read("esp"), exprInput({ kind: "reg", reg: "esp" }));
-});
-
-test("boundary sites carry state snapshots without concrete write plans or backend policy", () => {
-  const result = walkFragment({
-    block: [
-      { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
-      { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x55), accessWidth: 32 }
-    ]
-  });
-  const dynamicStore = walkFragment({
-    block: [
-      { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
-      { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 }
-    ],
-    resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(4), 32)]
-    })
-  });
-  const boundaries = [
-    ...boundarySitesOnly(result.timeline),
-    ...boundarySitesOnly(dynamicStore.timeline)
-  ];
-
-  deepStrictEqual(boundaries.map((site) => site.boundary.kind), ["exitState", "stateSync"]);
-  deepStrictEqual(Object.keys(boundaries[0]!), ["kind", "at", "boundary"]);
-  deepStrictEqual(Object.keys(boundaries[0]!.boundary), ["kind", "exit", "state"]);
-  deepStrictEqual(Object.keys(boundaries[1]!), ["kind", "at", "boundary"]);
-  deepStrictEqual(Object.keys(boundaries[1]!.boundary), ["kind", "state"]);
-  deepStrictEqual(disallowedBoundaryKeys(boundaries), []);
+  deepStrictEqual(fallthrough.action.exit.snapshot.registers.read("esp"), exprInput({ kind: "reg", reg: "esp" }));
 });
 
 test("block timeline placements are stable anchors without Wasm local mechanics", () => {
@@ -340,27 +280,21 @@ test("block timeline placements are stable anchors without Wasm local mechanics"
     ]
   });
   const timeline = result.timeline;
-  const nonExitBoundaryPlacements = timeline.filter((site) =>
-    site.kind !== "boundary" || site.boundary.kind !== "exitState"
-  );
-
   strictEqual(
-    new Set(nonExitBoundaryPlacements.map((site) => `${site.at.opIndex}:${site.at.epoch}`)).size,
-    nonExitBoundaryPlacements.length
+    new Set(timeline.map((site) => `${site.at.opIndex}:${site.at.epoch}`)).size,
+    timeline.length
   );
   deepStrictEqual(disallowedWasmKeys(timeline), []);
 });
 
 function timelineSiteKind(
   site: BlockTimelineSite
-): BlockAction["kind"] | BlockDefinition["kind"] | BlockBoundarySite["boundary"]["kind"] {
+): BlockAction["kind"] | BlockDefinition["kind"] {
   switch (site.kind) {
     case "action":
       return site.action.kind;
     case "definition":
       return site.definition.kind;
-    case "boundary":
-      return site.boundary.kind;
   }
 }
 
@@ -386,25 +320,10 @@ function requireDefinitionSite<TKind extends BlockDefinition["kind"]>(
   return definitionSite;
 }
 
-function requireBoundarySite<TKind extends BlockBoundarySite["boundary"]["kind"]>(
-  site: BlockTimelineSite | undefined,
-  kind: TKind
-): BoundarySiteFor<TKind> {
-  strictEqual(site?.kind, "boundary");
-  const boundarySite = site as BoundarySiteFor<TKind>;
-
-  strictEqual(boundarySite.boundary.kind, kind);
-  return boundarySite;
-}
-
 function walkFragment(
   input: Parameters<typeof walkExpressionBlock>[0]
 ): ReturnType<typeof walkExpressionBlock> {
   return walkExpressionBlock(input);
-}
-
-function boundarySitesOnly(timeline: readonly BlockTimelineSite[]): readonly BlockBoundarySite[] {
-  return timeline.flatMap((site) => site.kind === "boundary" ? [site] : []);
 }
 
 type ActionSiteFor<TKind extends BlockAction["kind"]> =
@@ -415,11 +334,6 @@ type DefinitionSiteFor<TKind extends BlockDefinition["kind"]> =
   Extract<BlockTimelineSite, { kind: "definition" }> &
   Readonly<{ definition: Extract<BlockDefinition, { kind: TKind }> }>;
 
-type BoundarySiteFor<TKind extends BlockBoundarySite["boundary"]["kind"]> =
-  BlockBoundarySite & Readonly<{
-    boundary: Extract<BlockBoundarySite["boundary"], { kind: TKind }>;
-  }>;
-
 function disallowedWasmKeys(value: unknown): readonly string[] {
   const disallowed = new Set([
     "local",
@@ -428,30 +342,6 @@ function disallowedWasmKeys(value: unknown): readonly string[] {
     "localSet",
     "localTee",
     "tee"
-  ]);
-  const seen = new Set<object>();
-  const found = new Set<string>();
-
-  collectDisallowedKeys(value, disallowed, seen, found);
-  return [...found].sort();
-}
-
-function disallowedBoundaryKeys(value: unknown): readonly string[] {
-  const disallowed = new Set([
-    "cellsToWrite",
-    "writes",
-    "stores",
-    "stateOffset",
-    "stateMemoryOffset",
-    "cpuStateOffset",
-    "local",
-    "localIndex",
-    "localGet",
-    "localSet",
-    "localTee",
-    "jitPolicy",
-    "interpreterPolicy",
-    "fallbackPolicy"
   ]);
   const seen = new Set<object>();
   const found = new Set<string>();

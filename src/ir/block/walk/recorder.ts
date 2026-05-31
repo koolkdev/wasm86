@@ -16,7 +16,6 @@ import type { OperandWidth } from "#x86/types.js";
 import type {
   BlockActionSite,
   BlockTimelineSite,
-  BlockBoundarySite,
   BlockDefinitionSite,
   Placement
 } from "#ir/block/timeline.js";
@@ -97,18 +96,6 @@ export class BlockWalkRecorder {
       at,
       action
     } satisfies BlockActionSite));
-    this.#recordExitBoundaries(action, at);
-  }
-
-  stateSync(at: OpSite, state: BlockState): void {
-    this.#timeline.push(Object.freeze({
-      kind: "boundary",
-      at: this.#placement(at),
-      boundary: Object.freeze({
-        kind: "stateSync",
-        state
-      })
-    } satisfies BlockBoundarySite));
   }
 
   #definition(definition: BlockDefinition): void {
@@ -119,40 +106,10 @@ export class BlockWalkRecorder {
     } satisfies BlockDefinitionSite));
   }
 
-  #recordExitBoundaries(action: BlockAction, at: Placement): void {
-    for (const exit of exitsForAction(action)) {
-      this.#timeline.push(Object.freeze({
-        kind: "boundary",
-        at,
-        boundary: Object.freeze({
-          kind: "exitState",
-          exit,
-          state: exit.snapshot
-        })
-      } satisfies BlockBoundarySite));
-    }
-  }
-
   #placement(at: OpSite): Placement {
     const epoch = this.#epochs.get(at.opIndex) ?? 0;
 
     this.#epochs.set(at.opIndex, epoch + 1);
     return Object.freeze({ opIndex: at.opIndex, epoch });
-  }
-}
-
-function exitsForAction(action: BlockAction): readonly BlockExit[] {
-  switch (action.kind) {
-    case "memoryGuard":
-      return [action.faultExit];
-    case "jump":
-    case "hostTrap":
-    case "fallthrough":
-      return [action.exit];
-    case "branch":
-      return [action.taken, action.notTaken];
-    case "memoryStore":
-    case "dynamicRegisterStore":
-      return [];
   }
 }

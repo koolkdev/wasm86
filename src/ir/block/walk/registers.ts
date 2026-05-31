@@ -11,7 +11,6 @@ export class RegisterWalkState {
   readonly #site: () => OpSite;
   readonly #validator: RegisterAccessValidator;
   #registers: RegisterState;
-  #revision = 0;
 
   constructor(input: Readonly<{
     registers: RegisterState;
@@ -25,10 +24,6 @@ export class RegisterWalkState {
 
   get state(): RegisterState {
     return this.#registers;
-  }
-
-  get revision(): number {
-    return this.#revision;
   }
 
   readAlias(reg: RegisterAlias, reason: StaticRegisterReadReason): ExprRef {
@@ -46,13 +41,7 @@ export class RegisterWalkState {
 
     this.#validator.staticWrite(at);
 
-    const nextRegisters = this.#registers.writeAlias(reg, value);
-
-    if (nextRegisters !== this.#registers) {
-      this.#revision += 1;
-    }
-
-    this.#registers = nextRegisters;
+    this.#registers = this.#registers.writeAlias(reg, value);
   }
 
   resetForDynamicRegisterStore(): void {

@@ -194,10 +194,6 @@ function addDefinitionDeps(id: BlockDefinitionId, deps: ExprDepsSet): void {
 function rootOutputWidth(root: BlockRoot): number | undefined {
   const { site, purpose } = root;
 
-  if (purpose.kind === "boundaryCell" && purpose.cell.kind === "flag") {
-    return 1;
-  }
-
   if (purpose.kind !== "actionInput" || purpose.input !== "value" || site.kind !== "action") {
     return undefined;
   }

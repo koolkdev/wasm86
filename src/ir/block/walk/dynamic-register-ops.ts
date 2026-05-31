@@ -12,7 +12,6 @@ export class DynamicRegisterWalkOps {
   readonly #validator: RegisterAccessValidator;
   readonly #site: () => OpSite;
   readonly #snapshot: () => BlockState;
-  #syncedRevision: number;
 
   constructor(input: Readonly<{
     recorder: BlockWalkRecorder;
@@ -26,7 +25,6 @@ export class DynamicRegisterWalkOps {
     this.#validator = input.validator;
     this.#site = input.site;
     this.#snapshot = input.snapshot;
-    this.#syncedRevision = input.registers.revision;
   }
 
   load(index: ExprRef, width: OperandWidth): ExprRef {
@@ -38,11 +36,7 @@ export class DynamicRegisterWalkOps {
 
   store(index: ExprRef, value: ExprRef, width: OperandWidth): void {
     const at = this.#site();
-
-    if (this.#registers.revision !== this.#syncedRevision) {
-      this.#recorder.stateSync(at, this.#snapshot());
-      this.#syncedRevision = this.#registers.revision;
-    }
+    const stateBefore = this.#snapshot();
 
     this.#validator.dynamicStore(at);
     this.#recorder.action(Object.freeze({
@@ -50,7 +44,8 @@ export class DynamicRegisterWalkOps {
       at,
       index,
       value,
-      width
+      width,
+      stateBefore
     }));
     this.#registers.resetForDynamicRegisterStore();
   }

@@ -1,7 +1,6 @@
-import { planBoundaries } from "./boundaries.js";
-import { planValues } from "./planned-values.js";
-import { planProducedValues } from "./produced-values.js";
-import { analyzeValueRoots } from "./root-analysis.js";
+import { analyzeValueRoots } from "./analysis.js";
+import { planValues } from "./planned.js";
+import { planProducedValues } from "./produced.js";
 import type {
   BlockValuePlan,
   BlockValuePlanInput
@@ -10,7 +9,6 @@ import type {
 export type {
   BlockValuePlan,
   BlockValuePlanInput,
-  PlannedBoundary,
   PlannedLifetime,
   PlannedProducedValue,
   PlannedValue,
@@ -23,7 +21,6 @@ export function planBlockValues(input: BlockValuePlanInput): BlockValuePlan {
 
   return Object.freeze({
     values,
-    produced: planProducedValues(input.producedValues, analyses),
-    boundaries: planBoundaries(input.valueRoots)
+    produced: planProducedValues(input.producedValues, analyses)
   });
 }
