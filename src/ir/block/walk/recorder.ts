@@ -30,8 +30,9 @@ export class BlockWalkRecorder {
   readonly #epochs = new Map<number, number>();
   readonly #exits: BlockExit[] = [];
 
-  result(final: BlockState): BlockWalkResult {
+  result(entry: BlockState, final: BlockState): BlockWalkResult {
     return Object.freeze({
+      entry,
       final,
       timeline: Object.freeze([...this.#timeline]),
       exits: Object.freeze([...this.#exits])

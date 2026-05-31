@@ -46,6 +46,7 @@ export function walkExpressionBlock(input: BlockWalkInput): BlockWalkResult {
 
 class ExpressionBlockWalker {
   readonly #block: IrBlock;
+  readonly #entry: BlockState;
   readonly #values: ValueWalkOps;
   readonly #recorder: BlockWalkRecorder;
   readonly #registers: RegisterWalkState;
@@ -65,6 +66,7 @@ class ExpressionBlockWalker {
       : canonicalizeExpr(input.continuation);
 
     this.#block = input.block;
+    this.#entry = entry;
     this.#values = new ValueWalkOps({
       values: input.values,
       value: input.value,
@@ -120,7 +122,7 @@ class ExpressionBlockWalker {
     }
 
     const final = this.#snapshot();
-    return this.#recorder.result(final);
+    return this.#recorder.result(this.#entry, final);
   }
 
   #walkOp(op: IrOp): void {

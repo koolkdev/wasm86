@@ -1,53 +1,77 @@
 import { reg32, type Reg32, type RegisterAlias } from "#x86/types.js";
-import {
-  exprBits,
-  exprInput,
-  exprInsertBits,
-  exprProject
-} from "#ir/expr/builders.js";
+import { exprInput } from "#ir/expr/builders.js";
 import { canonicalizeExpr } from "#ir/expr/canonicalize.js";
 import { exprsEqual } from "#ir/expr/equality.js";
 import type { ExprRef } from "#ir/expr/types.js";
+import {
+  materializeRegisterBase,
+  normalizeRegisterOverlayWrites,
+  readRegisterAlias,
+  registerAliasWrite
+} from "./register-overlays.js";
 
-export type RegisterCell = Readonly<{
-  reg: Reg32;
-  value: ExprRef;
+export {
+  registerMaterializationWrites
+} from "./register-materialization.js";
+export type {
+  RegisterMaterializationWrite
+} from "./register-materialization.js";
+
+const registerStateBrand: unique symbol = Symbol("RegisterState");
+
+type RegisterBaseSnapshot = Readonly<{
+  base: Reg32;
+  baseValue: ExprRef;
+  overlays: readonly ReturnType<typeof registerAliasWrite>[];
 }>;
 
-export class RegisterState {
-  readonly #cells: ReadonlyMap<Reg32, RegisterCell>;
+export interface RegisterState {
+  readonly [registerStateBrand]: true;
+  read(reg: Reg32): ExprRef;
+  readAlias(alias: RegisterAlias): ExprRef;
+  write(reg: Reg32, value: ExprRef): RegisterState;
+  writeAlias(alias: RegisterAlias, value: ExprRef): RegisterState;
+}
 
-  private constructor(cells: ReadonlyMap<Reg32, RegisterCell>) {
-    this.#cells = cells;
+export const RegisterState = Object.freeze({
+  initial(): RegisterState {
+    return RegisterStateImpl.initial();
+  }
+});
+
+class RegisterStateImpl implements RegisterState {
+  readonly [registerStateBrand] = true;
+  readonly #bases: ReadonlyMap<Reg32, RegisterBaseSnapshot>;
+
+  private constructor(bases: ReadonlyMap<Reg32, RegisterBaseSnapshot>) {
+    this.#bases = bases;
     Object.freeze(this);
   }
 
-  static initial(): RegisterState {
-    const cells = new Map<Reg32, RegisterCell>();
+  static initial(): RegisterStateImpl {
+    const bases = new Map<Reg32, RegisterBaseSnapshot>();
 
-    for (const reg of reg32) {
-      cells.set(reg, registerCell(reg, exprInput({ kind: "reg", reg })));
+    for (const base of reg32) {
+      bases.set(base, registerBaseSnapshot({
+        base,
+        baseValue: exprInput({ kind: "reg", reg: base }),
+        overlays: []
+      }));
     }
 
-    return new RegisterState(cells);
+    return new RegisterStateImpl(bases);
   }
 
   read(reg: Reg32): ExprRef {
-    return this.#cellFor(reg).value;
+    const base = this.#baseFor(reg);
+
+    return materializeRegisterBase(base.baseValue, base.overlays);
   }
 
   readAlias(alias: RegisterAlias): ExprRef {
-    const base = this.read(alias.base);
+    const base = this.#baseFor(alias.base);
 
-    if (alias.width === 32) {
-      return base;
-    }
-
-    return canonicalizeExpr(
-      alias.bitOffset === 0
-        ? exprProject(alias.width, base)
-        : exprBits(base, alias.bitOffset, alias.width)
-    );
+    return readRegisterAlias(base.baseValue, base.overlays, alias);
   }
 
   write(reg: Reg32, value: ExprRef): RegisterState {
@@ -57,14 +81,17 @@ export class RegisterState {
       return this;
     }
 
-    return this.#withCell(registerCell(reg, nextValue));
+    return this.#withBase(registerBaseSnapshot({
+      base: reg,
+      baseValue: nextValue,
+      overlays: []
+    }));
   }
 
   writeAlias(alias: RegisterAlias, value: ExprRef): RegisterState {
-    const currentAliasValue = this.readAlias(alias);
     const nextAliasValue = canonicalizeExpr(value);
 
-    if (exprsEqual(currentAliasValue, nextAliasValue)) {
+    if (exprsEqual(this.readAlias(alias), nextAliasValue)) {
       return this;
     }
 
@@ -72,39 +99,47 @@ export class RegisterState {
       return this.write(alias.base, nextAliasValue);
     }
 
-    const nextBaseValue = canonicalizeExpr(
-      exprInsertBits(this.read(alias.base), nextAliasValue, alias.bitOffset, alias.width)
+    const current = this.#baseFor(alias.base);
+    const overlays = normalizeRegisterOverlayWrites(
+      current.overlays,
+      registerAliasWrite(alias, nextAliasValue)
     );
 
-    if (exprsEqual(this.read(alias.base), nextBaseValue)) {
-      return this;
+    return this.#withBase(registerBaseSnapshot({
+      base: current.base,
+      baseValue: current.baseValue,
+      overlays
+    }));
+  }
+
+  baseState(reg: Reg32): RegisterBaseSnapshot {
+    return this.#baseFor(reg);
+  }
+
+  #withBase(base: RegisterBaseSnapshot): RegisterStateImpl {
+    const bases = new Map(this.#bases);
+    bases.set(base.base, base);
+
+    return new RegisterStateImpl(bases);
+  }
+
+  #baseFor(reg: Reg32): RegisterBaseSnapshot {
+    const base = this.#bases.get(reg);
+
+    if (base === undefined) {
+      throw new Error(`register state is missing base snapshot ${reg}`);
     }
 
-    return this.#withCell(registerCell(alias.base, nextBaseValue));
-  }
-
-  cells(): readonly RegisterCell[] {
-    return Object.freeze(reg32.map((reg) => this.#cellFor(reg)));
-  }
-
-  #withCell(cell: RegisterCell): RegisterState {
-    const cells = new Map(this.#cells);
-    cells.set(cell.reg, cell);
-
-    return new RegisterState(cells);
-  }
-
-  #cellFor(reg: Reg32): RegisterCell {
-    const cell = this.#cells.get(reg);
-
-    if (cell === undefined) {
-      throw new Error(`register state is missing base cell ${reg}`);
-    }
-
-    return cell;
+    return base;
   }
 }
 
-function registerCell(reg: Reg32, value: ExprRef): RegisterCell {
-  return Object.freeze({ reg, value: canonicalizeExpr(value) });
+function registerBaseSnapshot(input: RegisterBaseSnapshot): RegisterBaseSnapshot {
+  return Object.freeze({
+    base: input.base,
+    baseValue: canonicalizeExpr(input.baseValue),
+    overlays: Object.freeze(input.overlays.map((write) =>
+      registerAliasWrite(write.reg, write.value)
+    ))
+  });
 }

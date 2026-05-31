@@ -1,9 +1,12 @@
 import type { BlockExit } from "#ir/block/exits.js";
-import type { BlockTimelineSite } from "#ir/block/timeline.js";
+import type { BlockTimeline } from "#ir/block/timeline.js";
 import type { BlockState } from "./state.js";
 
-export type BlockWalkResult = Readonly<{
+export type WalkedBlock = Readonly<{
+  entry: BlockState;
   final: BlockState;
-  timeline: readonly BlockTimelineSite[];
+  timeline: BlockTimeline;
   exits: readonly BlockExit[];
 }>;
+
+export type BlockWalkResult = WalkedBlock;

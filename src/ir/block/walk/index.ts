@@ -16,7 +16,8 @@ export type {
 } from "./state.js";
 
 export type {
-  BlockWalkResult
+  BlockWalkResult,
+  WalkedBlock
 } from "./types.js";
 
 export {

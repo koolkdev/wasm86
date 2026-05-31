@@ -72,7 +72,7 @@ test("ControlWalkOps records branch continuation and shared snapshots", () => {
 
   control.branch(exprConst(1), exprConst(0x40), { kind: "nextEip" });
 
-  const result = recorder.result(snapshot);
+  const result = recorder.result(snapshot, snapshot);
   const action = onlyAction(actionsOf(result.timeline));
 
   strictEqual(action.kind, "branch");
@@ -84,7 +84,7 @@ test("ControlWalkOps records branch continuation and shared snapshots", () => {
 
   site = opSite(4);
   control.fallthrough();
-  strictEqual(actionsOf(recorder.result(snapshot).timeline).length, 2);
+  strictEqual(actionsOf(recorder.result(snapshot, snapshot).timeline).length, 2);
 });
 
 test("FlagWalkOps lowers flag writes and reports undefined conditions with op index", () => {
@@ -164,7 +164,11 @@ function storageHarness(resolver: BindingResolver): Readonly<{
 
   return Object.freeze({
     storage,
-    result: () => recorder.result(BlockState.initial({ registers: registers.state }))
+    result: () => {
+      const state = BlockState.initial({ registers: registers.state });
+
+      return recorder.result(state, state);
+    }
   });
 }
 

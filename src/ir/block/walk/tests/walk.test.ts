@@ -49,6 +49,22 @@ test("shared block walk applies register writes through RegisterState", () => {
   deepStrictEqual(result.timeline, []);
 });
 
+test("shared block walk returns the entry state with final state, timeline, and exits", () => {
+  const entry = BlockState.initial();
+  const result = walkFragment({
+    entry,
+    block: [
+      { op: "next" }
+    ],
+    continuation: exprConst(0x20)
+  });
+
+  strictEqual(result.entry, entry);
+  strictEqual(result.exits.length, 1);
+  deepStrictEqual(result.final.registers.read("eax"), exprInput({ kind: "reg", reg: "eax" }));
+  deepStrictEqual(result.timeline.map(timelineSiteKind), ["fallthrough"]);
+});
+
 test("shared block walk rejects value bindings as write targets", () => {
   throws(
     () => walkFragment({
