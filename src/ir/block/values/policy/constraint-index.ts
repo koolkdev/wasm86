@@ -3,9 +3,10 @@ import {
   type SourceCell
 } from "#ir/block/source-cells.js";
 import {
-  type CellValueTarget,
-  type CellWrite,
+  type CellObservation,
   type Path,
+  programPointBefore,
+  type ProgramPoint,
   type ReadBarrier,
   type SourceBarrierSource,
   type TimelineConstraints
@@ -36,8 +37,7 @@ export type ConstraintIndex = Readonly<{
   constraints: TimelineConstraints;
   pathAncestry: PathAncestry;
   readBarriers: ReadBarrierIndex;
-  valueTargetsByCell: SourceCellIndex<CellValueTarget>;
-  writesByCell: SourceCellIndex<CellWrite>;
+  observationsByCell: SourceCellIndex<CellObservation>;
 }>;
 
 export function buildConstraintIndex(
@@ -47,8 +47,7 @@ export function buildConstraintIndex(
     constraints,
     pathAncestry: buildPathAncestry(constraints.paths.root, constraints.paths.edges),
     readBarriers: indexReadBarriers(constraints.readBarriers),
-    valueTargetsByCell: indexCellItems(constraints.cellValueTargets),
-    writesByCell: indexCellItems(constraints.cellWrites)
+    observationsByCell: indexCellItems(constraints.cellObservations)
   } satisfies ConstraintIndex);
 }
 
@@ -67,22 +66,24 @@ export function pathCoversInConstraints(
   return index.pathAncestry.ancestorIndexesByPathIndex[observedIndex]?.has(candidateIndex) ?? false;
 }
 
-export function cellValueTargetsForCell(
+export function cellObservationsForCell(
   index: ConstraintIndex,
   cell: SourceCell
-): readonly CellValueTarget[] {
-  return indexedCellItems(index.valueTargetsByCell, cell).filter((target) =>
-    sourceCellsOverlap(target.cell, cell)
+): readonly CellObservation[] {
+  return indexedCellItems(index.observationsByCell, cell).filter((observation) =>
+    sourceCellsOverlap(observation.cell, cell)
   );
 }
 
-export function cellWritesForCell(
+export function coveredCellObservations(
   index: ConstraintIndex,
-  cell: SourceCell
-): readonly CellWrite[] {
-  return indexedCellItems(index.writesByCell, cell).filter((write) =>
-    sourceCellsOverlap(write.cell, cell)
-  );
+  cell: SourceCell,
+  at: ProgramPoint
+): readonly CellObservation[] {
+  return Object.freeze(cellObservationsForCell(index, cell).filter((observation) =>
+    pathCoversInConstraints(index, at.path, observation.point.path) &&
+      !programPointBefore(observation.point, at)
+  ));
 }
 
 export function sourceReadBarriersForCell(

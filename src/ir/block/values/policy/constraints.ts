@@ -44,7 +44,7 @@ export type PathTree = Readonly<{
   edges: readonly PathEdge[];
 }>;
 
-export type PathPoint = Readonly<{
+export type ProgramPoint = Readonly<{
   path: Path;
   at: Placement;
   phase: "before" | "at" | "after";
@@ -57,12 +57,11 @@ export type TimelineConstraintsInput = Readonly<{
 export type TimelineConstraints = Readonly<{
   paths: PathTree;
   readBarriers: readonly ReadBarrier[];
-  cellValueTargets: readonly CellValueTarget[];
-  cellWrites: readonly CellWrite[];
+  cellObservations: readonly CellObservation[];
 }>;
 
 export type ReadBarrier = Readonly<{
-  point: PathPoint;
+  point: ProgramPoint;
   domain: ReadBarrierDomain;
   site: BlockTimelineSite;
 }>;
@@ -85,15 +84,8 @@ export type DefinitionReplayDomain =
   | Readonly<{ kind: "memory" }>
   | Readonly<{ kind: "registers" }>;
 
-export type CellValueTarget = Readonly<{
-  point: PathPoint;
-  cell: SourceCell;
-  value: ExprRef;
-  site: BlockTimelineSite;
-}>;
-
-export type CellWrite = Readonly<{
-  point: PathPoint;
+export type CellObservation = Readonly<{
+  point: ProgramPoint;
   cell: SourceCell;
   value: ExprRef;
   site: BlockTimelineSite;
@@ -128,21 +120,6 @@ export function exitPath(exit: BlockExit): Path {
   });
 }
 
-export function pathCovers(
-  tree: PathTree,
-  candidate: Path,
-  observed: Path
-): boolean {
-  if (pathEquals(candidate, observed)) {
-    return true;
-  }
-
-  return tree.edges.some((edge) =>
-    pathEquals(edge.child, observed) &&
-      pathCovers(tree, candidate, edge.parent)
-  );
-}
-
 export function pathEquals(left: Path, right: Path): boolean {
   switch (left.kind) {
     case "root":
@@ -158,11 +135,11 @@ export function pathEquals(left: Path, right: Path): boolean {
   }
 }
 
-export function pathPoint(
+export function programPoint(
   path: Path,
   at: Placement,
-  phase: PathPoint["phase"]
-): PathPoint {
+  phase: ProgramPoint["phase"]
+): ProgramPoint {
   return Object.freeze({
     path,
     at,
@@ -170,7 +147,7 @@ export function pathPoint(
   });
 }
 
-export function comparePathPoints(left: PathPoint, right: PathPoint): number {
+export function compareProgramPoints(left: ProgramPoint, right: ProgramPoint): number {
   const placementOrder = comparePlacement(left.at, right.at);
 
   return placementOrder === 0
@@ -178,16 +155,16 @@ export function comparePathPoints(left: PathPoint, right: PathPoint): number {
     : placementOrder;
 }
 
-export function pathPointBefore(left: PathPoint, right: PathPoint): boolean {
-  return comparePathPoints(left, right) < 0;
+export function programPointBefore(left: ProgramPoint, right: ProgramPoint): boolean {
+  return compareProgramPoints(left, right) < 0;
 }
 
-export function pathPointAfter(left: PathPoint, right: PathPoint): boolean {
-  return comparePathPoints(left, right) > 0;
+export function programPointAfter(left: ProgramPoint, right: ProgramPoint): boolean {
+  return compareProgramPoints(left, right) > 0;
 }
 
-export function pathPointBeforeOrAt(left: PathPoint, right: PathPoint): boolean {
-  return comparePathPoints(left, right) <= 0;
+export function programPointBeforeOrAt(left: ProgramPoint, right: ProgramPoint): boolean {
+  return compareProgramPoints(left, right) <= 0;
 }
 
 export function buildTimelineConstraints(
@@ -203,12 +180,12 @@ export function definitionSiteForConstraints(
   return metadataForConstraints.get(constraints)?.definitions.get(id);
 }
 
-export function pathPointForSite(
+export function programPointForSite(
   constraints: TimelineConstraints,
   site: BlockTimelineSite,
-  phase: PathPoint["phase"]
-): PathPoint {
-  return pathPoint(constraints.paths.root, site.at, phase);
+  phase: ProgramPoint["phase"]
+): ProgramPoint {
+  return programPoint(constraints.paths.root, site.at, phase);
 }
 
 class TimelineConstraintsBuilder {
@@ -217,7 +194,7 @@ class TimelineConstraintsBuilder {
   readonly #exitPaths = new Map<BlockExit["id"], Path>();
   readonly #edges: PathEdge[] = [];
   readonly #readBarriers: ReadBarrier[] = [];
-  readonly #cellValueTargets: CellValueTarget[] = [];
+  readonly #cellObservations: CellObservation[] = [];
   readonly #definitions = new Map<BlockDefinitionId, BlockDefinitionSite>();
 
   constructor(timeline: readonly BlockTimelineSite[]) {
@@ -237,8 +214,7 @@ class TimelineConstraintsBuilder {
     const constraints = Object.freeze({
       paths,
       readBarriers: Object.freeze([...this.#readBarriers]),
-      cellValueTargets: Object.freeze([...this.#cellValueTargets]),
-      cellWrites: Object.freeze([])
+      cellObservations: Object.freeze([...this.#cellObservations])
     } satisfies TimelineConstraints);
 
     metadataForConstraints.set(constraints, Object.freeze({
@@ -292,10 +268,10 @@ class TimelineConstraintsBuilder {
           kind: "definitionReplay",
           domain: Object.freeze({ kind: "registers" })
         }, site));
-        appendStateValueTargets(
-          this.#cellValueTargets,
+        appendStateValueObservations(
+          this.#cellObservations,
           site,
-          pathPoint(point.path, site.at, "before"),
+          programPoint(point.path, site.at, "before"),
           site.action.stateBefore
         );
         return;
@@ -314,17 +290,17 @@ class TimelineConstraintsBuilder {
         break;
     }
 
-    this.#appendExitValueTargets(site);
+    this.#appendExitValueObservations(site);
   }
 
-  #appendExitValueTargets(
+  #appendExitValueObservations(
     site: Extract<BlockTimelineSite, { kind: "action" }>
   ): void {
     for (const exit of exitsForAction(site.action)) {
-      appendStateValueTargets(
-        this.#cellValueTargets,
+      appendStateValueObservations(
+        this.#cellObservations,
         site,
-        pathPoint(this.#exitPaths.get(exit.id) ?? pathForExitSite(site.at, exit), site.at, "at"),
+        programPoint(this.#exitPaths.get(exit.id) ?? pathForExitSite(site.at, exit), site.at, "at"),
         exit.snapshot
       );
     }
@@ -333,37 +309,37 @@ class TimelineConstraintsBuilder {
   #pointForSite(
     paths: PathTree,
     site: BlockTimelineSite,
-    phase: PathPoint["phase"]
-  ): PathPoint {
-    return pathPoint(paths.root, site.at, phase);
+    phase: ProgramPoint["phase"]
+  ): ProgramPoint {
+    return programPoint(paths.root, site.at, phase);
   }
 }
 
-function appendStateValueTargets(
-  targets: CellValueTarget[],
+function appendStateValueObservations(
+  observations: CellObservation[],
   site: BlockTimelineSite,
-  point: PathPoint,
+  point: ProgramPoint,
   state: BlockState
 ): void {
   for (const cell of state.registers.cells()) {
-    targets.push(cellValueTarget(point, sourceCellForRegisterAlias(registerAlias(cell.reg)), cell.value, site));
+    observations.push(cellObservation(point, sourceCellForRegisterAlias(registerAlias(cell.reg)), cell.value, site));
   }
 
   for (const { flag, cell } of state.flags.cells()) {
     const value = exprForFlagCell(cell);
 
     if (value !== undefined) {
-      targets.push(cellValueTarget(point, sourceCellForFlag(flag), value, site));
+      observations.push(cellObservation(point, sourceCellForFlag(flag), value, site));
     }
   }
 }
 
-function cellValueTarget(
-  point: PathPoint,
+function cellObservation(
+  point: ProgramPoint,
   cell: SourceCell,
   value: ExprRef,
   site: BlockTimelineSite
-): CellValueTarget {
+): CellObservation {
   return Object.freeze({
     point,
     cell,
@@ -373,7 +349,7 @@ function cellValueTarget(
 }
 
 function readBarrier(
-  point: PathPoint,
+  point: ProgramPoint,
   domain: ReadBarrierDomain,
   site: BlockTimelineSite
 ): ReadBarrier {
@@ -414,7 +390,7 @@ function exprForFlagCell(
   }
 }
 
-function phaseOrder(phase: PathPoint["phase"]): number {
+function phaseOrder(phase: ProgramPoint["phase"]): number {
   switch (phase) {
     case "before":
       return 0;

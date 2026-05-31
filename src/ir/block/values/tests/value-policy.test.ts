@@ -9,31 +9,41 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import type { BlockAction } from "#ir/block/actions.js";
 import type { BlockDefinitionId } from "#ir/block/definitions.js";
+import type {
+  BlockExit,
+  BlockExitId
+} from "#ir/block/exits.js";
 import {
   sourceCellForRegisterAlias,
   type SourceCell
 } from "#ir/block/source-cells.js";
 import {
+  type BlockActionSite,
   definitionSites,
-  type BlockTimelineSite
+  type BlockTimelineSite,
+  type Placement
 } from "#ir/block/timeline.js";
 import {
   buildTimelineConstraints,
   buildValuePolicyContext,
+  canMaterializeCellAt,
   canUseValueAt,
-  canWriteCellValueTargetAt,
-  pathPoint,
+  programPoint,
   producedValuesForDefinitions
 } from "#ir/block/values/index.js";
 import {
   walkExpressionBlock
 } from "#ir/block/walk/index.js";
+import { opSite } from "#ir/block/walk/site.js";
+import { BlockState } from "#ir/block/walk/state.js";
 import {
   exprConst,
   exprInput,
   exprProject
 } from "#ir/expr/builders.js";
+import type { ExprRef } from "#ir/expr/types.js";
 import type {
   IrValueType,
   ValueRef,
@@ -54,7 +64,7 @@ test("value policy blocks source inputs and definition access across matching ba
   const dynamicContext = buildValuePolicyContext({
     constraints: dynamicConstraints,
     timeline: dynamic.timeline,
-    storeCandidates: []
+    materializationValues: []
   });
   const dynamicStore = onlyActionSite(dynamic.timeline, "dynamicRegisterStore");
   const sourceDecision = canUseValueAt(
@@ -63,7 +73,7 @@ test("value policy blocks source inputs and definition access across matching ba
       kind: "sourceInput",
       source: sourceCellForRegisterAlias(registerAlias("eax"))
     },
-    pathPoint(dynamicConstraints.paths.root, dynamicStore.at, "after")
+    programPoint(dynamicConstraints.paths.root, dynamicStore.at, "after")
   );
 
   strictEqual(sourceDecision.kind, "blocked");
@@ -82,7 +92,7 @@ test("value policy blocks source inputs and definition access across matching ba
   const memoryContext = buildValuePolicyContext({
     constraints: memoryConstraints,
     timeline: memory.timeline,
-    storeCandidates: []
+    materializationValues: []
   });
   const load = onlyDefinitionSite(memory.timeline, "memoryLoad");
   const store = onlyActionSite(memory.timeline, "memoryStore");
@@ -92,7 +102,7 @@ test("value policy blocks source inputs and definition access across matching ba
       kind: "definitionInput",
       definition: load.definition.id
     },
-    pathPoint(memoryConstraints.paths.root, store.at, "after")
+    programPoint(memoryConstraints.paths.root, store.at, "after")
   );
 
   strictEqual(definitionDecision.kind, "blocked");
@@ -115,7 +125,7 @@ test("same-site action inputs are available before the action's barrier is cross
   const dynamicContext = buildValuePolicyContext({
     constraints: dynamicConstraints,
     timeline: dynamic.timeline,
-    storeCandidates: []
+    materializationValues: []
   });
   const dynamicStore = onlyActionSite(dynamic.timeline, "dynamicRegisterStore");
 
@@ -125,7 +135,7 @@ test("same-site action inputs are available before the action's barrier is cross
       kind: "sourceInput",
       source: sourceCellForRegisterAlias(registerAlias("eax"))
     },
-    pathPoint(dynamicConstraints.paths.root, dynamicStore.at, "at")
+    programPoint(dynamicConstraints.paths.root, dynamicStore.at, "at")
   ), { kind: "available" });
 
   const memory = walkExpressionBlock({
@@ -138,7 +148,7 @@ test("same-site action inputs are available before the action's barrier is cross
   const memoryContext = buildValuePolicyContext({
     constraints: memoryConstraints,
     timeline: memory.timeline,
-    storeCandidates: []
+    materializationValues: []
   });
   const load = onlyDefinitionSite(memory.timeline, "memoryLoad");
   const store = onlyActionSite(memory.timeline, "memoryStore");
@@ -149,7 +159,7 @@ test("same-site action inputs are available before the action's barrier is cross
       kind: "definitionInput",
       definition: load.definition.id
     },
-    pathPoint(memoryConstraints.paths.root, store.at, "at")
+    programPoint(memoryConstraints.paths.root, store.at, "at")
   ), { kind: "available" });
 });
 
@@ -163,7 +173,7 @@ test("value policy rejects unknown definition ids", () => {
   const context = buildValuePolicyContext({
     constraints,
     timeline: result.timeline,
-    storeCandidates: []
+    materializationValues: []
   });
 
   throws(() => canUseValueAt(
@@ -172,7 +182,7 @@ test("value policy rejects unknown definition ids", () => {
       kind: "definitionInput",
       definition: 999 as BlockDefinitionId
     },
-    pathPoint(constraints.paths.root, { opIndex: 0, epoch: 0 }, "after")
+    programPoint(constraints.paths.root, { opIndex: 0, epoch: 0 }, "after")
   ), /definition 999 is not present/);
 });
 
@@ -196,11 +206,105 @@ test("value policy context rejects produced values from another block", () => {
     constraints,
     timeline: first.timeline,
     producedValues: staleProducedValues,
-    storeCandidates: []
+    materializationValues: []
   }), /produced value 0 does not match timeline constraint definition site/);
 });
 
-test("value policy rejects cell stores that do not cover the cell value target path", () => {
+test("materialization blocks matching memory-load candidates after memory store barriers", () => {
+  const result = walkExpressionBlock({
+    block: [
+      { op: "get", dst: v(0), source: { kind: "mem", address: c(0x1000) }, accessWidth: 32 },
+      { op: "set", target: { kind: "reg", reg: "eax" }, value: v(0), accessWidth: 32 },
+      { op: "set", target: { kind: "mem", address: c(0x2000) }, value: c(0x55), accessWidth: 32 },
+      { op: "next" }
+    ],
+    continuation: exprConst(0x80)
+  });
+  const constraints = buildTimelineConstraints({ timeline: result.timeline });
+  const load = onlyDefinitionSite(result.timeline, "memoryLoad");
+  const observation = constraints.cellObservations.find((candidate) =>
+    candidate.point.path.kind === "exit" &&
+      cellEquals(candidate.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  );
+
+  if (observation === undefined) {
+    throw new Error("missing fallthrough observation");
+  }
+
+  const value = exprInput({ kind: "def", id: load.definition.id });
+  const context = buildValuePolicyContext({
+    constraints,
+    timeline: result.timeline,
+    materializationValues: [value]
+  });
+
+  deepStrictEqual(observation.value, value);
+
+  const decision = canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
+    value,
+    at: programPoint(constraints.paths.root, observation.point.at, "before")
+  });
+
+  strictEqual(decision.kind, "blocked");
+  if (decision.kind === "blocked") {
+    strictEqual(decision.by.kind, "valueUnavailable");
+    strictEqual(decision.by.decision.kind, "blocked");
+    if (decision.by.decision.kind === "blocked") {
+      strictEqual(decision.by.decision.by.kind, "readBarrier");
+      strictEqual(decision.by.decision.by.barrier.domain.kind, "definitionReplay");
+    }
+  }
+});
+
+test("materialization blocks matching source-register candidates after dynamic register barriers", () => {
+  const result = walkExpressionBlock({
+    block: [
+      { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
+      { op: "next" }
+    ],
+    continuation: exprConst(0x80),
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(exprConst(4), 32)]
+    })
+  });
+  const constraints = buildTimelineConstraints({ timeline: result.timeline });
+  const observation = constraints.cellObservations.find((candidate) =>
+    candidate.point.path.kind === "exit" &&
+      cellEquals(candidate.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  );
+
+  if (observation === undefined) {
+    throw new Error("missing fallthrough observation");
+  }
+
+  const value = exprInput({ kind: "reg", reg: "eax" });
+  const context = buildValuePolicyContext({
+    constraints,
+    timeline: result.timeline,
+    materializationValues: [value]
+  });
+
+  deepStrictEqual(observation.value, value);
+
+  const decision = canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
+    value,
+    at: programPoint(constraints.paths.root, observation.point.at, "before")
+  });
+
+  strictEqual(decision.kind, "blocked");
+  if (decision.kind === "blocked") {
+    strictEqual(decision.by.kind, "valueUnavailable");
+    strictEqual(decision.by.decision.kind, "blocked");
+    if (decision.by.decision.kind === "blocked") {
+      strictEqual(decision.by.decision.by.kind, "readBarrier");
+      strictEqual(decision.by.decision.by.barrier.domain.kind, "source");
+    }
+  }
+});
+
+test("materialization before a branch covers both branch observations", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
@@ -208,14 +312,14 @@ test("value policy rejects cell stores that do not cover the cell value target p
     ]
   });
   const constraints = buildTimelineConstraints({ timeline: result.timeline });
-  const taken = constraints.cellValueTargets.find((target) =>
+  const taken = constraints.cellObservations.find((target) =>
     target.point.path.kind === "branch" &&
       target.point.path.at.opIndex === 1 &&
       target.point.path.at.epoch === 0 &&
       target.point.path.arm === "taken" &&
       cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
   );
-  const notTaken = constraints.cellValueTargets.find((target) =>
+  const notTaken = constraints.cellObservations.find((target) =>
     target.point.path.kind === "branch" &&
       target.point.path.at.opIndex === 1 &&
       target.point.path.at.epoch === 0 &&
@@ -227,26 +331,156 @@ test("value policy rejects cell stores that do not cover the cell value target p
     throw new Error("missing branch exit targets");
   }
 
+  const value = exprProject(32, exprConst(0x11));
+  const context = buildValuePolicyContext({
+    constraints,
+    timeline: result.timeline,
+    materializationValues: [value]
+  });
+
+  const decision = canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
+    value,
+    at: programPoint(constraints.paths.root, taken.point.at, "before")
+  });
+
+  strictEqual(decision.kind, "available");
+  if (decision.kind === "available") {
+    deepStrictEqual(decision.covers, [taken, notTaken]);
+  }
+});
+
+test("conflicting branch observations block hoisting before the branch", () => {
+  const timeline = [
+    branchSite({ opIndex: 1, epoch: 0 }, exprConst(0x11), exprConst(0x22))
+  ];
+  const constraints = buildTimelineConstraints({ timeline });
+  const taken = constraints.cellObservations.find((observation) =>
+    observation.point.path.kind === "branch" &&
+      observation.point.path.arm === "taken" &&
+      cellEquals(observation.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  );
+  const notTaken = constraints.cellObservations.find((observation) =>
+    observation.point.path.kind === "branch" &&
+      observation.point.path.arm === "notTaken" &&
+      cellEquals(observation.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  );
+
+  if (taken === undefined || notTaken === undefined) {
+    throw new Error("missing branch observations");
+  }
+
+  const value = exprConst(0x11);
+  const context = buildValuePolicyContext({
+    constraints,
+    timeline,
+    materializationValues: [value]
+  });
+
+  const decision = canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
+    value,
+    at: programPoint(constraints.paths.root, taken.point.at, "before")
+  });
+
+  strictEqual(decision.kind, "blocked");
+  if (decision.kind === "blocked") {
+    strictEqual(decision.by.kind, "conflictingObservation");
+    strictEqual(decision.by.observation, notTaken);
+  }
+});
+
+test("materialization inside one control region does not cover a sibling region", () => {
+  const result = walkExpressionBlock({
+    block: [
+      { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
+      { op: "conditionalJump", condition: c(1), taken: c(0x40), notTaken: c(0x44) }
+    ]
+  });
+  const constraints = buildTimelineConstraints({ timeline: result.timeline });
+  const taken = constraints.cellObservations.find((observation) =>
+    observation.point.path.kind === "branch" &&
+      observation.point.path.arm === "taken" &&
+      cellEquals(observation.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  );
+  const notTaken = constraints.cellObservations.find((observation) =>
+    observation.point.path.kind === "branch" &&
+      observation.point.path.arm === "notTaken" &&
+      cellEquals(observation.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  );
+
+  if (taken === undefined || notTaken === undefined) {
+    throw new Error("missing branch observations");
+  }
+
   const value = exprConst(0x11);
   const context = buildValuePolicyContext({
     constraints,
     timeline: result.timeline,
-    storeCandidates: [value]
+    materializationValues: [value]
   });
-  const decision = canWriteCellValueTargetAt(
-    context,
-    notTaken,
-    value,
-    pathPoint(taken.point.path, taken.point.at, "before")
-  );
 
-  strictEqual(decision.kind, "blocked");
-  if (decision.kind === "blocked") {
-    strictEqual(decision.by.kind, "pathNotCovered");
+  const decision = canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
+    value,
+    at: programPoint(taken.point.path, taken.point.at, "before")
+  });
+
+  strictEqual(decision.kind, "available");
+  if (decision.kind === "available") {
+    deepStrictEqual(decision.covers, [taken]);
+    strictEqual(decision.covers.includes(notTaken), false);
   }
 });
 
-test("memory-guard passthrough cell value targets block stores before the guard", () => {
+test("memory guard fault observation is covered by materialization before the guard", () => {
+  const result = walkExpressionBlock({
+    block: [
+      { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
+      { op: "next" }
+    ],
+    continuation: exprConst(0x80)
+  });
+  const constraints = buildTimelineConstraints({ timeline: result.timeline });
+  const guard = onlyActionSite(result.timeline, "memoryGuard");
+  const faultTarget = constraints.cellObservations.find((target) =>
+    target.point.path.kind === "exit" &&
+      target.point.path.exit === 0 &&
+      cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  );
+  const fallthroughTarget = constraints.cellObservations.find((target) =>
+    target.point.path.kind === "exit" &&
+      target.point.path.exit === 1 &&
+      cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  );
+
+  if (faultTarget === undefined || fallthroughTarget === undefined) {
+    throw new Error("missing exit targets");
+  }
+
+  deepStrictEqual(faultTarget.value, exprInput({ kind: "reg", reg: "eax" }));
+  deepStrictEqual(fallthroughTarget.value, exprInput({ kind: "reg", reg: "eax" }));
+
+  const value = exprInput({ kind: "reg", reg: "eax" });
+  const context = buildValuePolicyContext({
+    constraints,
+    timeline: result.timeline,
+    materializationValues: [value]
+  });
+
+  const decision = canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
+    value,
+    at: programPoint(constraints.paths.root, guard.at, "before")
+  });
+
+  strictEqual(decision.kind, "available");
+  if (decision.kind === "available") {
+    deepStrictEqual(decision.covers, [faultTarget, fallthroughTarget]);
+  }
+});
+
+test("conflicting memory guard observations block hoisting before the guard", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
@@ -257,12 +491,12 @@ test("memory-guard passthrough cell value targets block stores before the guard"
   });
   const constraints = buildTimelineConstraints({ timeline: result.timeline });
   const guard = onlyActionSite(result.timeline, "memoryGuard");
-  const faultTarget = constraints.cellValueTargets.find((target) =>
+  const faultTarget = constraints.cellObservations.find((target) =>
     target.point.path.kind === "exit" &&
       target.point.path.exit === 0 &&
       cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
   );
-  const fallthroughTarget = constraints.cellValueTargets.find((target) =>
+  const fallthroughTarget = constraints.cellObservations.find((target) =>
     target.point.path.kind === "exit" &&
       target.point.path.exit === 1 &&
       cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
@@ -279,23 +513,23 @@ test("memory-guard passthrough cell value targets block stores before the guard"
   const context = buildValuePolicyContext({
     constraints,
     timeline: result.timeline,
-    storeCandidates: [value]
+    materializationValues: [value]
   });
-  const decision = canWriteCellValueTargetAt(
-    context,
-    fallthroughTarget,
+
+  const decision = canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
     value,
-    pathPoint(constraints.paths.root, guard.at, "before")
-  );
+    at: programPoint(constraints.paths.root, guard.at, "before")
+  });
 
   strictEqual(decision.kind, "blocked");
   if (decision.kind === "blocked") {
-    strictEqual(decision.by.kind, "cellValueTarget");
-    strictEqual(decision.by.target, faultTarget);
+    strictEqual(decision.by.kind, "conflictingObservation");
+    strictEqual(decision.by.observation, faultTarget);
   }
 });
 
-test("value policy allows shared stores across same-value cell value targets", () => {
+test("same value across multiple observations allows hoisting", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
@@ -306,12 +540,12 @@ test("value policy allows shared stores across same-value cell value targets", (
   });
   const constraints = buildTimelineConstraints({ timeline: result.timeline });
   const guard = onlyActionSite(result.timeline, "memoryGuard");
-  const faultTarget = constraints.cellValueTargets.find((target) =>
+  const faultTarget = constraints.cellObservations.find((target) =>
     target.point.path.kind === "exit" &&
       target.point.path.exit === 0 &&
       cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
   );
-  const fallthroughTarget = constraints.cellValueTargets.find((target) =>
+  const fallthroughTarget = constraints.cellObservations.find((target) =>
     target.point.path.kind === "exit" &&
       target.point.path.exit === 1 &&
       cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
@@ -325,20 +559,24 @@ test("value policy allows shared stores across same-value cell value targets", (
   const context = buildValuePolicyContext({
     constraints,
     timeline: result.timeline,
-    storeCandidates: [sharedValue]
+    materializationValues: [sharedValue]
   });
 
   deepStrictEqual(faultTarget.value, exprConst(0x11));
   deepStrictEqual(fallthroughTarget.value, exprConst(0x11));
-  deepStrictEqual(canWriteCellValueTargetAt(
-    context,
-    fallthroughTarget,
-    sharedValue,
-    pathPoint(constraints.paths.root, guard.at, "before")
-  ), { kind: "available" });
+  const decision = canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
+    value: sharedValue,
+    at: programPoint(constraints.paths.root, guard.at, "before")
+  });
+
+  strictEqual(decision.kind, "available");
+  if (decision.kind === "available") {
+    deepStrictEqual(decision.covers, [faultTarget, fallthroughTarget]);
+  }
 });
 
-test("value policy rejects stores that do not match the cell value target", () => {
+test("materialization rejects candidates that do not match covered observations", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
@@ -347,37 +585,37 @@ test("value policy rejects stores that do not match the cell value target", () =
     continuation: exprConst(0x80)
   });
   const constraints = buildTimelineConstraints({ timeline: result.timeline });
-  const target = constraints.cellValueTargets.find((candidate) =>
+  const observation = constraints.cellObservations.find((candidate) =>
     candidate.point.path.kind === "exit" &&
       candidate.point.path.exit === 0 &&
       cellEquals(candidate.cell, sourceCellForRegisterAlias(registerAlias("eax")))
   );
 
-  if (target === undefined) {
-    throw new Error("missing exit target");
+  if (observation === undefined) {
+    throw new Error("missing exit observation");
   }
 
   const value = exprConst(0x22);
   const context = buildValuePolicyContext({
     constraints,
     timeline: result.timeline,
-    storeCandidates: [value]
+    materializationValues: [value]
   });
-  const decision = canWriteCellValueTargetAt(
-    context,
-    target,
+
+  const decision = canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
     value,
-    pathPoint(constraints.paths.root, target.point.at, "before")
-  );
+    at: programPoint(constraints.paths.root, observation.point.at, "before")
+  });
 
   strictEqual(decision.kind, "blocked");
   if (decision.kind === "blocked") {
-    strictEqual(decision.by.kind, "cellValueTarget");
-    strictEqual(decision.by.target, target);
+    strictEqual(decision.by.kind, "conflictingObservation");
+    strictEqual(decision.by.observation, observation);
   }
 });
 
-test("value policy context requires declared store candidates", () => {
+test("value policy context requires declared materialization values", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
@@ -388,43 +626,83 @@ test("value policy context requires declared store candidates", () => {
   });
   const constraints = buildTimelineConstraints({ timeline: result.timeline });
   const guard = onlyActionSite(result.timeline, "memoryGuard");
-  const fallthroughTarget = constraints.cellValueTargets.find((target) =>
-    target.point.path.kind === "exit" &&
-      target.point.path.exit === 1 &&
-      cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
-  );
-
-  if (fallthroughTarget === undefined) {
-    throw new Error("missing fallthrough exit target");
-  }
-
   const candidate = exprConst(0x33);
   const context = buildValuePolicyContext({
     constraints,
     timeline: result.timeline,
-    storeCandidates: [candidate]
+    materializationValues: [candidate]
   });
 
-  strictEqual(canWriteCellValueTargetAt(
-    context,
-    fallthroughTarget,
-    candidate,
-    pathPoint(constraints.paths.root, guard.at, "before")
-  ).kind, "blocked");
+  strictEqual(canMaterializeCellAt(context, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
+    value: candidate,
+    at: programPoint(constraints.paths.root, guard.at, "before")
+  }).kind, "blocked");
 
   const incompleteContext = buildValuePolicyContext({
     constraints,
     timeline: result.timeline,
-    storeCandidates: []
+    materializationValues: []
   });
 
-  throws(() => canWriteCellValueTargetAt(
-    incompleteContext,
-    fallthroughTarget,
-    candidate,
-    pathPoint(constraints.paths.root, guard.at, "before")
-  ), /store candidate expression was not declared in storeCandidates/);
+  throws(() => canMaterializeCellAt(incompleteContext, {
+    cell: sourceCellForRegisterAlias(registerAlias("eax")),
+    value: candidate,
+    at: programPoint(constraints.paths.root, guard.at, "before")
+  }), /materialization value expression was not declared in materializationValues/);
 });
+
+function branchSite(
+  at: Placement,
+  takenEax: ExprRef,
+  notTakenEax: ExprRef
+): BlockActionSite & Readonly<{ action: Extract<BlockAction, { kind: "branch" }> }> {
+  const site = opSite(at.opIndex);
+
+  return Object.freeze({
+    kind: "action",
+    at,
+    action: Object.freeze({
+      kind: "branch",
+      at: site,
+      condition: exprConst(1),
+      takenTarget: exprConst(0x40),
+      continuation: Object.freeze({ kind: "continuation" }),
+      taken: branchExit(0, site, "taken", blockStateWithEax(takenEax)),
+      notTaken: branchExit(1, site, "notTaken", blockStateWithEax(notTakenEax))
+    } satisfies Extract<BlockAction, { kind: "branch" }>)
+  });
+}
+
+function branchExit(
+  id: number,
+  at: ReturnType<typeof opSite>,
+  direction: "taken" | "notTaken",
+  snapshot: BlockState
+): BlockExit {
+  return Object.freeze({
+    id: id as BlockExitId,
+    at,
+    kind: direction === "taken" ? "branchTaken" : "branchNotTaken",
+    snapshot,
+    payload: direction === "taken"
+      ? Object.freeze({
+        kind: "branch",
+        direction,
+        target: exprConst(0x40)
+      })
+      : Object.freeze({
+        kind: "branch",
+        direction
+      })
+  } satisfies BlockExit);
+}
+
+function blockStateWithEax(value: ExprRef): BlockState {
+  const state = BlockState.initial();
+
+  return state.withRegisters(state.registers.write("eax", value));
+}
 
 function cellEquals(left: SourceCell, right: SourceCell): boolean {
   if (left.kind !== right.kind) {

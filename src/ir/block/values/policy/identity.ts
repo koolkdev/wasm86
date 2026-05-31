@@ -9,7 +9,7 @@ import {
 import type { ExprRef } from "#ir/expr/types.js";
 import type { ProducedValue } from "../plan/produced.js";
 import type {
-  CellValueTarget,
+  CellObservation,
   TimelineConstraints
 } from "./constraints.js";
 import {
@@ -17,18 +17,18 @@ import {
   type ValueRoot
 } from "../plan/roots.js";
 
-declare const storeCandidateIdentityBrand: unique symbol;
+declare const materializationValueIdentityBrand: unique symbol;
 
-export type StoreCandidateIdentity = Readonly<{
+export type MaterializationValueIdentity = Readonly<{
   expr: ExprRef;
   id: ExprNodeId;
-  readonly [storeCandidateIdentityBrand]: "StoreCandidateIdentity";
+  readonly [materializationValueIdentityBrand]: "MaterializationValueIdentity";
 }>;
 
 export type ValueIdentity = Readonly<{
   graph: ExprGraph;
-  cellValueTargetValueIds: ReadonlyMap<CellValueTarget, ExprNodeId>;
-  storeCandidatesByValueId: ReadonlyMap<ExprNodeId, StoreCandidateIdentity>;
+  cellObservationValueIds: ReadonlyMap<CellObservation, ExprNodeId>;
+  materializationValuesByValueId: ReadonlyMap<ExprNodeId, MaterializationValueIdentity>;
 }>;
 
 export type ValueIdentityInput = Readonly<{
@@ -36,88 +36,88 @@ export type ValueIdentityInput = Readonly<{
   timeline?: readonly BlockTimelineSite[];
   valueRoots?: readonly ValueRoot[];
   producedValues?: readonly ProducedValue[];
-  /** Expressions that may be queried by canWriteCellValueTargetAt. Missing entries are planner bugs. */
-  storeCandidates: readonly ExprRef[];
+  /** Expressions that may be used as materialization candidate values. Missing entries are planner bugs. */
+  materializationValues: readonly ExprRef[];
 }>;
 
 export function buildValueIdentity(input: ValueIdentityInput): ValueIdentity {
   const expressions = collectIdentityExpressions(input);
   const graph = buildExprGraph(expressions);
-  const cellValueTargetValueIds = new Map<CellValueTarget, ExprNodeId>();
-  const storeCandidatesByValueId = new Map<ExprNodeId, StoreCandidateIdentity>();
+  const cellObservationValueIds = new Map<CellObservation, ExprNodeId>();
+  const materializationValuesByValueId = new Map<ExprNodeId, MaterializationValueIdentity>();
 
-  for (const target of input.constraints.cellValueTargets) {
-    cellValueTargetValueIds.set(target, graph.node(target.value).id);
+  for (const observation of input.constraints.cellObservations) {
+    cellObservationValueIds.set(observation, graph.node(observation.value).id);
   }
 
-  for (const value of input.storeCandidates) {
+  for (const value of input.materializationValues) {
     const id = graph.node(value).id;
 
-    if (!storeCandidatesByValueId.has(id)) {
-      storeCandidatesByValueId.set(id, storeCandidateIdentityValue(value, id));
+    if (!materializationValuesByValueId.has(id)) {
+      materializationValuesByValueId.set(id, materializationValueIdentity(value, id));
     }
   }
 
   return Object.freeze({
     graph,
-    cellValueTargetValueIds: new Map(cellValueTargetValueIds),
-    storeCandidatesByValueId: new Map(storeCandidatesByValueId)
+    cellObservationValueIds: new Map(cellObservationValueIds),
+    materializationValuesByValueId: new Map(materializationValuesByValueId)
   } satisfies ValueIdentity);
 }
 
-export function storeCandidateIdentity(
+export function materializationCandidateIdentity(
   identity: ValueIdentity,
   value: ExprRef
-): StoreCandidateIdentity {
+): MaterializationValueIdentity {
   let id: ExprNodeId;
 
   try {
     id = identity.graph.node(value).id;
   } catch {
-    throw undeclaredStoreCandidateError();
+    throw undeclaredMaterializationValueError();
   }
 
-  const candidate = identity.storeCandidatesByValueId.get(id);
+  const candidate = identity.materializationValuesByValueId.get(id);
 
   if (candidate === undefined) {
-    throw undeclaredStoreCandidateError();
+    throw undeclaredMaterializationValueError();
   }
 
   return candidate;
 }
 
-export function cellValueTargetValueId(
+export function cellObservationValueId(
   identity: ValueIdentity,
-  target: CellValueTarget
+  observation: CellObservation
 ): ExprNodeId {
-  const id = identity.cellValueTargetValueIds.get(target);
+  const id = identity.cellObservationValueIds.get(observation);
 
   if (id === undefined) {
-    throw new Error("cell value target is not present in value identity");
+    throw new Error("cell observation is not present in value identity");
   }
 
   return id;
 }
 
-function storeCandidateIdentityValue(
+function materializationValueIdentity(
   expr: ExprRef,
   id: ExprNodeId
-): StoreCandidateIdentity {
+): MaterializationValueIdentity {
   return Object.freeze({
     expr,
     id
-  }) as StoreCandidateIdentity;
+  }) as MaterializationValueIdentity;
 }
 
-function undeclaredStoreCandidateError(): Error {
-  return new Error("store candidate expression was not declared in storeCandidates");
+function undeclaredMaterializationValueError(): Error {
+  return new Error("materialization value expression was not declared in materializationValues");
 }
 
 function collectIdentityExpressions(input: ValueIdentityInput): readonly ExprRef[] {
   const expressions: ExprRef[] = [];
 
-  for (const target of input.constraints.cellValueTargets) {
-    expressions.push(target.value);
+  for (const observation of input.constraints.cellObservations) {
+    expressions.push(observation.value);
   }
 
   if (input.timeline !== undefined) {
@@ -138,6 +138,6 @@ function collectIdentityExpressions(input: ValueIdentityInput): readonly ExprRef
     }
   }
 
-  expressions.push(...input.storeCandidates);
+  expressions.push(...input.materializationValues);
   return expressions;
 }

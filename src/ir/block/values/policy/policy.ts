@@ -3,33 +3,26 @@ import {
   exprDepsForExpr,
   type ExprDeps
 } from "#ir/block/expr-deps.js";
-import {
-  sourceCellsOverlap,
-  type SourceCell
-} from "#ir/block/source-cells.js";
+import type { SourceCell } from "#ir/block/source-cells.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import type { ProducedValue } from "../plan/produced.js";
 import {
-  pathPoint,
-  pathPointAfter,
-  pathPointBefore,
-  pathPointBeforeOrAt,
-  type CellValueTarget,
-  type CellWrite,
-  type PathPoint,
+  programPoint,
+  programPointAfter,
+  programPointBefore,
+  type CellObservation,
+  type ProgramPoint,
   type ReadBarrier
 } from "./constraints.js";
 import {
-  cellValueTargetsForCell,
-  cellWritesForCell,
   definitionReplayBarriersForDomain,
   sourceReadBarriersForCell,
-  pathCoversInConstraints
+  pathCoversInConstraints,
+  coveredCellObservations as coveredCellObservationsInIndex
 } from "./constraint-index.js";
 import {
-  storeCandidateIdentity,
-  cellValueTargetValueId,
-  type StoreCandidateIdentity
+  materializationCandidateIdentity,
+  cellObservationValueId
 } from "./identity.js";
 import {
   producedValueForDefinition,
@@ -49,16 +42,33 @@ export type AvailabilityBlocker =
   | Readonly<{
       kind: "readBarrier";
       barrier: ReadBarrier;
+    }>;
+
+export type MaterializationCandidate = Readonly<{
+  cell: SourceCell;
+  value: ExprRef;
+  at: ProgramPoint;
+}>;
+
+export type MaterializationDecision =
+  | Readonly<{
+      kind: "available";
+      covers: readonly CellObservation[];
     }>
   | Readonly<{
-      kind: "cellWrite";
-      write: CellWrite;
+      kind: "blocked";
+      by: MaterializationBlocker;
+    }>;
+
+export type MaterializationBlocker =
+  | Readonly<{
+      kind: "valueUnavailable";
+      decision: Extract<AvailabilityDecision, { kind: "blocked" }>;
     }>
   | Readonly<{
-      kind: "cellValueTarget";
-      target: CellValueTarget;
-    }>
-  | Readonly<{ kind: "pathNotCovered" }>;
+      kind: "conflictingObservation";
+      observation: CellObservation;
+    }>;
 
 export type UsableValue =
   | Readonly<{ kind: "sourceInput"; source: SourceCell }>
@@ -68,143 +78,57 @@ export type UsableValue =
 export function canUseValueAt(
   context: ValuePolicyContext,
   value: UsableValue,
-  at: PathPoint
+  at: ProgramPoint
 ): AvailabilityDecision {
   return canUseValueAtWithSeen(valuePolicyContextState(context), value, at, new Set());
 }
 
-export function canWriteCellValueTargetAt(
+export function canMaterializeCellAt(
   context: ValuePolicyContext,
-  target: CellValueTarget,
-  value: ExprRef,
-  writeAt: PathPoint
-): AvailabilityDecision {
+  candidate: MaterializationCandidate
+): MaterializationDecision {
   const state = valuePolicyContextState(context);
-  const candidate = storeCandidateIdentity(state.identity, value);
-
-  const placementDecision = checkStorePlacement(state, target, writeAt);
-
-  if (placementDecision !== undefined) {
-    return placementDecision;
-  }
-
-  const targetDecision = checkStoreTargetValue(state, target, candidate);
-
-  if (targetDecision !== undefined) {
-    return targetDecision;
-  }
-
-  const valueDecision = checkStoreValueAvailability(state, value, writeAt);
-
-  if (valueDecision !== undefined) {
-    return valueDecision;
-  }
-
-  const conflictingTarget = conflictingCellValueTargetForStore(state, target, candidate, writeAt);
-
-  if (conflictingTarget !== undefined) {
-    return blockedByCellValueTarget(conflictingTarget);
-  }
-
-  const write = interveningWriteForStore(state, target, writeAt);
-
-  return write === undefined
-    ? available()
-    : blockedByCellWrite(write);
-}
-
-function checkStorePlacement(
-  context: ValuePolicyContextState,
-  target: CellValueTarget,
-  storeAt: PathPoint
-): AvailabilityDecision | undefined {
-  const observedAt = target.point;
-
-  // If storeAt is on another path, for example the opposite branch exit, the target will never see it.
-  if (!pathCoversInConstraints(context.constraintIndex, storeAt.path, observedAt.path)) {
-    return blockedByPath();
-  }
-
-  // If the write happens after the target point, it is too late to satisfy that target.
-  return pathPointAfter(storeAt, observedAt)
-    ? blockedByPath()
-    : undefined;
-}
-
-function checkStoreTargetValue(
-  context: ValuePolicyContextState,
-  target: CellValueTarget,
-  value: StoreCandidateIdentity
-): AvailabilityDecision | undefined {
-  const targetValueId = cellValueTargetValueId(context.identity, target);
-
-  // The target says which value its cell must contain; reject a write of any other value.
-  return value.id === targetValueId
-    ? undefined
-    : blockedByCellValueTarget(target);
-}
-
-function checkStoreValueAvailability(
-  context: ValuePolicyContextState,
-  value: ExprRef,
-  storeAt: PathPoint
-): AvailabilityDecision | undefined {
-  const decision = canUseValueAtWithSeen(
-    context,
+  const value = materializationCandidateIdentity(state.identity, candidate.value);
+  const valueDecision = canUseValueAtWithSeen(
+    state,
     {
       kind: "expr",
-      expr: value
+      expr: candidate.value
     },
-    storeAt,
+    candidate.at,
     new Set()
   );
 
-  return decision.kind === "blocked"
-    ? decision
-    : undefined;
+  if (valueDecision.kind === "blocked") {
+    return blockedByUnavailableValue(valueDecision);
+  }
+
+  const covered = coveredCellObservationsInIndex(
+    state.constraintIndex,
+    candidate.cell,
+    candidate.at
+  );
+  const conflict = covered.find((observation) =>
+    value.id !== cellObservationValueId(state.identity, observation)
+  );
+
+  return conflict === undefined
+    ? Object.freeze({ kind: "available", covers: covered })
+    : blockedByConflictingObservation(conflict);
 }
 
-function conflictingCellValueTargetForStore(
-  context: ValuePolicyContextState,
-  target: CellValueTarget,
-  value: StoreCandidateIdentity,
-  storeAt: PathPoint
-): CellValueTarget | undefined {
-  const cell = target.cell;
-  const observedAt = target.point;
-
-  // An earlier overlapping target would also see this write, so it must want the same value.
-  return cellValueTargetsForCell(context.constraintIndex, cell).find((candidate) =>
-    sourceCellsOverlap(candidate.cell, cell) &&
-      candidate !== target &&
-      value.id !== cellValueTargetValueId(context.identity, candidate) &&
-      pathCoversInConstraints(context.constraintIndex, storeAt.path, candidate.point.path) &&
-      !pathPointBefore(candidate.point, storeAt) &&
-      pathPointBeforeOrAt(candidate.point, observedAt)
-  );
-}
-
-function interveningWriteForStore(
-  context: ValuePolicyContextState,
-  target: CellValueTarget,
-  storeAt: PathPoint
-): CellWrite | undefined {
-  const cell = target.cell;
-  const observedAt = target.point;
-
-  // A real same-cell write before target would overwrite this write before target sees it.
-  return cellWritesForCell(context.constraintIndex, cell).find((candidate) =>
-    sourceCellsOverlap(candidate.cell, cell) &&
-      pathCoversInConstraints(context.constraintIndex, candidate.point.path, observedAt.path) &&
-      pathPointAfter(candidate.point, storeAt) &&
-      pathPointBeforeOrAt(candidate.point, observedAt)
-  );
+export function coveredCellObservations(
+  context: ValuePolicyContext,
+  cell: SourceCell,
+  at: ProgramPoint
+): readonly CellObservation[] {
+  return coveredCellObservationsInIndex(valuePolicyContextState(context).constraintIndex, cell, at);
 }
 
 function canUseValueAtWithSeen(
   context: ValuePolicyContextState,
   value: UsableValue,
-  at: PathPoint,
+  at: ProgramPoint,
   seenDefinitions: Set<BlockDefinitionId>
 ): AvailabilityDecision {
   switch (value.kind) {
@@ -225,7 +149,7 @@ function canUseValueAtWithSeen(
 function canUseExprAt(
   context: ValuePolicyContextState,
   expr: ExprRef,
-  at: PathPoint,
+  at: ProgramPoint,
   seenDefinitions: Set<BlockDefinitionId>
 ): AvailabilityDecision {
   return canUseExprDepsAt(context, exprDepsForExpr(expr), at, seenDefinitions);
@@ -234,7 +158,7 @@ function canUseExprAt(
 function canUseExprDepsAt(
   context: ValuePolicyContextState,
   deps: ExprDeps,
-  at: PathPoint,
+  at: ProgramPoint,
   seenDefinitions: Set<BlockDefinitionId>
 ): AvailabilityDecision {
   for (const source of deps.sourceCells) {
@@ -264,7 +188,7 @@ function canUseExprDepsAt(
 function canUseProducedValueAt(
   context: ValuePolicyContextState,
   produced: ProducedValue,
-  at: PathPoint,
+  at: ProgramPoint,
   seenDefinitions: Set<BlockDefinitionId>
 ): AvailabilityDecision {
   if (seenDefinitions.has(produced.id)) {
@@ -273,11 +197,11 @@ function canUseProducedValueAt(
 
   seenDefinitions.add(produced.id);
 
-  const origin = pathPoint(context.constraints.paths.root, produced.at, "at");
+  const origin = programPoint(context.constraints.paths.root, produced.at, "at");
   const barrier = definitionReplayBarriersForDomain(context.constraintIndex, produced.access.barrierDomain).find((candidate) =>
       pathCoversInConstraints(context.constraintIndex, candidate.point.path, at.path) &&
-      pathPointAfter(candidate.point, origin) &&
-      pathPointBefore(candidate.point, at)
+      programPointAfter(candidate.point, origin) &&
+      programPointBefore(candidate.point, at)
   );
 
   if (barrier !== undefined) {
@@ -299,7 +223,7 @@ function canUseProducedValueAt(
 function canUseSourceCellAt(
   context: ValuePolicyContextState,
   source: SourceCell,
-  at: PathPoint
+  at: ProgramPoint
 ): AvailabilityDecision {
   const barrier = sourceBarrierFor(source, at, context);
 
@@ -310,24 +234,17 @@ function canUseSourceCellAt(
 
 function sourceBarrierFor(
   source: SourceCell,
-  at: PathPoint,
+  at: ProgramPoint,
   context: ValuePolicyContextState
 ): ReadBarrier | undefined {
   return sourceReadBarriersForCell(context.constraintIndex, source).find((barrier) =>
       pathCoversInConstraints(context.constraintIndex, barrier.point.path, at.path) &&
-      pathPointBefore(barrier.point, at)
+      programPointBefore(barrier.point, at)
   );
 }
 
 function available(): AvailabilityDecision {
   return Object.freeze({ kind: "available" });
-}
-
-function blockedByPath(): AvailabilityDecision {
-  return Object.freeze({
-    kind: "blocked",
-    by: Object.freeze({ kind: "pathNotCovered" })
-  });
 }
 
 function blockedByReadBarrier(
@@ -342,26 +259,26 @@ function blockedByReadBarrier(
   });
 }
 
-function blockedByCellWrite(
-  write: CellWrite
-): AvailabilityDecision {
+function blockedByConflictingObservation(
+  observation: CellObservation
+): MaterializationDecision {
   return Object.freeze({
     kind: "blocked",
     by: Object.freeze({
-      kind: "cellWrite",
-      write
+      kind: "conflictingObservation",
+      observation
     })
   });
 }
 
-function blockedByCellValueTarget(
-  target: CellValueTarget
-): AvailabilityDecision {
+function blockedByUnavailableValue(
+  decision: Extract<AvailabilityDecision, { kind: "blocked" }>
+): MaterializationDecision {
   return Object.freeze({
     kind: "blocked",
     by: Object.freeze({
-      kind: "cellValueTarget",
-      target
+      kind: "valueUnavailable",
+      decision
     })
   });
 }

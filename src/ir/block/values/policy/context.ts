@@ -42,8 +42,8 @@ export type ValuePolicyContextInput = Readonly<{
   timeline?: readonly BlockTimelineSite[];
   valueRoots?: readonly ValueRoot[];
   producedValues?: readonly ProducedValue[];
-  /** Expressions that may be queried by canWriteCellValueTargetAt. Missing entries are planner bugs. */
-  storeCandidates: readonly ExprRef[];
+  /** Expressions that may be used as materialization candidate values. Missing entries are planner bugs. */
+  materializationValues: readonly ExprRef[];
 }>;
 
 export function buildValuePolicyContext(input: ValuePolicyContextInput): ValuePolicyContext {

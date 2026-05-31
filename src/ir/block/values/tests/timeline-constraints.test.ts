@@ -9,15 +9,18 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import {
+  buildConstraintIndex,
+  pathCoversInConstraints
+} from "#ir/block/values/policy/constraint-index.js";
 import type {
   BlockExit,
   BlockExitId
 } from "#ir/block/exits.js";
 import {
   buildTimelineConstraints,
-  pathCovers,
   pathEquals,
-  pathPoint,
+  programPoint,
   type Path
 } from "#ir/block/values/index.js";
 import {
@@ -48,7 +51,7 @@ import type {
 } from "#ir/model/types.js";
 import { registerAlias } from "#x86/registers.js";
 
-test("dynamic-register stores contribute barriers and pending-state cell value targets at the action", () => {
+test("dynamic-register stores contribute barriers and pending-state cell observations at the action", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "reg", reg: "esp" }, value: c(0x44), accessWidth: 32 },
@@ -80,9 +83,9 @@ test("dynamic-register stores contribute barriers and pending-state cell value t
     }
   ]);
 
-  const point = pathPoint(constraints.paths.root, store.at, "before");
+  const point = programPoint(constraints.paths.root, store.at, "before");
   deepStrictEqual(
-    targetSummary(targetFor(constraints.cellValueTargets, point, sourceCellForRegisterAlias(registerAlias("eax")))),
+    observationSummary(observationFor(constraints.cellObservations, point, sourceCellForRegisterAlias(registerAlias("eax")))),
     {
       point,
       cell: sourceCellForRegisterAlias(registerAlias("eax")),
@@ -91,7 +94,7 @@ test("dynamic-register stores contribute barriers and pending-state cell value t
     }
   );
   deepStrictEqual(
-    targetSummary(targetFor(constraints.cellValueTargets, point, sourceCellForRegisterAlias(registerAlias("esp")))),
+    observationSummary(observationFor(constraints.cellObservations, point, sourceCellForRegisterAlias(registerAlias("esp")))),
     {
       point,
       cell: sourceCellForRegisterAlias(registerAlias("esp")),
@@ -100,7 +103,7 @@ test("dynamic-register stores contribute barriers and pending-state cell value t
     }
   );
   deepStrictEqual(
-    targetSummary(targetFor(constraints.cellValueTargets, point, sourceCellForFlag("ZF"))),
+    observationSummary(observationFor(constraints.cellObservations, point, sourceCellForFlag("ZF"))),
     {
       point,
       cell: sourceCellForFlag("ZF"),
@@ -134,7 +137,7 @@ test("memory stores contribute memory replay barriers without source read barrie
   strictEqual(constraints.readBarriers.some((barrier) => barrier.domain.kind === "source"), false);
 });
 
-test("exit-bearing actions contribute path-local cell value targets", () => {
+test("exit-bearing actions contribute path-local cell observations", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
@@ -142,8 +145,9 @@ test("exit-bearing actions contribute path-local cell value targets", () => {
     ]
   });
   const constraints = buildTimelineConstraints({ timeline: result.timeline });
-  const targets = constraints.cellValueTargets.filter((target) =>
-    cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  const index = buildConstraintIndex(constraints);
+  const observations = constraints.cellObservations.filter((observation) =>
+    cellEquals(observation.cell, sourceCellForRegisterAlias(registerAlias("eax")))
   );
 
   deepStrictEqual(result.timeline.map(timelineKind), ["branch"]);
@@ -160,10 +164,10 @@ test("exit-bearing actions contribute path-local cell value targets", () => {
       child: { kind: "branch", at: { opIndex: 1, epoch: 0 }, arm: "notTaken" }
     }
   ]);
-  deepStrictEqual(targets.map((target) => ({
-    path: pathSummary(target.point.path),
-    value: target.value,
-    site: timelineKind(target.site)
+  deepStrictEqual(observations.map((observation) => ({
+    path: pathSummary(observation.point.path),
+    value: observation.value,
+    site: timelineKind(observation.site)
   })), [
     {
       path: { kind: "branch", at: { opIndex: 1, epoch: 0 }, arm: "taken" },
@@ -176,8 +180,8 @@ test("exit-bearing actions contribute path-local cell value targets", () => {
       site: "branch"
     }
   ]);
-  strictEqual(pathCovers(constraints.paths, constraints.paths.root, targets[0]!.point.path), true);
-  strictEqual(pathCovers(constraints.paths, targets[0]!.point.path, targets[1]!.point.path), false);
+  strictEqual(pathCoversInConstraints(index, constraints.paths.root, observations[0]!.point.path), true);
+  strictEqual(pathCoversInConstraints(index, observations[0]!.point.path, observations[1]!.point.path), false);
 });
 
 test("branch paths include timeline epoch to avoid same-op collisions", () => {
@@ -202,7 +206,7 @@ test("branch paths include timeline epoch to avoid same-op collisions", () => {
   }
 });
 
-test("non-branch exits contribute cell value targets on dedicated exit paths", () => {
+test("non-branch exits contribute cell observations on dedicated exit paths", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
@@ -212,15 +216,16 @@ test("non-branch exits contribute cell value targets on dedicated exit paths", (
     continuation: exprConst(0x80)
   });
   const constraints = buildTimelineConstraints({ timeline: result.timeline });
-  const targets = constraints.cellValueTargets.filter((target) =>
-    cellEquals(target.cell, sourceCellForRegisterAlias(registerAlias("eax")))
+  const index = buildConstraintIndex(constraints);
+  const observations = constraints.cellObservations.filter((observation) =>
+    cellEquals(observation.cell, sourceCellForRegisterAlias(registerAlias("eax")))
   );
 
   deepStrictEqual(result.timeline.map(timelineKind), ["memoryGuard", "fallthrough"]);
-  deepStrictEqual(targets.map((target) => ({
-    path: pathSummary(target.point.path),
-    value: target.value,
-    site: timelineKind(target.site)
+  deepStrictEqual(observations.map((observation) => ({
+    path: pathSummary(observation.point.path),
+    value: observation.value,
+    site: timelineKind(observation.site)
   })), [
     {
       path: { kind: "exit", exit: 0, exitKind: "memoryFault" },
@@ -233,36 +238,36 @@ test("non-branch exits contribute cell value targets on dedicated exit paths", (
       site: "fallthrough"
     }
   ]);
-  strictEqual(pathCovers(constraints.paths, constraints.paths.root, targets[0]!.point.path), true);
-  strictEqual(pathCovers(constraints.paths, targets[0]!.point.path, targets[1]!.point.path), false);
-  strictEqual(targets.some((target) => target.point.path === constraints.paths.root), false);
+  strictEqual(pathCoversInConstraints(index, constraints.paths.root, observations[0]!.point.path), true);
+  strictEqual(pathCoversInConstraints(index, observations[0]!.point.path, observations[1]!.point.path), false);
+  strictEqual(observations.some((observation) => observation.point.path === constraints.paths.root), false);
 });
 
-function targetFor(
-  targets: ReturnType<typeof buildTimelineConstraints>["cellValueTargets"],
-  point: ReturnType<typeof pathPoint>,
+function observationFor(
+  observations: ReturnType<typeof buildTimelineConstraints>["cellObservations"],
+  point: ReturnType<typeof programPoint>,
   cell: SourceCell
-): ReturnType<typeof buildTimelineConstraints>["cellValueTargets"][number] {
-  const target = targets.find((candidate) =>
-    samePathPoint(candidate.point, point) &&
+): ReturnType<typeof buildTimelineConstraints>["cellObservations"][number] {
+  const observation = observations.find((candidate) =>
+    sameProgramPoint(candidate.point, point) &&
       cellEquals(candidate.cell, cell)
   );
 
-  if (target === undefined) {
-    throw new Error("missing cell value target");
+  if (observation === undefined) {
+    throw new Error("missing cell observation");
   }
 
-  return target;
+  return observation;
 }
 
-function targetSummary(
-  target: ReturnType<typeof buildTimelineConstraints>["cellValueTargets"][number]
+function observationSummary(
+  observation: ReturnType<typeof buildTimelineConstraints>["cellObservations"][number]
 ): object {
   return {
-    point: target.point,
-    cell: target.cell,
-    value: target.value,
-    site: timelineKind(target.site)
+    point: observation.point,
+    cell: observation.cell,
+    value: observation.value,
+    site: timelineKind(observation.site)
   };
 }
 
@@ -285,9 +290,9 @@ function pathSummary(path: Path): object {
   }
 }
 
-function samePathPoint(
-  left: ReturnType<typeof pathPoint>,
-  right: ReturnType<typeof pathPoint>
+function sameProgramPoint(
+  left: ReturnType<typeof programPoint>,
+  right: ReturnType<typeof programPoint>
 ): boolean {
   return pathEquals(left.path, right.path) &&
     left.at.opIndex === right.at.opIndex &&

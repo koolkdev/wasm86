@@ -19,13 +19,12 @@ export {
   planBlockValues
 } from "./plan/plan.js";
 export type {
-  CellValueTarget,
-  CellWrite,
+  CellObservation,
   DefinitionReplayDomain,
   Path,
   PathEdge,
-  PathPoint,
   PathTree,
+  ProgramPoint,
   ReadBarrier,
   ReadBarrierDomain,
   SourceBarrierSource,
@@ -35,19 +34,22 @@ export type {
 export {
   branchPath,
   buildTimelineConstraints,
-  comparePathPoints,
+  compareProgramPoints,
   exitPath,
-  pathCovers,
   pathEquals,
-  pathPoint,
-  pathPointAfter,
-  pathPointBefore,
-  pathPointBeforeOrAt,
+  programPoint,
+  programPointAfter,
+  programPointBefore,
+  programPointBeforeOrAt,
+  programPointForSite,
   rootPath
 } from "./policy/constraints.js";
 export type {
   AvailabilityDecision,
   AvailabilityBlocker,
+  MaterializationBlocker,
+  MaterializationCandidate,
+  MaterializationDecision,
   UsableValue
 } from "./policy/policy.js";
 export type {
@@ -55,8 +57,9 @@ export type {
   ValuePolicyContextInput
 } from "./policy/context.js";
 export {
-  canUseValueAt,
-  canWriteCellValueTargetAt
+  canMaterializeCellAt,
+  coveredCellObservations,
+  canUseValueAt
 } from "./policy/policy.js";
 export {
   buildValuePolicyContext
