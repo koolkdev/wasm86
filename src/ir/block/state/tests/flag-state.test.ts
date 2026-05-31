@@ -5,11 +5,9 @@ import {
 import { test } from "node:test";
 
 import type { OperandWidth } from "#x86/types.js";
-import { registerAlias } from "#x86/registers.js";
 import { IR_ALU_FLAGS } from "#ir/model/flag-effects.js";
 import type { FlagName } from "#ir/model/flags.js";
 import type { ScalarCompareOp } from "#ir/expr/types.js";
-import { exprDepsForExpr } from "#ir/block/expr-deps.js";
 import {
   exprBinary,
   exprCompare,
@@ -147,15 +145,13 @@ test("INC and DEC semantic writes preserve CF", () => {
   }
 });
 
-test("source-cell analysis conservatively reports parity formula sources", () => {
+test("parity formula uses both input registers", () => {
   const eax = inputReg("eax");
   const ebx = inputReg("ebx");
   const state = FlagState.initial().apply(testFlagWrite(32, eax, ebx));
+  const result = binary("and", project(32, eax), project(32, ebx));
 
-  deepStrictEqual(exprDepsForExpr(exprCellValue(state.read("PF"))).sourceCells, [
-    { kind: "reg", reg: registerAlias("eax") },
-    { kind: "reg", reg: registerAlias("ebx") }
-  ]);
+  deepStrictEqual(exprCellValue(state.read("PF")), parityFlag(result));
 });
 
 test("sign and overflow formulas consume the operation sign bit", () => {
@@ -220,14 +216,16 @@ test("missing direct conditions fall back to current flag-cell composition", () 
 test("condition composition reads only the required flag cells", () => {
   const state = FlagState.initial();
 
-  deepStrictEqual(exprDepsForExpr(definedExpr(state.condition("A"))).sourceCells, [
-    { kind: "flag", flag: "CF" },
-    { kind: "flag", flag: "ZF" }
-  ]);
-  deepStrictEqual(exprDepsForExpr(definedExpr(state.condition("L"))).sourceCells, [
-    { kind: "flag", flag: "SF" },
-    { kind: "flag", flag: "OF" }
-  ]);
+  deepStrictEqual(definedExpr(state.condition("A")), binary(
+    "and",
+    boolNot(exprInput({ kind: "flag", flag: "CF" })),
+    boolNot(exprInput({ kind: "flag", flag: "ZF" }))
+  ));
+  deepStrictEqual(definedExpr(state.condition("L")), binary(
+    "xor",
+    exprInput({ kind: "flag", flag: "SF" }),
+    exprInput({ kind: "flag", flag: "OF" })
+  ));
 });
 
 test("condition composition returns undefined when a required flag is undefined", () => {

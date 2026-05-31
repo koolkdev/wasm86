@@ -6,7 +6,6 @@ import {
 } from "node:assert";
 import { test } from "node:test";
 
-import { rootsForBlockSites } from "#ir/block/roots.js";
 import { walkExpressionBlock } from "#ir/block/walk/index.js";
 import type { BlockDefinition } from "#ir/block/definitions.js";
 import {
@@ -68,30 +67,19 @@ test("ExprGraph closed lookup accepts covered equivalents and rejects new nodes"
   );
 });
 
-test("ExprGraph keeps block-defined value sources stable across BlockRoots", () => {
+test("ExprGraph keeps block-defined value inputs stable", () => {
   const result = walkExpressionBlock({
     block: [
       { op: "get", dst: v(0), source: { kind: "mem", address: c(0x2000) }, accessWidth: 32 },
       { op: "set", target: { kind: "mem", address: c(0x3000) }, value: v(0), accessWidth: 32 }
     ]
   });
-  const roots = rootsForBlockSites({ timeline: result.timeline });
-  const graph = buildExprGraph(roots.map((root) => root.expr));
   const definition = memoryLoadDefinition(result);
   const definitionExpr = exprInput(definition.result);
+  const graph = buildExprGraph([definitionExpr]);
   const freshDefinitionExpr = exprInput({ kind: "def", id: definition.id });
-  const rootExpr = roots.find((root) =>
-    root.expr.kind === "input" &&
-      root.expr.source.kind === "def" &&
-      root.expr.source.id === definition.id
-  )?.expr;
-
-  if (rootExpr === undefined) {
-    throw new Error("missing block-defined root expression");
-  }
 
   strictEqual(graph.node(freshDefinitionExpr), graph.node(definitionExpr));
-  strictEqual(graph.node(rootExpr), graph.node(definitionExpr));
 });
 
 test("ExprGraph child links are stable for every expression kind", () => {
