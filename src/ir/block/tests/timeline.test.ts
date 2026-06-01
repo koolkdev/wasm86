@@ -8,10 +8,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
-import {
-  exitsForAction,
-  type BlockAction
-} from "#ir/block/actions.js";
+import type { BlockAction } from "#ir/block/actions.js";
 import type { BlockDefinition } from "#ir/block/definitions.js";
 import {
   walkExpressionBlock
@@ -132,7 +129,7 @@ test("block timeline carries branch and fallthrough exits", () => {
     kind: "branch",
     direction: "notTaken"
   });
-  deepStrictEqual(exitsForAction(branch.action), [branch.action.taken, branch.action.notTaken]);
+  deepStrictEqual(branchResult.exits, [branch.action.taken, branch.action.notTaken]);
 
   const fallthroughResult = walkExpressionBlock({
     block: [
@@ -148,10 +145,10 @@ test("block timeline carries branch and fallthrough exits", () => {
     kind: "continuation",
     value: exprConst(0x80)
   });
-  deepStrictEqual(exitsForAction(fallthrough.action), [fallthrough.action.exit]);
+  deepStrictEqual(fallthroughResult.exits, [fallthrough.action.exit]);
 });
 
-test("exit-producing actions expose exit snapshots through action exits", () => {
+test("exit-producing actions expose exit snapshots through explicit action fields", () => {
   const memoryFault = walkFragment({
     block: [
       { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x11), accessWidth: 32 },
@@ -160,7 +157,7 @@ test("exit-producing actions expose exit snapshots through action exits", () => 
   });
   const guard = requireActionSite(memoryFault.timeline[0], "memoryGuard");
 
-  deepStrictEqual(exitsForAction(guard.action), [guard.action.faultExit]);
+  deepStrictEqual(memoryFault.exits, [guard.action.faultExit]);
   deepStrictEqual(guard.action.faultExit.snapshot.registers.read("eax"), exprConst(0x11));
 
   const jumpResult = walkExpressionBlock({
@@ -170,7 +167,7 @@ test("exit-producing actions expose exit snapshots through action exits", () => 
   });
   const jump = requireActionSite(jumpResult.timeline[0], "jump");
 
-  deepStrictEqual(exitsForAction(jump.action), [jump.action.exit]);
+  deepStrictEqual(jumpResult.exits, [jump.action.exit]);
 });
 
 test("block timeline includes dynamic register definitions and actions", () => {

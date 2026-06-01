@@ -1,4 +1,3 @@
-import { exitsForAction } from "#ir/block/actions.js";
 import type { BlockActionSite } from "#ir/block/timeline.js";
 import { flagMaterializationWrites } from "#ir/block/state/flag-materialization.js";
 import { RegisterState } from "#ir/block/state/register-state.js";
@@ -89,19 +88,33 @@ class StateObligationAnalyzer {
         throw new Error("timeline geometry is missing points for a walked timeline site");
       }
 
-      if (site.kind === "definition") {
-        continue;
-      }
+      switch (site.kind) {
+        case "definition":
+          break;
+        case "action": {
+          const baseline = this.#baselineForPath(sitePoints.at.path);
 
-      const baseline = this.#baselineForPath(sitePoints.at.path);
-
-      if (site.action.kind === "dynamicRegisterStore") {
-        this.#addDynamicRegisterStoreObligations(baseline, site.action.stateBefore, sitePoints);
-        continue;
-      }
-
-      for (const exit of exitsForAction(site.action)) {
-        this.#addExitStateObligations(site, exit, baseline);
+          switch (site.action.kind) {
+            case "dynamicRegisterStore":
+              this.#addDynamicRegisterStoreObligations(baseline, site.action.stateBefore, sitePoints);
+              break;
+            case "memoryStore":
+              break;
+            case "memoryGuard":
+              this.#addExitStateObligations(site, site.action.faultExit, baseline);
+              break;
+            case "jump":
+            case "hostTrap":
+            case "fallthrough":
+              this.#addExitStateObligations(site, site.action.exit, baseline);
+              break;
+            case "branch":
+              this.#addExitStateObligations(site, site.action.taken, baseline);
+              this.#addExitStateObligations(site, site.action.notTaken, baseline);
+              break;
+          }
+          break;
+        }
       }
     }
 

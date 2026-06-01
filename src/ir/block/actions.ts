@@ -63,19 +63,3 @@ export type BlockAction =
       continuation: BlockContinuation;
       exit: BlockExit;
     }>;
-
-export function exitsForAction(action: BlockAction): readonly BlockExit[] {
-  switch (action.kind) {
-    case "memoryGuard":
-      return Object.freeze([action.faultExit]);
-    case "jump":
-    case "hostTrap":
-    case "fallthrough":
-      return Object.freeze([action.exit]);
-    case "branch":
-      return Object.freeze([action.taken, action.notTaken]);
-    case "memoryStore":
-    case "dynamicRegisterStore":
-      return Object.freeze([]);
-  }
-}

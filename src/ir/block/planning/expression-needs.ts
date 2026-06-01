@@ -66,13 +66,15 @@ class ExpressionNeedAnalyzer {
 
   analyze(): ExprNeeds {
     for (const site of this.#walked.timeline) {
-      if (site.kind === "definition") {
-        this.#collectDefinitionInputNeeds(site);
-        continue;
+      switch (site.kind) {
+        case "definition":
+          this.#collectDefinitionInputNeeds(site);
+          break;
+        case "action":
+          this.#collectActionInputNeeds(site);
+          this.#collectExitPayloadNeeds(site);
+          break;
       }
-
-      this.#collectActionInputNeeds(site);
-      this.#collectExitPayloadNeeds(site);
     }
 
     this.#collectStateObligationNeeds();
