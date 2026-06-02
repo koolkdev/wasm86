@@ -11,24 +11,33 @@ import type {
   ProgramPoint,
   TimelineGeometry
 } from "./geometry/index.js";
-import type { StateObligations } from "./state-obligations.js";
+import type {
+  StateObligationId,
+  StateObligations
+} from "./state-obligations.js";
 
 export type ExprNeedId = number & { readonly __exprNeedId: unique symbol };
 
 export type ExprNeeds = Readonly<{
   needs: readonly ExprNeed[];
+  valueNeedByObligation: ReadonlyMap<StateObligationId, ExprNeedId>;
 }>;
 
 export type ExprNeed = Readonly<{
   id: ExprNeedId;
   expr: ExprRef;
   point: ProgramPoint;
-  reason:
-    | "action-input"
-    | "definition-input"
-    | "exit-payload"
-    | "state-obligation-value";
+  origin: ExprNeedOrigin;
 }>;
+
+export type ExprNeedOrigin =
+  | Readonly<{ kind: "action-input" }>
+  | Readonly<{ kind: "definition-input" }>
+  | Readonly<{ kind: "exit-payload" }>
+  | Readonly<{
+      kind: "state-obligation-value";
+      obligation: StateObligationId;
+    }>;
 
 export type ExpressionNeedsInput = Readonly<{
   walked: Pick<WalkedBlock, "timeline">;
@@ -57,6 +66,7 @@ class ExpressionNeedAnalyzer {
   readonly #obligations: StateObligations;
   readonly #ids = new ExprNeedIds();
   readonly #needs: ExprNeed[] = [];
+  readonly #valueNeedByObligation = new Map<StateObligationId, ExprNeedId>();
 
   constructor(input: ExpressionNeedsInput) {
     this.#walked = input.walked;
@@ -80,7 +90,8 @@ class ExpressionNeedAnalyzer {
     this.#collectStateObligationNeeds();
 
     return Object.freeze({
-      needs: Object.freeze([...this.#needs])
+      needs: Object.freeze([...this.#needs]),
+      valueNeedByObligation: Object.freeze(new Map(this.#valueNeedByObligation))
     });
   }
 
@@ -89,10 +100,10 @@ class ExpressionNeedAnalyzer {
 
     switch (site.definition.kind) {
       case "memoryLoad":
-        this.#addNeed(site.definition.address, point, "definition-input");
+        this.#addNeed(site.definition.address, point, { kind: "definition-input" });
         break;
       case "dynamicRegisterLoad":
-        this.#addNeed(site.definition.index, point, "definition-input");
+        this.#addNeed(site.definition.index, point, { kind: "definition-input" });
         break;
     }
   }
@@ -102,18 +113,18 @@ class ExpressionNeedAnalyzer {
 
     switch (site.action.kind) {
       case "memoryGuard":
-        this.#addNeed(site.action.address, point, "action-input");
+        this.#addNeed(site.action.address, point, { kind: "action-input" });
         break;
       case "memoryStore":
-        this.#addNeed(site.action.address, point, "action-input");
-        this.#addNeed(site.action.value, point, "action-input");
+        this.#addNeed(site.action.address, point, { kind: "action-input" });
+        this.#addNeed(site.action.value, point, { kind: "action-input" });
         break;
       case "dynamicRegisterStore":
-        this.#addNeed(site.action.index, point, "action-input");
-        this.#addNeed(site.action.value, point, "action-input");
+        this.#addNeed(site.action.index, point, { kind: "action-input" });
+        this.#addNeed(site.action.value, point, { kind: "action-input" });
         break;
       case "branch":
-        this.#addNeed(site.action.condition, point, "action-input");
+        this.#addNeed(site.action.condition, point, { kind: "action-input" });
         break;
       case "jump":
       case "hostTrap":
@@ -143,7 +154,7 @@ class ExpressionNeedAnalyzer {
 
         this.#addPayloadNeed(site.action.taken.payload, taken.point);
         if (site.action.continuation.value !== undefined) {
-          this.#addNeed(site.action.continuation.value, notTaken.point, "exit-payload");
+          this.#addNeed(site.action.continuation.value, notTaken.point, { kind: "exit-payload" });
         }
         break;
       }
@@ -151,7 +162,7 @@ class ExpressionNeedAnalyzer {
         const exitPoint = this.#exitPoint(site.action.exit, site);
 
         if (site.action.continuation.value !== undefined) {
-          this.#addNeed(site.action.continuation.value, exitPoint.point, "exit-payload");
+          this.#addNeed(site.action.continuation.value, exitPoint.point, { kind: "exit-payload" });
         }
         break;
       }
@@ -164,7 +175,16 @@ class ExpressionNeedAnalyzer {
   #collectStateObligationNeeds(): void {
     for (const obligation of this.#obligations.obligations) {
       if (obligation.write.value !== undefined) {
-        this.#addNeed(obligation.write.value, obligation.point, "state-obligation-value");
+        const need = this.#addNeed(
+          obligation.write.value,
+          obligation.point,
+          {
+            kind: "state-obligation-value",
+            obligation: obligation.id
+          }
+        );
+
+        this.#valueNeedByObligation.set(obligation.id, need.id);
       }
     }
   }
@@ -172,18 +192,18 @@ class ExpressionNeedAnalyzer {
   #addPayloadNeed(payload: BlockExit["payload"], point: ProgramPoint): void {
     switch (payload.kind) {
       case "memoryFault":
-        this.#addNeed(payload.address, point, "exit-payload");
+        this.#addNeed(payload.address, point, { kind: "exit-payload" });
         break;
       case "jump":
-        this.#addNeed(payload.target, point, "exit-payload");
+        this.#addNeed(payload.target, point, { kind: "exit-payload" });
         break;
       case "branch":
         if (payload.direction === "taken") {
-          this.#addNeed(payload.target, point, "exit-payload");
+          this.#addNeed(payload.target, point, { kind: "exit-payload" });
         }
         break;
       case "hostTrap":
-        this.#addNeed(payload.vector, point, "exit-payload");
+        this.#addNeed(payload.vector, point, { kind: "exit-payload" });
         break;
       case "fallthrough":
         break;
@@ -228,12 +248,15 @@ class ExpressionNeedAnalyzer {
     return exitPoint;
   }
 
-  #addNeed(expr: ExprRef, point: ProgramPoint, reason: ExprNeed["reason"]): void {
-    this.#needs.push(Object.freeze({
+  #addNeed(expr: ExprRef, point: ProgramPoint, origin: ExprNeedOrigin): ExprNeed {
+    const need = Object.freeze({
       id: this.#ids.next(),
       expr,
       point,
-      reason
-    } satisfies ExprNeed));
+      origin: Object.freeze({ ...origin })
+    } satisfies ExprNeed);
+
+    this.#needs.push(need);
+    return need;
   }
 }

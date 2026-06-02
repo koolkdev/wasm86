@@ -471,7 +471,10 @@ function analyzeBlock(
   const walked = walkExpressionBlock({ ...input, block });
   const geometry = buildTimelineGeometry(walked);
   const facts = analyzeBarrierFacts({ walked, geometry });
-  const needs = Object.freeze({ needs: Object.freeze([...makeNeeds({ geometry, facts })]) });
+  const needs = Object.freeze({
+    needs: Object.freeze([...makeNeeds({ geometry, facts })]),
+    valueNeedByObligation: Object.freeze(new Map())
+  });
 
   return {
     geometry,
@@ -495,7 +498,7 @@ function need(value: number, expr: ExprRef, point: ExprNeed["point"]): ExprNeed 
     id: id(value),
     expr,
     point,
-    reason: "action-input"
+    origin: Object.freeze({ kind: "action-input" })
   } satisfies ExprNeed);
 }
 

@@ -13,6 +13,7 @@ import {
   analyzeStateObligations,
   buildTimelineGeometry,
   type ExprNeed,
+  type ExprNeeds,
   type StateObligation
 } from "#ir/block/planning/index.js";
 import {
@@ -39,8 +40,8 @@ test("memory store creates address and value action-input needs", () => {
   const store = geometry.memory.writes[0]!;
 
   deepStrictEqual(needSummaries(needs), [
-    { reason: "action-input", expr: exprConst(0x1000) },
-    { reason: "action-input", expr: exprConst(0x55) }
+    { origin: { kind: "action-input" }, expr: exprConst(0x1000) },
+    { origin: { kind: "action-input" }, expr: exprConst(0x55) }
   ]);
   strictEqual(needs[0]!.point, store.point);
   strictEqual(needs[1]!.point, store.point);
@@ -53,8 +54,8 @@ test("memory guard creates action-site and fault-exit address needs", () => {
   const guard = geometry.memory.guards[0]!;
 
   deepStrictEqual(needSummaries(needs), [
-    { reason: "action-input", expr: exprConst(0x1000) },
-    { reason: "exit-payload", expr: exprConst(0x1000) }
+    { origin: { kind: "action-input" }, expr: exprConst(0x1000) },
+    { origin: { kind: "exit-payload" }, expr: exprConst(0x1000) }
   ]);
   strictEqual(needs[0]!.point, guard.point);
   strictEqual(needs[1]!.point, guard.faultExitPoint.point);
@@ -72,7 +73,7 @@ test("memory load creates address definition-input need", () => {
   const load = geometry.definitions.points[0]!;
 
   deepStrictEqual(needSummaries(needs), [
-    { reason: "definition-input", expr: exprConst(0x1000) }
+    { origin: { kind: "definition-input" }, expr: exprConst(0x1000) }
   ]);
   strictEqual(needs[0]!.point, load.point);
 });
@@ -103,9 +104,9 @@ test("dynamic register load and store create index and value needs", () => {
   const store = geometry.registers.dynamicStores[0]!;
 
   deepStrictEqual(needSummaries(needs), [
-    { reason: "definition-input", expr: exprConst(3) },
-    { reason: "action-input", expr: exprConst(4) },
-    { reason: "action-input", expr: exprConst(0x55) }
+    { origin: { kind: "definition-input" }, expr: exprConst(3) },
+    { origin: { kind: "action-input" }, expr: exprConst(4) },
+    { origin: { kind: "action-input" }, expr: exprConst(0x55) }
   ]);
   strictEqual(needs[0]!.point, load.point);
   strictEqual(needs[1]!.point, store.point);
@@ -126,9 +127,9 @@ test("branch creates condition and path-specific exit payload needs", () => {
   const notTaken = geometry.exits.points.find((point) => point.exit.kind === "branchNotTaken")!;
 
   deepStrictEqual(needSummaries(needs), [
-    { reason: "action-input", expr: exprConst(1) },
-    { reason: "exit-payload", expr: exprConst(0x40) },
-    { reason: "exit-payload", expr: exprConst(0x44) }
+    { origin: { kind: "action-input" }, expr: exprConst(1) },
+    { origin: { kind: "exit-payload" }, expr: exprConst(0x40) },
+    { origin: { kind: "exit-payload" }, expr: exprConst(0x44) }
   ]);
   strictEqual(needs[0]!.point, branchSite.at);
   strictEqual(needs[1]!.point, taken.point);
@@ -143,13 +144,13 @@ test("jump, host trap, and fallthrough create exit-payload needs only", () => {
   });
 
   deepStrictEqual(needSummaries(jump.needs), [
-    { reason: "exit-payload", expr: exprConst(0x80) }
+    { origin: { kind: "exit-payload" }, expr: exprConst(0x80) }
   ]);
   deepStrictEqual(needSummaries(hostTrap.needs), [
-    { reason: "exit-payload", expr: exprConst(0x13) }
+    { origin: { kind: "exit-payload" }, expr: exprConst(0x13) }
   ]);
   deepStrictEqual(needSummaries(fallthrough.needs), [
-    { reason: "exit-payload", expr: exprConst(0x90) }
+    { origin: { kind: "exit-payload" }, expr: exprConst(0x90) }
   ]);
   strictEqual(jump.needs[0]!.point, jump.geometry.exits.points[0]!.point);
   strictEqual(hostTrap.needs[0]!.point, hostTrap.geometry.exits.points[0]!.point);
@@ -157,7 +158,7 @@ test("jump, host trap, and fallthrough create exit-payload needs only", () => {
 });
 
 test("state obligations create concrete value needs and skip undefined flags", () => {
-  const { needs, obligations } = analyzeBlock([
+  const { needs, obligations, valueNeedByObligation } = analyzeBlock([
     { op: "set", target: { kind: "reg", reg: "eax" }, value: c(0x22) },
     {
       op: "flags.write",
@@ -170,11 +171,26 @@ test("state obligations create concrete value needs and skip undefined flags", (
   ]);
 
   deepStrictEqual(needSummaries(needs), [
-    { reason: "state-obligation-value", expr: exprConst(0x22) },
-    { reason: "state-obligation-value", expr: exprConst(1) }
+    {
+      origin: {
+        kind: "state-obligation-value",
+        obligation: obligations[0]!.id
+      },
+      expr: exprConst(0x22)
+    },
+    {
+      origin: {
+        kind: "state-obligation-value",
+        obligation: obligations[1]!.id
+      },
+      expr: exprConst(1)
+    }
   ]);
   strictEqual(needs[0]!.point, obligations[0]!.point);
   strictEqual(needs[1]!.point, obligations[1]!.point);
+  strictEqual(valueNeedByObligation.get(obligations[0]!.id), needs[0]!.id);
+  strictEqual(valueNeedByObligation.get(obligations[1]!.id), needs[1]!.id);
+  strictEqual(valueNeedByObligation.has(obligations[2]!.id), false);
 });
 
 function analyzeBlock(
@@ -184,21 +200,24 @@ function analyzeBlock(
   geometry: ReturnType<typeof buildTimelineGeometry>;
   obligations: readonly StateObligation[];
   needs: readonly ExprNeed[];
+  valueNeedByObligation: ExprNeeds["valueNeedByObligation"];
 }> {
   const walked = walkExpressionBlock({ ...input, block });
   const geometry = buildTimelineGeometry(walked);
   const obligations = analyzeStateObligations({ walked, geometry });
+  const needs = analyzeExpressionNeeds({ walked, geometry, obligations });
 
   return {
     geometry,
     obligations: obligations.obligations,
-    needs: analyzeExpressionNeeds({ walked, geometry, obligations }).needs
+    needs: needs.needs,
+    valueNeedByObligation: needs.valueNeedByObligation
   };
 }
 
 function needSummaries(needs: readonly ExprNeed[]): readonly unknown[] {
   return needs.map((need) => ({
-    reason: need.reason,
+    origin: need.origin,
     expr: need.expr
   }));
 }
