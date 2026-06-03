@@ -1,4 +1,7 @@
-import type { StateTarget } from "#ir/block/state/targets.js";
+import {
+  stateTargetsEqual,
+  type StateTarget
+} from "#ir/block/state/targets.js";
 import type { ExprNeeds } from "./expression-needs.js";
 import type { ProgramPoint } from "./geometry/index.js";
 import type {
@@ -7,6 +10,7 @@ import type {
   StateObligations
 } from "./state-obligations.js";
 import type {
+  ExprRecipeId,
   ExprRecipe,
   ValuePlan
 } from "./values/index.js";
@@ -15,6 +19,7 @@ export type StateWriteId = number & { readonly __stateWriteId: unique symbol };
 
 export type StateWritePlan = Readonly<{
   writes: readonly PlannedStateWrite[];
+  groups: readonly EquivalentStateWriteGroup[];
 }>;
 
 export type PlannedStateWrite = Readonly<{
@@ -23,7 +28,13 @@ export type PlannedStateWrite = Readonly<{
   point: ProgramPoint;
   target: StateTarget;
   value: ExprRecipe | undefined;
+  valueRecipeId: ExprRecipeId | undefined;
   reason: StateObligation["reason"];
+}>;
+
+export type EquivalentStateWriteGroup = Readonly<{
+  representative: PlannedStateWrite;
+  writes: readonly PlannedStateWrite[];
 }>;
 
 export type StateWritePlanInput = Readonly<{
@@ -60,15 +71,18 @@ class StateWriteAnalyzer {
   }
 
   analyze(): StateWritePlan {
+    const writes = Object.freeze(this.#obligations.obligations.map((obligation) =>
+      this.#plannedWrite(obligation)
+    ));
+
     return Object.freeze({
-      writes: Object.freeze(this.#obligations.obligations.map((obligation) =>
-        this.#plannedWrite(obligation)
-      ))
+      writes,
+      groups: groupEquivalentStateWrites(writes)
     } satisfies StateWritePlan);
   }
 
   #plannedWrite(obligation: StateObligation): PlannedStateWrite {
-    const value = obligation.write.value === undefined
+    const valuePlan = obligation.write.value === undefined
       ? this.#undefinedValue(obligation)
       : this.#recipeForConcreteValue(obligation);
 
@@ -77,7 +91,8 @@ class StateWriteAnalyzer {
       obligation: obligation.id,
       point: obligation.point,
       target: obligation.write.target,
-      value,
+      value: valuePlan?.recipe,
+      valueRecipeId: valuePlan?.recipeId,
       reason: obligation.reason
     } satisfies PlannedStateWrite);
   }
@@ -90,10 +105,17 @@ class StateWriteAnalyzer {
     return undefined;
   }
 
-  #recipeForConcreteValue(obligation: StateObligation): ExprRecipe {
+  #recipeForConcreteValue(obligation: StateObligation): Readonly<{
+    recipe: ExprRecipe;
+    recipeId: ExprRecipeId;
+  }> {
     const value = obligation.write.value;
 
     if (value === undefined) {
+      if (obligation.write.target.kind === "reg") {
+        throw new Error(`register state obligation ${obligation.id} has no value expression`);
+      }
+
       throw new Error("concrete state write recipe requested for an undefined value");
     }
 
@@ -103,12 +125,47 @@ class StateWriteAnalyzer {
       throw new Error(`state obligation ${obligation.id} has no expression need for its value`);
     }
 
-    const recipe = this.#values.recipeByNeed.get(needId);
+    const recipe = this.#values.recipes.recipeForNeed(needId);
 
     if (recipe === undefined) {
       throw new Error(`state obligation ${obligation.id} expression need ${needId} has no recipe`);
     }
 
-    return recipe;
+    const recipeId = this.#values.recipes.recipeIdForNeed(needId);
+
+    if (recipeId === undefined) {
+      throw new Error(`state obligation ${obligation.id} expression need ${needId} has no recipe id`);
+    }
+
+    return Object.freeze({ recipe, recipeId });
   }
+}
+
+function groupEquivalentStateWrites(
+  writes: readonly PlannedStateWrite[]
+): readonly EquivalentStateWriteGroup[] {
+  const groups: PlannedStateWrite[][] = [];
+
+  for (const write of writes) {
+    const existing = groups.find((group) => writesShareGroup(group[0]!, write));
+
+    if (existing === undefined) {
+      groups.push([write]);
+    } else {
+      existing.push(write);
+    }
+  }
+
+  return Object.freeze(groups.map((group) => Object.freeze({
+    representative: group[0]!,
+    writes: Object.freeze([...group])
+  } satisfies EquivalentStateWriteGroup)));
+}
+
+function writesShareGroup(
+  left: PlannedStateWrite,
+  right: PlannedStateWrite
+): boolean {
+  return stateTargetsEqual(left.target, right.target) &&
+    left.valueRecipeId === right.valueRecipeId;
 }

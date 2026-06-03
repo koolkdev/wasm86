@@ -278,6 +278,28 @@ test("ValuePlan computes a mixed-time expression from saved and definition child
   const dynamicStore = geometry.registers.dynamicStores[0]!;
   const topRecipe = recipe(plan, 0);
   const savedInput = plan.savedExprs[0]!;
+  const equivalentTopRecipe = Object.freeze({
+    kind: "compute",
+    expr: exprBinary(
+      "add",
+      exprInput({ kind: "reg", reg: "eax" }),
+      exprInput({ kind: "def", id: definition.id })
+    ),
+    children: Object.freeze([
+      Object.freeze({
+        kind: "saved-expr",
+        saved: savedInput.id
+      } satisfies ExprRecipe),
+      Object.freeze({
+        kind: "definition",
+        definition: definition.id,
+        input: Object.freeze({
+          kind: "inline",
+          expr: exprConst(0x1000)
+        } satisfies ExprRecipe)
+      } satisfies ExprRecipe)
+    ])
+  } satisfies ExprRecipe);
 
   strictEqual(topRecipe.kind, "compute");
   deepStrictEqual(topRecipe.expr, exprBinary(
@@ -301,6 +323,7 @@ test("ValuePlan computes a mixed-time expression from saved and definition child
   ]);
   deepStrictEqual(savedInput.expr, exprInput({ kind: "reg", reg: "eax" }));
   strictEqual(savedInput.saveAt, dynamicStore.point);
+  strictEqual(plan.recipes.recipeId(equivalentTopRecipe), recipeId(plan, 0));
 });
 
 test("ValuePlan reuses saved expressions only for semantic availability", () => {
@@ -411,6 +434,29 @@ test("ValuePlan uses expression graph identity for saved-expression reuse", () =
   deepStrictEqual(recipe(plan, 1), { kind: "saved-expr", saved: saved.id });
 });
 
+test("ValuePlan assigns the same recipe id to structurally equivalent inline recipes", () => {
+  const { plan } = analyzeBlock([
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x1000) },
+      value: c(0x11),
+      accessWidth: 32
+    }
+  ], ({ geometry }) => [
+    need(0, exprBinary("add", exprConst(1), exprConst(2)), geometry.memory.writes[0]!.point),
+    need(1, exprBinary("add", exprConst(1), exprConst(2)), geometry.memory.writes[0]!.point)
+  ]);
+
+  strictEqual(recipeId(plan, 0), recipeId(plan, 1));
+  strictEqual(
+    plan.recipes.recipeId({
+      kind: "inline",
+      expr: exprBinary("add", exprConst(1), exprConst(2))
+    }),
+    recipeId(plan, 0)
+  );
+});
+
 test("ValuePlan applies root-path barriers to branch-path expression needs", () => {
   const { geometry, plan } = analyzeBlock([
     {
@@ -450,7 +496,7 @@ test("ValuePlan exposes no carried-input planning API on its output", () => {
     need(0, geometry.memory.writes[0]!.site.action.value, geometry.memory.writes[0]!.point)
   ]);
 
-  deepStrictEqual(Object.keys(plan).sort(), ["recipeByNeed", "savedExprs"]);
+  deepStrictEqual(Object.keys(plan).sort(), ["recipes", "savedExprs"]);
   strictEqual(Object.hasOwn(plan, "SavedInput"), false);
   strictEqual(Object.hasOwn(plan, "InputLeafUse"), false);
   strictEqual(Object.hasOwn(plan, "carried"), false);
@@ -484,10 +530,20 @@ function analyzeBlock(
 }
 
 function recipe(plan: ValuePlan, value: number): ExprRecipe {
-  const found = plan.recipeByNeed.get(id(value));
+  const found = plan.recipes.recipeForNeed(id(value));
 
   if (found === undefined) {
     throw new Error(`missing recipe for need ${value}`);
+  }
+
+  return found;
+}
+
+function recipeId(plan: ValuePlan, value: number): NonNullable<ReturnType<ValuePlan["recipes"]["recipeId"]>> {
+  const found = plan.recipes.recipeIdForNeed(id(value));
+
+  if (found === undefined) {
+    throw new Error(`missing recipe id for need ${value}`);
   }
 
   return found;

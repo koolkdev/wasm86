@@ -1,8 +1,9 @@
 import type { BlockDefinitionId } from "#ir/block/definitions.js";
-import type {
-  Barrier,
-  BarrierFacts,
-  DefinitionResult
+import {
+  blockingBarrierForDefinitionReplay,
+  type Barrier,
+  type BarrierFacts,
+  type DefinitionResult
 } from "#ir/block/planning/barrier-facts.js";
 import {
   compareProgramPoints,
@@ -24,10 +25,10 @@ type CachedBlocker = SaveBlocker | null;
 type BarrierPathIndex = ReadonlyMap<Path, readonly Barrier[]>;
 
 export class ValueBarrierIndex {
+  readonly #facts: BarrierFacts;
   readonly #geometry: TimelineGeometry;
   readonly #definitions = new Map<BlockDefinitionId, DefinitionResult>();
   readonly #dynamicRegisterBarriersByPath: BarrierPathIndex;
-  readonly #memoryWriteBarriersByPath: BarrierPathIndex;
   readonly #sourceRegisterBlockerByUse = new Map<ProgramPoint, CachedBlocker>();
   readonly #definitionReplayBlockerByUse = new Map<BlockDefinitionId, Map<ProgramPoint, CachedBlocker>>();
 
@@ -35,6 +36,7 @@ export class ValueBarrierIndex {
     facts: BarrierFacts;
     geometry: TimelineGeometry;
   }>) {
+    this.#facts = input.facts;
     this.#geometry = input.geometry;
 
     for (const definition of input.facts.definitions) {
@@ -45,9 +47,6 @@ export class ValueBarrierIndex {
     // keep that order for firstBarrierIndexAfter's binary search.
     this.#dynamicRegisterBarriersByPath = indexBarriersByEffectPath(
       input.facts.barriers.filter((barrier) => barrier.kind === "dynamic-register-store")
-    );
-    this.#memoryWriteBarriersByPath = indexBarriersByEffectPath(
-      input.facts.barriers.filter((barrier) => barrier.kind === "memory-write")
     );
   }
 
@@ -89,10 +88,7 @@ export class ValueBarrierIndex {
   }
 
   #definitionReplayBlocker(definition: DefinitionResult, use: ProgramPoint): SaveBlocker | undefined {
-    const barriers = definition.domain === "memory"
-      ? this.#memoryWriteBarriersByPath
-      : this.#dynamicRegisterBarriersByPath;
-    const barrier = this.#firstCrossedBarrierAfter(barriers, definition.point, use);
+    const barrier = blockingBarrierForDefinitionReplay(this.#facts, definition, use);
 
     if (barrier !== undefined) {
       return Object.freeze({

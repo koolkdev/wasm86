@@ -228,6 +228,22 @@ test("StateWritePlan follows snapshot-delta order rather than attempted write or
   ]);
 });
 
+test("StateWritePlan groups equivalent writes by StateTarget and ExprRecipe identity", () => {
+  const { stateWrites } = analyzeBlock([
+    { op: "set", target: { kind: "reg", reg: "eax" }, value: c(1) },
+    { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
+    { op: "next" }
+  ]);
+
+  strictEqual(stateWrites.writes.length, 2);
+  strictEqual(stateWrites.groups.length, 1);
+  strictEqual(stateWrites.groups[0]!.representative, stateWrites.writes[0]);
+  deepStrictEqual(
+    stateWrites.groups[0]!.writes.map((write) => write.id),
+    stateWrites.writes.map((write) => write.id)
+  );
+});
+
 function analyzeBlock(
   block: IrBlock,
   input: Omit<BlockWalkInput, "block"> = {}
@@ -277,7 +293,7 @@ function recipeForWrite(
     throw new Error(`state write ${write.id} has no matching expression need`);
   }
 
-  const recipe = values.recipeByNeed.get(need);
+  const recipe = values.recipes.recipeForNeed(need);
 
   if (recipe === undefined) {
     throw new Error(`state write ${write.id} has no matching expression recipe`);

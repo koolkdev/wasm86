@@ -7,6 +7,7 @@ import {
   definitionExpr,
   type BlockDefinitionId
 } from "#ir/block/definitions.js";
+import type { StateTarget } from "#ir/block/state/targets.js";
 import type { WalkedBlock } from "#ir/block/walk/types.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import {
@@ -52,24 +53,29 @@ export function analyzeBarrierFacts(input: BarrierFactsInput): BarrierFacts {
   return new BarrierFactAnalyzer(input).analyze();
 }
 
-export function barriersCrossedBeforeUse(
-  facts: BarrierFacts,
-  from: ProgramPoint,
-  use: ProgramPoint
-): readonly Barrier[] {
-  return Object.freeze(facts.barriers.filter((barrier) =>
-    compareProgramPoints(from, barrier.effectPoint) < 0 &&
-    compareProgramPoints(barrier.effectPoint, use) < 0
-  ));
-}
-
 export function blockingBarrierForDefinitionReplay(
   facts: BarrierFacts,
   definition: DefinitionResult,
   use: ProgramPoint
 ): Barrier | undefined {
-  return barriersCrossedBeforeUse(facts, definition.point, use)
-    .find((barrier) => barrierBlocksDefinition(barrier, definition));
+  return blockingBarrierBetween(
+    facts,
+    definition.point,
+    use,
+    (barrier) => barrierBlocksDefinition(barrier, definition)
+  );
+}
+
+export function latestBlockingBarrierBeforeStateWrite(
+  facts: BarrierFacts,
+  target: StateTarget,
+  point: ProgramPoint
+): Barrier | undefined {
+  return latestBlockingBarrierBefore(
+    facts,
+    point,
+    (barrier) => barrierBlocksStateWrite(barrier, target)
+  );
 }
 
 class BarrierFactAnalyzer {
@@ -179,11 +185,56 @@ class BarrierFactAnalyzer {
   }
 }
 
+function blockingBarrierBetween(
+  facts: BarrierFacts,
+  from: ProgramPoint,
+  to: ProgramPoint,
+  predicate: (barrier: Barrier) => boolean
+): Barrier | undefined {
+  return facts.barriers.find((barrier) =>
+    compareProgramPoints(from, barrier.effectPoint) < 0 &&
+    compareProgramPoints(barrier.effectPoint, to) < 0 &&
+    predicate(barrier)
+  );
+}
+
+function latestBlockingBarrierBefore(
+  facts: BarrierFacts,
+  point: ProgramPoint,
+  predicate: (barrier: Barrier) => boolean
+): Barrier | undefined {
+  let latest: Barrier | undefined;
+
+  for (const barrier of facts.barriers) {
+    if (
+      compareProgramPoints(barrier.effectPoint, point) < 0 &&
+      predicate(barrier) &&
+      (
+        latest === undefined ||
+        compareProgramPoints(latest.effectPoint, barrier.effectPoint) < 0
+      )
+    ) {
+      latest = barrier;
+    }
+  }
+
+  return latest;
+}
+
 function barrierBlocksDefinition(barrier: Barrier, definition: DefinitionResult): boolean {
   switch (definition.domain) {
     case "memory":
       return barrier.kind === "memory-write";
     case "registers":
       return barrier.kind === "dynamic-register-store";
+  }
+}
+
+function barrierBlocksStateWrite(barrier: Barrier, target: StateTarget): boolean {
+  switch (target.kind) {
+    case "reg":
+      return barrier.kind === "dynamic-register-store";
+    case "flag":
+      return false;
   }
 }

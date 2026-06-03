@@ -10,16 +10,15 @@ import {
 } from "#ir/block/bindings/resolver.js";
 import {
   analyzeBarrierFacts,
-  barriersCrossedBeforeUse,
   blockingBarrierForDefinitionReplay,
   buildTimelineGeometry,
+  latestBlockingBarrierBeforeStateWrite,
   type BarrierFacts
 } from "#ir/block/planning/index.js";
 import {
   type BlockWalkInput,
   walkExpressionBlock
 } from "#ir/block/walk/index.js";
-import type { BlockTimelineSite } from "#ir/block/timeline.js";
 import {
   exprConst,
   exprInput
@@ -30,6 +29,7 @@ import type {
   ValueRef,
   VarRef
 } from "#ir/model/types.js";
+import { registerAlias } from "#x86/registers.js";
 
 test("memoryStore creates a memory-write barrier effect after its inputs", () => {
   const { facts, geometry } = analyzeBlock([
@@ -156,13 +156,44 @@ test("blockingBarrierForDefinitionReplay skips non-matching barriers and finds t
     })
   });
   const definition = facts.definitions[0]!;
-  const usePoint = geometry.points.bySite.get(fallthroughSite(geometry.points.bySite.keys()))!.at;
+  const fallthrough = geometry.exits.points.find((point) => point.exit.kind === "fallthrough")!;
 
-  deepStrictEqual(
-    barriersCrossedBeforeUse(facts, definition.point, usePoint).map((barrier) => barrier.kind),
-    ["dynamic-register-store", "memory-write", "memory-write"]
+  strictEqual(
+    blockingBarrierForDefinitionReplay(facts, definition, fallthrough.point),
+    facts.barriers[1]
   );
-  strictEqual(blockingBarrierForDefinitionReplay(facts, definition, usePoint), facts.barriers[1]);
+});
+
+test("blockingBarrierForDefinitionReplay blocks register definitions across dynamic-register-store barriers", () => {
+  const { facts, geometry } = analyzeBlock([
+    {
+      op: "get",
+      dst: v(0),
+      source: { kind: "operand", index: 0 },
+      accessWidth: 32
+    },
+    {
+      op: "set",
+      target: { kind: "operand", index: 1 },
+      value: c(1),
+      accessWidth: 32
+    },
+    { op: "next" }
+  ], {
+    resolver: new BindingResolver({
+      operands: [
+        dynamicRegBinding(exprConst(3), 32),
+        dynamicRegBinding(exprConst(4), 32)
+      ]
+    })
+  });
+  const definition = facts.definitions[0]!;
+  const fallthrough = geometry.exits.points.find((point) => point.exit.kind === "fallthrough")!;
+
+  strictEqual(
+    blockingBarrierForDefinitionReplay(facts, definition, fallthrough.point),
+    facts.barriers[0]
+  );
 });
 
 test("memoryStore barrier does not block definitions used by that store's inputs", () => {
@@ -185,7 +216,6 @@ test("memoryStore barrier does not block definitions used by that store's inputs
 
   deepStrictEqual(store.site.action.address, definition.result);
   deepStrictEqual(store.site.action.value, definition.result);
-  deepStrictEqual(barriersCrossedBeforeUse(facts, definition.point, store.point), []);
   strictEqual(blockingBarrierForDefinitionReplay(facts, definition, store.point), undefined);
 });
 
@@ -218,8 +248,120 @@ test("dynamicRegisterStore barrier does not block definitions used by that store
   deepStrictEqual(definition.result, firstDefinitionResult);
   deepStrictEqual(store.site.action.index, firstDefinitionResult);
   deepStrictEqual(store.site.action.value, firstDefinitionResult);
-  deepStrictEqual(barriersCrossedBeforeUse(facts, definition.point, store.point), []);
   strictEqual(blockingBarrierForDefinitionReplay(facts, definition, store.point), undefined);
+});
+
+test("latestBlockingBarrierBeforeStateWrite blocks register writes across dynamic-register-store barriers", () => {
+  const { facts, geometry } = analyzeBlock([
+    {
+      op: "set",
+      target: { kind: "operand", index: 0 },
+      value: c(0x55),
+      accessWidth: 32
+    },
+    { op: "next" }
+  ], {
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(exprConst(3), 32)]
+    })
+  });
+  const fallthrough = geometry.exits.points.find((point) => point.exit.kind === "fallthrough")!;
+
+  strictEqual(
+    latestBlockingBarrierBeforeStateWrite(
+      facts,
+      { kind: "reg", reg: registerAlias("eax") },
+      fallthrough.point
+    ),
+    facts.barriers[0]
+  );
+  strictEqual(
+    latestBlockingBarrierBeforeStateWrite(
+      facts,
+      { kind: "flag", flag: "CF" },
+      fallthrough.point
+    ),
+    undefined
+  );
+});
+
+test("latestBlockingBarrierBeforeStateWrite returns the newest matching blocker before a write point", () => {
+  const { facts, geometry } = analyzeBlock([
+    {
+      op: "set",
+      target: { kind: "operand", index: 0 },
+      value: c(0x11),
+      accessWidth: 32
+    },
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x1000) },
+      value: c(0x22),
+      accessWidth: 32
+    },
+    {
+      op: "set",
+      target: { kind: "operand", index: 1 },
+      value: c(0x33),
+      accessWidth: 32
+    },
+    { op: "next" }
+  ], {
+    resolver: new BindingResolver({
+      operands: [
+        dynamicRegBinding(exprConst(3), 32),
+        dynamicRegBinding(exprConst(4), 32)
+      ]
+    })
+  });
+  const fallthrough = geometry.exits.points.find((point) => point.exit.kind === "fallthrough")!;
+
+  strictEqual(
+    latestBlockingBarrierBeforeStateWrite(
+      facts,
+      { kind: "reg", reg: registerAlias("eax") },
+      fallthrough.point
+    ),
+    facts.barriers[2]
+  );
+  strictEqual(
+    latestBlockingBarrierBeforeStateWrite(
+      facts,
+      { kind: "flag", flag: "CF" },
+      fallthrough.point
+    ),
+    undefined
+  );
+});
+
+test("latestBlockingBarrierBeforeStateWrite does not treat memory writes as StateTarget blockers", () => {
+  const { facts, geometry } = analyzeBlock([
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x1000) },
+      value: c(0x55),
+      accessWidth: 32
+    },
+    { op: "next" }
+  ]);
+  const fallthrough = geometry.exits.points.find((point) => point.exit.kind === "fallthrough")!;
+
+  strictEqual(
+    latestBlockingBarrierBeforeStateWrite(
+      facts,
+      { kind: "reg", reg: registerAlias("eax") },
+      fallthrough.point
+    ),
+    undefined
+  );
+  strictEqual(
+    latestBlockingBarrierBeforeStateWrite(
+      facts,
+      { kind: "flag", flag: "CF" },
+      fallthrough.point
+    ),
+    undefined
+  );
 });
 
 test("BarrierFacts exposes only barriers and definitions", () => {
@@ -259,16 +401,6 @@ function analyzeBlock(
     facts: analyzeBarrierFacts({ walked, geometry }),
     geometry
   };
-}
-
-function fallthroughSite(sites: Iterable<BlockTimelineSite>): BlockTimelineSite {
-  for (const site of sites) {
-    if (site.kind === "action" && site.action.kind === "fallthrough") {
-      return site;
-    }
-  }
-
-  throw new Error("missing fallthrough site");
 }
 
 function v(id: number): VarRef {

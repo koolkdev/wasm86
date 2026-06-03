@@ -17,6 +17,7 @@ import {
 } from "#ir/expr/graph/index.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import { ValueBarrierIndex, type SaveBlocker } from "./barriers.js";
+import { RecipeRegistry } from "./recipes.js";
 import { SavedExprRegistry } from "./saves.js";
 import type {
   ExprRecipe,
@@ -39,12 +40,14 @@ class ValuePlanAnalyzer {
   readonly #needs: ExprNeeds;
   readonly #graph: ExprGraph;
   readonly #barriers: ValueBarrierIndex;
+  readonly #recipes: RecipeRegistry;
   readonly #saves = new SavedExprRegistry();
   readonly #memo = new Map<ExprNodeId, Map<ProgramPoint, ExprRecipe>>();
 
   constructor(input: ValuePlanInput) {
     this.#needs = input.needs;
     this.#graph = buildExprGraph(expressionGraphRoots(input));
+    this.#recipes = new RecipeRegistry(this.#graph);
     this.#barriers = new ValueBarrierIndex({
       facts: input.facts,
       geometry: input.geometry
@@ -52,18 +55,16 @@ class ValuePlanAnalyzer {
   }
 
   analyze(): ValuePlan {
-    const recipeByNeed = new Map<ExprNeedId, ExprRecipe>();
-
     for (const need of this.#needs.needs) {
       const recipe = this.#analyzeExpr(need.expr, need.point, need.id);
 
       this.#saves.recordRecipeUse(recipe, need.id);
-      recipeByNeed.set(need.id, recipe);
+      this.#recipes.recordNeedRecipe(need.id, recipe);
     }
 
     return Object.freeze({
       savedExprs: this.#saves.finalize(),
-      recipeByNeed: Object.freeze(recipeByNeed)
+      recipes: this.#recipes
     } satisfies ValuePlan);
   }
 
