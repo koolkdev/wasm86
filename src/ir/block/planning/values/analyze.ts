@@ -17,7 +17,7 @@ import {
 } from "#ir/expr/graph/index.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import { ValueBarrierIndex, type SaveBlocker } from "./barriers.js";
-import { RecipeRegistry } from "./recipes.js";
+import { MutableRecipeRegistry } from "./recipes.js";
 import { SavedExprRegistry } from "./saves.js";
 import type {
   ExprRecipe,
@@ -40,14 +40,14 @@ class ValuePlanAnalyzer {
   readonly #needs: ExprNeeds;
   readonly #graph: ExprGraph;
   readonly #barriers: ValueBarrierIndex;
-  readonly #recipes: RecipeRegistry;
+  readonly #recipes: MutableRecipeRegistry;
   readonly #saves = new SavedExprRegistry();
   readonly #memo = new Map<ExprNodeId, Map<ProgramPoint, ExprRecipe>>();
 
   constructor(input: ValuePlanInput) {
     this.#needs = input.needs;
     this.#graph = buildExprGraph(expressionGraphRoots(input));
-    this.#recipes = new RecipeRegistry(this.#graph);
+    this.#recipes = new MutableRecipeRegistry(this.#graph);
     this.#barriers = new ValueBarrierIndex({
       facts: input.facts,
       geometry: input.geometry
@@ -84,6 +84,7 @@ class ValuePlanAnalyzer {
       this.#memo.set(node.id, byPoint);
     }
 
+    this.#recipes.recordRecipe(recipe);
     byPoint.set(point, recipe);
     return recipe;
   }

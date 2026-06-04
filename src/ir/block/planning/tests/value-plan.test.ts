@@ -1,5 +1,6 @@
 import {
   deepStrictEqual,
+  notStrictEqual,
   strictEqual
 } from "node:assert";
 import { test } from "node:test";
@@ -15,8 +16,10 @@ import {
   type ExprNeed,
   type ExprNeedId,
   type ExprRecipe,
+  type SavedExprId,
   type ValuePlan
 } from "#ir/block/planning/index.js";
+import { MutableRecipeRegistry } from "#ir/block/planning/values/recipes.js";
 import {
   type BlockWalkInput,
   walkExpressionBlock
@@ -26,6 +29,7 @@ import {
   exprConst,
   exprInput
 } from "#ir/expr/builders.js";
+import { buildExprGraph } from "#ir/expr/graph/index.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import type {
   IrBlock,
@@ -455,6 +459,29 @@ test("ValuePlan assigns the same recipe id to structurally equivalent inline rec
     }),
     recipeId(plan, 0)
   );
+});
+
+test("MutableRecipeRegistry treats compute children as authoritative", () => {
+  const expr = exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(1));
+  const fromInline = {
+    kind: "compute",
+    expr,
+    children: [
+      { kind: "inline", expr: exprInput({ kind: "reg", reg: "eax" }) },
+      { kind: "inline", expr: exprConst(1) }
+    ]
+  } satisfies ExprRecipe;
+  const fromSaved = {
+    kind: "compute",
+    expr,
+    children: [
+      { kind: "saved-expr", saved: 0 as SavedExprId },
+      { kind: "inline", expr: exprConst(1) }
+    ]
+  } satisfies ExprRecipe;
+  const registry = new MutableRecipeRegistry(buildExprGraph([expr]));
+
+  notStrictEqual(registry.recordRecipe(fromInline), registry.recordRecipe(fromSaved));
 });
 
 test("ValuePlan applies root-path barriers to branch-path expression needs", () => {

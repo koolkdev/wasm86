@@ -12,7 +12,7 @@ import type {
   SavedExprId
 } from "./types.js";
 
-export class RecipeRegistry implements RecipeRegistryContract {
+export class MutableRecipeRegistry implements RecipeRegistryContract {
   readonly #graph: ExprGraph;
   readonly #recipes: ExprRecipe[] = [];
   readonly #needRecipes = new Map<ExprNeedId, ExprRecipe>();
@@ -20,7 +20,7 @@ export class RecipeRegistry implements RecipeRegistryContract {
   readonly #inlineByExpr = new Map<ExprNodeId, ExprRecipeId>();
   readonly #savedById = new Map<SavedExprId, ExprRecipeId>();
   readonly #definitionByInput = new Map<BlockDefinitionId, Map<ExprRecipeId, ExprRecipeId>>();
-  readonly #computeByExprAndChildren = new Map<ExprNodeId, Map<string, ExprRecipeId>>();
+  readonly #computeByExprAndChildren = new Map<ExprNodeId, RecipeIdSequenceMap<ExprRecipeId>>();
 
   constructor(graph: ExprGraph) {
     this.#graph = graph;
@@ -28,7 +28,7 @@ export class RecipeRegistry implements RecipeRegistryContract {
 
   recordNeedRecipe(need: ExprNeedId, recipe: ExprRecipe): void {
     this.#needRecipes.set(need, recipe);
-    this.#needRecipeIds.set(need, this.#id(recipe));
+    this.#needRecipeIds.set(need, this.recordRecipe(recipe));
   }
 
   recipeForNeed(need: ExprNeedId): ExprRecipe | undefined {
@@ -75,12 +75,12 @@ export class RecipeRegistry implements RecipeRegistryContract {
           childIds.push(childId);
         }
 
-        return this.#computeByExprAndChildren.get(exprId)?.get(childRecipeKey(childIds));
+        return this.#computeByExprAndChildren.get(exprId)?.get(childIds);
       }
     }
   }
 
-  #id(recipe: ExprRecipe): ExprRecipeId {
+  recordRecipe(recipe: ExprRecipe): ExprRecipeId {
     switch (recipe.kind) {
       case "inline":
         return this.#inlineRecipeId(recipe);
@@ -131,7 +131,7 @@ export class RecipeRegistry implements RecipeRegistryContract {
   }
 
   #definitionRecipeId(recipe: Extract<ExprRecipe, { kind: "definition" }>): ExprRecipeId {
-    const inputId = this.#id(recipe.input);
+    const inputId = this.recordRecipe(recipe.input);
     let byInput = this.#definitionByInput.get(recipe.definition);
 
     if (byInput === undefined) {
@@ -153,16 +153,15 @@ export class RecipeRegistry implements RecipeRegistryContract {
 
   #computeRecipeId(recipe: Extract<ExprRecipe, { kind: "compute" }>): ExprRecipeId {
     const exprId = this.#graph.node(recipe.expr).id;
-    const childIds = recipe.children.map((child) => this.#id(child));
-    const childKey = childRecipeKey(childIds);
+    const childIds = recipe.children.map((child) => this.recordRecipe(child));
     let byChildren = this.#computeByExprAndChildren.get(exprId);
 
     if (byChildren === undefined) {
-      byChildren = new Map();
+      byChildren = new RecipeIdSequenceMap();
       this.#computeByExprAndChildren.set(exprId, byChildren);
     }
 
-    const existing = byChildren.get(childKey);
+    const existing = byChildren.get(childIds);
 
     if (existing !== undefined) {
       return existing;
@@ -170,7 +169,7 @@ export class RecipeRegistry implements RecipeRegistryContract {
 
     const id = this.#next(recipe);
 
-    byChildren.set(childKey, id);
+    byChildren.set(childIds, id);
     return id;
   }
 
@@ -197,6 +196,50 @@ export class RecipeRegistry implements RecipeRegistryContract {
   }
 }
 
-function childRecipeKey(ids: readonly ExprRecipeId[]): string {
-  return ids.join(",");
+type RecipeIdSequenceNode<TValue> = {
+  value?: TValue;
+  children: Map<ExprRecipeId, RecipeIdSequenceNode<TValue>>;
+};
+
+class RecipeIdSequenceMap<TValue> {
+  readonly #root: RecipeIdSequenceNode<TValue> = {
+    children: new Map()
+  };
+
+  get(ids: readonly ExprRecipeId[]): TValue | undefined {
+    return this.#node(ids)?.value;
+  }
+
+  set(ids: readonly ExprRecipeId[], value: TValue): void {
+    let node = this.#root;
+
+    for (const id of ids) {
+      let child = node.children.get(id);
+
+      if (child === undefined) {
+        child = { children: new Map() };
+        node.children.set(id, child);
+      }
+
+      node = child;
+    }
+
+    node.value = value;
+  }
+
+  #node(ids: readonly ExprRecipeId[]): RecipeIdSequenceNode<TValue> | undefined {
+    let node = this.#root;
+
+    for (const id of ids) {
+      const child = node.children.get(id);
+
+      if (child === undefined) {
+        return undefined;
+      }
+
+      node = child;
+    }
+
+    return node;
+  }
 }

@@ -1,0 +1,217 @@
+import {
+  deepStrictEqual,
+  strictEqual
+} from "node:assert";
+import { test } from "node:test";
+
+import {
+  BindingResolver,
+  dynamicRegBinding
+} from "#ir/block/bindings/resolver.js";
+import {
+  analyzeBarrierFacts,
+  analyzeExpressionNeeds,
+  analyzePlacementPlan,
+  analyzeStateObligations,
+  analyzeStateWrites,
+  analyzeValuePlan,
+  buildBlockLayout,
+  buildTimelineGeometry,
+  type BlockLayout,
+  type LayoutStep,
+  type SavedExpr,
+  type ValuePlan
+} from "#ir/block/planning/index.js";
+import {
+  type BlockWalkInput,
+  walkExpressionBlock
+} from "#ir/block/walk/index.js";
+import {
+  exprConst
+} from "#ir/expr/builders.js";
+import type {
+  IrBlock,
+  IrValueType,
+  ValueRef,
+  VarRef
+} from "#ir/model/types.js";
+import {
+  planWasmCache,
+  WasmCachePlanner,
+  type WasmCacheEntry,
+  type WasmCachePlan
+} from "#wasm/emit/values/cache-plan.js";
+
+test("Wasm cache plan creates a forced entry for every SavedExpr", () => {
+  const { layout, values } = analyzeBlock([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+    { op: "set", target: { kind: "operand", index: 0 }, value: c(0x11), accessWidth: 32 },
+    { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(0), accessWidth: 32 }
+  ], {
+    resolver: dynamicResolver()
+  });
+  const saved = only(values.savedExprs);
+  const plan = new WasmCachePlanner({ layout, values }).plan();
+  const entry = forcedEntry(plan, saved);
+
+  deepStrictEqual(entry.recipe, saved.recipe);
+  deepStrictEqual(entry.reasons, [{ kind: "saved-expr", saved: saved.id }]);
+  strictEqual(entry.uses.length, 1);
+});
+
+test("Wasm cache plan attaches same-point uses to forced save entries", () => {
+  const { layout, values } = analyzeBlock([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+    { op: "set", target: { kind: "operand", index: 0 }, value: v(0), accessWidth: 32 },
+    { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(0), accessWidth: 32 }
+  ], {
+    resolver: dynamicResolver()
+  });
+  const saved = only(values.savedExprs);
+  const main = layout.regions.find((region) => region.kind === "main")!;
+  const saveIndex = main.steps.findIndex((step) => step.kind === "save-expr");
+  const storeIndex = main.steps.findIndex((step) =>
+    step.kind === "action" && step.site.action.kind === "dynamicRegisterStore"
+  );
+  const dynamicStore = main.steps[storeIndex] as Extract<LayoutStep, { kind: "action" }>;
+  const samePointUse = dynamicStore.inputs.find((input) => input.use.role === "value")!;
+  const laterSavedUse = only(main.steps.flatMap((step) =>
+    step.kind === "action" && step.site.action.kind === "memoryStore"
+      ? step.inputs.filter((input) => input.recipe.kind === "saved-expr")
+      : []
+  ));
+  const plan = planWasmCache({ layout, values });
+  const entry = forcedEntry(plan, saved);
+
+  strictEqual(saveIndex >= 0, true);
+  strictEqual(saveIndex < storeIndex, true);
+  deepStrictEqual(dynamicStore.inputs.map((input) => input.recipe.kind), ["inline", "inline"]);
+  strictEqual(samePointUse.recipe.kind, "inline");
+  strictEqual(laterSavedUse.recipe.kind, "saved-expr");
+  deepStrictEqual(entry.uses, [samePointUse.id, laterSavedUse.id]);
+});
+
+test("Wasm cache plan may choose repeated expressions without creating SavedExpr", () => {
+  const { layout, values } = analyzeBlock([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+    { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(1) },
+    { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(1), accessWidth: 32 },
+    { op: "set", target: { kind: "mem", address: c(0x1004) }, value: v(1), accessWidth: 32 }
+  ]);
+  const plan = planWasmCache({ layout, values });
+  const entry = only(plan.entries);
+
+  strictEqual(values.savedExprs.length, 0);
+  deepStrictEqual(entry.reasons.map((reason) => reason.kind), ["reuse"]);
+  strictEqual(entry.uses.length, 2);
+});
+
+test("Wasm cache plan leaves cheap repeated expressions inline", () => {
+  const { layout, values } = analyzeBlock([
+    { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" }
+  ]);
+  const plan = planWasmCache({ layout, values });
+
+  strictEqual(values.savedExprs.length, 0);
+  deepStrictEqual(plan.entries, []);
+});
+
+test("Wasm cache plan can attach saved-expr and reuse reasons to one entry", () => {
+  const { layout, values } = analyzeBlock([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+    { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(1) },
+    { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(1), accessWidth: 32 },
+    { op: "set", target: { kind: "mem", address: c(0x1004) }, value: v(1), accessWidth: 32 },
+    { op: "set", target: { kind: "operand", index: 0 }, value: c(0x11), accessWidth: 32 },
+    { op: "set", target: { kind: "mem", address: c(0x1008) }, value: v(1), accessWidth: 32 }
+  ], {
+    resolver: dynamicResolver()
+  });
+  const saved = only(values.savedExprs);
+  const plan = planWasmCache({ layout, values });
+  const entry = forcedEntry(plan, saved);
+  const reuse = entry.reasons.find((reason) => reason.kind === "reuse");
+
+  deepStrictEqual(entry.reasons.map((reason) => reason.kind), ["saved-expr", "reuse"]);
+  strictEqual(reuse?.kind, "reuse");
+  strictEqual(reuse.estimatedBenefit > 0, true);
+  strictEqual(entry.uses.length, 3);
+});
+
+test("Wasm cache plan output has no concrete local operation fields", () => {
+  const { layout, values } = analyzeBlock([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+    { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(1) },
+    { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(1), accessWidth: 32 },
+    { op: "set", target: { kind: "mem", address: c(0x1004) }, value: v(1), accessWidth: 32 }
+  ]);
+  const plan = planWasmCache({ layout, values });
+  const entry = only(plan.entries);
+  const reason = only(entry.reasons);
+  const serialized = JSON.stringify(plan);
+
+  deepStrictEqual(Object.keys(plan), ["entries"]);
+  deepStrictEqual(Object.keys(entry), ["id", "recipe", "reasons", "uses"]);
+  deepStrictEqual(Object.keys(reason), ["kind", "estimatedBenefit"]);
+  strictEqual(serialized.includes("local.get"), false);
+  strictEqual(serialized.includes("local.set"), false);
+  strictEqual(serialized.includes("local.tee"), false);
+});
+
+function analyzeBlock(
+  block: IrBlock,
+  input: Omit<BlockWalkInput, "block"> = {}
+): Readonly<{
+  layout: BlockLayout;
+  values: ValuePlan;
+}> {
+  const walked = walkExpressionBlock({ ...input, block });
+  const geometry = buildTimelineGeometry(walked);
+  const obligations = analyzeStateObligations({ walked, geometry });
+  const needs = analyzeExpressionNeeds({ walked, geometry, obligations });
+  const facts = analyzeBarrierFacts({ walked, geometry });
+  const values = analyzeValuePlan({ needs, geometry, facts });
+  const stateWrites = analyzeStateWrites({ obligations, needs, values });
+  const placement = analyzePlacementPlan({ geometry, facts, values, stateWrites });
+
+  return {
+    values,
+    layout: buildBlockLayout({
+      walked,
+      geometry,
+      exprNeeds: needs,
+      values,
+      stateWrites,
+      placement
+    })
+  };
+}
+
+function forcedEntry(plan: WasmCachePlan, saved: SavedExpr): WasmCacheEntry {
+  return plan.entries.find((entry) =>
+    entry.reasons.some((reason) => reason.kind === "saved-expr" && reason.saved === saved.id)
+  ) ?? fail(`missing forced entry for saved expression ${saved.id}`);
+}
+
+function only<TValue>(values: readonly TValue[]): TValue {
+  strictEqual(values.length, 1);
+  return values[0]!;
+}
+
+function fail(message: string): never {
+  throw new Error(message);
+}
+
+function dynamicResolver(): BindingResolver {
+  return new BindingResolver({
+    operands: [dynamicRegBinding(exprConst(3), 32)]
+  });
+}
+
+function v(value: number): VarRef {
+  return { kind: "var", id: value };
+}
+
+function c(value: number): ValueRef {
+  return { kind: "const", type: "i32" satisfies IrValueType, value };
+}
