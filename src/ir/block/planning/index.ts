@@ -5,3 +5,5 @@ export * from "./state-obligations.js";
 export * from "./state-writes.js";
 export * from "./values/index.js";
 export * from "./placement-analysis.js";
+export * from "./timeline/value-uses.js";
+export * from "./layout/index.js";
