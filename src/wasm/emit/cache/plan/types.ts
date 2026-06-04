@@ -9,7 +9,7 @@ import type {
   SavedExprId,
   ValuePlan
 } from "#ir/block/planning/values/index.js";
-import type { WasmRecipeCostModel } from "../recipe-cost.js";
+import type { WasmRecipeCostModel } from "./cost.js";
 
 export type WasmCacheEntryId = number & { readonly __wasmCacheEntryId: unique symbol };
 export type WasmCacheOccurrenceId = number & { readonly __wasmCacheOccurrenceId: unique symbol };

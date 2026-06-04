@@ -47,7 +47,7 @@ import {
   type WasmCacheEntry,
   type WasmCacheOccurrence,
   type WasmCachePlan
-} from "#wasm/emit/values/cache/index.js";
+} from "#wasm/emit/cache/plan/index.js";
 
 test("Wasm cache plan creates a forced entry for every SavedExpr", () => {
   const { layout, values } = analyzeBlock([

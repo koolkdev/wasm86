@@ -9,7 +9,7 @@ import {
   defaultWasmRecipeCostModel,
   shouldReuseWasmRecipe,
   wasmRecipeReuseBenefit
-} from "../recipe-cost.js";
+} from "./cost.js";
 import { recipeIdOrThrow } from "./recipes.js";
 import { summarizeRecipeOccurrences } from "./summary.js";
 import type {
