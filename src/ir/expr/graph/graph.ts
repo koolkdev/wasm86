@@ -17,6 +17,7 @@ import {
   exprSelect,
   exprUnary
 } from "../builders.js";
+import { exprChildren } from "../children.js";
 import type {
   ExprInputSource,
   ExprRef,
@@ -435,27 +436,6 @@ function canonical(expr: ExprRef, children: readonly ExprNode[]): Extract<Resolv
 
 function redirect(expr: ExprRef): Extract<ResolvedExpr, { kind: "redirect" }> {
   return { kind: "redirect", expr };
-}
-
-function exprChildren(expr: ExprRef): readonly ExprRef[] {
-  switch (expr.kind) {
-    case "const":
-    case "input":
-      return [];
-    case "binary":
-      return [expr.left, expr.right];
-    case "unary":
-      return [expr.value];
-    case "select":
-      return [expr.condition, expr.whenTrue, expr.whenFalse];
-    case "project":
-    case "bits":
-      return [expr.value];
-    case "insertBits":
-      return [expr.base, expr.value];
-    case "compare":
-      return [expr.left, expr.right];
-  }
 }
 
 function popChildNodes(results: ExprNode[], count: number): readonly ExprNode[] {

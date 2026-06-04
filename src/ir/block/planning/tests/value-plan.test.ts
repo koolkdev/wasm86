@@ -240,6 +240,64 @@ test("ValuePlan carries an exported recipe for definition replay inputs", () => 
   strictEqual(savedInput.saveAt, dynamicStore.point);
 });
 
+test("ValuePlan computes from a saved child instead of saving a parent composite", () => {
+  const { geometry, plan } = analyzeBlock([
+    {
+      op: "get",
+      dst: v(0),
+      source: { kind: "reg", reg: "eax" },
+      accessWidth: 32
+    },
+    {
+      op: "value.binary",
+      type: "i32",
+      operator: "add",
+      dst: v(1),
+      a: v(0),
+      b: c(4)
+    },
+    {
+      op: "set",
+      target: { kind: "operand", index: 0 },
+      value: c(0x11),
+      accessWidth: 32
+    },
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x1000) },
+      value: v(1),
+      accessWidth: 32
+    }
+  ], ({ geometry }) => [
+    need(0, geometry.memory.writes[0]!.site.action.value, geometry.memory.writes[0]!.point)
+  ], {
+    resolver: dynamicResolver()
+  });
+  const dynamicStore = geometry.registers.dynamicStores[0]!;
+  const savedInput = plan.savedExprs[0]!;
+
+  deepStrictEqual(recipe(plan, 0), {
+    kind: "compute",
+    expr: exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(4)),
+    children: [
+      {
+        kind: "saved-expr",
+        saved: savedInput.id
+      },
+      {
+        kind: "inline",
+        expr: exprConst(4)
+      }
+    ]
+  });
+  deepStrictEqual(savedInput.expr, exprInput({ kind: "reg", reg: "eax" }));
+  strictEqual(savedInput.saveAt, dynamicStore.point);
+  deepStrictEqual(savedInput.recipe, {
+    kind: "inline",
+    expr: exprInput({ kind: "reg", reg: "eax" })
+  });
+});
+
 test("ValuePlan computes a mixed-time expression from saved and definition child recipes", () => {
   const { geometry, plan, facts } = analyzeBlock([
     {

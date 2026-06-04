@@ -4,6 +4,7 @@ import type {
   ExprGraph,
   ExprNodeId
 } from "#ir/expr/graph/index.js";
+import { exprChildren } from "#ir/expr/children.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import type {
   ExprRecipe,
@@ -109,6 +110,10 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
 
     if (existing !== undefined) {
       return existing;
+    }
+
+    for (const child of exprChildren(recipe.expr)) {
+      this.#inlineRecipeId(Object.freeze({ kind: "inline", expr: child } satisfies ExprRecipe));
     }
 
     const id = this.#next(recipe);

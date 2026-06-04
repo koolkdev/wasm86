@@ -5,7 +5,6 @@ import type {
   ExprNeedId
 } from "#ir/block/planning/expression-needs.js";
 import {
-  compareProgramPoints,
   type ProgramPoint,
   type TimelineGeometry
 } from "#ir/block/planning/geometry/index.js";
@@ -164,12 +163,6 @@ class ValuePlanAnalyzer {
       return Object.freeze({ kind: "inline", expr: node.expr } satisfies ExprRecipe);
     }
 
-    const blocker = this.#firstBlocker(node, point);
-
-    if (blocker !== undefined && this.#exprExistsAt(node, blocker.saveAt)) {
-      return this.#savedRecipe(node, blocker, topLevelNeed);
-    }
-
     return Object.freeze({
       kind: "compute",
       expr: node.expr,
@@ -221,36 +214,6 @@ class ValuePlanAnalyzer {
     }
   }
 
-  #firstBlocker(node: ExprNode, point: ProgramPoint): SaveBlocker | undefined {
-    const expr = node.expr;
-
-    switch (expr.kind) {
-      case "const":
-        return undefined;
-      case "input":
-        switch (expr.source.kind) {
-          case "reg":
-          case "flag":
-            return this.#barriers.sourceInputBlocker(expr.source, point);
-          case "def": {
-            const definition = this.#definitionForExpr(expr);
-
-            return this.#barriers.definitionReplayBlocker(definition, point);
-          }
-        }
-      case "binary":
-      case "unary":
-      case "select":
-      case "project":
-      case "bits":
-      case "insertBits":
-      case "compare":
-        return earliestBlocker(node.children.map((child) =>
-          this.#firstBlocker(child, point)
-        ));
-    }
-  }
-
   #exprExistsAt(node: ExprNode, point: ProgramPoint): boolean {
     const expr = node.expr;
 
@@ -292,25 +255,6 @@ class ValuePlanAnalyzer {
 
     return definition;
   }
-}
-
-function earliestBlocker(blockers: readonly (SaveBlocker | undefined)[]): SaveBlocker | undefined {
-  let earliest: SaveBlocker | undefined;
-
-  for (const blocker of blockers) {
-    if (blocker === undefined) {
-      continue;
-    }
-
-    if (
-      earliest === undefined ||
-      compareProgramPoints(blocker.barrier.effectPoint, earliest.barrier.effectPoint) < 0
-    ) {
-      earliest = blocker;
-    }
-  }
-
-  return earliest;
 }
 
 function expressionGraphRoots(input: ValuePlanInput): Iterable<ExprRef> {

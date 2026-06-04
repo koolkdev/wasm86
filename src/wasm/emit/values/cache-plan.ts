@@ -9,6 +9,7 @@ import type {
   SavedExprId,
   ValuePlan
 } from "#ir/block/planning/values/index.js";
+import { exprChildren } from "#ir/expr/children.js";
 import {
   defaultWasmRecipeCostModel,
   shouldReuseWasmRecipe,
@@ -45,23 +46,17 @@ export type WasmCachePlanInput = Readonly<{
   costModel?: WasmRecipeCostModel;
 }>;
 
-type LayoutRecipeUse = Readonly<{
-  id: LayoutValueUseId;
+type RecipeOccurrenceSummary = {
   recipe: ExprRecipe;
-  recipeId: ExprRecipeId;
-}>;
+  occurrenceCount: number;
+  uses: Set<LayoutValueUseId>;
+};
 
 type MutableEntry = {
   id: WasmCacheEntryId;
   recipe: ExprRecipe;
   reasons: WasmCacheReason[];
-  uses: LayoutValueUseId[];
-};
-
-type ReuseCandidate = {
-  recipe: ExprRecipe;
-  recipeId: ExprRecipeId;
-  uses: LayoutValueUseId[];
+  uses: Set<LayoutValueUseId>;
 };
 
 export function planWasmCache(input: WasmCachePlanInput): WasmCachePlan {
@@ -69,20 +64,20 @@ export function planWasmCache(input: WasmCachePlanInput): WasmCachePlan {
 }
 
 export class WasmCachePlanner {
+  readonly #layout: BlockLayout;
   readonly #savedExprs: ValuePlan["savedExprs"];
   readonly #recipes: ValuePlan["recipes"];
   readonly #costModel: WasmRecipeCostModel;
-  readonly #uses: readonly LayoutRecipeUse[];
   readonly #entries = new Map<ExprRecipeId, MutableEntry>();
   readonly #savedEntryIds = new Map<SavedExprId, ExprRecipeId>();
   #nextEntryId = 0;
   #plan: WasmCachePlan | undefined;
 
   constructor(input: WasmCachePlanInput) {
+    this.#layout = input.layout;
     this.#savedExprs = input.values.savedExprs;
     this.#recipes = input.values.recipes;
     this.#costModel = input.costModel ?? defaultWasmRecipeCostModel;
-    this.#uses = layoutRecipeUses(input.layout, (recipe) => this.#recipeId(recipe));
   }
 
   plan(): WasmCachePlan {
@@ -95,8 +90,10 @@ export class WasmCachePlanner {
 
   #build(): WasmCachePlan {
     this.#addSavedExprEntries();
-    this.#addReuseEntries();
-    this.#attachUses();
+    const occurrences = this.#collectOccurrences();
+
+    this.#addReuseEntries(occurrences);
+    this.#attachUses(occurrences);
 
     return this.#freezePlan();
   }
@@ -114,33 +111,45 @@ export class WasmCachePlanner {
     }
   }
 
-  #addReuseEntries(): void {
-    for (const candidate of reuseCandidates(this.#uses)) {
-      const estimatedBenefit = wasmRecipeReuseBenefit(candidate.recipe, candidate.uses.length, this.#costModel);
+  #collectOccurrences(): ReadonlyMap<ExprRecipeId, RecipeOccurrenceSummary> {
+    const occurrences = new Map<ExprRecipeId, RecipeOccurrenceSummary>();
 
-      if (!shouldReuseWasmRecipe(candidate.recipe, candidate.uses.length, this.#costModel)) {
+    collectLayoutRecipeOccurrences(this.#layout, occurrences, (recipe) => this.#recipeId(recipe), (id) =>
+      this.#recipes.recipe(id), (saved) => this.#savedEntryIds.get(saved)
+    );
+
+    for (const saved of this.#savedExprs) {
+      collectRecipeOccurrences(saved.recipe, undefined, occurrences, (recipe) => this.#recipeId(recipe), (id) =>
+        this.#recipes.recipe(id), (saved) => this.#savedEntryIds.get(saved)
+      );
+    }
+
+    return occurrences;
+  }
+
+  #addReuseEntries(occurrences: ReadonlyMap<ExprRecipeId, RecipeOccurrenceSummary>): void {
+    for (const [recipeId, occurrence] of occurrences) {
+      const estimatedBenefit = wasmRecipeReuseBenefit(occurrence.recipe, occurrence.occurrenceCount, this.#costModel);
+
+      if (!shouldReuseWasmRecipe(occurrence.recipe, occurrence.occurrenceCount, this.#costModel)) {
         continue;
       }
 
-      this.#entryFor(candidate.recipe, candidate.recipeId).reasons.push(Object.freeze({
+      this.#entryFor(occurrence.recipe, recipeId).reasons.push(Object.freeze({
         kind: "reuse",
         estimatedBenefit
       } satisfies WasmCacheReason));
     }
   }
 
-  #attachUses(): void {
-    for (const use of this.#uses) {
-      const recipeId = this.#entryIdForUse(use);
-
-      if (recipeId === undefined) {
-        continue;
-      }
-
+  #attachUses(occurrences: ReadonlyMap<ExprRecipeId, RecipeOccurrenceSummary>): void {
+    for (const [recipeId, occurrence] of occurrences) {
       const entry = this.#entries.get(recipeId);
 
       if (entry !== undefined) {
-        addUse(entry, use.id);
+        for (const use of occurrence.uses) {
+          entry.uses.add(use);
+        }
       }
     }
   }
@@ -156,7 +165,7 @@ export class WasmCachePlanner {
       id: this.#nextEntryId as WasmCacheEntryId,
       recipe,
       reasons: [],
-      uses: []
+      uses: new Set<LayoutValueUseId>()
     };
 
     this.#nextEntryId += 1;
@@ -174,14 +183,6 @@ export class WasmCachePlanner {
     return recipeId;
   }
 
-  #entryIdForUse(use: LayoutRecipeUse): ExprRecipeId | undefined {
-    if (use.recipe.kind === "saved-expr") {
-      return this.#savedEntryIds.get(use.recipe.saved);
-    }
-
-    return use.recipeId;
-  }
-
   #freezePlan(): WasmCachePlan {
     return Object.freeze({
       entries: Object.freeze([...this.#entries.values()].map((entry) => Object.freeze({
@@ -194,76 +195,113 @@ export class WasmCachePlanner {
   }
 }
 
-function reuseCandidates(uses: readonly LayoutRecipeUse[]): readonly ReuseCandidate[] {
-  const byRecipe = new Map<ExprRecipeId, ReuseCandidate>();
-
-  for (const use of uses) {
-    if (use.recipe.kind === "saved-expr") {
-      continue;
-    }
-
-    let candidate = byRecipe.get(use.recipeId);
-
-    if (candidate === undefined) {
-      candidate = {
-        recipe: use.recipe,
-        recipeId: use.recipeId,
-        uses: []
-      };
-      byRecipe.set(use.recipeId, candidate);
-    }
-
-    candidate.uses.push(use.id);
-  }
-
-  return Object.freeze([...byRecipe.values()]);
-}
-
-function addUse(entry: MutableEntry, use: LayoutValueUseId): void {
-  if (!entry.uses.includes(use)) {
-    entry.uses.push(use);
-  }
-}
-
-function layoutRecipeUses(
+function collectLayoutRecipeOccurrences(
   layout: BlockLayout,
-  recipeId: (recipe: ExprRecipe) => ExprRecipeId
-): readonly LayoutRecipeUse[] {
-  const uses: LayoutRecipeUse[] = [];
-
+  occurrences: Map<ExprRecipeId, RecipeOccurrenceSummary>,
+  recipeId: (recipe: ExprRecipe) => ExprRecipeId,
+  recipeForId: (recipeId: ExprRecipeId) => ExprRecipe,
+  savedRecipeId: (saved: SavedExprId) => ExprRecipeId | undefined
+): void {
   for (const region of layout.regions) {
     for (const step of region.steps) {
-      uses.push(...stepRecipeUses(step, recipeId));
+      collectStepRecipeOccurrences(step, occurrences, recipeId, recipeForId, savedRecipeId);
     }
   }
-
-  return Object.freeze(uses);
 }
 
-function stepRecipeUses(
+function collectStepRecipeOccurrences(
   step: LayoutStep,
-  recipeId: (recipe: ExprRecipe) => ExprRecipeId
-): readonly LayoutRecipeUse[] {
+  occurrences: Map<ExprRecipeId, RecipeOccurrenceSummary>,
+  recipeId: (recipe: ExprRecipe) => ExprRecipeId,
+  recipeForId: (recipeId: ExprRecipeId) => ExprRecipe,
+  savedRecipeId: (saved: SavedExprId) => ExprRecipeId | undefined
+): void {
   switch (step.kind) {
     case "definition":
     case "action":
-      return step.inputs.map((input) => Object.freeze({
-        id: input.id,
-        recipe: input.recipe,
-        recipeId: recipeId(input.recipe)
-      } satisfies LayoutRecipeUse));
+      for (const input of step.inputs) {
+        collectRecipeOccurrences(input.recipe, input.id, occurrences, recipeId, recipeForId, savedRecipeId);
+      }
+      break;
     case "write-state":
-      return step.value === undefined
-        ? []
-        : [
-          Object.freeze({
-            id: step.value.id,
-            recipe: step.value.recipe,
-            recipeId: recipeId(step.value.recipe)
-          } satisfies LayoutRecipeUse)
-        ];
+      if (step.value !== undefined) {
+        collectRecipeOccurrences(step.value.recipe, step.value.id, occurrences, recipeId, recipeForId, savedRecipeId);
+      }
+      break;
     case "save-expr":
     case "exit":
+      break;
+  }
+}
+
+function collectRecipeOccurrences(
+  recipe: ExprRecipe,
+  use: LayoutValueUseId | undefined,
+  occurrences: Map<ExprRecipeId, RecipeOccurrenceSummary>,
+  recipeId: (recipe: ExprRecipe) => ExprRecipeId,
+  recipeForId: (recipeId: ExprRecipeId) => ExprRecipe,
+  savedRecipeId: (saved: SavedExprId) => ExprRecipeId | undefined
+): void {
+  const stack: ExprRecipe[] = [recipe];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+
+    if (current.kind === "saved-expr") {
+      const targetRecipeId = savedRecipeId(current.saved);
+
+      if (targetRecipeId !== undefined && use !== undefined) {
+        summaryFor(occurrences, targetRecipeId, recipeForId(targetRecipeId)).uses.add(use);
+      }
+
+      continue;
+    }
+
+    const currentRecipeId = recipeId(current);
+    const summary = summaryFor(occurrences, currentRecipeId, current);
+
+    summary.occurrenceCount += 1;
+
+    if (use !== undefined) {
+      summary.uses.add(use);
+    }
+
+    for (const child of recipeChildren(current).reverse()) {
+      stack.push(child);
+    }
+  }
+}
+
+function summaryFor(
+  occurrences: Map<ExprRecipeId, RecipeOccurrenceSummary>,
+  recipeId: ExprRecipeId,
+  recipe: ExprRecipe
+): RecipeOccurrenceSummary {
+  let summary = occurrences.get(recipeId);
+
+  if (summary === undefined) {
+    summary = {
+      recipe,
+      occurrenceCount: 0,
+      uses: new Set<LayoutValueUseId>()
+    };
+    occurrences.set(recipeId, summary);
+  }
+
+  return summary;
+}
+
+function recipeChildren(recipe: ExprRecipe): ExprRecipe[] {
+  switch (recipe.kind) {
+    case "inline":
+      return exprChildren(recipe.expr).map((expr) =>
+        Object.freeze({ kind: "inline", expr } satisfies ExprRecipe)
+      );
+    case "definition":
+      return [recipe.input];
+    case "compute":
+      return [...recipe.children];
+    case "saved-expr":
       return [];
   }
 }
