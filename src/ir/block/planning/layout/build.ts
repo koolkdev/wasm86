@@ -1,10 +1,8 @@
 import type { BlockExit } from "#ir/block/exits.js";
 import type { BlockActionSite, BlockDefinitionSite } from "#ir/block/timeline.js";
 import type { WalkedBlock } from "#ir/block/walk/types.js";
-import { exprsEqual } from "#ir/expr/equality.js";
 import type {
-  ExprNeed,
-  ExprNeeds
+  ExprNeedId
 } from "../expression-needs.js";
 import {
   compareProgramPoints,
@@ -25,7 +23,7 @@ import type {
   ValuePlan
 } from "../values/index.js";
 import {
-  timelineValueUses,
+  type TimelineValueUseIndex,
   type TimelineValueUse
 } from "../timeline/value-uses.js";
 
@@ -39,7 +37,6 @@ export type BlockLayout = Readonly<{
 export type LayoutRegion = Readonly<{
   id: LayoutRegionId;
   path: Path;
-  kind: "main" | "exit" | "branch-arm";
   steps: readonly LayoutStep[];
 }>;
 
@@ -69,7 +66,8 @@ export type LayoutStep =
 export type BlockLayoutInput = Readonly<{
   walked: Pick<WalkedBlock, "timeline">;
   geometry: TimelineGeometry;
-  exprNeeds: ExprNeeds;
+  timelineUses: TimelineValueUseIndex;
+  timelineNeedByUse: ReadonlyMap<TimelineValueUse["id"], ExprNeedId>;
   values: ValuePlan;
   stateWrites: StateWritePlan;
   placement: PlacementPlan;
@@ -94,7 +92,6 @@ class BlockLayoutBuilder {
   readonly #input: BlockLayoutInput;
   readonly #savedById: ReadonlyMap<SavedExprId, SavedExpr>;
   readonly #writeById: ReadonlyMap<StateWriteId, PlannedStateWrite>;
-  readonly #needCursor: LayoutValueNeedCursor;
   readonly #eventsByPath = new Map<Path, LayoutEvent[]>();
   #nextRegionId = 0;
   #nextUseId = 0;
@@ -104,7 +101,6 @@ class BlockLayoutBuilder {
     this.#input = input;
     this.#savedById = indexBy(input.values.savedExprs, (saved) => saved.id);
     this.#writeById = indexBy(input.stateWrites.writes, (write) => write.id);
-    this.#needCursor = new LayoutValueNeedCursor(input.exprNeeds.needs);
   }
 
   build(): BlockLayout {
@@ -165,17 +161,19 @@ class BlockLayoutBuilder {
   }
 
   #definitionInputs(site: BlockDefinitionSite): readonly LayoutTimelineInput[] {
-    return timelineValueUses(site, this.#input.geometry)
+    return this.#timelineUsesForSite(site)
       .map((use) => this.#timelineInput(use));
   }
 
   #actionInputs(site: BlockActionSite): readonly LayoutTimelineInput[] {
-    return timelineValueUses(site, this.#input.geometry)
+    return this.#timelineUsesForSite(site)
       .map((use) => this.#timelineInput(use));
   }
 
   #timelineInput(use: TimelineValueUse): LayoutTimelineInput {
-    const exprUse = this.#exprUse(this.#recipeForNeed(this.#needCursor.take(use.expr, use.point, use.originKind)));
+    const need = this.#input.timelineNeedByUse.get(use.id) ??
+      fail(`layout is missing a planned value need for ${use.kind}/${use.role}`);
+    const exprUse = this.#exprUse(this.#recipeForNeed(need));
 
     return Object.freeze({
       id: exprUse.id,
@@ -191,41 +189,34 @@ class BlockLayoutBuilder {
     return Object.freeze({ id, recipe } satisfies LayoutExprUse);
   }
 
-  #recipeForNeed(need: ExprNeed): ExprRecipe {
-    return this.#input.values.recipes.recipeForNeed(need.id) ??
-      fail(`layout references expression need ${need.id} without a value recipe`);
+  #recipeForNeed(need: ExprNeedId): ExprRecipe {
+    return this.#input.values.recipes.recipeForNeed(need) ??
+      fail(`layout references expression need ${need} without a value recipe`);
   }
 
   #regions(): readonly LayoutRegion[] {
     const regions = [
-      this.#region(this.#input.geometry.paths.root, "main", this.#stepsFor(this.#input.geometry.paths.root))
+      this.#region(this.#input.geometry.paths.root, this.#stepsFor(this.#input.geometry.paths.root))
     ];
 
     for (const exitPoint of this.#input.geometry.exits.points) {
       const steps = this.#stepsFor(exitPoint.path);
 
-      switch (exitPoint.path.kind) {
-        case "main":
-          throw new Error("block exit path cannot be the main layout path");
-        case "exit":
-          regions.push(this.#region(exitPoint.path, "exit", [...steps, exitStep(exitPoint.exit)]));
-          break;
-        case "branch":
-          if (steps.length > 0) {
-            regions.push(this.#region(exitPoint.path, "branch-arm", [...steps, exitStep(exitPoint.exit)]));
-          }
-          break;
+      if (exitPoint.path.kind !== "edge") {
+        throw new Error("block exit path must be an edge layout path");
       }
+
+      regions.push(this.#region(exitPoint.path, [...steps, exitStep(exitPoint.exit)]));
     }
 
     return Object.freeze(regions);
   }
 
-  #region(path: Path, kind: LayoutRegion["kind"], steps: readonly LayoutStep[]): LayoutRegion {
+  #region(path: Path, steps: readonly LayoutStep[]): LayoutRegion {
     const id = this.#nextRegionId as LayoutRegionId;
 
     this.#nextRegionId += 1;
-    return Object.freeze({ id, path, kind, steps: Object.freeze([...steps]) } satisfies LayoutRegion);
+    return Object.freeze({ id, path, steps: Object.freeze([...steps]) } satisfies LayoutRegion);
   }
 
   #addEvent(point: ProgramPoint, tier: number, step: LayoutStep): void {
@@ -251,39 +242,10 @@ class BlockLayoutBuilder {
     return this.#input.geometry.points.bySite.get(site)?.at ??
       fail("layout references missing timeline site points");
   }
-}
 
-class LayoutValueNeedCursor {
-  readonly #needsByPoint = new Map<ProgramPoint, Map<ExprNeed["origin"]["kind"], readonly ExprNeed[]>>();
-  readonly #used = new Set<ExprNeed["id"]>();
-
-  constructor(needs: readonly ExprNeed[]) {
-    for (const need of needs) {
-      const byOrigin = this.#needsByPoint.get(need.point) ?? new Map();
-      const originNeeds = byOrigin.get(need.origin.kind) ?? [];
-
-      byOrigin.set(need.origin.kind, Object.freeze([...originNeeds, need]));
-      this.#needsByPoint.set(need.point, byOrigin);
-    }
-  }
-
-  take(
-    expr: ExprNeed["expr"],
-    point: ProgramPoint,
-    originKind: ExprNeed["origin"]["kind"]
-  ): ExprNeed {
-    const candidates = this.#needsByPoint.get(point)?.get(originKind) ?? [];
-    const need = candidates.find((candidate) =>
-      !this.#used.has(candidate.id) &&
-      exprsEqual(candidate.expr, expr)
-    );
-
-    if (need === undefined) {
-      throw new Error(`layout is missing a planned value need for ${originKind}`);
-    }
-
-    this.#used.add(need.id);
-    return need;
+  #timelineUsesForSite(site: BlockDefinitionSite | BlockActionSite): readonly TimelineValueUse[] {
+    return this.#input.timelineUses.bySite.get(site) ??
+      fail("layout references missing timeline value uses for site");
   }
 }
 

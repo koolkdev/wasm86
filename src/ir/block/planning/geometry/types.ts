@@ -17,16 +17,26 @@ import type { WalkedBlock } from "#ir/block/walk/types.js";
 
 export type MainPath = Readonly<{ kind: "main" }>;
 
-export type BranchPath = Readonly<{
-  kind: "branch";
-  at: Placement;
-  arm: BranchArm;
+export type BlockEdgeId = number & { readonly __blockEdgeId: unique symbol };
+
+export type BlockEdgeKind =
+  | "memory-fault"
+  | "branch-taken"
+  | "branch-not-taken"
+  | "jump"
+  | "fallthrough"
+  | "host-trap";
+
+export type BlockEdge = Readonly<{
+  id: BlockEdgeId;
+  kind: BlockEdgeKind;
+  sourceSite: BlockActionSite;
+  exit: BlockExit;
 }>;
 
-export type ExitPath = Readonly<{
-  kind: "exit";
-  exit: BlockExitId;
-  exitKind: BlockExit["kind"];
+export type EdgePath = Readonly<{
+  kind: "edge";
+  edge: BlockEdgeId;
 }>;
 
 /**
@@ -36,10 +46,7 @@ export type ExitPath = Readonly<{
  */
 export type Path =
   | MainPath
-  | BranchPath
-  | ExitPath;
-
-export type BranchArm = "taken" | "notTaken";
+  | EdgePath;
 
 export type PathEdge = Readonly<{
   parent: Path;
@@ -76,7 +83,8 @@ export type SitePoints = Readonly<{
 
 export type ExitPoint = Readonly<{
   exit: BlockExit;
-  path: Path;
+  edge: BlockEdgeId;
+  path: EdgePath;
   point: ProgramPoint;
   sourceSite: BlockActionSite;
 }>;
@@ -113,6 +121,13 @@ export type ExitGeometry = Readonly<{
   byExit: ReadonlyMap<BlockExitId, ExitPoint>;
 }>;
 
+export type EdgeGeometry = Readonly<{
+  all: readonly BlockEdge[];
+  byId: ReadonlyMap<BlockEdgeId, BlockEdge>;
+  byExit: ReadonlyMap<BlockExitId, BlockEdge>;
+  byPath: ReadonlyMap<EdgePath, BlockEdge>;
+}>;
+
 export type DefinitionGeometry = Readonly<{
   points: readonly DefinitionPoint[];
   byDefinition: ReadonlyMap<BlockDefinitionId, DefinitionPoint>;
@@ -129,6 +144,7 @@ export type RegisterGeometry = Readonly<{
 
 export type TimelineGeometry = Readonly<{
   paths: PathGeometry;
+  edges: EdgeGeometry;
   points: TimelinePointIndex;
   exits: ExitGeometry;
   definitions: DefinitionGeometry;

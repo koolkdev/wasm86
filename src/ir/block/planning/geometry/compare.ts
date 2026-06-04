@@ -1,8 +1,6 @@
 import { comparePlacement } from "#ir/block/timeline.js";
 import type {
-  BranchArm,
-  BranchPath,
-  ExitPath,
+  EdgePath,
   Path,
   ProgramPoint,
   ProgramPointPhase
@@ -51,22 +49,8 @@ export function comparePathOrder(left: Path, right: Path): number {
   switch (left.kind) {
     case "main":
       return 0;
-    case "branch": {
-      const rightBranch = right as BranchPath;
-      const placementOrder = comparePlacement(left.at, rightBranch.at);
-
-      return placementOrder === 0
-        ? branchArmOrder(left.arm) - branchArmOrder(rightBranch.arm)
-        : placementOrder;
-    }
-    case "exit": {
-      const rightExit = right as ExitPath;
-      const exitOrder = left.exit - rightExit.exit;
-
-      return exitOrder === 0
-        ? left.exitKind.localeCompare(rightExit.exitKind)
-        : exitOrder;
-    }
+    case "edge":
+      return left.edge - (right as EdgePath).edge;
   }
 }
 
@@ -74,18 +58,7 @@ function pathKindOrder(path: Path): number {
   switch (path.kind) {
     case "main":
       return 0;
-    case "branch":
-      return 1;
-    case "exit":
-      return 2;
-  }
-}
-
-function branchArmOrder(arm: BranchArm): number {
-  switch (arm) {
-    case "taken":
-      return 0;
-    case "notTaken":
+    case "edge":
       return 1;
   }
 }

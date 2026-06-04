@@ -17,6 +17,7 @@ import {
   analyzeValuePlan,
   buildBlockLayout,
   buildTimelineGeometry,
+  buildTimelineValueUseIndex,
   type BlockLayout,
   type LayoutStep,
   type SavedExpr,
@@ -68,7 +69,7 @@ test("Wasm cache plan attaches same-point uses to forced save entries", () => {
     resolver: dynamicResolver()
   });
   const saved = only(values.savedExprs);
-  const main = layout.regions.find((region) => region.kind === "main")!;
+  const main = layout.regions.find((region) => region.path.kind === "main")!;
   const saveIndex = main.steps.findIndex((step) => step.kind === "save-expr");
   const storeIndex = main.steps.findIndex((step) =>
     step.kind === "action" && step.site.action.kind === "dynamicRegisterStore"
@@ -167,11 +168,16 @@ function analyzeBlock(
 }> {
   const walked = walkExpressionBlock({ ...input, block });
   const geometry = buildTimelineGeometry(walked);
+  const timelineUses = buildTimelineValueUseIndex({ walked, geometry });
   const obligations = analyzeStateObligations({ walked, geometry });
-  const needs = analyzeExpressionNeeds({ walked, geometry, obligations });
+  const needs = analyzeExpressionNeeds({ timelineUses, obligations });
   const facts = analyzeBarrierFacts({ walked, geometry });
-  const values = analyzeValuePlan({ needs, geometry, facts });
-  const stateWrites = analyzeStateWrites({ obligations, needs, values });
+  const values = analyzeValuePlan({ needs: needs.needs, geometry, facts });
+  const stateWrites = analyzeStateWrites({
+    obligations,
+    valueNeeds: needs.valueNeedByObligation,
+    values
+  });
   const placement = analyzePlacementPlan({ geometry, facts, values, stateWrites });
 
   return {
@@ -179,7 +185,8 @@ function analyzeBlock(
     layout: buildBlockLayout({
       walked,
       geometry,
-      exprNeeds: needs,
+      timelineUses,
+      timelineNeedByUse: needs.timelineNeedByUse,
       values,
       stateWrites,
       placement

@@ -13,7 +13,9 @@ import {
   analyzeValuePlan,
   buildBlockLayout,
   buildTimelineGeometry,
+  buildTimelineValueUseIndex,
   type BlockLayout,
+  type EdgePath,
   type LayoutRegion,
   type LayoutStep,
   type PlannedStateWrite,
@@ -31,17 +33,16 @@ import type {
 import { registerAlias } from "#x86/registers.js";
 
 test("BlockLayout keeps overwritten writes exit-local and leaves the timeline semantic-only", () => {
-  const { layout, stateWrites, walked } = analyzeBlock([
+  const { geometry, layout, stateWrites, walked } = analyzeBlock([
     { op: "set", target: { kind: "reg", reg: "eax" }, value: c(1) },
     { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
     { op: "set", target: { kind: "reg", reg: "eax" }, value: c(2) },
     { op: "next" }
   ]);
   const eax1 = only(eaxConstWrites(stateWrites, 1));
-  const faultRegion = layout.regions.find((region) =>
-    region.kind === "exit" &&
-    region.path.kind === "exit" &&
-    region.path.exitKind === "memoryFault"
+  const faultRegion = layout.regions.find((region): region is EdgeLayoutRegion =>
+    region.path.kind === "edge" &&
+    geometry.edges.byPath.get(region.path)?.kind === "memory-fault"
   )!;
 
   strictEqual(walked.timeline.every((site) => site.kind === "action" || site.kind === "definition"), true);
@@ -91,35 +92,68 @@ test("BlockLayout emits save-expr steps and wraps backend inputs as timeline inp
   strictEqual(values.savedExprs.length, 1);
   strictEqual(saveIndex >= 0, true);
   strictEqual(saveIndex < firstStoreIndex, true);
-  deepStrictEqual(definition.inputs.map((input) => input.use.originKind), ["definition-input"]);
+  deepStrictEqual(definition.inputs.map((input) => input.use.kind), ["definition-input"]);
   deepStrictEqual(definition.inputs.map((input) => input.use.role), ["address"]);
   deepStrictEqual(stores[1]!.inputs.map((input) => input.use.role), ["address", "value"]);
   strictEqual(stores[1]!.inputs[1]!.recipe.kind, "saved-expr");
 });
 
+test("BlockLayout exposes branch edge regions and edge-owned exit payload inputs", () => {
+  const { geometry, layout } = analyzeBlock([
+    { op: "conditionalJump", condition: c(1), taken: c(0x40), notTaken: c(0x44) }
+  ]);
+  const branchAction = only(mainRegion(layout).steps.filter((step): step is Extract<LayoutStep, { kind: "action" }> =>
+    step.kind === "action" && step.site.action.kind === "branch"
+  ));
+  const payloadInputs = branchAction.inputs.filter((input) => input.use.kind === "exit-payload");
+  const branchRegions = layout.regions.filter((region): region is EdgeLayoutRegion =>
+    region.path.kind === "edge" &&
+    geometry.edges.byPath.get(region.path)?.kind.startsWith("branch-") === true
+  );
+
+  deepStrictEqual(payloadInputs.map((input) => input.use.kind), ["exit-payload", "exit-payload"]);
+  deepStrictEqual(payloadInputs.map((input) => input.use.role), ["target", "target"]);
+  deepStrictEqual(payloadInputs.map((input) =>
+    input.use.kind === "exit-payload" ? geometry.edges.byId.get(input.use.edge)?.kind : undefined
+  ), ["branch-taken", "branch-not-taken"]);
+  deepStrictEqual(branchRegions.map((region) => geometry.edges.byPath.get(region.path)?.kind), [
+    "branch-taken",
+    "branch-not-taken"
+  ]);
+  strictEqual(branchRegions.every((region) => region.steps.at(-1)?.kind === "exit"), true);
+});
+
 function analyzeBlock(block: IrBlock): Readonly<{
   walked: ReturnType<typeof walkExpressionBlock>;
+  geometry: ReturnType<typeof buildTimelineGeometry>;
   values: ReturnType<typeof analyzeValuePlan>;
   stateWrites: StateWritePlan;
   layout: BlockLayout;
 }> {
   const walked = walkExpressionBlock({ block });
   const geometry = buildTimelineGeometry(walked);
+  const timelineUses = buildTimelineValueUseIndex({ walked, geometry });
   const obligations = analyzeStateObligations({ walked, geometry });
-  const needs = analyzeExpressionNeeds({ walked, geometry, obligations });
+  const needs = analyzeExpressionNeeds({ timelineUses, obligations });
   const facts = analyzeBarrierFacts({ walked, geometry });
-  const values = analyzeValuePlan({ needs, geometry, facts });
-  const stateWrites = analyzeStateWrites({ obligations, needs, values });
+  const values = analyzeValuePlan({ needs: needs.needs, geometry, facts });
+  const stateWrites = analyzeStateWrites({
+    obligations,
+    valueNeeds: needs.valueNeedByObligation,
+    values
+  });
   const placement = analyzePlacementPlan({ geometry, facts, values, stateWrites });
 
   return {
     walked,
+    geometry,
     values,
     stateWrites,
     layout: buildBlockLayout({
       walked,
       geometry,
-      exprNeeds: needs,
+      timelineUses,
+      timelineNeedByUse: needs.timelineNeedByUse,
       values,
       stateWrites,
       placement
@@ -128,8 +162,10 @@ function analyzeBlock(block: IrBlock): Readonly<{
 }
 
 function mainRegion(layout: BlockLayout): LayoutRegion {
-  return layout.regions.find((region) => region.kind === "main")!;
+  return layout.regions.find((region) => region.path.kind === "main")!;
 }
+
+type EdgeLayoutRegion = LayoutRegion & Readonly<{ path: EdgePath }>;
 
 function hasWrite(region: LayoutRegion, write: PlannedStateWrite): boolean {
   return region.steps.some((step) => step.kind === "write-state" && step.satisfies.includes(write.id));

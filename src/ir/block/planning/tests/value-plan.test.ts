@@ -17,6 +17,7 @@ import {
   type ExprNeedId,
   type ExprRecipe,
   type SavedExprId,
+  type StateObligationId,
   type ValuePlan
 } from "#ir/block/planning/index.js";
 import { MutableRecipeRegistry } from "#ir/block/planning/values/recipes.js";
@@ -544,10 +545,7 @@ function analyzeBlock(
   const walked = walkExpressionBlock({ ...input, block });
   const geometry = buildTimelineGeometry(walked);
   const facts = analyzeBarrierFacts({ walked, geometry });
-  const needs = Object.freeze({
-    needs: Object.freeze([...makeNeeds({ geometry, facts })]),
-    valueNeedByObligation: Object.freeze(new Map())
-  });
+  const needs = Object.freeze([...makeNeeds({ geometry, facts })]);
 
   return {
     geometry,
@@ -581,7 +579,10 @@ function need(value: number, expr: ExprRef, point: ExprNeed["point"]): ExprNeed 
     id: id(value),
     expr,
     point,
-    origin: Object.freeze({ kind: "action-input" })
+    origin: Object.freeze({
+      kind: "state-obligation-value",
+      obligation: id(value) as unknown as StateObligationId
+    })
   } satisfies ExprNeed);
 }
 

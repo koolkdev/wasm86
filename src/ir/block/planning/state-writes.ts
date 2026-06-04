@@ -2,7 +2,7 @@ import {
   stateTargetsEqual,
   type StateTarget
 } from "#ir/block/state/targets.js";
-import type { ExprNeeds } from "./expression-needs.js";
+import type { ExprNeedId } from "./expression-needs.js";
 import type { ProgramPoint } from "./geometry/index.js";
 import type {
   StateObligation,
@@ -39,7 +39,7 @@ export type EquivalentStateWriteGroup = Readonly<{
 
 export type StateWritePlanInput = Readonly<{
   obligations: StateObligations;
-  needs: ExprNeeds;
+  valueNeeds: ReadonlyMap<StateObligationId, ExprNeedId>;
   values: ValuePlan;
 }>;
 
@@ -60,13 +60,13 @@ export function analyzeStateWrites(input: StateWritePlanInput): StateWritePlan {
 
 class StateWriteAnalyzer {
   readonly #obligations: StateObligations;
-  readonly #needs: ExprNeeds;
+  readonly #valueNeedByObligation: ReadonlyMap<StateObligationId, ExprNeedId>;
   readonly #values: ValuePlan;
   readonly #ids = new StateWriteIds();
 
   constructor(input: StateWritePlanInput) {
     this.#obligations = input.obligations;
-    this.#needs = input.needs;
+    this.#valueNeedByObligation = input.valueNeeds;
     this.#values = input.values;
   }
 
@@ -119,7 +119,7 @@ class StateWriteAnalyzer {
       throw new Error("concrete state write recipe requested for an undefined value");
     }
 
-    const needId = this.#needs.valueNeedByObligation.get(obligation.id);
+    const needId = this.#valueNeedByObligation.get(obligation.id);
 
     if (needId === undefined) {
       throw new Error(`state obligation ${obligation.id} has no expression need for its value`);

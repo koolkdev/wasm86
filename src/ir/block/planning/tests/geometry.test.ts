@@ -16,6 +16,7 @@ import {
   pathCovers,
   pathsInTree,
   programPointsEqual,
+  type EdgePath,
   type ProgramPoint,
   type Path
 } from "#ir/block/planning/geometry/index.js";
@@ -72,13 +73,21 @@ test("timeline geometry creates a memory-fault exit path from memory guards", ()
   const geometry = buildTimelineGeometry(result);
   const guardPoint = geometry.memory.guards[0]!;
   const exitPoint = geometry.exits.points[0]!;
+  const edge = geometry.edges.byExit.get(exitPoint.exit.id)!;
 
   strictEqual(geometry.memory.guards.length, 1);
+  strictEqual(geometry.edges.all.length, 1);
   strictEqual(geometry.exits.points.length, 1);
   strictEqual(exitPoint.exit.kind, "memoryFault");
+  strictEqual(edge.kind, "memory-fault");
+  strictEqual(edge.exit, exitPoint.exit);
+  strictEqual(edge.sourceSite, guardPoint.site);
+  strictEqual(geometry.edges.byId.get(edge.id), edge);
+  strictEqual(geometry.edges.byPath.get(exitPoint.path), edge);
   strictEqual(geometry.exits.byExit.get(exitPoint.exit.id), exitPoint);
-  strictEqual(exitPoint.path.kind, "exit");
-  strictEqual(exitPoint.path.kind === "exit" ? exitPoint.path.exitKind : undefined, "memoryFault");
+  strictEqual(exitPoint.path.kind, "edge");
+  strictEqual(exitPoint.path.edge, edge.id);
+  strictEqual(exitPoint.edge, edge.id);
   strictEqual(guardPoint.faultExitPoint, exitPoint);
   strictEqual(pathCovers(geometry.paths, geometry.paths.root, exitPoint.path), true);
 });
@@ -90,15 +99,19 @@ test("timeline geometry creates taken and not-taken paths for branches", () => {
     ]
   });
   const geometry = buildTimelineGeometry(result);
-  const branchPaths = pathsInTree(geometry.paths).filter((path) => path.kind === "branch");
-
-  deepStrictEqual(branchPaths.map((path) => path.arm), ["taken", "notTaken"]);
-  strictEqual(geometry.exits.points.length, 2);
-  deepStrictEqual(geometry.exits.points.map((point) => point.path.kind), ["branch", "branch"]);
-  deepStrictEqual(
-    geometry.exits.points.map((point) => point.path.kind === "branch" ? point.path.arm : undefined),
-    ["taken", "notTaken"]
+  const branchPaths = pathsInTree(geometry.paths).filter((path): path is EdgePath =>
+    path.kind === "edge" && geometry.edges.byPath.get(path)?.kind.startsWith("branch-") === true
   );
+
+  deepStrictEqual(branchPaths.map((path) => geometry.edges.byPath.get(path)?.kind), [
+    "branch-taken",
+    "branch-not-taken"
+  ]);
+  strictEqual(geometry.exits.points.length, 2);
+  deepStrictEqual(geometry.exits.points.map((point) => point.path.kind), ["edge", "edge"]);
+  deepStrictEqual(geometry.exits.points.map((point) =>
+    geometry.edges.byExit.get(point.exit.id)?.kind
+  ), ["branch-taken", "branch-not-taken"]);
   strictEqual(pathCovers(geometry.paths, geometry.paths.root, branchPaths[0]!), true);
   strictEqual(pathCovers(geometry.paths, branchPaths[0]!, branchPaths[1]!), false);
 });
@@ -110,15 +123,14 @@ test("path coverage uses path tree object ownership", () => {
     ]
   });
   const geometry = buildTimelineGeometry(result);
-  const ownedTaken = pathsInTree(geometry.paths).find((path) =>
-    path.kind === "branch" && path.arm === "taken"
+  const ownedTaken = pathsInTree(geometry.paths).find((path): path is EdgePath =>
+    path.kind === "edge" && geometry.edges.byPath.get(path)?.kind === "branch-taken"
   )!;
-  strictEqual(ownedTaken.kind, "branch");
+  strictEqual(ownedTaken.kind, "edge");
   const clonedMain = Object.freeze({ kind: "main" } satisfies Path);
   const clonedTaken = Object.freeze({
-    kind: "branch",
-    at: ownedTaken.at,
-    arm: ownedTaken.arm
+    kind: "edge",
+    edge: ownedTaken.edge
   } satisfies Path);
   const ownedMainPoint = geometry.points.bySite.get(result.timeline[0]!)!.at;
   const clonedMainPoint = Object.freeze({
@@ -131,6 +143,7 @@ test("path coverage uses path tree object ownership", () => {
   strictEqual(pathCovers(geometry.paths, clonedMain, ownedTaken), false);
   strictEqual(pathCovers(geometry.paths, geometry.paths.root, clonedTaken), false);
   strictEqual(comparePathOrder(geometry.paths.root, clonedMain), 0);
+  strictEqual(comparePathOrder(ownedTaken, clonedTaken), 0);
   strictEqual(geometry.paths.root === clonedMain, false);
   strictEqual(programPointsEqual(ownedMainPoint, ownedMainPoint), true);
   strictEqual(programPointsEqual(ownedMainPoint, clonedMainPoint), false);
@@ -156,15 +169,13 @@ test("timeline geometry creates exit paths for jump, host trap, and fallthrough 
 
   deepStrictEqual(
     [jump, hostTrap, fallthrough].map((geometry) => geometry.exits.points[0]?.path.kind),
-    ["exit", "exit", "exit"]
+    ["edge", "edge", "edge"]
   );
   deepStrictEqual(
     [jump, hostTrap, fallthrough].map((geometry) =>
-      geometry.exits.points[0]?.path.kind === "exit"
-        ? geometry.exits.points[0].path.exitKind
-        : undefined
+      geometry.edges.byExit.get(geometry.exits.points[0]!.exit.id)?.kind
     ),
-    ["jump", "hostTrap", "fallthrough"]
+    ["jump", "host-trap", "fallthrough"]
   );
 });
 

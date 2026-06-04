@@ -1,22 +1,21 @@
-import type { WalkedBlock } from "#ir/block/walk/types.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import type {
-  ProgramPoint,
-  TimelineGeometry
+  ProgramPoint
 } from "./geometry/index.js";
 import type {
   StateObligationId,
   StateObligations
 } from "./state-obligations.js";
 import {
-  timelineValueUses,
-  type TimelineValueUseOriginKind
+  type TimelineValueUseId,
+  type TimelineValueUseIndex
 } from "./timeline/value-uses.js";
 
 export type ExprNeedId = number & { readonly __exprNeedId: unique symbol };
 
 export type ExprNeeds = Readonly<{
   needs: readonly ExprNeed[];
+  timelineNeedByUse: ReadonlyMap<TimelineValueUseId, ExprNeedId>;
   valueNeedByObligation: ReadonlyMap<StateObligationId, ExprNeedId>;
 }>;
 
@@ -28,15 +27,17 @@ export type ExprNeed = Readonly<{
 }>;
 
 export type ExprNeedOrigin =
-  | Readonly<{ kind: TimelineValueUseOriginKind }>
+  | Readonly<{
+      kind: "timeline-use";
+      use: TimelineValueUseId;
+    }>
   | Readonly<{
       kind: "state-obligation-value";
       obligation: StateObligationId;
     }>;
 
 export type ExpressionNeedsInput = Readonly<{
-  walked: Pick<WalkedBlock, "timeline">;
-  geometry: TimelineGeometry;
+  timelineUses: TimelineValueUseIndex;
   obligations: StateObligations;
 }>;
 
@@ -56,30 +57,33 @@ export function analyzeExpressionNeeds(input: ExpressionNeedsInput): ExprNeeds {
 }
 
 class ExpressionNeedAnalyzer {
-  readonly #walked: Pick<WalkedBlock, "timeline">;
-  readonly #geometry: TimelineGeometry;
+  readonly #timelineUses: TimelineValueUseIndex;
   readonly #obligations: StateObligations;
   readonly #ids = new ExprNeedIds();
   readonly #needs: ExprNeed[] = [];
+  readonly #timelineNeedByUse = new Map<TimelineValueUseId, ExprNeedId>();
   readonly #valueNeedByObligation = new Map<StateObligationId, ExprNeedId>();
 
   constructor(input: ExpressionNeedsInput) {
-    this.#walked = input.walked;
-    this.#geometry = input.geometry;
+    this.#timelineUses = input.timelineUses;
     this.#obligations = input.obligations;
   }
 
   analyze(): ExprNeeds {
-    for (const site of this.#walked.timeline) {
-      for (const use of timelineValueUses(site, this.#geometry)) {
-        this.#addNeed(use.expr, use.point, { kind: use.originKind });
-      }
+    for (const use of this.#timelineUses.all) {
+      const need = this.#addNeed(use.expr, use.point, {
+        kind: "timeline-use",
+        use: use.id
+      });
+
+      this.#timelineNeedByUse.set(use.id, need.id);
     }
 
     this.#collectStateObligationNeeds();
 
     return Object.freeze({
       needs: Object.freeze([...this.#needs]),
+      timelineNeedByUse: Object.freeze(new Map(this.#timelineNeedByUse)),
       valueNeedByObligation: Object.freeze(new Map(this.#valueNeedByObligation))
     });
   }

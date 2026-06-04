@@ -1,8 +1,8 @@
 import type { BlockDefinitionId } from "#ir/block/definitions.js";
 import type { BarrierFacts, DefinitionResult } from "#ir/block/planning/barrier-facts.js";
 import type {
-  ExprNeedId,
-  ExprNeeds
+  ExprNeed,
+  ExprNeedId
 } from "#ir/block/planning/expression-needs.js";
 import {
   compareProgramPoints,
@@ -27,7 +27,7 @@ import type {
 type InputExprNode = ExprNode & { readonly expr: Extract<ExprRef, { kind: "input" }> };
 
 export type ValuePlanInput = Readonly<{
-  needs: ExprNeeds;
+  needs: readonly ExprNeed[];
   geometry: TimelineGeometry;
   facts: BarrierFacts;
 }>;
@@ -37,7 +37,7 @@ export function analyzeValuePlan(input: ValuePlanInput): ValuePlan {
 }
 
 class ValuePlanAnalyzer {
-  readonly #needs: ExprNeeds;
+  readonly #needs: readonly ExprNeed[];
   readonly #graph: ExprGraph;
   readonly #barriers: ValueBarrierIndex;
   readonly #recipes: MutableRecipeRegistry;
@@ -55,7 +55,7 @@ class ValuePlanAnalyzer {
   }
 
   analyze(): ValuePlan {
-    for (const need of this.#needs.needs) {
+    for (const need of this.#needs) {
       const recipe = this.#analyzeExpr(need.expr, need.point, need.id);
 
       this.#saves.recordRecipeUse(recipe, need.id);
@@ -315,7 +315,7 @@ function earliestBlocker(blockers: readonly (SaveBlocker | undefined)[]): SaveBl
 
 function expressionGraphRoots(input: ValuePlanInput): Iterable<ExprRef> {
   return [
-    ...input.needs.needs.map((need) => need.expr),
+    ...input.needs.map((need) => need.expr),
     ...input.facts.definitions.flatMap((definition) => [
       definition.result,
       definition.inputExpr

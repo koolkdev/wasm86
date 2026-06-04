@@ -15,6 +15,7 @@ import {
   analyzeStateWrites,
   analyzeValuePlan,
   buildTimelineGeometry,
+  buildTimelineValueUseIndex,
   type ExprNeeds,
   type PlannedStateWrite,
   type StateObligations,
@@ -257,11 +258,16 @@ function analyzeBlock(
 }> {
   const walked = walkExpressionBlock({ ...input, block });
   const geometry = buildTimelineGeometry(walked);
+  const timelineUses = buildTimelineValueUseIndex({ walked, geometry });
   const obligations = analyzeStateObligations({ walked, geometry });
-  const needs = analyzeExpressionNeeds({ walked, geometry, obligations });
+  const needs = analyzeExpressionNeeds({ timelineUses, obligations });
   const facts = analyzeBarrierFacts({ walked, geometry });
-  const values = analyzeValuePlan({ needs, geometry, facts });
-  const stateWrites = analyzeStateWrites({ obligations, needs, values });
+  const values = analyzeValuePlan({ needs: needs.needs, geometry, facts });
+  const stateWrites = analyzeStateWrites({
+    obligations,
+    valueNeeds: needs.valueNeedByObligation,
+    values
+  });
 
   return {
     facts,

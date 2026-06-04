@@ -9,16 +9,20 @@ import type {
 } from "#ir/block/timeline.js";
 import type {
   ActionSiteFor,
-  BranchArm,
-  BranchPath,
+  BlockEdge,
+  BlockEdgeId,
+  BlockEdgeKind,
+  EdgeGeometry,
   DefinitionPoint,
-  ExitPath,
+  EdgePath,
+  ExitGeometry,
   ExitPoint,
   MainPath,
   MemoryGuardPoint,
   MemoryWritePoint,
   Path,
   PathEdge,
+  PathGeometry,
   ProgramPoint,
   ProgramPointPhase,
   RegisterGeometry,
@@ -29,18 +33,13 @@ import type {
 
 export function buildTimelineGeometry(input: TimelineGeometryInput): TimelineGeometry {
   const mainPath = Object.freeze({ kind: "main" } satisfies MainPath);
-  const edges: PathEdge[] = [];
-  const parentByPath = new Map<Path, Path>();
+  const edgeRecorder = new TimelineEdgeRecorder(mainPath, input.exits);
   const pointsBySite = new Map<BlockTimelineSite, SitePoints>();
-  const exitPoints: ExitPoint[] = [];
-  const exitByExit = new Map<BlockExitId, ExitPoint>();
   const definitionPoints: DefinitionPoint[] = [];
   const definitionByDefinition = new Map<DefinitionPoint["definition"]["id"], DefinitionPoint>();
   const memoryWritePoints: MemoryWritePoint[] = [];
   const memoryGuardPoints: MemoryGuardPoint[] = [];
   const dynamicRegisterStorePoints: RegisterGeometry["dynamicStores"][number][] = [];
-  const inputExitIds = new Set(input.exits.map((exit) => exit.id));
-  const seenExitIds = new Set<BlockExitId>();
 
   for (const site of input.timeline) {
     const sitePoints = createSitePoints(mainPath, site.at);
@@ -61,19 +60,13 @@ export function buildTimelineGeometry(input: TimelineGeometryInput): TimelineGeo
 
     switch (site.action.kind) {
       case "memoryGuard": {
-        const faultPath = createExitPath(site.action.faultExit);
-        const faultExitPoint = addExitPoint({
+        const faultExitPoint = edgeRecorder.recordExit({
+          kind: "memory-fault",
           exit: site.action.faultExit,
-          path: faultPath,
           site,
-          at: site.at,
-          inputExitIds,
-          seenExitIds,
-          exitPoints,
-          exitByExit
+          at: site.at
         });
 
-        addPathEdge(edges, parentByPath, mainPath, faultPath);
         memoryGuardPoints.push(Object.freeze({
           site: site as ActionSiteFor<"memoryGuard">,
           point: sitePoints.at,
@@ -97,71 +90,41 @@ export function buildTimelineGeometry(input: TimelineGeometryInput): TimelineGeo
       case "jump":
       case "hostTrap":
       case "fallthrough": {
-        const exitPath = createExitPath(site.action.exit);
-
-        addPathEdge(edges, parentByPath, mainPath, exitPath);
-        addExitPoint({
+        edgeRecorder.recordExit({
+          kind: edgeKindForAction(site.action.kind),
           exit: site.action.exit,
-          path: exitPath,
           site,
-          at: site.at,
-          inputExitIds,
-          seenExitIds,
-          exitPoints,
-          exitByExit
+          at: site.at
         });
         break;
       }
       case "branch": {
-        const takenPath = createBranchPath(site.at, "taken");
-        const notTakenPath = createBranchPath(site.at, "notTaken");
-
-        addPathEdge(edges, parentByPath, mainPath, takenPath);
-        addPathEdge(edges, parentByPath, mainPath, notTakenPath);
-        addExitPoint({
+        edgeRecorder.recordExit({
+          kind: "branch-taken",
           exit: site.action.taken,
-          path: takenPath,
           site,
-          at: site.at,
-          inputExitIds,
-          seenExitIds,
-          exitPoints,
-          exitByExit
+          at: site.at
         });
-        addExitPoint({
+        edgeRecorder.recordExit({
+          kind: "branch-not-taken",
           exit: site.action.notTaken,
-          path: notTakenPath,
           site,
-          at: site.at,
-          inputExitIds,
-          seenExitIds,
-          exitPoints,
-          exitByExit
+          at: site.at
         });
         break;
       }
     }
   }
 
-  for (const exit of input.exits) {
-    if (!seenExitIds.has(exit.id)) {
-      throw new Error(`block exit ${exit.id} has no source timeline action`);
-    }
-  }
+  edgeRecorder.assertEveryInputExitWasSeen();
 
   return Object.freeze({
-    paths: Object.freeze({
-      root: mainPath,
-      edges: Object.freeze([...edges]),
-      parentByPath: Object.freeze(new Map(parentByPath))
-    }),
+    paths: edgeRecorder.pathGeometry(),
+    edges: edgeRecorder.edgeGeometry(),
     points: Object.freeze({
       bySite: Object.freeze(pointsBySite)
     }),
-    exits: Object.freeze({
-      points: Object.freeze([...exitPoints]),
-      byExit: Object.freeze(new Map(exitByExit))
-    }),
+    exits: edgeRecorder.exitGeometry(),
     definitions: Object.freeze({
       points: Object.freeze([...definitionPoints]),
       byDefinition: Object.freeze(new Map(definitionByDefinition))
@@ -176,41 +139,115 @@ export function buildTimelineGeometry(input: TimelineGeometryInput): TimelineGeo
   });
 }
 
-function addExitPoint(input: Readonly<{
-  exit: BlockExit;
-  path: Path;
-  site: BlockActionSite;
-  at: Placement;
-  inputExitIds: ReadonlySet<BlockExitId>;
-  seenExitIds: Set<BlockExitId>;
-  exitPoints: ExitPoint[];
-  exitByExit: Map<BlockExitId, ExitPoint>;
-}>): ExitPoint {
-  if (!input.inputExitIds.has(input.exit.id)) {
-    throw new Error(`timeline action references unknown block exit ${input.exit.id}`);
+class BlockEdgeIds {
+  #next = 0;
+
+  next(): BlockEdgeId {
+    const id = this.#next;
+
+    this.#next += 1;
+    return id as BlockEdgeId;
+  }
+}
+
+class TimelineEdgeRecorder {
+  readonly #root: MainPath;
+  readonly #edgeIds = new BlockEdgeIds();
+  readonly #pathEdges: PathEdge[] = [];
+  readonly #parentByPath = new Map<Path, Path>();
+  readonly #blockEdges: BlockEdge[] = [];
+  readonly #blockEdgeById = new Map<BlockEdgeId, BlockEdge>();
+  readonly #blockEdgeByExit = new Map<BlockExitId, BlockEdge>();
+  readonly #blockEdgeByPath = new Map<EdgePath, BlockEdge>();
+  readonly #exitPoints: ExitPoint[] = [];
+  readonly #exitByExit = new Map<BlockExitId, ExitPoint>();
+  readonly #inputExitIds: ReadonlySet<BlockExitId>;
+  readonly #seenExitIds = new Set<BlockExitId>();
+
+  constructor(root: MainPath, exits: readonly BlockExit[]) {
+    this.#root = root;
+    this.#inputExitIds = new Set(exits.map((exit) => exit.id));
   }
 
-  if (input.seenExitIds.has(input.exit.id)) {
-    throw new Error(`block exit ${input.exit.id} is referenced by multiple timeline actions`);
+  recordExit(input: Readonly<{
+    kind: BlockEdgeKind;
+    exit: BlockExit;
+    site: BlockActionSite;
+    at: Placement;
+  }>): ExitPoint {
+    if (!this.#inputExitIds.has(input.exit.id)) {
+      throw new Error(`timeline action references unknown block exit ${input.exit.id}`);
+    }
+
+    if (this.#seenExitIds.has(input.exit.id)) {
+      throw new Error(`block exit ${input.exit.id} is referenced by multiple timeline actions`);
+    }
+
+    this.#seenExitIds.add(input.exit.id);
+
+    const edge = Object.freeze({
+      id: this.#edgeIds.next(),
+      kind: input.kind,
+      sourceSite: input.site,
+      exit: input.exit
+    } satisfies BlockEdge);
+    const path = createEdgePath(edge.id);
+
+    addPathEdge(this.#pathEdges, this.#parentByPath, this.#root, path);
+
+    const point = Object.freeze({
+      path,
+      at: input.at,
+      phase: "at"
+    } satisfies ProgramPoint);
+    const exitPoint = Object.freeze({
+      exit: input.exit,
+      edge: edge.id,
+      path,
+      point,
+      sourceSite: input.site
+    } satisfies ExitPoint);
+
+    this.#blockEdges.push(edge);
+    this.#blockEdgeById.set(edge.id, edge);
+    this.#blockEdgeByExit.set(input.exit.id, edge);
+    this.#blockEdgeByPath.set(path, edge);
+    this.#exitPoints.push(exitPoint);
+    this.#exitByExit.set(input.exit.id, exitPoint);
+    return exitPoint;
   }
 
-  input.seenExitIds.add(input.exit.id);
+  assertEveryInputExitWasSeen(): void {
+    for (const exitId of this.#inputExitIds) {
+      if (!this.#seenExitIds.has(exitId)) {
+        throw new Error(`block exit ${exitId} has no source timeline action`);
+      }
+    }
+  }
 
-  const point = Object.freeze({
-    path: input.path,
-    at: input.at,
-    phase: "at"
-  } satisfies ProgramPoint);
-  const exitPoint = Object.freeze({
-    exit: input.exit,
-    path: input.path,
-    point,
-    sourceSite: input.site
-  } satisfies ExitPoint);
+  pathGeometry(): PathGeometry {
+    return Object.freeze({
+      root: this.#root,
+      edges: Object.freeze([...this.#pathEdges]),
+      parentByPath: Object.freeze(new Map(this.#parentByPath))
+    } satisfies PathGeometry);
+  }
 
-  input.exitPoints.push(exitPoint);
-  input.exitByExit.set(input.exit.id, exitPoint);
-  return exitPoint;
+  edgeGeometry(): EdgeGeometry {
+    return Object.freeze({
+      all: Object.freeze([...this.#blockEdges]),
+      byId: Object.freeze(new Map(this.#blockEdgeById)),
+      byExit: Object.freeze(new Map(this.#blockEdgeByExit)),
+      byPath: Object.freeze(new Map(this.#blockEdgeByPath))
+    } satisfies EdgeGeometry);
+  }
+
+  exitGeometry(): ExitGeometry {
+    return Object.freeze({
+      points: Object.freeze([...this.#exitPoints]),
+      byExit: Object.freeze(new Map(this.#exitByExit))
+    } satisfies ExitGeometry);
+  }
 }
 
 function createSitePoints(path: Path, at: Placement): SitePoints {
@@ -233,19 +270,10 @@ function createProgramPoint(
   });
 }
 
-function createBranchPath(at: Placement, arm: BranchArm): BranchPath {
+function createEdgePath(edge: BlockEdgeId): EdgePath {
   return Object.freeze({
-    kind: "branch",
-    at,
-    arm
-  });
-}
-
-function createExitPath(exit: BlockExit): ExitPath {
-  return Object.freeze({
-    kind: "exit",
-    exit: exit.id,
-    exitKind: exit.kind
+    kind: "edge",
+    edge
   });
 }
 
@@ -262,4 +290,15 @@ function addPathEdge(
 
   edges.push(edge);
   parentByPath.set(child, parent);
+}
+
+function edgeKindForAction(kind: "jump" | "hostTrap" | "fallthrough"): BlockEdgeKind {
+  switch (kind) {
+    case "jump":
+      return "jump";
+    case "hostTrap":
+      return "host-trap";
+    case "fallthrough":
+      return "fallthrough";
+  }
 }
