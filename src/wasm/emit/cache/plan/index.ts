@@ -6,15 +6,7 @@ export {
 export type {
   WasmCacheEntry,
   WasmCacheEntryId,
-  WasmCacheOccurrence,
-  WasmCacheOccurrenceBase,
-  WasmCacheOccurrenceId,
-  WasmCacheOccurrenceSource,
   WasmCachePlan,
   WasmCachePlanInput,
-  WasmCacheRecipeOccurrence,
-  WasmCacheRegionSchedule,
-  WasmCacheReason,
-  WasmCacheSavedExprOccurrence,
-  WasmCacheSaveExprOccurrence
+  WasmCacheReason
 } from "./types.js";

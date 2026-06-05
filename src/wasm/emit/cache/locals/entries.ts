@@ -52,7 +52,7 @@ export class WasmCacheEntryIndex {
     const actualId = this.#values.recipes.recipeId(actual);
 
     if (expectedId === undefined || actualId === undefined || expectedId !== actualId) {
-      throw new Error("Wasm cache occurrence recipe does not match emitted recipe");
+      throw new Error("Wasm cache entry recipe does not match emitted recipe");
     }
   }
 }

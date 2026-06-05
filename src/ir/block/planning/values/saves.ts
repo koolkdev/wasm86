@@ -123,7 +123,10 @@ export class SavedExprRegistry {
     visited: Set<SavedExprId>
   ): void {
     switch (recipe.kind) {
-      case "inline":
+      case "expr":
+        for (const child of recipe.children) {
+          this.#recordRecipeUse(child, topLevelNeed, visited);
+        }
         break;
       case "saved-expr": {
         const saved = this.#byId.get(recipe.saved);
@@ -137,11 +140,6 @@ export class SavedExprRegistry {
       }
       case "definition":
         this.#recordRecipeUse(recipe.input, topLevelNeed, visited);
-        break;
-      case "compute":
-        for (const child of recipe.children) {
-          this.#recordRecipeUse(child, topLevelNeed, visited);
-        }
         break;
     }
   }

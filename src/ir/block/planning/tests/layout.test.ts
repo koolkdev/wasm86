@@ -192,7 +192,7 @@ function eaxConstWrites(stateWrites: StateWritePlan, value: number): readonly Pl
   return stateWrites.writes.filter((write) =>
     write.target.kind === "reg" &&
     write.target.reg === registerAlias("eax") &&
-    write.value?.kind === "inline" &&
+    write.value?.kind === "expr" &&
     exprsEqual(write.value.expr, exprConst(value))
   );
 }

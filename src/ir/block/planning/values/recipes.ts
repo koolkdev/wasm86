@@ -4,8 +4,8 @@ import type {
   ExprGraph,
   ExprNodeId
 } from "#ir/expr/graph/index.js";
-import { exprChildren } from "#ir/expr/children.js";
 import type { ExprRef } from "#ir/expr/types.js";
+import { exprChildren } from "#ir/expr/children.js";
 import type {
   ExprRecipe,
   ExprRecipeId,
@@ -18,10 +18,9 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
   readonly #recipes: ExprRecipe[] = [];
   readonly #needRecipes = new Map<ExprNeedId, ExprRecipe>();
   readonly #needRecipeIds = new Map<ExprNeedId, ExprRecipeId>();
-  readonly #inlineByExpr = new Map<ExprNodeId, ExprRecipeId>();
   readonly #savedById = new Map<SavedExprId, ExprRecipeId>();
   readonly #definitionByInput = new Map<BlockDefinitionId, Map<ExprRecipeId, ExprRecipeId>>();
-  readonly #computeByExprAndChildren = new Map<ExprNodeId, RecipeIdSequenceMap<ExprRecipeId>>();
+  readonly #exprByExprAndChildren = new Map<ExprNodeId, RecipeIdSequenceMap<ExprRecipeId>>();
 
   constructor(graph: ExprGraph) {
     this.#graph = graph;
@@ -42,23 +41,7 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
 
   recipeId(recipe: ExprRecipe): ExprRecipeId | undefined {
     switch (recipe.kind) {
-      case "inline": {
-        const exprId = this.#exprNodeId(recipe.expr);
-
-        return exprId === undefined
-          ? undefined
-          : this.#inlineByExpr.get(exprId);
-      }
-      case "saved-expr":
-        return this.#savedById.get(recipe.saved);
-      case "definition": {
-        const inputId = this.recipeId(recipe.input);
-
-        return inputId === undefined
-          ? undefined
-          : this.#definitionByInput.get(recipe.definition)?.get(inputId);
-      }
-      case "compute": {
+      case "expr": {
         const exprId = this.#exprNodeId(recipe.expr);
         const childIds: ExprRecipeId[] = [];
 
@@ -76,21 +59,28 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
           childIds.push(childId);
         }
 
-        return this.#computeByExprAndChildren.get(exprId)?.get(childIds);
+        return this.#exprByExprAndChildren.get(exprId)?.get(childIds);
+      }
+      case "saved-expr":
+        return this.#savedById.get(recipe.saved);
+      case "definition": {
+        const inputId = this.recipeId(recipe.input);
+
+        return inputId === undefined
+          ? undefined
+          : this.#definitionByInput.get(recipe.definition)?.get(inputId);
       }
     }
   }
 
   recordRecipe(recipe: ExprRecipe): ExprRecipeId {
     switch (recipe.kind) {
-      case "inline":
-        return this.#inlineRecipeId(recipe);
+      case "expr":
+        return this.#exprRecipeId(recipe);
       case "saved-expr":
         return this.#savedRecipeId(recipe);
       case "definition":
         return this.#definitionRecipeId(recipe);
-      case "compute":
-        return this.#computeRecipeId(recipe);
     }
   }
 
@@ -104,22 +94,39 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
     return recipe;
   }
 
-  #inlineRecipeId(recipe: Extract<ExprRecipe, { kind: "inline" }>): ExprRecipeId {
+  #exprRecipeId(recipe: Extract<ExprRecipe, { kind: "expr" }>): ExprRecipeId {
     const exprId = this.#graph.node(recipe.expr).id;
-    const existing = this.#inlineByExpr.get(exprId);
+    const childIds = this.#recordedExprChildIds(recipe);
+    let byChildren = this.#exprByExprAndChildren.get(exprId);
+
+    if (byChildren === undefined) {
+      byChildren = new RecipeIdSequenceMap();
+      this.#exprByExprAndChildren.set(exprId, byChildren);
+    }
+
+    const existing = byChildren.get(childIds);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    for (const child of exprChildren(recipe.expr)) {
-      this.#inlineRecipeId(Object.freeze({ kind: "inline", expr: child } satisfies ExprRecipe));
-    }
-
     const id = this.#next(recipe);
 
-    this.#inlineByExpr.set(exprId, id);
+    byChildren.set(childIds, id);
     return id;
+  }
+
+  #recordedExprChildIds(recipe: Extract<ExprRecipe, { kind: "expr" }>): ExprRecipeId[] {
+    const expectedChildCount = exprChildren(recipe.expr).length;
+
+    if (recipe.children.length !== expectedChildCount) {
+      throw new Error(
+        `expr ${recipe.expr.kind} recipe expected ${expectedChildCount} children, ` +
+        `got ${recipe.children.length}`
+      );
+    }
+
+    return recipe.children.map((child) => this.recordRecipe(child));
   }
 
   #savedRecipeId(recipe: Extract<ExprRecipe, { kind: "saved-expr" }>): ExprRecipeId {
@@ -153,28 +160,6 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
     const id = this.#next(recipe);
 
     byInput.set(inputId, id);
-    return id;
-  }
-
-  #computeRecipeId(recipe: Extract<ExprRecipe, { kind: "compute" }>): ExprRecipeId {
-    const exprId = this.#graph.node(recipe.expr).id;
-    const childIds = recipe.children.map((child) => this.recordRecipe(child));
-    let byChildren = this.#computeByExprAndChildren.get(exprId);
-
-    if (byChildren === undefined) {
-      byChildren = new RecipeIdSequenceMap();
-      this.#computeByExprAndChildren.set(exprId, byChildren);
-    }
-
-    const existing = byChildren.get(childIds);
-
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const id = this.#next(recipe);
-
-    byChildren.set(childIds, id);
     return id;
   }
 

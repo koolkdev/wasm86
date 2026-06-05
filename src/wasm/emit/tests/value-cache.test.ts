@@ -1,7 +1,5 @@
 import {
-  deepStrictEqual,
-  strictEqual,
-  throws
+  deepStrictEqual
 } from "node:assert";
 import { test } from "node:test";
 
@@ -23,6 +21,8 @@ import {
   exprConst,
   exprInput
 } from "#ir/expr/builders.js";
+import { exprChildren } from "#ir/expr/children.js";
+import type { ExprRef } from "#ir/expr/types.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import {
@@ -32,9 +32,6 @@ import {
 import type {
   WasmCacheEntry,
   WasmCacheEntryId,
-  WasmCacheOccurrence,
-  WasmCacheOccurrenceId,
-  WasmCacheOccurrenceSource,
   WasmCachePlan,
   WasmCacheReason
 } from "#wasm/emit/cache/plan/index.js";
@@ -45,15 +42,10 @@ import {
 
 test("Wasm value cache emits local.tee for first selected use and local.get for later use", () => {
   const main = region(0);
-  const recipe = inlineInputRecipe("eax");
+  const recipe = exprInputRecipe("eax");
   const useA = useId(10);
   const useB = useId(11);
-  const plan = cachePlan([cacheEntry(0, recipe)], [
-    regionSchedule(main, [
-      recipeOccurrence(0, 0, 0, recipe, sourceUse(useA)),
-      recipeOccurrence(1, 1, 0, recipe, sourceUse(useB))
-    ])
-  ]);
+  const plan = cachePlan([cacheEntry(0, recipe)]);
   const { body, cache, scratch } = createFixture(plan);
 
   cache.enterRegion(main);
@@ -73,9 +65,9 @@ test("Wasm value cache emits local.tee for first selected use and local.get for 
 
 test("Wasm value cache leaves unselected uses inline", () => {
   const main = region(0);
-  const recipe = inlineInputRecipe("eax");
+  const recipe = exprInputRecipe("eax");
   const use = useId(10);
-  const { body, cache, scratch } = createFixture(cachePlan([], []), [recipe]);
+  const { body, cache, scratch } = createFixture(cachePlan([]), [recipe]);
 
   cache.enterRegion(main);
   cache.emitUse({ id: use, recipe }, inline(body, "unselected"));
@@ -87,63 +79,44 @@ test("Wasm value cache leaves unselected uses inline", () => {
   scratch.assertClear();
 });
 
-test("Wasm value cache rejects leaving a region with unconsumed selected occurrences before freeing locals", () => {
+test("Wasm value cache releases selected locals on region leave", () => {
   const main = region(0);
-  const recipe = inlineInputRecipe("eax");
-  const useA = useId(12);
-  const useB = useId(13);
-  const plan = cachePlan([cacheEntry(0, recipe)], [
-    regionSchedule(main, [
-      recipeOccurrence(0, 0, 0, recipe, sourceUse(useA)),
-      recipeOccurrence(1, 1, 0, recipe, sourceUse(useB))
-    ])
-  ]);
+  const recipe = exprInputRecipe("eax");
+  const use = useId(12);
+  const plan = cachePlan([cacheEntry(0, recipe)]);
   const { body, cache, scratch } = createFixture(plan);
 
   cache.enterRegion(main);
-  cache.emitUse({ id: useA, recipe }, inline(body, "first"));
+  cache.emitUse({ id: use, recipe }, inline(body, "first"));
 
-  throws(
-    () => cache.leaveRegion(main),
-    /cannot leave Wasm cache region 0; unconsumed selected occurrence recipe#1/
-  );
   deepStrictEqual(body.ops, [
     { kind: "inline", label: "first" },
     { kind: "alloc", local: 0, type: wasmValueType.i32 },
     { kind: "tee", local: 0 }
   ]);
 
-  cache.emitUse({ id: useB, recipe }, inline(body, "second"));
   cache.leaveRegion(main);
 
   deepStrictEqual(body.ops, [
     { kind: "inline", label: "first" },
     { kind: "alloc", local: 0, type: wasmValueType.i32 },
     { kind: "tee", local: 0 },
-    { kind: "get", local: 0 },
     { kind: "free", local: 0 }
   ]);
   scratch.assertClear();
 });
 
-test("Wasm value cache releases saved expression local after last saved-expr use", () => {
+test("Wasm value cache keeps saved expression locals until region leave", () => {
   const main = region(0);
   const saved = savedId(0);
-  const savedRecipe = inlineInputRecipe("eax");
-  const laterRecipe = inlineRecipe(exprBinary("add", exprConst(2), exprConst(1)));
+  const savedRecipe = exprInputRecipe("eax");
+  const laterRecipe = exprRecipe(exprBinary("add", exprConst(2), exprConst(1)));
   const savedUse = useId(20);
   const laterUseA = useId(21);
   const laterUseB = useId(22);
   const plan = cachePlan([
     cacheEntry(0, savedRecipe, [{ kind: "saved-expr", saved }]),
     cacheEntry(1, laterRecipe)
-  ], [
-    regionSchedule(main, [
-      saveExprOccurrence(0, 0, 0, saved, savedRecipe),
-      savedExprOccurrence(1, 1, 0, saved, sourceUse(savedUse)),
-      recipeOccurrence(2, 2, 1, laterRecipe, sourceUse(laterUseA)),
-      recipeOccurrence(3, 3, 1, laterRecipe, sourceUse(laterUseB))
-    ])
   ]);
   const { body, cache, scratch } = createFixture(plan);
 
@@ -159,194 +132,143 @@ test("Wasm value cache releases saved expression local after last saved-expr use
     { kind: "alloc", local: 0, type: wasmValueType.i32 },
     { kind: "set", local: 0 },
     { kind: "get", local: 0 },
-    { kind: "free", local: 0 },
     { kind: "inline", label: "later-first" },
-    { kind: "alloc", local: 0, type: wasmValueType.i32 },
-    { kind: "tee", local: 0 },
-    { kind: "get", local: 0 },
-    { kind: "free", local: 0 }
+    { kind: "alloc", local: 1, type: wasmValueType.i32 },
+    { kind: "tee", local: 1 },
+    { kind: "get", local: 1 },
+    { kind: "free", local: 0 },
+    { kind: "free", local: 1 }
   ]);
   scratch.assertClear();
 });
 
-test("Wasm value cache consumes nested selected child before later save-expr", () => {
+test("Wasm value cache emits parent saved expressions in child regions", () => {
   const main = region(0);
+  const edge = region(1, edgePath(1));
   const saved = savedId(0);
-  const savedRecipe = inlineInputRecipe("eax");
-  const topUse = useId(30);
-  const savedUse = useId(31);
-  const source = sourceUse(topUse);
-  const plan = cachePlan([cacheEntry(0, savedRecipe, [{ kind: "saved-expr", saved }])], [
-    regionSchedule(main, [
-      recipeOccurrence(0, 0, 0, savedRecipe, source, 1),
-      saveExprOccurrence(1, 1, 0, saved, savedRecipe),
-      savedExprOccurrence(2, 2, 0, saved, sourceUse(savedUse))
-    ])
-  ]);
-
-  {
-    const { cache } = createFixture(plan);
-
-    cache.enterRegion(main);
-    throws(
-      () => cache.ensureSaved(saved, savedRecipe, failInline),
-      /expected Wasm cache save-expr occurrence.*found recipe#0/
-    );
-  }
-
+  const savedRecipe = exprInputRecipe("eax");
+  const plan = cachePlan([cacheEntry(0, savedRecipe, [{ kind: "saved-expr", saved }])]);
   const { body, cache, scratch } = createFixture(plan);
 
   cache.enterRegion(main);
-  cache.emitRecipe(savedRecipe, source, inline(body, "nested-child"));
-  cache.ensureSaved(saved, savedRecipe, inline(body, "save-should-not-run"));
-  cache.emitUse({ id: savedUse, recipe: savedExprRecipe(saved) }, inline(body, "saved-use"));
+  cache.ensureSaved(saved, savedRecipe, inline(body, "save"));
+
+  cache.enterRegion(edge);
+  cache.emitSaved(saved);
+  cache.leaveRegion(edge);
+
+  cache.emitSaved(saved);
   cache.leaveRegion(main);
 
   deepStrictEqual(body.ops, [
-    { kind: "inline", label: "nested-child" },
+    { kind: "inline", label: "save" },
     { kind: "alloc", local: 0, type: wasmValueType.i32 },
-    { kind: "tee", local: 0 },
+    { kind: "set", local: 0 },
+    { kind: "get", local: 0 },
     { kind: "get", local: 0 },
     { kind: "free", local: 0 }
   ]);
   scratch.assertClear();
 });
 
-test("Wasm value cache reuses locals for sequential cached values", () => {
+test("Wasm value cache keeps selected locals until region leave", () => {
   const main = region(0);
-  const entries: WasmCacheEntry[] = [];
-  const occurrences: WasmCacheOccurrence[] = [];
-  const uses: LayoutValueUseId[] = [];
-  const recipes: ExprRecipe[] = [];
-
-  for (let index = 0; index < 8; index += 1) {
-    const recipe = inlineRecipe(exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(index + 1)));
-    const firstUse = useId(100 + index * 2);
-    const secondUse = useId(101 + index * 2);
-
-    recipes.push(recipe);
-    uses.push(firstUse, secondUse);
-    entries.push(cacheEntry(index, recipe));
-    occurrences.push(
-      recipeOccurrence(index * 2, index * 2, index, recipe, sourceUse(firstUse)),
-      recipeOccurrence(index * 2 + 1, index * 2 + 1, index, recipe, sourceUse(secondUse))
-    );
-  }
-
-  const { body, cache, scratch } = createFixture(cachePlan(entries, [regionSchedule(main, occurrences)]), recipes);
+  const recipeA = exprRecipe(exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(1)));
+  const recipeB = exprRecipe(exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(2)));
+  const useA0 = useId(100);
+  const useB = useId(101);
+  const useA1 = useId(102);
+  const { body, cache, scratch } = createFixture(cachePlan([
+    cacheEntry(0, recipeA),
+    cacheEntry(1, recipeB)
+  ]));
 
   cache.enterRegion(main);
-
-  recipes.forEach((recipe, index) => {
-    cache.emitUse({ id: uses[index * 2]!, recipe }, inline(body, `first-${index}`));
-    cache.emitUse({ id: uses[index * 2 + 1]!, recipe }, inline(body, `second-${index}`));
-  });
-
+  cache.emitUse({ id: useA0, recipe: recipeA }, inline(body, "a-first"));
+  cache.emitUse({ id: useB, recipe: recipeB }, inline(body, "b-first"));
+  cache.emitUse({ id: useA1, recipe: recipeA }, inline(body, "a-second"));
   cache.leaveRegion(main);
 
-  const allocatedLocals = body.ops
-    .filter((op): op is Extract<RecordedOp, { kind: "alloc" }> => op.kind === "alloc")
-    .map((op) => op.local);
-  const teeLocals = body.ops
-    .filter((op): op is Extract<RecordedOp, { kind: "tee" }> => op.kind === "tee")
-    .map((op) => op.local);
-
-  deepStrictEqual([...new Set(allocatedLocals)], [0]);
-  deepStrictEqual([...new Set(teeLocals)], [0]);
-  strictEqual(teeLocals.length, 8);
+  deepStrictEqual(body.ops, [
+    { kind: "inline", label: "a-first" },
+    { kind: "alloc", local: 0, type: wasmValueType.i32 },
+    { kind: "tee", local: 0 },
+    { kind: "inline", label: "b-first" },
+    { kind: "alloc", local: 1, type: wasmValueType.i32 },
+    { kind: "tee", local: 1 },
+    { kind: "get", local: 0 },
+    { kind: "free", local: 0 },
+    { kind: "free", local: 1 }
+  ]);
   scratch.assertClear();
 });
 
-test("Wasm value cache keeps parent locals visible to child but not child locals visible to sibling", () => {
+test("Wasm value cache inherits parent selected locals into child regions", () => {
+  const main = region(0);
+  const edge = region(1, edgePath(1));
+  const recipe = exprInputRecipe("eax");
+  const mainUseA = useId(200);
+  const edgeUse = useId(201);
+  const mainUseB = useId(202);
+  const plan = cachePlan([
+    cacheEntry(0, recipe)
+  ]);
+  const { body, cache, scratch } = createFixture(plan);
+
+  cache.enterRegion(main);
+  cache.emitUse({ id: mainUseA, recipe }, inline(body, "main-first"));
+
+  cache.enterRegion(edge);
+  cache.emitUse({ id: edgeUse, recipe }, inline(body, "edge-should-not-run"));
+  cache.leaveRegion(edge);
+
+  cache.emitUse({ id: mainUseB, recipe }, inline(body, "main-second"));
+
+  cache.leaveRegion(main);
+
+  deepStrictEqual(body.ops, [
+    { kind: "inline", label: "main-first" },
+    { kind: "alloc", local: 0, type: wasmValueType.i32 },
+    { kind: "tee", local: 0 },
+    { kind: "get", local: 0 },
+    { kind: "get", local: 0 },
+    { kind: "free", local: 0 }
+  ]);
+  scratch.assertClear();
+});
+
+test("Wasm value cache releases child locals without exposing them to siblings", () => {
   const main = region(0);
   const child = region(1, edgePath(1));
   const sibling = region(2, edgePath(2));
-  const parentRecipe = inlineInputRecipe("eax");
-  const branchRecipe = inlineInputRecipe("ebx");
-  const mainUse = useId(200);
-  const childParentUse = useId(201);
-  const childBranchUse = useId(202);
-  const siblingBranchUse = useId(203);
+  const recipe = exprInputRecipe("eax");
+  const childUse = useId(300);
+  const siblingUse = useId(301);
   const plan = cachePlan([
-    cacheEntry(0, parentRecipe),
-    cacheEntry(1, branchRecipe)
-  ], [
-    regionSchedule(main, [
-      recipeOccurrence(0, 0, 0, parentRecipe, sourceUse(mainUse))
-    ]),
-    regionSchedule(child, [
-      recipeOccurrence(1, 0, 0, parentRecipe, sourceUse(childParentUse)),
-      recipeOccurrence(2, 1, 1, branchRecipe, sourceUse(childBranchUse))
-    ]),
-    regionSchedule(sibling, [
-      recipeOccurrence(3, 0, 1, branchRecipe, sourceUse(siblingBranchUse))
-    ])
+    cacheEntry(0, recipe)
   ]);
   const { body, cache, scratch } = createFixture(plan);
 
   cache.enterRegion(main);
-  cache.emitUse({ id: mainUse, recipe: parentRecipe }, inline(body, "parent-main"));
 
   cache.enterRegion(child);
-  cache.emitUse({ id: childParentUse, recipe: parentRecipe }, inline(body, "parent-child"));
-  cache.emitUse({ id: childBranchUse, recipe: branchRecipe }, inline(body, "branch-child"));
+  cache.emitUse({ id: childUse, recipe }, inline(body, "child"));
   cache.leaveRegion(child);
 
   cache.enterRegion(sibling);
-  cache.emitUse({ id: siblingBranchUse, recipe: branchRecipe }, inline(body, "branch-sibling"));
+  cache.emitUse({ id: siblingUse, recipe }, inline(body, "sibling"));
   cache.leaveRegion(sibling);
 
-  cache.leaveRegion(main);
-
-  deepStrictEqual(body.ops, [
-    { kind: "inline", label: "parent-main" },
-    { kind: "alloc", local: 0, type: wasmValueType.i32 },
-    { kind: "tee", local: 0 },
-    { kind: "get", local: 0 },
-    { kind: "free", local: 0 },
-    { kind: "inline", label: "branch-child" },
-    { kind: "alloc", local: 0, type: wasmValueType.i32 },
-    { kind: "tee", local: 0 },
-    { kind: "free", local: 0 },
-    { kind: "inline", label: "branch-sibling" },
-    { kind: "alloc", local: 0, type: wasmValueType.i32 },
-    { kind: "tee", local: 0 },
-    { kind: "free", local: 0 }
-  ]);
-  scratch.assertClear();
-});
-
-test("Wasm value cache keeps child-owned locals for nested child scheduled uses", () => {
-  const main = region(0);
-  const child = region(1, edgePath(1));
-  const nested = region(2, edgePath(2));
-  const recipe = inlineInputRecipe("eax");
-  const childUse = useId(210);
-  const nestedUse = useId(211);
-  const plan = cachePlan([cacheEntry(0, recipe)], [
-    regionSchedule(child, [
-      recipeOccurrence(0, 0, 0, recipe, sourceUse(childUse))
-    ]),
-    regionSchedule(nested, [
-      recipeOccurrence(1, 0, 0, recipe, sourceUse(nestedUse))
-    ])
-  ]);
-  const { body, cache, scratch } = createFixture(plan);
-
-  cache.enterRegion(main);
-  cache.enterRegion(child);
-  cache.emitUse({ id: childUse, recipe }, inline(body, "child"));
-  cache.enterRegion(nested);
-  cache.emitUse({ id: nestedUse, recipe }, inline(body, "nested-should-not-run"));
-  cache.leaveRegion(nested);
-  cache.leaveRegion(child);
   cache.leaveRegion(main);
 
   deepStrictEqual(body.ops, [
     { kind: "inline", label: "child" },
     { kind: "alloc", local: 0, type: wasmValueType.i32 },
     { kind: "tee", local: 0 },
-    { kind: "get", local: 0 },
+    { kind: "free", local: 0 },
+    { kind: "inline", label: "sibling" },
+    { kind: "alloc", local: 0, type: wasmValueType.i32 },
+    { kind: "tee", local: 0 },
     { kind: "free", local: 0 }
   ]);
   scratch.assertClear();
@@ -431,17 +353,11 @@ function inline(body: RecordingBody, label: string): () => WasmValueType {
   };
 }
 
-function failInline(): never {
-  throw new Error("inline emitter should not run");
-}
-
 function cachePlan(
-  entries: readonly WasmCacheEntry[],
-  schedule: readonly WasmCachePlan["schedule"][number][]
+  entries: readonly WasmCacheEntry[]
 ): WasmCachePlan {
   return Object.freeze({
-    entries: Object.freeze([...entries]),
-    schedule: Object.freeze([...schedule])
+    entries: Object.freeze([...entries])
   } satisfies WasmCachePlan);
 }
 
@@ -458,86 +374,12 @@ function cacheEntry(
   } satisfies WasmCacheEntry);
 }
 
-function regionSchedule(
-  region: LayoutRegion,
-  occurrences: readonly WasmCacheOccurrence[]
-): WasmCachePlan["schedule"][number] {
-  return Object.freeze({
-    region: region.id,
-    occurrences: Object.freeze([...occurrences])
-  });
-}
-
-function recipeOccurrence(
-  id: number,
-  index: number,
-  entry: number,
-  recipe: ExprRecipe,
-  source: WasmCacheOccurrenceSource,
-  depth = 0
-): WasmCacheOccurrence {
-  return Object.freeze({
-    id: id as WasmCacheOccurrenceId,
-    index,
-    entry: entry as WasmCacheEntryId,
-    step: index,
-    kind: "recipe",
-    depth,
-    source,
-    recipe
-  });
-}
-
-function saveExprOccurrence(
-  id: number,
-  index: number,
-  entry: number,
-  saved: SavedExprId,
-  recipe: ExprRecipe
-): WasmCacheOccurrence {
-  return Object.freeze({
-    id: id as WasmCacheOccurrenceId,
-    index,
-    entry: entry as WasmCacheEntryId,
-    step: index,
-    kind: "save-expr",
-    saved,
-    recipe
-  });
-}
-
-function savedExprOccurrence(
-  id: number,
-  index: number,
-  entry: number,
-  saved: SavedExprId,
-  source: WasmCacheOccurrenceSource
-): WasmCacheOccurrence {
-  return Object.freeze({
-    id: id as WasmCacheOccurrenceId,
-    index,
-    entry: entry as WasmCacheEntryId,
-    step: index,
-    kind: "saved-expr",
-    depth: 0,
-    source,
-    saved
-  });
-}
-
 function recipeValues(recipes: readonly ExprRecipe[]): Pick<ValuePlan, "recipes"> {
   const recipeList: ExprRecipe[] = [];
   const idByKey = new Map<string, ExprRecipeId>();
 
   for (const recipe of recipes) {
-    const key = JSON.stringify(recipe);
-
-    if (idByKey.has(key)) {
-      continue;
-    }
-
-    idByKey.set(key, recipeList.length as ExprRecipeId);
-    recipeList.push(recipe);
+    recordRecipe(recipe, recipeList, idByKey);
   }
 
   return {
@@ -550,23 +392,48 @@ function recipeValues(recipes: readonly ExprRecipe[]): Pick<ValuePlan, "recipes"
   };
 }
 
-function inlineInputRecipe(reg: "eax" | "ebx"): ExprRecipe {
-  return inlineRecipe(exprInput({ kind: "reg", reg }));
+function recordRecipe(
+  recipe: ExprRecipe,
+  recipeList: ExprRecipe[],
+  idByKey: Map<string, ExprRecipeId>
+): void {
+  switch (recipe.kind) {
+    case "expr":
+      for (const child of recipe.children) {
+        recordRecipe(child, recipeList, idByKey);
+      }
+      break;
+    case "definition":
+      recordRecipe(recipe.input, recipeList, idByKey);
+      break;
+    case "saved-expr":
+      break;
+  }
+
+  const key = JSON.stringify(recipe);
+
+  if (idByKey.has(key)) {
+    return;
+  }
+
+  idByKey.set(key, recipeList.length as ExprRecipeId);
+  recipeList.push(recipe);
 }
 
-function inlineRecipe(expr: ExprRecipeForInline): ExprRecipe {
-  return Object.freeze({ kind: "inline", expr } satisfies ExprRecipe);
+function exprInputRecipe(reg: "eax" | "ebx"): ExprRecipe {
+  return exprRecipe(exprInput({ kind: "reg", reg }));
+}
+
+function exprRecipe(expr: ExprRef): ExprRecipe {
+  return Object.freeze({
+    kind: "expr",
+    expr,
+    children: Object.freeze(exprChildren(expr).map(exprRecipe))
+  } satisfies ExprRecipe);
 }
 
 function savedExprRecipe(saved: SavedExprId): ExprRecipe {
   return Object.freeze({ kind: "saved-expr", saved } satisfies ExprRecipe);
-}
-
-function sourceUse(use: LayoutValueUseId): WasmCacheOccurrenceSource {
-  return Object.freeze({
-    kind: "layout-use",
-    use
-  } satisfies WasmCacheOccurrenceSource);
 }
 
 function region(id: number, path: LayoutRegion["path"] = Object.freeze({ kind: "main" })): LayoutRegion {
@@ -595,5 +462,3 @@ function useId(id: number): LayoutValueUseId {
 function fail(message: string): never {
   throw new Error(message);
 }
-
-type ExprRecipeForInline = Extract<ExprRecipe, { kind: "inline" }>["expr"];

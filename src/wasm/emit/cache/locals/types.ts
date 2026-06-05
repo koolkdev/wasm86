@@ -10,10 +10,7 @@ import type {
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmValueType } from "#wasm/encoder/types.js";
-import type {
-  WasmCacheOccurrenceSource,
-  WasmCachePlan
-} from "../plan/index.js";
+import type { WasmCachePlan } from "../plan/index.js";
 
 export type WasmValueCacheUse = Readonly<{
   id: LayoutValueUseId;
@@ -28,11 +25,10 @@ export type WasmValueCache = Readonly<{
   emitUse(use: WasmValueCacheUse, emitInline: WasmValueCacheInlineEmitter): WasmValueType;
   emitRecipe(
     recipe: ExprRecipe,
-    source: WasmCacheOccurrenceSource,
     emitInline: WasmValueCacheInlineEmitter
   ): WasmValueType;
   ensureSaved(saved: SavedExprId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void;
-  emitSaved(saved: SavedExprId, source?: WasmCacheOccurrenceSource): WasmValueType;
+  emitSaved(saved: SavedExprId): WasmValueType;
 }>;
 
 export type WasmValueCacheInput = Readonly<{

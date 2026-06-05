@@ -20,17 +20,16 @@ export type RecipeRegistry = Readonly<{
 }>;
 
 export type ExprRecipe =
-  | Readonly<{ kind: "inline"; expr: ExprRef }>
   | Readonly<{ kind: "saved-expr"; saved: SavedExprId }>
+  | Readonly<{
+      kind: "expr";
+      expr: ExprRef;
+      children: readonly ExprRecipe[];
+    }>
   | Readonly<{
       kind: "definition";
       definition: BlockDefinitionId;
       input: ExprRecipe;
-    }>
-  | Readonly<{
-      kind: "compute";
-      expr: ExprRef;
-      children: readonly ExprRecipe[];
     }>;
 
 export type SavedExpr = Readonly<{

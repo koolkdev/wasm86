@@ -15,17 +15,48 @@ export function recipeIdOrThrow(recipes: ValuePlan["recipes"], recipe: ExprRecip
   return recipeId;
 }
 
-export function recipeChildren(recipe: ExprRecipe): ExprRecipe[] {
+export function recipeEmissionChildren(recipe: ExprRecipe): ExprRecipe[] {
   switch (recipe.kind) {
-    case "inline":
-      return exprChildren(recipe.expr).map((expr) =>
-        Object.freeze({ kind: "inline", expr } satisfies ExprRecipe)
-      );
+    case "expr":
+      return exprEmissionChildren(recipe);
     case "definition":
       return [recipe.input];
-    case "compute":
-      return [...recipe.children];
     case "saved-expr":
       return [];
+  }
+}
+
+function exprEmissionChildren(recipe: Extract<ExprRecipe, { kind: "expr" }>): ExprRecipe[] {
+  const expr = recipe.expr;
+
+  assertExprRecipeChildCount(recipe);
+
+  switch (expr.kind) {
+    case "select":
+      return [
+        recipe.children[1]!,
+        recipe.children[2]!,
+        recipe.children[0]!
+      ];
+    case "const":
+    case "input":
+    case "binary":
+    case "unary":
+    case "project":
+    case "bits":
+    case "insertBits":
+    case "compare":
+      return [...recipe.children];
+  }
+}
+
+function assertExprRecipeChildCount(recipe: Extract<ExprRecipe, { kind: "expr" }>): void {
+  const expectedChildCount = exprChildren(recipe.expr).length;
+
+  if (recipe.children.length !== expectedChildCount) {
+    throw new Error(
+      `expr ${recipe.expr.kind} recipe expected ${expectedChildCount} children, ` +
+      `got ${recipe.children.length}`
+    );
   }
 }

@@ -9,7 +9,7 @@ import type {
   ValuePlan
 } from "#ir/block/planning/values/index.js";
 import {
-  recipeChildren,
+  recipeEmissionChildren,
   recipeIdOrThrow
 } from "./recipes.js";
 import type {
@@ -93,7 +93,7 @@ function summarizeRecipe(
       summary.uses.add(use);
     }
 
-    for (const child of recipeChildren(current).reverse()) {
+    for (const child of recipeEmissionChildren(current).reverse()) {
       stack.push(child);
     }
   }

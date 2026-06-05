@@ -4,7 +4,10 @@ import type {
   WasmCacheEntry,
   WasmCacheEntryId
 } from "../plan/index.js";
-import type { WasmCacheActiveRegion } from "./cursor.js";
+import type {
+  WasmCacheActiveRegion,
+  WasmCacheVisibleRegions
+} from "./regions.js";
 
 export type WasmCachedLocal = {
   entry: WasmCacheEntry;
@@ -15,18 +18,32 @@ export type WasmCachedLocal = {
 
 export class WasmValueCacheLocals {
   readonly #scratch: WasmLocalScratchAllocator;
-  readonly #byEntry = new Map<WasmCacheEntryId, WasmCachedLocal>();
+  readonly #byEntry = new Map<WasmCacheEntryId, WasmCachedLocal[]>();
 
   constructor(scratch: WasmLocalScratchAllocator) {
     this.#scratch = scratch;
   }
 
-  get(entry: WasmCacheEntryId): WasmCachedLocal | undefined {
-    return this.#byEntry.get(entry);
+  get(entry: WasmCacheEntryId, visibleRegions: WasmCacheVisibleRegions): WasmCachedLocal | undefined {
+    const locals = this.#byEntry.get(entry);
+
+    if (locals === undefined) {
+      return undefined;
+    }
+
+    for (const owner of visibleRegions) {
+      const local = locals.find((candidate) => candidate.owner === owner);
+
+      if (local !== undefined) {
+        return local;
+      }
+    }
+
+    return undefined;
   }
 
   establish(entry: WasmCacheEntry, type: WasmValueType, owner: WasmCacheActiveRegion): WasmCachedLocal {
-    const visible = this.#byEntry.get(entry.id);
+    const visible = this.#getOwned(entry.id, owner);
 
     if (visible !== undefined) {
       return visible;
@@ -39,25 +56,44 @@ export class WasmValueCacheLocals {
       owner
     };
 
-    this.#byEntry.set(entry.id, local);
+    const locals = this.#byEntry.get(entry.id) ?? [];
+
+    locals.push(local);
+    this.#byEntry.set(entry.id, locals);
     return local;
   }
 
-  releaseEntry(entry: WasmCacheEntryId): void {
-    const local = this.#byEntry.get(entry);
+  #getOwned(entry: WasmCacheEntryId, owner: WasmCacheActiveRegion): WasmCachedLocal | undefined {
+    return this.#byEntry.get(entry)?.find((local) => local.owner === owner);
+  }
+
+  releaseEntry(entry: WasmCacheEntryId, owner: WasmCacheActiveRegion): void {
+    const locals = this.#byEntry.get(entry);
+    const index = locals?.findIndex((local) => local.owner === owner) ?? -1;
+
+    if (locals === undefined || index < 0) {
+      return;
+    }
+
+    const [local] = locals.splice(index, 1);
+
+    if (locals.length === 0) {
+      this.#byEntry.delete(entry);
+    }
 
     if (local === undefined) {
       return;
     }
 
-    this.#byEntry.delete(entry);
     this.#scratch.freeLocal(local.local);
   }
 
   releaseOwnedBy(owner: WasmCacheActiveRegion): void {
-    for (const local of [...this.#byEntry.values()]) {
-      if (local.owner === owner) {
-        this.releaseEntry(local.entry.id);
+    for (const locals of [...this.#byEntry.values()]) {
+      for (const local of [...locals]) {
+        if (local.owner === owner) {
+          this.releaseEntry(local.entry.id, owner);
+        }
       }
     }
   }

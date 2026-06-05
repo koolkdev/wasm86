@@ -51,8 +51,9 @@ test("StateWritePlan keeps EAX then AL materialization order", () => {
       reason: "exit-state",
       target: { kind: "reg", reg: registerAlias("eax") },
       value: {
-        kind: "inline",
-        expr: exprConst(0x1234)
+        kind: "expr",
+        expr: exprConst(0x1234),
+        children: []
       }
     },
     {
@@ -60,8 +61,9 @@ test("StateWritePlan keeps EAX then AL materialization order", () => {
       reason: "exit-state",
       target: { kind: "reg", reg: registerAlias("al") },
       value: {
-        kind: "inline",
-        expr: exprConst(5)
+        kind: "expr",
+        expr: exprConst(5),
+        children: []
       }
     }
   ]);
@@ -83,8 +85,9 @@ test("StateWritePlan keeps normalized AL then EAX as only an EAX write", () => {
       reason: "exit-state",
       target: { kind: "reg", reg: registerAlias("eax") },
       value: {
-        kind: "inline",
-        expr: exprConst(0x1234)
+        kind: "expr",
+        expr: exprConst(0x1234),
+        children: []
       }
     }
   ]);
@@ -108,8 +111,9 @@ test("StateWritePlan preserves undefined flag writes without expression recipes"
       reason: "exit-state",
       target: { kind: "flag", flag: "CF" },
       value: {
-        kind: "inline",
-        expr: exprConst(1)
+        kind: "expr",
+        expr: exprConst(1),
+        children: []
       }
     },
     {
@@ -172,8 +176,9 @@ test("StateWritePlan records dynamic-register-store pre-state writes", () => {
       reason: "dynamic-register-store-pre-state",
       target: { kind: "reg", reg: registerAlias("eax") },
       value: {
-        kind: "inline",
-        expr: exprConst(0x11)
+        kind: "expr",
+        expr: exprConst(0x11),
+        children: []
       }
     }
   ]);
@@ -213,8 +218,9 @@ test("StateWritePlan follows snapshot-delta order rather than attempted write or
       reason: "exit-state",
       target: { kind: "reg", reg: registerAlias("eax") },
       value: {
-        kind: "inline",
-        expr: exprConst(1)
+        kind: "expr",
+        expr: exprConst(1),
+        children: []
       }
     },
     {
@@ -222,8 +228,9 @@ test("StateWritePlan follows snapshot-delta order rather than attempted write or
       reason: "exit-state",
       target: { kind: "reg", reg: registerAlias("ebx") },
       value: {
-        kind: "inline",
-        expr: exprConst(2)
+        kind: "expr",
+        expr: exprConst(2),
+        children: []
       }
     }
   ]);

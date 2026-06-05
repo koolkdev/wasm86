@@ -1,12 +1,9 @@
-import { scheduleCacheOccurrences } from "./schedule.js";
 import { selectCacheEntries } from "./selection.js";
 import type {
   MutableEntry,
-  MutableRegionSchedule,
   WasmCacheEntry,
   WasmCachePlan,
-  WasmCachePlanInput,
-  WasmCacheRegionSchedule
+  WasmCachePlanInput
 } from "./types.js";
 
 export function planWasmCache(input: WasmCachePlanInput): WasmCachePlan {
@@ -31,30 +28,18 @@ export class WasmCachePlanner {
 
   #build(): WasmCachePlan {
     const selected = selectCacheEntries(this.#input);
-    const schedule = scheduleCacheOccurrences({
-      layout: this.#input.layout,
-      recipes: this.#input.values.recipes,
-      selected
-    });
 
-    return freezePlan(selected.entries, schedule);
+    return freezePlan(selected.entries);
   }
 }
 
-function freezePlan(
-  entries: readonly MutableEntry[],
-  schedule: readonly MutableRegionSchedule[]
-): WasmCachePlan {
+function freezePlan(entries: readonly MutableEntry[]): WasmCachePlan {
   return Object.freeze({
     entries: Object.freeze(entries.map((entry) => Object.freeze({
       id: entry.id,
       recipe: entry.recipe,
       reasons: Object.freeze([...entry.reasons]),
       uses: Object.freeze([...entry.uses])
-    } satisfies WasmCacheEntry))),
-    schedule: Object.freeze(schedule.map((regionSchedule) => Object.freeze({
-      region: regionSchedule.region,
-      occurrences: Object.freeze([...regionSchedule.occurrences])
-    } satisfies WasmCacheRegionSchedule)))
+    } satisfies WasmCacheEntry)))
   } satisfies WasmCachePlan);
 }

@@ -93,7 +93,7 @@ class ValuePlanAnalyzer {
 
     switch (expr.kind) {
       case "const":
-        return Object.freeze({ kind: "inline", expr } satisfies ExprRecipe);
+        return exprRecipe(expr, []);
       case "input":
         return this.#inputRecipe(node as InputExprNode, point, topLevelNeed);
       case "binary":
@@ -120,7 +120,7 @@ class ValuePlanAnalyzer {
         const blocker = this.#barriers.sourceInputBlocker(expr.source, point);
 
         return blocker === undefined
-          ? Object.freeze({ kind: "inline", expr } satisfies ExprRecipe)
+          ? exprRecipe(expr, [])
           : this.#savedRecipe(node, blocker, topLevelNeed);
       }
       case "def":
@@ -159,17 +159,12 @@ class ValuePlanAnalyzer {
   }
 
   #compositeRecipe(node: ExprNode, point: ProgramPoint, topLevelNeed: ExprNeedId): ExprRecipe {
-    if (this.#canInlineAt(node, point)) {
-      return Object.freeze({ kind: "inline", expr: node.expr } satisfies ExprRecipe);
-    }
-
-    return Object.freeze({
-      kind: "compute",
-      expr: node.expr,
-      children: Object.freeze(node.children.map((child) =>
+    return exprRecipe(
+      node.expr,
+      node.children.map((child) =>
         this.#analyzeExpr(child.expr, point, topLevelNeed)
-      ))
-    } satisfies ExprRecipe);
+      )
+    );
   }
 
   #savedRecipe(node: ExprNode, blocker: SaveBlocker, topLevelNeed: ExprNeedId): ExprRecipe {
@@ -187,31 +182,6 @@ class ValuePlanAnalyzer {
     });
 
     return Object.freeze({ kind: "saved-expr", saved } satisfies ExprRecipe);
-  }
-
-  #canInlineAt(node: ExprNode, point: ProgramPoint): boolean {
-    const expr = node.expr;
-
-    switch (expr.kind) {
-      case "const":
-        return true;
-      case "input":
-        switch (expr.source.kind) {
-          case "reg":
-          case "flag":
-            return this.#barriers.sourceInputBlocker(expr.source, point) === undefined;
-          case "def":
-            return false;
-        }
-      case "binary":
-      case "unary":
-      case "select":
-      case "project":
-      case "bits":
-      case "insertBits":
-      case "compare":
-        return node.children.every((child) => this.#canInlineAt(child, point));
-    }
   }
 
   #exprExistsAt(node: ExprNode, point: ProgramPoint): boolean {
@@ -255,6 +225,14 @@ class ValuePlanAnalyzer {
 
     return definition;
   }
+}
+
+function exprRecipe(expr: ExprRef, children: readonly ExprRecipe[]): ExprRecipe {
+  return Object.freeze({
+    kind: "expr",
+    expr,
+    children: Object.freeze([...children])
+  } satisfies ExprRecipe);
 }
 
 function expressionGraphRoots(input: ValuePlanInput): Iterable<ExprRef> {

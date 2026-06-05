@@ -39,7 +39,7 @@ import type {
   VarRef
 } from "#ir/model/types.js";
 
-test("ValuePlan maps constants and valid source inputs to inline recipes", () => {
+test("ValuePlan maps constants and valid source inputs to expr recipes", () => {
   const { geometry, plan } = analyzeBlock([
     {
       op: "get",
@@ -65,12 +65,14 @@ test("ValuePlan maps constants and valid source inputs to inline recipes", () =>
   ]);
 
   deepStrictEqual(recipe(plan, 0), {
-    kind: "inline",
-    expr: exprConst(0x55)
+    kind: "expr",
+    expr: exprConst(0x55),
+    children: []
   });
   deepStrictEqual(recipe(plan, 1), {
-    kind: "inline",
-    expr: exprInput({ kind: "reg", reg: "eax" })
+    kind: "expr",
+    expr: exprInput({ kind: "reg", reg: "eax" }),
+    children: []
   });
   strictEqual(plan.savedExprs.length, 0);
   strictEqual(geometry.memory.writes.length, 2);
@@ -111,8 +113,9 @@ test("ValuePlan saves a source input that crosses a dynamic-register barrier", (
   deepStrictEqual(saved.expr, exprInput({ kind: "reg", reg: "eax" }));
   strictEqual(saved.saveAt, dynamicStore.point);
   deepStrictEqual(saved.recipe, {
-    kind: "inline",
-    expr: exprInput({ kind: "reg", reg: "eax" })
+    kind: "expr",
+    expr: exprInput({ kind: "reg", reg: "eax" }),
+    children: []
   });
   deepStrictEqual(saved.usedByTopLevelNeeds, [id(0)]);
   strictEqual(saved.reason.kind, "source-read-barrier");
@@ -141,8 +144,9 @@ test("ValuePlan creates a definition recipe when replay is legal", () => {
     kind: "definition",
     definition: definition.id,
     input: {
-      kind: "inline",
-      expr: exprConst(0x1000)
+      kind: "expr",
+      expr: exprConst(0x1000),
+      children: []
     }
   });
   strictEqual(plan.savedExprs.length, 0);
@@ -185,8 +189,9 @@ test("ValuePlan saves input(def) after its definition and before a replay barrie
     kind: "definition",
     definition: definition.id,
     input: {
-      kind: "inline",
-      expr: exprConst(0x1000)
+      kind: "expr",
+      expr: exprConst(0x1000),
+      children: []
     }
   });
   deepStrictEqual(saved.usedByTopLevelNeeds, [id(0)]);
@@ -277,7 +282,7 @@ test("ValuePlan computes from a saved child instead of saving a parent composite
   const savedInput = plan.savedExprs[0]!;
 
   deepStrictEqual(recipe(plan, 0), {
-    kind: "compute",
+    kind: "expr",
     expr: exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(4)),
     children: [
       {
@@ -285,16 +290,18 @@ test("ValuePlan computes from a saved child instead of saving a parent composite
         saved: savedInput.id
       },
       {
-        kind: "inline",
-        expr: exprConst(4)
+        kind: "expr",
+        expr: exprConst(4),
+        children: []
       }
     ]
   });
   deepStrictEqual(savedInput.expr, exprInput({ kind: "reg", reg: "eax" }));
   strictEqual(savedInput.saveAt, dynamicStore.point);
   deepStrictEqual(savedInput.recipe, {
-    kind: "inline",
-    expr: exprInput({ kind: "reg", reg: "eax" })
+    kind: "expr",
+    expr: exprInput({ kind: "reg", reg: "eax" }),
+    children: []
   });
 });
 
@@ -342,7 +349,7 @@ test("ValuePlan computes a mixed-time expression from saved and definition child
   const topRecipe = recipe(plan, 0);
   const savedInput = plan.savedExprs[0]!;
   const equivalentTopRecipe = Object.freeze({
-    kind: "compute",
+    kind: "expr",
     expr: exprBinary(
       "add",
       exprInput({ kind: "reg", reg: "eax" }),
@@ -357,14 +364,15 @@ test("ValuePlan computes a mixed-time expression from saved and definition child
         kind: "definition",
         definition: definition.id,
         input: Object.freeze({
-          kind: "inline",
-          expr: exprConst(0x1000)
+          kind: "expr",
+          expr: exprConst(0x1000),
+          children: Object.freeze([])
         } satisfies ExprRecipe)
       } satisfies ExprRecipe)
     ])
   } satisfies ExprRecipe);
 
-  strictEqual(topRecipe.kind, "compute");
+  strictEqual(topRecipe.kind, "expr");
   deepStrictEqual(topRecipe.expr, exprBinary(
     "add",
     exprInput({ kind: "reg", reg: "eax" }),
@@ -379,8 +387,9 @@ test("ValuePlan computes a mixed-time expression from saved and definition child
       kind: "definition",
       definition: definition.id,
       input: {
-        kind: "inline",
-        expr: exprConst(0x1000)
+        kind: "expr",
+        expr: exprConst(0x1000),
+        children: []
       }
     }
   ]);
@@ -423,8 +432,8 @@ test("ValuePlan reuses saved expressions only for semantic availability", () => 
   ]);
 
   strictEqual(plan.savedExprs.length, 0);
-  strictEqual(recipe(plan, 0).kind, "inline");
-  strictEqual(recipe(plan, 1).kind, "inline");
+  strictEqual(recipe(plan, 0).kind, "expr");
+  strictEqual(recipe(plan, 1).kind, "expr");
 });
 
 test("ValuePlan saved-expression usage tracks all top-level needs", () => {
@@ -497,7 +506,7 @@ test("ValuePlan uses expression graph identity for saved-expression reuse", () =
   deepStrictEqual(recipe(plan, 1), { kind: "saved-expr", saved: saved.id });
 });
 
-test("ValuePlan assigns the same recipe id to structurally equivalent inline recipes", () => {
+test("ValuePlan assigns the same recipe id to structurally equivalent expr recipes", () => {
   const { plan } = analyzeBlock([
     {
       op: "set",
@@ -513,29 +522,33 @@ test("ValuePlan assigns the same recipe id to structurally equivalent inline rec
   strictEqual(recipeId(plan, 0), recipeId(plan, 1));
   strictEqual(
     plan.recipes.recipeId({
-      kind: "inline",
-      expr: exprBinary("add", exprConst(1), exprConst(2))
+      kind: "expr",
+      expr: exprBinary("add", exprConst(1), exprConst(2)),
+      children: [
+        { kind: "expr", expr: exprConst(1), children: [] },
+        { kind: "expr", expr: exprConst(2), children: [] }
+      ]
     }),
     recipeId(plan, 0)
   );
 });
 
-test("MutableRecipeRegistry treats compute children as authoritative", () => {
+test("MutableRecipeRegistry treats expr children as authoritative", () => {
   const expr = exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(1));
   const fromInline = {
-    kind: "compute",
+    kind: "expr",
     expr,
     children: [
-      { kind: "inline", expr: exprInput({ kind: "reg", reg: "eax" }) },
-      { kind: "inline", expr: exprConst(1) }
+      { kind: "expr", expr: exprInput({ kind: "reg", reg: "eax" }), children: [] },
+      { kind: "expr", expr: exprConst(1), children: [] }
     ]
   } satisfies ExprRecipe;
   const fromSaved = {
-    kind: "compute",
+    kind: "expr",
     expr,
     children: [
       { kind: "saved-expr", saved: 0 as SavedExprId },
-      { kind: "inline", expr: exprConst(1) }
+      { kind: "expr", expr: exprConst(1), children: [] }
     ]
   } satisfies ExprRecipe;
   const registry = new MutableRecipeRegistry(buildExprGraph([expr]));

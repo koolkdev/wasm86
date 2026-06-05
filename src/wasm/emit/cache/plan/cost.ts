@@ -17,15 +17,13 @@ export const defaultWasmRecipeCostModel: WasmRecipeCostModel = Object.freeze({
 
 export function wasmRecipeInlineCost(recipe: ExprRecipe): number {
   switch (recipe.kind) {
-    case "inline":
-      return exprInlineCost(recipe.expr);
+    case "expr":
+      return exprOwnCost(recipe.expr) +
+        recipe.children.reduce((cost, child) => cost + wasmRecipeInlineCost(child), 0);
     case "saved-expr":
       return 1;
     case "definition":
       return 1 + wasmRecipeInlineCost(recipe.input);
-    case "compute":
-      return exprOwnCost(recipe.expr) +
-        recipe.children.reduce((cost, child) => cost + wasmRecipeInlineCost(child), 0);
   }
 }
 
@@ -56,29 +54,6 @@ export function shouldReuseWasmRecipe(
   costModel: WasmRecipeCostModel = defaultWasmRecipeCostModel
 ): boolean {
   return useCount > 1 && wasmRecipeReuseBenefit(recipe, useCount, costModel) > 0;
-}
-
-function exprInlineCost(expr: ExprRef): number {
-  switch (expr.kind) {
-    case "const":
-    case "input":
-      return 1;
-    case "binary":
-      return exprOwnCost(expr) + exprInlineCost(expr.left) + exprInlineCost(expr.right);
-    case "unary":
-    case "project":
-    case "bits":
-      return exprOwnCost(expr) + exprInlineCost(expr.value);
-    case "select":
-      return exprOwnCost(expr) +
-        exprInlineCost(expr.condition) +
-        exprInlineCost(expr.whenTrue) +
-        exprInlineCost(expr.whenFalse);
-    case "insertBits":
-      return exprOwnCost(expr) + exprInlineCost(expr.base) + exprInlineCost(expr.value);
-    case "compare":
-      return exprOwnCost(expr) + exprInlineCost(expr.left) + exprInlineCost(expr.right);
-  }
 }
 
 function exprOwnCost(expr: ExprRef): number {

@@ -8,6 +8,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import type { BlockDefinitionId } from "#ir/block/definitions.js";
 import {
   analyzeBarrierFacts,
   analyzeExpressionNeeds,
@@ -20,9 +21,9 @@ import {
   buildTimelineValueUseIndex,
   type BlockLayout,
   type ExprRecipe,
-  type LayoutRegion,
   type LayoutStep,
   type SavedExpr,
+  type SavedExprId,
   type ValuePlan
 } from "#ir/block/planning/index.js";
 import {
@@ -32,8 +33,10 @@ import {
 import {
   exprBinary,
   exprConst,
-  exprInput
+  exprInput,
+  exprSelect
 } from "#ir/expr/builders.js";
+import { exprChildren } from "#ir/expr/children.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import type {
   IrBlock,
@@ -45,9 +48,9 @@ import {
   planWasmCache,
   WasmCachePlanner,
   type WasmCacheEntry,
-  type WasmCacheOccurrence,
   type WasmCachePlan
 } from "#wasm/emit/cache/plan/index.js";
+import { recipeEmissionChildren } from "#wasm/emit/cache/plan/recipes.js";
 
 test("Wasm cache plan creates a forced entry for every SavedExpr", () => {
   const { layout, values } = analyzeBlock([
@@ -64,38 +67,6 @@ test("Wasm cache plan creates a forced entry for every SavedExpr", () => {
   deepStrictEqual(entry.recipe, saved.recipe);
   deepStrictEqual(entry.reasons, [{ kind: "saved-expr", saved: saved.id }]);
   strictEqual(entry.uses.length, 1);
-});
-
-test("Wasm cache plan attaches same-point uses to forced save entries", () => {
-  const { layout, values } = analyzeBlock([
-    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
-    { op: "set", target: { kind: "operand", index: 0 }, value: v(0), accessWidth: 32 },
-    { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(0), accessWidth: 32 }
-  ], {
-    resolver: dynamicResolver()
-  });
-  const saved = only(values.savedExprs);
-  const main = layout.regions.find((region) => region.path.kind === "main")!;
-  const saveIndex = main.steps.findIndex((step) => step.kind === "save-expr");
-  const storeIndex = main.steps.findIndex((step) =>
-    step.kind === "action" && step.site.action.kind === "dynamicRegisterStore"
-  );
-  const dynamicStore = main.steps[storeIndex] as Extract<LayoutStep, { kind: "action" }>;
-  const samePointUse = dynamicStore.inputs.find((input) => input.use.role === "value")!;
-  const laterSavedUse = only(main.steps.flatMap((step) =>
-    step.kind === "action" && step.site.action.kind === "memoryStore"
-      ? step.inputs.filter((input) => input.recipe.kind === "saved-expr")
-      : []
-  ));
-  const plan = planWasmCache({ layout, values });
-  const entry = forcedEntry(plan, saved);
-
-  strictEqual(saveIndex >= 0, true);
-  strictEqual(saveIndex < storeIndex, true);
-  deepStrictEqual(dynamicStore.inputs.map((input) => input.recipe.kind), ["inline", "inline"]);
-  strictEqual(samePointUse.recipe.kind, "inline");
-  strictEqual(laterSavedUse.recipe.kind, "saved-expr");
-  deepStrictEqual(entry.uses, [samePointUse.id, laterSavedUse.id]);
 });
 
 test("Wasm cache plan exposes nested pre-save child uses for forced save entries", () => {
@@ -118,25 +89,28 @@ test("Wasm cache plan exposes nested pre-save child uses for forced save entries
   const laterSavedUse = only(memoryStores[1]!.inputs.filter((input) => input.recipe.kind === "saved-expr"));
   const plan = planWasmCache({ layout, values });
   const entry = forcedEntry(plan, saved);
-  const scheduled = entryOccurrences(regionOccurrences(plan, main), entry);
 
   const preSaveIndex = main.steps.indexOf(memoryStores[0]!);
 
   strictEqual(preSaveIndex >= 0, true);
   strictEqual(saveIndex > preSaveIndex, true);
   deepStrictEqual(preSaveUse.recipe, {
-    kind: "inline",
-    expr: exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(4))
+    kind: "expr",
+    expr: exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(4)),
+    children: [
+      {
+        kind: "expr",
+        expr: exprInput({ kind: "reg", reg: "eax" }),
+        children: []
+      },
+      {
+        kind: "expr",
+        expr: exprConst(4),
+        children: []
+      }
+    ]
   });
   deepStrictEqual(entry.uses, [preSaveUse.id, laterSavedUse.id]);
-  deepStrictEqual(scheduled.map((event) => event.kind), ["recipe", "save-expr", "saved-expr"]);
-  strictEqual(scheduled[0]!.kind, "recipe");
-  strictEqual(scheduled[0]!.depth, 1);
-  deepStrictEqual(scheduled[0]!.source, { kind: "layout-use", use: preSaveUse.id });
-  strictEqual(scheduled[1]!.kind, "save-expr");
-  strictEqual(scheduled[1]!.step, saveIndex);
-  strictEqual(scheduled[2]!.kind, "saved-expr");
-  deepStrictEqual(scheduled[2]!.source, { kind: "layout-use", use: laterSavedUse.id });
 });
 
 test("Wasm cache plan may choose repeated expressions without creating SavedExpr", () => {
@@ -163,7 +137,7 @@ test("Wasm cache plan counts repeated expensive nested recipes for reuse", () =>
     { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(2), accessWidth: 32 },
     { op: "set", target: { kind: "mem", address: c(0x1004) }, value: v(3), accessWidth: 32 }
   ]);
-  const nestedAdd = inlineRecipe(exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(1)));
+  const nestedAdd = exprRecipe(exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(1)));
   const plan = planWasmCache({ layout, values });
   const entry = entryForRecipe(plan, values, nestedAdd);
 
@@ -181,20 +155,20 @@ test("Wasm cache plan leaves cheap repeated nested recipes inline", () => {
     { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(1), accessWidth: 32 },
     { op: "set", target: { kind: "mem", address: c(0x1004) }, value: v(2), accessWidth: 32 }
   ]);
-  const nestedInput = inlineRecipe(exprInput({ kind: "reg", reg: "eax" }));
+  const nestedInput = exprRecipe(exprInput({ kind: "reg", reg: "eax" }));
   const plan = planWasmCache({ layout, values });
 
   deepStrictEqual(values.savedExprs, []);
   strictEqual(entryForRecipe(plan, values, nestedInput), undefined);
 });
 
-test("Wasm cache schedule keeps duplicate selected child occurrences distinct", () => {
+test("Wasm cache plan can select duplicate child expressions", () => {
   const { layout, values } = analyzeBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: v(0) },
     { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(1), accessWidth: 32 }
   ]);
-  const inputRecipe = inlineRecipe(exprInput({ kind: "reg", reg: "eax" }));
+  const inputRecipe = exprRecipe(exprInput({ kind: "reg", reg: "eax" }));
   const plan = planWasmCache({
     layout,
     values,
@@ -206,25 +180,68 @@ test("Wasm cache schedule keeps duplicate selected child occurrences distinct", 
     }
   });
   const entry = entryForRecipe(plan, values, inputRecipe) ?? fail("missing selected input recipe");
-  const mainEvents = regionOccurrences(plan, mainRegion(layout));
-  const events = entryOccurrences(mainEvents, entry);
 
-  strictEqual(mainEvents.length, 2);
-  deepStrictEqual(mainEvents.map((event) => event.index), [0, 1]);
-  deepStrictEqual(events.map((event) => event.kind), ["recipe", "recipe"]);
-  strictEqual(events[0]!.entry, events[1]!.entry);
-  strictEqual(events[0]!.step, events[1]!.step);
-  strictEqual(events[0]!.id === events[1]!.id, false);
-  strictEqual(events[0]!.index === events[1]!.index, false);
+  deepStrictEqual(entry.recipe, inputRecipe);
+  deepStrictEqual(entry.reasons.map((reason) => reason.kind), ["reuse"]);
+});
 
-  const first = events[0]!;
-  const second = events[1]!;
+test("Wasm cache plan can select parent and child recipes independently", () => {
+  const { layout, values } = analyzeBlock([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+    { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: v(0) },
+    { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(1), accessWidth: 32 },
+    { op: "set", target: { kind: "mem", address: c(0x1004) }, value: v(1), accessWidth: 32 }
+  ]);
+  const inputRecipe = exprRecipe(exprInput({ kind: "reg", reg: "eax" }));
+  const parentRecipe = exprRecipe(exprBinary(
+    "add",
+    exprInput({ kind: "reg", reg: "eax" }),
+    exprInput({ kind: "reg", reg: "eax" })
+  ));
+  const plan = planWasmCache({
+    layout,
+    values,
+    costModel: {
+      inlineCost: () => 10,
+      cacheFromUseCost: 0,
+      cacheFromSaveCost: 0,
+      cachedUseCost: 0
+    }
+  });
+  const inputEntry = entryForRecipe(plan, values, inputRecipe) ?? fail("missing selected input recipe");
+  const parentEntry = entryForRecipe(plan, values, parentRecipe) ?? fail("missing selected parent recipe");
 
-  strictEqual(first.kind, "recipe");
-  strictEqual(second.kind, "recipe");
-  strictEqual(first.depth, second.depth);
-  deepStrictEqual(first.source, second.source);
-  deepStrictEqual(first.recipe, second.recipe);
+  deepStrictEqual(parentEntry.reasons.map((reason) => reason.kind), ["reuse"]);
+  deepStrictEqual(inputEntry.reasons.map((reason) => reason.kind), ["reuse"]);
+});
+
+test("Wasm recipe emission maps duplicated select child expressions by semantic slot", () => {
+  const definition = 0 as BlockDefinitionId;
+  const saved = 0 as SavedExprId;
+  const duplicatedInput = exprInput({ kind: "def", id: definition });
+  const whenFalseExpr = exprConst(0);
+  const conditionRecipe = Object.freeze({
+    kind: "definition",
+    definition,
+    input: exprRecipe(exprInput({ kind: "reg", reg: "eax" }))
+  } satisfies ExprRecipe);
+  const whenTrueRecipe = Object.freeze({ kind: "saved-expr", saved } satisfies ExprRecipe);
+  const whenFalseRecipe = exprRecipe(whenFalseExpr);
+  const selectRecipe = Object.freeze({
+    kind: "expr",
+    expr: exprSelect(duplicatedInput, duplicatedInput, whenFalseExpr),
+    children: Object.freeze([
+      conditionRecipe,
+      whenTrueRecipe,
+      whenFalseRecipe
+    ])
+  } satisfies ExprRecipe);
+
+  deepStrictEqual(recipeEmissionChildren(selectRecipe), [
+    whenTrueRecipe,
+    whenFalseRecipe,
+    conditionRecipe
+  ]);
 });
 
 test("Wasm cache plan leaves cheap repeated expressions inline", () => {
@@ -256,7 +273,7 @@ test("Wasm cache plan can attach saved-expr and reuse reasons to one entry", () 
   strictEqual(entry.uses.length, 2);
 });
 
-test("Wasm cache schedule keeps sequential address cache lifetimes non-overlapping", () => {
+test("Wasm cache plan selects repeated address recipes", () => {
   const { layout, values } = analyzeBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(1) },
@@ -276,69 +293,9 @@ test("Wasm cache schedule keeps sequential address cache lifetimes non-overlappi
     { op: "set", target: { kind: "mem", address: v(5) }, value: c(0x51), accessWidth: 32 }
   ]);
   const plan = planWasmCache({ layout, values });
-  const mainEvents = regionOccurrences(plan, mainRegion(layout));
 
   strictEqual(plan.entries.length, 5);
   deepStrictEqual(plan.entries.map((entry) => entry.uses.length), [2, 2, 2, 2, 2]);
-  strictEqual(mainEvents.length, 10);
-  strictEqual(maxConcurrentEntries(mainEvents), 1);
-  strictEqual(mainEvents.every((event) =>
-    event.kind === "recipe" &&
-    event.source.kind === "layout-use" &&
-    plan.entries.some((entry) => entry.id === event.entry)
-  ), true);
-});
-
-test("Wasm cache schedule ends SavedExpr lifetime before later same-region work", () => {
-  const { layout, values } = analyzeBlock([
-    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
-    { op: "set", target: { kind: "operand", index: 0 }, value: c(0x11), accessWidth: 32 },
-    { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(0), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: c(2), b: c(1) },
-    { op: "set", target: { kind: "mem", address: c(0x1004) }, value: v(2), accessWidth: 32 },
-    { op: "set", target: { kind: "mem", address: c(0x1008) }, value: v(2), accessWidth: 32 }
-  ], {
-    resolver: dynamicResolver()
-  });
-  const saved = only(values.savedExprs);
-  const plan = planWasmCache({ layout, values });
-  const entry = forcedEntry(plan, saved);
-  const mainEvents = regionOccurrences(plan, mainRegion(layout));
-  const lastForcedIndex = lastEntryOccurrenceIndex(mainEvents, entry);
-  const forcedEvents = entryOccurrences(mainEvents, entry);
-
-  strictEqual(forcedEvents.at(-1)?.kind, "saved-expr");
-  strictEqual(mainEvents.slice(lastForcedIndex + 1).some((event) => event.entry !== entry.id), true);
-});
-
-test("Wasm cache schedule keeps child-region occurrences separate from sibling work", () => {
-  const { layout, values } = analyzeBlock([
-    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(1) },
-    { op: "set", target: { kind: "reg", reg: "ebx" }, value: v(1), accessWidth: 32 },
-    { op: "set", target: { kind: "reg", reg: "ecx" }, value: v(1), accessWidth: 32 },
-    { op: "memory.guard", address: c(0x1000), byteLength: 4, access: "read" },
-    { op: "set", target: { kind: "reg", reg: "ebx" }, value: c(0), accessWidth: 32 },
-    { op: "set", target: { kind: "reg", reg: "ecx" }, value: c(0), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(0), b: c(2) },
-    { op: "set", target: { kind: "mem", address: c(0x1004) }, value: v(2), accessWidth: 32 },
-    { op: "set", target: { kind: "mem", address: c(0x1008) }, value: v(2), accessWidth: 32 },
-    { op: "next" }
-  ]);
-  const plan = planWasmCache({ layout, values });
-  const mainEvents = regionOccurrences(plan, mainRegion(layout));
-  const edgeEvents = layout.regions
-    .filter((region) => region.path.kind === "edge")
-    .flatMap((region) => regionOccurrences(plan, region));
-  const mainEntryIds = new Set(mainEvents.map((event) => event.entry));
-  const edgeEntryIds = new Set(edgeEvents.map((event) => event.entry));
-  const edgeOnlyEntryIds = [...edgeEntryIds].filter((entry) => !mainEntryIds.has(entry));
-  const mainOnlyEntryIds = [...mainEntryIds].filter((entry) => !edgeEntryIds.has(entry));
-
-  strictEqual(edgeOnlyEntryIds.length > 0, true);
-  strictEqual(mainOnlyEntryIds.length > 0, true);
-  strictEqual(edgeOnlyEntryIds.some((entry) => mainEntryIds.has(entry)), false);
-  strictEqual(mainOnlyEntryIds.some((entry) => edgeEntryIds.has(entry)), false);
 });
 
 test("Wasm cache plan output has no concrete local operation fields", () => {
@@ -353,7 +310,7 @@ test("Wasm cache plan output has no concrete local operation fields", () => {
   const reason = only(entry.reasons);
   const serialized = JSON.stringify(plan);
 
-  deepStrictEqual(Object.keys(plan), ["entries", "schedule"]);
+  deepStrictEqual(Object.keys(plan), ["entries"]);
   deepStrictEqual(Object.keys(entry), ["id", "recipe", "reasons", "uses"]);
   deepStrictEqual(Object.keys(reason), ["kind", "estimatedBenefit"]);
   strictEqual(serialized.includes("local.get"), false);
@@ -396,52 +353,6 @@ function analyzeBlock(
   };
 }
 
-function mainRegion(layout: BlockLayout): LayoutRegion {
-  return layout.regions.find((region) => region.path.kind === "main")!;
-}
-
-function regionOccurrences(plan: WasmCachePlan, region: LayoutRegion): readonly WasmCacheOccurrence[] {
-  return plan.schedule.find((schedule) => schedule.region === region.id)?.occurrences ?? [];
-}
-
-function entryOccurrences(
-  occurrences: readonly WasmCacheOccurrence[],
-  entry: WasmCacheEntry
-): readonly WasmCacheOccurrence[] {
-  return occurrences.filter((occurrence) => occurrence.entry === entry.id);
-}
-
-function maxConcurrentEntries(occurrences: readonly WasmCacheOccurrence[]): number {
-  const lastByEntry = new Map<WasmCacheEntry["id"], number>();
-  const live = new Set<WasmCacheEntry["id"]>();
-  let max = 0;
-
-  occurrences.forEach((occurrence, index) => {
-    lastByEntry.set(occurrence.entry, index);
-  });
-
-  occurrences.forEach((occurrence, index) => {
-    live.add(occurrence.entry);
-    max = Math.max(max, live.size);
-
-    if (lastByEntry.get(occurrence.entry) === index) {
-      live.delete(occurrence.entry);
-    }
-  });
-
-  return max;
-}
-
-function lastEntryOccurrenceIndex(occurrences: readonly WasmCacheOccurrence[], entry: WasmCacheEntry): number {
-  for (let index = occurrences.length - 1; index >= 0; index -= 1) {
-    if (occurrences[index]!.entry === entry.id) {
-      return index;
-    }
-  }
-
-  return fail(`missing schedule occurrence for cache entry ${entry.id}`);
-}
-
 function forcedEntry(plan: WasmCachePlan, saved: SavedExpr): WasmCacheEntry {
   return plan.entries.find((entry) =>
     entry.reasons.some((reason) => reason.kind === "saved-expr" && reason.saved === saved.id)
@@ -460,8 +371,12 @@ function entryForRecipe(
     : plan.entries.find((entry) => values.recipes.recipeId(entry.recipe) === recipeId);
 }
 
-function inlineRecipe(expr: ExprRef): ExprRecipe {
-  return Object.freeze({ kind: "inline", expr } satisfies ExprRecipe);
+function exprRecipe(expr: ExprRef): ExprRecipe {
+  return Object.freeze({
+    kind: "expr",
+    expr,
+    children: Object.freeze(exprChildren(expr).map(exprRecipe))
+  } satisfies ExprRecipe);
 }
 
 function only<TValue>(values: readonly TValue[]): TValue {
