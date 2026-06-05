@@ -82,8 +82,8 @@ test("Wasm cache plan exposes nested pre-snapshot child uses for forced snapshot
   const snapshot = only(values.snapshots);
   const main = layout.regions.find((region) => region.path.kind === "main")!;
   const snapshotIndex = main.steps.findIndex((step) => step.kind === "establish-snapshot");
-  const memoryStores = main.steps.filter((step): step is Extract<LayoutStep, { kind: "action" }> =>
-    step.kind === "action" && step.site.action.kind === "memoryStore"
+  const memoryStores = main.steps.filter((step): step is Extract<LayoutStep, { kind: "action-inputs" }> =>
+    step.kind === "action-inputs" && step.site.action.kind === "memoryStore"
   );
   const preSnapshotUse = only(memoryStores[0]!.inputs.filter((input) => input.use.role === "value"));
   const laterSnapshotUse = only(memoryStores[1]!.inputs.filter((input) => input.recipe.kind === "snapshot"));

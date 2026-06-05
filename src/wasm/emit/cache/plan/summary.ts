@@ -19,7 +19,6 @@ import type {
 
 export function summarizeRecipeOccurrences(input: Readonly<{
   layout: WasmCachePlanInput["layout"];
-  snapshots: ValuePlan["snapshots"];
   recipes: ValuePlan["recipes"];
   snapshotRecipeIds: ReadonlyMap<ValueSnapshotId, ExprRecipeId>;
 }>): ReadonlyMap<ExprRecipeId, RecipeOccurrenceSummary> {
@@ -29,10 +28,6 @@ export function summarizeRecipeOccurrences(input: Readonly<{
     for (const step of region.steps) {
       summarizeStep(step, summaries, input.recipes, input.snapshotRecipeIds);
     }
-  }
-
-  for (const snapshot of input.snapshots) {
-    summarizeRecipe(snapshot.recipe, undefined, summaries, input.recipes, input.snapshotRecipeIds);
   }
 
   return summaries;
@@ -46,17 +41,20 @@ function summarizeStep(
 ): void {
   switch (step.kind) {
     case "definition":
+    case "action-inputs":
     case "action":
       for (const input of step.inputs) {
         summarizeRecipe(input.recipe, input.id, summaries, recipes, snapshotRecipeIds);
       }
+      break;
+    case "establish-snapshot":
+      summarizeRecipe(step.recipe, undefined, summaries, recipes, snapshotRecipeIds);
       break;
     case "write-state":
       if (step.value !== undefined) {
         summarizeRecipe(step.value.recipe, step.value.id, summaries, recipes, snapshotRecipeIds);
       }
       break;
-    case "establish-snapshot":
     case "exit":
       break;
   }

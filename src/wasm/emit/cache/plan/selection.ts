@@ -40,7 +40,6 @@ export function selectCacheEntries(input: WasmCachePlanInput): CacheSelection {
 
   const summaries = summarizeRecipeOccurrences({
     layout: input.layout,
-    snapshots: input.values.snapshots,
     recipes: input.values.recipes,
     snapshotRecipeIds: selection.snapshotRecipeIds
   });

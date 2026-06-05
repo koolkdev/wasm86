@@ -53,6 +53,7 @@ export type LayoutTimelineInput = Readonly<{
 
 export type LayoutStep =
   | Readonly<{ kind: "definition"; site: BlockDefinitionSite; inputs: readonly LayoutTimelineInput[] }>
+  | Readonly<{ kind: "action-inputs"; site: BlockActionSite; inputs: readonly LayoutTimelineInput[] }>
   | Readonly<{ kind: "action"; site: BlockActionSite; inputs: readonly LayoutTimelineInput[] }>
   | Readonly<{ kind: "establish-snapshot"; snapshot: ValueSnapshotId; recipe: ExprRecipe }>
   | Readonly<{
@@ -80,9 +81,10 @@ type LayoutEvent = Readonly<{
   step: LayoutStep;
 }>;
 
-const ESTABLISH_SNAPSHOT_TIER = 0;
-const WRITE_TIER = 1;
-const SEMANTIC_TIER = 2;
+const ACTION_INPUT_TIER = 0;
+const ESTABLISH_SNAPSHOT_TIER = 1;
+const WRITE_TIER = 2;
+const SEMANTIC_TIER = 3;
 
 export function buildBlockLayout(input: BlockLayoutInput): BlockLayout {
   return new BlockLayoutBuilder(input).build();
@@ -146,17 +148,30 @@ class BlockLayoutBuilder {
     for (const site of this.#input.walked.timeline) {
       const point = this.#sitePoint(site);
 
-      this.#addEvent(point, SEMANTIC_TIER, site.kind === "definition"
-        ? Object.freeze({
+      if (site.kind === "definition") {
+        this.#addEvent(point, SEMANTIC_TIER, Object.freeze({
           kind: "definition",
           site,
           inputs: Object.freeze(this.#definitionInputs(site))
-        } satisfies LayoutStep)
-        : Object.freeze({
-          kind: "action",
-          site,
-          inputs: Object.freeze(this.#actionInputs(site))
         } satisfies LayoutStep));
+        continue;
+      }
+
+      const actionInputs = this.#actionInputs(site);
+
+      if (actionInputs.length > 0) {
+        this.#addEvent(point, ACTION_INPUT_TIER, Object.freeze({
+          kind: "action-inputs",
+          site,
+          inputs: Object.freeze(actionInputs)
+        } satisfies LayoutStep));
+      }
+
+      this.#addEvent(point, SEMANTIC_TIER, Object.freeze({
+        kind: "action",
+        site,
+        inputs: Object.freeze(this.#actionEffectInputs(site))
+      } satisfies LayoutStep));
     }
   }
 
@@ -167,6 +182,13 @@ class BlockLayoutBuilder {
 
   #actionInputs(site: BlockActionSite): readonly LayoutTimelineInput[] {
     return this.#timelineUsesForSite(site)
+      .filter((use) => use.kind === "action-input")
+      .map((use) => this.#timelineInput(use));
+  }
+
+  #actionEffectInputs(site: BlockActionSite): readonly LayoutTimelineInput[] {
+    return this.#timelineUsesForSite(site)
+      .filter((use) => use.kind !== "action-input")
       .map((use) => this.#timelineInput(use));
   }
 

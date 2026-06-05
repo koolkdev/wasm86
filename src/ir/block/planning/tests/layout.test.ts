@@ -21,7 +21,14 @@ import {
   type PlannedStateWrite,
   type StateWritePlan
 } from "#ir/block/planning/index.js";
-import { walkExpressionBlock } from "#ir/block/walk/index.js";
+import {
+  BindingResolver,
+  dynamicRegBinding
+} from "#ir/block/bindings/resolver.js";
+import {
+  type BlockWalkInput,
+  walkExpressionBlock
+} from "#ir/block/walk/index.js";
 import { exprConst } from "#ir/expr/builders.js";
 import { exprsEqual } from "#ir/expr/equality.js";
 import type {
@@ -81,27 +88,68 @@ test("BlockLayout emits establish-snapshot steps and wraps backend inputs as tim
   ]);
   const main = mainRegion(layout);
   const snapshotIndex = main.steps.findIndex((step) => step.kind === "establish-snapshot");
+  const firstStoreInputIndex = main.steps.findIndex((step) =>
+    step.kind === "action-inputs" && step.site.action.kind === "memoryStore"
+  );
   const firstStoreIndex = main.steps.findIndex((step) =>
     step.kind === "action" && step.site.action.kind === "memoryStore"
   );
   const definition = onlyStep(main, "definition");
-  const stores = main.steps.filter((step): step is Extract<LayoutStep, { kind: "action" }> =>
-    step.kind === "action" && step.site.action.kind === "memoryStore"
+  const storeInputs = main.steps.filter((step): step is Extract<LayoutStep, { kind: "action-inputs" }> =>
+    step.kind === "action-inputs" && step.site.action.kind === "memoryStore"
   );
 
   strictEqual(values.snapshots.length, 1);
   strictEqual(snapshotIndex >= 0, true);
+  strictEqual(firstStoreInputIndex >= 0, true);
+  strictEqual(firstStoreInputIndex < snapshotIndex, true);
   strictEqual(snapshotIndex < firstStoreIndex, true);
   deepStrictEqual(definition.inputs.map((input) => input.use.kind), ["definition-input"]);
   deepStrictEqual(definition.inputs.map((input) => input.use.role), ["address"]);
-  deepStrictEqual(stores[1]!.inputs.map((input) => input.use.role), ["address", "value"]);
-  strictEqual(stores[1]!.inputs[1]!.recipe.kind, "snapshot");
+  deepStrictEqual(storeInputs[1]!.inputs.map((input) => input.use.role), ["address", "value"]);
+  strictEqual(storeInputs[1]!.inputs[1]!.recipe.kind, "snapshot");
+});
+
+test("BlockLayout orders same-point action inputs before snapshots before action effects", () => {
+  const { geometry, layout, values } = analyzeBlock([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+    { op: "set", target: { kind: "operand", index: 0 }, value: v(0), accessWidth: 32 },
+    { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(0), accessWidth: 32 }
+  ], {
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(exprConst(3), 32)]
+    })
+  });
+  const snapshot = only(values.snapshots);
+  const dynamicStore = geometry.registers.dynamicStores[0]!;
+  const main = mainRegion(layout);
+  const inputIndex = main.steps.findIndex((step) =>
+    step.kind === "action-inputs" && step.site === dynamicStore.site
+  );
+  const snapshotIndex = main.steps.findIndex((step) =>
+    step.kind === "establish-snapshot" && step.snapshot === snapshot.id
+  );
+  const effectIndex = main.steps.findIndex((step) =>
+    step.kind === "action" && step.site === dynamicStore.site
+  );
+  const inputs = main.steps[inputIndex] as Extract<LayoutStep, { kind: "action-inputs" }>;
+
+  strictEqual(inputIndex >= 0, true);
+  strictEqual(snapshotIndex >= 0, true);
+  strictEqual(effectIndex >= 0, true);
+  strictEqual(inputIndex < snapshotIndex, true);
+  strictEqual(snapshotIndex < effectIndex, true);
+  deepStrictEqual(inputs.inputs.map((input) => input.use.role), ["index", "value"]);
+  deepStrictEqual(inputs.inputs[1]!.recipe, snapshot.recipe);
 });
 
 test("BlockLayout exposes branch edge regions and edge-owned exit payload inputs", () => {
   const { geometry, layout } = analyzeBlock([
     { op: "conditionalJump", condition: c(1), taken: c(0x40), notTaken: c(0x44) }
   ]);
+  const branchInputs = only(mainRegion(layout).steps.filter((step): step is Extract<LayoutStep, { kind: "action-inputs" }> =>
+    step.kind === "action-inputs" && step.site.action.kind === "branch"
+  ));
   const branchAction = only(mainRegion(layout).steps.filter((step): step is Extract<LayoutStep, { kind: "action" }> =>
     step.kind === "action" && step.site.action.kind === "branch"
   ));
@@ -111,6 +159,7 @@ test("BlockLayout exposes branch edge regions and edge-owned exit payload inputs
     geometry.edges.byPath.get(region.path)?.kind.startsWith("branch-") === true
   );
 
+  deepStrictEqual(branchInputs.inputs.map((input) => input.use.role), ["condition"]);
   deepStrictEqual(payloadInputs.map((input) => input.use.kind), ["exit-payload", "exit-payload"]);
   deepStrictEqual(payloadInputs.map((input) => input.use.role), ["target", "target"]);
   deepStrictEqual(payloadInputs.map((input) =>
@@ -123,14 +172,14 @@ test("BlockLayout exposes branch edge regions and edge-owned exit payload inputs
   strictEqual(branchRegions.every((region) => region.steps.at(-1)?.kind === "exit"), true);
 });
 
-function analyzeBlock(block: IrBlock): Readonly<{
+function analyzeBlock(block: IrBlock, input: Omit<BlockWalkInput, "block"> = {}): Readonly<{
   walked: ReturnType<typeof walkExpressionBlock>;
   geometry: ReturnType<typeof buildTimelineGeometry>;
   values: ReturnType<typeof analyzeValuePlan>;
   stateWrites: StateWritePlan;
   layout: BlockLayout;
 }> {
-  const walked = walkExpressionBlock({ block });
+  const walked = walkExpressionBlock({ ...input, block });
   const geometry = buildTimelineGeometry(walked);
   const timelineUses = buildTimelineValueUseIndex({ walked, geometry });
   const obligations = analyzeStateObligations({ walked, geometry });
