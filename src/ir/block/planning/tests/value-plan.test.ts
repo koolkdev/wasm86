@@ -28,7 +28,9 @@ import {
 import {
   exprBinary,
   exprConst,
-  exprInput
+  exprInput,
+  exprProject,
+  exprUnary
 } from "#ir/expr/builders.js";
 import { buildExprGraph } from "#ir/expr/graph/index.js";
 import type { ExprRef } from "#ir/expr/types.js";
@@ -196,6 +198,209 @@ test("ValuePlan snapshots input(def) after its definition and before a replay ba
   });
   deepStrictEqual(snapshot.usedByTopLevelNeeds, [id(0)]);
   strictEqual(snapshot.reason.kind, "definition-replay-barrier");
+});
+
+test("ValuePlan snapshots a barrier-crossing definition view chain", () => {
+  const { geometry, plan, facts } = analyzeBlock([
+    {
+      op: "get",
+      dst: v(0),
+      source: { kind: "mem", address: c(0x1000) },
+      accessWidth: 8
+    },
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x2000) },
+      value: c(1),
+      accessWidth: 32
+    },
+    {
+      op: "value.unary",
+      type: "i32",
+      operator: "extend8_s",
+      dst: v(1),
+      value: v(0)
+    },
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x3000) },
+      value: v(1),
+      accessWidth: 32
+    }
+  ], ({ geometry }) => [
+    need(0, geometry.memory.writes[1]!.site.action.value, geometry.memory.writes[1]!.point)
+  ]);
+  const definition = facts.definitions[0]!;
+  const firstStore = geometry.memory.writes[0]!;
+  const signedLoad = exprUnary("extend8_s", exprInput({ kind: "def", id: definition.id }));
+  const snapshot = plan.snapshots[0]!;
+
+  strictEqual(plan.snapshots.length, 1);
+  deepStrictEqual(recipe(plan, 0), {
+    kind: "snapshot",
+    snapshot: snapshot.id
+  });
+  deepStrictEqual(snapshot.expr, signedLoad);
+  strictEqual(snapshot.establishAt, firstStore.point);
+  deepStrictEqual(snapshot.recipe, {
+    kind: "expr",
+    expr: signedLoad,
+    children: [
+      {
+        kind: "definition",
+        definition: definition.id,
+        input: {
+          kind: "expr",
+          expr: exprConst(0x1000),
+          children: []
+        }
+      }
+    ]
+  });
+  deepStrictEqual(snapshot.usedByTopLevelNeeds, [id(0)]);
+  strictEqual(snapshot.reason.kind, "definition-replay-barrier");
+});
+
+test("ValuePlan snapshots non-unary barrier view chains", () => {
+  const { geometry, plan, facts } = analyzeBlock([
+    {
+      op: "get",
+      dst: v(0),
+      source: { kind: "mem", address: c(0x1000) },
+      accessWidth: 32
+    },
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x2000) },
+      value: c(1),
+      accessWidth: 32
+    },
+    {
+      op: "value.project",
+      type: "i32",
+      dst: v(1),
+      width: 8,
+      value: v(0)
+    },
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x3000) },
+      value: v(1),
+      accessWidth: 32
+    }
+  ], ({ geometry }) => [
+    need(0, geometry.memory.writes[1]!.site.action.value, geometry.memory.writes[1]!.point)
+  ]);
+  const definition = facts.definitions[0]!;
+  const firstStore = geometry.memory.writes[0]!;
+  const projectedLoad = exprProject(8, exprInput({ kind: "def", id: definition.id }));
+  const snapshot = plan.snapshots[0]!;
+
+  strictEqual(plan.snapshots.length, 1);
+  deepStrictEqual(recipe(plan, 0), {
+    kind: "snapshot",
+    snapshot: snapshot.id
+  });
+  deepStrictEqual(snapshot.expr, projectedLoad);
+  strictEqual(snapshot.establishAt, firstStore.point);
+  deepStrictEqual(snapshot.recipe, {
+    kind: "expr",
+    expr: projectedLoad,
+    children: [
+      {
+        kind: "definition",
+        definition: definition.id,
+        input: {
+          kind: "expr",
+          expr: exprConst(0x1000),
+          children: []
+        }
+      }
+    ]
+  });
+});
+
+test("ValuePlan stops barrier view snapshots before multi-input parents", () => {
+  const { plan, facts } = analyzeBlock([
+    {
+      op: "get",
+      dst: v(0),
+      source: { kind: "mem", address: c(0x1000) },
+      accessWidth: 8
+    },
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x2000) },
+      value: c(1),
+      accessWidth: 32
+    },
+    {
+      op: "get",
+      dst: v(1),
+      source: { kind: "reg", reg: "ecx" },
+      accessWidth: 32
+    },
+    {
+      op: "value.unary",
+      type: "i32",
+      operator: "extend8_s",
+      dst: v(2),
+      value: v(0)
+    },
+    {
+      op: "value.binary",
+      type: "i32",
+      operator: "add",
+      dst: v(3),
+      a: v(2),
+      b: v(1)
+    },
+    {
+      op: "set",
+      target: { kind: "mem", address: c(0x3000) },
+      value: v(3),
+      accessWidth: 32
+    }
+  ], ({ geometry }) => [
+    need(0, geometry.memory.writes[1]!.site.action.value, geometry.memory.writes[1]!.point)
+  ]);
+  const definition = facts.definitions[0]!;
+  const signedLoad = exprUnary("extend8_s", exprInput({ kind: "def", id: definition.id }));
+  const add = exprBinary("add", signedLoad, exprInput({ kind: "reg", reg: "ecx" }));
+  const snapshot = plan.snapshots[0]!;
+
+  strictEqual(plan.snapshots.length, 1);
+  deepStrictEqual(snapshot.expr, signedLoad);
+  deepStrictEqual(recipe(plan, 0), {
+    kind: "expr",
+    expr: add,
+    children: [
+      {
+        kind: "snapshot",
+        snapshot: snapshot.id
+      },
+      {
+        kind: "expr",
+        expr: exprInput({ kind: "reg", reg: "ecx" }),
+        children: []
+      }
+    ]
+  });
+  deepStrictEqual(snapshot.recipe, {
+    kind: "expr",
+    expr: signedLoad,
+    children: [
+      {
+        kind: "definition",
+        definition: definition.id,
+        input: {
+          kind: "expr",
+          expr: exprConst(0x1000),
+          children: []
+        }
+      }
+    ]
+  });
 });
 
 test("ValuePlan carries an exported recipe for definition replay inputs", () => {

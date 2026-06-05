@@ -22,8 +22,10 @@ import type {
   ExprRecipe,
   ValuePlan
 } from "./types.js";
-
-type InputExprNode = ExprNode & { readonly expr: Extract<ExprRef, { kind: "input" }> };
+import {
+  singleInputViewChainSource,
+  type InputExprNode
+} from "./view-chains.js";
 
 export type ValuePlanInput = Readonly<{
   needs: readonly ExprNeed[];
@@ -112,17 +114,17 @@ class ValuePlanAnalyzer {
     point: ProgramPoint,
     topLevelNeed: ExprNeedId
   ): ExprRecipe {
+    const blocker = this.#inputBlocker(node, point);
     const expr = node.expr;
+
+    if (blocker !== undefined) {
+      return this.#snapshotRecipe(node, blocker, topLevelNeed);
+    }
 
     switch (expr.source.kind) {
       case "reg":
-      case "flag": {
-        const blocker = this.#barriers.sourceInputBlocker(expr.source, point);
-
-        return blocker === undefined
-          ? exprRecipe(expr, [])
-          : this.#snapshotRecipe(node, blocker, topLevelNeed);
-      }
+      case "flag":
+        return exprRecipe(expr, []);
       case "def":
         return this.#definitionInputRecipe(node, point, topLevelNeed);
     }
@@ -145,12 +147,6 @@ class ValuePlanAnalyzer {
       throw new Error(`definition ${definition.id} is not available at this program point`);
     }
 
-    const blocker = this.#barriers.definitionReplayBlocker(definition, point);
-
-    if (blocker !== undefined) {
-      return this.#snapshotRecipe(node, blocker, topLevelNeed);
-    }
-
     return Object.freeze({
       kind: "definition",
       definition: definition.id,
@@ -159,6 +155,12 @@ class ValuePlanAnalyzer {
   }
 
   #compositeRecipe(node: ExprNode, point: ProgramPoint, topLevelNeed: ExprNeedId): ExprRecipe {
+    const blocker = this.#viewChainBlocker(node, point);
+
+    if (blocker !== undefined) {
+      return this.#snapshotRecipe(node, blocker, topLevelNeed);
+    }
+
     return exprRecipe(
       node.expr,
       node.children.map((child) =>
@@ -182,6 +184,33 @@ class ValuePlanAnalyzer {
     });
 
     return Object.freeze({ kind: "snapshot", snapshot } satisfies ExprRecipe);
+  }
+
+  #viewChainBlocker(node: ExprNode, point: ProgramPoint): SnapshotBlocker | undefined {
+    const source = singleInputViewChainSource(node);
+
+    return source === undefined
+      ? undefined
+      : this.#inputBlocker(source, point);
+  }
+
+  #inputBlocker(node: InputExprNode, point: ProgramPoint): SnapshotBlocker | undefined {
+    const expr = node.expr;
+
+    switch (expr.source.kind) {
+      case "reg":
+      case "flag":
+        return this.#barriers.sourceInputBlocker(expr.source, point);
+      case "def": {
+        const definition = this.#definitionForExpr(expr);
+
+        if (!this.#barriers.definitionExistsAt(definition, point)) {
+          throw new Error(`definition ${definition.id} is not available at this program point`);
+        }
+
+        return this.#barriers.definitionReplayBlocker(definition, point);
+      }
+    }
   }
 
   #exprExistsAt(node: ExprNode, point: ProgramPoint): boolean {
