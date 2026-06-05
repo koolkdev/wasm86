@@ -21,7 +21,7 @@ export function recipeEmissionChildren(recipe: ExprRecipe): ExprRecipe[] {
       return exprEmissionChildren(recipe);
     case "definition":
       return [recipe.input];
-    case "saved-expr":
+    case "snapshot":
       return [];
   }
 }

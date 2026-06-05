@@ -4,7 +4,7 @@ import type {
 } from "#ir/block/planning/layout/index.js";
 import type {
   ExprRecipe,
-  SavedExprId,
+  ValueSnapshotId,
   ValuePlan
 } from "#ir/block/planning/values/index.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -27,8 +27,8 @@ export type WasmValueCache = Readonly<{
     recipe: ExprRecipe,
     emitInline: WasmValueCacheInlineEmitter
   ): WasmValueType;
-  ensureSaved(saved: SavedExprId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void;
-  emitSaved(saved: SavedExprId): WasmValueType;
+  ensureSnapshot(snapshot: ValueSnapshotId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void;
+  emitSnapshot(snapshot: ValueSnapshotId): WasmValueType;
 }>;
 
 export type WasmValueCacheInput = Readonly<{

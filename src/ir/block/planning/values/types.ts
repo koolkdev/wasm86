@@ -4,11 +4,11 @@ import type { ExprNeedId } from "#ir/block/planning/expression-needs.js";
 import type { ProgramPoint } from "#ir/block/planning/geometry/index.js";
 import type { ExprRef } from "#ir/expr/types.js";
 
-export type SavedExprId = number & { readonly __savedExprId: unique symbol };
+export type ValueSnapshotId = number & { readonly __snapshotId: unique symbol };
 export type ExprRecipeId = number & { readonly __exprRecipeId: unique symbol };
 
 export type ValuePlan = Readonly<{
-  savedExprs: readonly SavedExpr[];
+  snapshots: readonly ValueSnapshot[];
   recipes: RecipeRegistry;
 }>;
 
@@ -20,7 +20,7 @@ export type RecipeRegistry = Readonly<{
 }>;
 
 export type ExprRecipe =
-  | Readonly<{ kind: "saved-expr"; saved: SavedExprId }>
+  | Readonly<{ kind: "snapshot"; snapshot: ValueSnapshotId }>
   | Readonly<{
       kind: "expr";
       expr: ExprRef;
@@ -32,16 +32,16 @@ export type ExprRecipe =
       input: ExprRecipe;
     }>;
 
-export type SavedExpr = Readonly<{
-  id: SavedExprId;
+export type ValueSnapshot = Readonly<{
+  id: ValueSnapshotId;
   expr: ExprRef;
-  saveAt: ProgramPoint;
+  establishAt: ProgramPoint;
   recipe: ExprRecipe;
   usedByTopLevelNeeds: readonly ExprNeedId[];
-  reason: SaveReason;
+  reason: SnapshotReason;
 }>;
 
-export type SaveReason =
+export type SnapshotReason =
   | Readonly<{
       kind: "source-read-barrier";
       domain: "registers";

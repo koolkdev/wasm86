@@ -5,7 +5,7 @@ import type {
 import type {
   ExprRecipe,
   ExprRecipeId,
-  SavedExprId,
+  ValueSnapshotId,
   ValuePlan
 } from "#ir/block/planning/values/index.js";
 import type { WasmRecipeCostModel } from "./cost.js";
@@ -25,8 +25,8 @@ export type WasmCacheEntry = Readonly<{
 
 export type WasmCacheReason =
   | Readonly<{
-    kind: "saved-expr";
-    saved: SavedExprId;
+    kind: "required-snapshot";
+    snapshot: ValueSnapshotId;
   }>
   | Readonly<{
     kind: "reuse";
@@ -55,5 +55,5 @@ export type MutableEntry = {
 export type CacheSelection = Readonly<{
   entries: readonly MutableEntry[];
   byRecipeId: ReadonlyMap<ExprRecipeId, MutableEntry>;
-  bySavedId: ReadonlyMap<SavedExprId, MutableEntry>;
+  bySnapshotId: ReadonlyMap<ValueSnapshotId, MutableEntry>;
 }>;

@@ -1,7 +1,7 @@
 import type { LayoutRegion } from "#ir/block/planning/layout/index.js";
 import type {
   ExprRecipe,
-  SavedExprId
+  ValueSnapshotId
 } from "#ir/block/planning/values/index.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -49,8 +49,8 @@ export class WasmValueCacheState implements WasmValueCache {
     recipe: ExprRecipe,
     emitInline: WasmValueCacheInlineEmitter
   ): ReturnType<WasmValueCache["emitRecipe"]> {
-    if (recipe.kind === "saved-expr") {
-      return this.emitSaved(recipe.saved);
+    if (recipe.kind === "snapshot") {
+      return this.emitSnapshot(recipe.snapshot);
     }
 
     const entry = this.#entries.entryForRecipe(recipe);
@@ -74,8 +74,8 @@ export class WasmValueCacheState implements WasmValueCache {
     return type;
   }
 
-  ensureSaved(saved: SavedExprId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void {
-    const entry = this.#entries.entryForSaved(saved);
+  ensureSnapshot(snapshot: ValueSnapshotId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void {
+    const entry = this.#entries.entryForSnapshot(snapshot);
     const active = this.#regions.activeRegion();
     const visible = this.#locals.get(entry.id, this.#regions.activeRegionChain());
 
@@ -91,12 +91,12 @@ export class WasmValueCacheState implements WasmValueCache {
     this.#body.localSet(local.local);
   }
 
-  emitSaved(saved: SavedExprId): ReturnType<WasmValueCache["emitSaved"]> {
-    const entry = this.#entries.entryForSaved(saved);
+  emitSnapshot(snapshot: ValueSnapshotId): ReturnType<WasmValueCache["emitSnapshot"]> {
+    const entry = this.#entries.entryForSnapshot(snapshot);
     const visible = this.#locals.get(entry.id, this.#regions.activeRegionChain());
 
     if (visible === undefined) {
-      throw new Error(`saved expression ${saved} is not available in the active Wasm cache path`);
+      throw new Error(`snapshot expression ${snapshot} is not available in the active Wasm cache path`);
     }
 
     this.#body.localGet(visible.local);

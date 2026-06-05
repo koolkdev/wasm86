@@ -383,7 +383,7 @@ test("BarrierFacts exposes only barriers and definitions", () => {
   deepStrictEqual(Object.keys(facts).sort(), ["barriers", "definitions"]);
   strictEqual(Object.hasOwn(facts, "NeedAvailability"), false);
   strictEqual(Object.hasOwn(facts, "ExprRecipe"), false);
-  strictEqual(Object.hasOwn(facts, "SavedExpr"), false);
+  strictEqual(Object.hasOwn(facts, "ValueSnapshot"), false);
   strictEqual(Object.hasOwn(facts, "policy"), false);
 });
 

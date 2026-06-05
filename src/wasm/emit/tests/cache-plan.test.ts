@@ -22,8 +22,8 @@ import {
   type BlockLayout,
   type ExprRecipe,
   type LayoutStep,
-  type SavedExpr,
-  type SavedExprId,
+  type ValueSnapshot,
+  type ValueSnapshotId,
   type ValuePlan
 } from "#ir/block/planning/index.js";
 import {
@@ -52,7 +52,7 @@ import {
 } from "#wasm/emit/cache/plan/index.js";
 import { recipeEmissionChildren } from "#wasm/emit/cache/plan/recipes.js";
 
-test("Wasm cache plan creates a forced entry for every SavedExpr", () => {
+test("Wasm cache plan creates a forced entry for every ValueSnapshot", () => {
   const { layout, values } = analyzeBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     { op: "set", target: { kind: "operand", index: 0 }, value: c(0x11), accessWidth: 32 },
@@ -60,16 +60,16 @@ test("Wasm cache plan creates a forced entry for every SavedExpr", () => {
   ], {
     resolver: dynamicResolver()
   });
-  const saved = only(values.savedExprs);
+  const snapshot = only(values.snapshots);
   const plan = new WasmCachePlanner({ layout, values }).plan();
-  const entry = forcedEntry(plan, saved);
+  const entry = forcedEntry(plan, snapshot);
 
-  deepStrictEqual(entry.recipe, saved.recipe);
-  deepStrictEqual(entry.reasons, [{ kind: "saved-expr", saved: saved.id }]);
+  deepStrictEqual(entry.recipe, snapshot.recipe);
+  deepStrictEqual(entry.reasons, [{ kind: "required-snapshot", snapshot: snapshot.id }]);
   strictEqual(entry.uses.length, 1);
 });
 
-test("Wasm cache plan exposes nested pre-save child uses for forced save entries", () => {
+test("Wasm cache plan exposes nested pre-snapshot child uses for forced snapshot entries", () => {
   const { layout, values } = analyzeBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(4) },
@@ -79,22 +79,22 @@ test("Wasm cache plan exposes nested pre-save child uses for forced save entries
   ], {
     resolver: dynamicResolver()
   });
-  const saved = only(values.savedExprs);
+  const snapshot = only(values.snapshots);
   const main = layout.regions.find((region) => region.path.kind === "main")!;
-  const saveIndex = main.steps.findIndex((step) => step.kind === "save-expr");
+  const snapshotIndex = main.steps.findIndex((step) => step.kind === "establish-snapshot");
   const memoryStores = main.steps.filter((step): step is Extract<LayoutStep, { kind: "action" }> =>
     step.kind === "action" && step.site.action.kind === "memoryStore"
   );
-  const preSaveUse = only(memoryStores[0]!.inputs.filter((input) => input.use.role === "value"));
-  const laterSavedUse = only(memoryStores[1]!.inputs.filter((input) => input.recipe.kind === "saved-expr"));
+  const preSnapshotUse = only(memoryStores[0]!.inputs.filter((input) => input.use.role === "value"));
+  const laterSnapshotUse = only(memoryStores[1]!.inputs.filter((input) => input.recipe.kind === "snapshot"));
   const plan = planWasmCache({ layout, values });
-  const entry = forcedEntry(plan, saved);
+  const entry = forcedEntry(plan, snapshot);
 
-  const preSaveIndex = main.steps.indexOf(memoryStores[0]!);
+  const preSnapshotIndex = main.steps.indexOf(memoryStores[0]!);
 
-  strictEqual(preSaveIndex >= 0, true);
-  strictEqual(saveIndex > preSaveIndex, true);
-  deepStrictEqual(preSaveUse.recipe, {
+  strictEqual(preSnapshotIndex >= 0, true);
+  strictEqual(snapshotIndex > preSnapshotIndex, true);
+  deepStrictEqual(preSnapshotUse.recipe, {
     kind: "expr",
     expr: exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(4)),
     children: [
@@ -110,10 +110,10 @@ test("Wasm cache plan exposes nested pre-save child uses for forced save entries
       }
     ]
   });
-  deepStrictEqual(entry.uses, [preSaveUse.id, laterSavedUse.id]);
+  deepStrictEqual(entry.uses, [preSnapshotUse.id, laterSnapshotUse.id]);
 });
 
-test("Wasm cache plan may choose repeated expressions without creating SavedExpr", () => {
+test("Wasm cache plan may choose repeated expressions without creating ValueSnapshot", () => {
   const { layout, values } = analyzeBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(1) },
@@ -123,7 +123,7 @@ test("Wasm cache plan may choose repeated expressions without creating SavedExpr
   const plan = planWasmCache({ layout, values });
   const entry = only(plan.entries);
 
-  strictEqual(values.savedExprs.length, 0);
+  strictEqual(values.snapshots.length, 0);
   deepStrictEqual(entry.reasons.map((reason) => reason.kind), ["reuse"]);
   strictEqual(entry.uses.length, 2);
 });
@@ -141,7 +141,7 @@ test("Wasm cache plan counts repeated expensive nested recipes for reuse", () =>
   const plan = planWasmCache({ layout, values });
   const entry = entryForRecipe(plan, values, nestedAdd);
 
-  deepStrictEqual(values.savedExprs, []);
+  deepStrictEqual(values.snapshots, []);
   deepStrictEqual(entry?.recipe, nestedAdd);
   deepStrictEqual(entry?.reasons.map((reason) => reason.kind), ["reuse"]);
   strictEqual(entry?.uses.length, 2);
@@ -158,7 +158,7 @@ test("Wasm cache plan leaves cheap repeated nested recipes inline", () => {
   const nestedInput = exprRecipe(exprInput({ kind: "reg", reg: "eax" }));
   const plan = planWasmCache({ layout, values });
 
-  deepStrictEqual(values.savedExprs, []);
+  deepStrictEqual(values.snapshots, []);
   strictEqual(entryForRecipe(plan, values, nestedInput), undefined);
 });
 
@@ -175,7 +175,7 @@ test("Wasm cache plan can select duplicate child expressions", () => {
     costModel: {
       inlineCost: () => 10,
       cacheFromUseCost: 0,
-      cacheFromSaveCost: 0,
+      cacheFromSnapshotCost: 0,
       cachedUseCost: 0
     }
   });
@@ -204,7 +204,7 @@ test("Wasm cache plan can select parent and child recipes independently", () => 
     costModel: {
       inlineCost: () => 10,
       cacheFromUseCost: 0,
-      cacheFromSaveCost: 0,
+      cacheFromSnapshotCost: 0,
       cachedUseCost: 0
     }
   });
@@ -217,7 +217,7 @@ test("Wasm cache plan can select parent and child recipes independently", () => 
 
 test("Wasm recipe emission maps duplicated select child expressions by semantic slot", () => {
   const definition = 0 as BlockDefinitionId;
-  const saved = 0 as SavedExprId;
+  const snapshot = 0 as ValueSnapshotId;
   const duplicatedInput = exprInput({ kind: "def", id: definition });
   const whenFalseExpr = exprConst(0);
   const conditionRecipe = Object.freeze({
@@ -225,7 +225,7 @@ test("Wasm recipe emission maps duplicated select child expressions by semantic 
     definition,
     input: exprRecipe(exprInput({ kind: "reg", reg: "eax" }))
   } satisfies ExprRecipe);
-  const whenTrueRecipe = Object.freeze({ kind: "saved-expr", saved } satisfies ExprRecipe);
+  const whenTrueRecipe = Object.freeze({ kind: "snapshot", snapshot } satisfies ExprRecipe);
   const whenFalseRecipe = exprRecipe(whenFalseExpr);
   const selectRecipe = Object.freeze({
     kind: "expr",
@@ -250,11 +250,11 @@ test("Wasm cache plan leaves cheap repeated expressions inline", () => {
   ]);
   const plan = planWasmCache({ layout, values });
 
-  strictEqual(values.savedExprs.length, 0);
+  strictEqual(values.snapshots.length, 0);
   deepStrictEqual(plan.entries, []);
 });
 
-test("Wasm cache plan can attach saved-expr and reuse reasons to one entry", () => {
+test("Wasm cache plan can attach required-snapshot and reuse reasons to one entry", () => {
   const { layout, values } = analyzeBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
     { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(1) },
@@ -262,12 +262,12 @@ test("Wasm cache plan can attach saved-expr and reuse reasons to one entry", () 
     { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(2), accessWidth: 32 },
     { op: "set", target: { kind: "mem", address: c(0x1004) }, value: v(2), accessWidth: 32 }
   ]);
-  const saved = only(values.savedExprs);
+  const snapshot = only(values.snapshots);
   const plan = planWasmCache({ layout, values });
-  const entry = forcedEntry(plan, saved);
+  const entry = forcedEntry(plan, snapshot);
   const reuse = entry.reasons.find((reason) => reason.kind === "reuse");
 
-  deepStrictEqual(entry.reasons.map((reason) => reason.kind), ["saved-expr", "reuse"]);
+  deepStrictEqual(entry.reasons.map((reason) => reason.kind), ["required-snapshot", "reuse"]);
   strictEqual(reuse?.kind, "reuse");
   strictEqual(reuse.estimatedBenefit > 0, true);
   strictEqual(entry.uses.length, 2);
@@ -353,10 +353,10 @@ function analyzeBlock(
   };
 }
 
-function forcedEntry(plan: WasmCachePlan, saved: SavedExpr): WasmCacheEntry {
+function forcedEntry(plan: WasmCachePlan, snapshot: ValueSnapshot): WasmCacheEntry {
   return plan.entries.find((entry) =>
-    entry.reasons.some((reason) => reason.kind === "saved-expr" && reason.saved === saved.id)
-  ) ?? fail(`missing forced entry for saved expression ${saved.id}`);
+    entry.reasons.some((reason) => reason.kind === "required-snapshot" && reason.snapshot === snapshot.id)
+  ) ?? fail(`missing forced entry for snapshot expression ${snapshot.id}`);
 }
 
 function entryForRecipe(

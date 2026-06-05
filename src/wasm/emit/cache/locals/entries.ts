@@ -1,7 +1,7 @@
 import type {
   ExprRecipe,
   ExprRecipeId,
-  SavedExprId,
+  ValueSnapshotId,
   ValuePlan
 } from "#ir/block/planning/values/index.js";
 import type {
@@ -12,7 +12,7 @@ import type {
 export class WasmCacheEntryIndex {
   readonly #values: Pick<ValuePlan, "recipes">;
   readonly #byRecipeId = new Map<ExprRecipeId, WasmCacheEntry>();
-  readonly #bySavedId = new Map<SavedExprId, WasmCacheEntry>();
+  readonly #bySnapshotId = new Map<ValueSnapshotId, WasmCacheEntry>();
 
   constructor(plan: WasmCachePlan, values: Pick<ValuePlan, "recipes">) {
     this.#values = values;
@@ -27,8 +27,8 @@ export class WasmCacheEntryIndex {
       this.#byRecipeId.set(recipeId, entry);
 
       for (const reason of entry.reasons) {
-        if (reason.kind === "saved-expr") {
-          this.#bySavedId.set(reason.saved, entry);
+        if (reason.kind === "required-snapshot") {
+          this.#bySnapshotId.set(reason.snapshot, entry);
         }
       }
     }
@@ -42,9 +42,9 @@ export class WasmCacheEntryIndex {
       : this.#byRecipeId.get(recipeId);
   }
 
-  entryForSaved(saved: SavedExprId): WasmCacheEntry {
-    return this.#bySavedId.get(saved) ??
-      fail(`saved expression ${saved} has no selected Wasm cache entry`);
+  entryForSnapshot(snapshot: ValueSnapshotId): WasmCacheEntry {
+    return this.#bySnapshotId.get(snapshot) ??
+      fail(`snapshot expression ${snapshot} has no selected Wasm cache entry`);
   }
 
   assertSameRecipe(expected: ExprRecipe, actual: ExprRecipe): void {

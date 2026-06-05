@@ -18,8 +18,8 @@ import type {
 } from "../state-writes.js";
 import type {
   ExprRecipe,
-  SavedExpr,
-  SavedExprId,
+  ValueSnapshot,
+  ValueSnapshotId,
   ValuePlan
 } from "../values/index.js";
 import {
@@ -54,7 +54,7 @@ export type LayoutTimelineInput = Readonly<{
 export type LayoutStep =
   | Readonly<{ kind: "definition"; site: BlockDefinitionSite; inputs: readonly LayoutTimelineInput[] }>
   | Readonly<{ kind: "action"; site: BlockActionSite; inputs: readonly LayoutTimelineInput[] }>
-  | Readonly<{ kind: "save-expr"; saved: SavedExprId; recipe: ExprRecipe }>
+  | Readonly<{ kind: "establish-snapshot"; snapshot: ValueSnapshotId; recipe: ExprRecipe }>
   | Readonly<{
       kind: "write-state";
       emit: StateWriteId;
@@ -80,7 +80,7 @@ type LayoutEvent = Readonly<{
   step: LayoutStep;
 }>;
 
-const SAVE_TIER = 0;
+const ESTABLISH_SNAPSHOT_TIER = 0;
 const WRITE_TIER = 1;
 const SEMANTIC_TIER = 2;
 
@@ -90,7 +90,7 @@ export function buildBlockLayout(input: BlockLayoutInput): BlockLayout {
 
 class BlockLayoutBuilder {
   readonly #input: BlockLayoutInput;
-  readonly #savedById: ReadonlyMap<SavedExprId, SavedExpr>;
+  readonly #snapshotById: ReadonlyMap<ValueSnapshotId, ValueSnapshot>;
   readonly #writeById: ReadonlyMap<StateWriteId, PlannedStateWrite>;
   readonly #eventsByPath = new Map<Path, LayoutEvent[]>();
   #nextRegionId = 0;
@@ -99,7 +99,7 @@ class BlockLayoutBuilder {
 
   constructor(input: BlockLayoutInput) {
     this.#input = input;
-    this.#savedById = indexBy(input.values.savedExprs, (saved) => saved.id);
+    this.#snapshotById = indexBy(input.values.snapshots, (snapshot) => snapshot.id);
     this.#writeById = indexBy(input.stateWrites.writes, (write) => write.id);
   }
 
@@ -113,14 +113,14 @@ class BlockLayoutBuilder {
   }
 
   #addPlacementSteps(): void {
-    for (const placed of this.#input.placement.saveExprs) {
-      const saved = this.#savedById.get(placed.saved) ??
-        fail(`layout references missing saved expression ${placed.saved}`);
+    for (const placed of this.#input.placement.snapshots) {
+      const snapshot = this.#snapshotById.get(placed.snapshot) ??
+        fail(`layout references missing snapshot expression ${placed.snapshot}`);
 
-      this.#addEvent(placed.point, SAVE_TIER, Object.freeze({
-        kind: "save-expr",
-        saved: saved.id,
-        recipe: saved.recipe
+      this.#addEvent(placed.point, ESTABLISH_SNAPSHOT_TIER, Object.freeze({
+        kind: "establish-snapshot",
+        snapshot: snapshot.id,
+        recipe: snapshot.recipe
       } satisfies LayoutStep));
     }
 

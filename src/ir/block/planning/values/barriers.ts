@@ -13,15 +13,15 @@ import {
 } from "#ir/block/planning/geometry/index.js";
 import type { TimelineGeometry } from "#ir/block/planning/geometry/index.js";
 import type { ExprInputSource } from "#ir/expr/types.js";
-import type { SaveReason } from "./types.js";
+import type { SnapshotReason } from "./types.js";
 
-export type SaveBlocker = Readonly<{
+export type SnapshotBlocker = Readonly<{
   barrier: Barrier;
-  saveAt: ProgramPoint;
-  reason: SaveReason;
+  establishAt: ProgramPoint;
+  reason: SnapshotReason;
 }>;
 
-type CachedBlocker = SaveBlocker | null;
+type CachedBlocker = SnapshotBlocker | null;
 type BarrierPathIndex = ReadonlyMap<Path, readonly Barrier[]>;
 
 export class ValueBarrierIndex {
@@ -59,7 +59,7 @@ export class ValueBarrierIndex {
       compareProgramPoints(definition.point, point) <= 0;
   }
 
-  sourceInputBlocker(source: ExprInputSource, use: ProgramPoint): SaveBlocker | undefined {
+  sourceInputBlocker(source: ExprInputSource, use: ProgramPoint): SnapshotBlocker | undefined {
     switch (source.kind) {
       case "reg":
         return this.#cachedSourceRegisterBlocker(use);
@@ -69,7 +69,7 @@ export class ValueBarrierIndex {
     }
   }
 
-  definitionReplayBlocker(definition: DefinitionResult, use: ProgramPoint): SaveBlocker | undefined {
+  definitionReplayBlocker(definition: DefinitionResult, use: ProgramPoint): SnapshotBlocker | undefined {
     let byUse = this.#definitionReplayBlockerByUse.get(definition.id);
 
     if (byUse === undefined) {
@@ -87,26 +87,26 @@ export class ValueBarrierIndex {
     return blocker;
   }
 
-  #definitionReplayBlocker(definition: DefinitionResult, use: ProgramPoint): SaveBlocker | undefined {
+  #definitionReplayBlocker(definition: DefinitionResult, use: ProgramPoint): SnapshotBlocker | undefined {
     const barrier = blockingBarrierForDefinitionReplay(this.#facts, definition, use);
 
     if (barrier !== undefined) {
       return Object.freeze({
         barrier,
-        saveAt: latestLegalSavePointBeforeBarrier(barrier),
+        establishAt: latestLegalSnapshotPointBeforeBarrier(barrier),
         reason: Object.freeze({
           kind: "definition-replay-barrier",
           domain: definition.domain,
           definition: definition.id,
           barrier
-        } satisfies SaveReason)
-      } satisfies SaveBlocker);
+        } satisfies SnapshotReason)
+      } satisfies SnapshotBlocker);
     }
 
     return undefined;
   }
 
-  #cachedSourceRegisterBlocker(use: ProgramPoint): SaveBlocker | undefined {
+  #cachedSourceRegisterBlocker(use: ProgramPoint): SnapshotBlocker | undefined {
     if (this.#sourceRegisterBlockerByUse.has(use)) {
       return this.#sourceRegisterBlockerByUse.get(use) ?? undefined;
     }
@@ -117,7 +117,7 @@ export class ValueBarrierIndex {
     return blocker;
   }
 
-  #sourceRegisterBlocker(use: ProgramPoint): SaveBlocker | undefined {
+  #sourceRegisterBlocker(use: ProgramPoint): SnapshotBlocker | undefined {
     const barrier = this.#firstCrossedBarrierAfter(
       this.#dynamicRegisterBarriersByPath,
       undefined,
@@ -127,13 +127,13 @@ export class ValueBarrierIndex {
     if (barrier !== undefined) {
       return Object.freeze({
         barrier,
-        saveAt: latestLegalSavePointBeforeBarrier(barrier),
+        establishAt: latestLegalSnapshotPointBeforeBarrier(barrier),
         reason: Object.freeze({
           kind: "source-read-barrier",
           domain: "registers",
           barrier
-        } satisfies SaveReason)
-      } satisfies SaveBlocker);
+        } satisfies SnapshotReason)
+      } satisfies SnapshotBlocker);
     }
 
     return undefined;
@@ -163,7 +163,7 @@ export class ValueBarrierIndex {
   }
 }
 
-export function latestLegalSavePointBeforeBarrier(barrier: Barrier): ProgramPoint {
+export function latestLegalSnapshotPointBeforeBarrier(barrier: Barrier): ProgramPoint {
   return barrier.inputPoint;
 }
 

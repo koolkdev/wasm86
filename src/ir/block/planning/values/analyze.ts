@@ -15,9 +15,9 @@ import {
   type ExprNodeId
 } from "#ir/expr/graph/index.js";
 import type { ExprRef } from "#ir/expr/types.js";
-import { ValueBarrierIndex, type SaveBlocker } from "./barriers.js";
+import { ValueBarrierIndex, type SnapshotBlocker } from "./barriers.js";
 import { MutableRecipeRegistry } from "./recipes.js";
-import { SavedExprRegistry } from "./saves.js";
+import { ValueSnapshotRegistry } from "./snapshots.js";
 import type {
   ExprRecipe,
   ValuePlan
@@ -40,7 +40,7 @@ class ValuePlanAnalyzer {
   readonly #graph: ExprGraph;
   readonly #barriers: ValueBarrierIndex;
   readonly #recipes: MutableRecipeRegistry;
-  readonly #saves = new SavedExprRegistry();
+  readonly #snapshots = new ValueSnapshotRegistry();
   readonly #memo = new Map<ExprNodeId, Map<ProgramPoint, ExprRecipe>>();
 
   constructor(input: ValuePlanInput) {
@@ -57,12 +57,12 @@ class ValuePlanAnalyzer {
     for (const need of this.#needs) {
       const recipe = this.#analyzeExpr(need.expr, need.point, need.id);
 
-      this.#saves.recordRecipeUse(recipe, need.id);
+      this.#snapshots.recordRecipeUse(recipe, need.id);
       this.#recipes.recordNeedRecipe(need.id, recipe);
     }
 
     return Object.freeze({
-      savedExprs: this.#saves.finalize(),
+      snapshots: this.#snapshots.finalize(),
       recipes: this.#recipes
     } satisfies ValuePlan);
   }
@@ -121,7 +121,7 @@ class ValuePlanAnalyzer {
 
         return blocker === undefined
           ? exprRecipe(expr, [])
-          : this.#savedRecipe(node, blocker, topLevelNeed);
+          : this.#snapshotRecipe(node, blocker, topLevelNeed);
       }
       case "def":
         return this.#definitionInputRecipe(node, point, topLevelNeed);
@@ -148,7 +148,7 @@ class ValuePlanAnalyzer {
     const blocker = this.#barriers.definitionReplayBlocker(definition, point);
 
     if (blocker !== undefined) {
-      return this.#savedRecipe(node, blocker, topLevelNeed);
+      return this.#snapshotRecipe(node, blocker, topLevelNeed);
     }
 
     return Object.freeze({
@@ -167,21 +167,21 @@ class ValuePlanAnalyzer {
     );
   }
 
-  #savedRecipe(node: ExprNode, blocker: SaveBlocker, topLevelNeed: ExprNeedId): ExprRecipe {
-    if (!this.#exprExistsAt(node, blocker.saveAt)) {
-      throw new Error("cannot save an expression before all of its definition inputs exist");
+  #snapshotRecipe(node: ExprNode, blocker: SnapshotBlocker, topLevelNeed: ExprNeedId): ExprRecipe {
+    if (!this.#exprExistsAt(node, blocker.establishAt)) {
+      throw new Error("cannot snapshot an expression before all of its definition inputs exist");
     }
 
-    const saved = this.#saves.getOrCreate({
+    const snapshot = this.#snapshots.getOrCreate({
       exprId: node.id,
       expr: node.expr,
-      saveAt: blocker.saveAt,
+      establishAt: blocker.establishAt,
       reason: blocker.reason,
       topLevelNeed,
-      createRecipe: () => this.#analyzeExpr(node.expr, blocker.saveAt, topLevelNeed)
+      createRecipe: () => this.#analyzeExpr(node.expr, blocker.establishAt, topLevelNeed)
     });
 
-    return Object.freeze({ kind: "saved-expr", saved } satisfies ExprRecipe);
+    return Object.freeze({ kind: "snapshot", snapshot } satisfies ExprRecipe);
   }
 
   #exprExistsAt(node: ExprNode, point: ProgramPoint): boolean {

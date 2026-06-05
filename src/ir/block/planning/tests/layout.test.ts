@@ -73,14 +73,14 @@ test("BlockLayout orders common-ancestor writes before the main action that can 
   strictEqual(writeIndex < guardIndex, true);
 });
 
-test("BlockLayout emits save-expr steps and wraps backend inputs as timeline inputs", () => {
+test("BlockLayout emits establish-snapshot steps and wraps backend inputs as timeline inputs", () => {
   const { layout, values } = analyzeBlock([
     { op: "get", dst: v(0), source: { kind: "mem", address: c(0x1000) }, accessWidth: 32 },
     { op: "set", target: { kind: "mem", address: c(0x2000) }, value: c(1), accessWidth: 32 },
     { op: "set", target: { kind: "mem", address: c(0x3000) }, value: v(0), accessWidth: 32 }
   ]);
   const main = mainRegion(layout);
-  const saveIndex = main.steps.findIndex((step) => step.kind === "save-expr");
+  const snapshotIndex = main.steps.findIndex((step) => step.kind === "establish-snapshot");
   const firstStoreIndex = main.steps.findIndex((step) =>
     step.kind === "action" && step.site.action.kind === "memoryStore"
   );
@@ -89,13 +89,13 @@ test("BlockLayout emits save-expr steps and wraps backend inputs as timeline inp
     step.kind === "action" && step.site.action.kind === "memoryStore"
   );
 
-  strictEqual(values.savedExprs.length, 1);
-  strictEqual(saveIndex >= 0, true);
-  strictEqual(saveIndex < firstStoreIndex, true);
+  strictEqual(values.snapshots.length, 1);
+  strictEqual(snapshotIndex >= 0, true);
+  strictEqual(snapshotIndex < firstStoreIndex, true);
   deepStrictEqual(definition.inputs.map((input) => input.use.kind), ["definition-input"]);
   deepStrictEqual(definition.inputs.map((input) => input.use.role), ["address"]);
   deepStrictEqual(stores[1]!.inputs.map((input) => input.use.role), ["address", "value"]);
-  strictEqual(stores[1]!.inputs[1]!.recipe.kind, "saved-expr");
+  strictEqual(stores[1]!.inputs[1]!.recipe.kind, "snapshot");
 });
 
 test("BlockLayout exposes branch edge regions and edge-owned exit payload inputs", () => {

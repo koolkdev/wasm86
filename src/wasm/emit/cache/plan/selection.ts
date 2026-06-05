@@ -2,7 +2,7 @@ import type { LayoutValueUseId } from "#ir/block/planning/layout/index.js";
 import type {
   ExprRecipe,
   ExprRecipeId,
-  SavedExprId,
+  ValueSnapshotId,
   ValuePlan
 } from "#ir/block/planning/values/index.js";
 import {
@@ -22,27 +22,27 @@ import type {
 
 type EntrySelection = {
   entries: Map<ExprRecipeId, MutableEntry>;
-  savedRecipeIds: Map<SavedExprId, ExprRecipeId>;
-  savedEntries: Map<SavedExprId, MutableEntry>;
+  snapshotRecipeIds: Map<ValueSnapshotId, ExprRecipeId>;
+  snapshotEntries: Map<ValueSnapshotId, MutableEntry>;
   nextEntryId: number;
 };
 
 export function selectCacheEntries(input: WasmCachePlanInput): CacheSelection {
   const selection: EntrySelection = {
     entries: new Map(),
-    savedRecipeIds: new Map(),
-    savedEntries: new Map(),
+    snapshotRecipeIds: new Map(),
+    snapshotEntries: new Map(),
     nextEntryId: 0
   };
   const costModel = input.costModel ?? defaultWasmRecipeCostModel;
 
-  addSavedExprEntries(input.values, selection);
+  addValueSnapshotEntries(input.values, selection);
 
   const summaries = summarizeRecipeOccurrences({
     layout: input.layout,
-    savedExprs: input.values.savedExprs,
+    snapshots: input.values.snapshots,
     recipes: input.values.recipes,
-    savedRecipeIds: selection.savedRecipeIds
+    snapshotRecipeIds: selection.snapshotRecipeIds
   });
 
   for (const [recipeId, summary] of summaries) {
@@ -67,20 +67,20 @@ export function selectCacheEntries(input: WasmCachePlanInput): CacheSelection {
   return Object.freeze({
     entries: Object.freeze([...selection.entries.values()]),
     byRecipeId: selection.entries,
-    bySavedId: selection.savedEntries
+    bySnapshotId: selection.snapshotEntries
   } satisfies CacheSelection);
 }
 
-function addSavedExprEntries(values: ValuePlan, selection: EntrySelection): void {
-  for (const saved of values.savedExprs) {
-    const recipeId = recipeIdOrThrow(values.recipes, saved.recipe);
-    const entry = entryFor(selection, saved.recipe, recipeId);
+function addValueSnapshotEntries(values: ValuePlan, selection: EntrySelection): void {
+  for (const snapshot of values.snapshots) {
+    const recipeId = recipeIdOrThrow(values.recipes, snapshot.recipe);
+    const entry = entryFor(selection, snapshot.recipe, recipeId);
 
-    selection.savedRecipeIds.set(saved.id, recipeId);
-    selection.savedEntries.set(saved.id, entry);
+    selection.snapshotRecipeIds.set(snapshot.id, recipeId);
+    selection.snapshotEntries.set(snapshot.id, entry);
     entry.reasons.push(Object.freeze({
-      kind: "saved-expr",
-      saved: saved.id
+      kind: "required-snapshot",
+      snapshot: snapshot.id
     } satisfies WasmCacheReason));
   }
 }

@@ -10,7 +10,7 @@ import type {
   ExprRecipe,
   ExprRecipeId,
   RecipeRegistry as RecipeRegistryContract,
-  SavedExprId
+  ValueSnapshotId
 } from "./types.js";
 
 export class MutableRecipeRegistry implements RecipeRegistryContract {
@@ -18,7 +18,7 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
   readonly #recipes: ExprRecipe[] = [];
   readonly #needRecipes = new Map<ExprNeedId, ExprRecipe>();
   readonly #needRecipeIds = new Map<ExprNeedId, ExprRecipeId>();
-  readonly #savedById = new Map<SavedExprId, ExprRecipeId>();
+  readonly #snapshotById = new Map<ValueSnapshotId, ExprRecipeId>();
   readonly #definitionByInput = new Map<BlockDefinitionId, Map<ExprRecipeId, ExprRecipeId>>();
   readonly #exprByExprAndChildren = new Map<ExprNodeId, RecipeIdSequenceMap<ExprRecipeId>>();
 
@@ -61,8 +61,8 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
 
         return this.#exprByExprAndChildren.get(exprId)?.get(childIds);
       }
-      case "saved-expr":
-        return this.#savedById.get(recipe.saved);
+      case "snapshot":
+        return this.#snapshotById.get(recipe.snapshot);
       case "definition": {
         const inputId = this.recipeId(recipe.input);
 
@@ -77,8 +77,8 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
     switch (recipe.kind) {
       case "expr":
         return this.#exprRecipeId(recipe);
-      case "saved-expr":
-        return this.#savedRecipeId(recipe);
+      case "snapshot":
+        return this.#snapshotRecipeId(recipe);
       case "definition":
         return this.#definitionRecipeId(recipe);
     }
@@ -129,8 +129,8 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
     return recipe.children.map((child) => this.recordRecipe(child));
   }
 
-  #savedRecipeId(recipe: Extract<ExprRecipe, { kind: "saved-expr" }>): ExprRecipeId {
-    const existing = this.#savedById.get(recipe.saved);
+  #snapshotRecipeId(recipe: Extract<ExprRecipe, { kind: "snapshot" }>): ExprRecipeId {
+    const existing = this.#snapshotById.get(recipe.snapshot);
 
     if (existing !== undefined) {
       return existing;
@@ -138,7 +138,7 @@ export class MutableRecipeRegistry implements RecipeRegistryContract {
 
     const id = this.#next(recipe);
 
-    this.#savedById.set(recipe.saved, id);
+    this.#snapshotById.set(recipe.snapshot, id);
     return id;
   }
 

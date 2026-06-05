@@ -4,14 +4,14 @@ import type { ExprRef } from "#ir/expr/types.js";
 export type WasmRecipeCostModel = Readonly<{
   inlineCost(recipe: ExprRecipe): number;
   cacheFromUseCost: number;
-  cacheFromSaveCost: number;
+  cacheFromSnapshotCost: number;
   cachedUseCost: number;
 }>;
 
 export const defaultWasmRecipeCostModel: WasmRecipeCostModel = Object.freeze({
   inlineCost: wasmRecipeInlineCost,
   cacheFromUseCost: 1,
-  cacheFromSaveCost: 1,
+  cacheFromSnapshotCost: 1,
   cachedUseCost: 1
 });
 
@@ -20,7 +20,7 @@ export function wasmRecipeInlineCost(recipe: ExprRecipe): number {
     case "expr":
       return exprOwnCost(recipe.expr) +
         recipe.children.reduce((cost, child) => cost + wasmRecipeInlineCost(child), 0);
-    case "saved-expr":
+    case "snapshot":
       return 1;
     case "definition":
       return 1 + wasmRecipeInlineCost(recipe.input);
@@ -41,11 +41,11 @@ export function wasmRecipeReuseBenefit(
   const cacheFromUseCost = inlineCost +
     costModel.cacheFromUseCost +
     costModel.cachedUseCost * (useCount - 1);
-  const cacheFromSaveCost = inlineCost +
-    costModel.cacheFromSaveCost +
+  const cacheFromSnapshotCost = inlineCost +
+    costModel.cacheFromSnapshotCost +
     costModel.cachedUseCost * useCount;
 
-  return repeatedInlineCost - Math.min(cacheFromUseCost, cacheFromSaveCost);
+  return repeatedInlineCost - Math.min(cacheFromUseCost, cacheFromSnapshotCost);
 }
 
 export function shouldReuseWasmRecipe(

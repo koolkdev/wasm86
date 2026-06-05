@@ -138,7 +138,7 @@ test("StateWritePlan uses value-plan recipes for concrete write values", () => {
     { op: "next" }
   ]);
   const definition = facts.definitions[0]!;
-  const saved = values.savedExprs[0]!;
+  const snapshot = values.snapshots[0]!;
   const memoryStore = geometry.memory.writes[0]!;
 
   deepStrictEqual(writeSummaries(stateWrites.writes), [
@@ -147,13 +147,13 @@ test("StateWritePlan uses value-plan recipes for concrete write values", () => {
       reason: "exit-state",
       target: { kind: "reg", reg: registerAlias("ebx") },
       value: {
-        kind: "saved-expr",
-        saved: saved.id
+        kind: "snapshot",
+        snapshot: snapshot.id
       }
     }
   ]);
-  deepStrictEqual(saved.expr, exprInput({ kind: "def", id: definition.id }));
-  strictEqual(saved.saveAt, memoryStore.point);
+  deepStrictEqual(snapshot.expr, exprInput({ kind: "def", id: definition.id }));
+  strictEqual(snapshot.establishAt, memoryStore.point);
 });
 
 test("StateWritePlan records dynamic-register-store pre-state writes", () => {

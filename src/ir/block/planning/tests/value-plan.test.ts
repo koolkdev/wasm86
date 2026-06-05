@@ -16,7 +16,7 @@ import {
   type ExprNeed,
   type ExprNeedId,
   type ExprRecipe,
-  type SavedExprId,
+  type ValueSnapshotId,
   type StateObligationId,
   type ValuePlan
 } from "#ir/block/planning/index.js";
@@ -74,11 +74,11 @@ test("ValuePlan maps constants and valid source inputs to expr recipes", () => {
     expr: exprInput({ kind: "reg", reg: "eax" }),
     children: []
   });
-  strictEqual(plan.savedExprs.length, 0);
+  strictEqual(plan.snapshots.length, 0);
   strictEqual(geometry.memory.writes.length, 2);
 });
 
-test("ValuePlan saves a source input that crosses a dynamic-register barrier", () => {
+test("ValuePlan snapshots a source input that crosses a dynamic-register barrier", () => {
   const { geometry, plan } = analyzeBlock([
     {
       op: "get",
@@ -104,21 +104,21 @@ test("ValuePlan saves a source input that crosses a dynamic-register barrier", (
     resolver: dynamicResolver()
   });
   const dynamicStore = geometry.registers.dynamicStores[0]!;
-  const saved = plan.savedExprs[0]!;
+  const snapshot = plan.snapshots[0]!;
 
   deepStrictEqual(recipe(plan, 0), {
-    kind: "saved-expr",
-    saved: saved.id
+    kind: "snapshot",
+    snapshot: snapshot.id
   });
-  deepStrictEqual(saved.expr, exprInput({ kind: "reg", reg: "eax" }));
-  strictEqual(saved.saveAt, dynamicStore.point);
-  deepStrictEqual(saved.recipe, {
+  deepStrictEqual(snapshot.expr, exprInput({ kind: "reg", reg: "eax" }));
+  strictEqual(snapshot.establishAt, dynamicStore.point);
+  deepStrictEqual(snapshot.recipe, {
     kind: "expr",
     expr: exprInput({ kind: "reg", reg: "eax" }),
     children: []
   });
-  deepStrictEqual(saved.usedByTopLevelNeeds, [id(0)]);
-  strictEqual(saved.reason.kind, "source-read-barrier");
+  deepStrictEqual(snapshot.usedByTopLevelNeeds, [id(0)]);
+  strictEqual(snapshot.reason.kind, "source-read-barrier");
 });
 
 test("ValuePlan creates a definition recipe when replay is legal", () => {
@@ -149,10 +149,10 @@ test("ValuePlan creates a definition recipe when replay is legal", () => {
       children: []
     }
   });
-  strictEqual(plan.savedExprs.length, 0);
+  strictEqual(plan.snapshots.length, 0);
 });
 
-test("ValuePlan saves input(def) after its definition and before a replay barrier", () => {
+test("ValuePlan snapshots input(def) after its definition and before a replay barrier", () => {
   const { geometry, plan, facts } = analyzeBlock([
     {
       op: "get",
@@ -177,15 +177,15 @@ test("ValuePlan saves input(def) after its definition and before a replay barrie
   ]);
   const definition = facts.definitions[0]!;
   const firstStore = geometry.memory.writes[0]!;
-  const saved = plan.savedExprs[0]!;
+  const snapshot = plan.snapshots[0]!;
 
   deepStrictEqual(recipe(plan, 0), {
-    kind: "saved-expr",
-    saved: saved.id
+    kind: "snapshot",
+    snapshot: snapshot.id
   });
-  deepStrictEqual(saved.expr, exprInput({ kind: "def", id: definition.id }));
-  strictEqual(saved.saveAt, firstStore.point);
-  deepStrictEqual(saved.recipe, {
+  deepStrictEqual(snapshot.expr, exprInput({ kind: "def", id: definition.id }));
+  strictEqual(snapshot.establishAt, firstStore.point);
+  deepStrictEqual(snapshot.recipe, {
     kind: "definition",
     definition: definition.id,
     input: {
@@ -194,8 +194,8 @@ test("ValuePlan saves input(def) after its definition and before a replay barrie
       children: []
     }
   });
-  deepStrictEqual(saved.usedByTopLevelNeeds, [id(0)]);
-  strictEqual(saved.reason.kind, "definition-replay-barrier");
+  deepStrictEqual(snapshot.usedByTopLevelNeeds, [id(0)]);
+  strictEqual(snapshot.reason.kind, "definition-replay-barrier");
 });
 
 test("ValuePlan carries an exported recipe for definition replay inputs", () => {
@@ -231,21 +231,21 @@ test("ValuePlan carries an exported recipe for definition replay inputs", () => 
   });
   const definition = facts.definitions[0]!;
   const dynamicStore = geometry.registers.dynamicStores[0]!;
-  const savedInput = plan.savedExprs[0]!;
+  const snapshotInput = plan.snapshots[0]!;
 
   deepStrictEqual(recipe(plan, 0), {
     kind: "definition",
     definition: definition.id,
     input: {
-      kind: "saved-expr",
-      saved: savedInput.id
+      kind: "snapshot",
+      snapshot: snapshotInput.id
     }
   });
-  deepStrictEqual(savedInput.expr, exprInput({ kind: "reg", reg: "eax" }));
-  strictEqual(savedInput.saveAt, dynamicStore.point);
+  deepStrictEqual(snapshotInput.expr, exprInput({ kind: "reg", reg: "eax" }));
+  strictEqual(snapshotInput.establishAt, dynamicStore.point);
 });
 
-test("ValuePlan computes from a saved child instead of saving a parent composite", () => {
+test("ValuePlan computes from a snapshot child instead of snapshotting a parent composite", () => {
   const { geometry, plan } = analyzeBlock([
     {
       op: "get",
@@ -279,15 +279,15 @@ test("ValuePlan computes from a saved child instead of saving a parent composite
     resolver: dynamicResolver()
   });
   const dynamicStore = geometry.registers.dynamicStores[0]!;
-  const savedInput = plan.savedExprs[0]!;
+  const snapshotInput = plan.snapshots[0]!;
 
   deepStrictEqual(recipe(plan, 0), {
     kind: "expr",
     expr: exprBinary("add", exprInput({ kind: "reg", reg: "eax" }), exprConst(4)),
     children: [
       {
-        kind: "saved-expr",
-        saved: savedInput.id
+        kind: "snapshot",
+        snapshot: snapshotInput.id
       },
       {
         kind: "expr",
@@ -296,16 +296,16 @@ test("ValuePlan computes from a saved child instead of saving a parent composite
       }
     ]
   });
-  deepStrictEqual(savedInput.expr, exprInput({ kind: "reg", reg: "eax" }));
-  strictEqual(savedInput.saveAt, dynamicStore.point);
-  deepStrictEqual(savedInput.recipe, {
+  deepStrictEqual(snapshotInput.expr, exprInput({ kind: "reg", reg: "eax" }));
+  strictEqual(snapshotInput.establishAt, dynamicStore.point);
+  deepStrictEqual(snapshotInput.recipe, {
     kind: "expr",
     expr: exprInput({ kind: "reg", reg: "eax" }),
     children: []
   });
 });
 
-test("ValuePlan computes a mixed-time expression from saved and definition child recipes", () => {
+test("ValuePlan computes a mixed-time expression from snapshot and definition child recipes", () => {
   const { geometry, plan, facts } = analyzeBlock([
     {
       op: "get",
@@ -347,7 +347,7 @@ test("ValuePlan computes a mixed-time expression from saved and definition child
   const definition = facts.definitions[0]!;
   const dynamicStore = geometry.registers.dynamicStores[0]!;
   const topRecipe = recipe(plan, 0);
-  const savedInput = plan.savedExprs[0]!;
+  const snapshotInput = plan.snapshots[0]!;
   const equivalentTopRecipe = Object.freeze({
     kind: "expr",
     expr: exprBinary(
@@ -357,8 +357,8 @@ test("ValuePlan computes a mixed-time expression from saved and definition child
     ),
     children: Object.freeze([
       Object.freeze({
-        kind: "saved-expr",
-        saved: savedInput.id
+        kind: "snapshot",
+        snapshot: snapshotInput.id
       } satisfies ExprRecipe),
       Object.freeze({
         kind: "definition",
@@ -380,8 +380,8 @@ test("ValuePlan computes a mixed-time expression from saved and definition child
   ));
   deepStrictEqual(topRecipe.children, [
     {
-      kind: "saved-expr",
-      saved: savedInput.id
+      kind: "snapshot",
+      snapshot: snapshotInput.id
     },
     {
       kind: "definition",
@@ -393,12 +393,12 @@ test("ValuePlan computes a mixed-time expression from saved and definition child
       }
     }
   ]);
-  deepStrictEqual(savedInput.expr, exprInput({ kind: "reg", reg: "eax" }));
-  strictEqual(savedInput.saveAt, dynamicStore.point);
+  deepStrictEqual(snapshotInput.expr, exprInput({ kind: "reg", reg: "eax" }));
+  strictEqual(snapshotInput.establishAt, dynamicStore.point);
   strictEqual(plan.recipes.recipeId(equivalentTopRecipe), recipeId(plan, 0));
 });
 
-test("ValuePlan reuses saved expressions only for semantic availability", () => {
+test("ValuePlan reuses snapshot expressions only for semantic availability", () => {
   const { plan } = analyzeBlock([
     {
       op: "get",
@@ -431,12 +431,12 @@ test("ValuePlan reuses saved expressions only for semantic availability", () => 
     need(1, geometry.memory.writes[1]!.site.action.value, geometry.memory.writes[1]!.point)
   ]);
 
-  strictEqual(plan.savedExprs.length, 0);
+  strictEqual(plan.snapshots.length, 0);
   strictEqual(recipe(plan, 0).kind, "expr");
   strictEqual(recipe(plan, 1).kind, "expr");
 });
 
-test("ValuePlan saved-expression usage tracks all top-level needs", () => {
+test("ValuePlan snapshot usage tracks all top-level needs", () => {
   const { geometry, plan } = analyzeBlock([
     {
       op: "get",
@@ -469,16 +469,16 @@ test("ValuePlan saved-expression usage tracks all top-level needs", () => {
     resolver: dynamicResolver()
   });
   const dynamicStore = geometry.registers.dynamicStores[0]!;
-  const saved = plan.savedExprs[0]!;
+  const snapshot = plan.snapshots[0]!;
 
-  strictEqual(plan.savedExprs.length, 1);
-  strictEqual(saved.saveAt, dynamicStore.point);
-  deepStrictEqual(saved.usedByTopLevelNeeds, [id(0), id(1)]);
-  deepStrictEqual(recipe(plan, 0), { kind: "saved-expr", saved: saved.id });
-  deepStrictEqual(recipe(plan, 1), { kind: "saved-expr", saved: saved.id });
+  strictEqual(plan.snapshots.length, 1);
+  strictEqual(snapshot.establishAt, dynamicStore.point);
+  deepStrictEqual(snapshot.usedByTopLevelNeeds, [id(0), id(1)]);
+  deepStrictEqual(recipe(plan, 0), { kind: "snapshot", snapshot: snapshot.id });
+  deepStrictEqual(recipe(plan, 1), { kind: "snapshot", snapshot: snapshot.id });
 });
 
-test("ValuePlan uses expression graph identity for saved-expression reuse", () => {
+test("ValuePlan uses expression graph identity for snapshot reuse", () => {
   const { plan } = analyzeBlock([
     {
       op: "set",
@@ -498,12 +498,12 @@ test("ValuePlan uses expression graph identity for saved-expression reuse", () =
   ], {
     resolver: dynamicResolver()
   });
-  const saved = plan.savedExprs[0]!;
+  const snapshot = plan.snapshots[0]!;
 
-  strictEqual(plan.savedExprs.length, 1);
-  deepStrictEqual(saved.usedByTopLevelNeeds, [id(0), id(1)]);
-  deepStrictEqual(recipe(plan, 0), { kind: "saved-expr", saved: saved.id });
-  deepStrictEqual(recipe(plan, 1), { kind: "saved-expr", saved: saved.id });
+  strictEqual(plan.snapshots.length, 1);
+  deepStrictEqual(snapshot.usedByTopLevelNeeds, [id(0), id(1)]);
+  deepStrictEqual(recipe(plan, 0), { kind: "snapshot", snapshot: snapshot.id });
+  deepStrictEqual(recipe(plan, 1), { kind: "snapshot", snapshot: snapshot.id });
 });
 
 test("ValuePlan assigns the same recipe id to structurally equivalent expr recipes", () => {
@@ -543,17 +543,17 @@ test("MutableRecipeRegistry treats expr children as authoritative", () => {
       { kind: "expr", expr: exprConst(1), children: [] }
     ]
   } satisfies ExprRecipe;
-  const fromSaved = {
+  const fromSnapshot = {
     kind: "expr",
     expr,
     children: [
-      { kind: "saved-expr", saved: 0 as SavedExprId },
+      { kind: "snapshot", snapshot: 0 as ValueSnapshotId },
       { kind: "expr", expr: exprConst(1), children: [] }
     ]
   } satisfies ExprRecipe;
   const registry = new MutableRecipeRegistry(buildExprGraph([expr]));
 
-  notStrictEqual(registry.recordRecipe(fromInline), registry.recordRecipe(fromSaved));
+  notStrictEqual(registry.recordRecipe(fromInline), registry.recordRecipe(fromSnapshot));
 });
 
 test("ValuePlan applies root-path barriers to branch-path expression needs", () => {
@@ -576,11 +576,11 @@ test("ValuePlan applies root-path barriers to branch-path expression needs", () 
     resolver: dynamicResolver()
   });
   const dynamicStore = geometry.registers.dynamicStores[0]!;
-  const saved = plan.savedExprs[0]!;
+  const snapshot = plan.snapshots[0]!;
 
-  strictEqual(plan.savedExprs.length, 1);
-  strictEqual(saved.saveAt, dynamicStore.point);
-  deepStrictEqual(recipe(plan, 0), { kind: "saved-expr", saved: saved.id });
+  strictEqual(plan.snapshots.length, 1);
+  strictEqual(snapshot.establishAt, dynamicStore.point);
+  deepStrictEqual(recipe(plan, 0), { kind: "snapshot", snapshot: snapshot.id });
 });
 
 test("ValuePlan exposes no carried-input planning API on its output", () => {
@@ -595,8 +595,8 @@ test("ValuePlan exposes no carried-input planning API on its output", () => {
     need(0, geometry.memory.writes[0]!.site.action.value, geometry.memory.writes[0]!.point)
   ]);
 
-  deepStrictEqual(Object.keys(plan).sort(), ["recipes", "savedExprs"]);
-  strictEqual(Object.hasOwn(plan, "SavedInput"), false);
+  deepStrictEqual(Object.keys(plan).sort(), ["recipes", "snapshots"]);
+  strictEqual(Object.hasOwn(plan, "ValueSnapshot"), false);
   strictEqual(Object.hasOwn(plan, "InputLeafUse"), false);
   strictEqual(Object.hasOwn(plan, "carried"), false);
 });

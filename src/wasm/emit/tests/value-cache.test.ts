@@ -13,7 +13,7 @@ import type {
   ExprRecipe,
   ExprRecipeId,
   RecipeRegistry,
-  SavedExprId,
+  ValueSnapshotId,
   ValuePlan
 } from "#ir/block/planning/values/index.js";
 import {
@@ -106,29 +106,29 @@ test("Wasm value cache releases selected locals on region leave", () => {
   scratch.assertClear();
 });
 
-test("Wasm value cache keeps saved expression locals until region leave", () => {
+test("Wasm value cache keeps snapshot expression locals until region leave", () => {
   const main = region(0);
-  const saved = savedId(0);
-  const savedRecipe = exprInputRecipe("eax");
+  const snapshot = snapshotId(0);
+  const snapshotSourceRecipe = exprInputRecipe("eax");
   const laterRecipe = exprRecipe(exprBinary("add", exprConst(2), exprConst(1)));
-  const savedUse = useId(20);
+  const snapshotUse = useId(20);
   const laterUseA = useId(21);
   const laterUseB = useId(22);
   const plan = cachePlan([
-    cacheEntry(0, savedRecipe, [{ kind: "saved-expr", saved }]),
+    cacheEntry(0, snapshotSourceRecipe, [{ kind: "required-snapshot", snapshot }]),
     cacheEntry(1, laterRecipe)
   ]);
   const { body, cache, scratch } = createFixture(plan);
 
   cache.enterRegion(main);
-  cache.ensureSaved(saved, savedRecipe, inline(body, "save"));
-  cache.emitUse({ id: savedUse, recipe: savedExprRecipe(saved) }, inline(body, "saved-use"));
+  cache.ensureSnapshot(snapshot, snapshotSourceRecipe, inline(body, "establish"));
+  cache.emitUse({ id: snapshotUse, recipe: snapshotRefRecipe(snapshot) }, inline(body, "snapshot-use"));
   cache.emitUse({ id: laterUseA, recipe: laterRecipe }, inline(body, "later-first"));
   cache.emitUse({ id: laterUseB, recipe: laterRecipe }, inline(body, "later-second"));
   cache.leaveRegion(main);
 
   deepStrictEqual(body.ops, [
-    { kind: "inline", label: "save" },
+    { kind: "inline", label: "establish" },
     { kind: "alloc", local: 0, type: wasmValueType.i32 },
     { kind: "set", local: 0 },
     { kind: "get", local: 0 },
@@ -142,26 +142,26 @@ test("Wasm value cache keeps saved expression locals until region leave", () => 
   scratch.assertClear();
 });
 
-test("Wasm value cache emits parent saved expressions in child regions", () => {
+test("Wasm value cache emits parent snapshot expressions in child regions", () => {
   const main = region(0);
   const edge = region(1, edgePath(1));
-  const saved = savedId(0);
-  const savedRecipe = exprInputRecipe("eax");
-  const plan = cachePlan([cacheEntry(0, savedRecipe, [{ kind: "saved-expr", saved }])]);
+  const snapshot = snapshotId(0);
+  const snapshotSourceRecipe = exprInputRecipe("eax");
+  const plan = cachePlan([cacheEntry(0, snapshotSourceRecipe, [{ kind: "required-snapshot", snapshot }])]);
   const { body, cache, scratch } = createFixture(plan);
 
   cache.enterRegion(main);
-  cache.ensureSaved(saved, savedRecipe, inline(body, "save"));
+  cache.ensureSnapshot(snapshot, snapshotSourceRecipe, inline(body, "establish"));
 
   cache.enterRegion(edge);
-  cache.emitSaved(saved);
+  cache.emitSnapshot(snapshot);
   cache.leaveRegion(edge);
 
-  cache.emitSaved(saved);
+  cache.emitSnapshot(snapshot);
   cache.leaveRegion(main);
 
   deepStrictEqual(body.ops, [
-    { kind: "inline", label: "save" },
+    { kind: "inline", label: "establish" },
     { kind: "alloc", local: 0, type: wasmValueType.i32 },
     { kind: "set", local: 0 },
     { kind: "get", local: 0 },
@@ -406,7 +406,7 @@ function recordRecipe(
     case "definition":
       recordRecipe(recipe.input, recipeList, idByKey);
       break;
-    case "saved-expr":
+    case "snapshot":
       break;
   }
 
@@ -432,8 +432,8 @@ function exprRecipe(expr: ExprRef): ExprRecipe {
   } satisfies ExprRecipe);
 }
 
-function savedExprRecipe(saved: SavedExprId): ExprRecipe {
-  return Object.freeze({ kind: "saved-expr", saved } satisfies ExprRecipe);
+function snapshotRefRecipe(snapshot: ValueSnapshotId): ExprRecipe {
+  return Object.freeze({ kind: "snapshot", snapshot } satisfies ExprRecipe);
 }
 
 function region(id: number, path: LayoutRegion["path"] = Object.freeze({ kind: "main" })): LayoutRegion {
@@ -451,8 +451,8 @@ function edgePath(edge: number): LayoutRegion["path"] {
   });
 }
 
-function savedId(id: number): SavedExprId {
-  return id as SavedExprId;
+function snapshotId(id: number): ValueSnapshotId {
+  return id as ValueSnapshotId;
 }
 
 function useId(id: number): LayoutValueUseId {

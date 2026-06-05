@@ -99,7 +99,7 @@ test("PlacementPlan emits register pre-state writes before a dynamic-register ba
   strictEqual(writePlacement(placement, eax1[0]!).point.at, dynamicStore.point.at);
 });
 
-test("PlacementPlan places saved expressions at their value-plan saveAt point", () => {
+test("PlacementPlan places snapshot expressions at their value-plan establishAt point", () => {
   const { placement, values } = analyzeBlock([
     {
       op: "get",
@@ -110,11 +110,11 @@ test("PlacementPlan places saved expressions at their value-plan saveAt point", 
     { op: "set", target: { kind: "mem", address: c(0x2000) }, value: c(1), accessWidth: 32 },
     { op: "set", target: { kind: "mem", address: c(0x3000) }, value: v(0), accessWidth: 32 }
   ]);
-  const saved = values.savedExprs[0]!;
-  const savedPlacement = placement.saveExprs.find((placed) => placed.saved === saved.id);
+  const snapshot = values.snapshots[0]!;
+  const snapshotPlacement = placement.snapshots.find((placed) => placed.snapshot === snapshot.id);
 
-  strictEqual(values.savedExprs.length, 1);
-  strictEqual(savedPlacement?.point, saved.saveAt);
+  strictEqual(values.snapshots.length, 1);
+  strictEqual(snapshotPlacement?.point, snapshot.establishAt);
 });
 
 test("PlacementPlan does not mutate the semantic timeline", () => {

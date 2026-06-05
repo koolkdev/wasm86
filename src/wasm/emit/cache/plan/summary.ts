@@ -5,7 +5,7 @@ import type {
 import type {
   ExprRecipe,
   ExprRecipeId,
-  SavedExprId,
+  ValueSnapshotId,
   ValuePlan
 } from "#ir/block/planning/values/index.js";
 import {
@@ -19,20 +19,20 @@ import type {
 
 export function summarizeRecipeOccurrences(input: Readonly<{
   layout: WasmCachePlanInput["layout"];
-  savedExprs: ValuePlan["savedExprs"];
+  snapshots: ValuePlan["snapshots"];
   recipes: ValuePlan["recipes"];
-  savedRecipeIds: ReadonlyMap<SavedExprId, ExprRecipeId>;
+  snapshotRecipeIds: ReadonlyMap<ValueSnapshotId, ExprRecipeId>;
 }>): ReadonlyMap<ExprRecipeId, RecipeOccurrenceSummary> {
   const summaries = new Map<ExprRecipeId, RecipeOccurrenceSummary>();
 
   for (const region of input.layout.regions) {
     for (const step of region.steps) {
-      summarizeStep(step, summaries, input.recipes, input.savedRecipeIds);
+      summarizeStep(step, summaries, input.recipes, input.snapshotRecipeIds);
     }
   }
 
-  for (const saved of input.savedExprs) {
-    summarizeRecipe(saved.recipe, undefined, summaries, input.recipes, input.savedRecipeIds);
+  for (const snapshot of input.snapshots) {
+    summarizeRecipe(snapshot.recipe, undefined, summaries, input.recipes, input.snapshotRecipeIds);
   }
 
   return summaries;
@@ -42,21 +42,21 @@ function summarizeStep(
   step: LayoutStep,
   summaries: Map<ExprRecipeId, RecipeOccurrenceSummary>,
   recipes: ValuePlan["recipes"],
-  savedRecipeIds: ReadonlyMap<SavedExprId, ExprRecipeId>
+  snapshotRecipeIds: ReadonlyMap<ValueSnapshotId, ExprRecipeId>
 ): void {
   switch (step.kind) {
     case "definition":
     case "action":
       for (const input of step.inputs) {
-        summarizeRecipe(input.recipe, input.id, summaries, recipes, savedRecipeIds);
+        summarizeRecipe(input.recipe, input.id, summaries, recipes, snapshotRecipeIds);
       }
       break;
     case "write-state":
       if (step.value !== undefined) {
-        summarizeRecipe(step.value.recipe, step.value.id, summaries, recipes, savedRecipeIds);
+        summarizeRecipe(step.value.recipe, step.value.id, summaries, recipes, snapshotRecipeIds);
       }
       break;
-    case "save-expr":
+    case "establish-snapshot":
     case "exit":
       break;
   }
@@ -67,15 +67,15 @@ function summarizeRecipe(
   use: LayoutValueUseId | undefined,
   summaries: Map<ExprRecipeId, RecipeOccurrenceSummary>,
   recipes: ValuePlan["recipes"],
-  savedRecipeIds: ReadonlyMap<SavedExprId, ExprRecipeId>
+  snapshotRecipeIds: ReadonlyMap<ValueSnapshotId, ExprRecipeId>
 ): void {
   const stack: ExprRecipe[] = [recipe];
 
   while (stack.length > 0) {
     const current = stack.pop()!;
 
-    if (current.kind === "saved-expr") {
-      const targetRecipeId = savedRecipeIds.get(current.saved);
+    if (current.kind === "snapshot") {
+      const targetRecipeId = snapshotRecipeIds.get(current.snapshot);
 
       if (targetRecipeId !== undefined && use !== undefined) {
         summaryFor(summaries, targetRecipeId, recipes.recipe(targetRecipeId)).uses.add(use);

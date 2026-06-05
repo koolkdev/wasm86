@@ -17,18 +17,18 @@ import type {
   StateWritePlan
 } from "./state-writes.js";
 import type {
-  SavedExpr,
-  SavedExprId,
+  ValueSnapshot,
+  ValueSnapshotId,
   ValuePlan
 } from "./values/index.js";
 
 export type PlacementPlan = Readonly<{
-  saveExprs: readonly SaveExprPlacement[];
+  snapshots: readonly ValueSnapshotPlacement[];
   stateWrites: readonly StateWritePlacement[];
 }>;
 
-export type SaveExprPlacement = Readonly<{
-  saved: SavedExprId;
+export type ValueSnapshotPlacement = Readonly<{
+  snapshot: ValueSnapshotId;
   point: ProgramPoint;
 }>;
 
@@ -76,13 +76,13 @@ class PlacementPlanAnalyzer {
 
   analyze(): PlacementPlan {
     return Object.freeze({
-      saveExprs: Object.freeze(this.#savedExprPlacements()),
+      snapshots: Object.freeze(this.#snapshotPlacements()),
       stateWrites: Object.freeze(this.#placeStateWriteGroups())
     } satisfies PlacementPlan);
   }
 
-  #savedExprPlacements(): readonly SaveExprPlacement[] {
-    return this.#values.savedExprs.map((saved) => saveExprPlacement(saved));
+  #snapshotPlacements(): readonly ValueSnapshotPlacement[] {
+    return this.#values.snapshots.map((snapshot) => snapshotPlacement(snapshot));
   }
 
   #placeStateWriteGroups(): readonly StateWritePlacement[] {
@@ -174,11 +174,11 @@ class PlacementPlanAnalyzer {
   }
 }
 
-function saveExprPlacement(saved: SavedExpr): SaveExprPlacement {
+function snapshotPlacement(snapshot: ValueSnapshot): ValueSnapshotPlacement {
   return Object.freeze({
-    saved: saved.id,
-    point: saved.saveAt
-  } satisfies SaveExprPlacement);
+    snapshot: snapshot.id,
+    point: snapshot.establishAt
+  } satisfies ValueSnapshotPlacement);
 }
 
 function writeStatePlacement(
