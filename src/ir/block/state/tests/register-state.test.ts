@@ -12,10 +12,13 @@ import {
   exprProject
 } from "#ir/expr/builders.js";
 import {
-  RegisterState,
-  registerMaterializationWrites
+  RegisterState
 } from "#ir/block/state/register-state.js";
+import { RegisterMaterializer } from "#ir/block/state/register-materialization.js";
 import { registerAlias } from "#x86/registers.js";
+
+const exactAliasMaterializer = new RegisterMaterializer("exact-alias");
+const fullBaseMaterializer = new RegisterMaterializer("full-base");
 
 test("RegisterState reads aliases from the base register input", () => {
   const state = RegisterState.initial();
@@ -141,7 +144,7 @@ test("RegisterState normalizes fully shadowed alias overlays", () => {
 
   deepStrictEqual(state.readAlias(registerAlias("ax")), exprConst(0x7856));
   deepStrictEqual(
-    registerMaterializationWrites(RegisterState.initial(), state),
+    exactAliasMaterializer.writes(RegisterState.initial(), state),
     [
       { reg: registerAlias("al"), value: exprConst(0x56) },
       { reg: registerAlias("ah"), value: exprConst(0x78) }
@@ -149,21 +152,24 @@ test("RegisterState normalizes fully shadowed alias overlays", () => {
   );
 });
 
-test("registerMaterializationWrites compares baseline and snapshot states", () => {
+test("RegisterMaterializer compares baseline and snapshot states", () => {
   const baseline = RegisterState.initial();
   const eax = exprInput({ kind: "reg", reg: "eax" });
   const ebx = exprInput({ kind: "reg", reg: "ebx" });
 
-  deepStrictEqual(registerMaterializationWrites(baseline, RegisterState.initial()), []);
   deepStrictEqual(
-    registerMaterializationWrites(
+    exactAliasMaterializer.writes(baseline, RegisterState.initial()),
+    []
+  );
+  deepStrictEqual(
+    exactAliasMaterializer.writes(
       baseline,
       baseline.writeAlias(registerAlias("al"), exprConst(5))
     ),
     [{ reg: registerAlias("al"), value: exprConst(5) }]
   );
   deepStrictEqual(
-    registerMaterializationWrites(
+    exactAliasMaterializer.writes(
       baseline,
       baseline.write("eax", ebx).writeAlias(registerAlias("al"), exprConst(5))
     ),
@@ -173,7 +179,7 @@ test("registerMaterializationWrites compares baseline and snapshot states", () =
     ]
   );
   deepStrictEqual(
-    registerMaterializationWrites(
+    exactAliasMaterializer.writes(
       baseline.writeAlias(registerAlias("al"), exprConst(5)),
       baseline
     ),
@@ -181,7 +187,50 @@ test("registerMaterializationWrites compares baseline and snapshot states", () =
   );
 });
 
-test("registerMaterializationWrites narrows baseline overlay resets to uncovered aliases", () => {
+test("RegisterMaterializer exact-alias mode preserves partial write behavior", () => {
+  const baseline = RegisterState.initial();
+  const snapshot = baseline.writeAlias(registerAlias("al"), exprConst(5));
+
+  deepStrictEqual(
+    exactAliasMaterializer.writes(baseline, snapshot),
+    [{ reg: registerAlias("al"), value: exprConst(5) }]
+  );
+});
+
+test("RegisterMaterializer full-base mode emits full base for partial writes", () => {
+  const baseline = RegisterState.initial();
+  const snapshot = baseline.writeAlias(registerAlias("al"), exprConst(5));
+
+  deepStrictEqual(
+    fullBaseMaterializer.writes(baseline, snapshot),
+    [{ reg: registerAlias("eax"), value: snapshot.read("eax") }]
+  );
+});
+
+test("RegisterMaterializer full-base mode emits no write when the full base is unchanged", () => {
+  const baseline = RegisterState.initial().writeAlias(registerAlias("al"), exprConst(5));
+  const snapshot = RegisterState.initial().write("eax", baseline.read("eax"));
+
+  deepStrictEqual(
+    fullBaseMaterializer.writes(baseline, snapshot),
+    []
+  );
+});
+
+test("RegisterMaterializer full-base mode emits one write per changed base", () => {
+  const baseline = RegisterState.initial();
+  const ebx = exprInput({ kind: "reg", reg: "ebx" });
+  const snapshot = baseline
+    .write("eax", ebx)
+    .writeAlias(registerAlias("al"), exprConst(5));
+
+  deepStrictEqual(
+    fullBaseMaterializer.writes(baseline, snapshot),
+    [{ reg: registerAlias("eax"), value: snapshot.read("eax") }]
+  );
+});
+
+test("RegisterMaterializer narrows baseline overlay resets to uncovered aliases", () => {
   const baseline = RegisterState.initial().writeAlias(
     registerAlias("ax"),
     exprInput({ kind: "reg", reg: "ebx" })
@@ -190,7 +239,7 @@ test("registerMaterializationWrites narrows baseline overlay resets to uncovered
   const eax = exprInput({ kind: "reg", reg: "eax" });
 
   deepStrictEqual(
-    registerMaterializationWrites(baseline, snapshot),
+    exactAliasMaterializer.writes(baseline, snapshot),
     [
       { reg: registerAlias("ah"), value: exprBits(eax, 8, 8) },
       { reg: registerAlias("al"), value: exprConst(5) }

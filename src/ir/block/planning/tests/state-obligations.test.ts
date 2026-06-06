@@ -13,11 +13,16 @@ import {
   buildTimelineGeometry,
   type StateObligation
 } from "#ir/block/planning/index.js";
+import type { RegisterMaterializationMode } from "#ir/block/state/register-materialization.js";
 import {
   type BlockWalkInput,
   walkExpressionBlock
 } from "#ir/block/walk/index.js";
-import { exprConst } from "#ir/expr/builders.js";
+import {
+  exprConst,
+  exprInput,
+  exprInsertBits
+} from "#ir/expr/builders.js";
 import type {
   IrBlock,
   IrConstValueRef,
@@ -38,6 +43,25 @@ test("AL write before exit creates AL obligation only", () => {
       write: {
         target: { kind: "reg", reg: registerAlias("al") },
         value: exprConst(5)
+      }
+    }
+  ]);
+});
+
+test("full-base register materialization mode creates EAX obligation for AL write", () => {
+  const { obligations } = analyzeBlock([
+    { op: "set", target: { kind: "reg", reg: "al" }, value: c(5) },
+    { op: "next" }
+  ], {}, {
+    registerMaterializationMode: "full-base"
+  });
+
+  deepStrictEqual(obligationWrites(obligations), [
+    {
+      reason: "exit-state",
+      write: {
+        target: { kind: "reg", reg: registerAlias("eax") },
+        value: exprInsertBits(exprInput({ kind: "reg", reg: "eax" }), exprConst(5), 0, 8)
       }
     }
   ]);
@@ -115,6 +139,29 @@ test("dynamic-register-store pre-state uses the action stateBefore snapshot", ()
   deepStrictEqual(obligations[0]!.write, {
     target: { kind: "reg", reg: registerAlias("eax") },
     value: exprConst(0x11)
+  });
+});
+
+test("dynamic-register-store pre-state uses full-base register materialization mode", () => {
+  const { geometry, obligations } = analyzeBlock([
+    { op: "set", target: { kind: "reg", reg: "al" }, value: c(5) },
+    { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 },
+    { op: "next" }
+  ], {
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(exprConst(2), 32)]
+    })
+  }, {
+    registerMaterializationMode: "full-base"
+  });
+  const dynamicStore = geometry.registers.dynamicStores[0]!;
+
+  strictEqual(obligations.length, 1);
+  strictEqual(obligations[0]!.reason, "dynamic-register-store-pre-state");
+  strictEqual(obligations[0]!.point, dynamicStore.preStatePoint);
+  deepStrictEqual(obligations[0]!.write, {
+    target: { kind: "reg", reg: registerAlias("eax") },
+    value: exprInsertBits(exprInput({ kind: "reg", reg: "eax" }), exprConst(5), 0, 8)
   });
 });
 
@@ -266,7 +313,8 @@ test("direct flag-condition caches do not create architectural obligations", () 
 
 function analyzeBlock(
   block: IrBlock,
-  input: Omit<BlockWalkInput, "block"> = {}
+  input: Omit<BlockWalkInput, "block"> = {},
+  obligationInput: Readonly<{ registerMaterializationMode?: RegisterMaterializationMode }> = {}
 ): Readonly<{
   geometry: ReturnType<typeof buildTimelineGeometry>;
   obligations: readonly StateObligation[];
@@ -276,7 +324,11 @@ function analyzeBlock(
 
   return {
     geometry,
-    obligations: analyzeStateObligations({ walked, geometry }).obligations
+    obligations: analyzeStateObligations({
+      walked,
+      geometry,
+      ...obligationInput
+    }).obligations
   };
 }
 

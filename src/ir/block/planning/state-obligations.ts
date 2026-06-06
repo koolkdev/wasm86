@@ -2,8 +2,9 @@ import type { BlockActionSite } from "#ir/block/timeline.js";
 import { flagMaterializationWrites } from "#ir/block/state/flag-materialization.js";
 import { RegisterState } from "#ir/block/state/register-state.js";
 import {
-  registerMaterializationWrites
-} from "#ir/block/state/register-state.js";
+  RegisterMaterializer,
+  type RegisterMaterializationMode
+} from "#ir/block/state/register-materialization.js";
 import type {
   FlagStateTarget,
   RegisterStateTarget
@@ -50,6 +51,7 @@ export type StateMaterializationWrite =
 export type StateObligationInput = Readonly<{
   walked: WalkedBlock;
   geometry: TimelineGeometry;
+  registerMaterializationMode?: RegisterMaterializationMode;
 }>;
 
 class StateObligationIds {
@@ -70,6 +72,7 @@ export function analyzeStateObligations(input: StateObligationInput): StateOblig
 class StateObligationAnalyzer {
   readonly #walked: WalkedBlock;
   readonly #geometry: TimelineGeometry;
+  readonly #registerMaterializer: RegisterMaterializer;
   readonly #ids = new StateObligationIds();
   readonly #obligations: StateObligation[] = [];
   readonly #baselineByPath = new Map<Path, BlockState>();
@@ -77,6 +80,9 @@ class StateObligationAnalyzer {
   constructor(input: StateObligationInput) {
     this.#walked = input.walked;
     this.#geometry = input.geometry;
+    this.#registerMaterializer = new RegisterMaterializer(
+      input.registerMaterializationMode ?? "exact-alias"
+    );
     this.#baselineByPath.set(input.geometry.paths.root, input.walked.entry);
   }
 
@@ -170,7 +176,7 @@ class StateObligationAnalyzer {
     point: ProgramPoint;
     reason: StateObligation["reason"];
   }>): void {
-    for (const write of stateMaterializationWrites(input.baseline, input.snapshot)) {
+    for (const write of this.#stateMaterializationWrites(input.baseline, input.snapshot)) {
       this.#obligations.push(Object.freeze({
         id: this.#ids.next(),
         point: input.point,
@@ -186,7 +192,7 @@ class StateObligationAnalyzer {
     point: ProgramPoint;
     reason: StateObligation["reason"];
   }>): void {
-    for (const write of registerStateMaterializationWrites(input.baseline, input.snapshot)) {
+    for (const write of this.#registerStateMaterializationWrites(input.baseline, input.snapshot)) {
       this.#obligations.push(Object.freeze({
         id: this.#ids.next(),
         point: input.point,
@@ -211,27 +217,27 @@ class StateObligationAnalyzer {
 
     return this.#baselineForPath(parent);
   }
-}
 
-function stateMaterializationWrites(
-  baseline: BlockState,
-  snapshot: BlockState
-): readonly StateMaterializationWrite[] {
-  return Object.freeze([
-    ...registerStateMaterializationWrites(baseline, snapshot),
-    ...flagMaterializationWrites(baseline.flags, snapshot.flags)
-      .map((write) => flagStateMaterializationWrite(write.flag, write.value))
-  ]);
-}
+  #stateMaterializationWrites(
+    baseline: BlockState,
+    snapshot: BlockState
+  ): readonly StateMaterializationWrite[] {
+    return Object.freeze([
+      ...this.#registerStateMaterializationWrites(baseline, snapshot),
+      ...flagMaterializationWrites(baseline.flags, snapshot.flags)
+        .map((write) => flagStateMaterializationWrite(write.flag, write.value))
+    ]);
+  }
 
-function registerStateMaterializationWrites(
-  baseline: BlockState,
-  snapshot: BlockState
-): readonly StateMaterializationWrite[] {
-  return Object.freeze(
-    registerMaterializationWrites(baseline.registers, snapshot.registers)
-      .map((write) => registerStateMaterializationWrite(write.reg, write.value))
-  );
+  #registerStateMaterializationWrites(
+    baseline: BlockState,
+    snapshot: BlockState
+  ): readonly StateMaterializationWrite[] {
+    return Object.freeze(
+      this.#registerMaterializer.writes(baseline.registers, snapshot.registers)
+        .map((write) => registerStateMaterializationWrite(write.reg, write.value))
+    );
+  }
 }
 
 function registerStateMaterializationWrite(

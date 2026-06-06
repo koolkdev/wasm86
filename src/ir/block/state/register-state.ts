@@ -10,13 +10,6 @@ import {
   registerAliasWrite
 } from "./register-overlays.js";
 
-export {
-  registerMaterializationWrites
-} from "./register-materialization.js";
-export type {
-  RegisterMaterializationWrite
-} from "./register-materialization.js";
-
 const registerStateBrand: unique symbol = Symbol("RegisterState");
 
 type RegisterBaseSnapshot = Readonly<{

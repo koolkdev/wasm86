@@ -12,6 +12,10 @@ import type { RegisterState } from "./register-state.js";
 
 export type { RegisterMaterializationWrite } from "./register-overlays.js";
 
+export type RegisterMaterializationMode =
+  | "exact-alias"
+  | "full-base";
+
 type RegisterBaseSnapshot = Readonly<{
   base: Reg32;
   baseValue: ExprRef;
@@ -22,7 +26,27 @@ type RegisterMaterializationState = RegisterState & Readonly<{
   baseState(reg: Reg32): RegisterBaseSnapshot;
 }>;
 
-export function registerMaterializationWrites(
+export class RegisterMaterializer {
+  readonly #mode: RegisterMaterializationMode;
+
+  constructor(mode: RegisterMaterializationMode) {
+    this.#mode = mode;
+  }
+
+  writes(
+    baseline: RegisterState,
+    snapshot: RegisterState
+  ): readonly RegisterMaterializationWrite[] {
+    switch (this.#mode) {
+      case "exact-alias":
+        return exactAliasRegisterMaterializationWrites(baseline, snapshot);
+      case "full-base":
+        return fullBaseRegisterMaterializationWrites(baseline, snapshot);
+    }
+  }
+}
+
+function exactAliasRegisterMaterializationWrites(
   baseline: RegisterState,
   snapshot: RegisterState
 ): readonly RegisterMaterializationWrite[] {
@@ -36,6 +60,19 @@ export function registerMaterializationWrites(
       snapshotState
     ).writes()
   ));
+}
+
+function fullBaseRegisterMaterializationWrites(
+  baseline: RegisterState,
+  snapshot: RegisterState
+): readonly RegisterMaterializationWrite[] {
+  return Object.freeze(reg32.flatMap((base) => {
+    const snapshotValue = snapshot.read(base);
+
+    return exprsEqual(baseline.read(base), snapshotValue)
+      ? []
+      : [registerMaterializationWrite(registerAlias(base), snapshotValue)];
+  }));
 }
 
 class RegisterBaseMaterializationPlanner {
