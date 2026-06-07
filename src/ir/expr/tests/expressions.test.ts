@@ -16,7 +16,43 @@ import {
   exprBits
 } from "#ir/expr/builders.js";
 import { canonicalizeExpr } from "#ir/expr/canonicalize.js";
+import {
+  exprChildren,
+  exprChildSlots,
+  type ExprChildSlot
+} from "#ir/expr/children.js";
 import { exprsEqual } from "#ir/expr/equality.js";
+import type { ExprRef } from "#ir/expr/types.js";
+
+test("ExprRef child slots name semantic roles in child order", () => {
+  const eax = exprInput({ kind: "reg", reg: "eax" });
+  const ebx = exprInput({ kind: "reg", reg: "ebx" });
+  const zf = exprInput({ kind: "flag", flag: "ZF" });
+  const leaf = exprConst(7);
+  const cases: readonly Readonly<{ expr: ExprRef; slots: readonly ExprChildSlot[] }>[] = [
+    { expr: leaf, slots: [] },
+    { expr: eax, slots: [] },
+    { expr: exprBinary("xor", eax, ebx), slots: [{ role: "left", expr: eax }, { role: "right", expr: ebx }] },
+    { expr: exprUnary("popcnt", eax), slots: [{ role: "value", expr: eax }] },
+    {
+      expr: exprSelect(zf, eax, ebx),
+      slots: [
+        { role: "condition", expr: zf },
+        { role: "whenTrue", expr: eax },
+        { role: "whenFalse", expr: ebx }
+      ]
+    },
+    { expr: exprProject(8, eax), slots: [{ role: "value", expr: eax }] },
+    { expr: exprBits(eax, 8, 8), slots: [{ role: "value", expr: eax }] },
+    { expr: exprInsertBits(eax, ebx, 8, 8), slots: [{ role: "base", expr: eax }, { role: "value", expr: ebx }] },
+    { expr: exprCompare(16, "eq", eax, ebx), slots: [{ role: "left", expr: eax }, { role: "right", expr: ebx }] }
+  ];
+
+  for (const valueCase of cases) {
+    deepStrictEqual(exprChildSlots(valueCase.expr), valueCase.slots);
+    deepStrictEqual(exprChildren(valueCase.expr), valueCase.slots.map((slot) => slot.expr));
+  }
+});
 
 test("ExprRef semantic projection constants canonicalize without consumer metadata", () => {
   deepStrictEqual(

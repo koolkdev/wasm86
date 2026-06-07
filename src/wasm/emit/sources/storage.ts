@@ -1,0 +1,119 @@
+import { assert } from "#common/assert.js";
+import type { ExprInputSource } from "#ir/expr/types.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
+import { emitLoadPackedFlagFromStack } from "../ops/flags.js";
+import { emitLoadStateI32 } from "../ops/state.js";
+import type { WasmStateI32Placement } from "../state/placement.js";
+
+export type WasmReadableInputSource = Exclude<ExprInputSource, Readonly<{ kind: "def" }>>;
+
+export type WasmSourceReadPlacement =
+  | Readonly<{
+      kind: "local.i32";
+      local: number;
+    }>
+  | Readonly<{
+      kind: "state.i32";
+      state: WasmStateI32Placement;
+    }>
+  | Readonly<{
+      kind: "packed-flag-local";
+      local: number;
+    }>
+  | Readonly<{
+      kind: "packed-flag-state";
+      state: WasmStateI32Placement;
+    }>;
+
+export type WasmSourceReadPlan = Readonly<{
+  placement(source: WasmReadableInputSource): WasmSourceReadPlacement;
+}>;
+
+export type WasmSourceReader = Readonly<{
+  emitInput(source: WasmReadableInputSource): WasmValueType;
+}>;
+
+export function createWasmSourceReader(
+  body: WasmFunctionBodyEncoder,
+  plan: WasmSourceReadPlan
+): WasmSourceReader {
+  return {
+    emitInput: (source) => {
+      const placement = plan.placement(source);
+
+      assertSourceReadPlacement(source, placement);
+      return emitSourceInput(body, source, placement);
+    }
+  };
+}
+
+function assertSourceReadPlacement(
+  source: WasmReadableInputSource,
+  placement: WasmSourceReadPlacement
+): void {
+  switch (source.kind) {
+    case "reg":
+      switch (placement.kind) {
+        case "local.i32":
+          return;
+        case "state.i32":
+          assert(
+            placement.state.width === 32,
+            `register input ${source.reg} must use a 32-bit state placement, ` +
+            `got ${placement.state.width}-bit state placement`
+          );
+          return;
+        case "packed-flag-local":
+        case "packed-flag-state":
+          assert(false, `register input ${source.reg} cannot use packed flag placement ${placement.kind}`);
+      }
+      return;
+    case "flag":
+      switch (placement.kind) {
+        case "packed-flag-local":
+          return;
+        case "packed-flag-state":
+          return;
+        case "local.i32":
+        case "state.i32":
+          assert(false, `flag input ${source.flag} must use a packed flag placement, got ${placement.kind}`);
+      }
+      return;
+  }
+}
+
+function emitSourceInput(
+  body: WasmFunctionBodyEncoder,
+  source: WasmReadableInputSource,
+  placement: WasmSourceReadPlacement
+): WasmValueType {
+  switch (placement.kind) {
+    case "local.i32":
+      body.localGet(placement.local);
+      return wasmValueType.i32;
+    case "state.i32":
+      return emitLoadStateI32(body, placement.state.offset, placement.state.width);
+    case "packed-flag-local": {
+      assert(source.kind === "flag", `packed flag source placement cannot read ${source.kind} input`);
+
+      body.localGet(placement.local);
+      emitLoadPackedFlag(body, source);
+      return wasmValueType.i32;
+    }
+    case "packed-flag-state": {
+      assert(source.kind === "flag", `packed flag source placement cannot read ${source.kind} input`);
+
+      emitLoadStateI32(body, placement.state.offset, placement.state.width);
+      emitLoadPackedFlag(body, source);
+      return wasmValueType.i32;
+    }
+  }
+}
+
+function emitLoadPackedFlag(
+  body: WasmFunctionBodyEncoder,
+  source: Extract<WasmReadableInputSource, Readonly<{ kind: "flag" }>>
+): void {
+  emitLoadPackedFlagFromStack(body, source.flag);
+}

@@ -1,20 +1,50 @@
 import type { ExprRef } from "./types.js";
 
-export function exprChildren(expr: ExprRef): readonly ExprRef[] {
+export type ExprChildRole =
+  | "value"
+  | "left"
+  | "right"
+  | "condition"
+  | "whenTrue"
+  | "whenFalse"
+  | "base";
+
+export type ExprChildSlot = Readonly<{
+  role: ExprChildRole;
+  expr: ExprRef;
+}>;
+
+export function exprChildSlots(expr: ExprRef): readonly ExprChildSlot[] {
   switch (expr.kind) {
     case "const":
     case "input":
       return [];
     case "binary":
     case "compare":
-      return [expr.left, expr.right];
+      return [
+        { role: "left", expr: expr.left },
+        { role: "right", expr: expr.right }
+      ];
     case "unary":
     case "project":
     case "bits":
-      return [expr.value];
+      return [
+        { role: "value", expr: expr.value }
+      ];
     case "select":
-      return [expr.condition, expr.whenTrue, expr.whenFalse];
+      return [
+        { role: "condition", expr: expr.condition },
+        { role: "whenTrue", expr: expr.whenTrue },
+        { role: "whenFalse", expr: expr.whenFalse }
+      ];
     case "insertBits":
-      return [expr.base, expr.value];
+      return [
+        { role: "base", expr: expr.base },
+        { role: "value", expr: expr.value }
+      ];
   }
+}
+
+export function exprChildren(expr: ExprRef): readonly ExprRef[] {
+  return exprChildSlots(expr).map((slot) => slot.expr);
 }

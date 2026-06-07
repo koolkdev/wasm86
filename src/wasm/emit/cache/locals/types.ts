@@ -27,6 +27,7 @@ export type WasmValueCache = Readonly<{
     recipe: ExprRecipe,
     emitInline: WasmValueCacheInlineEmitter
   ): WasmValueType;
+  isRecipeSelected(recipe: ExprRecipe): boolean;
   ensureSnapshot(snapshot: ValueSnapshotId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void;
   emitSnapshot(snapshot: ValueSnapshotId): WasmValueType;
 }>;

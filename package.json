@@ -9,6 +9,10 @@
       "types": "./src/backends/*",
       "default": "./dist/src/backends/*"
     },
+    "#common/*": {
+      "types": "./src/common/*",
+      "default": "./dist/src/common/*"
+    },
     "#runtime/*": {
       "types": "./src/runtime/*",
       "default": "./dist/src/runtime/*"

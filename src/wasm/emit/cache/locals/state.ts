@@ -74,6 +74,10 @@ export class WasmValueCacheState implements WasmValueCache {
     return type;
   }
 
+  isRecipeSelected(recipe: ExprRecipe): ReturnType<WasmValueCache["isRecipeSelected"]> {
+    return this.#entries.entryForRecipe(recipe) !== undefined;
+  }
+
   ensureSnapshot(snapshot: ValueSnapshotId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void {
     const entry = this.#entries.entryForSnapshot(snapshot);
     const active = this.#regions.activeRegion();
