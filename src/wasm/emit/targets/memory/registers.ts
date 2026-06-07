@@ -1,6 +1,5 @@
 import type { RegisterStateTarget } from "#ir/block/state/targets.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { type WasmValueType } from "#wasm/encoder/types.js";
 import {
   emitLoadStateI32,
   emitStoreStateI32
@@ -10,6 +9,7 @@ import type {
   WasmTargetStorage,
   WasmTargetValueProducer
 } from "../storage.js";
+import type { WasmEmittedValue } from "../../values/types.js";
 
 export function createStateMemoryRegisterTargetStorage(
   body: WasmFunctionBodyEncoder
@@ -25,7 +25,7 @@ export function createStateMemoryRegisterTargetStorage(
 function emitLoadStateRegisterTarget(
   body: WasmFunctionBodyEncoder,
   target: RegisterStateTarget
-): WasmValueType {
+): WasmEmittedValue {
   const placement = stateRegisterAliasPlacement(target.reg);
 
   return emitLoadStateI32(body, placement.offset, placement.width);

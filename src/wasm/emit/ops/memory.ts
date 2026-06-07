@@ -1,11 +1,14 @@
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
-import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 import type { OperandWidth } from "#x86/types.js";
+import {
+  wasmI32,
+  type WasmEmittedValue
+} from "../values/types.js";
 
-export type WasmMemoryAddressProducer = () => WasmValueType;
-export type WasmMemoryValueProducer = () => WasmValueType;
+export type WasmMemoryAddressProducer = () => WasmEmittedValue;
+export type WasmMemoryValueProducer = () => WasmEmittedValue;
 
 export function wasmMemoryAlignForWidth(width: OperandWidth): 0 | 1 | 2 {
   switch (width) {
@@ -23,10 +26,10 @@ export function emitLoadGuestMemoryUnchecked(
   emitAddress: WasmMemoryAddressProducer,
   width: OperandWidth,
   signed = false
-): WasmValueType {
+): WasmEmittedValue {
   emitAddress();
   emitI32Load(body, guestImmediate(width), width, signed);
-  return wasmValueType.i32;
+  return wasmI32(signed ? 32 : width);
 }
 
 export function emitStoreGuestMemoryUnchecked(

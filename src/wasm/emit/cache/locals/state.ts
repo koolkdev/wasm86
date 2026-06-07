@@ -64,14 +64,14 @@ export class WasmValueCacheState implements WasmValueCache {
 
     if (visible !== undefined) {
       this.#body.localGet(visible.local);
-      return visible.type;
+      return visible.value;
     }
 
-    const type = emitInline();
-    const local = this.#locals.establish(entry, type, active);
+    const value = emitInline();
+    const local = this.#locals.establish(entry, value, active);
 
     this.#body.localTee(local.local);
-    return type;
+    return value;
   }
 
   isRecipeSelected(recipe: ExprRecipe): ReturnType<WasmValueCache["isRecipeSelected"]> {
@@ -89,8 +89,8 @@ export class WasmValueCacheState implements WasmValueCache {
       return;
     }
 
-    const type = emitInline();
-    const local = this.#locals.establish(entry, type, active);
+    const value = emitInline();
+    const local = this.#locals.establish(entry, value, active);
 
     this.#body.localSet(local.local);
   }
@@ -104,6 +104,6 @@ export class WasmValueCacheState implements WasmValueCache {
     }
 
     this.#body.localGet(visible.local);
-    return visible.type;
+    return visible.value;
   }
 }

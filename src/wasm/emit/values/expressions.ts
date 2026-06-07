@@ -3,10 +3,6 @@ import type { ExprRecipe } from "#ir/block/planning/values/index.js";
 import type { ExprChildRole } from "#ir/expr/children.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import {
-  wasmValueType,
-  type WasmValueType
-} from "#wasm/encoder/types.js";
 import { i32 } from "#x86/numeric.js";
 import { registerAliasesByWidth } from "#x86/registers.js";
 import {
@@ -20,28 +16,36 @@ import {
   compareUsesSignedOrder,
   emitI32CompareOp
 } from "../ops/conditions.js";
-import {
-  emitMaskI32ToWidth,
-  emitSignExtendI32ToWidth
-} from "../ops/width.js";
+import { emitMaskI32ToWidth } from "../ops/width.js";
 import type { WasmSourceReader } from "../sources/storage.js";
 import { bindRecipeChildSlots } from "./children.js";
 import type { WasmDefinitionRecipeEmitter } from "./recipes.js";
+import {
+  binaryResultWidth,
+  constWidth,
+  ensureWidth,
+  maxWidth,
+  signExtendI32
+} from "./width.js";
+import {
+  wasmI32,
+  type WasmEmittedValue
+} from "./types.js";
 
 export type WasmExprChildEmitter = Readonly<{
-  emit(role: ExprChildRole): WasmValueType;
+  emit(role: ExprChildRole): WasmEmittedValue;
   recipe(role: ExprChildRole): ExprRecipe;
   isSelected(role: ExprChildRole): boolean;
 }>;
 
 export type WasmExprRecipeEmitter = Readonly<{
-  emitRecipe(recipe: ExprRecipe): WasmValueType;
+  emitRecipe(recipe: ExprRecipe): WasmEmittedValue;
   isRecipeSelected(recipe: ExprRecipe): boolean;
 }>;
 
 export type WasmCompositeExprContext = Readonly<{
   definitions: WasmDefinitionRecipeEmitter;
-  emitRecipe(recipe: ExprRecipe): WasmValueType;
+  emitRecipe(recipe: ExprRecipe): WasmEmittedValue;
   isRecipeSelected(recipe: ExprRecipe): boolean;
   sources: WasmSourceReader;
 }>;
@@ -64,26 +68,30 @@ export function emitCompositeExpr(
   recipe: Extract<ExprRecipe, { kind: "expr" }>,
   children: WasmExprChildEmitter,
   context: WasmCompositeExprContext
-): WasmValueType {
+): WasmEmittedValue {
   switch (recipe.expr.kind) {
     case "const":
       body.i32Const(i32(recipe.expr.value));
-      return wasmValueType.i32;
+      return wasmI32(constWidth(recipe.expr.value));
     case "input":
       return emitInputExpr(context.sources, recipe.expr.source);
-    case "binary":
-      children.emit("left");
-      children.emit("right");
+    case "binary": {
+      const left = children.emit("left");
+      const right = children.emit("right");
+
       emitI32BinaryOp(body, recipe.expr.op);
-      return wasmValueType.i32;
+      return wasmI32(binaryResultWidth(recipe.expr.op, left, right));
+    }
     case "unary":
       return emitUnaryExpr(body, recipe, children, context);
-    case "select":
-      children.emit("whenTrue");
-      children.emit("whenFalse");
+    case "select": {
+      const whenTrue = children.emit("whenTrue");
+      const whenFalse = children.emit("whenFalse");
+
       children.emit("condition");
       body.select();
-      return wasmValueType.i32;
+      return wasmI32(maxWidth(whenTrue.width, whenFalse.width));
+    }
     case "project":
       return emitProjectExpr(body, recipe, children, context);
     case "bits":
@@ -98,7 +106,7 @@ export function emitCompositeExpr(
 function emitInputExpr(
   sources: WasmSourceReader,
   source: Extract<ExprRef, { kind: "input" }>["source"]
-): WasmValueType {
+): WasmEmittedValue {
   switch (source.kind) {
     case "def":
       assert(
@@ -116,7 +124,7 @@ function emitUnaryExpr(
   recipe: Extract<ExprRecipe, { kind: "expr" }>,
   children: WasmExprChildEmitter,
   context: WasmCompositeExprContext
-): WasmValueType {
+): WasmEmittedValue {
   assert(recipe.expr.kind === "unary", `expected unary expression recipe, got ${recipe.expr.kind}`);
 
   switch (recipe.expr.op) {
@@ -127,7 +135,7 @@ function emitUnaryExpr(
     case "popcnt":
       children.emit("value");
       body.i32Popcnt();
-      return wasmValueType.i32;
+      return wasmI32(8);
   }
 }
 
@@ -136,7 +144,7 @@ function emitSignExtendExpr(
   width: 8 | 16,
   children: WasmExprChildEmitter,
   context: WasmCompositeExprContext
-): WasmValueType {
+): WasmEmittedValue {
   const fusedType = emitDirectSignedRegisterAliasInput(width, children, context) ??
     emitFusedSignedMemoryLoad(width, children, context);
 
@@ -145,15 +153,14 @@ function emitSignExtendExpr(
   }
 
   children.emit("value");
-  emitSignExtendI32ToWidth(body, width);
-  return wasmValueType.i32;
+  return signExtendI32(body, width);
 }
 
 function emitFusedSignedMemoryLoad(
   width: 8 | 16,
   children: WasmExprChildEmitter,
   context: WasmCompositeExprContext
-): WasmValueType | undefined {
+): WasmEmittedValue | undefined {
   const child = children.recipe("value");
 
   if (child.kind !== "definition") {
@@ -191,7 +198,7 @@ function emitProjectExpr(
   recipe: Extract<ExprRecipe, { kind: "expr" }>,
   children: WasmExprChildEmitter,
   context: WasmCompositeExprContext
-): WasmValueType {
+): WasmEmittedValue {
   assert(recipe.expr.kind === "project", `expected project expression recipe, got ${recipe.expr.kind}`);
   const expr = recipe.expr;
   const directType = tryEmitDirectRegisterAliasView(
@@ -204,9 +211,7 @@ function emitProjectExpr(
     return directType;
   }
 
-  children.emit("value");
-  emitMaskI32ToWidth(body, expr.width);
-  return wasmValueType.i32;
+  return ensureWidth(body, children.emit("value"), expr.width);
 }
 
 function emitBitsExpr(
@@ -214,7 +219,7 @@ function emitBitsExpr(
   recipe: Extract<ExprRecipe, { kind: "expr" }>,
   children: WasmExprChildEmitter,
   context: WasmCompositeExprContext
-): WasmValueType {
+): WasmEmittedValue {
   assert(recipe.expr.kind === "bits", `expected bits expression recipe, got ${recipe.expr.kind}`);
   const expr = recipe.expr;
   const directType = tryEmitDirectRegisterAliasView(
@@ -227,10 +232,14 @@ function emitBitsExpr(
     return directType;
   }
 
-  children.emit("value");
+  const value = children.emit("value");
   emitShiftRight(body, expr.offset);
-  emitMaskI32ToWidth(body, expr.width);
-  return wasmValueType.i32;
+
+  if (value.width > expr.offset + expr.width) {
+    emitMaskI32ToWidth(body, expr.width);
+  }
+
+  return wasmI32(expr.width);
 }
 
 function tryEmitDirectRegisterAliasView(
@@ -238,7 +247,7 @@ function tryEmitDirectRegisterAliasView(
   children: WasmExprChildEmitter,
   view: RegisterInputView,
   options: Readonly<{ signed?: boolean }> = {}
-): WasmValueType | undefined {
+): WasmEmittedValue | undefined {
   return tryEmitDirectRegisterAliasInput(
     context,
     view,
@@ -254,7 +263,7 @@ function tryEmitDirectRegisterAliasInput(
   child: ExprRecipe,
   childSelected: boolean,
   options: Readonly<{ signed?: boolean }> = {}
-): WasmValueType | undefined {
+): WasmEmittedValue | undefined {
   if (childSelected) {
     return undefined;
   }
@@ -278,7 +287,7 @@ function emitDirectSignedRegisterAliasInput(
   width: 8 | 16,
   children: WasmExprChildEmitter,
   context: WasmCompositeExprContext
-): WasmValueType | undefined {
+): WasmEmittedValue | undefined {
   const child = children.recipe("value");
 
   if (children.isSelected("value") || child.kind !== "expr") {
@@ -338,44 +347,41 @@ function emitInsertBitsExpr(
   body: WasmFunctionBodyEncoder,
   recipe: Extract<ExprRecipe, { kind: "expr" }>,
   children: WasmExprChildEmitter
-): WasmValueType {
+): WasmEmittedValue {
   assert(recipe.expr.kind === "insertBits", `expected insertBits expression recipe, got ${recipe.expr.kind}`);
 
   if (recipe.expr.width === 32) {
-    children.emit("value");
-    return wasmValueType.i32;
+    return children.emit("value");
   }
 
   const mask = shiftedMask(recipe.expr.offset, recipe.expr.width);
 
   children.emit("base");
   body.i32Const(i32(~mask)).i32And();
-  children.emit("value");
-  emitMaskI32ToWidth(body, recipe.expr.width);
+  const value = children.emit("value");
+  ensureWidth(body, value, recipe.expr.width);
   emitShiftLeft(body, recipe.expr.offset);
   body.i32Or();
-  return wasmValueType.i32;
+  return wasmI32(32);
 }
 
 function emitCompareExpr(
   body: WasmFunctionBodyEncoder,
   recipe: Extract<ExprRecipe, { kind: "expr" }>,
   children: WasmExprChildEmitter
-): WasmValueType {
+): WasmEmittedValue {
   assert(recipe.expr.kind === "compare", `expected compare expression recipe, got ${recipe.expr.kind}`);
 
   if (compareUsesSignedOrder(recipe.expr.op)) {
     emitSignedCompareChild(body, children, "left", recipe.expr.width);
     emitSignedCompareChild(body, children, "right", recipe.expr.width);
   } else {
-    children.emit("left");
-    emitMaskI32ToWidth(body, recipe.expr.width);
-    children.emit("right");
-    emitMaskI32ToWidth(body, recipe.expr.width);
+    ensureWidth(body, children.emit("left"), recipe.expr.width);
+    ensureWidth(body, children.emit("right"), recipe.expr.width);
   }
 
   emitI32CompareOp(body, recipe.expr.op);
-  return wasmValueType.i32;
+  return wasmI32(8);
 }
 
 function emitSignedCompareChild(
@@ -385,7 +391,17 @@ function emitSignedCompareChild(
   width: OperandWidth
 ): void {
   children.emit(role);
-  emitSignExtendI32ToWidth(body, width);
+
+  switch (width) {
+    case 8:
+      signExtendI32(body, 8);
+      return;
+    case 16:
+      signExtendI32(body, 16);
+      return;
+    case 32:
+      return;
+  }
 }
 
 function emitShiftRight(body: WasmFunctionBodyEncoder, offset: number): void {

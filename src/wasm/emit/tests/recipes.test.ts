@@ -24,6 +24,7 @@ import {
   exprCompare,
   exprConst,
   exprInput,
+  exprProject,
   exprSelect,
   exprUnary
 } from "#ir/expr/builders.js";
@@ -48,6 +49,10 @@ import type {
   WasmCacheReason
 } from "#wasm/emit/cache/plan/index.js";
 import { emitLoadGuestMemoryUnchecked } from "#wasm/emit/ops/memory.js";
+import {
+  wasmI32,
+  type WasmEmittedValue
+} from "#wasm/emit/values/types.js";
 import {
   createWasmSourceReader,
   type WasmReadableInputSource,
@@ -103,13 +108,13 @@ test("input expressions read through source storage", () => {
 
       strictEqual(source.reg, "eax");
       body.localGet(13);
-      return wasmValueType.i32;
+      return wasmI32(32);
     },
     tryEmitRegisterAliasInput: () => fail("unexpected register alias source read")
   };
   const definitions: WasmDefinitionRecipeEmitter = {
     definitionInfo: () => undefined,
-    emitDefinition: () => wasmValueType.i32
+    emitDefinition: () => wasmI32(32)
   };
   const { emitter } = createFixtureWithBody(body, cachePlan([]), [recipe], definitions, { sources });
 
@@ -373,7 +378,90 @@ test("snapshot establishment can fuse a signed view over a memory-load definitio
   strictEqual(opcodes.includes(wasmOpcode.i32Extend16S), false);
 });
 
-test("stage 13 value source keeps recipe orchestration separate from expression lowering", async () => {
+test("project over unsigned narrow memory-load definitions does not emit redundant masks", () => {
+  for (const width of [8, 16] as const) {
+    const def = definitionId(width);
+    const address = exprRecipe(exprConst(width));
+    const load = definitionRecipe(def, address);
+    const recipe = exprRecipeWithChildren(
+      exprProject(width, exprInput({ kind: "def", id: def })),
+      [load]
+    );
+    const body = new WasmFunctionBodyEncoder();
+    const definitions = new MemoryLoadDefinitions(body, [[def, width]]);
+    const { emitter } = createFixtureWithBody(body, cachePlan([]), [recipe], definitions);
+
+    deepStrictEqual(emitter.emitRecipe(recipe), wasmI32(width));
+    body.end();
+
+    const opcodes = wasmBodyOpcodes(body.encode());
+
+    strictEqual(opcodes.includes(width === 8 ? wasmOpcode.i32Load8U : wasmOpcode.i32Load16U), true);
+    strictEqual(opcodes.includes(wasmOpcode.i32And), false);
+  }
+});
+
+test("project over signed narrow memory-load definitions still masks to unsigned width", () => {
+  const def = definitionId(18);
+  const address = exprRecipe(exprConst(18));
+  const load = definitionRecipe(def, address);
+  const signedExpr = exprUnary("extend8_s", exprInput({ kind: "def", id: def }));
+  const signedLoad = exprRecipeWithChildren(
+    signedExpr,
+    [load]
+  );
+  const recipe = exprRecipeWithChildren(exprProject(8, signedExpr), [signedLoad]);
+  const body = new WasmFunctionBodyEncoder();
+  const definitions = new MemoryLoadDefinitions(body, [[def, 8]]);
+  const { emitter } = createFixtureWithBody(body, cachePlan([]), [recipe], definitions);
+
+  deepStrictEqual(emitter.emitRecipe(recipe), wasmI32(8));
+  body.end();
+
+  const opcodes = wasmBodyOpcodes(body.encode());
+
+  strictEqual(opcodes.includes(wasmOpcode.i32Load8S), true);
+  strictEqual(opcodes.includes(wasmOpcode.i32And), true);
+});
+
+test("project over compare results does not emit a redundant mask", () => {
+  const compareExpr = exprCompare(8, "eq", exprConst(1), exprConst(2));
+  const compare = exprRecipe(compareExpr);
+  const recipe = exprRecipeWithChildren(exprProject(8, compareExpr), [compare]);
+  const { body, emitter } = createFixture(cachePlan([]), [recipe]);
+
+  deepStrictEqual(emitter.emitRecipe(recipe), wasmI32(8));
+  body.end();
+
+  const opcodes = wasmBodyOpcodes(body.encode());
+
+  strictEqual(opcodes.includes(wasmOpcode.i32Eq), true);
+  strictEqual(opcodes.includes(wasmOpcode.i32And), false);
+});
+
+test("add result width grows from narrow unsigned operands", () => {
+  const add8 = exprRecipe(exprBinary("add", exprConst(1), exprConst(2)));
+  const add16 = exprRecipe(exprBinary("add", exprConst(0x100), exprConst(0x200)));
+  const fixture8 = createFixture(cachePlan([]), [add8]);
+  const fixture16 = createFixture(cachePlan([]), [add16]);
+
+  deepStrictEqual(fixture8.emitter.emitRecipe(add8), wasmI32(16));
+  deepStrictEqual(fixture16.emitter.emitRecipe(add16), wasmI32(32));
+});
+
+test("simple bitwise and right-shift result widths stay narrow", () => {
+  const and = exprRecipe(exprBinary("and", exprConst(0xff), exprConst(0x1234)));
+  const or = exprRecipe(exprBinary("or", exprConst(0xff), exprConst(0x1200)));
+  const xor = exprRecipe(exprBinary("xor", exprConst(0xff), exprConst(0x1200)));
+  const shr = exprRecipe(exprBinary("shr_u", exprConst(0x1234), exprConst(1)));
+
+  deepStrictEqual(createFixture(cachePlan([]), [and]).emitter.emitRecipe(and), wasmI32(8));
+  deepStrictEqual(createFixture(cachePlan([]), [or]).emitter.emitRecipe(or), wasmI32(16));
+  deepStrictEqual(createFixture(cachePlan([]), [xor]).emitter.emitRecipe(xor), wasmI32(16));
+  deepStrictEqual(createFixture(cachePlan([]), [shr]).emitter.emitRecipe(shr), wasmI32(16));
+});
+
+test("stage 14 value widths keep recipe orchestration separate from expression lowering", async () => {
   const fs = await import("node:fs/promises");
   const recipeSource = await fs.readFile("src/wasm/emit/values/recipes.ts", "utf8");
   const expressionSource = await fs.readFile("src/wasm/emit/values/expressions.ts", "utf8");
@@ -481,9 +569,9 @@ class MemoryLoadDefinitions implements WasmDefinitionRecipeEmitter {
 
   emitDefinition(
     definition: BlockDefinitionId,
-    emitInput: () => WasmValueType,
+    emitInput: () => WasmEmittedValue,
     options: { signed?: boolean } = {}
-  ): WasmValueType {
+  ): WasmEmittedValue {
     const info = this.#definitions.get(definition);
 
     if (info === undefined) {
@@ -516,7 +604,7 @@ function createFixture(
   const scratch = new RecordingScratch(body);
   const definitions: WasmDefinitionRecipeEmitter = {
     definitionInfo: () => undefined,
-    emitDefinition: () => wasmValueType.i32
+    emitDefinition: () => wasmI32(32)
   };
   const fixture = createFixtureWithBody(body, plan, extraRecipes, definitions, { scratch });
 
@@ -664,6 +752,14 @@ function exprRecipe(expr: ExprRef): ExprRecipe {
     kind: "expr",
     expr,
     children: Object.freeze(exprChildren(expr).map(exprRecipe))
+  } satisfies ExprRecipe);
+}
+
+function exprRecipeWithChildren(expr: ExprRef, children: readonly ExprRecipe[]): ExprRecipe {
+  return Object.freeze({
+    kind: "expr",
+    expr,
+    children: Object.freeze([...children])
   } satisfies ExprRecipe);
 }
 

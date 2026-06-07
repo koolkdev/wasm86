@@ -1,5 +1,4 @@
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import type { WasmValueType } from "#wasm/encoder/types.js";
 import type {
   WasmCacheEntry,
   WasmCacheEntryId
@@ -8,11 +7,15 @@ import type {
   WasmCacheActiveRegion,
   WasmCacheVisibleRegions
 } from "./regions.js";
+import {
+  wasmTypeOf,
+  type WasmEmittedValue
+} from "../../values/types.js";
 
 export type WasmCachedLocal = {
   entry: WasmCacheEntry;
   local: number;
-  type: WasmValueType;
+  value: WasmEmittedValue;
   owner: WasmCacheActiveRegion;
 };
 
@@ -42,7 +45,7 @@ export class WasmValueCacheLocals {
     return undefined;
   }
 
-  establish(entry: WasmCacheEntry, type: WasmValueType, owner: WasmCacheActiveRegion): WasmCachedLocal {
+  establish(entry: WasmCacheEntry, value: WasmEmittedValue, owner: WasmCacheActiveRegion): WasmCachedLocal {
     const visible = this.#getOwned(entry.id, owner);
 
     if (visible !== undefined) {
@@ -51,8 +54,8 @@ export class WasmValueCacheLocals {
 
     const local = {
       entry,
-      local: this.#scratch.allocLocal(type),
-      type,
+      local: this.#scratch.allocLocal(wasmTypeOf(value)),
+      value,
       owner
     };
 

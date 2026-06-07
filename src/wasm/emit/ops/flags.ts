@@ -1,4 +1,5 @@
 import type { FlagName } from "#ir/model/flags.js";
+import type { WasmEmittedValue } from "../values/types.js";
 import {
   x86ArithmeticFlagMask,
   x86ArithmeticFlagsMask
@@ -6,8 +7,9 @@ import {
 import { i32 } from "#x86/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { emitI32Boolean } from "./width.js";
+import { wasmI32 } from "../values/types.js";
 
-export type WasmPackedFlagValueProducer = () => void;
+export type WasmPackedFlagValueProducer = () => WasmEmittedValue;
 
 export function flagMask(flag: FlagName): number {
   return x86ArithmeticFlagMask[flag];
@@ -30,8 +32,9 @@ export function flagBitIndex(flag: FlagName): number {
   }
 }
 
-export function emitLoadPackedFlagFromStack(body: WasmFunctionBodyEncoder, flag: FlagName): void {
+export function emitLoadPackedFlagFromStack(body: WasmFunctionBodyEncoder, flag: FlagName): WasmEmittedValue {
   body.i32Const(flagBitIndex(flag)).i32ShrU().i32Const(1).i32And();
+  return wasmI32(8);
 }
 
 export function emitPackedFlagUpdateValue(
@@ -39,7 +42,7 @@ export function emitPackedFlagUpdateValue(
   flag: FlagName,
   emitPackedValue: WasmPackedFlagValueProducer,
   emitValue: WasmPackedFlagValueProducer
-): void {
+): WasmEmittedValue {
   const mask = flagMask(flag);
 
   emitPackedValue();
@@ -47,6 +50,7 @@ export function emitPackedFlagUpdateValue(
   emitValue();
   emitI32Boolean(body);
   body.i32Const(flagBitIndex(flag)).i32Shl().i32Or();
+  return wasmI32(8);
 }
 
 export function emitStorePackedFlagToLocal(
@@ -60,6 +64,7 @@ export function emitStorePackedFlagToLocal(
     flag,
     () => {
       body.localGet(local);
+      return wasmI32(8);
     },
     emitValue
   );

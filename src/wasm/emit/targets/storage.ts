@@ -3,12 +3,12 @@ import type {
   RegisterStateTarget,
   StateTarget
 } from "#ir/block/state/targets.js";
-import type { WasmValueType } from "#wasm/encoder/types.js";
+import type { WasmEmittedValue } from "../values/types.js";
 
-export type WasmTargetValueProducer = () => WasmValueType;
+export type WasmTargetValueProducer = () => WasmEmittedValue;
 
 export type WasmTargetStorage<Target extends StateTarget = StateTarget> = Readonly<{
-  emitLoad(target: Target): WasmValueType;
+  emitLoad(target: Target): WasmEmittedValue;
   emitStore(target: Target, emitValue: WasmTargetValueProducer): void;
 }>;
 

@@ -4,7 +4,6 @@ import type {
   ValueSnapshotId
 } from "#ir/block/planning/values/index.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import type { WasmValueType } from "#wasm/encoder/types.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { WasmValueCache } from "../cache/locals/index.js";
 import {
@@ -12,12 +11,13 @@ import {
   emitCompositeExpr
 } from "./expressions.js";
 import type { WasmSourceReader } from "../sources/storage.js";
+import type { WasmEmittedValue } from "./types.js";
 
-export type WasmValueProducer = () => WasmValueType;
+export type WasmValueProducer = () => WasmEmittedValue;
 
 export type WasmRecipeEmitter = Readonly<{
-  emitRecipe(recipe: ExprRecipe): WasmValueType;
-  emitRecipeBody(recipe: ExprRecipe): WasmValueType;
+  emitRecipe(recipe: ExprRecipe): WasmEmittedValue;
+  emitRecipeBody(recipe: ExprRecipe): WasmEmittedValue;
   establishSnapshot(snapshot: ValueSnapshotId, recipe: ExprRecipe): void;
 }>;
 
@@ -37,7 +37,7 @@ export type WasmDefinitionRecipeEmitter = Readonly<{
     definition: BlockDefinitionId,
     emitInput: WasmValueProducer,
     options?: { signed?: boolean }
-  ): WasmValueType;
+  ): WasmEmittedValue;
 }>;
 
 export type WasmRecipeEmitterInput = Readonly<{
@@ -64,11 +64,11 @@ class WasmRecipeEmitterState implements WasmRecipeEmitter {
     this.#sources = input.sources;
   }
 
-  emitRecipe(recipe: ExprRecipe): WasmValueType {
+  emitRecipe(recipe: ExprRecipe): WasmEmittedValue {
     return this.#cache.emitRecipe(recipe, () => this.emitRecipeBody(recipe));
   }
 
-  emitRecipeBody(recipe: ExprRecipe): WasmValueType {
+  emitRecipeBody(recipe: ExprRecipe): WasmEmittedValue {
     switch (recipe.kind) {
       case "snapshot":
         return this.#cache.emitSnapshot(recipe.snapshot);

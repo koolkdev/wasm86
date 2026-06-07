@@ -9,11 +9,7 @@ import { registerAlias } from "#x86/registers.js";
 import { reg32, type Reg32 } from "#x86/types.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import {
-  wasmOpcode,
-  wasmValueType,
-  type WasmValueType
-} from "#wasm/encoder/types.js";
+import { wasmOpcode } from "#wasm/encoder/types.js";
 import {
   wasmBodyMemoryAccesses,
   wasmBodyOpcodes
@@ -25,15 +21,19 @@ import { createLocalRegisterTargetStorage } from "#wasm/emit/targets/locals/regi
 import { createStateMemoryFlagTargetStorage } from "#wasm/emit/targets/memory/flags.js";
 import { createStateMemoryRegisterTargetStorage } from "#wasm/emit/targets/memory/registers.js";
 import { createWasmTargetStorage } from "#wasm/emit/targets/storage.js";
+import {
+  wasmI32,
+  type WasmEmittedValue
+} from "#wasm/emit/values/types.js";
 import { WASM_STATE_OFFSETS } from "#wasm/state-layout.js";
 
 test("register local storage loads and stores only full 32-bit base registers", () => {
   const body = new RecordingBody();
   const storage = createLocalRegisterTargetStorage(body, registerLocals());
 
-  strictEqual(
+  deepStrictEqual(
     storage.emitLoad({ kind: "reg", reg: registerAlias("eax") }),
-    wasmValueType.i32
+    wasmI32(32)
   );
   storage.emitStore({ kind: "reg", reg: registerAlias("eax") }, constValue(body, 0x1234_5678));
 
@@ -141,8 +141,8 @@ test("source reader placements can mix local registers with state-backed flags",
     }
   });
 
-  strictEqual(sources.emitInput({ kind: "reg", reg: "eax" }), wasmValueType.i32);
-  strictEqual(sources.emitInput({ kind: "flag", flag: "ZF" }), wasmValueType.i32);
+  deepStrictEqual(sources.emitInput({ kind: "reg", reg: "eax" }), wasmI32(32));
+  deepStrictEqual(sources.emitInput({ kind: "flag", flag: "ZF" }), wasmI32(8));
   body.end();
 
   deepStrictEqual(body.ops, [
@@ -270,9 +270,9 @@ function registerLocals(): Readonly<Record<Reg32, number>> {
   ) as Record<Reg32, number>);
 }
 
-function constValue(body: WasmFunctionBodyEncoder, value: number): () => WasmValueType {
+function constValue(body: WasmFunctionBodyEncoder, value: number): () => WasmEmittedValue {
   return () => {
     body.i32Const(value);
-    return wasmValueType.i32;
+    return wasmI32(32);
   };
 }

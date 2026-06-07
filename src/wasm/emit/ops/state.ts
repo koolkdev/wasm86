@@ -1,24 +1,27 @@
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
-import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 import type { OperandWidth } from "#x86/types.js";
+import {
+  wasmI32,
+  type WasmEmittedValue
+} from "../values/types.js";
 import {
   emitI32Load,
   emitI32Store
 } from "./memory.js";
 
-export type WasmStateValueProducer = () => WasmValueType;
+export type WasmStateValueProducer = () => WasmEmittedValue;
 
 export function emitLoadStateI32(
   body: WasmFunctionBodyEncoder,
   offset: number,
   width: OperandWidth,
   signed = false
-): WasmValueType {
+): WasmEmittedValue {
   body.i32Const(0);
   emitI32Load(body, stateImmediate(offset, width), width, signed);
-  return wasmValueType.i32;
+  return wasmI32(signed ? 32 : width);
 }
 
 export function emitStoreStateI32(

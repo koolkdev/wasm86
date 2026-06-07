@@ -1,9 +1,9 @@
 import { assert } from "#common/assert.js";
 import type { RegisterStateTarget } from "#ir/block/state/targets.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
 import type { Reg32 } from "#x86/types.js";
 import type { WasmTargetStorage } from "../storage.js";
+import { wasmI32 } from "../../values/types.js";
 
 export type WasmRegisterLocalMap = Readonly<Record<Reg32, number>>;
 
@@ -16,7 +16,7 @@ export function createLocalRegisterTargetStorage(
       const base = fullBaseRegisterTarget(target);
 
       body.localGet(locals[base]);
-      return wasmValueType.i32;
+      return wasmI32(32);
     },
     emitStore: (target, emitValue) => {
       const base = fullBaseRegisterTarget(target);

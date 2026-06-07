@@ -41,6 +41,10 @@ import {
 } from "#wasm/encoder/types.js";
 import { createWasmValueCache } from "#wasm/emit/cache/locals/index.js";
 import { planWasmCache } from "#wasm/emit/cache/plan/index.js";
+import {
+  wasmI32,
+  type WasmEmittedValue
+} from "#wasm/emit/values/types.js";
 
 test("same-point dynamic-register-store value input establishes its snapshot with local.tee", () => {
   const { layout, values } = analyzeBlock([
@@ -225,10 +229,10 @@ function analyzeBlock(
   };
 }
 
-function inline(body: RecordingBody, label: string): () => WasmValueType {
+function inline(body: RecordingBody, label: string): () => WasmEmittedValue {
   return () => {
     body.ops.push({ kind: "inline", label });
-    return wasmValueType.i32;
+    return wasmI32(32);
   };
 }
 

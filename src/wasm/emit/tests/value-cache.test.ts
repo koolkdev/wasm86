@@ -39,6 +39,10 @@ import {
   createWasmValueCache,
   type WasmValueCache
 } from "#wasm/emit/cache/locals/index.js";
+import {
+  wasmI32,
+  type WasmEmittedValue
+} from "#wasm/emit/values/types.js";
 
 test("Wasm value cache emits local.tee for first selected use and local.get for later use", () => {
   const main = region(0);
@@ -53,6 +57,31 @@ test("Wasm value cache emits local.tee for first selected use and local.get for 
   cache.emitUse({ id: useB, recipe }, inline(body, "second"));
   cache.leaveRegion(main);
 
+  deepStrictEqual(body.ops, [
+    { kind: "inline", label: "first" },
+    { kind: "alloc", local: 0, type: wasmValueType.i32 },
+    { kind: "tee", local: 0 },
+    { kind: "get", local: 0 },
+    { kind: "free", local: 0 }
+  ]);
+  scratch.assertClear();
+});
+
+test("Wasm value cache preserves cached value width on local.get", () => {
+  const main = region(0);
+  const recipe = exprInputRecipe("eax");
+  const useA = useId(13);
+  const useB = useId(14);
+  const plan = cachePlan([cacheEntry(0, recipe)]);
+  const { body, cache, scratch } = createFixture(plan);
+
+  cache.enterRegion(main);
+  const first = cache.emitUse({ id: useA, recipe }, inline(body, "first", 8));
+  const second = cache.emitUse({ id: useB, recipe }, inline(body, "second", 32));
+  cache.leaveRegion(main);
+
+  deepStrictEqual(first, wasmI32(8));
+  deepStrictEqual(second, wasmI32(8));
   deepStrictEqual(body.ops, [
     { kind: "inline", label: "first" },
     { kind: "alloc", local: 0, type: wasmValueType.i32 },
@@ -346,10 +375,10 @@ function createFixture(
   };
 }
 
-function inline(body: RecordingBody, label: string): () => WasmValueType {
+function inline(body: RecordingBody, label: string, width: 8 | 16 | 32 = 32): () => WasmEmittedValue {
   return () => {
     body.ops.push({ kind: "inline", label });
-    return wasmValueType.i32;
+    return wasmI32(width);
   };
 }
 

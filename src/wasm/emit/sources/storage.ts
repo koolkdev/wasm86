@@ -1,11 +1,14 @@
 import { assert } from "#common/assert.js";
 import type { ExprInputSource } from "#ir/expr/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 import type { RegisterAlias } from "#x86/types.js";
 import { emitLoadPackedFlagFromStack } from "../ops/flags.js";
 import { emitLoadStateI32 } from "../ops/state.js";
 import type { WasmStateI32Placement } from "../state/placement.js";
+import {
+  wasmI32,
+  type WasmEmittedValue
+} from "../values/types.js";
 
 export type WasmReadableInputSource = Exclude<ExprInputSource, Readonly<{ kind: "def" }>>;
 
@@ -36,11 +39,11 @@ export type WasmRegisterAliasInputReadOptions = Readonly<{
 }>;
 
 export type WasmSourceReader = Readonly<{
-  emitInput(source: WasmReadableInputSource): WasmValueType;
+  emitInput(source: WasmReadableInputSource): WasmEmittedValue;
   tryEmitRegisterAliasInput(
     alias: RegisterAlias,
     options?: WasmRegisterAliasInputReadOptions
-  ): WasmValueType | undefined;
+  ): WasmEmittedValue | undefined;
 }>;
 
 export function createWasmSourceReader(
@@ -118,26 +121,24 @@ function emitSourceInput(
   body: WasmFunctionBodyEncoder,
   source: WasmReadableInputSource,
   placement: WasmSourceReadPlacement
-): WasmValueType {
+): WasmEmittedValue {
   switch (placement.kind) {
     case "local.i32":
       body.localGet(placement.local);
-      return wasmValueType.i32;
+      return wasmI32(32);
     case "state.i32":
       return emitLoadStateI32(body, placement.state.offset, placement.state.width);
     case "packed-flag-local": {
       assert(source.kind === "flag", `packed flag source placement cannot read ${source.kind} input`);
 
       body.localGet(placement.local);
-      emitLoadPackedFlag(body, source);
-      return wasmValueType.i32;
+      return emitLoadPackedFlag(body, source);
     }
     case "packed-flag-state": {
       assert(source.kind === "flag", `packed flag source placement cannot read ${source.kind} input`);
 
       emitLoadStateI32(body, placement.state.offset, placement.state.width);
-      emitLoadPackedFlag(body, source);
-      return wasmValueType.i32;
+      return emitLoadPackedFlag(body, source);
     }
   }
 }
@@ -145,6 +146,6 @@ function emitSourceInput(
 function emitLoadPackedFlag(
   body: WasmFunctionBodyEncoder,
   source: Extract<WasmReadableInputSource, Readonly<{ kind: "flag" }>>
-): void {
-  emitLoadPackedFlagFromStack(body, source.flag);
+): WasmEmittedValue {
+  return emitLoadPackedFlagFromStack(body, source.flag);
 }

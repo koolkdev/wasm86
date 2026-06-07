@@ -9,27 +9,27 @@ import type {
 } from "#ir/block/planning/values/index.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import type { WasmValueType } from "#wasm/encoder/types.js";
 import type { WasmCachePlan } from "../plan/index.js";
+import type { WasmEmittedValue } from "../../values/types.js";
 
 export type WasmValueCacheUse = Readonly<{
   id: LayoutValueUseId;
   recipe: ExprRecipe;
 }>;
 
-export type WasmValueCacheInlineEmitter = () => WasmValueType;
+export type WasmValueCacheInlineEmitter = () => WasmEmittedValue;
 
 export type WasmValueCache = Readonly<{
   enterRegion(region: LayoutRegion): void;
   leaveRegion(region: LayoutRegion): void;
-  emitUse(use: WasmValueCacheUse, emitInline: WasmValueCacheInlineEmitter): WasmValueType;
+  emitUse(use: WasmValueCacheUse, emitInline: WasmValueCacheInlineEmitter): WasmEmittedValue;
   emitRecipe(
     recipe: ExprRecipe,
     emitInline: WasmValueCacheInlineEmitter
-  ): WasmValueType;
+  ): WasmEmittedValue;
   isRecipeSelected(recipe: ExprRecipe): boolean;
   ensureSnapshot(snapshot: ValueSnapshotId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void;
-  emitSnapshot(snapshot: ValueSnapshotId): WasmValueType;
+  emitSnapshot(snapshot: ValueSnapshotId): WasmEmittedValue;
 }>;
 
 export type WasmValueCacheInput = Readonly<{

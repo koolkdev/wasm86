@@ -1,6 +1,5 @@
 import type { FlagStateTarget } from "#ir/block/state/targets.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
 import {
   emitLoadPackedFlagFromStack,
   emitStorePackedFlagToLocal
@@ -14,8 +13,7 @@ export function createLocalFlagTargetStorage(
   return {
     emitLoad: (target) => {
       body.localGet(aluFlagsLocal);
-      emitLoadPackedFlagFromStack(body, target.flag);
-      return wasmValueType.i32;
+      return emitLoadPackedFlagFromStack(body, target.flag);
     },
     emitStore: (target, emitValue) => {
       emitStorePackedFlagToLocal(body, aluFlagsLocal, target.flag, emitValue);
