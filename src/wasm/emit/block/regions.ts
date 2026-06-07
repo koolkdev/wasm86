@@ -5,14 +5,18 @@ import type { BlockEdgeId } from "#ir/block/planning/geometry/index.js";
 import type {
   BlockLayout,
   LayoutRegion,
-  LayoutStep
+  LayoutStep,
+  LayoutTimelineInput
 } from "#ir/block/planning/layout/index.js";
 import type {
   PlannedStateWrite,
   StateWriteId,
   StateWritePlan
 } from "#ir/block/planning/state-writes.js";
-import type { WasmLayoutActionEdge } from "./types.js";
+import type {
+  WasmLayoutActionEdge,
+  WasmLayoutExitPayload
+} from "./types.js";
 
 export type LayoutRegionIndex = Readonly<{
   main: LayoutRegion;
@@ -80,7 +84,8 @@ export function indexStateWrites(stateWrites: StateWritePlan): ReadonlyMap<State
 
 export function actionEdgesForSite(
   site: BlockActionSite,
-  regions: LayoutRegionIndex
+  regions: LayoutRegionIndex,
+  inputs: readonly LayoutTimelineInput[]
 ): readonly WasmLayoutActionEdge[] {
   return Object.freeze(actionExits(site).map((exit) => {
     const region = regions.edgeByExit.get(exit.id);
@@ -89,9 +94,30 @@ export function actionEdgesForSite(
 
     return Object.freeze({
       edge: region.edge,
-      exit
+      exit,
+      exitPayload: exitPayloadForEdge(region.edge, inputs)
     } satisfies WasmLayoutActionEdge);
   }));
+}
+
+function exitPayloadForEdge(
+  edge: BlockEdgeId,
+  inputs: readonly LayoutTimelineInput[]
+): WasmLayoutExitPayload {
+  let payloadInput: LayoutTimelineInput | undefined;
+
+  for (const input of inputs) {
+    if (input.use.kind !== "exit-payload" || input.use.edge !== edge) {
+      continue;
+    }
+
+    assert(payloadInput === undefined, `layout edge ${edge} has multiple exit payload inputs`);
+    payloadInput = input;
+  }
+
+  return payloadInput === undefined
+    ? Object.freeze({ kind: "none" } satisfies WasmLayoutExitPayload)
+    : Object.freeze({ kind: "input", input: payloadInput } satisfies WasmLayoutExitPayload);
 }
 
 function regionExit(region: LayoutRegion): BlockExit {

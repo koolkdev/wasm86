@@ -298,6 +298,24 @@ test("Wasm cache plan selects repeated address recipes", () => {
   deepStrictEqual(plan.entries.map((entry) => entry.uses.length), [2, 2, 2, 2, 2]);
 });
 
+test("Wasm cache plan ignores replay-only definition input expressions", () => {
+  const { geometry, layout, values } = analyzeBlock([
+    { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
+    { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c(1) },
+    { op: "get", dst: v(2), source: { kind: "mem", address: v(1) }, accessWidth: 32 },
+    { op: "get", dst: v(3), source: { kind: "mem", address: v(1) }, accessWidth: 32 }
+  ]);
+  const stepKinds = layout.regions.flatMap((region) =>
+    region.steps.map((step) => step.kind as string)
+  );
+  const plan = planWasmCache({ layout, values });
+
+  strictEqual(geometry.definitions.points.length, 2);
+  strictEqual(stepKinds.includes("definition"), false);
+  strictEqual(values.snapshots.length, 0);
+  deepStrictEqual(plan.entries, []);
+});
+
 test("Wasm cache plan output has no concrete local operation fields", () => {
   const { layout, values } = analyzeBlock([
     { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 },
@@ -322,6 +340,7 @@ function analyzeBlock(
   block: IrBlock,
   input: Omit<BlockWalkInput, "block"> = {}
 ): Readonly<{
+  geometry: ReturnType<typeof buildTimelineGeometry>;
   layout: BlockLayout;
   values: ValuePlan;
 }> {
@@ -340,6 +359,7 @@ function analyzeBlock(
   const placement = analyzePlacementPlan({ geometry, facts, values, stateWrites });
 
   return {
+    geometry,
     values,
     layout: buildBlockLayout({
       walked,

@@ -1,5 +1,9 @@
+import { assert } from "#common/assert.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import {
+  wasmBranchHint,
+  type WasmFunctionBodyEncoder
+} from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
 import type { OperandWidth } from "#x86/types.js";
 import {
@@ -9,6 +13,9 @@ import {
 
 export type WasmMemoryAddressProducer = () => WasmEmittedValue;
 export type WasmMemoryValueProducer = () => WasmEmittedValue;
+export type WasmMemoryFaultEmitter = () => void;
+
+const wasmPageShift = 16;
 
 export function wasmMemoryAlignForWidth(width: OperandWidth): 0 | 1 | 2 {
   switch (width) {
@@ -41,6 +48,33 @@ export function emitStoreGuestMemoryUnchecked(
   emitAddress();
   emitValue();
   emitI32Store(body, guestImmediate(width), width);
+}
+
+export function emitStoreGuestMemoryFromStackUnchecked(
+  body: WasmFunctionBodyEncoder,
+  width: OperandWidth
+): void {
+  emitI32Store(body, guestImmediate(width), width);
+}
+
+export function emitGuardGuestMemoryRange(
+  body: WasmFunctionBodyEncoder,
+  addressLocal: number,
+  byteLength: number,
+  emitFault: WasmMemoryFaultEmitter
+): void {
+  assert(byteLength > 0, `Wasm memory guard byte length must be positive, got ${byteLength}`);
+
+  emitGuestMemoryByteLength(body);
+  body.i32Const(byteLength).i32LtU();
+
+  body.localGet(addressLocal);
+  emitLastValidGuestAddress(body, byteLength);
+  body.i32GtU();
+
+  body.i32Or().ifBlock(wasmBranchHint.unlikely);
+  emitFault();
+  body.endBlock();
 }
 
 export function emitI32Load(
@@ -94,4 +128,19 @@ function guestImmediate(width: OperandWidth): WasmMemoryImmediate {
     memoryIndex: wasmMemoryIndex.guest,
     offset: 0
   };
+}
+
+function emitLastValidGuestAddress(
+  body: WasmFunctionBodyEncoder,
+  byteLength: number
+): void {
+  emitGuestMemoryByteLength(body);
+  body.i32Const(byteLength).i32Sub();
+}
+
+function emitGuestMemoryByteLength(body: WasmFunctionBodyEncoder): void {
+  body
+    .memorySize(wasmMemoryIndex.guest)
+    .i32Const(wasmPageShift)
+    .i32Shl();
 }

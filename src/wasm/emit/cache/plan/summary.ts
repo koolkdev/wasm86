@@ -40,7 +40,6 @@ function summarizeStep(
   snapshotRecipeIds: ReadonlyMap<ValueSnapshotId, ExprRecipeId>
 ): void {
   switch (step.kind) {
-    case "definition":
     case "action-inputs":
     case "action":
       for (const input of step.inputs) {

@@ -81,7 +81,7 @@ test("BlockLayout orders common-ancestor writes before the main action that can 
 });
 
 test("BlockLayout emits establish-snapshot steps and wraps backend inputs as timeline inputs", () => {
-  const { layout, values } = analyzeBlock([
+  const { geometry, layout, values } = analyzeBlock([
     { op: "get", dst: v(0), source: { kind: "mem", address: c(0x1000) }, accessWidth: 32 },
     { op: "set", target: { kind: "mem", address: c(0x2000) }, value: c(1), accessWidth: 32 },
     { op: "set", target: { kind: "mem", address: c(0x3000) }, value: v(0), accessWidth: 32 }
@@ -94,18 +94,17 @@ test("BlockLayout emits establish-snapshot steps and wraps backend inputs as tim
   const firstStoreIndex = main.steps.findIndex((step) =>
     step.kind === "action" && step.site.action.kind === "memoryStore"
   );
-  const definition = onlyStep(main, "definition");
   const storeInputs = main.steps.filter((step): step is Extract<LayoutStep, { kind: "action-inputs" }> =>
     step.kind === "action-inputs" && step.site.action.kind === "memoryStore"
   );
 
+  strictEqual(geometry.definitions.points.length, 1);
+  strictEqual(main.steps.map((step) => step.kind as string).includes("definition"), false);
   strictEqual(values.snapshots.length, 1);
   strictEqual(snapshotIndex >= 0, true);
   strictEqual(firstStoreInputIndex >= 0, true);
   strictEqual(firstStoreInputIndex < snapshotIndex, true);
   strictEqual(snapshotIndex < firstStoreIndex, true);
-  deepStrictEqual(definition.inputs.map((input) => input.use.kind), ["definition-input"]);
-  deepStrictEqual(definition.inputs.map((input) => input.use.role), ["address"]);
   deepStrictEqual(storeInputs[1]!.inputs.map((input) => input.use.role), ["address", "value"]);
   strictEqual(storeInputs[1]!.inputs[1]!.recipe.kind, "snapshot");
 });
@@ -218,18 +217,6 @@ type EdgeLayoutRegion = LayoutRegion & Readonly<{ path: EdgePath }>;
 
 function hasWrite(region: LayoutRegion, write: PlannedStateWrite): boolean {
   return region.steps.some((step) => step.kind === "write-state" && step.satisfies.includes(write.id));
-}
-
-function onlyStep<TKind extends LayoutStep["kind"]>(
-  region: LayoutRegion,
-  kind: TKind
-): Extract<LayoutStep, { kind: TKind }> {
-  const steps = region.steps.filter((step): step is Extract<LayoutStep, { kind: TKind }> =>
-    step.kind === kind
-  );
-
-  strictEqual(steps.length, 1);
-  return steps[0]!;
 }
 
 function only<TValue>(values: readonly TValue[]): TValue {

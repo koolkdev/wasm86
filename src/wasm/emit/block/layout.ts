@@ -1,6 +1,5 @@
 import { assert } from "#common/assert.js";
 import type { BlockActionSite } from "#ir/block/timeline.js";
-import type { BlockEdgeId } from "#ir/block/planning/geometry/index.js";
 import type {
   LayoutExprUse,
   LayoutRegion,
@@ -20,6 +19,7 @@ import {
   type LayoutRegionIndex
 } from "./regions.js";
 import type {
+  WasmLayoutActionEdge,
   WasmLayoutDriver,
   WasmLayoutDriverInput
 } from "./types.js";
@@ -28,13 +28,12 @@ export type {
   WasmActionEffectEmitInput,
   WasmActionEmitter,
   WasmActionInputsEmitInput,
-  WasmDefinitionEmitter,
-  WasmDefinitionEmitInput,
   WasmExitEmitter,
   WasmExitEmitInput,
   WasmLayoutActionEdge,
   WasmLayoutDriver,
   WasmLayoutDriverInput,
+  WasmLayoutExitPayload,
   WasmLayoutInputEmitter,
   WasmStateWriteEmitter,
   WasmStateWriteEmitInput
@@ -61,17 +60,21 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
   }
 
   emit(): void {
-    this.#emitRegion(this.#regions.main);
+    this.#emitRegion(this.#regions.main, undefined);
     this.#assertEveryEdgeRegionWasEmitted();
   }
 
-  #emitRegion(region: LayoutRegion): void {
+  #emitRegion(region: LayoutRegion, entryInput: LayoutTimelineInput | undefined): void {
     assert(!this.#emittedRegions.has(region.id), `layout region ${region.id} was emitted more than once`);
 
     this.#emittedRegions.add(region.id);
     this.#input.cache.enterRegion(region);
 
     try {
+      if (entryInput !== undefined) {
+        this.#emitTimelineInput(entryInput);
+      }
+
       for (const step of region.steps) {
         this.#emitStep(step);
       }
@@ -82,13 +85,6 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
 
   #emitStep(step: LayoutStep): void {
     switch (step.kind) {
-      case "definition":
-        this.#input.definitions.emitDefinition({
-          site: step.site,
-          inputs: step.inputs,
-          emitInput: (input) => this.#emitTimelineInput(input)
-        });
-        return;
       case "action-inputs":
         this.#input.actions.emitActionInputs({
           site: step.site,
@@ -109,9 +105,7 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
       case "action":
         this.#input.actions.emitActionEffect({
           site: step.site,
-          inputs: step.inputs,
-          edges: actionEdgesForSite(step.site, this.#regions),
-          emitInput: (input) => this.#emitTimelineInput(input),
+          edges: actionEdgesForSite(step.site, this.#regions, step.inputs),
           emitEdge: (edge) => this.#emitActionEdge(step.site, edge)
         });
         return;
@@ -125,12 +119,15 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
     const write = this.#writeFor(step.emit);
     const value = step.value;
 
+    const satisfies = step.satisfies.map((writeId) => this.#writeFor(writeId));
+
     this.#input.stateWriteEmitter.emitStateWrite({
       write,
-      satisfies: step.satisfies.map((writeId) => this.#writeFor(writeId)),
-      ...(value === undefined
-        ? {}
-        : { emitValue: () => this.#emitExprUse(value) })
+      satisfies,
+      emitValue: () => {
+        assert(value !== undefined, `layout state write ${write.id} has no value expression`);
+        return this.#emitExprUse(value);
+      }
     });
   }
 
@@ -148,16 +145,20 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
     );
   }
 
-  #emitActionEdge(site: BlockActionSite, edge: BlockEdgeId): void {
-    const allowed = actionEdgesForSite(site, this.#regions).some((actionEdge) => actionEdge.edge === edge);
+  #emitActionEdge(site: BlockActionSite, edge: WasmLayoutActionEdge): void {
+    const allowed = actionEdgesForSite(site, this.#regions, []).some((actionEdge) => actionEdge.edge === edge.edge);
 
-    assert(allowed, `action ${site.action.kind} cannot emit non-owned block edge ${edge}`);
+    assert(allowed, `action ${site.action.kind} cannot emit non-owned block edge ${edge.edge}`);
 
-    const edgeRegion = this.#regions.edgeById.get(edge);
+    const edgeRegion = this.#regions.edgeById.get(edge.edge);
 
-    assert(edgeRegion !== undefined, `layout has no region for block edge ${edge}`);
+    assert(edgeRegion !== undefined, `layout has no region for block edge ${edge.edge}`);
+    assert(edgeRegion.exit === edge.exit, `layout edge ${edge.edge} is attached to the wrong exit`);
 
-    this.#emitRegion(edgeRegion.region);
+    this.#emitRegion(
+      edgeRegion.region,
+      edge.exitPayload.kind === "input" ? edge.exitPayload.input : undefined
+    );
   }
 
   #writeFor(write: StateWriteId): PlannedStateWrite {

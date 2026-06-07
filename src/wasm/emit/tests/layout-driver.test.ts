@@ -40,7 +40,7 @@ import {
   type BlockWalkInput,
   walkExpressionBlock
 } from "#ir/block/walk/index.js";
-import { exprConst } from "#ir/expr/builders.js";
+import { exprBinary, exprConst } from "#ir/expr/builders.js";
 import { exprChildren } from "#ir/expr/children.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import type {
@@ -60,7 +60,6 @@ import {
   type WasmActionEffectEmitInput,
   type WasmActionEmitter,
   type WasmActionInputsEmitInput,
-  type WasmDefinitionEmitter,
   type WasmExitEmitter,
   type WasmStateWriteEmitter
 } from "#wasm/emit/block/layout.js";
@@ -97,7 +96,7 @@ test("Wasm layout driver emits branch edge regions inside the owning if and else
   const notTakenWrite = indexOf(ops, "state-write", "ebx");
   const takenExit = indexOf(ops, "exit", "branchTaken");
   const notTakenExit = indexOf(ops, "exit", "branchNotTaken");
-  const notTakenPayload = indexOf(ops, "input", "branch:exit:target:1");
+  const notTakenPayload = indexOf(ops, "inline", "branch:exit:target:1");
 
   strictEqual(ifIndex >= 0, true);
   strictEqual(elseIndex > ifIndex, true);
@@ -118,6 +117,28 @@ test("Wasm layout driver emits branch edge regions inside the owning if and else
   scratch.assertClear();
 });
 
+test("Wasm layout driver owns selected branch payload locals by edge region", () => {
+  const branch = sharedPayloadBranchLayoutFixture();
+  const { ops, scratch } = emitFixture({
+    layout: branch.layout,
+    stateWrites: branch.stateWrites,
+    values: branch.values,
+    cachePlan: branch.cachePlan
+  });
+  const elseIndex = indexOf(ops, "else");
+  const takenPayload = indexOf(ops, "inline", "branch:exit:target:0");
+  const notTakenPayload = indexOf(ops, "inline", "branch:exit:target:1");
+  const takenTee = ops.findIndex((op, index) => op.kind === "tee" && index > takenPayload && index < elseIndex);
+  const notTakenTee = ops.findIndex((op, index) => op.kind === "tee" && index > notTakenPayload);
+
+  strictEqual(takenPayload >= 0, true);
+  strictEqual(takenTee > takenPayload, true);
+  strictEqual(notTakenPayload > elseIndex, true);
+  strictEqual(notTakenTee > notTakenPayload, true);
+  strictEqual(ops.some((op) => op.kind === "get"), false);
+  scratch.assertClear();
+});
+
 test("Wasm layout driver emits memory-fault edge regions inside the guard fault path", () => {
   const guard = memoryGuardLayoutFixture();
   const { ops, scratch } = emitFixture({
@@ -129,7 +150,11 @@ test("Wasm layout driver emits memory-fault edge regions inside the guard fault 
 
   const guardIf = indexOf(ops, "if");
   const guardEnd = indexOf(ops, "end");
-  const faultPayload = indexOf(ops, "input", "memoryGuard:exit:address:0");
+  const faultPayload = ops.findIndex((op, index) =>
+    op.kind === "inline" &&
+    index > guardIf &&
+    index < guardEnd
+  );
   const faultWrite = indexOf(ops, "state-write", "eax");
   const faultExit = indexOf(ops, "exit", "memoryFault");
 
@@ -266,28 +291,6 @@ class RecordingRecipeEmitter implements WasmRecipeEmitter {
   }
 }
 
-class RecordingDefinitionEmitter implements WasmDefinitionEmitter {
-  readonly #ops: RecordedOp[];
-
-  constructor(ops: RecordedOp[]) {
-    this.#ops = ops;
-  }
-
-  emitDefinition(input: Parameters<WasmDefinitionEmitter["emitDefinition"]>[0]): void {
-    for (const layoutInput of input.inputs) {
-      this.#emitInput(input.site.definition.kind, layoutInput, input.emitInput);
-    }
-  }
-
-  #emitInput(prefix: string, input: LayoutTimelineInput, emitInput: (input: LayoutTimelineInput) => WasmEmittedValue): void {
-    const label = `${prefix}:${input.use.kind}:${input.use.role}`;
-
-    this.#ops.push({ kind: "input", label, use: input });
-    recipeLabels.set(input.recipe, label);
-    emitInput(input);
-  }
-}
-
 class RecordingActionEmitter implements WasmActionEmitter {
   readonly #ops: RecordedOp[];
   readonly #body: RecordingBody;
@@ -316,7 +319,6 @@ class RecordingActionEmitter implements WasmActionEmitter {
       case "jump":
       case "hostTrap":
       case "fallthrough":
-        this.#emitPayloadInputs(input, edgeForExit(input, input.site.action.exit));
         input.emitEdge(edgeForExit(input, input.site.action.exit));
         return;
       case "memoryStore":
@@ -332,10 +334,8 @@ class RecordingActionEmitter implements WasmActionEmitter {
     const notTaken = edgeForExit(input, input.site.action.notTaken);
 
     this.#body.ifBlock();
-    this.#emitPayloadInputs(input, taken);
     input.emitEdge(taken);
     this.#body.elseBlock();
-    this.#emitPayloadInputs(input, notTaken);
     input.emitEdge(notTaken);
     this.#body.endBlock();
   }
@@ -346,17 +346,8 @@ class RecordingActionEmitter implements WasmActionEmitter {
     const fault = edgeForExit(input, input.site.action.faultExit);
 
     this.#body.ifBlock();
-    this.#emitPayloadInputs(input, fault);
     input.emitEdge(fault);
     this.#body.endBlock();
-  }
-
-  #emitPayloadInputs(input: WasmActionEffectEmitInput, edge: BlockEdgeId): void {
-    for (const layoutInput of input.inputs) {
-      if (layoutInput.use.kind === "exit-payload" && layoutInput.use.edge === edge) {
-        this.#emitInput(input.site.action.kind, layoutInput, input.emitInput);
-      }
-    }
   }
 
   #emitInput(prefix: string, input: LayoutTimelineInput, emitInput: (input: LayoutTimelineInput) => WasmEmittedValue): void {
@@ -370,11 +361,14 @@ class RecordingActionEmitter implements WasmActionEmitter {
   }
 }
 
-function edgeForExit(input: WasmActionEffectEmitInput, exit: BlockExit): BlockEdgeId {
+function edgeForExit(
+  input: WasmActionEffectEmitInput,
+  exit: BlockExit
+): WasmActionEffectEmitInput["edges"][number] {
   const edge = input.edges.find((edge) => edge.exit === exit);
 
   ok(edge !== undefined, `missing test edge for exit ${exit.id}`);
-  return edge.edge;
+  return edge;
 }
 
 class RecordingStateWriteEmitter implements WasmStateWriteEmitter {
@@ -385,7 +379,9 @@ class RecordingStateWriteEmitter implements WasmStateWriteEmitter {
   }
 
   emitStateWrite(input: Parameters<WasmStateWriteEmitter["emitStateWrite"]>[0]): void {
-    input.emitValue?.();
+    if (input.write.value !== undefined) {
+      input.emitValue();
+    }
 
     this.#ops.push({
       kind: "state-write",
@@ -426,13 +422,13 @@ function emitFixture(input: Readonly<{
   });
 
   recipeLabels = new WeakMap<ExprRecipe, string>();
+  labelLayoutInputs(input.layout);
 
   emitWasmBlockLayout({
     layout: input.layout,
     stateWrites: input.stateWrites,
     cache,
     recipes: new RecordingRecipeEmitter(body.ops),
-    definitions: new RecordingDefinitionEmitter(body.ops),
     actions: new RecordingActionEmitter(body.ops, body),
     stateWriteEmitter: new RecordingStateWriteEmitter(body.ops),
     exits: new RecordingExitEmitter(body.ops)
@@ -442,6 +438,31 @@ function emitFixture(input: Readonly<{
     ops: body.ops,
     scratch
   };
+}
+
+function labelLayoutInputs(layout: BlockLayout): void {
+  for (const region of layout.regions) {
+    for (const step of region.steps) {
+      switch (step.kind) {
+        case "action-inputs":
+        case "action":
+          for (const input of step.inputs) {
+            recipeLabels.set(input.recipe, layoutInputLabel(step.site.action.kind, input));
+          }
+          break;
+        case "establish-snapshot":
+        case "write-state":
+        case "exit":
+          break;
+      }
+    }
+  }
+}
+
+function layoutInputLabel(prefix: string, input: LayoutTimelineInput): string {
+  return input.use.kind === "exit-payload"
+    ? `${prefix}:exit:${input.use.role}:${input.use.edge}`
+    : `${prefix}:${input.use.kind}:${input.use.role}`;
 }
 
 type ManualLayoutFixture = Readonly<{
@@ -508,6 +529,52 @@ function branchLayoutFixture(): ManualLayoutFixture {
     stateWrites: stateWritePlan([takenWrite, notTakenWrite]),
     values: recipeValues([condition, takenTarget, notTakenTarget]),
     cachePlan: cachePlan([cacheEntry(0, condition)])
+  };
+}
+
+function sharedPayloadBranchLayoutFixture(): ManualLayoutFixture {
+  const placement = pointPlacement(0);
+  const taken = blockExit(0, "branchTaken", { kind: "branch", direction: "taken", target: ce(0x40) });
+  const notTaken = blockExit(1, "branchNotTaken", { kind: "branch", direction: "notTaken" });
+  const site: BlockActionSite = Object.freeze({
+    kind: "action",
+    at: placement,
+    action: Object.freeze({
+      kind: "branch",
+      at: opSite(0),
+      condition: ce(1),
+      takenTarget: ce(0x40),
+      continuation: Object.freeze({ kind: "continuation", value: ce(0x40) }),
+      taken,
+      notTaken
+    })
+  });
+  const condition = exprRecipe(exprConst(1));
+  const takenTarget = exprRecipe(exprBinary("add", exprConst(0x20), exprConst(0x20)));
+  const notTakenTarget = exprRecipe(exprBinary("add", exprConst(0x20), exprConst(0x20)));
+  const takenEdge = edgeId(0);
+  const notTakenEdge = edgeId(1);
+  const conditionInput = timelineInput(0, condition, actionInputUse(0, site, "condition"));
+  const takenInput = timelineInput(1, takenTarget, exitPayloadUse(1, takenEdge, "target"));
+  const notTakenInput = timelineInput(2, notTakenTarget, exitPayloadUse(2, notTakenEdge, "target"));
+  const layout = blockLayout([
+    region(0, { kind: "main" }, [
+      Object.freeze({ kind: "action-inputs", site, inputs: Object.freeze([conditionInput]) }),
+      Object.freeze({ kind: "action", site, inputs: Object.freeze([takenInput, notTakenInput]) })
+    ]),
+    region(1, { kind: "edge", edge: takenEdge }, [
+      Object.freeze({ kind: "exit", exit: taken })
+    ]),
+    region(2, { kind: "edge", edge: notTakenEdge }, [
+      Object.freeze({ kind: "exit", exit: notTaken })
+    ])
+  ]);
+
+  return {
+    layout,
+    stateWrites: stateWritePlan([]),
+    values: recipeValues([condition, takenTarget, notTakenTarget]),
+    cachePlan: cachePlan([cacheEntry(0, takenTarget)])
   };
 }
 

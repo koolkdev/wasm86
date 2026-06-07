@@ -163,11 +163,6 @@ function emitMainLayout(
 
   for (const step of main.steps) {
     switch (step.kind) {
-      case "definition":
-        for (const input of step.inputs) {
-          cache.emitUse(input, inline(body, `input:${step.kind}:${input.use.role}`));
-        }
-        break;
       case "action-inputs":
         for (const input of step.inputs) {
           cache.emitUse(input, inline(body, `input:${step.site.action.kind}:${input.use.role}`));

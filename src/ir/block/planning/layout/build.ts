@@ -1,5 +1,5 @@
 import type { BlockExit } from "#ir/block/exits.js";
-import type { BlockActionSite, BlockDefinitionSite } from "#ir/block/timeline.js";
+import type { BlockActionSite } from "#ir/block/timeline.js";
 import type { WalkedBlock } from "#ir/block/walk/types.js";
 import type {
   ExprNeedId
@@ -52,7 +52,6 @@ export type LayoutTimelineInput = Readonly<{
 }>;
 
 export type LayoutStep =
-  | Readonly<{ kind: "definition"; site: BlockDefinitionSite; inputs: readonly LayoutTimelineInput[] }>
   | Readonly<{ kind: "action-inputs"; site: BlockActionSite; inputs: readonly LayoutTimelineInput[] }>
   | Readonly<{ kind: "action"; site: BlockActionSite; inputs: readonly LayoutTimelineInput[] }>
   | Readonly<{ kind: "establish-snapshot"; snapshot: ValueSnapshotId; recipe: ExprRecipe }>
@@ -146,17 +145,11 @@ class BlockLayoutBuilder {
 
   #addSemanticSteps(): void {
     for (const site of this.#input.walked.timeline) {
-      const point = this.#sitePoint(site);
-
       if (site.kind === "definition") {
-        this.#addEvent(point, SEMANTIC_TIER, Object.freeze({
-          kind: "definition",
-          site,
-          inputs: Object.freeze(this.#definitionInputs(site))
-        } satisfies LayoutStep));
         continue;
       }
 
+      const point = this.#sitePoint(site);
       const actionInputs = this.#actionInputs(site);
 
       if (actionInputs.length > 0) {
@@ -173,11 +166,6 @@ class BlockLayoutBuilder {
         inputs: Object.freeze(this.#actionEffectInputs(site))
       } satisfies LayoutStep));
     }
-  }
-
-  #definitionInputs(site: BlockDefinitionSite): readonly LayoutTimelineInput[] {
-    return this.#timelineUsesForSite(site)
-      .map((use) => this.#timelineInput(use));
   }
 
   #actionInputs(site: BlockActionSite): readonly LayoutTimelineInput[] {
@@ -260,12 +248,12 @@ class BlockLayoutBuilder {
       .map((event) => event.step);
   }
 
-  #sitePoint(site: BlockDefinitionSite | BlockActionSite): ProgramPoint {
+  #sitePoint(site: BlockActionSite): ProgramPoint {
     return this.#input.geometry.points.bySite.get(site)?.at ??
       fail("layout references missing timeline site points");
   }
 
-  #timelineUsesForSite(site: BlockDefinitionSite | BlockActionSite): readonly TimelineValueUse[] {
+  #timelineUsesForSite(site: BlockActionSite): readonly TimelineValueUse[] {
     return this.#input.timelineUses.bySite.get(site) ??
       fail("layout references missing timeline value uses for site");
   }

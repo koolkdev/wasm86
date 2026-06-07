@@ -2,7 +2,6 @@ import type { BlockAction } from "#ir/block/actions.js";
 import type { BlockExit } from "#ir/block/exits.js";
 import type {
   BlockActionSite,
-  BlockDefinitionSite,
   BlockTimelineSite
 } from "#ir/block/timeline.js";
 import type { WalkedBlock } from "#ir/block/walk/types.js";
@@ -17,19 +16,10 @@ import type {
 
 export type TimelineValueUseId = number & { readonly __timelineValueUseId: unique symbol };
 
-export type TimelineDefinitionInputRole = "address" | "index";
 export type TimelineActionInputRole = "address" | "value" | "index" | "condition";
 export type TimelineExitPayloadRole = "address" | "target" | "vector";
 
 export type TimelineValueUse =
-  | Readonly<{
-      id: TimelineValueUseId;
-      kind: "definition-input";
-      site: BlockDefinitionSite;
-      role: TimelineDefinitionInputRole;
-      expr: ExprRef;
-      point: ProgramPoint;
-    }>
   | Readonly<{
       id: TimelineValueUseId;
       kind: "action-input";
@@ -100,24 +90,9 @@ function siteTimelineValueUses(
 ): readonly TimelineValueUse[] {
   switch (site.kind) {
     case "definition":
-      return definitionUses(site, geometry, ids);
+      return [];
     case "action":
       return actionUses(site, geometry, ids);
-  }
-}
-
-function definitionUses(
-  site: BlockDefinitionSite,
-  geometry: TimelineGeometry,
-  ids: TimelineValueUseIds
-): readonly TimelineValueUse[] {
-  const point = definitionPoint(site, geometry).point;
-
-  switch (site.definition.kind) {
-    case "memoryLoad":
-      return [definitionInput(ids.next(), site, site.definition.address, point, "address")];
-    case "dynamicRegisterLoad":
-      return [definitionInput(ids.next(), site, site.definition.index, point, "index")];
   }
 }
 
@@ -216,23 +191,6 @@ function branchUses(
     ];
 }
 
-function definitionInput(
-  id: TimelineValueUseId,
-  site: BlockDefinitionSite,
-  expr: ExprRef,
-  point: ProgramPoint,
-  role: TimelineDefinitionInputRole
-): TimelineValueUse {
-  return Object.freeze({
-    id,
-    kind: "definition-input",
-    site,
-    expr,
-    point,
-    role
-  } satisfies TimelineValueUse);
-}
-
 function actionInput(
   id: TimelineValueUseId,
   site: BlockActionSite,
@@ -275,23 +233,6 @@ function sitePoint(site: BlockTimelineSite, geometry: TimelineGeometry): Program
   }
 
   return points.at;
-}
-
-function definitionPoint(
-  site: BlockDefinitionSite,
-  geometry: TimelineGeometry
-): TimelineGeometry["definitions"]["points"][number] {
-  const point = geometry.definitions.byDefinition.get(site.definition.id);
-
-  if (point === undefined) {
-    throw new Error(`timeline geometry is missing definition point ${site.definition.id}`);
-  }
-
-  if (point.site !== site) {
-    throw new Error(`timeline geometry definition point ${site.definition.id} is attached to the wrong site`);
-  }
-
-  return point;
 }
 
 function exitPoint(

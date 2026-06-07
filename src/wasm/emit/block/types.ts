@@ -1,8 +1,5 @@
 import type { BlockExit } from "#ir/block/exits.js";
-import type {
-  BlockActionSite,
-  BlockDefinitionSite
-} from "#ir/block/timeline.js";
+import type { BlockActionSite } from "#ir/block/timeline.js";
 import type { BlockEdgeId } from "#ir/block/planning/geometry/index.js";
 import type {
   BlockLayout,
@@ -21,17 +18,12 @@ export type WasmLayoutInputEmitter = (input: LayoutTimelineInput) => WasmEmitted
 export type WasmLayoutActionEdge = Readonly<{
   edge: BlockEdgeId;
   exit: BlockExit;
+  exitPayload: WasmLayoutExitPayload;
 }>;
 
-export type WasmDefinitionEmitter = Readonly<{
-  emitDefinition(input: WasmDefinitionEmitInput): void;
-}>;
-
-export type WasmDefinitionEmitInput = Readonly<{
-  site: BlockDefinitionSite;
-  inputs: readonly LayoutTimelineInput[];
-  emitInput: WasmLayoutInputEmitter;
-}>;
+export type WasmLayoutExitPayload =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{ kind: "input"; input: LayoutTimelineInput }>;
 
 export type WasmActionEmitter = Readonly<{
   emitActionInputs(input: WasmActionInputsEmitInput): void;
@@ -46,10 +38,8 @@ export type WasmActionInputsEmitInput = Readonly<{
 
 export type WasmActionEffectEmitInput = Readonly<{
   site: BlockActionSite;
-  inputs: readonly LayoutTimelineInput[];
   edges: readonly WasmLayoutActionEdge[];
-  emitInput: WasmLayoutInputEmitter;
-  emitEdge(edge: BlockEdgeId): void;
+  emitEdge(edge: WasmLayoutActionEdge): void;
 }>;
 
 export type WasmStateWriteEmitter = Readonly<{
@@ -59,7 +49,7 @@ export type WasmStateWriteEmitter = Readonly<{
 export type WasmStateWriteEmitInput = Readonly<{
   write: PlannedStateWrite;
   satisfies: readonly PlannedStateWrite[];
-  emitValue?: () => WasmEmittedValue;
+  emitValue: () => WasmEmittedValue;
 }>;
 
 export type WasmExitEmitter = Readonly<{
@@ -75,7 +65,6 @@ export type WasmLayoutDriverInput = Readonly<{
   stateWrites: StateWritePlan;
   cache: WasmValueCache;
   recipes: WasmRecipeEmitter;
-  definitions: WasmDefinitionEmitter;
   actions: WasmActionEmitter;
   stateWriteEmitter: WasmStateWriteEmitter;
   exits: WasmExitEmitter;

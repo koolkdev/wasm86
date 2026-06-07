@@ -71,7 +71,7 @@ test("memory guard creates action-site and fault-exit address needs", () => {
   strictEqual(needs[1]!.point, guard.faultExitPoint.point);
 });
 
-test("memory load creates address definition-input need", () => {
+test("memory load definition does not create a linear address need", () => {
   const { geometry, timelineUses, needs } = analyzeBlock([
     {
       op: "get",
@@ -80,16 +80,10 @@ test("memory load creates address definition-input need", () => {
       accessWidth: 32
     }
   ]);
-  const load = geometry.definitions.points[0]!;
 
-  deepStrictEqual(needSummaries(needs, timelineUses), [
-    { origin: { kind: "definition-input", role: "address" }, expr: exprConst(0x1000) }
-  ]);
-  const addressNeed = needs[0]!;
-  const addressUse = timelineUseForNeed(addressNeed, timelineUses);
-
-  strictEqual(addressUse.kind === "definition-input" ? addressUse.site : undefined, load.site);
-  strictEqual(addressNeed.point, load.point);
+  strictEqual(geometry.definitions.points.length, 1);
+  deepStrictEqual(timelineUses.all, []);
+  deepStrictEqual(needSummaries(needs, timelineUses), []);
 });
 
 test("dynamic register load and store create index and value needs", () => {
@@ -114,17 +108,15 @@ test("dynamic register load and store create index and value needs", () => {
       ]
     })
   });
-  const load = geometry.definitions.points[0]!;
   const store = geometry.registers.dynamicStores[0]!;
 
   deepStrictEqual(needSummaries(needs, timelineUses), [
-    { origin: { kind: "definition-input", role: "index" }, expr: exprConst(3) },
     { origin: { kind: "action-input", role: "index" }, expr: exprConst(4) },
     { origin: { kind: "action-input", role: "value" }, expr: exprConst(0x55) }
   ]);
-  strictEqual(needs[0]!.point, load.point);
+  strictEqual(geometry.definitions.points.length, 1);
+  strictEqual(needs[0]!.point, store.point);
   strictEqual(needs[1]!.point, store.point);
-  strictEqual(needs[2]!.point, store.point);
 });
 
 test("branch creates condition and path-specific exit payload needs", () => {
@@ -296,8 +288,6 @@ function originSummary(
       }
 
       switch (use.kind) {
-        case "definition-input":
-          return { kind: use.kind, role: use.role };
         case "action-input":
           return { kind: use.kind, role: use.role };
         case "exit-payload":
