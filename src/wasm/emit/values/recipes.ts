@@ -88,6 +88,7 @@ class WasmRecipeEmitterState implements WasmRecipeEmitter {
           {
             definitions: this.#definitions,
             emitRecipe: (child) => this.emitRecipe(child),
+            isRecipeSelected: (child) => this.#cache.isRecipeSelected(child),
             sources: this.#sources
           }
         );

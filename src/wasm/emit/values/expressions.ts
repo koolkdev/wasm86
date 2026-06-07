@@ -8,9 +8,12 @@ import {
   type WasmValueType
 } from "#wasm/encoder/types.js";
 import { i32 } from "#x86/numeric.js";
+import { registerAliasesByWidth } from "#x86/registers.js";
 import {
   widthMask,
-  type OperandWidth
+  type OperandWidth,
+  type Reg32,
+  type RegisterAlias
 } from "#x86/types.js";
 import { emitI32BinaryOp } from "../ops/bit-ops.js";
 import {
@@ -39,6 +42,7 @@ export type WasmExprRecipeEmitter = Readonly<{
 export type WasmCompositeExprContext = Readonly<{
   definitions: WasmDefinitionRecipeEmitter;
   emitRecipe(recipe: ExprRecipe): WasmValueType;
+  isRecipeSelected(recipe: ExprRecipe): boolean;
   sources: WasmSourceReader;
 }>;
 
@@ -81,14 +85,9 @@ export function emitCompositeExpr(
       body.select();
       return wasmValueType.i32;
     case "project":
-      children.emit("value");
-      emitMaskI32ToWidth(body, recipe.expr.width);
-      return wasmValueType.i32;
+      return emitProjectExpr(body, recipe, children, context);
     case "bits":
-      children.emit("value");
-      emitShiftRight(body, recipe.expr.offset);
-      emitMaskI32ToWidth(body, recipe.expr.width);
-      return wasmValueType.i32;
+      return emitBitsExpr(body, recipe, children, context);
     case "insertBits":
       return emitInsertBitsExpr(body, recipe, children);
     case "compare":
@@ -138,7 +137,8 @@ function emitSignExtendExpr(
   children: WasmExprChildEmitter,
   context: WasmCompositeExprContext
 ): WasmValueType {
-  const fusedType = emitFusedSignedMemoryLoad(width, children, context);
+  const fusedType = emitDirectSignedRegisterAliasInput(width, children, context) ??
+    emitFusedSignedMemoryLoad(width, children, context);
 
   if (fusedType !== undefined) {
     return fusedType;
@@ -174,6 +174,163 @@ function emitFusedSignedMemoryLoad(
     child.definition,
     () => context.emitRecipe(child.input),
     { signed: true }
+  );
+}
+
+type RegisterInputView = Readonly<{
+  bitOffset: number;
+  width: OperandWidth;
+}>;
+
+type RecipeRegisterInputView = RegisterInputView & Readonly<{
+  child: ExprRecipe;
+}>;
+
+function emitProjectExpr(
+  body: WasmFunctionBodyEncoder,
+  recipe: Extract<ExprRecipe, { kind: "expr" }>,
+  children: WasmExprChildEmitter,
+  context: WasmCompositeExprContext
+): WasmValueType {
+  assert(recipe.expr.kind === "project", `expected project expression recipe, got ${recipe.expr.kind}`);
+  const expr = recipe.expr;
+  const directType = tryEmitDirectRegisterAliasView(
+    context,
+    children,
+    { bitOffset: 0, width: expr.width }
+  );
+
+  if (directType !== undefined) {
+    return directType;
+  }
+
+  children.emit("value");
+  emitMaskI32ToWidth(body, expr.width);
+  return wasmValueType.i32;
+}
+
+function emitBitsExpr(
+  body: WasmFunctionBodyEncoder,
+  recipe: Extract<ExprRecipe, { kind: "expr" }>,
+  children: WasmExprChildEmitter,
+  context: WasmCompositeExprContext
+): WasmValueType {
+  assert(recipe.expr.kind === "bits", `expected bits expression recipe, got ${recipe.expr.kind}`);
+  const expr = recipe.expr;
+  const directType = tryEmitDirectRegisterAliasView(
+    context,
+    children,
+    { bitOffset: expr.offset, width: expr.width }
+  );
+
+  if (directType !== undefined) {
+    return directType;
+  }
+
+  children.emit("value");
+  emitShiftRight(body, expr.offset);
+  emitMaskI32ToWidth(body, expr.width);
+  return wasmValueType.i32;
+}
+
+function tryEmitDirectRegisterAliasView(
+  context: WasmCompositeExprContext,
+  children: WasmExprChildEmitter,
+  view: RegisterInputView,
+  options: Readonly<{ signed?: boolean }> = {}
+): WasmValueType | undefined {
+  return tryEmitDirectRegisterAliasInput(
+    context,
+    view,
+    children.recipe("value"),
+    children.isSelected("value"),
+    options
+  );
+}
+
+function tryEmitDirectRegisterAliasInput(
+  context: WasmCompositeExprContext,
+  view: RegisterInputView,
+  child: ExprRecipe,
+  childSelected: boolean,
+  options: Readonly<{ signed?: boolean }> = {}
+): WasmValueType | undefined {
+  if (childSelected) {
+    return undefined;
+  }
+
+  const reg = directRegisterInput(child);
+
+  if (reg === undefined) {
+    return undefined;
+  }
+
+  const alias = canonicalRegisterAlias(reg, view);
+
+  if (alias === undefined) {
+    return undefined;
+  }
+
+  return context.sources.tryEmitRegisterAliasInput(alias, options);
+}
+
+function emitDirectSignedRegisterAliasInput(
+  width: 8 | 16,
+  children: WasmExprChildEmitter,
+  context: WasmCompositeExprContext
+): WasmValueType | undefined {
+  const child = children.recipe("value");
+
+  if (children.isSelected("value") || child.kind !== "expr") {
+    return undefined;
+  }
+
+  const view = registerInputViewForRecipe(child);
+
+  if (view === undefined || view.width !== width) {
+    return undefined;
+  }
+
+  return tryEmitDirectRegisterAliasInput(
+    context,
+    view,
+    view.child,
+    context.isRecipeSelected(view.child),
+    { signed: true }
+  );
+}
+
+function registerInputViewForRecipe(recipe: Extract<ExprRecipe, { kind: "expr" }>): RecipeRegisterInputView | undefined {
+  switch (recipe.expr.kind) {
+    case "project":
+      return {
+        bitOffset: 0,
+        width: recipe.expr.width,
+        child: bindRecipeChildSlots(recipe).recipe("value")
+      };
+    case "bits":
+      return {
+        bitOffset: recipe.expr.offset,
+        width: recipe.expr.width,
+        child: bindRecipeChildSlots(recipe).recipe("value")
+      };
+    default:
+      return undefined;
+  }
+}
+
+function directRegisterInput(recipe: ExprRecipe): Reg32 | undefined {
+  if (recipe.kind !== "expr" || recipe.expr.kind !== "input" || recipe.expr.source.kind !== "reg") {
+    return undefined;
+  }
+
+  return recipe.expr.source.reg;
+}
+
+function canonicalRegisterAlias(base: Reg32, view: RegisterInputView): RegisterAlias | undefined {
+  return registerAliasesByWidth[view.width].find((alias) =>
+    alias.base === base &&
+    alias.bitOffset === view.bitOffset
   );
 }
 

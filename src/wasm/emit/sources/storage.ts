@@ -2,6 +2,7 @@ import { assert } from "#common/assert.js";
 import type { ExprInputSource } from "#ir/expr/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
+import type { RegisterAlias } from "#x86/types.js";
 import { emitLoadPackedFlagFromStack } from "../ops/flags.js";
 import { emitLoadStateI32 } from "../ops/state.js";
 import type { WasmStateI32Placement } from "../state/placement.js";
@@ -30,8 +31,16 @@ export type WasmSourceReadPlan = Readonly<{
   placement(source: WasmReadableInputSource): WasmSourceReadPlacement;
 }>;
 
+export type WasmRegisterAliasInputReadOptions = Readonly<{
+  signed?: boolean;
+}>;
+
 export type WasmSourceReader = Readonly<{
   emitInput(source: WasmReadableInputSource): WasmValueType;
+  tryEmitRegisterAliasInput(
+    alias: RegisterAlias,
+    options?: WasmRegisterAliasInputReadOptions
+  ): WasmValueType | undefined;
 }>;
 
 export function createWasmSourceReader(
@@ -44,6 +53,28 @@ export function createWasmSourceReader(
 
       assertSourceReadPlacement(source, placement);
       return emitSourceInput(body, source, placement);
+    },
+    tryEmitRegisterAliasInput: (alias, options = {}) => {
+      const source = { kind: "reg", reg: alias.base } as const;
+      const placement = plan.placement(source);
+
+      assertSourceReadPlacement(source, placement);
+
+      if (placement.kind !== "state.i32") {
+        return undefined;
+      }
+
+      assert(
+        alias.bitOffset % 8 === 0,
+        `state-memory register ${alias.name} has non-byte bit offset ${alias.bitOffset}`
+      );
+
+      return emitLoadStateI32(
+        body,
+        placement.state.offset + alias.bitOffset / 8,
+        alias.width,
+        options.signed === true
+      );
     }
   };
 }

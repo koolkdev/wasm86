@@ -104,7 +104,8 @@ test("input expressions read through source storage", () => {
       strictEqual(source.reg, "eax");
       body.localGet(13);
       return wasmValueType.i32;
-    }
+    },
+    tryEmitRegisterAliasInput: () => fail("unexpected register alias source read")
   };
   const definitions: WasmDefinitionRecipeEmitter = {
     definitionInfo: () => undefined,
