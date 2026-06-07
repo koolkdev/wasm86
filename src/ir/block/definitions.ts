@@ -1,4 +1,5 @@
 import { exprInput } from "#ir/expr/builders.js";
+import type { ModRmSelector } from "#ir/block/modrm-selector.js";
 import type { ExprRef } from "#ir/expr/types.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { OpSite } from "./walk/site.js";
@@ -24,7 +25,7 @@ export type BlockDefinition =
       id: BlockDefinitionId;
       at: OpSite;
       result: DefinitionValueSource;
-      index: ExprRef;
+      selector: ModRmSelector;
       width: OperandWidth;
     }>;
 

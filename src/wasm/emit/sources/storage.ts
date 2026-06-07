@@ -50,35 +50,45 @@ export function createWasmSourceReader(
   body: WasmFunctionBodyEncoder,
   plan: WasmSourceReadPlan
 ): WasmSourceReader {
-  return {
-    emitInput: (source) => {
-      const placement = plan.placement(source);
+  const emitInput = (source: WasmReadableInputSource): WasmEmittedValue => {
+    const placement = plan.placement(source);
 
-      assertSourceReadPlacement(source, placement);
-      return emitSourceInput(body, source, placement);
-    },
-    tryEmitRegisterAliasInput: (alias, options = {}) => {
-      const source = { kind: "reg", reg: alias.base } as const;
-      const placement = plan.placement(source);
-
-      assertSourceReadPlacement(source, placement);
-
-      if (placement.kind !== "state.i32") {
-        return undefined;
-      }
-
-      assert(
-        alias.bitOffset % 8 === 0,
-        `state-memory register ${alias.name} has non-byte bit offset ${alias.bitOffset}`
-      );
-
-      return emitLoadStateI32(
-        body,
-        placement.state.offset + alias.bitOffset / 8,
-        alias.width,
-        options.signed === true
-      );
+    assertSourceReadPlacement(source, placement);
+    return emitSourceInput(body, source, placement);
+  };
+  const tryEmitRegisterAliasInput = (
+    alias: RegisterAlias,
+    options: WasmRegisterAliasInputReadOptions = {}
+  ): WasmEmittedValue | undefined => {
+    if (alias.width === 32) {
+      return emitInput({ kind: "reg", reg: alias.base });
     }
+
+    const source = { kind: "reg", reg: alias.base } as const;
+    const placement = plan.placement(source);
+
+    assertSourceReadPlacement(source, placement);
+
+    if (placement.kind !== "state.i32") {
+      return undefined;
+    }
+
+    assert(
+      alias.bitOffset % 8 === 0,
+      `state-memory register ${alias.name} has non-byte bit offset ${alias.bitOffset}`
+    );
+
+    return emitLoadStateI32(
+      body,
+      placement.state.offset + alias.bitOffset / 8,
+      alias.width,
+      options.signed === true
+    );
+  };
+
+  return {
+    emitInput,
+    tryEmitRegisterAliasInput
   };
 }
 

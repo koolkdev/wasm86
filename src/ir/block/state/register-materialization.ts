@@ -12,7 +12,7 @@ import type { RegisterState } from "./register-state.js";
 
 export type { RegisterMaterializationWrite } from "./register-overlays.js";
 
-export type RegisterMaterializationMode =
+export type RegisterAccessMode =
   | "exact-alias"
   | "full-base";
 
@@ -27,9 +27,9 @@ type RegisterMaterializationState = RegisterState & Readonly<{
 }>;
 
 export class RegisterMaterializer {
-  readonly #mode: RegisterMaterializationMode;
+  readonly #mode: RegisterAccessMode;
 
-  constructor(mode: RegisterMaterializationMode) {
+  constructor(mode: RegisterAccessMode) {
     this.#mode = mode;
   }
 

@@ -9,6 +9,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import { FlagState } from "#ir/block/state/flag-state.js";
 import { RegisterState } from "#ir/block/state/register-state.js";
 import {
@@ -42,7 +43,7 @@ import { ValueWalkOps } from "../value-ops.js";
 
 test("StorageWalkOps dispatches dynamic register storage through dynamic ops", () => {
   const harness = storageHarness(new BindingResolver({
-    operands: [dynamicRegBinding(exprConst(2), 32)]
+    operands: [dynamicRegBinding(modRmSelector(exprConst(2)), 32)]
   }));
   const loaded = harness.storage.read({ kind: "operand", index: 0 }, 32);
 
@@ -147,7 +148,8 @@ function storageHarness(resolver: BindingResolver): Readonly<{
     registers,
     validator: registerValidator,
     site: () => opSite(0),
-    snapshot: () => BlockState.initial({ registers: registers.state })
+    snapshot: () => BlockState.initial({ registers: registers.state }),
+    mode: "exact-alias"
   });
   const memory = new MemoryWalkOps({
     recorder,

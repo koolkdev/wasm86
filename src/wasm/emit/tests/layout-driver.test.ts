@@ -9,18 +9,10 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import type { BlockExit, BlockExitId } from "#ir/block/exits.js";
 import type { BlockActionSite, Placement } from "#ir/block/timeline.js";
 import {
-  analyzeBarrierFacts,
-  analyzeExpressionNeeds,
-  analyzePlacementPlan,
-  analyzeStateObligations,
-  analyzeStateWrites,
-  analyzeValuePlan,
-  buildBlockLayout,
-  buildTimelineGeometry,
-  buildTimelineValueUseIndex,
   type BlockLayout,
   type ExprRecipe,
   type ExprRecipeId,
@@ -36,10 +28,6 @@ import {
 } from "#ir/block/planning/index.js";
 import { initialBlockState } from "#ir/block/walk/state.js";
 import { opSite } from "#ir/block/walk/site.js";
-import {
-  type BlockWalkInput,
-  walkExpressionBlock
-} from "#ir/block/walk/index.js";
 import { exprBinary, exprConst } from "#ir/expr/builders.js";
 import { exprChildren } from "#ir/expr/children.js";
 import type { ExprRef } from "#ir/expr/types.js";
@@ -59,6 +47,7 @@ import {
   emitWasmBlockLayout,
   type WasmActionEffectEmitInput,
   type WasmActionEmitter,
+  type WasmActionInputRole,
   type WasmActionInputsEmitInput,
   type WasmExitEmitter,
   type WasmStateWriteEmitter
@@ -71,6 +60,11 @@ import {
   type WasmCachePlan,
   type WasmCacheReason
 } from "#wasm/emit/cache/plan/index.js";
+import {
+  analyzeWasmBlock,
+  wasmLocalRegisterAccessMode,
+  type WasmBlockAnalysisInput
+} from "#wasm/emit/block/analysis.js";
 import {
   wasmI32,
   type WasmEmittedValue
@@ -187,11 +181,11 @@ test("Wasm layout driver uses cache snapshot calls between same-point inputs and
   const dynamicEffect = indexOf(ops, "effect", "dynamicRegisterStore");
   const memoryValueGet = lastIndexOf(ops, "get");
 
-  strictEqual(indexInput >= 0, true);
-  strictEqual(valueInput > indexInput, true);
+  strictEqual(valueInput >= 0, true);
   strictEqual(snapshotSet > valueInput, true);
   strictEqual(dynamicEffect > snapshotSet, true);
-  strictEqual(memoryValueGet > dynamicEffect, true);
+  strictEqual(indexInput > dynamicEffect, true);
+  strictEqual(memoryValueGet > indexInput, true);
   strictEqual(ops.some((op) => op.kind === "recipe-establish"), false);
   scratch.assertClear();
 });
@@ -294,6 +288,7 @@ class RecordingRecipeEmitter implements WasmRecipeEmitter {
 class RecordingActionEmitter implements WasmActionEmitter {
   readonly #ops: RecordedOp[];
   readonly #body: RecordingBody;
+  readonly #inputs = new Map<BlockActionSite, readonly LayoutTimelineInput[]>();
 
   constructor(ops: RecordedOp[], body: RecordingBody) {
     this.#ops = ops;
@@ -301,8 +296,26 @@ class RecordingActionEmitter implements WasmActionEmitter {
   }
 
   emitActionInputs(input: WasmActionInputsEmitInput): void {
-    for (const layoutInput of input.inputs) {
-      this.#emitInput(input.site.action.kind, layoutInput, input.emitInput);
+    this.#inputs.set(input.site, input.inputs);
+
+    switch (input.site.action.kind) {
+      case "memoryGuard":
+        this.#emitInput(input, "address", "local");
+        return;
+      case "memoryStore":
+        this.#emitInput(input, "address", "stack");
+        this.#emitInput(input, "value", "stack");
+        return;
+      case "dynamicRegisterStore":
+        this.#emitInput(input, "value", "local");
+        return;
+      case "branch":
+        this.#emitInput(input, "condition", "stack");
+        return;
+      case "jump":
+      case "hostTrap":
+      case "fallthrough":
+        return;
     }
   }
 
@@ -322,7 +335,11 @@ class RecordingActionEmitter implements WasmActionEmitter {
         input.emitEdge(edgeForExit(input, input.site.action.exit));
         return;
       case "memoryStore":
+        return;
       case "dynamicRegisterStore":
+        ok(input.operands.has("index"), "dynamic register store effect should see its index input");
+        ok(input.operands.has("value"), "dynamic register store effect should see its value input");
+        this.#emitInput(input, "index", "stack");
         return;
     }
   }
@@ -350,14 +367,36 @@ class RecordingActionEmitter implements WasmActionEmitter {
     this.#body.endBlock();
   }
 
-  #emitInput(prefix: string, input: LayoutTimelineInput, emitInput: (input: LayoutTimelineInput) => WasmEmittedValue): void {
-    const label = input.use.kind === "exit-payload"
-      ? `${prefix}:exit:${input.use.role}:${input.use.edge}`
-      : `${prefix}:${input.use.kind}:${input.use.role}`;
+  #emitInput(
+    input: WasmActionInputsEmitInput | WasmActionEffectEmitInput,
+    role: WasmActionInputRole,
+    output: "stack" | "local"
+  ): void {
+    const layoutInput = this.#actionInput(input.site, role);
+    const prefix = input.site.action.kind;
+    const label = `${prefix}:${layoutInput.use.kind}:${role}`;
 
-    this.#ops.push({ kind: "input", label, use: input });
-    recipeLabels.set(input.recipe, label);
-    emitInput(input);
+    this.#ops.push({ kind: "input", label, use: layoutInput });
+    recipeLabels.set(layoutInput.recipe, label);
+
+    switch (output) {
+      case "stack":
+        input.operands.emitStack(role);
+        return;
+      case "local":
+        input.operands.emitLocal(role);
+        return;
+    }
+  }
+
+  #actionInput(site: BlockActionSite, role: WasmActionInputRole): LayoutTimelineInput {
+    const layoutInput = this.#inputs.get(site)?.find((input) =>
+      input.use.kind === "action-input" &&
+      input.use.role === role
+    );
+
+    ok(layoutInput !== undefined, `missing test action input ${role} for ${site.action.kind}`);
+    return layoutInput;
   }
 }
 
@@ -630,38 +669,22 @@ function memoryGuardLayoutFixture(): ManualLayoutFixture {
 
 function analyzeBlock(
   block: IrBlock,
-  input: Omit<BlockWalkInput, "block"> = {}
+  input: Omit<WasmBlockAnalysisInput, "block" | "registerAccessMode"> = {}
 ): Readonly<{
   layout: BlockLayout;
   stateWrites: StateWritePlan;
   values: ValuePlan;
 }> {
-  const walked = walkExpressionBlock({ ...input, block });
-  const geometry = buildTimelineGeometry(walked);
-  const timelineUses = buildTimelineValueUseIndex({ walked, geometry });
-  const obligations = analyzeStateObligations({ walked, geometry });
-  const needs = analyzeExpressionNeeds({ timelineUses, obligations });
-  const facts = analyzeBarrierFacts({ walked, geometry });
-  const values = analyzeValuePlan({ needs: needs.needs, geometry, facts });
-  const stateWrites = analyzeStateWrites({
-    obligations,
-    valueNeeds: needs.valueNeedByObligation,
-    values
+  const { layout, stateWrites, values } = analyzeWasmBlock({
+    ...input,
+    block,
+    registerAccessMode: wasmLocalRegisterAccessMode
   });
-  const placement = analyzePlacementPlan({ geometry, facts, values, stateWrites });
 
   return {
     values,
     stateWrites,
-    layout: buildBlockLayout({
-      walked,
-      geometry,
-      timelineUses,
-      timelineNeedByUse: needs.timelineNeedByUse,
-      values,
-      stateWrites,
-      placement
-    })
+    layout
   };
 }
 
@@ -898,10 +921,10 @@ function useId(id: number): LayoutValueUseId {
   return id as LayoutValueUseId;
 }
 
-function dynamicOperand(): Omit<BlockWalkInput, "block"> {
+function dynamicOperand(): Omit<WasmBlockAnalysisInput, "block" | "registerAccessMode"> {
   return {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(3), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(3)), 32)]
     })
   };
 }

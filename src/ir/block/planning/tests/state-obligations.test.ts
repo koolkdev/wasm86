@@ -8,12 +8,13 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
   analyzeStateObligations,
   buildTimelineGeometry,
   type StateObligation
 } from "#ir/block/planning/index.js";
-import type { RegisterMaterializationMode } from "#ir/block/state/register-materialization.js";
+import type { RegisterAccessMode } from "#ir/block/state/register-materialization.js";
 import {
   type BlockWalkInput,
   walkExpressionBlock
@@ -128,7 +129,7 @@ test("dynamic-register-store pre-state uses the action stateBefore snapshot", ()
     { op: "next" }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(2), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(2)), 32)]
     })
   });
   const dynamicStore = geometry.registers.dynamicStores[0]!;
@@ -149,7 +150,7 @@ test("dynamic-register-store pre-state uses full-base register materialization m
     { op: "next" }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(2), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(2)), 32)]
     })
   }, {
     registerMaterializationMode: "full-base"
@@ -177,7 +178,7 @@ test("dynamic-register-store is register-only and leaves pending flags for the e
     { op: "next" }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(2), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(2)), 32)]
     })
   });
   const fallthrough = geometry.exits.points.find((point) => point.exit.kind === "fallthrough")!;
@@ -208,7 +209,7 @@ test("dynamic-register-store emits pending registers before the store and leaves
     { op: "next" }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(2), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(2)), 32)]
     })
   });
   const dynamicStore = geometry.registers.dynamicStores[0]!;
@@ -314,7 +315,7 @@ test("direct flag-condition caches do not create architectural obligations", () 
 function analyzeBlock(
   block: IrBlock,
   input: Omit<BlockWalkInput, "block"> = {},
-  obligationInput: Readonly<{ registerMaterializationMode?: RegisterMaterializationMode }> = {}
+  obligationInput: Readonly<{ registerMaterializationMode?: RegisterAccessMode }> = {}
 ): Readonly<{
   geometry: ReturnType<typeof buildTimelineGeometry>;
   obligations: readonly StateObligation[];

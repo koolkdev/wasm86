@@ -8,24 +8,12 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
-  analyzeBarrierFacts,
-  analyzeExpressionNeeds,
-  analyzePlacementPlan,
-  analyzeStateObligations,
-  analyzeStateWrites,
-  analyzeValuePlan,
-  buildBlockLayout,
-  buildTimelineGeometry,
-  buildTimelineValueUseIndex,
   type BlockLayout,
   type LayoutRegion,
   type ValuePlan
 } from "#ir/block/planning/index.js";
-import {
-  type BlockWalkInput,
-  walkExpressionBlock
-} from "#ir/block/walk/index.js";
 import { exprConst } from "#ir/expr/builders.js";
 import type {
   IrBlock,
@@ -41,6 +29,11 @@ import {
 } from "#wasm/encoder/types.js";
 import { createWasmValueCache } from "#wasm/emit/cache/locals/index.js";
 import { planWasmCache } from "#wasm/emit/cache/plan/index.js";
+import {
+  analyzeWasmBlock,
+  wasmLocalRegisterAccessMode,
+  type WasmBlockAnalysisInput
+} from "#wasm/emit/block/analysis.js";
 import {
   wasmI32,
   type WasmEmittedValue
@@ -191,36 +184,20 @@ function emitMainLayout(
 
 function analyzeBlock(
   block: IrBlock,
-  input: Omit<BlockWalkInput, "block"> = {}
+  input: Omit<WasmBlockAnalysisInput, "block" | "registerAccessMode"> = {}
 ): Readonly<{
   layout: BlockLayout;
   values: ValuePlan;
 }> {
-  const walked = walkExpressionBlock({ ...input, block });
-  const geometry = buildTimelineGeometry(walked);
-  const timelineUses = buildTimelineValueUseIndex({ walked, geometry });
-  const obligations = analyzeStateObligations({ walked, geometry });
-  const needs = analyzeExpressionNeeds({ timelineUses, obligations });
-  const facts = analyzeBarrierFacts({ walked, geometry });
-  const values = analyzeValuePlan({ needs: needs.needs, geometry, facts });
-  const stateWrites = analyzeStateWrites({
-    obligations,
-    valueNeeds: needs.valueNeedByObligation,
-    values
+  const { layout, values } = analyzeWasmBlock({
+    ...input,
+    block,
+    registerAccessMode: wasmLocalRegisterAccessMode
   });
-  const placement = analyzePlacementPlan({ geometry, facts, values, stateWrites });
 
   return {
     values,
-    layout: buildBlockLayout({
-      walked,
-      geometry,
-      timelineUses,
-      timelineNeedByUse: needs.timelineNeedByUse,
-      values,
-      stateWrites,
-      placement
-    })
+    layout
   };
 }
 
@@ -235,10 +212,10 @@ function mainRegion(layout: BlockLayout): LayoutRegion {
   return layout.regions.find((region) => region.path.kind === "main")!;
 }
 
-function dynamicOperand(): Omit<BlockWalkInput, "block"> {
+function dynamicOperand(): Omit<WasmBlockAnalysisInput, "block" | "registerAccessMode"> {
   return {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(3), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(3)), 32)]
     })
   };
 }

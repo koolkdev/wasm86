@@ -8,6 +8,8 @@ import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import {
   emitLoadGuestMemoryUnchecked
 } from "../ops/memory.js";
+import { emitLoadDynamicRegister } from "./dynamic-registers.js";
+import type { WasmSourceReader } from "../sources/storage.js";
 import type {
   WasmDefinitionRecipeEmitter,
   WasmDefinitionRecipeInfo,
@@ -18,6 +20,7 @@ import type { WasmEmittedValue } from "../values/types.js";
 export type WasmDefinitionRecipeEmitterInput = Readonly<{
   body: WasmFunctionBodyEncoder;
   definitions: readonly DefinitionResult[];
+  sources: WasmSourceReader;
 }>;
 
 export function createWasmDefinitionRecipeEmitter(
@@ -34,10 +37,12 @@ export function createWasmDefinitionRecipeEmitter(
 
 class WasmDefinitionRecipeEmitterState {
   readonly #body: WasmFunctionBodyEncoder;
+  readonly #sources: WasmSourceReader;
   readonly #definitions = new Map<BlockDefinitionId, BlockDefinition>();
 
   constructor(input: WasmDefinitionRecipeEmitterInput) {
     this.#body = input.body;
+    this.#sources = input.sources;
 
     for (const definition of input.definitions) {
       this.#definitions.set(definition.id, definition.site.definition);
@@ -77,7 +82,22 @@ class WasmDefinitionRecipeEmitterState {
           options?.signed === true
         );
       case "dynamicRegisterLoad":
-        throw new Error("Wasm dynamicRegisterLoad definition lowering is unsupported");
+        assert(
+          site.width === 32,
+          `Wasm dynamic register load definitions require full-base access, got ${site.width}-bit`
+        );
+        return emitLoadDynamicRegister(
+          this.#body,
+          site.width,
+          emitInput,
+          (alias, loadOptions) => {
+            const value = this.#sources.tryEmitRegisterAliasInput(alias, loadOptions);
+
+            assert(value !== undefined, `Wasm dynamic register load ${alias.name} has no direct source`);
+            return value;
+          },
+          options?.signed === true
+        );
     }
   }
 }

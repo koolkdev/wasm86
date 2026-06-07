@@ -1,4 +1,5 @@
 import type { BlockAction } from "#ir/block/actions.js";
+import type { ModRmSelector } from "#ir/block/modrm-selector.js";
 import {
   BlockDefinitionIds,
   definitionExpr,
@@ -55,7 +56,7 @@ export class BlockWalkRecorder {
     return definitionExpr(result);
   }
 
-  dynamicRegisterLoad(at: OpSite, index: ExprRef, width: OperandWidth): ExprRef {
+  dynamicRegisterLoad(at: OpSite, selector: ModRmSelector, width: OperandWidth): ExprRef {
     const id = this.#definitionIds.next();
     const result = definitionValueSource(id);
     const definition = Object.freeze({
@@ -63,7 +64,7 @@ export class BlockWalkRecorder {
       id,
       at,
       result,
-      index,
+      selector,
       width
     } satisfies BlockDefinition);
 

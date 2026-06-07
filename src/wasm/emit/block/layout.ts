@@ -11,7 +11,13 @@ import type {
   PlannedStateWrite,
   StateWriteId
 } from "#ir/block/planning/state-writes.js";
+import type {
+  WasmValueCacheLocalEmission,
+  WasmValueCacheStackEmission
+} from "../cache/locals/index.js";
+import { wasmValueCacheOutput } from "../cache/locals/index.js";
 import type { WasmEmittedValue } from "../values/types.js";
+import { createWasmActionOperands } from "./action-inputs.js";
 import {
   actionEdgesForSite,
   indexLayoutRegions,
@@ -20,6 +26,7 @@ import {
 } from "./regions.js";
 import type {
   WasmLayoutActionEdge,
+  WasmActionOperands,
   WasmLayoutDriver,
   WasmLayoutDriverInput
 } from "./types.js";
@@ -27,7 +34,9 @@ import type {
 export type {
   WasmActionEffectEmitInput,
   WasmActionEmitter,
+  WasmActionInputRole,
   WasmActionInputsEmitInput,
+  WasmActionOperands,
   WasmExitEmitter,
   WasmExitEmitInput,
   WasmLayoutActionEdge,
@@ -52,6 +61,7 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
   readonly #regions: LayoutRegionIndex;
   readonly #stateWriteById: ReadonlyMap<StateWriteId, PlannedStateWrite>;
   readonly #emittedRegions = new Set<LayoutRegionId>();
+  readonly #actionOperands = new Map<BlockActionSite, WasmActionOperands>();
 
   constructor(input: WasmLayoutDriverInput) {
     this.#input = input;
@@ -85,13 +95,22 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
 
   #emitStep(step: LayoutStep): void {
     switch (step.kind) {
-      case "action-inputs":
+      case "action-inputs": {
+        const operands = createWasmActionOperands({
+          site: step.site,
+          inputs: step.inputs,
+          emitStackInput: (input) => this.#emitTimelineInput(input),
+          emitLocalInput: (input) => this.#emitTimelineInputLocal(input)
+        });
+
+        this.#actionOperands.set(step.site, operands);
         this.#input.actions.emitActionInputs({
           site: step.site,
           inputs: step.inputs,
-          emitInput: (input) => this.#emitTimelineInput(input)
+          operands
         });
         return;
+      }
       case "establish-snapshot":
         this.#input.cache.ensureSnapshot(
           step.snapshot,
@@ -102,13 +121,22 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
       case "write-state":
         this.#emitStateWrite(step);
         return;
-      case "action":
-        this.#input.actions.emitActionEffect({
-          site: step.site,
-          edges: actionEdgesForSite(step.site, this.#regions, step.inputs),
-          emitEdge: (edge) => this.#emitActionEdge(step.site, edge)
-        });
+      case "action": {
+        const operands = this.#actionOperandsForEffect(step.site);
+
+        try {
+          this.#input.actions.emitActionEffect({
+            site: step.site,
+            operands,
+            edges: actionEdgesForSite(step.site, this.#regions, step.inputs),
+            emitEdge: (edge) => this.#emitActionEdge(step.site, edge)
+          });
+        } finally {
+          operands.release();
+        }
+
         return;
+      }
       case "exit":
         this.#input.exits.emitExit({ exit: step.exit });
         return;
@@ -131,10 +159,19 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
     });
   }
 
-  #emitTimelineInput(input: LayoutTimelineInput): WasmEmittedValue {
+  #emitTimelineInput(input: LayoutTimelineInput): WasmValueCacheStackEmission {
     return this.#input.cache.emitUse(
       input,
-      () => this.#input.recipes.emitRecipeBody(input.recipe)
+      () => this.#input.recipes.emitRecipeBody(input.recipe),
+      wasmValueCacheOutput.stack
+    );
+  }
+
+  #emitTimelineInputLocal(input: LayoutTimelineInput): WasmValueCacheLocalEmission {
+    return this.#input.cache.emitUse(
+      input,
+      () => this.#input.recipes.emitRecipeBody(input.recipe),
+      wasmValueCacheOutput.local
     );
   }
 
@@ -168,6 +205,26 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
     return stateWrite;
   }
 
+  #actionOperandsForEffect(site: BlockActionSite): WasmActionOperands {
+    const operands = this.#actionOperands.get(site);
+
+    if (operands !== undefined) {
+      return operands;
+    }
+
+    assert(
+      actionCanOmitActionInputs(site),
+      `layout action ${site.action.kind} has no action-inputs step`
+    );
+
+    return createWasmActionOperands({
+      site,
+      inputs: [],
+      emitStackInput: (input) => this.#emitTimelineInput(input),
+      emitLocalInput: (input) => this.#emitTimelineInputLocal(input)
+    });
+  }
+
   #assertEveryEdgeRegionWasEmitted(): void {
     for (const edgeRegion of this.#regions.edgeById.values()) {
       assert(
@@ -175,5 +232,19 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
         `edge layout region ${edgeRegion.region.id} was not emitted by its owning action`
       );
     }
+  }
+}
+
+function actionCanOmitActionInputs(site: BlockActionSite): boolean {
+  switch (site.action.kind) {
+    case "jump":
+    case "hostTrap":
+    case "fallthrough":
+      return true;
+    case "memoryGuard":
+    case "memoryStore":
+    case "dynamicRegisterStore":
+    case "branch":
+      return false;
   }
 }

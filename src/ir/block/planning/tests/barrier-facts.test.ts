@@ -8,6 +8,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
   analyzeBarrierFacts,
   blockingBarrierForDefinitionReplay,
@@ -62,7 +63,7 @@ test("dynamicRegisterStore creates a dynamic-register-store barrier effect after
     }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(3), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(3)), 32)]
     })
   });
   const store = geometry.registers.dynamicStores[0]!;
@@ -98,7 +99,7 @@ test("memoryLoad creates a memory-domain definition result with address input", 
   }]);
 });
 
-test("dynamicRegisterLoad creates a registers-domain definition result with index input", () => {
+test("dynamicRegisterLoad creates a registers-domain definition result with selector input", () => {
   const { facts, geometry } = analyzeBlock([
     {
       op: "get",
@@ -108,7 +109,7 @@ test("dynamicRegisterLoad creates a registers-domain definition result with inde
     }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(7), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(7)), 32)]
     })
   });
   const definition = geometry.definitions.points[0]!;
@@ -152,7 +153,7 @@ test("blockingBarrierForDefinitionReplay skips non-matching barriers and finds t
     { op: "next" }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(4), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(4)), 32)]
     })
   });
   const definition = facts.definitions[0]!;
@@ -182,8 +183,8 @@ test("blockingBarrierForDefinitionReplay blocks register definitions across dyna
   ], {
     resolver: new BindingResolver({
       operands: [
-        dynamicRegBinding(exprConst(3), 32),
-        dynamicRegBinding(exprConst(4), 32)
+        dynamicRegBinding(modRmSelector(exprConst(3)), 32),
+        dynamicRegBinding(modRmSelector(exprConst(4)), 32)
       ]
     })
   });
@@ -237,8 +238,8 @@ test("dynamicRegisterStore barrier does not block definitions used by that store
   ], {
     resolver: new BindingResolver({
       operands: [
-        dynamicRegBinding(exprConst(3), 32),
-        dynamicRegBinding(firstDefinitionResult, 32)
+        dynamicRegBinding(modRmSelector(exprConst(3)), 32),
+        dynamicRegBinding(modRmSelector(firstDefinitionResult), 32)
       ]
     })
   });
@@ -246,7 +247,7 @@ test("dynamicRegisterStore barrier does not block definitions used by that store
   const store = geometry.registers.dynamicStores[0]!;
 
   deepStrictEqual(definition.result, firstDefinitionResult);
-  deepStrictEqual(store.site.action.index, firstDefinitionResult);
+  deepStrictEqual(store.site.action.selector.expr, firstDefinitionResult);
   deepStrictEqual(store.site.action.value, firstDefinitionResult);
   strictEqual(blockingBarrierForDefinitionReplay(facts, definition, store.point), undefined);
 });
@@ -262,7 +263,7 @@ test("latestBlockingBarrierBeforeStateWrite blocks register writes across dynami
     { op: "next" }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(3), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(3)), 32)]
     })
   });
   const fallthrough = geometry.exits.points.find((point) => point.exit.kind === "fallthrough")!;
@@ -309,8 +310,8 @@ test("latestBlockingBarrierBeforeStateWrite returns the newest matching blocker 
   ], {
     resolver: new BindingResolver({
       operands: [
-        dynamicRegBinding(exprConst(3), 32),
-        dynamicRegBinding(exprConst(4), 32)
+        dynamicRegBinding(modRmSelector(exprConst(3)), 32),
+        dynamicRegBinding(modRmSelector(exprConst(4)), 32)
       ]
     })
   });

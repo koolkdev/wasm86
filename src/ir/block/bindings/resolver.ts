@@ -1,5 +1,6 @@
 import { canonicalizeExpr } from "#ir/expr/canonicalize.js";
 import { exprConst, exprInput } from "#ir/expr/builders.js";
+import type { ModRmSelector } from "#ir/block/modrm-selector.js";
 import type {
   ExprInputSource,
   ExprRef
@@ -20,7 +21,7 @@ import {
 
 export type StorageBinding =
   | Readonly<{ kind: "reg"; reg: RegisterAlias }>
-  | Readonly<{ kind: "dynamicReg"; index: ExprRef; width: OperandWidth }>
+  | Readonly<{ kind: "dynamicReg"; selector: ModRmSelector; width: OperandWidth }>
   | Readonly<{ kind: "mem"; address: ExprRef; width: OperandWidth }>;
 
 export type ValueBinding = Readonly<{ kind: "value"; value: ExprRef }>;
@@ -116,10 +117,10 @@ export function memBinding(address: ExprRef, width: OperandWidth): StorageBindin
   });
 }
 
-export function dynamicRegBinding(index: ExprRef, width: OperandWidth): StorageBinding {
+export function dynamicRegBinding(selector: ModRmSelector, width: OperandWidth): StorageBinding {
   return Object.freeze({
     kind: "dynamicReg",
-    index: canonicalizeExpr(index),
+    selector,
     width
   });
 }

@@ -1,4 +1,5 @@
 import type { ExprRef } from "#ir/expr/types.js";
+import type { ModRmSelector } from "#ir/block/modrm-selector.js";
 import type {
   IrMemoryAccessKind
 } from "#ir/model/types.js";
@@ -31,7 +32,7 @@ export type BlockAction =
   | Readonly<{
       kind: "dynamicRegisterStore";
       at: OpSite;
-      index: ExprRef;
+      selector: ModRmSelector;
       value: ExprRef;
       width: OperandWidth;
       stateBefore: BlockState;

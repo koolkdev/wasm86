@@ -268,13 +268,7 @@ function tryEmitDirectRegisterAliasInput(
     return undefined;
   }
 
-  const reg = directRegisterInput(child);
-
-  if (reg === undefined) {
-    return undefined;
-  }
-
-  const alias = canonicalRegisterAlias(reg, view);
+  const alias = directRegisterAliasInput(child, view);
 
   if (alias === undefined) {
     return undefined;
@@ -307,6 +301,14 @@ function emitDirectSignedRegisterAliasInput(
     context.isRecipeSelected(view.child),
     { signed: true }
   );
+}
+
+function directRegisterAliasInput(recipe: ExprRecipe, view: RegisterInputView): RegisterAlias | undefined {
+  const reg = directRegisterInput(recipe);
+
+  return reg === undefined
+    ? undefined
+    : canonicalRegisterAlias(reg, view);
 }
 
 function registerInputViewForRecipe(recipe: Extract<ExprRecipe, { kind: "expr" }>): RecipeRegisterInputView | undefined {

@@ -164,7 +164,7 @@ class BarrierFactAnalyzer {
           site,
           result: definitionExpr(site.definition.result),
           domain: "registers",
-          inputExpr: site.definition.index,
+          inputExpr: site.definition.selector.expr,
           point: definitionPoint.point
         } satisfies DefinitionResult));
         break;

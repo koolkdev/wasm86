@@ -11,6 +11,7 @@ import {
   memBinding,
   valueBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
   BlockState,
   walkExpressionBlock
@@ -20,13 +21,19 @@ import type { BlockDefinition } from "#ir/block/definitions.js";
 import type { BlockTimelineSite } from "#ir/block/timeline.js";
 import {
   exprBinary,
+  exprBits,
   exprCompare,
   exprConst,
   exprInput,
-  exprInsertBits
+  exprInsertBits,
+  exprProject,
+  exprSelect
 } from "#ir/expr/builders.js";
 import { canonicalizeExpr } from "#ir/expr/canonicalize.js";
-import type { ExprRef } from "#ir/expr/types.js";
+import type {
+  ExprRef,
+  ScalarBinaryOp
+} from "#ir/expr/types.js";
 import type {
   IrOp,
   IrValueType,
@@ -116,8 +123,8 @@ test("shared block walk writes operand storage using the binding width", () => {
 });
 
 test("shared block walk keeps dynamic register reads and writes as ordered runtime facts", () => {
-  const readIndex = exprInput({ kind: "flag", flag: "ZF" });
-  const writeIndex = exprInput({ kind: "reg", reg: "esi" });
+  const readSelector = exprInput({ kind: "flag", flag: "ZF" });
+  const writeSelector = exprInput({ kind: "reg", reg: "esi" });
   const result = walkFragment({
     block: [
       { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 32 },
@@ -125,8 +132,8 @@ test("shared block walk keeps dynamic register reads and writes as ordered runti
     ],
     resolver: new BindingResolver({
       operands: [
-        dynamicRegBinding(readIndex, 32),
-        dynamicRegBinding(writeIndex, 32)
+        dynamicRegBinding(modRmSelector(readSelector), 32),
+        dynamicRegBinding(modRmSelector(writeSelector), 32)
       ]
     })
   });
@@ -139,13 +146,12 @@ test("shared block walk keeps dynamic register reads and writes as ordered runti
   if (definition.kind === "dynamicRegisterLoad") {
     strictEqual(definition.id, 0);
     deepStrictEqual(definition.result, { kind: "def", id: 0 });
-    deepStrictEqual(definition.index, readIndex);
-    strictEqual(definition.width, 32);
+    deepStrictEqual(definition.selector.expr, readSelector);
   }
 
   strictEqual(action.kind, "dynamicRegisterStore");
   if (action.kind === "dynamicRegisterStore") {
-    deepStrictEqual(action.index, writeIndex);
+    deepStrictEqual(action.selector.expr, writeSelector);
     deepStrictEqual(action.value, exprInput(definition.result));
     strictEqual(action.width, 32);
   }
@@ -158,6 +164,71 @@ test("shared block walk keeps dynamic register reads and writes as ordered runti
   deepStrictEqual(result.final.registers.read("esi"), exprInput({ kind: "reg", reg: "esi" }));
 });
 
+test("dynamic register load preserves exact alias width by default", () => {
+  const result = walkFragment({
+    block: [
+      { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 8 },
+      { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(0), accessWidth: 8 }
+    ],
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(modRmSelector(exprConst(4)), 8)]
+    })
+  });
+  const definitions = blockWalkDefinitions(result);
+  const definition = definitions[0]!;
+  const action = onlyAction(blockWalkActions(result));
+
+  strictEqual(definitions.length, 1);
+  strictEqual(definition.kind, "dynamicRegisterLoad");
+  if (definition.kind === "dynamicRegisterLoad") {
+    strictEqual(definition.width, 8);
+    deepStrictEqual(definition.selector.expr, exprConst(4));
+  }
+  strictEqual(action.kind, "memoryStore");
+  if (action.kind === "memoryStore") {
+    deepStrictEqual(action.value, exprInput(definition.result));
+    strictEqual(action.width, 8);
+  }
+  deepStrictEqual(result.timeline.map(timelineSiteKind), ["dynamicRegisterLoad", "memoryStore"]);
+});
+
+test("dynamic register load full-base mode lowers narrow binding to base load plus projection", () => {
+  const result = walkFragment({
+    block: [
+      { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 8 },
+      { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(0), accessWidth: 8 }
+    ],
+    resolver: new BindingResolver({
+      operands: [dynamicRegBinding(modRmSelector(exprConst(4)), 8)]
+    }),
+    dynamicRegisterAccessMode: "full-base"
+  });
+  const definitions = blockWalkDefinitions(result);
+  const definition = definitions[0]!;
+  const action = onlyAction(blockWalkActions(result));
+  const baseSelector = binary("and", exprConst(4), exprConst(3));
+  const highByteBit = binary("and", exprConst(4), exprConst(4));
+  const base = exprInput(definition.result);
+  const expectedValue = canonicalizeExpr(exprSelect(
+    highByteBit,
+    exprBits(base, 8, 8),
+    exprProject(8, base)
+  ));
+
+  strictEqual(definitions.length, 1);
+  strictEqual(definition.kind, "dynamicRegisterLoad");
+  if (definition.kind === "dynamicRegisterLoad") {
+    strictEqual(definition.width, 32);
+    deepStrictEqual(definition.selector.expr, baseSelector);
+  }
+  strictEqual(action.kind, "memoryStore");
+  if (action.kind === "memoryStore") {
+    deepStrictEqual(action.value, expectedValue);
+    strictEqual(action.width, 8);
+  }
+  deepStrictEqual(result.timeline.map(timelineSiteKind), ["dynamicRegisterLoad", "memoryStore"]);
+});
+
 test("dynamic register validation requires loads to use the pre-write register state", () => {
   throws(
     () => walkFragment({
@@ -166,7 +237,7 @@ test("dynamic register validation requires loads to use the pre-write register s
         { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 32 }
       ],
       resolver: new BindingResolver({
-        operands: [dynamicRegBinding(exprConst(1), 32)]
+        operands: [dynamicRegBinding(modRmSelector(exprConst(1)), 32)]
       })
     }),
     /dynamic register load after register write/
@@ -182,8 +253,8 @@ test("dynamic register validation rejects loads after dynamic register stores", 
       ],
       resolver: new BindingResolver({
         operands: [
-          dynamicRegBinding(exprConst(1), 32),
-          dynamicRegBinding(exprConst(2), 32)
+          dynamicRegBinding(modRmSelector(exprConst(1)), 32),
+          dynamicRegBinding(modRmSelector(exprConst(2)), 32)
         ]
       })
     }),
@@ -199,7 +270,7 @@ test("dynamic register validation rejects later static register reads", () => {
         { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" }, accessWidth: 32 }
       ],
       resolver: new BindingResolver({
-        operands: [dynamicRegBinding(exprConst(1), 32)]
+        operands: [dynamicRegBinding(modRmSelector(exprConst(1)), 32)]
       })
     }),
     /register read after dynamic register store/
@@ -214,7 +285,7 @@ test("dynamic register validation rejects partial static register writes after d
         { op: "set", target: { kind: "reg", reg: "al" }, value: c(0x66), accessWidth: 8 }
       ],
       resolver: new BindingResolver({
-        operands: [dynamicRegBinding(exprConst(1), 32)]
+        operands: [dynamicRegBinding(modRmSelector(exprConst(1)), 32)]
       })
     }),
     /partial register write after dynamic register store/
@@ -229,7 +300,7 @@ test("dynamic register validation rejects later static register writes", () => {
         { op: "set", target: { kind: "reg", reg: "ebx" }, value: c(0x66), accessWidth: 32 }
       ],
       resolver: new BindingResolver({
-        operands: [dynamicRegBinding(exprConst(1), 32)]
+        operands: [dynamicRegBinding(modRmSelector(exprConst(1)), 32)]
       })
     }),
     /register write after dynamic register store/
@@ -243,7 +314,7 @@ test("dynamic register stores allow earlier static register writes", () => {
       { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 }
     ],
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(4), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(4)), 32)]
     })
   });
 
@@ -267,8 +338,8 @@ test("dynamic register stores allow xchg-style tail stores from preloaded values
     ],
     resolver: new BindingResolver({
       operands: [
-        dynamicRegBinding(exprConst(1), 32),
-        dynamicRegBinding(exprConst(2), 32)
+        dynamicRegBinding(modRmSelector(exprConst(1)), 32),
+        dynamicRegBinding(modRmSelector(exprConst(2)), 32)
       ]
     })
   });
@@ -567,7 +638,7 @@ function timelineSiteKind(
   }
 }
 
-function binary(op: "add" | "and" | "xor", left: ExprRef, right: ExprRef): ExprRef {
+function binary(op: ScalarBinaryOp, left: ExprRef, right: ExprRef): ExprRef {
   return canonicalizeExpr(exprBinary(op, left, right));
 }
 

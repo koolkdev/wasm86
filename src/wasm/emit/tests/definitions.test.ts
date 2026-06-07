@@ -1,7 +1,7 @@
 import {
   deepStrictEqual,
-  strictEqual,
-  throws
+  ok,
+  strictEqual
 } from "node:assert";
 import { test } from "node:test";
 
@@ -10,6 +10,7 @@ import {
   type BlockDefinition,
   type BlockDefinitionId
 } from "#ir/block/definitions.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import type {
   DefinitionResult,
   ExprRecipe,
@@ -23,10 +24,19 @@ import type {
 import type { BlockDefinitionSite, Placement } from "#ir/block/timeline.js";
 import { opSite } from "#ir/block/walk/site.js";
 import { exprConst } from "#ir/expr/builders.js";
-import { wasmMemoryIndex } from "#wasm/abi.js";
+import {
+  stateOffset,
+  wasmImport,
+  wasmMemoryIndex
+} from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { wasmOpcode, type WasmValueType } from "#wasm/encoder/types.js";
+import { WasmModuleEncoder } from "#wasm/encoder/module.js";
+import {
+  wasmOpcode,
+  wasmValueType,
+  type WasmValueType
+} from "#wasm/encoder/types.js";
 import { createWasmDefinitionRecipeEmitter } from "#wasm/emit/block/definitions.js";
 import { createWasmValueCache } from "#wasm/emit/cache/locals/index.js";
 import type {
@@ -35,7 +45,12 @@ import type {
   WasmCachePlan
 } from "#wasm/emit/cache/plan/index.js";
 import { createWasmRecipeEmitter } from "#wasm/emit/values/recipes.js";
-import { createWasmSourceReader } from "#wasm/emit/sources/storage.js";
+import {
+  createWasmSourceReader,
+  type WasmSourceReader
+} from "#wasm/emit/sources/storage.js";
+import { stateRegisterBasePlacement } from "#wasm/emit/state/placement.js";
+import { wasmI32 } from "#wasm/emit/values/types.js";
 import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 
 test("memory-load definition metadata is replayable without emitting by itself", () => {
@@ -43,7 +58,8 @@ test("memory-load definition metadata is replayable without emitting by itself",
   const definition = memoryLoadDefinition(0, 8);
   const definitions = createWasmDefinitionRecipeEmitter({
     body,
-    definitions: [definitionMetadata(definition)]
+    definitions: [definitionMetadata(definition)],
+    sources: unusedSourceReader()
   });
 
   deepStrictEqual(body.events, []);
@@ -67,7 +83,8 @@ test("used memory-load definition emits once through a selected recipe cache pat
   });
   const definitions = createWasmDefinitionRecipeEmitter({
     body,
-    definitions: [definitionMetadata(definition)]
+    definitions: [definitionMetadata(definition)],
+    sources: unusedSourceReader()
   });
   const recipes = createWasmRecipeEmitter({
     body,
@@ -104,7 +121,8 @@ test("signed memory-load definitions lower to signed Wasm loads when requested",
     const definition = memoryLoadDefinition(id, width);
     const definitions = createWasmDefinitionRecipeEmitter({
       body,
-      definitions: [definitionMetadata(definition)]
+      definitions: [definitionMetadata(definition)],
+      sources: unusedSourceReader()
     });
 
     definitions.emitDefinition(
@@ -121,28 +139,20 @@ test("signed memory-load definitions lower to signed Wasm loads when requested",
   }
 });
 
-test("dynamic-register-load definition throws clearly until implemented", () => {
-  const body = new WasmFunctionBodyEncoder();
-  const definition = Object.freeze({
-    kind: "dynamicRegisterLoad",
-    id: definitionId(2),
-    at: opSite(0),
-    result: { kind: "def", id: definitionId(2) },
-    index: exprConst(3),
-    width: 32
-  } satisfies BlockDefinition);
-  const definitions = createWasmDefinitionRecipeEmitter({
-    body,
-    definitions: [definitionMetadata(definition)]
-  });
+test("dynamic-register-load definition dispatches register sources by runtime ModRM selector", async () => {
+  const state = new WebAssembly.Memory({ initial: 1 });
+  const view = new DataView(state.buffer);
+  const instance = await instantiateDynamicRegisterLoad(state);
+  const load = readExportedFunction(instance, "load");
 
-  throws(
-    () => definitions.emitDefinition(definition.id, () => {
-      body.i32Const(3);
-      return { wasmType: "i32", width: 32 };
-    }),
-    /dynamicRegisterLoad definition lowering is unsupported/
-  );
+  view.setUint32(stateOffset.eax, 0x0102_0304, true);
+  view.setUint32(stateOffset.ebx, 0x0506_0708, true);
+  view.setUint32(stateOffset.edi, 0x090a_0b0c, true);
+
+  strictEqual(load(0), 0x0102_0304);
+  strictEqual(load(3), 0x0506_0708);
+  strictEqual(load(7), 0x090a_0b0c);
+  strictEqual(load(99), 0);
 });
 
 type RecordedOp =
@@ -227,7 +237,7 @@ function definitionMetadata(definition: BlockDefinition): DefinitionResult {
         site,
         result: definitionExpr(definition.result),
         domain: "registers",
-        inputExpr: definition.index,
+        inputExpr: definition.selector.expr,
         point: programPoint(site.at)
       } satisfies DefinitionResult);
   }
@@ -313,6 +323,92 @@ function placement(opIndex: number): Placement {
 
 function definitionId(id: number): BlockDefinitionId {
   return id as BlockDefinitionId;
+}
+
+async function instantiateDynamicRegisterLoad(
+  state: WebAssembly.Memory
+): Promise<WebAssembly.Instance> {
+  const module = new WasmModuleEncoder();
+
+  module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
+
+  const typeIndex = module.addFunctionType({
+    params: [wasmValueType.i32],
+    results: [wasmValueType.i32]
+  });
+  const body = new WasmFunctionBodyEncoder(1);
+  const definition = dynamicRegisterLoadDefinition(2);
+  const definitions = createWasmDefinitionRecipeEmitter({
+    body,
+    definitions: [definitionMetadata(definition)],
+    sources: stateRegisterSourceReader(body)
+  });
+
+  definitions.emitDefinition(
+    definition.id,
+    () => {
+      body.localGet(0);
+      return wasmI32(32);
+    }
+  );
+  body.end();
+
+  const functionIndex = module.addFunction(typeIndex, body);
+
+  module.exportFunction("load", functionIndex);
+
+  return WebAssembly.instantiate(await WebAssembly.compile(module.encode()), {
+    [wasmImport.moduleName]: {
+      [wasmImport.stateMemoryName]: state
+    }
+  });
+}
+
+function dynamicRegisterLoadDefinition(id: number): BlockDefinition {
+  const definition = definitionId(id);
+
+  return Object.freeze({
+    kind: "dynamicRegisterLoad",
+    id: definition,
+    at: opSite(0),
+    result: Object.freeze({ kind: "def", id: definition }),
+    selector: modRmSelector(exprConst(0)),
+    width: 32
+  } satisfies BlockDefinition);
+}
+
+function unusedSourceReader(): WasmSourceReader {
+  return {
+    emitInput: (source) => {
+      ok(false, `unexpected source read ${source.kind}`);
+      return wasmI32(32);
+    },
+    tryEmitRegisterAliasInput: (alias) => {
+      ok(false, `unexpected register alias read ${alias.name}`);
+      return undefined;
+    }
+  };
+}
+
+function stateRegisterSourceReader(body: WasmFunctionBodyEncoder): WasmSourceReader {
+  return createWasmSourceReader(body, {
+    placement: (source) => {
+      switch (source.kind) {
+        case "reg":
+          return { kind: "state.i32", state: stateRegisterBasePlacement(source.reg) };
+        case "flag":
+          ok(false, `unexpected flag source ${source.flag}`);
+          return { kind: "packed-flag-local", local: 0 };
+      }
+    }
+  });
+}
+
+function readExportedFunction(instance: WebAssembly.Instance, name: string): (index: number) => number {
+  const value = instance.exports[name];
+
+  ok(typeof value === "function", `expected exported function ${name}`);
+  return value as (index: number) => number;
 }
 
 function fail(message: string): never {

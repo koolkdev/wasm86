@@ -8,6 +8,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
   analyzeExpressionNeeds,
   analyzeStateObligations,
@@ -103,8 +104,8 @@ test("dynamic register load and store create index and value needs", () => {
   ], {
     resolver: new BindingResolver({
       operands: [
-        dynamicRegBinding(exprConst(3), 32),
-        dynamicRegBinding(exprConst(4), 32)
+        dynamicRegBinding(modRmSelector(exprConst(3)), 32),
+        dynamicRegBinding(modRmSelector(exprConst(4)), 32)
       ]
     })
   });

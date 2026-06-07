@@ -8,17 +8,9 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import type { BlockDefinitionId } from "#ir/block/definitions.js";
 import {
-  analyzeBarrierFacts,
-  analyzeExpressionNeeds,
-  analyzePlacementPlan,
-  analyzeStateObligations,
-  analyzeStateWrites,
-  analyzeValuePlan,
-  buildBlockLayout,
-  buildTimelineGeometry,
-  buildTimelineValueUseIndex,
   type BlockLayout,
   type ExprRecipe,
   type LayoutStep,
@@ -26,10 +18,6 @@ import {
   type ValueSnapshotId,
   type ValuePlan
 } from "#ir/block/planning/index.js";
-import {
-  type BlockWalkInput,
-  walkExpressionBlock
-} from "#ir/block/walk/index.js";
 import {
   exprBinary,
   exprConst,
@@ -51,6 +39,11 @@ import {
   type WasmCachePlan
 } from "#wasm/emit/cache/plan/index.js";
 import { recipeEmissionChildren } from "#wasm/emit/cache/plan/recipes.js";
+import {
+  analyzeWasmBlock,
+  wasmLocalRegisterAccessMode,
+  type WasmBlockAnalysisInput
+} from "#wasm/emit/block/analysis.js";
 
 test("Wasm cache plan creates a forced entry for every ValueSnapshot", () => {
   const { layout, values } = analyzeBlock([
@@ -338,38 +331,22 @@ test("Wasm cache plan output has no concrete local operation fields", () => {
 
 function analyzeBlock(
   block: IrBlock,
-  input: Omit<BlockWalkInput, "block"> = {}
+  input: Omit<WasmBlockAnalysisInput, "block" | "registerAccessMode"> = {}
 ): Readonly<{
-  geometry: ReturnType<typeof buildTimelineGeometry>;
+  geometry: ReturnType<typeof analyzeWasmBlock>["geometry"];
   layout: BlockLayout;
   values: ValuePlan;
 }> {
-  const walked = walkExpressionBlock({ ...input, block });
-  const geometry = buildTimelineGeometry(walked);
-  const timelineUses = buildTimelineValueUseIndex({ walked, geometry });
-  const obligations = analyzeStateObligations({ walked, geometry });
-  const needs = analyzeExpressionNeeds({ timelineUses, obligations });
-  const facts = analyzeBarrierFacts({ walked, geometry });
-  const values = analyzeValuePlan({ needs: needs.needs, geometry, facts });
-  const stateWrites = analyzeStateWrites({
-    obligations,
-    valueNeeds: needs.valueNeedByObligation,
-    values
+  const { geometry, layout, values } = analyzeWasmBlock({
+    ...input,
+    block,
+    registerAccessMode: wasmLocalRegisterAccessMode
   });
-  const placement = analyzePlacementPlan({ geometry, facts, values, stateWrites });
 
   return {
     geometry,
     values,
-    layout: buildBlockLayout({
-      walked,
-      geometry,
-      timelineUses,
-      timelineNeedByUse: needs.timelineNeedByUse,
-      values,
-      stateWrites,
-      placement
-    })
+    layout
   };
 }
 
@@ -410,7 +387,7 @@ function fail(message: string): never {
 
 function dynamicResolver(): BindingResolver {
   return new BindingResolver({
-    operands: [dynamicRegBinding(exprConst(3), 32)]
+    operands: [dynamicRegBinding(modRmSelector(exprConst(3)), 32)]
   });
 }
 

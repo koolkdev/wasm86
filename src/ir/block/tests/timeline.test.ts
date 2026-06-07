@@ -8,6 +8,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import type { BlockAction } from "#ir/block/actions.js";
 import type { BlockDefinition } from "#ir/block/definitions.js";
 import {
@@ -170,7 +171,7 @@ test("exit-producing actions expose exit snapshots through explicit action field
   deepStrictEqual(jumpResult.exits, [jump.action.exit]);
 });
 
-test("block timeline includes dynamic register definitions and actions", () => {
+test("block timeline includes dynamic register base definitions and actions", () => {
   const result = walkFragment({
     block: [
       { op: "get", dst: v(0), source: { kind: "operand", index: 0 }, accessWidth: 32 },
@@ -178,8 +179,8 @@ test("block timeline includes dynamic register definitions and actions", () => {
     ],
     resolver: new BindingResolver({
       operands: [
-        dynamicRegBinding(exprConst(1), 32),
-        dynamicRegBinding(exprConst(2), 32)
+        dynamicRegBinding(modRmSelector(exprConst(1)), 32),
+        dynamicRegBinding(modRmSelector(exprConst(2)), 32)
       ]
     })
   });
@@ -190,10 +191,9 @@ test("block timeline includes dynamic register definitions and actions", () => {
   strictEqual(load.kind, "definition");
   strictEqual(store.kind, "action");
   strictEqual(load.definition.kind, "dynamicRegisterLoad");
-  deepStrictEqual(load.definition.index, exprConst(1));
-  strictEqual(load.definition.width, 32);
+  deepStrictEqual(load.definition.selector.expr, exprConst(1));
   strictEqual(store.action.kind, "dynamicRegisterStore");
-  deepStrictEqual(store.action.index, exprConst(2));
+  deepStrictEqual(store.action.selector.expr, exprConst(2));
   deepStrictEqual(store.action.value, exprInput(load.definition.result));
 });
 
@@ -215,7 +215,7 @@ test("dynamic register stores carry prior static register state on the real acti
       { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 }
     ],
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(4), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(4)), 32)]
     })
   });
   const store = requireActionSite(result.timeline[0], "dynamicRegisterStore");
@@ -235,7 +235,7 @@ test("dynamic register stores reset later exit register state", () => {
       { op: "next" }
     ],
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(4), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(4)), 32)]
     })
   });
   const store = requireActionSite(result.timeline[0], "dynamicRegisterStore");
@@ -254,7 +254,7 @@ test("dynamic register stores without preceding sync keep later register state r
       { op: "next" }
     ],
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(4), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(4)), 32)]
     })
   });
   const store = requireActionSite(result.timeline[0], "dynamicRegisterStore");

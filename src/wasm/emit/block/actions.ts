@@ -1,12 +1,13 @@
 import { assert } from "#common/assert.js";
 import type { BlockExit } from "#ir/block/exits.js";
+import type { RegisterStateTarget } from "#ir/block/state/targets.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
 import {
   emitGuardGuestMemoryRange,
   emitStoreGuestMemoryFromStackUnchecked
 } from "../ops/memory.js";
+import type { WasmTargetStorage } from "../targets/storage.js";
+import { emitStoreDynamicRegister } from "./dynamic-registers.js";
 import type {
   WasmActionEffectEmitInput,
   WasmActionEmitter,
@@ -20,8 +21,8 @@ import type {
 
 export type WasmActionEmitterInput = Readonly<{
   body: WasmFunctionBodyEncoder;
-  scratch: WasmLocalScratchAllocator;
   exitRegions: WasmExitRegionContext;
+  registers: WasmTargetStorage<RegisterStateTarget>;
 }>;
 
 export function createWasmActionEmitter(input: WasmActionEmitterInput): WasmActionEmitter {
@@ -30,18 +31,34 @@ export function createWasmActionEmitter(input: WasmActionEmitterInput): WasmActi
 
 class WasmActionEmitterState implements WasmActionEmitter {
   readonly #body: WasmFunctionBodyEncoder;
-  readonly #scratch: WasmLocalScratchAllocator;
   readonly #exitRegions: WasmExitRegionContext;
+  readonly #registers: WasmTargetStorage<RegisterStateTarget>;
 
   constructor(input: WasmActionEmitterInput) {
     this.#body = input.body;
-    this.#scratch = input.scratch;
     this.#exitRegions = input.exitRegions;
+    this.#registers = input.registers;
   }
 
   emitActionInputs(input: WasmActionInputsEmitInput): void {
-    for (const layoutInput of input.inputs) {
-      input.emitInput(layoutInput);
+    switch (input.site.action.kind) {
+      case "memoryGuard":
+        input.operands.emitLocal("address");
+        return;
+      case "memoryStore":
+        input.operands.emitStack("address");
+        input.operands.emitStack("value");
+        return;
+      case "dynamicRegisterStore":
+        input.operands.emitLocal("value");
+        return;
+      case "branch":
+        input.operands.emitStack("condition");
+        return;
+      case "jump":
+      case "hostTrap":
+      case "fallthrough":
+        return;
     }
   }
 
@@ -54,7 +71,8 @@ class WasmActionEmitterState implements WasmActionEmitter {
         emitStoreGuestMemoryFromStackUnchecked(this.#body, input.site.action.width);
         return;
       case "dynamicRegisterStore":
-        throw new Error("Wasm dynamicRegisterStore action lowering is unsupported");
+        this.#emitDynamicRegisterStore(input);
+        return;
       case "jump":
       case "hostTrap":
       case "fallthrough": {
@@ -74,19 +92,14 @@ class WasmActionEmitterState implements WasmActionEmitter {
 
     assert(action.kind === "memoryGuard", "expected memoryGuard action");
 
-    const addressLocal = this.#scratch.allocLocal(wasmValueType.i32);
     const fault = edgeForExit(input, action.faultExit);
+    const address = input.operands.local("address");
 
-    try {
-      this.#body.localSet(addressLocal);
-      this.#exitRegions.withControlDepth(1, () => {
-        emitGuardGuestMemoryRange(this.#body, addressLocal, action.byteLength, () => {
-          this.#emitEdgeRegion(input, fault);
-        });
+    this.#exitRegions.withControlDepth(1, () => {
+      emitGuardGuestMemoryRange(this.#body, address.local, action.byteLength, () => {
+        this.#emitEdgeRegion(input, fault);
       });
-    } finally {
-      this.#scratch.freeLocal(addressLocal);
-    }
+    });
   }
 
   #emitBranch(input: WasmActionEffectEmitInput): void {
@@ -102,6 +115,20 @@ class WasmActionEmitterState implements WasmActionEmitter {
       this.#emitEdgeRegion(input, notTaken);
       this.#body.endBlock();
     });
+  }
+
+  #emitDynamicRegisterStore(input: WasmActionEffectEmitInput): void {
+    assert(input.site.action.kind === "dynamicRegisterStore", "expected dynamicRegisterStore action");
+
+    emitStoreDynamicRegister(
+      this.#body,
+      input.site.action.width,
+      () => {
+        input.operands.emitStack("index");
+      },
+      input.operands.local("value"),
+      this.#registers
+    );
   }
 
   #emitEdgeRegion(

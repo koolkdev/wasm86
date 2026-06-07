@@ -16,7 +16,10 @@ import {
 import { opSite, type OpSite } from "./site.js";
 import type { BlockWalkResult } from "./types.js";
 import { ControlWalkOps } from "./control-ops.js";
-import { DynamicRegisterWalkOps } from "./dynamic-register-ops.js";
+import {
+  DynamicRegisterWalkOps
+} from "./dynamic-register-ops.js";
+import type { RegisterAccessMode } from "#ir/block/state/register-materialization.js";
 import { FlagWalkOps } from "./flag-ops.js";
 import { MemoryWalkOps } from "./memory-ops.js";
 import { BlockWalkRecorder } from "./recorder.js";
@@ -38,6 +41,7 @@ export type BlockWalkInput = Readonly<{
   values?: BlockValueBindings;
   value?: BlockExternalValueResolver;
   continuation?: ExprRef;
+  dynamicRegisterAccessMode?: RegisterAccessMode;
 }>;
 
 export function walkExpressionBlock(input: BlockWalkInput): BlockWalkResult {
@@ -84,7 +88,8 @@ class ExpressionBlockWalker {
       registers: this.#registers,
       validator: registerValidator,
       site: () => this.#site(),
-      snapshot: () => this.#snapshot()
+      snapshot: () => this.#snapshot(),
+      mode: input.dynamicRegisterAccessMode ?? "exact-alias"
     });
     this.#memory = new MemoryWalkOps({
       recorder: this.#recorder,

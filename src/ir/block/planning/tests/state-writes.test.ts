@@ -8,6 +8,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
   analyzeBarrierFacts,
   analyzeExpressionNeeds,
@@ -163,7 +164,7 @@ test("StateWritePlan records dynamic-register-store pre-state writes", () => {
     { op: "next" }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(2), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(2)), 32)]
     })
   });
   const dynamicStore = geometry.registers.dynamicStores[0]!;

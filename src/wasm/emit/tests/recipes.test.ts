@@ -1,6 +1,7 @@
 import {
   deepStrictEqual,
   doesNotMatch,
+  ok,
   strictEqual,
   throws
 } from "node:assert";
@@ -110,7 +111,10 @@ test("input expressions read through source storage", () => {
       body.localGet(13);
       return wasmI32(32);
     },
-    tryEmitRegisterAliasInput: () => fail("unexpected register alias source read")
+    tryEmitRegisterAliasInput: () => {
+      ok(false, "unexpected register alias source read");
+      return undefined;
+    }
   };
   const definitions: WasmDefinitionRecipeEmitter = {
     definitionInfo: () => undefined,
@@ -582,6 +586,8 @@ class MemoryLoadDefinitions implements WasmDefinitionRecipeEmitter {
       definition,
       signed: options.signed === true
     });
+    ok(info.kind === "memoryLoad", `expected memory-load test definition ${definition}, got ${info.kind}`);
+
     return emitLoadGuestMemoryUnchecked(
       this.#body,
       emitInput,

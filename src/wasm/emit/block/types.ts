@@ -9,11 +9,15 @@ import type {
   PlannedStateWrite,
   StateWritePlan
 } from "#ir/block/planning/state-writes.js";
-import type { WasmValueCache } from "../cache/locals/index.js";
+import type {
+  WasmValueCache,
+  WasmValueCacheLocalEmission,
+  WasmValueCacheStackEmission
+} from "../cache/locals/index.js";
 import type { WasmEmittedValue } from "../values/types.js";
 import type { WasmRecipeEmitter } from "../values/recipes.js";
 
-export type WasmLayoutInputEmitter = (input: LayoutTimelineInput) => WasmEmittedValue;
+export type WasmLayoutInputEmitter = (input: LayoutTimelineInput) => WasmValueCacheStackEmission;
 
 export type WasmLayoutActionEdge = Readonly<{
   edge: BlockEdgeId;
@@ -30,14 +34,25 @@ export type WasmActionEmitter = Readonly<{
   emitActionEffect(input: WasmActionEffectEmitInput): void;
 }>;
 
+export type WasmActionInputRole = Extract<LayoutTimelineInput["use"], { kind: "action-input" }>["role"];
+
+export type WasmActionOperands = Readonly<{
+  has(role: WasmActionInputRole): boolean;
+  emitStack(role: WasmActionInputRole): WasmValueCacheStackEmission;
+  emitLocal(role: WasmActionInputRole): WasmValueCacheLocalEmission;
+  local(role: WasmActionInputRole): WasmValueCacheLocalEmission;
+  release(): void;
+}>;
+
 export type WasmActionInputsEmitInput = Readonly<{
   site: BlockActionSite;
   inputs: readonly LayoutTimelineInput[];
-  emitInput: WasmLayoutInputEmitter;
+  operands: WasmActionOperands;
 }>;
 
 export type WasmActionEffectEmitInput = Readonly<{
   site: BlockActionSite;
+  operands: WasmActionOperands;
   edges: readonly WasmLayoutActionEdge[];
   emitEdge(edge: WasmLayoutActionEdge): void;
 }>;

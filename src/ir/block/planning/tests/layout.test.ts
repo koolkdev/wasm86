@@ -25,6 +25,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
   type BlockWalkInput,
   walkExpressionBlock
@@ -116,7 +117,7 @@ test("BlockLayout orders same-point action inputs before snapshots before action
     { op: "set", target: { kind: "mem", address: c(0x1000) }, value: v(0), accessWidth: 32 }
   ], {
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(3), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(3)), 32)]
     })
   });
   const snapshot = only(values.snapshots);

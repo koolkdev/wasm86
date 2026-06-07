@@ -120,7 +120,7 @@ function actionUses(
       ];
     case "dynamicRegisterStore":
       return [
-        actionInput(ids.next(), site, site.action.index, point, "index"),
+        actionInput(ids.next(), site, site.action.selector.expr, point, "index"),
         actionInput(ids.next(), site, site.action.value, point, "value")
       ];
     case "jump":

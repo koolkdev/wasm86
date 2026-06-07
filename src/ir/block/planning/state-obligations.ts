@@ -3,7 +3,7 @@ import { flagMaterializationWrites } from "#ir/block/state/flag-materialization.
 import { RegisterState } from "#ir/block/state/register-state.js";
 import {
   RegisterMaterializer,
-  type RegisterMaterializationMode
+  type RegisterAccessMode
 } from "#ir/block/state/register-materialization.js";
 import type {
   FlagStateTarget,
@@ -51,7 +51,7 @@ export type StateMaterializationWrite =
 export type StateObligationInput = Readonly<{
   walked: WalkedBlock;
   geometry: TimelineGeometry;
-  registerMaterializationMode?: RegisterMaterializationMode;
+  registerMaterializationMode?: RegisterAccessMode;
 }>;
 
 class StateObligationIds {

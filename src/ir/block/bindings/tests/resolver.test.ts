@@ -12,6 +12,7 @@ import {
   regBinding,
   valueBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
   exprBinary,
   exprConst,
@@ -40,9 +41,9 @@ test("explicit base-register storage narrows to canonical register aliases", () 
   );
 });
 
-test("dynamic ModRM register operands preserve the runtime register-index expression", () => {
-  const index = exprInput({ kind: "flag", flag: "ZF" });
-  const binding = dynamicRegBinding(index, 16);
+test("dynamic ModRM register operands preserve the runtime selector expression", () => {
+  const selector = exprInput({ kind: "flag", flag: "ZF" });
+  const binding = dynamicRegBinding(modRmSelector(selector), 16);
   const resolver = new BindingResolver({ operands: [binding] });
 
   deepStrictEqual(resolver.operand(0), binding);
@@ -51,7 +52,7 @@ test("dynamic ModRM register operands preserve the runtime register-index expres
 
 test("ModRM r/m register and memory paths use separate storage bindings", () => {
   const address = exprBinary("add", exprInput({ kind: "reg", reg: "esi" }), exprConst(4));
-  const registerPath = dynamicRegBinding(exprConst(3), 8);
+  const registerPath = dynamicRegBinding(modRmSelector(exprConst(3)), 8);
   const memoryPath = memBinding(address, 8);
   const registerResolver = new BindingResolver({ operands: [registerPath] });
   const memoryResolver = new BindingResolver({ operands: [memoryPath] });

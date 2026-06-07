@@ -9,6 +9,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
   analyzeBarrierFacts,
   analyzeValuePlan,
@@ -868,7 +869,7 @@ function id(value: number): ExprNeedId {
 
 function dynamicResolver(): BindingResolver {
   return new BindingResolver({
-    operands: [dynamicRegBinding(exprConst(3), 32)]
+    operands: [dynamicRegBinding(modRmSelector(exprConst(3)), 32)]
   });
 }
 

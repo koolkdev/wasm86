@@ -70,7 +70,7 @@ export class StorageWalkOps {
       case "reg":
         return this.#registers.readAlias(binding.reg, "storageRead");
       case "dynamicReg":
-        return this.#dynamic.load(binding.index, binding.width);
+        return this.#dynamic.load(binding.selector, binding.width);
       case "mem":
         return this.#memory.load(binding.address, binding.width);
     }
@@ -82,7 +82,7 @@ export class StorageWalkOps {
         this.#registers.writeAlias(binding.reg, value);
         return;
       case "dynamicReg":
-        this.#dynamic.store(binding.index, value, binding.width);
+        this.#dynamic.store(binding.selector, value, binding.width);
         return;
       case "mem":
         this.#memory.store(binding.address, value, binding.width);

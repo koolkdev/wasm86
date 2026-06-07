@@ -9,6 +9,7 @@ import {
   BindingResolver,
   dynamicRegBinding
 } from "#ir/block/bindings/resolver.js";
+import { modRmSelector } from "#ir/block/modrm-selector.js";
 import {
   buildTimelineGeometry,
   comparePathOrder,
@@ -185,7 +186,7 @@ test("timeline geometry exposes dynamic register store action and pre-state poin
       { op: "set", target: { kind: "operand", index: 0 }, value: c(0x55), accessWidth: 32 }
     ],
     resolver: new BindingResolver({
-      operands: [dynamicRegBinding(exprConst(2), 32)]
+      operands: [dynamicRegBinding(modRmSelector(exprConst(2)), 32)]
     })
   });
   const geometry = buildTimelineGeometry(result);
