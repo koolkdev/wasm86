@@ -46,8 +46,7 @@ import {
 import type {
   WasmCacheEntry,
   WasmCacheEntryId,
-  WasmCachePlan,
-  WasmCacheReason
+  WasmCachePlan
 } from "#wasm/emit/cache/plan/index.js";
 import { emitLoadGuestMemoryUnchecked } from "#wasm/emit/ops/memory.js";
 import {
@@ -179,7 +178,7 @@ test("snapshot recipes emit through the value cache", () => {
   const sourceRecipe = exprRecipe(exprConst(11));
   const snapshotRecipe = Object.freeze({ kind: "snapshot", snapshot } satisfies ExprRecipe);
   const plan = cachePlan([
-    cacheEntry(0, sourceRecipe, [{ kind: "required-snapshot", snapshot }])
+    cacheEntry(0, sourceRecipe, [snapshot])
   ]);
   const { body, cache, emitter, scratch } = createFixture(plan, [snapshotRecipe]);
 
@@ -292,7 +291,7 @@ test("signed extension over snapshot memory-load result does not bypass the snap
   const body = new WasmFunctionBodyEncoder();
   const definitions = new MemoryLoadDefinitions(body, [[def, 8]]);
   const plan = cachePlan([
-    cacheEntry(0, load, [{ kind: "required-snapshot", snapshot }])
+    cacheEntry(0, load, [snapshot])
   ]);
   const { cache, emitter } = createFixtureWithBody(body, plan, [recipe, snapshotRecipe], definitions);
 
@@ -324,7 +323,7 @@ test("signed extension over selected direct memory-load child preserves cache ow
   const scratch = new RecordingScratch(body);
   const definitions = new MemoryLoadDefinitions(body, [[def, 8]]);
   const plan = cachePlan([
-    cacheEntry(0, load, [{ kind: "reuse", estimatedBenefit: 1 }])
+    cacheEntry(0, load)
   ]);
   const { cache, emitter } = createFixtureWithBody(
     body,
@@ -366,7 +365,7 @@ test("snapshot establishment can fuse a signed view over a memory-load definitio
   const body = new WasmFunctionBodyEncoder();
   const definitions = new MemoryLoadDefinitions(body, [[def, 16]]);
   const plan = cachePlan([
-    cacheEntry(0, signedView, [{ kind: "required-snapshot", snapshot }])
+    cacheEntry(0, signedView, [snapshot])
   ]);
   const { cache, emitter } = createFixtureWithBody(body, plan, [signedView], definitions);
 
@@ -697,13 +696,12 @@ function cachePlan(entries: readonly WasmCacheEntry[]): WasmCachePlan {
 function cacheEntry(
   id: number,
   recipe: ExprRecipe,
-  reasons: readonly WasmCacheReason[] = []
+  requiredSnapshots: readonly ValueSnapshotId[] = []
 ): WasmCacheEntry {
   return Object.freeze({
     id: id as WasmCacheEntryId,
     recipe,
-    reasons: Object.freeze([...reasons]),
-    uses: Object.freeze([])
+    requiredSnapshots: Object.freeze([...requiredSnapshots])
   } satisfies WasmCacheEntry);
 }
 

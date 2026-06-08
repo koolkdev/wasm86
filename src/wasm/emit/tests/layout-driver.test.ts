@@ -24,7 +24,8 @@ import {
   type RecipeRegistry,
   type StateWriteId,
   type StateWritePlan,
-  type ValuePlan
+  type ValuePlan,
+  type ValueSnapshotId
 } from "#ir/block/planning/index.js";
 import { initialBlockState } from "#ir/block/walk/state.js";
 import { opSite } from "#ir/block/walk/site.js";
@@ -57,8 +58,7 @@ import {
   planWasmCache,
   type WasmCacheEntry,
   type WasmCacheEntryId,
-  type WasmCachePlan,
-  type WasmCacheReason
+  type WasmCachePlan
 } from "#wasm/emit/cache/plan/index.js";
 import {
   analyzeWasmBlock,
@@ -882,13 +882,12 @@ function cachePlan(entries: readonly WasmCacheEntry[]): WasmCachePlan {
 function cacheEntry(
   id: number,
   recipe: ExprRecipe,
-  reasons: readonly WasmCacheReason[] = []
+  requiredSnapshots: readonly ValueSnapshotId[] = []
 ): WasmCacheEntry {
   return Object.freeze({
     id: id as WasmCacheEntryId,
     recipe,
-    reasons: Object.freeze([...reasons]),
-    uses: Object.freeze([])
+    requiredSnapshots: Object.freeze([...requiredSnapshots])
   } satisfies WasmCacheEntry);
 }
 

@@ -32,8 +32,7 @@ import {
 import type {
   WasmCacheEntry,
   WasmCacheEntryId,
-  WasmCachePlan,
-  WasmCacheReason
+  WasmCachePlan
 } from "#wasm/emit/cache/plan/index.js";
 import {
   createWasmValueCache,
@@ -144,7 +143,7 @@ test("Wasm value cache keeps snapshot expression locals until region leave", () 
   const laterUseA = useId(21);
   const laterUseB = useId(22);
   const plan = cachePlan([
-    cacheEntry(0, snapshotSourceRecipe, [{ kind: "required-snapshot", snapshot }]),
+    cacheEntry(0, snapshotSourceRecipe, [snapshot]),
     cacheEntry(1, laterRecipe)
   ]);
   const { body, cache, scratch } = createFixture(plan);
@@ -176,7 +175,7 @@ test("Wasm value cache emits parent snapshot expressions in child regions", () =
   const edge = region(1, edgePath(1));
   const snapshot = snapshotId(0);
   const snapshotSourceRecipe = exprInputRecipe("eax");
-  const plan = cachePlan([cacheEntry(0, snapshotSourceRecipe, [{ kind: "required-snapshot", snapshot }])]);
+  const plan = cachePlan([cacheEntry(0, snapshotSourceRecipe, [snapshot])]);
   const { body, cache, scratch } = createFixture(plan);
 
   cache.enterRegion(main);
@@ -393,13 +392,12 @@ function cachePlan(
 function cacheEntry(
   id: number,
   recipe: ExprRecipe,
-  reasons: readonly WasmCacheReason[] = []
+  requiredSnapshots: readonly ValueSnapshotId[] = []
 ): WasmCacheEntry {
   return Object.freeze({
     id: id as WasmCacheEntryId,
     recipe,
-    reasons: Object.freeze([...reasons]),
-    uses: Object.freeze([])
+    requiredSnapshots: Object.freeze([...requiredSnapshots])
   } satisfies WasmCacheEntry);
 }
 

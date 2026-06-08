@@ -1,18 +1,7 @@
-import { assert } from "#common/assert.js";
 import type {
-  ExprRecipe,
-  ExprRecipeId,
-  ValuePlan
+  ExprRecipe
 } from "#ir/block/planning/values/index.js";
 import { bindRecipeChildSlots } from "../../values/children.js";
-
-export function recipeIdOrThrow(recipes: ValuePlan["recipes"], recipe: ExprRecipe): ExprRecipeId {
-  const recipeId = recipes.recipeId(recipe);
-
-  assert(recipeId !== undefined, "Wasm cache plan references an unregistered expression recipe");
-
-  return recipeId;
-}
 
 export function recipeEmissionChildren(recipe: ExprRecipe): ExprRecipe[] {
   switch (recipe.kind) {

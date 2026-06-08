@@ -26,10 +26,8 @@ export class WasmCacheEntryIndex {
 
       this.#byRecipeId.set(recipeId, entry);
 
-      for (const reason of entry.reasons) {
-        if (reason.kind === "required-snapshot") {
-          this.#bySnapshotId.set(reason.snapshot, entry);
-        }
+      for (const snapshot of entry.requiredSnapshots) {
+        this.#bySnapshotId.set(snapshot, entry);
       }
     }
   }

@@ -1,45 +1,23 @@
+import { defaultWasmRecipeCostModel } from "./cost.js";
 import { selectCacheEntries } from "./selection.js";
+import { buildWasmCacheUseIndex } from "./use-index.js";
 import type {
-  MutableEntry,
-  WasmCacheEntry,
   WasmCachePlan,
   WasmCachePlanInput
 } from "./types.js";
 
 export function planWasmCache(input: WasmCachePlanInput): WasmCachePlan {
-  return new WasmCachePlanner(input).plan();
-}
+  const useIndex = buildWasmCacheUseIndex({
+    layout: input.layout,
+    recipes: input.values.recipes
+  });
 
-export class WasmCachePlanner {
-  readonly #input: WasmCachePlanInput;
-  #plan: WasmCachePlan | undefined;
-
-  constructor(input: WasmCachePlanInput) {
-    this.#input = input;
-  }
-
-  plan(): WasmCachePlan {
-    if (this.#plan === undefined) {
-      this.#plan = this.#build();
-    }
-
-    return this.#plan;
-  }
-
-  #build(): WasmCachePlan {
-    const selected = selectCacheEntries(this.#input);
-
-    return freezePlan(selected.entries);
-  }
-}
-
-function freezePlan(entries: readonly MutableEntry[]): WasmCachePlan {
-  return Object.freeze({
-    entries: Object.freeze(entries.map((entry) => Object.freeze({
-      id: entry.id,
-      recipe: entry.recipe,
-      reasons: Object.freeze([...entry.reasons]),
-      uses: Object.freeze([...entry.uses])
-    } satisfies WasmCacheEntry)))
-  } satisfies WasmCachePlan);
+  return {
+    entries: selectCacheEntries({
+      useIndex,
+      recipes: input.values.recipes,
+      requiredSnapshots: input.values.snapshots,
+      costModel: input.costModel ?? defaultWasmRecipeCostModel
+    })
+  } satisfies WasmCachePlan;
 }

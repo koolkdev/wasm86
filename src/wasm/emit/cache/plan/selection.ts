@@ -1,104 +1,97 @@
-import type { LayoutValueUseId } from "#ir/block/planning/layout/index.js";
+import { assert } from "#common/assert.js";
 import type {
   ExprRecipe,
   ExprRecipeId,
-  ValueSnapshotId,
-  ValuePlan
+  ValuePlan,
+  ValueSnapshotId
 } from "#ir/block/planning/values/index.js";
 import {
-  defaultWasmRecipeCostModel,
   shouldReuseWasmRecipe,
-  wasmRecipeReuseBenefit
+  type WasmRecipeCostModel
 } from "./cost.js";
-import { recipeIdOrThrow } from "./recipes.js";
-import { summarizeRecipeOccurrences } from "./summary.js";
 import type {
-  CacheSelection,
-  MutableEntry,
-  WasmCacheEntryId,
-  WasmCachePlanInput,
-  WasmCacheReason
+  WasmCacheRecipeUse,
+  WasmCacheUseIndex
+} from "./use-index.js";
+import type {
+  WasmCacheEntry,
+  WasmCacheEntryId
 } from "./types.js";
 
-type EntrySelection = {
-  entries: Map<ExprRecipeId, MutableEntry>;
-  snapshotRecipeIds: Map<ValueSnapshotId, ExprRecipeId>;
-  snapshotEntries: Map<ValueSnapshotId, MutableEntry>;
-  nextEntryId: number;
+export type WasmCacheSelectionInput = Readonly<{
+  useIndex: WasmCacheUseIndex;
+  recipes: ValuePlan["recipes"];
+  requiredSnapshots: ValuePlan["snapshots"];
+  costModel: WasmRecipeCostModel;
+}>;
+
+type MutableWasmCacheEntry = {
+  id: WasmCacheEntryId;
+  recipe: ExprRecipe;
+  requiredSnapshots: ValueSnapshotId[];
 };
 
-export function selectCacheEntries(input: WasmCachePlanInput): CacheSelection {
-  const selection: EntrySelection = {
-    entries: new Map(),
-    snapshotRecipeIds: new Map(),
-    snapshotEntries: new Map(),
-    nextEntryId: 0
-  };
-  const costModel = input.costModel ?? defaultWasmRecipeCostModel;
+export function selectCacheEntries(input: WasmCacheSelectionInput): readonly WasmCacheEntry[] {
+  return new WasmCacheEntrySelector(input).select();
+}
 
-  addValueSnapshotEntries(input.values, selection);
+class WasmCacheEntrySelector {
+  readonly #input: WasmCacheSelectionInput;
+  readonly #entries: MutableWasmCacheEntry[] = [];
+  readonly #entryByRecipeId = new Map<ExprRecipeId, MutableWasmCacheEntry>();
+  #nextEntryId = 0;
 
-  const summaries = summarizeRecipeOccurrences({
-    layout: input.layout,
-    recipes: input.values.recipes,
-    snapshotRecipeIds: selection.snapshotRecipeIds
-  });
+  constructor(input: WasmCacheSelectionInput) {
+    this.#input = input;
+  }
 
-  for (const [recipeId, summary] of summaries) {
-    const estimatedBenefit = wasmRecipeReuseBenefit(summary.recipe, summary.occurrenceCount, costModel);
+  select(): readonly WasmCacheEntry[] {
+    this.#addRequiredSnapshotEntries();
+    this.#selectRecipeUses();
 
-    if (shouldReuseWasmRecipe(summary.recipe, summary.occurrenceCount, costModel)) {
-      entryFor(selection, summary.recipe, recipeId).reasons.push(Object.freeze({
-        kind: "reuse",
-        estimatedBenefit
-      } satisfies WasmCacheReason));
-    }
+    return this.#entries;
+  }
 
-    const entry = selection.entries.get(recipeId);
+  #addRequiredSnapshotEntries(): void {
+    for (const snapshot of this.#input.requiredSnapshots) {
+      const recipeId = this.#input.recipes.recipeId(snapshot.recipe);
 
-    if (entry !== undefined) {
-      for (const use of summary.uses) {
-        entry.uses.add(use);
-      }
+      assert(recipeId !== undefined, "Wasm cache plan references an unregistered snapshot recipe");
+
+      const entry = this.#entryFor(snapshot.recipe, recipeId);
+
+      entry.requiredSnapshots.push(snapshot.id);
     }
   }
 
-  return Object.freeze({
-    entries: Object.freeze([...selection.entries.values()]),
-    byRecipeId: selection.entries,
-    bySnapshotId: selection.snapshotEntries
-  } satisfies CacheSelection);
-}
-
-function addValueSnapshotEntries(values: ValuePlan, selection: EntrySelection): void {
-  for (const snapshot of values.snapshots) {
-    const recipeId = recipeIdOrThrow(values.recipes, snapshot.recipe);
-    const entry = entryFor(selection, snapshot.recipe, recipeId);
-
-    selection.snapshotRecipeIds.set(snapshot.id, recipeId);
-    selection.snapshotEntries.set(snapshot.id, entry);
-    entry.reasons.push(Object.freeze({
-      kind: "required-snapshot",
-      snapshot: snapshot.id
-    } satisfies WasmCacheReason));
-  }
-}
-
-function entryFor(selection: EntrySelection, recipe: ExprRecipe, recipeId: ExprRecipeId): MutableEntry {
-  const existing = selection.entries.get(recipeId);
-
-  if (existing !== undefined) {
-    return existing;
+  #selectRecipeUses(): void {
+    for (const [recipeId, recipeUse] of this.#input.useIndex.byRecipe) {
+      this.#selectRecipeUse(recipeId, recipeUse);
+    }
   }
 
-  const entry = {
-    id: selection.nextEntryId as WasmCacheEntryId,
-    recipe,
-    reasons: [],
-    uses: new Set<LayoutValueUseId>()
-  };
+  #selectRecipeUse(recipeId: ExprRecipeId, recipeUse: WasmCacheRecipeUse): void {
+    if (shouldReuseWasmRecipe(recipeUse.recipe, recipeUse.inlineUseCount, this.#input.costModel)) {
+      this.#entryFor(recipeUse.recipe, recipeId);
+    }
+  }
 
-  selection.nextEntryId += 1;
-  selection.entries.set(recipeId, entry);
-  return entry;
+  #entryFor(recipe: ExprRecipe, recipeId: ExprRecipeId): MutableWasmCacheEntry {
+    const existing = this.#entryByRecipeId.get(recipeId);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const entry = {
+      id: this.#nextEntryId as WasmCacheEntryId,
+      recipe,
+      requiredSnapshots: []
+    };
+
+    this.#nextEntryId += 1;
+    this.#entries.push(entry);
+    this.#entryByRecipeId.set(recipeId, entry);
+    return entry;
+  }
 }

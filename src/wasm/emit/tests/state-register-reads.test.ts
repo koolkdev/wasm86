@@ -33,8 +33,7 @@ import {
 import type {
   WasmCacheEntry,
   WasmCacheEntryId,
-  WasmCachePlan,
-  WasmCacheReason
+  WasmCachePlan
 } from "#wasm/emit/cache/plan/index.js";
 import { stateRegisterBasePlacement } from "#wasm/emit/state/placement.js";
 import {
@@ -175,7 +174,7 @@ test("snapshot children are not bypassed by direct state-register reads", () => 
   const snapshotRecipe = Object.freeze({ kind: "snapshot", snapshot } satisfies ExprRecipe);
   const recipe = exprRecipeWithChildren(exprProject(8, input.expr), [snapshotRecipe]);
   const bytes = emitRecipe(recipe, {
-    cacheEntries: [cacheEntry(0, input, [{ kind: "required-snapshot", snapshot }])],
+    cacheEntries: [cacheEntry(0, input, [snapshot])],
     beforeEmit: (emitter) => emitter.establishSnapshot(snapshot, input)
   });
   const opcodes = wasmBodyOpcodes(bytes);
@@ -242,7 +241,7 @@ test("signed extension respects snapshot-backed register view children", () => {
   const project = exprRecipeWithChildren(exprProject(8, input.expr), [snapshotRecipe]);
   const recipe = unaryRecipe("extend8_s", project);
   const bytes = emitRecipe(recipe, {
-    cacheEntries: [cacheEntry(0, input, [{ kind: "required-snapshot", snapshot }])],
+    cacheEntries: [cacheEntry(0, input, [snapshot])],
     beforeEmit: (emitter) => emitter.establishSnapshot(snapshot, input)
   });
   const opcodes = wasmBodyOpcodes(bytes);
@@ -386,13 +385,12 @@ function cachePlan(entries: readonly WasmCacheEntry[]): WasmCachePlan {
 function cacheEntry(
   id: number,
   recipe: ExprRecipe,
-  reasons: readonly WasmCacheReason[] = []
+  requiredSnapshots: readonly ValueSnapshotId[] = []
 ): WasmCacheEntry {
   return Object.freeze({
     id: id as WasmCacheEntryId,
     recipe,
-    reasons: Object.freeze([...reasons]),
-    uses: Object.freeze([])
+    requiredSnapshots: Object.freeze([...requiredSnapshots])
   } satisfies WasmCacheEntry);
 }
 

@@ -1,12 +1,10 @@
 export {
-  planWasmCache,
-  WasmCachePlanner
+  planWasmCache
 } from "./plan.js";
 
 export type {
   WasmCacheEntry,
   WasmCacheEntryId,
   WasmCachePlan,
-  WasmCachePlanInput,
-  WasmCacheReason
+  WasmCachePlanInput
 } from "./types.js";

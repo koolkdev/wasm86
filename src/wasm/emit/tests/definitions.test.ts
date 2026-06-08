@@ -296,8 +296,7 @@ function cacheEntry(id: number, recipe: ExprRecipe): WasmCacheEntry {
   return Object.freeze({
     id: id as WasmCacheEntryId,
     recipe,
-    reasons: Object.freeze([]),
-    uses: Object.freeze([])
+    requiredSnapshots: Object.freeze([])
   });
 }
 
