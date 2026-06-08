@@ -30,6 +30,7 @@ import {
   createWasmValueCache,
   type WasmValueCache
 } from "#wasm/emit/cache/locals/index.js";
+import { wasmCacheLifetimeKeepTracker } from "#wasm/emit/cache/lifetime/index.js";
 import type {
   WasmCacheEntry,
   WasmCacheEntryId,
@@ -322,7 +323,8 @@ function createFixture(
   const cache = createWasmValueCache({
     plan,
     values: recipeValues([...plan.entries.map((entry) => entry.recipe), ...extraRecipes]),
-    body
+    body,
+    lifetime: wasmCacheLifetimeKeepTracker
   });
   const sources = createWasmSourceReader(body, {
     placement: (source) => {

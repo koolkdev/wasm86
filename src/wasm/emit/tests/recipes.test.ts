@@ -43,6 +43,7 @@ import {
   createWasmValueCache,
   type WasmValueCache
 } from "#wasm/emit/cache/locals/index.js";
+import { wasmCacheLifetimeKeepTracker } from "#wasm/emit/cache/lifetime/index.js";
 import type {
   WasmCacheEntry,
   WasmCacheEntryId,
@@ -639,7 +640,8 @@ function createFixtureWithBody(
     plan,
     values: recipeValues([...recipes, ...extraRecipes]),
     body,
-    ...(options.scratch === undefined ? {} : { scratch: options.scratch })
+    ...(options.scratch === undefined ? {} : { scratch: options.scratch }),
+    lifetime: wasmCacheLifetimeKeepTracker
   });
   const registers = Object.fromEntries(
     reg32.map((reg, index) => [reg, index])

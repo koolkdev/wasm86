@@ -12,8 +12,7 @@ import type {
   StateWriteId
 } from "#ir/block/planning/state-writes.js";
 import type {
-  WasmValueCacheLocalEmission,
-  WasmValueCacheStackEmission
+  WasmValueCacheLocalEmission
 } from "../cache/locals/index.js";
 import { wasmValueCacheOutput } from "../cache/locals/index.js";
 import type { WasmEmittedValue } from "../values/types.js";
@@ -159,7 +158,7 @@ class WasmLayoutDriverState implements WasmLayoutDriver {
     });
   }
 
-  #emitTimelineInput(input: LayoutTimelineInput): WasmValueCacheStackEmission {
+  #emitTimelineInput(input: LayoutTimelineInput): WasmEmittedValue {
     return this.#input.cache.emitUse(
       input,
       () => this.#input.recipes.emitRecipeBody(input.recipe),

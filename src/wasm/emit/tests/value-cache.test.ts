@@ -38,6 +38,7 @@ import {
   createWasmValueCache,
   type WasmValueCache
 } from "#wasm/emit/cache/locals/index.js";
+import { wasmCacheLifetimeKeepTracker } from "#wasm/emit/cache/lifetime/index.js";
 import {
   wasmI32,
   type WasmEmittedValue
@@ -369,7 +370,8 @@ function createFixture(
       plan,
       values: recipeValues([...recipes, ...extraRecipes]),
       body,
-      scratch
+      scratch,
+      lifetime: wasmCacheLifetimeKeepTracker
     })
   };
 }

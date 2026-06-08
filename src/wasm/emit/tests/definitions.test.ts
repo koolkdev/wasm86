@@ -39,6 +39,7 @@ import {
 } from "#wasm/encoder/types.js";
 import { createWasmDefinitionRecipeEmitter } from "#wasm/emit/block/definitions.js";
 import { createWasmValueCache } from "#wasm/emit/cache/locals/index.js";
+import { wasmCacheLifetimeKeepTracker } from "#wasm/emit/cache/lifetime/index.js";
 import type {
   WasmCacheEntry,
   WasmCacheEntryId,
@@ -79,7 +80,8 @@ test("used memory-load definition emits once through a selected recipe cache pat
     plan,
     values: recipeValues([load]),
     body,
-    scratch
+    scratch,
+    lifetime: wasmCacheLifetimeKeepTracker
   });
   const definitions = createWasmDefinitionRecipeEmitter({
     body,

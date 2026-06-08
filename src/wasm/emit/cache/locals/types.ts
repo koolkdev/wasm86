@@ -9,6 +9,7 @@ import type {
 } from "#ir/block/planning/values/index.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import type { WasmCacheLifetimeTracker } from "../lifetime/index.js";
 import type { WasmCachePlan } from "../plan/index.js";
 import type { WasmEmittedValue } from "../../values/types.js";
 
@@ -18,17 +19,6 @@ export type WasmValueCacheUse = Readonly<{
 }>;
 
 export type WasmValueCacheInlineEmitter = () => WasmEmittedValue;
-
-export type WasmValueCacheStackEmission =
-  | Readonly<{
-      kind: "uncached";
-      value: WasmEmittedValue;
-    }>
-  | Readonly<{
-      kind: "cached";
-      value: WasmEmittedValue;
-      local: number;
-    }>;
 
 export type WasmValueCacheLocalEmission = Readonly<{
   value: WasmEmittedValue;
@@ -54,7 +44,7 @@ export type WasmValueCache = Readonly<{
       use: WasmValueCacheUse,
       emitInline: WasmValueCacheInlineEmitter,
       output: WasmValueCacheStackOutput
-    ): WasmValueCacheStackEmission;
+    ): WasmEmittedValue;
     (
       use: WasmValueCacheUse,
       emitInline: WasmValueCacheInlineEmitter,
@@ -67,7 +57,7 @@ export type WasmValueCache = Readonly<{
       recipe: ExprRecipe,
       emitInline: WasmValueCacheInlineEmitter,
       output: WasmValueCacheStackOutput
-    ): WasmValueCacheStackEmission;
+    ): WasmEmittedValue;
     (
       recipe: ExprRecipe,
       emitInline: WasmValueCacheInlineEmitter,
@@ -78,7 +68,7 @@ export type WasmValueCache = Readonly<{
   ensureSnapshot(snapshot: ValueSnapshotId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void;
   emitSnapshot: {
     (snapshot: ValueSnapshotId): WasmEmittedValue;
-    (snapshot: ValueSnapshotId, output: WasmValueCacheStackOutput): WasmValueCacheStackEmission;
+    (snapshot: ValueSnapshotId, output: WasmValueCacheStackOutput): WasmEmittedValue;
     (snapshot: ValueSnapshotId, output: WasmValueCacheLocalOutput): WasmValueCacheLocalEmission;
   };
 }>;
@@ -88,4 +78,5 @@ export type WasmValueCacheInput = Readonly<{
   values: Pick<ValuePlan, "recipes">;
   body: WasmFunctionBodyEncoder;
   scratch?: WasmLocalScratchAllocator;
+  lifetime: WasmCacheLifetimeTracker;
 }>;

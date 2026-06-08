@@ -42,10 +42,12 @@ import type {
   WasmLayoutExitPayload
 } from "#wasm/emit/block/layout.js";
 import type {
-  WasmValueCacheLocalEmission,
-  WasmValueCacheStackEmission
+  WasmValueCacheLocalEmission
 } from "#wasm/emit/cache/locals/index.js";
-import { wasmI32 } from "#wasm/emit/values/types.js";
+import {
+  wasmI32,
+  type WasmEmittedValue
+} from "#wasm/emit/values/types.js";
 import { wasmBodyMemoryAccesses } from "#wasm/tests/body-opcodes.js";
 
 test("action inputs emit operands in layout order and memoryStore consumes stack operands", () => {
@@ -284,7 +286,7 @@ test("dynamicRegisterStore reuses selected operand locals without scratch copies
 
       indexEmitCount += 1;
       body.localGet(indexLocal);
-      return cachedStack(wasmI32(32), indexLocal);
+      return wasmI32(32);
     },
     emitLocalInput: (input) => {
       if (input.use.kind !== "action-input" || input.use.role !== "value") {
@@ -371,7 +373,7 @@ class TrackingScratch extends WasmLocalScratchAllocator {
 function emitInput(
   body: WasmFunctionBodyEncoder,
   events: string[]
-): (input: LayoutTimelineInput) => WasmValueCacheStackEmission {
+): (input: LayoutTimelineInput) => WasmEmittedValue {
   return (input) => {
     const edge = input.use.kind === "exit-payload"
       ? `:${input.use.edge}`
@@ -379,7 +381,7 @@ function emitInput(
 
     events.push(`input:${input.use.kind}:${input.use.role}${edge}`);
     body.i32Const(input.id);
-    return uncachedStack(wasmI32(32));
+    return wasmI32(32);
   };
 }
 
@@ -398,7 +400,7 @@ function testActionOperands(
   events: string[],
   scratch = new WasmLocalScratchAllocator(body),
   emitters: Partial<Readonly<{
-    emitStackInput(input: LayoutTimelineInput): WasmValueCacheStackEmission;
+    emitStackInput(input: LayoutTimelineInput): WasmEmittedValue;
     emitLocalInput(input: LayoutTimelineInput): WasmValueCacheLocalEmission;
   }>> = {}
 ): WasmActionOperands {
@@ -409,20 +411,13 @@ function testActionOperands(
     inputs,
     emitStackInput,
     emitLocalInput: emitters.emitLocalInput ?? ((input) => {
-      const stack = emitStackInput(input);
+      const value = emitStackInput(input);
       const local = scratch.allocLocal(wasmValueType.i32);
 
       body.localSet(local);
-      return localEmission(stack.value, local, () => scratch.freeLocal(local));
+      return localEmission(value, local, () => scratch.freeLocal(local));
     })
   });
-}
-
-function uncachedStack(value: ReturnType<typeof wasmI32>): WasmValueCacheStackEmission {
-  return {
-    kind: "uncached",
-    value
-  };
 }
 
 function localEmission(
@@ -434,14 +429,6 @@ function localEmission(
     value,
     local,
     release
-  };
-}
-
-function cachedStack(value: ReturnType<typeof wasmI32>, local: number): WasmValueCacheStackEmission {
-  return {
-    kind: "cached",
-    value,
-    local
   };
 }
 
@@ -574,7 +561,7 @@ async function instantiateDynamicRegisterStore(
     actionInput(1, site, "value")
   ];
   const scratch = new WasmLocalScratchAllocator(body);
-  const emitDynamicInput = (input: LayoutTimelineInput): WasmValueCacheStackEmission => {
+  const emitDynamicInput = (input: LayoutTimelineInput): WasmEmittedValue => {
     if (input.use.kind !== "action-input") {
       throw new Error(`unexpected dynamic register store input kind ${input.use.kind}`);
     }
@@ -582,10 +569,10 @@ async function instantiateDynamicRegisterStore(
     switch (input.use.role) {
       case "index":
         body.localGet(0);
-        return uncachedStack(wasmI32(32));
+        return wasmI32(32);
       case "value":
         body.localGet(1);
-        return uncachedStack(wasmI32(32));
+        return wasmI32(32);
       case "address":
       case "condition":
         throw new Error(`unexpected dynamic register store input role ${input.use.role}`);
@@ -596,11 +583,11 @@ async function instantiateDynamicRegisterStore(
     inputs,
     emitStackInput: emitDynamicInput,
     emitLocalInput: (input) => {
-      const stack = emitDynamicInput(input);
+      const value = emitDynamicInput(input);
       const local = scratch.allocLocal(wasmValueType.i32);
 
       body.localSet(local);
-      return localEmission(stack.value, local, () => scratch.freeLocal(local));
+      return localEmission(value, local, () => scratch.freeLocal(local));
     }
   });
 

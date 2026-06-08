@@ -14,7 +14,6 @@ export type {
   WasmValueCacheLocalEmission,
   WasmValueCacheLocalOutput,
   WasmValueCacheOutput,
-  WasmValueCacheStackEmission,
   WasmValueCacheStackOutput,
   WasmValueCacheUse
 } from "./types.js";

@@ -11,13 +11,12 @@ import type {
 } from "#ir/block/planning/state-writes.js";
 import type {
   WasmValueCache,
-  WasmValueCacheLocalEmission,
-  WasmValueCacheStackEmission
+  WasmValueCacheLocalEmission
 } from "../cache/locals/index.js";
 import type { WasmEmittedValue } from "../values/types.js";
 import type { WasmRecipeEmitter } from "../values/recipes.js";
 
-export type WasmLayoutInputEmitter = (input: LayoutTimelineInput) => WasmValueCacheStackEmission;
+export type WasmLayoutInputEmitter = (input: LayoutTimelineInput) => WasmEmittedValue;
 
 export type WasmLayoutActionEdge = Readonly<{
   edge: BlockEdgeId;
@@ -38,7 +37,7 @@ export type WasmActionInputRole = Extract<LayoutTimelineInput["use"], { kind: "a
 
 export type WasmActionOperands = Readonly<{
   has(role: WasmActionInputRole): boolean;
-  emitStack(role: WasmActionInputRole): WasmValueCacheStackEmission;
+  emitStack(role: WasmActionInputRole): WasmEmittedValue;
   emitLocal(role: WasmActionInputRole): WasmValueCacheLocalEmission;
   local(role: WasmActionInputRole): WasmValueCacheLocalEmission;
   release(): void;

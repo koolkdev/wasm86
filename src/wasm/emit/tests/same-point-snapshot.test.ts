@@ -28,6 +28,7 @@ import {
   type WasmValueType
 } from "#wasm/encoder/types.js";
 import { createWasmValueCache } from "#wasm/emit/cache/locals/index.js";
+import { wasmCacheLifetimeKeepTracker } from "#wasm/emit/cache/lifetime/index.js";
 import { planWasmCache } from "#wasm/emit/cache/plan/index.js";
 import {
   analyzeWasmBlock,
@@ -148,7 +149,8 @@ function emitMainLayout(
     plan: planWasmCache({ layout, values }),
     values,
     body,
-    scratch
+    scratch,
+    lifetime: wasmCacheLifetimeKeepTracker
   });
   const main = mainRegion(layout);
 

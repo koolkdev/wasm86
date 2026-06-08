@@ -54,6 +54,7 @@ import {
   type WasmStateWriteEmitter
 } from "#wasm/emit/block/layout.js";
 import { createWasmValueCache } from "#wasm/emit/cache/locals/index.js";
+import { wasmCacheLifetimeKeepTracker } from "#wasm/emit/cache/lifetime/index.js";
 import {
   planWasmCache,
   type WasmCacheEntry,
@@ -457,7 +458,8 @@ function emitFixture(input: Readonly<{
     plan: input.cachePlan,
     values: input.values,
     body,
-    scratch
+    scratch,
+    lifetime: wasmCacheLifetimeKeepTracker
   });
 
   recipeLabels = new WeakMap<ExprRecipe, string>();

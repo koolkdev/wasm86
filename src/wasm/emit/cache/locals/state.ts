@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import type { LayoutRegion } from "#ir/block/planning/layout/index.js";
 import type {
   ExprRecipe,
@@ -5,7 +6,9 @@ import type {
 } from "#ir/block/planning/values/index.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { WasmCacheEntryIndex } from "./entries.js";
+import { WasmCacheEntryIndex } from "../entries.js";
+import type { WasmCacheLifetimeTracker } from "../lifetime/index.js";
+import type { WasmCachedLocal } from "./locals.js";
 import { WasmValueCacheLocals } from "./locals.js";
 import { WasmCacheRegionStack } from "./regions.js";
 import type {
@@ -15,7 +18,6 @@ import type {
   WasmValueCacheLocalEmission,
   WasmValueCacheLocalOutput,
   WasmValueCacheOutput,
-  WasmValueCacheStackEmission,
   WasmValueCacheStackOutput,
   WasmValueCacheUse
 } from "./types.js";
@@ -34,12 +36,14 @@ export class WasmValueCacheState implements WasmValueCache {
   readonly #entries: WasmCacheEntryIndex;
   readonly #regions = new WasmCacheRegionStack();
   readonly #locals: WasmValueCacheLocals;
+  readonly #lifetime: WasmCacheLifetimeTracker;
 
   constructor(input: WasmValueCacheInput) {
     this.#body = input.body;
     this.#scratch = input.scratch ?? new WasmLocalScratchAllocator(input.body);
     this.#entries = new WasmCacheEntryIndex(input.plan, input.values);
     this.#locals = new WasmValueCacheLocals(this.#scratch);
+    this.#lifetime = input.lifetime;
   }
 
   enterRegion(region: LayoutRegion): void {
@@ -57,7 +61,7 @@ export class WasmValueCacheState implements WasmValueCache {
     use: WasmValueCacheUse,
     emitInline: WasmValueCacheInlineEmitter,
     output: WasmValueCacheStackOutput
-  ): WasmValueCacheStackEmission;
+  ): WasmEmittedValue;
   emitUse(
     use: WasmValueCacheUse,
     emitInline: WasmValueCacheInlineEmitter,
@@ -67,7 +71,7 @@ export class WasmValueCacheState implements WasmValueCache {
     use: WasmValueCacheUse,
     emitInline: WasmValueCacheInlineEmitter,
     output?: WasmValueCacheOutput
-  ): WasmEmittedValue | WasmValueCacheStackEmission | WasmValueCacheLocalEmission {
+  ): WasmEmittedValue | WasmValueCacheLocalEmission {
     if (output === undefined) {
       return this.emitRecipe(use.recipe, emitInline);
     }
@@ -85,7 +89,7 @@ export class WasmValueCacheState implements WasmValueCache {
     recipe: ExprRecipe,
     emitInline: WasmValueCacheInlineEmitter,
     output: WasmValueCacheStackOutput
-  ): WasmValueCacheStackEmission;
+  ): WasmEmittedValue;
   emitRecipe(
     recipe: ExprRecipe,
     emitInline: WasmValueCacheInlineEmitter,
@@ -95,9 +99,9 @@ export class WasmValueCacheState implements WasmValueCache {
     recipe: ExprRecipe,
     emitInline: WasmValueCacheInlineEmitter,
     output?: WasmValueCacheOutput
-  ): WasmEmittedValue | WasmValueCacheStackEmission | WasmValueCacheLocalEmission {
+  ): WasmEmittedValue | WasmValueCacheLocalEmission {
     if (output === undefined) {
-      return this.#emitRecipeStack(recipe, emitInline).value;
+      return this.#emitRecipeStack(recipe, emitInline);
     }
 
     switch (output.kind) {
@@ -111,7 +115,7 @@ export class WasmValueCacheState implements WasmValueCache {
   #emitRecipeStack(
     recipe: ExprRecipe,
     emitInline: WasmValueCacheInlineEmitter
-  ): WasmValueCacheStackEmission {
+  ): WasmEmittedValue {
     if (recipe.kind === "snapshot") {
       return this.#emitSnapshotStack(recipe.snapshot);
     }
@@ -119,7 +123,7 @@ export class WasmValueCacheState implements WasmValueCache {
     const entry = this.#entries.entryForRecipe(recipe);
 
     if (entry === undefined) {
-      return uncachedStack(emitInline());
+      return emitInline();
     }
 
     const active = this.#regions.activeRegion();
@@ -127,14 +131,16 @@ export class WasmValueCacheState implements WasmValueCache {
 
     if (visible !== undefined) {
       this.#body.localGet(visible.local);
-      return cachedStack(visible.value, visible.local);
+      this.#releaseAfterStackUse(visible);
+      return visible.value;
     }
 
     const value = emitInline();
     const local = this.#locals.establish(entry, value, active);
 
     this.#body.localTee(local.local);
-    return cachedStack(value, local.local);
+    this.#releaseAfterStackUse(local);
+    return value;
   }
 
   #emitRecipeLocal(
@@ -159,14 +165,14 @@ export class WasmValueCacheState implements WasmValueCache {
     const visible = this.#locals.get(entry.id, this.#regions.activeRegionChain());
 
     if (visible !== undefined) {
-      return localEmission(visible.value, visible.local);
+      return this.#cachedLocalEmission(visible);
     }
 
     const value = emitInline();
     const local = this.#locals.establish(entry, value, active);
 
     this.#body.localSet(local.local);
-    return localEmission(value, local.local);
+    return this.#cachedLocalEmission(local);
   }
 
   isRecipeSelected(recipe: ExprRecipe): ReturnType<WasmValueCache["isRecipeSelected"]> {
@@ -174,7 +180,7 @@ export class WasmValueCacheState implements WasmValueCache {
   }
 
   ensureSnapshot(snapshot: ValueSnapshotId, recipe: ExprRecipe, emitInline: WasmValueCacheInlineEmitter): void {
-    const entry = this.#entries.entryForSnapshot(snapshot);
+    const entry = this.#entries.requireEntryForSnapshot(snapshot);
     const active = this.#regions.activeRegion();
     const visible = this.#locals.get(entry.id, this.#regions.activeRegionChain());
 
@@ -191,14 +197,14 @@ export class WasmValueCacheState implements WasmValueCache {
   }
 
   emitSnapshot(snapshot: ValueSnapshotId): WasmEmittedValue;
-  emitSnapshot(snapshot: ValueSnapshotId, output: WasmValueCacheStackOutput): WasmValueCacheStackEmission;
+  emitSnapshot(snapshot: ValueSnapshotId, output: WasmValueCacheStackOutput): WasmEmittedValue;
   emitSnapshot(snapshot: ValueSnapshotId, output: WasmValueCacheLocalOutput): WasmValueCacheLocalEmission;
   emitSnapshot(
     snapshot: ValueSnapshotId,
     output?: WasmValueCacheOutput
-  ): WasmEmittedValue | WasmValueCacheStackEmission | WasmValueCacheLocalEmission {
+  ): WasmEmittedValue | WasmValueCacheLocalEmission {
     if (output === undefined) {
-      return this.#emitSnapshotStack(snapshot).value;
+      return this.#emitSnapshotStack(snapshot);
     }
 
     switch (output.kind) {
@@ -209,43 +215,49 @@ export class WasmValueCacheState implements WasmValueCache {
     }
   }
 
-  #emitSnapshotStack(snapshot: ValueSnapshotId): WasmValueCacheStackEmission {
-    const entry = this.#entries.entryForSnapshot(snapshot);
+  #emitSnapshotStack(snapshot: ValueSnapshotId): WasmEmittedValue {
+    const entry = this.#entries.requireEntryForSnapshot(snapshot);
     const visible = this.#locals.get(entry.id, this.#regions.activeRegionChain());
 
-    if (visible === undefined) {
-      throw new Error(`snapshot expression ${snapshot} is not available in the active Wasm cache path`);
-    }
+    assert(visible !== undefined, `snapshot expression ${snapshot} is not available in the active Wasm cache path`);
 
     this.#body.localGet(visible.local);
-    return cachedStack(visible.value, visible.local);
+    this.#releaseAfterStackUse(visible);
+    return visible.value;
   }
 
   #emitSnapshotLocal(snapshot: ValueSnapshotId): WasmValueCacheLocalEmission {
-    const entry = this.#entries.entryForSnapshot(snapshot);
+    const entry = this.#entries.requireEntryForSnapshot(snapshot);
     const visible = this.#locals.get(entry.id, this.#regions.activeRegionChain());
 
-    if (visible === undefined) {
-      throw new Error(`snapshot expression ${snapshot} is not available in the active Wasm cache path`);
-    }
+    assert(visible !== undefined, `snapshot expression ${snapshot} is not available in the active Wasm cache path`);
 
-    return localEmission(visible.value, visible.local);
+    return this.#cachedLocalEmission(visible);
   }
-}
 
-function uncachedStack(value: WasmValueCacheStackEmission["value"]): WasmValueCacheStackEmission {
-  return {
-    kind: "uncached",
-    value
-  };
-}
+  #releaseAfterStackUse(local: WasmCachedLocal): void {
+    const decision = this.#lifetime.touchSelectedUse({
+      entry: local.entry.id,
+      ownerRegion: local.owner.region.id
+    });
 
-function cachedStack(value: WasmValueCacheStackEmission["value"], local: number): WasmValueCacheStackEmission {
-  return {
-    kind: "cached",
-    value,
-    local
-  };
+    if (decision.kind === "release") {
+      this.#locals.releaseEntry(local.entry.id, local.owner);
+    }
+  }
+
+  #cachedLocalEmission(local: WasmCachedLocal): WasmValueCacheLocalEmission {
+    const borrow = this.#lifetime.borrowSelectedLocal({
+      entry: local.entry.id,
+      ownerRegion: local.owner.region.id
+    });
+
+    return localEmission(local.value, local.local, () => {
+      if (borrow.release().kind === "release") {
+        this.#locals.releaseEntry(local.entry.id, local.owner);
+      }
+    });
+  }
 }
 
 function localEmission(
