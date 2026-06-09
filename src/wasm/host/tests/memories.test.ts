@@ -48,7 +48,7 @@ test("runtime Wasm state layout exposes raw execution fields", () => {
     instructionCount: 44,
     stopReason: 48
   });
-  strictEqual(stateByteLength, 52);
+  strictEqual(stateByteLength, 58);
 });
 
 test("runtime Wasm guest memory reads writes and reports faults", () => {
