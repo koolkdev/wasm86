@@ -4,7 +4,7 @@ import type { ValueId, ValueNode, ValueTable } from "#ir/action/values.js";
 
 // Pure per-region value analysis for the action emitter: everything is
 // decided up front from the action list and the value graph. No encoder
-// imports — the materializer consumes this, the analysis never emits.
+// imports — the value stack consumes this, the analysis never emits.
 
 export type RegionValueAnalysis = Readonly<{
   // Emission uses: action-operand edges plus the child edges of every

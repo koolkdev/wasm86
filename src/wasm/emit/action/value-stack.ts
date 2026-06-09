@@ -22,7 +22,7 @@ import type { RegionValueAnalysis } from "./values.js";
 // refcounted scratch local and replayed until its last counted use. The
 // registry below is the only scratch-local mechanism in the emitter.
 
-export type MaterializeContext = Readonly<{
+export type ValueStackContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   values: ValueTable;
@@ -30,11 +30,11 @@ export type MaterializeContext = Readonly<{
   // External id -> the wasm local the embedding bound it to.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
   // Pushes the channel's current value; the driver wires this to the state
-  // access layer — the materializer never sees offsets.
+  // access layer — the value stack never sees offsets.
   loadSlot(slot: StateSlot): void;
 }>;
 
-export type Materializer = Readonly<{
+export type ValueStack = Readonly<{
   // The driver calls this at each readState action point, in action order.
   readState(action: ReadStateAction): void;
   // Pushes one use of the value onto the stack.
@@ -50,7 +50,7 @@ type CompoundValueNode =
   | SelectValueNode
   | ProjectValueNode;
 
-export function createMaterializer(context: MaterializeContext): Materializer {
+export function createValueStack(context: ValueStackContext): ValueStack {
   const { body, values, analysis } = context;
   const registry = createLocalRegistry(body, context.scratch);
   // Unpinned readState outputs reload from their channel at every use.
@@ -243,7 +243,7 @@ function emitCompareOperator(
   operator: IrCompareOperator
 ): void {
   if (width !== 32) {
-    throw new Error(`${width}-bit compare not supported by action materializer yet`);
+    throw new Error(`${width}-bit compare not supported by action value stack yet`);
   }
 
   switch (operator) {

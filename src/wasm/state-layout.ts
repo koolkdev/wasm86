@@ -132,7 +132,7 @@ export function writeWasmStateChannel(view: DataView, channel: StateChannel, val
   }
 }
 
-function channelAccessByteLength(channel: StateChannel): 1 | 2 | 4 {
+export function channelAccessByteLength(channel: StateChannel): 1 | 2 | 4 {
   switch (channel.kind) {
     case "gpr":
       return channel.byteLength;

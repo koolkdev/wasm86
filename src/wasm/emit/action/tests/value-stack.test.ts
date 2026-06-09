@@ -5,7 +5,7 @@ import type { ExternalValueId } from "#ir/action/operands.js";
 import { gprChannel } from "#ir/action/slots.js";
 import type { ActionRegion, ReadStateAction } from "#ir/action/types.js";
 import { createValueTable, type ValueTable } from "#ir/action/values.js";
-import { createMaterializer, type Materializer } from "#wasm/emit/action/materialize.js";
+import { createValueStack, type ValueStack } from "#wasm/emit/action/value-stack.js";
 import { analyzeRegionValues } from "#wasm/emit/action/values.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -19,7 +19,7 @@ function entryRegion(actions: ActionRegion["actions"]): ActionRegion {
 type TestEmitter = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  materializer: Materializer;
+  valueStack: ValueStack;
 }>;
 
 function createTestEmitter(
@@ -30,7 +30,7 @@ function createTestEmitter(
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const externalLocals = new Map(externalIds.map((id) => [id, body.addLocal(wasmValueType.i32)]));
-  const materializer = createMaterializer({
+  const valueStack = createValueStack({
     body,
     scratch,
     values,
@@ -40,7 +40,7 @@ function createTestEmitter(
     loadSlot: () => body.i32Const(0).i32Load({ align: 2, offset: 0, memoryIndex: 0 })
   });
 
-  return { body, scratch, materializer };
+  return { body, scratch, valueStack };
 }
 
 test("single-use values emit inline with no locals", () => {
@@ -49,7 +49,7 @@ test("single-use values emit inline with no locals", () => {
   const five = values.internConst(5);
   const sum = values.internBinary("add", read, five);
   const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
-  const { body, scratch, materializer } = createTestEmitter(
+  const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
@@ -58,9 +58,9 @@ test("single-use values emit inline with no locals", () => {
     ])
   );
 
-  materializer.readState(readAction);
-  materializer.emitUse(sum);
-  materializer.assertClear();
+  valueStack.readState(readAction);
+  valueStack.emitUse(sum);
+  valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -81,7 +81,7 @@ test("a multi-use value tees once and replays from one freed local", () => {
   const five = values.internConst(5);
   const sum = values.internBinary("add", read, five);
   const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
-  const { body, scratch, materializer } = createTestEmitter(
+  const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
@@ -91,10 +91,10 @@ test("a multi-use value tees once and replays from one freed local", () => {
     ])
   );
 
-  materializer.readState(readAction);
-  materializer.emitUse(sum);
-  materializer.emitUse(sum);
-  materializer.assertClear();
+  valueStack.readState(readAction);
+  valueStack.emitUse(sum);
+  valueStack.emitUse(sum);
+  valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -117,7 +117,7 @@ test("a pinned read loads once at its action point and replays past the store", 
   const ebx = values.addActionOutput();
   const readEax: ReadStateAction = { kind: "readState", output: eax, slot: gprChannel("eax") };
   const readEbx: ReadStateAction = { kind: "readState", output: ebx, slot: gprChannel("ebx") };
-  const { body, scratch, materializer } = createTestEmitter(
+  const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readEax,
@@ -128,11 +128,11 @@ test("a pinned read loads once at its action point and replays past the store", 
     ])
   );
 
-  materializer.readState(readEax);
-  materializer.readState(readEbx);
-  materializer.emitUse(eax);
-  materializer.emitUse(ebx);
-  materializer.assertClear();
+  valueStack.readState(readEax);
+  valueStack.readState(readEbx);
+  valueStack.emitUse(eax);
+  valueStack.emitUse(ebx);
+  valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -156,7 +156,7 @@ test("a dead read emits nothing", () => {
   const read = values.addActionOutput();
   const seven = values.internConst(7);
   const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
-  const { body, scratch, materializer } = createTestEmitter(
+  const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
@@ -165,8 +165,8 @@ test("a dead read emits nothing", () => {
     ])
   );
 
-  materializer.readState(readAction);
-  materializer.assertClear();
+  valueStack.readState(readAction);
+  valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -179,7 +179,7 @@ test("constant and external leaves re-emit per use without scratch locals", () =
   const values = createValueTable();
   const seven = values.internConst(7);
   const external = values.internExternal(3);
-  const { body, scratch, materializer } = createTestEmitter(
+  const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: seven },
@@ -191,11 +191,11 @@ test("constant and external leaves re-emit per use without scratch locals", () =
     [3]
   );
 
-  materializer.emitUse(seven);
-  materializer.emitUse(seven);
-  materializer.emitUse(external);
-  materializer.emitUse(external);
-  materializer.assertClear();
+  valueStack.emitUse(seven);
+  valueStack.emitUse(seven);
+  valueStack.emitUse(external);
+  valueStack.emitUse(external);
+  valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -214,7 +214,7 @@ test("constant and external leaves re-emit per use without scratch locals", () =
 test("an external without a bound local fails loudly", () => {
   const values = createValueTable();
   const external = values.internExternal(3);
-  const { materializer } = createTestEmitter(
+  const { valueStack } = createTestEmitter(
     values,
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: external },
@@ -222,7 +222,7 @@ test("an external without a bound local fails loudly", () => {
     ])
   );
 
-  throws(() => materializer.emitUse(external), /no local bound for external value 3/);
+  throws(() => valueStack.emitUse(external), /no local bound for external value 3/);
 });
 
 test("select pushes whenTrue, whenFalse, then condition", () => {
@@ -232,7 +232,7 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
   const whenTrue = values.internUnary("popcnt", one);
   const condition = values.internCompare(32, "lt_u", one, two);
   const select = values.internSelect(condition, whenTrue, two);
-  const { body, materializer } = createTestEmitter(
+  const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: select },
@@ -240,8 +240,8 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
     ])
   );
 
-  materializer.emitUse(select);
-  materializer.assertClear();
+  valueStack.emitUse(select);
+  valueStack.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.i32Const,
@@ -265,7 +265,7 @@ test("operators map to their wasm opcodes", () => {
   const masked = values.internBinary("sub", values.internBinary("and", one, two), values.internBinary("or", one, two));
   const equal = values.internCompare(32, "eq", one, two);
   const signed = values.internCompare(32, "ge_s", one, two);
-  const { body, materializer } = createTestEmitter(
+  const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: mixed },
@@ -277,12 +277,12 @@ test("operators map to their wasm opcodes", () => {
     ])
   );
 
-  materializer.emitUse(mixed);
-  materializer.emitUse(extended);
-  materializer.emitUse(masked);
-  materializer.emitUse(equal);
-  materializer.emitUse(signed);
-  materializer.assertClear();
+  valueStack.emitUse(mixed);
+  valueStack.emitUse(extended);
+  valueStack.emitUse(masked);
+  valueStack.emitUse(equal);
+  valueStack.emitUse(signed);
+  valueStack.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.i32Const,
@@ -319,7 +319,7 @@ test("project masks to the requested width", () => {
   const low16 = values.internProject(16, read);
   const full = values.internProject(32, read);
   const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
-  const { body, materializer } = createTestEmitter(
+  const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
@@ -330,11 +330,11 @@ test("project masks to the requested width", () => {
     ])
   );
 
-  materializer.readState(readAction);
-  materializer.emitUse(low8);
-  materializer.emitUse(low16);
-  materializer.emitUse(full);
-  materializer.assertClear();
+  valueStack.readState(readAction);
+  valueStack.emitUse(low8);
+  valueStack.emitUse(low16);
+  valueStack.emitUse(full);
+  valueStack.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.i32Const,
@@ -351,12 +351,12 @@ test("project masks to the requested width", () => {
   ]);
 });
 
-test("narrow compares are not materialized yet", () => {
+test("narrow compares are rejected for now", () => {
   const values = createValueTable();
   const one = values.internConst(1);
   const two = values.internConst(2);
   const narrow = values.internCompare(16, "eq", one, two);
-  const { materializer } = createTestEmitter(
+  const { valueStack } = createTestEmitter(
     values,
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: narrow },
@@ -365,8 +365,8 @@ test("narrow compares are not materialized yet", () => {
   );
 
   throws(
-    () => materializer.emitUse(narrow),
-    /16-bit compare not supported by action materializer yet/
+    () => valueStack.emitUse(narrow),
+    /16-bit compare not supported by action value stack yet/
   );
 });
 
@@ -376,7 +376,7 @@ test("unconsumed captures fail assertClear and hold their scratch local", () => 
   const five = values.internConst(5);
   const sum = values.internBinary("add", read, five);
   const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
-  const { scratch, materializer } = createTestEmitter(
+  const { scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
@@ -386,9 +386,9 @@ test("unconsumed captures fail assertClear and hold their scratch local", () => 
     ])
   );
 
-  materializer.readState(readAction);
-  materializer.emitUse(sum);
+  valueStack.readState(readAction);
+  valueStack.emitUse(sum);
 
-  throws(() => materializer.assertClear(), /captured values with unconsumed uses/);
+  throws(() => valueStack.assertClear(), /captured values with unconsumed uses/);
   throws(() => scratch.assertClear(), /scratch locals still in use/);
 });
