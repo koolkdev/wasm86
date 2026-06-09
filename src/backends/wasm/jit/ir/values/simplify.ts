@@ -1,5 +1,5 @@
 import { widthMask, type OperandWidth } from "#x86/types.js";
-import type { IrUnaryOperator } from "#ir/model/types.js";
+import type { IrCompareOperator, IrUnaryOperator } from "#ir/model/types.js";
 import {
   flagProducerInputNames,
   flagProducerInputsFromRecord,
@@ -15,14 +15,19 @@ import {
   normalizeU32Mask
 } from "./bits.js";
 import {
+  flagWriteCellEntries,
+  flagWriteConditionEntries,
   normalizeFlagProducerMask,
   normalizeOptionalWidth
 } from "./flags.js";
 import type {
   JitBinaryValue,
+  JitCompareValue,
   JitExtractBitsValue,
   JitExtractMaskedBitsValue,
   JitFlagProducerValue,
+  JitFlagWriteCell,
+  JitFlagWriteValue,
   JitInsertBitsValue,
   JitInsertMaskedBitsValue,
   JitSelectValue,
@@ -54,8 +59,12 @@ export function simplifyValue(value: JitValue): JitValue {
       return simplifyJitExtractMaskedBitsValue(value);
     case "insertMaskedBits":
       return simplifyJitInsertMaskedBitsValue(value);
+    case "value.compare":
+      return simplifyJitCompareValue(value);
     case "flagProducer":
       return simplifyJitFlagProducerValue(value);
+    case "flagWrite":
+      return simplifyJitFlagWriteValue(value);
     case "flagCondition": {
       const flags = simplifyValue(value.flags);
 
@@ -373,6 +382,96 @@ function simplifyJitInsertMaskedBitsValue(value: JitInsertMaskedBitsValue): JitV
   return base === value.base && inserted === value.value && mask === value.mask
     ? value
     : { ...value, base, value: inserted, mask };
+}
+
+function simplifyJitCompareValue(value: JitCompareValue): JitValue {
+  const a = simplifyValue(value.a);
+  const b = simplifyValue(value.b);
+
+  if (a.kind === "const" && b.kind === "const") {
+    return {
+      kind: "const",
+      type: value.type,
+      value: foldCompareConst(value.operator, value.width, a.value, b.value) ? 1 : 0
+    };
+  }
+
+  return a === value.a && b === value.b ? value : { ...value, a, b };
+}
+
+function foldCompareConst(
+  operator: IrCompareOperator,
+  width: OperandWidth,
+  a: number,
+  b: number
+): boolean {
+  const left = (a & widthMask(width)) >>> 0;
+  const right = (b & widthMask(width)) >>> 0;
+
+  switch (operator) {
+    case "eq":
+      return left === right;
+    case "ne":
+      return left !== right;
+    case "lt_u":
+      return left < right;
+    case "le_u":
+      return left <= right;
+    case "gt_u":
+      return left > right;
+    case "ge_u":
+      return left >= right;
+    case "lt_s":
+      return signExtendToWidth(left, width) < signExtendToWidth(right, width);
+    case "le_s":
+      return signExtendToWidth(left, width) <= signExtendToWidth(right, width);
+    case "gt_s":
+      return signExtendToWidth(left, width) > signExtendToWidth(right, width);
+    case "ge_s":
+      return signExtendToWidth(left, width) >= signExtendToWidth(right, width);
+  }
+}
+
+function signExtendToWidth(value: number, width: OperandWidth): number {
+  const shift = 32 - width;
+
+  return (value << shift) >> shift;
+}
+
+function simplifyJitFlagWriteValue(value: JitFlagWriteValue): JitValue {
+  if (value.mask === 0) {
+    return { kind: "const", type: "i32", value: 0 };
+  }
+
+  let changed = false;
+  const cells: Record<string, JitFlagWriteCell> = {};
+
+  for (const [flag, cell] of flagWriteCellEntries(value)) {
+    if (cell.kind === "undef") {
+      cells[flag] = cell;
+      continue;
+    }
+
+    const simplified = simplifyValue(cell.value);
+
+    cells[flag] = simplified === cell.value ? cell : { kind: "expr", value: simplified };
+    changed ||= simplified !== cell.value;
+  }
+
+  if (value.conditions === undefined) {
+    return changed ? { ...value, cells } : value;
+  }
+
+  const conditions: Record<string, JitValue> = {};
+
+  for (const [cc, condition] of flagWriteConditionEntries(value)) {
+    const simplified = simplifyValue(condition);
+
+    conditions[cc] = simplified;
+    changed ||= simplified !== condition;
+  }
+
+  return changed ? { ...value, cells, conditions } : value;
 }
 
 function simplifyJitFlagProducerValue(value: JitFlagProducerValue): JitValue {

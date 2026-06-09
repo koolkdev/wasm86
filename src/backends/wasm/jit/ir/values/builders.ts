@@ -3,6 +3,7 @@ import { registerAlias } from "#x86/registers.js";
 import type {
   ConditionCode,
   FlagProducerName,
+  IrCompareOperator,
   IrValueType
 } from "#ir/model/types.js";
 import {
@@ -16,10 +17,12 @@ import {
   normalizeU32Mask
 } from "./bits.js";
 import {
+  flagWriteCellMask,
   normalizeFlagProducerMask,
   normalizeOptionalWidth
 } from "./flags.js";
 import type {
+  JitFlagWriteValue,
   JitInputValue,
   JitLoadResultValue,
   JitLoadResultValueId,
@@ -80,6 +83,27 @@ export function jitFlagProducerValue<Producer extends FlagProducerName>(
     ...(normalizedWidth === undefined ? {} : { width: normalizedWidth }),
     inputs: typedInputs,
     mask
+  };
+}
+
+export function jitCompareValue(
+  operator: IrCompareOperator,
+  width: OperandWidth,
+  a: JitValue,
+  b: JitValue
+): JitValue {
+  return { kind: "value.compare", type: "i32", operator, width, a, b };
+}
+
+export function jitFlagWriteValue(
+  cells: JitFlagWriteValue["cells"],
+  conditions?: JitFlagWriteValue["conditions"]
+): JitValue {
+  return {
+    kind: "flagWrite",
+    cells,
+    ...(conditions === undefined ? {} : { conditions }),
+    mask: flagWriteCellMask(cells)
   };
 }
 

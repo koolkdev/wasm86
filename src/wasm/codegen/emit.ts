@@ -310,7 +310,7 @@ class IrExprWasmEmitter {
   }
 }
 
-function compareUsesSignedOrder(operator: IrCompareOperator): boolean {
+export function compareUsesSignedOrder(operator: IrCompareOperator): boolean {
   switch (operator) {
     case "lt_s":
     case "le_s":
@@ -353,7 +353,7 @@ export function emitI32BinaryInstruction(body: WasmFunctionBodyEncoder, operator
   }
 }
 
-function emitI32CompareInstruction(
+export function emitI32CompareInstruction(
   body: WasmFunctionBodyEncoder,
   operator: IrCompareOperator
 ): void {

@@ -54,6 +54,12 @@ export type FlagProducerBitsDescriptor<T> = Readonly<{
   inputs: FlagProducerInputs<T>;
 }>;
 
+export type FlagWriteBitsCell<T> =
+  | Readonly<{ kind: "expr"; value: T }>
+  | Readonly<{ kind: "undef" }>;
+
+export type FlagWriteBitsCells<T> = Readonly<Partial<Record<FlagName, FlagWriteBitsCell<T>>>>;
+
 export function emitSetFlags(
   body: WasmFunctionBodyEncoder,
   aluFlags: WasmIrAluFlagsStorage,
@@ -178,12 +184,21 @@ function emitFlagWriteCells(
   descriptor: IrFlagWriteExprOp,
   helpers: WasmFlagValueEmitHelpers<IrValueExpr>
 ): void {
+  emitFlagWriteBitsFromCells(body, descriptor.cells, helpers, x86ArithmeticFlagsMask);
+}
+
+export function emitFlagWriteBitsFromCells<T>(
+  body: WasmFunctionBodyEncoder,
+  cells: FlagWriteBitsCells<T>,
+  helpers: WasmFlagValueEmitHelpers<T>,
+  mask: number
+): void {
   let hasWrittenBit = false;
 
   for (const flag of flagOrder) {
-    const cell = descriptor.cells[flag];
+    const cell = cells[flag];
 
-    if (cell === undefined || cell.kind === "undef") {
+    if (cell === undefined || cell.kind === "undef" || (mask & x86ArithmeticFlagMask[flag]) === 0) {
       continue;
     }
 

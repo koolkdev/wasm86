@@ -1,9 +1,10 @@
-import { flagProducerInputValues } from "./flags.js";
+import { flagProducerInputValues, flagWriteChildValues } from "./flags.js";
 import type { JitValue } from "./types.js";
 
 export function valueChildren(value: JitValue): readonly JitValue[] {
   switch (value.kind) {
     case "value.binary":
+    case "value.compare":
       return [value.a, value.b];
     case "value.unary":
       return [value.value];
@@ -17,6 +18,8 @@ export function valueChildren(value: JitValue): readonly JitValue[] {
       return [value.base, value.value];
     case "flagProducer":
       return flagProducerInputValues(value);
+    case "flagWrite":
+      return flagWriteChildValues(value);
     case "flagCondition":
       return [value.flags];
     case "const":

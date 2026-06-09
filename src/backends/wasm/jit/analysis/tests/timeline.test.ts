@@ -16,8 +16,11 @@ import {
 } from "#backends/wasm/jit/ir/block-expressions.js";
 import type { JitBoundExprBlock, JitBoundExprOp } from "#backends/wasm/jit/ir/bound-expressions.js";
 import {
+  jitCompareValue,
+  jitExtractBits,
   jitFlagConditionValue,
   jitFlagProducerValue,
+  jitFlagWriteValue,
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertBits,
@@ -28,6 +31,7 @@ import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { syntheticInstruction } from "#backends/wasm/jit/ir/tests/helpers.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
 import { FLAG_PRODUCERS } from "#ir/model/flags.js";
+import { x86ArithmeticFlagMask } from "#x86/flags.js";
 import type { Reg32 } from "#x86/types.js";
 
 type TestTimelineInput = Omit<TimelineInput, "expressions" | "loadResultRegistry"> & Readonly<{
@@ -395,47 +399,87 @@ test("JIT value timeline ignores no-op flag writes before resolving inputs", () 
   throws(() => timeline.viewAt(0).ref(v(102)));
 });
 
-test("legacy JIT timeline rejects semantic flag writes before consuming direct conditions", () => {
-  throws(
-    () => buildTimeline({
-      expressions: [{
-        op: "flags.write",
-        cells: {
-          ZF: { kind: "expr", value: c32(1) }
-        },
-        conditions: {
-          E: v(99)
+test("JIT value timeline records semantic flag writes with cells and conditions", () => {
+  const zfCell = jitCompareValue("eq", 32, jitInputReg32Value("eax"), c32(0));
+  const expectedFlags = jitInsertMaskedBits(
+    jitInputAluFlagsValue(),
+    jitFlagWriteValue({ ZF: { kind: "expr", value: zfCell } }, { E: zfCell }),
+    x86ArithmeticFlagMask.ZF
+  );
+  const condition = { kind: "flags.condition", cc: "E" } as const satisfies IrValueExpr;
+  const expressionBlock = [
+    {
+      op: "flags.write",
+      cells: {
+        ZF: {
+          kind: "expr",
+          value: {
+            kind: "value.compare",
+            type: "i32",
+            operator: "eq",
+            width: 32,
+            a: source(reg("eax")),
+            b: c32(0)
+          }
         }
-      }],
-      snapshotPoints: new Set()
-    }),
-    /semantic flags\.write is unsupported by legacy JIT analysis at op 0/
+      },
+      conditions: {
+        E: {
+          kind: "value.compare",
+          type: "i32",
+          operator: "eq",
+          width: 32,
+          a: source(reg("eax")),
+          b: c32(0)
+        }
+      }
+    },
+    { op: "let32", dst: v(0), value: condition }
+  ] as const satisfies IrExprBlock;
+  const timeline = buildTimeline({
+    expressions: expressionBlock,
+    snapshotPoints: new Set()
+  });
+
+  deepStrictEqual(timeline.writes, [{
+    opIndex: 0,
+    slot: { kind: "aluFlags" },
+    value: expectedFlags
+  }]);
+  deepStrictEqual(
+    timeline.viewAt(1).expression(condition),
+    jitFlagConditionValue(expectedFlags, "E")
   );
 });
 
-test("legacy JIT timeline rejects semantic project and compare values", () => {
-  throws(
-    () => buildTimeline({
-      expressions: [{
+test("JIT value timeline resolves semantic project and compare values", () => {
+  const timeline = buildTimeline({
+    expressions: [
+      {
         op: "let32",
         dst: v(0),
         value: { kind: "value.project", type: "i32", width: 8, value: c32(0x1234) }
-      }],
-      snapshotPoints: new Set()
-    }),
-    /semantic value\.project is unsupported by legacy JIT analysis at op 0/
-  );
-
-  throws(
-    () => buildTimeline({
-      expressions: [{
+      },
+      {
         op: "let32",
-        dst: v(0),
-        value: { kind: "value.compare", type: "i32", operator: "eq", width: 8, a: c32(0), b: c32(0) }
-      }],
-      snapshotPoints: new Set()
-    }),
-    /semantic value\.compare is unsupported by legacy JIT analysis at op 0/
+        dst: v(1),
+        value: {
+          kind: "value.compare",
+          type: "i32",
+          operator: "eq",
+          width: 8,
+          a: source(reg("eax"), 8),
+          b: c32(0x34)
+        }
+      }
+    ],
+    snapshotPoints: new Set()
+  });
+
+  deepStrictEqual(timeline.viewAt(0).ref(v(0)), c32(0x34));
+  deepStrictEqual(
+    timeline.viewAt(1).ref(v(1)),
+    jitCompareValue("eq", 8, jitExtractBits(jitInputReg32Value("eax"), 0, 8), c32(0x34))
   );
 });
 

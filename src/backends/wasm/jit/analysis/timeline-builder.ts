@@ -3,7 +3,10 @@ import type {
   IrStorageExpr,
   IrValueExpr
 } from "#wasm/codegen/expressions.js";
-import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
+import {
+  jitCompareValue,
+  jitExtractBits
+} from "#backends/wasm/jit/ir/values/builders.js";
 import {
   createJitValueResolver,
   type JitValueResolver
@@ -110,13 +113,12 @@ class TimelineBuilder {
         return;
       case "memory.guard":
       case "flags.set":
+      case "flags.write":
       case "jump":
       case "conditionalJump":
       case "hostTrap":
       case "next":
         return;
-      case "flags.write":
-        throw new UnsupportedWasmCodegenError(`semantic flags.write is unsupported by legacy JIT analysis at op ${this.#currentOpIndex}`);
     }
   }
 
@@ -144,10 +146,9 @@ class TimelineBuilder {
         this.#valueForExpression(op.vector);
         return;
       case "flags.set":
+      case "flags.write":
       case "next":
         return;
-      case "flags.write":
-        throw new UnsupportedWasmCodegenError(`semantic flags.write is unsupported by legacy JIT analysis at op ${this.#currentOpIndex}`);
     }
   }
 
@@ -159,6 +160,9 @@ class TimelineBuilder {
       case "flags.set":
         this.#recordFlagWrite(op);
         return;
+      case "flags.write":
+        this.#recordSemanticFlagWrite(op);
+        return;
       case "let32":
       case "memory.guard":
       case "jump":
@@ -166,8 +170,6 @@ class TimelineBuilder {
       case "hostTrap":
       case "next":
         return;
-      case "flags.write":
-        throw new UnsupportedWasmCodegenError(`semantic flags.write is unsupported by legacy JIT analysis at op ${this.#currentOpIndex}`);
     }
   }
 
@@ -301,6 +303,14 @@ class TimelineBuilder {
     }
   }
 
+  #recordSemanticFlagWrite(op: Extract<IrExprOp, { op: "flags.write" }>): void {
+    const write = this.#valueState.flags().recordWrite(op, (expr) => this.#valueForExpression(expr));
+
+    if (write !== undefined) {
+      this.#recordWrite(write.slot, write.value);
+    }
+  }
+
   #inputRecordFor(inputs: Readonly<Record<string, ValueRef>>): Readonly<Record<string, JitValue>> {
     const resolved: Record<string, JitValue> = {};
 
@@ -398,8 +408,13 @@ class TimelineBuilder {
         });
       }
       case "value.project":
-      case "value.compare":
-        throw new UnsupportedWasmCodegenError(`semantic ${expression.kind} is unsupported by legacy JIT analysis at op ${this.#currentOpIndex}`);
+        return simplifyValue(jitExtractBits(this.#valueForExpression(expression.value), 0, expression.width));
+      case "value.compare": {
+        const a = this.#valueForExpression(expression.a);
+        const b = this.#valueForExpression(expression.b);
+
+        return simplifyValue(jitCompareValue(expression.operator, expression.width, a, b));
+      }
       case "flags.condition":
         return this.#resolvedValue(this.#resolver.valueForExpression(expression));
       case "var":

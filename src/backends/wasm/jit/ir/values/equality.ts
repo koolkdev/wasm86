@@ -4,6 +4,8 @@ import {
 } from "#ir/model/flags.js";
 import {
   flagProducerWidth,
+  flagWriteCellEntries,
+  flagWriteConditionEntries,
   normalizeFlagProducerMask
 } from "./flags.js";
 import {
@@ -15,11 +17,13 @@ import {
 import { simplifyValue } from "./simplify.js";
 import type {
   JitBinaryValue,
+  JitCompareValue,
   JitConstValue,
   JitExtractBitsValue,
   JitExtractMaskedBitsValue,
   JitFlagConditionValue,
   JitFlagProducerValue,
+  JitFlagWriteValue,
   JitInputValue,
   JitInsertBitsValue,
   JitInsertMaskedBitsValue,
@@ -104,6 +108,15 @@ function valuesEqualStructural(a: JitValue, b: JitValue): boolean {
         valuesEqual(a.base, insert.base) &&
         valuesEqual(a.value, insert.value);
     }
+    case "value.compare": {
+      const compare = b as JitCompareValue;
+
+      return a.type === compare.type &&
+        a.operator === compare.operator &&
+        a.width === compare.width &&
+        valuesEqual(a.a, compare.a) &&
+        valuesEqual(a.b, compare.b);
+    }
     case "flagProducer": {
       const producer = b as JitFlagProducerValue;
 
@@ -112,12 +125,52 @@ function valuesEqualStructural(a: JitValue, b: JitValue): boolean {
         normalizeFlagProducerMask(a.producer, a.mask) === normalizeFlagProducerMask(producer.producer, producer.mask) &&
         jitFlagProducerInputsEqual(a, producer);
     }
+    case "flagWrite":
+      return jitFlagWritesEqual(a, b as JitFlagWriteValue);
     case "flagCondition": {
       const condition = b as JitFlagConditionValue;
 
       return a.cc === condition.cc && valuesEqual(a.flags, condition.flags);
     }
   }
+}
+
+function jitFlagWritesEqual(left: JitFlagWriteValue, right: JitFlagWriteValue): boolean {
+  if (left.mask !== right.mask) {
+    return false;
+  }
+
+  const leftCells = flagWriteCellEntries(left);
+  const rightCells = flagWriteCellEntries(right);
+
+  if (leftCells.length !== rightCells.length) {
+    return false;
+  }
+
+  for (const [index, [flag, cell]] of leftCells.entries()) {
+    const [rightFlag, rightCell] = rightCells[index]!;
+
+    if (flag !== rightFlag || cell.kind !== rightCell.kind) {
+      return false;
+    }
+
+    if (cell.kind === "expr" && rightCell.kind === "expr" && !valuesEqual(cell.value, rightCell.value)) {
+      return false;
+    }
+  }
+
+  const leftConditions = flagWriteConditionEntries(left);
+  const rightConditions = flagWriteConditionEntries(right);
+
+  if (leftConditions.length !== rightConditions.length) {
+    return false;
+  }
+
+  return leftConditions.every(([cc, condition], index) => {
+    const [rightCc, rightCondition] = rightConditions[index]!;
+
+    return cc === rightCc && valuesEqual(condition, rightCondition);
+  });
 }
 
 function jitFlagProducerInputsEqual(left: JitFlagProducerValue, right: JitFlagProducerValue): boolean {

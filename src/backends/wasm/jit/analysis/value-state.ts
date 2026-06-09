@@ -1,4 +1,4 @@
-import type { IrExprOp } from "#wasm/codegen/expressions.js";
+import type { IrExprOp, IrValueExpr } from "#wasm/codegen/expressions.js";
 import type {
   JitArchitecturalSlot,
   JitValue
@@ -14,7 +14,9 @@ import {
 import type { Reg16, Reg32, Reg8 } from "#x86/types.js";
 import {
   jitFlagSetProducerValue,
-  jitFlagSetWrittenMask
+  jitFlagSetWrittenMask,
+  jitFlagWriteBitsValue,
+  jitFlagWriteWrittenMask
 } from "./flag-values.js";
 
 export type ValueStateWrite = Readonly<{
@@ -108,6 +110,23 @@ export class FlagValueStateBuilder {
     const producer = jitFlagSetProducerValue(op, resolveInputs());
 
     this.#flags.writeFlagBits(mask, producer);
+    return {
+      slot: { kind: "aluFlags" },
+      value: this.#flags.readAluFlags()
+    };
+  }
+
+  recordWrite(
+    op: Extract<IrExprOp, { op: "flags.write" }>,
+    resolveValue: (expr: IrValueExpr) => JitValue
+  ): ValueStateWrite | undefined {
+    const mask = jitFlagWriteWrittenMask(op);
+
+    if (mask === 0) {
+      return undefined;
+    }
+
+    this.#flags.writeFlagBits(mask, jitFlagWriteBitsValue(op, resolveValue));
     return {
       slot: { kind: "aluFlags" },
       value: this.#flags.readAluFlags()

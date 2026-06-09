@@ -1,7 +1,9 @@
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import {
   applyRequestedValueWidth,
+  compareUsesSignedOrder,
   emitI32BinaryInstruction,
+  emitI32CompareInstruction,
   i32BinaryOperandEmitOptions
 } from "#wasm/codegen/emit.js";
 import {
@@ -21,6 +23,7 @@ import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import { bitRangeMask } from "#backends/wasm/jit/ir/values/bits.js";
 import type {
   JitArchitecturalSlot,
+  JitCompareValue,
   JitInputValue,
   JitLoadResultValue,
   JitValue
@@ -38,6 +41,7 @@ import type {
 import {
   emitFlagConditionValue,
   emitFlagProducerValue,
+  emitFlagWriteValue,
   type FlagValueEmitContext
 } from "./flag-values.js";
 
@@ -266,6 +270,8 @@ function emitInlineValue(
       return emitI32Unary(context, emitContext, value.operator, value.value);
     case "value.select":
       return emitI32Select(context, emitContext, value.condition, value.whenTrue, value.whenFalse);
+    case "value.compare":
+      return emitI32Compare(context, emitContext, value);
     case "extractBits":
       return emitExtractBits(context, emitContext, value.value, value.bitOffset, value.width);
     case "insertBits":
@@ -276,6 +282,8 @@ function emitInlineValue(
       return emitInsertMaskedBits(context, emitContext, value.base, value.value, value.mask);
     case "flagProducer":
       return emitFlagProducerValue(flagValueContext(context, emitContext), value);
+    case "flagWrite":
+      return emitFlagWriteValue(flagValueContext(context, emitContext), value);
     case "flagCondition":
       return emitFlagConditionValue(flagValueContext(context, emitContext), value.flags, value.cc);
   }
@@ -336,6 +344,36 @@ function emitI32SignExtend(
 
   emitContext.values.emit(value, { widthInsensitive: true });
   return emitSignExtendValueToWidth(context.body, width);
+}
+
+function emitI32Compare(
+  context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
+  value: JitCompareValue
+): ValueWidth {
+  if (compareUsesSignedOrder(value.operator)) {
+    emitSignedCompareOperand(context, emitContext, value.a, value.width);
+    emitSignedCompareOperand(context, emitContext, value.b, value.width);
+  } else {
+    emitContext.values.emitMasked(value.a, value.width);
+    emitContext.values.emitMasked(value.b, value.width);
+  }
+
+  emitI32CompareInstruction(context.body, value.operator);
+  return cleanValueWidth(8);
+}
+
+function emitSignedCompareOperand(
+  context: ValueEmitContext,
+  emitContext: InlineValueEmitContext,
+  value: JitValue,
+  width: OperandWidth
+): void {
+  emitContext.values.emitMasked(value, width);
+
+  if (width === 8 || width === 16) {
+    emitSignExtendValueToWidth(context.body, width);
+  }
 }
 
 function emitI32Select(
