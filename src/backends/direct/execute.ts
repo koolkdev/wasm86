@@ -5,7 +5,6 @@ import {
   getFlag,
   getRegisterAlias,
   getReg32,
-  hasEvenParityLowByte,
   setFlag,
   setRegisterAlias,
   type CpuState
@@ -14,17 +13,10 @@ import { u32 } from "#x86/numeric.js";
 import { registerAlias } from "#x86/registers.js";
 import { buildIr } from "#ir/build/builder.js";
 import { CONDITIONS, type FlagBoolExpr } from "#ir/model/conditions.js";
-import {
-  defineFlagProducer,
-  flagProducerInputsFromRecord,
-  type FlagExpr,
-  type FlagName,
-  type ValueExpr
-} from "#ir/model/flags.js";
+import type { FlagName } from "#ir/model/flags.js";
 import type {
   IrBinaryOperator,
   IrCompareOperator,
-  IrFlagSetOp,
   IrFlagWriteOp,
   IrOp,
   IrUnaryOperator,
@@ -149,9 +141,6 @@ function executeOp(context: ExecutionContext, op: IrOp): RunResult | undefined {
       return undefined;
     case "value.compare":
       setVar(context, op.dst, evalCompare(op.operator, op.width, evalValueRef(context, op.a), evalValueRef(context, op.b)) ? 1 : 0);
-      return undefined;
-    case "flags.set":
-      setFlags(context, op);
       return undefined;
     case "flags.write":
       writeFlags(context, op);
@@ -416,18 +405,6 @@ function unguardedMemoryAccess(fault: MemoryFault): never {
   );
 }
 
-function setFlags(
-  context: ExecutionContext,
-  descriptor: IrFlagSetOp
-): void {
-  const inputs = flagProducerInputsFromRecord(descriptor.producer, descriptor.inputs);
-  const defs = defineFlagProducer(descriptor.producer, inputs, descriptor.width ?? 32);
-
-  for (const [flag, expr] of Object.entries(defs) as [FlagName, FlagExpr][]) {
-    setFlag(context.state, flag, evalFlagExpr(context, expr));
-  }
-}
-
 function writeFlags(
   context: ExecutionContext,
   descriptor: IrFlagWriteOp
@@ -461,40 +438,6 @@ function evalFlagBoolExpr(context: ExecutionContext, expr: FlagBoolExpr): boolea
       return evalFlagBoolExpr(context, expr.a) || evalFlagBoolExpr(context, expr.b);
     case "xor":
       return evalFlagBoolExpr(context, expr.a) !== evalFlagBoolExpr(context, expr.b);
-  }
-}
-
-function evalFlagExpr(context: ExecutionContext, expr: FlagExpr): boolean {
-  switch (expr.kind) {
-    case "constFlag":
-      return expr.value !== 0;
-    case "undefFlag":
-      return false;
-    case "eqz":
-      return evalValueExpr(context, expr.value) === 0;
-    case "ne0":
-      return evalValueExpr(context, expr.value) !== 0;
-    case "uLt":
-      return evalValueExpr(context, expr.a) < evalValueExpr(context, expr.b);
-    case "bit":
-      return ((evalValueExpr(context, expr.value) >>> expr.bit) & 1) !== 0;
-    case "parity8":
-      return hasEvenParityLowByte(evalValueExpr(context, expr.value));
-    case "signBit":
-      return (evalValueExpr(context, expr.value) & signMask(expr.width)) !== 0;
-  }
-}
-
-function evalValueExpr(context: ExecutionContext, expr: ValueExpr): number {
-  switch (expr.kind) {
-    case "leaf":
-      return evalValueRef(context, expr.value);
-    case "const":
-      return evalValueRef(context, expr);
-    case "and":
-      return u32(evalValueExpr(context, expr.a) & evalValueExpr(context, expr.b));
-    case "xor":
-      return u32(evalValueExpr(context, expr.a) ^ evalValueExpr(context, expr.b));
   }
 }
 
@@ -537,10 +480,6 @@ function regAccess(reg: Parameters<typeof registerAlias>[0], accessWidth: Operan
 
 function maskValue(value: number, width: OperandWidth): number {
   return width === 32 ? u32(value) : value & widthMask(width);
-}
-
-function signMask(width: 8 | 16 | 32): number {
-  return width === 32 ? 0x8000_0000 : width === 16 ? 0x8000 : 0x80;
 }
 
 function signExtendValue(value: number, width: 8 | 16): number {

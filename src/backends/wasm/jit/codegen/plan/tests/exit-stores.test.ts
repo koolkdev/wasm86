@@ -6,12 +6,11 @@ import {
   ok,
   decodeBytes,
   IR_ALU_FLAG_MASK,
-  FLAG_PRODUCERS,
   ExitReason,
   buildBlock,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
-  jitFlagProducerValue,
+  jitFlagWriteValue,
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertMaskedBits,
@@ -30,11 +29,14 @@ import {
   type JitIrBlock,
   type JitCodegenPlan,
 } from "./plan-test-helpers.js";
+import { IR_ALU_FLAG_MASKS } from "#ir/model/flag-effects.js";
 import type { IrExprBlock } from "#wasm/codegen/expressions.js";
 import { storesForSnapshot } from "#backends/wasm/jit/codegen/plan/exit-stores.js";
 import { registerStores } from "#backends/wasm/jit/codegen/plan/register-stores.js";
 import { flagStores } from "#backends/wasm/jit/codegen/plan/flag-stores.js";
 import { valuesEqual } from "#backends/wasm/jit/ir/values/equality.js";
+
+const incWrittenMask = IR_ALU_FLAG_MASK & ~IR_ALU_FLAG_MASKS.CF;
 
 test("storesForSnapshot omits unchanged input register and flag stores", () => {
   const state = createJitValueState();
@@ -107,17 +109,20 @@ test("flagStores derives partial flag exit stores", () => {
   const state = createJitValueState();
   const eax = jitInputReg32Value("eax");
   const result = addValue(eax, c32(1));
-  const incFlags = jitFlagProducerValue("inc", {
-    left: eax,
-    result
-  }, { mask: FLAG_PRODUCERS.inc.writtenMask });
+  const incFlags = jitFlagWriteValue({
+    PF: { kind: "expr", value: result },
+    AF: { kind: "expr", value: result },
+    ZF: { kind: "expr", value: result },
+    SF: { kind: "expr", value: result },
+    OF: { kind: "expr", value: result }
+  });
   const expected = jitInsertMaskedBits(
     jitInputAluFlagsValue(),
     incFlags,
-    FLAG_PRODUCERS.inc.writtenMask
+    incWrittenMask
   );
 
-  state.flags.writeFlagBits(FLAG_PRODUCERS.inc.writtenMask, incFlags);
+  state.flags.writeFlagBits(incWrittenMask, incFlags);
 
   deepStrictEqual(flagStores(state.snapshot()), [flagStore(expected)]);
 });
@@ -127,17 +132,23 @@ test("flagStores lets later full flag writes replace partial merges", () => {
   const eax = jitInputReg32Value("eax");
   const incResult = addValue(eax, c32(1));
   const addResult = addValue(eax, jitInputReg32Value("ebx"));
-  const incFlags = jitFlagProducerValue("inc", {
-    left: eax,
-    result: incResult
-  }, { mask: FLAG_PRODUCERS.inc.writtenMask });
-  const addFlags = jitFlagProducerValue("add", {
-    left: eax,
-    right: jitInputReg32Value("ebx"),
-    result: addResult
-  }, { mask: IR_ALU_FLAG_MASK });
+  const incFlags = jitFlagWriteValue({
+    PF: { kind: "expr", value: incResult },
+    AF: { kind: "expr", value: incResult },
+    ZF: { kind: "expr", value: incResult },
+    SF: { kind: "expr", value: incResult },
+    OF: { kind: "expr", value: incResult }
+  });
+  const addFlags = jitFlagWriteValue({
+    CF: { kind: "expr", value: addResult },
+    PF: { kind: "expr", value: addResult },
+    AF: { kind: "expr", value: addResult },
+    ZF: { kind: "expr", value: addResult },
+    SF: { kind: "expr", value: addResult },
+    OF: { kind: "expr", value: addResult }
+  });
 
-  state.flags.writeFlagBits(FLAG_PRODUCERS.inc.writtenMask, incFlags);
+  state.flags.writeFlagBits(incWrittenMask, incFlags);
   state.flags.writeFlagBits(IR_ALU_FLAG_MASK, addFlags);
 
   deepStrictEqual(flagStores(state.snapshot()), [flagStore(addFlags)]);
@@ -304,13 +315,13 @@ test("planJitCodegen makes guard faults observe current flag state", () => {
           b: { kind: "const", type: "i32", value: 1 }
         },
         {
-          op: "flags.set",
-          producer: "inc",
-          writtenMask: FLAG_PRODUCERS.inc.writtenMask,
-          undefMask: 0,
-          inputs: {
-            left: { kind: "var", id: 0 },
-            result: { kind: "var", id: 1 }
+          op: "flags.write",
+          cells: {
+            PF: { kind: "expr", value: { kind: "var", id: 1 } },
+            AF: { kind: "expr", value: { kind: "var", id: 1 } },
+            ZF: { kind: "expr", value: { kind: "var", id: 1 } },
+            SF: { kind: "expr", value: { kind: "var", id: 1 } },
+            OF: { kind: "expr", value: { kind: "var", id: 1 } }
           }
         },
         {
@@ -329,13 +340,17 @@ test("planJitCodegen makes guard faults observe current flag state", () => {
   const expressionBlock = expressionBlockForPlan(codegenPlan);
   const guardOpIndex = expressionOpIndex(expressionBlock, "memory.guard");
   const hostTrapOpIndex = expressionOpIndex(expressionBlock, "hostTrap");
+  const incResult = addValue(jitInputReg32Value("eax"), c32(1));
   const expectedFlags = jitInsertMaskedBits(
     jitInputAluFlagsValue(),
-    jitFlagProducerValue("inc", {
-      left: jitInputReg32Value("eax"),
-      result: addValue(jitInputReg32Value("eax"), c32(1))
-    }, { mask: FLAG_PRODUCERS.inc.writtenMask }),
-    FLAG_PRODUCERS.inc.writtenMask
+    jitFlagWriteValue({
+      PF: { kind: "expr", value: incResult },
+      AF: { kind: "expr", value: incResult },
+      ZF: { kind: "expr", value: incResult },
+      SF: { kind: "expr", value: incResult },
+      OF: { kind: "expr", value: incResult }
+    }),
+    incWrittenMask
   );
 
   strictEqual(readFault.at.opIndex, guardOpIndex);
@@ -527,14 +542,14 @@ test("planJitCodegen records full flag producers in value-state snapshots", () =
           accessWidth: 32
         },
         {
-          op: "flags.set",
-          producer: "add",
-          writtenMask: IR_ALU_FLAG_MASK,
-          undefMask: 0,
-          inputs: {
-            left: { kind: "var", id: 0 },
-            right: { kind: "var", id: 1 },
-            result: { kind: "var", id: 2 }
+          op: "flags.write",
+          cells: {
+            CF: { kind: "expr", value: { kind: "var", id: 2 } },
+            PF: { kind: "expr", value: { kind: "var", id: 2 } },
+            AF: { kind: "expr", value: { kind: "var", id: 2 } },
+            ZF: { kind: "expr", value: { kind: "var", id: 2 } },
+            SF: { kind: "expr", value: { kind: "var", id: 2 } },
+            OF: { kind: "expr", value: { kind: "var", id: 2 } }
           }
         },
         { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
@@ -546,11 +561,14 @@ test("planJitCodegen records full flag producers in value-state snapshots", () =
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const result = addValue(eax, ebx);
-  const expectedFlags = jitFlagProducerValue("add", {
-    left: eax,
-    right: ebx,
-    result
-  }, { mask: IR_ALU_FLAG_MASK });
+  const expectedFlags = jitFlagWriteValue({
+    CF: { kind: "expr", value: result },
+    PF: { kind: "expr", value: result },
+    AF: { kind: "expr", value: result },
+    ZF: { kind: "expr", value: result },
+    SF: { kind: "expr", value: result },
+    OF: { kind: "expr", value: result }
+  });
   const expectedFlagStore = flagStore(expectedFlags);
 
   deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
@@ -561,7 +579,7 @@ test("planJitCodegen records full flag producers in value-state snapshots", () =
   ]);
 });
 
-test("planJitCodegen records partial flag producers as symbolic masked inserts", () => {
+test("planJitCodegen records partial flag writes as symbolic masked inserts", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "partial-flags",
@@ -583,13 +601,13 @@ test("planJitCodegen records partial flag producers as symbolic masked inserts",
           accessWidth: 32
         },
         {
-          op: "flags.set",
-          producer: "inc",
-          writtenMask: FLAG_PRODUCERS.inc.writtenMask,
-          undefMask: 0,
-          inputs: {
-            left: { kind: "var", id: 0 },
-            result: { kind: "var", id: 1 }
+          op: "flags.write",
+          cells: {
+            PF: { kind: "expr", value: { kind: "var", id: 1 } },
+            AF: { kind: "expr", value: { kind: "var", id: 1 } },
+            ZF: { kind: "expr", value: { kind: "var", id: 1 } },
+            SF: { kind: "expr", value: { kind: "var", id: 1 } },
+            OF: { kind: "expr", value: { kind: "var", id: 1 } }
           }
         },
         { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
@@ -600,19 +618,22 @@ test("planJitCodegen records partial flag producers as symbolic masked inserts",
   const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
   const eax = jitInputReg32Value("eax");
   const result = addValue(eax, c32(1));
-  const incFlags = jitFlagProducerValue("inc", {
-    left: eax,
-    result
-  }, { mask: FLAG_PRODUCERS.inc.writtenMask });
+  const incFlags = jitFlagWriteValue({
+    PF: { kind: "expr", value: result },
+    AF: { kind: "expr", value: result },
+    ZF: { kind: "expr", value: result },
+    SF: { kind: "expr", value: result },
+    OF: { kind: "expr", value: result }
+  });
 
   deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), jitInsertMaskedBits(
     jitInputAluFlagsValue(),
     incFlags,
-    FLAG_PRODUCERS.inc.writtenMask
+    incWrittenMask
   ));
 });
 
-test("planJitCodegen records effectful flag producer inputs as load-result values", () => {
+test("planJitCodegen records effectful flag write cells as load-result values", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "effectful-flag-input",
@@ -640,14 +661,10 @@ test("planJitCodegen records effectful flag producer inputs as load-result value
           b: { kind: "var", id: 1 }
         },
         {
-          op: "flags.set",
-          producer: "add",
-          writtenMask: IR_ALU_FLAG_MASK,
-          undefMask: 0,
-          inputs: {
-            left: { kind: "var", id: 0 },
-            right: { kind: "var", id: 1 },
-            result: { kind: "var", id: 2 }
+          op: "flags.write",
+          cells: {
+            CF: { kind: "expr", value: { kind: "var", id: 0 } },
+            ZF: { kind: "expr", value: { kind: "var", id: 2 } }
           }
         },
         { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
@@ -660,11 +677,14 @@ test("planJitCodegen records effectful flag producer inputs as load-result value
   const loadResult = jitLoadResultValue(0, "i32");
   const ebx = jitInputReg32Value("ebx");
   const result = addValue(loadResult, ebx);
-  const expectedFlags = jitFlagProducerValue("add", {
-    left: loadResult,
-    right: ebx,
-    result
-  }, { mask: IR_ALU_FLAG_MASK });
+  const expectedFlags = jitInsertMaskedBits(
+    jitInputAluFlagsValue(),
+    jitFlagWriteValue({
+      CF: { kind: "expr", value: loadResult },
+      ZF: { kind: "expr", value: result }
+    }),
+    IR_ALU_FLAG_MASKS.CF | IR_ALU_FLAG_MASKS.ZF
+  );
   const expectedFlagStore = flagStore(expectedFlags);
 
   deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), expectedFlags);
@@ -680,21 +700,17 @@ test("planJitCodegen records effectful flag producer inputs as load-result value
   ]);
 });
 
-test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () => {
+test("planJitCodegen fails loudly for unrepresentable flag write cells", () => {
   const block: JitIrBlock = {
     instructions: [{
       instructionId: "missing-flag-input",
       eip: startAddress,
       ir: [
         {
-          op: "flags.set",
-          producer: "add",
-          writtenMask: IR_ALU_FLAG_MASK,
-          undefMask: 0,
-          inputs: {
-            left: { kind: "var", id: 0 },
-            right: { kind: "const", type: "i32", value: 1 },
-            result: { kind: "const", type: "i32", value: 2 }
+          op: "flags.write",
+          cells: {
+            CF: { kind: "expr", value: { kind: "var", id: 0 } },
+            ZF: { kind: "expr", value: { kind: "const", type: "i32", value: 2 } }
           }
         },
         { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
@@ -708,7 +724,7 @@ test("planJitCodegen fails loudly for unrepresentable flag producer inputs", () 
   );
 });
 
-test("planJitCodegen lets later full flag producers replace partial merges", () => {
+test("planJitCodegen lets later full flag writes replace partial merges", () => {
   const block: JitIrBlock = {
     instructions: [
       {
@@ -731,13 +747,13 @@ test("planJitCodegen lets later full flag producers replace partial merges", () 
             accessWidth: 32
           },
           {
-            op: "flags.set",
-            producer: "inc",
-            writtenMask: FLAG_PRODUCERS.inc.writtenMask,
-            undefMask: 0,
-            inputs: {
-              left: { kind: "var", id: 0 },
-              result: { kind: "var", id: 1 }
+            op: "flags.write",
+            cells: {
+              PF: { kind: "expr", value: { kind: "var", id: 1 } },
+              AF: { kind: "expr", value: { kind: "var", id: 1 } },
+              ZF: { kind: "expr", value: { kind: "var", id: 1 } },
+              SF: { kind: "expr", value: { kind: "var", id: 1 } },
+              OF: { kind: "expr", value: { kind: "var", id: 1 } }
             }
           },
           { op: "next" }
@@ -764,14 +780,14 @@ test("planJitCodegen lets later full flag producers replace partial merges", () 
             accessWidth: 32
           },
           {
-            op: "flags.set",
-            producer: "add",
-            writtenMask: IR_ALU_FLAG_MASK,
-            undefMask: 0,
-            inputs: {
-              left: { kind: "var", id: 2 },
-              right: { kind: "var", id: 3 },
-              result: { kind: "var", id: 4 }
+            op: "flags.write",
+            cells: {
+              CF: { kind: "expr", value: { kind: "var", id: 4 } },
+              PF: { kind: "expr", value: { kind: "var", id: 4 } },
+              AF: { kind: "expr", value: { kind: "var", id: 4 } },
+              ZF: { kind: "expr", value: { kind: "var", id: 4 } },
+              SF: { kind: "expr", value: { kind: "var", id: 4 } },
+              OF: { kind: "expr", value: { kind: "var", id: 4 } }
             }
           },
           { op: "hostTrap", vector: { kind: "const", type: "i32", value: 0x2e } }
@@ -785,11 +801,14 @@ test("planJitCodegen lets later full flag producers replace partial merges", () 
   const edx = jitInputReg32Value("edx");
   const result = addValue(ecx, edx);
 
-  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), jitFlagProducerValue("add", {
-    left: ecx,
-    right: edx,
-    result
-  }, { mask: IR_ALU_FLAG_MASK }));
+  deepStrictEqual(exit.snapshot.valueState.flags.readAluFlags(), jitFlagWriteValue({
+    CF: { kind: "expr", value: result },
+    PF: { kind: "expr", value: result },
+    AF: { kind: "expr", value: result },
+    ZF: { kind: "expr", value: result },
+    SF: { kind: "expr", value: result },
+    OF: { kind: "expr", value: result }
+  }));
 });
 
 test("planJitCodegen records direct cmov conditions from current flag value state", () => {

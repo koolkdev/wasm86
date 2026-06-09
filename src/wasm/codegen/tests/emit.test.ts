@@ -166,7 +166,6 @@ test("emitIrExpressionBlockToWasm keeps let32 local-first in the shared emitter"
     emitSet: () => unsupported("set"),
     emitMemoryGuard: () => unsupported("memory.guard"),
     emitAddress: () => unsupported("address"),
-    emitSetFlags: () => unsupported("flags.set"),
     emitWriteFlags: () => unsupported("flags.write"),
     emitFlagsCondition: () => unsupported("flags.condition"),
     emitNext: () => unsupported("next"),
@@ -236,7 +235,6 @@ function encodeFlagWriteModule(program: IrBlock): Uint8Array<ArrayBuffer> {
     emitSet: () => unsupported("set"),
     emitMemoryGuard: () => unsupported("memory.guard"),
     emitAddress: () => unsupported("address"),
-    emitSetFlags: () => unsupported("flags.set"),
     emitWriteFlags: (descriptor, helpers) =>
       emitWriteFlags(body, wasmIrLocalAluFlagsStorage(body, 1), descriptor, helpers),
     emitFlagsCondition: () => unsupported("flags.condition"),
@@ -299,7 +297,6 @@ function emitTestProgram(program: IrBlock): WasmFunctionBodyEncoder {
       }
       body.i32Const(0x1000 + source.index);
     },
-    emitSetFlags: () => unsupported("flags.set"),
     emitWriteFlags: () => unsupported("flags.write"),
     emitFlagsCondition: () => unsupported("flags.condition"),
     emitNext: () => {
@@ -345,7 +342,6 @@ function emitWithTrackingScratch(
     emitSet: (target, value, _accessWidth, helpers) => emitSet(body, regLocals, target, value, helpers),
     emitMemoryGuard: () => unsupported("memory.guard"),
     emitAddress: () => unsupported("address"),
-    emitSetFlags: () => unsupported("flags.set"),
     emitWriteFlags: () => unsupported("flags.write"),
     emitFlagsCondition: () => unsupported("flags.condition"),
     emitNext: () => {},

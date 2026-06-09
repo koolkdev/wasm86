@@ -1,6 +1,5 @@
 import type { OperandWidth, RegName } from "#x86/types.js";
 import { createIrVarAllocator, type IrVarAllocator } from "./vars.js";
-import { createIrFlagSetOp } from "#ir/model/flags.js";
 import { irOpIsTerminator, type IrTerminatorOp } from "#ir/model/op-semantics.js";
 import {
   const32,
@@ -15,7 +14,6 @@ import {
 import type {
   ConditionCode,
   IrCompareOperator,
-  FlagProducerName,
   IrBinaryOperator,
   IrConstValueRef,
   MemRef,
@@ -244,16 +242,6 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
 
   i32Popcnt(value: ValueInput): VarRef {
     return this.#unaryValue("popcnt", value);
-  }
-
-  setFlags(producer: FlagProducerName, inputs: Readonly<Record<string, ValueInput>>, width?: OperandWidth): void {
-    this.#push(
-      createIrFlagSetOp(
-        producer,
-        Object.fromEntries(Object.entries(inputs).map(([name, value]) => [name, toValueRef(value)])),
-        width
-      )
-    );
   }
 
   flagExpr(value: ValueInput): IrFlagWriteCell {

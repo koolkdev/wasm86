@@ -59,7 +59,7 @@ function sourceReadUseAcceptsInlineSource(
     }
 
     if (opUsesVar(op, dst.id)) {
-      return op.op !== "flags.set";
+      return true;
     }
   }
 
@@ -109,8 +109,6 @@ function rewriteOp(
       };
     case "memory.guard":
       return { ...op, address: rewriteValue(op.address, bindings) };
-    case "flags.set":
-      return op;
     case "flags.write":
       return {
         ...op,
@@ -247,11 +245,6 @@ function visitOpValues(
       return;
     case "memory.guard":
       visitValue(op.address, visit);
-      return;
-    case "flags.set":
-      for (const value of Object.values(op.inputs)) {
-        visitValue(value, visit);
-      }
       return;
     case "flags.write":
       for (const cell of Object.values(op.cells)) {

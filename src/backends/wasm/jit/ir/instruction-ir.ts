@@ -81,14 +81,6 @@ class InstructionIrBinder {
       case "value.compare":
         this.#ops.push({ ...op, a: this.#value(op.a), b: this.#value(op.b) });
         return;
-      case "flags.set":
-        this.#ops.push({
-          ...op,
-          inputs: Object.fromEntries(
-            Object.entries(op.inputs).map(([name, value]) => [name, this.#value(value)])
-          )
-        });
-        return;
       case "flags.write":
         this.#ops.push({
           ...op,

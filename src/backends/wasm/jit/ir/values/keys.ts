@@ -1,14 +1,8 @@
-import {
-  flagProducerInputNames,
-  requiredFlagProducerInput
-} from "#ir/model/flags.js";
 import { i32 } from "#x86/numeric.js";
 import { simplifyValue } from "./simplify.js";
 import {
-  flagProducerWidth,
   flagWriteCellEntries,
-  flagWriteConditionEntries,
-  normalizeFlagProducerMask
+  flagWriteConditionEntries
 } from "./flags.js";
 import { normalizeU32Mask } from "./bits.js";
 import { jitArchitecturalSlotKey } from "./slots.js";
@@ -44,8 +38,6 @@ export function valueKey(value: JitValue): string {
       return `insertMaskedBits:${normalizeU32Mask(value.mask, "insertMaskedBits mask")}:${valueKey(value.base)}:${valueKey(value.value)}`;
     case "value.compare":
       return `compare:${value.type}:${value.operator}:${value.width}:${valueKey(value.a)}:${valueKey(value.b)}`;
-    case "flagProducer":
-      return `flagProducer:${value.producer}:${flagProducerWidth(value)}:${normalizeFlagProducerMask(value.producer, value.mask)}:${jitFlagProducerInputKey(value)}`;
     case "flagWrite":
       return `flagWrite:${value.mask}:${jitFlagWriteCellKey(value)}:${jitFlagWriteConditionKey(value)}`;
     case "flagCondition":
@@ -62,11 +54,5 @@ function jitFlagWriteCellKey(value: JitValue & { kind: "flagWrite" }): string {
 function jitFlagWriteConditionKey(value: JitValue & { kind: "flagWrite" }): string {
   return flagWriteConditionEntries(value)
     .map(([cc, condition]) => `${cc}=${valueKey(condition)}`)
-    .join(",");
-}
-
-function jitFlagProducerInputKey(value: JitValue & { kind: "flagProducer" }): string {
-  return flagProducerInputNames(value.producer)
-    .map((key) => `${key}=${valueKey(requiredFlagProducerInput(value.producer, value.inputs, key))}`)
     .join(",");
 }

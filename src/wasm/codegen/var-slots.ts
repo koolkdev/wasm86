@@ -98,11 +98,6 @@ function collectOpVarUses(op: IrExprOp, visit: (id: number) => void): void {
     case "memory.guard":
       collectValueVarUses(op.address, visit);
       return;
-    case "flags.set":
-      for (const value of Object.values(op.inputs)) {
-        collectValueVarUses(value, visit);
-      }
-      return;
     case "flags.write":
       for (const cell of Object.values(op.cells)) {
         if (cell?.kind === "expr") {

@@ -25,7 +25,6 @@ function flagsWriteOp(program: IrBlock): Extract<IrOp, { op: "flags.write" }> {
   const writes = program.filter((irOp) => irOp.op === "flags.write");
 
   strictEqual(writes.length, 1);
-  strictEqual(program.some((irOp) => irOp.op === "flags.set"), false);
   return writes[0] as Extract<IrOp, { op: "flags.write" }>;
 }
 

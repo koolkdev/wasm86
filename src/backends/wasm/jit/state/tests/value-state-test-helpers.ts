@@ -2,13 +2,12 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { IR_ALU_FLAG_MASK, IR_ALU_FLAG_MASKS } from "#ir/model/flag-effects.js";
-import { FLAG_PRODUCERS } from "#ir/model/flags.js";
 import type { Reg32 } from "#x86/types.js";
 import {
   jitExtractBits,
   jitExtractMaskedBits,
   jitFlagConditionValue,
-  jitFlagProducerValue,
+  jitFlagWriteValue,
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertBits,
@@ -31,11 +30,10 @@ export {
   test,
   IR_ALU_FLAG_MASK,
   IR_ALU_FLAG_MASKS,
-  FLAG_PRODUCERS,
   jitExtractBits,
   jitExtractMaskedBits,
   jitFlagConditionValue,
-  jitFlagProducerValue,
+  jitFlagWriteValue,
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertBits,

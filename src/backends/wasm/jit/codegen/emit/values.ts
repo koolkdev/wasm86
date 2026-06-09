@@ -40,7 +40,6 @@ import type {
 } from "./cache.js";
 import {
   emitFlagConditionValue,
-  emitFlagProducerValue,
   emitFlagWriteValue,
   type FlagValueEmitContext
 } from "./flag-values.js";
@@ -280,8 +279,6 @@ function emitInlineValue(
       return emitExtractMaskedBits(context, emitContext, value.value, value.mask);
     case "insertMaskedBits":
       return emitInsertMaskedBits(context, emitContext, value.base, value.value, value.mask);
-    case "flagProducer":
-      return emitFlagProducerValue(flagValueContext(context, emitContext), value);
     case "flagWrite":
       return emitFlagWriteValue(flagValueContext(context, emitContext), value);
     case "flagCondition":

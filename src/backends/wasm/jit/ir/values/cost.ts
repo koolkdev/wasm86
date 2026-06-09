@@ -1,5 +1,5 @@
 import { simplifyValue } from "./simplify.js";
-import { flagProducerInputValues, flagWriteChildValues } from "./flags.js";
+import { flagWriteChildValues } from "./flags.js";
 import type { JitValue } from "./types.js";
 
 export function valueCost(value: JitValue): number {
@@ -24,8 +24,6 @@ export function valueCost(value: JitValue): number {
     case "insertBits":
     case "insertMaskedBits":
       return 1 + valueCost(value.base) + valueCost(value.value);
-    case "flagProducer":
-      return 1 + flagProducerInputValues(value).reduce((cost, input) => cost + valueCost(input), 0);
     case "flagWrite":
       return 1 + flagWriteChildValues(value).reduce((cost, child) => cost + valueCost(child), 0);
     case "const":

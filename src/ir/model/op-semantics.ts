@@ -40,7 +40,6 @@ export function irOpResult(op: IrOp): IrOpResult {
       return { kind: "value", dst: op.dst, sideEffect: "none" };
     case "set":
     case "memory.guard":
-    case "flags.set":
     case "flags.write":
     case "next":
     case "jump":
@@ -75,7 +74,6 @@ export function irOpIsTerminator(op: IrOp): op is IrTerminatorOp {
     case "value.select":
     case "value.project":
     case "value.compare":
-    case "flags.set":
     case "flags.write":
     case "flags.condition":
       return false;
@@ -129,11 +127,6 @@ export function visitIrOpValueRefs(
     case "value.compare":
       visit(op.a, "value");
       visit(op.b, "value");
-      return;
-    case "flags.set":
-      for (const value of Object.values(op.inputs)) {
-        visit(value, "value");
-      }
       return;
     case "flags.write":
       for (const cell of Object.values(op.cells)) {
@@ -208,7 +201,6 @@ export function visitIrOpStorageRefs(
     case "value.select":
     case "value.project":
     case "value.compare":
-    case "flags.set":
     case "flags.write":
     case "flags.condition":
     case "next":

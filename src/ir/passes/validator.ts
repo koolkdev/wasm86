@@ -1,12 +1,11 @@
 import { CONDITIONS } from "#ir/model/conditions.js";
-import { assertIrAluFlagMask, IR_ALU_FLAGS } from "#ir/model/flag-effects.js";
-import { FLAG_PRODUCERS, type FlagName } from "#ir/model/flags.js";
+import { IR_ALU_FLAGS } from "#ir/model/flag-effects.js";
+import { type FlagName } from "#ir/model/flags.js";
 import { irOpDst, irOpIsTerminator } from "#ir/model/op-semantics.js";
 import type { OperandWidth } from "#x86/types.js";
 import type {
   ConditionCode,
   IrCompareOperator,
-  IrFlagSetOp,
   IrFlagWriteCell,
   IrFlagWriteOp,
   IrMemoryAccessKind,
@@ -109,9 +108,6 @@ function validateOpUses(
       validateCompareOperator(op.operator);
       validateValueRef(op.a, definedVars);
       validateValueRef(op.b, definedVars);
-      break;
-    case "flags.set":
-      validateFlagSetDescriptor(op, definedVars);
       break;
     case "flags.write":
       validateFlagWrite(op, definedVars);
@@ -255,21 +251,6 @@ function validateConditionCode(cc: string, label: "flags.write" | "flags.conditi
   }
 }
 
-function validateFlagSetDescriptor(
-  op: Pick<IrFlagSetOp, "producer" | "width" | "writtenMask" | "undefMask" | "inputs">,
-  definedVars: ReadonlySet<number>
-): void {
-  const producer = FLAG_PRODUCERS[op.producer];
-
-  validateAccessWidth(op.width);
-  validateFlagDescriptorMasks(op, "flags.set");
-  validateFlagInputs(op, definedVars, {
-    label: "flags.set",
-    requiredInputs: producer.inputs,
-    allowedInputs: producer.inputs
-  });
-}
-
 function validateAccessWidth(width: OperandWidth | undefined): void {
   if (width !== undefined && width !== 8 && width !== 16 && width !== 32) {
     throw new Error(`IR access width must be 8, 16, or 32, got ${width}`);
@@ -314,62 +295,6 @@ function validateMemoryGuardByteLength(byteLength: number): void {
 function validateMemoryGuardAccess(access: IrMemoryAccessKind): void {
   if (access !== "read" && access !== "write") {
     throw new Error(`IR memory.guard access must be "read" or "write", got ${String(access)}`);
-  }
-}
-
-function validateFlagDescriptorMasks(
-  op: Pick<IrFlagSetOp, "producer" | "writtenMask" | "undefMask">,
-  label: "flags.set"
-): void {
-  const producer = FLAG_PRODUCERS[op.producer];
-
-  assertIrAluFlagMask(op.writtenMask, `${label} writtenMask`);
-  assertIrAluFlagMask(op.undefMask, `${label} undefMask`);
-
-  if (op.writtenMask !== producer.writtenMask) {
-    throw new Error(`${label} ${op.producer} writtenMask does not match producer metadata`);
-  }
-
-  if (op.undefMask !== producer.undefMask) {
-    throw new Error(`${label} ${op.producer} undefMask does not match producer metadata`);
-  }
-
-  if ((op.undefMask & ~op.writtenMask) !== 0) {
-    throw new Error(`${label} ${op.producer} undefMask must be contained in writtenMask`);
-  }
-}
-
-function validateFlagInputs(
-  op: Pick<IrFlagSetOp, "producer" | "inputs">,
-  definedVars: ReadonlySet<number>,
-  options: Readonly<{
-    label: "flags.set";
-    requiredInputs: readonly string[];
-    allowedInputs: readonly string[];
-  }>
-): void {
-  const allowedInputs: ReadonlySet<string> = new Set(options.allowedInputs);
-
-  for (const inputName of options.requiredInputs) {
-    const value = op.inputs[inputName];
-
-    if (value === undefined) {
-      throw new Error(`${options.label} ${op.producer} is missing input '${inputName}'`);
-    }
-
-    validateValueRef(value, definedVars);
-  }
-
-  for (const inputName of Object.keys(op.inputs)) {
-    if (!allowedInputs.has(inputName)) {
-      throw new Error(`${options.label} ${op.producer} has unexpected input '${inputName}'`);
-    }
-
-    const value = op.inputs[inputName];
-
-    if (value !== undefined) {
-      validateValueRef(value, definedVars);
-    }
   }
 }
 

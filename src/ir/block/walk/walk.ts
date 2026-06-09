@@ -162,8 +162,6 @@ class ExpressionBlockWalker {
       case "value.compare":
         this.#values.bind(op.dst, this.#values.compare(op.width, op.operator, op.a, op.b));
         return;
-      case "flags.set":
-        throw new Error(`legacy flags.set is not supported by the shared block walk at op ${this.#opIndex}`);
       case "flags.write":
         this.#flags.write(op);
         return;

@@ -1,9 +1,8 @@
 import { x86ArithmeticFlags } from "#x86/flags.js";
 import { CONDITIONS } from "./conditions.js";
-import { FLAG_PRODUCERS, type FlagName } from "./flags.js";
+import type { FlagName } from "./flags.js";
 import type {
   ConditionCode,
-  FlagProducerName,
   IrBlock,
   IrOp
 } from "./types.js";
@@ -65,24 +64,8 @@ export function conditionFlagReadMask(cc: ConditionCode): IrFlagMask {
   return maskIrAluFlags(CONDITIONS[cc].reads);
 }
 
-export function flagProducerEffect(producer: FlagProducerName): IrFlagOpEffect {
-  const flagProducer = FLAG_PRODUCERS[producer];
-
-  return {
-    reads: IR_FLAG_MASK_NONE,
-    writes: flagProducer.writtenMask,
-    undefines: flagProducer.undefMask
-  };
-}
-
 export function irOpFlagEffect(op: IrOp): IrFlagOpEffect {
   switch (op.op) {
-    case "flags.set":
-      return {
-        reads: IR_FLAG_MASK_NONE,
-        writes: op.writtenMask,
-        undefines: op.undefMask
-      };
     case "flags.write":
       return flagWriteEffect(op);
     case "flags.condition":

@@ -409,24 +409,6 @@ test("shared block walk resolves composed flag conditions from current flag cell
   ));
 });
 
-test("shared block walk rejects legacy packed flags.set producers", () => {
-  throws(
-    () => walkFragment({
-      block: [
-        {
-          op: "flags.set",
-          producer: "logic",
-          width: 32,
-          writtenMask: 0,
-          undefMask: 0,
-          inputs: {}
-        }
-      ]
-    }),
-    /legacy flags\.set is not supported/
-  );
-});
-
 test("shared block walk emits branch actions with resolved expressions and snapshots", () => {
   const result = walkExpressionBlock({
     block: [

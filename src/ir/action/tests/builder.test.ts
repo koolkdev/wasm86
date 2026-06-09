@@ -95,8 +95,8 @@ test("repeated get of an unwritten channel returns the same leaf across instruct
 });
 
 test("two sequential add eax, imm read eax once and write the interned add chain once", () => {
-  // The alu semantic also sets flags, which 02a still rejects; this is its
-  // shape minus the setFlags call.
+  // The alu semantic also writes flags, which the builder still rejects; this
+  // is its shape minus the flag write.
   const addImmNoFlags: SemanticTemplate = (s) => {
     const sum = s.i32Add(s.get(s.operand(0), 32), s.get(s.operand(1), 32));
 

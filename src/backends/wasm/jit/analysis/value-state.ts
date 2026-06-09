@@ -13,8 +13,6 @@ import {
 } from "#backends/wasm/jit/state/value-state.js";
 import type { Reg16, Reg32, Reg8 } from "#x86/types.js";
 import {
-  jitFlagSetProducerValue,
-  jitFlagSetWrittenMask,
   jitFlagWriteBitsValue,
   jitFlagWriteWrittenMask
 } from "./flag-values.js";
@@ -95,25 +93,6 @@ export class FlagValueStateBuilder {
 
   readAluFlags(): JitValue {
     return this.#flags.readAluFlags();
-  }
-
-  recordSet(
-    op: Extract<IrExprOp, { op: "flags.set" }>,
-    resolveInputs: () => Readonly<Record<string, JitValue>>
-  ): ValueStateWrite | undefined {
-    const mask = jitFlagSetWrittenMask(op);
-
-    if (mask === 0) {
-      return undefined;
-    }
-
-    const producer = jitFlagSetProducerValue(op, resolveInputs());
-
-    this.#flags.writeFlagBits(mask, producer);
-    return {
-      slot: { kind: "aluFlags" },
-      value: this.#flags.readAluFlags()
-    };
   }
 
   recordWrite(

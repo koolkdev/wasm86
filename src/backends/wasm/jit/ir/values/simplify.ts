@@ -1,11 +1,5 @@
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import type { IrCompareOperator, IrUnaryOperator } from "#ir/model/types.js";
-import {
-  flagProducerInputNames,
-  flagProducerInputsFromRecord,
-  requiredFlagProducerInput,
-  type FlagProducerInputs
-} from "#ir/model/flags.js";
 import { i32 } from "#x86/numeric.js";
 import { valuesEqual } from "./equality.js";
 import {
@@ -16,16 +10,13 @@ import {
 } from "./bits.js";
 import {
   flagWriteCellEntries,
-  flagWriteConditionEntries,
-  normalizeFlagProducerMask,
-  normalizeOptionalWidth
+  flagWriteConditionEntries
 } from "./flags.js";
 import type {
   JitBinaryValue,
   JitCompareValue,
   JitExtractBitsValue,
   JitExtractMaskedBitsValue,
-  JitFlagProducerValue,
   JitFlagWriteCell,
   JitFlagWriteValue,
   JitInsertBitsValue,
@@ -61,8 +52,6 @@ export function simplifyValue(value: JitValue): JitValue {
       return simplifyJitInsertMaskedBitsValue(value);
     case "value.compare":
       return simplifyJitCompareValue(value);
-    case "flagProducer":
-      return simplifyJitFlagProducerValue(value);
     case "flagWrite":
       return simplifyJitFlagWriteValue(value);
     case "flagCondition": {
@@ -474,27 +463,6 @@ function simplifyJitFlagWriteValue(value: JitFlagWriteValue): JitValue {
   return changed ? { ...value, cells, conditions } : value;
 }
 
-function simplifyJitFlagProducerValue(value: JitFlagProducerValue): JitValue {
-  const width = normalizeOptionalWidth(value.width);
-  const mask = normalizeFlagProducerMask(value.producer, value.mask);
-
-  if (mask === 0) {
-    return { kind: "const", type: "i32", value: 0 };
-  }
-
-  const inputs = simplifyJitFlagProducerInputs(value);
-
-  return inputs === value.inputs && mask === value.mask && width === value.width
-    ? value
-    : {
-        kind: "flagProducer",
-        producer: value.producer,
-        ...(width === undefined ? {} : { width }),
-        inputs,
-        mask
-      } as JitFlagProducerValue;
-}
-
 function foldUnaryConst(operator: IrUnaryOperator, value: number): number {
   switch (operator) {
     case "extend8_s":
@@ -527,21 +495,4 @@ function insertConstBits(base: number, value: number, bitOffset: number, width: 
   const replacement = (((value >>> 0) & (widthMask(width) >>> 0)) << bitOffset) >>> 0;
 
   return i32(((base >>> 0) & (~mask >>> 0)) | replacement);
-}
-
-function simplifyJitFlagProducerInputs(value: JitFlagProducerValue): FlagProducerInputs<JitValue> {
-  let changed = false;
-  const simplified: Record<string, JitValue> = {};
-
-  for (const key of flagProducerInputNames(value.producer)) {
-    const input = requiredFlagProducerInput(value.producer, value.inputs, key);
-    const simplifiedValue = simplifyValue(input);
-
-    simplified[key] = simplifiedValue;
-    changed ||= simplifiedValue !== input;
-  }
-
-  return changed
-    ? flagProducerInputsFromRecord(value.producer, simplified)
-    : value.inputs;
 }

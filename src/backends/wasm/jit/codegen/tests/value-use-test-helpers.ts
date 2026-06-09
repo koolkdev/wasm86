@@ -123,7 +123,6 @@ function valueRootsForTestExpressionOp(
       return valueRootsForExpression(input, op.vector, at, root, "trapVector");
     case "let32":
     case "next":
-    case "flags.set":
     case "flags.write":
       return [];
   }

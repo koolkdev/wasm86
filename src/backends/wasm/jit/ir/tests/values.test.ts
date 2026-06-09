@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -9,7 +9,8 @@ import {
   jitExtractBits,
   jitExtractMaskedBits,
   jitFlagConditionValue,
-  jitFlagProducerValue,
+  jitCompareValue,
+  jitFlagWriteValue,
   jitInputAluFlagsValue,
   jitInputReg16Value,
   jitInputReg32Value,
@@ -87,40 +88,28 @@ test("JitValue masked-bit constructors are raw and explicit simplification model
   );
 });
 
-test("JitValue flagProducer derives metadata and validates masks", () => {
+test("JitValue flagWrite derives its mask from written cells", () => {
   const eax = jitInputReg32Value("eax");
   const result = add(eax, c32(1));
+  const flags = jitFlagWriteValue({
+    ZF: { kind: "expr", value: result },
+    AF: { kind: "undef" }
+  });
 
-  throws(
-    () => jitFlagProducerValue("inc", { left: eax, result }, { mask: IR_ALU_FLAG_MASKS.CF }),
-    /bits not written by inc/
-  );
-
-  const flags = jitFlagProducerValue("add", {
-    left: eax,
-    right: c32(1),
-    result
-  }, { mask: IR_ALU_FLAG_MASK });
-
-  strictEqual(flags.kind, "flagProducer");
-  strictEqual("writtenMask" in flags, false);
-  strictEqual("undefMask" in flags, false);
+  strictEqual(flags.kind, "flagWrite");
+  strictEqual(flags.kind === "flagWrite" ? flags.mask : 0, IR_ALU_FLAG_MASKS.ZF | IR_ALU_FLAG_MASKS.AF);
 });
 
 test("JitValue equality and cache keys are canonical after simplification", () => {
   const eax = jitInputReg32Value("eax");
   const first = jitInsertBits(eax, jitExtractBits(eax, 0, 8), 0, 8);
   const second = jitInputReg32Value("eax");
-  const left = jitFlagProducerValue("sub", {
-    left: eax,
-    right: c32(1),
-    result: sub(eax, c32(1))
-  }, { mask: IR_ALU_FLAG_MASKS.ZF });
-  const right = jitFlagProducerValue("sub", {
-    left: jitInputReg32Value("eax"),
-    right: c32(1),
-    result: sub(jitInputReg32Value("eax"), c32(1))
-  }, { mask: IR_ALU_FLAG_MASKS.ZF });
+  const left = jitFlagWriteValue({
+    ZF: { kind: "expr", value: sub(eax, c32(1)) }
+  });
+  const right = jitFlagWriteValue({
+    ZF: { kind: "expr", value: sub(jitInputReg32Value("eax"), c32(1)) }
+  });
 
   strictEqual(valuesEqual(first, second), true);
   strictEqual(valueKey(first), valueKey(second));
@@ -156,11 +145,10 @@ test("JitValue helper contract covers every value kind", () => {
   const ebx = jitInputReg32Value("ebx");
   const flags = jitInputAluFlagsValue();
   const binary = add(eax, c32(5));
-  const flagProducer = jitFlagProducerValue("add", {
-    left: eax,
-    right: ebx,
-    result: add(eax, ebx)
-  }, { mask: IR_ALU_FLAG_MASKS.CF | IR_ALU_FLAG_MASKS.ZF });
+  const flagWrite = jitFlagWriteValue({
+    CF: { kind: "expr", value: eax },
+    ZF: { kind: "expr", value: add(eax, ebx) }
+  });
   const cases: readonly ValueContractCase[] = [
     {
       kind: "const",
@@ -243,19 +231,24 @@ test("JitValue helper contract covers every value kind", () => {
       slots: ["reg32:eax", "reg32:ebx"]
     },
     {
-      kind: "flagProducer",
-      value: flagProducer,
-      same: jitFlagProducerValue("add", {
-        left: jitInputReg32Value("eax"),
-        right: jitInputReg32Value("ebx"),
-        result: add(jitInputReg32Value("eax"), jitInputReg32Value("ebx"))
-      }, { mask: IR_ALU_FLAG_MASKS.CF | IR_ALU_FLAG_MASKS.ZF }),
-      different: jitFlagProducerValue("add", {
-        left: eax,
-        right: ebx,
-        result: add(eax, ebx)
-      }, { mask: IR_ALU_FLAG_MASKS.ZF }),
-      children: [eax, ebx, add(eax, ebx)],
+      kind: "flagWrite",
+      value: flagWrite,
+      same: jitFlagWriteValue({
+        CF: { kind: "expr", value: jitInputReg32Value("eax") },
+        ZF: { kind: "expr", value: add(jitInputReg32Value("eax"), jitInputReg32Value("ebx")) }
+      }),
+      different: jitFlagWriteValue({
+        ZF: { kind: "expr", value: add(eax, ebx) }
+      }),
+      children: [eax, add(eax, ebx)],
+      slots: ["reg32:eax", "reg32:ebx"]
+    },
+    {
+      kind: "value.compare",
+      value: jitCompareValue("lt_u", 32, eax, ebx),
+      same: jitCompareValue("lt_u", 32, jitInputReg32Value("eax"), jitInputReg32Value("ebx")),
+      different: jitCompareValue("lt_u", 16, eax, ebx),
+      children: [eax, ebx],
       slots: ["reg32:eax", "reg32:ebx"]
     },
     {
@@ -317,25 +310,24 @@ test("JitValue dependency and slot walking includes nested flag inputs", () => {
   const edx = jitInputReg32Value("edx");
   const lea = add(ebx, ecx);
   const result = add(edx, lea);
-  const producer = jitFlagProducerValue("add", {
-    left: edx,
-    right: lea,
-    result
-  }, { mask: IR_ALU_FLAG_MASK });
-  const mergedFlags = jitInsertMaskedBits(jitInputAluFlagsValue(), producer, IR_ALU_FLAG_MASK);
+  const write = jitFlagWriteValue({
+    CF: { kind: "expr", value: jitCompareValue("lt_u", 32, edx, lea) },
+    ZF: { kind: "expr", value: result }
+  });
+  const mergedFlags = jitInsertMaskedBits(jitInputAluFlagsValue(), write, IR_ALU_FLAG_MASK);
   const walked: JitValue[] = [];
 
   walkValueChildren(mergedFlags, (dependency) => walked.push(dependency));
 
-  strictEqual(valueChildren(producer).some((value) => valuesEqual(value, lea)), true);
-  strictEqual(walked.some((value) => value.kind === "flagProducer"), true);
+  strictEqual(valueChildren(write).some((value) => valuesEqual(value, result)), true);
+  strictEqual(walked.some((value) => value.kind === "flagWrite"), true);
   deepStrictEqual(slotKeys(slotsReadByValue(mergedFlags)), [
     "aluFlags",
     "reg32:ebx",
     "reg32:ecx",
     "reg32:edx"
   ]);
-  strictEqual(valueCost(producer) > valueCost(lea), true);
+  strictEqual(valueCost(write) > valueCost(lea), true);
 });
 
 test("JitValue masked slot walking follows required bits", () => {

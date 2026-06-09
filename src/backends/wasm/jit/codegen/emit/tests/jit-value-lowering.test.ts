@@ -10,8 +10,9 @@ import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
 import { cleanValueWidth, type ValueWidth } from "#wasm/codegen/value-width.js";
 import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import {
+  jitCompareValue,
   jitFlagConditionValue,
-  jitFlagProducerValue,
+  jitFlagWriteValue,
   jitExtractBits,
   jitExtractMaskedBits,
   jitInputAluFlagsValue,
@@ -60,22 +61,22 @@ test("ValueEmitter lowers register bit insertion directly to Wasm", () => {
 test("ValueEmitter lowers every non-load-result JitValue kind", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
-  const producer = jitFlagProducerValue("add", {
-    left: eax,
-    right: ebx,
-    result: add(eax, ebx)
-  }, { mask: IR_ALU_FLAG_MASKS.CF | IR_ALU_FLAG_MASKS.ZF });
+  const flagWrite = jitFlagWriteValue({
+    CF: { kind: "expr", value: jitCompareValue("lt_u", 32, eax, ebx) },
+    ZF: { kind: "expr", value: jitCompareValue("eq", 32, eax, ebx) }
+  });
   const cases: readonly Readonly<{ kind: Exclude<JitValue["kind"], "loadResult">; value: JitValue }>[] = [
     { kind: "const", value: c32(7) },
     { kind: "input", value: eax },
     { kind: "value.binary", value: add(eax, ebx) },
     { kind: "value.unary", value: extend8s(eax) },
     { kind: "value.select", value: select(eax, ebx, c32(0)) },
+    { kind: "value.compare", value: jitCompareValue("lt_s", 16, eax, ebx) },
     { kind: "extractBits", value: jitExtractBits(eax, 8, 8) },
     { kind: "insertBits", value: jitInsertBits(eax, ebx, 8, 8) },
     { kind: "extractMaskedBits", value: jitExtractMaskedBits(eax, 0xff00) },
     { kind: "insertMaskedBits", value: jitInsertMaskedBits(eax, ebx, 0xff00) },
-    { kind: "flagProducer", value: producer },
+    { kind: "flagWrite", value: flagWrite },
     { kind: "flagCondition", value: jitFlagConditionValue(jitInputAluFlagsValue(), "E") }
   ];
 
@@ -124,29 +125,20 @@ test("ValueEmitter lowers shl binary values to Wasm shift-left", () => {
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Shl), 1);
 });
 
-test("ValueEmitter lowers symbolic flag producers with existing flag-bit logic", () => {
+test("ValueEmitter lowers symbolic flag writes with shared flag-bit packing", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
-  const producer = jitFlagProducerValue("sub", {
-    left: eax,
-    right: ebx,
-    result: sub(eax, ebx)
-  }, { mask: IR_ALU_FLAG_MASK });
-  const opcodes = emitSymbolicValue(producer);
+  const opcodes = emitSymbolicValue(subFlagWrite(eax, ebx));
 
   strictEqual(countOpcode(opcodes, wasmOpcode.i32LtU) >= 1, true);
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32Popcnt) >= 1, true);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Shl) >= 1, true);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Or) >= 1, true);
 });
 
-test("ValueEmitter reports flag producer width from its mask", () => {
+test("ValueEmitter reports flag write width from its mask", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
-  const producer = jitFlagProducerValue("sub", {
-    left: eax,
-    right: ebx,
-    result: sub(eax, ebx)
-  }, { mask: IR_ALU_FLAG_MASK });
-  const { valueWidth } = emitSymbolicValueResult(producer);
+  const { valueWidth } = emitSymbolicValueResult(subFlagWrite(eax, ebx));
 
   strictEqual(valueWidth.logicalWidth, cleanWidthForMask(IR_ALU_FLAG_MASK));
   strictEqual(valueWidth.cleanWidth, cleanWidthForMask(IR_ALU_FLAG_MASK));
@@ -280,33 +272,32 @@ test("emitInputSlotBits rejects non-register slots for slice access", () => {
   strictEqual(countOpcode(wasmBodyOpcodes(body.encode()), wasmOpcode.i32Load8U), 0);
 });
 
-test("ValueEmitter lowers flag conditions from producer inputs when possible", () => {
+test("ValueEmitter lowers flag conditions from write conditions when possible", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
-  const producer = jitFlagProducerValue("sub", {
-    left: eax,
-    right: ebx,
-    result: sub(eax, ebx)
-  }, { mask: IR_ALU_FLAG_MASK });
-  const opcodes = emitSymbolicValue(jitFlagConditionValue(producer, "E"));
+  const flags = jitFlagWriteValue(
+    {
+      CF: { kind: "expr", value: jitCompareValue("lt_u", 32, eax, ebx) },
+      ZF: { kind: "expr", value: sub(eax, ebx) }
+    },
+    { E: jitCompareValue("eq", 32, eax, ebx) }
+  );
+  const opcodes = emitSymbolicValue(jitFlagConditionValue(flags, "E"));
 
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 1);
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32Eqz), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Eq), 1);
   strictEqual(countOpcode(opcodes, wasmOpcode.i32And), 0);
 });
 
 test("ValueEmitter routes flag conditions through inserted masked flag bits", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
-  const producer = jitFlagProducerValue("sub", {
-    left: eax,
-    right: ebx,
-    result: sub(eax, ebx)
-  }, { mask: IR_ALU_FLAG_MASKS.ZF });
-  const flags = jitInsertMaskedBits(jitInputAluFlagsValue(), producer, IR_ALU_FLAG_MASKS.ZF);
+  const write = jitFlagWriteValue({
+    ZF: { kind: "expr", value: jitCompareValue("eq", 32, eax, ebx) }
+  });
+  const flags = jitInsertMaskedBits(jitInputAluFlagsValue(), write, IR_ALU_FLAG_MASKS.ZF);
   const opcodes = emitSymbolicValue(jitFlagConditionValue(flags, "E"));
 
-  strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 1);
+  strictEqual(countOpcode(opcodes, wasmOpcode.i32Eq), 1);
   strictEqual(countOpcode(opcodes, wasmOpcode.i32And), 0);
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Or), 0);
 });
@@ -314,12 +305,10 @@ test("ValueEmitter routes flag conditions through inserted masked flag bits", ()
 test("ValueEmitter routes flag conditions through preserved masked flag bits", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
-  const producer = jitFlagProducerValue("sub", {
-    left: eax,
-    right: ebx,
-    result: sub(eax, ebx)
-  }, { mask: IR_ALU_FLAG_MASKS.ZF });
-  const flags = jitInsertMaskedBits(jitInputAluFlagsValue(), producer, IR_ALU_FLAG_MASKS.ZF);
+  const write = jitFlagWriteValue({
+    ZF: { kind: "expr", value: jitCompareValue("eq", 32, eax, ebx) }
+  });
+  const flags = jitInsertMaskedBits(jitInputAluFlagsValue(), write, IR_ALU_FLAG_MASKS.ZF);
   const opcodes = emitSymbolicValue(jitFlagConditionValue(flags, "B"));
 
   strictEqual(countOpcode(opcodes, wasmOpcode.localGet), 1);
@@ -327,21 +316,19 @@ test("ValueEmitter routes flag conditions through preserved masked flag bits", (
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Or), 0);
 });
 
-test("ValueEmitter routes split flag conditions through nested masked producers", () => {
+test("ValueEmitter routes split flag conditions through nested masked flag writes", () => {
   const eax = jitInputReg32Value("eax");
   const ebx = jitInputReg32Value("ebx");
   const ecx = jitInputReg32Value("ecx");
-  const carryProducer = jitFlagProducerValue("sub", {
-    left: eax,
-    right: ebx,
-    result: sub(eax, ebx)
-  }, { mask: IR_ALU_FLAG_MASKS.CF });
-  const zeroProducer = jitFlagProducerValue("logic", {
-    result: ecx
-  }, { mask: IR_ALU_FLAG_MASKS.ZF });
+  const carryWrite = jitFlagWriteValue({
+    CF: { kind: "expr", value: jitCompareValue("lt_u", 32, eax, ebx) }
+  });
+  const zeroWrite = jitFlagWriteValue({
+    ZF: { kind: "expr", value: jitCompareValue("eq", 32, ecx, c32(0)) }
+  });
   const flags = jitInsertMaskedBits(
-    jitInsertMaskedBits(jitInputAluFlagsValue(), carryProducer, IR_ALU_FLAG_MASKS.CF),
-    zeroProducer,
+    jitInsertMaskedBits(jitInputAluFlagsValue(), carryWrite, IR_ALU_FLAG_MASKS.CF),
+    zeroWrite,
     IR_ALU_FLAG_MASKS.ZF
   );
   const opcodes = emitSymbolicValue(jitFlagConditionValue(flags, "BE"));
@@ -549,6 +536,19 @@ function shl(a: JitValue, b: JitValue): JitValue {
 
 function sub(a: JitValue, b: JitValue): JitValue {
   return { kind: "value.binary", type: "i32", operator: "sub", a, b };
+}
+
+function subFlagWrite(left: JitValue, right: JitValue): JitValue {
+  const result = sub(left, right);
+
+  return jitFlagWriteValue({
+    CF: { kind: "expr", value: jitCompareValue("lt_u", 32, left, right) },
+    PF: { kind: "expr", value: result },
+    AF: { kind: "expr", value: result },
+    ZF: { kind: "expr", value: jitCompareValue("eq", 32, left, right) },
+    SF: { kind: "expr", value: result },
+    OF: { kind: "expr", value: result }
+  });
 }
 
 function select(condition: JitValue, whenTrue: JitValue, whenFalse: JitValue): JitValue {

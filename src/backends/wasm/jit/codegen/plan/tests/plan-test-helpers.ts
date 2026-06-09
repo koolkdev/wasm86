@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { ok, decodeBytes } from "#x86/decoder/tests/helpers.js";
 import type { Reg32 } from "#x86/types.js";
 import { IR_ALU_FLAG_MASK } from "#ir/model/flag-effects.js";
-import { FLAG_PRODUCERS } from "#ir/model/flags.js";
 import { ExitReason } from "#wasm/exit.js";
 import type { IrExprBlock, IrValueExpr } from "#wasm/codegen/expressions.js";
 import { buildBlock } from "#backends/wasm/jit/block.js";
@@ -48,7 +47,7 @@ import type {
 import {
   jitExtractBits,
   jitFlagConditionValue,
-  jitFlagProducerValue,
+  jitFlagWriteValue,
   jitInputAluFlagsValue,
   jitInputReg16Value,
   jitInputReg32Value,
@@ -98,7 +97,6 @@ export {
   ok,
   decodeBytes,
   IR_ALU_FLAG_MASK,
-  FLAG_PRODUCERS,
   ExitReason,
   buildBlock,
   analyzeBlock,
@@ -111,7 +109,7 @@ export {
   buildTimeline,
   jitExtractBits,
   jitFlagConditionValue,
-  jitFlagProducerValue,
+  jitFlagWriteValue,
   jitInputAluFlagsValue,
   jitInputReg16Value,
   jitInputReg32Value,
@@ -212,13 +210,6 @@ function bindTestInstructionOp(op: IrOp, nextEip: number): IrOp {
       return { ...op, value: bindTestValue(op.value, nextEip) };
     case "value.compare":
       return { ...op, a: bindTestValue(op.a, nextEip), b: bindTestValue(op.b, nextEip) };
-    case "flags.set":
-      return {
-        ...op,
-        inputs: Object.fromEntries(
-          Object.entries(op.inputs).map(([name, value]) => [name, bindTestValue(value, nextEip)])
-        )
-      };
     case "flags.write":
       return {
         ...op,

@@ -1,13 +1,12 @@
 import type { OperandWidth, Reg16, Reg32, Reg8 } from "#x86/types.js";
 import type {
   ConditionCode,
-  FlagProducerName,
   IrBinaryOperator,
   IrCompareOperator,
   IrUnaryOperator,
   IrValueType
 } from "#ir/model/types.js";
-import type { FlagName, FlagProducerInputs } from "#ir/model/flags.js";
+import type { FlagName } from "#ir/model/flags.js";
 
 export type JitConstValue = Readonly<{ kind: "const"; type: IrValueType; value: number }>;
 export type JitLoadResultValueId = number & { readonly __jitLoadResultValueId: unique symbol };
@@ -91,22 +90,12 @@ export type JitInsertMaskedBitsValue = Readonly<{
   mask: number;
 }>;
 
-export type JitFlagProducerValueFor<Producer extends FlagProducerName> = Readonly<{
-  kind: "flagProducer";
-  producer: Producer;
-  width?: OperandWidth;
-  inputs: FlagProducerInputs<JitValue, Producer>;
-  mask: number;
-}>;
-
-export type JitFlagProducerValue = JitFlagProducerValueFor<FlagProducerName>;
-
 export type JitFlagWriteCell =
   | Readonly<{ kind: "expr"; value: JitValue }>
   | Readonly<{ kind: "undef" }>;
 
-// Packed alu-flag bits for the cells' mask, parallel to JitFlagProducerValue.
-// Conditions carry equivalent condition truth values for direct routing.
+// Packed alu-flag bits covering the cells' mask. Conditions carry equivalent
+// condition truth values for direct routing.
 export type JitFlagWriteValue = Readonly<{
   kind: "flagWrite";
   cells: Partial<Record<FlagName, JitFlagWriteCell>>;
@@ -132,7 +121,6 @@ export type JitValue =
   | JitInsertBitsValue
   | JitExtractMaskedBitsValue
   | JitInsertMaskedBitsValue
-  | JitFlagProducerValue
   | JitFlagWriteValue
   | JitFlagConditionValue;
 

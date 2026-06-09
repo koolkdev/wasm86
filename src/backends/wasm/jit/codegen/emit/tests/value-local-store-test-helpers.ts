@@ -222,13 +222,6 @@ function bindTestInstructionOp(op: IrOp, nextEip: number): IrOp {
       return { ...op, value: bindTestValue(op.value, nextEip) };
     case "value.compare":
       return { ...op, a: bindTestValue(op.a, nextEip), b: bindTestValue(op.b, nextEip) };
-    case "flags.set":
-      return {
-        ...op,
-        inputs: Object.fromEntries(
-          Object.entries(op.inputs).map(([name, value]) => [name, bindTestValue(value, nextEip)])
-        )
-      };
     case "flags.write":
       return {
         ...op,

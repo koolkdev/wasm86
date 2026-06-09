@@ -39,7 +39,7 @@ import {
   emitModRmRegIndex
 } from "#backends/wasm/interpreter/decode/modrm-bits.js";
 import { emitIrExpressionBlockToWasm, type WasmIrEmitHelpers } from "#wasm/codegen/emit.js";
-import { emitSetFlags, emitWriteFlags } from "#wasm/codegen/flags.js";
+import { emitWriteFlags } from "#wasm/codegen/flags.js";
 import { emitFlagsCondition } from "#wasm/codegen/conditions.js";
 import { ExitReason } from "#wasm/exit.js";
 import type { InterpreterLocals } from "./locals.js";
@@ -115,8 +115,6 @@ export function emitInterpreterIrWithContext(block: IrBlock, context: Interprete
     emitMemoryGuard: (op, helpers) =>
       emitMemoryGuard(context, op.address, op.byteLength, op.access, helpers),
     emitAddress: (source) => emitAddress(context, source),
-    emitSetFlags: (descriptor, helpers) =>
-      emitSetFlags(context.body, aluFlags, descriptor, helpers),
     emitWriteFlags: (descriptor, helpers) =>
       emitWriteFlags(context.body, aluFlags, descriptor, helpers),
     emitFlagsCondition: (cc) => emitFlagsCondition(context.body, aluFlags, cc),

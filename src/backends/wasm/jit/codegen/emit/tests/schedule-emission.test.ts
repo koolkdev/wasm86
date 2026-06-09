@@ -8,7 +8,6 @@ import {
   wasmValueType,
   ExitReason,
   stateOffset,
-  IR_ALU_FLAG_MASK,
   wasmBodyInstructions,
   wasmBodyMemoryAccesses,
   wasmBodyOpcodes,
@@ -293,11 +292,15 @@ test("JIT schedule emission skips unused arithmetic, register, and flag state", 
     },
     { op: "set", target: { kind: "reg", reg: "ebx" }, value: v(1), accessWidth: 32 },
     {
-      op: "flags.set",
-      producer: "logic",
-      writtenMask: IR_ALU_FLAG_MASK,
-      undefMask: 0,
-      inputs: { result: v(1) }
+      op: "flags.write",
+      cells: {
+        CF: { kind: "expr", value: v(1) },
+        PF: { kind: "expr", value: v(1) },
+        AF: { kind: "expr", value: v(1) },
+        ZF: { kind: "expr", value: v(1) },
+        SF: { kind: "expr", value: v(1) },
+        OF: { kind: "expr", value: v(1) }
+      }
     }
   ], { nextMode: "continue" }));
 

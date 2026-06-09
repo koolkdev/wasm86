@@ -4,7 +4,6 @@ import { test } from "node:test";
 import {
   buildIrExpressionBlock
 } from "#wasm/codegen/expressions.js";
-import { createIrFlagSetOp } from "#ir/model/flags.js";
 
 const v = (id: number) => ({ kind: "var" as const, id });
 const op = (index: number) => ({ kind: "operand" as const, index });
@@ -126,25 +125,6 @@ test("expression selector can reuse const bindings without a temporary", () => {
           b: c32(7)
         })
       },
-      { op: "next" }
-    ]
-  );
-});
-
-test("expression selector materializes flag inputs that still need value refs", () => {
-  deepStrictEqual(
-    buildIrExpressionBlock([
-      { op: "get", dst: v(0), source: op(0) },
-      { op: "get", dst: v(1), source: op(1) },
-      { op: "value.binary", type: "i32", operator: "sub", dst: v(2), a: v(0), b: v(1) },
-      createIrFlagSetOp("sub", { left: v(0), right: v(1), result: v(2) }),
-      { op: "next" }
-    ]),
-    [
-      { op: "let32", dst: v(0), value: sourceValue(op(0)) },
-      { op: "let32", dst: v(1), value: sourceValue(op(1)) },
-      { op: "let32", dst: v(2), value: { kind: "value.binary", type: "i32", operator: "sub", a: v(0), b: v(1) } },
-      createIrFlagSetOp("sub", { left: v(0), right: v(1), result: v(2) }),
       { op: "next" }
     ]
   );

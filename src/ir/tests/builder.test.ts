@@ -2,7 +2,6 @@ import { deepStrictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { buildIr } from "#ir/build/builder.js";
-import { createIrFlagSetOp } from "#ir/model/flags.js";
 
 test("builder appends implicit next for fallthrough templates", () => {
   deepStrictEqual(buildIr(() => {}), [{ op: "next" }]);
@@ -204,21 +203,6 @@ test("builder creates partial semantic flag write with undef cell and sparse con
           E: { kind: "var", id: 1 }
         }
       },
-      { op: "next" }
-    ]
-  );
-});
-
-test("builder still creates legacy flag producer writes through setFlags", () => {
-  deepStrictEqual(
-    buildIr((s) => {
-      const result = s.get(s.operand(0));
-
-      s.setFlags("logic", { result }, 8);
-    }),
-    [
-      { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
-      createIrFlagSetOp("logic", { result: { kind: "var", id: 0 } }, 8),
       { op: "next" }
     ]
   );

@@ -4,17 +4,12 @@ import {
   type ValueWidth,
   type WasmIrEmitValueOptions
 } from "#wasm/codegen/value-width.js";
+import { emitFlagsConditionFromAluFlagsValue } from "#wasm/codegen/conditions.js";
 import {
-  emitFlagsConditionFromAluFlagsValue,
-  emitFlagProducerConditionFromInputs
-} from "#wasm/codegen/conditions.js";
-import {
-  emitFlagProducerBitsFromInputs,
   emitFlagWriteBitsFromCells,
   type WasmFlagValueEmitHelpers
 } from "#wasm/codegen/flags.js";
 import { conditionFlagReadMask } from "#ir/model/flag-effects.js";
-import { flagProducerConditionKind } from "#ir/model/flag-conditions.js";
 import { CONDITIONS, type FlagBoolExpr } from "#ir/model/conditions.js";
 import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/types.js";
@@ -22,7 +17,6 @@ import type { ConditionCode } from "#ir/model/types.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import { narrowFlagWriteToMask } from "#backends/wasm/jit/ir/values/flags.js";
 import type {
-  JitFlagProducerValue,
   JitFlagWriteValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
@@ -32,19 +26,6 @@ export type FlagValueEmitContext = Readonly<{
   emitValue(value: JitValue, options?: WasmIrEmitValueOptions): ValueWidth;
   emitMaskedValue(value: JitValue, width: OperandWidth): ValueWidth;
 }>;
-
-export function emitFlagProducerValue(
-  context: FlagValueEmitContext,
-  value: JitFlagProducerValue
-): ValueWidth {
-  emitFlagProducerBitsFromInputs(
-    context.body,
-    value,
-    jitFlagValueHelpers(context),
-    value.mask
-  );
-  return cleanValueWidthForMask(value.mask);
-}
 
 export function emitFlagWriteValue(
   context: FlagValueEmitContext,
@@ -84,11 +65,6 @@ function emitRoutedFlagCondition(
   const simplifiedFlags = simplifyValue(flags);
   const readMask = conditionFlagReadMask(cc);
 
-  if (simplifiedFlags.kind === "flagProducer" && canEmitDirectFlagProducerCondition(simplifiedFlags, cc, readMask)) {
-    emitDirectFlagProducerCondition(context, simplifiedFlags, cc);
-    return true;
-  }
-
   if (simplifiedFlags.kind === "flagWrite" && (readMask & ~simplifiedFlags.mask) === 0) {
     return emitDirectFlagWriteCondition(context, simplifiedFlags, cc);
   }
@@ -106,18 +82,6 @@ function emitRoutedFlagCondition(
   }
 
   return false;
-}
-
-function canEmitDirectFlagProducerCondition(
-  value: JitFlagProducerValue,
-  cc: ConditionCode,
-  readMask: number
-): boolean {
-  return flagProducerConditionKind({
-    producer: value.producer,
-    width: value.width,
-    cc
-  }) !== undefined && (readMask & ~value.mask) === 0;
 }
 
 function emitFlagBitsForMask(
@@ -152,19 +116,6 @@ function emitFlagBitsForMask(
     emitFlagBitsForMask(context, simplifiedFlags.value, insertedReadMask, true);
     context.body.i32Or();
     return cleanValueWidthForMask(normalizedReadMask);
-  }
-
-  if (simplifiedFlags.kind === "flagProducer") {
-    const producedReadMask = normalizedReadMask & (simplifiedFlags.mask >>> 0);
-
-    if (producedReadMask === 0) {
-      context.body.i32Const(0);
-      return cleanValueWidth(8, 0);
-    }
-
-    return emitFlagProducerValue(context, producedReadMask === simplifiedFlags.mask
-      ? simplifiedFlags
-      : { ...simplifiedFlags, mask: producedReadMask });
   }
 
   if (simplifiedFlags.kind === "flagWrite") {
@@ -283,23 +234,6 @@ function isKnownBooleanValue(value: JitValue): boolean {
     default:
       return false;
   }
-}
-
-function emitDirectFlagProducerCondition(
-  context: FlagValueEmitContext,
-  value: JitFlagProducerValue,
-  cc: ConditionCode
-): void {
-  emitFlagProducerConditionFromInputs(
-    context.body,
-    {
-      cc,
-      producer: value.producer,
-      ...(value.width === undefined ? {} : { width: value.width }),
-      inputs: value.inputs
-    },
-    jitFlagValueHelpers(context)
-  );
 }
 
 function jitFlagValueHelpers(

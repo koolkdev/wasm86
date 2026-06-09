@@ -112,7 +112,6 @@ class TimelineBuilder {
         this.#recordStorageInputs(op.target);
         return;
       case "memory.guard":
-      case "flags.set":
       case "flags.write":
       case "jump":
       case "conditionalJump":
@@ -145,7 +144,6 @@ class TimelineBuilder {
       case "hostTrap":
         this.#valueForExpression(op.vector);
         return;
-      case "flags.set":
       case "flags.write":
       case "next":
         return;
@@ -156,9 +154,6 @@ class TimelineBuilder {
     switch (op.op) {
       case "set":
         this.#recordSetWrite(op);
-        return;
-      case "flags.set":
-        this.#recordFlagWrite(op);
         return;
       case "flags.write":
         this.#recordSemanticFlagWrite(op);
@@ -295,30 +290,12 @@ class TimelineBuilder {
     }
   }
 
-  #recordFlagWrite(op: Extract<IrExprOp, { op: "flags.set" }>): void {
-    const write = this.#valueState.flags().recordSet(op, () => this.#inputRecordFor(op.inputs));
-
-    if (write !== undefined) {
-      this.#recordWrite(write.slot, write.value);
-    }
-  }
-
   #recordSemanticFlagWrite(op: Extract<IrExprOp, { op: "flags.write" }>): void {
     const write = this.#valueState.flags().recordWrite(op, (expr) => this.#valueForExpression(expr));
 
     if (write !== undefined) {
       this.#recordWrite(write.slot, write.value);
     }
-  }
-
-  #inputRecordFor(inputs: Readonly<Record<string, ValueRef>>): Readonly<Record<string, JitValue>> {
-    const resolved: Record<string, JitValue> = {};
-
-    for (const [name, value] of Object.entries(inputs)) {
-      resolved[name] = this.#valueForRef(value);
-    }
-
-    return resolved;
   }
 
   #recordStorageInputs(storage: IrStorageExpr): void {

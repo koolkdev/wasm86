@@ -13,7 +13,6 @@ import type {
   ConditionCode,
   IrBinaryOperator,
   IrCompareOperator,
-  IrFlagSetOp,
   IrUnaryOperator,
 } from "#ir/model/types.js";
 import type { OperandWidth } from "#x86/types.js";
@@ -54,7 +53,6 @@ export type WasmIrEmitContext = Readonly<{
   ): void;
   emitMemoryGuard(op: IrMemoryGuardExprOp, helpers: WasmIrEmitHelpers): void;
   emitAddress(source: IrStorageExpr, helpers: WasmIrEmitHelpers): void;
-  emitSetFlags(descriptor: IrFlagSetOp, helpers: WasmIrEmitHelpers): void;
   emitWriteFlags(descriptor: IrFlagWriteExprOp, helpers: WasmIrEmitHelpers): void;
   emitFlagsCondition(cc: ConditionCode): void;
   emitNext(helpers: WasmIrEmitHelpers): void;
@@ -146,9 +144,6 @@ class IrExprWasmEmitter {
         return;
       case "memory.guard":
         this.#context.emitMemoryGuard(op, this.#helpers);
-        return;
-      case "flags.set":
-        this.#context.emitSetFlags(op, this.#helpers);
         return;
       case "flags.write":
         this.#context.emitWriteFlags(op, this.#helpers);

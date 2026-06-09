@@ -79,9 +79,6 @@ function bindJitExpressionOp(
       assertJitBoundStorage(op.target, opIndex);
       assertJitBoundValue(op.value, opIndex);
       return op;
-    case "flags.set":
-      Object.values(op.inputs).forEach((value) => assertJitBoundValue(value, opIndex));
-      return op;
     case "flags.write":
       Object.values(op.cells).forEach((cell) => {
         if (cell?.kind === "expr") {
@@ -121,9 +118,6 @@ function validateJitBoundExpressionOp(op: JitBoundExprOp, opIndex: number): void
     case "set":
       assertJitBoundStorage(op.target, opIndex);
       assertJitBoundValue(op.value, opIndex);
-      return;
-    case "flags.set":
-      Object.values(op.inputs).forEach((value) => assertJitBoundValue(value, opIndex));
       return;
     case "flags.write":
       Object.values(op.cells).forEach((cell) => {

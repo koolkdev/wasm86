@@ -1,4 +1,4 @@
-import { flagProducerInputValues, flagWriteChildValues } from "./flags.js";
+import { flagWriteChildValues } from "./flags.js";
 import type { JitValue } from "./types.js";
 
 export function valueChildren(value: JitValue): readonly JitValue[] {
@@ -16,8 +16,6 @@ export function valueChildren(value: JitValue): readonly JitValue[] {
     case "insertBits":
     case "insertMaskedBits":
       return [value.base, value.value];
-    case "flagProducer":
-      return flagProducerInputValues(value);
     case "flagWrite":
       return flagWriteChildValues(value);
     case "flagCondition":

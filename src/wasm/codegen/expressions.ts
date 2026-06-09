@@ -2,7 +2,6 @@ import type {
   ConditionCode,
   IrBinaryOperator,
   IrCompareOperator,
-  IrFlagSetOp,
   IrFlagWriteOp,
   IrMemoryAccessKind,
   OperandRef,
@@ -93,7 +92,6 @@ export type IrExprOp =
   | Readonly<{ op: "let32"; dst: VarRef; value: IrValueExpr }>
   | IrSetExprOp
   | IrMemoryGuardExprOp
-  | IrFlagSetOp
   | IrFlagWriteExprOp
   | Readonly<{ op: "next" }>
   | Readonly<{ op: "jump"; target: IrValueExpr }>
@@ -249,24 +247,6 @@ class ExpressionBuilder {
         case "flags.condition":
           this.#defineValue(op.dst, { kind: "flags.condition", cc: op.cc }, false);
           break;
-        case "flags.set": {
-          const inputs = Object.entries(op.inputs).map(([name, value]) => ({
-            name,
-            value: this.#materializedValue(value)
-          }));
-
-          this.#pushOp({
-            op: "flags.set",
-            producer: op.producer,
-            ...(op.width === undefined ? {} : { width: op.width }),
-            writtenMask: op.writtenMask,
-            undefMask: op.undefMask,
-            inputs: Object.fromEntries(
-              inputs.map(({ name, value }) => [name, value.value])
-            )
-          });
-          break;
-        }
         case "flags.write":
           this.#pushOp(this.#flagWriteExpr(op));
           break;
@@ -359,25 +339,6 @@ class ExpressionBuilder {
         )
       )
     };
-  }
-
-  #materializedValue(value: ValueRef): Readonly<{ value: ValueRef }> {
-    const expr = this.#valueExpr(value);
-    const exprValue = expr.value;
-
-    if (exprValue.kind === "var" || exprValue.kind === "const" || exprValue.kind === "nextEip") {
-      return { value: exprValue };
-    }
-
-    const materialized = value.kind === "var" ? value : undefined;
-
-    if (materialized === undefined) {
-      throw new Error("cannot materialize non-var IR expression input");
-    }
-
-    this.#pushOp({ op: "let32", dst: materialized, value: expr.value });
-    this.#bindings.delete(materialized.id);
-    return { value: materialized };
   }
 
   #storageExpr(storage: StorageRef): ExpressionStorageResult {

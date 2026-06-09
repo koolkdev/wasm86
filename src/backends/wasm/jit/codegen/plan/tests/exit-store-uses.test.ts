@@ -1,7 +1,7 @@
+import { IR_ALU_FLAG_MASK, IR_ALU_FLAG_MASKS } from "#ir/model/flag-effects.js";
 import {
   deepStrictEqual,
   test,
-  FLAG_PRODUCERS,
   ExitReason,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
@@ -106,7 +106,7 @@ test("buildJitCodegenEmissionPlan expands exit-store dependency trees once with 
   const conditionFlags = jitInsertMaskedBits(
     jitInputAluFlagsValue(),
     loadResult,
-    FLAG_PRODUCERS.inc.writtenMask
+    IR_ALU_FLAG_MASK & ~IR_ALU_FLAG_MASKS.CF
   );
   const selectedFlags = {
     kind: "value.select",

@@ -1,26 +1,16 @@
-import {
-  flagProducerInputsFromRecord
-} from "#ir/model/flags.js";
-import type { ConditionCode, IrFlagSetOp } from "#ir/model/types.js";
+import type { ConditionCode } from "#ir/model/types.js";
 import {
   x86ArithmeticFlagMask,
   x86ArithmeticFlags
 } from "#x86/flags.js";
 import type { IrFlagWriteExprOp, IrValueExpr } from "#wasm/codegen/expressions.js";
-import {
-  jitFlagProducerValue,
-  jitFlagWriteValue
-} from "#backends/wasm/jit/ir/values/builders.js";
+import { jitFlagWriteValue } from "#backends/wasm/jit/ir/values/builders.js";
 import { simplifyValue } from "#backends/wasm/jit/ir/values/simplify.js";
 import type {
   JitFlagWriteCell,
   JitFlagWriteValue,
   JitValue
 } from "#backends/wasm/jit/ir/values/types.js";
-
-export function jitFlagSetWrittenMask(op: Pick<IrFlagSetOp, "writtenMask" | "undefMask">): number {
-  return (op.writtenMask | op.undefMask) >>> 0;
-}
 
 export function jitFlagWriteWrittenMask(op: Pick<IrFlagWriteExprOp, "cells">): number {
   let mask = 0;
@@ -72,18 +62,4 @@ function jitFlagWriteConditions(
   }
 
   return conditions;
-}
-
-export function jitFlagSetProducerValue(
-  op: IrFlagSetOp,
-  inputs: Readonly<Record<string, JitValue>>
-): JitValue {
-  return simplifyValue(jitFlagProducerValue(
-    op.producer,
-    flagProducerInputsFromRecord(op.producer, inputs),
-    {
-      ...(op.width === undefined ? {} : { width: op.width }),
-      mask: jitFlagSetWrittenMask(op)
-    }
-  ));
 }

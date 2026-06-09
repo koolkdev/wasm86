@@ -1,12 +1,6 @@
 import {
-  flagProducerInputNames,
-  requiredFlagProducerInput
-} from "#ir/model/flags.js";
-import {
-  flagProducerWidth,
   flagWriteCellEntries,
-  flagWriteConditionEntries,
-  normalizeFlagProducerMask
+  flagWriteConditionEntries
 } from "./flags.js";
 import {
   jitArchitecturalSlotsEqual
@@ -22,7 +16,6 @@ import type {
   JitExtractBitsValue,
   JitExtractMaskedBitsValue,
   JitFlagConditionValue,
-  JitFlagProducerValue,
   JitFlagWriteValue,
   JitInputValue,
   JitInsertBitsValue,
@@ -117,14 +110,6 @@ function valuesEqualStructural(a: JitValue, b: JitValue): boolean {
         valuesEqual(a.a, compare.a) &&
         valuesEqual(a.b, compare.b);
     }
-    case "flagProducer": {
-      const producer = b as JitFlagProducerValue;
-
-      return a.producer === producer.producer &&
-        flagProducerWidth(a) === flagProducerWidth(producer) &&
-        normalizeFlagProducerMask(a.producer, a.mask) === normalizeFlagProducerMask(producer.producer, producer.mask) &&
-        jitFlagProducerInputsEqual(a, producer);
-    }
     case "flagWrite":
       return jitFlagWritesEqual(a, b as JitFlagWriteValue);
     case "flagCondition": {
@@ -171,17 +156,4 @@ function jitFlagWritesEqual(left: JitFlagWriteValue, right: JitFlagWriteValue): 
 
     return cc === rightCc && valuesEqual(condition, rightCondition);
   });
-}
-
-function jitFlagProducerInputsEqual(left: JitFlagProducerValue, right: JitFlagProducerValue): boolean {
-  if (left.producer !== right.producer) {
-    return false;
-  }
-
-  return flagProducerInputNames(left.producer).every((key) =>
-    valuesEqual(
-      requiredFlagProducerInput(left.producer, left.inputs, key),
-      requiredFlagProducerInput(right.producer, right.inputs, key)
-    )
-  );
 }

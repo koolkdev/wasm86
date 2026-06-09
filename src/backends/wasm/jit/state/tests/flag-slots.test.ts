@@ -3,10 +3,9 @@ import {
   test,
   IR_ALU_FLAG_MASK,
   IR_ALU_FLAG_MASKS,
-  FLAG_PRODUCERS,
   jitExtractMaskedBits,
   jitFlagConditionValue,
-  jitFlagProducerValue,
+  jitFlagWriteValue,
   jitInputAluFlagsValue,
   jitInputReg32Value,
   jitInsertMaskedBits,
@@ -20,17 +19,21 @@ test("JIT ALU flag value family preserves partial flag writes symbolically", () 
   const state = createJitValueState();
   const eax = jitInputReg32Value("eax");
   const result = add(eax, c32(1));
-  const incFlags = jitFlagProducerValue("inc", {
-    left: eax,
-    result
-  }, { mask: FLAG_PRODUCERS.inc.writtenMask });
+  const partialMask = IR_ALU_FLAG_MASK & ~IR_ALU_FLAG_MASKS.CF;
+  const incFlags = jitFlagWriteValue({
+    PF: { kind: "expr", value: result },
+    AF: { kind: "expr", value: result },
+    ZF: { kind: "expr", value: result },
+    SF: { kind: "expr", value: result },
+    OF: { kind: "expr", value: result }
+  });
 
-  state.flags.writeFlagBits(FLAG_PRODUCERS.inc.writtenMask, incFlags);
+  state.flags.writeFlagBits(partialMask, incFlags);
 
   const expected = jitInsertMaskedBits(
     jitInputAluFlagsValue(),
     incFlags,
-    FLAG_PRODUCERS.inc.writtenMask
+    partialMask
   );
 
   deepStrictEqual(state.flags.readAluFlags(), expected);
@@ -68,17 +71,24 @@ test("JIT ALU flag value family lets later full writes replace partial merges", 
   const eax = jitInputReg32Value("eax");
   const incResult = add(eax, c32(1));
   const addResult = add(eax, jitInputReg32Value("ebx"));
-  const incFlags = jitFlagProducerValue("inc", {
-    left: eax,
-    result: incResult
-  }, { mask: FLAG_PRODUCERS.inc.writtenMask });
-  const addFlags = jitFlagProducerValue("add", {
-    left: eax,
-    right: jitInputReg32Value("ebx"),
-    result: addResult
-  }, { mask: IR_ALU_FLAG_MASK });
+  const partialMask = IR_ALU_FLAG_MASK & ~IR_ALU_FLAG_MASKS.CF;
+  const incFlags = jitFlagWriteValue({
+    PF: { kind: "expr", value: incResult },
+    AF: { kind: "expr", value: incResult },
+    ZF: { kind: "expr", value: incResult },
+    SF: { kind: "expr", value: incResult },
+    OF: { kind: "expr", value: incResult }
+  });
+  const addFlags = jitFlagWriteValue({
+    CF: { kind: "expr", value: addResult },
+    PF: { kind: "expr", value: addResult },
+    AF: { kind: "expr", value: addResult },
+    ZF: { kind: "expr", value: addResult },
+    SF: { kind: "expr", value: addResult },
+    OF: { kind: "expr", value: addResult }
+  });
 
-  state.flags.writeFlagBits(FLAG_PRODUCERS.inc.writtenMask, incFlags);
+  state.flags.writeFlagBits(partialMask, incFlags);
   state.flags.writeFlagBits(IR_ALU_FLAG_MASK, addFlags);
 
   const snapshot = state.snapshot();

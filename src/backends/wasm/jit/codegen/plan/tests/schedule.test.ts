@@ -9,7 +9,6 @@ import {
   jitInputReg32Value,
   jitLoadResultValue,
   planJitCodegen,
-  IR_ALU_FLAG_MASK,
   startAddress,
   type Exit,
   type PlannedExit,
@@ -35,11 +34,15 @@ test("JIT schedule treats final fallthrough state as exit-store roots", () => {
         },
         { op: "set", target: { kind: "reg", reg: "ebx" }, value: { kind: "var", id: 1 }, accessWidth: 32 },
         {
-          op: "flags.set",
-          producer: "logic",
-          writtenMask: IR_ALU_FLAG_MASK,
-          undefMask: 0,
-          inputs: { result: { kind: "var", id: 1 } }
+          op: "flags.write",
+          cells: {
+            CF: { kind: "expr", value: { kind: "var", id: 1 } },
+            PF: { kind: "expr", value: { kind: "var", id: 1 } },
+            AF: { kind: "expr", value: { kind: "var", id: 1 } },
+            ZF: { kind: "expr", value: { kind: "var", id: 1 } },
+            SF: { kind: "expr", value: { kind: "var", id: 1 } },
+            OF: { kind: "expr", value: { kind: "var", id: 1 } }
+          }
         },
         { op: "next" }
       ]

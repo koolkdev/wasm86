@@ -19,7 +19,6 @@ import {
   jitCompareValue,
   jitExtractBits,
   jitFlagConditionValue,
-  jitFlagProducerValue,
   jitFlagWriteValue,
   jitInputAluFlagsValue,
   jitInputReg32Value,
@@ -30,7 +29,6 @@ import {
 import type { JitValue } from "#backends/wasm/jit/ir/values/types.js";
 import { syntheticInstruction } from "#backends/wasm/jit/ir/tests/helpers.js";
 import { createJitValueState } from "#backends/wasm/jit/state/value-state.js";
-import { FLAG_PRODUCERS } from "#ir/model/flags.js";
 import { x86ArithmeticFlagMask } from "#x86/flags.js";
 import type { Reg32 } from "#x86/types.js";
 
@@ -148,14 +146,13 @@ test("JIT value timeline does not expose unrequested entry or final snapshots", 
 test("JIT value timeline records condition reads before and after flag writes", () => {
   const eax = jitInputReg32Value("eax");
   const result = jitAdd(eax, c32(1));
-  const incFlags = jitFlagProducerValue("inc", {
-    left: eax,
-    result
-  }, { mask: FLAG_PRODUCERS.inc.writtenMask });
+  const incFlags = jitFlagWriteValue({
+    ZF: { kind: "expr", value: jitCompareValue("eq", 32, result, c32(0)) }
+  });
   const expectedFlags = jitInsertMaskedBits(
     jitInputAluFlagsValue(),
     incFlags,
-    FLAG_PRODUCERS.inc.writtenMask
+    x86ArithmeticFlagMask.ZF
   );
   const condition = { kind: "flags.condition", cc: "E" } as const satisfies IrValueExpr;
   const expressionBlock = [
@@ -163,13 +160,19 @@ test("JIT value timeline records condition reads before and after flag writes", 
     { op: "let32", dst: v(1), value: source(reg("eax")) },
     { op: "let32", dst: v(2), value: exprAdd(v(1), c32(1)) },
     {
-      op: "flags.set",
-      producer: "inc",
-      writtenMask: FLAG_PRODUCERS.inc.writtenMask,
-      undefMask: 0,
-      inputs: {
-        left: v(1),
-        result: v(2)
+      op: "flags.write",
+      cells: {
+        ZF: {
+          kind: "expr",
+          value: {
+            kind: "value.compare",
+            type: "i32",
+            operator: "eq",
+            width: 32,
+            a: v(2),
+            b: c32(0)
+          }
+        }
       }
     },
     { op: "let32", dst: v(3), value: condition }
@@ -380,23 +383,14 @@ test("JIT value timeline fails clearly for unresolved values", () => {
 test("JIT value timeline ignores no-op flag writes before resolving inputs", () => {
   const timeline = buildTimeline({
     expressions: [{
-      op: "flags.set",
-      producer: "add",
-      writtenMask: 0,
-      undefMask: 0,
-      inputs: {
-        left: v(100),
-        right: v(101),
-        result: v(102)
-      }
+      op: "flags.write",
+      cells: {}
     }],
     snapshotPoints: new Set()
   });
 
   deepStrictEqual(timeline.writes, []);
   throws(() => timeline.viewAt(0).ref(v(100)));
-  throws(() => timeline.viewAt(0).ref(v(101)));
-  throws(() => timeline.viewAt(0).ref(v(102)));
 });
 
 test("JIT value timeline records semantic flag writes with cells and conditions", () => {

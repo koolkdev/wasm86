@@ -7,7 +7,6 @@ import {
   test,
   WasmFunctionBodyEncoder,
   wasmOpcode,
-  IR_ALU_FLAG_MASK,
   extractOnlyWasmFunctionBody,
   wasmBodyOpcodes,
   createValueCache,
@@ -190,16 +189,18 @@ test("JIT production emission prefers repeated memory-store parent expressions",
   strictEqual(countOpcode(opcodes, wasmOpcode.i32Xor), 1);
 });
 
-test("JIT value-cache planning does not treat flags.set as an exit-store consumer", () => {
+test("JIT value-cache planning does not treat flags.write as an exit-store consumer", () => {
   const expressionBlock = [
     { op: "let32", dst: { kind: "var", id: 0 }, value: highCostExpr() },
     {
-      op: "flags.set",
-      producer: "logic",
-      writtenMask: IR_ALU_FLAG_MASK,
-      undefMask: 0,
-      inputs: {
-        result: { kind: "var", id: 0 }
+      op: "flags.write",
+      cells: {
+        CF: { kind: "expr", value: { kind: "var", id: 0 } },
+        PF: { kind: "expr", value: { kind: "var", id: 0 } },
+        AF: { kind: "expr", value: { kind: "var", id: 0 } },
+        ZF: { kind: "expr", value: { kind: "var", id: 0 } },
+        SF: { kind: "expr", value: { kind: "var", id: 0 } },
+        OF: { kind: "expr", value: { kind: "var", id: 0 } }
       }
     },
     { op: "next" }

@@ -8,7 +8,6 @@ import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
 import { buildIr, const32, operand, irVar } from "#ir/build/builder.js";
-import { createIrFlagSetOp } from "#ir/model/flags.js";
 import { validateIrBlock } from "#ir/passes/validator.js";
 import type { IrBlock } from "#ir/model/types.js";
 
@@ -104,50 +103,6 @@ test("validator rejects memory guards with malformed access", () => {
         { op: "next" }
       ]),
     /memory\.guard access must be "read" or "write"/
-  );
-});
-
-test("validator rejects malformed flag producer inputs", () => {
-  throws(
-    () =>
-      validateIrBlock([
-        { op: "value.const", type: "i32", dst: irVar(0), value: 1 },
-        createIrFlagSetOp("logic", {}),
-        { op: "next" }
-      ]),
-    /logic flag producer is missing input 'result'/
-  );
-
-  throws(
-    () =>
-      validateIrBlock([
-        { op: "value.const", type: "i32", dst: irVar(0), value: 1 },
-        createIrFlagSetOp("logic", { result: irVar(0), extra: irVar(0) }),
-        { op: "next" }
-      ]),
-    /logic flag producer has unexpected input 'extra'/
-  );
-});
-
-test("validator rejects flag descriptors that disagree with producer metadata", () => {
-  throws(
-    () =>
-      validateIrBlock([
-        { op: "value.const", type: "i32", dst: irVar(0), value: 1 },
-        { ...createIrFlagSetOp("logic", { result: irVar(0) }), writtenMask: 1 },
-        { op: "next" }
-      ]),
-    /flags\.set logic writtenMask does not match producer metadata/
-  );
-
-  throws(
-    () =>
-      validateIrBlock([
-        { op: "value.const", type: "i32", dst: irVar(0), value: 1 },
-        { ...createIrFlagSetOp("add", { left: irVar(0), right: const32(1), result: irVar(0) }), undefMask: 1 },
-        { op: "next" }
-      ]),
-    /flags\.set add undefMask does not match producer metadata/
   );
 });
 

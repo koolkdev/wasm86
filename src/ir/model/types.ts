@@ -46,18 +46,6 @@ export type ConditionCode =
   | "LE"
   | "G";
 
-export type FlagProducerName = "add" | "sub" | "logic" | "inc" | "dec";
-export type FlagMask = number;
-
-export type IrFlagSetOp = Readonly<{
-  op: "flags.set";
-  producer: FlagProducerName;
-  width?: OperandWidth;
-  writtenMask: FlagMask;
-  undefMask: FlagMask;
-  inputs: Readonly<Record<string, ValueRef>>;
-}>;
-
 export type IrFlagsConditionOp = Readonly<{
   op: "flags.condition";
   dst: VarRef;
@@ -171,7 +159,6 @@ export type IrOp =
   | IrSelectValueOp
   | IrProjectValueOp
   | IrCompareValueOp
-  | IrFlagSetOp
   | IrFlagsConditionOp
   | IrFlagWriteOp
   | Readonly<{ op: "next" }>
@@ -214,7 +201,6 @@ export interface IrBuilder {
   project(width: OperandWidth, value: ValueInput): VarRef;
   compare(width: OperandWidth, operator: IrCompareOperator, a: ValueInput, b: ValueInput): VarRef;
 
-  setFlags(producer: FlagProducerName, inputs: Readonly<Record<string, ValueInput>>, width?: OperandWidth): void;
   flagExpr(value: ValueInput): IrFlagWriteCell;
   flagUndef(): IrFlagWriteCell;
   writeFlags(write: IrFlagWriteInput): void;

@@ -2,25 +2,14 @@ import type { OperandWidth, Reg16, Reg32, Reg8 } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import type {
   ConditionCode,
-  FlagProducerName,
   IrCompareOperator,
   IrValueType
 } from "#ir/model/types.js";
 import {
-  FLAG_PRODUCERS,
-  flagProducerInputsFromRecord,
-  flagProducerInputsToRecord,
-  type FlagProducerInputs
-} from "#ir/model/flags.js";
-import {
   assertBitRange,
   normalizeU32Mask
 } from "./bits.js";
-import {
-  flagWriteCellMask,
-  normalizeFlagProducerMask,
-  normalizeOptionalWidth
-} from "./flags.js";
+import { flagWriteCellMask } from "./flags.js";
 import type {
   JitFlagWriteValue,
   JitInputValue,
@@ -63,27 +52,6 @@ export function jitInputAluFlagsValue(): JitInputValue {
 
 export function jitLoadResultValue(id: number, type: IrValueType): JitLoadResultValue {
   return { kind: "loadResult", id: id as JitLoadResultValueId, type };
-}
-
-export function jitFlagProducerValue<Producer extends FlagProducerName>(
-  producer: Producer,
-  inputs: FlagProducerInputs<JitValue, Producer>,
-  options: Readonly<{ width?: OperandWidth; mask?: number }> = {}
-): JitValue {
-  const normalizedWidth = normalizeOptionalWidth(options.width);
-  const mask = normalizeFlagProducerMask(producer, options.mask ?? FLAG_PRODUCERS[producer].writtenMask);
-  const typedInputs = flagProducerInputsFromRecord(
-    producer,
-    flagProducerInputsToRecord(producer, inputs)
-  );
-
-  return {
-    kind: "flagProducer",
-    producer,
-    ...(normalizedWidth === undefined ? {} : { width: normalizedWidth }),
-    inputs: typedInputs,
-    mask
-  };
 }
 
 export function jitCompareValue(

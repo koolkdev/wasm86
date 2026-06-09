@@ -1,32 +1,12 @@
 import type { Reg32 } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
-import { createIrFlagSetOp } from "#ir/model/flags.js";
-import type { ConditionCode, IrBlock, IrOp, StorageRef, ValueRef, VarRef } from "#ir/model/types.js";
+import type { IrBlock, IrOp, StorageRef, ValueRef, VarRef } from "#ir/model/types.js";
 import type {
   JitIrBlock,
   JitIrInstruction
 } from "#backends/wasm/jit/ir/types.js";
 
 export const startAddress = 0x1000;
-
-export function logic32LocalConditionBlock(cc: ConditionCode): JitIrBlock {
-  return {
-    instructions: [
-      syntheticInstruction([
-        { op: "get", dst: v(0), source: { kind: "reg", reg: "eax" } },
-        { op: "value.binary", type: "i32", operator: "and", dst: v(1), a: v(0), b: c32(0xff) },
-        createIrFlagSetOp("logic", { result: v(1) }),
-        { op: "set", target: { kind: "reg", reg: "eax" }, value: v(1) },
-        { op: "next" }
-      ], 0),
-      syntheticInstruction([
-        { op: "flags.condition", dst: v(0), cc },
-        ...selectSet(v(0), v(1)),
-        { op: "next" }
-      ], 1)
-    ]
-  };
-}
 
 export function selectSet(
   condition: ValueRef,
@@ -114,13 +94,6 @@ function bindTestInstructionIr(ir: IrBlock, nextEip: number): IrBlock {
         return { ...op, value: bindTestValue(op.value, nextEip) };
       case "value.compare":
         return { ...op, a: bindTestValue(op.a, nextEip), b: bindTestValue(op.b, nextEip) };
-      case "flags.set":
-        return {
-          ...op,
-          inputs: Object.fromEntries(
-            Object.entries(op.inputs).map(([name, value]) => [name, bindTestValue(value, nextEip)])
-          )
-        };
       case "flags.write":
         return {
           ...op,

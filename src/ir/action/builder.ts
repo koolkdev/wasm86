@@ -269,10 +269,6 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return irVar(this.#values.internCompare(width, operator, this.#valueId(a), this.#valueId(b)));
   }
 
-  setFlags(): void {
-    throw notSupportedError("setFlags");
-  }
-
   flagExpr(): IrFlagWriteCell {
     throw notSupportedError("flagExpr");
   }
