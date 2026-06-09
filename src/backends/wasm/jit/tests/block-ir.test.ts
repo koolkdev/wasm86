@@ -124,24 +124,30 @@ test("buildBlock lowers unary ALU forms with preserved widths", () => {
   const negIr = buildBlock([ok(decodeBytes([0xf6, 0xd8], startAddress))])
     .instructions[0]!.ir;
   const notSet = notIr.find((op) => op.op === "set");
-  const negFlags = negIr.find((op) => op.op === "flags.set");
+  const negSet = negIr.find((op) => op.op === "set");
+  const negFlags = negIr.find((op) => op.op === "flags.write");
 
   strictEqual(notIr.some((op) => op.op === "value.binary" && op.operator === "xor"), true);
-  strictEqual(notIr.some((op) => op.op === "flags.set"), false);
+  strictEqual(notIr.some((op) => op.op === "flags.write"), false);
   strictEqual(notSet?.op === "set" ? notSet.accessWidth : undefined, 16);
 
   strictEqual(negIr.some((op) => op.op === "value.binary" && op.operator === "sub"), true);
-  strictEqual(negFlags?.op === "flags.set" ? negFlags.producer : undefined, "sub");
-  strictEqual(negFlags?.op === "flags.set" ? negFlags.width : undefined, 8);
+  deepStrictEqual(
+    negFlags?.op === "flags.write" ? Object.keys(negFlags.cells).sort() : undefined,
+    ["AF", "CF", "OF", "PF", "SF", "ZF"]
+  );
+  strictEqual(negSet?.op === "set" ? negSet.accessWidth : undefined, 8);
 });
 
-test("buildBlock keeps overwritten flag producers as value-state writes", () => {
+test("buildBlock keeps overwritten flag writes as value-state writes", () => {
   const cmp = ok(decodeBytes([0x39, 0xd8], startAddress));
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], cmp.nextEip));
   const ir = codegenIr(buildBlock([cmp, add]));
-  const flagSets = ir.filter((op) => op.op === "flags.set");
+  const flagWrites = ir.filter((op) => op.op === "flags.write");
 
-  deepStrictEqual(flagSets.map((op) => op.op === "flags.set" ? op.producer : undefined), ["sub", "add"]);
+  strictEqual(flagWrites.length, 2);
+  strictEqual(flagWrites[0]?.op === "flags.write" ? flagWrites[0].conditions !== undefined : undefined, true);
+  strictEqual(flagWrites[1]?.op === "flags.write" ? flagWrites[1].conditions : null, undefined);
 });
 
 test("buildBlock keeps branch conditions as JIT flag values", () => {
@@ -161,14 +167,17 @@ test("buildBlock keeps branch conditions as JIT flag values", () => {
   strictEqual(hostTrapOpIndex !== -1, true);
 });
 
-test("buildBlock keeps earlier CF producer live across INC", () => {
+test("buildBlock keeps earlier CF write live across INC", () => {
   const add = ok(decodeBytes([0x83, 0xc0, 0x01], startAddress));
   const inc = ok(decodeBytes([0x40], add.nextEip));
   const jc = ok(decodeBytes([0x72, 0x05], inc.nextEip));
   const ir = codegenIr(buildBlock([add, inc, jc]));
-  const flagSets = ir.filter((op) => op.op === "flags.set");
+  const flagWrites = ir.filter((op) => op.op === "flags.write");
 
-  deepStrictEqual(flagSets.map((op) => op.op === "flags.set" ? op.producer : undefined), ["add", "inc"]);
+  deepStrictEqual(
+    flagWrites.map((op) => op.op === "flags.write" ? Object.hasOwn(op.cells, "CF") : undefined),
+    [true, false]
+  );
 });
 
 test("buildBlock keeps cmp and jcc branch conditions in flag value state", () => {

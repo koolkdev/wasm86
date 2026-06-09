@@ -1,5 +1,6 @@
 import type { SemanticTemplate } from "#ir/model/types.js";
 import type { OperandWidth } from "#x86/types.js";
+import { buildTestFlags } from "./flag-helpers.js";
 import { guardStorageRead } from "./memory.js";
 
 export function testSemantic(width: OperandWidth = 32): SemanticTemplate {
@@ -12,8 +13,7 @@ export function testSemantic(width: OperandWidth = 32): SemanticTemplate {
 
     const left = s.get(leftOperand, width);
     const right = s.get(rightOperand, width);
-    const result = s.i32And(left, right);
 
-    s.setFlags("logic", { result }, width);
+    s.writeFlags(buildTestFlags(s, { width, left, right }));
   };
 }

@@ -414,22 +414,24 @@ test("unary ALU semantics lower to flagless not and sub-flags neg IR", () => {
     a: { kind: "const", type: "i32", value: 0 },
     b: { kind: "var", id: 0 }
   });
-  strictEqual(neg[2]?.op, "flags.set");
-  if (neg[2]?.op === "flags.set") {
-    strictEqual(neg[2].producer, "sub");
-    strictEqual(neg[2].width, 8);
-    deepStrictEqual(neg[2].inputs, {
-      left: { kind: "const", type: "i32", value: 0 },
-      right: { kind: "var", id: 0 },
-      result: { kind: "var", id: 1 }
-    });
+
+  const negFlagsIndex = neg.findIndex((op) => op.op === "flags.write");
+  const negFlags = neg[negFlagsIndex];
+
+  strictEqual(negFlags?.op, "flags.write");
+  if (negFlags?.op === "flags.write") {
+    deepStrictEqual(
+      Object.keys(negFlags.cells).sort(),
+      ["AF", "CF", "OF", "PF", "SF", "ZF"]
+    );
   }
-  deepStrictEqual(neg[3], {
+  deepStrictEqual(neg.at(-2), {
     op: "set",
     target: { kind: "operand", index: 0 },
     value: { kind: "var", id: 1 },
     accessWidth: 8
   });
+  strictEqual(negFlagsIndex >= 0 && negFlagsIndex < neg.length - 2, true);
   strictEqual(neg.at(-1)?.op, "next");
 });
 

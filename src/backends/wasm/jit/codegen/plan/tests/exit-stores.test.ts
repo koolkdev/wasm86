@@ -11,7 +11,6 @@ import {
   buildBlock,
   buildJitCodegenEmissionPlan,
   planJitCodegen,
-  jitFlagConditionValue,
   jitFlagProducerValue,
   jitInputAluFlagsValue,
   jitInputReg32Value,
@@ -25,11 +24,9 @@ import {
   plannedFlagStores,
   c32,
   addValue,
-  subValue,
   branchPath,
   rootPath,
   createJitValueState,
-  type JitValue,
   type JitIrBlock,
   type JitCodegenPlan,
 } from "./plan-test-helpers.js";
@@ -802,26 +799,32 @@ test("planJitCodegen records direct cmov conditions from current flag value stat
   const codegenPlan = planJitCodegen(buildBlock([cmp, cmove, trap]));
   const expressions = expressionBlockForPlan(codegenPlan);
   const exit = onlyExit(codegenPlan.exits, ExitReason.HOST_TRAP);
-  const eax = jitInputReg32Value("eax");
-  const ebx = jitInputReg32Value("ebx");
-  const currentFlags = jitFlagProducerValue("sub", {
-    left: eax,
-    right: ebx,
-    result: subValue(eax, ebx)
-  }, { mask: IR_ALU_FLAG_MASK });
-  const selectedEdx = {
-    kind: "value.select",
-    type: "i32",
-    condition: jitFlagConditionValue(currentFlags, "E"),
-    whenTrue: jitInputReg32Value("ecx"),
-    whenFalse: jitInputReg32Value("edx")
-  } as const satisfies JitValue;
+  const stores = plannedRegisterStores(exit);
+  const selectedEdx = stores[0]?.value;
 
-  strictEqual(expressions.some((op) => op.op === "flags.set"), true);
+  strictEqual(expressions.some((op) => op.op === "flags.write"), true);
   strictEqual(expressions.some((op) =>
     op.op === "let32" && op.value.kind === "flags.condition"
   ), true);
-  deepStrictEqual(plannedRegisterStores(exit), [registerStore("edx", selectedEdx)]);
+  strictEqual(stores.length, 1);
+  deepStrictEqual(stores[0]?.target, { kind: "reg32", reg: "edx" });
+  strictEqual(selectedEdx?.kind, "value.select");
+
+  if (selectedEdx?.kind === "value.select") {
+    deepStrictEqual(selectedEdx.whenTrue, jitInputReg32Value("ecx"));
+    deepStrictEqual(selectedEdx.whenFalse, jitInputReg32Value("edx"));
+    strictEqual(selectedEdx.condition.kind, "flagCondition");
+
+    if (selectedEdx.condition.kind === "flagCondition") {
+      strictEqual(selectedEdx.condition.cc, "E");
+      strictEqual(selectedEdx.condition.flags.kind, "flagWrite");
+
+      if (selectedEdx.condition.flags.kind === "flagWrite") {
+        strictEqual(selectedEdx.condition.flags.mask, IR_ALU_FLAG_MASK);
+        strictEqual(selectedEdx.condition.flags.conditions?.E !== undefined, true);
+      }
+    }
+  }
 });
 
 test("planJitCodegen keeps load-result values out of observed boundaries before their memory-load values", () => {

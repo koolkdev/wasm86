@@ -1,8 +1,8 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { buildIr } from "#ir/build/builder.js";
-import { createIrFlagSetOp } from "#ir/model/flags.js";
+import type { IrBlock, IrOp, StorageRef } from "#ir/model/types.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { callSemantic, jccSemantic, jmpSemantic, retImmSemantic } from "#x86/semantics/control.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
@@ -20,6 +20,25 @@ const c32 = (value: number) => ({ kind: "const" as const, type: "i32" as const, 
 const regOperands = (count: number) => ({
   operandInfo: Array.from({ length: count }, () => ({ storage: "reg" as const }))
 });
+
+function flagsWriteOp(program: IrBlock): Extract<IrOp, { op: "flags.write" }> {
+  const writes = program.filter((irOp) => irOp.op === "flags.write");
+
+  strictEqual(writes.length, 1);
+  strictEqual(program.some((irOp) => irOp.op === "flags.set"), false);
+  return writes[0] as Extract<IrOp, { op: "flags.write" }>;
+}
+
+function assertFlagsWriteBeforeWriteback(program: IrBlock, target: StorageRef): void {
+  const flagsIndex = program.findIndex((irOp) => irOp.op === "flags.write");
+  const setIndex = program.findIndex((irOp) => irOp.op === "set");
+  const setOp = program[setIndex] as Extract<IrOp, { op: "set" }>;
+
+  flagsWriteOp(program);
+  ok(flagsIndex >= 0 && setIndex > flagsIndex);
+  deepStrictEqual(setOp.target, target);
+  deepStrictEqual(program[program.length - 1], { op: "next" });
+}
 
 test("mov semantic gets source, sets destination, and falls through", () => {
   deepStrictEqual(buildIr(movSemantic(), regOperands(2)), [
@@ -65,52 +84,43 @@ test("lea semantic computes address without getting the operand value", () => {
 });
 
 test("add semantic sets add flags before destination writeback", () => {
-  deepStrictEqual(buildIr(aluSemantic("add", 32), regOperands(2)), [
+  const program = buildIr(aluSemantic("add", 32), regOperands(2));
+
+  deepStrictEqual(program.slice(0, 2), [
     { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(1), source: op(1), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(0), b: v(1) },
-    createIrFlagSetOp("add", { left: v(0), right: v(1), result: v(2) }),
-    { op: "set", target: op(0), value: v(2), accessWidth: 32 },
-    { op: "next" }
+    { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
   ]);
+  assertFlagsWriteBeforeWriteback(program, op(0));
 });
 
 test("add semantic guards memory read-modify-write before flags", () => {
-  deepStrictEqual(
-    buildIr(aluSemantic("add", 32), {
-      operandInfo: [{ storage: "mem" }, { storage: "reg" }]
-    }),
-    [
-      { op: "address", dst: v(0), operand: op(0) },
-      { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-      { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
-      { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
-      { op: "get", dst: v(2), source: op(1), accessWidth: 32 },
-      { op: "value.binary", type: "i32", operator: "add", dst: v(3), a: v(1), b: v(2) },
-      createIrFlagSetOp("add", { left: v(1), right: v(2), result: v(3) }),
-      { op: "set", target: op(0), value: v(3), accessWidth: 32 },
-      { op: "next" }
-    ]
-  );
+  const program = buildIr(aluSemantic("add", 32), {
+    operandInfo: [{ storage: "mem" }, { storage: "reg" }]
+  });
+
+  deepStrictEqual(program.slice(0, 5), [
+    { op: "address", dst: v(0), operand: op(0) },
+    { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
+    { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
+    { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
+    { op: "get", dst: v(2), source: op(1), accessWidth: 32 }
+  ]);
+  assertFlagsWriteBeforeWriteback(program, op(0));
 });
 
 test("add semantic reuses one runtime rm address for read-write guards", () => {
-  deepStrictEqual(
-    buildIr(aluSemantic("add", 32), {
-      operandInfo: [{ storage: "regOrMem" }, { storage: "reg" }]
-    }),
-    [
-      { op: "address", dst: v(0), operand: op(0) },
-      { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-      { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
-      { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
-      { op: "get", dst: v(2), source: op(1), accessWidth: 32 },
-      { op: "value.binary", type: "i32", operator: "add", dst: v(3), a: v(1), b: v(2) },
-      createIrFlagSetOp("add", { left: v(1), right: v(2), result: v(3) }),
-      { op: "set", target: op(0), value: v(3), accessWidth: 32 },
-      { op: "next" }
-    ]
-  );
+  const program = buildIr(aluSemantic("add", 32), {
+    operandInfo: [{ storage: "regOrMem" }, { storage: "reg" }]
+  });
+
+  deepStrictEqual(program.slice(0, 5), [
+    { op: "address", dst: v(0), operand: op(0) },
+    { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
+    { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
+    { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
+    { op: "get", dst: v(2), source: op(1), accessWidth: 32 }
+  ]);
+  assertFlagsWriteBeforeWriteback(program, op(0));
 });
 
 test("mov semantic guards memory source and destination operands explicitly", () => {
@@ -131,55 +141,57 @@ test("mov semantic guards memory source and destination operands explicitly", ()
 });
 
 test("inc semantic sets partial inc flags before destination writeback", () => {
-  deepStrictEqual(buildIr(unaryAluSemantic("inc", 32), regOperands(1)), [
+  const program = buildIr(unaryAluSemantic("inc", 32), regOperands(1));
+
+  deepStrictEqual(program.slice(0, 2), [
     { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) },
-    createIrFlagSetOp("inc", { left: v(0), result: v(1) }),
-    { op: "set", target: op(0), value: v(1), accessWidth: 32 },
-    { op: "next" }
+    { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) }
   ]);
+  strictEqual(Object.hasOwn(flagsWriteOp(program).cells, "CF"), false);
+  assertFlagsWriteBeforeWriteback(program, op(0));
+  deepStrictEqual(program[program.length - 2], {
+    op: "set", target: op(0), value: v(1), accessWidth: 32
+  });
 });
 
 test("logical alu semantics set logic flags before destination writeback", () => {
-  deepStrictEqual(buildIr(aluSemantic("and", 32), regOperands(2)), [
-    { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(1), source: op(1), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "and", dst: v(2), a: v(0), b: v(1) },
-    createIrFlagSetOp("logic", { result: v(2) }),
-    { op: "set", target: op(0), value: v(2), accessWidth: 32 },
-    { op: "next" }
-  ]);
-  deepStrictEqual(buildIr(aluSemantic("or", 32), regOperands(2)), [
-    { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(1), source: op(1), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "or", dst: v(2), a: v(0), b: v(1) },
-    createIrFlagSetOp("logic", { result: v(2) }),
-    { op: "set", target: op(0), value: v(2), accessWidth: 32 },
-    { op: "next" }
-  ]);
+  for (const operator of ["and", "or"] as const) {
+    const program = buildIr(aluSemantic(operator, 32), regOperands(2));
+
+    deepStrictEqual(program.slice(0, 2), [
+      { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
+      { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
+    ]);
+    ok(program.some((irOp) => irOp.op === "value.binary" && irOp.operator === operator));
+    deepStrictEqual(flagsWriteOp(program).cells.AF, { kind: "undef" });
+    assertFlagsWriteBeforeWriteback(program, op(0));
+  }
 });
 
 test("cmp semantic subtracts for flags only", () => {
   const program = buildIr(cmpSemantic(), regOperands(2));
 
-  deepStrictEqual(program, [
+  deepStrictEqual(program.slice(0, 2), [
     { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(1), source: op(1), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "sub", dst: v(2), a: v(0), b: v(1) },
-    createIrFlagSetOp("sub", { left: v(0), right: v(1), result: v(2) }),
-    { op: "next" }
+    { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
   ]);
-  strictEqual(program.some((op) => op.op === "set"), false);
+  ok(program.some((irOp) => irOp.op === "value.binary" && irOp.operator === "sub"));
+  ok(flagsWriteOp(program).conditions !== undefined);
+  strictEqual(program.some((irOp) => irOp.op === "set"), false);
+  deepStrictEqual(program[program.length - 1], { op: "next" });
 });
 
 test("test semantic uses value.binary and logic flags", () => {
-  deepStrictEqual(buildIr(testSemantic(), regOperands(2)), [
+  const program = buildIr(testSemantic(), regOperands(2));
+
+  deepStrictEqual(program.slice(0, 2), [
     { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(1), source: op(1), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "and", dst: v(2), a: v(0), b: v(1) },
-    createIrFlagSetOp("logic", { result: v(2) }),
-    { op: "next" }
+    { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
   ]);
+  ok(program.some((irOp) => irOp.op === "value.binary" && irOp.operator === "and"));
+  deepStrictEqual(flagsWriteOp(program).cells.AF, { kind: "undef" });
+  strictEqual(program.some((irOp) => irOp.op === "set"), false);
+  deepStrictEqual(program[program.length - 1], { op: "next" });
 });
 
 test("pop semantic expands to generic stack get/set operations", () => {

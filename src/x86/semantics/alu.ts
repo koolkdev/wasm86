@@ -1,5 +1,14 @@
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { IrBuilder, SemanticTemplate, ValueRef } from "#ir/model/types.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
+import {
+  buildAddResultAndFlags,
+  buildDecFlags,
+  buildIncFlags,
+  buildLogicResultAndFlags,
+  buildNegFlags,
+  buildSubResultAndFlags,
+  type ResultAndFlags
+} from "./flag-helpers.js";
 import { guardStorageRead, guardStorageReadWrite } from "./memory.js";
 
 export type AluOp = "add" | "sub" | "xor" | "and" | "or";
@@ -15,31 +24,9 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
 
     const left = s.get(dst, width);
     const right = s.get(src, width);
-    let result;
+    const { result, flags } = aluResultAndFlags(s, op, width, left, right);
 
-    switch (op) {
-      case "add":
-        result = s.i32Add(left, right);
-        s.setFlags("add", { left, right, result }, width);
-        break;
-      case "sub":
-        result = s.i32Sub(left, right);
-        s.setFlags("sub", { left, right, result }, width);
-        break;
-      case "xor":
-        result = s.i32Xor(left, right);
-        s.setFlags("logic", { result }, width);
-        break;
-      case "and":
-        result = s.i32And(left, right);
-        s.setFlags("logic", { result }, width);
-        break;
-      case "or":
-        result = s.i32Or(left, right);
-        s.setFlags("logic", { result }, width);
-        break;
-    }
-
+    s.writeFlags(flags);
     s.set(dst, result, width);
   };
 }
@@ -56,24 +43,40 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
     switch (op) {
       case "inc":
         result = s.i32Add(value, s.const32(1));
-        s.setFlags("inc", { left: value, result }, width);
+        s.writeFlags(buildIncFlags(s, { width, input: value, result }));
         break;
       case "dec":
         result = s.i32Sub(value, s.const32(1));
-        s.setFlags("dec", { left: value, result }, width);
+        s.writeFlags(buildDecFlags(s, { width, input: value, result }));
         break;
       case "not":
         result = s.i32Xor(value, s.const32(widthMask(width)));
         break;
-      case "neg": {
-        const zero = s.const32(0);
-
-        result = s.i32Sub(zero, value);
-        s.setFlags("sub", { left: zero, right: value, result }, width);
+      case "neg":
+        result = s.i32Sub(s.const32(0), value);
+        s.writeFlags(buildNegFlags(s, { width, input: value, result }));
         break;
-      }
     }
 
     s.set(dst, result, width);
   };
+}
+
+function aluResultAndFlags(
+  s: IrBuilder,
+  op: AluOp,
+  width: OperandWidth,
+  left: ValueRef,
+  right: ValueRef
+): ResultAndFlags {
+  switch (op) {
+    case "add":
+      return buildAddResultAndFlags(s, { width, left, right });
+    case "sub":
+      return buildSubResultAndFlags(s, { width, left, right });
+    case "xor":
+    case "and":
+    case "or":
+      return buildLogicResultAndFlags(s, { width, op, left, right });
+  }
 }
