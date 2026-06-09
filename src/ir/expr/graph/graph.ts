@@ -42,7 +42,7 @@ import {
   type Map2,
   type Map3,
   type Map4
-} from "./nested-map.js";
+} from "#common/nested-map.js";
 
 type Frame =
   | Readonly<{ kind: "enter"; expr: ExprRef }>

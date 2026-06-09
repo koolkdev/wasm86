@@ -1,10 +1,13 @@
 import { assert } from "#common/assert.js";
 import { const32, irVar, mem, nextEip, operand, reg, toStorageRef, toValueRef } from "#ir/model/refs.js";
 import type {
+  IrBinaryOperator,
   IrBuilder,
+  IrCompareOperator,
   IrConstValueRef,
   IrFlagWriteCell,
   IrGetOptions,
+  IrUnaryOperator,
   MemRef,
   NextEipRef,
   OperandRef,
@@ -47,7 +50,13 @@ const entryRegionId: RegionId = 0;
 
 class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   readonly #values = createValueTable();
+  readonly #actions: Action[] = [];
   readonly #pending = new Map<StateSlot, ValueId>();
+  // readState leaf per channel; a channel is read at most once per region.
+  // Must be invalidated together with #pending once anything invalidates
+  // pendings mid-region (dynamic register writes, barriers) — a stale leaf
+  // here would silently serve a channel whose memory has changed.
+  readonly #reads = new Map<StateSlot, ValueId>();
   #bindings: readonly OperandBinding[] = [];
   #instruction: InstructionLocation | undefined;
   #terminated = false;
@@ -83,7 +92,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     assert(this.#pending.has(eipChannel), "action block did not advance eip; no instructions were added");
     this.#finished = true;
 
-    const actions: Action[] = [];
+    const actions = this.#actions;
 
     for (const [slot, value] of this.#pending) {
       actions.push({ kind: "writeState", slot, value });
@@ -145,10 +154,6 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
     const binding = this.#binding(storage.index);
 
-    if (binding.kind !== "imm") {
-      throw notSupportedError(`get from ${binding.kind} operand binding`);
-    }
-
     if (accessWidth !== 32) {
       throw notSupportedError(`${accessWidth}-bit get`);
     }
@@ -157,7 +162,19 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       throw notSupportedError("signed get");
     }
 
-    return irVar(this.#values.internConst(binding.value));
+    switch (binding.kind) {
+      case "imm":
+        return irVar(this.#values.internConst(binding.value));
+      case "reg":
+        if (binding.channel.byteLength !== 4) {
+          throw notSupportedError(`${binding.channel.byteLength * 8}-bit register get`);
+        }
+
+        return irVar(this.#readChannel(binding.channel));
+      case "mem":
+      case "external":
+        throw notSupportedError(`get from ${binding.kind} operand binding`);
+    }
   }
 
   set(target: StorageInput, value: ValueInput, accessWidth: OperandWidth = 32): void {
@@ -195,56 +212,61 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     throw notSupportedError("address");
   }
 
-  i32Add(): VarRef {
-    throw notSupportedError("i32Add");
+  i32Add(a: ValueInput, b: ValueInput): VarRef {
+    return this.#binary("i32Add", "add", a, b);
   }
 
-  i32Sub(): VarRef {
-    throw notSupportedError("i32Sub");
+  i32Sub(a: ValueInput, b: ValueInput): VarRef {
+    return this.#binary("i32Sub", "sub", a, b);
   }
 
-  i32Xor(): VarRef {
-    throw notSupportedError("i32Xor");
+  i32Xor(a: ValueInput, b: ValueInput): VarRef {
+    return this.#binary("i32Xor", "xor", a, b);
   }
 
-  i32Or(): VarRef {
-    throw notSupportedError("i32Or");
+  i32Or(a: ValueInput, b: ValueInput): VarRef {
+    return this.#binary("i32Or", "or", a, b);
   }
 
-  i32And(): VarRef {
-    throw notSupportedError("i32And");
+  i32And(a: ValueInput, b: ValueInput): VarRef {
+    return this.#binary("i32And", "and", a, b);
   }
 
-  i32Shl(): VarRef {
-    throw notSupportedError("i32Shl");
+  i32Shl(a: ValueInput, b: ValueInput): VarRef {
+    return this.#binary("i32Shl", "shl", a, b);
   }
 
-  i32ShrU(): VarRef {
-    throw notSupportedError("i32ShrU");
+  i32ShrU(a: ValueInput, b: ValueInput): VarRef {
+    return this.#binary("i32ShrU", "shr_u", a, b);
   }
 
-  i32Extend8S(): VarRef {
-    throw notSupportedError("i32Extend8S");
+  i32Extend8S(value: ValueInput): VarRef {
+    return this.#unary("i32Extend8S", "extend8_s", value);
   }
 
-  i32Extend16S(): VarRef {
-    throw notSupportedError("i32Extend16S");
+  i32Extend16S(value: ValueInput): VarRef {
+    return this.#unary("i32Extend16S", "extend16_s", value);
   }
 
-  i32Popcnt(): VarRef {
-    throw notSupportedError("i32Popcnt");
+  i32Popcnt(value: ValueInput): VarRef {
+    return this.#unary("i32Popcnt", "popcnt", value);
   }
 
-  i32Select(): VarRef {
-    throw notSupportedError("i32Select");
+  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef {
+    this.#beforeOp("i32Select");
+    return irVar(
+      this.#values.internSelect(this.#valueId(condition), this.#valueId(whenTrue), this.#valueId(whenFalse))
+    );
   }
 
-  project(): VarRef {
-    throw notSupportedError("project");
+  project(width: OperandWidth, value: ValueInput): VarRef {
+    this.#beforeOp("project");
+    return irVar(this.#values.internProject(width, this.#valueId(value)));
   }
 
-  compare(): VarRef {
-    throw notSupportedError("compare");
+  compare(width: OperandWidth, operator: IrCompareOperator, a: ValueInput, b: ValueInput): VarRef {
+    this.#beforeOp("compare");
+    return irVar(this.#values.internCompare(width, operator, this.#valueId(a), this.#valueId(b)));
   }
 
   setFlags(): void {
@@ -277,6 +299,36 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   hostTrap(): void {
     throw notSupportedError("hostTrap");
+  }
+
+  #binary(op: string, operator: IrBinaryOperator, a: ValueInput, b: ValueInput): VarRef {
+    this.#beforeOp(op);
+    return irVar(this.#values.internBinary(operator, this.#valueId(a), this.#valueId(b)));
+  }
+
+  #unary(op: string, operator: IrUnaryOperator, value: ValueInput): VarRef {
+    this.#beforeOp(op);
+    return irVar(this.#values.internUnary(operator, this.#valueId(value)));
+  }
+
+  #readChannel(channel: StateSlot): ValueId {
+    const pending = this.#pending.get(channel);
+
+    if (pending !== undefined) {
+      return pending;
+    }
+
+    const existing = this.#reads.get(channel);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const output = this.#values.addActionOutput();
+
+    this.#actions.push({ kind: "readState", output, slot: channel });
+    this.#reads.set(channel, output);
+    return output;
   }
 
   #valueId(input: ValueInput): ValueId {
