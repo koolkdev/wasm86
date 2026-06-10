@@ -43,9 +43,11 @@ export function pushSemantic(): SemanticTemplate {
 export function popSemantic(): SemanticTemplate {
   return (s, context) => {
     const dst = s.operand(0);
-    const target = popTargetStorage(s, context, dst);
+    // SDM order: esp is incremented before the destination EA is computed,
+    // so an esp-based destination sees the new esp.
+    const value = pop32(s, context);
 
-    s.set(target, pop32(s, context));
+    s.set(popTargetStorage(s, context, dst), value);
   };
 }
 

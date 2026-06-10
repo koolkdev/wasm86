@@ -13,7 +13,7 @@ const regOperands = (count: number) => ({
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 230);
+  strictEqual(X86_32_CORE.instructions.length, 231);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -72,6 +72,7 @@ test("x86-32 core registers the initial instruction surface", () => {
     "test.rm32_imm32",
     "push.r32",
     "pop.r32",
+    "pop.rm32",
     "leave.near",
     "jmp.rel8",
     "call.rm32",

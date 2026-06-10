@@ -59,6 +59,56 @@ test("pop oob fault is atomic", () => {
   deepStrictEqual(readGuestBytes(memory, 0, memory.byteLength), beforeBytes);
 });
 
+test("pop writes a memory destination", () => {
+  const memory = new ArrayBufferGuestMemory(0x40);
+  const state = createCpuState({ ebx: 0x20, esp: 0x38, eip: startAddress });
+
+  writeGuestU32(memory, 0x38, 0x1122_3344);
+
+  const result = run(state, [0x8f, 0x03], memory);
+
+  strictEqual(result.stopReason, StopReason.NONE);
+  strictEqual(state.esp, 0x3c);
+  deepStrictEqual(readGuestBytes(memory, 0x20, 4), [0x44, 0x33, 0x22, 0x11]);
+  strictEqual(state.instructionCount, 1);
+});
+
+test("pop [esp] stores at the incremented esp", () => {
+  const memory = new ArrayBufferGuestMemory(0x40);
+  const state = createCpuState({ esp: 0x20, eip: startAddress });
+
+  writeGuestU32(memory, 0x20, 0x1122_3344);
+
+  const result = run(state, [0x8f, 0x04, 0x24], memory);
+
+  strictEqual(result.stopReason, StopReason.NONE);
+  strictEqual(state.esp, 0x24);
+  deepStrictEqual(readGuestBytes(memory, 0x24, 4), [0x44, 0x33, 0x22, 0x11]);
+});
+
+test("pop memory destination fault is atomic", () => {
+  const memory = new ArrayBufferGuestMemory(0x40);
+  const state = createCpuState({ ebx: 0x3e, esp: 0x20, eip: startAddress, instructionCount: 7 });
+
+  fillGuestMemory(memory, 0xaa);
+
+  const beforeState = cloneCpuState(state);
+  const beforeBytes = readGuestBytes(memory, 0, memory.byteLength);
+  // The destination write guard faults after the template already advanced
+  // esp; the entry snapshot must roll it back.
+  const result = run(state, [0x8f, 0x03], memory);
+
+  strictEqual(result.stopReason, StopReason.MEMORY_FAULT);
+  strictEqual(result.faultAddress, 0x3e);
+  strictEqual(result.faultSize, 4);
+  strictEqual(result.faultOperation, "write");
+  strictEqual(state.ebx, beforeState.ebx);
+  strictEqual(state.esp, beforeState.esp);
+  strictEqual(state.eip, beforeState.eip);
+  strictEqual(state.instructionCount, beforeState.instructionCount);
+  deepStrictEqual(readGuestBytes(memory, 0, memory.byteLength), beforeBytes);
+});
+
 test("leave restores caller frame", () => {
   const memory = new ArrayBufferGuestMemory(0x40);
   const state = createCpuState({ ebp: 0x20, esp: 0x38, eip: startAddress });

@@ -2,6 +2,8 @@ import type { RunResult, RunResultDetails } from "#x86/execution/run-result.js";
 import { runResultFromState, StopReason } from "#x86/execution/run-result.js";
 import type { GuestMemory, MemoryFault } from "#x86/memory/guest-memory.js";
 import {
+  cloneCpuState,
+  copyCpuState,
   getFlag,
   getRegisterAlias,
   getReg32,
@@ -59,11 +61,20 @@ export function executeDirectInstruction(
   const program = buildIr(instruction.spec.semantics, {
     operandInfo: instruction.operands.map(semanticOperandInfoForBinding)
   });
+  // Templates may write state before a guard faults (pop r/m32 commits esp
+  // before its destination write guard); the entry snapshot makes the
+  // instruction atomic.
+  const entryState = cloneCpuState(state);
 
   for (const op of program) {
     const result = executeOp(context, op);
 
     if (result !== undefined) {
+      if (result.stopReason === StopReason.MEMORY_FAULT) {
+        copyCpuState(entryState, state);
+        state.stopReason = result.stopReason;
+      }
+
       return result;
     }
   }

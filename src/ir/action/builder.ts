@@ -29,7 +29,7 @@ import type {
 import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
 import type { OperandBinding } from "./operands.js";
 import { createPendingChannels } from "./pending.js";
-import { eipChannel, flagChannel, gprChannel } from "./slots.js";
+import { eipChannel, flagChannel, gprChannel, type GprChannel } from "./slots.js";
 import type { Action, ActionBlock, ActionRegion, RegionId } from "./types.js";
 import {
   createValueTable,
@@ -171,7 +171,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
     switch (storage.kind) {
       case "reg":
-        throw notSupportedError("get from reg storage");
+        return irVar(this.#readChannel(gprChannel(storage.reg), accessWidth, options));
       case "mem":
         return irVar(this.#readMemory(this.#valueId(storage.address), accessWidth, options));
       case "operand": {
@@ -188,11 +188,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
             );
           }
           case "reg":
-            assert(
-              binding.channel.byteLength * 8 === accessWidth,
-              `${accessWidth}-bit get from a ${binding.channel.byteLength * 8}-bit register channel`
-            );
-            return irVar(this.#pending.read(binding.channel, options));
+            return irVar(this.#readChannel(binding.channel, accessWidth, options));
           case "mem":
             return irVar(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
           case "external":
@@ -208,7 +204,8 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
     switch (storage.kind) {
       case "reg":
-        throw notSupportedError("set to reg storage");
+        this.#writeChannel(gprChannel(storage.reg), value, accessWidth);
+        return;
       case "mem":
         this.#writeMemory(this.#valueId(storage.address), value, accessWidth);
         return;
@@ -217,11 +214,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
         switch (binding.kind) {
           case "reg":
-            assert(
-              binding.channel.byteLength * 8 === accessWidth,
-              `${accessWidth}-bit set to a ${binding.channel.byteLength * 8}-bit register channel`
-            );
-            this.#pending.write(binding.channel, this.#valueId(value));
+            this.#writeChannel(binding.channel, value, accessWidth);
             return;
           case "mem":
             this.#writeMemory(this.#operandAddress(storage.index), value, accessWidth);
@@ -435,6 +428,22 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     this.#nextRegionId += 1;
     this.#edgeRegions.push({ id, kind: "edge", actions });
     return id;
+  }
+
+  #readChannel(channel: GprChannel, accessWidth: OperandWidth, options: IrGetOptions): ValueId {
+    assert(
+      channel.byteLength * 8 === accessWidth,
+      `${accessWidth}-bit get from a ${channel.byteLength * 8}-bit register channel`
+    );
+    return this.#pending.read(channel, options);
+  }
+
+  #writeChannel(channel: GprChannel, value: ValueInput, accessWidth: OperandWidth): void {
+    assert(
+      channel.byteLength * 8 === accessWidth,
+      `${accessWidth}-bit set to a ${channel.byteLength * 8}-bit register channel`
+    );
+    this.#pending.write(channel, this.#valueId(value));
   }
 
   #readMemory(address: ValueId, width: OperandWidth, options: IrGetOptions): ValueId {

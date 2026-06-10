@@ -22,6 +22,7 @@ import { jmpSemantic } from "#x86/semantics/control.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
+import { popSemantic } from "#x86/semantics/stack.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 
 function stateWrites(block: ActionBlock): WriteStateAction[] {
@@ -1117,6 +1118,120 @@ test("a guard after writing a previously-clean register omits the channel from i
     { kind: "exit", reason: "memoryWriteFault", payload: v.internConst(0x2000) }
   ]);
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, v.internConst(0x222));
+});
+
+test("pop [ebx] guards the stack read first and omits boundary-absent esp from its write edge", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(popSemantic(), [memBinding({ base: "ebx", scale: 1, disp: 0 })], {
+    eip: 0x1000,
+    nextEip: 0x1002
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const nextEsp = v.internBinary("add", 0, v.internConst(4));
+
+  strictEqual(block.regions.length, 3);
+  deepStrictEqual(block.regions[0]!.actions, [
+    { kind: "readState", output: 0, slot: gprChannel("esp") },
+    { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "readMemory", output: 2, address: 0, width: 32 },
+    { kind: "readState", output: 5, slot: gprChannel("ebx") },
+    { kind: "guardMemory", address: 5, byteLength: 4, access: "write", faultEdge: 2 },
+    { kind: "writeMemory", address: 5, value: 2, width: 32 },
+    { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
+    { kind: "exit", reason: "next" }
+  ]);
+
+  // esp was boundary-absent, so neither edge writes it — not even the write
+  // guard's, where esp is already pending with the incremented value.
+  deepStrictEqual(block.regions[1]!.actions, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
+    { kind: "exit", reason: "memoryReadFault", payload: 0 }
+  ]);
+  deepStrictEqual(block.regions[2]!.actions, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
+    { kind: "exit", reason: "memoryWriteFault", payload: 5 }
+  ]);
+});
+
+test("pop [ebx] write edge restores a previous instruction's pending esp", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("esp"), immBinding(0x30)], {
+    eip: 0x1000,
+    nextEip: 0x1005
+  });
+  builder.addInstruction(popSemantic(), [memBinding({ base: "ebx", scale: 1, disp: 0 })], {
+    eip: 0x1005,
+    nextEip: 0x1007
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const ebxRead = block.regions[0]!.actions.find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
+  )!;
+
+  // The edge restores the boundary esp — the mov's 0x30, not the pop's
+  // incremented value.
+  deepStrictEqual(block.regions[2]!.actions, [
+    { kind: "writeState", slot: gprChannel("esp"), value: v.internConst(0x30) },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) },
+    { kind: "exit", reason: "memoryWriteFault", payload: ebxRead.output }
+  ]);
+  strictEqual(
+    stateWrites(block).find((write) => write.slot === gprChannel("esp"))?.value,
+    v.internBinary("add", v.internConst(0x30), v.internConst(4))
+  );
+});
+
+test("pop [esp] builds the destination address from the incremented esp", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(popSemantic(), [memBinding({ base: "esp", scale: 1, disp: 0 })], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const nextEsp = v.internBinary("add", 0, v.internConst(4));
+
+  deepStrictEqual(block.regions[0]!.actions, [
+    { kind: "readState", output: 0, slot: gprChannel("esp") },
+    { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "readMemory", output: 2, address: 0, width: 32 },
+    { kind: "guardMemory", address: nextEsp, byteLength: 4, access: "write", faultEdge: 2 },
+    { kind: "writeMemory", address: nextEsp, value: 2, width: 32 },
+    { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1003) },
+    { kind: "exit", reason: "next" }
+  ]);
+});
+
+test("pop [esp+k] adds the displacement to the incremented esp", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(popSemantic(), [memBinding({ base: "esp", scale: 1, disp: 8 })], {
+    eip: 0x1000,
+    nextEip: 0x1004
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const address = v.internBinary("add", v.internBinary("add", 0, v.internConst(4)), v.internConst(8));
+  const writeGuard = block.regions[0]!.actions.find(
+    (action): action is GuardMemoryAction => action.kind === "guardMemory" && action.access === "write"
+  )!;
+  const store = block.regions[0]!.actions.find(
+    (action): action is WriteMemoryAction => action.kind === "writeMemory"
+  )!;
+
+  strictEqual(writeGuard.address, address);
+  strictEqual(store.address, address);
 });
 
 test("a guard after a memory write in the same instruction fails loudly", () => {
