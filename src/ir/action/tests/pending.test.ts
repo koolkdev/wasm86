@@ -1,4 +1,4 @@
-import { deepStrictEqual, notStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { createPendingChannels, type PendingChannels } from "#ir/action/pending.js";
@@ -211,4 +211,95 @@ test("flushAll materializes every pending in insertion order", () => {
   ]);
   strictEqual(pending.has(flagChannel("CF")), false);
   strictEqual(pending.has(gprChannel("esi")), false);
+});
+
+test("snapshot lists instruction-start values without consuming the map", () => {
+  const { values, actions, pending } = createHarness();
+  const byte = values.internConst(0x12);
+  const eip = values.internConst(0x1000);
+
+  pending.write(gprChannel("al"), byte);
+  pending.write(eipChannel, eip);
+  pending.beginInstruction();
+
+  deepStrictEqual(pending.snapshot(), [
+    [gprChannel("al"), byte],
+    [eipChannel, eip]
+  ]);
+  deepStrictEqual(actions, []);
+  strictEqual(pending.has(gprChannel("al")), true);
+  strictEqual(pending.has(eipChannel), true);
+});
+
+test("snapshot keeps a rewritten channel's instruction-start value", () => {
+  const { values, pending } = createHarness();
+  const before = values.internConst(1);
+  const after = values.internConst(2);
+
+  pending.write(gprChannel("eax"), before);
+  pending.beginInstruction();
+  pending.write(gprChannel("eax"), after);
+
+  deepStrictEqual(pending.snapshot(), [[gprChannel("eax"), before]]);
+  strictEqual(pending.read(gprChannel("eax")), after);
+});
+
+test("snapshot omits a channel first written this instruction", () => {
+  const { values, pending } = createHarness();
+
+  pending.beginInstruction();
+  pending.write(gprChannel("eax"), values.internConst(1));
+
+  deepStrictEqual(pending.snapshot(), []);
+});
+
+test("a covering write keeps the dropped channel's start value in the snapshot", () => {
+  const { values, pending } = createHarness();
+  const byte = values.internConst(0x12);
+
+  pending.write(gprChannel("al"), byte);
+  pending.beginInstruction();
+  pending.write(gprChannel("eax"), values.internConst(0x12345678));
+
+  // eax had no start pending (omitted); the dropped al still must reach
+  // state memory on the fault path.
+  deepStrictEqual(pending.snapshot(), [[gprChannel("al"), byte]]);
+});
+
+test("flushing a channel first written this instruction makes the snapshot unrestorable", () => {
+  const { values, pending } = createHarness();
+
+  pending.beginInstruction();
+  pending.write(gprChannel("al"), values.internConst(1));
+  pending.read(gprChannel("ax"));
+
+  throws(() => pending.snapshot(), /unrestorable/);
+
+  // The next instruction boundary takes a fresh copy.
+  pending.beginInstruction();
+  deepStrictEqual(pending.snapshot(), []);
+});
+
+test("flushing a channel rewritten this instruction keeps its start value in the snapshot", () => {
+  const { values, pending } = createHarness();
+  const before = values.internConst(0x111);
+
+  pending.write(gprChannel("eax"), before);
+  pending.beginInstruction();
+  pending.write(gprChannel("eax"), values.internConst(0x222));
+  pending.read(gprChannel("al"));
+
+  deepStrictEqual(pending.snapshot(), [[gprChannel("eax"), before]]);
+});
+
+test("flushing a channel untouched this instruction keeps it in the snapshot", () => {
+  const { values, pending } = createHarness();
+  const byte = values.internConst(0x12);
+
+  pending.write(gprChannel("al"), byte);
+  pending.beginInstruction();
+  pending.read(gprChannel("ax"));
+
+  // The flush already stored this value; rewriting it is harmless.
+  deepStrictEqual(pending.snapshot(), [[gprChannel("al"), byte]]);
 });

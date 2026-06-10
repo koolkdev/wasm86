@@ -2,9 +2,16 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { createActionBuilder } from "#ir/action/builder.js";
-import { immBinding, regBinding } from "#ir/action/operands.js";
+import { immBinding, memBinding, regBinding } from "#ir/action/operands.js";
 import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
-import type { ActionBlock, ReadStateAction, WriteStateAction } from "#ir/action/types.js";
+import type {
+  ActionBlock,
+  GuardMemoryAction,
+  ReadMemoryAction,
+  ReadStateAction,
+  WriteMemoryAction,
+  WriteStateAction
+} from "#ir/action/types.js";
 import type { ValueId, ValueNode } from "#ir/action/values.js";
 import type { FlagName } from "#ir/model/flags.js";
 import type { SemanticTemplate } from "#ir/model/types.js";
@@ -12,6 +19,7 @@ import { x86ArithmeticFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { jmpSemantic } from "#x86/semantics/control.js";
+import { leaSemantic } from "#x86/semantics/lea.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
@@ -678,7 +686,7 @@ test("unsupported operand bindings fail loudly", () => {
     () =>
       createActionBuilder().addInstruction(
         movSemantic(32),
-        [regBinding("eax"), { kind: "mem", address: { scale: 1, disp: 0x2000 } }],
+        [regBinding("eax"), { kind: "external", id: 0 }],
         { eip: 0x1000, nextEip: 0x1006 }
       ),
     /not supported by action builder yet/
@@ -753,4 +761,391 @@ test("a finished builder rejects further use", () => {
     /finished action builder/
   );
   throws(() => builder.finish(), /already finished/);
+});
+
+test("mov [ebx+8], eax guards before the store and flushes eip into the fault edge", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(
+    movSemantic(32),
+    [memBinding({ base: "ebx", scale: 1, disp: 8 }), regBinding("eax")],
+    { eip: 0x1000, nextEip: 0x1003 }
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  const address = v.internBinary("add", 1, v.internConst(8));
+
+  strictEqual(block.regions.length, 2);
+  deepStrictEqual(block.regions[0]!.actions, [
+    { kind: "readState", output: 0, slot: gprChannel("eax") },
+    { kind: "readState", output: 1, slot: gprChannel("ebx") },
+    { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 },
+    { kind: "writeMemory", address, value: 0, width: 32 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1003) },
+    { kind: "exit", reason: "next" }
+  ]);
+
+  const edge = block.regions[1]!;
+
+  strictEqual(edge.id, 1);
+  strictEqual(edge.kind, "edge");
+  deepStrictEqual(edge.actions, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
+    { kind: "exit", reason: "memoryWriteFault", payload: address }
+  ]);
+});
+
+test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(
+    aluSemantic("add", 32),
+    [memBinding({ base: "ebx", scale: 1, disp: 0 }), regBinding("ecx")],
+    { eip: 0x1000, nextEip: 0x1002 }
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  const actions = block.regions[0]!.actions;
+  const guards = actions.filter((action): action is GuardMemoryAction => action.kind === "guardMemory");
+
+  // guardStorageReadWrite emits a read guard then a write guard, both on the
+  // base-register read (scale 1 and disp 0 add no terms).
+  deepStrictEqual(guards, [
+    { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "guardMemory", address: 0, byteLength: 4, access: "write", faultEdge: 2 }
+  ]);
+
+  const readIndex = actions.findIndex((action) => action.kind === "readMemory");
+  const writeIndex = actions.findIndex((action) => action.kind === "writeMemory");
+  const lastGuardIndex = actions.lastIndexOf(guards[1]!);
+
+  ok(lastGuardIndex < readIndex && readIndex < writeIndex, "guards, then the load, then the store");
+
+  // The store carries the sum of the loaded value and the ecx read.
+  const loaded = (actions[readIndex] as ReadMemoryAction).output;
+  const ecx = actions.filter(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ecx")
+  )[0]!.output;
+
+  deepStrictEqual(actions[writeIndex], {
+    kind: "writeMemory",
+    address: 0,
+    value: v.internBinary("add", loaded, ecx),
+    width: 32
+  });
+
+  // Each guard owns an edge with its own fault reason; nothing was pending
+  // at guard time, so both flush only the instruction's eip.
+  deepStrictEqual(block.regions[1]!.actions, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
+    { kind: "exit", reason: "memoryReadFault", payload: 0 }
+  ]);
+  deepStrictEqual(block.regions[2]!.actions, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
+    { kind: "exit", reason: "memoryWriteFault", payload: 0 }
+  ]);
+});
+
+test("a later guard's edge flushes earlier pendings with the faulting eip", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+  builder.addInstruction(
+    movSemantic(32),
+    [memBinding({ base: "ebx", scale: 1, disp: 8 }), regBinding("eax")],
+    { eip: 0x1003, nextEip: 0x1006 }
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  const sum = v.internBinary("add", 0, v.internConst(5));
+  const ebxRead = block.regions[0]!.actions.find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
+  )!;
+  const address = v.internBinary("add", ebxRead.output, v.internConst(8));
+
+  strictEqual(block.regions.length, 2);
+
+  // The edge snapshots everything dirty at the guard — the add's six flags
+  // and eax sum — plus the faulting instruction's eip.
+  const edge = block.regions[1]!;
+  const edgeWrites = edge.actions.filter(
+    (action): action is WriteStateAction => action.kind === "writeState"
+  );
+
+  strictEqual(edgeWrites.length, 8);
+  deepStrictEqual(
+    edgeWrites.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
+    [...x86ArithmeticFlags].sort()
+  );
+  strictEqual(edgeWrites.find((write) => write.slot === gprChannel("eax"))?.value, sum);
+  strictEqual(edgeWrites.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1003));
+  deepStrictEqual(edge.actions[edge.actions.length - 1], {
+    kind: "exit",
+    reason: "memoryWriteFault",
+    payload: address
+  });
+
+  // The edge flush leaves the main-path map untouched: the entry still
+  // stores the sum and the store's value is the pending sum, not a reload.
+  const mainWrites = stateWrites(block);
+
+  strictEqual(mainWrites.find((write) => write.slot === gprChannel("eax"))?.value, sum);
+  strictEqual(mainWrites.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1006));
+
+  const store = block.regions[0]!.actions.find(
+    (action): action is WriteMemoryAction => action.kind === "writeMemory"
+  )!;
+
+  strictEqual(store.value, sum);
+});
+
+test("lea builds general modrm addresses from channel reads", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(
+    leaSemantic(32),
+    [regBinding("eax"), memBinding({ base: "ebx", index: "esi", scale: 4, disp: 0x10 })],
+    { eip: 0x1000, nextEip: 0x1007 }
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  // base + (index << 2) + disp, with no guard and no memory access.
+  const scaled = v.internBinary("shl", 1, v.internConst(2));
+  const address = v.internBinary("add", v.internBinary("add", 0, scaled), v.internConst(0x10));
+
+  strictEqual(block.regions.length, 1);
+  deepStrictEqual(block.regions[0]!.actions, [
+    { kind: "readState", output: 0, slot: gprChannel("ebx") },
+    { kind: "readState", output: 1, slot: gprChannel("esi") },
+    { kind: "writeState", slot: gprChannel("eax"), value: address },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
+    { kind: "exit", reason: "next" }
+  ]);
+});
+
+test("an absolute address is just its displacement constant", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(
+    movSemantic(32),
+    [regBinding("eax"), memBinding({ scale: 1, disp: 0x2000 })],
+    { eip: 0x1000, nextEip: 0x1005 }
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  const address = v.internConst(0x2000);
+
+  deepStrictEqual(block.regions[0]!.actions, [
+    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "readMemory", output: 2, address, width: 32 },
+    { kind: "writeState", slot: gprChannel("eax"), value: 2 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) },
+    { kind: "exit", reason: "next" }
+  ]);
+  deepStrictEqual(block.regions[1]!.actions, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
+    { kind: "exit", reason: "memoryReadFault", payload: address }
+  ]);
+});
+
+test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(
+    movzxSemantic(8, 32),
+    [regBinding("eax"), memBinding({ base: "ebx", scale: 1, disp: 0 })],
+    { eip: 0x1000, nextEip: 0x1003 }
+  );
+
+  const block = builder.finish();
+  const read = block.regions[0]!.actions.find(
+    (action): action is ReadMemoryAction => action.kind === "readMemory"
+  )!;
+
+  deepStrictEqual(read, { kind: "readMemory", output: read.output, address: 0, width: 8 });
+  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, read.output);
+  ok(!nodeKinds(block).includes("project"), "no projections expected");
+});
+
+test("movsx r32, byte [mem] marks the load signed with no extra extend", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(
+    movsxSemantic(8, 32),
+    [regBinding("eax"), memBinding({ base: "ebx", scale: 1, disp: 0 })],
+    { eip: 0x1000, nextEip: 0x1003 }
+  );
+
+  const block = builder.finish();
+  const read = block.regions[0]!.actions.find(
+    (action): action is ReadMemoryAction => action.kind === "readMemory"
+  )!;
+
+  deepStrictEqual(read, {
+    kind: "readMemory",
+    output: read.output,
+    address: 0,
+    width: 8,
+    signed: true
+  });
+  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, read.output);
+  ok(!nodeKinds(block).includes("unary"), "no extends expected");
+});
+
+test("xchg [ebx], ebx stores through the original address, not the new ebx", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(
+    xchgSemantic(32),
+    [memBinding({ base: "ebx", scale: 1, disp: 0 }), regBinding("ebx")],
+    { eip: 0x1000, nextEip: 0x1002 }
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+
+  // The effective address is computed once, before the instruction writes
+  // ebx: the store address and value are the original ebx read (0), and the
+  // register flush carries the loaded value (2).
+  deepStrictEqual(block.regions[0]!.actions, [
+    { kind: "readState", output: 0, slot: gprChannel("ebx") },
+    { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "guardMemory", address: 0, byteLength: 4, access: "write", faultEdge: 2 },
+    { kind: "readMemory", output: 2, address: 0, width: 32 },
+    { kind: "writeMemory", address: 0, value: 0, width: 32 },
+    { kind: "writeState", slot: gprChannel("ebx"), value: 2 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
+    { kind: "exit", reason: "next" }
+  ]);
+});
+
+test("get and set through s.mem lower to memory actions at the given address", () => {
+  const incMem: SemanticTemplate = (s) => {
+    const target = s.mem(0x2000);
+
+    s.memoryGuard(0x2000, 4, "read");
+    s.memoryGuard(0x2000, 4, "write");
+    s.set(target, s.i32Add(s.get(target, 32), 1), 32);
+  };
+  const builder = createActionBuilder();
+
+  builder.addInstruction(incMem, [], { eip: 0x1000, nextEip: 0x1006 });
+
+  const block = builder.finish();
+  const v = block.values;
+  const address = v.internConst(0x2000);
+
+  deepStrictEqual(block.regions[0]!.actions, [
+    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
+    { kind: "readMemory", output: 2, address, width: 32 },
+    { kind: "writeMemory", address, value: v.internBinary("add", 2, v.internConst(1)), width: 32 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1006) },
+    { kind: "exit", reason: "next" }
+  ]);
+});
+
+test("address of a non-mem operand binding fails loudly", () => {
+  throws(
+    () =>
+      createActionBuilder().addInstruction(
+        leaSemantic(32),
+        [regBinding("eax"), regBinding("ebx")],
+        { eip: 0x1000, nextEip: 0x1002 }
+      ),
+    /address of a reg operand binding/
+  );
+});
+
+// Writes a register, then guards — the pop r/m32 shape, where the
+// destination EA depends on the already-updated register.
+const setRegThenStore: SemanticTemplate = (s) => {
+  s.set(s.operand(0), 0x222, 32);
+  s.memoryGuard(0x2000, 4, "write");
+  s.set(s.mem(0x2000), s.get(s.operand(0), 32), 32);
+};
+
+test("a guard after a register write restores the pre-instruction value in its edge", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x111)], {
+    eip: 0x1000,
+    nextEip: 0x1005
+  });
+  builder.addInstruction(setRegThenStore, [regBinding("eax")], { eip: 0x1005, nextEip: 0x100b });
+
+  const block = builder.finish();
+  const v = block.values;
+
+  // The edge flushes eax's value as of instruction start — never the 0x222
+  // this instruction wrote before guarding.
+  deepStrictEqual(block.regions[1]!.actions, [
+    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x111) },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) },
+    { kind: "exit", reason: "memoryWriteFault", payload: v.internConst(0x2000) }
+  ]);
+
+  // The main path keeps the new value: the store and the flush carry 0x222.
+  const store = block.regions[0]!.actions.find(
+    (action): action is WriteMemoryAction => action.kind === "writeMemory"
+  )!;
+
+  strictEqual(store.value, v.internConst(0x222));
+  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, v.internConst(0x222));
+});
+
+test("a guard after writing a previously-clean register omits the channel from its edge", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(setRegThenStore, [regBinding("eax")], { eip: 0x1000, nextEip: 0x1006 });
+
+  const block = builder.finish();
+  const v = block.values;
+
+  // eax had no pending at instruction start: state memory already holds the
+  // right bytes, so the edge writes only the eip.
+  deepStrictEqual(block.regions[1]!.actions, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
+    { kind: "exit", reason: "memoryWriteFault", payload: v.internConst(0x2000) }
+  ]);
+  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, v.internConst(0x222));
+});
+
+test("a guard after a memory write in the same instruction fails loudly", () => {
+  const storeThenGuard: SemanticTemplate = (s) => {
+    s.memoryGuard(0x2000, 4, "write");
+    s.set(s.mem(0x2000), 1, 32);
+    s.memoryGuard(0x3000, 4, "write");
+  };
+
+  throws(
+    () =>
+      createActionBuilder().addInstruction(storeThenGuard, [], { eip: 0x1000, nextEip: 0x1006 }),
+    /cannot follow a memory write/
+  );
+});
+
+test("a guard after flushing a channel first written this instruction fails loudly", () => {
+  const flushThenGuard: SemanticTemplate = (s) => {
+    s.set(s.operand(0), 1, 8);
+    s.get(s.operand(1), 16);
+    s.memoryGuard(0x2000, 4, "read");
+  };
+
+  throws(
+    () =>
+      createActionBuilder().addInstruction(flushThenGuard, [regBinding("al"), regBinding("ax")], {
+        eip: 0x1000,
+        nextEip: 0x1003
+      }),
+    /unrestorable/
+  );
 });

@@ -11,9 +11,11 @@ import type {
   IrFlagWriteCell,
   IrFlagWriteInput,
   IrGetOptions,
+  IrMemoryAccessKind,
   IrUnaryOperator,
   MemRef,
   NextEipRef,
+  OperandInput,
   OperandRef,
   RegRef,
   SemanticBuildContext,
@@ -24,12 +26,18 @@ import type {
   ValueInput,
   VarRef
 } from "#ir/model/types.js";
-import type { OperandWidth, RegName } from "#x86/types.js";
+import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
 import type { OperandBinding } from "./operands.js";
 import { createPendingChannels } from "./pending.js";
-import { eipChannel, flagChannel } from "./slots.js";
-import type { Action, ActionBlock, RegionId } from "./types.js";
-import { createValueTable, type ValueId } from "./values.js";
+import { eipChannel, flagChannel, gprChannel } from "./slots.js";
+import type { Action, ActionBlock, ActionRegion, RegionId } from "./types.js";
+import {
+  createValueTable,
+  fitsUnsigned,
+  signExtended,
+  type ValueId,
+  type WidthBounds
+} from "./values.js";
 
 export type InstructionLocation = Readonly<{ eip: number; nextEip: number }>;
 
@@ -62,9 +70,16 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   // invalidates all earlier entries: they were derived from flag state that
   // is now stale.
   readonly #conditions = new Map<ConditionCode, ValueId>();
+  readonly #edgeRegions: ActionRegion[] = [];
+  // An effective address is computed once per operand, at its first use —
+  // x86 computes an EA once, so later uses (the store) see the same address
+  // even when the instruction rewrites a base register in between.
+  readonly #operandAddresses = new Map<number, ValueId>();
+  #nextRegionId: RegionId = entryRegionId + 1;
   #bindings: readonly OperandBinding[] = [];
   #instruction: InstructionLocation | undefined;
   #terminated = false;
+  #wroteMemory = false;
   #finished = false;
 
   addInstruction(
@@ -76,8 +91,11 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     assert(this.#instruction === undefined, "action builder has an incomplete instruction");
 
     this.#bindings = bindings;
+    this.#operandAddresses.clear();
     this.#instruction = location;
     this.#terminated = false;
+    this.#wroteMemory = false;
+    this.#pending.beginInstruction();
 
     template(this, this);
 
@@ -102,7 +120,10 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
     return {
       entry: entryRegionId,
-      regions: [{ id: entryRegionId, kind: "entry", actions: this.#actions }],
+      regions: [
+        { id: entryRegionId, kind: "entry", actions: this.#actions },
+        ...this.#edgeRegions
+      ],
       values: this.#values
     };
   }
@@ -148,31 +169,36 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     this.#beforeOp("get");
     const storage = toStorageRef(source);
 
-    if (storage.kind !== "operand") {
-      throw notSupportedError(`get from ${storage.kind} storage`);
-    }
-
-    const binding = this.#binding(storage.index);
-
-    switch (binding.kind) {
-      case "imm": {
-        const value = this.#values.internConst(binding.value);
-
-        return irVar(
-          options.signed === true
-            ? this.#values.extendTo(accessWidth, value)
-            : this.#values.projectTo(accessWidth, value)
-        );
-      }
+    switch (storage.kind) {
       case "reg":
-        assert(
-          binding.channel.byteLength * 8 === accessWidth,
-          `${accessWidth}-bit get from a ${binding.channel.byteLength * 8}-bit register channel`
-        );
-        return irVar(this.#pending.read(binding.channel, options));
+        throw notSupportedError("get from reg storage");
       case "mem":
-      case "external":
-        throw notSupportedError(`get from ${binding.kind} operand binding`);
+        return irVar(this.#readMemory(this.#valueId(storage.address), accessWidth, options));
+      case "operand": {
+        const binding = this.#binding(storage.index);
+
+        switch (binding.kind) {
+          case "imm": {
+            const value = this.#values.internConst(binding.value);
+
+            return irVar(
+              options.signed === true
+                ? this.#values.extendTo(accessWidth, value)
+                : this.#values.projectTo(accessWidth, value)
+            );
+          }
+          case "reg":
+            assert(
+              binding.channel.byteLength * 8 === accessWidth,
+              `${accessWidth}-bit get from a ${binding.channel.byteLength * 8}-bit register channel`
+            );
+            return irVar(this.#pending.read(binding.channel, options));
+          case "mem":
+            return irVar(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
+          case "external":
+            throw notSupportedError("get from external operand binding");
+        }
+      }
     }
   }
 
@@ -180,21 +206,32 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     this.#beforeOp("set");
     const storage = toStorageRef(target);
 
-    if (storage.kind !== "operand") {
-      throw notSupportedError(`set to ${storage.kind} storage`);
+    switch (storage.kind) {
+      case "reg":
+        throw notSupportedError("set to reg storage");
+      case "mem":
+        this.#writeMemory(this.#valueId(storage.address), value, accessWidth);
+        return;
+      case "operand": {
+        const binding = this.#binding(storage.index);
+
+        switch (binding.kind) {
+          case "reg":
+            assert(
+              binding.channel.byteLength * 8 === accessWidth,
+              `${accessWidth}-bit set to a ${binding.channel.byteLength * 8}-bit register channel`
+            );
+            this.#pending.write(binding.channel, this.#valueId(value));
+            return;
+          case "mem":
+            this.#writeMemory(this.#operandAddress(storage.index), value, accessWidth);
+            return;
+          case "imm":
+          case "external":
+            throw notSupportedError(`set to ${binding.kind} operand binding`);
+        }
+      }
     }
-
-    const binding = this.#binding(storage.index);
-
-    if (binding.kind !== "reg") {
-      throw notSupportedError(`set to ${binding.kind} operand binding`);
-    }
-
-    assert(
-      binding.channel.byteLength * 8 === accessWidth,
-      `${accessWidth}-bit set to a ${binding.channel.byteLength * 8}-bit register channel`
-    );
-    this.#pending.write(binding.channel, this.#valueId(value));
   }
 
   next(): void {
@@ -203,12 +240,26 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     this.#terminated = true;
   }
 
-  memoryGuard(): void {
-    throw notSupportedError("memoryGuard");
+  memoryGuard(address: ValueInput, byteLength: number, access: IrMemoryAccessKind): void {
+    this.#beforeOp("memoryGuard");
+    // Guest memory cannot be rolled back by any scheme, so a fault edge
+    // cannot restore the pre-instruction state once the instruction stored.
+    assert(!this.#wroteMemory, "a memory guard cannot follow a memory write in the same instruction");
+
+    const addressId = this.#valueId(address);
+
+    this.#actions.push({
+      kind: "guardMemory",
+      address: addressId,
+      byteLength,
+      access,
+      faultEdge: this.#faultEdge(access === "read" ? "memoryReadFault" : "memoryWriteFault", addressId)
+    });
   }
 
-  address(): VarRef {
-    throw notSupportedError("address");
+  address(operandRef: OperandInput): VarRef {
+    this.#beforeOp("address");
+    return irVar(this.#operandAddress(operandRef.index));
   }
 
   i32Add(a: ValueInput, b: ValueInput): VarRef {
@@ -357,6 +408,95 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     }
   }
 
+  // The snapshot leaves the main-path map untouched. Pending eip holds the
+  // previous instruction's nextEip; the edge stores the faulting eip instead.
+  #faultEdge(reason: "memoryReadFault" | "memoryWriteFault", address: ValueId): RegionId {
+    const eipValue = this.#values.internConst(this.#location().eip);
+    const actions: Action[] = [];
+    let wroteEip = false;
+
+    for (const [slot, value] of this.#pending.snapshot()) {
+      if (slot === eipChannel) {
+        wroteEip = true;
+        actions.push({ kind: "writeState", slot, value: eipValue });
+      } else {
+        actions.push({ kind: "writeState", slot, value });
+      }
+    }
+
+    if (!wroteEip) {
+      actions.push({ kind: "writeState", slot: eipChannel, value: eipValue });
+    }
+
+    actions.push({ kind: "exit", reason, payload: address });
+
+    const id = this.#nextRegionId;
+
+    this.#nextRegionId += 1;
+    this.#edgeRegions.push({ id, kind: "edge", actions });
+    return id;
+  }
+
+  #readMemory(address: ValueId, width: OperandWidth, options: IrGetOptions): ValueId {
+    // Sign-extension is meaningful only below the word, as in pending reads.
+    const signed = options.signed === true && width !== 32;
+    const output = this.#values.addActionOutput(memoryReadBounds(width, signed));
+
+    this.#actions.push(
+      signed
+        ? { kind: "readMemory", output, address, width, signed: true }
+        : { kind: "readMemory", output, address, width }
+    );
+    return output;
+  }
+
+  #writeMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
+    this.#wroteMemory = true;
+    this.#actions.push({ kind: "writeMemory", address, value: this.#valueId(value), width });
+  }
+
+  #operandAddress(index: number): ValueId {
+    const cached = this.#operandAddresses.get(index);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const binding = this.#binding(index);
+
+    assert(binding.kind === "mem", `address of a ${binding.kind} operand binding`);
+
+    const address = this.#effectiveAddress(binding.address);
+
+    this.#operandAddresses.set(index, address);
+    return address;
+  }
+
+  #effectiveAddress(ea: EffectiveAddress): ValueId {
+    let address: ValueId | undefined;
+
+    if (ea.base !== undefined) {
+      address = this.#pending.read(gprChannel(ea.base));
+    }
+
+    if (ea.index !== undefined) {
+      const index = this.#pending.read(gprChannel(ea.index));
+      const scaled = ea.scale === 1
+        ? index
+        : this.#values.internBinary("shl", index, this.#values.internConst(scaleShift[ea.scale]));
+
+      address = address === undefined ? scaled : this.#values.internBinary("add", address, scaled);
+    }
+
+    if (address === undefined) {
+      return this.#values.internConst(ea.disp);
+    }
+
+    return ea.disp === 0
+      ? address
+      : this.#values.internBinary("add", address, this.#values.internConst(ea.disp));
+  }
+
   #valueId(input: ValueInput): ValueId {
     const value = toValueRef(input);
 
@@ -396,6 +536,16 @@ const signedComparePredicates: ReadonlySet<IrCompareOperator> = new Set([
   "gt_s",
   "ge_s"
 ]);
+
+const scaleShift = { 1: 0, 2: 1, 4: 2, 8: 3 } as const;
+
+function memoryReadBounds(width: OperandWidth, signed: boolean): WidthBounds | undefined {
+  if (width === 32) {
+    return undefined;
+  }
+
+  return signed ? signExtended(width) : fitsUnsigned(width);
+}
 
 function notSupportedError(what: string): Error {
   return new Error(`${what} not supported by action builder yet`);

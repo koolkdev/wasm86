@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import { channelCovers, channelsOverlap, type StateChannel } from "./slots.js";
 import type { Action } from "./types.js";
 import {
@@ -23,6 +24,10 @@ import {
 //
 // Pendings stay pairwise disjoint by construction: the write rule clears
 // every overlap before inserting.
+//
+// Fault edges flush *pre-instruction* state — a faulting instruction
+// re-executes, so its own writes must not be visible. beginInstruction()
+// copies the pending map; snapshot() returns the copy.
 
 export type PendingReadOptions = Readonly<{ signed?: boolean }>;
 
@@ -30,6 +35,11 @@ export type PendingChannels = Readonly<{
   read(channel: StateChannel, options?: PendingReadOptions): ValueId;
   write(channel: StateChannel, value: ValueId): void;
   has(channel: StateChannel): boolean;
+  // Marks an instruction boundary for snapshot().
+  beginInstruction(): void;
+  // The pending map as of the last instruction boundary; the live map is
+  // untouched.
+  snapshot(): ReadonlyArray<readonly [StateChannel, ValueId]>;
   // Materializes every pending as a writeState, in insertion order.
   flushAll(): void;
 }>;
@@ -44,8 +54,16 @@ export function createPendingChannels(
   // leaf would silently serve a channel whose memory has changed.
   const reads = new Map<StateChannel, ValueId>();
   const signedReads = new Map<StateChannel, ValueId>();
+  let boundary = new Map<StateChannel, ValueId>();
+  let unrestorableFlush = false;
 
   function flush(channel: StateChannel, value: ValueId): void {
+    // A boundary-absent channel's pre-instruction bytes exist only in state
+    // memory; this store destroys them.
+    if (!boundary.has(channel)) {
+      unrestorableFlush = true;
+    }
+
     emit({ kind: "writeState", slot: channel, value });
     pending.delete(channel);
 
@@ -122,10 +140,24 @@ export function createPendingChannels(
     pending.set(channel, value);
   }
 
+  function snapshot(): ReadonlyArray<readonly [StateChannel, ValueId]> {
+    assert(
+      !unrestorableFlush,
+      "a channel first written this instruction was flushed; its pre-instruction bytes are unrestorable"
+    );
+
+    return [...boundary];
+  }
+
   return {
     read,
     write,
     has: (channel) => pending.has(channel),
+    beginInstruction(): void {
+      boundary = new Map(pending);
+      unrestorableFlush = false;
+    },
+    snapshot,
     flushAll(): void {
       for (const [channel, value] of pending) {
         flush(channel, value);

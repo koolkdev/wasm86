@@ -34,6 +34,9 @@ export type ReadMemoryAction = Readonly<{
   output: ValueId;
   address: ValueId;
   width: OperandWidth;
+  // Present only below the word width: the emitter lowers the read to a
+  // sign-extending load.
+  signed?: true;
 }>;
 
 export type WriteStateAction = Readonly<{

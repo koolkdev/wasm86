@@ -22,3 +22,7 @@ export function regBinding(name: RegName): RegOperandBinding {
 export function immBinding(value: number): ImmOperandBinding {
   return { kind: "imm", value };
 }
+
+export function memBinding(address: EffectiveAddress): MemOperandBinding {
+  return { kind: "mem", address };
+}
