@@ -3,8 +3,8 @@ import { test } from "node:test";
 
 import { createPendingChannels, type PendingChannels } from "#ir/action/pending.js";
 import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
-import type { Action } from "#ir/action/types.js";
-import { createValueTable, type ValueTable } from "#ir/action/values.js";
+import type { Action, GprDynamicSlot } from "#ir/action/types.js";
+import { createValueTable, type ValueId, type ValueTable } from "#ir/action/values.js";
 
 type Harness = Readonly<{
   values: ValueTable;
@@ -17,6 +17,10 @@ function createHarness(): Harness {
   const actions: Action[] = [];
 
   return { values, actions, pending: createPendingChannels(values, (action) => actions.push(action)) };
+}
+
+function dynamicGpr(index: ValueId, byteLength: 1 | 2 | 4 = 4): GprDynamicSlot {
+  return { kind: "gprDynamic", index, byteLength };
 }
 
 test("an exact pending hit returns the value with no actions", () => {
@@ -51,7 +55,13 @@ test("write al then read eax flushes the byte and reloads the word", () => {
     { kind: "writeState", slot: gprChannel("al"), value: byte },
     { kind: "readState", output: word, slot: gprChannel("eax") }
   ]);
-  strictEqual(pending.has(gprChannel("al")), false);
+
+  // The flushed al stays pending, clean: it serves reads with no new
+  // actions and never needs storing again.
+  strictEqual(pending.has(gprChannel("al")), true);
+  strictEqual(pending.read(gprChannel("al")), byte);
+  pending.flushAll();
+  strictEqual(actions.length, 2);
 });
 
 test("write eax then read al flushes the word and reloads the byte", () => {
@@ -196,7 +206,7 @@ test("an exact narrow hit normalizes values whose high bits are unproven", () =>
   strictEqual(pending.read(gprChannel("ah")), byte);
 });
 
-test("flushAll materializes every pending in insertion order", () => {
+test("flushAll materializes every dirty pending in insertion order", () => {
   const { values, actions, pending } = createHarness();
   const flag = values.internConst(1);
   const word = values.internConst(7);
@@ -209,8 +219,12 @@ test("flushAll materializes every pending in insertion order", () => {
     { kind: "writeState", slot: flagChannel("CF"), value: flag },
     { kind: "writeState", slot: gprChannel("esi"), value: word }
   ]);
-  strictEqual(pending.has(flagChannel("CF")), false);
-  strictEqual(pending.has(gprChannel("esi")), false);
+
+  // Everything is clean now: reads still hit, nothing stores twice.
+  strictEqual(pending.read(flagChannel("CF")), flag);
+  strictEqual(pending.read(gprChannel("esi")), word);
+  pending.flushAll();
+  strictEqual(actions.length, 2);
 });
 
 test("snapshot lists instruction-start values without consuming the map", () => {
@@ -275,9 +289,10 @@ test("flushing a channel first written this instruction makes the snapshot unres
 
   throws(() => pending.snapshot(), /unrestorable/);
 
-  // The next instruction boundary takes a fresh copy.
+  // The next instruction boundary takes a fresh copy; the flushed al is
+  // clean but still pending, so it joins the new boundary.
   pending.beginInstruction();
-  deepStrictEqual(pending.snapshot(), []);
+  deepStrictEqual(pending.snapshot(), [[gprChannel("al"), values.internConst(1)]]);
 });
 
 test("flushing a channel rewritten this instruction keeps its start value in the snapshot", () => {
@@ -302,4 +317,177 @@ test("flushing a channel untouched this instruction keeps it in the snapshot", (
 
   // The flush already stored this value; rewriting it is harmless.
   deepStrictEqual(pending.snapshot(), [[gprChannel("al"), byte]]);
+});
+
+test("a covering write drops a clean pending without a store", () => {
+  const { values, actions, pending } = createHarness();
+  const word = values.internConst(0x12345678);
+
+  pending.write(gprChannel("al"), values.internConst(0x12));
+  pending.read(gprChannel("eax"));
+  pending.write(gprChannel("eax"), word);
+  pending.flushAll();
+
+  // One al store (the flush before the read); the covering eax write drops
+  // the clean al, so only eax flushes at the end.
+  strictEqual(actions[0]!.kind, "writeState");
+  deepStrictEqual(actions[2], { kind: "writeState", slot: gprChannel("eax"), value: word });
+  strictEqual(actions.length, 3);
+});
+
+test("entries lists only dirty pendings", () => {
+  const { values, pending } = createHarness();
+  const byte = values.internConst(0x12);
+  const flag = values.internConst(1);
+
+  pending.write(gprChannel("al"), byte);
+  pending.write(flagChannel("ZF"), flag);
+  pending.read(gprChannel("ax"));
+
+  // The ax read flushed al; only the flag is still dirty.
+  deepStrictEqual(pending.entries(), [[flagChannel("ZF"), flag]]);
+});
+
+test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
+  const { values, actions, pending } = createHarness();
+  const word = values.internConst(0x77);
+  const flag = values.internConst(1);
+  const index = values.internExternal(0);
+
+  pending.write(gprChannel("eax"), word);
+  pending.write(flagChannel("ZF"), flag);
+
+  const first = pending.readDynamicGpr(dynamicGpr(index));
+
+  deepStrictEqual(actions, [
+    { kind: "writeState", slot: gprChannel("eax"), value: word },
+    { kind: "readState", output: first, slot: dynamicGpr(index) }
+  ]);
+
+  // eax is clean: it still serves reads and the next dynamic read flushes
+  // nothing. Each dynamic read loads fresh — the channel is unknown.
+  strictEqual(pending.read(gprChannel("eax")), word);
+
+  const second = pending.readDynamicGpr(dynamicGpr(index));
+
+  notStrictEqual(second, first);
+  deepStrictEqual(actions[2], { kind: "readState", output: second, slot: dynamicGpr(index) });
+  strictEqual(actions.length, 3);
+  strictEqual(pending.read(flagChannel("ZF")), flag);
+});
+
+test("a dynamic write stores immediately and invalidates every GPR pending", () => {
+  const { values, actions, pending } = createHarness();
+  const word = values.internConst(0x77);
+  const flag = values.internConst(1);
+  const eip = values.internConst(0x1000);
+  const stored = values.internConst(0x222);
+  const index = values.internExternal(0);
+
+  pending.write(gprChannel("eax"), word);
+  pending.write(flagChannel("CF"), flag);
+  pending.write(eipChannel, eip);
+  pending.writeDynamicGpr(dynamicGpr(index), stored);
+
+  deepStrictEqual(actions, [
+    { kind: "writeState", slot: gprChannel("eax"), value: word },
+    { kind: "writeState", slot: dynamicGpr(index), value: stored }
+  ]);
+
+  // The just-cleaned eax is gone too — the store may have hit its word —
+  // while flag and eip pendings ride through.
+  const reload = pending.read(gprChannel("eax"));
+
+  deepStrictEqual(actions[2], { kind: "readState", output: reload, slot: gprChannel("eax") });
+  strictEqual(pending.read(flagChannel("CF")), flag);
+  strictEqual(pending.read(eipChannel), eip);
+});
+
+test("a dynamic write invalidates cached GPR read leaves but not flag leaves", () => {
+  const { values, pending } = createHarness();
+  const index = values.internExternal(0);
+  const eaxRead = pending.read(gprChannel("eax"));
+  const zfRead = pending.read(flagChannel("ZF"));
+
+  pending.writeDynamicGpr(dynamicGpr(index), values.internConst(1));
+
+  notStrictEqual(pending.read(gprChannel("eax")), eaxRead);
+  strictEqual(pending.read(flagChannel("ZF")), zfRead);
+});
+
+test("a dynamic write makes the boundary snapshot unrestorable", () => {
+  const { values, pending } = createHarness();
+
+  pending.beginInstruction();
+  pending.writeDynamicGpr(dynamicGpr(values.internExternal(0)), values.internConst(1));
+
+  throws(() => pending.snapshot(), /unrestorable/);
+
+  // The next instruction boundary takes a fresh copy.
+  pending.beginInstruction();
+  deepStrictEqual(pending.snapshot(), []);
+});
+
+test("a dynamic read flushing a channel first written this instruction is unrestorable", () => {
+  const { values, pending } = createHarness();
+
+  pending.beginInstruction();
+  pending.write(gprChannel("ebx"), values.internConst(0x111));
+  pending.readDynamicGpr(dynamicGpr(values.internExternal(0)));
+
+  throws(() => pending.snapshot(), /unrestorable/);
+});
+
+test("a dynamic read flushing a boundary pending keeps the snapshot restorable", () => {
+  const { values, pending } = createHarness();
+  const before = values.internConst(0x111);
+
+  pending.write(gprChannel("ebx"), before);
+  pending.beginInstruction();
+  pending.readDynamicGpr(dynamicGpr(values.internExternal(0)));
+
+  deepStrictEqual(pending.snapshot(), [[gprChannel("ebx"), before]]);
+});
+
+test("narrow dynamic reads carry their byte length, bounds, and sign marker", () => {
+  const { values, actions, pending } = createHarness();
+  const index = values.internExternal(0);
+  const unsigned = pending.readDynamicGpr(dynamicGpr(index, 1));
+  const signed = pending.readDynamicGpr(dynamicGpr(index, 1), { signed: true });
+
+  deepStrictEqual(actions, [
+    { kind: "readState", output: unsigned, slot: dynamicGpr(index, 1) },
+    { kind: "readState", output: signed, slot: dynamicGpr(index, 1), signed: true }
+  ]);
+
+  // Bounds match static narrow channels: no masks or extends downstream.
+  strictEqual(values.projectTo(8, unsigned), unsigned);
+  strictEqual(values.extendTo(8, signed), signed);
+});
+
+test("a signed dynamic word read is the plain read", () => {
+  const { values, actions, pending } = createHarness();
+  const index = values.internExternal(0);
+  const read = pending.readDynamicGpr(dynamicGpr(index), { signed: true });
+
+  deepStrictEqual(actions, [{ kind: "readState", output: read, slot: dynamicGpr(index) }]);
+});
+
+test("a narrow dynamic write barriers word pendings all the same", () => {
+  const { values, actions, pending } = createHarness();
+  const word = values.internConst(0x12345678);
+  const byte = values.internConst(0x9a);
+  const index = values.internExternal(0);
+
+  pending.write(gprChannel("eax"), word);
+  pending.writeDynamicGpr(dynamicGpr(index, 1), byte);
+
+  deepStrictEqual(actions, [
+    { kind: "writeState", slot: gprChannel("eax"), value: word },
+    { kind: "writeState", slot: dynamicGpr(index, 1), value: byte }
+  ]);
+
+  const reload = pending.read(gprChannel("eax"));
+
+  deepStrictEqual(actions[2], { kind: "readState", output: reload, slot: gprChannel("eax") });
 });

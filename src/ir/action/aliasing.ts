@@ -1,13 +1,14 @@
-import { channelsOverlap, type StateChannel } from "./slots.js";
-import type { Action } from "./types.js";
+import { channelsOverlap } from "./slots.js";
+import type { Action, StateSlot } from "./types.js";
 
 // Effects are derived from action kind + slot, never stored per-action.
 // One aliasing rule over the address spaces: static channels alias iff their
-// byte ranges intersect; guest memory may-alias guest memory (no
+// byte ranges intersect; a dynamic GPR slot may alias every GPR word and
+// never flags or eip; guest memory may-alias guest memory (no
 // disambiguation); guest memory and state never alias.
 
 export type StorageEffect =
-  | Readonly<{ space: "state"; channel: StateChannel }>
+  | Readonly<{ space: "state"; slot: StateSlot }>
   | Readonly<{ space: "memory" }>;
 
 export type ActionEffects = Readonly<{
@@ -21,9 +22,9 @@ const noEffects: ActionEffects = {};
 export function effectsOf(action: Action): ActionEffects {
   switch (action.kind) {
     case "readState":
-      return { reads: { space: "state", channel: action.slot } };
+      return { reads: { space: "state", slot: action.slot } };
     case "writeState":
-      return { writes: { space: "state", channel: action.slot } };
+      return { writes: { space: "state", slot: action.slot } };
     case "readMemory":
       return { reads: memoryEffect };
     case "writeMemory":
@@ -42,6 +43,18 @@ export function mayAlias(a: StorageEffect, b: StorageEffect): boolean {
     case "memory":
       return b.space === "memory";
     case "state":
-      return b.space === "state" && channelsOverlap(a.channel, b.channel);
+      return b.space === "state" && slotsMayAlias(a.slot, b.slot);
+  }
+}
+
+export function slotsMayAlias(a: StateSlot, b: StateSlot): boolean {
+  switch (a.kind) {
+    case "gprDynamic":
+      return b.kind === "gpr" || b.kind === "gprDynamic";
+    case "gpr":
+      return b.kind === "gprDynamic" || channelsOverlap(a, b);
+    case "flag":
+    case "eip":
+      return b.kind !== "gprDynamic" && channelsOverlap(a, b);
   }
 }

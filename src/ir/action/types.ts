@@ -5,9 +5,14 @@ import type { ValueId, ValueTable } from "./values.js";
 
 export type RegionId = number;
 
-// Static channels only for now; the dynamic (runtime-indexed) GPR slot
-// variant joins this union when dynamic register access lands.
-export type StateSlot = StateChannel;
+// The index is the x86 register number for the access width (modrm encoding).
+export type GprDynamicSlot = Readonly<{
+  kind: "gprDynamic";
+  index: ValueId;
+  byteLength: 1 | 2 | 4;
+}>;
+
+export type StateSlot = StateChannel | GprDynamicSlot;
 
 // Maps one-to-one onto the wasm runtime's ExitReason; the action emitter
 // owns the numeric encoding.

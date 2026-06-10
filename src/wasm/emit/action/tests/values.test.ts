@@ -1,7 +1,7 @@
 import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, gprChannel } from "#ir/action/slots.js";
+import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
 import type { Action, EdgeRegion } from "#ir/action/types.js";
 import { createValueTable, type ValueTable } from "#ir/action/values.js";
 import { analyzeBlockValues } from "#wasm/emit/action/values.js";
@@ -309,6 +309,27 @@ test("the xchg shape pins only the read whose use crosses the store", () => {
   // last use is the ebx store itself, before any eax store: load at use.
   strictEqual(analysis.isPinned(ebx), true);
   strictEqual(analysis.isPinned(eax), false);
+});
+
+test("a dynamic store pins a GPR read used later, never a flag read", () => {
+  const values = createValueTable();
+  const gprRead = values.addActionOutput();
+  const flagRead = values.addActionOutput();
+  const index = values.internExternal(0);
+  const stored = values.internConst(5);
+  const analysis = analyze(values, [
+    { kind: "readState", output: gprRead, slot: gprChannel("eax") },
+    { kind: "readState", output: flagRead, slot: flagChannel("ZF") },
+    { kind: "writeState", slot: { kind: "gprDynamic", index, byteLength: 4 }, value: stored },
+    { kind: "writeState", slot: gprChannel("ebx"), value: gprRead },
+    { kind: "writeState", slot: gprChannel("ecx"), value: flagRead },
+    { kind: "exit", reason: "next" }
+  ]);
+
+  // The dynamic store may hit any GPR word, so the eax read pins; flag
+  // bytes never alias dynamic slots.
+  strictEqual(analysis.isPinned(gprRead), true);
+  strictEqual(analysis.isPinned(flagRead), false);
 });
 
 test("an overlapping partial-channel store pins a wider read used later", () => {

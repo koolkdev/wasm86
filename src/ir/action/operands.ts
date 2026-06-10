@@ -26,3 +26,7 @@ export function immBinding(value: number): ImmOperandBinding {
 export function memBinding(address: EffectiveAddress): MemOperandBinding {
   return { kind: "mem", address };
 }
+
+export function externalBinding(id: ExternalValueId): ExternalOperandBinding {
+  return { kind: "external", id };
+}

@@ -28,10 +28,18 @@ import type {
   VarRef
 } from "#ir/model/types.js";
 import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
-import type { OperandBinding } from "./operands.js";
+import type { ExternalOperandBinding, OperandBinding } from "./operands.js";
 import { createPendingChannels } from "./pending.js";
 import { eipChannel, flagChannel, gprChannel, type GprChannel, type StateChannel } from "./slots.js";
-import type { Action, ActionBlock, EdgeRegion, ExitAction, RegionId, WriteStateAction } from "./types.js";
+import type {
+  Action,
+  ActionBlock,
+  EdgeRegion,
+  ExitAction,
+  GprDynamicSlot,
+  RegionId,
+  WriteStateAction
+} from "./types.js";
 import {
   createValueTable,
   fitsUnsigned,
@@ -151,7 +159,8 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       case "mem":
         return { storage: "mem" };
       case "external":
-        throw notSupportedError("external operand binding");
+        // A runtime register index: register storage, dynamic channel.
+        return { storage: "reg" };
     }
   }
 
@@ -203,7 +212,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
           case "mem":
             return irVar(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
           case "external":
-            throw notSupportedError("get from external operand binding");
+            return irVar(this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options));
         }
       }
     }
@@ -230,9 +239,11 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
           case "mem":
             this.#writeMemory(this.#operandAddress(storage.index), value, accessWidth);
             return;
-          case "imm":
           case "external":
-            throw notSupportedError(`set to ${binding.kind} operand binding`);
+            this.#pending.writeDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), this.#valueId(value));
+            return;
+          case "imm":
+            throw notSupportedError("set to imm operand binding");
         }
       }
     }
@@ -479,6 +490,14 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return id;
   }
 
+  #dynamicGprSlot(binding: ExternalOperandBinding, accessWidth: OperandWidth): GprDynamicSlot {
+    return {
+      kind: "gprDynamic",
+      index: this.#values.internExternal(binding.id),
+      byteLength: dynamicGprByteLength[accessWidth]
+    };
+  }
+
   #readChannel(channel: GprChannel, accessWidth: OperandWidth, options: IrGetOptions): ValueId {
     assert(
       channel.byteLength * 8 === accessWidth,
@@ -596,6 +615,8 @@ const signedComparePredicates: ReadonlySet<IrCompareOperator> = new Set([
 ]);
 
 const scaleShift = { 1: 0, 2: 1, 4: 2, 8: 3 } as const;
+
+const dynamicGprByteLength = { 8: 1, 16: 2, 32: 4 } as const;
 
 function memoryReadBounds(width: OperandWidth, signed: boolean): WidthBounds | undefined {
   if (width === 32) {

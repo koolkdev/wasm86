@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { createActionBuilder } from "#ir/action/builder.js";
-import { immBinding, memBinding, regBinding } from "#ir/action/operands.js";
+import { externalBinding, immBinding, memBinding, regBinding } from "#ir/action/operands.js";
 import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
 import type {
   Action,
@@ -827,14 +827,17 @@ test("a flag write between cmp and setcc invalidates the recorded condition", ()
   );
 });
 
-test("unsupported operand bindings fail loudly", () => {
+test("set to an imm operand binding fails loudly", () => {
+  const setImm: SemanticTemplate = (s) => {
+    s.set(s.operand(0), 1, 32);
+  };
+
   throws(
     () =>
-      createActionBuilder().addInstruction(
-        movSemantic(32),
-        [regBinding("eax"), { kind: "external", id: 0 }],
-        { eip: 0x1000, nextEip: 0x1006 }
-      ),
+      createActionBuilder().addInstruction(setImm, [immBinding(0)], {
+        eip: 0x1000,
+        nextEip: 0x1006
+      }),
     /not supported by action builder yet/
   );
 });
@@ -1412,6 +1415,290 @@ test("a guard after flushing a channel first written this instruction fails loud
       createActionBuilder().addInstruction(flushThenGuard, [regBinding("al"), regBinding("ax")], {
         eip: 0x1000,
         nextEip: 0x1003
+      }),
+    /unrestorable/
+  );
+});
+
+test("add r/m32, r32 with both operands dynamic reads, then writes, in one block", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(aluSemantic("add", 32), [externalBinding(0), externalBinding(1)], {
+    eip: 0x1000,
+    nextEip: 0x1002
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const dst = v.internExternal(0);
+  const src = v.internExternal(1);
+  const sum = v.internBinary("add", 1, 3);
+  const actions = entryActions(block);
+
+  strictEqual(block.regions.length, 1);
+  deepStrictEqual(block.values.node(dst), { kind: "external", external: 0 });
+  deepStrictEqual(actions[0], {
+    kind: "readState",
+    output: 1,
+    slot: { kind: "gprDynamic", index: dst, byteLength: 4 }
+  });
+  deepStrictEqual(actions[1], {
+    kind: "readState",
+    output: 3,
+    slot: { kind: "gprDynamic", index: src, byteLength: 4 }
+  });
+  deepStrictEqual(actions[2], {
+    kind: "writeState",
+    slot: { kind: "gprDynamic", index: dst, byteLength: 4 },
+    value: sum
+  });
+
+  // Flags compute from the dynamic reads exactly as from static ones.
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86ArithmeticFlags].sort());
+  strictEqual(flagWriteValue(block, "ZF"), v.internCompare("eq", sum, v.internConst(0)));
+});
+
+test("a static register read keeps its order across a dynamic write", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(32), [externalBinding(0), regBinding("ebx")], {
+    eip: 0x1000,
+    nextEip: 0x1002
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+
+  deepStrictEqual(entryActions(block), [
+    { kind: "readState", output: 0, slot: gprChannel("ebx") },
+    {
+      kind: "writeState",
+      slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 4 },
+      value: 0
+    },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
+    { kind: "exit", reason: "next" }
+  ]);
+});
+
+test("dirty GPR pendings flush before dynamic access; flags and eip ride through", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+  builder.addInstruction(movSemantic(32), [externalBinding(0), regBinding("ecx")], {
+    eip: 0x1003,
+    nextEip: 0x1005
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const sum = v.internBinary("add", 0, v.internConst(5));
+  const actions = entryActions(block);
+  const eaxFlush = actions.findIndex((a) => a.kind === "writeState" && a.slot === gprChannel("eax"));
+  const dynamicWrite = actions.findIndex((a) => a.kind === "writeState" && a.slot.kind === "gprDynamic");
+  const firstFlagWrite = actions.findIndex((a) => a.kind === "writeState" && a.slot.kind === "flag");
+
+  ok(eaxFlush !== -1 && dynamicWrite !== -1, "expected an eax flush and a dynamic write");
+  ok(eaxFlush < dynamicWrite, "the dirty eax pending must flush before the dynamic write");
+  ok(dynamicWrite < firstFlagWrite, "flag pendings ride through and flush at the end");
+  strictEqual(stateWrites(block).filter((write) => write.slot === gprChannel("eax")).length, 1);
+  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, sum);
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86ArithmeticFlags].sort());
+
+  const eipWrites = stateWrites(block).filter((write) => write.slot === eipChannel);
+
+  strictEqual(eipWrites.length, 1);
+  strictEqual(eipWrites[0]!.value, v.internConst(0x1005));
+});
+
+test("a dynamic write invalidates static GPR pendings for later instructions", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
+    eip: 0x1000,
+    nextEip: 0x1005
+  });
+  builder.addInstruction(movSemantic(32), [externalBinding(0), immBinding(5)], {
+    eip: 0x1005,
+    nextEip: 0x100b
+  });
+  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], {
+    eip: 0x100b,
+    nextEip: 0x100d
+  });
+
+  const block = builder.finish();
+  const actions = entryActions(block);
+  const eaxReads = actions.filter(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
+  );
+  const dynamicWrite = actions.findIndex(
+    (action) => action.kind === "writeState" && action.slot.kind === "gprDynamic"
+  );
+
+  // The dynamic write may have hit eax's word, so the third mov reloads it.
+  strictEqual(eaxReads.length, 1);
+  ok(actions.indexOf(eaxReads[0]!) > dynamicWrite, "the eax reload must follow the dynamic write");
+  strictEqual(
+    stateWrites(block).find((write) => write.slot === gprChannel("ebx"))?.value,
+    eaxReads[0]!.output
+  );
+});
+
+test("a dynamic read leaves flushed pendings serving later static reads", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
+    eip: 0x1000,
+    nextEip: 0x1005
+  });
+  builder.addInstruction(movSemantic(32), [regBinding("ebx"), externalBinding(0)], {
+    eip: 0x1005,
+    nextEip: 0x100b
+  });
+  builder.addInstruction(movSemantic(32), [regBinding("ecx"), regBinding("eax")], {
+    eip: 0x100b,
+    nextEip: 0x100d
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const actions = entryActions(block);
+
+  // The dynamic read flushed eax once and left it clean: the third mov is
+  // served from the pending with no reload and no second store.
+  strictEqual(stateWrites(block).filter((write) => write.slot === gprChannel("eax")).length, 1);
+  strictEqual(
+    actions.filter((action) => action.kind === "readState" && action.slot === gprChannel("eax")).length,
+    0
+  );
+  strictEqual(
+    stateWrites(block).find((write) => write.slot === gprChannel("ecx"))?.value,
+    v.internConst(0x77)
+  );
+});
+
+test("pop r/mDyn flushes the incremented esp before the dynamic store, after the guard", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(popSemantic(), [externalBinding(0)], { eip: 0x1000, nextEip: 0x1002 });
+
+  const block = builder.finish();
+  const v = block.values;
+  const nextEsp = v.internBinary("add", 0, v.internConst(4));
+
+  // Values-first: the guard (and its snapshot) precedes the esp flush the
+  // dynamic store forces, so the unrestorable store happens after the last
+  // fault edge.
+  strictEqual(block.regions.length, 2);
+  deepStrictEqual(entryActions(block), [
+    { kind: "readState", output: 0, slot: gprChannel("esp") },
+    { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "readMemory", output: 2, address: 0, width: 32 },
+    { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
+    {
+      kind: "writeState",
+      slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 4 },
+      value: 2
+    },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
+    { kind: "exit", reason: "next" }
+  ]);
+});
+
+test("an 8-bit template width lowers a one-byte dynamic slot", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(8), [regBinding("bl"), externalBinding(0)], {
+    eip: 0x1000,
+    nextEip: 0x1002
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+
+  deepStrictEqual(entryActions(block), [
+    {
+      kind: "readState",
+      output: 1,
+      slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 1 }
+    },
+    { kind: "writeState", slot: gprChannel("bl"), value: 1 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
+    { kind: "exit", reason: "next" }
+  ]);
+});
+
+test("a 16-bit set through a dynamic register stores a two-byte slot", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(16), [externalBinding(0), immBinding(0x1234)], {
+    eip: 0x1000,
+    nextEip: 0x1004
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+
+  deepStrictEqual(entryActions(block)[0], {
+    kind: "writeState",
+    slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 2 },
+    value: v.internConst(0x1234)
+  });
+});
+
+test("movsx r32, r8 from a dynamic register marks the read signed with no extra extend", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movsxSemantic(8, 32), [regBinding("eax"), externalBinding(0)], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+
+  deepStrictEqual(entryActions(block)[0], {
+    kind: "readState",
+    output: 1,
+    slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 1 },
+    signed: true
+  });
+  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, 1);
+  ok(!nodeKinds(block).includes("unary"), "no extends expected");
+});
+
+test("a guard after a dynamic flush of an instruction-written register fails loudly", () => {
+  const setThenDynamicRead: SemanticTemplate = (s) => {
+    s.set(s.reg("ebx"), 0x111, 32);
+    s.get(s.operand(0), 32);
+    s.memoryGuard(0x2000, 4, "read");
+  };
+
+  throws(
+    () =>
+      createActionBuilder().addInstruction(setThenDynamicRead, [externalBinding(0)], {
+        eip: 0x1000,
+        nextEip: 0x1002
+      }),
+    /unrestorable/
+  );
+});
+
+test("a guard after a dynamic write fails loudly", () => {
+  const dynamicWriteThenGuard: SemanticTemplate = (s) => {
+    s.set(s.operand(0), 0x222, 32);
+    s.memoryGuard(0x2000, 4, "write");
+  };
+
+  throws(
+    () =>
+      createActionBuilder().addInstruction(dynamicWriteThenGuard, [externalBinding(0)], {
+        eip: 0x1000,
+        nextEip: 0x1002
       }),
     /unrestorable/
   );

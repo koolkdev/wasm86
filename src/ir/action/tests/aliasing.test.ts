@@ -2,12 +2,17 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { effectsOf, mayAlias, type StorageEffect } from "#ir/action/aliasing.js";
-import { eipChannel, flagChannel, gprChannel, type StateChannel } from "#ir/action/slots.js";
+import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
+import type { StateSlot } from "#ir/action/types.js";
 
 const memory: StorageEffect = { space: "memory" };
 
-function state(channel: StateChannel): StorageEffect {
-  return { space: "state", channel };
+function state(slot: StateSlot): StorageEffect {
+  return { space: "state", slot };
+}
+
+function dynamicGpr(index: number, byteLength: 1 | 2 | 4 = 4): StateSlot {
+  return { kind: "gprDynamic", index, byteLength };
 }
 
 test("effects derive from action kind and slot", () => {
@@ -16,6 +21,9 @@ test("effects derive from action kind and slot", () => {
   });
   deepStrictEqual(effectsOf({ kind: "writeState", slot: flagChannel("ZF"), value: 0 }), {
     writes: state(flagChannel("ZF"))
+  });
+  deepStrictEqual(effectsOf({ kind: "writeState", slot: dynamicGpr(3), value: 0 }), {
+    writes: state(dynamicGpr(3))
   });
   deepStrictEqual(effectsOf({ kind: "readMemory", output: 0, address: 1, width: 32 }), {
     reads: memory
@@ -38,6 +46,7 @@ test("guest memory may-aliases guest memory and never state", () => {
   strictEqual(mayAlias(memory, memory), true);
   strictEqual(mayAlias(memory, state(gprChannel("eax"))), false);
   strictEqual(mayAlias(state(eipChannel), memory), false);
+  strictEqual(mayAlias(state(dynamicGpr(0)), memory), false);
 });
 
 test("static channels alias iff their byte ranges intersect", () => {
@@ -46,4 +55,15 @@ test("static channels alias iff their byte ranges intersect", () => {
   strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ebx"))), false);
   strictEqual(mayAlias(state(flagChannel("ZF")), state(flagChannel("ZF"))), true);
   strictEqual(mayAlias(state(flagChannel("ZF")), state(gprChannel("eax"))), false);
+});
+
+test("a dynamic GPR slot may-aliases every GPR word and never flags or eip", () => {
+  strictEqual(mayAlias(state(dynamicGpr(0)), state(gprChannel("eax"))), true);
+  strictEqual(mayAlias(state(gprChannel("bl")), state(dynamicGpr(0))), true);
+  strictEqual(mayAlias(state(dynamicGpr(0)), state(dynamicGpr(1))), true);
+  strictEqual(mayAlias(state(dynamicGpr(0, 1)), state(gprChannel("esi"))), true);
+  strictEqual(mayAlias(state(dynamicGpr(0)), state(flagChannel("ZF"))), false);
+  strictEqual(mayAlias(state(flagChannel("CF")), state(dynamicGpr(0))), false);
+  strictEqual(mayAlias(state(dynamicGpr(0)), state(eipChannel)), false);
+  strictEqual(mayAlias(state(eipChannel), state(dynamicGpr(0))), false);
 });

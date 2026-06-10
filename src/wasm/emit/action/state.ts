@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import type { StateChannel } from "#ir/action/slots.js";
 import type { StateSlot } from "#ir/action/types.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -9,11 +10,12 @@ import { channelAccessByteLength, channelStateOffset } from "#wasm/state-layout.
 // widths; this file only encodes the matching access.
 
 export function emitChannelLoad(body: WasmFunctionBodyEncoder, slot: StateSlot, signed: boolean): void {
-  const immediate = channelImmediate(slot);
+  const channel = staticChannel(slot);
+  const immediate = channelImmediate(channel);
 
   body.i32Const(0);
 
-  switch (channelAccessByteLength(slot)) {
+  switch (channelAccessByteLength(channel)) {
     case 1:
       signed ? body.i32Load8S(immediate) : body.i32Load8U(immediate);
       return;
@@ -32,12 +34,13 @@ export function emitChannelStore(
   slot: StateSlot,
   emitValue: () => void
 ): void {
-  const immediate = channelImmediate(slot);
+  const channel = staticChannel(slot);
+  const immediate = channelImmediate(channel);
 
   body.i32Const(0);
   emitValue();
 
-  switch (channelAccessByteLength(slot)) {
+  switch (channelAccessByteLength(channel)) {
     case 1:
       body.i32Store8(immediate);
       return;
@@ -50,11 +53,16 @@ export function emitChannelStore(
   }
 }
 
-function channelImmediate(slot: StateSlot): WasmMemoryImmediate {
-  const offset = channelStateOffset(slot);
+function staticChannel(slot: StateSlot): StateChannel {
+  assert(slot.kind !== "gprDynamic", "dynamic register slots not supported by the action emitter yet");
+  return slot;
+}
+
+function channelImmediate(channel: StateChannel): WasmMemoryImmediate {
+  const offset = channelStateOffset(channel);
 
   return {
-    align: channelAlign(offset, channelAccessByteLength(slot)),
+    align: channelAlign(offset, channelAccessByteLength(channel)),
     offset,
     memoryIndex: wasmMemoryIndex.state
   };

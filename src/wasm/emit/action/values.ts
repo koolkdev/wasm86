@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { channelsOverlap } from "#ir/action/slots.js";
+import { slotsMayAlias } from "#ir/action/aliasing.js";
 import type {
   Action,
   ActionBlock,
@@ -157,9 +157,8 @@ class BlockValueUsage implements BlockValueAnalysis {
   }
 
   // The one ordering rule: a readState whose value is consumed past a
-  // may-aliasing store pins at its action point. Stores are static channels
-  // or guest memory, which never aliases state, so byte-range overlap is the
-  // whole aliasing story; revisit when dynamic slots land (07).
+  // may-aliasing store pins at its action point. Guest memory never aliases
+  // state, so slot may-alias is the whole aliasing story.
   #pinReadsCrossingStores(entry: EntryRegion): void {
     entry.actions.forEach((action, actionIndex) => {
       if (action.kind !== "readState") {
@@ -177,7 +176,7 @@ class BlockValueUsage implements BlockValueAnalysis {
       for (let index = actionIndex + 1; index < lastUse; index += 1) {
         const later = entry.actions[index]!;
 
-        if (later.kind === "writeState" && channelsOverlap(later.slot, action.slot)) {
+        if (later.kind === "writeState" && slotsMayAlias(later.slot, action.slot)) {
           this.#pinned.add(action.output);
           break;
         }
@@ -201,7 +200,7 @@ class BlockValueUsage implements BlockValueAnalysis {
       for (const value of edgeValues(edge)) {
         const read = readsByOutput.get(value);
 
-        if (read !== undefined && edge.flushes.some((flush) => channelsOverlap(flush.slot, read.slot))) {
+        if (read !== undefined && edge.flushes.some((flush) => slotsMayAlias(flush.slot, read.slot))) {
           this.#pinned.add(read.output);
         }
       }
