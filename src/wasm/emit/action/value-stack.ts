@@ -106,11 +106,22 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         emitUse(node.value);
         emitUnaryOperator(body, node.operator);
         return;
-      case "compare":
+      case "compare": {
+        // eq against zero is wasm's eqz; the other zero compares have no
+        // dedicated opcode.
+        const eqzOperand = zeroEqualityOperand(node);
+
+        if (eqzOperand !== undefined) {
+          emitUse(eqzOperand);
+          body.i32Eqz();
+          return;
+        }
+
         emitUse(node.a);
         emitUse(node.b);
         emitCompareOperator(body, node.operator);
         return;
+      }
       case "select":
         emitUse(node.whenTrue);
         emitUse(node.whenFalse);
@@ -122,6 +133,24 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         emitProjection(body, node.width);
         return;
     }
+  }
+
+  function zeroEqualityOperand(node: CompareValueNode): ValueId | undefined {
+    if (node.operator !== "eq") {
+      return undefined;
+    }
+
+    if (isConstZero(node.a)) {
+      return node.b;
+    }
+
+    return isConstZero(node.b) ? node.a : undefined;
+  }
+
+  function isConstZero(id: ValueId): boolean {
+    const node = values.node(id);
+
+    return node.kind === "const" && node.value === 0;
   }
 
   return {

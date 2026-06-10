@@ -274,6 +274,22 @@ test("mov ah and mov al merge through memory for a final 32-bit read", async () 
   strictEqual(readRegister(stateView, "ebx"), 0x1234abcd);
 });
 
+test("zero compares encode as eqz", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+
+  const body = emitActionBlock(builder.finish(), { body: new WasmFunctionBodyEncoder() }).encode();
+  const opcodes = wasmBodyOpcodes(body);
+
+  // ZF and parity both compare against zero; nothing else compares equal.
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Eqz).length, 2);
+  strictEqual(opcodes.includes(wasmOpcode.i32Eq), false);
+});
+
 test("a value used twice computes once and both uses observe it", async () => {
   // eax = ebx = eax + ebx: one interned add consumed by both stores.
   const sumIntoBoth: SemanticTemplate = (s) => {

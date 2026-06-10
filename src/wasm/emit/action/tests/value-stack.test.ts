@@ -351,6 +351,65 @@ test("project masks to the requested width", () => {
   ]);
 });
 
+test("equality against constant zero emits eqz from either side", () => {
+  const values = createValueTable();
+  const external = values.internExternal(3);
+  const zero = values.internConst(0);
+  const left = values.internCompare("eq", external, zero);
+  const right = values.internCompare("eq", zero, external);
+  const { body, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: left },
+      { kind: "writeState", slot: gprChannel("ebx"), value: right },
+      { kind: "exit", reason: "next" }
+    ]),
+    [3]
+  );
+
+  valueStack.emitUse(left);
+  valueStack.emitUse(right);
+  valueStack.assertClear();
+
+  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+    wasmOpcode.localGet,
+    wasmOpcode.i32Eqz,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Eqz,
+    wasmOpcode.end
+  ]);
+});
+
+test("ne and non-zero equality keep the generic compare", () => {
+  const values = createValueTable();
+  const external = values.internExternal(3);
+  const notZero = values.internCompare("ne", external, values.internConst(0));
+  const one = values.internCompare("eq", external, values.internConst(1));
+  const { body, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: notZero },
+      { kind: "writeState", slot: gprChannel("ebx"), value: one },
+      { kind: "exit", reason: "next" }
+    ]),
+    [3]
+  );
+
+  valueStack.emitUse(notZero);
+  valueStack.emitUse(one);
+  valueStack.assertClear();
+
+  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+    wasmOpcode.localGet,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Ne,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Eq,
+    wasmOpcode.end
+  ]);
+});
+
 test("unconsumed captures fail assertClear and hold their scratch local", () => {
   const values = createValueTable();
   const read = values.addActionOutput();
