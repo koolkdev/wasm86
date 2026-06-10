@@ -88,7 +88,7 @@ export type EntryRegion = Readonly<{
   actions: readonly Action[];
 }>;
 
-// Edge bodies restore state and leave.
+// Edge bodies flush state and leave.
 export type EdgeRegion = Readonly<{
   id: RegionId;
   kind: "edge";

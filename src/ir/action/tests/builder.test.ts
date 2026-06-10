@@ -20,8 +20,9 @@ import type { SemanticTemplate } from "#ir/model/types.js";
 import { x86ArithmeticFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
-import { jmpSemantic } from "#x86/semantics/control.js";
+import { jccSemantic, jmpSemantic } from "#x86/semantics/control.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
+import { intSemantic } from "#x86/semantics/misc.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 import { popSemantic } from "#x86/semantics/stack.js";
@@ -594,15 +595,143 @@ test("value methods intern through the builder", () => {
   deepStrictEqual(block.values.node(4), { kind: "select", condition: 2, whenTrue: 3, whenFalse: 0 });
 });
 
-test("unsupported templates fail loudly", () => {
+test("jmp redirects the eip flush and exits jump", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(jmpSemantic(), [immBinding(0x2000)], { eip: 0x1000, nextEip: 0x1005 });
+
+  const block = builder.finish();
+
+  strictEqual(block.regions.length, 1);
+  deepStrictEqual(entryActions(block), [
+    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x2000) },
+    { kind: "exit", reason: "jump" }
+  ]);
+});
+
+test("a jump flushes earlier pendings with the target eip", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
+    eip: 0x1000,
+    nextEip: 0x1005
+  });
+  builder.addInstruction(jmpSemantic(), [immBinding(0x2000)], { eip: 0x1005, nextEip: 0x100a });
+
+  const block = builder.finish();
+  const v = block.values;
+
+  deepStrictEqual(entryActions(block), [
+    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x77) },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x2000) },
+    { kind: "exit", reason: "jump" }
+  ]);
+});
+
+test("a block ended by a jump rejects further instructions", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(jmpSemantic(), [immBinding(0x2000)], { eip: 0x1000, nextEip: 0x1005 });
+
   throws(
     () =>
-      createActionBuilder().addInstruction(
-        jmpSemantic(),
-        [immBinding(0x2000)],
-        { eip: 0x1000, nextEip: 0x1005 }
-      ),
-    /not supported by action builder yet/
+      builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(1)], {
+        eip: 0x1005,
+        nextEip: 0x100a
+      }),
+    /after a block terminator/
+  );
+});
+
+test("ops after a control terminator in one template fail loudly", () => {
+  const jumpThenSet: SemanticTemplate = (s) => {
+    s.jump(0x2000);
+    s.set(s.reg("eax"), 1, 32);
+  };
+
+  throws(
+    () => createActionBuilder().addInstruction(jumpThenSet, [], { eip: 0x1000, nextEip: 0x1005 }),
+    /cannot emit set after instruction terminator/
+  );
+});
+
+test("jcc after cmp branches on the recorded condition with per-edge eip and flag flushes", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(cmpSemantic(32), [regBinding("eax"), immBinding(5)], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+  builder.addInstruction(jccSemantic("E"), [immBinding(0x2000)], {
+    eip: 0x1003,
+    nextEip: 0x1005
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const actions = entryActions(block);
+
+  strictEqual(block.regions.length, 3);
+  deepStrictEqual(actions[actions.length - 1], {
+    kind: "branch",
+    condition: v.internCompare("eq", 0, v.internConst(5)),
+    taken: 1,
+    notTaken: 2
+  });
+
+  // The branch is the entry's terminator: nothing flushes on the main path.
+  strictEqual(stateWrites(block).length, 0);
+
+  // Each edge flushes the cmp's six flags plus its own eip and nothing else.
+  const taken = edgeRegion(block, 1);
+  const notTaken = edgeRegion(block, 2);
+
+  for (const edge of [taken, notTaken]) {
+    strictEqual(edge.flushes.length, 7);
+    deepStrictEqual(
+      edge.flushes.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
+      [...x86ArithmeticFlags].sort()
+    );
+  }
+
+  strictEqual(taken.flushes.find((write) => write.slot === eipChannel)?.value, v.internConst(0x2000));
+  deepStrictEqual(taken.exit, { kind: "exit", reason: "jump" });
+  strictEqual(notTaken.flushes.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1005));
+  deepStrictEqual(notTaken.exit, { kind: "exit", reason: "next" });
+});
+
+test("int flushes pending state with the resume eip before a host trap exit", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
+    eip: 0x1000,
+    nextEip: 0x1005
+  });
+  builder.addInstruction(intSemantic(), [immBinding(0x21)], { eip: 0x1005, nextEip: 0x1007 });
+
+  const block = builder.finish();
+  const v = block.values;
+
+  strictEqual(block.regions.length, 1);
+  deepStrictEqual(entryActions(block), [
+    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x77) },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
+    { kind: "exit", reason: "hostTrap", payload: v.internConst(0x21) }
+  ]);
+});
+
+test("a block ended by a host trap rejects further instructions", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(intSemantic(), [immBinding(3)], { eip: 0x1000, nextEip: 0x1002 });
+
+  throws(
+    () =>
+      builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(1)], {
+        eip: 0x1002,
+        nextEip: 0x1007
+      }),
+    /after a block terminator/
   );
 });
 
@@ -724,14 +853,17 @@ test("a template width that disagrees with its register binding fails loudly", (
 
 test("a failed instruction poisons the builder, discarding its partial pendings", () => {
   const builder = createActionBuilder();
-  const setThenTrap: Parameters<typeof builder.addInstruction>[0] = (s) => {
+  const setThenFail: Parameters<typeof builder.addInstruction>[0] = (s) => {
     s.set(s.operand(0), 1, 32);
-    s.hostTrap(0);
+    s.set(s.operand(1), 2, 32);
   };
 
   throws(
     () =>
-      builder.addInstruction(setThenTrap, [regBinding("eax")], { eip: 0x1000, nextEip: 0x1002 }),
+      builder.addInstruction(setThenFail, [regBinding("eax"), immBinding(0)], {
+        eip: 0x1000,
+        nextEip: 0x1002
+      }),
     /not supported by action builder yet/
   );
   throws(

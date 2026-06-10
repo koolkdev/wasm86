@@ -40,6 +40,8 @@ export type PendingChannels = Readonly<{
   // The pending map as of the last instruction boundary; the live map is
   // untouched.
   snapshot(): ReadonlyArray<readonly [StateChannel, ValueId]>;
+  // The live pending map, for edges that observe completed-instruction state.
+  entries(): ReadonlyArray<readonly [StateChannel, ValueId]>;
   // Materializes every pending as a writeState, in insertion order.
   flushAll(): void;
 }>;
@@ -158,6 +160,7 @@ export function createPendingChannels(
       unrestorableFlush = false;
     },
     snapshot,
+    entries: () => [...pending],
     flushAll(): void {
       for (const [channel, value] of pending) {
         flush(channel, value);

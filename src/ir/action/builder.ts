@@ -23,14 +23,15 @@ import type {
   SemanticOperandInput,
   SemanticTemplate,
   StorageInput,
+  TargetInput,
   ValueInput,
   VarRef
 } from "#ir/model/types.js";
 import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
 import type { OperandBinding } from "./operands.js";
 import { createPendingChannels } from "./pending.js";
-import { eipChannel, flagChannel, gprChannel, type GprChannel } from "./slots.js";
-import type { Action, ActionBlock, EdgeRegion, RegionId, WriteStateAction } from "./types.js";
+import { eipChannel, flagChannel, gprChannel, type GprChannel, type StateChannel } from "./slots.js";
+import type { Action, ActionBlock, EdgeRegion, ExitAction, RegionId, WriteStateAction } from "./types.js";
 import {
   createValueTable,
   fitsUnsigned,
@@ -81,6 +82,8 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   #terminated = false;
   #wroteMemory = false;
   #finished = false;
+  // "terminated" means the entry region already holds its terminator.
+  #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
 
   addInstruction(
     template: SemanticTemplate,
@@ -88,6 +91,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     location: InstructionLocation
   ): void {
     assert(!this.#finished, "cannot add instructions to a finished action builder");
+    assert(this.#blockEnd === "fallthrough", "cannot add instructions after a block terminator");
     assert(this.#instruction === undefined, "action builder has an incomplete instruction");
 
     this.#bindings = bindings;
@@ -112,11 +116,18 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   finish(): ActionBlock {
     assert(!this.#finished, "action builder is already finished");
     assert(this.#instruction === undefined, "action builder has an incomplete instruction");
-    assert(this.#pending.has(eipChannel), "action block did not advance eip; no instructions were added");
     this.#finished = true;
 
-    this.#pending.flushAll();
-    this.#actions.push({ kind: "exit", reason: "next" });
+    switch (this.#blockEnd) {
+      case "fallthrough":
+      case "jump":
+        assert(this.#pending.has(eipChannel), "action block did not advance eip; no instructions were added");
+        this.#pending.flushAll();
+        this.#actions.push({ kind: "exit", reason: this.#blockEnd === "jump" ? "jump" : "next" });
+        break;
+      case "terminated":
+        break;
+    }
 
     return {
       entry: entryRegionId,
@@ -362,16 +373,39 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return irVar(this.#flagBoolExpr(CONDITIONS[cc].expr));
   }
 
-  jump(): void {
-    throw notSupportedError("jump");
+  jump(target: TargetInput): void {
+    this.#beforeOp("jump");
+    this.#pending.write(eipChannel, this.#valueId(target));
+    this.#blockEnd = "jump";
+    this.#terminated = true;
   }
 
-  conditionalJump(): void {
-    throw notSupportedError("conditionalJump");
+  conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void {
+    this.#beforeOp("conditionalJump");
+
+    const conditionId = this.#valueId(condition);
+
+    this.#actions.push({
+      kind: "branch",
+      condition: conditionId,
+      taken: this.#branchEdge("jump", taken),
+      notTaken: this.#branchEdge("next", notTaken)
+    });
+    this.#blockEnd = "terminated";
+    this.#terminated = true;
   }
 
-  hostTrap(): void {
-    throw notSupportedError("hostTrap");
+  // A trap resumes at the next instruction with all state observable.
+  hostTrap(vector: ValueInput): void {
+    this.#beforeOp("hostTrap");
+
+    const vectorId = this.#valueId(vector);
+
+    this.#pending.write(eipChannel, this.#values.internConst(this.#location().nextEip));
+    this.#pending.flushAll();
+    this.#actions.push({ kind: "exit", reason: "hostTrap", payload: vectorId });
+    this.#blockEnd = "terminated";
+    this.#terminated = true;
   }
 
   #binary(op: string, operator: IrBinaryOperator, a: ValueInput, b: ValueInput): VarRef {
@@ -404,11 +438,28 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   // The snapshot leaves the main-path map untouched. Pending eip holds the
   // previous instruction's nextEip; the edge stores the faulting eip instead.
   #faultEdge(reason: "memoryReadFault" | "memoryWriteFault", address: ValueId): RegionId {
-    const eipValue = this.#values.internConst(this.#location().eip);
+    return this.#edgeRegion(
+      { kind: "exit", reason, payload: address },
+      this.#pending.snapshot(),
+      this.#values.internConst(this.#location().eip)
+    );
+  }
+
+  // Branch edges observe the completed instruction, so they flush live
+  // pendings.
+  #branchEdge(reason: "jump" | "next", target: TargetInput): RegionId {
+    return this.#edgeRegion({ kind: "exit", reason }, this.#pending.entries(), this.#valueId(target));
+  }
+
+  #edgeRegion(
+    exit: ExitAction,
+    pendings: ReadonlyArray<readonly [StateChannel, ValueId]>,
+    eipValue: ValueId
+  ): RegionId {
     const flushes: WriteStateAction[] = [];
     let wroteEip = false;
 
-    for (const [slot, value] of this.#pending.snapshot()) {
+    for (const [slot, value] of pendings) {
       if (slot === eipChannel) {
         wroteEip = true;
         flushes.push({ kind: "writeState", slot, value: eipValue });
@@ -424,7 +475,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     const id = this.#nextRegionId;
 
     this.#nextRegionId += 1;
-    this.#edgeRegions.push({ id, kind: "edge", flushes, exit: { kind: "exit", reason, payload: address } });
+    this.#edgeRegions.push({ id, kind: "edge", flushes, exit });
     return id;
   }
 

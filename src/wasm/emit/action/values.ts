@@ -100,20 +100,28 @@ class BlockValueUsage implements BlockValueAnalysis {
         this.#addUse(operand, actionIndex);
       }
 
-      if (action.kind === "guardMemory") {
-        this.#chargeEdgeUses(action.faultEdge, actionIndex);
+      switch (action.kind) {
+        case "guardMemory":
+          this.#chargeEdgeUses(action.faultEdge, actionIndex);
+          break;
+        case "branch":
+          this.#chargeEdgeUses(action.taken, actionIndex);
+          this.#chargeEdgeUses(action.notTaken, actionIndex);
+          break;
+        default:
+          break;
       }
     });
   }
 
-  // The edge branches off at its guard, so its uses land there.
-  #chargeEdgeUses(edgeId: RegionId, guardIndex: number): void {
+  // An edge branches off at its guard or branch, so its uses land there.
+  #chargeEdgeUses(edgeId: RegionId, actionIndex: number): void {
     const edge = this.#edges.get(edgeId);
 
-    assert(edge !== undefined, `guard targets unknown fault edge ${edgeId}`);
+    assert(edge !== undefined, `entry action targets unknown edge region ${edgeId}`);
 
     for (const value of edgeValues(edge)) {
-      this.#addUse(value, guardIndex);
+      this.#addUse(value, actionIndex);
     }
   }
 

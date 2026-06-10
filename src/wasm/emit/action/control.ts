@@ -6,20 +6,23 @@ import { encodeExit, ExitReason } from "#wasm/exit.js";
 
 // Edge-region encoding and exit lowering.
 
-// Edge regions encode as wasm blocks: a guard br_ifs to its edge's label,
-// and the edge body sits right after that block's end — the first edge is
-// innermost, so an edge's label depth from the entry code is its position
-// in region order. Regions end with an exit, so nothing falls through
-// between them.
+// Edge regions encode as wasm blocks: a guard or branch br_ifs to its edge's
+// label, and the edge body sits right after that block's end — the first
+// edge is innermost, so an edge's label depth from the entry code is its
+// position in nest order. The fall-through edge nests first: entry code that
+// ends without branching runs past the innermost end into its body. Regions
+// end with an exit, so nothing falls through between bodies.
 export function withEdgeBlocks(
   body: WasmFunctionBodyEncoder,
   edges: readonly EdgeRegion[],
-  emitEntry: (faultDepthOf: (edge: RegionId) => number) => void,
+  fallthroughEdge: RegionId | undefined,
+  emitEntry: (edgeDepthOf: (edge: RegionId) => number) => void,
   emitEdgeBody: (edge: EdgeRegion) => void
 ): void {
-  const depths = new Map<RegionId, number>(edges.map((edge, index) => [edge.id, index]));
+  const nested = nestOrder(edges, fallthroughEdge);
+  const depths = new Map<RegionId, number>(nested.map((edge, index) => [edge.id, index]));
 
-  for (let index = 0; index < edges.length; index += 1) {
+  for (let index = 0; index < nested.length; index += 1) {
     body.block();
   }
 
@@ -30,10 +33,21 @@ export function withEdgeBlocks(
     return depth;
   });
 
-  for (const edge of edges) {
+  for (const edge of nested) {
     body.endBlock();
     emitEdgeBody(edge);
   }
+}
+
+function nestOrder(edges: readonly EdgeRegion[], fallthroughEdge: RegionId | undefined): readonly EdgeRegion[] {
+  if (fallthroughEdge === undefined) {
+    return edges;
+  }
+
+  const fallthrough = edges.find((edge) => edge.id === fallthroughEdge);
+
+  assert(fallthrough !== undefined, `no edge region ${fallthroughEdge} in this block`);
+  return [fallthrough, ...edges.filter((edge) => edge !== fallthrough)];
 }
 
 // The default exit lowering: return the encoded i64 exit. Embeddings with

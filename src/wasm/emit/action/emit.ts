@@ -2,10 +2,12 @@ import { assert } from "#common/assert.js";
 import type {
   Action,
   ActionBlock,
+  BranchAction,
   EdgeRegion,
   GuardMemoryAction,
   RegionId
 } from "#ir/action/types.js";
+import { validateActionBlock } from "#ir/action/validate.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { emitExit, withEdgeBlocks } from "./control.js";
@@ -24,19 +26,14 @@ export type ActionEmitContext = Readonly<{
 }>;
 
 export function emitActionBlock(block: ActionBlock, context: ActionEmitContext): WasmFunctionBodyEncoder {
+  validateActionBlock(block);
+
   const { body } = context;
   const entry = block.regions.find((region) => region.id === block.entry);
 
   assert(entry !== undefined && entry.kind === "entry", "action block entry region is missing");
 
   const edges = block.regions.filter((region): region is EdgeRegion => region.kind === "edge");
-
-  assert(block.regions.length === edges.length + 1, "action block has more than one entry region");
-  assert(
-    entry.actions[entry.actions.length - 1]?.kind === "exit",
-    "action region does not terminate with an exit"
-  );
-
   const scratch = new WasmLocalScratchAllocator(body);
   const valueStack = createValueStack({
     body,
@@ -49,11 +46,10 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
     loadSlot: (slot, signed) => emitChannelLoad(body, slot, signed),
     loadGuest: (width, signed) => emitGuestLoad(body, width, signed)
   });
-  // Guards are 1:1 with their edges; the guard's byte length resurfaces at
-  // the edge's exit as the fault size detail.
-  const edgeFaultSizes = new Map<RegionId, number>();
+  // Exit detail per edge: the guard's byte length, zero for branch edges.
+  const edgeExitDetails = new Map<RegionId, number>();
 
-  function emitEntryAction(action: Action, faultDepthOf: (edge: RegionId) => number): void {
+  function emitEntryAction(action: Action, edgeDepthOf: (edge: RegionId) => number): void {
     switch (action.kind) {
       case "readState":
         valueStack.readState(action);
@@ -70,50 +66,71 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
         emitGuestStore(body, action.width);
         return;
       case "guardMemory":
-        emitGuard(action, faultDepthOf);
+        emitGuard(action, edgeDepthOf);
         return;
       case "exit":
         emitExit(body, action, valueStack.emitUse);
         return;
       case "branch":
-        throw new Error("branch not supported by action emitter yet");
+        emitBranch(action, edgeDepthOf);
+        return;
     }
   }
 
-  function emitGuard(action: GuardMemoryAction, faultDepthOf: (edge: RegionId) => number): void {
-    const edge = edges.find((candidate) => candidate.id === action.faultEdge);
+  function emitGuard(action: GuardMemoryAction, edgeDepthOf: (edge: RegionId) => number): void {
+    const edge = edgeById(action.faultEdge);
 
-    assert(edge !== undefined, `guard targets unknown fault edge ${action.faultEdge}`);
-    assert(!edgeFaultSizes.has(edge.id), `fault edge ${edge.id} is targeted by more than one guard`);
-    edgeFaultSizes.set(edge.id, action.byteLength);
-
+    edgeExitDetails.set(edge.id, action.byteLength);
     valueStack.captureForEdge(edge);
     emitGuardChecks(
       body,
       action.byteLength,
       () => valueStack.emitUse(action.address),
-      faultDepthOf(edge.id)
+      edgeDepthOf(edge.id)
     );
   }
 
-  function emitEdgeBody(edge: EdgeRegion): void {
-    const faultSize = edgeFaultSizes.get(edge.id);
+  // Both edges' values are captured before any path leaves the entry.
+  function emitBranch(action: BranchAction, edgeDepthOf: (edge: RegionId) => number): void {
+    const taken = edgeById(action.taken);
+    const notTaken = edgeById(action.notTaken);
 
-    assert(faultSize !== undefined, `edge region ${edge.id} is not targeted by a guard`);
+    edgeExitDetails.set(taken.id, 0);
+    edgeExitDetails.set(notTaken.id, 0);
+    valueStack.captureForEdge(taken);
+    valueStack.captureForEdge(notTaken);
+    valueStack.emitUse(action.condition);
+    body.brIf(edgeDepthOf(taken.id));
+  }
+
+  function emitEdgeBody(edge: EdgeRegion): void {
+    const detail = edgeExitDetails.get(edge.id);
+
+    assert(detail !== undefined, `edge region ${edge.id} was never targeted by the entry`);
 
     for (const flush of edge.flushes) {
       emitChannelStore(body, flush.slot, () => valueStack.emitUse(flush.value));
     }
 
-    emitExit(body, edge.exit, valueStack.emitUse, faultSize);
+    emitExit(body, edge.exit, valueStack.emitUse, detail);
   }
+
+  function edgeById(id: RegionId): EdgeRegion {
+    const edge = edges.find((candidate) => candidate.id === id);
+
+    assert(edge !== undefined, `no edge region ${id} in this block`);
+    return edge;
+  }
+
+  const terminator = entry.actions[entry.actions.length - 1];
 
   withEdgeBlocks(
     body,
     edges,
-    (faultDepthOf) => {
+    terminator !== undefined && terminator.kind === "branch" ? terminator.notTaken : undefined,
+    (edgeDepthOf) => {
       for (const action of entry.actions) {
-        emitEntryAction(action, faultDepthOf);
+        emitEntryAction(action, edgeDepthOf);
       }
     },
     emitEdgeBody

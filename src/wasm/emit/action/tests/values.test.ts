@@ -1,7 +1,7 @@
 import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { gprChannel } from "#ir/action/slots.js";
+import { eipChannel, gprChannel } from "#ir/action/slots.js";
 import type { Action, EdgeRegion } from "#ir/action/types.js";
 import { createValueTable, type ValueTable } from "#ir/action/values.js";
 import { analyzeBlockValues } from "#wasm/emit/action/values.js";
@@ -37,7 +37,10 @@ test("action operand edges count at their action index", () => {
       { kind: "branch", condition, taken: 1, notTaken: 2 },
       { kind: "exit", reason: "next", payload }
     ],
-    [{ id: 1, kind: "edge", flushes: [], exit: { kind: "exit", reason: "memoryReadFault" } }]
+    [
+      { id: 1, kind: "edge", flushes: [], exit: { kind: "exit", reason: "memoryReadFault" } },
+      { id: 2, kind: "edge", flushes: [], exit: { kind: "exit", reason: "next" } }
+    ]
   );
 
   // The dead load contributes nothing — only the store consumes the address.
@@ -115,6 +118,42 @@ test("fault edge operands count at their guard's entry index", () => {
   strictEqual(analysis.lastUse(read), 1);
   strictEqual(analysis.useCount(address), 2);
   strictEqual(analysis.lastUse(address), 1);
+});
+
+test("branch edge values count once per edge, at the branch's entry index", () => {
+  const values = createValueTable();
+  const read = values.addActionOutput();
+  const condition = values.internConst(1);
+  const target = values.internConst(0x2000);
+  const analysis = analyze(
+    values,
+    [
+      { kind: "readState", output: read, slot: gprChannel("ebx") },
+      { kind: "branch", condition, taken: 1, notTaken: 2 }
+    ],
+    [
+      {
+        id: 1,
+        kind: "edge",
+        flushes: [
+          { kind: "writeState", slot: gprChannel("eax"), value: read },
+          { kind: "writeState", slot: eipChannel, value: target }
+        ],
+        exit: { kind: "exit", reason: "jump" }
+      },
+      {
+        id: 2,
+        kind: "edge",
+        flushes: [{ kind: "writeState", slot: gprChannel("eax"), value: read }],
+        exit: { kind: "exit", reason: "next" }
+      }
+    ]
+  );
+
+  strictEqual(analysis.useCount(read), 2);
+  strictEqual(analysis.lastUse(read), 1);
+  strictEqual(analysis.useCount(condition), 1);
+  strictEqual(analysis.useCount(target), 1);
 });
 
 test("an edge use past an overlapping store pins the read", () => {
@@ -350,6 +389,6 @@ test("a guard targeting a missing edge region fails loudly", () => {
         { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 9 },
         { kind: "exit", reason: "next" }
       ]),
-    /unknown fault edge 9/
+    /unknown edge region 9/
   );
 });
