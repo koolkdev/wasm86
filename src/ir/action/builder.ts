@@ -25,8 +25,9 @@ import type {
 } from "#ir/model/types.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
 import type { OperandBinding } from "./operands.js";
+import { createPendingChannels } from "./pending.js";
 import { eipChannel, flagChannel } from "./slots.js";
-import type { Action, ActionBlock, RegionId, StateSlot } from "./types.js";
+import type { Action, ActionBlock, RegionId } from "./types.js";
 import { createValueTable, type ValueId } from "./values.js";
 
 export type InstructionLocation = Readonly<{ eip: number; nextEip: number }>;
@@ -54,12 +55,7 @@ const entryRegionId: RegionId = 0;
 class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   readonly #values = createValueTable();
   readonly #actions: Action[] = [];
-  readonly #pending = new Map<StateSlot, ValueId>();
-  // readState leaf per channel; a channel is read at most once per region.
-  // Must be invalidated together with #pending once anything invalidates
-  // pendings mid-region (dynamic register writes, barriers) — a stale leaf
-  // here would silently serve a channel whose memory has changed.
-  readonly #reads = new Map<StateSlot, ValueId>();
+  readonly #pending = createPendingChannels(this.#values, (action) => this.#actions.push(action));
   // Fused condition expressions from the latest writeFlags, for condition()
   // (04b) to prefer over recomputing from flag bytes. Any flag write
   // invalidates all earlier entries: they were derived from flag state that
@@ -100,17 +96,12 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     assert(this.#pending.has(eipChannel), "action block did not advance eip; no instructions were added");
     this.#finished = true;
 
-    const actions = this.#actions;
-
-    for (const [slot, value] of this.#pending) {
-      actions.push({ kind: "writeState", slot, value });
-    }
-
-    actions.push({ kind: "exit", reason: "next" });
+    this.#pending.flushAll();
+    this.#actions.push({ kind: "exit", reason: "next" });
 
     return {
       entry: entryRegionId,
-      regions: [{ id: entryRegionId, kind: "entry", actions }],
+      regions: [{ id: entryRegionId, kind: "entry", actions: this.#actions }],
       values: this.#values
     };
   }
@@ -162,23 +153,22 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
     const binding = this.#binding(storage.index);
 
-    if (accessWidth !== 32) {
-      throw notSupportedError(`${accessWidth}-bit get`);
-    }
-
-    if (options.signed === true) {
-      throw notSupportedError("signed get");
-    }
-
     switch (binding.kind) {
-      case "imm":
-        return irVar(this.#values.internConst(binding.value));
-      case "reg":
-        if (binding.channel.byteLength !== 4) {
-          throw notSupportedError(`${binding.channel.byteLength * 8}-bit register get`);
-        }
+      case "imm": {
+        const value = this.#values.internConst(binding.value);
 
-        return irVar(this.#readChannel(binding.channel));
+        return irVar(
+          options.signed === true
+            ? this.#values.extendTo(accessWidth, value)
+            : this.#values.projectTo(accessWidth, value)
+        );
+      }
+      case "reg":
+        assert(
+          binding.channel.byteLength * 8 === accessWidth,
+          `${accessWidth}-bit get from a ${binding.channel.byteLength * 8}-bit register channel`
+        );
+        return irVar(this.#pending.read(binding.channel, options));
       case "mem":
       case "external":
         throw notSupportedError(`get from ${binding.kind} operand binding`);
@@ -199,16 +189,16 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       throw notSupportedError(`set to ${binding.kind} operand binding`);
     }
 
-    if (accessWidth !== 32 || binding.channel.byteLength !== 4) {
-      throw notSupportedError(`${accessWidth}-bit register set`);
-    }
-
-    this.#pending.set(binding.channel, this.#valueId(value));
+    assert(
+      binding.channel.byteLength * 8 === accessWidth,
+      `${accessWidth}-bit set to a ${binding.channel.byteLength * 8}-bit register channel`
+    );
+    this.#pending.write(binding.channel, this.#valueId(value));
   }
 
   next(): void {
     this.#beforeOp("next");
-    this.#pending.set(eipChannel, this.#values.internConst(this.#location().nextEip));
+    this.#pending.write(eipChannel, this.#values.internConst(this.#location().nextEip));
     this.#terminated = true;
   }
 
@@ -249,11 +239,13 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   }
 
   i32Extend8S(value: ValueInput): VarRef {
-    return this.#unary("i32Extend8S", "extend8_s", value);
+    this.#beforeOp("i32Extend8S");
+    return irVar(this.#values.extendTo(8, this.#valueId(value)));
   }
 
   i32Extend16S(value: ValueInput): VarRef {
-    return this.#unary("i32Extend16S", "extend16_s", value);
+    this.#beforeOp("i32Extend16S");
+    return irVar(this.#values.extendTo(16, this.#valueId(value)));
   }
 
   i32Popcnt(value: ValueInput): VarRef {
@@ -269,12 +261,20 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   project(width: OperandWidth, value: ValueInput): VarRef {
     this.#beforeOp("project");
-    return irVar(this.#values.internProject(width, this.#valueId(value)));
+    return irVar(this.#values.projectTo(width, this.#valueId(value)));
   }
 
   compare(width: OperandWidth, operator: IrCompareOperator, a: ValueInput, b: ValueInput): VarRef {
     this.#beforeOp("compare");
-    return irVar(this.#values.internCompare(width, operator, this.#valueId(a), this.#valueId(b)));
+    // Narrow compares lower by predicate class: signed predicates need
+    // sign-extended operands, the rest masked ones.
+    const lower = signedComparePredicates.has(operator)
+      ? (id: ValueId) => this.#values.extendTo(width, id)
+      : (id: ValueId) => this.#values.projectTo(width, id);
+
+    return irVar(
+      this.#values.internCompare(operator, lower(this.#valueId(a)), lower(this.#valueId(b)))
+    );
   }
 
   flagExpr(value: ValueInput): IrFlagWriteCell {
@@ -292,7 +292,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       // undef -> preserve: any value is architecturally allowed, so keeping
       // the old one is free and kills the write.
       if (cell.kind === "expr") {
-        this.#pending.set(flagChannel(flag), this.#valueId(cell.value));
+        this.#pending.write(flagChannel(flag), this.#valueId(cell.value));
       }
     }
 
@@ -331,26 +331,6 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return irVar(this.#values.internUnary(operator, this.#valueId(value)));
   }
 
-  #readChannel(channel: StateSlot): ValueId {
-    const pending = this.#pending.get(channel);
-
-    if (pending !== undefined) {
-      return pending;
-    }
-
-    const existing = this.#reads.get(channel);
-
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const output = this.#values.addActionOutput();
-
-    this.#actions.push({ kind: "readState", output, slot: channel });
-    this.#reads.set(channel, output);
-    return output;
-  }
-
   #valueId(input: ValueInput): ValueId {
     const value = toValueRef(input);
 
@@ -383,6 +363,13 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     assert(!this.#terminated, `cannot emit ${op} after instruction terminator`);
   }
 }
+
+const signedComparePredicates: ReadonlySet<IrCompareOperator> = new Set([
+  "lt_s",
+  "le_s",
+  "gt_s",
+  "ge_s"
+]);
 
 function notSupportedError(what: string): Error {
   return new Error(`${what} not supported by action builder yet`);

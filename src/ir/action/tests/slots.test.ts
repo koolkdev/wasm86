@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import {
+  channelCovers,
   channelsOverlap,
   eipChannel,
   flagChannel,
@@ -57,6 +58,31 @@ test("channelsOverlap matches byte-range intersection for gpr channels", () => {
     strictEqual(channelsOverlap(a, b), expected, `${JSON.stringify(a)} vs ${JSON.stringify(b)}`);
     strictEqual(channelsOverlap(b, a), expected, `${JSON.stringify(b)} vs ${JSON.stringify(a)}`);
   }
+});
+
+test("channelCovers requires full byte-range containment", () => {
+  const coverCases: ReadonlyArray<readonly [StateChannel, StateChannel, boolean]> = [
+    [gprChannel("eax"), gprChannel("eax"), true],
+    [gprChannel("eax"), gprChannel("ax"), true],
+    [gprChannel("eax"), gprChannel("al"), true],
+    [gprChannel("eax"), gprChannel("ah"), true],
+    [gprChannel("ax"), gprChannel("al"), true],
+    [gprChannel("ax"), gprChannel("ah"), true],
+    [gprChannel("ax"), gprChannel("eax"), false],
+    [gprChannel("al"), gprChannel("ax"), false],
+    [gprChannel("al"), gprChannel("ah"), false],
+    [gprChannel("ah"), gprChannel("ax"), false],
+    [gprChannel("eax"), gprChannel("cl"), false]
+  ];
+
+  for (const [outer, inner, expected] of coverCases) {
+    strictEqual(channelCovers(outer, inner), expected, `${JSON.stringify(outer)} covers ${JSON.stringify(inner)}`);
+  }
+
+  strictEqual(channelCovers(flagChannel("CF"), flagChannel("CF")), true);
+  strictEqual(channelCovers(flagChannel("CF"), flagChannel("ZF")), false);
+  strictEqual(channelCovers(eipChannel, eipChannel), true);
+  strictEqual(channelCovers(eipChannel, gprChannel("eax")), false);
 });
 
 test("channelsOverlap keeps flags and eip disjoint from everything else", () => {

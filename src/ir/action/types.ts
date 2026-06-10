@@ -24,6 +24,9 @@ export type ReadStateAction = Readonly<{
   kind: "readState";
   output: ValueId;
   slot: StateSlot;
+  // Present only on channels narrower than the word: the emitter lowers the
+  // read to a sign-extending load.
+  signed?: true;
 }>;
 
 export type ReadMemoryAction = Readonly<{

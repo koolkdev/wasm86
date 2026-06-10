@@ -44,6 +44,7 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
   for (const action of region.actions) {
     switch (action.kind) {
       case "readState":
+        assert(action.signed === undefined, "signed state read not supported by action emitter yet");
         valueStack.readState(action);
         break;
       case "writeState":

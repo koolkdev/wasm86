@@ -63,9 +63,30 @@ export function channelsOverlap(a: StateChannel, b: StateChannel): boolean {
       b.byteOffsetInReg < a.byteOffsetInReg + a.byteLength;
   }
 
-  if (a.kind === "flag" && b.kind === "flag") {
-    return a.flag === b.flag;
+  return sameChannel(a, b);
+}
+
+// Whether a write to `outer` overwrites every byte of `inner`.
+export function channelCovers(outer: StateChannel, inner: StateChannel): boolean {
+  if (outer.kind === "gpr" && inner.kind === "gpr") {
+    return outer.reg === inner.reg &&
+      outer.byteOffsetInReg <= inner.byteOffsetInReg &&
+      inner.byteOffsetInReg + inner.byteLength <= outer.byteOffsetInReg + outer.byteLength;
   }
 
-  return a.kind === "eip" && b.kind === "eip";
+  return sameChannel(outer, inner);
+}
+
+function sameChannel(a: StateChannel, b: StateChannel): boolean {
+  switch (a.kind) {
+    case "gpr":
+      return b.kind === "gpr" &&
+        a.reg === b.reg &&
+        a.byteOffsetInReg === b.byteOffsetInReg &&
+        a.byteLength === b.byteLength;
+    case "flag":
+      return b.kind === "flag" && a.flag === b.flag;
+    case "eip":
+      return b.kind === "eip";
+  }
 }

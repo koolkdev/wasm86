@@ -6,7 +6,7 @@ import { immBinding, regBinding } from "#ir/action/operands.js";
 import { eipChannel, gprChannel } from "#ir/action/slots.js";
 import type { SemanticTemplate } from "#ir/model/types.js";
 import type { RegName } from "#x86/types.js";
-import { movSemantic } from "#x86/semantics/mov.js";
+import { movSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
@@ -117,6 +117,56 @@ test("a mov before the xchg observes the pre-swap value", async () => {
   strictEqual(readRegister(stateView, "ecx"), 0x11111111);
   strictEqual(readRegister(stateView, "eax"), 0x22222222);
   strictEqual(readRegister(stateView, "ebx"), 0x11111111);
+});
+
+test("a byte write merges into the full register through state memory", async () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(8), [regBinding("al"), immBinding(0x9a)], {
+    eip: 0x1000,
+    nextEip: 0x1002
+  });
+  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], {
+    eip: 0x1002,
+    nextEip: 0x1004
+  });
+
+  const { stateView, run } = await instantiateActionBlock(builder.finish());
+
+  writeWasmCpuState(stateView, { eax: 0x12345678 });
+  assertFallthrough(run());
+  strictEqual(readRegister(stateView, "eax"), 0x1234569a);
+  strictEqual(readRegister(stateView, "ebx"), 0x1234569a);
+});
+
+test("a 16-bit immediate store leaves the upper register half intact", async () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(16), [regBinding("ax"), immBinding(0xbeef)], {
+    eip: 0x1000,
+    nextEip: 0x1004
+  });
+
+  const { stateView, run } = await instantiateActionBlock(builder.finish());
+
+  writeWasmCpuState(stateView, { eax: 0x12345678 });
+  assertFallthrough(run());
+  strictEqual(readRegister(stateView, "eax"), 0x1234beef);
+});
+
+test("movzx r32, r8 zero-extends the high byte through an offset load", async () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movzxSemantic(8, 32), [regBinding("ebx"), regBinding("ah")], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+
+  const { stateView, run } = await instantiateActionBlock(builder.finish());
+
+  writeWasmCpuState(stateView, { eax: 0x1234f678 });
+  assertFallthrough(run());
+  strictEqual(readRegister(stateView, "ebx"), 0xf6);
 });
 
 test("a value used twice computes once and both uses observe it", async () => {

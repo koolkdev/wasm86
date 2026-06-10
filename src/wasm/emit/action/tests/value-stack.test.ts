@@ -230,7 +230,7 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
   const one = values.internConst(1);
   const two = values.internConst(2);
   const whenTrue = values.internUnary("popcnt", one);
-  const condition = values.internCompare(32, "lt_u", one, two);
+  const condition = values.internCompare("lt_u", one, two);
   const select = values.internSelect(condition, whenTrue, two);
   const { body, valueStack } = createTestEmitter(
     values,
@@ -263,8 +263,8 @@ test("operators map to their wasm opcodes", () => {
   const mixed = values.internBinary("xor", shifted, values.internBinary("shr_u", one, two));
   const extended = values.internUnary("extend16_s", values.internUnary("extend8_s", one));
   const masked = values.internBinary("sub", values.internBinary("and", one, two), values.internBinary("or", one, two));
-  const equal = values.internCompare(32, "eq", one, two);
-  const signed = values.internCompare(32, "ge_s", one, two);
+  const equal = values.internCompare("eq", one, two);
+  const signed = values.internCompare("ge_s", one, two);
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
@@ -349,25 +349,6 @@ test("project masks to the requested width", () => {
     wasmOpcode.i32Load,
     wasmOpcode.end
   ]);
-});
-
-test("narrow compares are rejected for now", () => {
-  const values = createValueTable();
-  const one = values.internConst(1);
-  const two = values.internConst(2);
-  const narrow = values.internCompare(16, "eq", one, two);
-  const { valueStack } = createTestEmitter(
-    values,
-    entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: narrow },
-      { kind: "exit", reason: "next" }
-    ])
-  );
-
-  throws(
-    () => valueStack.emitUse(narrow),
-    /16-bit compare not supported by action value stack yet/
-  );
 });
 
 test("unconsumed captures fail assertClear and hold their scratch local", () => {

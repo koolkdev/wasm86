@@ -109,7 +109,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       case "compare":
         emitUse(node.a);
         emitUse(node.b);
-        emitCompareOperator(body, node.width, node.operator);
+        emitCompareOperator(body, node.operator);
         return;
       case "select":
         emitUse(node.whenTrue);
@@ -237,15 +237,7 @@ function emitUnaryOperator(body: WasmFunctionBodyEncoder, operator: IrUnaryOpera
   }
 }
 
-function emitCompareOperator(
-  body: WasmFunctionBodyEncoder,
-  width: OperandWidth,
-  operator: IrCompareOperator
-): void {
-  if (width !== 32) {
-    throw new Error(`${width}-bit compare not supported by action value stack yet`);
-  }
-
+function emitCompareOperator(body: WasmFunctionBodyEncoder, operator: IrCompareOperator): void {
   switch (operator) {
     case "eq":
       body.i32Eq();
