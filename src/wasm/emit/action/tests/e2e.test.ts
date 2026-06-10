@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { createActionBuilder, type ActionBuilder } from "#ir/action/builder.js";
 import { immBinding, regBinding } from "#ir/action/operands.js";
 import { eipChannel, gprChannel } from "#ir/action/slots.js";
-import type { ActionBlock, StateSlot } from "#ir/action/types.js";
+import type { Action, ActionBlock, StateSlot } from "#ir/action/types.js";
 import type { SemanticTemplate } from "#ir/model/types.js";
 import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
@@ -25,8 +25,15 @@ function readRegister(view: DataView, name: RegName): number {
   return readWasmStateChannel(view, gprChannel(name));
 }
 
+function entryActions(block: ActionBlock): readonly Action[] {
+  const entry = block.regions[0]!;
+
+  ok(entry.kind === "entry", "first region is the entry");
+  return entry.actions;
+}
+
 function touchedGprSlots(block: ActionBlock): StateSlot[] {
-  return block.regions[0]!.actions.flatMap((action) =>
+  return entryActions(block).flatMap((action) =>
     (action.kind === "readState" || action.kind === "writeState") && action.slot.kind === "gpr"
       ? [action.slot]
       : []
@@ -79,7 +86,7 @@ test("chained movs forward one read to both destinations", async () => {
   const block = builder.finish();
 
   // The second mov forwards the first read instead of reading ebx.
-  strictEqual(block.regions[0]!.actions.filter((action) => action.kind === "readState").length, 1);
+  strictEqual(entryActions(block).filter((action) => action.kind === "readState").length, 1);
 
   const { stateView, run } = await instantiateActionBlock(block);
 

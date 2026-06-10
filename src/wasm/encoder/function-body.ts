@@ -102,6 +102,19 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  brIf(labelDepth: number, hint?: WasmBranchHint): this {
+    if (hint !== undefined) {
+      this.#branchHints.push({
+        instructionOffset: this.#instructions.byteLength,
+        value: hint
+      });
+    }
+
+    this.#writeInstruction(wasmOpcode.brIf);
+    this.#instructions.writeU32(labelDepth);
+    return this;
+  }
+
   brTable(labelDepths: readonly number[], defaultLabelDepth: number): this {
     this.#writeInstruction(wasmOpcode.brTable);
     this.#instructions.writeVecLength(labelDepths.length);

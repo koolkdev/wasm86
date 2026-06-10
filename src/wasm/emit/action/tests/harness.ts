@@ -12,6 +12,7 @@ import { emitActionBlock } from "#wasm/emit/action/emit.js";
 
 export type InstantiatedActionBlock = Readonly<{
   stateView: DataView;
+  guestView: DataView;
   run(): bigint;
 }>;
 
@@ -33,6 +34,7 @@ export async function instantiateActionBlock(block: ActionBlock): Promise<Instan
 
   return {
     stateView: new DataView(state.buffer),
+    guestView: new DataView(guest.buffer),
     run: () => (run as () => bigint)()
   };
 }

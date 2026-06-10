@@ -18,6 +18,7 @@ export const wasmOpcode = {
   if: 0x04,
   else: 0x05,
   br: 0x0c,
+  brIf: 0x0d,
   brTable: 0x0e,
   call: 0x10,
   callIndirect: 0x11,

@@ -30,7 +30,7 @@ import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
 import type { OperandBinding } from "./operands.js";
 import { createPendingChannels } from "./pending.js";
 import { eipChannel, flagChannel, gprChannel, type GprChannel } from "./slots.js";
-import type { Action, ActionBlock, ActionRegion, RegionId } from "./types.js";
+import type { Action, ActionBlock, EdgeRegion, RegionId, WriteStateAction } from "./types.js";
 import {
   createValueTable,
   fitsUnsigned,
@@ -70,7 +70,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   // invalidates all earlier entries: they were derived from flag state that
   // is now stale.
   readonly #conditions = new Map<ConditionCode, ValueId>();
-  readonly #edgeRegions: ActionRegion[] = [];
+  readonly #edgeRegions: EdgeRegion[] = [];
   // An effective address is computed once per operand, at its first use —
   // x86 computes an EA once, so later uses (the store) see the same address
   // even when the instruction rewrites a base register in between.
@@ -405,28 +405,26 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   // previous instruction's nextEip; the edge stores the faulting eip instead.
   #faultEdge(reason: "memoryReadFault" | "memoryWriteFault", address: ValueId): RegionId {
     const eipValue = this.#values.internConst(this.#location().eip);
-    const actions: Action[] = [];
+    const flushes: WriteStateAction[] = [];
     let wroteEip = false;
 
     for (const [slot, value] of this.#pending.snapshot()) {
       if (slot === eipChannel) {
         wroteEip = true;
-        actions.push({ kind: "writeState", slot, value: eipValue });
+        flushes.push({ kind: "writeState", slot, value: eipValue });
       } else {
-        actions.push({ kind: "writeState", slot, value });
+        flushes.push({ kind: "writeState", slot, value });
       }
     }
 
     if (!wroteEip) {
-      actions.push({ kind: "writeState", slot: eipChannel, value: eipValue });
+      flushes.push({ kind: "writeState", slot: eipChannel, value: eipValue });
     }
-
-    actions.push({ kind: "exit", reason, payload: address });
 
     const id = this.#nextRegionId;
 
     this.#nextRegionId += 1;
-    this.#edgeRegions.push({ id, kind: "edge", actions });
+    this.#edgeRegions.push({ id, kind: "edge", flushes, exit: { kind: "exit", reason, payload: address } });
     return id;
   }
 

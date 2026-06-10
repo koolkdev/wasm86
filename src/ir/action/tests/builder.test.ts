@@ -5,7 +5,9 @@ import { createActionBuilder } from "#ir/action/builder.js";
 import { immBinding, memBinding, regBinding } from "#ir/action/operands.js";
 import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
 import type {
+  Action,
   ActionBlock,
+  EdgeRegion,
   GuardMemoryAction,
   ReadMemoryAction,
   ReadStateAction,
@@ -25,8 +27,22 @@ import { setccSemantic } from "#x86/semantics/setcc.js";
 import { popSemantic } from "#x86/semantics/stack.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 
+function entryActions(block: ActionBlock): readonly Action[] {
+  const entry = block.regions[0]!;
+
+  ok(entry.kind === "entry", "first region is the entry");
+  return entry.actions;
+}
+
+function edgeRegion(block: ActionBlock, index: number): EdgeRegion {
+  const region = block.regions[index]!;
+
+  ok(region.kind === "edge", `region ${index} is an edge`);
+  return region;
+}
+
 function stateWrites(block: ActionBlock): WriteStateAction[] {
-  return block.regions[0]!.actions.filter(
+  return entryActions(block).filter(
     (action): action is WriteStateAction => action.kind === "writeState"
   );
 }
@@ -88,7 +104,7 @@ test("pending writes overwrite per channel and consts intern across instructions
 
   const block = builder.finish();
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("eax"), value: block.values.internConst(9) },
     { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x100f) },
     { kind: "writeState", slot: gprChannel("ecx"), value: block.values.internConst(7) },
@@ -109,7 +125,7 @@ test("mov r32, r32 records one readState and forwards its leaf", () => {
 
   const block = builder.finish();
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
     { kind: "writeState", slot: eipChannel, value: 1 },
@@ -128,7 +144,7 @@ test("repeated get of an unwritten channel returns the same leaf across instruct
 
   const block = builder.finish();
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
     { kind: "writeState", slot: eipChannel, value: 2 },
@@ -166,7 +182,7 @@ test("two adds in one block flush exactly one write per channel, second instruct
   builder.addInstruction(add, [regBinding("eax"), immBinding(7)], { eip: 0x1003, nextEip: 0x1006 });
 
   const block = builder.finish();
-  const actions = block.regions[0]!.actions;
+  const actions = entryActions(block);
   const writes = stateWrites(block);
 
   // One read feeds both adds; one flush per channel: six flags + eax + eip.
@@ -263,7 +279,7 @@ test("xchg eax, ebx swaps pendings through two reads with no temporaries", () =>
 
   const block = builder.finish();
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("eax") },
     { kind: "readState", output: 1, slot: gprChannel("ebx") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
@@ -286,7 +302,7 @@ test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
 
   const block = builder.finish();
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("ah") },
     { kind: "writeState", slot: gprChannel("bl"), value: 0 },
     { kind: "writeState", slot: eipChannel, value: 1 },
@@ -311,7 +327,7 @@ test("write al then read eax flushes the byte and reloads the word", () => {
   const block = builder.finish();
   const v = block.values;
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("al"), value: v.internConst(0x12) },
     { kind: "readState", output: 2, slot: gprChannel("eax") },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1004) },
@@ -335,7 +351,7 @@ test("write eax then read al flushes the word and reloads the byte", () => {
   const block = builder.finish();
   const v = block.values;
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
     { kind: "readState", output: 2, slot: gprChannel("al") },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
@@ -359,7 +375,7 @@ test("write al then write eax drops the byte pending with no flush", () => {
   const block = builder.finish();
   const v = block.values;
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
     { kind: "exit", reason: "next" }
@@ -379,7 +395,7 @@ test("write eax then read ah reloads through the high-byte channel", () => {
   });
 
   const block = builder.finish();
-  const actions = block.regions[0]!.actions;
+  const actions = entryActions(block);
 
   strictEqual(actions[0]!.kind, "writeState");
   deepStrictEqual(actions[1], { kind: "readState", output: 2, slot: gprChannel("ah") });
@@ -402,7 +418,7 @@ test("ax and al pendings mix without touching flag pendings", () => {
   });
 
   const block = builder.finish();
-  const actions = block.regions[0]!.actions;
+  const actions = entryActions(block);
   const indexOf = (predicate: (action: (typeof actions)[number]) => boolean) =>
     actions.findIndex(predicate);
 
@@ -435,7 +451,7 @@ test("movzx r32, r8 forwards the unsigned byte read unmasked", () => {
 
   const block = builder.finish();
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("al") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
     { kind: "writeState", slot: eipChannel, value: 1 },
@@ -454,7 +470,7 @@ test("movsx r32, r8 marks the read for a sign-extending load", () => {
 
   const block = builder.finish();
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("al"), signed: true },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
     { kind: "writeState", slot: eipChannel, value: 1 },
@@ -542,7 +558,7 @@ test("a signed byte get feeds a signed compare with no extra extends", () => {
   });
 
   const block = builder.finish();
-  const actions = block.regions[0]!.actions;
+  const actions = entryActions(block);
 
   deepStrictEqual(actions[0], { kind: "readState", output: 0, slot: gprChannel("al"), signed: true });
   deepStrictEqual(actions[1], { kind: "readState", output: 1, slot: gprChannel("bl"), signed: true });
@@ -567,7 +583,7 @@ test("value methods intern through the builder", () => {
   const block = builder.finish();
 
   // 0: eax leaf, 1: 0, 2: compare, 3: sub(0 - leaf), 4: select, 5: 0x1003.
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("eax"), value: 4 },
     { kind: "writeState", slot: eipChannel, value: 5 },
@@ -611,7 +627,7 @@ test("setcc after cmp consumes the recorded condition expression", () => {
     stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
     v.internSelect(condition, v.internConst(1), v.internConst(0))
   );
-  strictEqual(block.regions[0]!.actions.filter((action) => action.kind === "readState").length, 1);
+  strictEqual(entryActions(block).filter((action) => action.kind === "readState").length, 1);
 });
 
 test("setcc with no recorded condition builds from flag byte reads", () => {
@@ -624,7 +640,7 @@ test("setcc with no recorded condition builds from flag byte reads", () => {
 
   const block = builder.finish();
   const v = block.values;
-  const reads = block.regions[0]!.actions.filter(
+  const reads = entryActions(block).filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
 
@@ -662,7 +678,7 @@ test("a flag write between cmp and setcc invalidates the recorded condition", ()
 
   const block = builder.finish();
   const v = block.values;
-  const actions = block.regions[0]!.actions;
+  const actions = entryActions(block);
 
   // E rebuilds from the add's pending ZF expression — no flag byte load.
   strictEqual(
@@ -778,7 +794,7 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
   const address = v.internBinary("add", 1, v.internConst(8));
 
   strictEqual(block.regions.length, 2);
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("eax") },
     { kind: "readState", output: 1, slot: gprChannel("ebx") },
     { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 },
@@ -787,14 +803,13 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
     { kind: "exit", reason: "next" }
   ]);
 
-  const edge = block.regions[1]!;
+  const edge = edgeRegion(block, 1);
 
   strictEqual(edge.id, 1);
-  strictEqual(edge.kind, "edge");
-  deepStrictEqual(edge.actions, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
-    { kind: "exit", reason: "memoryWriteFault", payload: address }
+  deepStrictEqual(edge.flushes, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
   ]);
+  deepStrictEqual(edge.exit, { kind: "exit", reason: "memoryWriteFault", payload: address });
 });
 
 test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", () => {
@@ -808,7 +823,7 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
 
   const block = builder.finish();
   const v = block.values;
-  const actions = block.regions[0]!.actions;
+  const actions = entryActions(block);
   const guards = actions.filter((action): action is GuardMemoryAction => action.kind === "guardMemory");
 
   // guardStorageReadWrite emits a read guard then a write guard, both on the
@@ -839,14 +854,12 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
 
   // Each guard owns an edge with its own fault reason; nothing was pending
   // at guard time, so both flush only the instruction's eip.
-  deepStrictEqual(block.regions[1]!.actions, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
-    { kind: "exit", reason: "memoryReadFault", payload: 0 }
-  ]);
-  deepStrictEqual(block.regions[2]!.actions, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
-    { kind: "exit", reason: "memoryWriteFault", payload: 0 }
-  ]);
+  const eipFlushes = [{ kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }];
+
+  deepStrictEqual(edgeRegion(block, 1).flushes, eipFlushes);
+  deepStrictEqual(edgeRegion(block, 1).exit, { kind: "exit", reason: "memoryReadFault", payload: 0 });
+  deepStrictEqual(edgeRegion(block, 2).flushes, eipFlushes);
+  deepStrictEqual(edgeRegion(block, 2).exit, { kind: "exit", reason: "memoryWriteFault", payload: 0 });
 });
 
 test("a later guard's edge flushes earlier pendings with the faulting eip", () => {
@@ -865,7 +878,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
   const block = builder.finish();
   const v = block.values;
   const sum = v.internBinary("add", 0, v.internConst(5));
-  const ebxRead = block.regions[0]!.actions.find(
+  const ebxRead = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
   )!;
   const address = v.internBinary("add", ebxRead.output, v.internConst(8));
@@ -874,19 +887,16 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
 
   // The edge snapshots everything dirty at the guard — the add's six flags
   // and eax sum — plus the faulting instruction's eip.
-  const edge = block.regions[1]!;
-  const edgeWrites = edge.actions.filter(
-    (action): action is WriteStateAction => action.kind === "writeState"
-  );
+  const edge = edgeRegion(block, 1);
 
-  strictEqual(edgeWrites.length, 8);
+  strictEqual(edge.flushes.length, 8);
   deepStrictEqual(
-    edgeWrites.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
+    edge.flushes.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
     [...x86ArithmeticFlags].sort()
   );
-  strictEqual(edgeWrites.find((write) => write.slot === gprChannel("eax"))?.value, sum);
-  strictEqual(edgeWrites.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1003));
-  deepStrictEqual(edge.actions[edge.actions.length - 1], {
+  strictEqual(edge.flushes.find((write) => write.slot === gprChannel("eax"))?.value, sum);
+  strictEqual(edge.flushes.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1003));
+  deepStrictEqual(edge.exit, {
     kind: "exit",
     reason: "memoryWriteFault",
     payload: address
@@ -899,7 +909,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
   strictEqual(mainWrites.find((write) => write.slot === gprChannel("eax"))?.value, sum);
   strictEqual(mainWrites.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1006));
 
-  const store = block.regions[0]!.actions.find(
+  const store = entryActions(block).find(
     (action): action is WriteMemoryAction => action.kind === "writeMemory"
   )!;
 
@@ -922,7 +932,7 @@ test("lea builds general modrm addresses from channel reads", () => {
   const address = v.internBinary("add", v.internBinary("add", 0, scaled), v.internConst(0x10));
 
   strictEqual(block.regions.length, 1);
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("ebx") },
     { kind: "readState", output: 1, slot: gprChannel("esi") },
     { kind: "writeState", slot: gprChannel("eax"), value: address },
@@ -944,17 +954,17 @@ test("an absolute address is just its displacement constant", () => {
   const v = block.values;
   const address = v.internConst(0x2000);
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
     { kind: "readMemory", output: 2, address, width: 32 },
     { kind: "writeState", slot: gprChannel("eax"), value: 2 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) },
     { kind: "exit", reason: "next" }
   ]);
-  deepStrictEqual(block.regions[1]!.actions, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
-    { kind: "exit", reason: "memoryReadFault", payload: address }
+  deepStrictEqual(edgeRegion(block, 1).flushes, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
   ]);
+  deepStrictEqual(edgeRegion(block, 1).exit, { kind: "exit", reason: "memoryReadFault", payload: address });
 });
 
 test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
@@ -967,7 +977,7 @@ test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
   );
 
   const block = builder.finish();
-  const read = block.regions[0]!.actions.find(
+  const read = entryActions(block).find(
     (action): action is ReadMemoryAction => action.kind === "readMemory"
   )!;
 
@@ -986,7 +996,7 @@ test("movsx r32, byte [mem] marks the load signed with no extra extend", () => {
   );
 
   const block = builder.finish();
-  const read = block.regions[0]!.actions.find(
+  const read = entryActions(block).find(
     (action): action is ReadMemoryAction => action.kind === "readMemory"
   )!;
 
@@ -1016,7 +1026,7 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
   // The effective address is computed once, before the instruction writes
   // ebx: the store address and value are the original ebx read (0), and the
   // register flush carries the loaded value (2).
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("ebx") },
     { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
     { kind: "guardMemory", address: 0, byteLength: 4, access: "write", faultEdge: 2 },
@@ -1044,7 +1054,7 @@ test("get and set through s.mem lower to memory actions at the given address", (
   const v = block.values;
   const address = v.internConst(0x2000);
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
     { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
     { kind: "readMemory", output: 2, address, width: 32 },
@@ -1088,14 +1098,18 @@ test("a guard after a register write restores the pre-instruction value in its e
 
   // The edge flushes eax's value as of instruction start — never the 0x222
   // this instruction wrote before guarding.
-  deepStrictEqual(block.regions[1]!.actions, [
+  deepStrictEqual(edgeRegion(block, 1).flushes, [
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x111) },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) },
-    { kind: "exit", reason: "memoryWriteFault", payload: v.internConst(0x2000) }
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) }
   ]);
+  deepStrictEqual(edgeRegion(block, 1).exit, {
+    kind: "exit",
+    reason: "memoryWriteFault",
+    payload: v.internConst(0x2000)
+  });
 
   // The main path keeps the new value: the store and the flush carry 0x222.
-  const store = block.regions[0]!.actions.find(
+  const store = entryActions(block).find(
     (action): action is WriteMemoryAction => action.kind === "writeMemory"
   )!;
 
@@ -1113,10 +1127,14 @@ test("a guard after writing a previously-clean register omits the channel from i
 
   // eax had no pending at instruction start: state memory already holds the
   // right bytes, so the edge writes only the eip.
-  deepStrictEqual(block.regions[1]!.actions, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
-    { kind: "exit", reason: "memoryWriteFault", payload: v.internConst(0x2000) }
+  deepStrictEqual(edgeRegion(block, 1).flushes, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
   ]);
+  deepStrictEqual(edgeRegion(block, 1).exit, {
+    kind: "exit",
+    reason: "memoryWriteFault",
+    payload: v.internConst(0x2000)
+  });
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, v.internConst(0x222));
 });
 
@@ -1133,7 +1151,7 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
   const nextEsp = v.internBinary("add", 0, v.internConst(4));
 
   strictEqual(block.regions.length, 3);
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("esp") },
     { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
     { kind: "readMemory", output: 2, address: 0, width: 32 },
@@ -1147,14 +1165,12 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
 
   // esp was boundary-absent, so neither edge writes it — not even the write
   // guard's, where esp is already pending with the incremented value.
-  deepStrictEqual(block.regions[1]!.actions, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
-    { kind: "exit", reason: "memoryReadFault", payload: 0 }
-  ]);
-  deepStrictEqual(block.regions[2]!.actions, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) },
-    { kind: "exit", reason: "memoryWriteFault", payload: 5 }
-  ]);
+  const eipFlushes = [{ kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }];
+
+  deepStrictEqual(edgeRegion(block, 1).flushes, eipFlushes);
+  deepStrictEqual(edgeRegion(block, 1).exit, { kind: "exit", reason: "memoryReadFault", payload: 0 });
+  deepStrictEqual(edgeRegion(block, 2).flushes, eipFlushes);
+  deepStrictEqual(edgeRegion(block, 2).exit, { kind: "exit", reason: "memoryWriteFault", payload: 5 });
 });
 
 test("pop [ebx] write edge restores a previous instruction's pending esp", () => {
@@ -1171,17 +1187,21 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
 
   const block = builder.finish();
   const v = block.values;
-  const ebxRead = block.regions[0]!.actions.find(
+  const ebxRead = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
   )!;
 
   // The edge restores the boundary esp — the mov's 0x30, not the pop's
   // incremented value.
-  deepStrictEqual(block.regions[2]!.actions, [
+  deepStrictEqual(edgeRegion(block, 2).flushes, [
     { kind: "writeState", slot: gprChannel("esp"), value: v.internConst(0x30) },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) },
-    { kind: "exit", reason: "memoryWriteFault", payload: ebxRead.output }
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) }
   ]);
+  deepStrictEqual(edgeRegion(block, 2).exit, {
+    kind: "exit",
+    reason: "memoryWriteFault",
+    payload: ebxRead.output
+  });
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("esp"))?.value,
     v.internBinary("add", v.internConst(0x30), v.internConst(4))
@@ -1200,7 +1220,7 @@ test("pop [esp] builds the destination address from the incremented esp", () => 
   const v = block.values;
   const nextEsp = v.internBinary("add", 0, v.internConst(4));
 
-  deepStrictEqual(block.regions[0]!.actions, [
+  deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("esp") },
     { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
     { kind: "readMemory", output: 2, address: 0, width: 32 },
@@ -1223,10 +1243,10 @@ test("pop [esp+k] adds the displacement to the incremented esp", () => {
   const block = builder.finish();
   const v = block.values;
   const address = v.internBinary("add", v.internBinary("add", 0, v.internConst(4)), v.internConst(8));
-  const writeGuard = block.regions[0]!.actions.find(
+  const writeGuard = entryActions(block).find(
     (action): action is GuardMemoryAction => action.kind === "guardMemory" && action.access === "write"
   )!;
-  const store = block.regions[0]!.actions.find(
+  const store = entryActions(block).find(
     (action): action is WriteMemoryAction => action.kind === "writeMemory"
   )!;
 

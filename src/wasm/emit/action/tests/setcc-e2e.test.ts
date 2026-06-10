@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert";
+import { ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createActionBuilder } from "#ir/action/builder.js";
@@ -57,10 +57,13 @@ for (const [cc, predicate] of comparePredicates) {
       });
 
       const block = builder.finish();
+      const entry = block.regions[0]!;
+
+      ok(entry.kind === "entry", "first region is the entry");
 
       // The recorded condition serves setcc: no flag byte is read back.
       strictEqual(
-        block.regions[0]!.actions.some(
+        entry.actions.some(
           (action) => action.kind === "readState" && action.slot.kind === "flag"
         ),
         false

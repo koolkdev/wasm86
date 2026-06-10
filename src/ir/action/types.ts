@@ -82,13 +82,21 @@ export type Action =
   | BranchAction
   | ExitAction;
 
-export type ActionRegionKind = "entry" | "edge";
-
-export type ActionRegion = Readonly<{
+export type EntryRegion = Readonly<{
   id: RegionId;
-  kind: ActionRegionKind;
+  kind: "entry";
   actions: readonly Action[];
 }>;
+
+// Edge bodies restore state and leave.
+export type EdgeRegion = Readonly<{
+  id: RegionId;
+  kind: "edge";
+  flushes: readonly WriteStateAction[];
+  exit: ExitAction;
+}>;
+
+export type ActionRegion = EntryRegion | EdgeRegion;
 
 export type ActionBlock = Readonly<{
   entry: RegionId;

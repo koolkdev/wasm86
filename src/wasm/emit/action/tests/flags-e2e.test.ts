@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert";
+import { ok as assertOk, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { executeDirectInstruction } from "#backends/direct/execute.js";
@@ -109,7 +109,11 @@ test("two adds in one block store each flag byte once, with the second add's fla
   const block = builder.finish();
 
   // Dead flag writes collapse in the contract: one writeState per flag...
-  const flagWrites = block.regions[0]!.actions.filter(
+  const entry = block.regions[0]!;
+
+  assertOk(entry.kind === "entry", "first region is the entry");
+
+  const flagWrites = entry.actions.filter(
     (action): action is WriteStateAction => action.kind === "writeState" && action.slot.kind === "flag"
   );
 

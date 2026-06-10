@@ -3,16 +3,22 @@ import { test } from "node:test";
 
 import type { ExternalValueId } from "#ir/action/operands.js";
 import { gprChannel } from "#ir/action/slots.js";
-import type { ActionRegion, ReadStateAction } from "#ir/action/types.js";
+import type {
+  Action,
+  EdgeRegion,
+  EntryRegion,
+  ReadMemoryAction,
+  ReadStateAction
+} from "#ir/action/types.js";
 import { createValueTable, type ValueTable } from "#ir/action/values.js";
 import { createValueStack, type ValueStack } from "#wasm/emit/action/value-stack.js";
-import { analyzeRegionValues } from "#wasm/emit/action/values.js";
+import { analyzeBlockValues } from "#wasm/emit/action/values.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 
-function entryRegion(actions: ActionRegion["actions"]): ActionRegion {
+function entryRegion(actions: readonly Action[]): EntryRegion {
   return { id: 0, kind: "entry", actions };
 }
 
@@ -24,7 +30,7 @@ type TestEmitter = Readonly<{
 
 function createTestEmitter(
   values: ValueTable,
-  region: ActionRegion,
+  region: EntryRegion,
   externalIds: readonly ExternalValueId[] = []
 ): TestEmitter {
   const body = new WasmFunctionBodyEncoder();
@@ -34,10 +40,11 @@ function createTestEmitter(
     body,
     scratch,
     values,
-    analysis: analyzeRegionValues(region, values),
+    analysis: analyzeBlockValues({ entry: region.id, regions: [region], values }),
     externalLocals,
-    // Stand-in for the 02c state access layer: address push + load.
-    loadSlot: () => body.i32Const(0).i32Load({ align: 2, offset: 0, memoryIndex: 0 })
+    // Stand-ins for the state and guest access layers: plain loads.
+    loadSlot: () => body.i32Const(0).i32Load({ align: 2, offset: 0, memoryIndex: 0 }),
+    loadGuest: () => body.i32Load({ align: 2, offset: 0, memoryIndex: 1 })
   });
 
   return { body, scratch, valueStack };
@@ -408,6 +415,109 @@ test("ne and non-zero equality keep the generic compare", () => {
     wasmOpcode.i32Eq,
     wasmOpcode.end
   ]);
+});
+
+test("a loaded value pins to a local at its action point and replays", () => {
+  const values = createValueTable();
+  const address = values.internConst(0x2000);
+  const loaded = values.addActionOutput();
+  const readAction: ReadMemoryAction = { kind: "readMemory", output: loaded, address, width: 32 };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      readAction,
+      { kind: "writeState", slot: gprChannel("eax"), value: loaded },
+      { kind: "writeState", slot: gprChannel("ebx"), value: loaded },
+      { kind: "exit", reason: "next" }
+    ])
+  );
+
+  valueStack.readMemory(readAction);
+  valueStack.emitUse(loaded);
+  valueStack.emitUse(loaded);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
+});
+
+test("a dead load emits nothing", () => {
+  const values = createValueTable();
+  const address = values.internConst(0x2000);
+  const loaded = values.addActionOutput();
+  const readAction: ReadMemoryAction = { kind: "readMemory", output: loaded, address, width: 32 };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([readAction, { kind: "exit", reason: "next" }])
+  );
+
+  valueStack.readMemory(readAction);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [wasmOpcode.end]);
+});
+
+test("captureForEdge computes an untouched compound into a local for later uses", () => {
+  const values = createValueTable();
+  const read = values.addActionOutput();
+  const five = values.internConst(5);
+  const sum = values.internBinary("add", read, five);
+  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      readAction,
+      { kind: "writeState", slot: gprChannel("ebx"), value: sum },
+      { kind: "writeState", slot: gprChannel("ecx"), value: sum },
+      { kind: "exit", reason: "next" }
+    ])
+  );
+  // An edge consuming the compound twice plus both leaves: one capture, the
+  // rest are no-ops (replay for the compound, reload and inline for the
+  // unpinned read and the const).
+  const edge: EdgeRegion = {
+    id: 1,
+    kind: "edge",
+    flushes: [
+      { kind: "writeState", slot: gprChannel("ebx"), value: sum },
+      { kind: "writeState", slot: gprChannel("ecx"), value: sum },
+      { kind: "writeState", slot: gprChannel("edx"), value: read }
+    ],
+    exit: { kind: "exit", reason: "memoryWriteFault", payload: five }
+  };
+
+  valueStack.readState(readAction);
+  valueStack.captureForEdge(edge);
+  valueStack.emitUse(sum);
+  valueStack.emitUse(sum);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  // One computation set into a local, two replays.
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Add,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
 test("unconsumed captures fail assertClear and hold their scratch local", () => {

@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/action/operands.js";
-import type { ReadStateAction, StateSlot } from "#ir/action/types.js";
+import type { EdgeRegion, ReadMemoryAction, ReadStateAction, StateSlot } from "#ir/action/types.js";
 import type {
   BinaryValueNode,
   CompareValueNode,
@@ -15,7 +15,7 @@ import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import type { RegionValueAnalysis } from "./values.js";
+import { edgeValues, type BlockValueAnalysis } from "./values.js";
 
 // Turns analysis + the value graph into stack code. emitUse pushes exactly
 // one use of a value; anything needed more than once is captured into a
@@ -26,19 +26,26 @@ export type ValueStackContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   values: ValueTable;
-  analysis: RegionValueAnalysis;
+  analysis: BlockValueAnalysis;
   // External id -> the wasm local the embedding bound it to.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
   // Pushes the channel's current value; the driver wires this to the state
   // access layer — the value stack never sees offsets.
   loadSlot(slot: StateSlot, signed: boolean): void;
+  // Loads guest memory at the address already on the stack.
+  loadGuest(width: OperandWidth, signed: boolean): void;
 }>;
 
 export type ValueStack = Readonly<{
   // The driver calls this at each readState action point, in action order.
   readState(action: ReadStateAction): void;
+  // The driver calls this at each readMemory action point, in action order.
+  readMemory(action: ReadMemoryAction): void;
   // Pushes one use of the value onto the stack.
   emitUse(id: ValueId): void;
+  // Called before any branch into the edge: its body is emitted later but
+  // executes here, so anything it consumes must be replayable from a local.
+  captureForEdge(edge: EdgeRegion): void;
   // Every captured value fully consumed, every scratch local returned.
   assertClear(): void;
 }>;
@@ -87,7 +94,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         const uses = analysis.useCount(id);
 
         if (uses > 1) {
-          body.localTee(registry.capture(id, uses - 1));
+          registry.captureTee(id, uses - 1);
         }
 
         return;
@@ -153,6 +160,34 @@ export function createValueStack(context: ValueStackContext): ValueStack {
     return node.kind === "const" && node.value === 0;
   }
 
+  function captureValue(id: ValueId): void {
+    if (registry.has(id)) {
+      return;
+    }
+
+    const node = values.node(id);
+
+    switch (node.kind) {
+      case "const":
+      case "external":
+        // Re-emittable anywhere.
+        return;
+      case "actionOutput":
+        // Unpinned reads reload their untouched channel; pinned reads and
+        // loaded values sit in the registry.
+        assert(reads.has(id), `action output ${id} has no replay source`);
+        return;
+      default: {
+        // Not in the registry means nothing consumed it yet (the pending
+        // edge use keeps a consumed multi-use compound captured), so every
+        // counted use is still to come.
+        emitCompute(node);
+        registry.captureSet(id, analysis.useCount(id));
+        return;
+      }
+    }
+  }
+
   return {
     readState(action: ReadStateAction): void {
       const uses = analysis.useCount(action.output);
@@ -168,7 +203,24 @@ export function createValueStack(context: ValueStackContext): ValueStack {
 
       // A later overlapping store would corrupt a load at use: capture now.
       context.loadSlot(action.slot, action.signed === true);
-      body.localSet(registry.capture(action.output, uses));
+      registry.captureSet(action.output, uses);
+    },
+    readMemory(action: ReadMemoryAction): void {
+      const uses = analysis.useCount(action.output);
+
+      if (uses === 0) {
+        return;
+      }
+
+      // Boring policy: every loaded value pins at its action point.
+      emitUse(action.address);
+      context.loadGuest(action.width, action.signed === true);
+      registry.captureSet(action.output, uses);
+    },
+    captureForEdge(edge: EdgeRegion): void {
+      for (const id of edgeValues(edge)) {
+        captureValue(id);
+      }
     },
     emitUse,
     assertClear: () => registry.assertClear()
@@ -176,11 +228,16 @@ export function createValueStack(context: ValueStackContext): ValueStack {
 }
 
 // All scratch-local bookkeeping in one place: which local replays a value,
-// how many uses remain, freeing at the last one. The walk above stays
+// how many uses remain, freeing at the last one. Captures take the value on
+// top of the stack, so the walk above never sees a local index and stays
 // policy-only.
 type LocalRegistry = Readonly<{
-  capture(id: ValueId, remainingUses: number): number;
+  // Pops the stack top into a fresh local.
+  captureSet(id: ValueId, remainingUses: number): void;
+  // Copies the stack top into a fresh local, leaving it pushed as one use.
+  captureTee(id: ValueId, remainingUses: number): void;
   replay(id: ValueId): boolean;
+  has(id: ValueId): boolean;
   assertClear(): void;
 }>;
 
@@ -190,15 +247,22 @@ function createLocalRegistry(
 ): LocalRegistry {
   const entries = new Map<ValueId, { local: number; remainingUses: number }>();
 
+  function capture(id: ValueId, remainingUses: number): number {
+    assert(remainingUses > 0, `cannot capture value ${id} without remaining uses`);
+    assert(!entries.has(id), `value ${id} is already captured`);
+
+    const local = scratch.allocLocal(wasmValueType.i32);
+
+    entries.set(id, { local, remainingUses });
+    return local;
+  }
+
   return {
-    capture(id: ValueId, remainingUses: number): number {
-      assert(remainingUses > 0, `cannot capture value ${id} without remaining uses`);
-      assert(!entries.has(id), `value ${id} is already captured`);
-
-      const local = scratch.allocLocal(wasmValueType.i32);
-
-      entries.set(id, { local, remainingUses });
-      return local;
+    captureSet(id: ValueId, remainingUses: number): void {
+      body.localSet(capture(id, remainingUses));
+    },
+    captureTee(id: ValueId, remainingUses: number): void {
+      body.localTee(capture(id, remainingUses));
     },
     replay(id: ValueId): boolean {
       const entry = entries.get(id);
@@ -217,6 +281,7 @@ function createLocalRegistry(
 
       return true;
     },
+    has: (id) => entries.has(id),
     assertClear(): void {
       assert(
         entries.size === 0,
