@@ -3,11 +3,34 @@ import { test } from "node:test";
 
 import { createActionBuilder } from "#ir/action/builder.js";
 import { immBinding, regBinding } from "#ir/action/operands.js";
-import { eipChannel, gprChannel } from "#ir/action/slots.js";
+import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
+import type { ActionBlock, WriteStateAction } from "#ir/action/types.js";
+import type { ValueId } from "#ir/action/values.js";
+import type { FlagName } from "#ir/model/flags.js";
 import type { SemanticTemplate } from "#ir/model/types.js";
-import { aluSemantic } from "#x86/semantics/alu.js";
+import { x86ArithmeticFlags } from "#x86/flags.js";
+import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
+import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { movSemantic } from "#x86/semantics/mov.js";
+import { setccSemantic } from "#x86/semantics/setcc.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
+
+function stateWrites(block: ActionBlock): WriteStateAction[] {
+  return block.regions[0]!.actions.filter(
+    (action): action is WriteStateAction => action.kind === "writeState"
+  );
+}
+
+function writtenFlags(block: ActionBlock): FlagName[] {
+  return stateWrites(block).flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : []));
+}
+
+function flagWriteValue(block: ActionBlock, flag: FlagName): ValueId {
+  const writes = stateWrites(block).filter((write) => write.slot === flagChannel(flag));
+
+  strictEqual(writes.length, 1, `expected exactly one ${flag} write`);
+  return writes[0]!.value;
+}
 
 test("mov r32, imm32 flushes the register write, the eip advance, and a next exit", () => {
   const builder = createActionBuilder();
@@ -94,37 +117,129 @@ test("repeated get of an unwritten channel returns the same leaf across instruct
   ]);
 });
 
-test("two sequential add eax, imm read eax once and write the interned add chain once", () => {
-  // The alu semantic also writes flags, which the builder still rejects; this
-  // is its shape minus the flag write.
-  const addImmNoFlags: SemanticTemplate = (s) => {
-    const sum = s.i32Add(s.get(s.operand(0), 32), s.get(s.operand(1), 32));
-
-    s.set(s.operand(0), sum, 32);
-  };
+test("add eax, imm32 writes all six arithmetic flags as pending expressions", () => {
   const builder = createActionBuilder();
 
-  builder.addInstruction(addImmNoFlags, [regBinding("eax"), immBinding(5)], {
+  builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
     eip: 0x1000,
     nextEip: 0x1003
-  });
-  builder.addInstruction(addImmNoFlags, [regBinding("eax"), immBinding(7)], {
-    eip: 0x1003,
-    nextEip: 0x1006
   });
 
   const block = builder.finish();
 
-  // 0: eax leaf, 1: 5, 2: add(0,1), 3: 0x1003, 4: 7, 5: add(2,4), 6: 0x1006.
-  deepStrictEqual(block.regions[0]!.actions, [
-    { kind: "readState", output: 0, slot: gprChannel("eax") },
-    { kind: "writeState", slot: gprChannel("eax"), value: 5 },
-    { kind: "writeState", slot: eipChannel, value: 6 },
-    { kind: "exit", reason: "next" }
-  ]);
-  deepStrictEqual(block.values.node(0), { kind: "actionOutput" });
-  deepStrictEqual(block.values.node(2), { kind: "binary", operator: "add", a: 0, b: 1 });
-  deepStrictEqual(block.values.node(5), { kind: "binary", operator: "add", a: 2, b: 4 });
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86ArithmeticFlags].sort());
+
+  // Spot-check through re-interning: ZF compares the projected sum against
+  // zero, and the register write shares the same sum node.
+  const v = block.values;
+  const sum = v.internProject(
+    32,
+    v.internBinary("add", v.internProject(32, 0), v.internProject(32, v.internConst(5)))
+  );
+
+  strictEqual(flagWriteValue(block, "ZF"), v.internCompare(32, "eq", sum, v.internConst(0)));
+  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, sum);
+});
+
+test("two adds in one block flush exactly one write per channel, second instruction wins", () => {
+  const builder = createActionBuilder();
+  const add = aluSemantic("add", 32);
+
+  builder.addInstruction(add, [regBinding("eax"), immBinding(5)], { eip: 0x1000, nextEip: 0x1003 });
+  builder.addInstruction(add, [regBinding("eax"), immBinding(7)], { eip: 0x1003, nextEip: 0x1006 });
+
+  const block = builder.finish();
+  const actions = block.regions[0]!.actions;
+  const writes = stateWrites(block);
+
+  // One read feeds both adds; one flush per channel: six flags + eax + eip.
+  strictEqual(actions.filter((action) => action.kind === "readState").length, 1);
+  strictEqual(writes.length, 8);
+  strictEqual(new Set(writes.map((write) => write.slot)).size, 8);
+
+  const v = block.values;
+  const sum1 = v.internProject(
+    32,
+    v.internBinary("add", v.internProject(32, 0), v.internProject(32, v.internConst(5)))
+  );
+  const sum2 = v.internProject(
+    32,
+    v.internBinary("add", v.internProject(32, sum1), v.internProject(32, v.internConst(7)))
+  );
+
+  strictEqual(writes.find((write) => write.slot === gprChannel("eax"))?.value, sum2);
+  strictEqual(flagWriteValue(block, "ZF"), v.internCompare(32, "eq", sum2, v.internConst(0)));
+});
+
+test("inc leaves CF unwritten", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(unaryAluSemantic("inc", 32), [regBinding("eax")], {
+    eip: 0x1000,
+    nextEip: 0x1001
+  });
+
+  const block = builder.finish();
+
+  deepStrictEqual([...writtenFlags(block)].sort(), ["AF", "OF", "PF", "SF", "ZF"]);
+});
+
+test("cmp writes flags but no register", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(cmpSemantic(32), [regBinding("eax"), regBinding("ebx")], {
+    eip: 0x1000,
+    nextEip: 0x1002
+  });
+
+  const block = builder.finish();
+  const writes = stateWrites(block);
+
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86ArithmeticFlags].sort());
+  strictEqual(writes.some((write) => write.slot.kind === "gpr"), false);
+  strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
+});
+
+test("flagUndef cells produce no write: xor leaves AF unwritten", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(aluSemantic("xor", 32), [regBinding("eax"), regBinding("ebx")], {
+    eip: 0x1000,
+    nextEip: 0x1002
+  });
+
+  const block = builder.finish();
+
+  deepStrictEqual([...writtenFlags(block)].sort(), ["CF", "OF", "PF", "SF", "ZF"]);
+});
+
+test("an undef cell preserves the previous instruction's pending flag", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+  builder.addInstruction(aluSemantic("xor", 32), [regBinding("ecx"), regBinding("edx")], {
+    eip: 0x1003,
+    nextEip: 0x1005
+  });
+
+  const block = builder.finish();
+
+  // xor leaves AF undefined, so the add's AF expression survives and flushes.
+  const v = block.values;
+  const a = v.internProject(32, 0);
+  const b = v.internProject(32, v.internConst(5));
+  const result = v.internProject(32, v.internBinary("add", a, b));
+  const carryChain = v.internBinary("xor", v.internBinary("xor", a, b), result);
+  const af = v.internBinary("and", v.internBinary("shr_u", carryChain, v.internConst(4)), v.internConst(1));
+
+  strictEqual(flagWriteValue(block, "AF"), af);
+
+  // xor's constant-zero CF/OF writes win over the add's expressions.
+  strictEqual(flagWriteValue(block, "CF"), v.internConst(0));
+  strictEqual(flagWriteValue(block, "OF"), v.internConst(0));
 });
 
 test("xchg eax, ebx swaps pendings through two reads with no temporaries", () => {
@@ -176,12 +291,13 @@ test("value methods intern through the builder", () => {
 });
 
 test("unsupported templates fail loudly", () => {
+  // condition() consumption lands in 04b; setcc still rejects.
   throws(
     () =>
       createActionBuilder().addInstruction(
-        aluSemantic("add", 32),
-        [regBinding("eax"), immBinding(1)],
-        { eip: 0x1000, nextEip: 0x1005 }
+        setccSemantic("E"),
+        [regBinding("al")],
+        { eip: 0x1000, nextEip: 0x1003 }
       ),
     /not supported by action builder yet/
   );

@@ -1,11 +1,14 @@
 import { assert } from "#common/assert.js";
+import type { FlagName } from "#ir/model/flags.js";
 import { const32, irVar, mem, nextEip, operand, reg, toStorageRef, toValueRef } from "#ir/model/refs.js";
 import type {
+  ConditionCode,
   IrBinaryOperator,
   IrBuilder,
   IrCompareOperator,
   IrConstValueRef,
   IrFlagWriteCell,
+  IrFlagWriteInput,
   IrGetOptions,
   IrUnaryOperator,
   MemRef,
@@ -22,7 +25,7 @@ import type {
 } from "#ir/model/types.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
 import type { OperandBinding } from "./operands.js";
-import { eipChannel } from "./slots.js";
+import { eipChannel, flagChannel } from "./slots.js";
 import type { Action, ActionBlock, RegionId, StateSlot } from "./types.js";
 import { createValueTable, type ValueId } from "./values.js";
 
@@ -57,6 +60,11 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   // pendings mid-region (dynamic register writes, barriers) — a stale leaf
   // here would silently serve a channel whose memory has changed.
   readonly #reads = new Map<StateSlot, ValueId>();
+  // Fused condition expressions from the latest writeFlags, for condition()
+  // (04b) to prefer over recomputing from flag bytes. Any flag write
+  // invalidates all earlier entries: they were derived from flag state that
+  // is now stale.
+  readonly #conditions = new Map<ConditionCode, ValueId>();
   #bindings: readonly OperandBinding[] = [];
   #instruction: InstructionLocation | undefined;
   #terminated = false;
@@ -269,16 +277,32 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return irVar(this.#values.internCompare(width, operator, this.#valueId(a), this.#valueId(b)));
   }
 
-  flagExpr(): IrFlagWriteCell {
-    throw notSupportedError("flagExpr");
+  flagExpr(value: ValueInput): IrFlagWriteCell {
+    return { kind: "expr", value: toValueRef(value) };
   }
 
   flagUndef(): IrFlagWriteCell {
-    throw notSupportedError("flagUndef");
+    return { kind: "undef" };
   }
 
-  writeFlags(): void {
-    throw notSupportedError("writeFlags");
+  writeFlags(write: IrFlagWriteInput): void {
+    this.#beforeOp("writeFlags");
+
+    for (const [flag, cell] of Object.entries(write.cells) as [FlagName, IrFlagWriteCell][]) {
+      // undef -> preserve: any value is architecturally allowed, so keeping
+      // the old one is free and kills the write.
+      if (cell.kind === "expr") {
+        this.#pending.set(flagChannel(flag), this.#valueId(cell.value));
+      }
+    }
+
+    this.#conditions.clear();
+
+    if (write.conditions !== undefined) {
+      for (const [cc, value] of Object.entries(write.conditions) as [ConditionCode, ValueInput][]) {
+        this.#conditions.set(cc, this.#valueId(value));
+      }
+    }
   }
 
   condition(): VarRef {
