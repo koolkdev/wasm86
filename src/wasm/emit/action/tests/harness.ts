@@ -7,20 +7,24 @@ import { wasmValueType } from "#wasm/encoder/types.js";
 import { emitActionBlock } from "#wasm/emit/action/emit.js";
 
 // Test-only module wrapper around the action emitter: imported state + guest
-// memories, one run export returning the encoded i64 exit. Module assembly
-// for real use is the backends' job.
+// memories, one run export returning the encoded i64 exit. External value n
+// is the function's n-th i32 parameter. Module assembly for real use is the
+// backends' job.
 
 export type InstantiatedActionBlock = Readonly<{
   stateView: DataView;
   guestView: DataView;
-  run(): bigint;
+  run(...externals: number[]): bigint;
 }>;
 
-export async function instantiateActionBlock(block: ActionBlock): Promise<InstantiatedActionBlock> {
+export async function instantiateActionBlock(
+  block: ActionBlock,
+  externalParamCount = 0
+): Promise<InstantiatedActionBlock> {
   const state = new WebAssembly.Memory({ initial: 1 });
   const guest = new WebAssembly.Memory({ initial: wasmGuestMemoryMinPages });
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeActionBlockModule(block)),
+    await WebAssembly.compile(encodeActionBlockModule(block, externalParamCount)),
     {
       [wasmImport.moduleName]: {
         [wasmImport.stateMemoryName]: state,
@@ -35,11 +39,11 @@ export async function instantiateActionBlock(block: ActionBlock): Promise<Instan
   return {
     stateView: new DataView(state.buffer),
     guestView: new DataView(guest.buffer),
-    run: () => (run as () => bigint)()
+    run: (...externals) => (run as (...args: number[]) => bigint)(...externals)
   };
 }
 
-function encodeActionBlockModule(block: ActionBlock): Uint8Array<ArrayBuffer> {
+function encodeActionBlockModule(block: ActionBlock, externalParamCount: number): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
   const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
   const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
@@ -51,8 +55,14 @@ function encodeActionBlockModule(block: ActionBlock): Uint8Array<ArrayBuffer> {
     "unexpected Wasm memory import order"
   );
 
-  const typeIndex = module.addFunctionType({ params: [], results: [wasmValueType.i64] });
-  const body = emitActionBlock(block, { body: new WasmFunctionBodyEncoder() });
+  const typeIndex = module.addFunctionType({
+    params: Array.from({ length: externalParamCount }, () => wasmValueType.i32),
+    results: [wasmValueType.i64]
+  });
+  const body = emitActionBlock(block, {
+    body: new WasmFunctionBodyEncoder(externalParamCount),
+    externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id]))
+  });
 
   module.exportFunction(wasmBlockExportName, module.addFunction(typeIndex, body));
   return module.encode();

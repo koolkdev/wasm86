@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import type { ExternalValueId } from "#ir/action/operands.js";
 import type {
   Action,
   ActionBlock,
@@ -12,7 +13,7 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { emitExit, withEdgeBlocks } from "./control.js";
 import { emitGuardChecks, emitGuestLoad, emitGuestStore } from "./memory.js";
-import { emitChannelLoad, emitChannelStore } from "./state.js";
+import { emitSlotLoad, emitSlotStore } from "./state.js";
 import { createValueStack } from "./value-stack.js";
 import { analyzeBlockValues } from "./values.js";
 
@@ -23,6 +24,8 @@ import { analyzeBlockValues } from "./values.js";
 
 export type ActionEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
+  // External id -> the wasm local the embedding bound it to.
+  externalLocals?: ReadonlyMap<ExternalValueId, number>;
 }>;
 
 export function emitActionBlock(block: ActionBlock, context: ActionEmitContext): WasmFunctionBodyEncoder {
@@ -40,10 +43,8 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
     scratch,
     values: block.values,
     analysis: analyzeBlockValues(block),
-    // Nothing binds external values yet: blocks come from the builder, which
-    // rejects external operand bindings.
-    externalLocals: new Map(),
-    loadSlot: (slot, signed) => emitChannelLoad(body, slot, signed),
+    externalLocals: context.externalLocals ?? new Map(),
+    loadSlot: (slot, signed, emitUse) => emitSlotLoad(body, slot, signed, emitUse),
     loadGuest: (width, signed) => emitGuestLoad(body, width, signed)
   });
   // Exit detail per edge: the guard's byte length, zero for branch edges.
@@ -58,7 +59,7 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
         valueStack.readMemory(action);
         return;
       case "writeState":
-        emitChannelStore(body, action.slot, () => valueStack.emitUse(action.value));
+        emitSlotStore(body, action.slot, action.value, valueStack.emitUse);
         return;
       case "writeMemory":
         valueStack.emitUse(action.address);
@@ -109,7 +110,7 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
     assert(detail !== undefined, `edge region ${edge.id} was never targeted by the entry`);
 
     for (const flush of edge.flushes) {
-      emitChannelStore(body, flush.slot, () => valueStack.emitUse(flush.value));
+      emitSlotStore(body, flush.slot, flush.value, valueStack.emitUse);
     }
 
     emitExit(body, edge.exit, valueStack.emitUse, detail);

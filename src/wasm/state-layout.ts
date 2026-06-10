@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import type { StateChannel } from "#ir/action/slots.js";
 import {
   x86ArithmeticFlagMask,
@@ -38,6 +39,17 @@ export const WASM_STATE_OFFSETS = {
   instructionCount: 44,
   stopReason: 48
 } as const satisfies Readonly<Record<WasmStateField, number>>;
+
+// Dynamic register access indexes the GPR words as one contiguous array in
+// modrm register order.
+export const WASM_GPR_BASE_OFFSET = WASM_STATE_OFFSETS.eax;
+
+for (const [index, reg] of reg32.entries()) {
+  assert(
+    WASM_STATE_OFFSETS[reg] === WASM_GPR_BASE_OFFSET + index * 4,
+    "state layout GPR words must be contiguous in modrm register order"
+  );
+}
 
 export const WASM_FLAG_BYTE_OFFSETS = {
   CF: 52,

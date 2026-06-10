@@ -332,6 +332,36 @@ test("a dynamic store pins a GPR read used later, never a flag read", () => {
   strictEqual(analysis.isPinned(flagRead), false);
 });
 
+test("a dynamic slot consumes its index once per address push", () => {
+  const values = createValueTable();
+  const index = values.internExternal(0);
+  const wordRead = values.addActionOutput();
+  const stored = values.internConst(5);
+  const analysis = analyze(values, [
+    { kind: "readState", output: wordRead, slot: { kind: "gprDynamic", index, byteLength: 4 } },
+    { kind: "writeState", slot: gprChannel("eax"), value: wordRead },
+    { kind: "writeState", slot: { kind: "gprDynamic", index, byteLength: 1 }, value: stored },
+    { kind: "exit", reason: "next" }
+  ]);
+
+  // One use for the word read, two for the byte store's split address.
+  strictEqual(analysis.useCount(index), 3);
+  strictEqual(analysis.lastUse(index), 2);
+});
+
+test("a dead dynamic read never consumes its computed index", () => {
+  const values = createValueTable();
+  const index = values.internBinary("and", values.internExternal(0), values.internConst(7));
+  const dead = values.addActionOutput();
+  const analysis = analyze(values, [
+    { kind: "readState", output: dead, slot: { kind: "gprDynamic", index, byteLength: 4 } },
+    { kind: "exit", reason: "next" }
+  ]);
+
+  strictEqual(analysis.useCount(index), 0);
+  strictEqual(analysis.lastUse(index), undefined);
+});
+
 test("an overlapping partial-channel store pins a wider read used later", () => {
   const values = createValueTable();
   const read = values.addActionOutput();

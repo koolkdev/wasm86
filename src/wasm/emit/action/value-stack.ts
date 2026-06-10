@@ -29,9 +29,10 @@ export type ValueStackContext = Readonly<{
   analysis: BlockValueAnalysis;
   // External id -> the wasm local the embedding bound it to.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
-  // Pushes the channel's current value; the driver wires this to the state
-  // access layer — the value stack never sees offsets.
-  loadSlot(slot: StateSlot, signed: boolean): void;
+  // Pushes the slot's current value; the driver wires this to the state
+  // access layer — the value stack never sees offsets. A dynamic slot's
+  // index value is consumed through the given emitter.
+  loadSlot(slot: StateSlot, signed: boolean, emitUse: (id: ValueId) => void): void;
   // Loads guest memory at the address already on the stack.
   loadGuest(width: OperandWidth, signed: boolean): void;
 }>;
@@ -85,7 +86,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         const read = reads.get(id);
 
         assert(read !== undefined, `action output ${id} has no readState source`);
-        context.loadSlot(read.slot, read.signed === true);
+        context.loadSlot(read.slot, read.signed === true, emitUse);
         return;
       }
       default: {
@@ -196,13 +197,16 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         return;
       }
 
-      if (!analysis.isPinned(action.output)) {
+      // Dynamic slots follow the guest-load policy and pin at their action
+      // point, so the index is consumed exactly once per address push and
+      // may be any expression. Static channels reload at use unless a later
+      // overlapping store would corrupt the load.
+      if (action.slot.kind !== "gprDynamic" && !analysis.isPinned(action.output)) {
         reads.set(action.output, action);
         return;
       }
 
-      // A later overlapping store would corrupt a load at use: capture now.
-      context.loadSlot(action.slot, action.signed === true);
+      context.loadSlot(action.slot, action.signed === true, emitUse);
       registry.captureSet(action.output, uses);
     },
     readMemory(action: ReadMemoryAction): void {

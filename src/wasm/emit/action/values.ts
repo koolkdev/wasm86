@@ -6,7 +6,8 @@ import type {
   EdgeRegion,
   EntryRegion,
   ReadStateAction,
-  RegionId
+  RegionId,
+  StateSlot
 } from "#ir/action/types.js";
 import type { ValueId, ValueNode, ValueTable } from "#ir/action/values.js";
 
@@ -222,11 +223,11 @@ export function edgeValues(edge: EdgeRegion): readonly ValueId[] {
 function actionOperands(action: Action): readonly ValueId[] {
   switch (action.kind) {
     case "readState":
-      return [];
+      return slotOperands(action.slot);
     case "readMemory":
       return [action.address];
     case "writeState":
-      return [action.value];
+      return [...slotOperands(action.slot), action.value];
     case "writeMemory":
       return [action.address, action.value];
     case "guardMemory":
@@ -235,6 +236,25 @@ function actionOperands(action: Action): readonly ValueId[] {
       return [action.condition];
     case "exit":
       return action.payload === undefined ? [] : [action.payload];
+  }
+}
+
+// One index use per address push, matching the state layer's lowering: byte
+// access pushes the index twice (word term and high-byte term).
+function slotOperands(slot: StateSlot): readonly ValueId[] {
+  switch (slot.kind) {
+    case "gprDynamic":
+      switch (slot.byteLength) {
+        case 1:
+          return [slot.index, slot.index];
+        case 2:
+        case 4:
+          return [slot.index];
+      }
+    case "gpr":
+    case "flag":
+    case "eip":
+      return [];
   }
 }
 
