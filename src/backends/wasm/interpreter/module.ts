@@ -1,4 +1,4 @@
-import { wasmBlockExportName, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
@@ -20,7 +20,9 @@ const fuelParam = 0;
 export function encodeInterpreterModule(): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
   const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, { minPages: 1 });
+  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
+    minPages: wasmGuestMemoryMinPages
+  });
 
   if (stateMemoryIndex !== wasmMemoryIndex.state || guestMemoryIndex !== wasmMemoryIndex.guest) {
     throw new Error("unexpected Wasm memory import order");

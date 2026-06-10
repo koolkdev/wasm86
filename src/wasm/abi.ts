@@ -13,6 +13,12 @@ export const wasmMemoryIndex = {
   guest: 1
 } as const;
 
+export const wasmPageByteLength = 0x1_0000;
+
+// Declared on the guest memory import, so instantiation enforces it.
+export const wasmGuestMemoryMinPages = 1;
+export const wasmGuestMemoryMinByteLength = wasmGuestMemoryMinPages * wasmPageByteLength;
+
 export const wasmBlockExportName = "run";
 export const wasmStatePtr = 32;
 

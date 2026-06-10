@@ -1,4 +1,4 @@
-import { wasmMemoryIndex } from "#wasm/abi.js";
+import { wasmGuestMemoryMinByteLength, wasmMemoryIndex } from "#wasm/abi.js";
 import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
 import type { OperandWidth } from "#x86/types.js";
@@ -9,18 +9,22 @@ import type { OperandWidth } from "#x86/types.js";
 
 const wasmPageShift = 16;
 
-// Guest addresses are unsigned, so one range check per side suffices: a
-// guest smaller than the access faults at any address, anything else faults
-// past the last in-bounds start address. The subtraction in the second check
-// cannot underflow once the first has passed.
+// Guest addresses are unsigned, so an access faults iff its start address
+// exceeds the last in-bounds one, guestByteLength - byteLength. Instantiation
+// enforces the guest import's declared minimum, so that subtraction cannot
+// underflow for accesses within wasmGuestMemoryMinByteLength; larger accesses
+// get a leading size check that faults guests too small to hold them and
+// restores the bound.
 export function emitGuardChecks(
   body: WasmFunctionBodyEncoder,
   byteLength: number,
   emitAddress: () => void,
   faultDepth: number
 ): void {
-  emitGuestByteLength(body);
-  body.i32Const(byteLength).i32LtU().brIf(faultDepth, wasmBranchHint.unlikely);
+  if (byteLength > wasmGuestMemoryMinByteLength) {
+    emitGuestByteLength(body);
+    body.i32Const(byteLength).i32LtU().brIf(faultDepth, wasmBranchHint.unlikely);
+  }
 
   emitAddress();
   emitGuestByteLength(body);

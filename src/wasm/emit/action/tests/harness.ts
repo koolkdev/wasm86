@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ActionBlock } from "#ir/action/types.js";
-import { wasmBlockExportName, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
@@ -18,7 +18,7 @@ export type InstantiatedActionBlock = Readonly<{
 
 export async function instantiateActionBlock(block: ActionBlock): Promise<InstantiatedActionBlock> {
   const state = new WebAssembly.Memory({ initial: 1 });
-  const guest = new WebAssembly.Memory({ initial: 1 });
+  const guest = new WebAssembly.Memory({ initial: wasmGuestMemoryMinPages });
   const instance = await WebAssembly.instantiate(
     await WebAssembly.compile(encodeActionBlockModule(block)),
     {
@@ -42,7 +42,9 @@ export async function instantiateActionBlock(block: ActionBlock): Promise<Instan
 function encodeActionBlockModule(block: ActionBlock): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
   const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, { minPages: 1 });
+  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
+    minPages: wasmGuestMemoryMinPages
+  });
 
   assert(
     stateMemoryIndex === wasmMemoryIndex.state && guestMemoryIndex === wasmMemoryIndex.guest,

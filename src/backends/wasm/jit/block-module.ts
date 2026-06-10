@@ -1,5 +1,5 @@
 import { u32 } from "#x86/numeric.js";
-import { wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
@@ -44,7 +44,9 @@ export function encodeJitBlock(
   const blockFunctionIndices = blockFunctionIndicesForEntries(entries, targetEips);
   const module = new WasmModuleEncoder();
   const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, { minPages: 1 });
+  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
+    minPages: wasmGuestMemoryMinPages
+  });
   const linkTableIndex = targetEips.length === 0
     ? undefined
     : module.importTable(wasmImport.moduleName, wasmImport.linkTableName, {
