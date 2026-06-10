@@ -31,7 +31,7 @@ export type ValueStackContext = Readonly<{
   externalLocals: ReadonlyMap<ExternalValueId, number>;
   // Pushes the channel's current value; the driver wires this to the state
   // access layer — the value stack never sees offsets.
-  loadSlot(slot: StateSlot): void;
+  loadSlot(slot: StateSlot, signed: boolean): void;
 }>;
 
 export type ValueStack = Readonly<{
@@ -54,7 +54,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
   const { body, values, analysis } = context;
   const registry = createLocalRegistry(body, context.scratch);
   // Unpinned readState outputs reload from their channel at every use.
-  const readSlots = new Map<ValueId, StateSlot>();
+  const reads = new Map<ValueId, ReadStateAction>();
 
   function emitUse(id: ValueId): void {
     if (registry.replay(id)) {
@@ -75,10 +75,10 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         return;
       }
       case "actionOutput": {
-        const slot = readSlots.get(id);
+        const read = reads.get(id);
 
-        assert(slot !== undefined, `action output ${id} has no readState source`);
-        context.loadSlot(slot);
+        assert(read !== undefined, `action output ${id} has no readState source`);
+        context.loadSlot(read.slot, read.signed === true);
         return;
       }
       default: {
@@ -133,12 +133,12 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       }
 
       if (!analysis.isPinned(action.output)) {
-        readSlots.set(action.output, action.slot);
+        reads.set(action.output, action);
         return;
       }
 
       // A later overlapping store would corrupt a load at use: capture now.
-      context.loadSlot(action.slot);
+      context.loadSlot(action.slot, action.signed === true);
       body.localSet(registry.capture(action.output, uses));
     },
     emitUse,

@@ -8,19 +8,20 @@ import { channelAccessByteLength, channelStateOffset } from "#wasm/state-layout.
 // Channel loads and stores against state memory. The layout owns offsets and
 // widths; this file only encodes the matching access.
 
-export function emitChannelLoad(body: WasmFunctionBodyEncoder, slot: StateSlot): void {
+export function emitChannelLoad(body: WasmFunctionBodyEncoder, slot: StateSlot, signed: boolean): void {
   const immediate = channelImmediate(slot);
 
   body.i32Const(0);
 
   switch (channelAccessByteLength(slot)) {
     case 1:
-      body.i32Load8U(immediate);
+      signed ? body.i32Load8S(immediate) : body.i32Load8U(immediate);
       return;
     case 2:
-      body.i32Load16U(immediate);
+      signed ? body.i32Load16S(immediate) : body.i32Load16U(immediate);
       return;
     case 4:
+      // Sign extension from the full width is the identity.
       body.i32Load(immediate);
       return;
   }

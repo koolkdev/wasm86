@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { CONDITIONS, type FlagBoolExpr } from "#ir/model/conditions.js";
 import type { FlagName } from "#ir/model/flags.js";
 import { const32, irVar, mem, nextEip, operand, reg, toStorageRef, toValueRef } from "#ir/model/refs.js";
 import type {
@@ -56,8 +57,8 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   readonly #values = createValueTable();
   readonly #actions: Action[] = [];
   readonly #pending = createPendingChannels(this.#values, (action) => this.#actions.push(action));
-  // Fused condition expressions from the latest writeFlags, for condition()
-  // (04b) to prefer over recomputing from flag bytes. Any flag write
+  // Fused condition expressions from the latest writeFlags; condition()
+  // prefers these over recomputing from flag bytes. Any flag write
   // invalidates all earlier entries: they were derived from flag state that
   // is now stale.
   readonly #conditions = new Map<ConditionCode, ValueId>();
@@ -305,8 +306,16 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     }
   }
 
-  condition(): VarRef {
-    throw notSupportedError("condition");
+  condition(cc: ConditionCode): VarRef {
+    this.#beforeOp("condition");
+
+    const recorded = this.#conditions.get(cc);
+
+    if (recorded !== undefined) {
+      return irVar(recorded);
+    }
+
+    return irVar(this.#flagBoolExpr(CONDITIONS[cc].expr));
   }
 
   jump(): void {
@@ -329,6 +338,23 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   #unary(op: string, operator: IrUnaryOperator, value: ValueInput): VarRef {
     this.#beforeOp(op);
     return irVar(this.#values.internUnary(operator, this.#valueId(value)));
+  }
+
+  // Flag channel values are 0/1 bytes, so the boolean algebra is plain
+  // bitwise math and "not" is a compare against zero.
+  #flagBoolExpr(expr: FlagBoolExpr): ValueId {
+    switch (expr.kind) {
+      case "flag":
+        return this.#pending.read(flagChannel(expr.flag));
+      case "not":
+        return this.#values.internCompare("eq", this.#flagBoolExpr(expr.value), this.#values.internConst(0));
+      case "and":
+        return this.#values.internBinary("and", this.#flagBoolExpr(expr.a), this.#flagBoolExpr(expr.b));
+      case "or":
+        return this.#values.internBinary("or", this.#flagBoolExpr(expr.a), this.#flagBoolExpr(expr.b));
+      case "xor":
+        return this.#values.internBinary("xor", this.#flagBoolExpr(expr.a), this.#flagBoolExpr(expr.b));
+    }
   }
 
   #valueId(input: ValueInput): ValueId {

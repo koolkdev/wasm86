@@ -4,13 +4,14 @@ import { test } from "node:test";
 import { createActionBuilder } from "#ir/action/builder.js";
 import { immBinding, regBinding } from "#ir/action/operands.js";
 import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
-import type { ActionBlock, WriteStateAction } from "#ir/action/types.js";
+import type { ActionBlock, ReadStateAction, WriteStateAction } from "#ir/action/types.js";
 import type { ValueId, ValueNode } from "#ir/action/values.js";
 import type { FlagName } from "#ir/model/flags.js";
 import type { SemanticTemplate } from "#ir/model/types.js";
 import { x86ArithmeticFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
+import { jmpSemantic } from "#x86/semantics/control.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
@@ -569,15 +570,106 @@ test("value methods intern through the builder", () => {
 });
 
 test("unsupported templates fail loudly", () => {
-  // condition() consumption lands in 04b; setcc still rejects.
   throws(
     () =>
       createActionBuilder().addInstruction(
-        setccSemantic("E"),
-        [regBinding("al")],
-        { eip: 0x1000, nextEip: 0x1003 }
+        jmpSemantic(),
+        [immBinding(0x2000)],
+        { eip: 0x1000, nextEip: 0x1005 }
       ),
     /not supported by action builder yet/
+  );
+});
+
+test("setcc after cmp consumes the recorded condition expression", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+  builder.addInstruction(setccSemantic("B"), [regBinding("al")], {
+    eip: 0x1003,
+    nextEip: 0x1006
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  // B is the cmp's lt_u over its raw operands; no flag byte is read.
+  const condition = v.internCompare("lt_u", 0, v.internConst(5));
+
+  strictEqual(
+    stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
+    v.internSelect(condition, v.internConst(1), v.internConst(0))
+  );
+  strictEqual(block.regions[0]!.actions.filter((action) => action.kind === "readState").length, 1);
+});
+
+test("setcc with no recorded condition builds from flag byte reads", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(setccSemantic("A"), [regBinding("al")], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const reads = block.regions[0]!.actions.filter(
+    (action): action is ReadStateAction => action.kind === "readState"
+  );
+
+  deepStrictEqual(reads.map((read) => read.slot), [flagChannel("CF"), flagChannel("ZF")]);
+
+  // A = !CF && !ZF over the two 0/1 flag bytes.
+  const zero = v.internConst(0);
+  const condition = v.internBinary(
+    "and",
+    v.internCompare("eq", reads[0]!.output, zero),
+    v.internCompare("eq", reads[1]!.output, zero)
+  );
+
+  strictEqual(
+    stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
+    v.internSelect(condition, v.internConst(1), zero)
+  );
+});
+
+test("a flag write between cmp and setcc invalidates the recorded condition", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+  builder.addInstruction(aluSemantic("add", 32), [regBinding("ecx"), immBinding(1)], {
+    eip: 0x1003,
+    nextEip: 0x1006
+  });
+  builder.addInstruction(setccSemantic("E"), [regBinding("al")], {
+    eip: 0x1006,
+    nextEip: 0x1009
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const actions = block.regions[0]!.actions;
+
+  // E rebuilds from the add's pending ZF expression — no flag byte load.
+  strictEqual(
+    actions.filter((action) => action.kind === "readState" && action.slot.kind === "flag").length,
+    0
+  );
+
+  const ecxRead = actions.filter(
+    (action): action is ReadStateAction => action.kind === "readState"
+  )[1]!.output;
+  const sum = v.internBinary("add", ecxRead, v.internConst(1));
+  const zf = v.internCompare("eq", sum, v.internConst(0));
+
+  strictEqual(
+    stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
+    v.internSelect(zf, v.internConst(1), v.internConst(0))
   );
 });
 
