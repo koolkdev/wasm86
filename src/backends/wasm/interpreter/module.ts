@@ -1,72 +1,87 @@
+import { assert } from "#common/assert.js";
 import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
-import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import { ExitReason } from "#wasm/exit.js";
-import { encodeExit } from "#wasm/exit.js";
-import { emitWasmIrExitConstPayload, type WasmIrExitDestination } from "#wasm/codegen/exit.js";
-import { emitLoadGuestByte } from "./decode/guest-bytes.js";
-import { emitOpcodeDispatch } from "./dispatch/opcode-dispatch.js";
-import { InterpreterLocals } from "./codegen/locals.js";
-import {
-  createInterpreterStateCache,
-  emitFlushInterpreterStateCache,
-  emitLoadInterpreterStateCache
-} from "./codegen/state-cache.js";
+import { encodeExit, ExitReason } from "#wasm/exit.js";
+import { RmDecodeHelpers } from "./decode.js";
+import { emitOpcodeDispatch } from "./dispatch.js";
+import { emitOpcodeFetch } from "./fragments.js";
+import type { InterpreterHandler } from "./handlers.js";
+import { InterpreterLocals } from "./locals.js";
+
+// The interpreter module: a hand-written fuel loop around the dispatch.
+// State stays memory-backed — fault and unsupported exits return directly
+// with everything already observable, and handler blocks advance the
+// instruction count themselves.
 
 const fuelParam = 0;
 
-export function encodeInterpreterModule(): Uint8Array<ArrayBuffer> {
-  const module = new WasmModuleEncoder();
-  const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
-    minPages: wasmGuestMemoryMinPages
-  });
+export type InterpreterModule = Readonly<{
+  bytes: Uint8Array<ArrayBuffer>;
+  // One entry per emitted handler body, in emission order.
+  handlers: readonly InterpreterHandler[];
+  // Opcode lengths with an emitted shared rm-decode helper, in emission order.
+  rmDecodeHelpers: readonly number[];
+}>;
 
-  if (stateMemoryIndex !== wasmMemoryIndex.state || guestMemoryIndex !== wasmMemoryIndex.guest) {
-    throw new Error("unexpected Wasm memory import order");
-  }
+export function encodeInterpreterModule(): InterpreterModule {
+  const module = new WasmModuleEncoder();
+
+  importInterpreterMemories(module);
 
   const typeIndex = module.addFunctionType({
     params: [wasmValueType.i32],
     results: [wasmValueType.i64]
   });
+  const rmDecode = new RmDecodeHelpers(module);
+  // Emitting the run loop adds the rm-decode helpers it uses to the module.
+  const { body, handlers } = encodeRunLoopBody(rmDecode);
+  const functionIndex = module.addFunction(typeIndex, body);
+
+  module.exportFunction(wasmBlockExportName, functionIndex);
+  return { bytes: module.encode(), handlers, rmDecodeHelpers: rmDecode.emittedOpcodeLengths() };
+}
+
+function importInterpreterMemories(module: WasmModuleEncoder): void {
+  const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, {
+    minPages: 1
+  });
+  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
+    minPages: wasmGuestMemoryMinPages
+  });
+
+  assert(
+    stateMemoryIndex === wasmMemoryIndex.state && guestMemoryIndex === wasmMemoryIndex.guest,
+    "unexpected Wasm memory import order"
+  );
+}
+
+function encodeRunLoopBody(
+  rmDecode: RmDecodeHelpers
+): Readonly<{ body: WasmFunctionBodyEncoder; handlers: InterpreterHandler[] }> {
   const body = new WasmFunctionBodyEncoder(1);
   const locals = new InterpreterLocals(body);
-  const state = createInterpreterStateCache(body, locals.eip);
-  const exit: WasmIrExitDestination = { exitLocal: locals.exit, labelDepth: 2 };
   const scratch = new WasmLocalScratchAllocator(body);
+  const handlers: InterpreterHandler[] = [];
 
-  emitLoadInterpreterStateCache(body, state);
-  body.i64Const(encodeExit(ExitReason.INSTRUCTION_LIMIT, 0)).localSet(locals.exit);
-
-  body.block();
   body.loop();
   body.localGet(fuelParam).i32Eqz().ifBlock();
-  emitWasmIrExitConstPayload(body, {
-    destination: { ...exit, labelDepth: 2 },
-    reason: ExitReason.INSTRUCTION_LIMIT,
-    payload: 0
-  });
+  body.i64Const(encodeExit(ExitReason.INSTRUCTION_LIMIT, 0)).returnFromFunction();
   body.endBlock();
 
+  // Completed instructions land on this block's end; faults and unsupported
+  // opcodes return from inside.
   body.block();
-  emitLoadGuestByte(body, locals.eip, 0, locals.address, locals.byte, exit);
-  emitOpcodeDispatch(body, state, exit, locals, scratch);
+  emitOpcodeFetch({ body, scratch }, { eipLocal: locals.eip, byteLocal: locals.byte });
+  emitOpcodeDispatch({ body, scratch, locals, handlers, continueDepth: 0, rmDecode });
   body.endBlock();
+
   body.localGet(fuelParam).i32Const(1).i32Sub().localSet(fuelParam);
   body.br(0);
-
   body.endBlock();
-  body.endBlock();
-  emitFlushInterpreterStateCache(body, state);
-  body.localGet(locals.exit).returnFromFunction();
+  body.unreachable();
   scratch.assertClear();
-  body.end();
-
-  const functionIndex = module.addFunction(typeIndex, body);
-  module.exportFunction(wasmBlockExportName, functionIndex);
-
-  return module.encode();
+  return { body: body.end(), handlers };
 }

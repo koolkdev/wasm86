@@ -1,36 +1,27 @@
 import type { CpuState } from "#x86/state/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
-import { readWasmCpuState, writeWasmCpuState, type WasmFlagsRepresentation } from "#wasm/state-layout.js";
-import { encodeActionInterpreterModule } from "./action/module.js";
-import { readInterpreterWasmArtifact } from "./artifact.js";
+import { readWasmCpuState, writeWasmCpuState } from "#wasm/state-layout.js";
+import { encodeInterpreterModule } from "./module.js";
 
-// "static" is the prebuilt artifact and stays the default; "action" is the
-// variant built on the action emitter. The variants disagree on where flags
-// live in state memory, so the choice is exposed as flagsRepresentation.
-export type WasmInterpreterVariant = "static" | "action";
-
-const compiledInterpreterModules = new Map<WasmInterpreterVariant, WebAssembly.Module>();
+let compiledInterpreterModule: WebAssembly.Module | undefined;
 
 export type WasmInterpreterRuntimeOptions = Readonly<{
   stateMemory?: WebAssembly.Memory;
-  variant?: WasmInterpreterVariant;
 }>;
 
 export class WasmInterpreterRuntime {
   readonly guestMemory: WebAssembly.Memory;
   readonly stateMemory: WebAssembly.Memory;
   readonly stateView: DataView<ArrayBuffer>;
-  readonly variant: WasmInterpreterVariant;
   readonly #run: (fuel: number) => bigint;
 
   constructor(guestMemory: WebAssembly.Memory, options: WasmInterpreterRuntimeOptions = {}) {
     this.guestMemory = guestMemory;
     this.stateMemory = options.stateMemory ?? new WebAssembly.Memory({ initial: 1 });
     this.stateView = new DataView(this.stateMemory.buffer);
-    this.variant = options.variant ?? "static";
 
-    const instance = new WebAssembly.Instance(compiledModule(this.variant), {
+    const instance = new WebAssembly.Instance(compiledModule(), {
       [wasmImport.moduleName]: {
         [wasmImport.stateMemoryName]: this.stateMemory,
         [wasmImport.guestMemoryName]: this.guestMemory
@@ -38,10 +29,6 @@ export class WasmInterpreterRuntime {
     });
 
     this.#run = readRunExport(instance);
-  }
-
-  get flagsRepresentation(): WasmFlagsRepresentation {
-    return this.variant === "action" ? "bytes" : "packed";
   }
 
   run(fuel: number): DecodedExit {
@@ -52,31 +39,15 @@ export class WasmInterpreterRuntime {
     writeWasmCpuState(this.stateView, state);
   }
 
+  // The interpreter writes flag bytes, never the packed word.
   copyStateFromWasm(state: CpuState): void {
-    Object.assign(state, readWasmCpuState(this.stateView, this.flagsRepresentation));
+    Object.assign(state, readWasmCpuState(this.stateView, "bytes"));
   }
 }
 
-function compiledModule(variant: WasmInterpreterVariant): WebAssembly.Module {
-  const existing = compiledInterpreterModules.get(variant);
-
-  if (existing !== undefined) {
-    return existing;
-  }
-
-  const compiled = new WebAssembly.Module(moduleBytes(variant));
-
-  compiledInterpreterModules.set(variant, compiled);
-  return compiled;
-}
-
-function moduleBytes(variant: WasmInterpreterVariant): Uint8Array<ArrayBuffer> {
-  switch (variant) {
-    case "static":
-      return readInterpreterWasmArtifact();
-    case "action":
-      return encodeActionInterpreterModule().bytes;
-  }
+function compiledModule(): WebAssembly.Module {
+  compiledInterpreterModule ??= new WebAssembly.Module(encodeInterpreterModule().bytes);
+  return compiledInterpreterModule;
 }
 
 function readRunExport(instance: WebAssembly.Instance): (fuel: number) => bigint {

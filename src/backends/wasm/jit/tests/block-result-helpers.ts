@@ -124,7 +124,8 @@ const wasmInterpreterRunner: BlockRunner = {
     writeGuestBytes(interpreter.guestView, state.eip, testCase.bytes);
     writeWasmMemory(interpreter.guestView, testCase.memory ?? []);
     const exit = interpreter.run(decodedInstructionCount(testCase.bytes, state.eip));
-    const finalState = readWasmCpuState(interpreter.stateView);
+    // The interpreter keeps flags in the state-memory flag bytes.
+    const finalState = readWasmCpuState(interpreter.stateView, "bytes");
 
     return snapshotFor(
       finalState,

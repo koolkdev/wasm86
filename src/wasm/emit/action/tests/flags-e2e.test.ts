@@ -9,7 +9,7 @@ import type { WriteStateAction } from "#ir/action/types.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { StopReason } from "#x86/execution/run-result.js";
-import { x86ArithmeticFlags, type X86ArithmeticFlag } from "#x86/flags.js";
+import { x86ArithmeticFlags } from "#x86/flags.js";
 import { createCpuState, getFlag, type CpuState } from "#x86/state/cpu-state.js";
 import { reg32 } from "#x86/types.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -26,23 +26,21 @@ import { instantiateActionBlock } from "./harness.js";
 // template to both sides, so the comparison is between the two executions,
 // never between two transcriptions of the instruction.
 
-// All six arithmetic flags set, so clears and the undef-preserve policy are
-// both observable.
+// All six arithmetic flags set, so every clear is observable.
 const allArithmeticEflags = 0x8d5;
 
 // dst=ebx, src=ecx for every form: modrm 0xcb = mod 11, reg ecx, rm ebx.
 const aluCases: readonly Readonly<{
   name: string;
   bytes: readonly number[];
-  undefinedFlags: readonly X86ArithmeticFlag[];
 }>[] = [
-  { name: "add ebx, ecx", bytes: [0x01, 0xcb], undefinedFlags: [] },
-  { name: "or ebx, ecx", bytes: [0x09, 0xcb], undefinedFlags: ["AF"] },
-  { name: "and ebx, ecx", bytes: [0x21, 0xcb], undefinedFlags: ["AF"] },
-  { name: "sub ebx, ecx", bytes: [0x29, 0xcb], undefinedFlags: [] },
-  { name: "xor ebx, ecx", bytes: [0x31, 0xcb], undefinedFlags: ["AF"] },
-  { name: "cmp ebx, ecx", bytes: [0x39, 0xcb], undefinedFlags: [] },
-  { name: "test ebx, ecx", bytes: [0x85, 0xcb], undefinedFlags: ["AF"] }
+  { name: "add ebx, ecx", bytes: [0x01, 0xcb] },
+  { name: "or ebx, ecx", bytes: [0x09, 0xcb] },
+  { name: "and ebx, ecx", bytes: [0x21, 0xcb] },
+  { name: "sub ebx, ecx", bytes: [0x29, 0xcb] },
+  { name: "xor ebx, ecx", bytes: [0x31, 0xcb] },
+  { name: "cmp ebx, ecx", bytes: [0x39, 0xcb] },
+  { name: "test ebx, ecx", bytes: [0x85, 0xcb] }
 ];
 
 // Edge values per pair position: zero results, carries, signed overflow in
@@ -85,7 +83,7 @@ for (const aluCase of aluCases) {
 
       writeWasmCpuState(stateView, initial);
       strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH, label);
-      assertMatchesReference(stateView, refState, aluCase.undefinedFlags, label);
+      assertMatchesReference(stateView, refState, label);
     }
   });
 }
@@ -140,15 +138,10 @@ test("two adds in one block store each flag byte once, with the second add's fla
 
   writeWasmCpuState(stateView, initial);
   strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH);
-  assertMatchesReference(stateView, refState, [], "two adds");
+  assertMatchesReference(stateView, refState, "two adds");
 });
 
-function assertMatchesReference(
-  stateView: DataView,
-  refState: CpuState,
-  undefinedFlags: readonly X86ArithmeticFlag[],
-  label: string
-): void {
+function assertMatchesReference(stateView: DataView, refState: CpuState, label: string): void {
   for (const name of reg32) {
     strictEqual(readWasmStateChannel(stateView, gprChannel(name)), refState[name], `${label} ${name}`);
   }
@@ -156,14 +149,7 @@ function assertMatchesReference(
   strictEqual(readWasmStateChannel(stateView, eipChannel), refState.eip, `${label} eip`);
 
   for (const flag of x86ArithmeticFlags) {
-    if (undefinedFlags.includes(flag)) {
-      // The pipeline's undef policy is preserve, so the byte keeps its
-      // initial 1. (The direct reference clears undef flags instead — both
-      // are architecturally allowed.)
-      strictEqual(readWasmFlagByte(stateView, flag), 1, `${label} ${flag} (undef preserves)`);
-    } else {
-      strictEqual(readWasmFlagByte(stateView, flag), getFlag(refState, flag) ? 1 : 0, `${label} ${flag}`);
-    }
+    strictEqual(readWasmFlagByte(stateView, flag), getFlag(refState, flag) ? 1 : 0, `${label} ${flag}`);
   }
 }
 

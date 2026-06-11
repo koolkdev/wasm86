@@ -19,7 +19,7 @@ import {
   emitRelTargetFetch,
   type DecodeCursor
 } from "./fragments.js";
-import type { ActionInterpreterLocals } from "./locals.js";
+import type { InterpreterLocals } from "./locals.js";
 
 // Instruction handlers are single-instruction ActionBlocks over the existing
 // semantics templates. Decoded operands arrive as externals — dynamic
@@ -29,7 +29,7 @@ import type { ActionInterpreterLocals } from "./locals.js";
 // The rm operand's resolved addressing form; "plain" has no rm operand.
 export type HandlerForm = "plain" | "register" | "memory";
 
-export type ActionInterpreterHandler = Readonly<{
+export type InterpreterHandler = Readonly<{
   instructionId: string;
   opcode: readonly number[];
   form: HandlerForm;
@@ -38,10 +38,10 @@ export type ActionInterpreterHandler = Readonly<{
 export type HandlerEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  locals: ActionInterpreterLocals;
+  locals: InterpreterLocals;
   // Label depth from the emission point to the instruction-complete target.
   continueDepth: number;
-  handlers: ActionInterpreterHandler[];
+  handlers: InterpreterHandler[];
 }>;
 
 export function emitInstructionHandler(

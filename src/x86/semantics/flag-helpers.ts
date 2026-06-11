@@ -202,7 +202,7 @@ function logicFlags(s: IrBuilder, width: OperandWidth, result: ValueRef): IrFlag
     cells: {
       ...zspCells(s, { width, result }),
       CF: s.flagExpr(0),
-      AF: s.flagUndef(),
+      AF: s.flagExpr(0), // Architecturally undefined
       OF: s.flagExpr(0)
     }
   };

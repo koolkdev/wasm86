@@ -16,23 +16,22 @@ import {
   type InterpreterModuleInstance
 } from "#backends/wasm/interpreter/tests/interpreter-helpers.js";
 import {
-  encodeActionInterpreterModule,
-  type ActionInterpreterModule
-} from "#backends/wasm/interpreter/action/module.js";
+  encodeInterpreterModule,
+  type InterpreterModule
+} from "#backends/wasm/interpreter/module.js";
 
-// End-to-end coverage of the action interpreter variant: guest programs over
-// the wired families (mov, ALU, cmp/test, jcc), decode faults, and the
-// one-handler-per-op+width shape.
+// End-to-end coverage of the interpreter module: guest programs over the
+// dispatch loop, decode faults, and the one-handler-per-op+width shape.
 
 const startAddress = 0x1000;
-// Any byte outside the wired families stops the run.
+// Any byte outside the ISA stops the run.
 const haltByte = 0xf4;
 
-let encoded: ActionInterpreterModule | undefined;
+let encoded: InterpreterModule | undefined;
 let compiled: WebAssembly.Module | undefined;
 
-function encodedModule(): ActionInterpreterModule {
-  encoded ??= encodeActionInterpreterModule();
+function encodedModule(): InterpreterModule {
+  encoded ??= encodeInterpreterModule();
   return encoded;
 }
 
@@ -347,11 +346,20 @@ test("one handler body per ALU op, width, and addressing form", () => {
     [...counts.entries()].sort(),
     [
       ["add.al_imm8/plain", 1],
+      ["add.ax_imm16/plain", 1],
       ["add.eax_imm32/plain", 1],
+      ["add.r16_rm16/memory", 1],
+      ["add.r16_rm16/register", 1],
       ["add.r32_rm32/memory", 1],
       ["add.r32_rm32/register", 1],
       ["add.r8_rm8/memory", 1],
       ["add.r8_rm8/register", 1],
+      ["add.rm16_imm16/memory", 1],
+      ["add.rm16_imm16/register", 1],
+      ["add.rm16_imm8/memory", 1],
+      ["add.rm16_imm8/register", 1],
+      ["add.rm16_r16/memory", 1],
+      ["add.rm16_r16/register", 1],
       ["add.rm32_imm32/memory", 1],
       ["add.rm32_imm32/register", 1],
       ["add.rm32_imm8/memory", 1],
@@ -370,7 +378,9 @@ test("every ModRM memory arm shares one rm-decode helper per opcode length", () 
   const memoryHandlers = encodedModule().handlers.filter((handler) => handler.form === "memory");
 
   ok(memoryHandlers.length > 1, "expected several ModRM memory arms");
-  deepStrictEqual(encodedModule().rmDecodeHelpers, [1]);
+  // One helper per byte count before the ModRM: plain, two-byte or prefixed,
+  // and prefixed two-byte opcodes.
+  deepStrictEqual([...encodedModule().rmDecodeHelpers].sort(), [1, 2, 3]);
 });
 
 test("ModRM handlers never repeat per register", () => {

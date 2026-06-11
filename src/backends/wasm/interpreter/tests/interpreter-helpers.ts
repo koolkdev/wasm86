@@ -1,9 +1,16 @@
 import { strictEqual } from "node:assert";
 
 import { type CpuState } from "#x86/state/cpu-state.js";
+import { x86ArithmeticFlags } from "#x86/flags.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
-import { readWasmCpuState, readWasmStateField, WASM_STATE_FIELDS, writeWasmCpuState } from "#wasm/state-layout.js";
+import {
+  readWasmCpuState,
+  readWasmFlagByte,
+  readWasmStateField,
+  WASM_STATE_FIELDS,
+  writeWasmCpuState
+} from "#wasm/state-layout.js";
 import { createGuestMemory } from "#wasm/tests/helpers.js";
 
 export type InterpreterModuleInstance = Readonly<{
@@ -54,7 +61,7 @@ export function writeInterpreterState(view: DataView, state: CpuState): void {
 }
 
 export function readInterpreterState(view: DataView): CpuState {
-  return readWasmCpuState(view);
+  return readWasmCpuState(view, "bytes");
 }
 
 export function assertInterpreterStateEquals(view: DataView, state: CpuState): void {
@@ -64,6 +71,10 @@ export function assertInterpreterStateEquals(view: DataView, state: CpuState): v
 
   for (const field of WASM_STATE_FIELDS) {
     strictEqual(readWasmStateField(view, field), readWasmStateField(expectedView, field));
+  }
+
+  for (const flag of x86ArithmeticFlags) {
+    strictEqual(readWasmFlagByte(view, flag), readWasmFlagByte(expectedView, flag));
   }
 }
 

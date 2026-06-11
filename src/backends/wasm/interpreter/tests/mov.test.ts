@@ -347,7 +347,7 @@ test("truncated MOV r32, imm32 returns decode fault without changing architectur
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { exitReason: ExitReason.DECODE_FAULT, payload: eip + 1 });
+  deepStrictEqual(exit, { exitReason: ExitReason.DECODE_FAULT, payload: eip + 1, detail: 4 });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

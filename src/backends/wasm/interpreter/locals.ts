@@ -4,7 +4,7 @@ import { wasmValueType } from "#wasm/encoder/types.js";
 // The dispatch locals: everything decode fragments export and handlers
 // consume as externals. One set serves the whole loop; each dispatch case
 // writes only what its instruction uses.
-export class ActionInterpreterLocals {
+export class InterpreterLocals {
   readonly eip: number;
   readonly byte: number;
   readonly mod: number;

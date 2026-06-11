@@ -1,9 +1,8 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ExitReason } from "#wasm/exit.js";
 import { startAddress } from "#wasm/tests/helpers.js";
-import { maxX86InstructionLength } from "#x86/decoder/reader.js";
 import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
 import {
   assertInterpreterStateEquals,
@@ -56,65 +55,6 @@ test("executes MOV into AL, AH, and prefixed AX register views", async () => {
   assertSingleInstructionExit(movAx.exit);
   strictEqual(movAx.state.eax, 0x1234_5678);
   assertCompletedInstruction(movAx.state, startAddress + 4, 8);
-});
-
-test("repeated operand-size prefixes still execute the 16-bit form once", async () => {
-  const { exit, state } = await executeInstruction([0x66, 0x66, 0xb8, 0x34, 0x12], createCpuState({
-    eax: 0xffff_0000,
-    eip: startAddress,
-    instructionCount: 7
-  }));
-
-  assertSingleInstructionExit(exit);
-  strictEqual(state.eax, 0xffff_1234);
-  assertCompletedInstruction(state, startAddress + 5, 8);
-});
-
-test("maximum length repeated operand-size prefixes still execute", async () => {
-  const bytes = [...new Array<number>(12).fill(0x66), 0xb8, 0x34, 0x12];
-  const { exit, state } = await executeInstruction(bytes, createCpuState({
-    eax: 0xffff_0000,
-    eip: startAddress,
-    instructionCount: 7
-  }));
-
-  assertSingleInstructionExit(exit);
-  strictEqual(state.eax, 0xffff_1234);
-  assertCompletedInstruction(state, startAddress + maxX86InstructionLength, 8);
-});
-
-test("overlong prefixed instructions return decode faults", async () => {
-  const immediateCrossesLimit = await executeInstruction(
-    [...new Array<number>(13).fill(0x66), 0xb8, 0x34, 0x12],
-    createCpuState({
-      eax: 0x1122_3344,
-      eip: startAddress,
-      instructionCount: 7
-    })
-  );
-
-  deepStrictEqual(immediateCrossesLimit.exit, {
-    exitReason: ExitReason.DECODE_FAULT,
-    payload: startAddress + maxX86InstructionLength
-  });
-  strictEqual(immediateCrossesLimit.state.eax, 0x1122_3344);
-  assertCompletedInstruction(immediateCrossesLimit.state, startAddress, 7);
-
-  const prefixLoopCrossesLimit = await executeInstruction(
-    new Array<number>(15).fill(0x66),
-    createCpuState({
-      eax: 0x5566_7788,
-      eip: startAddress,
-      instructionCount: 7
-    })
-  );
-
-  deepStrictEqual(prefixLoopCrossesLimit.exit, {
-    exitReason: ExitReason.DECODE_FAULT,
-    payload: startAddress + maxX86InstructionLength
-  });
-  strictEqual(prefixLoopCrossesLimit.state.eax, 0x5566_7788);
-  assertCompletedInstruction(prefixLoopCrossesLimit.state, startAddress, 7);
 });
 
 test("executes byte and word memory reads and writes", async () => {

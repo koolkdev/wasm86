@@ -10,6 +10,7 @@ import type {
   ExpandedInstructionSpec,
   MemOperandType,
   ModRmMatch,
+  OperandSizePrefixMode,
   OperandSpec,
   Reg3,
   RmOperandType
@@ -19,21 +20,37 @@ import { encodeExit, ExitReason } from "#wasm/exit.js";
 import type { RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";
 import { emitInstructionHandler, type HandlerEmitContext } from "./handlers.js";
-import { actionInterpreterDispatchRoot } from "./instructions.js";
+import { interpreterDispatchRoot } from "./instructions.js";
 
 // The hand-written dispatch shape: br_table over the fetched opcode byte,
 // the reg-field group switch, and the mod-form split. Fetches and handlers
 // are action fragments; memory arms call the shared rm-decode helper.
+//
+// The operand-size prefix dispatches positionally, canonical encodings only:
+// 0x66 at the first byte is one more dispatch case that fetches the next
+// byte and re-enters the root with the override candidate sets, the prefix
+// counted in the opcode length. Anything else — repeated prefixes, prefixes
+// on multi-byte positions — falls through dispatch to the honest
+// unsupported exit.
+
+const operandSizeOverridePrefix = 0x66;
 
 export type DispatchEmitContext = HandlerEmitContext & Readonly<{ rmDecode: RmDecodeHelpers }>;
 
-export function emitActionOpcodeDispatch(context: DispatchEmitContext): void {
-  emitDispatchNode(actionInterpreterDispatchRoot, context, 1);
+type OpcodeDispatchContext = DispatchEmitContext &
+  Readonly<{
+    operandSize: OperandSizePrefixMode;
+    // Prefix bytes before the opcode (0 or 1); leaf byte offsets shift by it.
+    prefixLength: number;
+  }>;
+
+export function emitOpcodeDispatch(context: DispatchEmitContext): void {
+  emitDispatchNode(interpreterDispatchRoot, { ...context, operandSize: "default", prefixLength: 0 }, 1);
 }
 
-function emitDispatchNode(node: OpcodeDispatchNode, context: DispatchEmitContext, opcodeLength: number): void {
+function emitDispatchNode(node: OpcodeDispatchNode, context: OpcodeDispatchContext, opcodeLength: number): void {
   const { body } = context;
-  const bytes = dispatchBytes(node);
+  const bytes = dispatchBytesWithPrefix(node, prefixDispatches(context, opcodeLength));
 
   if (bytes.length === 0) {
     emitReturnUnsupported(body);
@@ -50,11 +67,16 @@ function emitDispatchNode(node: OpcodeDispatchNode, context: DispatchEmitContext
     body.endBlock();
 
     const byte = bytes[index]!;
+    const caseContext = { ...context, continueDepth: context.continueDepth + 1 + index };
+
+    if (byte === operandSizeOverridePrefix && prefixDispatches(context, opcodeLength)) {
+      emitOperandSizePrefixCase(caseContext);
+      continue;
+    }
+
     const child = node.next[byte];
 
     assert(child !== undefined, `opcode dispatch lost byte 0x${byte.toString(16)}`);
-
-    const caseContext = { ...context, continueDepth: context.continueDepth + 1 + index };
 
     if (child.leaf !== undefined) {
       emitLeaf(child.leaf, caseContext);
@@ -68,8 +90,38 @@ function emitDispatchNode(node: OpcodeDispatchNode, context: DispatchEmitContext
   emitReturnUnsupported(body);
 }
 
-function emitLeaf(leaf: OpcodeDispatchLeaf, context: DispatchEmitContext): void {
-  const candidates = leaf.operandSize.default;
+// The prefix is a first-byte dispatch case of the unprefixed root only.
+function prefixDispatches(context: OpcodeDispatchContext, opcodeLength: number): boolean {
+  return context.operandSize === "default" && opcodeLength === 1;
+}
+
+function dispatchBytesWithPrefix(node: OpcodeDispatchNode, withPrefix: boolean): number[] {
+  const bytes = dispatchBytes(node);
+
+  if (!withPrefix) {
+    return bytes;
+  }
+
+  assert(
+    !bytes.includes(operandSizeOverridePrefix),
+    "the operand-size prefix byte collides with an opcode"
+  );
+  return [...bytes, operandSizeOverridePrefix];
+}
+
+// The byte after the prefix is the opcode: fetch it and re-enter the root
+// dispatch over the override candidate sets.
+function emitOperandSizePrefixCase(context: OpcodeDispatchContext): void {
+  emitOpcodeByteFetch(context, context.locals.eip, 1, context.locals.byte);
+  emitDispatchNode(
+    interpreterDispatchRoot,
+    { ...context, operandSize: "override", prefixLength: 1 },
+    2
+  );
+}
+
+function emitLeaf(leaf: OpcodeDispatchLeaf, context: OpcodeDispatchContext): void {
+  const candidates = leaf.operandSize[context.operandSize];
 
   switch (candidates.kind) {
     case "empty":
@@ -85,7 +137,7 @@ function emitLeaf(leaf: OpcodeDispatchLeaf, context: DispatchEmitContext): void 
 
       emitInstructionHandler(context, instruction, "plain", {
         kind: "static",
-        offset: leaf.opcodeLength
+        offset: context.prefixLength + leaf.opcodeLength
       });
       return;
     }
@@ -98,11 +150,12 @@ function emitLeaf(leaf: OpcodeDispatchLeaf, context: DispatchEmitContext): void 
 function emitModRmLeaf(
   leaf: OpcodeDispatchLeaf,
   candidates: OpcodeDispatchCandidateSet,
-  context: DispatchEmitContext
+  context: OpcodeDispatchContext
 ): void {
   const { body, locals } = context;
+  const opcodeEnd = context.prefixLength + leaf.opcodeLength;
 
-  emitModRmFetch(context, locals.eip, leaf.opcodeLength, {
+  emitModRmFetch(context, locals.eip, opcodeEnd, {
     modLocal: locals.mod,
     regLocal: locals.reg,
     rmLocal: locals.rm
@@ -116,7 +169,7 @@ function emitModRmLeaf(
   }
 
   if (cases.length === 1 && cases[0]!.regs.length === reg3Values.length) {
-    emitModRmForms(cases[0]!.instruction, leaf, context);
+    emitModRmForms(cases[0]!.instruction, opcodeEnd, context);
     return;
   }
 
@@ -128,7 +181,7 @@ function emitModRmLeaf(
 
   for (let index = cases.length - 1; index >= 0; index -= 1) {
     body.endBlock();
-    emitModRmForms(cases[index]!.instruction, leaf, {
+    emitModRmForms(cases[index]!.instruction, opcodeEnd, {
       ...context,
       continueDepth: context.continueDepth + 1 + index
     });
@@ -142,11 +195,11 @@ function emitModRmLeaf(
 // index, the rest decode an effective address.
 function emitModRmForms(
   instruction: ExpandedInstructionSpec<SemanticTemplate>,
-  leaf: OpcodeDispatchLeaf,
+  opcodeEnd: number,
   context: DispatchEmitContext
 ): void {
   const { body } = context;
-  const cursorAfterModRm: DecodeCursor = { kind: "static", offset: leaf.opcodeLength + 1 };
+  const cursorAfterModRm: DecodeCursor = { kind: "static", offset: opcodeEnd + 1 };
   const rmOperand = (instruction.spec.operands ?? []).find(isRmOperand);
 
   if (rmOperand === undefined) {
@@ -165,7 +218,7 @@ function emitModRmForms(
   }
 
   body.elseBlock();
-  armContext.rmDecode.emitMemoryAddressDecode(armContext, leaf.opcodeLength);
+  armContext.rmDecode.emitMemoryAddressDecode(armContext, opcodeEnd);
   emitInstructionHandler(armContext, instruction, "memory", {
     kind: "local",
     local: context.locals.length

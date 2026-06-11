@@ -3,7 +3,7 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#wasm/encoder/types.js";
 import { emitRmAddressFragment, emitSibFetch, type RmAddressParts } from "./fragments.js";
-import type { ActionInterpreterLocals } from "./locals.js";
+import type { InterpreterLocals } from "./locals.js";
 
 // The memory form of a ModRM rm operand, shared as one module-level helper
 // function per opcode length so every fragment offset stays static. The
@@ -26,7 +26,7 @@ type RmDecodeGlobals = Readonly<{ address: number; length: number }>;
 export type RmDecodeCallContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  locals: ActionInterpreterLocals;
+  locals: InterpreterLocals;
 }>;
 
 // One module's shared rm-decode helpers: the result globals plus one helper

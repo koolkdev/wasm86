@@ -162,7 +162,7 @@ test("logical alu semantics set logic flags before destination writeback", () =>
       { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
     ]);
     ok(program.some((irOp) => irOp.op === "value.binary" && irOp.operator === operator));
-    deepStrictEqual(flagsWriteOp(program).cells.AF, { kind: "undef" });
+    deepStrictEqual(flagsWriteOp(program).cells.AF, { kind: "expr", value: c32(0) });
     assertFlagsWriteBeforeWriteback(program, op(0));
   }
 });
@@ -188,7 +188,7 @@ test("test semantic uses value.binary and logic flags", () => {
     { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
   ]);
   ok(program.some((irOp) => irOp.op === "value.binary" && irOp.operator === "and"));
-  deepStrictEqual(flagsWriteOp(program).cells.AF, { kind: "undef" });
+  deepStrictEqual(flagsWriteOp(program).cells.AF, { kind: "expr", value: c32(0) });
   strictEqual(program.some((irOp) => irOp.op === "set"), false);
   deepStrictEqual(program[program.length - 1], { op: "next" });
 });

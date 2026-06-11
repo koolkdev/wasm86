@@ -86,6 +86,6 @@ test("truncated ModRM returns decode fault without changing architectural state"
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { exitReason: ExitReason.DECODE_FAULT, payload: eip + 1 });
+  deepStrictEqual(exit, { exitReason: ExitReason.DECODE_FAULT, payload: eip + 1, detail: 1 });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

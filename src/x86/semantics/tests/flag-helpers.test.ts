@@ -67,7 +67,7 @@ test("CMP helper writes cells and sparse direct optimized conditions without res
   assertCompare(block, conditionValue(write, "L"), 16, "lt_s");
 });
 
-test("TEST helper writes logic cells, marks AF undefined, and exposes only E/NE direct conditions", () => {
+test("TEST helper writes logic cells, clears AF, and exposes only E/NE direct conditions", () => {
   const block = buildHelperIr((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
@@ -76,7 +76,7 @@ test("TEST helper writes logic cells, marks AF undefined, and exposes only E/NE 
   });
   const write = flagWrite(block);
 
-  deepStrictEqual(write.cells.AF, { kind: "undef" });
+  deepStrictEqual(exprCell(write, "AF"), { kind: "const", type: "i32", value: 0 });
   deepStrictEqual(exprCell(write, "CF"), { kind: "const", type: "i32", value: 0 });
   deepStrictEqual(exprCell(write, "OF"), { kind: "const", type: "i32", value: 0 });
   deepStrictEqual(sortedKeys(write.conditions), ["E", "NE"]);
@@ -278,7 +278,7 @@ test("logic result helpers produce sparse semantic writes without direct conditi
 
     deepStrictEqual(sortedKeys(write.cells), sortedFlags());
     strictEqual(write.conditions, undefined);
-    deepStrictEqual(write.cells.AF, { kind: "undef" });
+    deepStrictEqual(exprCell(write, "AF"), { kind: "const", type: "i32", value: 0 });
   }
 });
 

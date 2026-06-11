@@ -117,6 +117,6 @@ test("truncated JMP rel32 returns decode fault without changing architectural st
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { exitReason: ExitReason.DECODE_FAULT, payload: eip + 1 });
+  deepStrictEqual(exit, { exitReason: ExitReason.DECODE_FAULT, payload: eip + 1, detail: 4 });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

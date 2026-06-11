@@ -32,9 +32,8 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
-    "build:interpreter-wasm": "node dist/src/backends/wasm/interpreter/write-artifact.js",
     "typecheck": "tsc --noEmit",
-    "test": "npm run clean && tsc -p tsconfig.json && npm run build:interpreter-wasm && node --test 'dist/src/**/tests/*.test.js'"
+    "test": "npm run clean && tsc -p tsconfig.json && node --test 'dist/src/**/tests/*.test.js'"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

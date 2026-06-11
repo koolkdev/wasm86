@@ -8,7 +8,7 @@ import {
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
 import { ExitReason, type DecodedExit } from "#wasm/exit.js";
-import { readInterpreterWasmArtifact } from "#backends/wasm/interpreter/artifact.js";
+import { encodeInterpreterModule } from "#backends/wasm/interpreter/module.js";
 
 export type ExecutedInstruction = Readonly<{
   exit: DecodedExit;
@@ -24,7 +24,7 @@ export type GuestMemoryBytes = Readonly<{
 let interpreterModule: WebAssembly.Module | undefined;
 
 export async function instantiateWasmInterpreter(): Promise<InterpreterModuleInstance> {
-  interpreterModule ??= new WebAssembly.Module(readInterpreterWasmArtifact());
+  interpreterModule ??= new WebAssembly.Module(encodeInterpreterModule().bytes);
   return instantiateInterpreterCompiledModule(interpreterModule);
 }
 

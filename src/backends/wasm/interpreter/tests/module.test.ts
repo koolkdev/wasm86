@@ -8,48 +8,15 @@ import {
   writeInterpreterState
 } from "./interpreter-helpers.js";
 import { assertMemoryImports, startAddress } from "#wasm/tests/helpers.js";
-import { wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
-import {
-  extractOnlyWasmFunctionBody,
-  wasmBodyOpcodes,
-  wasmBodyMemoryAccesses
-} from "#wasm/tests/body-opcodes.js";
+import { wasmImport } from "#wasm/abi.js";
 import { ExitReason } from "#wasm/exit.js";
-import { readInterpreterWasmArtifact } from "#backends/wasm/interpreter/artifact.js";
 import { encodeInterpreterModule } from "#backends/wasm/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";
 
-test("generated interpreter artifact matches the encoder output", () => {
-  const artifact = readInterpreterWasmArtifact();
-  const encoded = encodeInterpreterModule();
-
-  strictEqual(artifact.byteLength, encoded.byteLength);
-  strictEqual(Buffer.compare(Buffer.from(artifact), Buffer.from(encoded)), 0);
-});
-
 test("imports state and guest memories in ABI order", () => {
-  const module = new WebAssembly.Module(readInterpreterWasmArtifact());
+  const module = new WebAssembly.Module(encodeInterpreterModule().bytes);
 
   assertMemoryImports(module);
-});
-
-test("generated interpreter sign-extends MOVSX memory forms explicitly", () => {
-  const body = extractOnlyWasmFunctionBody(readInterpreterWasmArtifact());
-  const opcodes = wasmBodyOpcodes(body);
-  const accesses = wasmBodyMemoryAccesses(body);
-  const signedGuestLoads = accesses.filter((access) =>
-    access.memoryIndex === wasmMemoryIndex.guest &&
-    access.offset === 0 &&
-    (access.opcode === wasmOpcode.i32Load8S || access.opcode === wasmOpcode.i32Load16S)
-  );
-
-  deepStrictEqual(
-    new Set(signedGuestLoads.map((access) => access.opcode)),
-    new Set()
-  );
-  strictEqual(opcodes.includes(wasmOpcode.i32Extend8S), true);
-  strictEqual(opcodes.includes(wasmOpcode.i32Extend16S), true);
 });
 
 test("exports run(fuel) -> i64", async () => {
@@ -115,6 +82,29 @@ test("operand-size prefix dispatches to the prefixed opcode form", async () => {
   strictEqual(state.instructionCount, 8);
 });
 
+test("non-canonical prefix encodings report unsupported instead of misdecoding", async () => {
+  const interpreter = await instantiateWasmInterpreter();
+  const cases = [
+    [0x66, 0x66, 0xb8, 0x34, 0x12], // repeated operand-size prefix
+    [0x66, 0x0f, 0x84, 0x00, 0x00, 0x00, 0x00] // prefix on an unprefixed-only form
+  ] as const;
+
+  for (const bytes of cases) {
+    const initialState = createCpuState({
+      eax: 0x1122_3344,
+      eip: startAddress,
+      instructionCount: 7
+    });
+    writeInterpreterState(interpreter.stateView, initialState);
+    writeGuestBytes(interpreter.guestView, startAddress, bytes);
+
+    const exit = interpreter.run(1);
+
+    strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+    assertInterpreterStateEquals(interpreter.stateView, initialState);
+  }
+});
+
 test("truncated two-byte opcode escape returns decode fault", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const lastGuestByte = interpreter.guestView.byteLength - 1;
@@ -127,7 +117,8 @@ test("truncated two-byte opcode escape returns decode fault", async () => {
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { exitReason: ExitReason.DECODE_FAULT, payload: interpreter.guestView.byteLength });
+  strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
+  strictEqual(exit.payload, interpreter.guestView.byteLength);
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -147,7 +138,7 @@ test("unsupported two-byte opcode path dispatches before unsupported exit", asyn
 });
 
 test("requires both ABI memories when instantiating", async () => {
-  const module = new WebAssembly.Module(readInterpreterWasmArtifact());
+  const module = new WebAssembly.Module(encodeInterpreterModule().bytes);
   const stateMemory = new WebAssembly.Memory({ initial: 1 });
 
   await WebAssembly.instantiate(module, {

@@ -6,7 +6,7 @@ import type { CpuStateField } from "#x86/state/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import { decodeExit } from "#wasm/exit.js";
-import { readInterpreterWasmArtifact } from "#backends/wasm/interpreter/artifact.js";
+import { encodeInterpreterModule } from "#backends/wasm/interpreter/module.js";
 import type { CompiledBlockCache } from "#backends/wasm/jit/compiled-blocks/block-cache.js";
 import { WasmBlocksEngine } from "#runtime/engines/wasm-blocks.js";
 import { WasmInterpreterEngine, type WasmInterpreter } from "#runtime/engines/wasm-interpreter.js";
@@ -52,7 +52,7 @@ export function prepareEngineFixture(fixture: EngineFixture): PreparedEngineFixt
 }
 
 export function instantiateFixtureWasmInterpreter(memories: WasmHostMemories): WasmInterpreter {
-  interpreterModule ??= new WebAssembly.Module(readInterpreterWasmArtifact());
+  interpreterModule ??= new WebAssembly.Module(encodeInterpreterModule().bytes);
 
   const instance = new WebAssembly.Instance(interpreterModule, {
     [wasmImport.moduleName]: {
