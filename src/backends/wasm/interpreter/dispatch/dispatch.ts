@@ -8,18 +8,6 @@ export const interpreterOpcodeDispatchRoot: OpcodeDispatchNode = buildOpcodeDisp
   X86_32_CORE.instructions.filter(interpreterSupportsInstruction).flatMap((spec) => expandInstructionSpec(spec))
 );
 
-export function dispatchBytes(node: OpcodeDispatchNode): number[] {
-  const bytes: number[] = [];
-
-  for (let byte = 0; byte <= 0xff; byte += 1) {
-    if (node.next[byte] !== undefined) {
-      bytes.push(byte);
-    }
-  }
-
-  return bytes;
-}
-
 function interpreterSupportsInstruction(spec: InstructionSpec): boolean {
   return (
     (spec.prefixes === undefined || spec.prefixes.operandSize !== undefined) &&

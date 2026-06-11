@@ -3,30 +3,44 @@ import { gprChannel, type GprChannel } from "./slots.js";
 
 export type ExternalValueId = number;
 
+// Each storage family has a static form and a runtime-bound form whose
+// payload arrives as an external value: a register index, an operand value
+// (decoded immediate or resolved branch target), or a computed address.
 export type RegOperandBinding = Readonly<{ kind: "reg"; channel: GprChannel }>;
+export type RegDynamicOperandBinding = Readonly<{ kind: "regDynamic"; index: ExternalValueId }>;
 export type ImmOperandBinding = Readonly<{ kind: "imm"; value: number }>;
+export type ImmExternalOperandBinding = Readonly<{ kind: "immExternal"; value: ExternalValueId }>;
 export type MemOperandBinding = Readonly<{ kind: "mem"; address: EffectiveAddress }>;
-// A runtime value supplied by the host function, e.g. an interpreter local.
-export type ExternalOperandBinding = Readonly<{ kind: "external"; id: ExternalValueId }>;
+export type MemExternalOperandBinding = Readonly<{ kind: "memExternal"; address: ExternalValueId }>;
 
 export type OperandBinding =
   | RegOperandBinding
+  | RegDynamicOperandBinding
   | ImmOperandBinding
+  | ImmExternalOperandBinding
   | MemOperandBinding
-  | ExternalOperandBinding;
+  | MemExternalOperandBinding;
 
 export function regBinding(name: RegName): RegOperandBinding {
   return { kind: "reg", channel: gprChannel(name) };
+}
+
+export function regDynamicBinding(index: ExternalValueId): RegDynamicOperandBinding {
+  return { kind: "regDynamic", index };
 }
 
 export function immBinding(value: number): ImmOperandBinding {
   return { kind: "imm", value };
 }
 
+export function immExternalBinding(value: ExternalValueId): ImmExternalOperandBinding {
+  return { kind: "immExternal", value };
+}
+
 export function memBinding(address: EffectiveAddress): MemOperandBinding {
   return { kind: "mem", address };
 }
 
-export function externalBinding(id: ExternalValueId): ExternalOperandBinding {
-  return { kind: "external", id };
+export function memExternalBinding(address: ExternalValueId): MemExternalOperandBinding {
+  return { kind: "memExternal", address };
 }

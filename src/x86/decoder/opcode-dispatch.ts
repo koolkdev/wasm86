@@ -39,6 +39,19 @@ type MutableOpcodeDispatchNode = {
   next: (MutableOpcodeDispatchNode | undefined)[];
 };
 
+// The dispatchable byte values at a node, in ascending order.
+export function dispatchBytes(node: OpcodeDispatchNode): number[] {
+  const bytes: number[] = [];
+
+  for (let byte = 0; byte <= 0xff; byte += 1) {
+    if (node.next[byte] !== undefined) {
+      bytes.push(byte);
+    }
+  }
+
+  return bytes;
+}
+
 export function buildOpcodeDispatch(
   instructions: readonly ExpandedInstructionSpec<SemanticTemplate>[]
 ): OpcodeDispatchNode {

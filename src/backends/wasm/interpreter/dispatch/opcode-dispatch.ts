@@ -1,7 +1,8 @@
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { ExitReason } from "#wasm/exit.js";
-import { dispatchBytes, interpreterOpcodeDispatchRoot } from "./dispatch.js";
+import { dispatchBytes } from "#x86/decoder/opcode-dispatch.js";
+import { interpreterOpcodeDispatchRoot } from "./dispatch.js";
 import { emitWasmIrExitConstPayload, type WasmIrExitDestination } from "#wasm/codegen/exit.js";
 import { emitInstructionHandlerForLeaf } from "./instruction-handlers.js";
 import type { InterpreterStateCache } from "#backends/wasm/interpreter/codegen/state-cache.js";

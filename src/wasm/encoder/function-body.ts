@@ -132,6 +132,11 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  unreachable(): this {
+    this.#writeInstruction(wasmOpcode.unreachable);
+    return this;
+  }
+
   select(): this {
     this.#writeInstruction(wasmOpcode.select);
     return this;

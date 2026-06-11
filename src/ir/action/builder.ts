@@ -28,7 +28,7 @@ import type {
   VarRef
 } from "#ir/model/types.js";
 import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
-import type { ExternalOperandBinding, OperandBinding } from "./operands.js";
+import type { ExternalValueId, OperandBinding, RegDynamicOperandBinding } from "./operands.js";
 import { createPendingChannels } from "./pending.js";
 import { eipChannel, flagChannel, gprChannel, type GprChannel, type StateChannel } from "./slots.js";
 import type {
@@ -48,7 +48,11 @@ import {
   type WidthBounds
 } from "./values.js";
 
-export type InstructionLocation = Readonly<{ eip: number; nextEip: number }>;
+// A location value is a compile-time constant (block compilation) or an
+// external supplied by the host function (interpreter dispatch).
+export type LocationValue = number | Readonly<{ external: ExternalValueId }>;
+
+export type InstructionLocation = Readonly<{ eip: LocationValue; nextEip: LocationValue }>;
 
 export type ActionBuilder = Readonly<{
   addInstruction(
@@ -157,10 +161,14 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       case "imm":
         return { storage: "imm" };
       case "mem":
+      case "memExternal":
         return { storage: "mem" };
-      case "external":
+      case "regDynamic":
         // A runtime register index: register storage, dynamic channel.
         return { storage: "reg" };
+      case "immExternal":
+        // A runtime value with no storage cell, e.g. a decoded immediate.
+        return { storage: "imm" };
     }
   }
 
@@ -198,20 +206,16 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
         const binding = this.#binding(storage.index);
 
         switch (binding.kind) {
-          case "imm": {
-            const value = this.#values.internConst(binding.value);
-
-            return irVar(
-              options.signed === true
-                ? this.#values.extendTo(accessWidth, value)
-                : this.#values.projectTo(accessWidth, value)
-            );
-          }
+          case "imm":
+            return irVar(this.#widthAdjusted(this.#values.internConst(binding.value), accessWidth, options));
+          case "immExternal":
+            return irVar(this.#widthAdjusted(this.#values.internExternal(binding.value), accessWidth, options));
           case "reg":
             return irVar(this.#readChannel(binding.channel, accessWidth, options));
           case "mem":
+          case "memExternal":
             return irVar(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
-          case "external":
+          case "regDynamic":
             return irVar(this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options));
         }
       }
@@ -237,13 +241,15 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
             this.#writeChannel(binding.channel, value, accessWidth);
             return;
           case "mem":
+          case "memExternal":
             this.#writeMemory(this.#operandAddress(storage.index), value, accessWidth);
             return;
-          case "external":
+          case "regDynamic":
             this.#pending.writeDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), this.#valueId(value));
             return;
           case "imm":
-            throw notSupportedError("set to imm operand binding");
+          case "immExternal":
+            throw notSupportedError(`set to ${binding.kind} operand binding`);
         }
       }
     }
@@ -251,7 +257,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   next(): void {
     this.#beforeOp("next");
-    this.#pending.write(eipChannel, this.#values.internConst(this.#location().nextEip));
+    this.#pending.write(eipChannel, this.#locationValueId(this.#location().nextEip));
     this.#terminated = true;
   }
 
@@ -412,7 +418,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
     const vectorId = this.#valueId(vector);
 
-    this.#pending.write(eipChannel, this.#values.internConst(this.#location().nextEip));
+    this.#pending.write(eipChannel, this.#locationValueId(this.#location().nextEip));
     this.#pending.flushAll();
     this.#actions.push({ kind: "exit", reason: "hostTrap", payload: vectorId });
     this.#blockEnd = "terminated";
@@ -452,7 +458,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return this.#edgeRegion(
       { kind: "exit", reason, payload: address },
       this.#pending.snapshot(),
-      this.#values.internConst(this.#location().eip)
+      this.#locationValueId(this.#location().eip)
     );
   }
 
@@ -490,12 +496,24 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return id;
   }
 
-  #dynamicGprSlot(binding: ExternalOperandBinding, accessWidth: OperandWidth): GprDynamicSlot {
+  #dynamicGprSlot(binding: RegDynamicOperandBinding, accessWidth: OperandWidth): GprDynamicSlot {
     return {
       kind: "gprDynamic",
-      index: this.#values.internExternal(binding.id),
+      index: this.#values.internExternal(binding.index),
       byteLength: dynamicGprByteLength[accessWidth]
     };
+  }
+
+  #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: IrGetOptions): ValueId {
+    return options.signed === true
+      ? this.#values.extendTo(accessWidth, value)
+      : this.#values.projectTo(accessWidth, value);
+  }
+
+  #locationValueId(value: LocationValue): ValueId {
+    return typeof value === "number"
+      ? this.#values.internConst(value)
+      : this.#values.internExternal(value.external);
   }
 
   #readChannel(channel: GprChannel, accessWidth: OperandWidth, options: IrGetOptions): ValueId {
@@ -540,13 +558,24 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     }
 
     const binding = this.#binding(index);
-
-    assert(binding.kind === "mem", `address of a ${binding.kind} operand binding`);
-
-    const address = this.#effectiveAddress(binding.address);
+    const address = this.#bindingAddress(binding);
 
     this.#operandAddresses.set(index, address);
     return address;
+  }
+
+  #bindingAddress(binding: OperandBinding): ValueId {
+    assert(
+      binding.kind === "mem" || binding.kind === "memExternal",
+      `address of a ${binding.kind} operand binding`
+    );
+
+    switch (binding.kind) {
+      case "mem":
+        return this.#effectiveAddress(binding.address);
+      case "memExternal":
+        return this.#values.internExternal(binding.address);
+    }
   }
 
   #effectiveAddress(ea: EffectiveAddress): ValueId {
@@ -581,7 +610,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       case "const":
         return this.#values.internConst(value.value);
       case "nextEip":
-        return this.#values.internConst(this.#location().nextEip);
+        return this.#locationValueId(this.#location().nextEip);
       case "var": {
         this.#values.node(value.id);
         return value.id;

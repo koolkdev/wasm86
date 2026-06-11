@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createActionBuilder } from "#ir/action/builder.js";
-import { externalBinding, immBinding, regBinding } from "#ir/action/operands.js";
+import { regDynamicBinding, immBinding, regBinding } from "#ir/action/operands.js";
 import { gprChannel } from "#ir/action/slots.js";
 import type { ActionBlock } from "#ir/action/types.js";
 import { createValueTable, type ValueId, type ValueTable } from "#ir/action/values.js";
@@ -28,7 +28,7 @@ function assertFallthrough(exit: bigint): void {
 test("one add r/m32, r32 body serves several runtime register pairs", async () => {
   const builder = createActionBuilder();
 
-  builder.addInstruction(aluSemantic("add", 32), [externalBinding(0), externalBinding(1)], {
+  builder.addInstruction(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], {
     eip: 0x1000,
     nextEip: 0x1002
   });
@@ -59,7 +59,7 @@ test("one add r/m32, r32 body serves several runtime register pairs", async () =
 test("dst == src reads the original value for the result and the flags", async () => {
   const builder = createActionBuilder();
 
-  builder.addInstruction(aluSemantic("add", 32), [externalBinding(0), externalBinding(1)], {
+  builder.addInstruction(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], {
     eip: 0x1000,
     nextEip: 0x1002
   });
@@ -87,7 +87,7 @@ test("a static read before a dynamic write to the same register keeps the old va
     eip: 0x1000,
     nextEip: 0x1002
   });
-  builder.addInstruction(movSemantic(32), [externalBinding(0), immBinding(0x99)], {
+  builder.addInstruction(movSemantic(32), [regDynamicBinding(0), immBinding(0x99)], {
     eip: 0x1002,
     nextEip: 0x1008
   });
@@ -103,7 +103,7 @@ test("a static read before a dynamic write to the same register keeps the old va
 test("xchg r/mDyn, ebx swaps through the dynamic slot", async () => {
   const builder = createActionBuilder();
 
-  builder.addInstruction(xchgSemantic(32), [externalBinding(0), regBinding("ebx")], {
+  builder.addInstruction(xchgSemantic(32), [regDynamicBinding(0), regBinding("ebx")], {
     eip: 0x1000,
     nextEip: 0x1002
   });
@@ -124,7 +124,7 @@ test("xchg r/mDyn, ebx swaps through the dynamic slot", async () => {
 test("one add r/m8, r8 body serves low and high byte registers", async () => {
   const builder = createActionBuilder();
 
-  builder.addInstruction(aluSemantic("add", 8), [externalBinding(0), externalBinding(1)], {
+  builder.addInstruction(aluSemantic("add", 8), [regDynamicBinding(0), regDynamicBinding(1)], {
     eip: 0x1000,
     nextEip: 0x1002
   });
@@ -223,7 +223,7 @@ test("a computed index drives byte access through its two address pushes", async
 test("a 16-bit dynamic access touches two bytes of the indexed word", async () => {
   const builder = createActionBuilder();
 
-  builder.addInstruction(aluSemantic("add", 16), [externalBinding(0), externalBinding(1)], {
+  builder.addInstruction(aluSemantic("add", 16), [regDynamicBinding(0), regDynamicBinding(1)], {
     eip: 0x1000,
     nextEip: 0x1002
   });

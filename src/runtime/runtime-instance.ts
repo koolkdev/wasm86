@@ -1,7 +1,7 @@
 import type { RunResult } from "#x86/execution/run-result.js";
 import { u32 } from "#x86/numeric.js";
 import type { CpuState } from "#x86/state/cpu-state.js";
-import { WasmInterpreterRuntime } from "#backends/wasm/interpreter/runtime.js";
+import { WasmInterpreterRuntime, type WasmInterpreterVariant } from "#backends/wasm/interpreter/runtime.js";
 import {
   WasmCompiledBlockCache,
   type WasmCompiledBlockCacheLike
@@ -27,6 +27,9 @@ export type RuntimeInstanceOptions = Readonly<{
   state?: Partial<CpuState>;
   memory?: RuntimeInstanceMemoryOptions;
   mode?: RuntimeModeValue;
+  // The wasm interpreter module the interpreter engine runs ("static" until
+  // the action variant covers every family).
+  interpreterVariant?: WasmInterpreterVariant;
   compiledBlocks?: WasmCompiledBlockCacheLike;
 }>;
 
@@ -64,7 +67,10 @@ export class RuntimeInstance {
     this.compiledBlocks = options.compiledBlocks ?? new WasmCompiledBlockCache();
     this.engines = {
       interpreter: new WasmInterpreterEngine(
-        new WasmInterpreterRuntime(this.memories.guestMemory, { stateMemory: this.memories.stateMemory })
+        new WasmInterpreterRuntime(this.memories.guestMemory, {
+          stateMemory: this.memories.stateMemory,
+          ...(options.interpreterVariant === undefined ? {} : { variant: options.interpreterVariant })
+        })
       ),
       compiledBlocks: new WasmBlocksEngine(this.compiledBlocks)
     };
