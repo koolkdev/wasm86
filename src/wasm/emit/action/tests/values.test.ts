@@ -9,13 +9,17 @@ import { analyzeBlockValues } from "#wasm/emit/action/values.js";
 function analyze(
   values: ValueTable,
   actions: readonly Action[],
-  edges: readonly EdgeRegion[] = []
+  edges: readonly EdgeRegion[] = [],
+  exportedOutputs: readonly number[] = []
 ) {
-  return analyzeBlockValues({
-    entry: 0,
-    regions: [{ id: 0, kind: "entry", actions }, ...edges],
-    values
-  });
+  return analyzeBlockValues(
+    {
+      entry: 0,
+      regions: [{ id: 0, kind: "entry", actions }, ...edges],
+      values
+    },
+    exportedOutputs
+  );
 }
 
 test("action operand edges count at their action index", () => {
@@ -442,4 +446,43 @@ test("a guard targeting a missing edge region fails loudly", () => {
       ]),
     /unknown edge region 9/
   );
+});
+
+test("an exported output counts as a use at the entry terminator", () => {
+  const values = createValueTable();
+  const read = values.addActionOutput();
+  const analysis = analyze(
+    values,
+    [
+      { kind: "readState", output: read, slot: gprChannel("eax") },
+      { kind: "exit", reason: "next" }
+    ],
+    [],
+    [read]
+  );
+
+  // Otherwise dead, the read stays live for the embedding alone.
+  strictEqual(analysis.useCount(read), 1);
+  strictEqual(analysis.lastUse(read), 1);
+  strictEqual(analysis.isPinned(read), false);
+});
+
+test("an exported read crossing an overlapping store pins", () => {
+  const values = createValueTable();
+  const read = values.addActionOutput();
+  const seven = values.internConst(7);
+  const analysis = analyze(
+    values,
+    [
+      { kind: "readState", output: read, slot: gprChannel("eax") },
+      { kind: "writeState", slot: gprChannel("eax"), value: seven },
+      { kind: "exit", reason: "next" }
+    ],
+    [],
+    [read]
+  );
+
+  // The export materializes after the store executed, so a load at the
+  // terminator would observe the new eax: the read pins.
+  strictEqual(analysis.isPinned(read), true);
 });

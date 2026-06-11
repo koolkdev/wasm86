@@ -9,9 +9,11 @@ import type {
   RegionId
 } from "#ir/action/types.js";
 import { validateActionBlock } from "#ir/action/validate.js";
+import type { ValueId } from "#ir/action/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { emitExit, withEdgeBlocks } from "./control.js";
+import { createControlFrame } from "./control.js";
+import { exitRerouteOf, type ActionEmbedding } from "./embed.js";
 import { emitGuardChecks, emitGuestLoad, emitGuestStore } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";
 import { createValueStack } from "./value-stack.js";
@@ -20,7 +22,17 @@ import { analyzeBlockValues } from "./values.js";
 // The emitter driver: walks an ActionBlock in action order and fills the
 // given function body. Its product is a function body, never a module —
 // module assembly (imports, exports, ABI) belongs to the backends; the only
-// module wrapping under emit/action is the test harness.
+// module wrapping under emit/action is the test harness. A fragment leaves
+// its body open for the embedder.
+
+export type ActionFragmentContext = Readonly<{
+  body: WasmFunctionBodyEncoder;
+  // The enclosing function's allocator; the fragment frees every local it
+  // takes.
+  scratch: WasmLocalScratchAllocator;
+  externalLocals?: ReadonlyMap<ExternalValueId, number>;
+  embedding: ActionEmbedding;
+}>;
 
 export type ActionEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -29,28 +41,47 @@ export type ActionEmitContext = Readonly<{
 }>;
 
 export function emitActionBlock(block: ActionBlock, context: ActionEmitContext): WasmFunctionBodyEncoder {
+  const scratch = new WasmLocalScratchAllocator(context.body);
+
+  emitActionFragment(block, { ...context, scratch, embedding: {} });
+  scratch.assertClear();
+  return context.body.end();
+}
+
+export function emitActionFragment(block: ActionBlock, context: ActionFragmentContext): void {
   validateActionBlock(block);
 
-  const { body } = context;
+  const { body, embedding } = context;
   const entry = block.regions.find((region) => region.id === block.entry);
 
   assert(entry !== undefined && entry.kind === "entry", "action block entry region is missing");
 
   const edges = block.regions.filter((region): region is EdgeRegion => region.kind === "edge");
-  const scratch = new WasmLocalScratchAllocator(body);
+  const outputs = embedding.outputs ?? new Map<ValueId, number>();
   const valueStack = createValueStack({
     body,
-    scratch,
+    scratch: context.scratch,
     values: block.values,
-    analysis: analyzeBlockValues(block),
+    analysis: analyzeBlockValues(block, outputs.keys()),
     externalLocals: context.externalLocals ?? new Map(),
     loadSlot: (slot, signed, emitUse) => emitSlotLoad(body, slot, signed, emitUse),
     loadGuest: (width, signed) => emitGuestLoad(body, width, signed)
   });
   // Exit detail per edge: the guard's byte length, zero for branch edges.
   const edgeExitDetails = new Map<RegionId, number>();
+  const terminator = entry.actions[entry.actions.length - 1];
 
-  function emitEntryAction(action: Action, edgeDepthOf: (edge: RegionId) => number): void {
+  assert(terminator !== undefined, "entry region does not end with a terminator");
+
+  const frame = createControlFrame({
+    body,
+    edges,
+    terminator,
+    exitReroute: (reason) => exitRerouteOf(embedding, reason),
+    emitPayload: valueStack.emitUse
+  });
+
+  function emitEntryAction(action: Action): void {
     switch (action.kind) {
       case "readState":
         valueStack.readState(action);
@@ -67,18 +98,18 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
         emitGuestStore(body, action.width);
         return;
       case "guardMemory":
-        emitGuard(action, edgeDepthOf);
+        emitGuard(action);
         return;
       case "exit":
-        emitExit(body, action, valueStack.emitUse);
+        frame.emitExit(action);
         return;
       case "branch":
-        emitBranch(action, edgeDepthOf);
+        emitBranch(action);
         return;
     }
   }
 
-  function emitGuard(action: GuardMemoryAction, edgeDepthOf: (edge: RegionId) => number): void {
+  function emitGuard(action: GuardMemoryAction): void {
     const edge = edgeById(action.faultEdge);
 
     edgeExitDetails.set(edge.id, action.byteLength);
@@ -87,12 +118,12 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
       body,
       action.byteLength,
       () => valueStack.emitUse(action.address),
-      edgeDepthOf(edge.id)
+      frame.depthOf(edge.id)
     );
   }
 
   // Both edges' values are captured before any path leaves the entry.
-  function emitBranch(action: BranchAction, edgeDepthOf: (edge: RegionId) => number): void {
+  function emitBranch(action: BranchAction): void {
     const taken = edgeById(action.taken);
     const notTaken = edgeById(action.notTaken);
 
@@ -101,7 +132,16 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
     valueStack.captureForEdge(taken);
     valueStack.captureForEdge(notTaken);
     valueStack.emitUse(action.condition);
-    body.brIf(edgeDepthOf(taken.id));
+    body.brIf(frame.depthOf(taken.id));
+  }
+
+  // Every store ordered before the terminator has executed by now, and
+  // both branch paths see the exports.
+  function emitExportedOutputs(): void {
+    for (const [id, local] of outputs) {
+      valueStack.emitUse(id);
+      body.localSet(local);
+    }
   }
 
   function emitEdgeBody(edge: EdgeRegion): void {
@@ -113,7 +153,7 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
       emitSlotStore(body, flush.slot, flush.value, valueStack.emitUse);
     }
 
-    emitExit(body, edge.exit, valueStack.emitUse, detail);
+    frame.emitExit(edge.exit, detail);
   }
 
   function edgeById(id: RegionId): EdgeRegion {
@@ -123,21 +163,14 @@ export function emitActionBlock(block: ActionBlock, context: ActionEmitContext):
     return edge;
   }
 
-  const terminator = entry.actions[entry.actions.length - 1];
+  frame.run(() => {
+    for (const action of entry.actions.slice(0, -1)) {
+      emitEntryAction(action);
+    }
 
-  withEdgeBlocks(
-    body,
-    edges,
-    terminator !== undefined && terminator.kind === "branch" ? terminator.notTaken : undefined,
-    (edgeDepthOf) => {
-      for (const action of entry.actions) {
-        emitEntryAction(action, edgeDepthOf);
-      }
-    },
-    emitEdgeBody
-  );
+    emitExportedOutputs();
+    emitEntryAction(terminator);
+  }, emitEdgeBody);
 
   valueStack.assertClear();
-  scratch.assertClear();
-  return body.end();
 }

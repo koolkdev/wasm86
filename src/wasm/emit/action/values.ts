@@ -28,8 +28,11 @@ export type BlockValueAnalysis = Readonly<{
   isPinned(id: ValueId): boolean;
 }>;
 
-export function analyzeBlockValues(block: ActionBlock): BlockValueAnalysis {
-  return new BlockValueUsage(block);
+export function analyzeBlockValues(
+  block: ActionBlock,
+  exportedOutputs: Iterable<ValueId> = []
+): BlockValueAnalysis {
+  return new BlockValueUsage(block, exportedOutputs);
 }
 
 class BlockValueUsage implements BlockValueAnalysis {
@@ -43,7 +46,7 @@ class BlockValueUsage implements BlockValueAnalysis {
   readonly #producers = new Map<ValueId, Readonly<{ action: Action; actionIndex: number }>>();
   readonly #pinned = new Set<ValueId>();
 
-  constructor(block: ActionBlock) {
+  constructor(block: ActionBlock, exportedOutputs: Iterable<ValueId>) {
     this.#values = block.values;
 
     const entry = block.regions.find((region) => region.id === block.entry);
@@ -57,6 +60,7 @@ class BlockValueUsage implements BlockValueAnalysis {
     }
 
     this.#chargeActionUses(entry);
+    this.#chargeExportedUses(entry, exportedOutputs);
     this.#chargeValueGraph();
     this.#pinReadsCrossingStores(entry);
     this.#pinReadsCrossingEdgeFlushes(entry);
@@ -113,6 +117,15 @@ class BlockValueUsage implements BlockValueAnalysis {
           break;
       }
     });
+  }
+
+  // Exported outputs materialize right before the entry terminator, so they
+  // count as uses there — like edge captures at their branch point.
+  #chargeExportedUses(entry: EntryRegion, exported: Iterable<ValueId>): void {
+    for (const id of exported) {
+      this.#values.node(id);
+      this.#addUse(id, entry.actions.length - 1);
+    }
   }
 
   // An edge branches off at its guard or branch, so its uses land there.

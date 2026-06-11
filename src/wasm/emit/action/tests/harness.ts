@@ -21,10 +21,24 @@ export async function instantiateActionBlock(
   block: ActionBlock,
   externalParamCount = 0
 ): Promise<InstantiatedActionBlock> {
+  const body = emitActionBlock(block, {
+    body: new WasmFunctionBodyEncoder(externalParamCount),
+    externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id]))
+  });
+
+  return instantiateFunctionBody(body, externalParamCount);
+}
+
+// Same wrapper around an already finished body — typically a hand-written
+// embedder function with fragments emitted inline.
+export async function instantiateFunctionBody(
+  body: WasmFunctionBodyEncoder,
+  paramCount = 0
+): Promise<InstantiatedActionBlock> {
   const state = new WebAssembly.Memory({ initial: 1 });
   const guest = new WebAssembly.Memory({ initial: wasmGuestMemoryMinPages });
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeActionBlockModule(block, externalParamCount)),
+    await WebAssembly.compile(encodeFunctionBodyModule(body, paramCount)),
     {
       [wasmImport.moduleName]: {
         [wasmImport.stateMemoryName]: state,
@@ -43,7 +57,7 @@ export async function instantiateActionBlock(
   };
 }
 
-function encodeActionBlockModule(block: ActionBlock, externalParamCount: number): Uint8Array<ArrayBuffer> {
+function encodeFunctionBodyModule(body: WasmFunctionBodyEncoder, paramCount: number): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
   const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
   const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
@@ -56,12 +70,8 @@ function encodeActionBlockModule(block: ActionBlock, externalParamCount: number)
   );
 
   const typeIndex = module.addFunctionType({
-    params: Array.from({ length: externalParamCount }, () => wasmValueType.i32),
+    params: Array.from({ length: paramCount }, () => wasmValueType.i32),
     results: [wasmValueType.i64]
-  });
-  const body = emitActionBlock(block, {
-    body: new WasmFunctionBodyEncoder(externalParamCount),
-    externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id]))
   });
 
   module.exportFunction(wasmBlockExportName, module.addFunction(typeIndex, body));
