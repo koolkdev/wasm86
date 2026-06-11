@@ -10,7 +10,7 @@ import {
   regBinding,
   regDynamicBinding
 } from "#ir/action/operands.js";
-import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
+import { eipChannel, flagChannel, gprChannel, instructionCountChannel } from "#ir/action/slots.js";
 import type {
   Action,
   ActionBlock,
@@ -35,7 +35,23 @@ import { setccSemantic } from "#x86/semantics/setcc.js";
 import { popSemantic } from "#x86/semantics/stack.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 
+// Every instruction advances the count channel; the dedicated tests at the
+// end cover that bookkeeping, the shape tests assert around it.
+function isInstructionCountAction(action: Action): boolean {
+  switch (action.kind) {
+    case "readState":
+    case "writeState":
+      return action.slot.kind === "instructionCount";
+    default:
+      return false;
+  }
+}
+
 function entryActions(block: ActionBlock): readonly Action[] {
+  return rawEntryActions(block).filter((action) => !isInstructionCountAction(action));
+}
+
+function rawEntryActions(block: ActionBlock): readonly Action[] {
   const entry = block.regions[0]!;
 
   ok(entry.kind === "entry", "first region is the entry");
@@ -47,6 +63,10 @@ function edgeRegion(block: ActionBlock, index: number): EdgeRegion {
 
   ok(region.kind === "edge", `region ${index} is an edge`);
   return region;
+}
+
+function edgeFlushes(block: ActionBlock, index: number): WriteStateAction[] {
+  return edgeRegion(block, index).flushes.filter((flush) => !isInstructionCountAction(flush));
 }
 
 function stateWrites(block: ActionBlock): WriteStateAction[] {
@@ -85,6 +105,7 @@ test("mov r32, imm32 flushes the register write, the eip advance, and a next exi
   });
 
   const block = builder.finish();
+  const v = block.values;
 
   strictEqual(block.regions.length, 1);
 
@@ -92,14 +113,14 @@ test("mov r32, imm32 flushes the register write, the eip advance, and a next exi
 
   strictEqual(entry.id, block.entry);
   strictEqual(entry.kind, "entry");
-  deepStrictEqual(entry.actions, [
-    { kind: "writeState", slot: gprChannel("eax"), value: 0 },
-    { kind: "writeState", slot: eipChannel, value: 1 },
+  deepStrictEqual(entryActions(block), [
+    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x401005) },
     { kind: "exit", reason: "next" }
   ]);
-  deepStrictEqual(block.values.node(0), { kind: "const", value: 0x12345678 });
-  deepStrictEqual(block.values.node(1), { kind: "const", value: 0x401005 });
-  strictEqual(block.values.size(), 2);
+  deepStrictEqual(v.node(0), { kind: "const", value: 0x12345678 });
+  // The two constants plus the count advance — nothing else was created.
+  strictEqual(v.size(), 5);
 });
 
 test("pending writes overwrite per channel and consts intern across instructions", () => {
@@ -119,8 +140,9 @@ test("pending writes overwrite per channel and consts intern across instructions
     { kind: "exit", reason: "next" }
   ]);
 
-  // Exactly 7, 0x1005, 0x100a, 9, 0x100f — both movs of 7 share one const.
-  strictEqual(block.values.size(), 5);
+  // 7, 9, the three eip constants, and the count read with its three folded
+  // advances — both movs of 7 share one const.
+  strictEqual(block.values.size(), 12);
 });
 
 test("mov r32, r32 records one readState and forwards its leaf", () => {
@@ -132,15 +154,17 @@ test("mov r32, r32 records one readState and forwards its leaf", () => {
   });
 
   const block = builder.finish();
+  const v = block.values;
 
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
-    { kind: "writeState", slot: eipChannel, value: 1 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
     { kind: "exit", reason: "next" }
   ]);
-  deepStrictEqual(block.values.node(0), { kind: "actionOutput" });
-  strictEqual(block.values.size(), 2);
+  deepStrictEqual(v.node(0), { kind: "actionOutput" });
+  // The read leaf, the eip constant, and the count advance — nothing else.
+  strictEqual(v.size(), 5);
 });
 
 test("repeated get of an unwritten channel returns the same leaf across instructions", () => {
@@ -155,7 +179,7 @@ test("repeated get of an unwritten channel returns the same leaf across instruct
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
-    { kind: "writeState", slot: eipChannel, value: 2 },
+    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1004) },
     { kind: "writeState", slot: gprChannel("ecx"), value: 0 },
     { kind: "exit", reason: "next" }
   ]);
@@ -235,17 +259,20 @@ test("cmp writes flags but no register", () => {
   strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
 });
 
-test("flagUndef cells produce no write: xor leaves AF unwritten", () => {
+// A template writing ZF and leaving AF undefined; no ISA template marks
+// flags undef anymore, but the builder contract (undef = preserve) stays.
+const undefAfTemplate: SemanticTemplate = (s) => {
+  s.writeFlags({ cells: { ZF: s.flagExpr(1), AF: s.flagUndef() } });
+};
+
+test("flagUndef cells produce no write", () => {
   const builder = createActionBuilder();
 
-  builder.addInstruction(aluSemantic("xor", 32), [regBinding("eax"), regBinding("ebx")], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
+  builder.addInstruction(undefAfTemplate, [], { eip: 0x1000, nextEip: 0x1002 });
 
   const block = builder.finish();
 
-  deepStrictEqual([...writtenFlags(block)].sort(), ["CF", "OF", "PF", "SF", "ZF"]);
+  deepStrictEqual([...writtenFlags(block)].sort(), ["ZF"]);
 });
 
 test("an undef cell preserves the previous instruction's pending flag", () => {
@@ -255,14 +282,15 @@ test("an undef cell preserves the previous instruction's pending flag", () => {
     eip: 0x1000,
     nextEip: 0x1003
   });
-  builder.addInstruction(aluSemantic("xor", 32), [regBinding("ecx"), regBinding("edx")], {
+  builder.addInstruction(undefAfTemplate, [], {
     eip: 0x1003,
     nextEip: 0x1005
   });
 
   const block = builder.finish();
 
-  // xor leaves AF undefined, so the add's AF expression survives and flushes.
+  // The second instruction leaves AF undefined, so the add's AF expression
+  // survives and flushes.
   const v = block.values;
   const a = 0; // the eax readState leaf
   const b = v.internConst(5);
@@ -272,9 +300,8 @@ test("an undef cell preserves the previous instruction's pending flag", () => {
 
   strictEqual(flagWriteValue(block, "AF"), af);
 
-  // xor's constant-zero CF/OF writes win over the add's expressions.
-  strictEqual(flagWriteValue(block, "CF"), v.internConst(0));
-  strictEqual(flagWriteValue(block, "OF"), v.internConst(0));
+  // The second instruction's constant ZF write wins over the add's expression.
+  strictEqual(flagWriteValue(block, "ZF"), v.internConst(1));
 });
 
 test("xchg eax, ebx swaps pendings through two reads with no temporaries", () => {
@@ -292,12 +319,13 @@ test("xchg eax, ebx swaps pendings through two reads with no temporaries", () =>
     { kind: "readState", output: 1, slot: gprChannel("ebx") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
     { kind: "writeState", slot: gprChannel("eax"), value: 1 },
-    { kind: "writeState", slot: eipChannel, value: 2 },
+    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1002) },
     { kind: "exit", reason: "next" }
   ]);
 
-  // Two read leaves plus the eip constant — nothing else was created.
-  strictEqual(block.values.size(), 3);
+  // Two read leaves, the eip constant, and the count advance — no
+  // temporaries were created.
+  strictEqual(block.values.size(), 6);
 });
 
 test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
@@ -313,11 +341,12 @@ test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("ah") },
     { kind: "writeState", slot: gprChannel("bl"), value: 0 },
-    { kind: "writeState", slot: eipChannel, value: 1 },
+    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1002) },
     { kind: "exit", reason: "next" }
   ]);
-  // The read leaf and the eip constant — no masks or shifts were created.
-  strictEqual(block.values.size(), 2);
+  // The read leaf, the eip constant, and the count advance — no masks or
+  // shifts were created.
+  strictEqual(block.values.size(), 5);
 });
 
 test("write al then read eax flushes the byte and reloads the word", () => {
@@ -337,9 +366,9 @@ test("write al then read eax flushes the byte and reloads the word", () => {
 
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("al"), value: v.internConst(0x12) },
-    { kind: "readState", output: 2, slot: gprChannel("eax") },
+    { kind: "readState", output: 5, slot: gprChannel("eax") },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1004) },
-    { kind: "writeState", slot: gprChannel("ebx"), value: 2 },
+    { kind: "writeState", slot: gprChannel("ebx"), value: 5 },
     { kind: "exit", reason: "next" }
   ]);
 });
@@ -361,9 +390,9 @@ test("write eax then read al flushes the word and reloads the byte", () => {
 
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
-    { kind: "readState", output: 2, slot: gprChannel("al") },
+    { kind: "readState", output: 5, slot: gprChannel("al") },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
-    { kind: "writeState", slot: gprChannel("bl"), value: 2 },
+    { kind: "writeState", slot: gprChannel("bl"), value: 5 },
     { kind: "exit", reason: "next" }
   ]);
 });
@@ -406,7 +435,7 @@ test("write eax then read ah reloads through the high-byte channel", () => {
   const actions = entryActions(block);
 
   strictEqual(actions[0]!.kind, "writeState");
-  deepStrictEqual(actions[1], { kind: "readState", output: 2, slot: gprChannel("ah") });
+  deepStrictEqual(actions[1], { kind: "readState", output: 5, slot: gprChannel("ah") });
 });
 
 test("ax and al pendings mix without touching flag pendings", () => {
@@ -462,10 +491,10 @@ test("movzx r32, r8 forwards the unsigned byte read unmasked", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("al") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
-    { kind: "writeState", slot: eipChannel, value: 1 },
+    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1003) },
     { kind: "exit", reason: "next" }
   ]);
-  strictEqual(block.values.size(), 2);
+  strictEqual(block.values.size(), 5);
 });
 
 test("movsx r32, r8 marks the read for a sign-extending load", () => {
@@ -481,10 +510,10 @@ test("movsx r32, r8 marks the read for a sign-extending load", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("al"), signed: true },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
-    { kind: "writeState", slot: eipChannel, value: 1 },
+    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1003) },
     { kind: "exit", reason: "next" }
   ]);
-  strictEqual(block.values.size(), 2);
+  strictEqual(block.values.size(), 5);
 });
 
 test("narrow signed compares sign-extend both operands", () => {
@@ -590,11 +619,11 @@ test("value methods intern through the builder", () => {
 
   const block = builder.finish();
 
-  // 0: eax leaf, 1: 0, 2: compare, 3: sub(0 - leaf), 4: select, 5: 0x1003.
+  // 0: eax leaf, 1: 0, 2: compare, 3: sub(0 - leaf), 4: select.
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("eax"), value: 4 },
-    { kind: "writeState", slot: eipChannel, value: 5 },
+    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1003) },
     { kind: "exit", reason: "next" }
   ]);
   deepStrictEqual(block.values.node(2), { kind: "compare", operator: "lt_s", a: 0, b: 1 });
@@ -690,21 +719,21 @@ test("jcc after cmp branches on the recorded condition with per-edge eip and fla
   strictEqual(stateWrites(block).length, 0);
 
   // Each edge flushes the cmp's six flags plus its own eip and nothing else.
-  const taken = edgeRegion(block, 1);
-  const notTaken = edgeRegion(block, 2);
+  const taken = edgeFlushes(block, 1);
+  const notTaken = edgeFlushes(block, 2);
 
-  for (const edge of [taken, notTaken]) {
-    strictEqual(edge.flushes.length, 7);
+  for (const flushes of [taken, notTaken]) {
+    strictEqual(flushes.length, 7);
     deepStrictEqual(
-      edge.flushes.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
+      flushes.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
       [...x86ArithmeticFlags].sort()
     );
   }
 
-  strictEqual(taken.flushes.find((write) => write.slot === eipChannel)?.value, v.internConst(0x2000));
-  deepStrictEqual(taken.exit, { kind: "exit", reason: "jump" });
-  strictEqual(notTaken.flushes.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1005));
-  deepStrictEqual(notTaken.exit, { kind: "exit", reason: "next" });
+  strictEqual(taken.find((write) => write.slot === eipChannel)?.value, v.internConst(0x2000));
+  deepStrictEqual(edgeRegion(block, 1).exit, { kind: "exit", reason: "jump" });
+  strictEqual(notTaken.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1005));
+  deepStrictEqual(edgeRegion(block, 2).exit, { kind: "exit", reason: "next" });
 });
 
 test("int flushes pending state with the resume eip before a host trap exit", () => {
@@ -1029,16 +1058,16 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
 
   // The edge snapshots everything dirty at the guard — the add's six flags
   // and eax sum — plus the faulting instruction's eip.
-  const edge = edgeRegion(block, 1);
+  const flushes = edgeFlushes(block, 1);
 
-  strictEqual(edge.flushes.length, 8);
+  strictEqual(flushes.length, 8);
   deepStrictEqual(
-    edge.flushes.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
+    flushes.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
     [...x86ArithmeticFlags].sort()
   );
-  strictEqual(edge.flushes.find((write) => write.slot === gprChannel("eax"))?.value, sum);
-  strictEqual(edge.flushes.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1003));
-  deepStrictEqual(edge.exit, {
+  strictEqual(flushes.find((write) => write.slot === gprChannel("eax"))?.value, sum);
+  strictEqual(flushes.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1003));
+  deepStrictEqual(edgeRegion(block, 1).exit, {
     kind: "exit",
     reason: "memoryWriteFault",
     payload: address
@@ -1240,7 +1269,7 @@ test("a guard after a register write restores the pre-instruction value in its e
 
   // The edge flushes eax's value as of instruction start — never the 0x222
   // this instruction wrote before guarding.
-  deepStrictEqual(edgeRegion(block, 1).flushes, [
+  deepStrictEqual(edgeFlushes(block, 1), [
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x111) },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) }
   ]);
@@ -1335,7 +1364,7 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
 
   // The edge restores the boundary esp — the mov's 0x30, not the pop's
   // incremented value.
-  deepStrictEqual(edgeRegion(block, 2).flushes, [
+  deepStrictEqual(edgeFlushes(block, 2), [
     { kind: "writeState", slot: gprChannel("esp"), value: v.internConst(0x30) },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) }
   ]);
@@ -1817,4 +1846,100 @@ test("a signed immExternal get sign-extends instead of masking", () => {
     operator: "extend8_s",
     value: v.internExternal(0)
   });
+});
+
+function instructionCountRead(block: ActionBlock): ReadStateAction {
+  const read = rawEntryActions(block).find(
+    (action): action is ReadStateAction =>
+      action.kind === "readState" && action.slot === instructionCountChannel
+  );
+
+  ok(read !== undefined, "expected an instruction-count read");
+  return read;
+}
+
+test("every instruction advances the count channel once, flushed once", () => {
+  const builder = createActionBuilder();
+  const mov = movSemantic(32);
+
+  builder.addInstruction(mov, [regBinding("eax"), immBinding(7)], { eip: 0x1000, nextEip: 0x1005 });
+  builder.addInstruction(mov, [regBinding("ecx"), immBinding(9)], { eip: 0x1005, nextEip: 0x100a });
+
+  const block = builder.finish();
+  const v = block.values;
+  const writes = rawEntryActions(block).filter(
+    (action): action is WriteStateAction =>
+      action.kind === "writeState" && action.slot === instructionCountChannel
+  );
+
+  // Both advances fold onto the block's one count read.
+  deepStrictEqual(writes, [
+    {
+      kind: "writeState",
+      slot: instructionCountChannel,
+      value: v.internBinary("add", instructionCountRead(block).output, v.internConst(2))
+    }
+  ]);
+});
+
+test("branch edges flush the advanced count", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(jccSemantic("E"), [immBinding(0x2000)], { eip: 0x1000, nextEip: 0x1002 });
+
+  const block = builder.finish();
+  const v = block.values;
+  const advanced = v.internBinary("add", instructionCountRead(block).output, v.internConst(1));
+
+  for (const index of [1, 2]) {
+    strictEqual(
+      edgeRegion(block, index).flushes.find((flush) => flush.slot === instructionCountChannel)?.value,
+      advanced
+    );
+  }
+});
+
+test("a fault edge restores the boundary count", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
+    eip: 0x1000,
+    nextEip: 0x1005
+  });
+  builder.addInstruction(
+    movSemantic(32),
+    [memBinding({ base: "ebx", scale: 1, disp: 0 }), regBinding("eax")],
+    { eip: 0x1005, nextEip: 0x1007 }
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+
+  // The faulting store's own advance never reaches the edge: it restores the
+  // first instruction's count.
+  strictEqual(
+    edgeRegion(block, 1).flushes.find((flush) => flush.slot === instructionCountChannel)?.value,
+    v.internBinary("add", instructionCountRead(block).output, v.internConst(1))
+  );
+});
+
+test("a host trap flushes the advanced count", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(intSemantic(), [immBinding(0x21)], { eip: 0x1000, nextEip: 0x1002 });
+
+  const block = builder.finish();
+  const v = block.values;
+  const writes = rawEntryActions(block).filter(
+    (action): action is WriteStateAction =>
+      action.kind === "writeState" && action.slot === instructionCountChannel
+  );
+
+  deepStrictEqual(writes, [
+    {
+      kind: "writeState",
+      slot: instructionCountChannel,
+      value: v.internBinary("add", instructionCountRead(block).output, v.internConst(1))
+    }
+  ]);
 });

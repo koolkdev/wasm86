@@ -252,6 +252,7 @@ function channelReadBounds(channel: StateChannel, signed: boolean): WidthBounds 
       // Flag bytes hold 0 or 1 by the flag-write contract.
       return fitsUnsigned(1);
     case "eip":
+    case "instructionCount":
       return undefined;
   }
 }

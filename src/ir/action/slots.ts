@@ -12,7 +12,8 @@ export type GprChannel = Readonly<{
 
 export type FlagChannel = Readonly<{ kind: "flag"; flag: FlagName }>;
 export type EipChannel = Readonly<{ kind: "eip" }>;
-export type StateChannel = GprChannel | FlagChannel | EipChannel;
+export type InstructionCountChannel = Readonly<{ kind: "instructionCount" }>;
+export type StateChannel = GprChannel | FlagChannel | EipChannel | InstructionCountChannel;
 
 const byteOffsetFromBitOffset = { 0: 0, 8: 1 } as const;
 const byteLengthFromWidth = { 8: 1, 16: 2, 32: 4 } as const;
@@ -35,6 +36,7 @@ const flagChannels = new Map<FlagName, FlagChannel>(
 );
 
 export const eipChannel: EipChannel = { kind: "eip" };
+export const instructionCountChannel: InstructionCountChannel = { kind: "instructionCount" };
 
 export function gprChannel(name: RegName): GprChannel {
   const channel = gprChannels.get(name);
@@ -88,5 +90,7 @@ function sameChannel(a: StateChannel, b: StateChannel): boolean {
       return b.kind === "flag" && a.flag === b.flag;
     case "eip":
       return b.kind === "eip";
+    case "instructionCount":
+      return b.kind === "instructionCount";
   }
 }

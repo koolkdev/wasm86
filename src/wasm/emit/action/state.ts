@@ -67,6 +67,7 @@ function emitSlotAddress(body: WasmFunctionBodyEncoder, slot: StateSlot, emitUse
     case "gpr":
     case "flag":
     case "eip":
+    case "instructionCount":
       body.i32Const(0);
       return;
   }
@@ -113,6 +114,7 @@ function slotBaseOffset(slot: StateSlot): number {
     case "gpr":
     case "flag":
     case "eip":
+    case "instructionCount":
       return channelStateOffset(slot);
   }
 }
@@ -124,6 +126,7 @@ function slotAccessByteLength(slot: StateSlot): 1 | 2 | 4 {
     case "gpr":
     case "flag":
     case "eip":
+    case "instructionCount":
       return channelAccessByteLength(slot);
   }
 }

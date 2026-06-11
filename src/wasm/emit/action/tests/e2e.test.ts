@@ -86,7 +86,12 @@ test("chained movs forward one read to both destinations", async () => {
   const block = builder.finish();
 
   // The second mov forwards the first read instead of reading ebx.
-  strictEqual(entryActions(block).filter((action) => action.kind === "readState").length, 1);
+  strictEqual(
+    entryActions(block).filter(
+      (action) => action.kind === "readState" && action.slot.kind === "gpr"
+    ).length,
+    1
+  );
 
   const { stateView, run } = await instantiateActionBlock(block);
 
@@ -268,9 +273,15 @@ test("mov ah and mov al merge through memory for a final 32-bit read", async () 
 
   const block = builder.finish();
 
-  // Pure moves: only constants and read leaves — no bit ops anywhere.
-  for (let id = 0; id < block.values.size(); id += 1) {
-    ok(["const", "actionOutput"].includes(block.values.node(id).kind), `node ${id} is a leaf`);
+  // Pure moves: every flushed register value is a constant or read leaf —
+  // no bit algebra on the register path.
+  for (const action of entryActions(block)) {
+    if (action.kind === "writeState" && action.slot.kind === "gpr") {
+      ok(
+        ["const", "actionOutput"].includes(block.values.node(action.value).kind),
+        "register writes carry leaves"
+      );
+    }
   }
 
   const { stateView, run } = await instantiateActionBlock(block);
@@ -315,7 +326,8 @@ test("a value used twice computes once and both uses observe it", async () => {
   const block = builder.finish();
   const body = emitActionBlock(block, { body: new WasmFunctionBodyEncoder() }).encode();
 
-  strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Add).length, 1);
+  // One add for the shared sum, one for the count advance.
+  strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Add).length, 2);
 
   const { stateView, run } = await instantiateActionBlock(block);
 

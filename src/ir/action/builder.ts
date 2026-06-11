@@ -30,7 +30,14 @@ import type {
 import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
 import type { ExternalValueId, OperandBinding, RegDynamicOperandBinding } from "./operands.js";
 import { createPendingChannels } from "./pending.js";
-import { eipChannel, flagChannel, gprChannel, type GprChannel, type StateChannel } from "./slots.js";
+import {
+  eipChannel,
+  flagChannel,
+  gprChannel,
+  instructionCountChannel,
+  type GprChannel,
+  type StateChannel
+} from "./slots.js";
 import type {
   Action,
   ActionBlock,
@@ -91,6 +98,8 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   #nextRegionId: RegionId = entryRegionId + 1;
   #bindings: readonly OperandBinding[] = [];
   #instruction: InstructionLocation | undefined;
+  #instructionCountBase: ValueId | undefined;
+  #instructionsCompleted = 0;
   #terminated = false;
   #wroteMemory = false;
   #finished = false;
@@ -257,6 +266,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   next(): void {
     this.#beforeOp("next");
+    this.#advanceInstructionCount();
     this.#pending.write(eipChannel, this.#locationValueId(this.#location().nextEip));
     this.#terminated = true;
   }
@@ -392,6 +402,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   jump(target: TargetInput): void {
     this.#beforeOp("jump");
+    this.#advanceInstructionCount();
     this.#pending.write(eipChannel, this.#valueId(target));
     this.#blockEnd = "jump";
     this.#terminated = true;
@@ -399,6 +410,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void {
     this.#beforeOp("conditionalJump");
+    this.#advanceInstructionCount();
 
     const conditionId = this.#valueId(condition);
 
@@ -415,6 +427,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   // A trap resumes at the next instruction with all state observable.
   hostTrap(vector: ValueInput): void {
     this.#beforeOp("hostTrap");
+    this.#advanceInstructionCount();
 
     const vectorId = this.#valueId(vector);
 
@@ -494,6 +507,23 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     this.#nextRegionId += 1;
     this.#edgeRegions.push({ id, kind: "edge", flushes, exit });
     return id;
+  }
+
+  // Every terminator advances the count: fault edges snapshot the
+  // instruction boundary, so a faulting instruction never counts. The value
+  // is always base + completed off the block's one read, so a flush stores
+  // a single folded add.
+  #advanceInstructionCount(): void {
+    this.#instructionCountBase ??= this.#pending.read(instructionCountChannel);
+    this.#instructionsCompleted += 1;
+    this.#pending.write(
+      instructionCountChannel,
+      this.#values.internBinary(
+        "add",
+        this.#instructionCountBase,
+        this.#values.internConst(this.#instructionsCompleted)
+      )
+    );
   }
 
   #dynamicGprSlot(binding: RegDynamicOperandBinding, accessWidth: OperandWidth): GprDynamicSlot {

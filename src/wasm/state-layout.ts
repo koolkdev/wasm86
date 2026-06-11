@@ -107,6 +107,8 @@ export function channelStateOffset(channel: StateChannel): number {
       return flagStateOffset(channel.flag);
     case "eip":
       return WASM_STATE_OFFSETS.eip;
+    case "instructionCount":
+      return WASM_STATE_OFFSETS.instructionCount;
   }
 }
 
@@ -151,6 +153,7 @@ export function channelAccessByteLength(channel: StateChannel): 1 | 2 | 4 {
     case "flag":
       return 1;
     case "eip":
+    case "instructionCount":
       return 4;
   }
 }

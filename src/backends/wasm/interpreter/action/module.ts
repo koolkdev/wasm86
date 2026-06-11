@@ -5,7 +5,6 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
-import { WASM_STATE_OFFSETS } from "#wasm/state-layout.js";
 import { RmDecodeHelpers } from "./decode.js";
 import { emitActionOpcodeDispatch } from "./dispatch.js";
 import { emitOpcodeFetch } from "./fragments.js";
@@ -71,28 +70,17 @@ function encodeRunLoopBody(
   body.i64Const(encodeExit(ExitReason.INSTRUCTION_LIMIT, 0)).returnFromFunction();
   body.endBlock();
 
-  // Completed instructions land on this block's end; faults and unsupported
-  // opcodes return from inside without counting.
+  // Completed instructions land on this block's end; handler blocks advance
+  // the instruction count themselves.
   body.block();
   emitOpcodeFetch({ body, scratch }, { eipLocal: locals.eip, byteLocal: locals.byte });
   emitActionOpcodeDispatch({ body, scratch, locals, handlers, continueDepth: 0, rmDecode });
   body.endBlock();
 
-  emitIncrementInstructionCount(body);
   body.localGet(fuelParam).i32Const(1).i32Sub().localSet(fuelParam);
   body.br(0);
   body.endBlock();
   body.unreachable();
   scratch.assertClear();
   return { body: body.end(), handlers };
-}
-
-function emitIncrementInstructionCount(body: WasmFunctionBodyEncoder): void {
-  const immediate = {
-    align: 2,
-    offset: WASM_STATE_OFFSETS.instructionCount,
-    memoryIndex: wasmMemoryIndex.state
-  } as const;
-
-  body.i32Const(0).i32Const(0).i32Load(immediate).i32Const(1).i32Add().i32Store(immediate);
 }

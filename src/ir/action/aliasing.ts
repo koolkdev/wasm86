@@ -55,6 +55,7 @@ export function slotsMayAlias(a: StateSlot, b: StateSlot): boolean {
       return b.kind === "gprDynamic" || channelsOverlap(a, b);
     case "flag":
     case "eip":
+    case "instructionCount":
       return b.kind !== "gprDynamic" && channelsOverlap(a, b);
   }
 }

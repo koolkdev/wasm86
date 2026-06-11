@@ -267,6 +267,7 @@ function slotOperands(slot: StateSlot): readonly ValueId[] {
     case "gpr":
     case "flag":
     case "eip":
+    case "instructionCount":
       return [];
   }
 }
