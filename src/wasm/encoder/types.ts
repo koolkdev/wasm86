@@ -31,6 +31,8 @@ export const wasmOpcode = {
   localGet: 0x20,
   localSet: 0x21,
   localTee: 0x22,
+  globalGet: 0x23,
+  globalSet: 0x24,
   i32Load: 0x28,
   i32Load8S: 0x2c,
   i32Load8U: 0x2d,
@@ -53,6 +55,7 @@ export const wasmOpcode = {
   i32GeU: 0x4f,
   i32Const: 0x41,
   i64Const: 0x42,
+  i64Eqz: 0x50,
   i32Popcnt: 0x69,
   i32Add: 0x6a,
   i32Sub: 0x6b,
@@ -73,6 +76,7 @@ export const wasmSectionId = {
   type: 1,
   import: 2,
   function: 3,
+  global: 6,
   export: 7,
   code: 10
 } as const;

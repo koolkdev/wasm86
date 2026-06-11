@@ -66,6 +66,18 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  globalGet(index: number): this {
+    this.#writeInstruction(wasmOpcode.globalGet);
+    this.#instructions.writeU32(index);
+    return this;
+  }
+
+  globalSet(index: number): this {
+    this.#writeInstruction(wasmOpcode.globalSet);
+    this.#instructions.writeU32(index);
+    return this;
+  }
+
   block(result?: WasmValueType): this {
     this.#writeInstruction(wasmOpcode.block);
     this.#instructions.writeByte(result ?? wasmBlockType.empty);
@@ -341,6 +353,11 @@ export class WasmFunctionBodyEncoder {
   memorySize(memoryIndex: number): this {
     this.#writeInstruction(wasmOpcode.memorySize);
     this.#instructions.writeU32(memoryIndex);
+    return this;
+  }
+
+  i64Eqz(): this {
+    this.#writeInstruction(wasmOpcode.i64Eqz);
     return this;
   }
 

@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { gprChannel } from "#ir/action/slots.js";
@@ -276,6 +276,38 @@ test("a displacement crossing the end of memory is a decode fault", async () => 
   strictEqual(readWasmStateField(interpreter.stateView, "eip"), eip);
 });
 
+test("a SIB byte past the end of memory is a decode fault at its address", async () => {
+  const interpreter = await instantiate();
+  const eip = wasmGuestMemoryMinByteLength - 2;
+
+  writeWasmCpuState(interpreter.stateView, { eip });
+  writeProgram(interpreter.guestView, eip, [0x8b, 0x04]); // mov eax, [sib...] cut short
+
+  const exit = interpreter.run(10);
+
+  strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
+  strictEqual(exit.payload, eip + 2);
+  strictEqual(exit.detail, 1);
+  strictEqual(readWasmStateField(interpreter.stateView, "eip"), eip);
+  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 0);
+});
+
+test("a SIB displacement crossing the end of memory is a decode fault", async () => {
+  const interpreter = await instantiate();
+  const eip = wasmGuestMemoryMinByteLength - 5;
+
+  writeWasmCpuState(interpreter.stateView, { eip });
+  writeProgram(interpreter.guestView, eip, [0x8b, 0x04, 0x45, 0x00, 0x20]); // mov eax, [eax*2+disp32] cut short
+
+  const exit = interpreter.run(10);
+
+  strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
+  strictEqual(exit.payload, eip + 3);
+  strictEqual(exit.detail, 4);
+  strictEqual(readWasmStateField(interpreter.stateView, "eip"), eip);
+  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 0);
+});
+
 test("a guest load past the end is a memory fault, not a decode fault", async () => {
   const interpreter = await instantiate();
   const address = wasmGuestMemoryMinByteLength - 3;
@@ -332,6 +364,13 @@ test("one handler body per ALU op, width, and addressing form", () => {
       ["add.rm8_r8/register", 1]
     ]
   );
+});
+
+test("every ModRM memory arm shares one rm-decode helper per opcode length", () => {
+  const memoryHandlers = encodedModule().handlers.filter((handler) => handler.form === "memory");
+
+  ok(memoryHandlers.length > 1, "expected several ModRM memory arms");
+  deepStrictEqual(encodedModule().rmDecodeHelpers, [1]);
 });
 
 test("ModRM handlers never repeat per register", () => {

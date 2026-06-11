@@ -1,10 +1,12 @@
 import { ByteSink } from "./byte-sink.js";
 import { WasmFunctionBodyEncoder, type EncodedBranchHint, type EncodedWasmFunctionBody } from "./function-body.js";
+import { encodeI32Leb128, encodeI64Leb128 } from "./leb128.js";
 import { validateMemoryLimits, type WasmMemoryLimits } from "./memory.js";
 import {
   wasmExternalKind,
   wasmFunctionTypePrefix,
   wasmMagic,
+  wasmOpcode,
   wasmSectionId,
   wasmValueType,
   wasmVersion,
@@ -16,6 +18,7 @@ export class WasmModuleEncoder {
   readonly #memoryImports: MemoryImport[] = [];
   readonly #tableImports: TableImport[] = [];
   readonly #functions: number[] = [];
+  readonly #globals: WasmGlobalDefinition[] = [];
   readonly #exports: FunctionExport[] = [];
   readonly #bodies: EncodedWasmFunctionBody[] = [];
 
@@ -52,6 +55,12 @@ export class WasmModuleEncoder {
     return functionIndex;
   }
 
+  addGlobal(definition: WasmGlobalDefinition): number {
+    const globalIndex = this.#globals.length;
+    this.#globals.push(definition);
+    return globalIndex;
+  }
+
   exportFunction(name: string, functionIndex: number): void {
     if (!Number.isInteger(functionIndex) || functionIndex < 0 || functionIndex >= this.#functions.length) {
       throw new RangeError(`unknown Wasm function index: ${functionIndex}`);
@@ -70,6 +79,9 @@ export class WasmModuleEncoder {
       module.writeSection(wasmSectionId.import, (section) => this.#writeImportSection(section));
     }
     module.writeSection(wasmSectionId.function, (section) => this.#writeFunctionSection(section));
+    if (this.#globals.length > 0) {
+      module.writeSection(wasmSectionId.global, (section) => this.#writeGlobalSection(section));
+    }
     module.writeSection(wasmSectionId.export, (section) => this.#writeExportSection(section));
     if (this.#hasBranchHints()) {
       module.writeSection(wasmSectionId.custom, (section) => this.#writeBranchHintSection(section));
@@ -114,6 +126,16 @@ export class WasmModuleEncoder {
 
     for (const typeIndex of this.#functions) {
       section.writeU32(typeIndex);
+    }
+  }
+
+  #writeGlobalSection(section: ByteSink): void {
+    section.writeVecLength(this.#globals.length);
+
+    for (const global of this.#globals) {
+      section.writeByte(global.type);
+      section.writeByte(global.mutable ? 0x01 : 0x00);
+      writeGlobalInit(section, global);
     }
   }
 
@@ -166,6 +188,10 @@ type MemoryImport = Readonly<{
   name: string;
   limits: WasmMemoryLimits;
 }>;
+
+export type WasmGlobalDefinition =
+  | Readonly<{ type: typeof wasmValueType.i32; mutable: boolean; initialValue: number }>
+  | Readonly<{ type: typeof wasmValueType.i64; mutable: boolean; initialValue: bigint }>;
 
 export type WasmTableLimits = Readonly<{
   minElements: number;
@@ -220,6 +246,21 @@ function validateU32(value: number, label: string): void {
   if (!Number.isInteger(value) || value < 0 || value > 0xffff_ffff) {
     throw new RangeError(`${label} out of range: ${value}`);
   }
+}
+
+function writeGlobalInit(section: ByteSink, global: WasmGlobalDefinition): void {
+  switch (global.type) {
+    case wasmValueType.i32:
+      section.writeByte(wasmOpcode.i32Const);
+      section.writeBytes(encodeI32Leb128(global.initialValue));
+      break;
+    case wasmValueType.i64:
+      section.writeByte(wasmOpcode.i64Const);
+      section.writeBytes(encodeI64Leb128(global.initialValue));
+      break;
+  }
+
+  section.writeByte(wasmOpcode.end);
 }
 
 function writeBranchHints(section: ByteSink, hints: readonly EncodedBranchHint[]): void {

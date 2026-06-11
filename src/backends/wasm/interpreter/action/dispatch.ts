@@ -16,20 +16,22 @@ import type {
 } from "#x86/schema/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
-import { emitRmMemoryAddressDecode } from "./decode.js";
+import type { RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";
 import { emitInstructionHandler, type HandlerEmitContext } from "./handlers.js";
 import { actionInterpreterDispatchRoot } from "./instructions.js";
 
 // The hand-written dispatch shape: br_table over the fetched opcode byte,
-// the reg-field group switch, and the mod-form split. Every linear segment
-// inside — fetches, address decode, handlers — is an action fragment.
+// the reg-field group switch, and the mod-form split. Fetches and handlers
+// are action fragments; memory arms call the shared rm-decode helper.
 
-export function emitActionOpcodeDispatch(context: HandlerEmitContext): void {
+export type DispatchEmitContext = HandlerEmitContext & Readonly<{ rmDecode: RmDecodeHelpers }>;
+
+export function emitActionOpcodeDispatch(context: DispatchEmitContext): void {
   emitDispatchNode(actionInterpreterDispatchRoot, context, 1);
 }
 
-function emitDispatchNode(node: OpcodeDispatchNode, context: HandlerEmitContext, opcodeLength: number): void {
+function emitDispatchNode(node: OpcodeDispatchNode, context: DispatchEmitContext, opcodeLength: number): void {
   const { body } = context;
   const bytes = dispatchBytes(node);
 
@@ -66,7 +68,7 @@ function emitDispatchNode(node: OpcodeDispatchNode, context: HandlerEmitContext,
   emitReturnUnsupported(body);
 }
 
-function emitLeaf(leaf: OpcodeDispatchLeaf, context: HandlerEmitContext): void {
+function emitLeaf(leaf: OpcodeDispatchLeaf, context: DispatchEmitContext): void {
   const candidates = leaf.operandSize.default;
 
   switch (candidates.kind) {
@@ -96,7 +98,7 @@ function emitLeaf(leaf: OpcodeDispatchLeaf, context: HandlerEmitContext): void {
 function emitModRmLeaf(
   leaf: OpcodeDispatchLeaf,
   candidates: OpcodeDispatchCandidateSet,
-  context: HandlerEmitContext
+  context: DispatchEmitContext
 ): void {
   const { body, locals } = context;
 
@@ -141,7 +143,7 @@ function emitModRmLeaf(
 function emitModRmForms(
   instruction: ExpandedInstructionSpec<SemanticTemplate>,
   leaf: OpcodeDispatchLeaf,
-  context: HandlerEmitContext
+  context: DispatchEmitContext
 ): void {
   const { body } = context;
   const cursorAfterModRm: DecodeCursor = { kind: "static", offset: leaf.opcodeLength + 1 };
@@ -163,7 +165,7 @@ function emitModRmForms(
   }
 
   body.elseBlock();
-  emitRmMemoryAddressDecode(armContext, leaf.opcodeLength);
+  armContext.rmDecode.emitMemoryAddressDecode(armContext, leaf.opcodeLength);
   emitInstructionHandler(armContext, instruction, "memory", {
     kind: "local",
     local: context.locals.length

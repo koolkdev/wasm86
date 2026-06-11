@@ -10,8 +10,6 @@ export class ActionInterpreterLocals {
   readonly mod: number;
   readonly reg: number;
   readonly rm: number;
-  readonly scaledIndex: number;
-  readonly sibBase: number;
   readonly address: number;
   readonly length: number;
   readonly imm: number;
@@ -24,8 +22,6 @@ export class ActionInterpreterLocals {
     this.mod = body.addLocal(wasmValueType.i32);
     this.reg = body.addLocal(wasmValueType.i32);
     this.rm = body.addLocal(wasmValueType.i32);
-    this.scaledIndex = body.addLocal(wasmValueType.i32);
-    this.sibBase = body.addLocal(wasmValueType.i32);
     this.address = body.addLocal(wasmValueType.i32);
     this.length = body.addLocal(wasmValueType.i32);
     this.imm = body.addLocal(wasmValueType.i32);

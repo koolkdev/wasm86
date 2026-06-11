@@ -6,6 +6,7 @@ import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
 import { WASM_STATE_OFFSETS } from "#wasm/state-layout.js";
+import { RmDecodeHelpers } from "./decode.js";
 import { emitActionOpcodeDispatch } from "./dispatch.js";
 import { emitOpcodeFetch } from "./fragments.js";
 import type { ActionInterpreterHandler } from "./handlers.js";
@@ -21,10 +22,29 @@ export type ActionInterpreterModule = Readonly<{
   bytes: Uint8Array<ArrayBuffer>;
   // One entry per emitted handler body, in emission order.
   handlers: readonly ActionInterpreterHandler[];
+  // Opcode lengths with an emitted shared rm-decode helper, in emission order.
+  rmDecodeHelpers: readonly number[];
 }>;
 
 export function encodeActionInterpreterModule(): ActionInterpreterModule {
   const module = new WasmModuleEncoder();
+
+  importInterpreterMemories(module);
+
+  const typeIndex = module.addFunctionType({
+    params: [wasmValueType.i32],
+    results: [wasmValueType.i64]
+  });
+  const rmDecode = new RmDecodeHelpers(module);
+  // Emitting the run loop adds the rm-decode helpers it uses to the module.
+  const { body, handlers } = encodeRunLoopBody(rmDecode);
+  const functionIndex = module.addFunction(typeIndex, body);
+
+  module.exportFunction(wasmBlockExportName, functionIndex);
+  return { bytes: module.encode(), handlers, rmDecodeHelpers: rmDecode.emittedOpcodeLengths() };
+}
+
+function importInterpreterMemories(module: WasmModuleEncoder): void {
   const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, {
     minPages: 1
   });
@@ -36,11 +56,11 @@ export function encodeActionInterpreterModule(): ActionInterpreterModule {
     stateMemoryIndex === wasmMemoryIndex.state && guestMemoryIndex === wasmMemoryIndex.guest,
     "unexpected Wasm memory import order"
   );
+}
 
-  const typeIndex = module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i64]
-  });
+function encodeRunLoopBody(
+  rmDecode: RmDecodeHelpers
+): Readonly<{ body: WasmFunctionBodyEncoder; handlers: ActionInterpreterHandler[] }> {
   const body = new WasmFunctionBodyEncoder(1);
   const locals = new ActionInterpreterLocals(body);
   const scratch = new WasmLocalScratchAllocator(body);
@@ -55,7 +75,7 @@ export function encodeActionInterpreterModule(): ActionInterpreterModule {
   // opcodes return from inside without counting.
   body.block();
   emitOpcodeFetch({ body, scratch }, { eipLocal: locals.eip, byteLocal: locals.byte });
-  emitActionOpcodeDispatch({ body, scratch, locals, handlers, continueDepth: 0 });
+  emitActionOpcodeDispatch({ body, scratch, locals, handlers, continueDepth: 0, rmDecode });
   body.endBlock();
 
   emitIncrementInstructionCount(body);
@@ -64,12 +84,7 @@ export function encodeActionInterpreterModule(): ActionInterpreterModule {
   body.endBlock();
   body.unreachable();
   scratch.assertClear();
-  body.end();
-
-  const functionIndex = module.addFunction(typeIndex, body);
-
-  module.exportFunction(wasmBlockExportName, functionIndex);
-  return { bytes: module.encode(), handlers };
+  return { body: body.end(), handlers };
 }
 
 function emitIncrementInstructionCount(body: WasmFunctionBodyEncoder): void {
