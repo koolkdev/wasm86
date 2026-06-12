@@ -78,9 +78,18 @@ export function createPendingChannels(
     }
 
     // A boundary-absent channel's pre-instruction bytes exist only in state
-    // memory; this store destroys them.
+    // memory; this store destroys them. A live cached read of the exact
+    // channel is still that value (any store would have invalidated it), so
+    // it joins the boundary; a signed read serves too — its low
+    // channel-width bits are the memory bytes.
     if (!boundary.has(channel)) {
-      unrestorableStore = true;
+      const cached = reads.get(channel) ?? signedReads.get(channel);
+
+      if (cached !== undefined) {
+        boundary.set(channel, cached);
+      } else {
+        unrestorableStore = true;
+      }
     }
 
     emit({ kind: "writeState", slot: channel, value: entry.value });

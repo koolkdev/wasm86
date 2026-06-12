@@ -11,7 +11,15 @@ export type RegDynamicOperandBinding = Readonly<{ kind: "regDynamic"; index: Ext
 export type ImmOperandBinding = Readonly<{ kind: "imm"; value: number }>;
 export type ImmExternalOperandBinding = Readonly<{ kind: "immExternal"; value: ExternalValueId }>;
 export type MemOperandBinding = Readonly<{ kind: "mem"; address: EffectiveAddress }>;
-export type MemExternalOperandBinding = Readonly<{ kind: "memExternal"; address: ExternalValueId }>;
+// An address with no state-dependent term, resolved at decode.
+export type MemStaticOperandBinding = Readonly<{ kind: "memStatic"; address: ExternalValueId }>;
+// base holds a GPR word index 0..7, read inside the instruction so pop's
+// esp-based EA sees the incremented esp; offset pre-sums the other terms.
+export type MemDynamicOperandBinding = Readonly<{
+  kind: "memDynamic";
+  base: ExternalValueId;
+  offset: ExternalValueId;
+}>;
 
 export type OperandBinding =
   | RegOperandBinding
@@ -19,7 +27,8 @@ export type OperandBinding =
   | ImmOperandBinding
   | ImmExternalOperandBinding
   | MemOperandBinding
-  | MemExternalOperandBinding;
+  | MemStaticOperandBinding
+  | MemDynamicOperandBinding;
 
 export function regBinding(name: RegName): RegOperandBinding {
   return { kind: "reg", channel: gprChannel(name) };
@@ -41,6 +50,10 @@ export function memBinding(address: EffectiveAddress): MemOperandBinding {
   return { kind: "mem", address };
 }
 
-export function memExternalBinding(address: ExternalValueId): MemExternalOperandBinding {
-  return { kind: "memExternal", address };
+export function memStaticBinding(address: ExternalValueId): MemStaticOperandBinding {
+  return { kind: "memStatic", address };
+}
+
+export function memDynamicBinding(base: ExternalValueId, offset: ExternalValueId): MemDynamicOperandBinding {
+  return { kind: "memDynamic", base, offset };
 }

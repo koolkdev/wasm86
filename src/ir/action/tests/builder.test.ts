@@ -6,7 +6,8 @@ import {
   immBinding,
   immExternalBinding,
   memBinding,
-  memExternalBinding,
+  memDynamicBinding,
+  memStaticBinding,
   regBinding,
   regDynamicBinding
 } from "#ir/action/operands.js";
@@ -1784,10 +1785,27 @@ test("a fault edge restores an external eip", () => {
   );
 });
 
-test("a memExternal operand guards and accesses the external address", () => {
+// The memDynamic address: the in-block base register read plus the
+// pre-summed offset external.
+function dynamicAddress(block: ActionBlock, baseRead: ReadStateAction): ValueId {
+  const v = block.values;
+
+  return v.internBinary("add", baseRead.output, v.internExternal(1));
+}
+
+function dynamicBaseRead(block: ActionBlock): ReadStateAction {
+  const read = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot.kind === "gprDynamic"
+  );
+
+  ok(read !== undefined, "expected a dynamic base register read");
+  return read;
+}
+
+test("a memStatic operand guards and accesses the external address", () => {
   const builder = createActionBuilder();
 
-  builder.addInstruction(movSemantic(32), [regBinding("eax"), memExternalBinding(7)], {
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), memStaticBinding(7)], {
     eip: 0x1000,
     nextEip: 0x1006
   });
@@ -1808,6 +1826,123 @@ test("a memExternal operand guards and accesses the external address", () => {
     reason: "memoryReadFault",
     payload: address
   });
+});
+
+test("a memDynamic operand reads the base register inside the block", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), memDynamicBinding(0, 1)], {
+    eip: 0x1000,
+    nextEip: 0x1006
+  });
+
+  const block = builder.finish();
+  const v = block.values;
+  const baseRead = dynamicBaseRead(block);
+  const address = dynamicAddress(block, baseRead);
+  const load = entryActions(block).find(
+    (action): action is ReadMemoryAction => action.kind === "readMemory"
+  )!;
+
+  deepStrictEqual(entryActions(block), [
+    {
+      kind: "readState",
+      output: baseRead.output,
+      slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 4 }
+    },
+    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "readMemory", output: load.output, address, width: 32 },
+    { kind: "writeState", slot: gprChannel("eax"), value: load.output },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1006) },
+    { kind: "exit", reason: "next" }
+  ]);
+  deepStrictEqual(edgeRegion(block, 1).exit, {
+    kind: "exit",
+    reason: "memoryReadFault",
+    payload: address
+  });
+});
+
+test("a read+write memDynamic operand reads the base once and reuses the address", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(aluSemantic("add", 32), [memDynamicBinding(0, 1), immBinding(5)], {
+    eip: 0x1000,
+    nextEip: 0x1003
+  });
+
+  const block = builder.finish();
+  const actions = entryActions(block);
+  const baseReads = actions.filter(
+    (action) => action.kind === "readState" && action.slot.kind === "gprDynamic"
+  );
+  const load = actions.find((action): action is ReadMemoryAction => action.kind === "readMemory")!;
+  const store = actions.find((action): action is WriteMemoryAction => action.kind === "writeMemory")!;
+
+  strictEqual(baseReads.length, 1);
+  strictEqual(load.address, dynamicAddress(block, dynamicBaseRead(block)));
+  strictEqual(store.address, load.address);
+});
+
+test("pop [memDynamic] flushes esp before the base read and restores it on the write edge", () => {
+  const builder = createActionBuilder();
+
+  builder.addInstruction(popSemantic(), [memDynamicBinding(0, 1)], { eip: 0x1000, nextEip: 0x1003 });
+
+  const block = builder.finish();
+  const v = block.values;
+  const nextEsp = v.internBinary("add", 0, v.internConst(4));
+  const baseRead = dynamicBaseRead(block);
+  const address = dynamicAddress(block, baseRead);
+
+  // The main path stores the incremented esp before the base read, so an
+  // esp-based destination follows the SDM; the value comes from the
+  // pre-increment esp read.
+  strictEqual(block.regions.length, 3);
+  deepStrictEqual(entryActions(block), [
+    { kind: "readState", output: 0, slot: gprChannel("esp") },
+    { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "readMemory", output: 2, address: 0, width: 32 },
+    { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
+    { kind: "readState", output: baseRead.output, slot: baseRead.slot },
+    { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
+    { kind: "writeMemory", address, value: 2, width: 32 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1003) },
+    { kind: "exit", reason: "next" }
+  ]);
+
+  // The read guard predates the flush: its edge omits esp (state memory
+  // still holds it on that path). The write guard's edge restores the
+  // pre-instruction esp read the flush destroyed.
+  deepStrictEqual(edgeRegion(block, 1).flushes, [
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
+  ]);
+  deepStrictEqual(edgeRegion(block, 1).exit, { kind: "exit", reason: "memoryReadFault", payload: 0 });
+  deepStrictEqual(edgeFlushes(block, 2), [
+    { kind: "writeState", slot: gprChannel("esp"), value: 0 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
+  ]);
+  deepStrictEqual(edgeRegion(block, 2).exit, {
+    kind: "exit",
+    reason: "memoryWriteFault",
+    payload: address
+  });
+});
+
+test("a guard after a memDynamic flush of a never-read register fails loudly", () => {
+  const blindWriteThenDynamicAddress: SemanticTemplate = (s) => {
+    s.set(s.reg("ebx"), 0x111, 32);
+    s.memoryGuard(s.address(s.operand(0)), 4, "write");
+  };
+
+  throws(
+    () =>
+      createActionBuilder().addInstruction(blindWriteThenDynamicAddress, [memDynamicBinding(0, 1)], {
+        eip: 0x1000,
+        nextEip: 0x1002
+      }),
+    /unrestorable/
+  );
 });
 
 test("a narrow immExternal get projects to the access width", () => {

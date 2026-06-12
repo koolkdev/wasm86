@@ -28,7 +28,12 @@ import type {
   VarRef
 } from "#ir/model/types.js";
 import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
-import type { ExternalValueId, OperandBinding, RegDynamicOperandBinding } from "./operands.js";
+import type {
+  ExternalValueId,
+  MemDynamicOperandBinding,
+  OperandBinding,
+  RegDynamicOperandBinding
+} from "./operands.js";
 import { createPendingChannels } from "./pending.js";
 import {
   eipChannel,
@@ -170,7 +175,8 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       case "imm":
         return { storage: "imm" };
       case "mem":
-      case "memExternal":
+      case "memStatic":
+      case "memDynamic":
         return { storage: "mem" };
       case "regDynamic":
         // A runtime register index: register storage, dynamic channel.
@@ -222,7 +228,8 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
           case "reg":
             return irVar(this.#readChannel(binding.channel, accessWidth, options));
           case "mem":
-          case "memExternal":
+          case "memStatic":
+          case "memDynamic":
             return irVar(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
           case "regDynamic":
             return irVar(this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options));
@@ -250,7 +257,8 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
             this.#writeChannel(binding.channel, value, accessWidth);
             return;
           case "mem":
-          case "memExternal":
+          case "memStatic":
+          case "memDynamic":
             this.#writeMemory(this.#operandAddress(storage.index), value, accessWidth);
             return;
           case "regDynamic":
@@ -596,16 +604,28 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   #bindingAddress(binding: OperandBinding): ValueId {
     assert(
-      binding.kind === "mem" || binding.kind === "memExternal",
+      binding.kind === "mem" || binding.kind === "memStatic" || binding.kind === "memDynamic",
       `address of a ${binding.kind} operand binding`
     );
 
     switch (binding.kind) {
       case "mem":
         return this.#effectiveAddress(binding.address);
-      case "memExternal":
+      case "memStatic":
         return this.#values.internExternal(binding.address);
+      case "memDynamic":
+        return this.#dynamicAddress(binding);
     }
+  }
+
+  #dynamicAddress(binding: MemDynamicOperandBinding): ValueId {
+    const base = this.#pending.readDynamicGpr({
+      kind: "gprDynamic",
+      index: this.#values.internExternal(binding.base),
+      byteLength: 4
+    });
+
+    return this.#values.internBinary("add", base, this.#values.internExternal(binding.offset));
   }
 
   #effectiveAddress(ea: EffectiveAddress): ValueId {

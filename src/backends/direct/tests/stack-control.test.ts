@@ -86,6 +86,19 @@ test("pop [esp] stores at the incremented esp", () => {
   deepStrictEqual(readGuestBytes(memory, 0x24, 4), [0x44, 0x33, 0x22, 0x11]);
 });
 
+test("pop [esp+k] adds the displacement to the incremented esp", () => {
+  const memory = new ArrayBufferGuestMemory(0x40);
+  const state = createCpuState({ esp: 0x20, eip: startAddress });
+
+  writeGuestU32(memory, 0x20, 0x1122_3344);
+
+  const result = run(state, [0x8f, 0x44, 0x24, 0x08], memory);
+
+  strictEqual(result.stopReason, StopReason.NONE);
+  strictEqual(state.esp, 0x24);
+  deepStrictEqual(readGuestBytes(memory, 0x2c, 4), [0x44, 0x33, 0x22, 0x11]);
+});
+
 test("pop memory destination fault is atomic", () => {
   const memory = new ArrayBufferGuestMemory(0x40);
   const state = createCpuState({ ebx: 0x3e, esp: 0x20, eip: startAddress, instructionCount: 7 });

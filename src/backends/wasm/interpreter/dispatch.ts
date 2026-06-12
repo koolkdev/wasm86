@@ -17,7 +17,7 @@ import type {
 } from "#x86/schema/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
-import type { RmDecodeHelpers } from "./decode.js";
+import { noBaseRegister, type RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";
 import { emitInstructionHandler, type HandlerEmitContext } from "./handlers.js";
 import { interpreterDispatchRoot } from "./instructions.js";
@@ -191,8 +191,9 @@ function emitModRmLeaf(
   emitReturnUnsupported(body);
 }
 
-// The two addressing forms of one instruction: mod 3 binds the rm register
-// index, the rest decode an effective address.
+// The addressing forms of one instruction: mod 3 binds the rm register
+// index, the rest decode an effective address and base presence picks the
+// memStatic or memDynamic body.
 function emitModRmForms(
   instruction: ExpandedInstructionSpec<SemanticTemplate>,
   opcodeEnd: number,
@@ -208,21 +209,24 @@ function emitModRmForms(
   }
 
   const armContext = { ...context, continueDepth: context.continueDepth + 1 };
+  const memoryContext = { ...context, continueDepth: context.continueDepth + 2 };
+  const cursorAfterAddress: DecodeCursor = { kind: "local", local: context.locals.length };
 
   body.localGet(context.locals.mod).i32Const(3).i32Eq().ifBlock();
 
   if (isMemoryOnlyRmType(rmOperand.type)) {
     emitReturnUnsupported(body);
   } else {
-    emitInstructionHandler(armContext, instruction, "register", cursorAfterModRm);
+    emitInstructionHandler(armContext, instruction, "regDynamic", cursorAfterModRm);
   }
 
   body.elseBlock();
   armContext.rmDecode.emitMemoryAddressDecode(armContext, opcodeEnd);
-  emitInstructionHandler(armContext, instruction, "memory", {
-    kind: "local",
-    local: context.locals.length
-  });
+  body.localGet(context.locals.base).i32Const(noBaseRegister).i32Eq().ifBlock();
+  emitInstructionHandler(memoryContext, instruction, "memStatic", cursorAfterAddress);
+  body.elseBlock();
+  emitInstructionHandler(memoryContext, instruction, "memDynamic", cursorAfterAddress);
+  body.endBlock();
   body.endBlock();
 }
 

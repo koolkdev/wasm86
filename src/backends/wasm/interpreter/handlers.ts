@@ -2,7 +2,8 @@ import { assert } from "#common/assert.js";
 import { createActionBuilder } from "#ir/action/builder.js";
 import {
   immExternalBinding,
-  memExternalBinding,
+  memDynamicBinding,
+  memStaticBinding,
   regBinding,
   regDynamicBinding,
   type ExternalValueId,
@@ -26,8 +27,8 @@ import type { InterpreterLocals } from "./locals.js";
 // register indices, immediates, computed addresses — and eip/nextEip are
 // externals too, so one handler body serves every register pair and address.
 
-// The rm operand's resolved addressing form; "plain" has no rm operand.
-export type HandlerForm = "plain" | "register" | "memory";
+// The rm operand's resolved binding kind; "plain" has no rm operand.
+export type HandlerForm = "plain" | "regDynamic" | "memStatic" | "memDynamic";
 
 export type InterpreterHandler = Readonly<{
   instructionId: string;
@@ -102,13 +103,7 @@ function decodeOperand(
       return { binding: regDynamicBinding(externals.bind(locals.reg)), cursor };
     case "modrm.rm":
       assert(form !== "plain", `${instruction.spec.id}: rm operand without a resolved form`);
-      return {
-        binding:
-          form === "memory"
-            ? memExternalBinding(externals.bind(locals.address))
-            : regDynamicBinding(externals.bind(locals.rm)),
-        cursor
-      };
+      return { binding: rmBinding(form, locals, externals), cursor };
     case "opcode.reg": {
       assert(
         instruction.opcodeLowBits !== undefined,
@@ -142,6 +137,22 @@ function decodeOperand(
         cursor: { kind: "static", offset: length }
       };
     }
+  }
+}
+
+// The base-less EA leaves decode complete in the offset local.
+function rmBinding(
+  form: Exclude<HandlerForm, "plain">,
+  locals: InterpreterLocals,
+  externals: HandlerExternals
+): OperandBinding {
+  switch (form) {
+    case "regDynamic":
+      return regDynamicBinding(externals.bind(locals.rm));
+    case "memStatic":
+      return memStaticBinding(externals.bind(locals.offset));
+    case "memDynamic":
+      return memDynamicBinding(externals.bind(locals.base), externals.bind(locals.offset));
   }
 }
 

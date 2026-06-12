@@ -449,6 +449,37 @@ test("a dynamic read flushing a boundary pending keeps the snapshot restorable",
   deepStrictEqual(pending.snapshot(), [[gprChannel("ebx"), before]]);
 });
 
+test("a destructive flush served by a cached read keeps the snapshot restorable", () => {
+  const { values, pending } = createHarness();
+
+  pending.beginInstruction();
+
+  const before = pending.read(gprChannel("esp"));
+
+  pending.write(gprChannel("esp"), values.internConst(0x44));
+  pending.readDynamicGpr(dynamicGpr(values.internExternal(0)));
+
+  // The cached read is the pre-instruction value — no store hit esp before
+  // its first flush — so it joins the boundary instead of latching the
+  // unrestorable assert.
+  deepStrictEqual(pending.snapshot(), [[gprChannel("esp"), before]]);
+});
+
+test("a signed cached read serves a destructive flush of its channel", () => {
+  const { values, pending } = createHarness();
+
+  pending.beginInstruction();
+
+  const before = pending.read(gprChannel("al"), { signed: true });
+
+  pending.write(gprChannel("al"), values.internConst(0x12));
+  pending.read(gprChannel("ax"));
+
+  // The sign-extended read's low channel-width bits are the memory bytes;
+  // the channel-width boundary store masks the rest.
+  deepStrictEqual(pending.snapshot(), [[gprChannel("al"), before]]);
+});
+
 test("narrow dynamic reads carry their byte length, bounds, and sign marker", () => {
   const { values, actions, pending } = createHarness();
   const index = values.internExternal(0);

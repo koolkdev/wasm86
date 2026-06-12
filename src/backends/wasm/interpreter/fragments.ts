@@ -224,10 +224,9 @@ export function emitSibFetch(
   fragment.emit(context);
 }
 
-// One ModRM memory-address case: the sum of whichever terms the addressing
-// form has — a base register word, a SIB scaled-index term, a displacement.
+// The state-independent terms of one ModRM address case — scaled index,
+// displacement; the base register is not a term. The empty sum is const 0.
 export type RmAddressParts = Readonly<{
-  baseRegLocal?: number;
   scaledIndexLocal?: number;
   displacement?: Readonly<{ offset: number; width: 8 | 32 }>;
 }>;
@@ -236,14 +235,10 @@ export function emitRmAddressFragment(
   context: FragmentEmitContext,
   eipLocal: number,
   parts: RmAddressParts,
-  addressLocal: number
+  offsetLocal: number
 ): void {
   const fragment = new DecodeFragment();
   const terms: ValueId[] = [];
-
-  if (parts.baseRegLocal !== undefined) {
-    terms.push(fragment.readGprWord(fragment.external(parts.baseRegLocal)));
-  }
 
   if (parts.scaledIndexLocal !== undefined) {
     terms.push(fragment.external(parts.scaledIndexLocal));
@@ -259,8 +254,10 @@ export function emitRmAddressFragment(
     );
   }
 
-  assert(terms.length > 0, "a ModRM address needs at least one term");
-  fragment.output(terms.reduce((sum, term) => fragment.add(sum, term)), addressLocal);
+  fragment.output(
+    terms.length === 0 ? fragment.const32(0) : terms.reduce((sum, term) => fragment.add(sum, term)),
+    offsetLocal
+  );
   fragment.emit(context);
 }
 

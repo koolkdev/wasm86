@@ -10,7 +10,8 @@ export class InterpreterLocals {
   readonly mod: number;
   readonly reg: number;
   readonly rm: number;
-  readonly address: number;
+  readonly base: number;
+  readonly offset: number;
   readonly length: number;
   readonly imm: number;
   readonly target: number;
@@ -22,7 +23,8 @@ export class InterpreterLocals {
     this.mod = body.addLocal(wasmValueType.i32);
     this.reg = body.addLocal(wasmValueType.i32);
     this.rm = body.addLocal(wasmValueType.i32);
-    this.address = body.addLocal(wasmValueType.i32);
+    this.base = body.addLocal(wasmValueType.i32);
+    this.offset = body.addLocal(wasmValueType.i32);
     this.length = body.addLocal(wasmValueType.i32);
     this.imm = body.addLocal(wasmValueType.i32);
     this.target = body.addLocal(wasmValueType.i32);
