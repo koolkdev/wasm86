@@ -46,6 +46,7 @@ import {
 import type {
   Action,
   ActionBlock,
+  ContinueAction,
   EdgeRegion,
   ExitAction,
   GprDynamicSlot,
@@ -149,7 +150,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       case "jump":
         assert(this.#pending.has(eipChannel), "action block did not advance eip; no instructions were added");
         this.#pending.flushAll();
-        this.#actions.push({ kind: "exit", reason: this.#blockEnd === "jump" ? "jump" : "next" });
+        this.#actions.push({ kind: "continue" });
         break;
       case "terminated":
         break;
@@ -425,8 +426,8 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     this.#actions.push({
       kind: "branch",
       condition: conditionId,
-      taken: this.#branchEdge("jump", taken),
-      notTaken: this.#branchEdge("next", notTaken)
+      taken: this.#branchEdge(taken),
+      notTaken: this.#branchEdge(notTaken)
     });
     this.#blockEnd = "terminated";
     this.#terminated = true;
@@ -485,12 +486,12 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   // Branch edges observe the completed instruction, so they flush live
   // pendings.
-  #branchEdge(reason: "jump" | "next", target: TargetInput): RegionId {
-    return this.#edgeRegion({ kind: "exit", reason }, this.#pending.entries(), this.#valueId(target));
+  #branchEdge(target: TargetInput): RegionId {
+    return this.#edgeRegion({ kind: "continue" }, this.#pending.entries(), this.#valueId(target));
   }
 
   #edgeRegion(
-    exit: ExitAction,
+    terminator: ExitAction | ContinueAction,
     pendings: ReadonlyArray<readonly [StateChannel, ValueId]>,
     eipValue: ValueId
   ): RegionId {
@@ -513,7 +514,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     const id = this.#nextRegionId;
 
     this.#nextRegionId += 1;
-    this.#edgeRegions.push({ id, kind: "edge", flushes, exit });
+    this.#edgeRegions.push({ id, kind: "edge", flushes, terminator });
     return id;
   }
 

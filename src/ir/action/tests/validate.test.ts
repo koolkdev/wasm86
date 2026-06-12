@@ -13,12 +13,27 @@ function blockWith(regions: readonly ActionRegion[], entry = 0): ActionBlock {
   return { entry, regions, values: createValueTable() };
 }
 
+const continueAction = { kind: "continue" } as const;
 const edgeExit = { kind: "exit", reason: "memoryReadFault" } as const;
 
 test("an entry ending with an exit validates", () => {
   doesNotThrow(() =>
     validateActionBlock(
-      blockWith([{ id: 0, kind: "entry", actions: [{ kind: "exit", reason: "next" }] }])
+      blockWith([{ id: 0, kind: "entry", actions: [{ kind: "exit", reason: "unsupported" }] }])
+    )
+  );
+});
+
+test("an entry ending with a continue validates", () => {
+  doesNotThrow(() =>
+    validateActionBlock(
+      blockWith([
+        {
+          id: 0,
+          kind: "entry",
+          actions: [{ kind: "writeState", slot: eipChannel, value: 0 }, continueAction]
+        }
+      ])
     )
   );
 });
@@ -35,9 +50,9 @@ test("a branch terminator with both edges targeted once validates", () => {
             { kind: "branch", condition: 0, taken: 1, notTaken: 2 }
           ]
         },
-        { id: 1, kind: "edge", flushes: [], exit: { kind: "exit", reason: "jump" } },
-        { id: 2, kind: "edge", flushes: [], exit: { kind: "exit", reason: "next" } },
-        { id: 3, kind: "edge", flushes: [], exit: edgeExit }
+        { id: 1, kind: "edge", flushes: [], terminator: continueAction },
+        { id: 2, kind: "edge", flushes: [], terminator: continueAction },
+        { id: 3, kind: "edge", flushes: [], terminator: edgeExit }
       ])
     )
   );
@@ -52,13 +67,29 @@ test("an action after the exit terminator is rejected", () => {
             id: 0,
             kind: "entry",
             actions: [
-              { kind: "exit", reason: "next" },
+              { kind: "exit", reason: "unsupported" },
               { kind: "writeState", slot: eipChannel, value: 0 }
             ]
           }
         ])
       ),
     /continues after its exit terminator/
+  );
+});
+
+test("an action after a continue terminator is rejected", () => {
+  throws(
+    () =>
+      validateActionBlock(
+        blockWith([
+          {
+            id: 0,
+            kind: "entry",
+            actions: [continueAction, { kind: "writeState", slot: eipChannel, value: 0 }]
+          }
+        ])
+      ),
+    /continues after its continue terminator/
   );
 });
 
@@ -70,13 +101,10 @@ test("an action after a branch terminator is rejected", () => {
           {
             id: 0,
             kind: "entry",
-            actions: [
-              { kind: "branch", condition: 0, taken: 1, notTaken: 2 },
-              { kind: "exit", reason: "next" }
-            ]
+            actions: [{ kind: "branch", condition: 0, taken: 1, notTaken: 2 }, continueAction]
           },
-          { id: 1, kind: "edge", flushes: [], exit: { kind: "exit", reason: "jump" } },
-          { id: 2, kind: "edge", flushes: [], exit: { kind: "exit", reason: "next" } }
+          { id: 1, kind: "edge", flushes: [], terminator: continueAction },
+          { id: 2, kind: "edge", flushes: [], terminator: continueAction }
         ])
       ),
     /continues after its branch terminator/
@@ -109,7 +137,7 @@ test("a branch targeting a missing edge region is rejected", () => {
             kind: "entry",
             actions: [{ kind: "branch", condition: 0, taken: 1, notTaken: 9 }]
           },
-          { id: 1, kind: "edge", flushes: [], exit: { kind: "exit", reason: "jump" } }
+          { id: 1, kind: "edge", flushes: [], terminator: continueAction }
         ])
       ),
     /branch targets unknown edge region 9/
@@ -127,10 +155,10 @@ test("an edge targeted by two guards is rejected", () => {
             actions: [
               { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
               { kind: "guardMemory", address: 0, byteLength: 4, access: "write", faultEdge: 1 },
-              { kind: "exit", reason: "next" }
+              continueAction
             ]
           },
-          { id: 1, kind: "edge", flushes: [], exit: edgeExit }
+          { id: 1, kind: "edge", flushes: [], terminator: edgeExit }
         ])
       ),
     /targeted more than once/
@@ -142,8 +170,8 @@ test("an edge no entry action targets is rejected", () => {
     () =>
       validateActionBlock(
         blockWith([
-          { id: 0, kind: "entry", actions: [{ kind: "exit", reason: "next" }] },
-          { id: 1, kind: "edge", flushes: [], exit: edgeExit }
+          { id: 0, kind: "entry", actions: [continueAction] },
+          { id: 1, kind: "edge", flushes: [], terminator: edgeExit }
         ])
       ),
     /not targeted by any entry action/
@@ -153,9 +181,7 @@ test("an edge no entry action targets is rejected", () => {
 test("a block whose entry id resolves to no entry region is rejected", () => {
   throws(
     () =>
-      validateActionBlock(
-        blockWith([{ id: 1, kind: "entry", actions: [{ kind: "exit", reason: "next" }] }])
-      ),
+      validateActionBlock(blockWith([{ id: 1, kind: "entry", actions: [continueAction] }])),
     /entry region is missing/
   );
 });
@@ -170,11 +196,11 @@ test("duplicate region ids are rejected", () => {
             kind: "entry",
             actions: [
               { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
-              { kind: "exit", reason: "next" }
+              continueAction
             ]
           },
-          { id: 1, kind: "edge", flushes: [], exit: edgeExit },
-          { id: 1, kind: "edge", flushes: [], exit: edgeExit }
+          { id: 1, kind: "edge", flushes: [], terminator: edgeExit },
+          { id: 1, kind: "edge", flushes: [], terminator: edgeExit }
         ])
       ),
     /not unique/

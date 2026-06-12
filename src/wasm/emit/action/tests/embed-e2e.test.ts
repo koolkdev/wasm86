@@ -9,7 +9,7 @@ import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { emitActionFragment } from "#wasm/emit/action/emit.js";
-import type { ExitReroute } from "#wasm/emit/action/embed.js";
+import type { CompletionPolicy } from "#wasm/emit/action/embed.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
 import { instantiateFunctionBody } from "./harness.js";
@@ -40,14 +40,14 @@ function decodeReadFragment(k: number): DecodeReadFragment {
           { kind: "readState", output: eipValue, slot: eipChannel },
           { kind: "guardMemory", address, byteLength: 1, access: "read", faultEdge: 1 },
           { kind: "readMemory", output: fetched, address, width: 8 },
-          { kind: "exit", reason: "next" }
+          { kind: "continue" }
         ]
       },
       {
         id: 1,
         kind: "edge",
         flushes: [{ kind: "writeState", slot: eipChannel, value: eipValue }],
-        exit: { kind: "exit", reason: "decodeFault" }
+        terminator: { kind: "exit", reason: "decodeFault" }
       }
     ],
     values
@@ -57,7 +57,7 @@ function decodeReadFragment(k: number): DecodeReadFragment {
 }
 
 // The fetched byte widened to the run export's i64 result.
-async function instantiateDecodeRead(success: ExitReroute) {
+async function instantiateDecodeRead(completion: CompletionPolicy) {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const fetchedLocal = scratch.allocLocal(wasmValueType.i32);
@@ -66,7 +66,7 @@ async function instantiateDecodeRead(success: ExitReroute) {
   emitActionFragment(fragment.block, {
     body,
     scratch,
-    embedding: { success, outputs: new Map([[fragment.fetched, fetchedLocal]]) }
+    embedding: { completion, outputs: new Map([[fragment.fetched, fetchedLocal]]) }
   });
   body.localGet(fetchedLocal).i64ExtendI32U().end();
   scratch.freeLocal(fetchedLocal);
@@ -74,7 +74,7 @@ async function instantiateDecodeRead(success: ExitReroute) {
   return instantiateFunctionBody(body);
 }
 
-test("a decode-read fragment exports the byte and falls through on success", async () => {
+test("a decode-read fragment exports the byte and its continue falls through", async () => {
   const { stateView, guestView, run } = await instantiateDecodeRead({ kind: "fallthrough" });
 
   writeWasmCpuState(stateView, { eip: 0x10 });
@@ -96,7 +96,7 @@ test("the decode-fault edge keeps the encoded return", async () => {
   strictEqual(readWasmStateChannel(stateView, eipChannel), eip);
 });
 
-test("a br-rerouted success lands on the embedder label across the fragment's nesting", async () => {
+test("a br continue lands on the embedder label across the fragment's nesting", async () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const fetchedLocal = scratch.allocLocal(wasmValueType.i32);
@@ -107,7 +107,7 @@ test("a br-rerouted success lands on the embedder label across the fragment's ne
     body,
     scratch,
     embedding: {
-      success: { kind: "br", depth: 0 },
+      completion: { kind: "br", depth: 0 },
       outputs: new Map([[fragment.fetched, fetchedLocal]])
     }
   });
@@ -138,7 +138,7 @@ test("consecutive fragments share the embedder's scratch locals", async () => {
       body,
       scratch,
       embedding: {
-        success: { kind: "fallthrough" },
+        completion: { kind: "fallthrough" },
         outputs: new Map([[fragment.fetched, local]])
       }
     });
@@ -180,7 +180,7 @@ test("an exported register read pins across a later overlapping store", async ()
         actions: [
           { kind: "readState", output: readValue, slot: gprChannel("eax") },
           { kind: "writeState", slot: gprChannel("eax"), value: incremented },
-          { kind: "exit", reason: "next" }
+          { kind: "continue" }
         ]
       }
     ],
@@ -194,7 +194,7 @@ test("an exported register read pins across a later overlapping store", async ()
     body,
     scratch,
     embedding: {
-      success: { kind: "fallthrough" },
+      completion: { kind: "fallthrough" },
       outputs: new Map([[readValue, readLocal]])
     }
   });

@@ -16,7 +16,7 @@ import { createCpuState, getFlag, type CpuState } from "#x86/state/cpu-state.js"
 import { reg32, type EffectiveAddress, type MemOperand, type RegName } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
-import { instantiateActionBlock } from "./harness.js";
+import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
 
 // Stage 5's end-to-end slice: memory operands through guards, guest access,
 // and fault edges, with the direct backend executing the same decoded
@@ -41,7 +41,7 @@ test("mov r32, [ebx+disp] loads the guest cell", async () => {
   writeGuestU32(memory, 0x24, 0x1122_3344);
 
   strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
-  strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH);
+  strictEqual(run(), actionBlockCompleted);
   strictEqual(readRegister(stateView, "eax"), 0x1122_3344);
   assertMatchesReference(stateView, refState, "mov r32, [ebx+4]");
 });
@@ -60,7 +60,7 @@ test("mov [ebx+disp], r32 stores the guest cell", async () => {
   writeWasmCpuState(stateView, initial);
 
   strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
-  strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH);
+  strictEqual(run(), actionBlockCompleted);
   strictEqual(guestView.getUint32(0x24, true), 0xcafe_1234);
   strictEqual(guestView.getUint32(0x24, true), readReferenceU32(memory, 0x24));
   assertMatchesReference(stateView, refState, "mov [ebx+4], r32");
@@ -83,7 +83,7 @@ test("add [mem], r32 read-modify-writes the cell with reference flags", async ()
   writeGuestU32(memory, 0x20, 1);
 
   strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
-  strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH);
+  strictEqual(run(), actionBlockCompleted);
   strictEqual(guestView.getUint32(0x20, true), 0);
   strictEqual(guestView.getUint32(0x20, true), readReferenceU32(memory, 0x20));
   assertMatchesReference(stateView, refState, "add [eax], ebx");
@@ -105,7 +105,7 @@ test("add r32, [mem] loads the operand with reference flags", async () => {
   writeGuestU32(memory, 0x20, 1);
 
   strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
-  strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH);
+  strictEqual(run(), actionBlockCompleted);
   // 0x7fffffff + 1 overflows signed: SF and OF per the reference.
   strictEqual(readRegister(stateView, "ebx"), 0x8000_0000);
   assertMatchesReference(stateView, refState, "add ebx, [eax]");
@@ -132,7 +132,7 @@ test("byte and word guest accesses load and store at their widths", async () => 
     strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
   }
 
-  strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH);
+  strictEqual(run(), actionBlockCompleted);
   strictEqual(readRegister(stateView, "eax"), 0xf6);
   strictEqual(readRegister(stateView, "ecx"), 0xffff_fff6);
   strictEqual(guestView.getUint32(0x20, true), 0xbeef_7ff6);

@@ -27,8 +27,9 @@ export function validateActionBlock(block: ActionBlock): void {
   validateEntryActions(entry, edgeIds);
 }
 
-// Branch and exit are region terminators; edge bodies always branch off the
-// entry, so every edge is targeted by exactly one guard or branch.
+// Branch, exit, and continue are region terminators; edge bodies always
+// branch off the entry, so every edge is targeted by exactly one guard or
+// branch.
 function validateEntryActions(entry: EntryRegion, edgeIds: ReadonlySet<RegionId>): void {
   const targeted = new Set<RegionId>();
 
@@ -59,6 +60,7 @@ function validateEntryActions(entry: EntryRegion, edgeIds: ReadonlySet<RegionId>
       case "writeState":
       case "writeMemory":
       case "exit":
+      case "continue":
         break;
     }
   }
@@ -76,6 +78,7 @@ function isRegionTerminator(action: Action): boolean {
   switch (action.kind) {
     case "branch":
     case "exit":
+    case "continue":
       return true;
     case "readState":
     case "readMemory":

@@ -14,11 +14,8 @@ export type GprDynamicSlot = Readonly<{
 
 export type StateSlot = StateChannel | GprDynamicSlot;
 
-// Maps one-to-one onto the wasm runtime's ExitReason; the action emitter
-// owns the numeric encoding.
+// Reports to the host; the action emitter owns the numeric encoding.
 export type ActionExitReason =
-  | "next"
-  | "jump"
   | "hostTrap"
   | "unsupported"
   | "decodeFault"
@@ -78,6 +75,11 @@ export type ExitAction = Readonly<{
   payload?: ValueId;
 }>;
 
+// The block completed; execution continues from the flushed state.
+export type ContinueAction = Readonly<{
+  kind: "continue";
+}>;
+
 export type Action =
   | ReadStateAction
   | ReadMemoryAction
@@ -85,7 +87,8 @@ export type Action =
   | WriteMemoryAction
   | GuardMemoryAction
   | BranchAction
-  | ExitAction;
+  | ExitAction
+  | ContinueAction;
 
 export type EntryRegion = Readonly<{
   id: RegionId;
@@ -98,7 +101,7 @@ export type EdgeRegion = Readonly<{
   id: RegionId;
   kind: "edge";
   flushes: readonly WriteStateAction[];
-  exit: ExitAction;
+  terminator: ExitAction | ContinueAction;
 }>;
 
 export type ActionRegion = EntryRegion | EdgeRegion;

@@ -13,7 +13,7 @@ import type { ValueId } from "#ir/action/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
-import { exitRerouteOf, type ActionEmbedding } from "./embed.js";
+import type { ActionEmbedding } from "./embed.js";
 import { emitGuardChecks, emitGuestLoad, emitGuestStore } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";
 import { createValueStack } from "./value-stack.js";
@@ -38,12 +38,14 @@ export type ActionEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   // External id -> the wasm local the embedding bound it to.
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
+  embedding: ActionEmbedding;
 }>;
 
+// The block-shaped entry point: the block is the whole function body.
 export function emitActionBlock(block: ActionBlock, context: ActionEmitContext): WasmFunctionBodyEncoder {
   const scratch = new WasmLocalScratchAllocator(context.body);
 
-  emitActionFragment(block, { ...context, scratch, embedding: {} });
+  emitActionFragment(block, { ...context, scratch });
   scratch.assertClear();
   return context.body.end();
 }
@@ -77,7 +79,7 @@ export function emitActionFragment(block: ActionBlock, context: ActionFragmentCo
     body,
     edges,
     terminator,
-    exitReroute: (reason) => exitRerouteOf(embedding, reason),
+    completion: embedding.completion,
     emitPayload: valueStack.emitUse
   });
 
@@ -101,7 +103,8 @@ export function emitActionFragment(block: ActionBlock, context: ActionFragmentCo
         emitGuard(action);
         return;
       case "exit":
-        frame.emitExit(action);
+      case "continue":
+        frame.emitTerminator(action);
         return;
       case "branch":
         emitBranch(action);
@@ -153,7 +156,7 @@ export function emitActionFragment(block: ActionBlock, context: ActionFragmentCo
       emitSlotStore(body, flush.slot, flush.value, valueStack.emitUse);
     }
 
-    frame.emitExit(edge.exit, detail);
+    frame.emitTerminator(edge.terminator, detail);
   }
 
   function edgeById(id: RegionId): EdgeRegion {

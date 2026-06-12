@@ -16,7 +16,7 @@ import { createCpuState, getFlag, type CpuState } from "#x86/state/cpu-state.js"
 import { reg32, type EffectiveAddress, type MemOperand, type RegName } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
-import { instantiateActionBlock } from "./harness.js";
+import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
 
 // Stage 6's end-to-end slice: jumps, conditional branches, and host traps,
 // with the direct backend executing the same decoded instructions as the
@@ -24,7 +24,7 @@ import { instantiateActionBlock } from "./harness.js";
 
 const allArithmeticEflags = 0x8d5;
 
-test("cmp + jcc taken exits jump at the target with flushed flags", async () => {
+test("cmp + jcc taken continues at the target with flushed flags", async () => {
   // cmp eax, 5; je +0x20 — equal, so the branch is taken.
   const instructions = decodeSequence([
     [0x83, 0xf8, 0x05],
@@ -41,11 +41,11 @@ test("cmp + jcc taken exits jump at the target with flushed flags", async () => 
   }
 
   strictEqual(refState.eip, 0x1025);
-  strictEqual(decodeExit(run()).exitReason, ExitReason.JUMP);
+  strictEqual(run(), actionBlockCompleted);
   assertMatchesReference(stateView, refState, "jcc taken");
 });
 
-test("cmp + jcc not taken exits next at the fall-through with flushed flags", async () => {
+test("cmp + jcc not taken continues at the fall-through with flushed flags", async () => {
   // cmp eax, 5; je +0x20 — not equal, so execution falls through.
   const instructions = decodeSequence([
     [0x83, 0xf8, 0x05],
@@ -66,11 +66,11 @@ test("cmp + jcc not taken exits next at the fall-through with flushed flags", as
   }
 
   strictEqual(refState.eip, instructions[1]!.nextEip);
-  strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH);
+  strictEqual(run(), actionBlockCompleted);
   assertMatchesReference(stateView, refState, "jcc not taken");
 });
 
-test("jmp rel32 exits jump with earlier pendings flushed at the target", async () => {
+test("jmp rel32 continues at the target with earlier pendings flushed", async () => {
   // mov ecx, 0x77; jmp +0x10.
   const instructions = decodeSequence([
     [0xb9, 0x77, 0x00, 0x00, 0x00],
@@ -87,7 +87,7 @@ test("jmp rel32 exits jump with earlier pendings flushed at the target", async (
   }
 
   strictEqual(refState.eip, 0x101a);
-  strictEqual(decodeExit(run()).exitReason, ExitReason.JUMP);
+  strictEqual(run(), actionBlockCompleted);
   strictEqual(readRegister(stateView, "ecx"), 0x77);
   assertMatchesReference(stateView, refState, "jmp rel32");
 });
@@ -141,7 +141,7 @@ test("a branch composes with a fault edge in one block", async () => {
   }
 
   strictEqual(refState.eip, 0x1024);
-  strictEqual(decodeExit(run()).exitReason, ExitReason.JUMP);
+  strictEqual(run(), actionBlockCompleted);
   strictEqual(readRegister(stateView, "ecx"), 0x55);
   assertMatchesReference(stateView, refState, "load then branch");
 });

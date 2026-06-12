@@ -226,8 +226,15 @@ class BlockValueUsage implements BlockValueAnalysis {
 export function edgeValues(edge: EdgeRegion): readonly ValueId[] {
   const values = edge.flushes.map((flush) => flush.value);
 
-  if (edge.exit.payload !== undefined) {
-    values.push(edge.exit.payload);
+  switch (edge.terminator.kind) {
+    case "exit":
+      if (edge.terminator.payload !== undefined) {
+        values.push(edge.terminator.payload);
+      }
+
+      break;
+    case "continue":
+      break;
   }
 
   return values;
@@ -249,6 +256,8 @@ function actionOperands(action: Action): readonly ValueId[] {
       return [action.condition];
     case "exit":
       return action.payload === undefined ? [] : [action.payload];
+    case "continue":
+      return [];
   }
 }
 
@@ -282,6 +291,7 @@ function actionOutput(action: Action): ValueId | undefined {
     case "guardMemory":
     case "branch":
     case "exit":
+    case "continue":
       return undefined;
   }
 }

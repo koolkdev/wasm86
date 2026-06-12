@@ -12,13 +12,10 @@ import { StopReason } from "#x86/execution/run-result.js";
 import { x86ArithmeticFlags } from "#x86/flags.js";
 import { createCpuState, getFlag, type CpuState } from "#x86/state/cpu-state.js";
 import { reg32 } from "#x86/types.js";
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
-import { emitActionBlock } from "#wasm/emit/action/emit.js";
-import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
 import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
-import { instantiateActionBlock } from "./harness.js";
+import { actionBlockBody, actionBlockCompleted, instantiateActionBlock } from "./harness.js";
 
 // Stage 3's end-to-end slice: ALU r32 forms through the action pipeline with
 // every flag byte checked against the direct backend executing the same
@@ -82,7 +79,7 @@ for (const aluCase of aluCases) {
       const { stateView, run } = await instantiateActionBlock(builder.finish());
 
       writeWasmCpuState(stateView, initial);
-      strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH, label);
+      strictEqual(run(), actionBlockCompleted, label);
       assertMatchesReference(stateView, refState, label);
     }
   });
@@ -119,7 +116,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
   strictEqual(new Set(flagWrites.map((write) => write.slot)).size, x86ArithmeticFlags.length);
 
   // ...and in the encoding: exactly six byte stores.
-  const body = emitActionBlock(block, { body: new WasmFunctionBodyEncoder() }).encode();
+  const body = actionBlockBody(block).encode();
 
   strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Store8).length, 6);
 
@@ -137,7 +134,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
   const { stateView, run } = await instantiateActionBlock(block);
 
   writeWasmCpuState(stateView, initial);
-  strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH);
+  strictEqual(run(), actionBlockCompleted);
   assertMatchesReference(stateView, refState, "two adds");
 });
 

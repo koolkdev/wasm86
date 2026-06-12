@@ -10,9 +10,8 @@ import type { ConditionCode } from "#ir/model/types.js";
 import { x86EflagsMask } from "#x86/flags.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
-import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
-import { instantiateActionBlock } from "./harness.js";
+import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
 
 // cmp + setcc consuming the recorded condition expression, and standalone
 // setcc rebuilding the condition from flag bytes.
@@ -73,7 +72,7 @@ for (const [cc, predicate] of comparePredicates) {
       const label = `set${cc.toLowerCase()} with ${left}, ${right}`;
 
       writeWasmCpuState(stateView, { ebx: left, eax: 0xdeadbeaa });
-      strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH, label);
+      strictEqual(run(), actionBlockCompleted, label);
 
       // setcc writes the low byte only; the rest of eax is untouched.
       const expected = 0xdeadbe00 + (predicate(left, right) ? 1 : 0);
@@ -116,7 +115,7 @@ for (const cc of Object.keys(CONDITIONS) as ConditionCode[]) {
       const label = `set${cc.toLowerCase()} with ${[...flags].join("+") || "no flags"}`;
 
       writeWasmCpuState(stateView, { eax: 0x55aa55aa, eflags });
-      strictEqual(decodeExit(run()).exitReason, ExitReason.FALLTHROUGH, label);
+      strictEqual(run(), actionBlockCompleted, label);
 
       const expected = 0x55aa5500 + (evaluateCondition(condition.expr, flags) ? 1 : 0);
 

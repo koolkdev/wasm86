@@ -10,13 +10,10 @@ import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
-import { emitActionBlock } from "#wasm/emit/action/emit.js";
-import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
 import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
-import { instantiateActionBlock } from "./harness.js";
+import { actionBlockBody, actionBlockCompleted, instantiateActionBlock } from "./harness.js";
 
 // The stage's end-to-end slice: semantics -> ActionBuilder -> emit ->
 // instantiate -> run -> assert state memory through the host view.
@@ -40,8 +37,8 @@ function touchedGprSlots(block: ActionBlock): StateSlot[] {
   );
 }
 
-function assertFallthrough(exit: bigint): void {
-  deepStrictEqual(decodeExit(exit), { exitReason: ExitReason.FALLTHROUGH, payload: 0 });
+function assertCompleted(exit: bigint): void {
+  strictEqual(exit, actionBlockCompleted);
 }
 
 test("mov r32, imm32 sets the register bytes and eip and falls through", async () => {
@@ -54,7 +51,7 @@ test("mov r32, imm32 sets the register bytes and eip and falls through", async (
 
   const { stateView, run } = await instantiateActionBlock(builder.finish());
 
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0x12345678);
   strictEqual(readWasmStateChannel(stateView, eipChannel), 0x401005);
 });
@@ -70,7 +67,7 @@ test("mov r32, r32 copies the source register and leaves it intact", async () =>
   const { stateView, run } = await instantiateActionBlock(builder.finish());
 
   writeWasmCpuState(stateView, { eax: 0xcafe1234 });
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0xcafe1234);
   strictEqual(readRegister(stateView, "ebx"), 0xcafe1234);
   strictEqual(readWasmStateChannel(stateView, eipChannel), 0x1002);
@@ -96,7 +93,7 @@ test("chained movs forward one read to both destinations", async () => {
   const { stateView, run } = await instantiateActionBlock(block);
 
   writeWasmCpuState(stateView, { eax: 0xdeadbeef });
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "ebx"), 0xdeadbeef);
   strictEqual(readRegister(stateView, "ecx"), 0xdeadbeef);
   strictEqual(readWasmStateChannel(stateView, eipChannel), 0x1004);
@@ -113,7 +110,7 @@ test("xchg eax, ebx swaps the registers", async () => {
   const { stateView, run } = await instantiateActionBlock(builder.finish());
 
   writeWasmCpuState(stateView, { eax: 0x11111111, ebx: 0x22222222 });
-  assertFallthrough(run());
+  assertCompleted(run());
   // The pinning rule is load-bearing here: reloading ebx at its use would
   // observe the just-stored eax and leave both registers equal.
   strictEqual(readRegister(stateView, "eax"), 0x22222222);
@@ -135,7 +132,7 @@ test("a mov before the xchg observes the pre-swap value", async () => {
   const { stateView, run } = await instantiateActionBlock(builder.finish());
 
   writeWasmCpuState(stateView, { eax: 0x11111111, ebx: 0x22222222 });
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "ecx"), 0x11111111);
   strictEqual(readRegister(stateView, "eax"), 0x22222222);
   strictEqual(readRegister(stateView, "ebx"), 0x11111111);
@@ -156,7 +153,7 @@ test("a byte write merges into the full register through state memory", async ()
   const { stateView, run } = await instantiateActionBlock(builder.finish());
 
   writeWasmCpuState(stateView, { eax: 0x12345678 });
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0x1234569a);
   strictEqual(readRegister(stateView, "ebx"), 0x1234569a);
 });
@@ -172,7 +169,7 @@ test("a 16-bit immediate store leaves the upper register half intact", async () 
   const { stateView, run } = await instantiateActionBlock(builder.finish());
 
   writeWasmCpuState(stateView, { eax: 0x12345678 });
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0x1234beef);
 });
 
@@ -187,7 +184,7 @@ test("movzx r32, r8 zero-extends the high byte through an offset load", async ()
   const { stateView, run } = await instantiateActionBlock(builder.finish());
 
   writeWasmCpuState(stateView, { eax: 0x1234f678 });
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "ebx"), 0xf6);
 });
 
@@ -206,7 +203,7 @@ test("movsx r32, r8/r16 sign-extends through marked loads", async () => {
   const { stateView, run } = await instantiateActionBlock(builder.finish());
 
   writeWasmCpuState(stateView, { eax: 0x1234f678 });
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "ebx"), 0xfffffff6);
   strictEqual(readRegister(stateView, "ecx"), 0xfffff678);
 });
@@ -227,7 +224,7 @@ test("add al, imm8 stays on the byte channel with byte-wide flags", async () => 
   const { stateView, run } = await instantiateActionBlock(block);
 
   writeWasmCpuState(stateView, { eax: 0x123456f0 });
-  assertFallthrough(run());
+  assertCompleted(run());
   // 0xf0 + 0x70 = 0x160: the byte wraps and carries out.
   strictEqual(readRegister(stateView, "eax"), 0x12345660);
   strictEqual(readWasmFlagByte(stateView, "CF"), 1);
@@ -249,7 +246,7 @@ test("add ax, imm16 stays on the word channel", async () => {
   const { stateView, run } = await instantiateActionBlock(block);
 
   writeWasmCpuState(stateView, { eax: 0x1234f00f });
-  assertFallthrough(run());
+  assertCompleted(run());
   // 0xf00f + 0x2001 = 0x11010: the word wraps and carries out.
   strictEqual(readRegister(stateView, "eax"), 0x12341010);
   strictEqual(readWasmFlagByte(stateView, "CF"), 1);
@@ -287,7 +284,7 @@ test("mov ah and mov al merge through memory for a final 32-bit read", async () 
   const { stateView, run } = await instantiateActionBlock(block);
 
   writeWasmCpuState(stateView, { eax: 0x12345678 });
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0x1234abcd);
   strictEqual(readRegister(stateView, "ebx"), 0x1234abcd);
 });
@@ -300,7 +297,7 @@ test("zero compares encode as eqz", () => {
     nextEip: 0x1003
   });
 
-  const body = emitActionBlock(builder.finish(), { body: new WasmFunctionBodyEncoder() }).encode();
+  const body = actionBlockBody(builder.finish()).encode();
   const opcodes = wasmBodyOpcodes(body);
 
   // ZF and parity both compare against zero; nothing else compares equal.
@@ -324,7 +321,7 @@ test("a value used twice computes once and both uses observe it", async () => {
   });
 
   const block = builder.finish();
-  const body = emitActionBlock(block, { body: new WasmFunctionBodyEncoder() }).encode();
+  const body = actionBlockBody(block).encode();
 
   // One add for the shared sum, one for the count advance.
   strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Add).length, 2);
@@ -332,7 +329,7 @@ test("a value used twice computes once and both uses observe it", async () => {
   const { stateView, run } = await instantiateActionBlock(block);
 
   writeWasmCpuState(stateView, { eax: 100, ebx: 28 });
-  assertFallthrough(run());
+  assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 128);
   strictEqual(readRegister(stateView, "ebx"), 128);
 });

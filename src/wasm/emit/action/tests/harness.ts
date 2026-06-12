@@ -2,14 +2,20 @@ import { assert } from "#common/assert.js";
 import type { ActionBlock } from "#ir/action/types.js";
 import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import { emitActionBlock } from "#wasm/emit/action/emit.js";
+import { emitActionFragment } from "#wasm/emit/action/emit.js";
 
 // Test-only module wrapper around the action emitter: imported state + guest
-// memories, one run export returning the encoded i64 exit. External value n
-// is the function's n-th i32 parameter. Module assembly for real use is the
+// memories, one run export returning the encoded i64 exit. The harness
+// embeds like any host — a fallthrough continue lands on its sentinel tail,
+// reports return their real encoded exits. External value n is the
+// function's n-th i32 parameter. Module assembly for real use is the
 // backends' job.
+
+// No encoded exit equals the sentinel: its reason field is 0xffff.
+export const actionBlockCompleted = -1n;
 
 export type InstantiatedActionBlock = Readonly<{
   stateView: DataView;
@@ -17,16 +23,26 @@ export type InstantiatedActionBlock = Readonly<{
   run(...externals: number[]): bigint;
 }>;
 
+// The fragment with a fallthrough completion, then the sentinel tail.
+export function actionBlockBody(block: ActionBlock, externalParamCount = 0): WasmFunctionBodyEncoder {
+  const body = new WasmFunctionBodyEncoder(externalParamCount);
+  const scratch = new WasmLocalScratchAllocator(body);
+
+  emitActionFragment(block, {
+    body,
+    scratch,
+    externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
+    embedding: { completion: { kind: "fallthrough" } }
+  });
+  scratch.assertClear();
+  return body.i64Const(actionBlockCompleted).end();
+}
+
 export async function instantiateActionBlock(
   block: ActionBlock,
   externalParamCount = 0
 ): Promise<InstantiatedActionBlock> {
-  const body = emitActionBlock(block, {
-    body: new WasmFunctionBodyEncoder(externalParamCount),
-    externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id]))
-  });
-
-  return instantiateFunctionBody(body, externalParamCount);
+  return instantiateFunctionBody(actionBlockBody(block, externalParamCount), externalParamCount);
 }
 
 // Same wrapper around an already finished body — typically a hand-written
