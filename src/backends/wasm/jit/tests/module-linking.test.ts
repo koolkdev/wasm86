@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { ExitReason } from "#wasm/exit.js";
 import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
+import { flagsOf } from "#x86/state/cpu-state.js";
 import { jitModuleLinkFallbackExportName } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
 import type { WasmCompiledBlockCodeMap } from "#backends/wasm/jit/compiled-blocks/block-cache.js";
 import { WasmCompiledBlockCache } from "#backends/wasm/jit/compiled-blocks/wasm-cache.js";
@@ -15,9 +16,8 @@ import {
 const aEip = 0x1000;
 const bEip = 0x2000;
 const cEip = 0x3000;
-const zeroFlag = 0x40;
-const preservedEflags = 0xffff_0000;
-const addWraparoundEflags = 0x55;
+const addWraparoundFlags = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 } as const;
+const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 
 test("unlinked final static jmp uses module-local fallback stub", () => {
   const fixture = createLinkingFixture([
@@ -160,7 +160,7 @@ test("compiled conditional targets patch both branch slots", () => {
   deepStrictEqual(takenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(takenState.eax, 2);
 
-  fixture.memories.state.load({ eip: aEip, eflags: zeroFlag });
+  fixture.memories.state.load({ eip: aEip, ZF: 1 });
 
   const notTakenRun = branch.run();
   const notTakenState = fixture.memories.state.snapshot();
@@ -187,24 +187,23 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
   strictEqual(branch.moduleLinkTable?.table.get(notTakenSlot), notTaken.exportedBlockFunctionForEip(notTakenEip));
   strictEqual(branch.moduleLinkTable?.table.get(takenSlot), taken.exportedBlockFunctionForEip(takenEip));
 
-  fixture.memories.state.load({ eip: aEip, eax: 0, eflags: preservedEflags });
+  fixture.memories.state.load({ eip: aEip, eax: 0 });
 
   const takenRun = branch.run();
-  // The action pipeline writes flag bytes, never the packed word.
   const takenState = fixture.memories.state.snapshot();
 
   deepStrictEqual(takenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(takenState.eax, 1);
-  strictEqual(takenState.eflags, preservedEflags);
+  deepStrictEqual(flagsOf(takenState), noFlags);
 
-  fixture.memories.state.load({ eip: aEip, eax: 0xffff_ffff, eflags: preservedEflags });
+  fixture.memories.state.load({ eip: aEip, eax: 0xffff_ffff });
 
   const notTakenRun = branch.run();
   const notTakenState = fixture.memories.state.snapshot();
 
   deepStrictEqual(notTakenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(notTakenState.eax, 0);
-  strictEqual(notTakenState.eflags, (preservedEflags | addWraparoundEflags) >>> 0);
+  deepStrictEqual(flagsOf(notTakenState), addWraparoundFlags);
 });
 
 test("invalidating compiled target restores dependent module-local fallback", () => {

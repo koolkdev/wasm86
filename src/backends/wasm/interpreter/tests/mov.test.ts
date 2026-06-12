@@ -1,7 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState } from "#x86/state/cpu-state.js";
+import { flagsOf,
+  createCpuState } from "#x86/state/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -17,7 +18,10 @@ import {
   writeGuestBytes
 } from "./support.js";
 
-const zeroFlag = 1 << 6;
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
+
+const zeroFlag = { CF: 0, PF: 0, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
+const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 
 test("executes MOV eax, imm32", async () => {
   const interpreter = await instantiateWasmInterpreter();
@@ -74,42 +78,42 @@ test("executes MOV r/m32, imm32 through C7 group", async () => {
 });
 
 test("executes MOVZX and MOVSX register forms without modifying flags", async () => {
-  const flags = 0x8d5;
+  const flags = allFlagsSet;
   const zeroExtend = await executeInstruction(
     [0x0f, 0xb6, 0xc7],
-    createCpuState({ eax: 0xaaaa_aaaa, ebx: 0x1234_807f, eflags: flags, eip: startAddress, instructionCount: 7 })
+    createCpuState({ eax: 0xaaaa_aaaa, ebx: 0x1234_807f, ...flags, eip: startAddress, instructionCount: 7 })
   );
   const signExtend = await executeInstruction(
     [0x0f, 0xbe, 0xcf],
-    createCpuState({ ebx: 0x1234_807f, eflags: flags, eip: startAddress, instructionCount: 7 })
+    createCpuState({ ebx: 0x1234_807f, ...flags, eip: startAddress, instructionCount: 7 })
   );
   const zeroExtendWordDestination = await executeInstruction(
     [0x66, 0x0f, 0xb6, 0xc3],
-    createCpuState({ eax: 0x1234_0000, ebx: 0x80, eflags: flags, eip: startAddress, instructionCount: 7 })
+    createCpuState({ eax: 0x1234_0000, ebx: 0x80, ...flags, eip: startAddress, instructionCount: 7 })
   );
   const signExtendWordDestination = await executeInstruction(
     [0x66, 0x0f, 0xbe, 0xc3],
-    createCpuState({ eax: 0x1234_0000, ebx: 0x80, eflags: flags, eip: startAddress, instructionCount: 7 })
+    createCpuState({ eax: 0x1234_0000, ebx: 0x80, ...flags, eip: startAddress, instructionCount: 7 })
   );
 
   assertSingleInstructionExit(zeroExtend.exit);
   strictEqual(zeroExtend.state.eax, 0x80);
-  strictEqual(zeroExtend.state.eflags, flags);
+  deepStrictEqual(flagsOf(zeroExtend.state), flags);
   assertCompletedInstruction(zeroExtend.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(signExtend.exit);
   strictEqual(signExtend.state.ecx, 0xffff_ff80);
-  strictEqual(signExtend.state.eflags, flags);
+  deepStrictEqual(flagsOf(signExtend.state), flags);
   assertCompletedInstruction(signExtend.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(zeroExtendWordDestination.exit);
   strictEqual(zeroExtendWordDestination.state.eax, 0x1234_0080);
-  strictEqual(zeroExtendWordDestination.state.eflags, flags);
+  deepStrictEqual(flagsOf(zeroExtendWordDestination.state), flags);
   assertCompletedInstruction(zeroExtendWordDestination.state, startAddress + 4, 8);
 
   assertSingleInstructionExit(signExtendWordDestination.exit);
   strictEqual(signExtendWordDestination.state.eax, 0x1234_ff80);
-  strictEqual(signExtendWordDestination.state.eflags, flags);
+  deepStrictEqual(flagsOf(signExtendWordDestination.state), flags);
   assertCompletedInstruction(signExtendWordDestination.state, startAddress + 4, 8);
 });
 
@@ -150,7 +154,7 @@ test("executes MOVSX from a word register copy", async () => {
     eax: 0x1234_0000,
     ebx: 0x0000_8001,
     ecx: 0xcccc_cccc,
-    eflags: 0x8d5,
+    ...allFlagsSet,
     eip: startAddress,
     instructionCount: 7
   }));
@@ -163,51 +167,51 @@ test("executes MOVSX from a word register copy", async () => {
   strictEqual(state.eax, 0x1234_8001);
   strictEqual(state.ebx, 0x0000_8001);
   strictEqual(state.ecx, 0xffff_8001);
-  strictEqual(state.eflags, 0x8d5);
+  deepStrictEqual(flagsOf(state), allFlagsSet);
   assertCompletedInstruction(state, startAddress + bytes.length, 9);
 });
 
 test("executes MOVZX and MOVSX memory forms", async () => {
-  const flags = 0x8d5;
+  const flags = allFlagsSet;
   const zeroExtendByte = await executeMovWithMemory(
     [0x0f, 0xb6, 0x03],
-    createCpuState({ eax: 0xffff_ffff, ebx: 0x20, eflags: flags, eip: startAddress, instructionCount: 7 }),
+    createCpuState({ eax: 0xffff_ffff, ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
     (guest) => guest.setUint8(0x20, 0xfe)
   );
   const zeroExtend = await executeMovWithMemory(
     [0x0f, 0xb7, 0x03],
-    createCpuState({ eax: 0xffff_ffff, ebx: 0x20, eflags: flags, eip: startAddress, instructionCount: 7 }),
+    createCpuState({ eax: 0xffff_ffff, ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
     (guest) => guest.setUint16(0x20, 0x80ff, true)
   );
   const signExtendByte = await executeMovWithMemory(
     [0x0f, 0xbe, 0x03],
-    createCpuState({ ebx: 0x20, eflags: flags, eip: startAddress, instructionCount: 7 }),
+    createCpuState({ ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
     (guest) => guest.setUint8(0x20, 0x80)
   );
   const signExtend = await executeMovWithMemory(
     [0x0f, 0xbf, 0x03],
-    createCpuState({ ebx: 0x20, eflags: flags, eip: startAddress, instructionCount: 7 }),
+    createCpuState({ ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
     (guest) => guest.setUint16(0x20, 0x8001, true)
   );
 
   assertSingleInstructionExit(zeroExtendByte.exit);
   strictEqual(zeroExtendByte.state.eax, 0xfe);
-  strictEqual(zeroExtendByte.state.eflags, flags);
+  deepStrictEqual(flagsOf(zeroExtendByte.state), flags);
   assertCompletedInstruction(zeroExtendByte.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(zeroExtend.exit);
   strictEqual(zeroExtend.state.eax, 0x80ff);
-  strictEqual(zeroExtend.state.eflags, flags);
+  deepStrictEqual(flagsOf(zeroExtend.state), flags);
   assertCompletedInstruction(zeroExtend.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(signExtendByte.exit);
   strictEqual(signExtendByte.state.eax, 0xffff_ff80);
-  strictEqual(signExtendByte.state.eflags, flags);
+  deepStrictEqual(flagsOf(signExtendByte.state), flags);
   assertCompletedInstruction(signExtendByte.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(signExtend.exit);
   strictEqual(signExtend.state.eax, 0xffff_8001);
-  strictEqual(signExtend.state.eflags, flags);
+  deepStrictEqual(flagsOf(signExtend.state), flags);
   assertCompletedInstruction(signExtend.state, startAddress + 3, 8);
 });
 
@@ -217,7 +221,7 @@ test("executes CMOVcc r16 as a conditional partial register write", async () => 
     createCpuState({
       ecx: 0x3333_2222,
       edx: 0xaaaa_1111,
-      eflags: zeroFlag,
+      ZF: 1,
       eip: startAddress,
       instructionCount: 7
     })
@@ -227,7 +231,6 @@ test("executes CMOVcc r16 as a conditional partial register write", async () => 
     createCpuState({
       ecx: 0x3333_2222,
       edx: 0xaaaa_1111,
-      eflags: 0,
       eip: startAddress,
       instructionCount: 7
     })
@@ -235,12 +238,12 @@ test("executes CMOVcc r16 as a conditional partial register write", async () => 
 
   assertSingleInstructionExit(taken.exit);
   strictEqual(taken.state.edx, 0xaaaa_2222);
-  strictEqual(taken.state.eflags, zeroFlag);
+  deepStrictEqual(flagsOf(taken.state), zeroFlag);
   assertCompletedInstruction(taken.state, startAddress + 4, 8);
 
   assertSingleInstructionExit(notTaken.exit);
   strictEqual(notTaken.state.edx, 0xaaaa_1111);
-  strictEqual(notTaken.state.eflags, 0);
+  deepStrictEqual(flagsOf(notTaken.state), noFlags);
   assertCompletedInstruction(notTaken.state, startAddress + 4, 8);
 });
 
@@ -248,7 +251,7 @@ test("CMOVcc r16 memory source faults even when condition is false", async () =>
   const initial = createCpuState({
     ebx: 0x1_0000,
     edx: 0xaaaa_1111,
-    eflags: zeroFlag,
+    ZF: 1,
     eip: startAddress,
     instructionCount: 7
   });
@@ -256,7 +259,7 @@ test("CMOVcc r16 memory source faults even when condition is false", async () =>
 
   deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x1_0000, detail: 2 });
   strictEqual(state.edx, initial.edx);
-  strictEqual(state.eflags, initial.eflags);
+  deepStrictEqual(flagsOf(state), flagsOf(initial));
   strictEqual(state.eip, initial.eip);
   strictEqual(state.instructionCount, initial.instructionCount);
 });
@@ -264,73 +267,73 @@ test("CMOVcc r16 memory source faults even when condition is false", async () =>
 test("executes register-only SETcc without modifying flags", async () => {
   const taken = await executeInstruction(
     [0x0f, 0x94, 0xc0],
-    createCpuState({ eax: 0x1234_5678, eflags: zeroFlag, eip: startAddress, instructionCount: 7 })
+    createCpuState({ eax: 0x1234_5678, ZF: 1, eip: startAddress, instructionCount: 7 })
   );
   const notTaken = await executeInstruction(
     [0x0f, 0x94, 0xc0],
-    createCpuState({ eax: 0x1234_5678, eflags: 0, eip: startAddress, instructionCount: 7 })
+    createCpuState({ eax: 0x1234_5678, eip: startAddress, instructionCount: 7 })
   );
   const highByte = await executeInstruction(
     [0x0f, 0x95, 0xc4],
-    createCpuState({ eax: 0x1234_5678, eflags: 0, eip: startAddress, instructionCount: 7 })
+    createCpuState({ eax: 0x1234_5678, eip: startAddress, instructionCount: 7 })
   );
 
   assertSingleInstructionExit(taken.exit);
   strictEqual(taken.state.eax, 0x1234_5601);
-  strictEqual(taken.state.eflags, zeroFlag);
+  deepStrictEqual(flagsOf(taken.state), zeroFlag);
   assertCompletedInstruction(taken.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(notTaken.exit);
   strictEqual(notTaken.state.eax, 0x1234_5600);
-  strictEqual(notTaken.state.eflags, 0);
+  deepStrictEqual(flagsOf(notTaken.state), noFlags);
   assertCompletedInstruction(notTaken.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(highByte.exit);
   strictEqual(highByte.state.eax, 0x1234_0178);
-  strictEqual(highByte.state.eflags, 0);
+  deepStrictEqual(flagsOf(highByte.state), noFlags);
   assertCompletedInstruction(highByte.state, startAddress + 3, 8);
 });
 
 test("executes memory SETcc as a selected byte store", async () => {
   const taken = await executeInstruction(
     [0x0f, 0x94, 0x03],
-    createCpuState({ ebx: 0x20, eflags: zeroFlag, eip: startAddress, instructionCount: 7 }),
+    createCpuState({ ebx: 0x20, ZF: 1, eip: startAddress, instructionCount: 7 }),
     [{ address: 0x20, bytes: [0xaa] }]
   );
   const notTaken = await executeInstruction(
     [0x0f, 0x94, 0x03],
-    createCpuState({ ebx: 0x20, eflags: 0, eip: startAddress, instructionCount: 7 }),
+    createCpuState({ ebx: 0x20, eip: startAddress, instructionCount: 7 }),
     [{ address: 0x20, bytes: [0xaa] }]
   );
 
   assertSingleInstructionExit(taken.exit);
   strictEqual(taken.guestView.getUint8(0x20), 1);
-  strictEqual(taken.state.eflags, zeroFlag);
+  deepStrictEqual(flagsOf(taken.state), zeroFlag);
   assertCompletedInstruction(taken.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(notTaken.exit);
   strictEqual(notTaken.guestView.getUint8(0x20), 0);
-  strictEqual(notTaken.state.eflags, 0);
+  deepStrictEqual(flagsOf(notTaken.state), noFlags);
   assertCompletedInstruction(notTaken.state, startAddress + 3, 8);
 });
 
 test("executes multi-byte NOP without reading memory or modifying flags", async () => {
-  const flags = 0x8d5;
+  const flags = allFlagsSet;
   const dword = await executeInstruction(
     [0x0f, 0x1f, 0x40, 0x00],
-    createCpuState({ eax: 0x1_0000, eflags: flags, eip: startAddress, instructionCount: 7 })
+    createCpuState({ eax: 0x1_0000, ...flags, eip: startAddress, instructionCount: 7 })
   );
   const word = await executeInstruction(
     [0x66, 0x0f, 0x1f, 0x00],
-    createCpuState({ eax: 0x1_0000, eflags: flags, eip: startAddress, instructionCount: 7 })
+    createCpuState({ eax: 0x1_0000, ...flags, eip: startAddress, instructionCount: 7 })
   );
 
   assertSingleInstructionExit(dword.exit);
-  strictEqual(dword.state.eflags, flags);
+  deepStrictEqual(flagsOf(dword.state), flags);
   assertCompletedInstruction(dword.state, startAddress + 4, 8);
 
   assertSingleInstructionExit(word.exit);
-  strictEqual(word.state.eflags, flags);
+  deepStrictEqual(flagsOf(word.state), flags);
   assertCompletedInstruction(word.state, startAddress + 4, 8);
 });
 

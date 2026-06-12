@@ -17,7 +17,6 @@ import {
   writeGuestBytes
 } from "./support.js";
 
-const zeroFlag = 0x40;
 
 test("executes JMP rel8 to nextEip plus signed displacement", async () => {
   const initialState = createCpuState({
@@ -67,7 +66,6 @@ test("executes JMP rel32 to nextEip plus signed displacement", async () => {
 test("executes JNE rel8 taken when ZF is clear", async () => {
   const initialState = createCpuState({
     eip: startAddress,
-    eflags: 0,
     instructionCount: 7
   });
 
@@ -80,7 +78,7 @@ test("executes JNE rel8 taken when ZF is clear", async () => {
 test("executes JNE rel8 fallthrough when ZF is set", async () => {
   const initialState = createCpuState({
     eip: startAddress,
-    eflags: zeroFlag,
+    ZF: 1,
     instructionCount: 7
   });
 
@@ -93,7 +91,6 @@ test("executes JNE rel8 fallthrough when ZF is set", async () => {
 test("executes JNE rel32 with the same condition as rel8", async () => {
   const initialState = createCpuState({
     eip: startAddress,
-    eflags: 0,
     instructionCount: 7
   });
 
@@ -109,7 +106,7 @@ test("truncated JMP rel32 returns decode fault without changing architectural st
   const initialState = createCpuState({
     eax: 0x1234_5678,
     eip,
-    eflags: zeroFlag,
+    ZF: 1,
     instructionCount: 7
   });
   writeInterpreterState(interpreter.stateView, initialState);

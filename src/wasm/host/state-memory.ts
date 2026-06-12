@@ -1,15 +1,11 @@
 import type { StateChannel } from "#ir/action/slots.js";
-import type { FlagName } from "#ir/model/flags.js";
+import type { X86Flag } from "#x86/flags.js";
 import { type CpuState } from "#x86/state/cpu-state.js";
 import {
-  mergeWasmEflags,
-  readWasmAluFlagBytes,
   readWasmCpuState,
   readWasmFlagByte,
   readWasmStateChannel,
   readWasmStateField,
-  splitEflagsForWasm,
-  writeWasmAluFlagBytes,
   writeWasmCpuState,
   writeWasmFlagByte,
   writeWasmStateChannel,
@@ -41,11 +37,11 @@ export class WasmCpuState {
     writeWasmStateChannel(this.#view(), channel, value);
   }
 
-  readFlagByte(flag: FlagName): number {
+  readFlagByte(flag: X86Flag): number {
     return readWasmFlagByte(this.#view(), flag);
   }
 
-  writeFlagByte(flag: FlagName, value: number): void {
+  writeFlagByte(flag: X86Flag, value: number): void {
     writeWasmFlagByte(this.#view(), flag, value);
   }
 
@@ -63,17 +59,6 @@ export class WasmCpuState {
 
   set eip(value: number) {
     this.write("eip", value);
-  }
-
-  get eflags(): number {
-    return mergeWasmEflags(readWasmAluFlagBytes(this.#view()), this.read("ctrlFlags"));
-  }
-
-  set eflags(value: number) {
-    const flags = splitEflagsForWasm(value);
-
-    this.write("ctrlFlags", flags.ctrlFlags);
-    writeWasmAluFlagBytes(this.#view(), flags.aluFlags);
   }
 
   get instructionCount(): number {

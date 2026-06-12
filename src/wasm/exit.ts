@@ -1,16 +1,16 @@
 import { u32 } from "#x86/numeric.js";
 
 export const ExitReason = {
-  HOST_TRAP: 2,
-  UNSUPPORTED: 3,
-  DECODE_FAULT: 4,
-  MEMORY_READ_FAULT: 5,
-  MEMORY_WRITE_FAULT: 6,
-  INSTRUCTION_LIMIT: 7,
+  HOST_TRAP: 0,
+  UNSUPPORTED: 1,
+  DECODE_FAULT: 2,
+  MEMORY_READ_FAULT: 3,
+  MEMORY_WRITE_FAULT: 4,
+  INSTRUCTION_LIMIT: 5,
   // A runtime-computed jump target; the host resumes at the flushed eip.
-  DYNAMIC_JUMP: 8,
+  DYNAMIC_JUMP: 6,
   // An unpatched link stub; the payload is the uncompiled target eip.
-  LINK_STUB: 9
+  LINK_STUB: 7
 } as const;
 
 export type ExitReason = (typeof ExitReason)[keyof typeof ExitReason];

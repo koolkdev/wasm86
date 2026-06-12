@@ -9,13 +9,15 @@ import type { WriteStateAction } from "#ir/action/types.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { StopReason } from "#x86/execution/run-result.js";
-import { x86ArithmeticFlags } from "#x86/flags.js";
+import { x86Flags } from "#x86/flags.js";
 import { createCpuState, getFlag, type CpuState } from "#x86/state/cpu-state.js";
 import { reg32 } from "#x86/types.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
 import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import { actionBlockBody, actionBlockCompleted, instantiateActionBlock } from "./harness.js";
+
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
 // Stage 3's end-to-end slice: ALU r32 forms through the action pipeline with
 // every flag byte checked against the direct backend executing the same
@@ -24,7 +26,6 @@ import { actionBlockBody, actionBlockCompleted, instantiateActionBlock } from ".
 // never between two transcriptions of the instruction.
 
 // All six arithmetic flags set, so every clear is observable.
-const allArithmeticEflags = 0x8d5;
 
 // dst=ebx, src=ecx for every form: modrm 0xcb = mod 11, reg ecx, rm ebx.
 const aluCases: readonly Readonly<{
@@ -62,7 +63,7 @@ for (const aluCase of aluCases) {
         ebx: pair.left,
         ecx: pair.right,
         eip: instruction.address,
-        eflags: allArithmeticEflags
+        ...allFlagsSet
       };
       const refState = createCpuState(initial);
       const result = executeDirectInstruction(refState, instruction);
@@ -112,8 +113,8 @@ test("two adds in one block store each flag byte once, with the second add's fla
     (action): action is WriteStateAction => action.kind === "writeState" && action.slot.kind === "flag"
   );
 
-  strictEqual(flagWrites.length, x86ArithmeticFlags.length);
-  strictEqual(new Set(flagWrites.map((write) => write.slot)).size, x86ArithmeticFlags.length);
+  strictEqual(flagWrites.length, x86Flags.length);
+  strictEqual(new Set(flagWrites.map((write) => write.slot)).size, x86Flags.length);
 
   // ...and in the encoding: exactly six byte stores.
   const body = actionBlockBody(block).encode();
@@ -124,7 +125,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
     ebx: 0x7fff_fffe,
     ecx: 0x0000_0001,
     eip: first.address,
-    eflags: allArithmeticEflags
+    ...allFlagsSet
   };
   const refState = createCpuState(initial);
 
@@ -145,7 +146,7 @@ function assertMatchesReference(stateView: DataView, refState: CpuState, label: 
 
   strictEqual(readWasmStateChannel(stateView, eipChannel), refState.eip, `${label} eip`);
 
-  for (const flag of x86ArithmeticFlags) {
+  for (const flag of x86Flags) {
     strictEqual(readWasmFlagByte(stateView, flag), getFlag(refState, flag) ? 1 : 0, `${label} ${flag}`);
   }
 }

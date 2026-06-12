@@ -1,6 +1,6 @@
-import type { FlagName } from "#ir/model/flags.js";
+import type { X86Flag } from "#x86/flags.js";
 import { registerAlias } from "#x86/registers.js";
-import { x86ArithmeticFlags } from "#x86/flags.js";
+import { x86Flags } from "#x86/flags.js";
 import { reg16, reg32, reg8, type Reg32, type RegName } from "#x86/types.js";
 
 export type GprChannel = Readonly<{
@@ -10,7 +10,7 @@ export type GprChannel = Readonly<{
   byteLength: 1 | 2 | 4;
 }>;
 
-export type FlagChannel = Readonly<{ kind: "flag"; flag: FlagName }>;
+export type FlagChannel = Readonly<{ kind: "flag"; flag: X86Flag }>;
 export type EipChannel = Readonly<{ kind: "eip" }>;
 export type InstructionCountChannel = Readonly<{ kind: "instructionCount" }>;
 export type StateChannel = GprChannel | FlagChannel | EipChannel | InstructionCountChannel;
@@ -31,8 +31,8 @@ const gprChannels = new Map<RegName, GprChannel>(
   })
 );
 
-const flagChannels = new Map<FlagName, FlagChannel>(
-  x86ArithmeticFlags.map((flag) => [flag, { kind: "flag", flag }])
+const flagChannels = new Map<X86Flag, FlagChannel>(
+  x86Flags.map((flag) => [flag, { kind: "flag", flag }])
 );
 
 export const eipChannel: EipChannel = { kind: "eip" };
@@ -48,7 +48,7 @@ export function gprChannel(name: RegName): GprChannel {
   return channel;
 }
 
-export function flagChannel(flag: FlagName): FlagChannel {
+export function flagChannel(flag: X86Flag): FlagChannel {
   const channel = flagChannels.get(flag);
 
   if (channel === undefined) {

@@ -1,5 +1,5 @@
 import type { OperandWidth, RegName } from "#x86/types.js";
-import type { FlagName } from "./flags.js";
+import type { X86Flag } from "#x86/flags.js";
 
 export type VarId = number;
 
@@ -57,7 +57,7 @@ export type IrFlagWriteCell =
   | Readonly<{ kind: "undef" }>;
 
 export type IrFlagWrite = Readonly<{
-  cells: Partial<Record<FlagName, IrFlagWriteCell>>;
+  cells: Partial<Record<X86Flag, IrFlagWriteCell>>;
   conditions?: Partial<Record<ConditionCode, ValueRef>>;
 }>;
 
@@ -217,6 +217,6 @@ export type StorageInput = StorageRef;
 export type ValueInput = ValueRef | number;
 export type TargetInput = ValueInput;
 export type IrFlagWriteInput = Readonly<{
-  cells: Partial<Record<FlagName, IrFlagWriteCell>>;
+  cells: Partial<Record<X86Flag, IrFlagWriteCell>>;
   conditions?: Partial<Record<ConditionCode, ValueInput>>;
 }>;

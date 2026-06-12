@@ -1,9 +1,10 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ExitReason } from "#wasm/exit.js";
 import { startAddress } from "#wasm/tests/helpers.js";
-import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
+import { flagsOf,
+  createCpuState, type CpuState } from "#x86/state/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -18,12 +19,12 @@ import {
   writeGuestBytes
 } from "./support.js";
 
-const preservedEflags = 0x0020_0000;
-const allModeledEflags = 0x8d5;
-const addWraparoundEflags = 0x55;
-const subBorrowEflags = 0x95;
-const zeroResultEflags = 0x44;
-const signLogicEflags = 0x84;
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
+
+const addWraparoundFlags = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 } as const;
+const subBorrowFlags = { CF: 1, PF: 1, AF: 1, ZF: 0, SF: 1, OF: 0 } as const;
+const zeroResultFlags = { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
+const signLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 
 test("executes MOV into AL, AH, and prefixed AX register views", async () => {
   const movAl = await executeInstruction([0xb0, 0x44], createCpuState({
@@ -101,46 +102,46 @@ test("materializes representative 8/16-bit ALU flags", async () => {
   const add8 = await executeInstruction([0x04, 0x01], createCpuState({
     eax: 0xffff_ffff,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   }));
 
   assertSingleInstructionExit(add8.exit);
   strictEqual(add8.state.eax, 0xffff_ff00);
-  strictEqual(add8.state.eflags, preservedEflags | addWraparoundEflags);
+  deepStrictEqual(flagsOf(add8.state), addWraparoundFlags);
 
   const sub16 = await executeInstruction([0x66, 0x2d, 0x01, 0x00], createCpuState({
     eax: 0xffff_0000,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   }));
 
   assertSingleInstructionExit(sub16.exit);
   strictEqual(sub16.state.eax, 0xffff_ffff);
-  strictEqual(sub16.state.eflags, preservedEflags | subBorrowEflags);
+  deepStrictEqual(flagsOf(sub16.state), subBorrowFlags);
 
   const cmp8 = await executeInstruction([0x3c, 0x80], createCpuState({
     eax: 0x80,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   }));
 
   assertSingleInstructionExit(cmp8.exit);
   strictEqual(cmp8.state.eax, 0x80);
-  strictEqual(cmp8.state.eflags, preservedEflags | zeroResultEflags);
+  deepStrictEqual(flagsOf(cmp8.state), zeroResultFlags);
 
   const test16 = await executeInstruction([0x66, 0xa9, 0x00, 0x80], createCpuState({
     eax: 0x8000,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   }));
 
   assertSingleInstructionExit(test16.exit);
   strictEqual(test16.state.eax, 0x8000);
-  strictEqual(test16.state.eflags, preservedEflags | signLogicEflags);
+  deepStrictEqual(flagsOf(test16.state), signLogicFlags);
 });
 
 test("unsupported prefixed opcode streams terminate without changing architectural state", async () => {

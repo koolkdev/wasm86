@@ -9,7 +9,7 @@ import type { ActionBlock } from "#ir/action/types.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { StopReason } from "#x86/execution/run-result.js";
-import { x86ArithmeticFlags } from "#x86/flags.js";
+import { x86Flags } from "#x86/flags.js";
 import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
 import { writeGuestU32 } from "#x86/memory/tests/helpers.js";
 import { createCpuState, getFlag, type CpuState } from "#x86/state/cpu-state.js";
@@ -18,11 +18,12 @@ import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
 import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
 
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
+
 // Stage 6's end-to-end slice: jumps, conditional branches, and host traps,
 // with the direct backend executing the same decoded instructions as the
 // reference for eip, registers, and flags on every path.
 
-const allArithmeticEflags = 0x8d5;
 
 test("cmp + jcc taken continues at the target with flushed flags", async () => {
   // cmp eax, 5; je +0x20 — equal, so the branch is taken.
@@ -30,7 +31,7 @@ test("cmp + jcc taken continues at the target with flushed flags", async () => {
     [0x83, 0xf8, 0x05],
     [0x74, 0x20]
   ]);
-  const initial: Partial<CpuState> = { eax: 5, eip: instructions[0]!.address, eflags: 0 };
+  const initial: Partial<CpuState> = { eax: 5, eip: instructions[0]!.address };
   const { refState, memory } = directReference(initial);
   const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
 
@@ -54,7 +55,7 @@ test("cmp + jcc not taken continues at the fall-through with flushed flags", asy
   const initial: Partial<CpuState> = {
     eax: 6,
     eip: instructions[0]!.address,
-    eflags: allArithmeticEflags
+    ...allFlagsSet
   };
   const { refState, memory } = directReference(initial);
   const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
@@ -76,7 +77,7 @@ test("jmp rel32 continues at the target with earlier pendings flushed", async ()
     [0xb9, 0x77, 0x00, 0x00, 0x00],
     [0xe9, 0x10, 0x00, 0x00, 0x00]
   ]);
-  const initial: Partial<CpuState> = { eip: instructions[0]!.address, eflags: allArithmeticEflags };
+  const initial: Partial<CpuState> = { eip: instructions[0]!.address, ...allFlagsSet };
   const { refState, memory } = directReference(initial);
   const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
 
@@ -98,7 +99,7 @@ test("int exits host trap with the vector payload and pending state visible", as
     [0xb9, 0x77, 0x00, 0x00, 0x00],
     [0xcd, 0x21]
   ]);
-  const initial: Partial<CpuState> = { eip: instructions[0]!.address, eflags: allArithmeticEflags };
+  const initial: Partial<CpuState> = { eip: instructions[0]!.address, ...allFlagsSet };
   const { refState, memory } = directReference(initial);
   const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
 
@@ -127,8 +128,7 @@ test("a branch composes with a fault edge in one block", async () => {
     [0x8b, 0x0b],
     [0x74, 0x20]
   ]);
-  const zfOnly = 0x40;
-  const initial: Partial<CpuState> = { ebx: 0x20, eip: instructions[0]!.address, eflags: zfOnly };
+  const initial: Partial<CpuState> = { ebx: 0x20, eip: instructions[0]!.address, ZF: 1 };
   const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf(instructions));
 
@@ -156,7 +156,7 @@ test("a faulting load before a branch exits through its fault edge", async () =>
   const initial: Partial<CpuState> = {
     ebx: 0x10000,
     eip: instructions[0]!.address,
-    eflags: allArithmeticEflags
+    ...allFlagsSet
   };
   const { refState, memory } = directReference(initial);
   const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
@@ -249,7 +249,7 @@ function assertMatchesReference(stateView: DataView, refState: CpuState, label: 
 
   strictEqual(readWasmStateChannel(stateView, eipChannel), refState.eip, `${label} eip`);
 
-  for (const flag of x86ArithmeticFlags) {
+  for (const flag of x86Flags) {
     strictEqual(readWasmFlagByte(stateView, flag), getFlag(refState, flag) ? 1 : 0, `${label} ${flag}`);
   }
 }

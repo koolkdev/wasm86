@@ -2,26 +2,29 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { flagChannel, gprChannel } from "#ir/action/slots.js";
-import { x86ArithmeticFlags } from "#x86/flags.js";
+import { x86Flags } from "#x86/flags.js";
+import { flagsOf } from "#x86/state/cpu-state.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 
-test("host view splits eflags into flag bytes and ctrl word and merges them back", () => {
-  const { state } = createWasmHostMemories();
-  const eflags = 0xffff_08d5;
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
+const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 
-  state.load({ eflags });
+test("host view stores flag fields as flag bytes and reads them back", () => {
+  const { state } = createWasmHostMemories();
+
+  state.load({ ...allFlagsSet });
 
   deepStrictEqual(
-    x86ArithmeticFlags.map((flag) => [flag, state.readFlagByte(flag)]),
+    x86Flags.map((flag) => [flag, state.readFlagByte(flag)]),
     [["CF", 1], ["PF", 1], ["AF", 1], ["ZF", 1], ["SF", 1], ["OF", 1]]
   );
-  strictEqual(state.snapshot().eflags, eflags);
+  deepStrictEqual(flagsOf(state.snapshot()), allFlagsSet);
 
-  state.load({ eflags: 0x0000_0202 });
+  state.load({});
 
-  strictEqual(state.snapshot().eflags, 0x0000_0202);
+  deepStrictEqual(flagsOf(state.snapshot()), noFlags);
   deepStrictEqual(
-    x86ArithmeticFlags.map((flag) => state.readFlagByte(flag)),
+    x86Flags.map((flag) => state.readFlagByte(flag)),
     [0, 0, 0, 0, 0, 0]
   );
 });
@@ -29,28 +32,17 @@ test("host view splits eflags into flag bytes and ctrl word and merges them back
 test("flag byte writes are visible to snapshots", () => {
   const { state } = createWasmHostMemories();
 
-  state.load({ eflags: 0x0000_0002 });
   state.writeFlagByte("CF", 1);
   state.writeFlagByte("ZF", 0xff);
 
   strictEqual(state.readFlagByte("CF"), 1);
   strictEqual(state.readFlagByte("ZF"), 1);
-  strictEqual(state.snapshot().eflags, 0x0000_0043);
+  deepStrictEqual(flagsOf(state.snapshot()), { ...noFlags, CF: 1, ZF: 1 });
 
   state.writeChannel(flagChannel("CF"), 0);
 
   strictEqual(state.readChannel(flagChannel("CF")), 0);
-  strictEqual(state.snapshot().eflags, 0x0000_0042);
-});
-
-test("eflags setter writes the flag bytes and the ctrl word", () => {
-  const { state } = createWasmHostMemories();
-
-  state.eflags = 0x0000_00c7;
-
-  strictEqual(state.snapshot().eflags, 0x0000_00c7);
-  strictEqual(state.readFlagByte("CF"), 1);
-  strictEqual(state.readFlagByte("AF"), 0);
+  deepStrictEqual(flagsOf(state.snapshot()), { ...noFlags, ZF: 1 });
 });
 
 test("gpr channels read and write at every width against the state word", () => {

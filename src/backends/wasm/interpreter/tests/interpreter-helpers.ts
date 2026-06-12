@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert";
 
 import { type CpuState } from "#x86/state/cpu-state.js";
-import { x86ArithmeticFlags } from "#x86/flags.js";
+import { x86Flags } from "#x86/flags.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
 import {
@@ -73,7 +73,7 @@ export function assertInterpreterStateEquals(view: DataView, state: CpuState): v
     strictEqual(readWasmStateField(view, field), readWasmStateField(expectedView, field));
   }
 
-  for (const flag of x86ArithmeticFlags) {
+  for (const flag of x86Flags) {
     strictEqual(readWasmFlagByte(view, flag), readWasmFlagByte(expectedView, flag));
   }
 }

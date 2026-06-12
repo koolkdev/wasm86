@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
-import { x86ArithmeticFlags } from "#x86/flags.js";
+import { x86Flags } from "#x86/flags.js";
 import { reg16, reg32, reg8 } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import {
@@ -16,18 +16,18 @@ import {
 
 test("flag byte offsets are stable and disjoint from existing fields", () => {
   deepStrictEqual(WASM_FLAG_BYTE_OFFSETS, {
-    CF: 48,
-    PF: 49,
-    AF: 50,
-    ZF: 51,
-    SF: 52,
-    OF: 53
+    CF: 44,
+    PF: 45,
+    AF: 46,
+    ZF: 47,
+    SF: 48,
+    OF: 49
   });
-  strictEqual(WASM_STATE_BYTE_LENGTH, 54);
+  strictEqual(WASM_STATE_BYTE_LENGTH, 50);
 
   const existingFieldsEnd = Math.max(...WASM_STATE_FIELDS.map((field) => WASM_STATE_OFFSETS[field] + 4));
 
-  for (const flag of x86ArithmeticFlags) {
+  for (const flag of x86Flags) {
     strictEqual(flagStateOffset(flag), WASM_FLAG_BYTE_OFFSETS[flag]);
     strictEqual(flagStateOffset(flag) >= existingFieldsEnd, true);
     strictEqual(flagStateOffset(flag) + 1 <= WASM_STATE_BYTE_LENGTH, true);
@@ -43,7 +43,7 @@ test("channel offsets derive from the register word offset plus the byte offset"
 
   strictEqual(channelStateOffset(eipChannel), WASM_STATE_OFFSETS.eip);
 
-  for (const flag of x86ArithmeticFlags) {
+  for (const flag of x86Flags) {
     strictEqual(channelStateOffset(flagChannel(flag)), WASM_FLAG_BYTE_OFFSETS[flag]);
   }
 });

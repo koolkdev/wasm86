@@ -9,7 +9,7 @@ import type { ActionBlock } from "#ir/action/types.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { StopReason, type RunResult } from "#x86/execution/run-result.js";
-import { x86ArithmeticFlags } from "#x86/flags.js";
+import { x86Flags } from "#x86/flags.js";
 import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
 import { writeGuestU32 } from "#x86/memory/tests/helpers.js";
 import { createCpuState, getFlag, type CpuState } from "#x86/state/cpu-state.js";
@@ -17,6 +17,8 @@ import { reg32, type EffectiveAddress, type MemOperand, type RegName } from "#x8
 import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
 import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
+
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
 // Stage 5's end-to-end slice: memory operands through guards, guest access,
 // and fault edges, with the direct backend executing the same decoded
@@ -28,11 +30,10 @@ import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
 // where faults start.
 const guestByteLength = 0x10000;
 
-const allArithmeticEflags = 0x8d5;
 
 test("mov r32, [ebx+disp] loads the guest cell", async () => {
   const instruction = ok(decodeBytes([0x8b, 0x43, 0x04]));
-  const initial: Partial<CpuState> = { ebx: 0x20, eip: instruction.address, eflags: allArithmeticEflags };
+  const initial: Partial<CpuState> = { ebx: 0x20, eip: instruction.address, ...allFlagsSet };
   const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
 
@@ -52,7 +53,7 @@ test("mov [ebx+disp], r32 stores the guest cell", async () => {
     eax: 0xcafe_1234,
     ebx: 0x20,
     eip: instruction.address,
-    eflags: allArithmeticEflags
+    ...allFlagsSet
   };
   const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
@@ -73,7 +74,6 @@ test("add [mem], r32 read-modify-writes the cell with reference flags", async ()
     eax: 0x20,
     ebx: 0xffff_ffff,
     eip: instruction.address,
-    eflags: 0
   };
   const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
@@ -95,7 +95,6 @@ test("add r32, [mem] loads the operand with reference flags", async () => {
     eax: 0x20,
     ebx: 0x7fff_ffff,
     eip: instruction.address,
-    eflags: 0
   };
   const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
@@ -120,7 +119,7 @@ test("byte and word guest accesses load and store at their widths", async () => 
     [0xc6, 0x43, 0x01, 0x7f],
     [0x66, 0xc7, 0x43, 0x02, 0xef, 0xbe]
   ]);
-  const initial: Partial<CpuState> = { ebx: 0x20, eip: instructions[0]!.address, eflags: allArithmeticEflags };
+  const initial: Partial<CpuState> = { ebx: 0x20, eip: instructions[0]!.address, ...allFlagsSet };
   const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf(instructions));
 
@@ -150,7 +149,7 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
     eax: 0x1234_5678,
     ebx: guestByteLength,
     eip: instructions[0]!.address,
-    eflags: allArithmeticEflags
+    ...allFlagsSet
   };
   const { refState, memory } = directReference(initial);
   const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
@@ -176,7 +175,7 @@ test("a write fault leaves guest memory untouched", async () => {
     eax: 0xdead_beef,
     ebx: guestByteLength - 2,
     eip: instruction.address,
-    eflags: allArithmeticEflags
+    ...allFlagsSet
   };
   const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
@@ -197,7 +196,7 @@ test("a narrow access faults with its byte length", async () => {
   const initial: Partial<CpuState> = {
     ebx: guestByteLength,
     eip: instruction.address,
-    eflags: allArithmeticEflags
+    ...allFlagsSet
   };
   const { refState, memory } = directReference(initial);
   const { stateView, run } = await instantiateActionBlock(blockOf([instruction]));
@@ -224,7 +223,7 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
     ebx: guestByteLength - 2,
     esp: 0x1c,
     eip: instructions[0]!.address,
-    eflags: allArithmeticEflags
+    ...allFlagsSet
   };
   const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf(instructions));
@@ -334,7 +333,7 @@ function assertMatchesReference(stateView: DataView, refState: CpuState, label: 
 
   strictEqual(readWasmStateChannel(stateView, eipChannel), refState.eip, `${label} eip`);
 
-  for (const flag of x86ArithmeticFlags) {
+  for (const flag of x86Flags) {
     strictEqual(readWasmFlagByte(stateView, flag), getFlag(refState, flag) ? 1 : 0, `${label} ${flag}`);
   }
 }

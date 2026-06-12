@@ -1,7 +1,8 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState } from "#x86/state/cpu-state.js";
+import { flagsOf,
+  createCpuState } from "#x86/state/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   writeInterpreterState
@@ -16,20 +17,20 @@ import {
   writeGuestBytes
 } from "./support.js";
 
-const preservedEflags = 0x0020_0000;
-const allModeledEflags = 0x8d5;
-const addWraparoundEflags = 0x55;
-const subBorrowEflags = 0x95;
-const zeroResultEflags = 0x44;
-const carryAuxEflags = 0x11;
-const parityOnlyEflags = 0x04;
-const signParityEflags = 0x84;
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
+
+const addWraparoundFlags = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 } as const;
+const subBorrowFlags = { CF: 1, PF: 1, AF: 1, ZF: 0, SF: 1, OF: 0 } as const;
+const zeroResultFlags = { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
+const carryAuxFlags = { CF: 1, PF: 0, AF: 1, ZF: 0, SF: 0, OF: 0 } as const;
+const parityOnlyFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
+const signParityFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 
 test("executes ADD EAX, imm32", async () => {
   const initialState = createCpuState({
     eax: 0xffff_ffff,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -38,14 +39,14 @@ test("executes ADD EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  strictEqual(state.eflags, preservedEflags | addWraparoundEflags);
+  deepStrictEqual(flagsOf(state), addWraparoundFlags);
 });
 
 test("executes SUB EAX, imm32", async () => {
   const initialState = createCpuState({
     eax: 0,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -54,7 +55,7 @@ test("executes SUB EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_ffff);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  strictEqual(state.eflags, preservedEflags | subBorrowEflags);
+  deepStrictEqual(flagsOf(state), subBorrowFlags);
 });
 
 test("executes ADD AX, imm16 with 16-bit wraparound", async () => {
@@ -131,7 +132,7 @@ test("executes XOR EAX, imm32", async () => {
   const initialState = createCpuState({
     eax: 0xffff_ffff,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -140,14 +141,14 @@ test("executes XOR EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  strictEqual(state.eflags, preservedEflags | zeroResultEflags);
+  deepStrictEqual(flagsOf(state), zeroResultFlags);
 });
 
 test("executes OR EAX, imm32", async () => {
   const initialState = createCpuState({
     eax: 0x8000_0000,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -156,14 +157,14 @@ test("executes OR EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x8000_0100);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  strictEqual(state.eflags, preservedEflags | signParityEflags);
+  deepStrictEqual(flagsOf(state), signParityFlags);
 });
 
 test("executes AND EAX, imm32", async () => {
   const initialState = createCpuState({
     eax: 0xffff_ffff,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -172,14 +173,14 @@ test("executes AND EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  strictEqual(state.eflags, preservedEflags | zeroResultEflags);
+  deepStrictEqual(flagsOf(state), zeroResultFlags);
 });
 
 test("executes CMP EAX, imm32 without writing EAX", async () => {
   const initialState = createCpuState({
     eax: 5,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -188,14 +189,14 @@ test("executes CMP EAX, imm32 without writing EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  strictEqual(state.eflags, preservedEflags | zeroResultEflags);
+  deepStrictEqual(flagsOf(state), zeroResultFlags);
 });
 
 test("executes TEST EAX, imm32 without writing EAX", async () => {
   const initialState = createCpuState({
     eax: 0xff,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -204,14 +205,14 @@ test("executes TEST EAX, imm32 without writing EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  strictEqual(state.eflags, preservedEflags | parityOnlyEflags);
+  deepStrictEqual(flagsOf(state), parityOnlyFlags);
 });
 
 test("executes 81 /7 CMP r/m32, imm32 for register operands", async () => {
   const initialState = createCpuState({
     eax: 0,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -220,14 +221,14 @@ test("executes 81 /7 CMP r/m32, imm32 for register operands", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 6, 8);
-  strictEqual(state.eflags, preservedEflags | zeroResultEflags);
+  deepStrictEqual(flagsOf(state), zeroResultFlags);
 });
 
 test("executes 83 /5 SUB r/m32, sign-extended imm8 for register operands", async () => {
   const initialState = createCpuState({
     eax: 1,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -236,14 +237,14 @@ test("executes 83 /5 SUB r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 2);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  strictEqual(state.eflags, preservedEflags | carryAuxEflags);
+  deepStrictEqual(flagsOf(state), carryAuxFlags);
 });
 
 test("executes 83 /6 XOR r/m32, sign-extended imm8 for register operands", async () => {
   const initialState = createCpuState({
     eax: 0,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -252,14 +253,14 @@ test("executes 83 /6 XOR r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_ffff);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  strictEqual(state.eflags, preservedEflags | signParityEflags);
+  deepStrictEqual(flagsOf(state), signParityFlags);
 });
 
 test("executes 83 /4 AND r/m32, sign-extended imm8 for register operands", async () => {
   const initialState = createCpuState({
     eax: 0xffff_ffff,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -268,7 +269,7 @@ test("executes 83 /4 AND r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  strictEqual(state.eflags, preservedEflags | zeroResultEflags);
+  deepStrictEqual(flagsOf(state), zeroResultFlags);
 });
 
 test("unsupported 81 /2 group returns unsupported before immediate decode", async () => {
@@ -277,7 +278,7 @@ test("unsupported 81 /2 group returns unsupported before immediate decode", asyn
   const initialState = createCpuState({
     eax: 0x1234_5678,
     eip,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
   writeInterpreterState(interpreter.stateView, initialState);

@@ -1,7 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
+import { flagsOf,
+  createCpuState, type CpuState } from "#x86/state/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -16,6 +17,8 @@ import {
   instantiateWasmInterpreter,
   writeGuestBytes
 } from "./support.js";
+
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
 type MemoryRunResult = Readonly<{
   interpreter: InterpreterModuleInstance;
@@ -116,7 +119,7 @@ test("executes LEA r16 without reading memory or modifying flags", async () => {
     eax: 0x1234_0000,
     ebx: 0x100,
     esi: 3,
-    eflags: 0x8d5,
+    ...allFlagsSet,
     eip: startAddress,
     instructionCount: 7
   });
@@ -125,7 +128,7 @@ test("executes LEA r16 without reading memory or modifying flags", async () => {
 
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x1234_0114);
-  strictEqual(state.eflags, initialState.eflags);
+  deepStrictEqual(flagsOf(state), flagsOf(initialState));
   strictEqual(state.ebx, initialState.ebx);
   strictEqual(state.esi, initialState.esi);
   assertCompletedInstruction(state, startAddress + 5, 8);

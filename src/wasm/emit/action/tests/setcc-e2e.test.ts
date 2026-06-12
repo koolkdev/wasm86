@@ -5,9 +5,9 @@ import { createActionBuilder } from "#ir/action/builder.js";
 import { immBinding, regBinding } from "#ir/action/operands.js";
 import { gprChannel } from "#ir/action/slots.js";
 import { CONDITIONS, type FlagBoolExpr } from "#ir/model/conditions.js";
-import type { FlagName } from "#ir/model/flags.js";
+import type { X86Flag } from "#x86/flags.js";
 import type { ConditionCode } from "#ir/model/types.js";
-import { x86EflagsMask } from "#x86/flags.js";
+
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 import { readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
@@ -82,7 +82,7 @@ for (const [cc, predicate] of comparePredicates) {
   });
 }
 
-function evaluateCondition(expr: FlagBoolExpr, flags: ReadonlySet<FlagName>): boolean {
+function evaluateCondition(expr: FlagBoolExpr, flags: ReadonlySet<X86Flag>): boolean {
   switch (expr.kind) {
     case "flag":
       return flags.has(expr.flag);
@@ -111,10 +111,10 @@ for (const cc of Object.keys(CONDITIONS) as ConditionCode[]) {
 
     for (let combo = 0; combo < 1 << condition.reads.length; combo += 1) {
       const flags = new Set(condition.reads.filter((_, index) => (combo >> index) & 1));
-      const eflags = [...flags].reduce((bits, flag) => bits | x86EflagsMask[flag], 0);
+      const flagFields = Object.fromEntries([...flags].map((flag) => [flag, 1]));
       const label = `set${cc.toLowerCase()} with ${[...flags].join("+") || "no flags"}`;
 
-      writeWasmCpuState(stateView, { eax: 0x55aa55aa, eflags });
+      writeWasmCpuState(stateView, { eax: 0x55aa55aa, ...flagFields });
       strictEqual(run(), actionBlockCompleted, label);
 
       const expected = 0x55aa5500 + (evaluateCondition(condition.expr, flags) ? 1 : 0);

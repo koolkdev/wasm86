@@ -1,19 +1,19 @@
 import type { ConditionCode } from "./types.js";
-import type { FlagName } from "./flags.js";
+import type { X86Flag } from "#x86/flags.js";
 
 export type FlagBoolExpr =
-  | Readonly<{ kind: "flag"; flag: FlagName }>
+  | Readonly<{ kind: "flag"; flag: X86Flag }>
   | Readonly<{ kind: "not"; value: FlagBoolExpr }>
   | Readonly<{ kind: "and"; a: FlagBoolExpr; b: FlagBoolExpr }>
   | Readonly<{ kind: "or"; a: FlagBoolExpr; b: FlagBoolExpr }>
   | Readonly<{ kind: "xor"; a: FlagBoolExpr; b: FlagBoolExpr }>;
 
 export type ConditionSemantics = Readonly<{
-  reads: readonly FlagName[];
+  reads: readonly X86Flag[];
   expr: FlagBoolExpr;
 }>;
 
-export const f = (flag: FlagName): FlagBoolExpr => ({ kind: "flag", flag });
+export const f = (flag: X86Flag): FlagBoolExpr => ({ kind: "flag", flag });
 export const not = (value: FlagBoolExpr): FlagBoolExpr => ({ kind: "not", value });
 export const band = (a: FlagBoolExpr, b: FlagBoolExpr): FlagBoolExpr => ({ kind: "and", a, b });
 export const bor = (a: FlagBoolExpr, b: FlagBoolExpr): FlagBoolExpr => ({ kind: "or", a, b });

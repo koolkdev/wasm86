@@ -9,7 +9,7 @@ import {
   gprChannel,
   type StateChannel
 } from "#ir/action/slots.js";
-import { x86ArithmeticFlags } from "#x86/flags.js";
+import { x86Flags } from "#x86/flags.js";
 import { reg16, reg32, reg8 } from "#x86/types.js";
 
 test("gpr channels describe byte ranges within their register", () => {
@@ -28,7 +28,7 @@ test("gpr channels describe byte ranges within their register", () => {
 });
 
 test("flag and eip channels are atomic units", () => {
-  for (const flag of x86ArithmeticFlags) {
+  for (const flag of x86Flags) {
     deepStrictEqual(flagChannel(flag), { kind: "flag", flag });
     strictEqual(flagChannel(flag), flagChannel(flag));
   }

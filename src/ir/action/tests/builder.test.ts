@@ -23,9 +23,9 @@ import type {
   WriteStateAction
 } from "#ir/action/types.js";
 import type { ValueId, ValueNode } from "#ir/action/values.js";
-import type { FlagName } from "#ir/model/flags.js";
+import type { X86Flag } from "#x86/flags.js";
 import type { SemanticTemplate } from "#ir/model/types.js";
-import { x86ArithmeticFlags } from "#x86/flags.js";
+import { x86Flags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { jccSemantic, jmpSemantic } from "#x86/semantics/control.js";
@@ -86,11 +86,11 @@ function nodeKinds(block: ActionBlock): ValueNode["kind"][] {
   return kinds;
 }
 
-function writtenFlags(block: ActionBlock): FlagName[] {
+function writtenFlags(block: ActionBlock): X86Flag[] {
   return stateWrites(block).flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : []));
 }
 
-function flagWriteValue(block: ActionBlock, flag: FlagName): ValueId {
+function flagWriteValue(block: ActionBlock, flag: X86Flag): ValueId {
   const writes = stateWrites(block).filter((write) => write.slot === flagChannel(flag));
 
   strictEqual(writes.length, 1, `expected exactly one ${flag} write`);
@@ -196,7 +196,7 @@ test("add eax, imm32 writes all six arithmetic flags as pending expressions", ()
 
   const block = builder.finish();
 
-  deepStrictEqual([...writtenFlags(block)].sort(), [...x86ArithmeticFlags].sort());
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86Flags].sort());
 
   // Spot-check through re-interning: ZF compares the sum against zero, and
   // the register write shares the same sum node.
@@ -255,7 +255,7 @@ test("cmp writes flags but no register", () => {
   const block = builder.finish();
   const writes = stateWrites(block);
 
-  deepStrictEqual([...writtenFlags(block)].sort(), [...x86ArithmeticFlags].sort());
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86Flags].sort());
   strictEqual(writes.some((write) => write.slot.kind === "gpr"), false);
   strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
 });
@@ -470,7 +470,7 @@ test("ax and al pendings mix without touching flag pendings", () => {
   ok(alFlush !== -1 && ahFlush !== -1 && axRead !== -1, "expected al/ah flushes and an ax read");
   ok(alFlush < axRead && ahFlush < axRead, "the ax read must flush al and ah first");
   ok(axRead < firstFlagWrite, "flag writes stay at the end of the block");
-  deepStrictEqual([...writtenFlags(block)].sort(), [...x86ArithmeticFlags].sort());
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86Flags].sort());
 
   // The flushed al carries the add's projected result.
   const v = block.values;
@@ -727,7 +727,7 @@ test("jcc after cmp branches on the recorded condition with per-edge eip and fla
     strictEqual(flushes.length, 7);
     deepStrictEqual(
       flushes.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
-      [...x86ArithmeticFlags].sort()
+      [...x86Flags].sort()
     );
   }
 
@@ -1064,7 +1064,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
   strictEqual(flushes.length, 8);
   deepStrictEqual(
     flushes.flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : [])).sort(),
-    [...x86ArithmeticFlags].sort()
+    [...x86Flags].sort()
   );
   strictEqual(flushes.find((write) => write.slot === gprChannel("eax"))?.value, sum);
   strictEqual(flushes.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1003));
@@ -1491,7 +1491,7 @@ test("add r/m32, r32 with both operands dynamic reads, then writes, in one block
   });
 
   // Flags compute from the dynamic reads exactly as from static ones.
-  deepStrictEqual([...writtenFlags(block)].sort(), [...x86ArithmeticFlags].sort());
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86Flags].sort());
   strictEqual(flagWriteValue(block, "ZF"), v.internCompare("eq", sum, v.internConst(0)));
 });
 
@@ -1543,7 +1543,7 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
   ok(dynamicWrite < firstFlagWrite, "flag pendings ride through and flush at the end");
   strictEqual(stateWrites(block).filter((write) => write.slot === gprChannel("eax")).length, 1);
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, sum);
-  deepStrictEqual([...writtenFlags(block)].sort(), [...x86ArithmeticFlags].sort());
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86Flags].sort());
 
   const eipWrites = stateWrites(block).filter((write) => write.slot === eipChannel);
 

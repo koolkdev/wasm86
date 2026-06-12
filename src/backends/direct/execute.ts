@@ -15,7 +15,7 @@ import { u32 } from "#x86/numeric.js";
 import { registerAlias } from "#x86/registers.js";
 import { buildIr } from "#ir/build/builder.js";
 import { CONDITIONS, type FlagBoolExpr } from "#ir/model/conditions.js";
-import type { FlagName } from "#ir/model/flags.js";
+import type { X86Flag } from "#x86/flags.js";
 import type {
   IrBinaryOperator,
   IrCompareOperator,
@@ -420,7 +420,7 @@ function writeFlags(
   context: ExecutionContext,
   descriptor: IrFlagWriteOp
 ): void {
-  for (const [flag, cell] of Object.entries(descriptor.cells) as [FlagName, IrFlagWriteOp["cells"][FlagName]][]) {
+  for (const [flag, cell] of Object.entries(descriptor.cells) as [X86Flag, IrFlagWriteOp["cells"][X86Flag]][]) {
     if (cell === undefined) {
       continue;
     }

@@ -11,7 +11,7 @@ test("executes register control flow loop", () => {
     0x83, 0xe8, 0x01, // sub eax, 1
     0x75, 0xfb // jnz -5
   ]);
-  const state = createCpuState({ eip: startAddress, eflags: 0xffff_0000 });
+  const state = createCpuState({ eip: startAddress });
 
   const result = runIsaBytes(state, program, { baseAddress: startAddress });
 
@@ -30,7 +30,7 @@ test("executes register control flow loop", () => {
 });
 
 test("executes spec-only immediate logical forms", () => {
-  const state = createCpuState({ eip: startAddress, eflags: 0xffff_0000 });
+  const state = createCpuState({ eip: startAddress });
   const program = bytes([
     0xb8, 0xff, 0xff, 0xff, 0xff, // mov eax, 0xffffffff
     0x35, 0xff, 0xff, 0xff, 0xff, // xor eax, 0xffffffff

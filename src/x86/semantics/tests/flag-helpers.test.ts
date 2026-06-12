@@ -5,8 +5,8 @@ import {
 import { test } from "node:test";
 
 import { buildIr } from "#ir/build/builder.js";
-import { IR_ALU_FLAGS } from "#ir/model/flag-effects.js";
-import type { FlagName } from "#ir/model/flags.js";
+import { x86Flags } from "#x86/flags.js";
+import type { X86Flag } from "#x86/flags.js";
 import { irOpDst } from "#ir/model/op-semantics.js";
 import type {
   IrBinaryOperator,
@@ -300,7 +300,7 @@ function flagWrite(block: IrBlock): IrFlagWriteOp {
   return op;
 }
 
-function exprCell(write: IrFlagWriteOp, flag: FlagName): ValueRef {
+function exprCell(write: IrFlagWriteOp, flag: X86Flag): ValueRef {
   const cell = write.cells[flag];
 
   if (cell?.kind !== "expr") {
@@ -486,5 +486,5 @@ function sortedKeys(record: object | undefined): string[] {
 }
 
 function sortedFlags(): string[] {
-  return [...IR_ALU_FLAGS].sort();
+  return [...x86Flags].sort();
 }

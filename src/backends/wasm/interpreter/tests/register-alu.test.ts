@@ -1,23 +1,24 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState } from "#x86/state/cpu-state.js";
+import { flagsOf,
+  createCpuState } from "#x86/state/cpu-state.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
-const preservedEflags = 0x0020_0000;
-const allModeledEflags = 0x8d5;
-const addWraparoundEflags = 0x55;
-const subBorrowEflags = 0x95;
-const zeroLogicEflags = 0x44;
-const signLogicEflags = 0x84;
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
+
+const addWraparoundFlags = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 } as const;
+const subBorrowFlags = { CF: 1, PF: 1, AF: 1, ZF: 0, SF: 1, OF: 0 } as const;
+const zeroLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
+const signLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 
 test("executes ADD r32, r/m32 and materializes add flags", async () => {
   const initialState = createCpuState({
     eax: 0xffff_ffff,
     ebx: 1,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -27,7 +28,7 @@ test("executes ADD r32, r/m32 and materializes add flags", async () => {
   strictEqual(state.eax, 0);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  strictEqual(state.eflags, preservedEflags | addWraparoundEflags);
+  deepStrictEqual(flagsOf(state), addWraparoundFlags);
 });
 
 test("executes SUB r/m32, r32 and materializes sub flags", async () => {
@@ -35,7 +36,7 @@ test("executes SUB r/m32, r32 and materializes sub flags", async () => {
     eax: 0,
     ebx: 1,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -45,14 +46,14 @@ test("executes SUB r/m32, r32 and materializes sub flags", async () => {
   strictEqual(state.eax, 0xffff_ffff);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  strictEqual(state.eflags, preservedEflags | subBorrowEflags);
+  deepStrictEqual(flagsOf(state), subBorrowFlags);
 });
 
 test("executes XOR r/m32, r32 and materializes logic flags", async () => {
   const initialState = createCpuState({
     eax: 0x1234_5678,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -61,7 +62,7 @@ test("executes XOR r/m32, r32 and materializes logic flags", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  strictEqual(state.eflags, preservedEflags | zeroLogicEflags);
+  deepStrictEqual(flagsOf(state), zeroLogicFlags);
 });
 
 test("executes OR r32, r/m32 and materializes logic flags", async () => {
@@ -69,7 +70,7 @@ test("executes OR r32, r/m32 and materializes logic flags", async () => {
     eax: 0x8000_0000,
     ebx: 0x100,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -79,7 +80,7 @@ test("executes OR r32, r/m32 and materializes logic flags", async () => {
   strictEqual(state.eax, 0x8000_0100);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  strictEqual(state.eflags, preservedEflags | signLogicEflags);
+  deepStrictEqual(flagsOf(state), signLogicFlags);
 });
 
 test("executes AND r/m32, r32 and materializes logic flags", async () => {
@@ -87,7 +88,7 @@ test("executes AND r/m32, r32 and materializes logic flags", async () => {
     eax: 0xffff_ffff,
     ebx: 0,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -97,7 +98,7 @@ test("executes AND r/m32, r32 and materializes logic flags", async () => {
   strictEqual(state.eax, 0);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  strictEqual(state.eflags, preservedEflags | zeroLogicEflags);
+  deepStrictEqual(flagsOf(state), zeroLogicFlags);
 });
 
 test("executes CMP r/m32, r32 without writing operands", async () => {
@@ -105,7 +106,7 @@ test("executes CMP r/m32, r32 without writing operands", async () => {
     eax: 5,
     ebx: 5,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -115,7 +116,7 @@ test("executes CMP r/m32, r32 without writing operands", async () => {
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  strictEqual(state.eflags, preservedEflags | zeroLogicEflags);
+  deepStrictEqual(flagsOf(state), zeroLogicFlags);
 });
 
 test("executes TEST r/m32, r32 without writing operands", async () => {
@@ -123,7 +124,7 @@ test("executes TEST r/m32, r32 without writing operands", async () => {
     eax: 0x8000_0000,
     ebx: 0xffff_ffff,
     eip: startAddress,
-    eflags: preservedEflags | allModeledEflags,
+    ...allFlagsSet,
     instructionCount: 7
   });
 
@@ -133,5 +134,5 @@ test("executes TEST r/m32, r32 without writing operands", async () => {
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  strictEqual(state.eflags, preservedEflags | signLogicEflags);
+  deepStrictEqual(flagsOf(state), signLogicFlags);
 });

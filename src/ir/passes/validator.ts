@@ -1,6 +1,6 @@
 import { CONDITIONS } from "#ir/model/conditions.js";
-import { IR_ALU_FLAGS } from "#ir/model/flag-effects.js";
-import { type FlagName } from "#ir/model/flags.js";
+import { x86Flags } from "#x86/flags.js";
+import { type X86Flag } from "#x86/flags.js";
 import { irOpDst, irOpIsTerminator } from "#ir/model/op-semantics.js";
 import type { OperandWidth } from "#x86/types.js";
 import type {
@@ -220,7 +220,7 @@ function validateFlagWriteCells(
 }
 
 function validateFlagWriteCell(
-  flag: FlagName,
+  flag: X86Flag,
   cell: IrFlagWriteCell,
   definedVars: ReadonlySet<number>
 ): void {
@@ -239,8 +239,8 @@ function validateFlagWriteCell(
   throw new Error(`flags.write ${flag} cell has unknown kind '${String((cell as { kind?: unknown }).kind)}'`);
 }
 
-function validateFlagName(flag: string, label: "flags.write"): asserts flag is FlagName {
-  if (!(IR_ALU_FLAGS as readonly string[]).includes(flag)) {
+function validateFlagName(flag: string, label: "flags.write"): asserts flag is X86Flag {
+  if (!(x86Flags as readonly string[]).includes(flag)) {
     throw new Error(`${label} has unknown flag '${flag}'`);
   }
 }

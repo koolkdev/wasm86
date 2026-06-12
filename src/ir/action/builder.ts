@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { CONDITIONS, type FlagBoolExpr } from "#ir/model/conditions.js";
-import type { FlagName } from "#ir/model/flags.js";
+import type { X86Flag } from "#x86/flags.js";
 import { const32, irVar, mem, nextEip, operand, reg, toStorageRef, toValueRef } from "#ir/model/refs.js";
 import type {
   ConditionCode,
@@ -388,7 +388,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
   writeFlags(write: IrFlagWriteInput): void {
     this.#beforeOp("writeFlags");
 
-    for (const [flag, cell] of Object.entries(write.cells) as [FlagName, IrFlagWriteCell][]) {
+    for (const [flag, cell] of Object.entries(write.cells) as [X86Flag, IrFlagWriteCell][]) {
       // undef -> preserve: any value is architecturally allowed, so keeping
       // the old one is free and kills the write.
       if (cell.kind === "expr") {

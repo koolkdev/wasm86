@@ -1,13 +1,7 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import {
-  controlEflagsMask,
-  createCpuState,
-  getFlag,
-  supportedEflagsMask
-} from "#x86/state/cpu-state.js";
-import { u32 } from "#x86/numeric.js";
+import { createCpuState, getFlag } from "#x86/state/cpu-state.js";
 import { executeDirectInstruction } from "#backends/direct/execute.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import type { SemanticTemplate } from "#ir/model/types.js";
@@ -93,23 +87,6 @@ test("add_83_sign_extends", () => {
   strictEqual(state.eax, 1);
 });
 
-test("arithmetic_preserves_unsupported_eflags_bits", () => {
-  const unsupportedBits = u32(0xffff_ffff & ~supportedEflagsMask);
-  const state = createCpuState({ eax: 1, eip: startAddress, eflags: unsupportedBits });
-
-  execute(state, [0x81, 0xc0, 0x01, 0x00, 0x00, 0x00]);
-
-  strictEqual(u32(state.eflags & ~supportedEflagsMask), unsupportedBits);
-});
-
-test("arithmetic_preserves_control_eflags_bits", () => {
-  const state = createCpuState({ eax: 1, eip: startAddress, eflags: controlEflagsMask });
-
-  execute(state, [0x81, 0xc0, 0x01, 0x00, 0x00, 0x00]);
-
-  strictEqual(u32(state.eflags & controlEflagsMask), controlEflagsMask);
-});
-
 test("xor_clears_register_and_sets_zf", () => {
   const state = createCpuState({ eax: 0x1234, eip: startAddress });
 
@@ -124,7 +101,7 @@ test("xor_clears_register_and_sets_zf", () => {
 });
 
 test("inc_updates_status_flags_without_changing_cf", () => {
-  const state = createCpuState({ eax: 0xffff_ffff, eip: startAddress, eflags: 1 });
+  const state = createCpuState({ eax: 0xffff_ffff, eip: startAddress, CF: 1 });
 
   execute(state, [0x40]);
 
@@ -138,7 +115,7 @@ test("inc_updates_status_flags_without_changing_cf", () => {
 });
 
 test("inc_byte_updates_width_flags_without_changing_cf", () => {
-  const state = createCpuState({ eax: 0x1234_56ff, eip: startAddress, eflags: 1 });
+  const state = createCpuState({ eax: 0x1234_56ff, eip: startAddress, CF: 1 });
 
   execute(state, [0xfe, 0xc0]);
 
@@ -149,7 +126,7 @@ test("inc_byte_updates_width_flags_without_changing_cf", () => {
 });
 
 test("dec_updates_status_flags_without_changing_cf", () => {
-  const state = createCpuState({ eax: 0, eip: startAddress, eflags: 1 });
+  const state = createCpuState({ eax: 0, eip: startAddress, CF: 1 });
 
   execute(state, [0x48]);
 
@@ -163,7 +140,7 @@ test("dec_updates_status_flags_without_changing_cf", () => {
 });
 
 test("dec_word_updates_width_flags_without_changing_cf", () => {
-  const state = createCpuState({ eax: 0x1234_0000, eip: startAddress, eflags: 1 });
+  const state = createCpuState({ eax: 0x1234_0000, eip: startAddress, CF: 1 });
 
   execute(state, [0x66, 0x48]);
 
@@ -257,10 +234,8 @@ test("test_sets_pf_from_low_byte", () => {
 });
 
 test("direct executor evaluates synthetic semantic flag writes", () => {
-  const state = createCpuState({
-    eip: startAddress,
-    eflags: controlEflagsMask | supportedEflagsMask
-  });
+  // All modeled flags start set so written, cleared, and preserved cells differ.
+  const state = createCpuState({ eip: startAddress, CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 });
   const instruction = syntheticInstruction((s) => {
     const low = s.project(8, 0x1ff);
 
@@ -284,7 +259,6 @@ test("direct executor evaluates synthetic semantic flag writes", () => {
   strictEqual(getFlag(state, "SF"), true);
   strictEqual(getFlag(state, "PF"), true);
   strictEqual(getFlag(state, "OF"), true);
-  strictEqual(u32(state.eflags & controlEflagsMask), controlEflagsMask);
 });
 
 function execute(state: ReturnType<typeof createCpuState>, values: readonly number[]): void {

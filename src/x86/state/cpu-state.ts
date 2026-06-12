@@ -1,43 +1,22 @@
-import {
-  x86ArithmeticEflagsMask,
-  x86ArithmeticFlags,
-  x86ControlEflagsMask,
-  x86ControlFlags,
-  x86EflagsFieldMask,
-  x86EflagsMask,
-  x86SupportedEflagsMask,
-  type X86ArithmeticFlag,
-  type X86ControlFlag,
-  type X86EflagsFlag
-} from "#x86/flags.js";
+import { x86Flags, type X86Flag } from "#x86/flags.js";
 import { reg32, widthMask, type RegisterAlias, type Reg32 } from "#x86/types.js";
 import { u32 } from "#x86/numeric.js";
 
-export type CpuArithmeticFlag = X86ArithmeticFlag;
-export type CpuControlFlag = X86ControlFlag;
-export type CpuFlag = X86EflagsFlag;
+export type CpuFlag = X86Flag;
 
 export type CpuState = {
   [Register in Reg32]: number;
 } & {
+  [Flag in CpuFlag]: number;
+} & {
   eip: number;
-  eflags: number;
   instructionCount: number;
   stopReason: number;
 };
 
-export const cpuArithmeticFlags = x86ArithmeticFlags;
-export const cpuControlFlags = x86ControlFlags;
-export const cpuFlags = [...cpuArithmeticFlags, ...cpuControlFlags] as const satisfies readonly CpuFlag[];
+export const cpuFlags = x86Flags;
 
-export const eflagsMask = x86EflagsMask;
-export const eflagsFieldMask = x86EflagsFieldMask;
-
-export const arithmeticEflagsMask = x86ArithmeticEflagsMask;
-export const controlEflagsMask = x86ControlEflagsMask;
-export const supportedEflagsMask = x86SupportedEflagsMask;
-
-export const cpuStateFields = [...reg32, "eip", "eflags", "instructionCount", "stopReason"] as const satisfies readonly (keyof CpuState)[];
+export const cpuStateFields = [...reg32, "eip", ...cpuFlags, "instructionCount", "stopReason"] as const satisfies readonly (keyof CpuState)[];
 export type CpuStateField = (typeof cpuStateFields)[number];
 
 export function createCpuState(overrides: Partial<CpuState> = {}): CpuState {
@@ -51,7 +30,12 @@ export function createCpuState(overrides: Partial<CpuState> = {}): CpuState {
     esi: 0,
     edi: 0,
     eip: 0,
-    eflags: 0,
+    CF: 0,
+    PF: 0,
+    AF: 0,
+    ZF: 0,
+    SF: 0,
+    OF: 0,
     instructionCount: 0,
     stopReason: 0,
     ...overrides
@@ -86,13 +70,16 @@ export function setRegisterAlias(state: CpuState, alias: RegisterAlias, value: n
   setReg32(state, alias.base, (base & ~mask) | ((value << alias.bitOffset) & mask));
 }
 
+export function flagsOf(state: Pick<CpuState, CpuFlag>): Readonly<Record<CpuFlag, number>> {
+  return { CF: state.CF, PF: state.PF, AF: state.AF, ZF: state.ZF, SF: state.SF, OF: state.OF };
+}
+
 export function getFlag(state: CpuState, flag: CpuFlag): boolean {
-  return (state.eflags & eflagsMask[flag]) !== 0;
+  return state[flag] !== 0;
 }
 
 export function setFlag(state: CpuState, flag: CpuFlag, value: boolean): void {
-  const mask = eflagsMask[flag];
-  state.eflags = value ? u32(state.eflags | mask) : u32(state.eflags & ~mask);
+  state[flag] = value ? 1 : 0;
 }
 
 export function hasEvenParityLowByte(value: number): boolean {
@@ -124,6 +111,10 @@ export function cpuStatesEqual(left: CpuState, right: CpuState): boolean {
 function normalizeCpuState(state: CpuState): CpuState {
   for (const field of cpuStateFields) {
     state[field] = u32(state[field]);
+  }
+
+  for (const flag of cpuFlags) {
+    state[flag] = state[flag] === 0 ? 0 : 1;
   }
 
   return state;

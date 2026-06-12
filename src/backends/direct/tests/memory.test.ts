@@ -4,8 +4,11 @@ import { test } from "node:test";
 import { StopReason, type FaultOperation } from "#x86/execution/run-result.js";
 import { ArrayBufferGuestMemory, type MemoryFault } from "#x86/memory/guest-memory.js";
 import { fillGuestMemory, readGuestBytes, writeGuestU32 } from "#x86/memory/tests/helpers.js";
-import { cloneCpuState, createCpuState, getFlag } from "#x86/state/cpu-state.js";
+import { cloneCpuState, flagsOf,
+  createCpuState, getFlag } from "#x86/state/cpu-state.js";
 import { bytes, runIsaBytes, startAddress } from "./helpers.js";
+
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
 test("loads and stores absolute u32 memory", () => {
   const memory = new ArrayBufferGuestMemory(0x40);
@@ -143,7 +146,7 @@ test("add loads memory operand like register operand", () => {
   strictEqual(run(memoryState, [0x03, 0x05, 0x20, 0x00, 0x00, 0x00], memory).stopReason, StopReason.NONE);
   strictEqual(run(registerState, [0x03, 0xc3]).stopReason, StopReason.NONE);
   strictEqual(memoryState.eax, registerState.eax);
-  strictEqual(memoryState.eflags, registerState.eflags);
+  deepStrictEqual(flagsOf(memoryState), flagsOf(registerState));
 });
 
 test("add stores memory destination", () => {
@@ -201,7 +204,7 @@ test("test memory does not write memory", () => {
 
 test("memory ALU fault before write is atomic", () => {
   const memory = new ArrayBufferGuestMemory(0x40);
-  const state = createCpuState({ eax: 5, eip: startAddress, eflags: 0x8d5, instructionCount: 7 });
+  const state = createCpuState({ eax: 5, eip: startAddress, ...allFlagsSet, instructionCount: 7 });
 
   fillGuestMemory(memory, 0xaa);
 
@@ -214,7 +217,7 @@ test("memory ALU fault before write is atomic", () => {
   strictEqual(result.faultSize, 4);
   strictEqual(result.faultOperation, "read");
   strictEqual(state.eax, beforeState.eax);
-  strictEqual(state.eflags, beforeState.eflags);
+  deepStrictEqual(flagsOf(state), flagsOf(beforeState));
   strictEqual(state.eip, beforeState.eip);
   strictEqual(state.instructionCount, beforeState.instructionCount);
   deepStrictEqual(readGuestBytes(memory, 0, memory.byteLength), beforeBytes);
@@ -222,7 +225,7 @@ test("memory ALU fault before write is atomic", () => {
 
 test("memory ALU write guard faults before flags mutate", () => {
   const memory = new WriteFaultGuestMemory(0x40, 0x20);
-  const state = createCpuState({ eax: 5, eip: startAddress, eflags: 0x8d5, instructionCount: 7 });
+  const state = createCpuState({ eax: 5, eip: startAddress, ...allFlagsSet, instructionCount: 7 });
 
   writeGuestU32(memory, 0x20, 1);
 
@@ -235,7 +238,7 @@ test("memory ALU write guard faults before flags mutate", () => {
   strictEqual(result.faultSize, 4);
   strictEqual(result.faultOperation, "write");
   strictEqual(state.eax, beforeState.eax);
-  strictEqual(state.eflags, beforeState.eflags);
+  deepStrictEqual(flagsOf(state), flagsOf(beforeState));
   strictEqual(state.eip, beforeState.eip);
   strictEqual(state.instructionCount, beforeState.instructionCount);
   deepStrictEqual(readGuestBytes(memory, 0, memory.byteLength), beforeBytes);
@@ -243,7 +246,7 @@ test("memory ALU write guard faults before flags mutate", () => {
 
 test("memory cmp fault does not update flags", () => {
   const memory = new ArrayBufferGuestMemory(0x40);
-  const state = createCpuState({ eax: 1, eip: startAddress, eflags: 0x8d5, instructionCount: 7 });
+  const state = createCpuState({ eax: 1, eip: startAddress, ...allFlagsSet, instructionCount: 7 });
   const beforeState = cloneCpuState(state);
   const result = run(state, [0x3b, 0x05, 0x3e, 0x00, 0x00, 0x00], memory);
 
@@ -251,7 +254,7 @@ test("memory cmp fault does not update flags", () => {
   strictEqual(result.faultAddress, 0x3e);
   strictEqual(result.faultSize, 4);
   strictEqual(result.faultOperation, "read");
-  strictEqual(state.eflags, beforeState.eflags);
+  deepStrictEqual(flagsOf(state), flagsOf(beforeState));
   strictEqual(state.eip, beforeState.eip);
   strictEqual(state.instructionCount, beforeState.instructionCount);
 });
