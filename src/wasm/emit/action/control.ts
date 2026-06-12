@@ -2,15 +2,15 @@ import { assert } from "#common/assert.js";
 import type {
   Action,
   ActionExitReason,
-  ContinueAction,
   EdgeRegion,
   ExitAction,
   RegionId
 } from "#ir/action/types.js";
 import type { ValueId } from "#ir/action/values.js";
+import { u32 } from "#x86/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
-import type { CompletionPolicy } from "./embed.js";
+import type { CompletionPolicy, LinkCompletion } from "./embed.js";
 
 // Edge-region encoding and terminator emission.
 
@@ -19,19 +19,20 @@ export type ControlFrameContext = Readonly<{
   edges: readonly EdgeRegion[];
   // The entry region's terminator.
   terminator: Action;
-  // Where a completed block lands; never a host return.
+  // Where a completed block lands.
   completion: CompletionPolicy;
-  // Pushes an exit payload value; the frame never touches the value layer
-  // otherwise.
+  // Pushes an exit payload value.
   emitPayload(id: ValueId): void;
+  constValue(id: ValueId): number | undefined;
 }>;
 
 export type ControlFrame = Readonly<{
   // Label depth of the edge's block as seen from entry code.
   depthOf(edge: RegionId): number;
-  // Emits the terminator at the current emission point; detail is the
-  // guard's byte length on fault edges.
-  emitTerminator(terminator: ExitAction | ContinueAction, detail?: number): void;
+  // Detail is the guard's byte length on fault edges.
+  emitReport(exit: ExitAction, detail?: number): void;
+  // Continuation is the region's flushed eip.
+  emitCompletion(continuation: ValueId | undefined): void;
   run(emitEntry: () => void, emitEdgeBody: (edge: EdgeRegion) => void): void;
 }>;
 
@@ -50,18 +51,7 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
   // Edge blocks still open around the current emission point.
   let openEdgeBlocks = nested.length;
 
-  function emitTerminator(action: ExitAction | ContinueAction, detail = 0): void {
-    switch (action.kind) {
-      case "exit":
-        emitReport(action, detail);
-        return;
-      case "continue":
-        emitCompletion();
-        return;
-    }
-  }
-
-  function emitCompletion(): void {
+  function emitCompletion(continuation: ValueId | undefined): void {
     switch (completion.kind) {
       case "fallthrough":
         // Past the remaining edge bodies to the wrapper's end; with none
@@ -75,10 +65,42 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
       case "br":
         body.br(completion.depth + openEdgeBlocks + (wrapped ? 1 : 0));
         return;
+      case "link":
+        emitLinkedCompletion(completion, continuation);
+        return;
     }
   }
 
-  function emitReport(exit: ExitAction, detail: number): void {
+  // State is already flushed, so a constant target is a bare tail call. A
+  // constant with neither a function nor a table slot is a bug: module
+  // assembly walks the same continuations to build the table.
+  function emitLinkedCompletion(link: LinkCompletion, continuation: ValueId | undefined): void {
+    assert(continuation !== undefined, "a linked completion needs the region's eip flush");
+
+    const target = context.constValue(continuation);
+
+    if (target === undefined) {
+      body.i64Const(encodeExit(ExitReason.DYNAMIC_JUMP, 0)).returnFromFunction();
+      return;
+    }
+
+    const functionIndex = link.functionFor(target);
+
+    if (functionIndex !== undefined) {
+      body.returnCallFunction(functionIndex);
+      return;
+    }
+
+    const slot = link.table?.slotFor(target);
+
+    assert(
+      link.table !== undefined && slot !== undefined,
+      `constant link target 0x${u32(target).toString(16)} has no function or table slot`
+    );
+    body.i32Const(slot).returnCallIndirect(link.table.typeIndex, link.table.tableIndex);
+  }
+
+  function emitReport(exit: ExitAction, detail = 0): void {
     const reason = exitReasonCode(exit.reason);
 
     if (exit.payload === undefined) {
@@ -97,7 +119,8 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
       assert(depth !== undefined, `no edge region ${edge} in this block`);
       return depth;
     },
-    emitTerminator,
+    emitReport,
+    emitCompletion,
     run(emitEntry: () => void, emitEdgeBody: (edge: EdgeRegion) => void): void {
       if (wrapped) {
         body.block();

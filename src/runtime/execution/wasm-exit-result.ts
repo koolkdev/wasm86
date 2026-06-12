@@ -12,6 +12,8 @@ export function runResultFromWasmExit(state: WasmCpuState, exit: DecodedExit): R
   switch (exit.exitReason) {
     case ExitReason.FALLTHROUGH:
     case ExitReason.JUMP:
+    case ExitReason.DYNAMIC_JUMP:
+    case ExitReason.LINK_STUB:
       state.write("stopReason", StopReason.NONE);
       return runResultFromState(state.snapshot(), StopReason.NONE);
     case ExitReason.HOST_TRAP:

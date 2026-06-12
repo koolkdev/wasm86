@@ -145,10 +145,13 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     assert(this.#instruction === undefined, "action builder has an incomplete instruction");
     this.#finished = true;
 
+    let continuation: ValueId | undefined;
+
     switch (this.#blockEnd) {
       case "fallthrough":
       case "jump":
         assert(this.#pending.has(eipChannel), "action block did not advance eip; no instructions were added");
+        continuation = this.#pending.read(eipChannel);
         this.#pending.flushAll();
         this.#actions.push({ kind: "continue" });
         break;
@@ -159,7 +162,12 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return {
       entry: entryRegionId,
       regions: [
-        { id: entryRegionId, kind: "entry", actions: this.#actions },
+        {
+          id: entryRegionId,
+          kind: "entry",
+          actions: this.#actions,
+          ...(continuation === undefined ? {} : { continuation })
+        },
         ...this.#edgeRegions
       ],
       values: this.#values
@@ -514,7 +522,13 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     const id = this.#nextRegionId;
 
     this.#nextRegionId += 1;
-    this.#edgeRegions.push({ id, kind: "edge", flushes, terminator });
+    this.#edgeRegions.push({
+      id,
+      kind: "edge",
+      flushes,
+      terminator,
+      ...(terminator.kind === "continue" ? { continuation: eipValue } : {})
+    });
     return id;
   }
 

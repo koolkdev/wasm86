@@ -3,6 +3,12 @@ import { u32 } from "#x86/numeric.js";
 import { wasmImport } from "#wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
+import { buildActionBlock } from "./action-compiler.js";
+import {
+  actionJitModuleLinkTargets,
+  encodeActionJitModule,
+  type ActionJitBlock
+} from "./action-module.js";
 import {
   buildBlock,
   buildBlockExpressions,
@@ -68,6 +74,38 @@ export function compileWasmBlockHandle(
   blocks: readonly IsaDecodedBlock[],
   options: CompileWasmBlockHandleOptions
 ): WasmBlockHandle {
+  assertCompilableBlocks(blocks);
+
+  const modulePlans = blocks.map(buildModulePlan);
+  const moduleLinkTable = createModuleLinkTable(modulePlans);
+  const linkResolver = moduleLinkTable === undefined ? undefined : linkResolverForTable(moduleLinkTable);
+  const bytes = encodeJitBlock(modulePlans, linkResolver === undefined ? {} : { linkResolver });
+
+  return instantiateCompiledBlocks(blocks, bytes, moduleLinkTable, options);
+}
+
+// The action-pipeline counterpart of compileWasmBlockHandle.
+export function compileActionWasmBlockHandle(
+  blocks: readonly IsaDecodedBlock[],
+  options: CompileWasmBlockHandleOptions
+): WasmBlockHandle {
+  assertCompilableBlocks(blocks);
+
+  const moduleBlocks: ActionJitBlock[] = blocks.map((block) => ({
+    entryEip: u32(block.startEip),
+    actions: buildActionBlock(block.instructions)
+  }));
+  const targetEips = actionJitModuleLinkTargets(moduleBlocks);
+  const moduleLinkTable = targetEips.length === 0 ? undefined : new JitModuleLinkTable({ targetEips });
+  const bytes = encodeActionJitModule(
+    moduleBlocks,
+    moduleLinkTable === undefined ? {} : { moduleLinkTable }
+  );
+
+  return instantiateCompiledBlocks(blocks, bytes, moduleLinkTable, options);
+}
+
+function assertCompilableBlocks(blocks: readonly IsaDecodedBlock[]): void {
   if (blocks.length === 0) {
     throw new UnsupportedWasmCodegenError("cannot compile empty block module");
   }
@@ -77,12 +115,15 @@ export function compileWasmBlockHandle(
       throw new UnsupportedWasmCodegenError(unsupportedBlockMessage(block));
     }
   }
+}
 
-  const modulePlans = blocks.map(buildModulePlan);
-  const entryEips = modulePlans.map((entry) => entry.entryEip);
-  const moduleLinkTable = createModuleLinkTable(modulePlans);
-  const linkResolver = moduleLinkTable === undefined ? undefined : linkResolverForTable(moduleLinkTable);
-  const bytes = encodeJitBlock(modulePlans, linkResolver === undefined ? {} : { linkResolver });
+function instantiateCompiledBlocks(
+  blocks: readonly IsaDecodedBlock[],
+  bytes: Uint8Array<ArrayBuffer>,
+  moduleLinkTable: JitModuleLinkTable | undefined,
+  options: CompileWasmBlockHandleOptions
+): WasmBlockHandle {
+  const entryEips = blocks.map((block) => u32(block.startEip));
   const compileStart = performance.now();
   const module = new WebAssembly.Module(bytes);
   const compileMs = performance.now() - compileStart;

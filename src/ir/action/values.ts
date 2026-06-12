@@ -89,6 +89,8 @@ export type ValueTable = Readonly<{
   projectTo(width: OperandWidth, value: ValueId): ValueId;
   extendTo(width: OperandWidth, value: ValueId): ValueId;
   node(id: ValueId): ValueNode;
+  // The node's compile-time constant, when it is one; i32-canonical.
+  constValue(id: ValueId): number | undefined;
   // References from other nodes in this table; action and region uses are
   // the consumer's to count.
   useCount(id: ValueId): number;
@@ -278,6 +280,11 @@ export function createValueTable(): ValueTable {
     projectTo,
     extendTo,
     node,
+    constValue(id: ValueId): number | undefined {
+      const found = node(id);
+
+      return found.kind === "const" ? found.value : undefined;
+    },
     useCount(id: ValueId): number {
       node(id);
       return useCounts[id]!;

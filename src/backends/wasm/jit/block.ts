@@ -19,7 +19,8 @@ export type {
   EncodeJitBlockOptions,
   JitBlockModulePlan
 } from "./block-module.js";
-export { encodeJitBlock, jitBlockExportName } from "./block-module.js";
+export { jitBlockExportName } from "./action-module.js";
+export { encodeJitBlock } from "./block-module.js";
 export { buildBlock } from "./ir/block-builder.js";
 export {
   buildBlockExpressions

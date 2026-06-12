@@ -15,7 +15,7 @@ import type { RuntimeEngines } from "#runtime/execution/runner.js";
 import { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import { loadProgramRegions } from "#runtime/program/loader.js";
 import { codeRegionsFromProgram, type RuntimeProgramRegion } from "#runtime/program/regions.js";
-import { compileWasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
+import { compileActionWasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { engineFixtureStartAddress } from "./programs.js";
@@ -85,7 +85,7 @@ export function createFixtureCompiledBlockCache(): CompiledBlockCache {
       }
 
       try {
-        return compileWasmBlockHandle([block], {
+        return compileActionWasmBlockHandle([block], {
           stateMemory: memories.stateMemory,
           guestMemory: memories.guestMemory,
           blockKey: startEip

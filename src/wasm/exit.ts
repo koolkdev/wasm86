@@ -8,7 +8,11 @@ export const ExitReason = {
   DECODE_FAULT: 4,
   MEMORY_READ_FAULT: 5,
   MEMORY_WRITE_FAULT: 6,
-  INSTRUCTION_LIMIT: 7
+  INSTRUCTION_LIMIT: 7,
+  // A runtime-computed jump target; the host resumes at the flushed eip.
+  DYNAMIC_JUMP: 8,
+  // An unpatched link stub; the payload is the uncompiled target eip.
+  LINK_STUB: 9
 } as const;
 
 export type ExitReason = (typeof ExitReason)[keyof typeof ExitReason];

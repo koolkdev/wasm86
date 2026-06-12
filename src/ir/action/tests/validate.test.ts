@@ -31,10 +31,28 @@ test("an entry ending with a continue validates", () => {
         {
           id: 0,
           kind: "entry",
-          actions: [{ kind: "writeState", slot: eipChannel, value: 0 }, continueAction]
+          actions: [{ kind: "writeState", slot: eipChannel, value: 0 }, continueAction],
+          continuation: 0
         }
       ])
     )
+  );
+});
+
+test("a continuation that does not match the flushed eip is rejected", () => {
+  throws(
+    () =>
+      validateActionBlock(
+        blockWith([
+          {
+            id: 0,
+            kind: "entry",
+            actions: [{ kind: "writeState", slot: eipChannel, value: 0 }, continueAction],
+            continuation: 1
+          }
+        ])
+      ),
+    /continuation does not match its flushed eip/
   );
 });
 

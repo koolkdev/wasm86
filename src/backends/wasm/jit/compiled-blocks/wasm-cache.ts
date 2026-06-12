@@ -2,7 +2,7 @@ import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.
 import type { IsaDecodeFault } from "#x86/decoder/reader.js";
 import { u32 } from "#x86/numeric.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
-import { compileWasmBlockHandle, type WasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
+import { compileActionWasmBlockHandle, type WasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
 import type { CompiledBlockCache, CompiledBlockHandle, WasmCompiledBlockCodeMap } from "./block-cache.js";
 import type { JitModuleLinkTable, JitLinkedBlockFunction } from "./module-link-table.js";
@@ -45,7 +45,7 @@ export class WasmCompiledBlockCache implements WasmCompiledBlockCacheLike {
         return undefined;
       }
 
-      const compiled = compileWasmBlockHandle([block], {
+      const compiled = compileActionWasmBlockHandle([block], {
         stateMemory: memories.stateMemory,
         guestMemory: memories.guestMemory,
         blockKey

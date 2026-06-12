@@ -37,7 +37,7 @@ test("unlinked final static jmp uses module-local fallback stub", () => {
   const run = a.run();
   const state = fixture.memories.state.snapshot();
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.JUMP, payload: bEip });
+  deepStrictEqual(run.exit, { exitReason: ExitReason.LINK_STUB, payload: bEip });
   strictEqual(state.eip, bEip);
   strictEqual(state.eax, 1);
 });
@@ -85,25 +85,30 @@ test("compiled target patches static call through dependent module-local table",
   strictEqual(new DataView(fixture.memories.guestMemory.buffer).getUint32(0x7c, true), returnAddress);
 });
 
-test("constant indirect jump target is not module-linked", () => {
+// The pending map folds the moved constant into the jump target, so the
+// indirect jump links exactly like a static one.
+test("constant-folded indirect jump target links through the module-local table", () => {
   const fixture = createLinkingFixture([
     block(aEip, movEaxJmpEax(bEip)),
     block(bEip, incEaxHostTrap())
   ]);
   const a = compileBlock(fixture, aEip);
+  const slot = slotForTarget(a, bEip);
 
-  strictEqual(a.moduleLinkTable, undefined);
-  compileBlock(fixture, bEip);
-  strictEqual(a.moduleLinkTable, undefined);
+  strictEqual(a.moduleLinkTable?.table.get(slot), exportedFunction(a, jitModuleLinkFallbackExportName(bEip)));
+
+  const b = compileBlock(fixture, bEip);
+
+  strictEqual(a.moduleLinkTable?.table.get(slot), b.exportedBlockFunctionForEip(bEip));
 
   fixture.memories.state.load({ eip: aEip });
 
   const run = a.run();
   const state = fixture.memories.state.snapshot();
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.JUMP, payload: bEip });
-  strictEqual(state.eax, bEip);
-  strictEqual(state.eip, bEip);
+  deepStrictEqual(run.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  strictEqual(state.eax, bEip + 1);
+  strictEqual(state.eip, bEip + 3);
 });
 
 test("final jmp rel8 can link through the module-local table", () => {
@@ -185,7 +190,8 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
   fixture.memories.state.load({ eip: aEip, eax: 0, eflags: preservedEflags });
 
   const takenRun = branch.run();
-  const takenState = fixture.memories.state.snapshot();
+  // The action pipeline writes flag bytes, never the packed word.
+  const takenState = fixture.memories.state.snapshot("bytes");
 
   deepStrictEqual(takenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(takenState.eax, 1);
@@ -194,7 +200,7 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
   fixture.memories.state.load({ eip: aEip, eax: 0xffff_ffff, eflags: preservedEflags });
 
   const notTakenRun = branch.run();
-  const notTakenState = fixture.memories.state.snapshot();
+  const notTakenState = fixture.memories.state.snapshot("bytes");
 
   deepStrictEqual(notTakenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(notTakenState.eax, 0);
@@ -221,7 +227,7 @@ test("invalidating compiled target restores dependent module-local fallback", ()
   const run = a.run();
   const state = fixture.memories.state.snapshot();
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.JUMP, payload: bEip });
+  deepStrictEqual(run.exit, { exitReason: ExitReason.LINK_STUB, payload: bEip });
   strictEqual(state.eip, bEip);
   strictEqual(state.eax, 1);
 });
@@ -255,7 +261,7 @@ test("target compile and invalidation patch multiple dependent module tables", (
   strictEqual(c.moduleLinkTable?.table.get(cSlot), exportedFunction(c, jitModuleLinkFallbackExportName(bEip)));
 
   fixture.memories.state.load({ eip: cEip });
-  deepStrictEqual(c.run().exit, { exitReason: ExitReason.JUMP, payload: bEip });
+  deepStrictEqual(c.run().exit, { exitReason: ExitReason.LINK_STUB, payload: bEip });
   strictEqual(fixture.memories.state.snapshot().eax, 1);
 });
 

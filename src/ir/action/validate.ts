@@ -1,14 +1,20 @@
 import { assert } from "#common/assert.js";
-import type { Action, ActionBlock, EntryRegion, RegionId } from "./types.js";
+import type { Action, ActionBlock, ActionRegion, EntryRegion, RegionId } from "./types.js";
+import type { ValueId } from "./values.js";
 
-// Structural checks: regions terminate exactly once and every region
-// reference resolves.
+// Structural checks: regions terminate exactly once, every region reference
+// resolves, and cached continuations match the flushes.
 
 export function validateActionBlock(block: ActionBlock): void {
   const edgeIds = new Set<RegionId>();
   let entry: EntryRegion | undefined;
 
   for (const region of block.regions) {
+    assert(
+      region.continuation === continuationOf(region),
+      `region ${region.id} continuation does not match its flushed eip`
+    );
+
     switch (region.kind) {
       case "entry":
         assert(entry === undefined, "action block has more than one entry region");
@@ -87,4 +93,35 @@ function isRegionTerminator(action: Action): boolean {
     case "guardMemory":
       return false;
   }
+}
+
+function continuationOf(region: ActionRegion): ValueId | undefined {
+  switch (region.kind) {
+    case "entry": {
+      const terminator = region.actions[region.actions.length - 1];
+
+      return terminator !== undefined && terminator.kind === "continue"
+        ? flushedEip(region.actions)
+        : undefined;
+    }
+    case "edge":
+      switch (region.terminator.kind) {
+        case "continue":
+          return flushedEip(region.flushes);
+        case "exit":
+          return undefined;
+      }
+  }
+}
+
+function flushedEip(actions: readonly Action[]): ValueId | undefined {
+  let flushed: ValueId | undefined;
+
+  for (const action of actions) {
+    if (action.kind === "writeState" && action.slot.kind === "eip") {
+      flushed = action.value;
+    }
+  }
+
+  return flushed;
 }

@@ -13,7 +13,7 @@ import type { ValueId } from "#ir/action/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
-import type { ActionEmbedding } from "./embed.js";
+import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { emitGuardChecks, emitGuestLoad, emitGuestStore } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";
 import { createValueStack } from "./value-stack.js";
@@ -31,21 +31,23 @@ export type ActionFragmentContext = Readonly<{
   // takes.
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
-  embedding: ActionEmbedding;
+  embedding: FragmentEmbedding;
 }>;
 
-export type ActionEmitContext = Readonly<{
+export type ActionFunctionContext = Readonly<{
   body: WasmFunctionBodyEncoder;
-  // External id -> the wasm local the embedding bound it to.
-  externalLocals?: ReadonlyMap<ExternalValueId, number>;
-  embedding: ActionEmbedding;
+  embedding: FunctionEmbedding;
 }>;
 
-// The block-shaped entry point: the block is the whole function body.
-export function emitActionBlock(block: ActionBlock, context: ActionEmitContext): WasmFunctionBodyEncoder {
+// The function-shaped entry point: the block is the whole function body.
+export function emitActionFunction(block: ActionBlock, context: ActionFunctionContext): WasmFunctionBodyEncoder {
   const scratch = new WasmLocalScratchAllocator(context.body);
 
-  emitActionFragment(block, { ...context, scratch });
+  emitActionFragment(block, {
+    body: context.body,
+    scratch,
+    embedding: context.embedding
+  });
   scratch.assertClear();
   return context.body.end();
 }
@@ -69,9 +71,11 @@ export function emitActionFragment(block: ActionBlock, context: ActionFragmentCo
     loadSlot: (slot, signed, emitUse) => emitSlotLoad(body, slot, signed, emitUse),
     loadGuest: (width, signed) => emitGuestLoad(body, width, signed)
   });
-  // Exit detail per edge: the guard's byte length, zero for branch edges.
+  // Per-edge report detail (the guard's byte length); branch edges record
+  // a zero that only marks them as targeted.
   const edgeExitDetails = new Map<RegionId, number>();
   const terminator = entry.actions[entry.actions.length - 1];
+  const entryContinuation = entry.continuation;
 
   assert(terminator !== undefined, "entry region does not end with a terminator");
 
@@ -80,7 +84,8 @@ export function emitActionFragment(block: ActionBlock, context: ActionFragmentCo
     edges,
     terminator,
     completion: embedding.completion,
-    emitPayload: valueStack.emitUse
+    emitPayload: valueStack.emitUse,
+    constValue: block.values.constValue
   });
 
   function emitEntryAction(action: Action): void {
@@ -103,8 +108,10 @@ export function emitActionFragment(block: ActionBlock, context: ActionFragmentCo
         emitGuard(action);
         return;
       case "exit":
+        frame.emitReport(action);
+        return;
       case "continue":
-        frame.emitTerminator(action);
+        frame.emitCompletion(entryContinuation);
         return;
       case "branch":
         emitBranch(action);
@@ -156,7 +163,14 @@ export function emitActionFragment(block: ActionBlock, context: ActionFragmentCo
       emitSlotStore(body, flush.slot, flush.value, valueStack.emitUse);
     }
 
-    frame.emitTerminator(edge.terminator, detail);
+    switch (edge.terminator.kind) {
+      case "exit":
+        frame.emitReport(edge.terminator, detail);
+        return;
+      case "continue":
+        frame.emitCompletion(edge.continuation);
+        return;
+    }
   }
 
   function edgeById(id: RegionId): EdgeRegion {

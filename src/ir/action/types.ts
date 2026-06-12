@@ -94,6 +94,9 @@ export type EntryRegion = Readonly<{
   id: RegionId;
   kind: "entry";
   actions: readonly Action[];
+  // The flushed eip a completed region continues at; a continue without
+  // one stays at the current eip.
+  continuation?: ValueId;
 }>;
 
 // Edge bodies flush state and leave.
@@ -102,6 +105,7 @@ export type EdgeRegion = Readonly<{
   kind: "edge";
   flushes: readonly WriteStateAction[];
   terminator: ExitAction | ContinueAction;
+  continuation?: ValueId;
 }>;
 
 export type ActionRegion = EntryRegion | EdgeRegion;

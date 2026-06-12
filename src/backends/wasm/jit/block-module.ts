@@ -5,6 +5,7 @@ import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
+import { jitBlockExportName } from "./action-module.js";
 import { jitModuleLinkFallbackExportName } from "./compiled-blocks/module-link-table.js";
 import { buildJitCodegenEmissionPlan } from "./codegen/plan/emission.js";
 import {
@@ -98,10 +99,6 @@ export function encodeJitBlock(
   }
 
   return module.encode();
-}
-
-export function jitBlockExportName(eip: number): string {
-  return `block_${u32(eip).toString(16)}`;
 }
 
 function encodeJitBlockFunctionBody(
