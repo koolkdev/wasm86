@@ -1,8 +1,6 @@
 import { u32 } from "#x86/numeric.js";
 
 export const ExitReason = {
-  FALLTHROUGH: 0,
-  JUMP: 1,
   HOST_TRAP: 2,
   UNSUPPORTED: 3,
   DECODE_FAULT: 4,

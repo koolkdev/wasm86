@@ -5,7 +5,7 @@ import { flagChannel, gprChannel } from "#ir/action/slots.js";
 import { x86ArithmeticFlags } from "#x86/flags.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 
-test("host view fills both flag representations and reads back through either", () => {
+test("host view splits eflags into flag bytes and ctrl word and merges them back", () => {
   const { state } = createWasmHostMemories();
   const eflags = 0xffff_08d5;
 
@@ -16,18 +16,17 @@ test("host view fills both flag representations and reads back through either", 
     [["CF", 1], ["PF", 1], ["AF", 1], ["ZF", 1], ["SF", 1], ["OF", 1]]
   );
   strictEqual(state.snapshot().eflags, eflags);
-  strictEqual(state.snapshot("bytes").eflags, eflags);
 
   state.load({ eflags: 0x0000_0202 });
 
-  strictEqual(state.snapshot("bytes").eflags, 0x0000_0202);
+  strictEqual(state.snapshot().eflags, 0x0000_0202);
   deepStrictEqual(
     x86ArithmeticFlags.map((flag) => state.readFlagByte(flag)),
     [0, 0, 0, 0, 0, 0]
   );
 });
 
-test("each readback path reads its own flag representation", () => {
+test("flag byte writes are visible to snapshots", () => {
   const { state } = createWasmHostMemories();
 
   state.load({ eflags: 0x0000_0002 });
@@ -36,21 +35,20 @@ test("each readback path reads its own flag representation", () => {
 
   strictEqual(state.readFlagByte("CF"), 1);
   strictEqual(state.readFlagByte("ZF"), 1);
-  strictEqual(state.snapshot().eflags, 0x0000_0002);
-  strictEqual(state.snapshot("bytes").eflags, 0x0000_0043);
+  strictEqual(state.snapshot().eflags, 0x0000_0043);
 
   state.writeChannel(flagChannel("CF"), 0);
 
   strictEqual(state.readChannel(flagChannel("CF")), 0);
-  strictEqual(state.snapshot("bytes").eflags, 0x0000_0042);
+  strictEqual(state.snapshot().eflags, 0x0000_0042);
 });
 
-test("eflags setter keeps the byte representation in sync", () => {
+test("eflags setter writes the flag bytes and the ctrl word", () => {
   const { state } = createWasmHostMemories();
 
   state.eflags = 0x0000_00c7;
 
-  strictEqual(state.snapshot("bytes").eflags, 0x0000_00c7);
+  strictEqual(state.snapshot().eflags, 0x0000_00c7);
   strictEqual(state.readFlagByte("CF"), 1);
   strictEqual(state.readFlagByte("AF"), 0);
 });

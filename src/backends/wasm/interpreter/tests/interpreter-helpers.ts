@@ -61,7 +61,7 @@ export function writeInterpreterState(view: DataView, state: CpuState): void {
 }
 
 export function readInterpreterState(view: DataView): CpuState {
-  return readWasmCpuState(view, "bytes");
+  return readWasmCpuState(view);
 }
 
 export function assertInterpreterStateEquals(view: DataView, state: CpuState): void {

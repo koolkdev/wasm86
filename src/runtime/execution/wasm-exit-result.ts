@@ -10,8 +10,6 @@ import type { WasmCpuState } from "#wasm/host/state-memory.js";
 
 export function runResultFromWasmExit(state: WasmCpuState, exit: DecodedExit): RunResult {
   switch (exit.exitReason) {
-    case ExitReason.FALLTHROUGH:
-    case ExitReason.JUMP:
     case ExitReason.DYNAMIC_JUMP:
     case ExitReason.LINK_STUB:
       state.write("stopReason", StopReason.NONE);

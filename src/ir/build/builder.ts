@@ -11,8 +11,6 @@ export {
 } from "#ir/model/refs.js";
 export { irBlockTerminator };
 export type { IrBlockTerminator } from "./emitter.js";
-export { createIrVarAllocator } from "./vars.js";
-export type { IrVarAllocator } from "./vars.js";
 
 export type BuildIrOptions = Pick<IrEmitterOptions, "operandInfo">;
 

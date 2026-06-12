@@ -8,8 +8,8 @@ import { decodeExit, encodeExit, ExitReason, type DecodedExit } from "#wasm/exit
 
 const fixtures: readonly ExitFixture[] = [
   {
-    name: "fallthrough_exit_decodes",
-    exitReason: ExitReason.FALLTHROUGH,
+    name: "dynamic_jump_exit_decodes",
+    exitReason: ExitReason.DYNAMIC_JUMP,
     payload: 0x1005
   },
   {
@@ -45,7 +45,7 @@ const fixtures: readonly ExitFixture[] = [
   },
   {
     name: "roundtrip_high_payload_bit",
-    exitReason: ExitReason.FALLTHROUGH,
+    exitReason: ExitReason.DYNAMIC_JUMP,
     payload: 0xffff_ffff
   }
 ];

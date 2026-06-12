@@ -43,12 +43,11 @@ test("runtime Wasm state layout exposes raw execution fields", () => {
     esi: 24,
     edi: 28,
     eip: 32,
-    aluFlags: 36,
-    ctrlFlags: 40,
-    instructionCount: 44,
-    stopReason: 48
+    ctrlFlags: 36,
+    instructionCount: 40,
+    stopReason: 44
   });
-  strictEqual(stateByteLength, 58);
+  strictEqual(stateByteLength, 54);
 });
 
 test("runtime Wasm guest memory reads writes and reports faults", () => {

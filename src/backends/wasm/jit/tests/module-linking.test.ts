@@ -191,7 +191,7 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
 
   const takenRun = branch.run();
   // The action pipeline writes flag bytes, never the packed word.
-  const takenState = fixture.memories.state.snapshot("bytes");
+  const takenState = fixture.memories.state.snapshot();
 
   deepStrictEqual(takenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(takenState.eax, 1);
@@ -200,7 +200,7 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
   fixture.memories.state.load({ eip: aEip, eax: 0xffff_ffff, eflags: preservedEflags });
 
   const notTakenRun = branch.run();
-  const notTakenState = fixture.memories.state.snapshot("bytes");
+  const notTakenState = fixture.memories.state.snapshot();
 
   deepStrictEqual(notTakenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(notTakenState.eax, 0);

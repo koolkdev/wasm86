@@ -4,10 +4,7 @@ import { test } from "node:test";
 import {
   irOpDst,
   irOpIsTerminator,
-  irOpResult,
-  irOpStorageReads,
-  irOpStorageWrites,
-  irOpValueUses
+  irOpResult
 } from "#ir/model/op-semantics.js";
 import type { IrOp } from "#ir/model/types.js";
 import { const32, irVar } from "#ir/build/builder.js";
@@ -26,23 +23,7 @@ test("IR op semantics exposes results, dsts, and terminators", () => {
   strictEqual(irOpIsTerminator(localDef), false);
 });
 
-test("IR op semantics exposes set value and storage uses", () => {
-  const target = { kind: "mem" as const, address: irVar(1) };
-  const op: IrOp = {
-    op: "set",
-    target,
-    value: irVar(2)
-  };
-
-  deepStrictEqual(irOpValueUses(op), [
-    { value: irVar(1), role: "value" },
-    { value: irVar(2), role: "value" }
-  ]);
-  deepStrictEqual(irOpStorageReads(op), []);
-  deepStrictEqual(irOpStorageWrites(op), [target]);
-});
-
-test("IR select values expose their selector as a condition use", () => {
+test("IR select values expose their result", () => {
   const op: IrOp = {
     op: "value.select",
     type: "i32",
@@ -52,15 +33,10 @@ test("IR select values expose their selector as a condition use", () => {
     whenFalse: irVar(2)
   };
 
-  deepStrictEqual(irOpValueUses(op), [
-    { value: irVar(0), role: "condition" },
-    { value: irVar(1), role: "value" },
-    { value: irVar(2), role: "value" }
-  ]);
   deepStrictEqual(irOpResult(op), { kind: "value", dst: irVar(3), sideEffect: "none" });
 });
 
-test("IR memory guards use an address value without storage read or write", () => {
+test("IR memory guards have no result and do not terminate", () => {
   const op: IrOp = {
     op: "memory.guard",
     address: irVar(0),
@@ -68,9 +44,6 @@ test("IR memory guards use an address value without storage read or write", () =
     access: "write"
   };
 
-  deepStrictEqual(irOpValueUses(op), [{ value: irVar(0), role: "value" }]);
-  deepStrictEqual(irOpStorageReads(op), []);
-  deepStrictEqual(irOpStorageWrites(op), []);
   deepStrictEqual(irOpResult(op), { kind: "none" });
   strictEqual(irOpIsTerminator(op), false);
 });

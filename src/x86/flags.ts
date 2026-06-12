@@ -42,7 +42,6 @@ export const x86ControlEflagsMask = (
   x86EflagsFieldMask.IOPL
 ) >>> 0;
 export const x86SupportedEflagsMask = (x86ArithmeticEflagsMask | x86ControlEflagsMask) >>> 0;
-export const x86ArithmeticFlagsMask = maskArithmeticFlags(x86ArithmeticFlags);
 export const x86NonArithmeticEflagsMask = (~x86ArithmeticEflagsMask) >>> 0;
 
 export function x86ArithmeticFlagsFromEflags(eflags: number): number {
@@ -82,16 +81,6 @@ function maskEflags(flags: Iterable<X86EflagsFlag>): number {
 
   for (const flag of flags) {
     mask |= x86EflagsMask[flag];
-  }
-
-  return mask >>> 0;
-}
-
-function maskArithmeticFlags(flags: Iterable<X86ArithmeticFlag>): number {
-  let mask = 0;
-
-  for (const flag of flags) {
-    mask |= x86ArithmeticFlagMask[flag];
   }
 
   return mask >>> 0;

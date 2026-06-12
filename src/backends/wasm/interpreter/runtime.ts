@@ -41,7 +41,7 @@ export class WasmInterpreterRuntime {
 
   // The interpreter writes flag bytes, never the packed word.
   copyStateFromWasm(state: CpuState): void {
-    Object.assign(state, readWasmCpuState(this.stateView, "bytes"));
+    Object.assign(state, readWasmCpuState(this.stateView));
   }
 }
 

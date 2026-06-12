@@ -16,14 +16,14 @@ import {
 
 test("flag byte offsets are stable and disjoint from existing fields", () => {
   deepStrictEqual(WASM_FLAG_BYTE_OFFSETS, {
-    CF: 52,
-    PF: 53,
-    AF: 54,
-    ZF: 55,
-    SF: 56,
-    OF: 57
+    CF: 48,
+    PF: 49,
+    AF: 50,
+    ZF: 51,
+    SF: 52,
+    OF: 53
   });
-  strictEqual(WASM_STATE_BYTE_LENGTH, 58);
+  strictEqual(WASM_STATE_BYTE_LENGTH, 54);
 
   const existingFieldsEnd = Math.max(...WASM_STATE_FIELDS.map((field) => WASM_STATE_OFFSETS[field] + 4));
 

@@ -41,24 +41,17 @@ import type {
 export type IrBlockTerminator = IrTerminatorOp["op"];
 
 export type IrEmitterOptions = Readonly<{
-  ops?: IrOp[];
-  allocator?: IrVarAllocator;
-  resolveOperand?: (index: number) => OperandRef;
   operandInfo?: readonly (SemanticOperandInfo | undefined)[];
 }>;
 
 export class IrEmitter implements IrBuilder, SemanticBuildContext {
-  readonly #ops: IrOp[];
-  readonly #allocator: IrVarAllocator;
-  readonly #resolveOperand: (index: number) => OperandRef;
+  readonly #ops: IrOp[] = [];
+  readonly #allocator: IrVarAllocator = createIrVarAllocator();
   readonly #operandInfo: readonly (SemanticOperandInfo | undefined)[];
   readonly #semanticOperandIndexByOperandRef = new WeakMap<OperandRef, number>();
   #terminator: IrBlockTerminator | undefined;
 
   constructor(options: IrEmitterOptions = {}) {
-    this.#ops = options.ops ?? [];
-    this.#allocator = options.allocator ?? createIrVarAllocator();
-    this.#resolveOperand = options.resolveOperand ?? operand;
     this.#operandInfo = options.operandInfo ?? [];
   }
 
@@ -79,7 +72,7 @@ export class IrEmitter implements IrBuilder, SemanticBuildContext {
   }
 
   operand(index: number): OperandRef {
-    const operandRef: OperandRef = { ...this.#resolveOperand(index) };
+    const operandRef: OperandRef = { ...operand(index) };
 
     this.#semanticOperandIndexByOperandRef.set(operandRef, index);
     return operandRef;

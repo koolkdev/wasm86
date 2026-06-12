@@ -4,8 +4,6 @@ import {
   x86ArithmeticFlagMask,
   x86ArithmeticFlags,
   x86ArithmeticFlagsFromEflags,
-  x86ArithmeticFlagsMask,
-  x86ArithmeticFlagsToEflags,
   x86ControlFlagsFromEflags,
   x86MergeSplitEflags,
   x86NonArithmeticEflagsMask,
@@ -15,10 +13,10 @@ import { reg32, type Reg32 } from "#x86/types.js";
 import { u32 } from "#x86/numeric.js";
 import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
 
-export type WasmStateField = Reg32 | "eip" | "aluFlags" | "ctrlFlags" | "instructionCount" | "stopReason";
+export type WasmStateField = Reg32 | "eip" | "ctrlFlags" | "instructionCount" | "stopReason";
 
-export type WasmFlagsRepresentation = "packed" | "bytes";
-
+// Arithmetic flags live in the per-flag bytes; non-arithmetic eflags bits are
+// host-only state stored in the ctrlFlags word.
 export type WasmSplitEflags = Readonly<{
   aluFlags: number;
   ctrlFlags: number;
@@ -34,10 +32,9 @@ export const WASM_STATE_OFFSETS = {
   esi: 24,
   edi: 28,
   eip: 32,
-  aluFlags: 36,
-  ctrlFlags: 40,
-  instructionCount: 44,
-  stopReason: 48
+  ctrlFlags: 36,
+  instructionCount: 40,
+  stopReason: 44
 } as const satisfies Readonly<Record<WasmStateField, number>>;
 
 // Dynamic register access indexes the GPR words as one contiguous array in
@@ -52,43 +49,33 @@ for (const [index, reg] of reg32.entries()) {
 }
 
 export const WASM_FLAG_BYTE_OFFSETS = {
-  CF: 52,
-  PF: 53,
-  AF: 54,
-  ZF: 55,
-  SF: 56,
-  OF: 57
+  CF: 48,
+  PF: 49,
+  AF: 50,
+  ZF: 51,
+  SF: 52,
+  OF: 53
 } as const satisfies Readonly<Record<X86ArithmeticFlag, number>>;
 
-export const WASM_STATE_BYTE_LENGTH = 58;
+export const WASM_STATE_BYTE_LENGTH = 54;
 export const WASM_STATE_FIELDS = [
   ...reg32,
   "eip",
-  "aluFlags",
   "ctrlFlags",
   "instructionCount",
   "stopReason"
 ] as const satisfies readonly WasmStateField[];
-export const WASM_ALU_FLAGS_MASK = x86ArithmeticFlagsMask;
 export const WASM_CTRL_FLAGS_MASK = x86NonArithmeticEflagsMask;
 
 export function splitEflagsForWasm(eflags: number): WasmSplitEflags {
   return {
-    aluFlags: normalizeWasmAluFlags(x86ArithmeticFlagsFromEflags(eflags)),
+    aluFlags: x86ArithmeticFlagsFromEflags(eflags),
     ctrlFlags: normalizeWasmCtrlFlags(x86ControlFlagsFromEflags(eflags))
   };
 }
 
 export function mergeWasmEflags(aluFlags: number, ctrlFlags: number): number {
   return x86MergeSplitEflags(aluFlags, ctrlFlags);
-}
-
-export function wasmAluFlagsToEflags(aluFlags: number): number {
-  return x86ArithmeticFlagsToEflags(aluFlags);
-}
-
-export function normalizeWasmAluFlags(aluFlags: number): number {
-  return u32(aluFlags & WASM_ALU_FLAGS_MASK);
 }
 
 export function normalizeWasmCtrlFlags(ctrlFlags: number): number {
@@ -192,9 +179,9 @@ export function writeWasmStateField(view: DataView, field: WasmStateField, value
   view.setUint32(WASM_STATE_OFFSETS[field], normalizeWasmStateField(field, value), true);
 }
 
-export function readWasmCpuState(view: DataView, flagsFrom: WasmFlagsRepresentation = "packed"): CpuState {
+export function readWasmCpuState(view: DataView): CpuState {
   const state = createCpuState();
-  const aluFlags = flagsFrom === "bytes" ? readWasmAluFlagBytes(view) : readWasmStateField(view, "aluFlags");
+  const aluFlags = readWasmAluFlagBytes(view);
 
   for (const reg of reg32) {
     state[reg] = readWasmStateField(view, reg);
@@ -217,7 +204,6 @@ export function writeWasmCpuState(view: DataView, stateInit: Partial<CpuState>):
   }
 
   writeWasmStateField(view, "eip", state.eip);
-  writeWasmStateField(view, "aluFlags", flags.aluFlags);
   writeWasmStateField(view, "ctrlFlags", flags.ctrlFlags);
   writeWasmAluFlagBytes(view, flags.aluFlags);
   writeWasmStateField(view, "instructionCount", state.instructionCount);
@@ -226,8 +212,6 @@ export function writeWasmCpuState(view: DataView, stateInit: Partial<CpuState>):
 
 export function normalizeWasmStateField(field: WasmStateField, value: number): number {
   switch (field) {
-    case "aluFlags":
-      return normalizeWasmAluFlags(value);
     case "ctrlFlags":
       return normalizeWasmCtrlFlags(value);
     default:

@@ -3,6 +3,7 @@ import type { FlagName } from "#ir/model/flags.js";
 import { type CpuState } from "#x86/state/cpu-state.js";
 import {
   mergeWasmEflags,
+  readWasmAluFlagBytes,
   readWasmCpuState,
   readWasmFlagByte,
   readWasmStateChannel,
@@ -14,7 +15,6 @@ import {
   writeWasmStateChannel,
   writeWasmStateField,
   WASM_STATE_BYTE_LENGTH,
-  type WasmFlagsRepresentation,
   type WasmStateField
 } from "#wasm/state-layout.js";
 
@@ -53,8 +53,8 @@ export class WasmCpuState {
     writeWasmCpuState(this.#view(), state);
   }
 
-  snapshot(flagsFrom: WasmFlagsRepresentation = "packed"): CpuState {
-    return readWasmCpuState(this.#view(), flagsFrom);
+  snapshot(): CpuState {
+    return readWasmCpuState(this.#view());
   }
 
   get eip(): number {
@@ -66,13 +66,12 @@ export class WasmCpuState {
   }
 
   get eflags(): number {
-    return mergeWasmEflags(this.read("aluFlags"), this.read("ctrlFlags"));
+    return mergeWasmEflags(readWasmAluFlagBytes(this.#view()), this.read("ctrlFlags"));
   }
 
   set eflags(value: number) {
     const flags = splitEflagsForWasm(value);
 
-    this.write("aluFlags", flags.aluFlags);
     this.write("ctrlFlags", flags.ctrlFlags);
     writeWasmAluFlagBytes(this.#view(), flags.aluFlags);
   }

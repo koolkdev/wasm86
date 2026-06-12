@@ -27,7 +27,7 @@ test("return_call_two_function_smoke_test", async () => {
 });
 
 test("return_call_result_reaches_typescript_once", async () => {
-  const instance = await instantiateReturnCallModule(constantTargetBody(ExitReason.JUMP, 0x1234));
+  const instance = await instantiateReturnCallModule(constantTargetBody(ExitReason.DYNAMIC_JUMP, 0x1234));
   const entry = exportedFunction(instance, entryExportName);
   const result = entry(statePtr);
 
@@ -36,7 +36,7 @@ test("return_call_result_reaches_typescript_once", async () => {
   }
 
   deepStrictEqual(decodeExit(result), {
-    exitReason: ExitReason.JUMP,
+    exitReason: ExitReason.DYNAMIC_JUMP,
     payload: 0x1234
   });
 });
@@ -56,7 +56,7 @@ test("return_call_preserves_state_memory_abi", async () => {
   }
 
   deepStrictEqual(decodeExit(result), {
-    exitReason: ExitReason.JUMP,
+    exitReason: ExitReason.DYNAMIC_JUMP,
     payload: 0xfeed_cafe
   });
 });
@@ -147,7 +147,7 @@ function statePayloadTargetBody(): WasmFunctionBodyEncoder {
       offset: stateOffset.eax
     })
     .i64ExtendI32U()
-    .i64Const(encodeExit(ExitReason.JUMP, 0))
+    .i64Const(encodeExit(ExitReason.DYNAMIC_JUMP, 0))
     .i64Or()
     .end();
 }
