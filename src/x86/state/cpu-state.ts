@@ -94,16 +94,6 @@ export function hasEvenParityLowByte(value: number): boolean {
   return isEven;
 }
 
-export function cloneCpuState(state: CpuState): CpuState {
-  return createCpuState(state);
-}
-
-export function copyCpuState(source: CpuState, target: CpuState): void {
-  for (const field of cpuStateFields) {
-    target[field] = u32(source[field]);
-  }
-}
-
 export function cpuStatesEqual(left: CpuState, right: CpuState): boolean {
   return cpuStateFields.every((field) => u32(left[field]) === u32(right[field]));
 }

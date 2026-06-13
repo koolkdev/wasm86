@@ -5,8 +5,6 @@ import { reg32 } from "#x86/types.js";
 import {
   cpuFlags,
   createCpuState,
-  cloneCpuState,
-  copyCpuState,
   cpuStatesEqual,
   getFlag,
   getReg32,
@@ -75,7 +73,7 @@ test("modeled_flags_are_the_arithmetic_six", () => {
   deepStrictEqual(cpuFlags, ["CF", "PF", "AF", "ZF", "SF", "OF"]);
 });
 
-test("state_clone_copy_and_compare", () => {
+test("state_compare_normalizes_numeric_fields", () => {
   const source = createCpuState({
     eax: 0xffff_ffff,
     ecx: 0x1_0000_0001,
@@ -84,14 +82,10 @@ test("state_clone_copy_and_compare", () => {
     instructionCount: 7,
     stopReason: 3
   });
-  const clone = cloneCpuState(source);
-  const target = createCpuState();
+  const matching = createCpuState({ ...source });
 
-  strictEqual(cpuStatesEqual(source, clone), true);
+  strictEqual(cpuStatesEqual(source, matching), true);
 
-  clone.eax = 0;
-  strictEqual(cpuStatesEqual(source, clone), false);
-
-  copyCpuState(source, target);
-  strictEqual(cpuStatesEqual(source, target), true);
+  matching.eax = 0;
+  strictEqual(cpuStatesEqual(source, matching), false);
 });
