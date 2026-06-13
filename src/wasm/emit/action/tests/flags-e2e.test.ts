@@ -1,44 +1,38 @@
 import { ok as assertOk, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { executeDirectInstruction } from "#backends/direct/execute.js";
 import { createActionBuilder } from "#ir/action/builder.js";
 import { regBinding, type OperandBinding } from "#ir/action/operands.js";
 import { eipChannel, gprChannel } from "#ir/action/slots.js";
 import type { WriteStateAction } from "#ir/action/types.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { StopReason } from "#x86/execution/run-result.js";
 import { x86Flags } from "#x86/flags.js";
-import { createCpuState, getFlag, type CpuState } from "#x86/state/cpu-state.js";
-import { reg32 } from "#x86/types.js";
+import type { CpuState } from "#x86/state/cpu-state.js";
+import { reg32, type Reg32 } from "#x86/types.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
 import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import { actionBlockBody, actionBlockCompleted, instantiateActionBlock } from "./harness.js";
+import { aluReference, type AluFlags, type AluOp } from "./reference.js";
 
-const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
 
-// Stage 3's end-to-end slice: ALU r32 forms through the action pipeline with
-// every flag byte checked against the direct backend executing the same
-// decoded instruction on a CpuState. The decoded spec supplies the semantic
-// template to both sides, so the comparison is between the two executions,
-// never between two transcriptions of the instruction.
-
-// All six arithmetic flags set, so every clear is observable.
+// ALU r32 forms through the action pipeline, checked against reference.ts.
 
 // dst=ebx, src=ecx for every form: modrm 0xcb = mod 11, reg ecx, rm ebx.
 const aluCases: readonly Readonly<{
   name: string;
+  op: AluOp;
   bytes: readonly number[];
 }>[] = [
-  { name: "add ebx, ecx", bytes: [0x01, 0xcb] },
-  { name: "or ebx, ecx", bytes: [0x09, 0xcb] },
-  { name: "and ebx, ecx", bytes: [0x21, 0xcb] },
-  { name: "sub ebx, ecx", bytes: [0x29, 0xcb] },
-  { name: "xor ebx, ecx", bytes: [0x31, 0xcb] },
-  { name: "cmp ebx, ecx", bytes: [0x39, 0xcb] },
-  { name: "test ebx, ecx", bytes: [0x85, 0xcb] }
+  { name: "add ebx, ecx", op: "add", bytes: [0x01, 0xcb] },
+  { name: "or ebx, ecx", op: "or", bytes: [0x09, 0xcb] },
+  { name: "and ebx, ecx", op: "and", bytes: [0x21, 0xcb] },
+  { name: "sub ebx, ecx", op: "sub", bytes: [0x29, 0xcb] },
+  { name: "xor ebx, ecx", op: "xor", bytes: [0x31, 0xcb] },
+  { name: "cmp ebx, ecx", op: "cmp", bytes: [0x39, 0xcb] },
+  { name: "test ebx, ecx", op: "test", bytes: [0x85, 0xcb] }
 ];
 
 // Edge values per pair position: zero results, carries, signed overflow in
@@ -55,7 +49,7 @@ const operandPairs: readonly Readonly<{ left: number; right: number }>[] = [
 ];
 
 for (const aluCase of aluCases) {
-  test(`${aluCase.name} matches the direct reference across edge values`, async () => {
+  test(`${aluCase.name} matches the SDM reference across edge values`, async () => {
     for (const pair of operandPairs) {
       const label = `${aluCase.name} with ${hex(pair.left)}, ${hex(pair.right)}`;
       const instruction = ok(decodeBytes(aluCase.bytes));
@@ -65,10 +59,7 @@ for (const aluCase of aluCases) {
         eip: instruction.address,
         ...allFlagsSet
       };
-      const refState = createCpuState(initial);
-      const result = executeDirectInstruction(refState, instruction);
-
-      strictEqual(result.stopReason, StopReason.NONE, label);
+      const reference = aluReference(aluCase.op, 32, pair.left, pair.right);
 
       const builder = createActionBuilder();
 
@@ -81,7 +72,11 @@ for (const aluCase of aluCases) {
 
       writeWasmCpuState(stateView, initial);
       strictEqual(run(), actionBlockCompleted, label);
-      assertMatchesReference(stateView, refState, label);
+      assertState(
+        stateView,
+        { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: reference.flags },
+        label
+      );
     }
   });
 }
@@ -127,27 +122,34 @@ test("two adds in one block store each flag byte once, with the second add's fla
     eip: first.address,
     ...allFlagsSet
   };
-  const refState = createCpuState(initial);
-
-  strictEqual(executeDirectInstruction(refState, first).stopReason, StopReason.NONE);
-  strictEqual(executeDirectInstruction(refState, second).stopReason, StopReason.NONE);
+  // ebx threads through the two adds; the block ends with the second add's flags.
+  const afterFirst = aluReference("add", 32, 0x7fff_fffe, 0x0000_0001);
+  const reference = aluReference("add", 32, afterFirst.result, 0x0000_0001);
 
   const { stateView, run } = await instantiateActionBlock(block);
 
   writeWasmCpuState(stateView, initial);
   strictEqual(run(), actionBlockCompleted);
-  assertMatchesReference(stateView, refState, "two adds");
+  assertState(
+    stateView,
+    { regs: { ebx: reference.result, ecx: 0x0000_0001 }, eip: second.nextEip, flags: reference.flags },
+    "two adds"
+  );
 });
 
-function assertMatchesReference(stateView: DataView, refState: CpuState, label: string): void {
+function assertState(
+  stateView: DataView,
+  expected: Readonly<{ regs: Partial<Record<Reg32, number>>; eip: number; flags: AluFlags }>,
+  label: string
+): void {
   for (const name of reg32) {
-    strictEqual(readWasmStateChannel(stateView, gprChannel(name)), refState[name], `${label} ${name}`);
+    strictEqual(readWasmStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
   }
 
-  strictEqual(readWasmStateChannel(stateView, eipChannel), refState.eip, `${label} eip`);
+  strictEqual(readWasmStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
 
   for (const flag of x86Flags) {
-    strictEqual(readWasmFlagByte(stateView, flag), getFlag(refState, flag) ? 1 : 0, `${label} ${flag}`);
+    strictEqual(readWasmFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
   }
 }
 

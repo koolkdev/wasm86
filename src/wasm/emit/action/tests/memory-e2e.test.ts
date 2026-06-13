@@ -1,50 +1,41 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { executeDirectInstruction } from "#backends/direct/execute.js";
 import { createActionBuilder } from "#ir/action/builder.js";
 import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/action/operands.js";
 import { eipChannel, gprChannel } from "#ir/action/slots.js";
 import type { ActionBlock } from "#ir/action/types.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { StopReason, type RunResult } from "#x86/execution/run-result.js";
 import { x86Flags } from "#x86/flags.js";
-import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
-import { writeGuestU32 } from "#x86/memory/tests/helpers.js";
-import { createCpuState, getFlag, type CpuState } from "#x86/state/cpu-state.js";
-import { reg32, type EffectiveAddress, type MemOperand, type RegName } from "#x86/types.js";
+import type { CpuState } from "#x86/state/cpu-state.js";
+import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
 import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
+import { aluReference, type AluFlags } from "./reference.js";
 
-const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
+const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
 
-// Stage 5's end-to-end slice: memory operands through guards, guest access,
-// and fault edges, with the direct backend executing the same decoded
-// instructions on a CpuState plus an equally sized guest memory as the
-// reference — including the fault path, where 05b's instruction-level
-// atomicity is the contract both sides must meet.
+// Memory cases with explicit state, guest bytes, and fault expectations.
 
-// One wasm page, so the harness guest and the reference memory agree on
-// where faults start.
+// One wasm page, so the first out-of-bounds byte is at guestByteLength.
 const guestByteLength = 0x10000;
-
 
 test("mov r32, [ebx+disp] loads the guest cell", async () => {
   const instruction = ok(decodeBytes([0x8b, 0x43, 0x04]));
   const initial: Partial<CpuState> = { ebx: 0x20, eip: instruction.address, ...allFlagsSet };
-  const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x24, 0x1122_3344, true);
-  writeGuestU32(memory, 0x24, 0x1122_3344);
 
-  strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
   strictEqual(run(), actionBlockCompleted);
-  strictEqual(readRegister(stateView, "eax"), 0x1122_3344);
-  assertMatchesReference(stateView, refState, "mov r32, [ebx+4]");
+  assertState(
+    stateView,
+    { regs: { eax: 0x1122_3344, ebx: 0x20 }, eip: instruction.nextEip, flags: allFlagsSet },
+    "mov r32, [ebx+4]"
+  );
 });
 
 test("mov [ebx+disp], r32 stores the guest cell", async () => {
@@ -55,16 +46,17 @@ test("mov [ebx+disp], r32 stores the guest cell", async () => {
     eip: instruction.address,
     ...allFlagsSet
   };
-  const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
 
-  strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
   strictEqual(run(), actionBlockCompleted);
   strictEqual(guestView.getUint32(0x24, true), 0xcafe_1234);
-  strictEqual(guestView.getUint32(0x24, true), readReferenceU32(memory, 0x24));
-  assertMatchesReference(stateView, refState, "mov [ebx+4], r32");
+  assertState(
+    stateView,
+    { regs: { eax: 0xcafe_1234, ebx: 0x20 }, eip: instruction.nextEip, flags: allFlagsSet },
+    "mov [ebx+4], r32"
+  );
 });
 
 test("add [mem], r32 read-modify-writes the cell with reference flags", async () => {
@@ -73,20 +65,23 @@ test("add [mem], r32 read-modify-writes the cell with reference flags", async ()
   const initial: Partial<CpuState> = {
     eax: 0x20,
     ebx: 0xffff_ffff,
-    eip: instruction.address,
+    eip: instruction.address
   };
-  const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x20, 1, true);
-  writeGuestU32(memory, 0x20, 1);
 
-  strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
+  // dest = [eax] (1), src = ebx (0xffffffff): the cell wraps to zero.
+  const reference = aluReference("add", 32, 1, 0xffff_ffff);
+
   strictEqual(run(), actionBlockCompleted);
-  strictEqual(guestView.getUint32(0x20, true), 0);
-  strictEqual(guestView.getUint32(0x20, true), readReferenceU32(memory, 0x20));
-  assertMatchesReference(stateView, refState, "add [eax], ebx");
+  strictEqual(guestView.getUint32(0x20, true), reference.result);
+  assertState(
+    stateView,
+    { regs: { eax: 0x20, ebx: 0xffff_ffff }, eip: instruction.nextEip, flags: reference.flags },
+    "add [eax], ebx"
+  );
 });
 
 test("add r32, [mem] loads the operand with reference flags", async () => {
@@ -94,20 +89,22 @@ test("add r32, [mem] loads the operand with reference flags", async () => {
   const initial: Partial<CpuState> = {
     eax: 0x20,
     ebx: 0x7fff_ffff,
-    eip: instruction.address,
+    eip: instruction.address
   };
-  const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x20, 1, true);
-  writeGuestU32(memory, 0x20, 1);
 
-  strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
+  // dest = ebx (0x7fffffff), src = [eax] (1): overflows signed, so SF and OF.
+  const reference = aluReference("add", 32, 0x7fff_ffff, 1);
+
   strictEqual(run(), actionBlockCompleted);
-  // 0x7fffffff + 1 overflows signed: SF and OF per the reference.
-  strictEqual(readRegister(stateView, "ebx"), 0x8000_0000);
-  assertMatchesReference(stateView, refState, "add ebx, [eax]");
+  assertState(
+    stateView,
+    { regs: { eax: 0x20, ebx: reference.result }, eip: instruction.nextEip, flags: reference.flags },
+    "add ebx, [eax]"
+  );
 });
 
 test("byte and word guest accesses load and store at their widths", async () => {
@@ -120,23 +117,22 @@ test("byte and word guest accesses load and store at their widths", async () => 
     [0x66, 0xc7, 0x43, 0x02, 0xef, 0xbe]
   ]);
   const initial: Partial<CpuState> = { ebx: 0x20, eip: instructions[0]!.address, ...allFlagsSet };
-  const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x20, 0x1122_33f6, true);
-  writeGuestU32(memory, 0x20, 0x1122_33f6);
-
-  for (const instruction of instructions) {
-    strictEqual(executeDirectInstruction(refState, instruction, { memory }).stopReason, StopReason.NONE);
-  }
 
   strictEqual(run(), actionBlockCompleted);
-  strictEqual(readRegister(stateView, "eax"), 0xf6);
-  strictEqual(readRegister(stateView, "ecx"), 0xffff_fff6);
   strictEqual(guestView.getUint32(0x20, true), 0xbeef_7ff6);
-  strictEqual(guestView.getUint32(0x20, true), readReferenceU32(memory, 0x20));
-  assertMatchesReference(stateView, refState, "byte and word accesses");
+  assertState(
+    stateView,
+    {
+      regs: { eax: 0xf6, ecx: 0xffff_fff6, ebx: 0x20 },
+      eip: instructions[3]!.nextEip,
+      flags: allFlagsSet
+    },
+    "byte and word accesses"
+  );
 });
 
 test("a read fault reports the faulting eip and keeps earlier instructions' state", async () => {
@@ -151,21 +147,21 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
     eip: instructions[0]!.address,
     ...allFlagsSet
   };
-  const { refState, memory } = directReference(initial);
   const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
 
-  strictEqual(executeDirectInstruction(refState, instructions[0]!, { memory }).stopReason, StopReason.NONE);
-
-  const refResult = executeDirectInstruction(refState, instructions[1]!, { memory });
-
-  strictEqual(refResult.stopReason, StopReason.MEMORY_FAULT);
-  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, refResult, "read fault");
-  strictEqual(readRegister(stateView, "ecx"), 0x77);
-  strictEqual(readRegister(stateView, "eax"), 0x1234_5678);
-  strictEqual(readWasmStateChannel(stateView, eipChannel), instructions[1]!.address);
-  assertMatchesReference(stateView, refState, "read fault");
+  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength, 4, "read fault");
+  assertState(
+    stateView,
+    {
+      // ecx is committed; the faulting load leaves eax at its initial value.
+      regs: { ecx: 0x77, eax: 0x1234_5678, ebx: guestByteLength },
+      eip: instructions[1]!.address,
+      flags: allFlagsSet
+    },
+    "read fault"
+  );
 });
 
 test("a write fault leaves guest memory untouched", async () => {
@@ -177,17 +173,17 @@ test("a write fault leaves guest memory untouched", async () => {
     eip: instruction.address,
     ...allFlagsSet
   };
-  const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
 
-  const refResult = executeDirectInstruction(refState, instruction, { memory });
-
-  strictEqual(refResult.stopReason, StopReason.MEMORY_FAULT);
-  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, refResult, "write fault");
+  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "write fault");
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0);
-  assertMatchesReference(stateView, refState, "write fault");
+  assertState(
+    stateView,
+    { regs: { eax: 0xdead_beef, ebx: guestByteLength - 2 }, eip: instruction.address, flags: allFlagsSet },
+    "write fault"
+  );
 });
 
 test("a narrow access faults with its byte length", async () => {
@@ -198,17 +194,16 @@ test("a narrow access faults with its byte length", async () => {
     eip: instruction.address,
     ...allFlagsSet
   };
-  const { refState, memory } = directReference(initial);
   const { stateView, run } = await instantiateActionBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
 
-  const refResult = executeDirectInstruction(refState, instruction, { memory });
-
-  strictEqual(refResult.stopReason, StopReason.MEMORY_FAULT);
-  strictEqual(refResult.faultSize, 1);
-  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, refResult, "byte fault");
-  assertMatchesReference(stateView, refState, "byte fault");
+  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength, 1, "byte fault");
+  assertState(
+    stateView,
+    { regs: { ebx: guestByteLength }, eip: instruction.address, flags: allFlagsSet },
+    "byte fault"
+  );
 });
 
 test("a faulting pop [mem] restores esp to its pre-instruction value", async () => {
@@ -225,25 +220,21 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
     eip: instructions[0]!.address,
     ...allFlagsSet
   };
-  const { refState, memory } = directReference(initial);
   const { stateView, guestView, run } = await instantiateActionBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x20, 0xcafe_1234, true);
-  writeGuestU32(memory, 0x20, 0xcafe_1234);
 
-  strictEqual(executeDirectInstruction(refState, instructions[0]!, { memory }).stopReason, StopReason.NONE);
+  // The add commits esp = 0x20 and its flags before the pop faults.
+  const reference = aluReference("add", 32, 0x1c, 4);
 
-  const refResult = executeDirectInstruction(refState, instructions[1]!, { memory });
-
-  strictEqual(refResult.stopReason, StopReason.MEMORY_FAULT);
-  strictEqual(refState.esp, 0x20);
-
-  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, refResult, "pop [mem] fault");
-  strictEqual(readRegister(stateView, "esp"), 0x20);
-  strictEqual(readWasmStateChannel(stateView, eipChannel), instructions[1]!.address);
+  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "pop [mem] fault");
   strictEqual(guestView.getUint32(0x20, true), 0xcafe_1234);
-  assertMatchesReference(stateView, refState, "pop [mem] fault");
+  assertState(
+    stateView,
+    { regs: { esp: reference.result, ebx: guestByteLength - 2 }, eip: instructions[1]!.address, flags: reference.flags },
+    "pop [mem] fault"
+  );
 });
 
 function blockOf(instructions: readonly IsaDecodedInstruction[]): ActionBlock {
@@ -271,12 +262,6 @@ function decodeSequence(byteLists: readonly (readonly number[])[]): readonly Isa
   }
 
   return instructions;
-}
-
-function directReference(
-  initial: Partial<CpuState>
-): Readonly<{ refState: CpuState; memory: ArrayBufferGuestMemory }> {
-  return { refState: createCpuState(initial), memory: new ArrayBufferGuestMemory(guestByteLength) };
 }
 
 function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBinding[] {
@@ -307,33 +292,26 @@ function effectiveAddressOf(operand: MemOperand): EffectiveAddress {
   };
 }
 
-function readRegister(view: DataView, name: RegName): number {
-  return readWasmStateChannel(view, gprChannel(name));
-}
-
-function readReferenceU32(memory: ArrayBufferGuestMemory, address: number): number {
-  const read = memory.readU32(address);
-
-  strictEqual(read.ok, true, `reference read at ${address}`);
-  return read.ok ? read.value : 0;
-}
-
-function assertFaultExit(exit: bigint, reason: ExitReason, reference: RunResult, label: string): void {
+function assertFaultExit(exit: bigint, reason: ExitReason, address: number, size: number, label: string): void {
   const decoded = decodeExit(exit);
 
   strictEqual(decoded.exitReason, reason, `${label} reason`);
-  strictEqual(decoded.payload, reference.faultAddress, `${label} payload`);
-  strictEqual(decoded.detail, reference.faultSize, `${label} fault size`);
+  strictEqual(decoded.payload, address, `${label} payload`);
+  strictEqual(decoded.detail, size, `${label} fault size`);
 }
 
-function assertMatchesReference(stateView: DataView, refState: CpuState, label: string): void {
+function assertState(
+  stateView: DataView,
+  expected: Readonly<{ regs: Partial<Record<Reg32, number>>; eip: number; flags: AluFlags }>,
+  label: string
+): void {
   for (const name of reg32) {
-    strictEqual(readWasmStateChannel(stateView, gprChannel(name)), refState[name], `${label} ${name}`);
+    strictEqual(readWasmStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
   }
 
-  strictEqual(readWasmStateChannel(stateView, eipChannel), refState.eip, `${label} eip`);
+  strictEqual(readWasmStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
 
   for (const flag of x86Flags) {
-    strictEqual(readWasmFlagByte(stateView, flag), getFlag(refState, flag) ? 1 : 0, `${label} ${flag}`);
+    strictEqual(readWasmFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
   }
 }
