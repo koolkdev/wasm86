@@ -1,6 +1,4 @@
 import { u32 } from "#x86/numeric.js";
-import { buildIr, irBlockTerminator } from "#ir/build/builder.js";
-import type { SemanticOperandInfo } from "#ir/model/types.js";
 import { decodeIsaInstructionFromReader } from "./decode.js";
 import {
   decodeFault,
@@ -10,7 +8,7 @@ import {
   type IsaDecodeFault,
   type IsaDecodeReader
 } from "./reader.js";
-import type { IsaDecodedInstruction, IsaOperandBinding } from "./types.js";
+import type { IsaDecodedInstruction } from "./types.js";
 
 export type IsaDecodedBlock = Readonly<{
   startEip: number;
@@ -58,7 +56,7 @@ export function decodeIsaBlock(
 
     instructions.push(decoded.instruction);
 
-    if (isBlockTerminator(decoded.instruction)) {
+    if (shouldEndDecodedBlock(decoded.instruction)) {
       return { startEip, instructions, terminator: { kind: "control", instruction: decoded.instruction } };
     }
 
@@ -107,21 +105,14 @@ function decodeInstruction(
   }
 }
 
-function isBlockTerminator(instruction: IsaDecodedInstruction): boolean {
-  return irBlockTerminator(buildIr(instruction.spec.semantics, {
-    operandInfo: instruction.operands.map(semanticOperandInfoForBinding)
-  })) !== "next";
-}
-
-function semanticOperandInfoForBinding(binding: IsaOperandBinding): SemanticOperandInfo {
-  switch (binding.kind) {
-    case "reg":
-      return { storage: "reg" };
-    case "mem":
-      return { storage: "mem" };
-    case "imm":
-      return { storage: "imm" };
-    case "relTarget":
-      return { storage: "relTarget" };
+function shouldEndDecodedBlock(instruction: IsaDecodedInstruction): boolean {
+  switch (instruction.spec.mnemonic) {
+    case "call":
+    case "int":
+    case "jmp":
+    case "ret":
+      return true;
+    default:
+      return instruction.spec.mnemonic.startsWith("j");
   }
 }
