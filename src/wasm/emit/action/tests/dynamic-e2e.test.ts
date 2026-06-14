@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder } from "#ir/builder.js";
+import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { regDynamicBinding, immBinding, regBinding } from "#ir/operands.js";
 import { gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
@@ -27,10 +27,7 @@ function assertCompleted(exit: bigint): void {
 test("one add r/m32, r32 body serves several runtime register pairs", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
+  builder.addInstruction(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
 
@@ -58,10 +55,7 @@ test("one add r/m32, r32 body serves several runtime register pairs", async () =
 test("dst == src reads the original value for the result and the flags", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
+  builder.addInstruction(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
 
@@ -82,14 +76,8 @@ test("dst == src reads the original value for the result and the flags", async (
 test("a static read before a dynamic write to the same register keeps the old value", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
-  builder.addInstruction(movSemantic(32), [regDynamicBinding(0), immBinding(0x99)], {
-    eip: 0x1002,
-    nextEip: 0x1008
-  });
+  builder.addInstruction(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], loc(0x1000, 0x1002));
+  builder.addInstruction(movSemantic(32), [regDynamicBinding(0), immBinding(0x99)], loc(0x1002, 0x1008));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 1);
 
@@ -102,10 +90,7 @@ test("a static read before a dynamic write to the same register keeps the old va
 test("xchg r/mDyn, ebx swaps through the dynamic slot", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(xchgSemantic(32), [regDynamicBinding(0), regBinding("ebx")], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
+  builder.addInstruction(xchgSemantic(32), [regDynamicBinding(0), regBinding("ebx")], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 1);
 
@@ -123,10 +108,7 @@ test("xchg r/mDyn, ebx swaps through the dynamic slot", async () => {
 test("one add r/m8, r8 body serves low and high byte registers", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(aluSemantic("add", 8), [regDynamicBinding(0), regDynamicBinding(1)], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
+  builder.addInstruction(aluSemantic("add", 8), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
 
@@ -222,10 +204,7 @@ test("a computed index drives byte access through its two address pushes", async
 test("a 16-bit dynamic access touches two bytes of the indexed word", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(aluSemantic("add", 16), [regDynamicBinding(0), regDynamicBinding(1)], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
+  builder.addInstruction(aluSemantic("add", 16), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
 

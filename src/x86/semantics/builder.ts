@@ -4,17 +4,14 @@ import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type { CompareOperator } from "#x86/semantics/ops.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
 import type {
-  ConstValueRef,
   MemRef,
-  NextEipRef,
   OperandInput,
   OperandRef,
   RegRef,
   StorageInput,
   TargetInput,
-  ValueInput,
-  ValueRef,
-  VarRef
+  Value,
+  ValueInput
 } from "./refs.js";
 
 export type SemanticOperandStorageKind =
@@ -29,14 +26,14 @@ export type SemanticOperandInfo = Readonly<{
 }>;
 
 export type FlagWriteCell =
-  | Readonly<{ kind: "expr"; value: ValueRef }>
+  | Readonly<{ kind: "expr"; value: Value }>
   | Readonly<{ kind: "undef" }>;
 
 export type GetOptions = Readonly<{
   signed?: boolean;
 }>;
 
-export type SemanticOperandInput = number | OperandRef;
+export type SemanticOperandInput = OperandRef;
 
 export interface SemanticBuildContext {
   operandInfo(operand: SemanticOperandInput): SemanticOperandInfo;
@@ -46,34 +43,34 @@ export type SemanticTemplate = (builder: SemanticsBuilder, context: SemanticBuil
 
 export interface SemanticsBuilder {
   operand(index: number): OperandRef;
-  const32(value: number): ConstValueRef;
-  nextEip(): NextEipRef;
+  const32(value: number): Value;
+  nextEip(): Value;
   reg(reg: RegName): RegRef;
   mem(address: ValueInput): MemRef;
 
-  get(source: StorageInput, accessWidth?: OperandWidth, options?: GetOptions): VarRef;
+  get(source: StorageInput, accessWidth?: OperandWidth, options?: GetOptions): Value;
   set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
   memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void;
-  address(operand: OperandInput): VarRef;
+  address(operand: OperandInput): Value;
 
-  i32Add(a: ValueInput, b: ValueInput): VarRef;
-  i32Sub(a: ValueInput, b: ValueInput): VarRef;
-  i32Xor(a: ValueInput, b: ValueInput): VarRef;
-  i32Or(a: ValueInput, b: ValueInput): VarRef;
-  i32And(a: ValueInput, b: ValueInput): VarRef;
-  i32Shl(a: ValueInput, b: ValueInput): VarRef;
-  i32ShrU(a: ValueInput, b: ValueInput): VarRef;
-  i32Extend8S(value: ValueInput): VarRef;
-  i32Extend16S(value: ValueInput): VarRef;
-  i32Popcnt(value: ValueInput): VarRef;
-  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef;
-  project(width: OperandWidth, value: ValueInput): VarRef;
-  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): VarRef;
+  i32Add(a: ValueInput, b: ValueInput): Value;
+  i32Sub(a: ValueInput, b: ValueInput): Value;
+  i32Xor(a: ValueInput, b: ValueInput): Value;
+  i32Or(a: ValueInput, b: ValueInput): Value;
+  i32And(a: ValueInput, b: ValueInput): Value;
+  i32Shl(a: ValueInput, b: ValueInput): Value;
+  i32ShrU(a: ValueInput, b: ValueInput): Value;
+  i32Extend8S(value: ValueInput): Value;
+  i32Extend16S(value: ValueInput): Value;
+  i32Popcnt(value: ValueInput): Value;
+  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value;
+  project(width: OperandWidth, value: ValueInput): Value;
+  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value;
 
   flagExpr(value: ValueInput): FlagWriteCell;
   flagUndef(): FlagWriteCell;
   writeFlags(write: FlagWriteInput): void;
-  condition(cc: ConditionCode): VarRef;
+  condition(cc: ConditionCode): Value;
 
   next(): void;
   jump(target: TargetInput): void;

@@ -8,6 +8,6 @@ export function setccSemantic(cc: ConditionCode): SemanticTemplate {
     const condition = s.condition(cc);
 
     guardStorageWrite(s, context, dst, 8);
-    s.set(dst, s.i32Select(condition, 1, 0), 8);
+    s.set(dst, s.i32Select(condition, s.const32(1), s.const32(0)), 8);
   };
 }

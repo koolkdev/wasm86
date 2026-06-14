@@ -1,4 +1,4 @@
-import { createIrBlockBuilder } from "#ir/builder.js";
+import { createIrBlockBuilder, staticInstructionLocation } from "#ir/builder.js";
 import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import type { IrBlock } from "#ir/block.js";
 import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/decoder/types.js";
@@ -7,10 +7,11 @@ export function buildIrBlock(instructions: readonly IsaDecodedInstruction[]): Ir
   const builder = createIrBlockBuilder();
 
   for (const instruction of instructions) {
-    builder.addInstruction(instruction.spec.semantics, instruction.operands.map(staticBinding), {
-      eip: instruction.address,
-      nextEip: instruction.nextEip
-    });
+    builder.addInstruction(
+      instruction.spec.semantics,
+      instruction.operands.map(staticBinding),
+      staticInstructionLocation(instruction.address, instruction.nextEip)
+    );
   }
 
   return builder.finish();

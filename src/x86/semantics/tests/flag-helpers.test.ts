@@ -86,7 +86,8 @@ test("INC and DEC helpers preserve CF by omitting the CF cell", () => {
   ] as const) {
     const trace = buildHelperTrace((s) => {
       const input = s.get(s.operand(0), 8);
-      const result = name === "inc" ? s.i32Add(input, 1) : s.i32Sub(input, 1);
+      const one = s.const32(1);
+      const result = name === "inc" ? s.i32Add(input, one) : s.i32Sub(input, one);
 
       s.writeFlags(helper(s, { width: 8, input, result }));
     }, regOperands(1));
@@ -104,7 +105,7 @@ test("INC and DEC helpers preserve CF by omitting the CF cell", () => {
 test("NEG helper follows x86 CF and OF rules", () => {
   const trace = buildHelperTrace((s) => {
     const input = s.get(s.operand(0), 8);
-    const result = s.i32Sub(0, input);
+    const result = s.i32Sub(s.const32(0), input);
 
     s.writeFlags(buildNegFlags(s, { width: 8, input, result }));
   }, regOperands(1));
@@ -154,7 +155,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const left = s.get(s.operand(0), 8);
     const right = s.get(s.operand(1), 8);
 
-    addCarryIn = s.compare(8, "ne", left, 0);
+    addCarryIn = s.compare(8, "ne", left, s.const32(0));
     s.writeFlags(buildAddResultAndFlags(s, { width: 8, left, right, carryIn: addCarryIn }).flags);
   });
   const addCf = addTrace.def(flagCell(onlyFlagWrite(addTrace), "CF"));
@@ -172,7 +173,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const left = s.get(s.operand(0), 8);
     const right = s.get(s.operand(1), 8);
 
-    subBorrowIn = s.compare(8, "ne", right, 0);
+    subBorrowIn = s.compare(8, "ne", right, s.const32(0));
     s.writeFlags(buildSubResultAndFlags(s, { width: 8, left, right, borrowIn: subBorrowIn }).flags);
   });
   const subCf = subTrace.def(flagCell(onlyFlagWrite(subTrace), "CF"));

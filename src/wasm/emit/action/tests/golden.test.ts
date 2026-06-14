@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder } from "#ir/builder.js";
+import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
@@ -59,10 +59,7 @@ function blockOf(byteLists: readonly (readonly number[])[]): IrBlock {
   for (const bytes of byteLists) {
     const instruction = address === undefined ? ok(decodeBytes(bytes)) : ok(decodeBytes(bytes, address));
 
-    builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), {
-      eip: instruction.address,
-      nextEip: instruction.nextEip
-    });
+    builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
     address = instruction.nextEip;
   }
 

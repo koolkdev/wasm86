@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { createIrBlockBuilder } from "#ir/builder.js";
+import { createIrBlockBuilder, externalInstructionLocation } from "#ir/builder.js";
 import {
   immExternalBinding,
   memDynamicBinding,
@@ -73,10 +73,14 @@ export function emitInstructionHandler(
 
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(instruction.spec.semantics, bindings, {
-    eip: { external: externals.bind(context.locals.eip) },
-    nextEip: { external: externals.bind(context.locals.nextEip) }
-  });
+  builder.addInstruction(
+    instruction.spec.semantics,
+    bindings,
+    externalInstructionLocation(
+      externals.bind(context.locals.eip),
+      externals.bind(context.locals.nextEip)
+    )
+  );
   emitActionFragment(builder.finish(), {
     body: context.body,
     scratch: context.scratch,

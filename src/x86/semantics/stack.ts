@@ -1,10 +1,10 @@
 import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
-import type { OperandRef, StorageInput, ValueInput, VarRef } from "#x86/semantics/refs.js";
+import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
 export function push32(s: SemanticsBuilder, context: SemanticBuildContext, value: ValueInput): void {
   const esp = s.get(s.reg("esp"));
-  const nextEsp = s.i32Sub(esp, 4);
+  const nextEsp = s.i32Sub(esp, s.const32(4));
   const stack = s.mem(nextEsp);
 
   guardStorageWrite(s, context, stack, 32);
@@ -12,13 +12,13 @@ export function push32(s: SemanticsBuilder, context: SemanticBuildContext, value
   s.set(s.reg("esp"), nextEsp);
 }
 
-export function pop32(s: SemanticsBuilder, context: SemanticBuildContext): VarRef {
+export function pop32(s: SemanticsBuilder, context: SemanticBuildContext): Value {
   const esp = s.get(s.reg("esp"));
   const stack = s.mem(esp);
 
   guardStorageRead(s, context, stack, 32);
   const value = s.get(stack);
-  const nextEsp = s.i32Add(esp, 4);
+  const nextEsp = s.i32Add(esp, s.const32(4));
 
   s.set(s.reg("esp"), nextEsp);
   return value;
@@ -51,7 +51,7 @@ export function leaveSemantic(): SemanticTemplate {
 
     guardStorageRead(s, context, savedFrameStorage, 32);
     const savedFrame = s.get(savedFrameStorage);
-    const nextEsp = s.i32Add(frame, 4);
+    const nextEsp = s.i32Add(frame, s.const32(4));
 
     s.set(s.reg("esp"), nextEsp);
     s.set(s.reg("ebp"), savedFrame);

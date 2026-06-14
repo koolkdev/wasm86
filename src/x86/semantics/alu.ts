@@ -1,5 +1,5 @@
 import type { SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
-import type { ValueRef } from "#x86/semantics/refs.js";
+import type { Value } from "#x86/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import {
   buildAddResultAndFlags,
@@ -67,8 +67,8 @@ function aluResultAndFlags(
   s: SemanticsBuilder,
   op: AluOp,
   width: OperandWidth,
-  left: ValueRef,
-  right: ValueRef
+  left: Value,
+  right: Value
 ): ResultAndFlags {
   switch (op) {
     case "add":

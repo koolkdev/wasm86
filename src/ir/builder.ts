@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
 import type { X86Flag } from "#x86/flags.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
-import { const32, varRef, mem, nextEip, operand, reg, toStorageRef, toValueRef } from "#x86/semantics/refs.js";
+import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
   SemanticsBuilder,
   FlagWriteCell,
@@ -14,16 +14,14 @@ import type {
   SemanticTemplate
 } from "#x86/semantics/builder.js";
 import type {
-  ConstValueRef,
   MemRef,
-  NextEipRef,
   OperandInput,
   OperandRef,
   RegRef,
   StorageInput,
   TargetInput,
-  ValueInput,
-  VarRef
+  Value,
+  ValueInput
 } from "#x86/semantics/refs.js";
 import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
 import { signedComparePredicates, type BinaryOperator, type CompareOperator, type UnaryOperator } from "#x86/semantics/ops.js";
@@ -58,11 +56,19 @@ import {
   type WidthBounds
 } from "./values.js";
 
-// A location value is a compile-time constant (block compilation) or an
-// external supplied by the host function (interpreter dispatch).
-export type LocationValue = number | Readonly<{ external: ExternalValueId }>;
+// Instruction addresses are known at block-compile time for JIT blocks, but
+// interpreter handlers receive them from host locals so one handler can serve
+// many decoded instructions.
+export type InstructionAddressSource =
+  | Readonly<{ kind: "const"; address: number }>
+  | Readonly<{ kind: "external"; external: ExternalValueId }>;
 
-export type InstructionLocation = Readonly<{ eip: LocationValue; nextEip: LocationValue }>;
+export type InstructionLocation = Readonly<{
+  eip: InstructionAddressSource;
+  nextEip: InstructionAddressSource;
+}>;
+
+type InternedInstructionLocation = Readonly<{ eip(): ValueId; nextEip(): ValueId }>;
 
 export type IrBlockBuilder = Readonly<{
   addInstruction(
@@ -82,7 +88,28 @@ export function createIrBlockBuilder(): IrBlockBuilder {
   };
 }
 
+export function staticInstructionLocation(eip: number, nextEip: number): InstructionLocation {
+  return {
+    eip: { kind: "const", address: eip },
+    nextEip: { kind: "const", address: nextEip }
+  };
+}
+
+export function externalInstructionLocation(
+  eip: ExternalValueId,
+  nextEip: ExternalValueId
+): InstructionLocation {
+  return {
+    eip: { kind: "external", external: eip },
+    nextEip: { kind: "external", external: nextEip }
+  };
+}
+
 const entryRegionId: RegionId = 0;
+
+function valueFromId(id: ValueId): Value {
+  return id as Value;
+}
 
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = createValueTable();
@@ -100,7 +127,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #operandAddresses = new Map<number, ValueId>();
   #nextRegionId: RegionId = entryRegionId + 1;
   #bindings: readonly OperandBinding[] = [];
-  #instruction: InstructionLocation | undefined;
+  #instructionLocation: InternedInstructionLocation | undefined;
   #instructionCountBase: ValueId | undefined;
   #instructionsCompleted = 0;
   #terminated = false;
@@ -116,11 +143,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   ): void {
     assert(!this.#finished, "cannot add instructions to a finished IR block builder");
     assert(this.#blockEnd === "fallthrough", "cannot add instructions after a block terminator");
-    assert(this.#instruction === undefined, "IR block builder has an incomplete instruction");
+    assert(this.#instructionLocation === undefined, "IR block builder has an incomplete instruction");
 
     this.#bindings = bindings;
     this.#operandAddresses.clear();
-    this.#instruction = location;
+    this.#instructionLocation = this.#internLocation(location);
     this.#terminated = false;
     this.#wroteMemory = false;
     this.#pending.beginInstruction();
@@ -133,13 +160,13 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     // Cleared only on success: a template that throws leaves the instruction
     // in place with its partial pendings, poisoning further use.
-    this.#instruction = undefined;
+    this.#instructionLocation = undefined;
     this.#bindings = [];
   }
 
   finish(): IrBlock {
     assert(!this.#finished, "IR block builder is already finished");
-    assert(this.#instruction === undefined, "IR block builder has an incomplete instruction");
+    assert(this.#instructionLocation === undefined, "IR block builder has an incomplete instruction");
     this.#finished = true;
 
     let continuation: ValueId | undefined;
@@ -172,8 +199,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   operandInfo(operandInput: SemanticOperandInput): SemanticOperandInfo {
-    const index = typeof operandInput === "number" ? operandInput : operandInput.index;
-    const binding = this.#binding(index);
+    const binding = this.#binding(operandInput.index);
 
     switch (binding.kind) {
       case "reg":
@@ -198,12 +224,14 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return operand(index);
   }
 
-  const32(value: number): ConstValueRef {
-    return const32(value);
+  const32(value: number): Value {
+    this.#beforeOp("const32");
+    return valueFromId(this.#values.internConst(value));
   }
 
-  nextEip(): NextEipRef {
-    return nextEip();
+  nextEip(): Value {
+    this.#beforeOp("nextEip");
+    return valueFromId(this.#location().nextEip());
   }
 
   reg(regInput: RegName): RegRef {
@@ -214,31 +242,33 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return mem(address);
   }
 
-  get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): VarRef {
+  get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): Value {
     this.#beforeOp("get");
     const storage = toStorageRef(source);
 
     switch (storage.kind) {
       case "reg":
-        return varRef(this.#readChannel(gprChannel(storage.reg), accessWidth, options));
+        return valueFromId(this.#readChannel(gprChannel(storage.reg), accessWidth, options));
       case "mem":
-        return varRef(this.#readMemory(this.#valueId(storage.address), accessWidth, options));
+        return valueFromId(this.#readMemory(storage.address, accessWidth, options));
       case "operand": {
         const binding = this.#binding(storage.index);
 
         switch (binding.kind) {
           case "imm":
-            return varRef(this.#widthAdjusted(this.#values.internConst(binding.value), accessWidth, options));
+            return valueFromId(this.#widthAdjusted(this.#values.internConst(binding.value), accessWidth, options));
           case "immExternal":
-            return varRef(this.#widthAdjusted(this.#values.internExternal(binding.value), accessWidth, options));
+            return valueFromId(this.#widthAdjusted(this.#values.internExternal(binding.value), accessWidth, options));
           case "reg":
-            return varRef(this.#readChannel(binding.channel, accessWidth, options));
+            return valueFromId(this.#readChannel(binding.channel, accessWidth, options));
           case "mem":
           case "memStatic":
           case "memDynamic":
-            return varRef(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
+            return valueFromId(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
           case "regDynamic":
-            return varRef(this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options));
+            return valueFromId(
+              this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options)
+            );
         }
       }
     }
@@ -253,7 +283,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         this.#writeChannel(gprChannel(storage.reg), value, accessWidth);
         return;
       case "mem":
-        this.#writeMemory(this.#valueId(storage.address), value, accessWidth);
+        this.#writeMemory(storage.address, value, accessWidth);
         return;
       case "operand": {
         const binding = this.#binding(storage.index);
@@ -268,7 +298,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
             this.#writeMemory(this.#operandAddress(storage.index), value, accessWidth);
             return;
           case "regDynamic":
-            this.#pending.writeDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), this.#valueId(value));
+            this.#pending.writeDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), value);
             return;
           case "imm":
           case "immExternal":
@@ -281,7 +311,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   next(): void {
     this.#beforeOp("next");
     this.#advanceInstructionCount();
-    this.#pending.write(eipChannel, this.#locationValueId(this.#location().nextEip));
+    this.#pending.write(eipChannel, this.#location().nextEip());
     this.#terminated = true;
   }
 
@@ -291,7 +321,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     // cannot restore the pre-instruction state once the instruction stored.
     assert(!this.#wroteMemory, "a memory guard cannot follow a memory write in the same instruction");
 
-    const addressId = this.#valueId(address);
+    const addressId = address;
 
     this.#actions.push({
       kind: "guardMemory",
@@ -302,66 +332,64 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     });
   }
 
-  address(operandRef: OperandInput): VarRef {
+  address(operandRef: OperandInput): Value {
     this.#beforeOp("address");
-    return varRef(this.#operandAddress(operandRef.index));
+    return valueFromId(this.#operandAddress(operandRef.index));
   }
 
-  i32Add(a: ValueInput, b: ValueInput): VarRef {
+  i32Add(a: ValueInput, b: ValueInput): Value {
     return this.#binary("i32Add", "add", a, b);
   }
 
-  i32Sub(a: ValueInput, b: ValueInput): VarRef {
+  i32Sub(a: ValueInput, b: ValueInput): Value {
     return this.#binary("i32Sub", "sub", a, b);
   }
 
-  i32Xor(a: ValueInput, b: ValueInput): VarRef {
+  i32Xor(a: ValueInput, b: ValueInput): Value {
     return this.#binary("i32Xor", "xor", a, b);
   }
 
-  i32Or(a: ValueInput, b: ValueInput): VarRef {
+  i32Or(a: ValueInput, b: ValueInput): Value {
     return this.#binary("i32Or", "or", a, b);
   }
 
-  i32And(a: ValueInput, b: ValueInput): VarRef {
+  i32And(a: ValueInput, b: ValueInput): Value {
     return this.#binary("i32And", "and", a, b);
   }
 
-  i32Shl(a: ValueInput, b: ValueInput): VarRef {
+  i32Shl(a: ValueInput, b: ValueInput): Value {
     return this.#binary("i32Shl", "shl", a, b);
   }
 
-  i32ShrU(a: ValueInput, b: ValueInput): VarRef {
+  i32ShrU(a: ValueInput, b: ValueInput): Value {
     return this.#binary("i32ShrU", "shr_u", a, b);
   }
 
-  i32Extend8S(value: ValueInput): VarRef {
+  i32Extend8S(value: ValueInput): Value {
     this.#beforeOp("i32Extend8S");
-    return varRef(this.#values.extendTo(8, this.#valueId(value)));
+    return valueFromId(this.#values.extendTo(8, value));
   }
 
-  i32Extend16S(value: ValueInput): VarRef {
+  i32Extend16S(value: ValueInput): Value {
     this.#beforeOp("i32Extend16S");
-    return varRef(this.#values.extendTo(16, this.#valueId(value)));
+    return valueFromId(this.#values.extendTo(16, value));
   }
 
-  i32Popcnt(value: ValueInput): VarRef {
+  i32Popcnt(value: ValueInput): Value {
     return this.#unary("i32Popcnt", "popcnt", value);
   }
 
-  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef {
+  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
     this.#beforeOp("i32Select");
-    return varRef(
-      this.#values.internSelect(this.#valueId(condition), this.#valueId(whenTrue), this.#valueId(whenFalse))
-    );
+    return valueFromId(this.#values.internSelect(condition, whenTrue, whenFalse));
   }
 
-  project(width: OperandWidth, value: ValueInput): VarRef {
+  project(width: OperandWidth, value: ValueInput): Value {
     this.#beforeOp("project");
-    return varRef(this.#values.projectTo(width, this.#valueId(value)));
+    return valueFromId(this.#values.projectTo(width, value));
   }
 
-  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): VarRef {
+  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
     this.#beforeOp("compare");
     // Narrow compares lower by predicate class: signed predicates need
     // sign-extended operands, the rest masked ones.
@@ -369,13 +397,13 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       ? (id: ValueId) => this.#values.extendTo(width, id)
       : (id: ValueId) => this.#values.projectTo(width, id);
 
-    return varRef(
-      this.#values.internCompare(operator, lower(this.#valueId(a)), lower(this.#valueId(b)))
+    return valueFromId(
+      this.#values.internCompare(operator, lower(a), lower(b))
     );
   }
 
   flagExpr(value: ValueInput): FlagWriteCell {
-    return { kind: "expr", value: toValueRef(value) };
+    return { kind: "expr", value };
   }
 
   flagUndef(): FlagWriteCell {
@@ -389,7 +417,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       // undef -> preserve: any value is architecturally allowed, so keeping
       // the old one is free and kills the write.
       if (cell.kind === "expr") {
-        this.#pending.write(flagChannel(flag), this.#valueId(cell.value));
+        this.#pending.write(flagChannel(flag), cell.value);
       }
     }
 
@@ -397,27 +425,27 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     if (write.conditions !== undefined) {
       for (const [cc, value] of Object.entries(write.conditions) as [ConditionCode, ValueInput][]) {
-        this.#conditions.set(cc, this.#valueId(value));
+        this.#conditions.set(cc, value);
       }
     }
   }
 
-  condition(cc: ConditionCode): VarRef {
+  condition(cc: ConditionCode): Value {
     this.#beforeOp("condition");
 
     const recorded = this.#conditions.get(cc);
 
     if (recorded !== undefined) {
-      return varRef(recorded);
+      return valueFromId(recorded);
     }
 
-    return varRef(this.#flagBoolExpr(CONDITIONS[cc].expr));
+    return valueFromId(this.#flagBoolExpr(CONDITIONS[cc].expr));
   }
 
   jump(target: TargetInput): void {
     this.#beforeOp("jump");
     this.#advanceInstructionCount();
-    this.#pending.write(eipChannel, this.#valueId(target));
+    this.#pending.write(eipChannel, target);
     this.#blockEnd = "jump";
     this.#terminated = true;
   }
@@ -426,7 +454,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#beforeOp("conditionalJump");
     this.#advanceInstructionCount();
 
-    const conditionId = this.#valueId(condition);
+    const conditionId = condition;
 
     this.#actions.push({
       kind: "branch",
@@ -443,23 +471,23 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#beforeOp("hostTrap");
     this.#advanceInstructionCount();
 
-    const vectorId = this.#valueId(vector);
+    const vectorId = vector;
 
-    this.#pending.write(eipChannel, this.#locationValueId(this.#location().nextEip));
+    this.#pending.write(eipChannel, this.#location().nextEip());
     this.#pending.flushAll();
     this.#actions.push({ kind: "exit", reason: "hostTrap", payload: vectorId });
     this.#blockEnd = "terminated";
     this.#terminated = true;
   }
 
-  #binary(op: string, operator: BinaryOperator, a: ValueInput, b: ValueInput): VarRef {
+  #binary(op: string, operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
     this.#beforeOp(op);
-    return varRef(this.#values.internBinary(operator, this.#valueId(a), this.#valueId(b)));
+    return valueFromId(this.#values.internBinary(operator, a, b));
   }
 
-  #unary(op: string, operator: UnaryOperator, value: ValueInput): VarRef {
+  #unary(op: string, operator: UnaryOperator, value: ValueInput): Value {
     this.#beforeOp(op);
-    return varRef(this.#values.internUnary(operator, this.#valueId(value)));
+    return valueFromId(this.#values.internUnary(operator, value));
   }
 
   // Flag channel values are 0/1 bytes, so the boolean algebra is plain
@@ -485,14 +513,14 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return this.#edgeRegion(
       { kind: "exit", reason, payload: address },
       this.#pending.snapshot(),
-      this.#locationValueId(this.#location().eip)
+      this.#location().eip()
     );
   }
 
   // Branch edges observe the completed instruction, so they flush live
   // pendings.
   #branchEdge(target: TargetInput): RegionId {
-    return this.#edgeRegion({ kind: "continue" }, this.#pending.entries(), this.#valueId(target));
+    return this.#edgeRegion({ kind: "continue" }, this.#pending.entries(), target);
   }
 
   #edgeRegion(
@@ -560,12 +588,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       : this.#values.projectTo(accessWidth, value);
   }
 
-  #locationValueId(value: LocationValue): ValueId {
-    return typeof value === "number"
-      ? this.#values.internConst(value)
-      : this.#values.internExternal(value.external);
-  }
-
   #readChannel(channel: GprChannel, accessWidth: OperandWidth, options: GetOptions): ValueId {
     assert(
       channel.byteLength * 8 === accessWidth,
@@ -579,7 +601,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       channel.byteLength * 8 === accessWidth,
       `${accessWidth}-bit set to a ${channel.byteLength * 8}-bit register channel`
     );
-    this.#pending.write(channel, this.#valueId(value));
+    this.#pending.write(channel, value);
   }
 
   #readMemory(address: ValueId, width: OperandWidth, options: GetOptions): ValueId {
@@ -597,7 +619,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   #writeMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
     this.#wroteMemory = true;
-    this.#actions.push({ kind: "writeMemory", address, value: this.#valueId(value), width });
+    this.#actions.push({ kind: "writeMemory", address, value, width });
   }
 
   #operandAddress(index: number): ValueId {
@@ -665,21 +687,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       : this.#values.internBinary("add", address, this.#values.internConst(ea.disp));
   }
 
-  #valueId(input: ValueInput): ValueId {
-    const value = toValueRef(input);
-
-    switch (value.kind) {
-      case "const":
-        return this.#values.internConst(value.value);
-      case "nextEip":
-        return this.#locationValueId(this.#location().nextEip);
-      case "var": {
-        this.#values.node(value.id);
-        return value.id;
-      }
-    }
-  }
-
   #binding(index: number): OperandBinding {
     const binding = this.#bindings[index];
 
@@ -687,9 +694,35 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return binding;
   }
 
-  #location(): InstructionLocation {
-    assert(this.#instruction !== undefined, "IR block builder has no current instruction");
-    return this.#instruction;
+  #internLocation(location: InstructionLocation): InternedInstructionLocation {
+    return {
+      eip: this.#internLocationValue(location.eip),
+      nextEip: this.#internLocationValue(location.nextEip)
+    };
+  }
+
+  #internLocationValue(source: InstructionAddressSource): () => ValueId {
+    let interned: ValueId | undefined;
+
+    return () => {
+      if (interned !== undefined) {
+        return interned;
+      }
+
+      switch (source.kind) {
+        case "const":
+          interned = this.#values.internConst(source.address);
+          return interned;
+        case "external":
+          interned = this.#values.internExternal(source.external);
+          return interned;
+      }
+    };
+  }
+
+  #location(): InternedInstructionLocation {
+    assert(this.#instructionLocation !== undefined, "IR block builder has no current instruction");
+    return this.#instructionLocation;
   }
 
   #beforeOp(op: string): void {

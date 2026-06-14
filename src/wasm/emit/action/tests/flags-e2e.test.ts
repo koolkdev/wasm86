@@ -1,7 +1,7 @@
 import { ok as assertOk, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder } from "#ir/builder.js";
+import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { WriteStateAction } from "#ir/actions.js";
@@ -63,10 +63,7 @@ for (const aluCase of aluCases) {
 
       const builder = createIrBlockBuilder();
 
-      builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), {
-        eip: instruction.address,
-        nextEip: instruction.nextEip
-      });
+      builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
 
       const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -88,14 +85,8 @@ test("two adds in one block store each flag byte once, with the second add's fla
   const second = ok(decodeBytes([0x01, 0xcb], first.nextEip));
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(first.spec.semantics, bindingsFor(first), {
-    eip: first.address,
-    nextEip: first.nextEip
-  });
-  builder.addInstruction(second.spec.semantics, bindingsFor(second), {
-    eip: second.address,
-    nextEip: second.nextEip
-  });
+  builder.addInstruction(first.spec.semantics, bindingsFor(first), loc(first.address, first.nextEip));
+  builder.addInstruction(second.spec.semantics, bindingsFor(second), loc(second.address, second.nextEip));
 
   const block = builder.finish();
 

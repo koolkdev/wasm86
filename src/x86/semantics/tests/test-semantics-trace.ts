@@ -1,6 +1,6 @@
 import { strictEqual } from "node:assert";
 
-import { const32, mem, nextEip, operand, reg, toValueRef } from "#x86/semantics/refs.js";
+import { mem, operand, reg } from "#x86/semantics/refs.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type {
@@ -15,17 +15,14 @@ import type {
   SemanticTemplate
 } from "#x86/semantics/builder.js";
 import type {
-  ConstValueRef,
   MemRef,
-  NextEipRef,
   OperandInput,
   OperandRef,
   RegRef,
   StorageInput,
   TargetInput,
-  ValueInput,
-  ValueRef,
-  VarRef
+  Value,
+  ValueInput
 } from "#x86/semantics/refs.js";
 import type { X86Flag } from "#x86/flags.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
@@ -57,7 +54,7 @@ export function regOperands(count: number): readonly SemanticOperandInfo[] {
   return Array.from({ length: count }, () => ({ storage: "reg" as const }));
 }
 
-export function flagCell(write: FlagWriteInput, flag: X86Flag): ValueRef {
+export function flagCell(write: FlagWriteInput, flag: X86Flag): Value {
   const cell = write.cells[flag];
 
   strictEqual(cell?.kind, "expr", `expected ${flag} expr cell`);
@@ -82,6 +79,11 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
   readonly #defs: string[] = [];
   readonly #flagWrites: FlagWriteInput[] = [];
   readonly #operandInfo: readonly SemanticOperandInfo[];
+  readonly #constValues = new Map<number, Value>();
+  readonly #inlineValues = new Map<Value, string>();
+  readonly #displayValues = new Map<Value, number>();
+  #nextEipValue: Value | undefined;
+  #nextValueId = 0;
   #terminated = false;
 
   constructor(operandInfo: readonly SemanticOperandInfo[]) {
@@ -92,12 +94,31 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return operand(index);
   }
 
-  const32(value: number): ConstValueRef {
-    return const32(value);
+  const32(value: number): Value {
+    const canonical = value >>> 0;
+    const existing = this.#constValues.get(canonical);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const handle = this.#allocateValue();
+
+    this.#constValues.set(canonical, handle);
+    this.#inlineValues.set(handle, `${canonical}`);
+    return handle;
   }
 
-  nextEip(): NextEipRef {
-    return nextEip();
+  nextEip(): Value {
+    if (this.#nextEipValue !== undefined) {
+      return this.#nextEipValue;
+    }
+
+    const handle = this.#allocateValue();
+
+    this.#nextEipValue = handle;
+    this.#inlineValues.set(handle, "nextEip");
+    return handle;
   }
 
   reg(regInput: RegName): RegRef {
@@ -109,7 +130,7 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
   }
 
   operandInfo(operandInput: SemanticOperandInput): SemanticOperandInfo {
-    const index = typeof operandInput === "number" ? operandInput : operandInput.index;
+    const index = operandInput.index;
     const info = this.#operandInfo[index];
 
     if (info === undefined) {
@@ -119,12 +140,12 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return info;
   }
 
-  get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): VarRef {
+  get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): Value {
     const out = this.#alloc(
       `get ${this.#storage(source)}:${accessWidth}${options.signed === true ? ":signed" : ""}`
     );
 
-    this.#emit(`${this.#def(out)} = ${this.#defs[out.id]}`);
+    this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
     return out;
   }
 
@@ -136,69 +157,69 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     this.#emit(`guard ${access} ${this.#value(address)}:${byteLength}`);
   }
 
-  address(operandRef: OperandInput): VarRef {
+  address(operandRef: OperandInput): Value {
     const out = this.#alloc(`addr ${this.#storage(operandRef)}`);
 
-    this.#emit(`${this.#def(out)} = ${this.#defs[out.id]}`);
+    this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
     return out;
   }
 
-  i32Add(a: ValueInput, b: ValueInput): VarRef {
+  i32Add(a: ValueInput, b: ValueInput): Value {
     return this.#binary("add", a, b);
   }
 
-  i32Sub(a: ValueInput, b: ValueInput): VarRef {
+  i32Sub(a: ValueInput, b: ValueInput): Value {
     return this.#binary("sub", a, b);
   }
 
-  i32Xor(a: ValueInput, b: ValueInput): VarRef {
+  i32Xor(a: ValueInput, b: ValueInput): Value {
     return this.#binary("xor", a, b);
   }
 
-  i32Or(a: ValueInput, b: ValueInput): VarRef {
+  i32Or(a: ValueInput, b: ValueInput): Value {
     return this.#binary("or", a, b);
   }
 
-  i32And(a: ValueInput, b: ValueInput): VarRef {
+  i32And(a: ValueInput, b: ValueInput): Value {
     return this.#binary("and", a, b);
   }
 
-  i32Shl(a: ValueInput, b: ValueInput): VarRef {
+  i32Shl(a: ValueInput, b: ValueInput): Value {
     return this.#binary("shl", a, b);
   }
 
-  i32ShrU(a: ValueInput, b: ValueInput): VarRef {
+  i32ShrU(a: ValueInput, b: ValueInput): Value {
     return this.#binary("shr_u", a, b);
   }
 
-  i32Extend8S(value: ValueInput): VarRef {
+  i32Extend8S(value: ValueInput): Value {
     return this.#unary("extend8_s", value);
   }
 
-  i32Extend16S(value: ValueInput): VarRef {
+  i32Extend16S(value: ValueInput): Value {
     return this.#unary("extend16_s", value);
   }
 
-  i32Popcnt(value: ValueInput): VarRef {
+  i32Popcnt(value: ValueInput): Value {
     return this.#unary("popcnt", value);
   }
 
-  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef {
+  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
     return this.#alloc(
       `select(${this.#value(condition)}, ${this.#value(whenTrue)}, ${this.#value(whenFalse)})`
     );
   }
 
-  project(width: OperandWidth, value: ValueInput): VarRef {
+  project(width: OperandWidth, value: ValueInput): Value {
     return this.#alloc(`project${width}(${this.#value(value)})`);
   }
 
-  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): VarRef {
+  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
     return this.#alloc(`cmp${width}.${operator}(${this.#value(a)}, ${this.#value(b)})`);
   }
 
   flagExpr(value: ValueInput): FlagWriteCell {
-    return { kind: "expr", value: toValueRef(value) };
+    return { kind: "expr", value };
   }
 
   flagUndef(): FlagWriteCell {
@@ -210,7 +231,7 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
 
     for (const [flag, cell] of Object.entries(write.cells) as [X86Flag, FlagWriteCell][]) {
       cells[flag] = cell.kind === "expr"
-        ? { kind: "expr", value: toValueRef(cell.value) }
+        ? { kind: "expr", value: cell.value }
         : { kind: "undef" };
     }
 
@@ -218,19 +239,17 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
       ? { cells }
       : {
           cells,
-          conditions: Object.fromEntries(
-            Object.entries(write.conditions).map(([cc, value]) => [cc, toValueRef(value)])
-          )
+          conditions: { ...write.conditions }
         };
 
     this.#flagWrites.push(copied);
     this.#emit(`flags ${Object.keys(cells).sort().join(",")}`);
   }
 
-  condition(cc: ConditionCode): VarRef {
+  condition(cc: ConditionCode): Value {
     const out = this.#alloc(`condition ${cc}`);
 
-    this.#emit(`${this.#def(out)} = ${this.#defs[out.id]}`);
+    this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
     return out;
   }
 
@@ -266,17 +285,18 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     };
   }
 
-  #binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): VarRef {
+  #binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
     return this.#alloc(`${operator}(${this.#value(a)}, ${this.#value(b)})`);
   }
 
-  #unary(operator: UnaryOperator, value: ValueInput): VarRef {
+  #unary(operator: UnaryOperator, value: ValueInput): Value {
     return this.#alloc(`${operator}(${this.#value(value)})`);
   }
 
-  #alloc(definition: string): VarRef {
-    const out: VarRef = { kind: "var", id: this.#defs.length };
+  #alloc(definition: string): Value {
+    const out = this.#allocateValue();
 
+    this.#displayValues.set(out, this.#defs.length);
     this.#defs.push(definition);
     return out;
   }
@@ -306,35 +326,45 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
   }
 
   #value(input: ValueInput): string {
-    const value = toValueRef(input);
+    const inline = this.#inlineValues.get(input);
 
-    switch (value.kind) {
-      case "const":
-        return `${value.value}`;
-      case "nextEip":
-        return "nextEip";
-      case "var":
-        return this.#def(value);
+    if (inline !== undefined) {
+      return inline;
     }
+
+    return `%${this.#display(input)}`;
   }
 
   #definition(input: ValueInput): string {
-    const value = toValueRef(input);
+    const inline = this.#inlineValues.get(input);
 
-    if (value.kind !== "var") {
-      return this.#value(value);
+    if (inline !== undefined) {
+      return inline;
     }
 
-    const definition = this.#defs[value.id];
+    const definition = this.#defs[this.#display(input)];
 
     if (definition === undefined) {
-      throw new Error(`missing definition for ${this.#def(value)}`);
+      throw new Error(`missing definition for ${this.#value(input)}`);
     }
 
     return definition;
   }
 
-  #def(value: VarRef): string {
-    return `%${value.id}`;
+  #display(value: Value): number {
+    const display = this.#displayValues.get(value);
+
+    if (display === undefined) {
+      throw new Error(`unknown value ${value}`);
+    }
+
+    return display;
+  }
+
+  #allocateValue(): Value {
+    const handle = this.#nextValueId as Value;
+
+    this.#nextValueId += 1;
+    return handle;
   }
 }

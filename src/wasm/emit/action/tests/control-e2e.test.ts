@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder } from "#ir/builder.js";
+import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
@@ -147,10 +147,7 @@ function blockOf(instructions: readonly IsaDecodedInstruction[]): IrBlock {
   const builder = createIrBlockBuilder();
 
   for (const instruction of instructions) {
-    builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), {
-      eip: instruction.address,
-      nextEip: instruction.nextEip
-    });
+    builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
   }
 
   return builder.finish();

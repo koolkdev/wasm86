@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, type IrBlockBuilder } from "#ir/builder.js";
+import { createIrBlockBuilder, staticInstructionLocation as loc, type IrBlockBuilder } from "#ir/builder.js";
 import { immBinding, regBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Action, StateSlot } from "#ir/actions.js";
@@ -45,10 +45,7 @@ function assertCompleted(exit: bigint): void {
 test("mov r32, imm32 sets the register bytes and eip and falls through", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], {
-    eip: 0x401000,
-    nextEip: 0x401005
-  });
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], loc(0x401000, 0x401005));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -60,10 +57,7 @@ test("mov r32, imm32 sets the register bytes and eip and falls through", async (
 test("mov r32, r32 copies the source register and leaves it intact", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
+  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -78,8 +72,8 @@ test("chained movs forward one read to both destinations", async () => {
   const builder = createIrBlockBuilder();
   const mov = movSemantic(32);
 
-  builder.addInstruction(mov, [regBinding("ebx"), regBinding("eax")], { eip: 0x1000, nextEip: 0x1002 });
-  builder.addInstruction(mov, [regBinding("ecx"), regBinding("ebx")], { eip: 0x1002, nextEip: 0x1004 });
+  builder.addInstruction(mov, [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
+  builder.addInstruction(mov, [regBinding("ecx"), regBinding("ebx")], loc(0x1002, 0x1004));
 
   const block = builder.finish();
 
@@ -103,10 +97,7 @@ test("chained movs forward one read to both destinations", async () => {
 test("xchg eax, ebx swaps the registers", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
+  builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -121,14 +112,8 @@ test("xchg eax, ebx swaps the registers", async () => {
 test("a mov before the xchg observes the pre-swap value", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(32), [regBinding("ecx"), regBinding("eax")], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
-  builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], {
-    eip: 0x1002,
-    nextEip: 0x1004
-  });
+  builder.addInstruction(movSemantic(32), [regBinding("ecx"), regBinding("eax")], loc(0x1000, 0x1002));
+  builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1002, 0x1004));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -142,14 +127,8 @@ test("a mov before the xchg observes the pre-swap value", async () => {
 test("a byte write merges into the full register through state memory", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(8), [regBinding("al"), immBinding(0x9a)], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
-  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], {
-    eip: 0x1002,
-    nextEip: 0x1004
-  });
+  builder.addInstruction(movSemantic(8), [regBinding("al"), immBinding(0x9a)], loc(0x1000, 0x1002));
+  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1002, 0x1004));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -162,10 +141,7 @@ test("a byte write merges into the full register through state memory", async ()
 test("a 16-bit immediate store leaves the upper register half intact", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(16), [regBinding("ax"), immBinding(0xbeef)], {
-    eip: 0x1000,
-    nextEip: 0x1004
-  });
+  builder.addInstruction(movSemantic(16), [regBinding("ax"), immBinding(0xbeef)], loc(0x1000, 0x1004));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -177,10 +153,7 @@ test("a 16-bit immediate store leaves the upper register half intact", async () 
 test("movzx r32, r8 zero-extends the high byte through an offset load", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movzxSemantic(8, 32), [regBinding("ebx"), regBinding("ah")], {
-    eip: 0x1000,
-    nextEip: 0x1003
-  });
+  builder.addInstruction(movzxSemantic(8, 32), [regBinding("ebx"), regBinding("ah")], loc(0x1000, 0x1003));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -192,14 +165,8 @@ test("movzx r32, r8 zero-extends the high byte through an offset load", async ()
 test("movsx r32, r8/r16 sign-extends through marked loads", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movsxSemantic(8, 32), [regBinding("ebx"), regBinding("ah")], {
-    eip: 0x1000,
-    nextEip: 0x1003
-  });
-  builder.addInstruction(movsxSemantic(16, 32), [regBinding("ecx"), regBinding("ax")], {
-    eip: 0x1003,
-    nextEip: 0x1006
-  });
+  builder.addInstruction(movsxSemantic(8, 32), [regBinding("ebx"), regBinding("ah")], loc(0x1000, 0x1003));
+  builder.addInstruction(movsxSemantic(16, 32), [regBinding("ecx"), regBinding("ax")], loc(0x1003, 0x1006));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -212,10 +179,7 @@ test("movsx r32, r8/r16 sign-extends through marked loads", async () => {
 test("add al, imm8 stays on the byte channel with byte-wide flags", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(aluSemantic("add", 8), [regBinding("al"), immBinding(0x70)], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
+  builder.addInstruction(aluSemantic("add", 8), [regBinding("al"), immBinding(0x70)], loc(0x1000, 0x1002));
 
   const block = builder.finish();
 
@@ -235,10 +199,7 @@ test("add al, imm8 stays on the byte channel with byte-wide flags", async () => 
 test("add ax, imm16 stays on the word channel", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(aluSemantic("add", 16), [regBinding("ax"), immBinding(0x2001)], {
-    eip: 0x1000,
-    nextEip: 0x1004
-  });
+  builder.addInstruction(aluSemantic("add", 16), [regBinding("ax"), immBinding(0x2001)], loc(0x1000, 0x1004));
 
   const block = builder.finish();
 
@@ -256,18 +217,9 @@ test("add ax, imm16 stays on the word channel", async () => {
 test("mov ah and mov al merge through memory for a final 32-bit read", async () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(8), [regBinding("ah"), immBinding(0xab)], {
-    eip: 0x1000,
-    nextEip: 0x1002
-  });
-  builder.addInstruction(movSemantic(8), [regBinding("al"), immBinding(0xcd)], {
-    eip: 0x1002,
-    nextEip: 0x1004
-  });
-  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], {
-    eip: 0x1004,
-    nextEip: 0x1006
-  });
+  builder.addInstruction(movSemantic(8), [regBinding("ah"), immBinding(0xab)], loc(0x1000, 0x1002));
+  builder.addInstruction(movSemantic(8), [regBinding("al"), immBinding(0xcd)], loc(0x1002, 0x1004));
+  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1004, 0x1006));
 
   const block = builder.finish();
 
@@ -293,10 +245,7 @@ test("mov ah and mov al merge through memory for a final 32-bit read", async () 
 test("zero compares encode as eqz", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
-    eip: 0x1000,
-    nextEip: 0x1003
-  });
+  builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
 
   const body = irBlockBody(builder.finish()).encode();
   const opcodes = wasmBodyOpcodes(body);
@@ -316,10 +265,7 @@ test("a value used twice computes once and both uses observe it", async () => {
   };
   const builder: IrBlockBuilder = createIrBlockBuilder();
 
-  builder.addInstruction(sumIntoBoth, [regBinding("eax"), regBinding("ebx")], {
-    eip: 0x1000,
-    nextEip: 0x1003
-  });
+  builder.addInstruction(sumIntoBoth, [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1003));
 
   const block = builder.finish();
   const body = irBlockBody(block).encode();

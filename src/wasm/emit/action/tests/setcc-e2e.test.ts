@@ -1,7 +1,7 @@
 import { ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder } from "#ir/builder.js";
+import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { immBinding, regBinding } from "#ir/operands.js";
 import { gprChannel } from "#ir/slots.js";
 import { CONDITIONS, type FlagBoolExpr } from "#x86/conditions.js";
@@ -46,14 +46,8 @@ for (const [cc, predicate] of comparePredicates) {
     for (const [left, right] of operandPairs) {
       const builder = createIrBlockBuilder();
 
-      builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(right)], {
-        eip: 0x1000,
-        nextEip: 0x1006
-      });
-      builder.addInstruction(setccSemantic(cc), [regBinding("al")], {
-        eip: 0x1006,
-        nextEip: 0x1009
-      });
+      builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(right)], loc(0x1000, 0x1006));
+      builder.addInstruction(setccSemantic(cc), [regBinding("al")], loc(0x1006, 0x1009));
 
       const block = builder.finish();
       const entry = block.regions[0]!;
@@ -102,10 +96,7 @@ for (const cc of Object.keys(CONDITIONS) as ConditionCode[]) {
     const condition = CONDITIONS[cc];
     const builder = createIrBlockBuilder();
 
-    builder.addInstruction(setccSemantic(cc), [regBinding("al")], {
-      eip: 0x1000,
-      nextEip: 0x1003
-    });
+    builder.addInstruction(setccSemantic(cc), [regBinding("al")], loc(0x1000, 0x1003));
 
     const { stateView, run } = await instantiateIrBlock(builder.finish());
 
