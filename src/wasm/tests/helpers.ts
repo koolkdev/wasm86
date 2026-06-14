@@ -30,7 +30,7 @@ export function assertMemoryImports(module: WebAssembly.Module): void {
     .map((entry) => ({ module: entry.module, name: entry.name, kind: entry.kind }));
 
   deepStrictEqual(memoryImports, [
-    { module: wasmImport.moduleName, name: wasmImport.stateMemoryName, kind: "memory" },
-    { module: wasmImport.moduleName, name: wasmImport.guestMemoryName, kind: "memory" }
+    { module: wasmImport.namespace, name: wasmImport.cpuStateMemoryName, kind: "memory" },
+    { module: wasmImport.namespace, name: wasmImport.guestMemoryName, kind: "memory" }
   ]);
 }

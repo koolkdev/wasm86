@@ -1,28 +1,24 @@
 import {
-  runResultFromState,
+  runResultFromExecutionState,
   StopReason,
   type FaultOperation,
   type RunResult,
   type RunResultDetails
 } from "#x86/execution/run-result.js";
 import { ExitReason, type DecodedExit } from "#wasm/exit.js";
-import type { WasmCpuState } from "#wasm/host/state-memory.js";
+import type { WasmCpuState } from "#wasm/host/cpu-state.js";
 
 export function runResultFromWasmExit(state: WasmCpuState, exit: DecodedExit): RunResult {
   switch (exit.exitReason) {
     case ExitReason.DYNAMIC_JUMP:
     case ExitReason.LINK_STUB:
-      state.write("stopReason", StopReason.NONE);
-      return runResultFromState(state.snapshot(), StopReason.NONE);
+      return runResultFromExecutionState(state, StopReason.NONE);
     case ExitReason.HOST_TRAP:
-      state.write("stopReason", StopReason.HOST_TRAP);
-      return runResultFromState(state.snapshot(), StopReason.HOST_TRAP, { trapVector: exit.payload });
+      return runResultFromExecutionState(state, StopReason.HOST_TRAP, { trapVector: exit.payload });
     case ExitReason.UNSUPPORTED:
-      state.write("stopReason", StopReason.UNSUPPORTED);
-      return runResultFromState(state.snapshot(), StopReason.UNSUPPORTED, unsupportedDetails());
+      return runResultFromExecutionState(state, StopReason.UNSUPPORTED, unsupportedDetails());
     case ExitReason.DECODE_FAULT:
-      state.write("stopReason", StopReason.DECODE_FAULT);
-      return runResultFromState(state.snapshot(), StopReason.DECODE_FAULT, {
+      return runResultFromExecutionState(state, StopReason.DECODE_FAULT, {
         faultAddress: exit.payload,
         faultOperation: "execute"
       });
@@ -31,8 +27,7 @@ export function runResultFromWasmExit(state: WasmCpuState, exit: DecodedExit): R
     case ExitReason.MEMORY_WRITE_FAULT:
       return stopWithMemoryFault(state, exit, "write", memoryFaultSize(exit));
     case ExitReason.INSTRUCTION_LIMIT:
-      state.write("stopReason", StopReason.INSTRUCTION_LIMIT);
-      return runResultFromState(state.snapshot(), StopReason.INSTRUCTION_LIMIT);
+      return runResultFromExecutionState(state, StopReason.INSTRUCTION_LIMIT);
   }
 }
 
@@ -52,8 +47,7 @@ function stopWithMemoryFault(
   faultOperation: FaultOperation,
   faultSize: number
 ): RunResult {
-  state.write("stopReason", StopReason.MEMORY_FAULT);
-  return runResultFromState(state.snapshot(), StopReason.MEMORY_FAULT, {
+  return runResultFromExecutionState(state, StopReason.MEMORY_FAULT, {
     faultAddress: exit.payload,
     faultSize,
     faultOperation

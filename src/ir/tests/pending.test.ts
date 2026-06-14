@@ -276,7 +276,7 @@ test("a covering write keeps the dropped channel's start value in the snapshot",
   pending.write(gprChannel("eax"), values.internConst(0x12345678));
 
   // eax had no start pending (omitted); the dropped al still must reach
-  // state memory on the fault path.
+  // cpu state memory on the fault path.
   deepStrictEqual(pending.snapshot(), [[gprChannel("al"), byte]]);
 });
 

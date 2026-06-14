@@ -1,8 +1,8 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { runResultFromState, StopReason } from "#x86/execution/run-result.js";
-import { createCpuState } from "#x86/state/cpu-state.js";
+import { runResultFromExecutionState, StopReason } from "#x86/execution/run-result.js";
+import { createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import {
   assertEngineFixtureResult,
@@ -26,7 +26,7 @@ import {
 test("interpreter runtime step runs only the interpreter engine", () => {
   const calls: string[] = [];
   const result = runRuntimeStep(RuntimeMode.INTERPRETER, context(), createInstructionBudget(0, 10), {
-    interpreter: engine("interpreter", calls, engineDone(runResultFromState(createCpuState({ eip: 0x11 }), StopReason.NONE))),
+    interpreter: engine("interpreter", calls, engineDone(runResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x11 }), StopReason.NONE))),
     compiledBlocks: engine("compiled", calls, engineUnavailable("no-compiled-block"))
   });
 
@@ -38,7 +38,7 @@ test("interpreter runtime step runs only the interpreter engine", () => {
 test("compiled-blocks runtime step falls back to interpreter when no block is available", () => {
   const calls: string[] = [];
   const result = runRuntimeStep(RuntimeMode.COMPILED_BLOCKS, context(), createInstructionBudget(0, 10), {
-    interpreter: engine("interpreter", calls, engineDone(runResultFromState(createCpuState({ eip: 0x22 }), StopReason.NONE))),
+    interpreter: engine("interpreter", calls, engineDone(runResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x22 }), StopReason.NONE))),
     compiledBlocks: engine("compiled", calls, engineUnavailable("no-compiled-block"))
   });
 
@@ -50,8 +50,8 @@ test("compiled-blocks runtime step falls back to interpreter when no block is av
 test("compiled-blocks runtime step returns compiled result when available", () => {
   const calls: string[] = [];
   const result = runRuntimeStep(RuntimeMode.COMPILED_BLOCKS, context(), createInstructionBudget(0, 10), {
-    interpreter: engine("interpreter", calls, engineDone(runResultFromState(createCpuState({ eip: 0x11 }), StopReason.NONE))),
-    compiledBlocks: engine("compiled", calls, engineDone(runResultFromState(createCpuState({ eip: 0x33 }), StopReason.NONE)))
+    interpreter: engine("interpreter", calls, engineDone(runResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x11 }), StopReason.NONE))),
+    compiledBlocks: engine("compiled", calls, engineDone(runResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x33 }), StopReason.NONE)))
   });
 
   strictEqual(result.kind, "done");

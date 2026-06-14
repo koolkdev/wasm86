@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState } from "#x86/state/cpu-state.js";
+import { createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -13,7 +13,7 @@ import { ExitReason } from "#wasm/exit.js";
 import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";
 
-test("imports state and guest memories in ABI order", () => {
+test("imports cpu state and guest memories in ABI order", () => {
   const module = new WebAssembly.Module(encodeInterpreterModule().bytes);
 
   assertMemoryImports(module);
@@ -32,7 +32,7 @@ test("exports run(fuel) -> i64", async () => {
 
 test("fuel zero returns instruction-limit exit without changing architectural state", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1122_3344,
     ebx: 0x5566_7788,
     eip: startAddress,
@@ -48,7 +48,7 @@ test("fuel zero returns instruction-limit exit without changing architectural st
 
 test("unsupported byte returns unsupported exit without changing architectural state", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1122_3344,
     ebx: 0x5566_7788,
     eip: startAddress,
@@ -65,7 +65,7 @@ test("unsupported byte returns unsupported exit without changing architectural s
 
 test("operand-size prefix dispatches to the prefixed opcode form", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_0000,
     eip: startAddress,
     instructionCount: 7
@@ -90,7 +90,7 @@ test("non-canonical prefix encodings report unsupported instead of misdecoding",
   ] as const;
 
   for (const bytes of cases) {
-    const initialState = createCpuState({
+    const initialState = createWasmCpuStateSnapshot({
       eax: 0x1122_3344,
       eip: startAddress,
       instructionCount: 7
@@ -108,7 +108,7 @@ test("non-canonical prefix encodings report unsupported instead of misdecoding",
 test("truncated two-byte opcode escape returns decode fault", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const lastGuestByte = interpreter.guestView.byteLength - 1;
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: lastGuestByte,
     instructionCount: 7
   });
@@ -124,7 +124,7 @@ test("truncated two-byte opcode escape returns decode fault", async () => {
 
 test("unsupported two-byte opcode path dispatches before unsupported exit", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
   });
@@ -139,11 +139,11 @@ test("unsupported two-byte opcode path dispatches before unsupported exit", asyn
 
 test("requires both ABI memories when instantiating", async () => {
   const module = new WebAssembly.Module(encodeInterpreterModule().bytes);
-  const stateMemory = new WebAssembly.Memory({ initial: 1 });
+  const cpuStateMemory = new WebAssembly.Memory({ initial: 1 });
 
   await WebAssembly.instantiate(module, {
-    [wasmImport.moduleName]: {
-      [wasmImport.stateMemoryName]: stateMemory
+    [wasmImport.namespace]: {
+      [wasmImport.cpuStateMemoryName]: cpuStateMemory
     }
   }).then(
     () => {

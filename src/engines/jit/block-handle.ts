@@ -55,7 +55,7 @@ export type WasmBlockHandle = Readonly<{
 export type WasmBlockKey = number;
 
 export type CompileWasmBlockHandleOptions = Readonly<{
-  stateMemory: WebAssembly.Memory;
+  cpuStateMemory: WebAssembly.Memory;
   guestMemory: WebAssembly.Memory;
   blockKey?: WasmBlockKey;
 }>;
@@ -103,7 +103,7 @@ function instantiateCompiledBlocks(
   const module = new WebAssembly.Module(bytes);
   const compileMs = performance.now() - compileStart;
   const instantiateStart = performance.now();
-  const instance = new WebAssembly.Instance(module, wasmImports(options.stateMemory, options.guestMemory, moduleLinkTable));
+  const instance = new WebAssembly.Instance(module, wasmImports(options.cpuStateMemory, options.guestMemory, moduleLinkTable));
   const instantiateMs = performance.now() - instantiateStart;
   installModuleLocalFallbacks(instance, moduleLinkTable);
   const exportedBlockFunctions = readExportedBlockFunctions(instance, entryEips);
@@ -160,13 +160,13 @@ function installModuleLocalFallbacks(
 }
 
 function wasmImports(
-  stateMemory: WebAssembly.Memory,
+  cpuStateMemory: WebAssembly.Memory,
   guestMemory: WebAssembly.Memory,
   moduleLinkTable: JitModuleLinkTable | undefined
 ): WebAssembly.Imports {
   return {
-    [wasmImport.moduleName]: {
-      [wasmImport.stateMemoryName]: stateMemory,
+    [wasmImport.namespace]: {
+      [wasmImport.cpuStateMemoryName]: cpuStateMemory,
       [wasmImport.guestMemoryName]: guestMemory,
       ...(moduleLinkTable === undefined ? {} : { [wasmImport.linkTableName]: moduleLinkTable.table })
     }

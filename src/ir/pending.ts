@@ -12,10 +12,10 @@ import {
 // The pending map — the one materialization mechanism. A channel's latest
 // write stays symbolic until architectural state becomes observable or an
 // overlapping access forces it out. No bit algebra on register state, ever:
-// state memory is the bit-combiner.
+// cpu state memory is the bit-combiner.
 //
 // A pending is dirty until a flush stores it; a flushed pending stays in the
-// map clean — its value matches state memory, so it keeps serving reads and
+// map clean — its value matches cpu state memory, so it keeps serving reads and
 // never needs storing again.
 //
 // The rule table:
@@ -51,7 +51,7 @@ export type PendingChannels = Readonly<{
   // untouched.
   snapshot(): ReadonlyArray<readonly [StateChannel, ValueId]>;
   // The live dirty pendings, for edges that observe completed-instruction
-  // state; clean values are already in state memory.
+  // state; clean values are already in cpu state memory.
   entries(): ReadonlyArray<readonly [StateChannel, ValueId]>;
   // Materializes every dirty pending as a writeState, in insertion order.
   flushAll(): void;
@@ -77,8 +77,8 @@ export function createPendingChannels(
       return;
     }
 
-    // A boundary-absent channel's pre-instruction bytes exist only in state
-    // memory; this store destroys them. A live cached read of the exact
+    // A boundary-absent channel's pre-instruction bytes exist only in the
+    // cpu-state memory; this store destroys them. A live cached read of the exact
     // channel is still that value (any store would have invalidated it), so
     // it joins the boundary; a signed read serves too — its low
     // channel-width bits are the memory bytes.

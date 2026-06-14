@@ -1,6 +1,5 @@
 import type { RunResult } from "#x86/execution/run-result.js";
 import { u32 } from "#x86/numeric.js";
-import type { CpuState } from "#x86/state/cpu-state.js";
 import { WasmInterpreterRuntime } from "#engines/interpreter/runtime.js";
 import {
   WasmCompiledBlockCache,
@@ -21,10 +20,11 @@ import {
   type RuntimeProgramRegion
 } from "./program/regions.js";
 import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
+import type { WasmCpuStateInit } from "#wasm/host/cpu-state.js";
 
 export type RuntimeInstanceOptions = Readonly<{
   program?: RuntimeProgramInput;
-  state?: Partial<CpuState>;
+  cpuState?: WasmCpuStateInit;
   memory?: RuntimeInstanceMemoryOptions;
   mode?: RuntimeModeValue;
   compiledBlocks?: WasmCompiledBlockCacheLike;
@@ -33,7 +33,7 @@ export type RuntimeInstanceOptions = Readonly<{
 export type RuntimeInstanceMemoryOptions = Readonly<{
   guestBytes?: number;
   guest?: WebAssembly.Memory;
-  state?: WebAssembly.Memory;
+  cpuState?: WebAssembly.Memory;
 }>;
 
 export type RuntimeInstanceRunOptions = Readonly<{
@@ -58,33 +58,35 @@ export class RuntimeInstance {
     this.memories = createWasmHostMemories({
       guestMemoryByteLength: requiredGuestBytes(options.memory, program),
       ...(options.memory?.guest === undefined ? {} : { guestMemory: options.memory.guest }),
-      ...(options.memory?.state === undefined ? {} : { stateMemory: options.memory.state })
+      ...(options.memory?.cpuState === undefined
+        ? {}
+        : { cpuStateMemory: options.memory.cpuState })
     });
     this.codeMap = new RuntimeCodeMap(codeRegionsFromProgram(program));
     this.compiledBlocks = options.compiledBlocks ?? new WasmCompiledBlockCache();
     this.engines = {
       interpreter: new WasmInterpreterEngine(
         new WasmInterpreterRuntime(this.memories.guestMemory, {
-          stateMemory: this.memories.stateMemory
+          cpuStateMemory: this.memories.cpuStateMemory
         })
       ),
       compiledBlocks: new WasmBlocksEngine(this.compiledBlocks)
     };
 
     loadProgramBytes(program, this.memories);
-    this.memories.state.load(options.state ?? {});
+    this.memories.cpuState.load(options.cpuState ?? {});
   }
 
   run(options: RuntimeInstanceRunOptions = {}): RunResult {
     if (options.eip !== undefined) {
-      this.memories.state.eip = u32(options.eip);
+      this.memories.cpuState.eip = u32(options.eip);
     }
 
     const engineResult = runRuntimeProgram(
       this.mode,
       { codeMap: this.codeMap, memories: this.memories },
       createInstructionBudget(
-        this.memories.state.instructionCount,
+        this.memories.cpuState.instructionCount,
         options.maxInstructions ?? defaultMaxInstructions
       ),
       this.engines

@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { flagsOf,
-  createCpuState } from "#x86/state/cpu-state.js";
+import { wasmCpuFlagsOf,
+  createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
@@ -14,7 +14,7 @@ const zeroLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
 const signLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 
 test("executes ADD r32, r/m32 and materializes add flags", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
     ebx: 1,
     eip: startAddress,
@@ -28,11 +28,11 @@ test("executes ADD r32, r/m32 and materializes add flags", async () => {
   strictEqual(state.eax, 0);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(flagsOf(state), addWraparoundFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), addWraparoundFlags);
 });
 
 test("executes SUB r/m32, r32 and materializes sub flags", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0,
     ebx: 1,
     eip: startAddress,
@@ -46,11 +46,11 @@ test("executes SUB r/m32, r32 and materializes sub flags", async () => {
   strictEqual(state.eax, 0xffff_ffff);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(flagsOf(state), subBorrowFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), subBorrowFlags);
 });
 
 test("executes XOR r/m32, r32 and materializes logic flags", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
     eip: startAddress,
     ...allFlagsSet,
@@ -62,11 +62,11 @@ test("executes XOR r/m32, r32 and materializes logic flags", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(flagsOf(state), zeroLogicFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), zeroLogicFlags);
 });
 
 test("executes OR r32, r/m32 and materializes logic flags", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x8000_0000,
     ebx: 0x100,
     eip: startAddress,
@@ -80,11 +80,11 @@ test("executes OR r32, r/m32 and materializes logic flags", async () => {
   strictEqual(state.eax, 0x8000_0100);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(flagsOf(state), signLogicFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), signLogicFlags);
 });
 
 test("executes AND r/m32, r32 and materializes logic flags", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
     ebx: 0,
     eip: startAddress,
@@ -98,11 +98,11 @@ test("executes AND r/m32, r32 and materializes logic flags", async () => {
   strictEqual(state.eax, 0);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(flagsOf(state), zeroLogicFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), zeroLogicFlags);
 });
 
 test("executes CMP r/m32, r32 without writing operands", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 5,
     ebx: 5,
     eip: startAddress,
@@ -116,11 +116,11 @@ test("executes CMP r/m32, r32 without writing operands", async () => {
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(flagsOf(state), zeroLogicFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), zeroLogicFlags);
 });
 
 test("executes TEST r/m32, r32 without writing operands", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x8000_0000,
     ebx: 0xffff_ffff,
     eip: startAddress,
@@ -134,5 +134,5 @@ test("executes TEST r/m32, r32 without writing operands", async () => {
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(flagsOf(state), signLogicFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), signLogicFlags);
 });

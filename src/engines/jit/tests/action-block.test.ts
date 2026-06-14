@@ -9,6 +9,7 @@ import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
 import { ExitReason } from "#wasm/exit.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
+import { readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
 
 const startEip = 0x1000;
 
@@ -40,14 +41,14 @@ test("a guard fault mid-block reports the faulting eip with earlier state flushe
   const block = decodeBlock([0x40, 0x8b, 0x05, 0x00, 0x00, 0xff, 0x00]);
   const memories = createWasmHostMemories();
   const handle = compileActionWasmBlockHandle([block], {
-    stateMemory: memories.stateMemory,
+    cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
-  memories.state.load({ eip: startEip, eax: 5 });
+  memories.cpuState.load({ eip: startEip, eax: 5 });
 
   const run = handle.run();
-  const state = memories.state.snapshot();
+  const state = readWasmCpuState(memories.cpuState);
 
   deepStrictEqual(run.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: faultAddress, detail: 4 });
   strictEqual(state.eax, 6);
@@ -63,16 +64,16 @@ test("a static jump to a block in the same module tail-calls it directly", () =>
   const second = decodeBlock([0x40, 0xcd, 0x2e], targetEip);
   const memories = createWasmHostMemories();
   const handle = compileActionWasmBlockHandle([first, second], {
-    stateMemory: memories.stateMemory,
+    cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
   strictEqual(handle.moduleLinkTable, undefined);
 
-  memories.state.load({ eip: startEip, eax: 0 });
+  memories.cpuState.load({ eip: startEip, eax: 0 });
 
   const run = handle.run(startEip);
-  const state = memories.state.snapshot();
+  const state = readWasmCpuState(memories.cpuState);
 
   deepStrictEqual(run.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(state.eax, 2);
@@ -85,16 +86,16 @@ test("a dynamic jump target reports DYNAMIC_JUMP and resumes from flushed state"
   const block = decodeBlock([0xff, 0xe0]);
   const memories = createWasmHostMemories();
   const handle = compileActionWasmBlockHandle([block], {
-    stateMemory: memories.stateMemory,
+    cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
   strictEqual(handle.moduleLinkTable, undefined);
 
-  memories.state.load({ eip: startEip, eax: 0x4000 });
+  memories.cpuState.load({ eip: startEip, eax: 0x4000 });
 
   const run = handle.run();
-  const state = memories.state.snapshot();
+  const state = readWasmCpuState(memories.cpuState);
 
   deepStrictEqual(run.exit, { exitReason: ExitReason.DYNAMIC_JUMP, payload: 0 });
   strictEqual(state.eip, 0x4000);

@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState } from "#x86/state/cpu-state.js";
-import { stateByteLength, stateOffset } from "#wasm/abi.js";
+import { createWasmCpuStateSnapshot, readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
+import { WASM_CPU_STATE_BYTE_LENGTH, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { createWasmHostMemories, wasmPagesForByteLength } from "#wasm/host/memories.js";
 
 test("wasmPagesForByteLength rounds up to WebAssembly pages", () => {
@@ -12,15 +12,15 @@ test("wasmPagesForByteLength rounds up to WebAssembly pages", () => {
   strictEqual(wasmPagesForByteLength(0x1_0001), 2);
 });
 
-test("runtime Wasm memories expose canonical state memory", () => {
+test("runtime Wasm memories expose canonical cpu state memory", () => {
   const memories = createWasmHostMemories();
 
-  memories.state.load({ eax: 0x1234_5678, eip: 0x401000, instructionCount: 7, CF: 1, ZF: 1 });
-  memories.state.write("ebx", 0xaabb_ccdd);
+  memories.cpuState.load({ eax: 0x1234_5678, eip: 0x401000, instructionCount: 7, CF: 1, ZF: 1 });
+  memories.cpuState.writeReg32("ebx", 0xaabb_ccdd);
 
-  const snapshot = memories.state.snapshot();
+  const snapshot = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(snapshot, createCpuState({
+  deepStrictEqual(snapshot, createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
     ebx: 0xaabb_ccdd,
     CF: 1,
@@ -30,8 +30,8 @@ test("runtime Wasm memories expose canonical state memory", () => {
   }));
 });
 
-test("runtime Wasm state layout exposes raw execution fields", () => {
-  deepStrictEqual(stateOffset, {
+test("runtime Wasm memories expose raw cpu state field offsets", () => {
+  deepStrictEqual(WASM_CPU_STATE_OFFSETS, {
     eax: 0,
     ecx: 4,
     edx: 8,
@@ -42,9 +42,14 @@ test("runtime Wasm state layout exposes raw execution fields", () => {
     edi: 28,
     eip: 32,
     instructionCount: 36,
-    stopReason: 40
+    CF: 44,
+    PF: 45,
+    AF: 46,
+    ZF: 47,
+    SF: 48,
+    OF: 49
   });
-  strictEqual(stateByteLength, 50);
+  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 50);
 });
 
 test("runtime Wasm guest memory reads writes and reports faults", () => {

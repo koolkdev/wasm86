@@ -2,7 +2,7 @@ import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { StopReason } from "#x86/execution/run-result.js";
-import type { CpuStateField } from "#x86/state/cpu-state.js";
+import { readWasmCpuState, type WasmCpuStateField } from "#runtime/tests/fixtures/cpu-state.js";
 import { CompiledBlockDecodeError } from "#engines/jit/compiled-blocks/wasm-cache.js";
 import { RuntimeMode } from "#runtime/execution/mode.js";
 import { RuntimeInstance } from "#runtime/runtime-instance.js";
@@ -54,19 +54,18 @@ test("runtime instance stops at max instructions", () => {
   const result = runtime.run({ maxInstructions: 4 });
 
   strictEqual(result.stopReason, StopReason.INSTRUCTION_LIMIT);
-  strictEqual(runtime.memories.state.stopReason, StopReason.INSTRUCTION_LIMIT);
-  strictEqual(runtime.memories.state.instructionCount, 4);
+  strictEqual(runtime.memories.cpuState.instructionCount, 4);
 });
 
 test("runtime instance executes from guest memory even when eip is outside loaded code regions", () => {
   const runtime = new RuntimeInstance({
-    state: { eip: engineFixtureStartAddress }
+    cpuState: { eip: engineFixtureStartAddress }
   });
   const result = runtime.run({ maxInstructions: 1 });
 
   strictEqual(result.stopReason, StopReason.INSTRUCTION_LIMIT);
-  strictEqual(runtime.memories.state.eip, engineFixtureStartAddress + 2);
-  strictEqual(runtime.memories.state.instructionCount, 1);
+  strictEqual(runtime.memories.cpuState.eip, engineFixtureStartAddress + 2);
+  strictEqual(runtime.memories.cpuState.instructionCount, 1);
 });
 
 test("runtime instance compiled-blocks mode does not fall back after block decode faults", () => {
@@ -75,22 +74,22 @@ test("runtime instance compiled-blocks mode does not fall back after block decod
       baseAddress: engineFixtureStartAddress,
       bytes: [0x90, 0xb8, 0x01]
     },
-    state: { eip: engineFixtureStartAddress },
+    cpuState: { eip: engineFixtureStartAddress },
     mode: RuntimeMode.COMPILED_BLOCKS
   });
 
   throws(() => runtime.run(), CompiledBlockDecodeError);
-  strictEqual(runtime.memories.state.instructionCount, 0);
+  strictEqual(runtime.memories.cpuState.instructionCount, 0);
 });
 
 function createRuntime(
   fixture: EngineFixture,
-  options: Omit<ConstructorParameters<typeof RuntimeInstance>[0], "program" | "state"> = {}
+  options: Omit<ConstructorParameters<typeof RuntimeInstance>[0], "program" | "cpuState"> = {}
 ): RuntimeInstance {
   return new RuntimeInstance({
     ...options,
     program: { baseAddress: engineFixtureStartAddress, bytes: fixture.bytes },
-    state: fixture.initialState
+    cpuState: fixture.initialState
   });
 }
 
@@ -105,7 +104,7 @@ function assertFixtureResult(
 
   for (const [field, expected] of Object.entries(fixture.expected.state)) {
     strictEqual(
-      runtime.memories.state.snapshot()[field as CpuStateField],
+      readWasmCpuState(runtime.memories.cpuState)[field as WasmCpuStateField],
       expected,
       `${fixture.name}: expected state.${field}`
     );

@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 
 import { decodeIsaBlock } from "#x86/decoder/decode-block.js";
 import type { RunResult } from "#x86/execution/run-result.js";
-import type { CpuStateField } from "#x86/state/cpu-state.js";
+import { readWasmCpuState, type WasmCpuStateField } from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import { decodeExit } from "#wasm/exit.js";
@@ -43,7 +43,7 @@ export function prepareEngineFixture(fixture: EngineFixture): PreparedEngineFixt
     throw new Error(`failed to load fixture code at 0x${fault.faultAddress.toString(16)}`);
   }
 
-  memories.state.load(fixture.initialState);
+  memories.cpuState.load(fixture.initialState);
 
   return {
     codeMap: new RuntimeCodeMap(codeRegionsFromProgram([programRegion])),
@@ -55,8 +55,8 @@ export function instantiateFixtureWasmInterpreter(memories: WasmHostMemories): W
   interpreterModule ??= new WebAssembly.Module(encodeInterpreterModule().bytes);
 
   const instance = new WebAssembly.Instance(interpreterModule, {
-    [wasmImport.moduleName]: {
-      [wasmImport.stateMemoryName]: memories.stateMemory,
+    [wasmImport.namespace]: {
+      [wasmImport.cpuStateMemoryName]: memories.cpuStateMemory,
       [wasmImport.guestMemoryName]: memories.guestMemory
     }
   });
@@ -86,7 +86,7 @@ export function createFixtureCompiledBlockCache(): CompiledBlockCache {
 
       try {
         return compileActionWasmBlockHandle([block], {
-          stateMemory: memories.stateMemory,
+          cpuStateMemory: memories.cpuStateMemory,
           guestMemory: memories.guestMemory,
           blockKey: startEip
         });
@@ -157,11 +157,11 @@ function assertResultFields(fixture: EngineFixture, actual: RunResult): void {
 }
 
 function assertStateFields(fixture: EngineFixture, memories: WasmHostMemories): void {
-  const actual = memories.state.snapshot();
+  const actual = readWasmCpuState(memories.cpuState);
 
   for (const [field, expected] of Object.entries(fixture.expected.state)) {
     strictEqual(
-      actual[field as CpuStateField],
+      actual[field as WasmCpuStateField],
       expected,
       `${fixture.name}: expected state.${field}`
     );

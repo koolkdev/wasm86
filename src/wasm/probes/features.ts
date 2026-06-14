@@ -21,11 +21,11 @@ export type WasmFeatureReport = Readonly<{
   interpreterAvailable: true;
 }>;
 
-const importNamespace = "webwin32";
-const stateImportName = "state";
+const importNamespace = "wasm86";
+const cpuStateImportName = "cpuState";
 const guestImportName = "guest";
-const stateEaxOffset = 0;
-const statePtr = 32;
+const cpuStateEaxOffset = 0;
+const cpuStatePtr = 32;
 const expectedI64Payload = 0x1234_5678;
 const expectedI64ExitReason = ExitReason.UNSUPPORTED;
 const expectedStoredValue = 0x1234_5678;
@@ -103,15 +103,15 @@ async function probeI64ReturnBigInt(): Promise<void> {
 
 async function probeImportedMemorySharing(): Promise<void> {
   const state = new WebAssembly.Memory({ initial: 1 });
-  const instance = await instantiateProbeModule(encodeStateStoreProbeModule(), state);
-  const storeState = readExportedFunction(instance, "storeState");
+  const instance = await instantiateProbeModule(encodeCpuStateStoreProbeModule(), state);
+  const storeCpuState = readExportedFunction(instance, "storeCpuState");
 
-  storeState(statePtr);
+  storeCpuState(cpuStatePtr);
 
-  const actual = new DataView(state.buffer).getUint32(statePtr + stateEaxOffset, true);
+  const actual = new DataView(state.buffer).getUint32(cpuStatePtr + cpuStateEaxOffset, true);
 
   if (actual !== expectedStoredValue) {
-    throw new Error(`state memory value ${actual}, expected ${expectedStoredValue}`);
+    throw new Error(`cpu state memory value ${actual}, expected ${expectedStoredValue}`);
   }
 }
 
@@ -145,7 +145,7 @@ async function instantiateProbeModule(
       ? undefined
       : {
           [importNamespace]: {
-            [stateImportName]: state,
+            [cpuStateImportName]: state,
             ...(guest === undefined ? {} : { [guestImportName]: guest })
           }
         };
@@ -155,7 +155,7 @@ async function instantiateProbeModule(
 
 function encodeGuestLoadProbeModule(): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
-  module.importMemory(importNamespace, stateImportName, { minPages: 1 });
+  module.importMemory(importNamespace, cpuStateImportName, { minPages: 1 });
   const guestMemoryIndex = module.importMemory(importNamespace, guestImportName, { minPages: 1 });
   const typeIndex = module.addFunctionType({
     params: [wasmValueType.i32],
@@ -210,9 +210,9 @@ function encodeSignExtensionProbeModule(): Uint8Array<ArrayBuffer> {
   return module.encode();
 }
 
-function encodeStateStoreProbeModule(): Uint8Array<ArrayBuffer> {
+function encodeCpuStateStoreProbeModule(): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
-  const stateMemoryIndex = module.importMemory(importNamespace, stateImportName, { minPages: 1 });
+  const cpuStateMemoryIndex = module.importMemory(importNamespace, cpuStateImportName, { minPages: 1 });
   const typeIndex = module.addFunctionType({
     params: [wasmValueType.i32],
     results: []
@@ -222,13 +222,13 @@ function encodeStateStoreProbeModule(): Uint8Array<ArrayBuffer> {
     .i32Const(expectedStoredValue)
     .i32Store({
       align: 2,
-      memoryIndex: stateMemoryIndex,
-      offset: stateEaxOffset
+      memoryIndex: cpuStateMemoryIndex,
+      offset: cpuStateEaxOffset
     })
     .end();
   const functionIndex = module.addFunction(typeIndex, body);
 
-  module.exportFunction("storeState", functionIndex);
+  module.exportFunction("storeCpuState", functionIndex);
 
   return module.encode();
 }

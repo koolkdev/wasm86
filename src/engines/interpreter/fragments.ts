@@ -161,7 +161,7 @@ function cursorAddress(fragment: DecodeFragment, eipLocal: number, cursor: Decod
   }
 }
 
-// The first instruction byte: eip leaves state memory here and is exported
+// The first instruction byte: eip leaves cpu state memory here and is exported
 // alongside the byte for the rest of the iteration.
 export function emitOpcodeFetch(
   context: FragmentEmitContext,

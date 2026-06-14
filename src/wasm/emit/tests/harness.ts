@@ -56,8 +56,8 @@ export async function instantiateFunctionBody(
   const instance = await WebAssembly.instantiate(
     await WebAssembly.compile(encodeFunctionBodyModule(body, paramCount)),
     {
-      [wasmImport.moduleName]: {
-        [wasmImport.stateMemoryName]: state,
+      [wasmImport.namespace]: {
+        [wasmImport.cpuStateMemoryName]: state,
         [wasmImport.guestMemoryName]: guest
       }
     }
@@ -75,13 +75,13 @@ export async function instantiateFunctionBody(
 
 function encodeFunctionBodyModule(body: WasmFunctionBodyEncoder, paramCount: number): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
-  const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
+  const cpuStateMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.cpuStateMemoryName, { minPages: 1 });
+  const guestMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.guestMemoryName, {
     minPages: wasmGuestMemoryMinPages
   });
 
   assert(
-    stateMemoryIndex === wasmMemoryIndex.state && guestMemoryIndex === wasmMemoryIndex.guest,
+    cpuStateMemoryIndex === wasmMemoryIndex.cpuState && guestMemoryIndex === wasmMemoryIndex.guest,
     "unexpected Wasm memory import order"
   );
 

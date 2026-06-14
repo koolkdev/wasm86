@@ -8,10 +8,10 @@ import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags } from "#x86/flags.js";
-import type { CpuState } from "#x86/state/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
-import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
+import { readWasmCpuFlagByte, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags } from "./reference.js";
 
@@ -25,10 +25,10 @@ test("cmp + jcc taken continues at the target with flushed flags", async () => {
     [0x83, 0xf8, 0x05],
     [0x74, 0x20]
   ]);
-  const initial: Partial<CpuState> = { eax: 5, eip: instructions[0]!.address };
+  const initial: Partial<WasmCpuStateSnapshot> = { eax: 5, eip: instructions[0]!.address };
   const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
 
   strictEqual(run(), irBlockCompleted);
   assertState(
@@ -44,14 +44,14 @@ test("cmp + jcc not taken continues at the fall-through with flushed flags", asy
     [0x83, 0xf8, 0x05],
     [0x74, 0x20]
   ]);
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 6,
     eip: instructions[0]!.address,
     ...allFlagsSet
   };
   const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
 
   strictEqual(run(), irBlockCompleted);
   assertState(
@@ -67,10 +67,10 @@ test("jmp rel32 continues at the target with earlier pendings flushed", async ()
     [0xb9, 0x77, 0x00, 0x00, 0x00],
     [0xe9, 0x10, 0x00, 0x00, 0x00]
   ]);
-  const initial: Partial<CpuState> = { eip: instructions[0]!.address, ...allFlagsSet };
+  const initial: Partial<WasmCpuStateSnapshot> = { eip: instructions[0]!.address, ...allFlagsSet };
   const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
 
   strictEqual(run(), irBlockCompleted);
   assertState(stateView, { regs: { ecx: 0x77 }, eip: 0x101a, flags: allFlagsSet }, "jmp rel32");
@@ -82,10 +82,10 @@ test("int exits host trap with the vector payload and pending state visible", as
     [0xb9, 0x77, 0x00, 0x00, 0x00],
     [0xcd, 0x21]
   ]);
-  const initial: Partial<CpuState> = { eip: instructions[0]!.address, ...allFlagsSet };
+  const initial: Partial<WasmCpuStateSnapshot> = { eip: instructions[0]!.address, ...allFlagsSet };
   const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
 
   const exit = decodeExit(run());
 
@@ -101,10 +101,10 @@ test("a branch composes with a fault edge in one block", async () => {
     [0x8b, 0x0b],
     [0x74, 0x20]
   ]);
-  const initial: Partial<CpuState> = { ebx: 0x20, eip: instructions[0]!.address, ZF: 1 };
+  const initial: Partial<WasmCpuStateSnapshot> = { ebx: 0x20, eip: instructions[0]!.address, ZF: 1 };
   const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
   guestView.setUint32(0x20, 0x55, true);
 
   strictEqual(run(), irBlockCompleted);
@@ -122,14 +122,14 @@ test("a faulting load before a branch exits through its fault edge", async () =>
     [0x8b, 0x0b],
     [0x74, 0x20]
   ]);
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     ebx: 0x10000,
     eip: instructions[0]!.address,
     ...allFlagsSet
   };
   const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
 
   const exit = decodeExit(run());
 
@@ -202,12 +202,12 @@ function assertState(
   label: string
 ): void {
   for (const name of reg32) {
-    strictEqual(readWasmStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
   }
 
-  strictEqual(readWasmStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
+  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
 
   for (const flag of x86Flags) {
-    strictEqual(readWasmFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
+    strictEqual(readWasmCpuFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
   }
 }

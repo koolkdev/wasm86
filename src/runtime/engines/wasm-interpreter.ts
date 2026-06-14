@@ -12,9 +12,9 @@ export class WasmInterpreterEngine implements RuntimeEngine {
   constructor(readonly interpreter: WasmInterpreter) {}
 
   run(context: RuntimeEngineContext, budget: InstructionBudget): RuntimeEngineResult {
-    const remaining = budget.remaining(context.memories.state.instructionCount);
+    const remaining = budget.remaining(context.memories.cpuState.instructionCount);
     const exit = this.interpreter.run(remaining);
 
-    return engineDone(runResultFromWasmExit(context.memories.state, exit));
+    return engineDone(runResultFromWasmExit(context.memories.cpuState, exit));
   }
 }

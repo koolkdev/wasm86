@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 
-import type { CpuState } from "#x86/state/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   instantiateInterpreterCompiledModule,
   readInterpreterState,
@@ -12,7 +12,7 @@ import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 
 export type ExecutedInstruction = Readonly<{
   exit: DecodedExit;
-  state: CpuState;
+  state: WasmCpuStateSnapshot;
   guestView: DataView;
 }>;
 
@@ -30,7 +30,7 @@ export async function instantiateWasmInterpreter(): Promise<InterpreterModuleIns
 
 export async function executeInstruction(
   bytes: readonly number[],
-  initialState: CpuState,
+  initialState: WasmCpuStateSnapshot,
   memory: readonly GuestMemoryBytes[] = []
 ): Promise<ExecutedInstruction> {
   const interpreter = await instantiateWasmInterpreter();
@@ -58,7 +58,7 @@ export function assertSingleInstructionExit(exit: DecodedExit): void {
 }
 
 export function assertCompletedInstruction(
-  state: CpuState,
+  state: WasmCpuStateSnapshot,
   expectedEip: number,
   expectedInstructionCount: number
 ): void {

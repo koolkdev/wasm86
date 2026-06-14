@@ -1,5 +1,3 @@
-import type { CpuState } from "#x86/state/cpu-state.js";
-
 export const StopReason = {
   NONE: 0,
   HOST_TRAP: 4,
@@ -35,8 +33,13 @@ export type RunResultDetails = Readonly<
   Omit<RunResult, "stopReason" | "finalEip" | "instructionCount">
 >;
 
-export function runResultFromState(
-  state: CpuState,
+export type RunResultStateView = Readonly<{
+  eip: number;
+  instructionCount: number;
+}>;
+
+export function runResultFromExecutionState(
+  state: RunResultStateView,
   stopReason: StopReason,
   details: RunResultDetails = {}
 ): RunResult {
@@ -48,10 +51,9 @@ export function runResultFromState(
   };
 }
 
-export function runResultMatchesState(result: RunResult, state: CpuState): boolean {
+export function runResultMatchesExecutionState(result: RunResult, state: RunResultStateView): boolean {
   return (
     result.finalEip === state.eip &&
-    result.instructionCount === state.instructionCount &&
-    result.stopReason === state.stopReason
+    result.instructionCount === state.instructionCount
   );
 }

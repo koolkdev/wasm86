@@ -11,7 +11,7 @@ import { wasmValueType } from "#wasm/encoder/types.js";
 import { emitActionFragment } from "#wasm/emit/emit.js";
 import type { CompletionPolicy } from "#wasm/emit/embed.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
-import { readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
+import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
 
 // Fragments emitted inline in hand-written function bodies. The fragments
@@ -77,7 +77,7 @@ async function instantiateDecodeRead(completion: CompletionPolicy) {
 test("a decode-read fragment exports the byte and its continue falls through", async () => {
   const { stateView, guestView, run } = await instantiateDecodeRead({ kind: "fallthrough" });
 
-  writeWasmCpuState(stateView, { eip: 0x10 });
+  writeWasmCpuStateSnapshot(stateView, { eip: 0x10 });
   guestView.setUint8(0x12, 0x90);
 
   strictEqual(run(), 0x90n);
@@ -87,13 +87,13 @@ test("the decode-fault edge keeps the encoded return", async () => {
   const { stateView, run } = await instantiateDecodeRead({ kind: "fallthrough" });
   const eip = wasmGuestMemoryMinByteLength - 2;
 
-  writeWasmCpuState(stateView, { eip });
+  writeWasmCpuStateSnapshot(stateView, { eip });
 
   const decoded = decodeExit(run());
 
   strictEqual(decoded.exitReason, ExitReason.DECODE_FAULT);
   strictEqual(decoded.detail, 1);
-  strictEqual(readWasmStateChannel(stateView, eipChannel), eip);
+  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), eip);
 });
 
 test("a br continue lands on the embedder label across the fragment's nesting", async () => {
@@ -118,11 +118,11 @@ test("a br continue lands on the embedder label across the fragment's nesting", 
 
   const { stateView, guestView, run } = await instantiateFunctionBody(body);
 
-  writeWasmCpuState(stateView, { eip: 0x10 });
+  writeWasmCpuStateSnapshot(stateView, { eip: 0x10 });
   guestView.setUint8(0x12, 0x90);
   strictEqual(run(), 0x90n);
 
-  writeWasmCpuState(stateView, { eip: wasmGuestMemoryMinByteLength - 2 });
+  writeWasmCpuStateSnapshot(stateView, { eip: wasmGuestMemoryMinByteLength - 2 });
   strictEqual(decodeExit(run()).exitReason, ExitReason.DECODE_FAULT);
 });
 
@@ -160,7 +160,7 @@ test("consecutive fragments share the embedder's scratch locals", async () => {
 
   const { stateView, guestView, run } = await instantiateFunctionBody(body);
 
-  writeWasmCpuState(stateView, { eip: 0x10 });
+  writeWasmCpuStateSnapshot(stateView, { eip: 0x10 });
   guestView.setUint8(0x12, 0x34);
   guestView.setUint8(0x13, 0x12);
 
@@ -204,8 +204,8 @@ test("an exported register read pins across a later overlapping store", async ()
 
   const { stateView, run } = await instantiateFunctionBody(body);
 
-  writeWasmCpuState(stateView, { eax: 5 });
+  writeWasmCpuStateSnapshot(stateView, { eax: 5 });
 
   strictEqual(run(), 5n);
-  strictEqual(readWasmStateChannel(stateView, gprChannel("eax")), 6);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 6);
 });

@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState } from "#x86/state/cpu-state.js";
+import { createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -19,7 +19,7 @@ import {
 
 
 test("executes JMP rel8 to nextEip plus signed displacement", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
   });
@@ -32,7 +32,7 @@ test("executes JMP rel8 to nextEip plus signed displacement", async () => {
 
 test("continues the interpreter loop after JMP while fuel remains", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
   });
@@ -52,7 +52,7 @@ test("continues the interpreter loop after JMP while fuel remains", async () => 
 });
 
 test("executes JMP rel32 to nextEip plus signed displacement", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
   });
@@ -64,7 +64,7 @@ test("executes JMP rel32 to nextEip plus signed displacement", async () => {
 });
 
 test("executes JNE rel8 taken when ZF is clear", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
   });
@@ -76,7 +76,7 @@ test("executes JNE rel8 taken when ZF is clear", async () => {
 });
 
 test("executes JNE rel8 fallthrough when ZF is set", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     ZF: 1,
     instructionCount: 7
@@ -89,7 +89,7 @@ test("executes JNE rel8 fallthrough when ZF is set", async () => {
 });
 
 test("executes JNE rel32 with the same condition as rel8", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
   });
@@ -103,7 +103,7 @@ test("executes JNE rel32 with the same condition as rel8", async () => {
 test("truncated JMP rel32 returns decode fault without changing architectural state", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const eip = interpreter.guestView.byteLength - 4;
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
     eip,
     ZF: 1,

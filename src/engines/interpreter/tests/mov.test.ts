@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { flagsOf,
-  createCpuState } from "#x86/state/cpu-state.js";
+import { wasmCpuFlagsOf,
+  createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -25,7 +25,7 @@ const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 
 test("executes MOV eax, imm32", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
   });
@@ -43,7 +43,7 @@ test("executes MOV eax, imm32", async () => {
 
 test("executes MOV edi, imm32 through opcode register low bits", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1122_3344,
     eip: startAddress,
     instructionCount: 7
@@ -62,7 +62,7 @@ test("executes MOV edi, imm32 through opcode register low bits", async () => {
 
 test("executes MOV r/m32, imm32 through C7 group", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
   });
@@ -81,39 +81,39 @@ test("executes MOVZX and MOVSX register forms without modifying flags", async ()
   const flags = allFlagsSet;
   const zeroExtend = await executeInstruction(
     [0x0f, 0xb6, 0xc7],
-    createCpuState({ eax: 0xaaaa_aaaa, ebx: 0x1234_807f, ...flags, eip: startAddress, instructionCount: 7 })
+    createWasmCpuStateSnapshot({ eax: 0xaaaa_aaaa, ebx: 0x1234_807f, ...flags, eip: startAddress, instructionCount: 7 })
   );
   const signExtend = await executeInstruction(
     [0x0f, 0xbe, 0xcf],
-    createCpuState({ ebx: 0x1234_807f, ...flags, eip: startAddress, instructionCount: 7 })
+    createWasmCpuStateSnapshot({ ebx: 0x1234_807f, ...flags, eip: startAddress, instructionCount: 7 })
   );
   const zeroExtendWordDestination = await executeInstruction(
     [0x66, 0x0f, 0xb6, 0xc3],
-    createCpuState({ eax: 0x1234_0000, ebx: 0x80, ...flags, eip: startAddress, instructionCount: 7 })
+    createWasmCpuStateSnapshot({ eax: 0x1234_0000, ebx: 0x80, ...flags, eip: startAddress, instructionCount: 7 })
   );
   const signExtendWordDestination = await executeInstruction(
     [0x66, 0x0f, 0xbe, 0xc3],
-    createCpuState({ eax: 0x1234_0000, ebx: 0x80, ...flags, eip: startAddress, instructionCount: 7 })
+    createWasmCpuStateSnapshot({ eax: 0x1234_0000, ebx: 0x80, ...flags, eip: startAddress, instructionCount: 7 })
   );
 
   assertSingleInstructionExit(zeroExtend.exit);
   strictEqual(zeroExtend.state.eax, 0x80);
-  deepStrictEqual(flagsOf(zeroExtend.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(zeroExtend.state), flags);
   assertCompletedInstruction(zeroExtend.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(signExtend.exit);
   strictEqual(signExtend.state.ecx, 0xffff_ff80);
-  deepStrictEqual(flagsOf(signExtend.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(signExtend.state), flags);
   assertCompletedInstruction(signExtend.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(zeroExtendWordDestination.exit);
   strictEqual(zeroExtendWordDestination.state.eax, 0x1234_0080);
-  deepStrictEqual(flagsOf(zeroExtendWordDestination.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(zeroExtendWordDestination.state), flags);
   assertCompletedInstruction(zeroExtendWordDestination.state, startAddress + 4, 8);
 
   assertSingleInstructionExit(signExtendWordDestination.exit);
   strictEqual(signExtendWordDestination.state.eax, 0x1234_ff80);
-  deepStrictEqual(flagsOf(signExtendWordDestination.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(signExtendWordDestination.state), flags);
   assertCompletedInstruction(signExtendWordDestination.state, startAddress + 4, 8);
 });
 
@@ -126,7 +126,7 @@ test("executes MOVSX r16 from byte register before BL/BX/EBX alias operations", 
   ];
   const interpreter = await instantiateWasmInterpreter();
 
-  writeInterpreterState(interpreter.stateView, createCpuState({
+  writeInterpreterState(interpreter.stateView, createWasmCpuStateSnapshot({
     eax: 0x80,
     ebx: 0x1122_3344,
     eip: startAddress,
@@ -150,7 +150,7 @@ test("executes MOVSX from a word register copy", async () => {
   ];
   const interpreter = await instantiateWasmInterpreter();
 
-  writeInterpreterState(interpreter.stateView, createCpuState({
+  writeInterpreterState(interpreter.stateView, createWasmCpuStateSnapshot({
     eax: 0x1234_0000,
     ebx: 0x0000_8001,
     ecx: 0xcccc_cccc,
@@ -167,7 +167,7 @@ test("executes MOVSX from a word register copy", async () => {
   strictEqual(state.eax, 0x1234_8001);
   strictEqual(state.ebx, 0x0000_8001);
   strictEqual(state.ecx, 0xffff_8001);
-  deepStrictEqual(flagsOf(state), allFlagsSet);
+  deepStrictEqual(wasmCpuFlagsOf(state), allFlagsSet);
   assertCompletedInstruction(state, startAddress + bytes.length, 9);
 });
 
@@ -175,50 +175,50 @@ test("executes MOVZX and MOVSX memory forms", async () => {
   const flags = allFlagsSet;
   const zeroExtendByte = await executeMovWithMemory(
     [0x0f, 0xb6, 0x03],
-    createCpuState({ eax: 0xffff_ffff, ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
+    createWasmCpuStateSnapshot({ eax: 0xffff_ffff, ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
     (guest) => guest.setUint8(0x20, 0xfe)
   );
   const zeroExtend = await executeMovWithMemory(
     [0x0f, 0xb7, 0x03],
-    createCpuState({ eax: 0xffff_ffff, ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
+    createWasmCpuStateSnapshot({ eax: 0xffff_ffff, ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
     (guest) => guest.setUint16(0x20, 0x80ff, true)
   );
   const signExtendByte = await executeMovWithMemory(
     [0x0f, 0xbe, 0x03],
-    createCpuState({ ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
+    createWasmCpuStateSnapshot({ ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
     (guest) => guest.setUint8(0x20, 0x80)
   );
   const signExtend = await executeMovWithMemory(
     [0x0f, 0xbf, 0x03],
-    createCpuState({ ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
+    createWasmCpuStateSnapshot({ ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
     (guest) => guest.setUint16(0x20, 0x8001, true)
   );
 
   assertSingleInstructionExit(zeroExtendByte.exit);
   strictEqual(zeroExtendByte.state.eax, 0xfe);
-  deepStrictEqual(flagsOf(zeroExtendByte.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(zeroExtendByte.state), flags);
   assertCompletedInstruction(zeroExtendByte.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(zeroExtend.exit);
   strictEqual(zeroExtend.state.eax, 0x80ff);
-  deepStrictEqual(flagsOf(zeroExtend.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(zeroExtend.state), flags);
   assertCompletedInstruction(zeroExtend.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(signExtendByte.exit);
   strictEqual(signExtendByte.state.eax, 0xffff_ff80);
-  deepStrictEqual(flagsOf(signExtendByte.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(signExtendByte.state), flags);
   assertCompletedInstruction(signExtendByte.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(signExtend.exit);
   strictEqual(signExtend.state.eax, 0xffff_8001);
-  deepStrictEqual(flagsOf(signExtend.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(signExtend.state), flags);
   assertCompletedInstruction(signExtend.state, startAddress + 3, 8);
 });
 
 test("executes CMOVcc r16 as a conditional partial register write", async () => {
   const taken = await executeInstruction(
     [0x66, 0x0f, 0x44, 0xd1],
-    createCpuState({
+    createWasmCpuStateSnapshot({
       ecx: 0x3333_2222,
       edx: 0xaaaa_1111,
       ZF: 1,
@@ -228,7 +228,7 @@ test("executes CMOVcc r16 as a conditional partial register write", async () => 
   );
   const notTaken = await executeInstruction(
     [0x66, 0x0f, 0x44, 0xd1],
-    createCpuState({
+    createWasmCpuStateSnapshot({
       ecx: 0x3333_2222,
       edx: 0xaaaa_1111,
       eip: startAddress,
@@ -238,17 +238,17 @@ test("executes CMOVcc r16 as a conditional partial register write", async () => 
 
   assertSingleInstructionExit(taken.exit);
   strictEqual(taken.state.edx, 0xaaaa_2222);
-  deepStrictEqual(flagsOf(taken.state), zeroFlag);
+  deepStrictEqual(wasmCpuFlagsOf(taken.state), zeroFlag);
   assertCompletedInstruction(taken.state, startAddress + 4, 8);
 
   assertSingleInstructionExit(notTaken.exit);
   strictEqual(notTaken.state.edx, 0xaaaa_1111);
-  deepStrictEqual(flagsOf(notTaken.state), noFlags);
+  deepStrictEqual(wasmCpuFlagsOf(notTaken.state), noFlags);
   assertCompletedInstruction(notTaken.state, startAddress + 4, 8);
 });
 
 test("CMOVcc r16 memory source faults even when condition is false", async () => {
-  const initial = createCpuState({
+  const initial = createWasmCpuStateSnapshot({
     ebx: 0x1_0000,
     edx: 0xaaaa_1111,
     ZF: 1,
@@ -259,7 +259,7 @@ test("CMOVcc r16 memory source faults even when condition is false", async () =>
 
   deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x1_0000, detail: 2 });
   strictEqual(state.edx, initial.edx);
-  deepStrictEqual(flagsOf(state), flagsOf(initial));
+  deepStrictEqual(wasmCpuFlagsOf(state), wasmCpuFlagsOf(initial));
   strictEqual(state.eip, initial.eip);
   strictEqual(state.instructionCount, initial.instructionCount);
 });
@@ -267,53 +267,53 @@ test("CMOVcc r16 memory source faults even when condition is false", async () =>
 test("executes register-only SETcc without modifying flags", async () => {
   const taken = await executeInstruction(
     [0x0f, 0x94, 0xc0],
-    createCpuState({ eax: 0x1234_5678, ZF: 1, eip: startAddress, instructionCount: 7 })
+    createWasmCpuStateSnapshot({ eax: 0x1234_5678, ZF: 1, eip: startAddress, instructionCount: 7 })
   );
   const notTaken = await executeInstruction(
     [0x0f, 0x94, 0xc0],
-    createCpuState({ eax: 0x1234_5678, eip: startAddress, instructionCount: 7 })
+    createWasmCpuStateSnapshot({ eax: 0x1234_5678, eip: startAddress, instructionCount: 7 })
   );
   const highByte = await executeInstruction(
     [0x0f, 0x95, 0xc4],
-    createCpuState({ eax: 0x1234_5678, eip: startAddress, instructionCount: 7 })
+    createWasmCpuStateSnapshot({ eax: 0x1234_5678, eip: startAddress, instructionCount: 7 })
   );
 
   assertSingleInstructionExit(taken.exit);
   strictEqual(taken.state.eax, 0x1234_5601);
-  deepStrictEqual(flagsOf(taken.state), zeroFlag);
+  deepStrictEqual(wasmCpuFlagsOf(taken.state), zeroFlag);
   assertCompletedInstruction(taken.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(notTaken.exit);
   strictEqual(notTaken.state.eax, 0x1234_5600);
-  deepStrictEqual(flagsOf(notTaken.state), noFlags);
+  deepStrictEqual(wasmCpuFlagsOf(notTaken.state), noFlags);
   assertCompletedInstruction(notTaken.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(highByte.exit);
   strictEqual(highByte.state.eax, 0x1234_0178);
-  deepStrictEqual(flagsOf(highByte.state), noFlags);
+  deepStrictEqual(wasmCpuFlagsOf(highByte.state), noFlags);
   assertCompletedInstruction(highByte.state, startAddress + 3, 8);
 });
 
 test("executes memory SETcc as a selected byte store", async () => {
   const taken = await executeInstruction(
     [0x0f, 0x94, 0x03],
-    createCpuState({ ebx: 0x20, ZF: 1, eip: startAddress, instructionCount: 7 }),
+    createWasmCpuStateSnapshot({ ebx: 0x20, ZF: 1, eip: startAddress, instructionCount: 7 }),
     [{ address: 0x20, bytes: [0xaa] }]
   );
   const notTaken = await executeInstruction(
     [0x0f, 0x94, 0x03],
-    createCpuState({ ebx: 0x20, eip: startAddress, instructionCount: 7 }),
+    createWasmCpuStateSnapshot({ ebx: 0x20, eip: startAddress, instructionCount: 7 }),
     [{ address: 0x20, bytes: [0xaa] }]
   );
 
   assertSingleInstructionExit(taken.exit);
   strictEqual(taken.guestView.getUint8(0x20), 1);
-  deepStrictEqual(flagsOf(taken.state), zeroFlag);
+  deepStrictEqual(wasmCpuFlagsOf(taken.state), zeroFlag);
   assertCompletedInstruction(taken.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(notTaken.exit);
   strictEqual(notTaken.guestView.getUint8(0x20), 0);
-  deepStrictEqual(flagsOf(notTaken.state), noFlags);
+  deepStrictEqual(wasmCpuFlagsOf(notTaken.state), noFlags);
   assertCompletedInstruction(notTaken.state, startAddress + 3, 8);
 });
 
@@ -321,26 +321,26 @@ test("executes multi-byte NOP without reading memory or modifying flags", async 
   const flags = allFlagsSet;
   const dword = await executeInstruction(
     [0x0f, 0x1f, 0x40, 0x00],
-    createCpuState({ eax: 0x1_0000, ...flags, eip: startAddress, instructionCount: 7 })
+    createWasmCpuStateSnapshot({ eax: 0x1_0000, ...flags, eip: startAddress, instructionCount: 7 })
   );
   const word = await executeInstruction(
     [0x66, 0x0f, 0x1f, 0x00],
-    createCpuState({ eax: 0x1_0000, ...flags, eip: startAddress, instructionCount: 7 })
+    createWasmCpuStateSnapshot({ eax: 0x1_0000, ...flags, eip: startAddress, instructionCount: 7 })
   );
 
   assertSingleInstructionExit(dword.exit);
-  deepStrictEqual(flagsOf(dword.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(dword.state), flags);
   assertCompletedInstruction(dword.state, startAddress + 4, 8);
 
   assertSingleInstructionExit(word.exit);
-  deepStrictEqual(flagsOf(word.state), flags);
+  deepStrictEqual(wasmCpuFlagsOf(word.state), flags);
   assertCompletedInstruction(word.state, startAddress + 4, 8);
 });
 
 test("truncated MOV r32, imm32 returns decode fault without changing architectural state", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const eip = interpreter.guestView.byteLength - 3;
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1122_3344,
     eip,
     instructionCount: 7
@@ -356,7 +356,7 @@ test("truncated MOV r32, imm32 returns decode fault without changing architectur
 
 async function executeMovWithMemory(
   bytes: readonly number[],
-  initialState: ReturnType<typeof createCpuState>,
+  initialState: ReturnType<typeof createWasmCpuStateSnapshot>,
   setupGuest: (view: DataView) => void
 ) {
   const interpreter = await instantiateWasmInterpreter();

@@ -1,6 +1,6 @@
 import type { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
-import { runResultFromState, StopReason } from "#x86/execution/run-result.js";
+import { runResultFromExecutionState, StopReason } from "#x86/execution/run-result.js";
 import type { InstructionBudget } from "./budget.js";
 import { engineDone, type RuntimeEngineResult } from "./engine-result.js";
 import { RuntimeMode, type RuntimeMode as RuntimeModeValue } from "./mode.js";
@@ -44,15 +44,15 @@ export function runRuntimeProgram(
   budget: InstructionBudget,
   engines: RuntimeEngines
 ): RuntimeEngineResult {
-  while (!budget.exhausted(context.memories.state.instructionCount)) {
-    const previousInstructionCount = context.memories.state.instructionCount;
+  while (!budget.exhausted(context.memories.cpuState.instructionCount)) {
+    const previousInstructionCount = context.memories.cpuState.instructionCount;
     const result = runRuntimeStep(mode, context, budget, engines);
 
     if (result.kind !== "done" || result.result.stopReason !== StopReason.NONE) {
       return result;
     }
 
-    if (context.memories.state.instructionCount === previousInstructionCount) {
+    if (context.memories.cpuState.instructionCount === previousInstructionCount) {
       throw new Error("runtime executor made no instruction progress");
     }
   }
@@ -61,6 +61,5 @@ export function runRuntimeProgram(
 }
 
 function stopWithInstructionLimit(context: RuntimeEngineContext): RuntimeEngineResult {
-  context.memories.state.write("stopReason", StopReason.INSTRUCTION_LIMIT);
-  return engineDone(runResultFromState(context.memories.state.snapshot(), StopReason.INSTRUCTION_LIMIT));
+  return engineDone(runResultFromExecutionState(context.memories.cpuState, StopReason.INSTRUCTION_LIMIT));
 }

@@ -1,20 +1,21 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { stateOffset, wasmImport } from "#wasm/abi.js";
+import { wasmImport } from "#wasm/abi.js";
+import { WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { decodeExit, encodeExit, ExitReason } from "#wasm/exit.js";
 
 const entryExportName = "entry";
-const statePtr = 32;
+const cpuStatePtr = 32;
 const u32Align = 2;
 
 test("return_call_two_function_smoke_test", async () => {
   const instance = await instantiateReturnCallModule(constantTargetBody(ExitReason.HOST_TRAP, 0x2e));
   const entry = exportedFunction(instance, entryExportName);
-  const result = entry(statePtr);
+  const result = entry(cpuStatePtr);
 
   if (typeof result !== "bigint") {
     throw new Error(`expected bigint result, got ${typeof result}`);
@@ -29,7 +30,7 @@ test("return_call_two_function_smoke_test", async () => {
 test("return_call_result_reaches_typescript_once", async () => {
   const instance = await instantiateReturnCallModule(constantTargetBody(ExitReason.DYNAMIC_JUMP, 0x1234));
   const entry = exportedFunction(instance, entryExportName);
-  const result = entry(statePtr);
+  const result = entry(cpuStatePtr);
 
   if (typeof result !== "bigint") {
     throw new Error(`expected bigint result, got ${typeof result}`);
@@ -41,15 +42,15 @@ test("return_call_result_reaches_typescript_once", async () => {
   });
 });
 
-test("return_call_preserves_state_memory_abi", async () => {
-  const stateMemory = new WebAssembly.Memory({ initial: 1 });
-  const instance = await instantiateReturnCallModule(statePayloadTargetBody(), stateMemory);
-  const stateView = new DataView(stateMemory.buffer);
+test("return_call_preserves_cpu_state_memory_abi", async () => {
+  const cpuStateMemory = new WebAssembly.Memory({ initial: 1 });
+  const instance = await instantiateReturnCallModule(statePayloadTargetBody(), cpuStateMemory);
+  const stateView = new DataView(cpuStateMemory.buffer);
 
-  stateView.setUint32(statePtr + stateOffset.eax, 0xfeed_cafe, true);
+  stateView.setUint32(cpuStatePtr + WASM_CPU_STATE_OFFSETS.eax, 0xfeed_cafe, true);
 
   const entry = exportedFunction(instance, entryExportName);
-  const result = entry(statePtr);
+  const result = entry(cpuStatePtr);
 
   if (typeof result !== "bigint") {
     throw new Error(`expected bigint result, got ${typeof result}`);
@@ -70,14 +71,14 @@ test("return_call_same_signature_required", async () => {
 
 async function instantiateReturnCallModule(
   targetBody: WasmFunctionBodyEncoder,
-  stateMemory = new WebAssembly.Memory({ initial: 1 })
+  cpuStateMemory = new WebAssembly.Memory({ initial: 1 })
 ): Promise<WebAssembly.Instance> {
   const module = await WebAssembly.compile(encodeReturnCallModule(targetBody));
   const guestMemory = new WebAssembly.Memory({ initial: 1 });
 
   return WebAssembly.instantiate(module, {
-    [wasmImport.moduleName]: {
-      [wasmImport.stateMemoryName]: stateMemory,
+    [wasmImport.namespace]: {
+      [wasmImport.cpuStateMemoryName]: cpuStateMemory,
       [wasmImport.guestMemoryName]: guestMemory
     }
   });
@@ -112,8 +113,8 @@ function encodeMismatchedReturnCallModule(): Uint8Array<ArrayBuffer> {
 function moduleWithMemories(): WasmModuleEncoder {
   const module = new WasmModuleEncoder();
 
-  module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
-  module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, { minPages: 1 });
+  module.importMemory(wasmImport.namespace, wasmImport.cpuStateMemoryName, { minPages: 1 });
+  module.importMemory(wasmImport.namespace, wasmImport.guestMemoryName, { minPages: 1 });
 
   return module;
 }
@@ -144,7 +145,7 @@ function statePayloadTargetBody(): WasmFunctionBodyEncoder {
     .i32Load({
       align: u32Align,
       memoryIndex: 0,
-      offset: stateOffset.eax
+      offset: WASM_CPU_STATE_OFFSETS.eax
     })
     .i64ExtendI32U()
     .i64Const(encodeExit(ExitReason.DYNAMIC_JUMP, 0))
@@ -170,12 +171,12 @@ async function compileForTest(bytes: Uint8Array<ArrayBuffer>): Promise<CompileRe
   }
 }
 
-function exportedFunction(instance: WebAssembly.Instance, name: string): (statePtr: number) => unknown {
+function exportedFunction(instance: WebAssembly.Instance, name: string): (cpuStatePtr: number) => unknown {
   const value = instance.exports[name];
 
   if (typeof value !== "function") {
     throw new Error(`expected exported function '${name}'`);
   }
 
-  return value as (statePtr: number) => unknown;
+  return value as (cpuStatePtr: number) => unknown;
 }

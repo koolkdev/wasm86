@@ -72,20 +72,20 @@ export function encodeActionJitModule(
   assert(blocks.length > 0, "cannot encode an empty JIT block module");
 
   const module = new WasmModuleEncoder();
-  const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
+  const cpuStateMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.cpuStateMemoryName, { minPages: 1 });
+  const guestMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.guestMemoryName, {
     minPages: wasmGuestMemoryMinPages
   });
 
   assert(
-    stateMemoryIndex === wasmMemoryIndex.state && guestMemoryIndex === wasmMemoryIndex.guest,
+    cpuStateMemoryIndex === wasmMemoryIndex.cpuState && guestMemoryIndex === wasmMemoryIndex.guest,
     "unexpected Wasm memory import order"
   );
 
   const tableTargetEips = options.moduleLinkTable?.targetEips() ?? [];
   const tableIndex = tableTargetEips.length === 0
     ? undefined
-    : module.importTable(wasmImport.moduleName, wasmImport.linkTableName, {
+    : module.importTable(wasmImport.namespace, wasmImport.linkTableName, {
         minElements: tableTargetEips.length,
         maxElements: tableTargetEips.length
       });

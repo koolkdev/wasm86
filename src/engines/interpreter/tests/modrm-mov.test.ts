@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState } from "#x86/state/cpu-state.js";
+import { createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -18,7 +18,7 @@ import {
 
 test("executes MOV r32, r/m32 with register ModRM", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     ebx: 0x1234_5678,
     eip: startAddress,
     instructionCount: 7
@@ -37,7 +37,7 @@ test("executes MOV r32, r/m32 with register ModRM", async () => {
 
 test("executes MOV r/m32, r32 with register ModRM", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xaaaa_aaaa,
     ebx: 0x1234_5678,
     eip: startAddress,
@@ -57,7 +57,7 @@ test("executes MOV r/m32, r32 with register ModRM", async () => {
 
 test("memory ModRM with out-of-range address returns read fault without changing architectural state", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xaaaa_aaaa,
     ebx: 0x1234_5678,
     eip: startAddress,
@@ -75,7 +75,7 @@ test("memory ModRM with out-of-range address returns read fault without changing
 test("truncated ModRM returns decode fault without changing architectural state", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const eip = interpreter.guestView.byteLength - 1;
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xaaaa_aaaa,
     ebx: 0x1234_5678,
     eip,

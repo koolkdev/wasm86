@@ -1169,7 +1169,7 @@ test("a guard after writing a previously-clean register omits the channel from i
   const block = builder.finish();
   const v = block.values;
 
-  // eax had no pending at instruction start: state memory already holds the
+  // eax had no pending at instruction start: cpu state memory already holds the
   // right bytes, so the edge writes only the eip.
   deepStrictEqual(edgeRegion(block, 1).flushes, [
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
@@ -1714,7 +1714,7 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
     { kind: "continue" }
   ]);
 
-  // The read guard predates the flush: its edge omits esp (state memory
+  // The read guard predates the flush: its edge omits esp (cpu state memory
   // still holds it on that path). The write guard's edge restores the
   // pre-instruction esp read the flush destroyed.
   deepStrictEqual(edgeRegion(block, 1).flushes, [

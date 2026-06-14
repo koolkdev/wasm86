@@ -17,7 +17,7 @@ export class WasmBlocksEngine implements RuntimeEngine {
 
   run(context: RuntimeEngineContext, _budget: InstructionBudget): RuntimeEngineResult {
     const block = this.blockCache.getOrCompile(
-      context.memories.state.eip,
+      context.memories.cpuState.eip,
       context.codeMap,
       context.memories
     );
@@ -26,6 +26,6 @@ export class WasmBlocksEngine implements RuntimeEngine {
       return engineUnavailable(this.unavailableReason);
     }
 
-    return engineDone(runResultFromWasmExit(context.memories.state, block.run().exit));
+    return engineDone(runResultFromWasmExit(context.memories.cpuState, block.run().exit));
   }
 }

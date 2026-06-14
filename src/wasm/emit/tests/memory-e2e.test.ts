@@ -8,10 +8,10 @@ import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags } from "#x86/flags.js";
-import type { CpuState } from "#x86/state/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
-import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
+import { readWasmCpuFlagByte, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags } from "./reference.js";
 
@@ -24,10 +24,10 @@ const guestByteLength = 0x10000;
 
 test("mov r32, [ebx+disp] loads the guest cell", async () => {
   const instruction = ok(decodeBytes([0x8b, 0x43, 0x04]));
-  const initial: Partial<CpuState> = { ebx: 0x20, eip: instruction.address, ...allFlagsSet };
+  const initial: Partial<WasmCpuStateSnapshot> = { ebx: 0x20, eip: instruction.address, ...allFlagsSet };
   const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
   guestView.setUint32(0x24, 0x1122_3344, true);
 
   strictEqual(run(), irBlockCompleted);
@@ -40,7 +40,7 @@ test("mov r32, [ebx+disp] loads the guest cell", async () => {
 
 test("mov [ebx+disp], r32 stores the guest cell", async () => {
   const instruction = ok(decodeBytes([0x89, 0x43, 0x04]));
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xcafe_1234,
     ebx: 0x20,
     eip: instruction.address,
@@ -48,7 +48,7 @@ test("mov [ebx+disp], r32 stores the guest cell", async () => {
   };
   const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
 
   strictEqual(run(), irBlockCompleted);
   strictEqual(guestView.getUint32(0x24, true), 0xcafe_1234);
@@ -62,14 +62,14 @@ test("mov [ebx+disp], r32 stores the guest cell", async () => {
 test("add [mem], r32 read-modify-writes the cell with reference flags", async () => {
   // add [eax], ebx with a wrap to zero: CF and ZF both come out set.
   const instruction = ok(decodeBytes([0x01, 0x18]));
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0x20,
     ebx: 0xffff_ffff,
     eip: instruction.address
   };
   const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
   guestView.setUint32(0x20, 1, true);
 
   // dest = [eax] (1), src = ebx (0xffffffff): the cell wraps to zero.
@@ -86,14 +86,14 @@ test("add [mem], r32 read-modify-writes the cell with reference flags", async ()
 
 test("add r32, [mem] loads the operand with reference flags", async () => {
   const instruction = ok(decodeBytes([0x03, 0x18]));
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0x20,
     ebx: 0x7fff_ffff,
     eip: instruction.address
   };
   const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
   guestView.setUint32(0x20, 1, true);
 
   // dest = ebx (0x7fffffff), src = [eax] (1): overflows signed, so SF and OF.
@@ -116,10 +116,10 @@ test("byte and word guest accesses load and store at their widths", async () => 
     [0xc6, 0x43, 0x01, 0x7f],
     [0x66, 0xc7, 0x43, 0x02, 0xef, 0xbe]
   ]);
-  const initial: Partial<CpuState> = { ebx: 0x20, eip: instructions[0]!.address, ...allFlagsSet };
+  const initial: Partial<WasmCpuStateSnapshot> = { ebx: 0x20, eip: instructions[0]!.address, ...allFlagsSet };
   const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
   guestView.setUint32(0x20, 0x1122_33f6, true);
 
   strictEqual(run(), irBlockCompleted);
@@ -141,7 +141,7 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
     [0xb9, 0x77, 0x00, 0x00, 0x00],
     [0x8b, 0x03]
   ]);
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0x1234_5678,
     ebx: guestByteLength,
     eip: instructions[0]!.address,
@@ -149,7 +149,7 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
   };
   const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
 
   assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength, 4, "read fault");
   assertState(
@@ -167,7 +167,7 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
 test("a write fault leaves guest memory untouched", async () => {
   // mov [ebx], eax with the range crossing the guest end.
   const instruction = ok(decodeBytes([0x89, 0x03]));
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xdead_beef,
     ebx: guestByteLength - 2,
     eip: instruction.address,
@@ -175,7 +175,7 @@ test("a write fault leaves guest memory untouched", async () => {
   };
   const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
 
   assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "write fault");
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0);
@@ -189,14 +189,14 @@ test("a write fault leaves guest memory untouched", async () => {
 test("a narrow access faults with its byte length", async () => {
   // movzx eax, byte [ebx] one past the guest.
   const instruction = ok(decodeBytes([0x0f, 0xb6, 0x03]));
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     ebx: guestByteLength,
     eip: instruction.address,
     ...allFlagsSet
   };
   const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
 
   assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength, 1, "byte fault");
   assertState(
@@ -214,7 +214,7 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
     [0x83, 0xc4, 0x04],
     [0x8f, 0x03]
   ]);
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     ebx: guestByteLength - 2,
     esp: 0x1c,
     eip: instructions[0]!.address,
@@ -222,7 +222,7 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
   };
   const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
   guestView.setUint32(0x20, 0xcafe_1234, true);
 
   // The add commits esp = 0x20 and its flags before the pop faults.
@@ -303,12 +303,12 @@ function assertState(
   label: string
 ): void {
   for (const name of reg32) {
-    strictEqual(readWasmStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
   }
 
-  strictEqual(readWasmStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
+  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
 
   for (const flag of x86Flags) {
-    strictEqual(readWasmFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
+    strictEqual(readWasmCpuFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
   }
 }

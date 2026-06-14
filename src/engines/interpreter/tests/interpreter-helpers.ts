@@ -1,22 +1,20 @@
 import { strictEqual } from "node:assert";
 
-import { type CpuState } from "#x86/state/cpu-state.js";
-import { x86Flags } from "#x86/flags.js";
+import {
+  readWasmCpuStateSnapshot,
+  readWasmCpuStateField,
+  writeWasmCpuStateSnapshot,
+  type WasmCpuStateSnapshot
+} from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
-import {
-  readWasmCpuState,
-  readWasmFlagByte,
-  readWasmStateField,
-  WASM_STATE_FIELDS,
-  writeWasmCpuState
-} from "#wasm/state-layout.js";
+import { WASM_CPU_STATE_FIELDS } from "#wasm/cpu-state-layout.js";
 import { createGuestMemory } from "#wasm/tests/helpers.js";
 
 export type InterpreterModuleInstance = Readonly<{
   module: WebAssembly.Module;
   instance: WebAssembly.Instance;
-  stateMemory: WebAssembly.Memory;
+  cpuStateMemory: WebAssembly.Memory;
   guestMemory: WebAssembly.Memory;
   stateView: DataView;
   guestView: DataView;
@@ -34,12 +32,12 @@ export async function instantiateInterpreterCompiledModule(
   module: WebAssembly.Module,
   guestMemory: WebAssembly.Memory = createGuestMemory()
 ): Promise<InterpreterModuleInstance> {
-  const stateMemory = new WebAssembly.Memory({ initial: 1 });
-  const stateView = new DataView(stateMemory.buffer);
+  const cpuStateMemory = new WebAssembly.Memory({ initial: 1 });
+  const stateView = new DataView(cpuStateMemory.buffer);
   const guestView = new DataView(guestMemory.buffer);
   const instance = await WebAssembly.instantiate(module, {
-    [wasmImport.moduleName]: {
-      [wasmImport.stateMemoryName]: stateMemory,
+    [wasmImport.namespace]: {
+      [wasmImport.cpuStateMemoryName]: cpuStateMemory,
       [wasmImport.guestMemoryName]: guestMemory
     }
   });
@@ -48,7 +46,7 @@ export async function instantiateInterpreterCompiledModule(
   return {
     module,
     instance,
-    stateMemory,
+    cpuStateMemory,
     guestMemory,
     stateView,
     guestView,
@@ -56,25 +54,21 @@ export async function instantiateInterpreterCompiledModule(
   };
 }
 
-export function writeInterpreterState(view: DataView, state: CpuState): void {
-  writeWasmCpuState(view, state);
+export function writeInterpreterState(view: DataView, state: WasmCpuStateSnapshot): void {
+  writeWasmCpuStateSnapshot(view, state);
 }
 
-export function readInterpreterState(view: DataView): CpuState {
-  return readWasmCpuState(view);
+export function readInterpreterState(view: DataView): WasmCpuStateSnapshot {
+  return readWasmCpuStateSnapshot(view);
 }
 
-export function assertInterpreterStateEquals(view: DataView, state: CpuState): void {
+export function assertInterpreterStateEquals(view: DataView, state: WasmCpuStateSnapshot): void {
   const expectedView = new DataView(new ArrayBuffer(view.byteLength));
 
-  writeWasmCpuState(expectedView, state);
+  writeWasmCpuStateSnapshot(expectedView, state);
 
-  for (const field of WASM_STATE_FIELDS) {
-    strictEqual(readWasmStateField(view, field), readWasmStateField(expectedView, field));
-  }
-
-  for (const flag of x86Flags) {
-    strictEqual(readWasmFlagByte(view, flag), readWasmFlagByte(expectedView, flag));
+  for (const field of WASM_CPU_STATE_FIELDS) {
+    strictEqual(readWasmCpuStateField(view, field), readWasmCpuStateField(expectedView, field));
   }
 }
 

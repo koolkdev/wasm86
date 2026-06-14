@@ -46,7 +46,7 @@ export class WasmCompiledBlockCache implements WasmCompiledBlockCacheLike {
       }
 
       const compiled = compileActionWasmBlockHandle([block], {
-        stateMemory: memories.stateMemory,
+        cpuStateMemory: memories.cpuStateMemory,
         guestMemory: memories.guestMemory,
         blockKey
       });

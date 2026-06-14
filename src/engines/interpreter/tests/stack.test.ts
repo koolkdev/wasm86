@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
+import { createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -19,12 +19,12 @@ import {
 
 type StackRunResult = Readonly<{
   interpreter: InterpreterModuleInstance;
-  state: CpuState;
+  state: WasmCpuStateSnapshot;
 }>;
 
 async function executeStackInstruction(
   bytes: readonly number[],
-  initialState: CpuState,
+  initialState: WasmCpuStateSnapshot,
   setupGuest?: (view: DataView) => void
 ): Promise<StackRunResult> {
   const interpreter = await instantiateWasmInterpreter();
@@ -43,7 +43,7 @@ async function executeStackInstruction(
 }
 
 test("executes PUSH r32 by decrementing ESP and storing the value", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1122_3344,
     esp: 0x40,
     eip: startAddress,
@@ -59,7 +59,7 @@ test("executes PUSH r32 by decrementing ESP and storing the value", async () => 
 });
 
 test("executes PUSH sign-extended imm8", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7
@@ -73,7 +73,7 @@ test("executes PUSH sign-extended imm8", async () => {
 });
 
 test("executes POP r32 by loading from ESP then incrementing ESP", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7
@@ -91,7 +91,7 @@ test("executes POP r32 by loading from ESP then incrementing ESP", async () => {
 });
 
 test("executes POP ESP with popped value as final ESP", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7
@@ -108,7 +108,7 @@ test("executes POP ESP with popped value as final ESP", async () => {
 });
 
 test("executes LEAVE by restoring EBP and ESP from the frame", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     ebp: 0x40,
     esp: 0x20,
     eip: startAddress,
@@ -127,7 +127,7 @@ test("executes LEAVE by restoring EBP and ESP from the frame", async () => {
 });
 
 test("executes POP [ESP] by writing at the incremented ESP", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7
@@ -145,7 +145,7 @@ test("executes POP [ESP] by writing at the incremented ESP", async () => {
 });
 
 test("executes POP [ESP + disp8] against the incremented ESP", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7
@@ -163,7 +163,7 @@ test("executes POP [ESP + disp8] against the incremented ESP", async () => {
 });
 
 test("a faulting POP [mem] write leaves ESP, EIP, and the stack untouched", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     ebx: 0xfffd,
     esp: 0x40,
     eip: startAddress,
@@ -185,7 +185,7 @@ test("a faulting POP [mem] write leaves ESP, EIP, and the stack untouched", asyn
 });
 
 test("executes PUSH [ESP] by reading the source before writing the new stack slot", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7

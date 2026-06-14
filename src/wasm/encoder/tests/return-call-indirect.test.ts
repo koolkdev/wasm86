@@ -6,11 +6,11 @@ import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { decodeExit, encodeExit, ExitReason } from "#wasm/exit.js";
 
-const importNamespace = "webwin32";
+const importNamespace = "wasm86";
 const tableImportName = "links";
 const entryExportName = "entry";
 const targetExportName = "target";
-const statePtr = 32;
+const cpuStatePtr = 32;
 
 test("return_call_indirect_invokes_imported_table_target", async () => {
   const { instance, table } = await instantiateIndirectCallModule(returnCallIndirectEntryBody);
@@ -18,7 +18,7 @@ test("return_call_indirect_invokes_imported_table_target", async () => {
   table.set(0, exportedFunction(instance, targetExportName));
 
   const entry = exportedFunction(instance, entryExportName);
-  const result = entry(statePtr);
+  const result = entry(cpuStatePtr);
 
   if (typeof result !== "bigint") {
     throw new Error(`expected bigint result, got ${typeof result}`);
@@ -36,7 +36,7 @@ test("call_indirect_invokes_imported_table_target", async () => {
   table.set(0, exportedFunction(instance, targetExportName));
 
   const entry = exportedFunction(instance, entryExportName);
-  const result = entry(statePtr);
+  const result = entry(cpuStatePtr);
 
   if (typeof result !== "bigint") {
     throw new Error(`expected bigint result, got ${typeof result}`);

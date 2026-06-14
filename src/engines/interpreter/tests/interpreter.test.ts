@@ -5,11 +5,11 @@ import { gprChannel } from "#ir/slots.js";
 import type { RegName } from "#x86/types.js";
 import { ExitReason } from "#wasm/exit.js";
 import {
-  readWasmFlagByte,
-  readWasmStateChannel,
-  readWasmStateField,
-  writeWasmCpuState
-} from "#wasm/state-layout.js";
+  readWasmCpuFlagByte,
+  readWasmCpuStateChannel,
+  readWasmCpuStateField,
+  writeWasmCpuStateSnapshot
+} from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import {
   instantiateInterpreterCompiledModule,
@@ -47,13 +47,13 @@ function writeProgram(view: DataView, address: number, bytes: readonly number[])
 }
 
 function readRegister(view: DataView, name: RegName): number {
-  return readWasmStateChannel(view, gprChannel(name));
+  return readWasmCpuStateChannel(view, gprChannel(name));
 }
 
 test("a program mixing mov, ALU, cmp, and jcc runs to its halt byte", async () => {
   const interpreter = await instantiate();
 
-  writeWasmCpuState(interpreter.stateView, { eip: startAddress });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eip: startAddress });
   writeProgram(interpreter.guestView, startAddress, [
     0xb9, 0x05, 0x00, 0x00, 0x00, // mov ecx, 5
     0xb8, 0x00, 0x00, 0x00, 0x00, // mov eax, 0
@@ -68,16 +68,16 @@ test("a program mixing mov, ALU, cmp, and jcc runs to its halt byte", async () =
   strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 15);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), startAddress + 0x11);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 17);
-  strictEqual(readWasmFlagByte(interpreter.stateView, "ZF"), 1);
-  strictEqual(readWasmFlagByte(interpreter.stateView, "CF"), 0);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x11);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 17);
+  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 1);
+  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "CF"), 0);
 });
 
 test("cmp against an immediate steers a two-byte jcc when taken", async () => {
   const interpreter = await instantiate();
 
-  writeWasmCpuState(interpreter.stateView, { eax: 7, eip: startAddress });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eax: 7, eip: startAddress });
   writeProgram(interpreter.guestView, startAddress, [
     0x3d, 0x07, 0x00, 0x00, 0x00,       // cmp eax, 7
     0x0f, 0x84, 0x01, 0x00, 0x00, 0x00, // je +1
@@ -90,15 +90,15 @@ test("cmp against an immediate steers a two-byte jcc when taken", async () => {
 
   strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 42);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), startAddress + 0x11);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 3);
-  strictEqual(readWasmFlagByte(interpreter.stateView, "ZF"), 1);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x11);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 3);
+  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 1);
 });
 
 test("a not-taken jcc falls through to the next instruction", async () => {
   const interpreter = await instantiate();
 
-  writeWasmCpuState(interpreter.stateView, { eax: 8, eip: startAddress });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eax: 8, eip: startAddress });
   writeProgram(interpreter.guestView, startAddress, [
     0x3d, 0x07, 0x00, 0x00, 0x00,       // cmp eax, 7
     0x0f, 0x84, 0x01, 0x00, 0x00, 0x00, // je +1
@@ -109,15 +109,15 @@ test("a not-taken jcc falls through to the next instruction", async () => {
 
   strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 8);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), startAddress + 0x0b);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 2);
-  strictEqual(readWasmFlagByte(interpreter.stateView, "ZF"), 0);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x0b);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 2);
+  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 0);
 });
 
 test("memory operands round-trip through the ModRM addressing forms", async () => {
   const interpreter = await instantiate();
 
-  writeWasmCpuState(interpreter.stateView, {
+  writeWasmCpuStateSnapshot(interpreter.stateView, {
     ebx: 0x2000,
     esi: 0x30,
     ecx: 0x11223344,
@@ -142,14 +142,14 @@ test("memory operands round-trip through the ModRM addressing forms", async () =
   strictEqual(interpreter.guestView.getUint8(0x2000), 0xbe);
   strictEqual(readRegister(interpreter.stateView, "edx"), 0x11224444);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0xcafebabe);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), startAddress + 0x14);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 6);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x14);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 6);
 });
 
 test("SIB addressing covers scaled-index, base-displacement, and no-index forms", async () => {
   const interpreter = await instantiate();
 
-  writeWasmCpuState(interpreter.stateView, {
+  writeWasmCpuStateSnapshot(interpreter.stateView, {
     eax: 2,
     ebp: 0x3000,
     esp: 0x2800,
@@ -171,14 +171,14 @@ test("SIB addressing covers scaled-index, base-displacement, and no-index forms"
   strictEqual(readRegister(interpreter.stateView, "edx"), 0x1111);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0x2222);
   strictEqual(readRegister(interpreter.stateView, "ebx"), 0x3333);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), startAddress + 0x0e);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 3);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x0e);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 3);
 });
 
 test("byte-register forms touch only their byte of the register file", async () => {
   const interpreter = await instantiate();
 
-  writeWasmCpuState(interpreter.stateView, { eax: 0x11223344, ebx: 0, eip: startAddress });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eax: 0x11223344, ebx: 0, eip: startAddress });
   writeProgram(interpreter.guestView, startAddress, [
     0x00, 0xc4,       // add ah, al  -> ah = 0x33 + 0x44
     0x88, 0xe3,       // mov bl, ah
@@ -191,14 +191,14 @@ test("byte-register forms touch only their byte of the register file", async () 
   strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 0x11220744);
   strictEqual(readRegister(interpreter.stateView, "ebx"), 0x77);
-  strictEqual(readWasmFlagByte(interpreter.stateView, "CF"), 1);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 3);
+  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "CF"), 1);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 3);
 });
 
 test("test writes flags without touching its operands", async () => {
   const interpreter = await instantiate();
 
-  writeWasmCpuState(interpreter.stateView, { eax: 0xf0, eip: startAddress });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eax: 0xf0, eip: startAddress });
   writeProgram(interpreter.guestView, startAddress, [
     0xa8, 0x0f, // test al, 0x0f
     haltByte
@@ -208,13 +208,13 @@ test("test writes flags without touching its operands", async () => {
 
   strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 0xf0);
-  strictEqual(readWasmFlagByte(interpreter.stateView, "ZF"), 1);
+  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 1);
 });
 
 test("exhausted fuel exits with the instruction limit and the count preserved", async () => {
   const interpreter = await instantiate();
 
-  writeWasmCpuState(interpreter.stateView, { eip: startAddress, instructionCount: 7 });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eip: startAddress, instructionCount: 7 });
   writeProgram(interpreter.guestView, startAddress, [
     0xb8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
     0xb9, 0x02, 0x00, 0x00, 0x00  // mov ecx, 2
@@ -225,30 +225,30 @@ test("exhausted fuel exits with the instruction limit and the count preserved", 
   strictEqual(exit.exitReason, ExitReason.INSTRUCTION_LIMIT);
   strictEqual(readRegister(interpreter.stateView, "eax"), 1);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), startAddress + 5);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 8);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 5);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 8);
 });
 
 test("fetching the opcode past mapped memory is a decode fault at the boundary", async () => {
   const interpreter = await instantiate();
   const eip = wasmGuestMemoryMinByteLength;
 
-  writeWasmCpuState(interpreter.stateView, { eip });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
 
   const exit = interpreter.run(10);
 
   strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
   strictEqual(exit.payload, eip);
   strictEqual(exit.detail, 1);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), eip);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 0);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
 
 test("an immediate crossing the end of memory faults with the instruction's eip", async () => {
   const interpreter = await instantiate();
   const eip = wasmGuestMemoryMinByteLength - 2;
 
-  writeWasmCpuState(interpreter.stateView, { eip });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
   writeProgram(interpreter.guestView, eip, [0xb8, 0x99]); // mov eax, imm32 cut short
 
   const exit = interpreter.run(10);
@@ -256,15 +256,15 @@ test("an immediate crossing the end of memory faults with the instruction's eip"
   strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
   strictEqual(exit.payload, eip + 1);
   strictEqual(exit.detail, 4);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), eip);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 0);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
 
 test("a displacement crossing the end of memory is a decode fault", async () => {
   const interpreter = await instantiate();
   const eip = wasmGuestMemoryMinByteLength - 5;
 
-  writeWasmCpuState(interpreter.stateView, { eip });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
   writeProgram(interpreter.guestView, eip, [0x8b, 0x05, 0x00, 0x20, 0x00]); // mov eax, [disp32] cut short
 
   const exit = interpreter.run(10);
@@ -272,14 +272,14 @@ test("a displacement crossing the end of memory is a decode fault", async () => 
   strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
   strictEqual(exit.payload, eip + 2);
   strictEqual(exit.detail, 4);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), eip);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
 });
 
 test("a SIB byte past the end of memory is a decode fault at its address", async () => {
   const interpreter = await instantiate();
   const eip = wasmGuestMemoryMinByteLength - 2;
 
-  writeWasmCpuState(interpreter.stateView, { eip });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
   writeProgram(interpreter.guestView, eip, [0x8b, 0x04]); // mov eax, [sib...] cut short
 
   const exit = interpreter.run(10);
@@ -287,15 +287,15 @@ test("a SIB byte past the end of memory is a decode fault at its address", async
   strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
   strictEqual(exit.payload, eip + 2);
   strictEqual(exit.detail, 1);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), eip);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 0);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
 
 test("a SIB displacement crossing the end of memory is a decode fault", async () => {
   const interpreter = await instantiate();
   const eip = wasmGuestMemoryMinByteLength - 5;
 
-  writeWasmCpuState(interpreter.stateView, { eip });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
   writeProgram(interpreter.guestView, eip, [0x8b, 0x04, 0x45, 0x00, 0x20]); // mov eax, [eax*2+disp32] cut short
 
   const exit = interpreter.run(10);
@@ -303,15 +303,15 @@ test("a SIB displacement crossing the end of memory is a decode fault", async ()
   strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
   strictEqual(exit.payload, eip + 3);
   strictEqual(exit.detail, 4);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), eip);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 0);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
 
 test("a guest load past the end is a memory fault, not a decode fault", async () => {
   const interpreter = await instantiate();
   const address = wasmGuestMemoryMinByteLength - 3;
 
-  writeWasmCpuState(interpreter.stateView, { eip: startAddress });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eip: startAddress });
   writeProgram(interpreter.guestView, startAddress, [
     0x8b, 0x05,
     address & 0xff,
@@ -325,8 +325,8 @@ test("a guest load past the end is a memory fault, not a decode fault", async ()
   strictEqual(exit.exitReason, ExitReason.MEMORY_READ_FAULT);
   strictEqual(exit.payload, address);
   strictEqual(exit.detail, 4);
-  strictEqual(readWasmStateField(interpreter.stateView, "eip"), startAddress);
-  strictEqual(readWasmStateField(interpreter.stateView, "instructionCount"), 0);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
 
 test("one handler body per ALU op, width, and addressing form", () => {

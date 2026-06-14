@@ -4,7 +4,7 @@ import type { ValueId } from "#ir/values.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
-import { channelAccessByteLength, channelStateOffset, WASM_GPR_BASE_OFFSET } from "#wasm/state-layout.js";
+import { wasmCpuStateChannelAccessByteLength, wasmCpuStateChannelOffset, WASM_CPU_GPR_BASE_OFFSET } from "#wasm/cpu-state-layout.js";
 
 // State slot loads and stores. The layout owns offsets and widths; this file
 // only encodes the matching access. A dynamic slot lowers to address math
@@ -103,19 +103,19 @@ function slotImmediate(slot: StateSlot): WasmMemoryImmediate {
   return {
     align: accessAlign(offset, slotAccessByteLength(slot)),
     offset,
-    memoryIndex: wasmMemoryIndex.state
+    memoryIndex: wasmMemoryIndex.cpuState
   };
 }
 
 function slotBaseOffset(slot: StateSlot): number {
   switch (slot.kind) {
     case "gprDynamic":
-      return WASM_GPR_BASE_OFFSET;
+      return WASM_CPU_GPR_BASE_OFFSET;
     case "gpr":
     case "flag":
     case "eip":
     case "instructionCount":
-      return channelStateOffset(slot);
+      return wasmCpuStateChannelOffset(slot);
   }
 }
 
@@ -127,7 +127,7 @@ function slotAccessByteLength(slot: StateSlot): 1 | 2 | 4 {
     case "flag":
     case "eip":
     case "instructionCount":
-      return channelAccessByteLength(slot);
+      return wasmCpuStateChannelAccessByteLength(slot);
   }
 }
 

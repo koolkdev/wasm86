@@ -45,15 +45,15 @@ export function encodeInterpreterModule(): InterpreterModule {
 }
 
 function importInterpreterMemories(module: WasmModuleEncoder): void {
-  const stateMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.stateMemoryName, {
+  const cpuStateMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.cpuStateMemoryName, {
     minPages: 1
   });
-  const guestMemoryIndex = module.importMemory(wasmImport.moduleName, wasmImport.guestMemoryName, {
+  const guestMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.guestMemoryName, {
     minPages: wasmGuestMemoryMinPages
   });
 
   assert(
-    stateMemoryIndex === wasmMemoryIndex.state && guestMemoryIndex === wasmMemoryIndex.guest,
+    cpuStateMemoryIndex === wasmMemoryIndex.cpuState && guestMemoryIndex === wasmMemoryIndex.guest,
     "unexpected Wasm memory import order"
   );
 }

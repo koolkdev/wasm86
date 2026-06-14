@@ -1,5 +1,5 @@
 import type { RunResult } from "#x86/execution/run-result.js";
-import type { CpuState } from "#x86/state/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 
 export type MemoryPatch = Readonly<{
   address: number;
@@ -9,13 +9,13 @@ export type MemoryPatch = Readonly<{
 export type EngineFixture = Readonly<{
   name: string;
   bytes: readonly number[];
-  initialState: Partial<CpuState>;
+  initialState: Partial<WasmCpuStateSnapshot>;
   initialMemory?: readonly MemoryPatch[];
   expected: EngineExpectation;
 }>;
 
 export type EngineExpectation = Readonly<{
   result: Partial<RunResult> & Pick<RunResult, "stopReason">;
-  state: Partial<CpuState>;
+  state: Partial<WasmCpuStateSnapshot>;
   memory?: readonly MemoryPatch[];
 }>;

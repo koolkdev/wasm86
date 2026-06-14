@@ -6,18 +6,18 @@ import { encodeMemoryImmediate } from "#wasm/encoder/memory.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 
-const importNamespace = "webwin32";
-const stateImportName = "state";
+const importNamespace = "wasm86";
+const cpuStateImportName = "cpuState";
 const guestImportName = "guest";
 
-test("state memory is index 0", async () => {
+test("cpu state memory is index 0", async () => {
   const bytes = encodeImportedMemoryTestModule();
   const state = new WebAssembly.Memory({ initial: 1 });
   const guest = new WebAssembly.Memory({ initial: 1 });
   const instance = await instantiateImportedMemoryTestModule(bytes, state, guest);
-  const storeState = readExportedFunction(instance, "storeState");
+  const storeCpuState = readExportedFunction(instance, "storeCpuState");
 
-  storeState(0);
+  storeCpuState(0);
 
   strictEqual(new DataView(state.buffer).getUint32(0, true), 0x1234_5678);
   strictEqual(new DataView(guest.buffer).getUint32(0, true), 0);
@@ -40,10 +40,10 @@ test("guest memory is index 1", async () => {
 
 test("memory import order is stable", () => {
   const module = new WasmModuleEncoder();
-  const stateMemoryIndex = module.importMemory(importNamespace, stateImportName, { minPages: 1 });
+  const cpuStateMemoryIndex = module.importMemory(importNamespace, cpuStateImportName, { minPages: 1 });
   const guestMemoryIndex = module.importMemory(importNamespace, guestImportName, { minPages: 1 });
 
-  strictEqual(stateMemoryIndex, 0);
+  strictEqual(cpuStateMemoryIndex, 0);
   strictEqual(guestMemoryIndex, 1);
 });
 
@@ -68,7 +68,7 @@ async function instantiateImportedMemoryTestModule(
   const module = await WebAssembly.compile(bytes);
   return WebAssembly.instantiate(module, {
     [importNamespace]: {
-      [stateImportName]: state,
+      [cpuStateImportName]: state,
       [guestImportName]: guest
     }
   });
@@ -76,10 +76,10 @@ async function instantiateImportedMemoryTestModule(
 
 function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
-  const stateMemoryIndex = module.importMemory(importNamespace, stateImportName, { minPages: 1 });
+  const cpuStateMemoryIndex = module.importMemory(importNamespace, cpuStateImportName, { minPages: 1 });
   const guestMemoryIndex = module.importMemory(importNamespace, guestImportName, { minPages: 1 });
 
-  const storeStateType = module.addFunctionType({
+  const storeCpuStateType = module.addFunctionType({
     params: [wasmValueType.i32],
     results: []
   });
@@ -92,14 +92,14 @@ function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
     results: [wasmValueType.i32]
   });
 
-  const storeState = module.addFunction(
-    storeStateType,
+  const storeCpuState = module.addFunction(
+    storeCpuStateType,
     new WasmFunctionBodyEncoder()
       .localGet(0)
       .i32Const(0x1234_5678)
       .i32Store({
         align: 2,
-        memoryIndex: stateMemoryIndex,
+        memoryIndex: cpuStateMemoryIndex,
         offset: 0
       })
       .end()
@@ -128,7 +128,7 @@ function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
       .end()
   );
 
-  module.exportFunction("storeState", storeState);
+  module.exportFunction("storeCpuState", storeCpuState);
   module.exportFunction("storeGuest", storeGuest);
   module.exportFunction("loadGuest", loadGuest);
 

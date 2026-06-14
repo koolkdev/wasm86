@@ -1,29 +1,27 @@
-import type { CpuState } from "#x86/state/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
-import { readWasmCpuState, writeWasmCpuState } from "#wasm/state-layout.js";
 import { encodeInterpreterModule } from "./module.js";
 
 let compiledInterpreterModule: WebAssembly.Module | undefined;
 
 export type WasmInterpreterRuntimeOptions = Readonly<{
-  stateMemory?: WebAssembly.Memory;
+  cpuStateMemory?: WebAssembly.Memory;
 }>;
 
 export class WasmInterpreterRuntime {
   readonly guestMemory: WebAssembly.Memory;
-  readonly stateMemory: WebAssembly.Memory;
+  readonly cpuStateMemory: WebAssembly.Memory;
   readonly stateView: DataView<ArrayBuffer>;
   readonly #run: (fuel: number) => bigint;
 
   constructor(guestMemory: WebAssembly.Memory, options: WasmInterpreterRuntimeOptions = {}) {
     this.guestMemory = guestMemory;
-    this.stateMemory = options.stateMemory ?? new WebAssembly.Memory({ initial: 1 });
-    this.stateView = new DataView(this.stateMemory.buffer);
+    this.cpuStateMemory = options.cpuStateMemory ?? new WebAssembly.Memory({ initial: 1 });
+    this.stateView = new DataView(this.cpuStateMemory.buffer);
 
     const instance = new WebAssembly.Instance(compiledModule(), {
-      [wasmImport.moduleName]: {
-        [wasmImport.stateMemoryName]: this.stateMemory,
+      [wasmImport.namespace]: {
+        [wasmImport.cpuStateMemoryName]: this.cpuStateMemory,
         [wasmImport.guestMemoryName]: this.guestMemory
       }
     });
@@ -33,15 +31,6 @@ export class WasmInterpreterRuntime {
 
   run(fuel: number): DecodedExit {
     return decodeExit(this.#run(fuel));
-  }
-
-  copyStateToWasm(state: CpuState): void {
-    writeWasmCpuState(this.stateView, state);
-  }
-
-  // The interpreter writes flag bytes, never the packed word.
-  copyStateFromWasm(state: CpuState): void {
-    Object.assign(state, readWasmCpuState(this.stateView));
   }
 }
 

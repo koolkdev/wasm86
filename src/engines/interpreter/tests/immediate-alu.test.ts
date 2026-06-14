@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { flagsOf,
-  createCpuState } from "#x86/state/cpu-state.js";
+import { wasmCpuFlagsOf,
+  createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   writeInterpreterState
@@ -27,7 +27,7 @@ const parityOnlyFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 const signParityFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 
 test("executes ADD EAX, imm32", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
     eip: startAddress,
     ...allFlagsSet,
@@ -39,11 +39,11 @@ test("executes ADD EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(flagsOf(state), addWraparoundFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), addWraparoundFlags);
 });
 
 test("executes SUB EAX, imm32", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0,
     eip: startAddress,
     ...allFlagsSet,
@@ -55,11 +55,11 @@ test("executes SUB EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_ffff);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(flagsOf(state), subBorrowFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), subBorrowFlags);
 });
 
 test("executes ADD AX, imm16 with 16-bit wraparound", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_0001,
     eip: startAddress,
     instructionCount: 7
@@ -73,7 +73,7 @@ test("executes ADD AX, imm16 with 16-bit wraparound", async () => {
 });
 
 test("executes ADD AX, imm16 without leaking carry into high EAX", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_ffff,
     eip: startAddress,
     instructionCount: 7
@@ -87,7 +87,7 @@ test("executes ADD AX, imm16 without leaking carry into high EAX", async () => {
 });
 
 test("executes SUB AX, imm16 without borrowing from high EAX", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_0000,
     eip: startAddress,
     instructionCount: 7
@@ -101,7 +101,7 @@ test("executes SUB AX, imm16 without borrowing from high EAX", async () => {
 });
 
 test("executes ADD AL, imm8 without leaking carry into high EAX", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_00ff,
     eip: startAddress,
     instructionCount: 7
@@ -115,7 +115,7 @@ test("executes ADD AL, imm8 without leaking carry into high EAX", async () => {
 });
 
 test("executes SUB AL, imm8 without borrowing from high EAX", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_0000,
     eip: startAddress,
     instructionCount: 7
@@ -129,7 +129,7 @@ test("executes SUB AL, imm8 without borrowing from high EAX", async () => {
 });
 
 test("executes XOR EAX, imm32", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
     eip: startAddress,
     ...allFlagsSet,
@@ -141,11 +141,11 @@ test("executes XOR EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(flagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
 });
 
 test("executes OR EAX, imm32", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x8000_0000,
     eip: startAddress,
     ...allFlagsSet,
@@ -157,11 +157,11 @@ test("executes OR EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x8000_0100);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(flagsOf(state), signParityFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), signParityFlags);
 });
 
 test("executes AND EAX, imm32", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
     eip: startAddress,
     ...allFlagsSet,
@@ -173,11 +173,11 @@ test("executes AND EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(flagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
 });
 
 test("executes CMP EAX, imm32 without writing EAX", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 5,
     eip: startAddress,
     ...allFlagsSet,
@@ -189,11 +189,11 @@ test("executes CMP EAX, imm32 without writing EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(flagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
 });
 
 test("executes TEST EAX, imm32 without writing EAX", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xff,
     eip: startAddress,
     ...allFlagsSet,
@@ -205,11 +205,11 @@ test("executes TEST EAX, imm32 without writing EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(flagsOf(state), parityOnlyFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), parityOnlyFlags);
 });
 
 test("executes 81 /7 CMP r/m32, imm32 for register operands", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0,
     eip: startAddress,
     ...allFlagsSet,
@@ -221,11 +221,11 @@ test("executes 81 /7 CMP r/m32, imm32 for register operands", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 6, 8);
-  deepStrictEqual(flagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
 });
 
 test("executes 83 /5 SUB r/m32, sign-extended imm8 for register operands", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 1,
     eip: startAddress,
     ...allFlagsSet,
@@ -237,11 +237,11 @@ test("executes 83 /5 SUB r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 2);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  deepStrictEqual(flagsOf(state), carryAuxFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), carryAuxFlags);
 });
 
 test("executes 83 /6 XOR r/m32, sign-extended imm8 for register operands", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0,
     eip: startAddress,
     ...allFlagsSet,
@@ -253,11 +253,11 @@ test("executes 83 /6 XOR r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_ffff);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  deepStrictEqual(flagsOf(state), signParityFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), signParityFlags);
 });
 
 test("executes 83 /4 AND r/m32, sign-extended imm8 for register operands", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
     eip: startAddress,
     ...allFlagsSet,
@@ -269,13 +269,13 @@ test("executes 83 /4 AND r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  deepStrictEqual(flagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
 });
 
 test("unsupported 81 /2 group returns unsupported before immediate decode", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const eip = interpreter.guestView.byteLength - 2;
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
     eip,
     ...allFlagsSet,

@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { flagsOf,
-  createCpuState, type CpuState } from "#x86/state/cpu-state.js";
+import { wasmCpuFlagsOf,
+  createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -23,12 +23,12 @@ const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 type MemoryRunResult = Readonly<{
   interpreter: InterpreterModuleInstance;
   exit: DecodedExit;
-  state: CpuState;
+  state: WasmCpuStateSnapshot;
 }>;
 
 async function executeMemoryInstruction(
   bytes: readonly number[],
-  initialState: CpuState,
+  initialState: WasmCpuStateSnapshot,
   setupGuest?: (view: DataView) => void
 ): Promise<MemoryRunResult> {
   const interpreter = await instantiateWasmInterpreter();
@@ -44,7 +44,7 @@ async function executeMemoryInstruction(
 }
 
 test("executes MOV r32, [base + disp8]", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     ebx: 0x20,
     eip: startAddress,
     instructionCount: 7
@@ -63,7 +63,7 @@ test("executes MOV r32, [base + disp8]", async () => {
 });
 
 test("executes MOV [base + disp8], r32", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
     ebx: 0x20,
     eip: startAddress,
@@ -80,7 +80,7 @@ test("executes MOV [base + disp8], r32", async () => {
 });
 
 test("executes MOV [base + disp8], imm32 through C7 group", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     ebx: 0x20,
     eip: startAddress,
     instructionCount: 7
@@ -98,7 +98,7 @@ test("executes MOV [base + disp8], imm32 through C7 group", async () => {
 });
 
 test("executes LEA r32, [base + index*scale + disp8] without reading memory", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     ebx: 0x100,
     esi: 3,
     eip: startAddress,
@@ -115,7 +115,7 @@ test("executes LEA r32, [base + index*scale + disp8] without reading memory", as
 });
 
 test("executes LEA r16 without reading memory or modifying flags", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_0000,
     ebx: 0x100,
     esi: 3,
@@ -128,14 +128,14 @@ test("executes LEA r16 without reading memory or modifying flags", async () => {
 
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x1234_0114);
-  deepStrictEqual(flagsOf(state), flagsOf(initialState));
+  deepStrictEqual(wasmCpuFlagsOf(state), wasmCpuFlagsOf(initialState));
   strictEqual(state.ebx, initialState.ebx);
   strictEqual(state.esi, initialState.esi);
   assertCompletedInstruction(state, startAddress + 5, 8);
 });
 
 test("executes MOV r32, [disp32]", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
   });
@@ -154,7 +154,7 @@ test("executes MOV r32, [disp32]", async () => {
 test("memory read guards report 1, 2, and 4 byte fault ranges", async () => {
   for (const width of [8, 16, 32] as const) {
     const faultAddress = 0x1_0000 - width / 8 + 1;
-    const initialState = createCpuState({
+    const initialState = createWasmCpuStateSnapshot({
       eax: 0xaaaa_aaaa,
       eip: startAddress,
       instructionCount: 7
@@ -177,7 +177,7 @@ test("memory read guards report 1, 2, and 4 byte fault ranges", async () => {
 test("memory write guards report 1, 2, and 4 byte fault ranges before stores", async () => {
   for (const width of [8, 16, 32] as const) {
     const faultAddress = 0x1_0000 - width / 8 + 1;
-    const initialState = createCpuState({
+    const initialState = createWasmCpuStateSnapshot({
       eax: 0x1234_5678,
       eip: startAddress,
       instructionCount: 7
@@ -198,7 +198,7 @@ test("memory write guards report 1, 2, and 4 byte fault ranges before stores", a
 });
 
 test("executes MOV r32, [index*scale + disp32] through SIB", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     ecx: 2,
     eip: startAddress,
     instructionCount: 7
@@ -217,7 +217,7 @@ test("executes MOV r32, [index*scale + disp32] through SIB", async () => {
 });
 
 test("LEA m32 form rejects register ModRM", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
     eip: startAddress,
     instructionCount: 7

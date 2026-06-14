@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createCpuState, type CpuState } from "#x86/state/cpu-state.js";
+import { createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   readInterpreterState,
   writeInterpreterState,
@@ -16,12 +16,12 @@ import {
 
 type ControlRunResult = Readonly<{
   interpreter: InterpreterModuleInstance;
-  state: CpuState;
+  state: WasmCpuStateSnapshot;
 }>;
 
 async function executeControlInstruction(
   bytes: readonly number[],
-  initialState: CpuState,
+  initialState: WasmCpuStateSnapshot,
   setupGuest?: (view: DataView) => void
 ): Promise<ControlRunResult> {
   const interpreter = await instantiateWasmInterpreter();
@@ -40,7 +40,7 @@ async function executeControlInstruction(
 }
 
 test("executes CALL rel32 by pushing next EIP and jumping to the target", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7
@@ -58,7 +58,7 @@ test("executes CALL rel32 by pushing next EIP and jumping to the target", async 
 });
 
 test("executes CALL [ESP] by resolving the target before pushing the return address", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7
@@ -78,7 +78,7 @@ test("executes CALL [ESP] by resolving the target before pushing the return addr
 });
 
 test("executes JMP r/m32 with register target", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x2000,
     eip: startAddress,
     instructionCount: 7
@@ -92,7 +92,7 @@ test("executes JMP r/m32 with register target", async () => {
 });
 
 test("executes RET by popping the target into EIP", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7
@@ -110,7 +110,7 @@ test("executes RET by popping the target into EIP", async () => {
 });
 
 test("executes RET imm16 by popping the target then adding stack bytes", async () => {
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
     eip: startAddress,
     instructionCount: 7

@@ -10,7 +10,7 @@ import type { ConditionCode } from "#x86/conditions.js";
 
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
-import { readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
+import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 // cmp + setcc consuming the recorded condition expression, and standalone
@@ -65,13 +65,13 @@ for (const [cc, predicate] of comparePredicates) {
       const { stateView, run } = await instantiateIrBlock(block);
       const label = `set${cc.toLowerCase()} with ${left}, ${right}`;
 
-      writeWasmCpuState(stateView, { ebx: left, eax: 0xdeadbeaa });
+      writeWasmCpuStateSnapshot(stateView, { ebx: left, eax: 0xdeadbeaa });
       strictEqual(run(), irBlockCompleted, label);
 
       // setcc writes the low byte only; the rest of eax is untouched.
       const expected = 0xdeadbe00 + (predicate(left, right) ? 1 : 0);
 
-      strictEqual(readWasmStateChannel(stateView, gprChannel("eax")), expected, label);
+      strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), expected, label);
     }
   });
 }
@@ -105,12 +105,12 @@ for (const cc of Object.keys(CONDITIONS) as ConditionCode[]) {
       const flagFields = Object.fromEntries([...flags].map((flag) => [flag, 1]));
       const label = `set${cc.toLowerCase()} with ${[...flags].join("+") || "no flags"}`;
 
-      writeWasmCpuState(stateView, { eax: 0x55aa55aa, ...flagFields });
+      writeWasmCpuStateSnapshot(stateView, { eax: 0x55aa55aa, ...flagFields });
       strictEqual(run(), irBlockCompleted, label);
 
       const expected = 0x55aa5500 + (evaluateCondition(condition.expr, flags) ? 1 : 0);
 
-      strictEqual(readWasmStateChannel(stateView, gprChannel("eax")), expected, label);
+      strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), expected, label);
     }
   });
 }

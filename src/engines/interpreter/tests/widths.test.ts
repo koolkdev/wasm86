@@ -3,8 +3,8 @@ import { test } from "node:test";
 
 import { ExitReason } from "#wasm/exit.js";
 import { startAddress } from "#wasm/tests/helpers.js";
-import { flagsOf,
-  createCpuState, type CpuState } from "#x86/state/cpu-state.js";
+import { wasmCpuFlagsOf,
+  createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -27,7 +27,7 @@ const zeroResultFlags = { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
 const signLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 
 test("executes MOV into AL, AH, and prefixed AX register views", async () => {
-  const movAl = await executeInstruction([0xb0, 0x44], createCpuState({
+  const movAl = await executeInstruction([0xb0, 0x44], createWasmCpuStateSnapshot({
     eax: 0x1122_3300,
     eip: startAddress,
     instructionCount: 7
@@ -37,7 +37,7 @@ test("executes MOV into AL, AH, and prefixed AX register views", async () => {
   strictEqual(movAl.state.eax, 0x1122_3344);
   assertCompletedInstruction(movAl.state, startAddress + 2, 8);
 
-  const movAh = await executeInstruction([0xb4, 0x55], createCpuState({
+  const movAh = await executeInstruction([0xb4, 0x55], createWasmCpuStateSnapshot({
     eax: 0x1122_0033,
     eip: startAddress,
     instructionCount: 7
@@ -47,7 +47,7 @@ test("executes MOV into AL, AH, and prefixed AX register views", async () => {
   strictEqual(movAh.state.eax, 0x1122_5533);
   assertCompletedInstruction(movAh.state, startAddress + 2, 8);
 
-  const movAx = await executeInstruction([0x66, 0xb8, 0x78, 0x56], createCpuState({
+  const movAx = await executeInstruction([0x66, 0xb8, 0x78, 0x56], createWasmCpuStateSnapshot({
     eax: 0x1234_0000,
     eip: startAddress,
     instructionCount: 7
@@ -59,7 +59,7 @@ test("executes MOV into AL, AH, and prefixed AX register views", async () => {
 });
 
 test("executes byte and word memory reads and writes", async () => {
-  const byteStore = await executeWithGuest([0x88, 0x03], createCpuState({
+  const byteStore = await executeWithGuest([0x88, 0x03], createWasmCpuStateSnapshot({
     eax: 0xaabb_ccdd,
     ebx: 0x40,
     eip: startAddress,
@@ -72,7 +72,7 @@ test("executes byte and word memory reads and writes", async () => {
 
   const wordLoad = await executeWithGuest(
     [0x66, 0x8b, 0x03],
-    createCpuState({
+    createWasmCpuStateSnapshot({
       eax: 0xffff_0000,
       ebx: 0x40,
       eip: startAddress,
@@ -85,7 +85,7 @@ test("executes byte and word memory reads and writes", async () => {
   strictEqual(wordLoad.state.eax, 0xffff_1234);
   assertCompletedInstruction(wordLoad.state, startAddress + 3, 8);
 
-  const wordStore = await executeWithGuest([0x66, 0x89, 0x03], createCpuState({
+  const wordStore = await executeWithGuest([0x66, 0x89, 0x03], createWasmCpuStateSnapshot({
     eax: 0xaaaa_babe,
     ebx: 0x44,
     eip: startAddress,
@@ -99,7 +99,7 @@ test("executes byte and word memory reads and writes", async () => {
 });
 
 test("materializes representative 8/16-bit ALU flags", async () => {
-  const add8 = await executeInstruction([0x04, 0x01], createCpuState({
+  const add8 = await executeInstruction([0x04, 0x01], createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
     eip: startAddress,
     ...allFlagsSet,
@@ -108,9 +108,9 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(add8.exit);
   strictEqual(add8.state.eax, 0xffff_ff00);
-  deepStrictEqual(flagsOf(add8.state), addWraparoundFlags);
+  deepStrictEqual(wasmCpuFlagsOf(add8.state), addWraparoundFlags);
 
-  const sub16 = await executeInstruction([0x66, 0x2d, 0x01, 0x00], createCpuState({
+  const sub16 = await executeInstruction([0x66, 0x2d, 0x01, 0x00], createWasmCpuStateSnapshot({
     eax: 0xffff_0000,
     eip: startAddress,
     ...allFlagsSet,
@@ -119,9 +119,9 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(sub16.exit);
   strictEqual(sub16.state.eax, 0xffff_ffff);
-  deepStrictEqual(flagsOf(sub16.state), subBorrowFlags);
+  deepStrictEqual(wasmCpuFlagsOf(sub16.state), subBorrowFlags);
 
-  const cmp8 = await executeInstruction([0x3c, 0x80], createCpuState({
+  const cmp8 = await executeInstruction([0x3c, 0x80], createWasmCpuStateSnapshot({
     eax: 0x80,
     eip: startAddress,
     ...allFlagsSet,
@@ -130,9 +130,9 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(cmp8.exit);
   strictEqual(cmp8.state.eax, 0x80);
-  deepStrictEqual(flagsOf(cmp8.state), zeroResultFlags);
+  deepStrictEqual(wasmCpuFlagsOf(cmp8.state), zeroResultFlags);
 
-  const test16 = await executeInstruction([0x66, 0xa9, 0x00, 0x80], createCpuState({
+  const test16 = await executeInstruction([0x66, 0xa9, 0x00, 0x80], createWasmCpuStateSnapshot({
     eax: 0x8000,
     eip: startAddress,
     ...allFlagsSet,
@@ -141,12 +141,12 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(test16.exit);
   strictEqual(test16.state.eax, 0x8000);
-  deepStrictEqual(flagsOf(test16.state), signLogicFlags);
+  deepStrictEqual(wasmCpuFlagsOf(test16.state), signLogicFlags);
 });
 
 test("unsupported prefixed opcode streams terminate without changing architectural state", async () => {
   const interpreter = await instantiateWasmInterpreter();
-  const initialState = createCpuState({
+  const initialState = createWasmCpuStateSnapshot({
     eax: 0x1122_3344,
     eip: startAddress,
     instructionCount: 7
@@ -163,12 +163,12 @@ test("unsupported prefixed opcode streams terminate without changing architectur
 
 async function executeWithGuest(
   bytes: readonly number[],
-  initialState: CpuState,
+  initialState: WasmCpuStateSnapshot,
   setupGuest?: (view: DataView) => void
 ): Promise<Readonly<{
   exit: ReturnType<InterpreterModuleInstance["run"]>;
   interpreter: InterpreterModuleInstance;
-  state: CpuState;
+  state: WasmCpuStateSnapshot;
 }>> {
   const interpreter = await instantiateWasmInterpreter();
 

@@ -18,7 +18,7 @@ test("wasm memory fault exits report byte, word, and dword fault sizes", () => {
 
   for (const [exitReason, detail, faultSize, faultOperation] of cases) {
     const memories = createWasmHostMemories();
-    const result = runResultFromWasmExit(memories.state, {
+    const result = runResultFromWasmExit(memories.cpuState, {
       exitReason,
       payload: 0x1234,
       ...(detail === undefined ? {} : { detail })

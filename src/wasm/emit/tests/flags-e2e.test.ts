@@ -8,10 +8,10 @@ import type { WriteStateAction } from "#ir/actions.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags } from "#x86/flags.js";
-import type { CpuState } from "#x86/state/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type Reg32 } from "#x86/types.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
-import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
+import { readWasmCpuFlagByte, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";
@@ -53,7 +53,7 @@ for (const aluCase of aluCases) {
     for (const pair of operandPairs) {
       const label = `${aluCase.name} with ${hex(pair.left)}, ${hex(pair.right)}`;
       const instruction = ok(decodeBytes(aluCase.bytes));
-      const initial: Partial<CpuState> = {
+      const initial: Partial<WasmCpuStateSnapshot> = {
         ebx: pair.left,
         ecx: pair.right,
         eip: instruction.address,
@@ -67,7 +67,7 @@ for (const aluCase of aluCases) {
 
       const { stateView, run } = await instantiateIrBlock(builder.finish());
 
-      writeWasmCpuState(stateView, initial);
+      writeWasmCpuStateSnapshot(stateView, initial);
       strictEqual(run(), irBlockCompleted, label);
       assertState(
         stateView,
@@ -107,7 +107,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
 
   strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Store8).length, 6);
 
-  const initial: Partial<CpuState> = {
+  const initial: Partial<WasmCpuStateSnapshot> = {
     ebx: 0x7fff_fffe,
     ecx: 0x0000_0001,
     eip: first.address,
@@ -119,7 +119,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
 
   const { stateView, run } = await instantiateIrBlock(block);
 
-  writeWasmCpuState(stateView, initial);
+  writeWasmCpuStateSnapshot(stateView, initial);
   strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
@@ -134,13 +134,13 @@ function assertState(
   label: string
 ): void {
   for (const name of reg32) {
-    strictEqual(readWasmStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
   }
 
-  strictEqual(readWasmStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
+  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
 
   for (const flag of x86Flags) {
-    strictEqual(readWasmFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
+    strictEqual(readWasmCpuFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
   }
 }
 
