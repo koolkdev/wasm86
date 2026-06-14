@@ -7,8 +7,6 @@ import type {
   RegRef,
   StorageInput,
   StorageRef,
-  TargetInput,
-  TargetRef,
   ValueInput,
   ValueRef,
   VarRef
@@ -46,14 +44,6 @@ export function toStorageRef(value: StorageInput): StorageRef {
 
 export function toValueRef(value: ValueInput): ValueRef {
   return typeof value === "number" ? const32(value) : value;
-}
-
-export function toTargetRef(value: TargetInput): TargetRef {
-  if (typeof value === "number") {
-    return const32(value);
-  }
-
-  return value;
 }
 
 function assertOperandIndex(index: number): void {

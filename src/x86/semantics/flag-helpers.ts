@@ -1,7 +1,7 @@
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import type {
   IrBuilder,
-  IrFlagWrite,
+  IrFlagWriteInput,
   ValueInput,
   ValueRef
 } from "#ir/model/types.js";
@@ -10,7 +10,7 @@ export type LogicFlagOp = "and" | "or" | "xor";
 
 export type ResultAndFlags = Readonly<{
   result: ValueRef;
-  flags: IrFlagWrite;
+  flags: IrFlagWriteInput;
 }>;
 
 export type AddResultAndFlagsInput = Readonly<{
@@ -113,7 +113,7 @@ export function buildLogicResultAndFlags(s: IrBuilder, input: LogicResultAndFlag
   };
 }
 
-export function buildCmpFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWrite {
+export function buildCmpFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWriteInput {
   const width = input.width;
   const a = projectInput(s, width, input.left);
   const b = projectInput(s, width, input.right);
@@ -139,7 +139,7 @@ export function buildCmpFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWrite
   };
 }
 
-export function buildTestFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWrite {
+export function buildTestFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWriteInput {
   const width = input.width;
   const left = projectInput(s, width, input.left);
   const right = projectInput(s, width, input.right);
@@ -154,7 +154,7 @@ export function buildTestFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWrit
   };
 }
 
-export function buildIncFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlagWrite {
+export function buildIncFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlagWriteInput {
   const width = input.width;
   const left = projectInput(s, width, input.input);
   const result = projectResult(s, width, input.result);
@@ -168,7 +168,7 @@ export function buildIncFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlag
   };
 }
 
-export function buildDecFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlagWrite {
+export function buildDecFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlagWriteInput {
   const width = input.width;
   const left = projectInput(s, width, input.input);
   const result = projectResult(s, width, input.result);
@@ -182,7 +182,7 @@ export function buildDecFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlag
   };
 }
 
-export function buildNegFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlagWrite {
+export function buildNegFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlagWriteInput {
   const width = input.width;
   const value = projectInput(s, width, input.input);
   const result = projectResult(s, width, input.result);
@@ -197,7 +197,7 @@ export function buildNegFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlag
   };
 }
 
-function logicFlags(s: IrBuilder, width: OperandWidth, result: ValueRef): IrFlagWrite {
+function logicFlags(s: IrBuilder, width: OperandWidth, result: ValueRef): IrFlagWriteInput {
   return {
     cells: {
       ...zspCells(s, { width, result }),
@@ -208,7 +208,7 @@ function logicFlags(s: IrBuilder, width: OperandWidth, result: ValueRef): IrFlag
   };
 }
 
-function zspCells(s: IrBuilder, dag: ResultFlagDag): IrFlagWrite["cells"] {
+function zspCells(s: IrBuilder, dag: ResultFlagDag): IrFlagWriteInput["cells"] {
   return {
     ZF: s.flagExpr(s.compare(dag.width, "eq", dag.result, 0)),
     SF: s.flagExpr(signBit(s, dag.width, dag.result)),
@@ -220,7 +220,7 @@ function addCarryCells(
   s: IrBuilder,
   dag: BinaryFlagDag,
   carryIn?: ValueInput
-): Required<Pick<IrFlagWrite["cells"], "CF" | "AF" | "OF">> {
+): Required<Pick<IrFlagWriteInput["cells"], "CF" | "AF" | "OF">> {
   return {
     CF: s.flagExpr(addCarry(s, dag, carryIn)),
     AF: s.flagExpr(auxCarry(s, dag)),
@@ -232,7 +232,7 @@ function subCarryCells(
   s: IrBuilder,
   dag: BinaryFlagDag,
   borrowIn?: ValueInput
-): Required<Pick<IrFlagWrite["cells"], "CF" | "AF" | "OF">> {
+): Required<Pick<IrFlagWriteInput["cells"], "CF" | "AF" | "OF">> {
   return {
     CF: s.flagExpr(subBorrow(s, dag, borrowIn)),
     AF: s.flagExpr(auxCarry(s, dag)),

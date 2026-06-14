@@ -15,8 +15,6 @@ export type RegRef = Readonly<{ kind: "reg"; reg: RegName }>;
 export type MemRef = Readonly<{ kind: "mem"; address: ValueRef }>;
 export type StorageRef = OperandRef | RegRef | MemRef;
 
-export type TargetRef = ValueRef;
-
 export type SemanticOperandStorageKind =
   | "reg"
   | "mem"
@@ -46,24 +44,9 @@ export type ConditionCode =
   | "LE"
   | "G";
 
-export type IrFlagsConditionOp = Readonly<{
-  op: "flags.condition";
-  dst: VarRef;
-  cc: ConditionCode;
-}>;
-
 export type IrFlagWriteCell =
   | Readonly<{ kind: "expr"; value: ValueRef }>
   | Readonly<{ kind: "undef" }>;
-
-export type IrFlagWrite = Readonly<{
-  cells: Partial<Record<X86Flag, IrFlagWriteCell>>;
-  conditions?: Partial<Record<ConditionCode, ValueRef>>;
-}>;
-
-export type IrFlagWriteOp = IrFlagWrite & Readonly<{
-  op: "flags.write";
-}>;
 
 export type IrBinaryOperator =
   | "add"
@@ -91,82 +74,12 @@ export type IrUnaryOperator =
   | "extend16_s"
   | "popcnt";
 
-export type IrBinaryValueOp = Readonly<{
-  op: "value.binary";
-  type: IrValueType;
-  operator: IrBinaryOperator;
-  dst: VarRef;
-  a: ValueRef;
-  b: ValueRef;
-}>;
-
-export type IrUnaryValueOp = Readonly<{
-  op: "value.unary";
-  type: IrValueType;
-  operator: IrUnaryOperator;
-  dst: VarRef;
-  value: ValueRef;
-}>;
-
-export type IrSelectValueOp = Readonly<{
-  op: "value.select";
-  type: IrValueType;
-  dst: VarRef;
-  condition: ValueRef;
-  whenTrue: ValueRef;
-  whenFalse: ValueRef;
-}>;
-
-export type IrProjectValueOp = Readonly<{
-  op: "value.project";
-  type: IrValueType;
-  dst: VarRef;
-  width: OperandWidth;
-  value: ValueRef;
-}>;
-
-export type IrCompareValueOp = Readonly<{
-  op: "value.compare";
-  type: IrValueType;
-  operator: IrCompareOperator;
-  dst: VarRef;
-  width: OperandWidth;
-  a: ValueRef;
-  b: ValueRef;
-}>;
-
 export type IrGetOptions = Readonly<{
   signed?: boolean;
 }>;
 
 export type IrMemoryAccessKind = "read" | "write";
 
-export type IrMemoryGuardOp = Readonly<{
-  op: "memory.guard";
-  address: ValueRef;
-  byteLength: number;
-  access: IrMemoryAccessKind;
-}>;
-
-export type IrOp =
-  | Readonly<{ op: "get"; dst: VarRef; source: StorageRef; accessWidth?: OperandWidth }>
-  | Readonly<{ op: "set"; target: StorageRef; value: ValueRef; accessWidth?: OperandWidth }>
-  | IrMemoryGuardOp
-  | Readonly<{ op: "address"; dst: VarRef; operand: OperandRef }>
-  | Readonly<{ op: "value.const"; type: IrValueType; dst: VarRef; value: number }>
-  | IrBinaryValueOp
-  | IrUnaryValueOp
-  | IrSelectValueOp
-  | IrProjectValueOp
-  | IrCompareValueOp
-  | IrFlagsConditionOp
-  | IrFlagWriteOp
-  | Readonly<{ op: "next" }>
-  | Readonly<{ op: "jump"; target: TargetRef }>
-  | Readonly<{ op: "conditionalJump"; condition: ValueRef; taken: TargetRef; notTaken: TargetRef }>
-  | Readonly<{ op: "hostTrap"; vector: ValueRef }>;
-
-export type IrBlock = readonly IrOp[];
 export type SemanticOperandInput = number | OperandRef;
 
 export interface SemanticBuildContext {
