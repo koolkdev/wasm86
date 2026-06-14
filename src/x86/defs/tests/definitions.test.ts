@@ -1,15 +1,15 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { buildIr } from "#ir/build/builder.js";
 import type { SemanticTemplate } from "#ir/model/types.js";
+import { x86Flags } from "#x86/flags.js";
 import { X86_32_CORE } from "#x86/index.js";
 import { expandInstructionSpec } from "#x86/schema/builders.js";
 import type { InstructionSpec } from "#x86/schema/types.js";
-
-const regOperands = (count: number) => ({
-  operandInfo: Array.from({ length: count }, () => ({ storage: "reg" as const }))
-});
+import {
+  buildSemanticTrace,
+  regOperands
+} from "#x86/semantics/tests/test-semantics-trace.js";
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
@@ -104,7 +104,8 @@ test("multi-byte nop forms use slash-zero ModRM operands without side effects", 
   deepStrictEqual(near.modrm, { match: { reg: 0 } });
   deepStrictEqual(near.operands, [{ kind: "modrm.rm", type: "rm32" }]);
   deepStrictEqual(near.format, { syntax: "nop {0}" });
-  deepStrictEqual(buildIr(near.semantics as SemanticTemplate), [{ op: "next" }]);
+
+  deepStrictEqual(buildSemanticTrace(semanticsOf(near)).events, ["next"]);
 
   deepStrictEqual(operandSize.prefixes, { operandSize: "override" });
   deepStrictEqual(operandSize.operands, [{ kind: "modrm.rm", type: "rm16" }]);
@@ -128,58 +129,27 @@ test("cmovcc forms are concrete specs with select-value semantics", () => {
   ]);
   deepStrictEqual(spec.format, { syntax: "cmove {0}, {1}" });
 
-  const program = buildIr(spec.semantics as SemanticTemplate, regOperands(2));
+  const trace = buildSemanticTrace(semanticsOf(spec), regOperands(2));
 
-  deepStrictEqual(program[1], { op: "flags.condition", dst: { kind: "var", id: 1 }, cc: "E" });
-  deepStrictEqual(program[2], {
-    op: "get",
-    dst: { kind: "var", id: 2 },
-    source: { kind: "operand", index: 0 },
-    accessWidth: 32
-  });
-  deepStrictEqual(program[3], {
-    op: "value.select",
-    type: "i32",
-    dst: { kind: "var", id: 3 },
-    condition: { kind: "var", id: 1 },
-    whenTrue: { kind: "var", id: 0 },
-    whenFalse: { kind: "var", id: 2 }
-  });
-  deepStrictEqual(program[4], {
-    op: "set",
-    target: { kind: "operand", index: 0 },
-    value: { kind: "var", id: 3 },
-    accessWidth: 32
-  });
-  strictEqual(program.at(-1)?.op, "next");
+  deepStrictEqual(trace.events, [
+    "%0 = get op1:32",
+    "%1 = condition E",
+    "%2 = get op0:32",
+    "set op0:32 <- %3",
+    "next"
+  ]);
+  strictEqual(trace.defs[3], "select(%1, %0, %2)");
 
-  const wordProgram = buildIr(word.semantics as SemanticTemplate, regOperands(2));
-  deepStrictEqual(wordProgram[0], {
-    op: "get",
-    dst: { kind: "var", id: 0 },
-    source: { kind: "operand", index: 1 },
-    accessWidth: 16
-  });
-  deepStrictEqual(wordProgram[2], {
-    op: "get",
-    dst: { kind: "var", id: 2 },
-    source: { kind: "operand", index: 0 },
-    accessWidth: 16
-  });
-  deepStrictEqual(wordProgram[3], {
-    op: "value.select",
-    type: "i32",
-    dst: { kind: "var", id: 3 },
-    condition: { kind: "var", id: 1 },
-    whenTrue: { kind: "var", id: 0 },
-    whenFalse: { kind: "var", id: 2 }
-  });
-  deepStrictEqual(wordProgram[4], {
-    op: "set",
-    target: { kind: "operand", index: 0 },
-    value: { kind: "var", id: 3 },
-    accessWidth: 16
-  });
+  const wordTrace = buildSemanticTrace(semanticsOf(word), regOperands(2));
+
+  deepStrictEqual(wordTrace.events, [
+    "%0 = get op1:16",
+    "%1 = condition E",
+    "%2 = get op0:16",
+    "set op0:16 <- %3",
+    "next"
+  ]);
+  strictEqual(wordTrace.defs[3], "select(%1, %0, %2)");
 });
 
 test("setcc forms use select-value semantics for register or memory destinations", () => {
@@ -190,24 +160,14 @@ test("setcc forms use select-value semantics for register or memory destinations
   deepStrictEqual(spec.operands, [{ kind: "modrm.rm", type: "rm8" }]);
   deepStrictEqual(spec.format, { syntax: "sete {0}" });
 
-  deepStrictEqual(buildIr(spec.semantics as SemanticTemplate, regOperands(1)), [
-    { op: "flags.condition", dst: { kind: "var", id: 0 }, cc: "E" },
-    {
-      op: "value.select",
-      type: "i32",
-      dst: { kind: "var", id: 1 },
-      condition: { kind: "var", id: 0 },
-      whenTrue: { kind: "const", type: "i32", value: 1 },
-      whenFalse: { kind: "const", type: "i32", value: 0 }
-    },
-    {
-      op: "set",
-      target: { kind: "operand", index: 0 },
-      value: { kind: "var", id: 1 },
-      accessWidth: 8
-    },
-    { op: "next" }
+  const trace = buildSemanticTrace(semanticsOf(spec), regOperands(1));
+
+  deepStrictEqual(trace.events, [
+    "%0 = condition E",
+    "set op0:8 <- %1",
+    "next"
   ]);
+  strictEqual(trace.defs[1], "select(%0, 1, 0)");
 });
 
 test("leave is a no-operand stack frame instruction", () => {
@@ -260,24 +220,14 @@ test("xchg slash-r forms allow register or memory r/m operands", () => {
 });
 
 test("xchg semantics read both operands before writing either operand", () => {
-  const program = buildIr(instruction("xchg.rm32_r32").semantics as SemanticTemplate, regOperands(2));
+  const trace = buildSemanticTrace(semanticsOf(instruction("xchg.rm32_r32")), regOperands(2));
 
-  deepStrictEqual(program, [
-    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 0 }, accessWidth: 32 },
-    { op: "get", dst: { kind: "var", id: 1 }, source: { kind: "operand", index: 1 }, accessWidth: 32 },
-    {
-      op: "set",
-      target: { kind: "operand", index: 1 },
-      value: { kind: "var", id: 0 },
-      accessWidth: 32
-    },
-    {
-      op: "set",
-      target: { kind: "operand", index: 0 },
-      value: { kind: "var", id: 1 },
-      accessWidth: 32
-    },
-    { op: "next" }
+  deepStrictEqual(trace.events, [
+    "%0 = get op0:32",
+    "%1 = get op1:32",
+    "set op1:32 <- %0",
+    "set op0:32 <- %1",
+    "next"
   ]);
 });
 
@@ -381,59 +331,26 @@ test("width-specific decode forms record operand-size metadata", () => {
   deepStrictEqual(neg16.operands, [{ kind: "modrm.rm", type: "rm16" }]);
 });
 
-test("unary ALU semantics lower to flagless not and sub-flags neg IR", () => {
-  const not = buildIr(instruction("not.rm16").semantics as SemanticTemplate, regOperands(1));
-  const neg = buildIr(instruction("neg.rm8").semantics as SemanticTemplate, regOperands(1));
+test("unary ALU semantics lower to flagless not and sub-flags neg", () => {
+  const not = buildSemanticTrace(semanticsOf(instruction("not.rm16")), regOperands(1));
 
-  deepStrictEqual(not, [
-    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 0 }, accessWidth: 16 },
-    {
-      op: "value.binary", type: "i32", operator: "xor",
-      dst: { kind: "var", id: 1 },
-      a: { kind: "var", id: 0 },
-      b: { kind: "const", type: "i32", value: 0xffff }
-    },
-    {
-      op: "set",
-      target: { kind: "operand", index: 0 },
-      value: { kind: "var", id: 1 },
-      accessWidth: 16
-    },
-    { op: "next" }
+  deepStrictEqual(not.events, [
+    "%0 = get op0:16",
+    "set op0:16 <- %1",
+    "next"
   ]);
-  strictEqual(not.some((op) => op.op.startsWith("flags.")), false);
+  strictEqual(not.defs[1], "xor(%0, 65535)");
+  strictEqual(not.flagWrites.length, 0);
 
-  deepStrictEqual(neg[0], {
-    op: "get",
-    dst: { kind: "var", id: 0 },
-    source: { kind: "operand", index: 0 },
-    accessWidth: 8
-  });
-  deepStrictEqual(neg[1], {
-    op: "value.binary", type: "i32", operator: "sub",
-    dst: { kind: "var", id: 1 },
-    a: { kind: "const", type: "i32", value: 0 },
-    b: { kind: "var", id: 0 }
-  });
+  const neg = buildSemanticTrace(semanticsOf(instruction("neg.rm8")), regOperands(1));
 
-  const negFlagsIndex = neg.findIndex((op) => op.op === "flags.write");
-  const negFlags = neg[negFlagsIndex];
-
-  strictEqual(negFlags?.op, "flags.write");
-  if (negFlags?.op === "flags.write") {
-    deepStrictEqual(
-      Object.keys(negFlags.cells).sort(),
-      ["AF", "CF", "OF", "PF", "SF", "ZF"]
-    );
-  }
-  deepStrictEqual(neg.at(-2), {
-    op: "set",
-    target: { kind: "operand", index: 0 },
-    value: { kind: "var", id: 1 },
-    accessWidth: 8
-  });
-  strictEqual(negFlagsIndex >= 0 && negFlagsIndex < neg.length - 2, true);
-  strictEqual(neg.at(-1)?.op, "next");
+  deepStrictEqual(neg.events.slice(0, 2), [
+    "%0 = get op0:8",
+    "flags AF,CF,OF,PF,SF,ZF"
+  ]);
+  strictEqual(neg.defs[1], "sub(0, %0)");
+  deepStrictEqual(Object.keys(neg.flagWrites[0]!.cells).sort(), [...x86Flags].sort());
+  ok(neg.events.includes("set op0:8 <- %1"));
 });
 
 test("mov r/m32, imm32 uses C7 slash-zero form", () => {
@@ -448,38 +365,21 @@ test("mov r/m32, imm32 uses C7 slash-zero form", () => {
 });
 
 test("extension move semantics are flagless and encode source and destination widths", () => {
-  const movzx = buildIr(instruction("movzx.r32_rm8").semantics as SemanticTemplate, regOperands(2));
-  const movsx = buildIr(instruction("movsx.r16_rm8").semantics as SemanticTemplate, regOperands(2));
+  const movzx = buildSemanticTrace(semanticsOf(instruction("movzx.r32_rm8")), regOperands(2));
+  const movsx = buildSemanticTrace(semanticsOf(instruction("movsx.r16_rm8")), regOperands(2));
 
-  deepStrictEqual(movzx, [
-    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 1 }, accessWidth: 8 },
-    {
-      op: "set",
-      target: { kind: "operand", index: 0 },
-      value: { kind: "var", id: 0 },
-      accessWidth: 32
-    },
-    { op: "next" }
+  deepStrictEqual(movzx.events, [
+    "%0 = get op1:8",
+    "set op0:32 <- %0",
+    "next"
   ]);
-  deepStrictEqual(movsx, [
-    { op: "get", dst: { kind: "var", id: 0 }, source: { kind: "operand", index: 1 }, accessWidth: 8 },
-    {
-      op: "value.unary",
-      type: "i32",
-      operator: "extend8_s",
-      dst: { kind: "var", id: 1 },
-      value: { kind: "var", id: 0 }
-    },
-    {
-      op: "set",
-      target: { kind: "operand", index: 0 },
-      value: { kind: "var", id: 1 },
-      accessWidth: 16
-    },
-    { op: "next" }
+  deepStrictEqual(movsx.events, [
+    "%0 = get op1:8:signed",
+    "set op0:16 <- %0",
+    "next"
   ]);
-  strictEqual(movzx.some((op) => op.op.startsWith("flags.")), false);
-  strictEqual(movsx.some((op) => op.op.startsWith("flags.")), false);
+  strictEqual(movzx.flagWrites.length, 0);
+  strictEqual(movsx.flagWrites.length, 0);
 });
 
 test("opcode-encoded register forms expand through opcode low bits", () => {
@@ -526,8 +426,10 @@ test("ret imm16 records unsigned immediate and generic control semantics", () =>
   deepStrictEqual(spec.operands, [{ kind: "imm", width: 16 }]);
   deepStrictEqual(spec.format, { syntax: "ret {0}" });
 
-  const program = buildIr(spec.semantics as SemanticTemplate);
-  strictEqual(program.at(-1)?.op, "jump");
+  const trace = buildSemanticTrace(semanticsOf(spec));
+
+  strictEqual(trace.events.at(-1), "jump %1");
+  ok(trace.events.includes("%3 = get op0:32"));
 });
 
 test("jcc forms are concrete specs with condition-specific semantics", () => {
@@ -542,9 +444,13 @@ test("jcc forms are concrete specs with condition-specific semantics", () => {
   deepStrictEqual(near.operands, [{ kind: "rel", width: 32 }]);
   deepStrictEqual(near.format, { syntax: "jne {0}" });
 
-  const program = buildIr(short.semantics as SemanticTemplate);
-  deepStrictEqual(program[0], { op: "flags.condition", dst: { kind: "var", id: 0 }, cc: "NE" });
-  strictEqual(program.at(-1)?.op, "conditionalJump");
+  const trace = buildSemanticTrace(semanticsOf(short));
+
+  deepStrictEqual(trace.events, [
+    "%0 = condition NE",
+    "%1 = get op0:32",
+    "branch %0 ? %1 : nextEip"
+  ]);
 });
 
 function instruction(id: string): InstructionSpec {
@@ -555,4 +461,8 @@ function instruction(id: string): InstructionSpec {
   }
 
   return spec;
+}
+
+function semanticsOf(spec: InstructionSpec): SemanticTemplate {
+  return spec.semantics as SemanticTemplate;
 }

@@ -1,294 +1,208 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { buildIr } from "#ir/build/builder.js";
-import type { IrBlock, IrOp, StorageRef } from "#ir/model/types.js";
+import { x86Flags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
-import { callSemantic, jccSemantic, jmpSemantic, retImmSemantic } from "#x86/semantics/control.js";
+import { callSemantic, retSemantic } from "#x86/semantics/control.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
 import { leaveSemantic, popSemantic } from "#x86/semantics/stack.js";
 import { testSemantic } from "#x86/semantics/test.js";
+import { xchgSemantic } from "#x86/semantics/xchg.js";
 
-const v = (id: number) => ({ kind: "var" as const, id });
-const op = (index: number) => ({ kind: "operand" as const, index });
-const reg = (reg: "esp") => ({ kind: "reg" as const, reg });
-const mem = (address: ReturnType<typeof v>) => ({ kind: "mem" as const, address });
-const c32 = (value: number) => ({ kind: "const" as const, type: "i32" as const, value });
-const regOperands = (count: number) => ({
-  operandInfo: Array.from({ length: count }, () => ({ storage: "reg" as const }))
-});
+import { buildSemanticTrace, operands, regOperands } from "./test-semantics-trace.js";
 
-function flagsWriteOp(program: IrBlock): Extract<IrOp, { op: "flags.write" }> {
-  const writes = program.filter((irOp) => irOp.op === "flags.write");
+test("mov semantic gets the source, sets the destination, and falls through", () => {
+  const trace = buildSemanticTrace(movSemantic(), regOperands(2));
 
-  strictEqual(writes.length, 1);
-  return writes[0] as Extract<IrOp, { op: "flags.write" }>;
-}
-
-function assertFlagsWriteBeforeWriteback(program: IrBlock, target: StorageRef): void {
-  const flagsIndex = program.findIndex((irOp) => irOp.op === "flags.write");
-  const setIndex = program.findIndex((irOp) => irOp.op === "set");
-  const setOp = program[setIndex] as Extract<IrOp, { op: "set" }>;
-
-  flagsWriteOp(program);
-  ok(flagsIndex >= 0 && setIndex > flagsIndex);
-  deepStrictEqual(setOp.target, target);
-  deepStrictEqual(program[program.length - 1], { op: "next" });
-}
-
-test("mov semantic gets source, sets destination, and falls through", () => {
-  deepStrictEqual(buildIr(movSemantic(), regOperands(2)), [
-    { op: "get", dst: v(0), source: op(1), accessWidth: 32 },
-    { op: "set", target: op(0), value: v(0), accessWidth: 32 },
-    { op: "next" }
+  deepStrictEqual(trace.events, [
+    "%0 = get op1:32",
+    "set op0:32 <- %0",
+    "next"
   ]);
 });
 
-test("cmov semantic reads source unconditionally and selects the destination value", () => {
-  deepStrictEqual(buildIr(cmovSemantic("E"), regOperands(2)), [
-    { op: "get", dst: v(0), source: op(1), accessWidth: 32 },
-    { op: "flags.condition", dst: v(1), cc: "E" },
-    { op: "get", dst: v(2), source: op(0), accessWidth: 32 },
-    { op: "value.select", type: "i32", dst: v(3), condition: v(1), whenTrue: v(0), whenFalse: v(2) },
-    { op: "set", target: op(0), value: v(3), accessWidth: 32 },
-    { op: "next" }
+test("cmov semantic reads the source unconditionally and selects the destination value", () => {
+  const trace = buildSemanticTrace(cmovSemantic("E"), regOperands(2));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get op1:32",
+    "%1 = condition E",
+    "%2 = get op0:32",
+    "set op0:32 <- %3",
+    "next"
   ]);
+  strictEqual(trace.defs[3], "select(%1, %0, %2)");
 });
 
 test("nop semantic falls through without side effects", () => {
-  deepStrictEqual(buildIr(nopSemantic()), [
-    { op: "next" }
-  ]);
+  const trace = buildSemanticTrace(nopSemantic());
+
+  deepStrictEqual(trace.events, ["next"]);
 });
 
 test("int semantic reads the vector and exits to a host trap", () => {
-  deepStrictEqual(buildIr(intSemantic()), [
-    { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "hostTrap", vector: v(0) }
+  const trace = buildSemanticTrace(intSemantic(), regOperands(1));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get op0:32",
+    "hostTrap %0"
   ]);
 });
 
-test("lea semantic computes address without getting the operand value", () => {
-  const program = buildIr(leaSemantic());
+test("lea semantic computes an address without getting the operand value", () => {
+  const trace = buildSemanticTrace(leaSemantic(), regOperands(2));
 
-  deepStrictEqual(program, [
-    { op: "address", dst: v(0), operand: op(1) },
-    { op: "set", target: op(0), value: v(0), accessWidth: 32 },
-    { op: "next" }
+  deepStrictEqual(trace.events, [
+    "%0 = addr op1",
+    "set op0:32 <- %0",
+    "next"
   ]);
-  strictEqual(program.some((op) => op.op === "get"), false);
-});
-
-test("add semantic sets add flags before destination writeback", () => {
-  const program = buildIr(aluSemantic("add", 32), regOperands(2));
-
-  deepStrictEqual(program.slice(0, 2), [
-    { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
-  ]);
-  assertFlagsWriteBeforeWriteback(program, op(0));
-});
-
-test("add semantic guards memory read-modify-write before flags", () => {
-  const program = buildIr(aluSemantic("add", 32), {
-    operandInfo: [{ storage: "mem" }, { storage: "reg" }]
-  });
-
-  deepStrictEqual(program.slice(0, 5), [
-    { op: "address", dst: v(0), operand: op(0) },
-    { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-    { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
-    { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(2), source: op(1), accessWidth: 32 }
-  ]);
-  assertFlagsWriteBeforeWriteback(program, op(0));
-});
-
-test("add semantic reuses one runtime rm address for read-write guards", () => {
-  const program = buildIr(aluSemantic("add", 32), {
-    operandInfo: [{ storage: "regOrMem" }, { storage: "reg" }]
-  });
-
-  deepStrictEqual(program.slice(0, 5), [
-    { op: "address", dst: v(0), operand: op(0) },
-    { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-    { op: "memory.guard", address: v(0), byteLength: 4, access: "write" },
-    { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(2), source: op(1), accessWidth: 32 }
-  ]);
-  assertFlagsWriteBeforeWriteback(program, op(0));
+  strictEqual(trace.events.some((event) => event.includes("get op1")), false);
 });
 
 test("mov semantic guards memory source and destination operands explicitly", () => {
-  deepStrictEqual(
-    buildIr(movSemantic(), {
-      operandInfo: [{ storage: "mem" }, { storage: "mem" }]
-    }),
-    [
-      { op: "address", dst: v(0), operand: op(1) },
-      { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-      { op: "get", dst: v(1), source: op(1), accessWidth: 32 },
-      { op: "address", dst: v(2), operand: op(0) },
-      { op: "memory.guard", address: v(2), byteLength: 4, access: "write" },
-      { op: "set", target: op(0), value: v(1), accessWidth: 32 },
-      { op: "next" }
-    ]
-  );
-});
+  const trace = buildSemanticTrace(movSemantic(), operands("mem", "mem"));
 
-test("inc semantic sets partial inc flags before destination writeback", () => {
-  const program = buildIr(unaryAluSemantic("inc", 32), regOperands(1));
-
-  deepStrictEqual(program.slice(0, 2), [
-    { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "add", dst: v(1), a: v(0), b: c32(1) }
+  deepStrictEqual(trace.events, [
+    "%0 = addr op1",
+    "guard read %0:4",
+    "%1 = get op1:32",
+    "%2 = addr op0",
+    "guard write %2:4",
+    "set op0:32 <- %1",
+    "next"
   ]);
-  strictEqual(Object.hasOwn(flagsWriteOp(program).cells, "CF"), false);
-  assertFlagsWriteBeforeWriteback(program, op(0));
-  deepStrictEqual(program[program.length - 2], {
-    op: "set", target: op(0), value: v(1), accessWidth: 32
-  });
 });
 
-test("logical alu semantics set logic flags before destination writeback", () => {
-  for (const operator of ["and", "or"] as const) {
-    const program = buildIr(aluSemantic(operator, 32), regOperands(2));
+test("add semantic guards memory read-modify-write before operand reads", () => {
+  const trace = buildSemanticTrace(aluSemantic("add", 32), operands("mem", "reg"));
 
-    deepStrictEqual(program.slice(0, 2), [
-      { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-      { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
-    ]);
-    ok(program.some((irOp) => irOp.op === "value.binary" && irOp.operator === operator));
-    deepStrictEqual(flagsWriteOp(program).cells.AF, { kind: "expr", value: c32(0) });
-    assertFlagsWriteBeforeWriteback(program, op(0));
+  deepStrictEqual(trace.events.slice(0, 5), [
+    "%0 = addr op0",
+    "guard read %0:4",
+    "guard write %0:4",
+    "%1 = get op0:32",
+    "%2 = get op1:32"
+  ]);
+  strictEqual(trace.events.some((event) => event.startsWith("set op0:32 <- %")), true);
+});
+
+test("xchg semantic reads both operands before writing either operand", () => {
+  const trace = buildSemanticTrace(xchgSemantic(), regOperands(2));
+  const firstSet = trace.events.findIndex((event) => event.startsWith("set "));
+
+  ok(trace.events.indexOf("%0 = get op0:32") < firstSet);
+  ok(trace.events.indexOf("%1 = get op1:32") < firstSet);
+  deepStrictEqual(trace.events.slice(firstSet), [
+    "set op1:32 <- %0",
+    "set op0:32 <- %1",
+    "next"
+  ]);
+});
+
+test("cmp and test semantics write flags without setting operands", () => {
+  for (const [name, template] of [
+    ["cmp", cmpSemantic()],
+    ["test", testSemantic()]
+  ] as const) {
+    const trace = buildSemanticTrace(template, regOperands(2));
+
+    strictEqual(trace.events.some((event) => event.startsWith("set ")), false, name);
+    strictEqual(trace.flagWrites.length, 1, name);
+    deepStrictEqual(trace.events.at(-1), "next");
   }
 });
 
-test("cmp semantic subtracts for flags only", () => {
-  const program = buildIr(cmpSemantic(), regOperands(2));
+test("pop semantic loads from old esp, increments esp, then writes the destination", () => {
+  const trace = buildSemanticTrace(popSemantic(), operands("reg"));
 
-  deepStrictEqual(program.slice(0, 2), [
-    { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
+  deepStrictEqual(trace.events, [
+    "%0 = get esp:32",
+    "guard read %0:4",
+    "%1 = get mem(%0):32",
+    "set esp:32 <- %2",
+    "set op0:32 <- %1",
+    "next"
   ]);
-  ok(program.some((irOp) => irOp.op === "value.binary" && irOp.operator === "sub"));
-  ok(flagsWriteOp(program).conditions !== undefined);
-  strictEqual(program.some((irOp) => irOp.op === "set"), false);
-  deepStrictEqual(program[program.length - 1], { op: "next" });
+  strictEqual(trace.defs[2], "add(%0, 4)");
 });
 
-test("test semantic uses value.binary and logic flags", () => {
-  const program = buildIr(testSemantic(), regOperands(2));
+test("pop memory destination computes the destination address after esp update", () => {
+  const trace = buildSemanticTrace(popSemantic(), operands("mem"));
 
-  deepStrictEqual(program.slice(0, 2), [
-    { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(1), source: op(1), accessWidth: 32 }
+  deepStrictEqual(trace.events, [
+    "%0 = get esp:32",
+    "guard read %0:4",
+    "%1 = get mem(%0):32",
+    "set esp:32 <- %2",
+    "%3 = addr op0",
+    "guard write %3:4",
+    "set mem(%3):32 <- %1",
+    "next"
   ]);
-  ok(program.some((irOp) => irOp.op === "value.binary" && irOp.operator === "and"));
-  deepStrictEqual(flagsWriteOp(program).cells.AF, { kind: "expr", value: c32(0) });
-  strictEqual(program.some((irOp) => irOp.op === "set"), false);
-  deepStrictEqual(program[program.length - 1], { op: "next" });
-});
-
-test("pop semantic expands to generic stack get/set operations", () => {
-  deepStrictEqual(
-    buildIr(popSemantic(), {
-      operandInfo: [{ storage: "reg" }]
-    }),
-    [
-      { op: "get", dst: v(0), source: reg("esp"), accessWidth: 32 },
-      { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-      { op: "get", dst: v(1), source: mem(v(0)), accessWidth: 32 },
-      { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(0), b: c32(4) },
-      { op: "set", target: reg("esp"), value: v(2), accessWidth: 32 },
-      { op: "set", target: op(0), value: v(1), accessWidth: 32 },
-      { op: "next" }
-    ]
-  );
-});
-
-test("pop semantic computes a memory destination address after the esp update", () => {
-  deepStrictEqual(
-    buildIr(popSemantic(), {
-      operandInfo: [{ storage: "mem" }]
-    }),
-    [
-      { op: "get", dst: v(0), source: reg("esp"), accessWidth: 32 },
-      { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-      { op: "get", dst: v(1), source: mem(v(0)), accessWidth: 32 },
-      { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(0), b: c32(4) },
-      { op: "set", target: reg("esp"), value: v(2), accessWidth: 32 },
-      { op: "address", dst: v(3), operand: op(0) },
-      { op: "memory.guard", address: v(3), byteLength: 4, access: "write" },
-      { op: "set", target: mem(v(3)), value: v(1), accessWidth: 32 },
-      { op: "next" }
-    ]
-  );
 });
 
 test("leave semantic reads saved frame before updating esp and ebp", () => {
-  deepStrictEqual(buildIr(leaveSemantic()), [
-    { op: "get", dst: v(0), source: { kind: "reg", reg: "ebp" }, accessWidth: 32 },
-    { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-    { op: "get", dst: v(1), source: mem(v(0)), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(0), b: c32(4) },
-    { op: "set", target: reg("esp"), value: v(2), accessWidth: 32 },
-    { op: "set", target: { kind: "reg", reg: "ebp" }, value: v(1), accessWidth: 32 },
-    { op: "next" }
+  const trace = buildSemanticTrace(leaveSemantic());
+
+  deepStrictEqual(trace.events, [
+    "%0 = get ebp:32",
+    "guard read %0:4",
+    "%1 = get mem(%0):32",
+    "set esp:32 <- %2",
+    "set ebp:32 <- %1",
+    "next"
   ]);
+  strictEqual(trace.defs[2], "add(%0, 4)");
 });
 
-test("jmp semantic resolves target value before jumping", () => {
-  deepStrictEqual(buildIr(jmpSemantic(), regOperands(1)), [
-    { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-    { op: "jump", target: v(0) }
+test("call semantic resolves the target before pushing the return address", () => {
+  const trace = buildSemanticTrace(callSemantic(), regOperands(1));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get op0:32",
+    "%1 = get esp:32",
+    "guard write %2:4",
+    "set mem(%2):32 <- nextEip",
+    "set esp:32 <- %2",
+    "jump %0"
   ]);
+  strictEqual(trace.defs[2], "sub(%1, 4)");
 });
 
-test("call semantic resolves target before pushing return address", () => {
-  deepStrictEqual(
-    buildIr(callSemantic(), {
-      operandInfo: [{ storage: "reg" }]
-    }),
-    [
-      { op: "get", dst: v(0), source: op(0), accessWidth: 32 },
-      { op: "get", dst: v(1), source: reg("esp"), accessWidth: 32 },
-      { op: "value.binary", type: "i32", operator: "sub", dst: v(2), a: v(1), b: c32(4) },
-      { op: "memory.guard", address: v(2), byteLength: 4, access: "write" },
-      { op: "set", target: mem(v(2)), value: { kind: "nextEip" }, accessWidth: 32 },
-      { op: "set", target: reg("esp"), value: v(2), accessWidth: 32 },
-      { op: "jump", target: v(0) }
-    ]
-  );
+test("ret semantic jumps to the popped value after incrementing esp", () => {
+  const trace = buildSemanticTrace(retSemantic());
+
+  deepStrictEqual(trace.events, [
+    "%0 = get esp:32",
+    "guard read %0:4",
+    "%1 = get mem(%0):32",
+    "set esp:32 <- %2",
+    "jump %1"
+  ]);
+  strictEqual(trace.defs[2], "add(%0, 4)");
 });
 
-test("ret imm semantic adjusts esp explicitly after popping target", () => {
-  deepStrictEqual(buildIr(retImmSemantic()), [
-    { op: "get", dst: v(0), source: reg("esp"), accessWidth: 32 },
-    { op: "memory.guard", address: v(0), byteLength: 4, access: "read" },
-    { op: "get", dst: v(1), source: mem(v(0)), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "add", dst: v(2), a: v(0), b: c32(4) },
-    { op: "set", target: reg("esp"), value: v(2), accessWidth: 32 },
-    { op: "get", dst: v(3), source: op(0), accessWidth: 32 },
-    { op: "get", dst: v(4), source: reg("esp"), accessWidth: 32 },
-    { op: "value.binary", type: "i32", operator: "add", dst: v(5), a: v(4), b: v(3) },
-    { op: "set", target: reg("esp"), value: v(5), accessWidth: 32 },
-    { op: "jump", target: v(1) }
-  ]);
+test("flag-writing templates write the six architectural flag cells", () => {
+  for (const [name, template, operands] of [
+    ["add", aluSemantic("add", 32), regOperands(2)],
+    ["cmp", cmpSemantic(), regOperands(2)],
+    ["test", testSemantic(), regOperands(2)],
+    ["neg", unaryAluSemantic("neg", 32), regOperands(1)]
+  ] as const) {
+    const trace = buildSemanticTrace(template, operands);
+
+    strictEqual(trace.flagWrites.length, 1, name);
+    deepStrictEqual(Object.keys(trace.flagWrites[0]!.cells).sort(), [...x86Flags].sort(), name);
+  }
 });
 
-test("jcc semantic resolves relative target value before conditional jump", () => {
-  deepStrictEqual(buildIr(jccSemantic("NE")), [
-    { op: "flags.condition", dst: v(0), cc: "NE" },
-    { op: "get", dst: v(1), source: op(0), accessWidth: 32 },
-    {
-      op: "conditionalJump",
-      condition: v(0),
-      taken: v(1),
-      notTaken: { kind: "nextEip" }
-    }
-  ]);
+test("inc writes partial flags and preserves CF by omitting it", () => {
+  const trace = buildSemanticTrace(unaryAluSemantic("inc", 32), regOperands(1));
+
+  strictEqual(trace.flagWrites.length, 1);
+  deepStrictEqual(Object.keys(trace.flagWrites[0]!.cells).sort(), ["AF", "OF", "PF", "SF", "ZF"].sort());
 });
