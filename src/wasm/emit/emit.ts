@@ -19,8 +19,8 @@ import { analyzeBlockValues } from "./values.js";
 
 // The emitter driver: walks an IrBlock in action order and fills the
 // given function body. Its product is a function body, never a module —
-// module assembly (imports, exports, ABI) belongs to the backends; the only
-// module wrapping under emit/action is the test harness. A fragment leaves
+// module assembly (imports, exports, ABI) belongs to the engines; the only
+// module wrapping under emit is the test harness. A fragment leaves
 // its body open for the embedder.
 
 export type ActionFragmentContext = Readonly<{

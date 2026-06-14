@@ -4,10 +4,10 @@ import { test } from "node:test";
 import { ExitReason } from "#wasm/exit.js";
 import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
 import { flagsOf } from "#x86/state/cpu-state.js";
-import { jitModuleLinkFallbackExportName } from "#backends/wasm/jit/compiled-blocks/module-link-table.js";
-import type { WasmCompiledBlockCodeMap } from "#backends/wasm/jit/compiled-blocks/block-cache.js";
-import { WasmCompiledBlockCache } from "#backends/wasm/jit/compiled-blocks/wasm-cache.js";
-import type { WasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
+import { jitModuleLinkFallbackExportName } from "#engines/jit/compiled-blocks/module-link-table.js";
+import type { WasmCompiledBlockCodeMap } from "#engines/jit/compiled-blocks/block-cache.js";
+import { WasmCompiledBlockCache } from "#engines/jit/compiled-blocks/wasm-cache.js";
+import type { WasmBlockHandle } from "#engines/jit/block-handle.js";
 import {
   GuestMemoryDecodeReader,
   type GuestMemoryDecodeRegion

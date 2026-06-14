@@ -5,9 +5,9 @@
   "license": "MIT",
   "type": "module",
   "imports": {
-    "#backends/*": {
-      "types": "./src/backends/*",
-      "default": "./dist/src/backends/*"
+    "#engines/*": {
+      "types": "./src/engines/*",
+      "default": "./dist/src/engines/*"
     },
     "#common/*": {
       "types": "./src/common/*",

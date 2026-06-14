@@ -5,7 +5,7 @@ import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { EdgeRegion } from "#ir/block.js";
 import { createValueTable, type ValueTable } from "#ir/values.js";
-import { analyzeBlockValues } from "#wasm/emit/action/values.js";
+import { analyzeBlockValues } from "#wasm/emit/values.js";
 
 function analyze(
   values: ValueTable,

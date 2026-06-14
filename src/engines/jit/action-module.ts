@@ -5,8 +5,8 @@ import { wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import type { LinkCompletion } from "#wasm/emit/action/embed.js";
-import { emitActionFunction } from "#wasm/emit/action/emit.js";
+import type { LinkCompletion } from "#wasm/emit/embed.js";
+import { emitActionFunction } from "#wasm/emit/emit.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
 import {
   jitModuleLinkFallbackExportName,

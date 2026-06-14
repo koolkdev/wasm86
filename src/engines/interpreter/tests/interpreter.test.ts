@@ -14,11 +14,11 @@ import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import {
   instantiateInterpreterCompiledModule,
   type InterpreterModuleInstance
-} from "#backends/wasm/interpreter/tests/interpreter-helpers.js";
+} from "#engines/interpreter/tests/interpreter-helpers.js";
 import {
   encodeInterpreterModule,
   type InterpreterModule
-} from "#backends/wasm/interpreter/module.js";
+} from "#engines/interpreter/module.js";
 
 // End-to-end coverage of the interpreter module: guest programs over the
 // dispatch loop, decode faults, and the one-handler-per-op+width shape.

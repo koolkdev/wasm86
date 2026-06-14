@@ -10,8 +10,8 @@ import type {
 } from "#ir/actions.js";
 import type { EdgeRegion, EntryRegion } from "#ir/block.js";
 import { createValueTable, type ValueTable } from "#ir/values.js";
-import { createValueStack, type ValueStack } from "#wasm/emit/action/value-stack.js";
-import { analyzeBlockValues } from "#wasm/emit/action/values.js";
+import { createValueStack, type ValueStack } from "#wasm/emit/value-stack.js";
+import { analyzeBlockValues } from "#wasm/emit/values.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";

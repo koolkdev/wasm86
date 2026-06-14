@@ -14,7 +14,7 @@ import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#x86/
 import { reg16, reg32, reg8, type RegName } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { emitActionFragment } from "#wasm/emit/action/emit.js";
+import { emitActionFragment } from "#wasm/emit/emit.js";
 import {
   emitImmediateFetch,
   emitRelTargetFetch,

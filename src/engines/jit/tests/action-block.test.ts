@@ -1,8 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { buildIrBlock } from "#backends/wasm/jit/action-compiler.js";
-import { compileActionWasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
+import { buildIrBlock } from "#engines/jit/action-compiler.js";
+import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
 import type { Action, StateSlot } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";

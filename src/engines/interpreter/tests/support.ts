@@ -8,7 +8,7 @@ import {
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
 import { ExitReason, type DecodedExit } from "#wasm/exit.js";
-import { encodeInterpreterModule } from "#backends/wasm/interpreter/module.js";
+import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 
 export type ExecutedInstruction = Readonly<{
   exit: DecodedExit;

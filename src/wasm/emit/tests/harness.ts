@@ -5,14 +5,14 @@ import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import { emitActionFragment } from "#wasm/emit/action/emit.js";
+import { emitActionFragment } from "#wasm/emit/emit.js";
 
 // Test-only module wrapper around the action emitter: imported state + guest
 // memories, one run export returning the encoded i64 exit. The harness
 // embeds like any host — a fallthrough continue lands on its sentinel tail,
 // reports return their real encoded exits. External value n is the
 // function's n-th i32 parameter. Module assembly for real use is the
-// backends' job.
+// engines' job.
 
 // No encoded exit equals the sentinel: its reason field is 0xffff.
 export const irBlockCompleted = -1n;

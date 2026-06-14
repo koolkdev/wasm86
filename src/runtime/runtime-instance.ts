@@ -1,11 +1,11 @@
 import type { RunResult } from "#x86/execution/run-result.js";
 import { u32 } from "#x86/numeric.js";
 import type { CpuState } from "#x86/state/cpu-state.js";
-import { WasmInterpreterRuntime } from "#backends/wasm/interpreter/runtime.js";
+import { WasmInterpreterRuntime } from "#engines/interpreter/runtime.js";
 import {
   WasmCompiledBlockCache,
   type WasmCompiledBlockCacheLike
-} from "#backends/wasm/jit/compiled-blocks/wasm-cache.js";
+} from "#engines/jit/compiled-blocks/wasm-cache.js";
 import { WasmBlocksEngine } from "./engines/wasm-blocks.js";
 import { WasmInterpreterEngine } from "./engines/wasm-interpreter.js";
 import { createInstructionBudget } from "./execution/budget.js";

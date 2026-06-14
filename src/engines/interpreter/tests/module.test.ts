@@ -10,7 +10,7 @@ import {
 import { assertMemoryImports, startAddress } from "#wasm/tests/helpers.js";
 import { wasmImport } from "#wasm/abi.js";
 import { ExitReason } from "#wasm/exit.js";
-import { encodeInterpreterModule } from "#backends/wasm/interpreter/module.js";
+import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";
 
 test("imports state and guest memories in ABI order", () => {

@@ -7,7 +7,7 @@ import {
 } from "#runtime/execution/engine-result.js";
 import type { RuntimeEngine, RuntimeEngineContext } from "#runtime/execution/runner.js";
 import { runResultFromWasmExit } from "#runtime/execution/wasm-exit-result.js";
-import type { CompiledBlockCache } from "#backends/wasm/jit/compiled-blocks/block-cache.js";
+import type { CompiledBlockCache } from "#engines/jit/compiled-blocks/block-cache.js";
 
 export class WasmBlocksEngine implements RuntimeEngine {
   constructor(

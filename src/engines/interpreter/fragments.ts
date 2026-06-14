@@ -13,7 +13,7 @@ import {
 import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { emitActionFragment } from "#wasm/emit/action/emit.js";
+import { emitActionFragment } from "#wasm/emit/emit.js";
 
 // Decode reads as action fragments: a guarded guest fetch is guardMemory +
 // readMemory with a decode-fault edge, and the decoded values leave through
