@@ -4,9 +4,9 @@ import { test } from "node:test";
 import { createActionBuilder } from "#ir/action/builder.js";
 import { immBinding, regBinding } from "#ir/action/operands.js";
 import { gprChannel } from "#ir/action/slots.js";
-import { CONDITIONS, type FlagBoolExpr } from "#ir/model/conditions.js";
+import { CONDITIONS, type FlagBoolExpr } from "#x86/conditions.js";
 import type { X86Flag } from "#x86/flags.js";
-import type { ConditionCode } from "#ir/model/types.js";
+import type { ConditionCode } from "#x86/conditions.js";
 
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";

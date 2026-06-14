@@ -10,7 +10,7 @@ import type {
   ValueId,
   ValueTable
 } from "#ir/action/values.js";
-import type { IrBinaryOperator, IrCompareOperator, IrUnaryOperator } from "#ir/model/types.js";
+import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -295,7 +295,7 @@ function createLocalRegistry(
   };
 }
 
-function emitBinaryOperator(body: WasmFunctionBodyEncoder, operator: IrBinaryOperator): void {
+function emitBinaryOperator(body: WasmFunctionBodyEncoder, operator: BinaryOperator): void {
   switch (operator) {
     case "add":
       body.i32Add();
@@ -321,7 +321,7 @@ function emitBinaryOperator(body: WasmFunctionBodyEncoder, operator: IrBinaryOpe
   }
 }
 
-function emitUnaryOperator(body: WasmFunctionBodyEncoder, operator: IrUnaryOperator): void {
+function emitUnaryOperator(body: WasmFunctionBodyEncoder, operator: UnaryOperator): void {
   switch (operator) {
     case "extend8_s":
       body.i32Extend8S();
@@ -335,7 +335,7 @@ function emitUnaryOperator(body: WasmFunctionBodyEncoder, operator: IrUnaryOpera
   }
 }
 
-function emitCompareOperator(body: WasmFunctionBodyEncoder, operator: IrCompareOperator): void {
+function emitCompareOperator(body: WasmFunctionBodyEncoder, operator: CompareOperator): void {
   switch (operator) {
     case "eq":
       body.i32Eq();

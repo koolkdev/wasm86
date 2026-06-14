@@ -1,4 +1,4 @@
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import {
   CONDITION_CODE_DESCRIPTORS,
   type ConditionCodeDescriptor

@@ -1,4 +1,4 @@
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandWidth } from "#x86/types.js";
 
 export function leaSemantic(width: OperandWidth = 32): SemanticTemplate {

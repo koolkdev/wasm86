@@ -9,7 +9,7 @@ import {
   type ExternalValueId,
   type OperandBinding
 } from "#ir/action/operands.js";
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#x86/schema/types.js";
 import { reg16, reg32, reg8, type RegName } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";

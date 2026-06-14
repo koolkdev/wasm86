@@ -1,40 +1,40 @@
 import { strictEqual } from "node:assert";
 
-import { const32, mem, nextEip, operand, reg, toValueRef } from "#ir/model/refs.js";
+import { const32, mem, nextEip, operand, reg, toValueRef } from "#x86/semantics/refs.js";
+import type { ConditionCode } from "#x86/conditions.js";
+import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type {
-  ConditionCode,
-  IrBinaryOperator,
-  IrBuilder,
-  IrCompareOperator,
-  IrConstValueRef,
-  IrFlagWriteCell,
-  IrFlagWriteInput,
-  IrGetOptions,
-  IrMemoryAccessKind,
-  IrUnaryOperator,
+  SemanticsBuilder,
+  FlagWriteCell,
+  FlagWriteInput,
+  GetOptions,
+  SemanticBuildContext,
+  SemanticOperandInfo,
+  SemanticOperandInput,
+  SemanticOperandStorageKind,
+  SemanticTemplate
+} from "#x86/semantics/builder.js";
+import type {
+  ConstValueRef,
   MemRef,
   NextEipRef,
   OperandInput,
   OperandRef,
   RegRef,
-  SemanticBuildContext,
-  SemanticOperandInfo,
-  SemanticOperandInput,
-  SemanticOperandStorageKind,
-  SemanticTemplate,
   StorageInput,
   TargetInput,
   ValueInput,
   ValueRef,
   VarRef
-} from "#ir/model/types.js";
+} from "#x86/semantics/refs.js";
 import type { X86Flag } from "#x86/flags.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
+import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
 
 export type SemanticTrace = Readonly<{
   events: readonly string[];
   defs: readonly string[];
-  flagWrites: readonly IrFlagWriteInput[];
+  flagWrites: readonly FlagWriteInput[];
   value(input: ValueInput): string;
   def(input: ValueInput): string;
 }>;
@@ -57,7 +57,7 @@ export function regOperands(count: number): readonly SemanticOperandInfo[] {
   return Array.from({ length: count }, () => ({ storage: "reg" as const }));
 }
 
-export function flagCell(write: IrFlagWriteInput, flag: X86Flag): ValueRef {
+export function flagCell(write: FlagWriteInput, flag: X86Flag): ValueRef {
   const cell = write.cells[flag];
 
   strictEqual(cell?.kind, "expr", `expected ${flag} expr cell`);
@@ -65,8 +65,8 @@ export function flagCell(write: IrFlagWriteInput, flag: X86Flag): ValueRef {
 }
 
 export function conditionValue(
-  write: IrFlagWriteInput,
-  cc: keyof NonNullable<IrFlagWriteInput["conditions"]>
+  write: FlagWriteInput,
+  cc: keyof NonNullable<FlagWriteInput["conditions"]>
 ): ValueInput {
   const value = write.conditions?.[cc];
 
@@ -77,10 +77,10 @@ export function conditionValue(
   return value;
 }
 
-class TraceBuilder implements IrBuilder, SemanticBuildContext {
+class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
   readonly #events: string[] = [];
   readonly #defs: string[] = [];
-  readonly #flagWrites: IrFlagWriteInput[] = [];
+  readonly #flagWrites: FlagWriteInput[] = [];
   readonly #operandInfo: readonly SemanticOperandInfo[];
   #terminated = false;
 
@@ -92,7 +92,7 @@ class TraceBuilder implements IrBuilder, SemanticBuildContext {
     return operand(index);
   }
 
-  const32(value: number): IrConstValueRef {
+  const32(value: number): ConstValueRef {
     return const32(value);
   }
 
@@ -119,7 +119,7 @@ class TraceBuilder implements IrBuilder, SemanticBuildContext {
     return info;
   }
 
-  get(source: StorageInput, accessWidth: OperandWidth = 32, options: IrGetOptions = {}): VarRef {
+  get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): VarRef {
     const out = this.#alloc(
       `get ${this.#storage(source)}:${accessWidth}${options.signed === true ? ":signed" : ""}`
     );
@@ -132,7 +132,7 @@ class TraceBuilder implements IrBuilder, SemanticBuildContext {
     this.#emit(`set ${this.#storage(target)}:${accessWidth} <- ${this.#value(value)}`);
   }
 
-  memoryGuard(address: ValueInput, byteLength: number, access: IrMemoryAccessKind): void {
+  memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void {
     this.#emit(`guard ${access} ${this.#value(address)}:${byteLength}`);
   }
 
@@ -193,28 +193,28 @@ class TraceBuilder implements IrBuilder, SemanticBuildContext {
     return this.#alloc(`project${width}(${this.#value(value)})`);
   }
 
-  compare(width: OperandWidth, operator: IrCompareOperator, a: ValueInput, b: ValueInput): VarRef {
+  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): VarRef {
     return this.#alloc(`cmp${width}.${operator}(${this.#value(a)}, ${this.#value(b)})`);
   }
 
-  flagExpr(value: ValueInput): IrFlagWriteCell {
+  flagExpr(value: ValueInput): FlagWriteCell {
     return { kind: "expr", value: toValueRef(value) };
   }
 
-  flagUndef(): IrFlagWriteCell {
+  flagUndef(): FlagWriteCell {
     return { kind: "undef" };
   }
 
-  writeFlags(write: IrFlagWriteInput): void {
-    const cells: IrFlagWriteInput["cells"] = {};
+  writeFlags(write: FlagWriteInput): void {
+    const cells: FlagWriteInput["cells"] = {};
 
-    for (const [flag, cell] of Object.entries(write.cells) as [X86Flag, IrFlagWriteCell][]) {
+    for (const [flag, cell] of Object.entries(write.cells) as [X86Flag, FlagWriteCell][]) {
       cells[flag] = cell.kind === "expr"
         ? { kind: "expr", value: toValueRef(cell.value) }
         : { kind: "undef" };
     }
 
-    const copied: IrFlagWriteInput = write.conditions === undefined
+    const copied: FlagWriteInput = write.conditions === undefined
       ? { cells }
       : {
           cells,
@@ -266,11 +266,11 @@ class TraceBuilder implements IrBuilder, SemanticBuildContext {
     };
   }
 
-  #binary(operator: IrBinaryOperator, a: ValueInput, b: ValueInput): VarRef {
+  #binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): VarRef {
     return this.#alloc(`${operator}(${this.#value(a)}, ${this.#value(b)})`);
   }
 
-  #unary(operator: IrUnaryOperator, value: ValueInput): VarRef {
+  #unary(operator: UnaryOperator, value: ValueInput): VarRef {
     return this.#alloc(`${operator}(${this.#value(value)})`);
   }
 

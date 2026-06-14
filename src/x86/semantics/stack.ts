@@ -1,15 +1,8 @@
-import type {
-  OperandRef,
-  SemanticTemplate,
-  IrBuilder,
-  SemanticBuildContext,
-  StorageInput,
-  ValueInput,
-  VarRef
-} from "#ir/model/types.js";
+import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
+import type { OperandRef, StorageInput, ValueInput, VarRef } from "#x86/semantics/refs.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
-export function push32(s: IrBuilder, context: SemanticBuildContext, value: ValueInput): void {
+export function push32(s: SemanticsBuilder, context: SemanticBuildContext, value: ValueInput): void {
   const esp = s.get(s.reg("esp"));
   const nextEsp = s.i32Sub(esp, 4);
   const stack = s.mem(nextEsp);
@@ -19,7 +12,7 @@ export function push32(s: IrBuilder, context: SemanticBuildContext, value: Value
   s.set(s.reg("esp"), nextEsp);
 }
 
-export function pop32(s: IrBuilder, context: SemanticBuildContext): VarRef {
+export function pop32(s: SemanticsBuilder, context: SemanticBuildContext): VarRef {
   const esp = s.get(s.reg("esp"));
   const stack = s.mem(esp);
 
@@ -65,7 +58,7 @@ export function leaveSemantic(): SemanticTemplate {
   };
 }
 
-function popTargetStorage(s: IrBuilder, context: SemanticBuildContext, dst: OperandRef): StorageInput {
+function popTargetStorage(s: SemanticsBuilder, context: SemanticBuildContext, dst: OperandRef): StorageInput {
   if (context.operandInfo(dst).storage === "mem") {
     const target = s.mem(s.address(dst));
 

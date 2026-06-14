@@ -24,7 +24,7 @@ import type {
 } from "#ir/action/types.js";
 import type { ValueId, ValueNode } from "#ir/action/values.js";
 import type { X86Flag } from "#x86/flags.js";
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86Flags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";

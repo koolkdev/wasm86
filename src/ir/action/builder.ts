@@ -1,33 +1,32 @@
 import { assert } from "#common/assert.js";
-import { CONDITIONS, type FlagBoolExpr } from "#ir/model/conditions.js";
+import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
 import type { X86Flag } from "#x86/flags.js";
-import { const32, irVar, mem, nextEip, operand, reg, toStorageRef, toValueRef } from "#ir/model/refs.js";
+import type { MemoryAccessKind } from "#x86/memory-access.js";
+import { const32, varRef, mem, nextEip, operand, reg, toStorageRef, toValueRef } from "#x86/semantics/refs.js";
 import type {
-  ConditionCode,
-  IrBinaryOperator,
-  IrBuilder,
-  IrCompareOperator,
-  IrConstValueRef,
-  IrFlagWriteCell,
-  IrFlagWriteInput,
-  IrGetOptions,
-  IrMemoryAccessKind,
-  IrUnaryOperator,
+  SemanticsBuilder,
+  FlagWriteCell,
+  FlagWriteInput,
+  GetOptions,
+  SemanticBuildContext,
+  SemanticOperandInfo,
+  SemanticOperandInput,
+  SemanticTemplate
+} from "#x86/semantics/builder.js";
+import type {
+  ConstValueRef,
   MemRef,
   NextEipRef,
   OperandInput,
   OperandRef,
   RegRef,
-  SemanticBuildContext,
-  SemanticOperandInfo,
-  SemanticOperandInput,
-  SemanticTemplate,
   StorageInput,
   TargetInput,
   ValueInput,
   VarRef
-} from "#ir/model/types.js";
+} from "#x86/semantics/refs.js";
 import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
+import { signedComparePredicates, type BinaryOperator, type CompareOperator, type UnaryOperator } from "#x86/semantics/ops.js";
 import type {
   ExternalValueId,
   MemDynamicOperandBinding,
@@ -77,7 +76,7 @@ export type ActionBuilder = Readonly<{
 }>;
 
 export function createActionBuilder(): ActionBuilder {
-  const builder = new ActionIrBuilder();
+  const builder = new ActionSemanticsBuilder();
 
   return {
     addInstruction: (template, bindings, location) => builder.addInstruction(template, bindings, location),
@@ -87,7 +86,7 @@ export function createActionBuilder(): ActionBuilder {
 
 const entryRegionId: RegionId = 0;
 
-class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
+class ActionSemanticsBuilder implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = createValueTable();
   readonly #actions: Action[] = [];
   readonly #pending = createPendingChannels(this.#values, (action) => this.#actions.push(action));
@@ -201,7 +200,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return operand(index);
   }
 
-  const32(value: number): IrConstValueRef {
+  const32(value: number): ConstValueRef {
     return const32(value);
   }
 
@@ -217,31 +216,31 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     return mem(address);
   }
 
-  get(source: StorageInput, accessWidth: OperandWidth = 32, options: IrGetOptions = {}): VarRef {
+  get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): VarRef {
     this.#beforeOp("get");
     const storage = toStorageRef(source);
 
     switch (storage.kind) {
       case "reg":
-        return irVar(this.#readChannel(gprChannel(storage.reg), accessWidth, options));
+        return varRef(this.#readChannel(gprChannel(storage.reg), accessWidth, options));
       case "mem":
-        return irVar(this.#readMemory(this.#valueId(storage.address), accessWidth, options));
+        return varRef(this.#readMemory(this.#valueId(storage.address), accessWidth, options));
       case "operand": {
         const binding = this.#binding(storage.index);
 
         switch (binding.kind) {
           case "imm":
-            return irVar(this.#widthAdjusted(this.#values.internConst(binding.value), accessWidth, options));
+            return varRef(this.#widthAdjusted(this.#values.internConst(binding.value), accessWidth, options));
           case "immExternal":
-            return irVar(this.#widthAdjusted(this.#values.internExternal(binding.value), accessWidth, options));
+            return varRef(this.#widthAdjusted(this.#values.internExternal(binding.value), accessWidth, options));
           case "reg":
-            return irVar(this.#readChannel(binding.channel, accessWidth, options));
+            return varRef(this.#readChannel(binding.channel, accessWidth, options));
           case "mem":
           case "memStatic":
           case "memDynamic":
-            return irVar(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
+            return varRef(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
           case "regDynamic":
-            return irVar(this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options));
+            return varRef(this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options));
         }
       }
     }
@@ -288,7 +287,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     this.#terminated = true;
   }
 
-  memoryGuard(address: ValueInput, byteLength: number, access: IrMemoryAccessKind): void {
+  memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void {
     this.#beforeOp("memoryGuard");
     // Guest memory cannot be rolled back by any scheme, so a fault edge
     // cannot restore the pre-instruction state once the instruction stored.
@@ -307,7 +306,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   address(operandRef: OperandInput): VarRef {
     this.#beforeOp("address");
-    return irVar(this.#operandAddress(operandRef.index));
+    return varRef(this.#operandAddress(operandRef.index));
   }
 
   i32Add(a: ValueInput, b: ValueInput): VarRef {
@@ -340,12 +339,12 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   i32Extend8S(value: ValueInput): VarRef {
     this.#beforeOp("i32Extend8S");
-    return irVar(this.#values.extendTo(8, this.#valueId(value)));
+    return varRef(this.#values.extendTo(8, this.#valueId(value)));
   }
 
   i32Extend16S(value: ValueInput): VarRef {
     this.#beforeOp("i32Extend16S");
-    return irVar(this.#values.extendTo(16, this.#valueId(value)));
+    return varRef(this.#values.extendTo(16, this.#valueId(value)));
   }
 
   i32Popcnt(value: ValueInput): VarRef {
@@ -354,17 +353,17 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
 
   i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): VarRef {
     this.#beforeOp("i32Select");
-    return irVar(
+    return varRef(
       this.#values.internSelect(this.#valueId(condition), this.#valueId(whenTrue), this.#valueId(whenFalse))
     );
   }
 
   project(width: OperandWidth, value: ValueInput): VarRef {
     this.#beforeOp("project");
-    return irVar(this.#values.projectTo(width, this.#valueId(value)));
+    return varRef(this.#values.projectTo(width, this.#valueId(value)));
   }
 
-  compare(width: OperandWidth, operator: IrCompareOperator, a: ValueInput, b: ValueInput): VarRef {
+  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): VarRef {
     this.#beforeOp("compare");
     // Narrow compares lower by predicate class: signed predicates need
     // sign-extended operands, the rest masked ones.
@@ -372,23 +371,23 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       ? (id: ValueId) => this.#values.extendTo(width, id)
       : (id: ValueId) => this.#values.projectTo(width, id);
 
-    return irVar(
+    return varRef(
       this.#values.internCompare(operator, lower(this.#valueId(a)), lower(this.#valueId(b)))
     );
   }
 
-  flagExpr(value: ValueInput): IrFlagWriteCell {
+  flagExpr(value: ValueInput): FlagWriteCell {
     return { kind: "expr", value: toValueRef(value) };
   }
 
-  flagUndef(): IrFlagWriteCell {
+  flagUndef(): FlagWriteCell {
     return { kind: "undef" };
   }
 
-  writeFlags(write: IrFlagWriteInput): void {
+  writeFlags(write: FlagWriteInput): void {
     this.#beforeOp("writeFlags");
 
-    for (const [flag, cell] of Object.entries(write.cells) as [X86Flag, IrFlagWriteCell][]) {
+    for (const [flag, cell] of Object.entries(write.cells) as [X86Flag, FlagWriteCell][]) {
       // undef -> preserve: any value is architecturally allowed, so keeping
       // the old one is free and kills the write.
       if (cell.kind === "expr") {
@@ -411,10 +410,10 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     const recorded = this.#conditions.get(cc);
 
     if (recorded !== undefined) {
-      return irVar(recorded);
+      return varRef(recorded);
     }
 
-    return irVar(this.#flagBoolExpr(CONDITIONS[cc].expr));
+    return varRef(this.#flagBoolExpr(CONDITIONS[cc].expr));
   }
 
   jump(target: TargetInput): void {
@@ -455,14 +454,14 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     this.#terminated = true;
   }
 
-  #binary(op: string, operator: IrBinaryOperator, a: ValueInput, b: ValueInput): VarRef {
+  #binary(op: string, operator: BinaryOperator, a: ValueInput, b: ValueInput): VarRef {
     this.#beforeOp(op);
-    return irVar(this.#values.internBinary(operator, this.#valueId(a), this.#valueId(b)));
+    return varRef(this.#values.internBinary(operator, this.#valueId(a), this.#valueId(b)));
   }
 
-  #unary(op: string, operator: IrUnaryOperator, value: ValueInput): VarRef {
+  #unary(op: string, operator: UnaryOperator, value: ValueInput): VarRef {
     this.#beforeOp(op);
-    return irVar(this.#values.internUnary(operator, this.#valueId(value)));
+    return varRef(this.#values.internUnary(operator, this.#valueId(value)));
   }
 
   // Flag channel values are 0/1 bytes, so the boolean algebra is plain
@@ -557,7 +556,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     };
   }
 
-  #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: IrGetOptions): ValueId {
+  #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: GetOptions): ValueId {
     return options.signed === true
       ? this.#values.extendTo(accessWidth, value)
       : this.#values.projectTo(accessWidth, value);
@@ -569,7 +568,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
       : this.#values.internExternal(value.external);
   }
 
-  #readChannel(channel: GprChannel, accessWidth: OperandWidth, options: IrGetOptions): ValueId {
+  #readChannel(channel: GprChannel, accessWidth: OperandWidth, options: GetOptions): ValueId {
     assert(
       channel.byteLength * 8 === accessWidth,
       `${accessWidth}-bit get from a ${channel.byteLength * 8}-bit register channel`
@@ -585,7 +584,7 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     this.#pending.write(channel, this.#valueId(value));
   }
 
-  #readMemory(address: ValueId, width: OperandWidth, options: IrGetOptions): ValueId {
+  #readMemory(address: ValueId, width: OperandWidth, options: GetOptions): ValueId {
     // Sign-extension is meaningful only below the word, as in pending reads.
     const signed = options.signed === true && width !== 32;
     const output = this.#values.addActionOutput(memoryReadBounds(width, signed));
@@ -700,13 +699,6 @@ class ActionIrBuilder implements IrBuilder, SemanticBuildContext {
     assert(!this.#terminated, `cannot emit ${op} after instruction terminator`);
   }
 }
-
-const signedComparePredicates: ReadonlySet<IrCompareOperator> = new Set([
-  "lt_s",
-  "le_s",
-  "gt_s",
-  "ge_s"
-]);
 
 const scaleShift = { 1: 0, 2: 1, 4: 2, 8: 3 } as const;
 

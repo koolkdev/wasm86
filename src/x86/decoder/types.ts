@@ -1,5 +1,5 @@
 import type { MemOperand, OperandWidth, RegisterAlias } from "#x86/types.js";
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { InstructionSpec, ImmediateExtension } from "#x86/schema/types.js";
 
 export type IsaOperandBinding =

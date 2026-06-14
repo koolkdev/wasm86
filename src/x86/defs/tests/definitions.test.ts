@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86Flags } from "#x86/flags.js";
 import { X86_32_CORE } from "#x86/index.js";
 import { expandInstructionSpec } from "#x86/schema/builders.js";

@@ -1,4 +1,4 @@
-import type { ConditionCode } from "#ir/model/types.js";
+import type { ConditionCode } from "#x86/conditions.js";
 
 export type ConditionCodeDescriptor = Readonly<{
   opcodeLow: number;

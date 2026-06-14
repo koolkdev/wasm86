@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import {
   dispatchBytes,
   type OpcodeDispatchCandidateSet,

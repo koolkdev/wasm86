@@ -1,7 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { IrFlagWriteInput, SemanticTemplate, ValueInput } from "#ir/model/types.js";
+import type { FlagWriteInput, SemanticTemplate } from "#x86/semantics/builder.js";
+import type { ValueInput } from "#x86/semantics/refs.js";
 import { x86Flags, type X86Flag } from "#x86/flags.js";
 import {
   buildAddResultAndFlags,
@@ -235,12 +236,12 @@ function buildHelperTrace(
   return buildSemanticTrace(template, operandInfo);
 }
 
-function onlyFlagWrite(trace: SemanticTrace): IrFlagWriteInput {
+function onlyFlagWrite(trace: SemanticTrace): FlagWriteInput {
   strictEqual(trace.flagWrites.length, 1);
   return trace.flagWrites[0]!;
 }
 
-function assertFlagSet(write: IrFlagWriteInput, flags: readonly X86Flag[]): void {
+function assertFlagSet(write: FlagWriteInput, flags: readonly X86Flag[]): void {
   deepStrictEqual(Object.keys(write.cells).sort(), [...flags].sort());
 }
 
@@ -249,9 +250,9 @@ function assertDefStarts(trace: SemanticTrace, value: ValueInput, prefix: string
 }
 
 function assertCapturedConditionReused(
-  write: IrFlagWriteInput,
-  source: IrFlagWriteInput | undefined,
-  cc: keyof NonNullable<IrFlagWriteInput["conditions"]>
+  write: FlagWriteInput,
+  source: FlagWriteInput | undefined,
+  cc: keyof NonNullable<FlagWriteInput["conditions"]>
 ): void {
   const original = source?.conditions?.[cc];
 

@@ -1,4 +1,5 @@
-import type { ConditionCode, SemanticTemplate } from "#ir/model/types.js";
+import type { ConditionCode } from "#x86/conditions.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { guardStorageWrite } from "./memory.js";
 
 export function setccSemantic(cc: ConditionCode): SemanticTemplate {

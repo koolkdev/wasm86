@@ -7,7 +7,7 @@ import {
   type Map2,
   type Map3
 } from "#common/nested-map.js";
-import type { IrBinaryOperator, IrCompareOperator, IrUnaryOperator } from "#ir/model/types.js";
+import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
 import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { ExternalValueId } from "./operands.js";
@@ -22,14 +22,14 @@ export type ActionOutputValueNode = Readonly<{ kind: "actionOutput" }>;
 export type ExternalValueNode = Readonly<{ kind: "external"; external: ExternalValueId }>;
 export type BinaryValueNode = Readonly<{
   kind: "binary";
-  operator: IrBinaryOperator;
+  operator: BinaryOperator;
   a: ValueId;
   b: ValueId;
 }>;
-export type UnaryValueNode = Readonly<{ kind: "unary"; operator: IrUnaryOperator; value: ValueId }>;
+export type UnaryValueNode = Readonly<{ kind: "unary"; operator: UnaryOperator; value: ValueId }>;
 export type CompareValueNode = Readonly<{
   kind: "compare";
-  operator: IrCompareOperator;
+  operator: CompareOperator;
   a: ValueId;
   b: ValueId;
 }>;
@@ -79,9 +79,9 @@ export type ValueTable = Readonly<{
   internConst(value: number): ValueId;
   internExternal(external: ExternalValueId): ValueId;
   addActionOutput(bounds?: WidthBounds): ValueId;
-  internBinary(operator: IrBinaryOperator, a: ValueId, b: ValueId): ValueId;
-  internUnary(operator: IrUnaryOperator, value: ValueId): ValueId;
-  internCompare(operator: IrCompareOperator, a: ValueId, b: ValueId): ValueId;
+  internBinary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId;
+  internUnary(operator: UnaryOperator, value: ValueId): ValueId;
+  internCompare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId;
   internSelect(condition: ValueId, whenTrue: ValueId, whenFalse: ValueId): ValueId;
   internProject(width: OperandWidth, value: ValueId): ValueId;
   // Smart constructors: the interned projection/extension, or the value
@@ -104,9 +104,9 @@ export function createValueTable(): ValueTable {
   const widthBounds: (WidthBounds | undefined)[] = [];
   const constIds = new Map<number, ValueId>();
   const externalIds = new Map<ExternalValueId, ValueId>();
-  const binaryIds: Map3<IrBinaryOperator, ValueId, ValueId, ValueId> = new Map();
-  const unaryIds: Map2<IrUnaryOperator, ValueId, ValueId> = new Map();
-  const compareIds: Map3<IrCompareOperator, ValueId, ValueId, ValueId> = new Map();
+  const binaryIds: Map3<BinaryOperator, ValueId, ValueId, ValueId> = new Map();
+  const unaryIds: Map2<UnaryOperator, ValueId, ValueId> = new Map();
+  const compareIds: Map3<CompareOperator, ValueId, ValueId, ValueId> = new Map();
   const selectIds: Map3<ValueId, ValueId, ValueId, ValueId> = new Map();
   const projectIds: Map2<OperandWidth, ValueId, ValueId> = new Map();
 
@@ -183,7 +183,7 @@ export function createValueTable(): ValueTable {
     return id;
   }
 
-  function internBinary(operator: IrBinaryOperator, a: ValueId, b: ValueId): ValueId {
+  function internBinary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
     const existing = get3(binaryIds, operator, a, b);
 
     if (existing !== undefined) {
@@ -196,7 +196,7 @@ export function createValueTable(): ValueTable {
     return id;
   }
 
-  function internUnary(operator: IrUnaryOperator, value: ValueId): ValueId {
+  function internUnary(operator: UnaryOperator, value: ValueId): ValueId {
     const existing = get2(unaryIds, operator, value);
 
     if (existing !== undefined) {
@@ -209,7 +209,7 @@ export function createValueTable(): ValueTable {
     return id;
   }
 
-  function internCompare(operator: IrCompareOperator, a: ValueId, b: ValueId): ValueId {
+  function internCompare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
     const existing = get3(compareIds, operator, a, b);
 
     if (existing !== undefined) {

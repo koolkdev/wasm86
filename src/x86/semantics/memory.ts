@@ -1,14 +1,10 @@
-import type {
-  IrBuilder,
-  IrMemoryAccessKind,
-  SemanticBuildContext,
-  StorageInput,
-  ValueInput
-} from "#ir/model/types.js";
+import type { MemoryAccessKind } from "#x86/memory-access.js";
+import type { SemanticBuildContext, SemanticsBuilder } from "#x86/semantics/builder.js";
+import type { StorageInput, ValueInput } from "#x86/semantics/refs.js";
 import type { OperandWidth } from "#x86/types.js";
 
 export function guardStorageRead(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
@@ -17,7 +13,7 @@ export function guardStorageRead(
 }
 
 export function guardStorageWrite(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
@@ -26,7 +22,7 @@ export function guardStorageWrite(
 }
 
 export function guardStorageReadWrite(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
@@ -35,11 +31,11 @@ export function guardStorageReadWrite(
 }
 
 function guardStorageAccesses(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   context: SemanticBuildContext,
   storage: StorageInput,
   byteLength: number,
-  accesses: readonly IrMemoryAccessKind[]
+  accesses: readonly MemoryAccessKind[]
 ): void {
   const address = memoryGuardAddress(s, context, storage);
 
@@ -53,7 +49,7 @@ function guardStorageAccesses(
 }
 
 function memoryGuardAddress(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   context: SemanticBuildContext,
   storage: StorageInput
 ): ValueInput | undefined {

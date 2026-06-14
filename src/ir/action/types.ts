@@ -1,4 +1,4 @@
-import type { IrMemoryAccessKind } from "#ir/model/types.js";
+import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { StateChannel } from "./slots.js";
 import type { ValueId, ValueTable } from "./values.js";
@@ -58,7 +58,7 @@ export type GuardMemoryAction = Readonly<{
   kind: "guardMemory";
   address: ValueId;
   byteLength: number;
-  access: IrMemoryAccessKind;
+  access: MemoryAccessKind;
   faultEdge: RegionId;
 }>;
 

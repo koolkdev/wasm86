@@ -1,5 +1,5 @@
 import type { OperandWidth } from "#x86/types.js";
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { guardStorageReadWrite } from "./memory.js";
 
 export function xchgSemantic(width: OperandWidth = 32): SemanticTemplate {

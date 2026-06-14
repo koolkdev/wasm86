@@ -1,4 +1,5 @@
-import type { IrBuilder, SemanticTemplate, ValueRef } from "#ir/model/types.js";
+import type { SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
+import type { ValueRef } from "#x86/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import {
   buildAddResultAndFlags,
@@ -63,7 +64,7 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
 }
 
 function aluResultAndFlags(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   op: AluOp,
   width: OperandWidth,
   left: ValueRef,

@@ -5,7 +5,7 @@ import { createActionBuilder, type ActionBuilder } from "#ir/action/builder.js";
 import { immBinding, regBinding } from "#ir/action/operands.js";
 import { eipChannel, gprChannel } from "#ir/action/slots.js";
 import type { Action, ActionBlock, StateSlot } from "#ir/action/types.js";
-import type { SemanticTemplate } from "#ir/model/types.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";

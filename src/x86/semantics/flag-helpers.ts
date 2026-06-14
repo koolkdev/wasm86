@@ -1,16 +1,12 @@
 import { widthMask, type OperandWidth } from "#x86/types.js";
-import type {
-  IrBuilder,
-  IrFlagWriteInput,
-  ValueInput,
-  ValueRef
-} from "#ir/model/types.js";
+import type { FlagWriteInput, SemanticsBuilder } from "#x86/semantics/builder.js";
+import type { ValueInput, ValueRef } from "#x86/semantics/refs.js";
 
 export type LogicFlagOp = "and" | "or" | "xor";
 
 export type ResultAndFlags = Readonly<{
   result: ValueRef;
-  flags: IrFlagWriteInput;
+  flags: FlagWriteInput;
 }>;
 
 export type AddResultAndFlagsInput = Readonly<{
@@ -60,7 +56,7 @@ type BinaryFlagDag = ResultFlagDag & Readonly<{
   aXorBXorResult: ValueRef;
 }>;
 
-export function buildAddResultAndFlags(s: IrBuilder, input: AddResultAndFlagsInput): ResultAndFlags {
+export function buildAddResultAndFlags(s: SemanticsBuilder, input: AddResultAndFlagsInput): ResultAndFlags {
   const width = input.width;
   const a = projectInput(s, width, input.left);
   const b = projectInput(s, width, input.right);
@@ -80,7 +76,7 @@ export function buildAddResultAndFlags(s: IrBuilder, input: AddResultAndFlagsInp
   };
 }
 
-export function buildSubResultAndFlags(s: IrBuilder, input: SubResultAndFlagsInput): ResultAndFlags {
+export function buildSubResultAndFlags(s: SemanticsBuilder, input: SubResultAndFlagsInput): ResultAndFlags {
   const width = input.width;
   const a = projectInput(s, width, input.left);
   const b = projectInput(s, width, input.right);
@@ -100,7 +96,7 @@ export function buildSubResultAndFlags(s: IrBuilder, input: SubResultAndFlagsInp
   };
 }
 
-export function buildLogicResultAndFlags(s: IrBuilder, input: LogicResultAndFlagsInput): ResultAndFlags {
+export function buildLogicResultAndFlags(s: SemanticsBuilder, input: LogicResultAndFlagsInput): ResultAndFlags {
   const width = input.width;
   const left = projectInput(s, width, input.left);
   const right = projectInput(s, width, input.right);
@@ -113,7 +109,7 @@ export function buildLogicResultAndFlags(s: IrBuilder, input: LogicResultAndFlag
   };
 }
 
-export function buildCmpFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWriteInput {
+export function buildCmpFlags(s: SemanticsBuilder, input: BinaryFlagInput): FlagWriteInput {
   const width = input.width;
   const a = projectInput(s, width, input.left);
   const b = projectInput(s, width, input.right);
@@ -139,7 +135,7 @@ export function buildCmpFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWrite
   };
 }
 
-export function buildTestFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWriteInput {
+export function buildTestFlags(s: SemanticsBuilder, input: BinaryFlagInput): FlagWriteInput {
   const width = input.width;
   const left = projectInput(s, width, input.left);
   const right = projectInput(s, width, input.right);
@@ -154,7 +150,7 @@ export function buildTestFlags(s: IrBuilder, input: BinaryFlagInput): IrFlagWrit
   };
 }
 
-export function buildIncFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlagWriteInput {
+export function buildIncFlags(s: SemanticsBuilder, input: UnaryResultFlagInput): FlagWriteInput {
   const width = input.width;
   const left = projectInput(s, width, input.input);
   const result = projectResult(s, width, input.result);
@@ -168,7 +164,7 @@ export function buildIncFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlag
   };
 }
 
-export function buildDecFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlagWriteInput {
+export function buildDecFlags(s: SemanticsBuilder, input: UnaryResultFlagInput): FlagWriteInput {
   const width = input.width;
   const left = projectInput(s, width, input.input);
   const result = projectResult(s, width, input.result);
@@ -182,7 +178,7 @@ export function buildDecFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlag
   };
 }
 
-export function buildNegFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlagWriteInput {
+export function buildNegFlags(s: SemanticsBuilder, input: UnaryResultFlagInput): FlagWriteInput {
   const width = input.width;
   const value = projectInput(s, width, input.input);
   const result = projectResult(s, width, input.result);
@@ -197,7 +193,7 @@ export function buildNegFlags(s: IrBuilder, input: UnaryResultFlagInput): IrFlag
   };
 }
 
-function logicFlags(s: IrBuilder, width: OperandWidth, result: ValueRef): IrFlagWriteInput {
+function logicFlags(s: SemanticsBuilder, width: OperandWidth, result: ValueRef): FlagWriteInput {
   return {
     cells: {
       ...zspCells(s, { width, result }),
@@ -208,7 +204,7 @@ function logicFlags(s: IrBuilder, width: OperandWidth, result: ValueRef): IrFlag
   };
 }
 
-function zspCells(s: IrBuilder, dag: ResultFlagDag): IrFlagWriteInput["cells"] {
+function zspCells(s: SemanticsBuilder, dag: ResultFlagDag): FlagWriteInput["cells"] {
   return {
     ZF: s.flagExpr(s.compare(dag.width, "eq", dag.result, 0)),
     SF: s.flagExpr(signBit(s, dag.width, dag.result)),
@@ -217,10 +213,10 @@ function zspCells(s: IrBuilder, dag: ResultFlagDag): IrFlagWriteInput["cells"] {
 }
 
 function addCarryCells(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   dag: BinaryFlagDag,
   carryIn?: ValueInput
-): Required<Pick<IrFlagWriteInput["cells"], "CF" | "AF" | "OF">> {
+): Required<Pick<FlagWriteInput["cells"], "CF" | "AF" | "OF">> {
   return {
     CF: s.flagExpr(addCarry(s, dag, carryIn)),
     AF: s.flagExpr(auxCarry(s, dag)),
@@ -229,10 +225,10 @@ function addCarryCells(
 }
 
 function subCarryCells(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   dag: BinaryFlagDag,
   borrowIn?: ValueInput
-): Required<Pick<IrFlagWriteInput["cells"], "CF" | "AF" | "OF">> {
+): Required<Pick<FlagWriteInput["cells"], "CF" | "AF" | "OF">> {
   return {
     CF: s.flagExpr(subBorrow(s, dag, borrowIn)),
     AF: s.flagExpr(auxCarry(s, dag)),
@@ -241,7 +237,7 @@ function subCarryCells(
 }
 
 function addCarry(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   dag: BinaryFlagDag,
   carryIn?: ValueInput
 ): ValueRef {
@@ -255,7 +251,7 @@ function addCarry(
 }
 
 function subBorrow(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   dag: BinaryFlagDag,
   borrowIn?: ValueInput
 ): ValueRef {
@@ -268,31 +264,31 @@ function subBorrow(
   return s.i32Select(borrowIn, s.compare(dag.width, "le_u", dag.a, dag.b), borrow);
 }
 
-function auxCarry(s: IrBuilder, dag: BinaryFlagDag): ValueRef {
+function auxCarry(s: SemanticsBuilder, dag: BinaryFlagDag): ValueRef {
   return lowBit(s, s.i32ShrU(dag.aXorBXorResult, 4));
 }
 
-function parityFlag(s: IrBuilder, value: ValueInput): ValueRef {
+function parityFlag(s: SemanticsBuilder, value: ValueInput): ValueRef {
   const lowByte = s.i32And(value, 0xff);
   const odd = lowBit(s, s.i32Popcnt(lowByte));
 
   return s.compare(32, "eq", odd, 0);
 }
 
-function projectInput(s: IrBuilder, width: OperandWidth, value: ValueInput): ValueRef {
+function projectInput(s: SemanticsBuilder, width: OperandWidth, value: ValueInput): ValueRef {
   return projectValue(s, width, value);
 }
 
-function projectResult(s: IrBuilder, width: OperandWidth, value: ValueInput): ValueRef {
+function projectResult(s: SemanticsBuilder, width: OperandWidth, value: ValueInput): ValueRef {
   return projectValue(s, width, value);
 }
 
-function projectValue(s: IrBuilder, width: OperandWidth, value: ValueInput): ValueRef {
+function projectValue(s: SemanticsBuilder, width: OperandWidth, value: ValueInput): ValueRef {
   return s.project(width, valueRef(s, value));
 }
 
 function buildBinaryFlagDag(
-  s: IrBuilder,
+  s: SemanticsBuilder,
   width: OperandWidth,
   a: ValueRef,
   b: ValueRef,
@@ -316,11 +312,11 @@ function buildBinaryFlagDag(
   };
 }
 
-function valueRef(s: IrBuilder, value: ValueInput): ValueRef {
+function valueRef(s: SemanticsBuilder, value: ValueInput): ValueRef {
   return typeof value === "number" ? s.const32(value) : value;
 }
 
-function logicResult(s: IrBuilder, op: LogicFlagOp, left: ValueRef, right: ValueRef): ValueRef {
+function logicResult(s: SemanticsBuilder, op: LogicFlagOp, left: ValueRef, right: ValueRef): ValueRef {
   switch (op) {
     case "and":
       return s.i32And(left, right);
@@ -331,15 +327,15 @@ function logicResult(s: IrBuilder, op: LogicFlagOp, left: ValueRef, right: Value
   }
 }
 
-function signBit(s: IrBuilder, width: OperandWidth, value: ValueInput): ValueRef {
+function signBit(s: SemanticsBuilder, width: OperandWidth, value: ValueInput): ValueRef {
   return s.i32ShrU(value, width - 1);
 }
 
-function lowBit(s: IrBuilder, value: ValueInput): ValueRef {
+function lowBit(s: SemanticsBuilder, value: ValueInput): ValueRef {
   return s.i32And(value, 1);
 }
 
-function lowNibble(s: IrBuilder, value: ValueInput): ValueRef {
+function lowNibble(s: SemanticsBuilder, value: ValueInput): ValueRef {
   return s.i32And(value, 0xf);
 }
 

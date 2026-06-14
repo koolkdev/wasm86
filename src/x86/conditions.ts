@@ -1,5 +1,22 @@
-import type { ConditionCode } from "./types.js";
 import type { X86Flag } from "#x86/flags.js";
+
+export type ConditionCode =
+  | "O"
+  | "NO"
+  | "B"
+  | "AE"
+  | "E"
+  | "NE"
+  | "BE"
+  | "A"
+  | "S"
+  | "NS"
+  | "P"
+  | "NP"
+  | "L"
+  | "GE"
+  | "LE"
+  | "G";
 
 export type FlagBoolExpr =
   | Readonly<{ kind: "flag"; flag: X86Flag }>

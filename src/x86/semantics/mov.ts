@@ -1,4 +1,5 @@
-import type { ConditionCode, SemanticTemplate } from "#ir/model/types.js";
+import type { ConditionCode } from "#x86/conditions.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandWidth } from "#x86/types.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
