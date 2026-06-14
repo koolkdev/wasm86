@@ -1,15 +1,13 @@
 import { assert } from "#common/assert.js";
-import type { ExternalValueId } from "#ir/action/operands.js";
+import type { ExternalValueId } from "#ir/operands.js";
 import type {
   Action,
-  ActionBlock,
   BranchAction,
-  EdgeRegion,
-  GuardMemoryAction,
-  RegionId
-} from "#ir/action/types.js";
-import { validateActionBlock } from "#ir/action/validate.js";
-import type { ValueId } from "#ir/action/values.js";
+  GuardMemoryAction
+} from "#ir/actions.js";
+import type { EdgeRegion, IrBlock, RegionId } from "#ir/block.js";
+import { validateIrBlock } from "#ir/validate.js";
+import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
@@ -19,7 +17,7 @@ import { emitSlotLoad, emitSlotStore } from "./state.js";
 import { createValueStack } from "./value-stack.js";
 import { analyzeBlockValues } from "./values.js";
 
-// The emitter driver: walks an ActionBlock in action order and fills the
+// The emitter driver: walks an IrBlock in action order and fills the
 // given function body. Its product is a function body, never a module —
 // module assembly (imports, exports, ABI) belongs to the backends; the only
 // module wrapping under emit/action is the test harness. A fragment leaves
@@ -40,7 +38,7 @@ export type ActionFunctionContext = Readonly<{
 }>;
 
 // The function-shaped entry point: the block is the whole function body.
-export function emitActionFunction(block: ActionBlock, context: ActionFunctionContext): WasmFunctionBodyEncoder {
+export function emitActionFunction(block: IrBlock, context: ActionFunctionContext): WasmFunctionBodyEncoder {
   const scratch = new WasmLocalScratchAllocator(context.body);
 
   emitActionFragment(block, {
@@ -52,13 +50,13 @@ export function emitActionFunction(block: ActionBlock, context: ActionFunctionCo
   return context.body.end();
 }
 
-export function emitActionFragment(block: ActionBlock, context: ActionFragmentContext): void {
-  validateActionBlock(block);
+export function emitActionFragment(block: IrBlock, context: ActionFragmentContext): void {
+  validateIrBlock(block);
 
   const { body, embedding } = context;
   const entry = block.regions.find((region) => region.id === block.entry);
 
-  assert(entry !== undefined && entry.kind === "entry", "action block entry region is missing");
+  assert(entry !== undefined && entry.kind === "entry", "IR block entry region is missing");
 
   const edges = block.regions.filter((region): region is EdgeRegion => region.kind === "edge");
   const outputs = embedding.outputs ?? new Map<ValueId, number>();

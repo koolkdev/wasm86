@@ -1,12 +1,7 @@
 import { assert } from "#common/assert.js";
-import type {
-  Action,
-  ActionExitReason,
-  EdgeRegion,
-  ExitAction,
-  RegionId
-} from "#ir/action/types.js";
-import type { ValueId } from "#ir/action/values.js";
+import type { Action, ActionExitReason, ExitAction } from "#ir/actions.js";
+import type { EdgeRegion, RegionId } from "#ir/block.js";
+import type { ValueId } from "#ir/values.js";
 import { u32 } from "#x86/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";

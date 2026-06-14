@@ -1,12 +1,12 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createActionBuilder } from "#ir/action/builder.js";
-import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/action/operands.js";
-import type { ActionBlock } from "#ir/action/types.js";
+import { createIrBlockBuilder } from "#ir/builder.js";
+import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
+import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { actionBlockBody } from "./harness.js";
+import { irBlockBody } from "./harness.js";
 
 // Pinned harness-embedded bodies (fallthrough continue + sentinel tail):
 // these bytes may only change when the emission itself deliberately does.
@@ -49,11 +49,11 @@ test("a compare and branch emits its golden body", () => {
 });
 
 function emitGolden(byteLists: readonly (readonly number[])[]): string {
-  return Buffer.from(actionBlockBody(blockOf(byteLists)).encode()).toString("hex");
+  return Buffer.from(irBlockBody(blockOf(byteLists)).encode()).toString("hex");
 }
 
-function blockOf(byteLists: readonly (readonly number[])[]): ActionBlock {
-  const builder = createActionBuilder();
+function blockOf(byteLists: readonly (readonly number[])[]): IrBlock {
+  const builder = createIrBlockBuilder();
   let address: number | undefined;
 
   for (const bytes of byteLists) {

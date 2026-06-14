@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { flagChannel, gprChannel } from "#ir/action/slots.js";
+import { flagChannel, gprChannel } from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
 import { flagsOf } from "#x86/state/cpu-state.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";

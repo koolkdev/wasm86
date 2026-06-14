@@ -44,14 +44,12 @@ import {
 } from "./slots.js";
 import type {
   Action,
-  ActionBlock,
   ContinueAction,
-  EdgeRegion,
   ExitAction,
   GprDynamicSlot,
-  RegionId,
   WriteStateAction
-} from "./types.js";
+} from "./actions.js";
+import type { EdgeRegion, IrBlock, RegionId } from "./block.js";
 import {
   createValueTable,
   fitsUnsigned,
@@ -66,17 +64,17 @@ export type LocationValue = number | Readonly<{ external: ExternalValueId }>;
 
 export type InstructionLocation = Readonly<{ eip: LocationValue; nextEip: LocationValue }>;
 
-export type ActionBuilder = Readonly<{
+export type IrBlockBuilder = Readonly<{
   addInstruction(
     template: SemanticTemplate,
     bindings: readonly OperandBinding[],
     location: InstructionLocation
   ): void;
-  finish(): ActionBlock;
+  finish(): IrBlock;
 }>;
 
-export function createActionBuilder(): ActionBuilder {
-  const builder = new ActionSemanticsBuilder();
+export function createIrBlockBuilder(): IrBlockBuilder {
+  const builder = new IrBlockBuilderImpl();
 
   return {
     addInstruction: (template, bindings, location) => builder.addInstruction(template, bindings, location),
@@ -86,7 +84,7 @@ export function createActionBuilder(): ActionBuilder {
 
 const entryRegionId: RegionId = 0;
 
-class ActionSemanticsBuilder implements SemanticsBuilder, SemanticBuildContext {
+class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = createValueTable();
   readonly #actions: Action[] = [];
   readonly #pending = createPendingChannels(this.#values, (action) => this.#actions.push(action));
@@ -116,9 +114,9 @@ class ActionSemanticsBuilder implements SemanticsBuilder, SemanticBuildContext {
     bindings: readonly OperandBinding[],
     location: InstructionLocation
   ): void {
-    assert(!this.#finished, "cannot add instructions to a finished action builder");
+    assert(!this.#finished, "cannot add instructions to a finished IR block builder");
     assert(this.#blockEnd === "fallthrough", "cannot add instructions after a block terminator");
-    assert(this.#instruction === undefined, "action builder has an incomplete instruction");
+    assert(this.#instruction === undefined, "IR block builder has an incomplete instruction");
 
     this.#bindings = bindings;
     this.#operandAddresses.clear();
@@ -139,9 +137,9 @@ class ActionSemanticsBuilder implements SemanticsBuilder, SemanticBuildContext {
     this.#bindings = [];
   }
 
-  finish(): ActionBlock {
-    assert(!this.#finished, "action builder is already finished");
-    assert(this.#instruction === undefined, "action builder has an incomplete instruction");
+  finish(): IrBlock {
+    assert(!this.#finished, "IR block builder is already finished");
+    assert(this.#instruction === undefined, "IR block builder has an incomplete instruction");
     this.#finished = true;
 
     let continuation: ValueId | undefined;
@@ -149,7 +147,7 @@ class ActionSemanticsBuilder implements SemanticsBuilder, SemanticBuildContext {
     switch (this.#blockEnd) {
       case "fallthrough":
       case "jump":
-        assert(this.#pending.has(eipChannel), "action block did not advance eip; no instructions were added");
+        assert(this.#pending.has(eipChannel), "IR block did not advance eip; no instructions were added");
         continuation = this.#pending.read(eipChannel);
         this.#pending.flushAll();
         this.#actions.push({ kind: "continue" });
@@ -690,7 +688,7 @@ class ActionSemanticsBuilder implements SemanticsBuilder, SemanticBuildContext {
   }
 
   #location(): InstructionLocation {
-    assert(this.#instruction !== undefined, "action builder has no current instruction");
+    assert(this.#instruction !== undefined, "IR block builder has no current instruction");
     return this.#instruction;
   }
 
@@ -713,5 +711,5 @@ function memoryReadBounds(width: OperandWidth, signed: boolean): WidthBounds | u
 }
 
 function notSupportedError(what: string): Error {
-  return new Error(`${what} not supported by action builder yet`);
+  return new Error(`${what} not supported by IR block builder yet`);
 }

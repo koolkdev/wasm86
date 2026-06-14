@@ -1,15 +1,15 @@
 import { doesNotThrow, throws } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel } from "#ir/action/slots.js";
-import type { ActionBlock, ActionRegion } from "#ir/action/types.js";
-import { validateActionBlock } from "#ir/action/validate.js";
-import { createValueTable } from "#ir/action/values.js";
+import { eipChannel } from "#ir/slots.js";
+import type { IrBlock, IrRegion } from "#ir/block.js";
+import { validateIrBlock } from "#ir/validate.js";
+import { createValueTable } from "#ir/values.js";
 
 // Validation checks shape only, so the value table can stay empty and value
 // ids are arbitrary.
 
-function blockWith(regions: readonly ActionRegion[], entry = 0): ActionBlock {
+function blockWith(regions: readonly IrRegion[], entry = 0): IrBlock {
   return { entry, regions, values: createValueTable() };
 }
 
@@ -18,7 +18,7 @@ const edgeExit = { kind: "exit", reason: "memoryReadFault" } as const;
 
 test("an entry ending with an exit validates", () => {
   doesNotThrow(() =>
-    validateActionBlock(
+    validateIrBlock(
       blockWith([{ id: 0, kind: "entry", actions: [{ kind: "exit", reason: "unsupported" }] }])
     )
   );
@@ -26,7 +26,7 @@ test("an entry ending with an exit validates", () => {
 
 test("an entry ending with a continue validates", () => {
   doesNotThrow(() =>
-    validateActionBlock(
+    validateIrBlock(
       blockWith([
         {
           id: 0,
@@ -42,7 +42,7 @@ test("an entry ending with a continue validates", () => {
 test("a continuation that does not match the flushed eip is rejected", () => {
   throws(
     () =>
-      validateActionBlock(
+      validateIrBlock(
         blockWith([
           {
             id: 0,
@@ -58,7 +58,7 @@ test("a continuation that does not match the flushed eip is rejected", () => {
 
 test("a branch terminator with both edges targeted once validates", () => {
   doesNotThrow(() =>
-    validateActionBlock(
+    validateIrBlock(
       blockWith([
         {
           id: 0,
@@ -79,7 +79,7 @@ test("a branch terminator with both edges targeted once validates", () => {
 test("an action after the exit terminator is rejected", () => {
   throws(
     () =>
-      validateActionBlock(
+      validateIrBlock(
         blockWith([
           {
             id: 0,
@@ -98,7 +98,7 @@ test("an action after the exit terminator is rejected", () => {
 test("an action after a continue terminator is rejected", () => {
   throws(
     () =>
-      validateActionBlock(
+      validateIrBlock(
         blockWith([
           {
             id: 0,
@@ -114,7 +114,7 @@ test("an action after a continue terminator is rejected", () => {
 test("an action after a branch terminator is rejected", () => {
   throws(
     () =>
-      validateActionBlock(
+      validateIrBlock(
         blockWith([
           {
             id: 0,
@@ -132,7 +132,7 @@ test("an action after a branch terminator is rejected", () => {
 test("an entry that does not end with a terminator is rejected", () => {
   throws(
     () =>
-      validateActionBlock(
+      validateIrBlock(
         blockWith([
           {
             id: 0,
@@ -148,7 +148,7 @@ test("an entry that does not end with a terminator is rejected", () => {
 test("a branch targeting a missing edge region is rejected", () => {
   throws(
     () =>
-      validateActionBlock(
+      validateIrBlock(
         blockWith([
           {
             id: 0,
@@ -165,7 +165,7 @@ test("a branch targeting a missing edge region is rejected", () => {
 test("an edge targeted by two guards is rejected", () => {
   throws(
     () =>
-      validateActionBlock(
+      validateIrBlock(
         blockWith([
           {
             id: 0,
@@ -186,7 +186,7 @@ test("an edge targeted by two guards is rejected", () => {
 test("an edge no entry action targets is rejected", () => {
   throws(
     () =>
-      validateActionBlock(
+      validateIrBlock(
         blockWith([
           { id: 0, kind: "entry", actions: [continueAction] },
           { id: 1, kind: "edge", flushes: [], terminator: edgeExit }
@@ -199,7 +199,7 @@ test("an edge no entry action targets is rejected", () => {
 test("a block whose entry id resolves to no entry region is rejected", () => {
   throws(
     () =>
-      validateActionBlock(blockWith([{ id: 1, kind: "entry", actions: [continueAction] }])),
+      validateIrBlock(blockWith([{ id: 1, kind: "entry", actions: [continueAction] }])),
     /entry region is missing/
   );
 });
@@ -207,7 +207,7 @@ test("a block whose entry id resolves to no entry region is rejected", () => {
 test("duplicate region ids are rejected", () => {
   throws(
     () =>
-      validateActionBlock(
+      validateIrBlock(
         blockWith([
           {
             id: 0,

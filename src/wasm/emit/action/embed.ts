@@ -1,6 +1,6 @@
-import type { ValueId } from "#ir/action/values.js";
+import type { ValueId } from "#ir/values.js";
 
-// A fragment is an ActionBlock emitted inline into a hand-written function
+// A fragment is an IrBlock emitted inline into a hand-written function
 // body. The embedding never changes the block — it only decides what the
 // emitter does where the block completes.
 

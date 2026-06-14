@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { createActionBuilder } from "#ir/action/builder.js";
+import { createIrBlockBuilder } from "#ir/builder.js";
 import {
   immExternalBinding,
   memDynamicBinding,
@@ -8,7 +8,7 @@ import {
   regDynamicBinding,
   type ExternalValueId,
   type OperandBinding
-} from "#ir/action/operands.js";
+} from "#ir/operands.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#x86/schema/types.js";
 import { reg16, reg32, reg8, type RegName } from "#x86/types.js";
@@ -22,7 +22,7 @@ import {
 } from "./fragments.js";
 import type { InterpreterLocals } from "./locals.js";
 
-// Instruction handlers are single-instruction ActionBlocks over the existing
+// Instruction handlers are single-instruction IrBlocks over the existing
 // semantics templates. Decoded operands arrive as externals — dynamic
 // register indices, immediates, computed addresses — and eip/nextEip are
 // externals too, so one handler body serves every register pair and address.
@@ -71,7 +71,7 @@ export function emitInstructionHandler(
 
   emitNextEip(context, cursor);
 
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(instruction.spec.semantics, bindings, {
     eip: { external: externals.bind(context.locals.eip) },

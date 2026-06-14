@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { createActionBuilder } from "#ir/action/builder.js";
+import { createIrBlockBuilder } from "#ir/builder.js";
 import {
   immBinding,
   immExternalBinding,
@@ -10,19 +10,18 @@ import {
   memStaticBinding,
   regBinding,
   regDynamicBinding
-} from "#ir/action/operands.js";
-import { eipChannel, flagChannel, gprChannel, instructionCountChannel } from "#ir/action/slots.js";
+} from "#ir/operands.js";
+import { eipChannel, flagChannel, gprChannel, instructionCountChannel } from "#ir/slots.js";
 import type {
   Action,
-  ActionBlock,
-  EdgeRegion,
   GuardMemoryAction,
   ReadMemoryAction,
   ReadStateAction,
   WriteMemoryAction,
   WriteStateAction
-} from "#ir/action/types.js";
-import type { ValueId, ValueNode } from "#ir/action/values.js";
+} from "#ir/actions.js";
+import type { EdgeRegion, IrBlock } from "#ir/block.js";
+import type { ValueId, ValueNode } from "#ir/values.js";
 import type { X86Flag } from "#x86/flags.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86Flags } from "#x86/flags.js";
@@ -48,35 +47,35 @@ function isInstructionCountAction(action: Action): boolean {
   }
 }
 
-function entryActions(block: ActionBlock): readonly Action[] {
+function entryActions(block: IrBlock): readonly Action[] {
   return rawEntryActions(block).filter((action) => !isInstructionCountAction(action));
 }
 
-function rawEntryActions(block: ActionBlock): readonly Action[] {
+function rawEntryActions(block: IrBlock): readonly Action[] {
   const entry = block.regions[0]!;
 
   ok(entry.kind === "entry", "first region is the entry");
   return entry.actions;
 }
 
-function edgeRegion(block: ActionBlock, index: number): EdgeRegion {
+function edgeRegion(block: IrBlock, index: number): EdgeRegion {
   const region = block.regions[index]!;
 
   ok(region.kind === "edge", `region ${index} is an edge`);
   return region;
 }
 
-function edgeFlushes(block: ActionBlock, index: number): WriteStateAction[] {
+function edgeFlushes(block: IrBlock, index: number): WriteStateAction[] {
   return edgeRegion(block, index).flushes.filter((flush) => !isInstructionCountAction(flush));
 }
 
-function stateWrites(block: ActionBlock): WriteStateAction[] {
+function stateWrites(block: IrBlock): WriteStateAction[] {
   return entryActions(block).filter(
     (action): action is WriteStateAction => action.kind === "writeState"
   );
 }
 
-function nodeKinds(block: ActionBlock): ValueNode["kind"][] {
+function nodeKinds(block: IrBlock): ValueNode["kind"][] {
   const kinds: ValueNode["kind"][] = [];
 
   for (let id = 0; id < block.values.size(); id += 1) {
@@ -86,11 +85,11 @@ function nodeKinds(block: ActionBlock): ValueNode["kind"][] {
   return kinds;
 }
 
-function writtenFlags(block: ActionBlock): X86Flag[] {
+function writtenFlags(block: IrBlock): X86Flag[] {
   return stateWrites(block).flatMap((write) => (write.slot.kind === "flag" ? [write.slot.flag] : []));
 }
 
-function flagWriteValue(block: ActionBlock, flag: X86Flag): ValueId {
+function flagWriteValue(block: IrBlock, flag: X86Flag): ValueId {
   const writes = stateWrites(block).filter((write) => write.slot === flagChannel(flag));
 
   strictEqual(writes.length, 1, `expected exactly one ${flag} write`);
@@ -98,7 +97,7 @@ function flagWriteValue(block: ActionBlock, flag: X86Flag): ValueId {
 }
 
 test("mov r32, imm32 flushes the register write, the eip advance, and a continue", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], {
     eip: 0x401000,
@@ -125,7 +124,7 @@ test("mov r32, imm32 flushes the register write, the eip advance, and a continue
 });
 
 test("pending writes overwrite per channel and consts intern across instructions", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
   const mov = movSemantic(32);
 
   builder.addInstruction(mov, [regBinding("eax"), immBinding(7)], { eip: 0x1000, nextEip: 0x1005 });
@@ -147,7 +146,7 @@ test("pending writes overwrite per channel and consts intern across instructions
 });
 
 test("mov r32, r32 records one readState and forwards its leaf", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], {
     eip: 0x1000,
@@ -169,7 +168,7 @@ test("mov r32, r32 records one readState and forwards its leaf", () => {
 });
 
 test("repeated get of an unwritten channel returns the same leaf across instructions", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
   const mov = movSemantic(32);
 
   builder.addInstruction(mov, [regBinding("ebx"), regBinding("eax")], { eip: 0x1000, nextEip: 0x1002 });
@@ -187,7 +186,7 @@ test("repeated get of an unwritten channel returns the same leaf across instruct
 });
 
 test("add eax, imm32 writes all six arithmetic flags as pending expressions", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
     eip: 0x1000,
@@ -208,7 +207,7 @@ test("add eax, imm32 writes all six arithmetic flags as pending expressions", ()
 });
 
 test("two adds in one block flush exactly one write per channel, second instruction wins", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
   const add = aluSemantic("add", 32);
 
   builder.addInstruction(add, [regBinding("eax"), immBinding(5)], { eip: 0x1000, nextEip: 0x1003 });
@@ -232,7 +231,7 @@ test("two adds in one block flush exactly one write per channel, second instruct
 });
 
 test("inc leaves CF unwritten", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(unaryAluSemantic("inc", 32), [regBinding("eax")], {
     eip: 0x1000,
@@ -245,7 +244,7 @@ test("inc leaves CF unwritten", () => {
 });
 
 test("cmp writes flags but no register", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("eax"), regBinding("ebx")], {
     eip: 0x1000,
@@ -267,7 +266,7 @@ const undefAfTemplate: SemanticTemplate = (s) => {
 };
 
 test("flagUndef cells produce no write", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(undefAfTemplate, [], { eip: 0x1000, nextEip: 0x1002 });
 
@@ -277,7 +276,7 @@ test("flagUndef cells produce no write", () => {
 });
 
 test("an undef cell preserves the previous instruction's pending flag", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
     eip: 0x1000,
@@ -306,7 +305,7 @@ test("an undef cell preserves the previous instruction's pending flag", () => {
 });
 
 test("xchg eax, ebx swaps pendings through two reads with no temporaries", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], {
     eip: 0x1000,
@@ -330,7 +329,7 @@ test("xchg eax, ebx swaps pendings through two reads with no temporaries", () =>
 });
 
 test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(8), [regBinding("bl"), regBinding("ah")], {
     eip: 0x1000,
@@ -351,7 +350,7 @@ test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
 });
 
 test("write al then read eax flushes the byte and reloads the word", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(8), [regBinding("al"), immBinding(0x12)], {
     eip: 0x1000,
@@ -375,7 +374,7 @@ test("write al then read eax flushes the byte and reloads the word", () => {
 });
 
 test("write eax then read al flushes the word and reloads the byte", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], {
     eip: 0x1000,
@@ -399,7 +398,7 @@ test("write eax then read al flushes the word and reloads the byte", () => {
 });
 
 test("write al then write eax drops the byte pending with no flush", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(8), [regBinding("al"), immBinding(0x12)], {
     eip: 0x1000,
@@ -421,7 +420,7 @@ test("write al then write eax drops the byte pending with no flush", () => {
 });
 
 test("write eax then read ah reloads through the high-byte channel", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], {
     eip: 0x1000,
@@ -440,7 +439,7 @@ test("write eax then read ah reloads through the high-byte channel", () => {
 });
 
 test("ax and al pendings mix without touching flag pendings", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(aluSemantic("add", 8), [regBinding("al"), regBinding("bl")], {
     eip: 0x1000,
@@ -480,7 +479,7 @@ test("ax and al pendings mix without touching flag pendings", () => {
 });
 
 test("movzx r32, r8 forwards the unsigned byte read unmasked", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movzxSemantic(8, 32), [regBinding("ebx"), regBinding("al")], {
     eip: 0x1000,
@@ -499,7 +498,7 @@ test("movzx r32, r8 forwards the unsigned byte read unmasked", () => {
 });
 
 test("movsx r32, r8 marks the read for a sign-extending load", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movsxSemantic(8, 32), [regBinding("ebx"), regBinding("al")], {
     eip: 0x1000,
@@ -521,7 +520,7 @@ test("narrow signed compares sign-extend both operands", () => {
   const cmp8: SemanticTemplate = (s) => {
     s.set(s.operand(0), s.compare(8, "lt_s", s.get(s.operand(0), 32), s.get(s.operand(1), 32)), 32);
   };
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmp8, [regBinding("eax"), regBinding("ebx")], {
     eip: 0x1000,
@@ -539,7 +538,7 @@ test("an 8-bit unsigned compare of covered operands creates no projections", () 
   const cmpAl: SemanticTemplate = (s) => {
     s.set(s.operand(0), s.compare(8, "lt_u", s.get(s.operand(0), 8), s.get(s.operand(1), 8)), 8);
   };
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpAl, [regBinding("al"), immBinding(5)], {
     eip: 0x1000,
@@ -564,7 +563,7 @@ test("an 8-bit equality on an unproven value keeps its mask", () => {
 
     s.set(s.operand(0), s.compare(8, "eq", sum, 0), 8);
   };
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSum, [regBinding("al"), regBinding("bl")], {
     eip: 0x1000,
@@ -588,7 +587,7 @@ test("a signed byte get feeds a signed compare with no extra extends", () => {
 
     s.set(s.operand(0), s.compare(8, "lt_s", a, b), 8);
   };
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSigned, [regBinding("al"), regBinding("bl")], {
     eip: 0x1000,
@@ -614,7 +613,7 @@ test("value methods intern through the builder", () => {
 
     s.set(s.operand(0), s.i32Select(negative, s.i32Sub(0, value), value), 32);
   };
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(abs, [regBinding("eax")], { eip: 0x1000, nextEip: 0x1003 });
 
@@ -633,7 +632,7 @@ test("value methods intern through the builder", () => {
 });
 
 test("jmp redirects the eip flush and continues at the target", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(jmpSemantic(), [immBinding(0x2000)], { eip: 0x1000, nextEip: 0x1005 });
 
@@ -647,7 +646,7 @@ test("jmp redirects the eip flush and continues at the target", () => {
 });
 
 test("a jump flushes earlier pendings with the target eip", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
     eip: 0x1000,
@@ -666,7 +665,7 @@ test("a jump flushes earlier pendings with the target eip", () => {
 });
 
 test("a block ended by a jump rejects further instructions", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(jmpSemantic(), [immBinding(0x2000)], { eip: 0x1000, nextEip: 0x1005 });
 
@@ -687,13 +686,13 @@ test("ops after a control terminator in one template fail loudly", () => {
   };
 
   throws(
-    () => createActionBuilder().addInstruction(jumpThenSet, [], { eip: 0x1000, nextEip: 0x1005 }),
+    () => createIrBlockBuilder().addInstruction(jumpThenSet, [], { eip: 0x1000, nextEip: 0x1005 }),
     /cannot emit set after instruction terminator/
   );
 });
 
 test("jcc after cmp branches on the recorded condition with per-edge eip and flag flushes", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("eax"), immBinding(5)], {
     eip: 0x1000,
@@ -738,7 +737,7 @@ test("jcc after cmp branches on the recorded condition with per-edge eip and fla
 });
 
 test("int flushes pending state with the resume eip before a host trap exit", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
     eip: 0x1000,
@@ -758,7 +757,7 @@ test("int flushes pending state with the resume eip before a host trap exit", ()
 });
 
 test("a block ended by a host trap rejects further instructions", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(intSemantic(), [immBinding(3)], { eip: 0x1000, nextEip: 0x1002 });
 
@@ -773,7 +772,7 @@ test("a block ended by a host trap rejects further instructions", () => {
 });
 
 test("setcc after cmp consumes the recorded condition expression", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], {
     eip: 0x1000,
@@ -797,7 +796,7 @@ test("setcc after cmp consumes the recorded condition expression", () => {
 });
 
 test("setcc with no recorded condition builds from flag byte reads", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(setccSemantic("A"), [regBinding("al")], {
     eip: 0x1000,
@@ -827,7 +826,7 @@ test("setcc with no recorded condition builds from flag byte reads", () => {
 });
 
 test("a flag write between cmp and setcc invalidates the recorded condition", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], {
     eip: 0x1000,
@@ -871,18 +870,18 @@ test("set to an imm operand binding fails loudly", () => {
 
   throws(
     () =>
-      createActionBuilder().addInstruction(setImm, [immBinding(0)], {
+      createIrBlockBuilder().addInstruction(setImm, [immBinding(0)], {
         eip: 0x1000,
         nextEip: 0x1006
       }),
-    /not supported by action builder yet/
+    /not supported by IR block builder yet/
   );
 });
 
 test("a template width that disagrees with its register binding fails loudly", () => {
   throws(
     () =>
-      createActionBuilder().addInstruction(
+      createIrBlockBuilder().addInstruction(
         movSemantic(8),
         [regBinding("eax"), immBinding(1)],
         { eip: 0x1000, nextEip: 0x1002 }
@@ -892,7 +891,7 @@ test("a template width that disagrees with its register binding fails loudly", (
 });
 
 test("a failed instruction poisons the builder, discarding its partial pendings", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
   const setThenFail: Parameters<typeof builder.addInstruction>[0] = (s) => {
     s.set(s.operand(0), 1, 32);
     s.set(s.operand(1), 2, 32);
@@ -904,7 +903,7 @@ test("a failed instruction poisons the builder, discarding its partial pendings"
         eip: 0x1000,
         nextEip: 0x1002
       }),
-    /not supported by action builder yet/
+    /not supported by IR block builder yet/
   );
   throws(
     () =>
@@ -918,13 +917,13 @@ test("a failed instruction poisons the builder, discarding its partial pendings"
 });
 
 test("a builder with no instructions cannot finish", () => {
-  throws(() => createActionBuilder().finish(), /no instructions were added/);
+  throws(() => createIrBlockBuilder().finish(), /no instructions were added/);
 });
 
 test("missing operand bindings fail loudly", () => {
   throws(
     () =>
-      createActionBuilder().addInstruction(movSemantic(32), [regBinding("eax")], {
+      createIrBlockBuilder().addInstruction(movSemantic(32), [regBinding("eax")], {
         eip: 0x1000,
         nextEip: 0x1005
       }),
@@ -933,7 +932,7 @@ test("missing operand bindings fail loudly", () => {
 });
 
 test("a finished builder rejects further use", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(1)], {
     eip: 0x1000,
@@ -947,13 +946,13 @@ test("a finished builder rejects further use", () => {
         eip: 0x1005,
         nextEip: 0x100a
       }),
-    /finished action builder/
+    /finished IR block builder/
   );
   throws(() => builder.finish(), /already finished/);
 });
 
 test("mov [ebx+8], eax guards before the store and flushes eip into the fault edge", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(
     movSemantic(32),
@@ -985,7 +984,7 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
 });
 
 test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(
     aluSemantic("add", 32),
@@ -1035,7 +1034,7 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
 });
 
 test("a later guard's edge flushes earlier pendings with the faulting eip", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
     eip: 0x1000,
@@ -1089,7 +1088,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
 });
 
 test("lea builds general modrm addresses from channel reads", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(
     leaSemantic(32),
@@ -1114,7 +1113,7 @@ test("lea builds general modrm addresses from channel reads", () => {
 });
 
 test("an absolute address is just its displacement constant", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(
     movSemantic(32),
@@ -1140,7 +1139,7 @@ test("an absolute address is just its displacement constant", () => {
 });
 
 test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(
     movzxSemantic(8, 32),
@@ -1159,7 +1158,7 @@ test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
 });
 
 test("movsx r32, byte [mem] marks the load signed with no extra extend", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(
     movsxSemantic(8, 32),
@@ -1184,7 +1183,7 @@ test("movsx r32, byte [mem] marks the load signed with no extra extend", () => {
 });
 
 test("xchg [ebx], ebx stores through the original address, not the new ebx", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(
     xchgSemantic(32),
@@ -1218,7 +1217,7 @@ test("get and set through s.mem lower to memory actions at the given address", (
     s.memoryGuard(0x2000, 4, "write");
     s.set(target, s.i32Add(s.get(target, 32), 1), 32);
   };
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(incMem, [], { eip: 0x1000, nextEip: 0x1006 });
 
@@ -1239,7 +1238,7 @@ test("get and set through s.mem lower to memory actions at the given address", (
 test("address of a non-mem operand binding fails loudly", () => {
   throws(
     () =>
-      createActionBuilder().addInstruction(
+      createIrBlockBuilder().addInstruction(
         leaSemantic(32),
         [regBinding("eax"), regBinding("ebx")],
         { eip: 0x1000, nextEip: 0x1002 }
@@ -1257,7 +1256,7 @@ const setRegThenStore: SemanticTemplate = (s) => {
 };
 
 test("a guard after a register write restores the pre-instruction value in its edge", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x111)], {
     eip: 0x1000,
@@ -1290,7 +1289,7 @@ test("a guard after a register write restores the pre-instruction value in its e
 });
 
 test("a guard after writing a previously-clean register omits the channel from its edge", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(setRegThenStore, [regBinding("eax")], { eip: 0x1000, nextEip: 0x1006 });
 
@@ -1311,7 +1310,7 @@ test("a guard after writing a previously-clean register omits the channel from i
 });
 
 test("pop [ebx] guards the stack read first and omits boundary-absent esp from its write edge", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(popSemantic(), [memBinding({ base: "ebx", scale: 1, disp: 0 })], {
     eip: 0x1000,
@@ -1346,7 +1345,7 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
 });
 
 test("pop [ebx] write edge restores a previous instruction's pending esp", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("esp"), immBinding(0x30)], {
     eip: 0x1000,
@@ -1381,7 +1380,7 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
 });
 
 test("pop [esp] builds the destination address from the incremented esp", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(popSemantic(), [memBinding({ base: "esp", scale: 1, disp: 0 })], {
     eip: 0x1000,
@@ -1405,7 +1404,7 @@ test("pop [esp] builds the destination address from the incremented esp", () => 
 });
 
 test("pop [esp+k] adds the displacement to the incremented esp", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(popSemantic(), [memBinding({ base: "esp", scale: 1, disp: 8 })], {
     eip: 0x1000,
@@ -1435,7 +1434,7 @@ test("a guard after a memory write in the same instruction fails loudly", () => 
 
   throws(
     () =>
-      createActionBuilder().addInstruction(storeThenGuard, [], { eip: 0x1000, nextEip: 0x1006 }),
+      createIrBlockBuilder().addInstruction(storeThenGuard, [], { eip: 0x1000, nextEip: 0x1006 }),
     /cannot follow a memory write/
   );
 });
@@ -1449,7 +1448,7 @@ test("a guard after flushing a channel first written this instruction fails loud
 
   throws(
     () =>
-      createActionBuilder().addInstruction(flushThenGuard, [regBinding("al"), regBinding("ax")], {
+      createIrBlockBuilder().addInstruction(flushThenGuard, [regBinding("al"), regBinding("ax")], {
         eip: 0x1000,
         nextEip: 0x1003
       }),
@@ -1458,7 +1457,7 @@ test("a guard after flushing a channel first written this instruction fails loud
 });
 
 test("add r/m32, r32 with both operands dynamic reads, then writes, in one block", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], {
     eip: 0x1000,
@@ -1496,7 +1495,7 @@ test("add r/m32, r32 with both operands dynamic reads, then writes, in one block
 });
 
 test("a static register read keeps its order across a dynamic write", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regDynamicBinding(0), regBinding("ebx")], {
     eip: 0x1000,
@@ -1519,7 +1518,7 @@ test("a static register read keeps its order across a dynamic write", () => {
 });
 
 test("dirty GPR pendings flush before dynamic access; flags and eip ride through", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], {
     eip: 0x1000,
@@ -1552,7 +1551,7 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
 });
 
 test("a dynamic write invalidates static GPR pendings for later instructions", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
     eip: 0x1000,
@@ -1586,7 +1585,7 @@ test("a dynamic write invalidates static GPR pendings for later instructions", (
 });
 
 test("a dynamic read leaves flushed pendings serving later static reads", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
     eip: 0x1000,
@@ -1619,7 +1618,7 @@ test("a dynamic read leaves flushed pendings serving later static reads", () => 
 });
 
 test("pop r/mDyn flushes the incremented esp before the dynamic store, after the guard", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(popSemantic(), [regDynamicBinding(0)], { eip: 0x1000, nextEip: 0x1002 });
 
@@ -1647,7 +1646,7 @@ test("pop r/mDyn flushes the incremented esp before the dynamic store, after the
 });
 
 test("an 8-bit template width lowers a one-byte dynamic slot", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(8), [regBinding("bl"), regDynamicBinding(0)], {
     eip: 0x1000,
@@ -1670,7 +1669,7 @@ test("an 8-bit template width lowers a one-byte dynamic slot", () => {
 });
 
 test("a 16-bit set through a dynamic register stores a two-byte slot", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(16), [regDynamicBinding(0), immBinding(0x1234)], {
     eip: 0x1000,
@@ -1688,7 +1687,7 @@ test("a 16-bit set through a dynamic register stores a two-byte slot", () => {
 });
 
 test("movsx r32, r8 from a dynamic register marks the read signed with no extra extend", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movsxSemantic(8, 32), [regBinding("eax"), regDynamicBinding(0)], {
     eip: 0x1000,
@@ -1717,7 +1716,7 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
 
   throws(
     () =>
-      createActionBuilder().addInstruction(setThenDynamicRead, [regDynamicBinding(0)], {
+      createIrBlockBuilder().addInstruction(setThenDynamicRead, [regDynamicBinding(0)], {
         eip: 0x1000,
         nextEip: 0x1002
       }),
@@ -1733,7 +1732,7 @@ test("a guard after a dynamic write fails loudly", () => {
 
   throws(
     () =>
-      createActionBuilder().addInstruction(dynamicWriteThenGuard, [regDynamicBinding(0)], {
+      createIrBlockBuilder().addInstruction(dynamicWriteThenGuard, [regDynamicBinding(0)], {
         eip: 0x1000,
         nextEip: 0x1002
       }),
@@ -1742,7 +1741,7 @@ test("a guard after a dynamic write fails loudly", () => {
 });
 
 test("an external location flushes eip as the nextEip external", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(5)], {
     eip: { external: 0 },
@@ -1760,7 +1759,7 @@ test("an external location flushes eip as the nextEip external", () => {
 });
 
 test("a fault edge restores an external eip", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(
     movSemantic(32),
@@ -1787,13 +1786,13 @@ test("a fault edge restores an external eip", () => {
 
 // The memDynamic address: the in-block base register read plus the
 // pre-summed offset external.
-function dynamicAddress(block: ActionBlock, baseRead: ReadStateAction): ValueId {
+function dynamicAddress(block: IrBlock, baseRead: ReadStateAction): ValueId {
   const v = block.values;
 
   return v.internBinary("add", baseRead.output, v.internExternal(1));
 }
 
-function dynamicBaseRead(block: ActionBlock): ReadStateAction {
+function dynamicBaseRead(block: IrBlock): ReadStateAction {
   const read = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot.kind === "gprDynamic"
   );
@@ -1803,7 +1802,7 @@ function dynamicBaseRead(block: ActionBlock): ReadStateAction {
 }
 
 test("a memStatic operand guards and accesses the external address", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), memStaticBinding(7)], {
     eip: 0x1000,
@@ -1829,7 +1828,7 @@ test("a memStatic operand guards and accesses the external address", () => {
 });
 
 test("a memDynamic operand reads the base register inside the block", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), memDynamicBinding(0, 1)], {
     eip: 0x1000,
@@ -1864,7 +1863,7 @@ test("a memDynamic operand reads the base register inside the block", () => {
 });
 
 test("a read+write memDynamic operand reads the base once and reuses the address", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(aluSemantic("add", 32), [memDynamicBinding(0, 1), immBinding(5)], {
     eip: 0x1000,
@@ -1885,7 +1884,7 @@ test("a read+write memDynamic operand reads the base once and reuses the address
 });
 
 test("pop [memDynamic] flushes esp before the base read and restores it on the write edge", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(popSemantic(), [memDynamicBinding(0, 1)], { eip: 0x1000, nextEip: 0x1003 });
 
@@ -1937,7 +1936,7 @@ test("a guard after a memDynamic flush of a never-read register fails loudly", (
 
   throws(
     () =>
-      createActionBuilder().addInstruction(blindWriteThenDynamicAddress, [memDynamicBinding(0, 1)], {
+      createIrBlockBuilder().addInstruction(blindWriteThenDynamicAddress, [memDynamicBinding(0, 1)], {
         eip: 0x1000,
         nextEip: 0x1002
       }),
@@ -1946,7 +1945,7 @@ test("a guard after a memDynamic flush of a never-read register fails loudly", (
 });
 
 test("a narrow immExternal get projects to the access width", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(8), [regBinding("bl"), immExternalBinding(0)], {
     eip: 0x1000,
@@ -1965,7 +1964,7 @@ test("a narrow immExternal get projects to the access width", () => {
 });
 
 test("a signed immExternal get sign-extends instead of masking", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movsxSemantic(8, 32), [regBinding("eax"), immExternalBinding(0)], {
     eip: 0x1000,
@@ -1983,7 +1982,7 @@ test("a signed immExternal get sign-extends instead of masking", () => {
   });
 });
 
-function instructionCountRead(block: ActionBlock): ReadStateAction {
+function instructionCountRead(block: IrBlock): ReadStateAction {
   const read = rawEntryActions(block).find(
     (action): action is ReadStateAction =>
       action.kind === "readState" && action.slot === instructionCountChannel
@@ -1994,7 +1993,7 @@ function instructionCountRead(block: ActionBlock): ReadStateAction {
 }
 
 test("every instruction advances the count channel once, flushed once", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
   const mov = movSemantic(32);
 
   builder.addInstruction(mov, [regBinding("eax"), immBinding(7)], { eip: 0x1000, nextEip: 0x1005 });
@@ -2018,7 +2017,7 @@ test("every instruction advances the count channel once, flushed once", () => {
 });
 
 test("branch edges flush the advanced count", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(jccSemantic("E"), [immBinding(0x2000)], { eip: 0x1000, nextEip: 0x1002 });
 
@@ -2035,7 +2034,7 @@ test("branch edges flush the advanced count", () => {
 });
 
 test("a fault edge restores the boundary count", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], {
     eip: 0x1000,
@@ -2059,7 +2058,7 @@ test("a fault edge restores the boundary count", () => {
 });
 
 test("a host trap flushes the advanced count", () => {
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(intSemantic(), [immBinding(0x21)], { eip: 0x1000, nextEip: 0x1002 });
 

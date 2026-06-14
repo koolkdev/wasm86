@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { gprChannel } from "#ir/action/slots.js";
+import { gprChannel } from "#ir/slots.js";
 import type { RegName } from "#x86/types.js";
 import { ExitReason } from "#wasm/exit.js";
 import {

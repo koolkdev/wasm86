@@ -1,9 +1,9 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, gprChannel } from "#ir/action/slots.js";
-import type { ActionBlock } from "#ir/action/types.js";
-import { createValueTable, type ValueId } from "#ir/action/values.js";
+import { eipChannel, gprChannel } from "#ir/slots.js";
+import type { IrBlock } from "#ir/block.js";
+import { createValueTable, type ValueId } from "#ir/values.js";
 import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -19,7 +19,7 @@ import { instantiateFunctionBody } from "./harness.js";
 // decode-fault edge — exporting the fetched byte to an embedder local.
 
 type DecodeReadFragment = Readonly<{
-  block: ActionBlock;
+  block: IrBlock;
   fetched: ValueId;
 }>;
 
@@ -30,7 +30,7 @@ function decodeReadFragment(k: number): DecodeReadFragment {
   const eipValue = values.addActionOutput();
   const address = values.internBinary("add", eipValue, values.internConst(k));
   const fetched = values.addActionOutput();
-  const block: ActionBlock = {
+  const block: IrBlock = {
     entry: 0,
     regions: [
       {
@@ -171,7 +171,7 @@ test("an exported register read pins across a later overlapping store", async ()
   const values = createValueTable();
   const readValue = values.addActionOutput();
   const incremented = values.internBinary("add", readValue, values.internConst(1));
-  const block: ActionBlock = {
+  const block: IrBlock = {
     entry: 0,
     regions: [
       {

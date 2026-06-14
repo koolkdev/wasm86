@@ -1,5 +1,5 @@
 import { channelsOverlap } from "./slots.js";
-import type { Action, StateSlot } from "./types.js";
+import type { Action, StateSlot } from "./actions.js";
 
 // Effects are derived from action kind + slot, never stored per-action.
 // One aliasing rule over the address spaces: static channels alias iff their

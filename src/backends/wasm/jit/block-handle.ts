@@ -3,7 +3,7 @@ import { u32 } from "#x86/numeric.js";
 import { wasmImport } from "#wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
-import { buildActionBlock } from "./action-compiler.js";
+import { buildIrBlock } from "./action-compiler.js";
 import {
   actionJitModuleLinkTargets,
   encodeActionJitModule,
@@ -68,7 +68,7 @@ export function compileActionWasmBlockHandle(
 
   const moduleBlocks: ActionJitBlock[] = blocks.map((block) => ({
     entryEip: u32(block.startEip),
-    actions: buildActionBlock(block.instructions)
+    actions: buildIrBlock(block.instructions)
   }));
   const targetEips = actionJitModuleLinkTargets(moduleBlocks);
   const moduleLinkTable = targetEips.length === 0 ? undefined : new JitModuleLinkTable({ targetEips });

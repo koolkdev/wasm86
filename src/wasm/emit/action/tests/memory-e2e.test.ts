@@ -1,10 +1,10 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createActionBuilder } from "#ir/action/builder.js";
-import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/action/operands.js";
-import { eipChannel, gprChannel } from "#ir/action/slots.js";
-import type { ActionBlock } from "#ir/action/types.js";
+import { createIrBlockBuilder } from "#ir/builder.js";
+import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
+import { eipChannel, gprChannel } from "#ir/slots.js";
+import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags } from "#x86/flags.js";
@@ -12,7 +12,7 @@ import type { CpuState } from "#x86/state/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
-import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
+import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags } from "./reference.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
@@ -25,12 +25,12 @@ const guestByteLength = 0x10000;
 test("mov r32, [ebx+disp] loads the guest cell", async () => {
   const instruction = ok(decodeBytes([0x8b, 0x43, 0x04]));
   const initial: Partial<CpuState> = { ebx: 0x20, eip: instruction.address, ...allFlagsSet };
-  const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x24, 0x1122_3344, true);
 
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
     { regs: { eax: 0x1122_3344, ebx: 0x20 }, eip: instruction.nextEip, flags: allFlagsSet },
@@ -46,11 +46,11 @@ test("mov [ebx+disp], r32 stores the guest cell", async () => {
     eip: instruction.address,
     ...allFlagsSet
   };
-  const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
 
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   strictEqual(guestView.getUint32(0x24, true), 0xcafe_1234);
   assertState(
     stateView,
@@ -67,7 +67,7 @@ test("add [mem], r32 read-modify-writes the cell with reference flags", async ()
     ebx: 0xffff_ffff,
     eip: instruction.address
   };
-  const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x20, 1, true);
@@ -75,7 +75,7 @@ test("add [mem], r32 read-modify-writes the cell with reference flags", async ()
   // dest = [eax] (1), src = ebx (0xffffffff): the cell wraps to zero.
   const reference = aluReference("add", 32, 1, 0xffff_ffff);
 
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   strictEqual(guestView.getUint32(0x20, true), reference.result);
   assertState(
     stateView,
@@ -91,7 +91,7 @@ test("add r32, [mem] loads the operand with reference flags", async () => {
     ebx: 0x7fff_ffff,
     eip: instruction.address
   };
-  const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x20, 1, true);
@@ -99,7 +99,7 @@ test("add r32, [mem] loads the operand with reference flags", async () => {
   // dest = ebx (0x7fffffff), src = [eax] (1): overflows signed, so SF and OF.
   const reference = aluReference("add", 32, 0x7fff_ffff, 1);
 
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
     { regs: { eax: 0x20, ebx: reference.result }, eip: instruction.nextEip, flags: reference.flags },
@@ -117,12 +117,12 @@ test("byte and word guest accesses load and store at their widths", async () => 
     [0x66, 0xc7, 0x43, 0x02, 0xef, 0xbe]
   ]);
   const initial: Partial<CpuState> = { ebx: 0x20, eip: instructions[0]!.address, ...allFlagsSet };
-  const { stateView, guestView, run } = await instantiateActionBlock(blockOf(instructions));
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x20, 0x1122_33f6, true);
 
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   strictEqual(guestView.getUint32(0x20, true), 0xbeef_7ff6);
   assertState(
     stateView,
@@ -147,7 +147,7 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
     eip: instructions[0]!.address,
     ...allFlagsSet
   };
-  const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
+  const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
 
@@ -173,7 +173,7 @@ test("a write fault leaves guest memory untouched", async () => {
     eip: instruction.address,
     ...allFlagsSet
   };
-  const { stateView, guestView, run } = await instantiateActionBlock(blockOf([instruction]));
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
 
@@ -194,7 +194,7 @@ test("a narrow access faults with its byte length", async () => {
     eip: instruction.address,
     ...allFlagsSet
   };
-  const { stateView, run } = await instantiateActionBlock(blockOf([instruction]));
+  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
 
   writeWasmCpuState(stateView, initial);
 
@@ -220,7 +220,7 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
     eip: instructions[0]!.address,
     ...allFlagsSet
   };
-  const { stateView, guestView, run } = await instantiateActionBlock(blockOf(instructions));
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x20, 0xcafe_1234, true);
@@ -237,8 +237,8 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
   );
 });
 
-function blockOf(instructions: readonly IsaDecodedInstruction[]): ActionBlock {
-  const builder = createActionBuilder();
+function blockOf(instructions: readonly IsaDecodedInstruction[]): IrBlock {
+  const builder = createIrBlockBuilder();
 
   for (const instruction of instructions) {
     builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), {

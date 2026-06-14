@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { StateChannel } from "#ir/action/slots.js";
+import type { StateChannel } from "#ir/slots.js";
 import { x86Flags, type X86Flag } from "#x86/flags.js";
 import { reg32, type Reg32 } from "#x86/types.js";
 import { u32 } from "#x86/numeric.js";

@@ -1,10 +1,10 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { createPendingChannels, type PendingChannels } from "#ir/action/pending.js";
-import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
-import type { Action, GprDynamicSlot } from "#ir/action/types.js";
-import { createValueTable, type ValueId, type ValueTable } from "#ir/action/values.js";
+import { createPendingChannels, type PendingChannels } from "#ir/pending.js";
+import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
+import type { Action, GprDynamicSlot } from "#ir/actions.js";
+import { createValueTable, type ValueId, type ValueTable } from "#ir/values.js";
 
 type Harness = Readonly<{
   values: ValueTable;

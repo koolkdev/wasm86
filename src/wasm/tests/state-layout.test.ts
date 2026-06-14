@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
+import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
 import { reg16, reg32, reg8 } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";

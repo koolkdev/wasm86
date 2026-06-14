@@ -1,4 +1,4 @@
-import type { StateChannel } from "#ir/action/slots.js";
+import type { StateChannel } from "#ir/slots.js";
 import type { X86Flag } from "#x86/flags.js";
 import { type CpuState } from "#x86/state/cpu-state.js";
 import {

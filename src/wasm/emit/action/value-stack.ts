@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
-import type { ExternalValueId } from "#ir/action/operands.js";
-import type { EdgeRegion, ReadMemoryAction, ReadStateAction, StateSlot } from "#ir/action/types.js";
+import type { ExternalValueId } from "#ir/operands.js";
+import type { ReadMemoryAction, ReadStateAction, StateSlot } from "#ir/actions.js";
+import type { EdgeRegion } from "#ir/block.js";
 import type {
   BinaryValueNode,
   CompareValueNode,
@@ -9,7 +10,7 @@ import type {
   UnaryValueNode,
   ValueId,
   ValueTable
-} from "#ir/action/values.js";
+} from "#ir/values.js";
 import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";

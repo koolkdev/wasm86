@@ -1,9 +1,9 @@
 import { ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createActionBuilder } from "#ir/action/builder.js";
-import { immBinding, regBinding } from "#ir/action/operands.js";
-import { gprChannel } from "#ir/action/slots.js";
+import { createIrBlockBuilder } from "#ir/builder.js";
+import { immBinding, regBinding } from "#ir/operands.js";
+import { gprChannel } from "#ir/slots.js";
 import { CONDITIONS, type FlagBoolExpr } from "#x86/conditions.js";
 import type { X86Flag } from "#x86/flags.js";
 import type { ConditionCode } from "#x86/conditions.js";
@@ -11,7 +11,7 @@ import type { ConditionCode } from "#x86/conditions.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 import { readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
-import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
+import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 // cmp + setcc consuming the recorded condition expression, and standalone
 // setcc rebuilding the condition from flag bytes.
@@ -44,7 +44,7 @@ const operandPairs: ReadonlyArray<readonly [number, number]> = [
 for (const [cc, predicate] of comparePredicates) {
   test(`cmp ebx, imm + set${cc.toLowerCase()} al matches the predicate`, async () => {
     for (const [left, right] of operandPairs) {
-      const builder = createActionBuilder();
+      const builder = createIrBlockBuilder();
 
       builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(right)], {
         eip: 0x1000,
@@ -68,11 +68,11 @@ for (const [cc, predicate] of comparePredicates) {
         false
       );
 
-      const { stateView, run } = await instantiateActionBlock(block);
+      const { stateView, run } = await instantiateIrBlock(block);
       const label = `set${cc.toLowerCase()} with ${left}, ${right}`;
 
       writeWasmCpuState(stateView, { ebx: left, eax: 0xdeadbeaa });
-      strictEqual(run(), actionBlockCompleted, label);
+      strictEqual(run(), irBlockCompleted, label);
 
       // setcc writes the low byte only; the rest of eax is untouched.
       const expected = 0xdeadbe00 + (predicate(left, right) ? 1 : 0);
@@ -100,14 +100,14 @@ function evaluateCondition(expr: FlagBoolExpr, flags: ReadonlySet<X86Flag>): boo
 for (const cc of Object.keys(CONDITIONS) as ConditionCode[]) {
   test(`standalone set${cc.toLowerCase()} al evaluates every flag combination`, async () => {
     const condition = CONDITIONS[cc];
-    const builder = createActionBuilder();
+    const builder = createIrBlockBuilder();
 
     builder.addInstruction(setccSemantic(cc), [regBinding("al")], {
       eip: 0x1000,
       nextEip: 0x1003
     });
 
-    const { stateView, run } = await instantiateActionBlock(builder.finish());
+    const { stateView, run } = await instantiateIrBlock(builder.finish());
 
     for (let combo = 0; combo < 1 << condition.reads.length; combo += 1) {
       const flags = new Set(condition.reads.filter((_, index) => (combo >> index) & 1));
@@ -115,7 +115,7 @@ for (const cc of Object.keys(CONDITIONS) as ConditionCode[]) {
       const label = `set${cc.toLowerCase()} with ${[...flags].join("+") || "no flags"}`;
 
       writeWasmCpuState(stateView, { eax: 0x55aa55aa, ...flagFields });
-      strictEqual(run(), actionBlockCompleted, label);
+      strictEqual(run(), irBlockCompleted, label);
 
       const expected = 0x55aa5500 + (evaluateCondition(condition.expr, flags) ? 1 : 0);
 

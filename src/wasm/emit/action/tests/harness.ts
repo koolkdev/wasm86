@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { ActionBlock } from "#ir/action/types.js";
+import type { IrBlock } from "#ir/block.js";
 import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -15,16 +15,16 @@ import { emitActionFragment } from "#wasm/emit/action/emit.js";
 // backends' job.
 
 // No encoded exit equals the sentinel: its reason field is 0xffff.
-export const actionBlockCompleted = -1n;
+export const irBlockCompleted = -1n;
 
-export type InstantiatedActionBlock = Readonly<{
+export type InstantiatedIrBlock = Readonly<{
   stateView: DataView;
   guestView: DataView;
   run(...externals: number[]): bigint;
 }>;
 
 // The fragment with a fallthrough completion, then the sentinel tail.
-export function actionBlockBody(block: ActionBlock, externalParamCount = 0): WasmFunctionBodyEncoder {
+export function irBlockBody(block: IrBlock, externalParamCount = 0): WasmFunctionBodyEncoder {
   const body = new WasmFunctionBodyEncoder(externalParamCount);
   const scratch = new WasmLocalScratchAllocator(body);
 
@@ -35,14 +35,14 @@ export function actionBlockBody(block: ActionBlock, externalParamCount = 0): Was
     embedding: { completion: { kind: "fallthrough" } }
   });
   scratch.assertClear();
-  return body.i64Const(actionBlockCompleted).end();
+  return body.i64Const(irBlockCompleted).end();
 }
 
-export async function instantiateActionBlock(
-  block: ActionBlock,
+export async function instantiateIrBlock(
+  block: IrBlock,
   externalParamCount = 0
-): Promise<InstantiatedActionBlock> {
-  return instantiateFunctionBody(actionBlockBody(block, externalParamCount), externalParamCount);
+): Promise<InstantiatedIrBlock> {
+  return instantiateFunctionBody(irBlockBody(block, externalParamCount), externalParamCount);
 }
 
 // Same wrapper around an already finished body — typically a hand-written
@@ -50,7 +50,7 @@ export async function instantiateActionBlock(
 export async function instantiateFunctionBody(
   body: WasmFunctionBodyEncoder,
   paramCount = 0
-): Promise<InstantiatedActionBlock> {
+): Promise<InstantiatedIrBlock> {
   const state = new WebAssembly.Memory({ initial: 1 });
   const guest = new WebAssembly.Memory({ initial: wasmGuestMemoryMinPages });
   const instance = await WebAssembly.instantiate(

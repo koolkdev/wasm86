@@ -1,9 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { buildActionBlock } from "#backends/wasm/jit/action-compiler.js";
+import { buildIrBlock } from "#backends/wasm/jit/action-compiler.js";
 import { compileActionWasmBlockHandle } from "#backends/wasm/jit/block-handle.js";
-import type { Action, ActionBlock, StateSlot } from "#ir/action/types.js";
+import type { Action, StateSlot } from "#ir/actions.js";
+import type { IrBlock } from "#ir/block.js";
 import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
 import { ExitReason } from "#wasm/exit.js";
@@ -13,7 +14,7 @@ const startEip = 0x1000;
 
 test("a repeated add compiles to one eax read and one eax write", () => {
   // add eax, 1; add eax, 1.
-  const block = buildActionBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
+  const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
   const actions = entryActions(block);
 
   strictEqual(actions.filter((action) => action.kind === "readState" && isEaxWordSlot(action.slot)).length, 1);
@@ -22,7 +23,7 @@ test("a repeated add compiles to one eax read and one eax write", () => {
 
 test("cross-instruction dead flag and eip writes are absent from the action list", () => {
   // add eax, 1; add eax, 1.
-  const block = buildActionBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
+  const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
   const actions = entryActions(block);
   const flagWrites = actions.flatMap((action) =>
     action.kind === "writeState" && action.slot.kind === "flag" ? [action.slot.flag] : []
@@ -104,10 +105,10 @@ function decodeBlock(bytes: readonly number[], eip = startEip): IsaDecodedBlock 
   return decodeIsaBlock(new ByteArrayDecodeReader(Uint8Array.from(bytes), eip), eip);
 }
 
-function entryActions(block: ActionBlock): readonly Action[] {
+function entryActions(block: IrBlock): readonly Action[] {
   const entry = block.regions.find((region) => region.id === block.entry);
 
-  ok(entry !== undefined && entry.kind === "entry", "expected the action block entry region");
+  ok(entry !== undefined && entry.kind === "entry", "expected the IR block entry region");
   return entry.actions;
 }
 

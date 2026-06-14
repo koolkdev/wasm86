@@ -1,16 +1,15 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import type { ExternalValueId } from "#ir/action/operands.js";
-import { gprChannel } from "#ir/action/slots.js";
+import type { ExternalValueId } from "#ir/operands.js";
+import { gprChannel } from "#ir/slots.js";
 import type {
   Action,
-  EdgeRegion,
-  EntryRegion,
   ReadMemoryAction,
   ReadStateAction
-} from "#ir/action/types.js";
-import { createValueTable, type ValueTable } from "#ir/action/values.js";
+} from "#ir/actions.js";
+import type { EdgeRegion, EntryRegion } from "#ir/block.js";
+import { createValueTable, type ValueTable } from "#ir/values.js";
 import { createValueStack, type ValueStack } from "#wasm/emit/action/value-stack.js";
 import { analyzeBlockValues } from "#wasm/emit/action/values.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";

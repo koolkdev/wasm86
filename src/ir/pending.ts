@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { channelCovers, channelsOverlap, type StateChannel } from "./slots.js";
-import type { Action, GprDynamicSlot } from "./types.js";
+import type { Action, GprDynamicSlot } from "./actions.js";
 import {
   fitsUnsigned,
   signExtended,

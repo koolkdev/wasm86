@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
-import type { GprDynamicSlot, StateSlot } from "#ir/action/types.js";
-import type { ValueId } from "#ir/action/values.js";
+import type { GprDynamicSlot, StateSlot } from "#ir/actions.js";
+import type { ValueId } from "#ir/values.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";

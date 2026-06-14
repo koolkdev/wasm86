@@ -1,9 +1,8 @@
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type { OperandWidth } from "#x86/types.js";
+import type { RegionId } from "./block.js";
 import type { StateChannel } from "./slots.js";
-import type { ValueId, ValueTable } from "./values.js";
-
-export type RegionId = number;
+import type { ValueId } from "./values.js";
 
 // The index is the x86 register number for the access width (modrm encoding).
 export type GprDynamicSlot = Readonly<{
@@ -89,29 +88,3 @@ export type Action =
   | BranchAction
   | ExitAction
   | ContinueAction;
-
-export type EntryRegion = Readonly<{
-  id: RegionId;
-  kind: "entry";
-  actions: readonly Action[];
-  // The flushed eip a completed region continues at; a continue without
-  // one stays at the current eip.
-  continuation?: ValueId;
-}>;
-
-// Edge bodies flush state and leave.
-export type EdgeRegion = Readonly<{
-  id: RegionId;
-  kind: "edge";
-  flushes: readonly WriteStateAction[];
-  terminator: ExitAction | ContinueAction;
-  continuation?: ValueId;
-}>;
-
-export type ActionRegion = EntryRegion | EdgeRegion;
-
-export type ActionBlock = Readonly<{
-  entry: RegionId;
-  regions: readonly ActionRegion[];
-  values: ValueTable;
-}>;

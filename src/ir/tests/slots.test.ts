@@ -8,7 +8,7 @@ import {
   flagChannel,
   gprChannel,
   type StateChannel
-} from "#ir/action/slots.js";
+} from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
 import { reg16, reg32, reg8 } from "#x86/types.js";
 

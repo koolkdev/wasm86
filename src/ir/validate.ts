@@ -1,11 +1,12 @@
 import { assert } from "#common/assert.js";
-import type { Action, ActionBlock, ActionRegion, EntryRegion, RegionId } from "./types.js";
+import type { Action } from "./actions.js";
+import type { EntryRegion, IrBlock, IrRegion, RegionId } from "./block.js";
 import type { ValueId } from "./values.js";
 
 // Structural checks: regions terminate exactly once, every region reference
 // resolves, and cached continuations match the flushes.
 
-export function validateActionBlock(block: ActionBlock): void {
+export function validateIrBlock(block: IrBlock): void {
   const edgeIds = new Set<RegionId>();
   let entry: EntryRegion | undefined;
 
@@ -17,7 +18,7 @@ export function validateActionBlock(block: ActionBlock): void {
 
     switch (region.kind) {
       case "entry":
-        assert(entry === undefined, "action block has more than one entry region");
+        assert(entry === undefined, "IR block has more than one entry region");
         entry = region;
         break;
       case "edge":
@@ -26,9 +27,9 @@ export function validateActionBlock(block: ActionBlock): void {
     }
   }
 
-  assert(entry !== undefined && entry.id === block.entry, "action block entry region is missing");
-  assert(edgeIds.size + 1 === block.regions.length, "action block region ids are not unique");
-  assert(!edgeIds.has(entry.id), "action block region ids are not unique");
+  assert(entry !== undefined && entry.id === block.entry, "IR block entry region is missing");
+  assert(edgeIds.size + 1 === block.regions.length, "IR block region ids are not unique");
+  assert(!edgeIds.has(entry.id), "IR block region ids are not unique");
 
   validateEntryActions(entry, edgeIds);
 }
@@ -95,7 +96,7 @@ function isRegionTerminator(action: Action): boolean {
   }
 }
 
-function continuationOf(region: ActionRegion): ValueId | undefined {
+function continuationOf(region: IrRegion): ValueId | undefined {
   switch (region.kind) {
     case "entry": {
       const terminator = region.actions[region.actions.length - 1];

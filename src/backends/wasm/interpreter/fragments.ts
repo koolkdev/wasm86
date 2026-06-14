@@ -1,14 +1,15 @@
 import { assert } from "#common/assert.js";
-import type { ExternalValueId } from "#ir/action/operands.js";
-import { eipChannel } from "#ir/action/slots.js";
-import type { Action, ActionBlock, EdgeRegion, RegionId } from "#ir/action/types.js";
+import type { ExternalValueId } from "#ir/operands.js";
+import { eipChannel } from "#ir/slots.js";
+import type { Action } from "#ir/actions.js";
+import type { EdgeRegion, IrBlock, RegionId } from "#ir/block.js";
 import {
   createValueTable,
   fitsUnsigned,
   signExtended,
   type ValueId,
   type WidthBounds
-} from "#ir/action/values.js";
+} from "#ir/values.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -119,7 +120,7 @@ class DecodeFragment {
   }
 
   emit(context: FragmentEmitContext): void {
-    const block: ActionBlock = {
+    const block: IrBlock = {
       entry: entryRegionId,
       regions: [
         {

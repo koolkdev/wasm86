@@ -1,15 +1,13 @@
 import { assert } from "#common/assert.js";
-import { slotsMayAlias } from "#ir/action/aliasing.js";
+import { slotsMayAlias } from "#ir/aliasing.js";
+import type { Action, ReadStateAction, StateSlot } from "#ir/actions.js";
 import type {
-  Action,
-  ActionBlock,
+  IrBlock,
   EdgeRegion,
   EntryRegion,
-  ReadStateAction,
-  RegionId,
-  StateSlot
-} from "#ir/action/types.js";
-import type { ValueId, ValueNode, ValueTable } from "#ir/action/values.js";
+  RegionId
+} from "#ir/block.js";
+import type { ValueId, ValueNode, ValueTable } from "#ir/values.js";
 
 // Pure value analysis for the action emitter: everything is decided up front
 // from the action lists and the value graph. No encoder imports — the value
@@ -29,7 +27,7 @@ export type BlockValueAnalysis = Readonly<{
 }>;
 
 export function analyzeBlockValues(
-  block: ActionBlock,
+  block: IrBlock,
   exportedOutputs: Iterable<ValueId> = []
 ): BlockValueAnalysis {
   return new BlockValueUsage(block, exportedOutputs);
@@ -46,12 +44,12 @@ class BlockValueUsage implements BlockValueAnalysis {
   readonly #producers = new Map<ValueId, Readonly<{ action: Action; actionIndex: number }>>();
   readonly #pinned = new Set<ValueId>();
 
-  constructor(block: ActionBlock, exportedOutputs: Iterable<ValueId>) {
+  constructor(block: IrBlock, exportedOutputs: Iterable<ValueId>) {
     this.#values = block.values;
 
     const entry = block.regions.find((region) => region.id === block.entry);
 
-    assert(entry !== undefined && entry.kind === "entry", "action block entry region is missing");
+    assert(entry !== undefined && entry.kind === "entry", "IR block entry region is missing");
 
     for (const region of block.regions) {
       if (region.kind === "edge") {

@@ -1,10 +1,10 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createActionBuilder } from "#ir/action/builder.js";
-import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/action/operands.js";
-import { eipChannel, gprChannel } from "#ir/action/slots.js";
-import type { ActionBlock } from "#ir/action/types.js";
+import { createIrBlockBuilder } from "#ir/builder.js";
+import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
+import { eipChannel, gprChannel } from "#ir/slots.js";
+import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags } from "#x86/flags.js";
@@ -12,7 +12,7 @@ import type { CpuState } from "#x86/state/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
-import { actionBlockCompleted, instantiateActionBlock } from "./harness.js";
+import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags } from "./reference.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
@@ -26,11 +26,11 @@ test("cmp + jcc taken continues at the target with flushed flags", async () => {
     [0x74, 0x20]
   ]);
   const initial: Partial<CpuState> = { eax: 5, eip: instructions[0]!.address };
-  const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
+  const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
 
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
     { regs: { eax: 5 }, eip: 0x1025, flags: aluReference("cmp", 32, 5, 5).flags },
@@ -49,11 +49,11 @@ test("cmp + jcc not taken continues at the fall-through with flushed flags", asy
     eip: instructions[0]!.address,
     ...allFlagsSet
   };
-  const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
+  const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
 
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
     { regs: { eax: 6 }, eip: instructions[1]!.nextEip, flags: aluReference("cmp", 32, 6, 5).flags },
@@ -68,11 +68,11 @@ test("jmp rel32 continues at the target with earlier pendings flushed", async ()
     [0xe9, 0x10, 0x00, 0x00, 0x00]
   ]);
   const initial: Partial<CpuState> = { eip: instructions[0]!.address, ...allFlagsSet };
-  const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
+  const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
 
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   assertState(stateView, { regs: { ecx: 0x77 }, eip: 0x101a, flags: allFlagsSet }, "jmp rel32");
 });
 
@@ -83,7 +83,7 @@ test("int exits host trap with the vector payload and pending state visible", as
     [0xcd, 0x21]
   ]);
   const initial: Partial<CpuState> = { eip: instructions[0]!.address, ...allFlagsSet };
-  const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
+  const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
 
@@ -102,12 +102,12 @@ test("a branch composes with a fault edge in one block", async () => {
     [0x74, 0x20]
   ]);
   const initial: Partial<CpuState> = { ebx: 0x20, eip: instructions[0]!.address, ZF: 1 };
-  const { stateView, guestView, run } = await instantiateActionBlock(blockOf(instructions));
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
   guestView.setUint32(0x20, 0x55, true);
 
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
     { regs: { ebx: 0x20, ecx: 0x55 }, eip: 0x1024, flags: { CF: 0, PF: 0, AF: 0, ZF: 1, SF: 0, OF: 0 } },
@@ -127,7 +127,7 @@ test("a faulting load before a branch exits through its fault edge", async () =>
     eip: instructions[0]!.address,
     ...allFlagsSet
   };
-  const { stateView, run } = await instantiateActionBlock(blockOf(instructions));
+  const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
 
   writeWasmCpuState(stateView, initial);
 
@@ -143,8 +143,8 @@ test("a faulting load before a branch exits through its fault edge", async () =>
   );
 });
 
-function blockOf(instructions: readonly IsaDecodedInstruction[]): ActionBlock {
-  const builder = createActionBuilder();
+function blockOf(instructions: readonly IsaDecodedInstruction[]): IrBlock {
+  const builder = createIrBlockBuilder();
 
   for (const instruction of instructions) {
     builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), {

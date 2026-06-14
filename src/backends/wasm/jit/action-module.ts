@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { ActionBlock } from "#ir/action/types.js";
+import type { IrBlock } from "#ir/block.js";
 import { u32 } from "#x86/numeric.js";
 import { wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -19,7 +19,7 @@ import {
 
 export type ActionJitBlock = Readonly<{
   entryEip: number;
-  actions: ActionBlock;
+  actions: IrBlock;
 }>;
 
 export type EncodeActionJitModuleOptions = Readonly<{
@@ -49,7 +49,7 @@ export function actionJitModuleLinkTargets(blocks: readonly ActionJitBlock[]): r
   return targetEips;
 }
 
-function constantContinuations(actions: ActionBlock): readonly number[] {
+function constantContinuations(actions: IrBlock): readonly number[] {
   const targets: number[] = [];
 
   for (const region of actions.regions) {

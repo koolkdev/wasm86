@@ -1,10 +1,10 @@
-import { createActionBuilder } from "#ir/action/builder.js";
-import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/action/operands.js";
-import type { ActionBlock } from "#ir/action/types.js";
+import { createIrBlockBuilder } from "#ir/builder.js";
+import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
+import type { IrBlock } from "#ir/block.js";
 import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/decoder/types.js";
 
-export function buildActionBlock(instructions: readonly IsaDecodedInstruction[]): ActionBlock {
-  const builder = createActionBuilder();
+export function buildIrBlock(instructions: readonly IsaDecodedInstruction[]): IrBlock {
+  const builder = createIrBlockBuilder();
 
   for (const instruction of instructions) {
     builder.addInstruction(instruction.spec.semantics, instruction.operands.map(staticBinding), {

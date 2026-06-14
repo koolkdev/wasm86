@@ -1,10 +1,10 @@
 import { ok as assertOk, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createActionBuilder } from "#ir/action/builder.js";
-import { regBinding, type OperandBinding } from "#ir/action/operands.js";
-import { eipChannel, gprChannel } from "#ir/action/slots.js";
-import type { WriteStateAction } from "#ir/action/types.js";
+import { createIrBlockBuilder } from "#ir/builder.js";
+import { regBinding, type OperandBinding } from "#ir/operands.js";
+import { eipChannel, gprChannel } from "#ir/slots.js";
+import type { WriteStateAction } from "#ir/actions.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags } from "#x86/flags.js";
@@ -13,7 +13,7 @@ import { reg32, type Reg32 } from "#x86/types.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
 import { readWasmFlagByte, readWasmStateChannel, writeWasmCpuState } from "#wasm/state-layout.js";
 import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
-import { actionBlockBody, actionBlockCompleted, instantiateActionBlock } from "./harness.js";
+import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
@@ -61,17 +61,17 @@ for (const aluCase of aluCases) {
       };
       const reference = aluReference(aluCase.op, 32, pair.left, pair.right);
 
-      const builder = createActionBuilder();
+      const builder = createIrBlockBuilder();
 
       builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), {
         eip: instruction.address,
         nextEip: instruction.nextEip
       });
 
-      const { stateView, run } = await instantiateActionBlock(builder.finish());
+      const { stateView, run } = await instantiateIrBlock(builder.finish());
 
       writeWasmCpuState(stateView, initial);
-      strictEqual(run(), actionBlockCompleted, label);
+      strictEqual(run(), irBlockCompleted, label);
       assertState(
         stateView,
         { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: reference.flags },
@@ -86,7 +86,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
   // stores observably carry the second instruction's values.
   const first = ok(decodeBytes([0x01, 0xcb]));
   const second = ok(decodeBytes([0x01, 0xcb], first.nextEip));
-  const builder = createActionBuilder();
+  const builder = createIrBlockBuilder();
 
   builder.addInstruction(first.spec.semantics, bindingsFor(first), {
     eip: first.address,
@@ -112,7 +112,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
   strictEqual(new Set(flagWrites.map((write) => write.slot)).size, x86Flags.length);
 
   // ...and in the encoding: exactly six byte stores.
-  const body = actionBlockBody(block).encode();
+  const body = irBlockBody(block).encode();
 
   strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Store8).length, 6);
 
@@ -126,10 +126,10 @@ test("two adds in one block store each flag byte once, with the second add's fla
   const afterFirst = aluReference("add", 32, 0x7fff_fffe, 0x0000_0001);
   const reference = aluReference("add", 32, afterFirst.result, 0x0000_0001);
 
-  const { stateView, run } = await instantiateActionBlock(block);
+  const { stateView, run } = await instantiateIrBlock(block);
 
   writeWasmCpuState(stateView, initial);
-  strictEqual(run(), actionBlockCompleted);
+  strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
     { regs: { ebx: reference.result, ecx: 0x0000_0001 }, eip: second.nextEip, flags: reference.flags },

@@ -1,9 +1,10 @@
 import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
-import type { Action, EdgeRegion } from "#ir/action/types.js";
-import { createValueTable, type ValueTable } from "#ir/action/values.js";
+import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
+import type { Action } from "#ir/actions.js";
+import type { EdgeRegion } from "#ir/block.js";
+import { createValueTable, type ValueTable } from "#ir/values.js";
 import { analyzeBlockValues } from "#wasm/emit/action/values.js";
 
 function analyze(

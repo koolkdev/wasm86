@@ -1,9 +1,9 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { effectsOf, mayAlias, type StorageEffect } from "#ir/action/aliasing.js";
-import { eipChannel, flagChannel, gprChannel } from "#ir/action/slots.js";
-import type { StateSlot } from "#ir/action/types.js";
+import { effectsOf, mayAlias, type StorageEffect } from "#ir/aliasing.js";
+import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
+import type { StateSlot } from "#ir/actions.js";
 
 const memory: StorageEffect = { space: "memory" };
 
