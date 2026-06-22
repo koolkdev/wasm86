@@ -79,8 +79,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
 
   const frame = createControlFrame({
     body,
-    edges,
-    terminator,
     completion: embedding.completion,
     emitPayload: valueStack.emitUse,
     constValue: block.values.constValue
@@ -122,12 +120,14 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
 
     edgeExitDetails.set(edge.id, action.byteLength);
     valueStack.captureForEdge(edge);
-    emitGuardChecks(
-      body,
-      action.byteLength,
-      () => valueStack.emitUse(action.address),
-      frame.depthOf(edge.id)
-    );
+    frame.withNestedControl(() => {
+      emitGuardChecks(
+        body,
+        action.byteLength,
+        () => valueStack.emitUse(action.address),
+        () => emitEdgeBody(edge)
+      );
+    });
   }
 
   // Both edges' values are captured before any path leaves the entry.
@@ -140,7 +140,17 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     valueStack.captureForEdge(taken);
     valueStack.captureForEdge(notTaken);
     valueStack.emitUse(action.condition);
-    body.brIf(frame.depthOf(taken.id));
+    body.ifBlock();
+    frame.withNestedControl(() => {
+      emitEdgeBody(taken);
+      body.elseBlock();
+      emitEdgeBody(notTaken);
+    });
+    body.endBlock();
+
+    if (embedding.completion.kind === "link") {
+      body.unreachable();
+    }
   }
 
   // Every store ordered before the terminator has executed by now, and
@@ -178,14 +188,12 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     return edge;
   }
 
-  frame.run(() => {
-    for (const action of entry.actions.slice(0, -1)) {
-      emitEntryAction(action);
-    }
+  for (const action of entry.actions.slice(0, -1)) {
+    emitEntryAction(action);
+  }
 
-    emitExportedOutputs();
-    emitEntryAction(terminator);
-  }, emitEdgeBody);
+  emitExportedOutputs();
+  emitEntryAction(terminator);
 
   valueStack.assertClear();
 }

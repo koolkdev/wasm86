@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { Action } from "./actions.js";
-import type { EntryRegion, IrBlock, IrRegion, RegionId } from "./block.js";
+import type { EdgeRegion, EntryRegion, IrBlock, IrRegion, RegionId } from "./block.js";
 import type { ValueId } from "./values.js";
 
 // Structural checks: regions terminate exactly once, every region reference
@@ -8,6 +8,7 @@ import type { ValueId } from "./values.js";
 
 export function validateIrBlock(block: IrBlock): void {
   const edgeIds = new Set<RegionId>();
+  const edgeById = new Map<RegionId, EdgeRegion>();
   let entry: EntryRegion | undefined;
 
   for (const region of block.regions) {
@@ -23,6 +24,7 @@ export function validateIrBlock(block: IrBlock): void {
         break;
       case "edge":
         edgeIds.add(region.id);
+        edgeById.set(region.id, region);
         break;
     }
   }
@@ -31,13 +33,17 @@ export function validateIrBlock(block: IrBlock): void {
   assert(edgeIds.size + 1 === block.regions.length, "IR block region ids are not unique");
   assert(!edgeIds.has(entry.id), "IR block region ids are not unique");
 
-  validateEntryActions(entry, edgeIds);
+  validateEntryActions(entry, edgeIds, edgeById);
 }
 
 // Branch, exit, and continue are region terminators; edge bodies always
 // branch off the entry, so every edge is targeted by exactly one guard or
 // branch.
-function validateEntryActions(entry: EntryRegion, edgeIds: ReadonlySet<RegionId>): void {
+function validateEntryActions(
+  entry: EntryRegion,
+  edgeIds: ReadonlySet<RegionId>,
+  edgeById: ReadonlyMap<RegionId, EdgeRegion>
+): void {
   const targeted = new Set<RegionId>();
 
   function target(edge: RegionId, by: Action["kind"]): void {
@@ -57,6 +63,10 @@ function validateEntryActions(entry: EntryRegion, edgeIds: ReadonlySet<RegionId>
     switch (action.kind) {
       case "guardMemory":
         target(action.faultEdge, action.kind);
+        assert(
+          edgeById.get(action.faultEdge)?.terminator.kind === "exit",
+          `guardMemory fault edge ${action.faultEdge} must terminate with exit`
+        );
         break;
       case "branch":
         target(action.taken, action.kind);

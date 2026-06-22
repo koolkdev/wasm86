@@ -95,8 +95,8 @@ test("int exits host trap with the vector payload and pending state visible", as
 });
 
 test("a branch composes with a fault edge in one block", async () => {
-  // mov ecx, [ebx]; je +0x20 with ZF preset: the load's fault edge nests
-  // around the branch's edges, and the taken branch crosses all of them.
+  // mov ecx, [ebx]; je +0x20 with ZF preset: the load's inline fault
+  // edge coexists with the branch's inline if/else arms.
   const instructions = decodeSequence([
     [0x8b, 0x0b],
     [0x74, 0x20]
@@ -116,8 +116,8 @@ test("a branch composes with a fault edge in one block", async () => {
 });
 
 test("a faulting load before a branch exits through its fault edge", async () => {
-  // The same block with ebx one past the guest: the read guard's br_if must
-  // still find its edge with the branch's notTaken edge nested innermost.
+  // The same block with ebx one past the guest: the read guard's inline
+  // fault body exits before the branch runs.
   const instructions = decodeSequence([
     [0x8b, 0x0b],
     [0x74, 0x20]

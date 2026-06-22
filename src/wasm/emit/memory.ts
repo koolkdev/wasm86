@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import { wasmGuestMemoryMinByteLength, wasmMemoryIndex } from "#wasm/abi.js";
 import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
@@ -12,23 +13,20 @@ const wasmPageShift = 16;
 // Guest addresses are unsigned, so an access faults iff its start address
 // exceeds the last in-bounds one, guestByteLength - byteLength. Instantiation
 // enforces the guest import's declared minimum, so that subtraction cannot
-// underflow for accesses within wasmGuestMemoryMinByteLength; larger accesses
-// get a leading size check that faults guests too small to hold them and
-// restores the bound.
+// underflow for the 1/2/4-byte accesses emitted by the current IR.
 export function emitGuardChecks(
   body: WasmFunctionBodyEncoder,
   byteLength: number,
   emitAddress: () => void,
-  faultDepth: number
+  emitFaultBody: () => void
 ): void {
-  if (byteLength > wasmGuestMemoryMinByteLength) {
-    emitGuestByteLength(body);
-    body.i32Const(byteLength).i32LtU().brIf(faultDepth, wasmBranchHint.unlikely);
-  }
+  assert(byteLength <= wasmGuestMemoryMinByteLength, "guest access exceeds the minimum imported memory");
 
   emitAddress();
   emitGuestByteLength(body);
-  body.i32Const(byteLength).i32Sub().i32GtU().brIf(faultDepth, wasmBranchHint.unlikely);
+  body.i32Const(byteLength).i32Sub().i32GtU().ifBlock(wasmBranchHint.unlikely);
+  emitFaultBody();
+  body.endBlock();
 }
 
 export function emitGuestLoad(body: WasmFunctionBodyEncoder, width: OperandWidth, signed: boolean): void {

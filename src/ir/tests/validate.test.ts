@@ -76,6 +76,26 @@ test("a branch terminator with both edges targeted once validates", () => {
   );
 });
 
+test("a guard fault edge must exit", () => {
+  throws(
+    () =>
+      validateIrBlock(
+        blockWith([
+          {
+            id: 0,
+            kind: "entry",
+            actions: [
+              { kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 },
+              continueAction
+            ]
+          },
+          { id: 1, kind: "edge", flushes: [], terminator: continueAction }
+        ])
+      ),
+    /guardMemory fault edge 1 must terminate with exit/
+  );
+});
+
 test("an action after the exit terminator is rejected", () => {
   throws(
     () =>
