@@ -1,19 +1,17 @@
-import { strictEqual } from "node:assert";
-
-import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
+import { x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
 import { mem, operand, reg } from "#x86/semantics/refs.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type {
   SemanticsBuilder,
-  FlagWriteCell,
-  FlagWriteInput,
   GetOptions,
   SemanticBuildContext,
   SemanticOperandInfo,
   SemanticOperandInput,
   SemanticOperandStorageKind,
-  SemanticTemplate
+  SemanticTemplate,
+  SimpleFlagSource,
+  StatusFlagValues
 } from "#x86/semantics/builder.js";
 import type {
   MemRef,
@@ -31,7 +29,7 @@ import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semant
 export type SemanticTrace = Readonly<{
   events: readonly string[];
   defs: readonly string[];
-  flagWrites: readonly FlagWriteInput[];
+  flagWrites: readonly StatusFlagValues[];
   value(input: ValueInput): string;
   def(input: ValueInput): string;
 }>;
@@ -54,30 +52,34 @@ export function regOperands(count: number): readonly SemanticOperandInfo[] {
   return Array.from({ length: count }, () => ({ storage: "reg" as const }));
 }
 
-export function flagCell(write: FlagWriteInput, flag: X86StatusFlag): Value {
-  const cell = write.cells[flag];
-
-  strictEqual(cell?.kind, "expr", `expected ${flag} expr cell`);
-  return cell.value;
-}
-
-export function conditionValue(
-  write: FlagWriteInput,
-  cc: keyof NonNullable<FlagWriteInput["conditions"]>
+export function flagCell(
+  write: Partial<Record<X86StatusFlag, ValueInput>>,
+  flag: X86StatusFlag
 ): ValueInput {
-  const value = write.conditions?.[cc];
+  const value = write[flag];
 
   if (value === undefined) {
-    throw new Error(`expected ${cc} condition`);
+    throw new Error(`expected ${flag} flag value`);
   }
 
   return value;
 }
 
+function statusFlagValues(flags: StatusFlagValues): StatusFlagValues {
+  return {
+    CF: flags.CF,
+    PF: flags.PF,
+    AF: flags.AF,
+    ZF: flags.ZF,
+    SF: flags.SF,
+    OF: flags.OF
+  };
+}
+
 class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
   readonly #events: string[] = [];
   readonly #defs: string[] = [];
-  readonly #flagWrites: FlagWriteInput[] = [];
+  readonly #flagWrites: StatusFlagValues[] = [];
   readonly #operandInfo: readonly SemanticOperandInfo[];
   readonly #constValues = new Map<number, Value>();
   readonly #inlineValues = new Map<Value, string>();
@@ -218,14 +220,6 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return this.#alloc(`cmp${width}.${operator}(${this.#value(a)}, ${this.#value(b)})`);
   }
 
-  flagExpr(value: ValueInput): FlagWriteCell {
-    return { kind: "expr", value };
-  }
-
-  flagUndef(): FlagWriteCell {
-    return { kind: "undef" };
-  }
-
   readFlag(flag: X86Flag): Value {
     const out = this.#alloc(`flag ${flag}`);
 
@@ -237,24 +231,17 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     this.#emit(`flag ${flag} <- ${this.#value(value)}`);
   }
 
-  writeFlags(write: FlagWriteInput): void {
-    const cells: FlagWriteInput["cells"] = {};
+  writeFlagSource(source: SimpleFlagSource): void {
+    this.#emit(
+      source.kind === "logic"
+        ? `flagSource ${source.kind}:${source.width} result=${this.#value(source.result)}`
+        : `flagSource ${source.kind}:${source.width} left=${this.#value(source.left)} right=${this.#value(source.right)} result=${this.#value(source.result)}`
+    );
+  }
 
-    for (const [flag, cell] of Object.entries(write.cells) as [X86StatusFlag, FlagWriteCell][]) {
-      cells[flag] = cell.kind === "expr"
-        ? { kind: "expr", value: cell.value }
-        : { kind: "undef" };
-    }
-
-    const copied: FlagWriteInput = write.conditions === undefined
-      ? { cells }
-      : {
-          cells,
-          conditions: { ...write.conditions }
-        };
-
-    this.#flagWrites.push(copied);
-    this.#emit(`flags ${Object.keys(cells).sort().join(",")}`);
+  writeFlags(flags: StatusFlagValues): void {
+    this.#flagWrites.push(statusFlagValues(flags));
+    this.#emit(`flags ${[...x86StatusFlags].sort().join(",")}`);
   }
 
   condition(cc: ConditionCode): Value {

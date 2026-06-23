@@ -11,6 +11,7 @@ import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
 import { leaveSemantic, popSemantic } from "#x86/semantics/stack.js";
 import { testSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
+import type { ValueInput } from "#x86/semantics/refs.js";
 
 import { buildSemanticTrace, flagCell, operands, regOperands, type SemanticTrace } from "./test-semantics-trace.js";
 
@@ -112,7 +113,7 @@ test("adc and sbb read old CF after operands and before replacing arithmetic fla
       ? x86StatusFlags
       : x86StatusFlags.filter((flag) => flag !== "CF");
 
-    deepStrictEqual(Object.keys(write.cells).sort(), [...x86StatusFlags].sort(), op);
+    deepStrictEqual(statusFlagKeys(write).sort(), [...x86StatusFlags].sort(), op);
     for (const flag of resultDerivedFlags) {
       strictEqual(referencesValue(trace, trace.def(flagCell(write, flag)), resultValue), true, `${op} ${flag}`);
     }
@@ -216,7 +217,7 @@ test("ret semantic jumps to the popped value after incrementing esp", () => {
   strictEqual(trace.defs[2], "add(%0, 4)");
 });
 
-test("flag-writing templates write the six architectural flag cells", () => {
+test("flag-writing templates write the six architectural flag values", () => {
   for (const [name, template, operands] of [
     ["add", aluSemantic("add", 32), regOperands(2)],
     ["cmp", cmpSemantic(), regOperands(2)],
@@ -226,15 +227,15 @@ test("flag-writing templates write the six architectural flag cells", () => {
     const trace = buildSemanticTrace(template, operands);
 
     strictEqual(trace.flagWrites.length, 1, name);
-    deepStrictEqual(Object.keys(trace.flagWrites[0]!.cells).sort(), [...x86StatusFlags].sort(), name);
+    deepStrictEqual(statusFlagKeys(trace.flagWrites[0]!).sort(), [...x86StatusFlags].sort(), name);
   }
 });
 
 test("inc writes partial flags and preserves CF by omitting it", () => {
   const trace = buildSemanticTrace(unaryAluSemantic("inc", 32), regOperands(1));
 
-  strictEqual(trace.flagWrites.length, 1);
-  deepStrictEqual(Object.keys(trace.flagWrites[0]!.cells).sort(), ["AF", "OF", "PF", "SF", "ZF"].sort());
+  strictEqual(trace.flagWrites.length, 0);
+  deepStrictEqual(directFlagWrites(trace).sort(), ["AF", "OF", "PF", "SF", "ZF"].sort());
 });
 
 function referencesValue(trace: SemanticTrace, definition: string, value: string, seen = new Set<string>()): boolean {
@@ -261,4 +262,16 @@ function referencesValue(trace: SemanticTrace, definition: string, value: string
 
 function referencedValues(definition: string): string[] {
   return Array.from(definition.matchAll(/%\d+/g), (match) => match[0]);
+}
+
+function statusFlagKeys(write: Partial<Record<(typeof x86StatusFlags)[number], ValueInput>>): string[] {
+  return x86StatusFlags.filter((flag) => flag in write);
+}
+
+function directFlagWrites(trace: SemanticTrace): string[] {
+  return trace.events.flatMap((event) => {
+    const match = /^flag ([A-Z]+) <- /.exec(event);
+
+    return match === null ? [] : [match[1]!];
+  });
 }

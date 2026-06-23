@@ -1,12 +1,16 @@
 import { widthMask, type OperandWidth } from "#x86/types.js";
-import type { FlagWriteInput, SemanticsBuilder } from "#x86/semantics/builder.js";
+import type {
+  SemanticsBuilder,
+  SimpleFlagSource,
+  StatusFlagValues
+} from "#x86/semantics/builder.js";
 import type { Value, ValueInput } from "#x86/semantics/refs.js";
 
 export type LogicFlagOp = "and" | "or" | "xor";
 
 export type ResultAndFlags = Readonly<{
   result: Value;
-  flags: FlagWriteInput;
+  flags: StatusFlagValues;
 }>;
 
 export type AddResultAndFlagsInput = Readonly<{
@@ -68,10 +72,8 @@ export function buildAddResultAndFlags(s: SemanticsBuilder, input: AddResultAndF
   return {
     result: dag.result,
     flags: {
-      cells: {
-        ...zspCells(s, dag),
-        ...addCarryCells(s, dag, input.carryIn)
-      }
+      ...zspValues(s, dag),
+      ...addCarryValues(s, dag, input.carryIn)
     }
   };
 }
@@ -88,10 +90,8 @@ export function buildSubResultAndFlags(s: SemanticsBuilder, input: SubResultAndF
   return {
     result: dag.result,
     flags: {
-      cells: {
-        ...zspCells(s, dag),
-        ...subCarryCells(s, dag, input.borrowIn)
-      }
+      ...zspValues(s, dag),
+      ...subCarryValues(s, dag, input.borrowIn)
     }
   };
 }
@@ -109,138 +109,155 @@ export function buildLogicResultAndFlags(s: SemanticsBuilder, input: LogicResult
   };
 }
 
-export function buildCmpFlags(s: SemanticsBuilder, input: BinaryFlagInput): FlagWriteInput {
+export function buildFlagSourceValues(
+  s: SemanticsBuilder,
+  source: SimpleFlagSource
+): StatusFlagValues {
+  switch (source.kind) {
+    case "add": {
+      const a = projectInput(s, source.width, source.left);
+      const b = projectInput(s, source.width, source.right);
+      const dag = buildBinaryFlagDag(s, source.width, a, b, source.result);
+
+      return {
+        ...zspValues(s, dag),
+        ...addCarryValues(s, dag)
+      };
+    }
+    case "sub": {
+      const a = projectInput(s, source.width, source.left);
+      const b = projectInput(s, source.width, source.right);
+      const dag = buildBinaryFlagDag(s, source.width, a, b, source.result);
+
+      return {
+        ...zspValues(s, dag),
+        ...subCarryValues(s, dag)
+      };
+    }
+    case "logic": {
+      const result = projectResult(s, source.width, source.result);
+
+      return logicFlags(s, source.width, result);
+    }
+  }
+}
+
+export function buildCmpFlags(s: SemanticsBuilder, input: BinaryFlagInput): StatusFlagValues {
   const width = input.width;
   const a = projectInput(s, width, input.left);
   const b = projectInput(s, width, input.right);
   const dag = buildBinaryFlagDag(s, width, a, b, s.i32Sub(a, b));
 
   return {
-    cells: {
-      ...zspCells(s, dag),
-      ...subCarryCells(s, dag)
-    },
-    conditions: {
-      E: s.compare(width, "eq", dag.a, dag.b),
-      NE: s.compare(width, "ne", dag.a, dag.b),
-      B: s.compare(width, "lt_u", dag.a, dag.b),
-      AE: s.compare(width, "ge_u", dag.a, dag.b),
-      BE: s.compare(width, "le_u", dag.a, dag.b),
-      A: s.compare(width, "gt_u", dag.a, dag.b),
-      L: s.compare(width, "lt_s", dag.a, dag.b),
-      GE: s.compare(width, "ge_s", dag.a, dag.b),
-      LE: s.compare(width, "le_s", dag.a, dag.b),
-      G: s.compare(width, "gt_s", dag.a, dag.b)
-    }
+    ...zspValues(s, dag),
+    ...subCarryValues(s, dag)
   };
 }
 
-export function buildTestFlags(s: SemanticsBuilder, input: BinaryFlagInput): FlagWriteInput {
+export function buildTestFlags(s: SemanticsBuilder, input: BinaryFlagInput): StatusFlagValues {
   const width = input.width;
   const left = projectInput(s, width, input.left);
   const right = projectInput(s, width, input.right);
   const result = projectResult(s, width, s.i32And(left, right));
-  const zero = s.const32(0);
 
-  return {
-    ...logicFlags(s, width, result),
-    conditions: {
-      E: s.compare(width, "eq", result, zero),
-      NE: s.compare(width, "ne", result, zero)
-    }
-  };
+  return logicFlags(s, width, result);
 }
 
-export function buildIncFlags(s: SemanticsBuilder, input: UnaryResultFlagInput): FlagWriteInput {
+export function writeIncFlags(
+  s: SemanticsBuilder,
+  input: UnaryResultFlagInput
+): void {
   const width = input.width;
   const left = projectInput(s, width, input.input);
   const result = projectResult(s, width, input.result);
 
-  return {
-    cells: {
-      ...zspCells(s, { width, result }),
-      AF: s.flagExpr(s.compare(32, "eq", lowNibble(s, left), s.const32(0xf))),
-      OF: s.flagExpr(s.compare(width, "eq", left, s.const32(maxSignedValue(width))))
-    }
-  };
+  writeZspFlags(s, { width, result });
+  s.writeFlag("AF", s.compare(32, "eq", lowNibble(s, left), s.const32(0xf)));
+  s.writeFlag("OF", s.compare(width, "eq", left, s.const32(maxSignedValue(width))));
 }
 
-export function buildDecFlags(s: SemanticsBuilder, input: UnaryResultFlagInput): FlagWriteInput {
+export function writeDecFlags(
+  s: SemanticsBuilder,
+  input: UnaryResultFlagInput
+): void {
   const width = input.width;
   const left = projectInput(s, width, input.input);
   const result = projectResult(s, width, input.result);
   const zero = s.const32(0);
 
-  return {
-    cells: {
-      ...zspCells(s, { width, result }),
-      AF: s.flagExpr(s.compare(32, "eq", lowNibble(s, left), zero)),
-      OF: s.flagExpr(s.compare(width, "eq", left, s.const32(minSignedValue(width))))
-    }
-  };
+  writeZspFlags(s, { width, result });
+  s.writeFlag("AF", s.compare(32, "eq", lowNibble(s, left), zero));
+  s.writeFlag("OF", s.compare(width, "eq", left, s.const32(minSignedValue(width))));
 }
 
-export function buildNegFlags(s: SemanticsBuilder, input: UnaryResultFlagInput): FlagWriteInput {
+export function buildNegFlags(s: SemanticsBuilder, input: UnaryResultFlagInput): StatusFlagValues {
   const width = input.width;
   const value = projectInput(s, width, input.input);
   const result = projectResult(s, width, input.result);
   const zero = s.const32(0);
 
   return {
-    cells: {
-      ...zspCells(s, { width, result }),
-      CF: s.flagExpr(s.compare(width, "ne", value, zero)),
-      AF: s.flagExpr(s.compare(32, "ne", lowNibble(s, value), zero)),
-      OF: s.flagExpr(s.compare(width, "eq", value, s.const32(minSignedValue(width))))
-    }
+    ...zspValues(s, { width, result }),
+    CF: s.compare(width, "ne", value, zero),
+    AF: s.compare(32, "ne", lowNibble(s, value), zero),
+    OF: s.compare(width, "eq", value, s.const32(minSignedValue(width)))
   };
 }
 
-function logicFlags(s: SemanticsBuilder, width: OperandWidth, result: Value): FlagWriteInput {
+function logicFlags(s: SemanticsBuilder, width: OperandWidth, result: Value): StatusFlagValues {
   const zero = s.const32(0);
 
   return {
-    cells: {
-      ...zspCells(s, { width, result }),
-      CF: s.flagExpr(zero),
-      AF: s.flagExpr(zero), // Architecturally undefined
-      OF: s.flagExpr(zero)
-    }
+    ...zspValues(s, { width, result }),
+    CF: zero,
+    AF: zero, // Architecturally undefined
+    OF: zero
   };
 }
 
-function zspCells(s: SemanticsBuilder, dag: ResultFlagDag): FlagWriteInput["cells"] {
+function zspValues(
+  s: SemanticsBuilder,
+  dag: ResultFlagDag
+): Pick<StatusFlagValues, "ZF" | "SF" | "PF"> {
   const zero = s.const32(0);
 
   return {
-    ZF: s.flagExpr(s.compare(dag.width, "eq", dag.result, zero)),
-    SF: s.flagExpr(signBit(s, dag.width, dag.result)),
-    PF: s.flagExpr(parityFlag(s, dag.result))
+    ZF: s.compare(dag.width, "eq", dag.result, zero),
+    SF: signBit(s, dag.width, dag.result),
+    PF: parityFlag(s, dag.result)
   };
 }
 
-function addCarryCells(
+function addCarryValues(
   s: SemanticsBuilder,
   dag: BinaryFlagDag,
   carryIn?: ValueInput
-): Required<Pick<FlagWriteInput["cells"], "CF" | "AF" | "OF">> {
+): Pick<StatusFlagValues, "CF" | "AF" | "OF"> {
   return {
-    CF: s.flagExpr(addCarry(s, dag, carryIn)),
-    AF: s.flagExpr(auxCarry(s, dag)),
-    OF: s.flagExpr(signBit(s, dag.width, s.i32And(dag.aXorResult, dag.bXorResult)))
+    CF: addCarry(s, dag, carryIn),
+    AF: auxCarry(s, dag),
+    OF: signBit(s, dag.width, s.i32And(dag.aXorResult, dag.bXorResult))
   };
 }
 
-function subCarryCells(
+function subCarryValues(
   s: SemanticsBuilder,
   dag: BinaryFlagDag,
   borrowIn?: ValueInput
-): Required<Pick<FlagWriteInput["cells"], "CF" | "AF" | "OF">> {
+): Pick<StatusFlagValues, "CF" | "AF" | "OF"> {
   return {
-    CF: s.flagExpr(subBorrow(s, dag, borrowIn)),
-    AF: s.flagExpr(auxCarry(s, dag)),
-    OF: s.flagExpr(signBit(s, dag.width, s.i32And(dag.aXorB, dag.aXorResult)))
+    CF: subBorrow(s, dag, borrowIn),
+    AF: auxCarry(s, dag),
+    OF: signBit(s, dag.width, s.i32And(dag.aXorB, dag.aXorResult))
   };
+}
+
+function writeZspFlags(s: SemanticsBuilder, dag: ResultFlagDag): void {
+  const zero = s.const32(0);
+
+  s.writeFlag("ZF", s.compare(dag.width, "eq", dag.result, zero));
+  s.writeFlag("SF", signBit(s, dag.width, dag.result));
+  s.writeFlag("PF", parityFlag(s, dag.result));
 }
 
 function addCarry(

@@ -1,29 +1,28 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { FlagWriteInput, SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticTemplate, StatusFlagValues } from "#x86/semantics/builder.js";
 import type { ValueInput } from "#x86/semantics/refs.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import {
   buildAddResultAndFlags,
   buildCmpFlags,
-  buildDecFlags,
-  buildIncFlags,
   buildLogicResultAndFlags,
   buildNegFlags,
   buildSubResultAndFlags,
-  buildTestFlags
+  buildTestFlags,
+  writeDecFlags,
+  writeIncFlags
 } from "#x86/semantics/flag-helpers.js";
 
 import {
   buildSemanticTrace,
-  conditionValue,
   flagCell,
   regOperands,
   type SemanticTrace
 } from "./test-semantics-trace.js";
 
-test("ADD and SUB helpers write every arithmetic flag cell", () => {
+test("ADD and SUB helpers build every arithmetic flag value", () => {
   for (const helper of [buildAddResultAndFlags, buildSubResultAndFlags]) {
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), 32);
@@ -36,11 +35,10 @@ test("ADD and SUB helpers write every arithmetic flag cell", () => {
     const write = onlyFlagWrite(trace);
 
     assertFlagSet(write, x86StatusFlags);
-    strictEqual(write.conditions, undefined);
   }
 });
 
-test("CMP helper writes cells and direct optimized conditions without result payload", () => {
+test("CMP helper builds concrete flag values without a result payload", () => {
   let flags: ReturnType<typeof buildCmpFlags> | undefined;
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 16);
@@ -53,16 +51,9 @@ test("CMP helper writes cells and direct optimized conditions without result pay
 
   strictEqual(flags === undefined ? false : "result" in flags, false);
   assertFlagSet(write, x86StatusFlags);
-  deepStrictEqual(Object.keys(write.conditions ?? {}).sort(), ["A", "AE", "B", "BE", "E", "G", "GE", "L", "LE", "NE"]);
-  assertCapturedConditionReused(write, flags, "E");
-  assertCapturedConditionReused(write, flags, "B");
-  assertCapturedConditionReused(write, flags, "L");
-  assertDefStarts(trace, conditionValue(write, "E"), "cmp16.eq(");
-  assertDefStarts(trace, conditionValue(write, "B"), "cmp16.lt_u(");
-  assertDefStarts(trace, conditionValue(write, "L"), "cmp16.lt_s(");
 });
 
-test("TEST helper writes logic cells, clears AF, and exposes only E/NE direct conditions", () => {
+test("TEST helper builds logic flag values and clears AF", () => {
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
@@ -74,31 +65,27 @@ test("TEST helper writes logic cells, clears AF, and exposes only E/NE direct co
   strictEqual(trace.def(flagCell(write, "AF")), "0");
   strictEqual(trace.def(flagCell(write, "CF")), "0");
   strictEqual(trace.def(flagCell(write, "OF")), "0");
-  deepStrictEqual(Object.keys(write.conditions ?? {}).sort(), ["E", "NE"]);
-  assertDefStarts(trace, conditionValue(write, "E"), "cmp32.eq(");
-  assertDefStarts(trace, conditionValue(write, "NE"), "cmp32.ne(");
 });
 
-test("INC and DEC helpers preserve CF by omitting the CF cell", () => {
+test("INC and DEC helpers preserve CF by writing only the other status flags", () => {
   for (const [name, helper] of [
-    ["inc", buildIncFlags],
-    ["dec", buildDecFlags]
+    ["inc", writeIncFlags],
+    ["dec", writeDecFlags]
   ] as const) {
     const trace = buildHelperTrace((s) => {
       const input = s.get(s.operand(0), 8);
       const one = s.const32(1);
       const result = name === "inc" ? s.i32Add(input, one) : s.i32Sub(input, one);
 
-      s.writeFlags(helper(s, { width: 8, input, result }));
+      helper(s, { width: 8, input, result });
     }, regOperands(1));
-    const write = onlyFlagWrite(trace);
 
-    assertFlagSet(write, ["AF", "OF", "PF", "SF", "ZF"]);
-    strictEqual(write.conditions, undefined);
-    assertDefStarts(trace, flagCell(write, "AF"), "cmp32.eq(");
-    assertDefStarts(trace, flagCell(write, "OF"), "cmp8.eq(");
-    ok(trace.def(flagCell(write, "AF")).includes(name === "inc" ? ", 15)" : ", 0)"));
-    ok(trace.def(flagCell(write, "OF")).includes(name === "inc" ? ", 127)" : ", 128)"));
+    strictEqual(trace.flagWrites.length, 0);
+    deepStrictEqual(directFlagWrites(trace).sort(), ["AF", "OF", "PF", "SF", "ZF"].sort());
+    assertDefinitionStarts(directFlagDefinition(trace, "AF"), "cmp32.eq(");
+    assertDefinitionStarts(directFlagDefinition(trace, "OF"), "cmp8.eq(");
+    ok(directFlagDefinition(trace, "AF").includes(name === "inc" ? ", 15)" : ", 0)"));
+    ok(directFlagDefinition(trace, "OF").includes(name === "inc" ? ", 127)" : ", 128)"));
   }
 });
 
@@ -187,7 +174,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
   ok(subTrace.defs.some((def) => def.startsWith("cmp8.lt_u(")));
 });
 
-test("result helpers share destination writeback result with flag cells", () => {
+test("result helpers share destination writeback result with flag values", () => {
   let result: ValueInput | undefined;
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 16);
@@ -212,7 +199,7 @@ test("result helpers share destination writeback result with flag cells", () => 
   ok(trace.def(flagCell(write, "CF")).startsWith(`cmp16.lt_u(${resultValue}, `));
 });
 
-test("logic result helpers produce sparse semantic writes without direct conditions", () => {
+test("logic result helpers produce concrete status flags without direct conditions", () => {
   for (const op of ["and", "or", "xor"] as const) {
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), 8);
@@ -225,7 +212,6 @@ test("logic result helpers produce sparse semantic writes without direct conditi
     const write = onlyFlagWrite(trace);
 
     assertFlagSet(write, x86StatusFlags);
-    strictEqual(write.conditions, undefined);
     strictEqual(trace.def(flagCell(write, "AF")), "0");
   }
 });
@@ -237,29 +223,53 @@ function buildHelperTrace(
   return buildSemanticTrace(template, operandInfo);
 }
 
-function onlyFlagWrite(trace: SemanticTrace): FlagWriteInput {
+function onlyFlagWrite(trace: SemanticTrace): StatusFlagValues {
   strictEqual(trace.flagWrites.length, 1);
   return trace.flagWrites[0]!;
 }
 
-function assertFlagSet(write: FlagWriteInput, flags: readonly X86StatusFlag[]): void {
-  deepStrictEqual(Object.keys(write.cells).sort(), [...flags].sort());
+function assertFlagSet(write: StatusFlagValues, flags: readonly X86StatusFlag[]): void {
+  deepStrictEqual(statusFlagKeys(write).sort(), [...flags].sort());
 }
 
 function assertDefStarts(trace: SemanticTrace, value: ValueInput, prefix: string): void {
   ok(trace.def(value).startsWith(prefix), `${trace.def(value)} should start with ${prefix}`);
 }
 
-function assertCapturedConditionReused(
-  write: FlagWriteInput,
-  source: FlagWriteInput | undefined,
-  cc: keyof NonNullable<FlagWriteInput["conditions"]>
-): void {
-  const original = source?.conditions?.[cc];
+function assertDefinitionStarts(definition: string, prefix: string): void {
+  ok(definition.startsWith(prefix), `${definition} should start with ${prefix}`);
+}
 
-  if (original === undefined) {
-    throw new Error(`expected captured ${cc} condition`);
+function statusFlagKeys(write: StatusFlagValues): X86StatusFlag[] {
+  return x86StatusFlags.filter((flag) => flag in write);
+}
+
+function directFlagWrites(trace: SemanticTrace): X86StatusFlag[] {
+  return trace.events.flatMap((event) => {
+    const match = /^flag ([A-Z]+) <- /.exec(event);
+
+    return match === null ? [] : [match[1]! as X86StatusFlag];
+  });
+}
+
+function directFlagDefinition(trace: SemanticTrace, flag: X86StatusFlag): string {
+  const prefix = `flag ${flag} <- `;
+  const event = trace.events.find((entry) => entry.startsWith(prefix));
+
+  if (event === undefined) {
+    throw new Error(`expected direct ${flag} flag write`);
   }
 
-  strictEqual(conditionValue(write, cc), original);
+  const value = event.slice(prefix.length);
+  const display = /^%(\d+)$/.exec(value);
+
+  return display === null ? value : expectDefined(trace.defs[Number(display[1]!)]);
+}
+
+function expectDefined<T>(value: T | undefined): T {
+  if (value === undefined) {
+    throw new Error("expected value to be captured");
+  }
+
+  return value;
 }

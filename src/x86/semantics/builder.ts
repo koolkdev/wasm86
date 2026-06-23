@@ -1,4 +1,5 @@
 import type { ConditionCode } from "#x86/conditions.js";
+import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#x86/flag-sources.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type { CompareOperator } from "#x86/semantics/ops.js";
@@ -25,9 +26,9 @@ export type SemanticOperandInfo = Readonly<{
   storage: SemanticOperandStorageKind;
 }>;
 
-export type FlagWriteCell =
-  | Readonly<{ kind: "expr"; value: Value }>
-  | Readonly<{ kind: "undef" }>;
+export type SimpleFlagSource = ArchitecturalSimpleFlagSource<ValueInput>;
+
+export type StatusFlagValues = Readonly<Record<X86StatusFlag, ValueInput>>;
 
 export type GetOptions = Readonly<{
   signed?: boolean;
@@ -67,11 +68,10 @@ export interface SemanticsBuilder {
   project(width: OperandWidth, value: ValueInput): Value;
   compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value;
 
-  flagExpr(value: ValueInput): FlagWriteCell;
-  flagUndef(): FlagWriteCell;
   readFlag(flag: X86Flag): Value;
   writeFlag(flag: X86Flag, value: ValueInput): void;
-  writeFlags(write: FlagWriteInput): void;
+  writeFlagSource(source: SimpleFlagSource): void;
+  writeFlags(flags: StatusFlagValues): void;
   condition(cc: ConditionCode): Value;
 
   next(): void;
@@ -79,8 +79,3 @@ export interface SemanticsBuilder {
   conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void;
   hostTrap(vector: ValueInput): void;
 }
-
-export type FlagWriteInput = Readonly<{
-  cells: Partial<Record<X86StatusFlag, FlagWriteCell>>;
-  conditions?: Partial<Record<ConditionCode, ValueInput>>;
-}>;

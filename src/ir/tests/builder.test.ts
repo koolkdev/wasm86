@@ -18,6 +18,7 @@ import {
 import { eipChannel, flagChannel, gprChannel, instructionCountChannel } from "#ir/slots.js";
 import type {
   Action,
+  BranchAction,
   GuardMemoryAction,
   ReadMemoryAction,
   ReadStateAction,
@@ -77,6 +78,13 @@ function stateWrites(block: IrBlock): WriteStateAction[] {
   return entryActions(block).filter(
     (action): action is WriteStateAction => action.kind === "writeState"
   );
+}
+
+function branchAction(block: IrBlock): BranchAction {
+  const action = entryActions(block).find((entry): entry is BranchAction => entry.kind === "branch");
+
+  ok(action !== undefined, "expected branch action");
+  return action;
 }
 
 function nodeKinds(block: IrBlock): ValueNode["kind"][] {
@@ -248,31 +256,31 @@ test("cmp writes flags but no register", () => {
   strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
 });
 
-// A template writing ZF and leaving AF undefined; no ISA template marks
-// flags undef anymore, but the builder contract (undef = preserve) stays.
-const undefAfTemplate: SemanticTemplate = (s) => {
-  s.writeFlags({ cells: { ZF: s.flagExpr(s.const32(1)), AF: s.flagUndef() } });
+// A template writing only ZF; omitted status flags are preserved by using the
+// singular flag-write API instead of a full flag image.
+const directZfTemplate: SemanticTemplate = (s) => {
+  s.writeFlag("ZF", s.const32(1));
 };
 
-test("flagUndef cells produce no write", () => {
+test("writeFlag updates only the requested flag", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(undefAfTemplate, [], loc(0x1000, 0x1002));
+  builder.addInstruction(directZfTemplate, [], loc(0x1000, 0x1002));
 
   const block = builder.finish();
 
   deepStrictEqual([...writtenFlags(block)].sort(), ["ZF"]);
 });
 
-test("an undef cell preserves the previous instruction's pending flag", () => {
+test("an omitted direct flag write preserves the previous instruction's pending flag", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
-  builder.addInstruction(undefAfTemplate, [], loc(0x1003, 0x1005));
+  builder.addInstruction(directZfTemplate, [], loc(0x1003, 0x1005));
 
   const block = builder.finish();
 
-  // The second instruction leaves AF undefined, so the add's AF expression
+  // The second instruction does not touch AF, so the add's AF expression
   // survives and flushes.
   const v = block.values;
   const a = 0; // the eax readState leaf
@@ -615,7 +623,7 @@ test("ops after a control terminator in one template fail loudly", () => {
   );
 });
 
-test("jcc after cmp branches on the recorded condition with per-edge eip and flag flushes", () => {
+test("jcc after concrete cmp branches through pending ZF with per-edge eip and flag flushes", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
@@ -628,7 +636,7 @@ test("jcc after cmp branches on the recorded condition with per-edge eip and fla
   strictEqual(block.regions.length, 3);
   deepStrictEqual(actions[actions.length - 1], {
     kind: "branch",
-    condition: v.internCompare("eq", 0, v.internConst(5)),
+    condition: v.internCompare("eq", v.internBinary("sub", 0, v.internConst(5)), v.internConst(0)),
     taken: 1,
     notTaken: 2
   });
@@ -652,6 +660,25 @@ test("jcc after cmp branches on the recorded condition with per-edge eip and fla
   deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "continue" });
   strictEqual(notTaken.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1005));
   deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "continue" });
+});
+
+const subSourceThenJccTemplate: SemanticTemplate = (s) => {
+  const left = s.get(s.reg("eax"), 32);
+  const right = s.get(s.reg("ebx"), 32);
+  const result = s.i32Sub(left, right);
+
+  s.writeFlagSource({ kind: "sub", width: 32, left, right, result });
+  s.conditionalJump(s.condition("E"), s.const32(0x2000), s.const32(0x1005));
+};
+
+test("jcc after a sub flag source uses the source-derived condition", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(subSourceThenJccTemplate, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  strictEqual(branchAction(block).condition, block.values.internCompare("eq", 0, 1));
 });
 
 test("int flushes pending state with the resume eip before a host trap exit", () => {
@@ -683,7 +710,7 @@ test("a block ended by a host trap rejects further instructions", () => {
   );
 });
 
-test("setcc after cmp consumes the recorded condition expression", () => {
+test("setcc after concrete cmp consumes the pending flag expression", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], loc(0x1000, 0x1003));
@@ -691,7 +718,7 @@ test("setcc after cmp consumes the recorded condition expression", () => {
 
   const block = builder.finish();
   const v = block.values;
-  // B is the cmp's lt_u over its raw operands; no flag byte is read.
+  // B is the pending CF expression from the cmp; no flag byte is read.
   const condition = v.internCompare("lt_u", 0, v.internConst(5));
 
   strictEqual(
@@ -701,7 +728,36 @@ test("setcc after cmp consumes the recorded condition expression", () => {
   strictEqual(entryActions(block).filter((action) => action.kind === "readState").length, 1);
 });
 
-test("setcc with no recorded condition builds from flag byte reads", () => {
+const logicSourceThenSetccTemplate: SemanticTemplate = (s) => {
+  const left = s.get(s.reg("eax"), 32);
+  const right = s.get(s.reg("ebx"), 32);
+  const result = s.i32And(left, right);
+
+  s.writeFlagSource({ kind: "logic", width: 32, result });
+  s.set(s.reg("al"), s.i32Select(s.condition("NE"), s.const32(1), s.const32(0)), 8);
+};
+
+test("setcc after a logic flag source uses the source-derived condition", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(logicSourceThenSetccTemplate, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+  const v = block.values;
+  const result = v.internBinary("and", 0, 1);
+  const condition = v.internCompare("ne", result, v.internConst(0));
+
+  strictEqual(
+    stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
+    v.internSelect(condition, v.internConst(1), v.internConst(0))
+  );
+  strictEqual(
+    entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
+    false
+  );
+});
+
+test("setcc with no pending flag value builds from flag byte reads", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(setccSemantic("A"), [regBinding("al")], loc(0x1000, 0x1003));
@@ -728,7 +784,7 @@ test("setcc with no recorded condition builds from flag byte reads", () => {
   );
 });
 
-test("a flag write between cmp and setcc invalidates the recorded condition", () => {
+test("setcc after an intervening add uses the latest pending flag expression", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], loc(0x1000, 0x1003));

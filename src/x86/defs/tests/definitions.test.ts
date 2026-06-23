@@ -387,7 +387,7 @@ test("unary ALU semantics lower to flagless not and sub-flags neg", () => {
     "flags AF,CF,OF,PF,SF,ZF"
   ]);
   strictEqual(neg.defs[1], "sub(0, %0)");
-  deepStrictEqual(Object.keys(neg.flagWrites[0]!.cells).sort(), [...x86StatusFlags].sort());
+  deepStrictEqual(statusFlagKeys(neg.flagWrites[0]!).sort(), [...x86StatusFlags].sort());
   ok(neg.events.includes("set op0:8 <- %1"));
 });
 
@@ -503,4 +503,8 @@ function instruction(id: string): InstructionSpec {
 
 function semanticsOf(spec: InstructionSpec): SemanticTemplate {
   return spec.semantics as SemanticTemplate;
+}
+
+function statusFlagKeys(write: Partial<Record<(typeof x86StatusFlags)[number], unknown>>): string[] {
+  return x86StatusFlags.filter((flag) => flag in write);
 }

@@ -3,12 +3,12 @@ import type { Value } from "#x86/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import {
   buildAddResultAndFlags,
-  buildDecFlags,
-  buildIncFlags,
   buildLogicResultAndFlags,
   buildNegFlags,
   buildSubResultAndFlags,
-  type ResultAndFlags
+  type ResultAndFlags,
+  writeDecFlags,
+  writeIncFlags
 } from "./flag-helpers.js";
 import { guardStorageRead, guardStorageReadWrite } from "./memory.js";
 
@@ -44,11 +44,11 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
     switch (op) {
       case "inc":
         result = s.i32Add(value, s.const32(1));
-        s.writeFlags(buildIncFlags(s, { width, input: value, result }));
+        writeIncFlags(s, { width, input: value, result });
         break;
       case "dec":
         result = s.i32Sub(value, s.const32(1));
-        s.writeFlags(buildDecFlags(s, { width, input: value, result }));
+        writeDecFlags(s, { width, input: value, result });
         break;
       case "not":
         result = s.i32Xor(value, s.const32(widthMask(width)));

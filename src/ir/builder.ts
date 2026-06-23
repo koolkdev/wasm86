@@ -1,17 +1,18 @@
 import { assert } from "#common/assert.js";
 import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
-import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
+import { x86StatusFlags, type X86Flag } from "#x86/flags.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
+import { buildFlagSourceValues } from "#x86/semantics/flag-helpers.js";
 import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
   SemanticsBuilder,
-  FlagWriteCell,
-  FlagWriteInput,
   GetOptions,
   SemanticBuildContext,
   SemanticOperandInfo,
   SemanticOperandInput,
-  SemanticTemplate
+  SemanticTemplate,
+  SimpleFlagSource,
+  StatusFlagValues
 } from "#x86/semantics/builder.js";
 import type {
   MemRef,
@@ -115,7 +116,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = createValueTable();
   readonly #actions: Action[] = [];
   readonly #pending = createPendingChannels(this.#values, (action) => this.#actions.push(action));
-  // Fused condition expressions from the latest writeFlags; condition()
+  // Fused condition expressions from the latest writeFlagSource; condition()
   // prefers these over recomputing from flag bytes. Any flag write
   // invalidates all earlier entries: they were derived from flag state that
   // is now stale.
@@ -402,14 +403,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     );
   }
 
-  flagExpr(value: ValueInput): FlagWriteCell {
-    return { kind: "expr", value };
-  }
-
-  flagUndef(): FlagWriteCell {
-    return { kind: "undef" };
-  }
-
   readFlag(flag: X86Flag): Value {
     this.#beforeOp("readFlag");
     return valueFromId(this.#pending.read(flagChannel(flag)));
@@ -421,24 +414,23 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#conditions.clear();
   }
 
-  writeFlags(write: FlagWriteInput): void {
-    this.#beforeOp("writeFlags");
+  writeFlagSource(source: SimpleFlagSource): void {
+    this.#beforeOp("writeFlagSource");
+    this.#writeFlags(buildFlagSourceValues(this, source));
+    this.#recordSourceConditionHints(source);
+  }
 
-    for (const [flag, cell] of Object.entries(write.cells) as [X86StatusFlag, FlagWriteCell][]) {
-      // undef -> preserve: any value is architecturally allowed, so keeping
-      // the old one is free and kills the write.
-      if (cell.kind === "expr") {
-        this.#pending.write(flagChannel(flag), cell.value);
-      }
+  writeFlags(flags: StatusFlagValues): void {
+    this.#beforeOp("writeFlags");
+    this.#writeFlags(flags);
+  }
+
+  #writeFlags(flags: StatusFlagValues): void {
+    for (const flag of x86StatusFlags) {
+      this.#pending.write(flagChannel(flag), flags[flag]);
     }
 
     this.#conditions.clear();
-
-    if (write.conditions !== undefined) {
-      for (const [cc, value] of Object.entries(write.conditions) as [ConditionCode, ValueInput][]) {
-        this.#conditions.set(cc, value);
-      }
-    }
   }
 
   condition(cc: ConditionCode): Value {
@@ -451,6 +443,37 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     }
 
     return valueFromId(this.#flagBoolExpr(CONDITIONS[cc].expr));
+  }
+
+  #recordSourceConditionHints(source: SimpleFlagSource): void {
+    switch (source.kind) {
+      case "add":
+        return;
+      case "sub": {
+        const a = this.project(source.width, source.left);
+        const b = this.project(source.width, source.right);
+
+        this.#conditions.set("E", this.compare(source.width, "eq", a, b));
+        this.#conditions.set("NE", this.compare(source.width, "ne", a, b));
+        this.#conditions.set("B", this.compare(source.width, "lt_u", a, b));
+        this.#conditions.set("AE", this.compare(source.width, "ge_u", a, b));
+        this.#conditions.set("BE", this.compare(source.width, "le_u", a, b));
+        this.#conditions.set("A", this.compare(source.width, "gt_u", a, b));
+        this.#conditions.set("L", this.compare(source.width, "lt_s", a, b));
+        this.#conditions.set("GE", this.compare(source.width, "ge_s", a, b));
+        this.#conditions.set("LE", this.compare(source.width, "le_s", a, b));
+        this.#conditions.set("G", this.compare(source.width, "gt_s", a, b));
+        return;
+      }
+      case "logic": {
+        const result = this.project(source.width, source.result);
+        const zero = this.const32(0);
+
+        this.#conditions.set("E", this.compare(source.width, "eq", result, zero));
+        this.#conditions.set("NE", this.compare(source.width, "ne", result, zero));
+        return;
+      }
+    }
   }
 
   jump(target: TargetInput): void {
