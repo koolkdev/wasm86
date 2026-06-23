@@ -28,7 +28,7 @@ import type { EdgeRegion, IrBlock } from "#ir/block.js";
 import type { ValueId, ValueNode } from "#ir/values.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import { x86StatusFlags } from "#x86/flags.js";
+import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { jccSemantic, jmpSemantic } from "#x86/semantics/control.js";
@@ -36,7 +36,7 @@ import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic } from "#x86/semantics/misc.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
-import { popSemantic, pushfdSemantic } from "#x86/semantics/stack.js";
+import { popfdSemantic, popSemantic, pushfdSemantic } from "#x86/semantics/stack.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 
 // Every instruction advances the count channel; the dedicated tests at the
@@ -770,6 +770,47 @@ test("pushfd reuses pending arithmetic flags and reads non-arithmetic flags", ()
 
   deepStrictEqual(flagReads, ["TF", "DF", "NT", "AC", "ID"]);
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
+});
+
+test("popfd writes every stored flag from the popped image", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(popfdSemantic(), [], loc(0x1000, 0x1001));
+
+  const block = builder.finish();
+  const v = block.values;
+  const actions = entryActions(block);
+  const espRead = actions.find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("esp")
+  );
+  const popRead = actions.find(
+    (action): action is ReadMemoryAction => action.kind === "readMemory"
+  );
+
+  ok(espRead !== undefined, "expected popfd to read esp");
+  ok(popRead !== undefined, "expected popfd to read stack memory");
+  strictEqual(
+    actions.filter((action) => action.kind === "readState" && action.slot.kind === "flag").length,
+    0
+  );
+
+  const writes = stateWrites(block);
+  const flagWrites = writes.filter(
+    (write): write is WriteStateAction & { slot: ReturnType<typeof flagChannel> } => write.slot.kind === "flag"
+  );
+
+  strictEqual(writes[0]?.slot, gprChannel("esp"));
+  strictEqual(writes[0]?.value, v.internBinary("add", espRead.output, v.internConst(4)));
+  deepStrictEqual(flagWrites.map((write) => write.slot.flag), [...x86Flags]);
+
+  for (const write of flagWrites) {
+    const offset = x86EflagsBitOffset[write.slot.flag];
+    const shifted: ValueId = offset === 0
+      ? popRead.output
+      : v.internBinary("shr_u", popRead.output, v.internConst(offset));
+
+    strictEqual(write.value, v.internBinary("and", shifted, v.internConst(1)), write.slot.flag);
+  }
 });
 
 test("set to an imm operand binding fails loudly", () => {

@@ -233,6 +233,10 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return out;
   }
 
+  writeFlag(flag: X86Flag, value: ValueInput): void {
+    this.#emit(`flag ${flag} <- ${this.#value(value)}`);
+  }
+
   writeFlags(write: FlagWriteInput): void {
     const cells: FlagWriteInput["cells"] = {};
 

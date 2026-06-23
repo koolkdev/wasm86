@@ -7,7 +7,7 @@ import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { x86StatusFlags, type X86Flag } from "#x86/flags.js";
+import { x86Flags, x86StatusFlags, type X86Flag } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
@@ -263,6 +263,96 @@ test("pushfd stores the fixed usermode image when no state flags are set", async
   );
 });
 
+test("popfd distributes stored flags and ignores privileged bits", async () => {
+  const instruction = ok(decodeBytes([0x9d]));
+  const privilegedBits = (1 << 9) | (3 << 12) | (1 << 16) | (1 << 17) | (1 << 19) | (1 << 20);
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x40,
+    eip: instruction.address,
+    ...allPushfdFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+  guestView.setUint32(0x40, privilegedBits, true);
+
+  strictEqual(run(), irBlockCompleted);
+  assertState(
+    stateView,
+    { regs: { esp: 0x44 }, eip: instruction.nextEip, flags: noFlagsSet },
+    "popfd"
+  );
+  assertStoredFlags(stateView, storedFlagsFromImage(0), "popfd");
+});
+
+test("popfd/pushfd round-trips stored flags", async () => {
+  const instructions = decodeSequence([
+    [0x9d],
+    [0x9c]
+  ]);
+  const image = expectedPushfdImage({ CF: 1, AF: 1, DF: 1, AC: 1, ID: 1 }) | (1 << 9) | (3 << 12) | (1 << 16);
+  const expectedImage = expectedPushfdImage(storedFlagsFromImage(image));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x40,
+    eip: instructions[0]!.address
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+  guestView.setUint32(0x40, image, true);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint32(0x40, true), expectedImage);
+  assertState(
+    stateView,
+    {
+      regs: { esp: 0x40 },
+      eip: instructions[1]!.nextEip,
+      flags: {
+        CF: 1,
+        PF: 0,
+        AF: 1,
+        ZF: 0,
+        SF: 0,
+        OF: 0
+      }
+    },
+    "popfd/pushfd"
+  );
+  assertStoredFlags(stateView, storedFlagsFromImage(image), "popfd/pushfd");
+});
+
+test("popfd makes AC and ID toggle detection stick", async () => {
+  for (const [name, bit] of [["AC", pushfdFlagMasks.AC], ["ID", pushfdFlagMasks.ID]] as const) {
+    const instructions = decodeSequence([
+      [0x9c],
+      [0x81, 0x34, 0x24, bit & 0xff, (bit >>> 8) & 0xff, (bit >>> 16) & 0xff, (bit >>> 24) & 0xff],
+      [0x9d],
+      [0x9c],
+      [0x58]
+    ]);
+    const initial: Partial<WasmCpuStateSnapshot> = {
+      esp: 0x40,
+      eip: instructions[0]!.address
+    };
+    const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
+
+    writeWasmCpuStateSnapshot(stateView, initial);
+
+    strictEqual(run(), irBlockCompleted);
+    assertState(
+      stateView,
+      {
+        regs: { eax: 0x202 | bit, esp: 0x40 },
+        eip: instructions[4]!.nextEip,
+        flags: noFlagsSet
+      },
+      name
+    );
+    strictEqual(readWasmCpuFlagByte(stateView, name), 1, name);
+  }
+});
+
 test("a faulting pushfd write reports its eip with prior state flushed", async () => {
   // add eax, 1; pushfd with esp too close to zero for a dword stack write.
   const instructions = decodeSequence([
@@ -284,6 +374,30 @@ test("a faulting pushfd write reports its eip with prior state flushed", async (
     stateView,
     { regs: { eax: reference.result, esp: 2 }, eip: instructions[1]!.address, flags: reference.flags },
     "pushfd fault"
+  );
+});
+
+test("a faulting popfd read reports its eip with prior state flushed", async () => {
+  // add eax, 1; popfd with esp too close to the guest end for a dword stack read.
+  const instructions = decodeSequence([
+    [0x83, 0xc0, 0x01],
+    [0x9d]
+  ]);
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0xffff_ffff,
+    esp: guestByteLength - 2,
+    eip: instructions[0]!.address
+  };
+  const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
+  const reference = aluReference("add", 32, 0xffff_ffff, 1);
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength - 2, 4, "popfd fault");
+  assertState(
+    stateView,
+    { regs: { eax: reference.result, esp: guestByteLength - 2 }, eip: instructions[1]!.address, flags: reference.flags },
+    "popfd fault"
   );
 });
 
@@ -404,4 +518,20 @@ function expectedPushfdImage(flags: Partial<Record<X86Flag, number>>): number {
   }
 
   return image >>> 0;
+}
+
+function storedFlagsFromImage(image: number): Readonly<Record<X86Flag, number>> {
+  return Object.fromEntries(
+    x86Flags.map((flag) => [flag, (image & pushfdFlagMasks[flag]) === 0 ? 0 : 1])
+  ) as Readonly<Record<X86Flag, number>>;
+}
+
+function assertStoredFlags(
+  stateView: DataView,
+  expected: Readonly<Record<X86Flag, number>>,
+  label: string
+): void {
+  for (const flag of x86Flags) {
+    strictEqual(readWasmCpuFlagByte(stateView, flag), expected[flag], `${label} ${flag}`);
+  }
 }

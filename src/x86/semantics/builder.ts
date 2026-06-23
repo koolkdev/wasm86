@@ -70,6 +70,7 @@ export interface SemanticsBuilder {
   flagExpr(value: ValueInput): FlagWriteCell;
   flagUndef(): FlagWriteCell;
   readFlag(flag: X86Flag): Value;
+  writeFlag(flag: X86Flag, value: ValueInput): void;
   writeFlags(write: FlagWriteInput): void;
   condition(cc: ConditionCode): Value;
 

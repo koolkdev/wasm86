@@ -50,6 +50,20 @@ export function pushfdSemantic(): SemanticTemplate {
   };
 }
 
+export function popfdSemantic(): SemanticTemplate {
+  return (s, context) => {
+    const image = pop32(s, context);
+    const one = s.const32(1);
+
+    for (const flag of x86Flags) {
+      const offset = x86EflagsBitOffset[flag];
+      const shifted = offset === 0 ? image : s.i32ShrU(image, s.const32(offset));
+
+      s.writeFlag(flag, s.i32And(shifted, one));
+    }
+  };
+}
+
 export function popSemantic(): SemanticTemplate {
   return (s, context) => {
     const dst = s.operand(0);

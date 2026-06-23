@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 232);
+  strictEqual(X86_32_CORE.instructions.length, 233);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -74,6 +74,7 @@ test("x86-32 core registers the initial instruction surface", () => {
     "pop.r32",
     "pop.rm32",
     "pushfd.dword",
+    "popfd.dword",
     "leave.near",
     "jmp.rel8",
     "call.rm32",
@@ -185,6 +186,14 @@ test("pushfd is a no-operand dword flags push", () => {
   deepStrictEqual(spec.opcode, [0x9c]);
   strictEqual(spec.operands, undefined);
   deepStrictEqual(spec.format, { syntax: "pushfd" });
+});
+
+test("popfd is a no-operand dword flags pop", () => {
+  const spec = instruction("popfd.dword");
+
+  deepStrictEqual(spec.opcode, [0x9d]);
+  strictEqual(spec.operands, undefined);
+  deepStrictEqual(spec.format, { syntax: "popfd" });
 });
 
 test("slash-r forms use ModRM operands without an explicit ModRM match", () => {

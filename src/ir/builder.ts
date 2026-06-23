@@ -415,6 +415,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return valueFromId(this.#pending.read(flagChannel(flag)));
   }
 
+  writeFlag(flag: X86Flag, value: ValueInput): void {
+    this.#beforeOp("writeFlag");
+    this.#pending.write(flagChannel(flag), value);
+    this.#conditions.clear();
+  }
+
   writeFlags(write: FlagWriteInput): void {
     this.#beforeOp("writeFlags");
 

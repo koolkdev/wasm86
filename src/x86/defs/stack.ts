@@ -1,7 +1,7 @@
 import { form, mnemonic } from "#x86/schema/builders.js";
 import { imm, modrmRm, opReg } from "#x86/schema/operands.js";
 import { opcodePlusReg } from "#x86/schema/opcodes.js";
-import { leaveSemantic, popSemantic, pushfdSemantic, pushSemantic } from "#x86/semantics/stack.js";
+import { leaveSemantic, popfdSemantic, popSemantic, pushfdSemantic, pushSemantic } from "#x86/semantics/stack.js";
 
 export const PUSH = mnemonic("push", [
   // 50+rd: PUSH r32
@@ -59,6 +59,15 @@ export const PUSHFD = mnemonic("pushfd", [
     opcode: [0x9c],
     format: { syntax: "pushfd" },
     semantics: pushfdSemantic()
+  })
+]);
+
+export const POPFD = mnemonic("popfd", [
+  // 9D: POPFD
+  form("dword", {
+    opcode: [0x9d],
+    format: { syntax: "popfd" },
+    semantics: popfdSemantic()
   })
 ]);
 
