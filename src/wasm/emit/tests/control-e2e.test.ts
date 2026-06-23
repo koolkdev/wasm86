@@ -7,7 +7,7 @@ import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { x86Flags } from "#x86/flags.js";
+import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
@@ -207,7 +207,7 @@ function assertState(
 
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
 
-  for (const flag of x86Flags) {
+  for (const flag of x86StatusFlags) {
     strictEqual(readWasmCpuFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
   }
 }

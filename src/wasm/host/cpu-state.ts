@@ -3,10 +3,10 @@ import type { X86Flag } from "#x86/flags.js";
 import type { Reg32 } from "#x86/types.js";
 import { u32 } from "#x86/numeric.js";
 import {
-  WASM_CPU_FLAG_BYTE_OFFSETS,
   WASM_CPU_STATE_BYTE_LENGTH,
   WASM_CPU_STATE_FIELDS,
   WASM_CPU_STATE_LAYOUT,
+  wasmCpuFlagByteOffset,
   type WasmCpuStateField
 } from "#wasm/cpu-state-layout.js";
 
@@ -85,10 +85,10 @@ export class WasmCpuState implements MutableCpuStateView {
   }
 
   #readFlagByte(view: DataView, flag: X86Flag): number {
-    return view.getUint8(WASM_CPU_FLAG_BYTE_OFFSETS[flag]);
+    return view.getUint8(wasmCpuFlagByteOffset(flag));
   }
 
   #writeFlagByte(view: DataView, flag: X86Flag, value: number): void {
-    view.setUint8(WASM_CPU_FLAG_BYTE_OFFSETS[flag], value === 0 ? 0 : 1);
+    view.setUint8(wasmCpuFlagByteOffset(flag), value === 0 ? 0 : 1);
   }
 }

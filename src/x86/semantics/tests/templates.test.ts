@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { x86Flags } from "#x86/flags.js";
+import { x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { callSemantic, retSemantic } from "#x86/semantics/control.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
@@ -196,7 +196,7 @@ test("flag-writing templates write the six architectural flag cells", () => {
     const trace = buildSemanticTrace(template, operands);
 
     strictEqual(trace.flagWrites.length, 1, name);
-    deepStrictEqual(Object.keys(trace.flagWrites[0]!.cells).sort(), [...x86Flags].sort(), name);
+    deepStrictEqual(Object.keys(trace.flagWrites[0]!.cells).sort(), [...x86StatusFlags].sort(), name);
   }
 });
 

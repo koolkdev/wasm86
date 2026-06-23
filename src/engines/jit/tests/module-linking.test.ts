@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { ExitReason } from "#wasm/exit.js";
 import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
-import { readWasmCpuState, wasmCpuFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
+import { readWasmCpuState, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
 import { jitModuleLinkFallbackExportName } from "#engines/jit/compiled-blocks/module-link-table.js";
 import type { WasmCompiledBlockCodeMap } from "#engines/jit/compiled-blocks/block-cache.js";
 import { WasmCompiledBlockCache } from "#engines/jit/compiled-blocks/wasm-cache.js";
@@ -194,7 +194,7 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
 
   deepStrictEqual(takenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(takenState.eax, 1);
-  deepStrictEqual(wasmCpuFlagsOf(takenState), noFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(takenState), noFlags);
 
   fixture.memories.cpuState.load({ eip: aEip, eax: 0xffff_ffff });
 
@@ -203,7 +203,7 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
 
   deepStrictEqual(notTakenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(notTakenState.eax, 0);
-  deepStrictEqual(wasmCpuFlagsOf(notTakenState), addWraparoundFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(notTakenState), addWraparoundFlags);
 });
 
 test("invalidating compiled target restores dependent module-local fallback", () => {

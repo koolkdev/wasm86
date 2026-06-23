@@ -1,5 +1,6 @@
 import { strictEqual } from "node:assert";
 
+import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import { mem, operand, reg } from "#x86/semantics/refs.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
@@ -24,7 +25,6 @@ import type {
   Value,
   ValueInput
 } from "#x86/semantics/refs.js";
-import type { X86Flag } from "#x86/flags.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
 import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
 
@@ -54,7 +54,7 @@ export function regOperands(count: number): readonly SemanticOperandInfo[] {
   return Array.from({ length: count }, () => ({ storage: "reg" as const }));
 }
 
-export function flagCell(write: FlagWriteInput, flag: X86Flag): Value {
+export function flagCell(write: FlagWriteInput, flag: X86StatusFlag): Value {
   const cell = write.cells[flag];
 
   strictEqual(cell?.kind, "expr", `expected ${flag} expr cell`);
@@ -226,10 +226,17 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return { kind: "undef" };
   }
 
+  readFlag(flag: X86Flag): Value {
+    const out = this.#alloc(`flag ${flag}`);
+
+    this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
+    return out;
+  }
+
   writeFlags(write: FlagWriteInput): void {
     const cells: FlagWriteInput["cells"] = {};
 
-    for (const [flag, cell] of Object.entries(write.cells) as [X86Flag, FlagWriteCell][]) {
+    for (const [flag, cell] of Object.entries(write.cells) as [X86StatusFlag, FlagWriteCell][]) {
       cells[flag] = cell.kind === "expr"
         ? { kind: "expr", value: cell.value }
         : { kind: "undef" };

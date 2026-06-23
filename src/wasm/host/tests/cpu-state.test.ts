@@ -4,29 +4,54 @@ import { test } from "node:test";
 import { readRegisterAlias, writeRegisterAlias } from "#x86/cpu-state.js";
 import { x86Flags } from "#x86/flags.js";
 import { registerAlias } from "#x86/registers.js";
-import { readWasmCpuState, wasmCpuFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
+import { readWasmCpuState, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
+const allFlagBytesSet = {
+  CF: 1,
+  PF: 1,
+  AF: 1,
+  ZF: 1,
+  SF: 1,
+  OF: 1,
+  DF: 1,
+  TF: 1,
+  NT: 1,
+  AC: 1,
+  ID: 1
+} as const;
 const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 
 test("host view stores flag fields as flag bytes and reads them back", () => {
   const { cpuState: state } = createWasmHostMemories();
 
-  state.load({ ...allFlagsSet });
+  state.load({ ...allFlagBytesSet });
 
   deepStrictEqual(
     x86Flags.map((flag) => [flag, state.readFlag(flag)]),
-    [["CF", true], ["PF", true], ["AF", true], ["ZF", true], ["SF", true], ["OF", true]]
+    [
+      ["CF", true],
+      ["PF", true],
+      ["AF", true],
+      ["ZF", true],
+      ["SF", true],
+      ["OF", true],
+      ["TF", true],
+      ["DF", true],
+      ["NT", true],
+      ["AC", true],
+      ["ID", true]
+    ]
   );
-  deepStrictEqual(wasmCpuFlagsOf(readWasmCpuState(state)), allFlagsSet);
+  deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuState(state)), allFlagsSet);
 
   state.load({});
 
-  deepStrictEqual(wasmCpuFlagsOf(readWasmCpuState(state)), noFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuState(state)), noFlags);
   deepStrictEqual(
     x86Flags.map((flag) => state.readFlag(flag)),
-    [false, false, false, false, false, false]
+    [false, false, false, false, false, false, false, false, false, false, false]
   );
 });
 
@@ -37,12 +62,14 @@ test("flag writes are visible to snapshots", () => {
 
   strictEqual(state.readFlag("CF"), true);
   strictEqual(state.readFlag("ZF"), true);
-  deepStrictEqual(wasmCpuFlagsOf(readWasmCpuState(state)), { ...noFlags, CF: 1, ZF: 1 });
+  deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuState(state)), { ...noFlags, CF: 1, ZF: 1 });
 
   state.writeFlag("CF", false);
+  state.writeFlag("ID", true);
 
   strictEqual(state.readFlag("CF"), false);
-  deepStrictEqual(wasmCpuFlagsOf(readWasmCpuState(state)), { ...noFlags, ZF: 1 });
+  strictEqual(state.readFlag("ID"), true);
+  deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuState(state)), { ...noFlags, ZF: 1 });
 });
 
 test("host view stores register words and supports x86 register aliases", () => {

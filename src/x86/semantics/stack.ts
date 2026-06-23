@@ -1,5 +1,6 @@
 import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
+import { x86EflagsBitOffset, x86Flags } from "#x86/flags.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
 export function push32(s: SemanticsBuilder, context: SemanticBuildContext, value: ValueInput): void {
@@ -30,6 +31,22 @@ export function pushSemantic(): SemanticTemplate {
 
     guardStorageRead(s, context, src, 32);
     push32(s, context, s.get(src));
+  };
+}
+
+export function pushfdSemantic(): SemanticTemplate {
+  return (s, context) => {
+    // Reserved bit 1 and the user-mode IF image bit are set.
+    let image: Value = s.const32(0x202);
+
+    for (const flag of x86Flags) {
+      const bit = s.readFlag(flag);
+      const offset = x86EflagsBitOffset[flag];
+
+      image = s.i32Or(image, offset === 0 ? bit : s.i32Shl(bit, s.const32(offset)));
+    }
+
+    push32(s, context, image);
   };
 }
 

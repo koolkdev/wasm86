@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
-import type { X86Flag } from "#x86/flags.js";
+import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
@@ -410,10 +410,15 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return { kind: "undef" };
   }
 
+  readFlag(flag: X86Flag): Value {
+    this.#beforeOp("readFlag");
+    return valueFromId(this.#pending.read(flagChannel(flag)));
+  }
+
   writeFlags(write: FlagWriteInput): void {
     this.#beforeOp("writeFlags");
 
-    for (const [flag, cell] of Object.entries(write.cells) as [X86Flag, FlagWriteCell][]) {
+    for (const [flag, cell] of Object.entries(write.cells) as [X86StatusFlag, FlagWriteCell][]) {
       // undef -> preserve: any value is architecturally allowed, so keeping
       // the old one is free and kills the write.
       if (cell.kind === "expr") {

@@ -7,7 +7,7 @@ import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { WriteStateAction } from "#ir/actions.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { x86Flags } from "#x86/flags.js";
+import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type Reg32 } from "#x86/types.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
@@ -99,8 +99,8 @@ test("two adds in one block store each flag byte once, with the second add's fla
     (action): action is WriteStateAction => action.kind === "writeState" && action.slot.kind === "flag"
   );
 
-  strictEqual(flagWrites.length, x86Flags.length);
-  strictEqual(new Set(flagWrites.map((write) => write.slot)).size, x86Flags.length);
+  strictEqual(flagWrites.length, x86StatusFlags.length);
+  strictEqual(new Set(flagWrites.map((write) => write.slot)).size, x86StatusFlags.length);
 
   // ...and in the encoding: exactly six byte stores.
   const body = irBlockBody(block).encode();
@@ -139,7 +139,7 @@ function assertState(
 
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
 
-  for (const flag of x86Flags) {
+  for (const flag of x86StatusFlags) {
     strictEqual(readWasmCpuFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
   }
 }

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import type { FlagWriteInput, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { ValueInput } from "#x86/semantics/refs.js";
-import { x86Flags, type X86Flag } from "#x86/flags.js";
+import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import {
   buildAddResultAndFlags,
   buildCmpFlags,
@@ -35,7 +35,7 @@ test("ADD and SUB helpers write every arithmetic flag cell", () => {
     });
     const write = onlyFlagWrite(trace);
 
-    assertFlagSet(write, x86Flags);
+    assertFlagSet(write, x86StatusFlags);
     strictEqual(write.conditions, undefined);
   }
 });
@@ -52,7 +52,7 @@ test("CMP helper writes cells and direct optimized conditions without result pay
   const write = onlyFlagWrite(trace);
 
   strictEqual(flags === undefined ? false : "result" in flags, false);
-  assertFlagSet(write, x86Flags);
+  assertFlagSet(write, x86StatusFlags);
   deepStrictEqual(Object.keys(write.conditions ?? {}).sort(), ["A", "AE", "B", "BE", "E", "G", "GE", "L", "LE", "NE"]);
   assertCapturedConditionReused(write, flags, "E");
   assertCapturedConditionReused(write, flags, "B");
@@ -111,7 +111,7 @@ test("NEG helper follows x86 CF and OF rules", () => {
   }, regOperands(1));
   const write = onlyFlagWrite(trace);
 
-  assertFlagSet(write, x86Flags);
+  assertFlagSet(write, x86StatusFlags);
   assertDefStarts(trace, flagCell(write, "CF"), "cmp8.ne(");
   ok(trace.def(flagCell(write, "CF")).endsWith(", 0)"));
   assertDefStarts(trace, flagCell(write, "AF"), "cmp32.ne(");
@@ -224,7 +224,7 @@ test("logic result helpers produce sparse semantic writes without direct conditi
     });
     const write = onlyFlagWrite(trace);
 
-    assertFlagSet(write, x86Flags);
+    assertFlagSet(write, x86StatusFlags);
     strictEqual(write.conditions, undefined);
     strictEqual(trace.def(flagCell(write, "AF")), "0");
   }
@@ -242,7 +242,7 @@ function onlyFlagWrite(trace: SemanticTrace): FlagWriteInput {
   return trace.flagWrites[0]!;
 }
 
-function assertFlagSet(write: FlagWriteInput, flags: readonly X86Flag[]): void {
+function assertFlagSet(write: FlagWriteInput, flags: readonly X86StatusFlag[]): void {
   deepStrictEqual(Object.keys(write.cells).sort(), [...flags].sort());
 }
 

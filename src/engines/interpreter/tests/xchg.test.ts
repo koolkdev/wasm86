@@ -2,8 +2,12 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ExitReason } from "#wasm/exit.js";
-import { wasmCpuFlagsOf,
-  createWasmCpuStateSnapshot, type WasmCpuStateFlag, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import {
+  createWasmCpuStateSnapshot,
+  wasmCpuStatusFlagsOf,
+  type WasmCpuStateSnapshot,
+  type WasmCpuStatusFlag
+} from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
@@ -20,7 +24,7 @@ test("executes register-only XCHG forms after reading both operands", async () =
     name: string;
     bytes: readonly number[];
     initial: WasmCpuStateSnapshot;
-    expected: Pick<WasmCpuStateSnapshot, "eax" | "ebx" | WasmCpuStateFlag>;
+    expected: Pick<WasmCpuStateSnapshot, "eax" | "ebx" | WasmCpuStatusFlag>;
   }>[] = [
     {
       name: "xchg eax, ebx",
@@ -54,7 +58,7 @@ test("executes register-only XCHG forms after reading both operands", async () =
     assertSingleInstructionExit(exit);
     strictEqual(state.eax, entry.expected.eax, entry.name);
     strictEqual(state.ebx, entry.expected.ebx, entry.name);
-    deepStrictEqual(wasmCpuFlagsOf(state), wasmCpuFlagsOf(entry.expected), entry.name);
+    deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(entry.expected), entry.name);
     assertCompletedInstruction(state, startAddress + entry.bytes.length, 1);
   }
 });
@@ -75,7 +79,7 @@ test("executes same-register XCHG forms as flagless no-ops", async () => {
     assertSingleInstructionExit(exit);
     strictEqual(state.eax, initial.eax, entry.name);
     strictEqual(state.ebx, initial.ebx, entry.name);
-    deepStrictEqual(wasmCpuFlagsOf(state), flags, entry.name);
+    deepStrictEqual(wasmCpuStatusFlagsOf(state), flags, entry.name);
     assertCompletedInstruction(state, startAddress + entry.bytes.length, 1);
   }
 });
@@ -88,7 +92,7 @@ test("executes memory XCHG forms after reading memory and register operands", as
     width: 8 | 16 | 32;
     initial: WasmCpuStateSnapshot;
     memoryValue: number;
-    expected: Pick<WasmCpuStateSnapshot, "eax" | "ebx" | WasmCpuStateFlag>;
+    expected: Pick<WasmCpuStateSnapshot, "eax" | "ebx" | WasmCpuStatusFlag>;
     expectedMemoryValue: number;
   }>[] = [
     {
@@ -130,7 +134,7 @@ test("executes memory XCHG forms after reading memory and register operands", as
     assertSingleInstructionExit(exit);
     strictEqual(state.eax, entry.expected.eax, entry.name);
     strictEqual(state.ebx, entry.expected.ebx, entry.name);
-    deepStrictEqual(wasmCpuFlagsOf(state), wasmCpuFlagsOf(entry.expected), entry.name);
+    deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(entry.expected), entry.name);
     strictEqual(readGuestValue(guestView, entry.initial.eax, entry.width), entry.expectedMemoryValue, entry.name);
     assertCompletedInstruction(state, startAddress + entry.bytes.length, 1);
   }
@@ -149,7 +153,7 @@ test("XCHG memory read faults before changing register state", async () => {
   deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x1_0000, detail: 4 });
   strictEqual(state.eax, initial.eax);
   strictEqual(state.ebx, initial.ebx);
-  deepStrictEqual(wasmCpuFlagsOf(state), wasmCpuFlagsOf(initial));
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(initial));
   strictEqual(state.eip, initial.eip);
   strictEqual(state.instructionCount, initial.instructionCount);
 });

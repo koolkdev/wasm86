@@ -1,8 +1,11 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { wasmCpuFlagsOf,
-  createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import {
+  createWasmCpuStateSnapshot,
+  wasmCpuStatusFlagsOf,
+  type WasmCpuStateSnapshot
+} from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -128,7 +131,7 @@ test("executes LEA r16 without reading memory or modifying flags", async () => {
 
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x1234_0114);
-  deepStrictEqual(wasmCpuFlagsOf(state), wasmCpuFlagsOf(initialState));
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(initialState));
   strictEqual(state.ebx, initialState.ebx);
   strictEqual(state.esi, initialState.esi);
   assertCompletedInstruction(state, startAddress + 5, 8);

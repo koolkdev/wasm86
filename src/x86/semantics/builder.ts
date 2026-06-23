@@ -1,5 +1,5 @@
 import type { ConditionCode } from "#x86/conditions.js";
-import type { X86Flag } from "#x86/flags.js";
+import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type { CompareOperator } from "#x86/semantics/ops.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
@@ -69,6 +69,7 @@ export interface SemanticsBuilder {
 
   flagExpr(value: ValueInput): FlagWriteCell;
   flagUndef(): FlagWriteCell;
+  readFlag(flag: X86Flag): Value;
   writeFlags(write: FlagWriteInput): void;
   condition(cc: ConditionCode): Value;
 
@@ -79,6 +80,6 @@ export interface SemanticsBuilder {
 }
 
 export type FlagWriteInput = Readonly<{
-  cells: Partial<Record<X86Flag, FlagWriteCell>>;
+  cells: Partial<Record<X86StatusFlag, FlagWriteCell>>;
   conditions?: Partial<Record<ConditionCode, ValueInput>>;
 }>;

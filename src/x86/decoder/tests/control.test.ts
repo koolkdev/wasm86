@@ -161,6 +161,13 @@ const fixtures: readonly DecoderFixture[] = [
     mnemonic: "push",
     operands: [signImm8(0xffff_ffff)],
     id: "push.imm8"
+  },
+  {
+    name: "pushfd",
+    bytes: [0x9c],
+    mnemonic: "pushfd",
+    id: "pushfd.dword",
+    format: "pushfd"
   }
 ];
 

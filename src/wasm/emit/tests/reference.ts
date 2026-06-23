@@ -1,4 +1,4 @@
-import type { X86Flag } from "#x86/flags.js";
+import type { X86StatusFlag } from "#x86/flags.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 
 // Test-local arithmetic-flag reference for action e2e ALU cases. It avoids
@@ -8,7 +8,7 @@ export type AluOp = "add" | "or" | "and" | "sub" | "xor" | "cmp" | "test";
 
 export type FlagByte = 0 | 1;
 
-export type AluFlags = Readonly<Record<X86Flag, FlagByte>>;
+export type AluFlags = Readonly<Record<X86StatusFlag, FlagByte>>;
 
 export type AluReference = Readonly<{
   // The value left in the destination operand. cmp and test discard their

@@ -1,8 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { wasmCpuFlagsOf,
-  createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { createWasmCpuStateSnapshot, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   writeInterpreterState
@@ -39,7 +38,7 @@ test("executes ADD EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), addWraparoundFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), addWraparoundFlags);
 });
 
 test("executes SUB EAX, imm32", async () => {
@@ -55,7 +54,7 @@ test("executes SUB EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_ffff);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), subBorrowFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), subBorrowFlags);
 });
 
 test("executes ADD AX, imm16 with 16-bit wraparound", async () => {
@@ -141,7 +140,7 @@ test("executes XOR EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
 });
 
 test("executes OR EAX, imm32", async () => {
@@ -157,7 +156,7 @@ test("executes OR EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x8000_0100);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), signParityFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), signParityFlags);
 });
 
 test("executes AND EAX, imm32", async () => {
@@ -173,7 +172,7 @@ test("executes AND EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
 });
 
 test("executes CMP EAX, imm32 without writing EAX", async () => {
@@ -189,7 +188,7 @@ test("executes CMP EAX, imm32 without writing EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
 });
 
 test("executes TEST EAX, imm32 without writing EAX", async () => {
@@ -205,7 +204,7 @@ test("executes TEST EAX, imm32 without writing EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), parityOnlyFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), parityOnlyFlags);
 });
 
 test("executes 81 /7 CMP r/m32, imm32 for register operands", async () => {
@@ -221,7 +220,7 @@ test("executes 81 /7 CMP r/m32, imm32 for register operands", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 6, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
 });
 
 test("executes 83 /5 SUB r/m32, sign-extended imm8 for register operands", async () => {
@@ -237,7 +236,7 @@ test("executes 83 /5 SUB r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 2);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), carryAuxFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), carryAuxFlags);
 });
 
 test("executes 83 /6 XOR r/m32, sign-extended imm8 for register operands", async () => {
@@ -253,7 +252,7 @@ test("executes 83 /6 XOR r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_ffff);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), signParityFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), signParityFlags);
 });
 
 test("executes 83 /4 AND r/m32, sign-extended imm8 for register operands", async () => {
@@ -269,7 +268,7 @@ test("executes 83 /4 AND r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
 });
 
 test("unsupported 81 /2 group returns unsupported before immediate decode", async () => {

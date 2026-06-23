@@ -34,7 +34,6 @@ test("flag and eip channels are atomic units", () => {
   }
 
   deepStrictEqual(eipChannel, { kind: "eip" });
-  throws(() => flagChannel("DF" as never), /unknown flag channel/);
 });
 
 test("channelsOverlap matches byte-range intersection for gpr channels", () => {

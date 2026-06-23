@@ -1,8 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { wasmCpuFlagsOf,
-  createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { createWasmCpuStateSnapshot, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
@@ -28,7 +27,7 @@ test("executes ADD r32, r/m32 and materializes add flags", async () => {
   strictEqual(state.eax, 0);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), addWraparoundFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), addWraparoundFlags);
 });
 
 test("executes SUB r/m32, r32 and materializes sub flags", async () => {
@@ -46,7 +45,7 @@ test("executes SUB r/m32, r32 and materializes sub flags", async () => {
   strictEqual(state.eax, 0xffff_ffff);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), subBorrowFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), subBorrowFlags);
 });
 
 test("executes XOR r/m32, r32 and materializes logic flags", async () => {
@@ -62,7 +61,7 @@ test("executes XOR r/m32, r32 and materializes logic flags", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), zeroLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroLogicFlags);
 });
 
 test("executes OR r32, r/m32 and materializes logic flags", async () => {
@@ -80,7 +79,7 @@ test("executes OR r32, r/m32 and materializes logic flags", async () => {
   strictEqual(state.eax, 0x8000_0100);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), signLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), signLogicFlags);
 });
 
 test("executes AND r/m32, r32 and materializes logic flags", async () => {
@@ -98,7 +97,7 @@ test("executes AND r/m32, r32 and materializes logic flags", async () => {
   strictEqual(state.eax, 0);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), zeroLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroLogicFlags);
 });
 
 test("executes CMP r/m32, r32 without writing operands", async () => {
@@ -116,7 +115,7 @@ test("executes CMP r/m32, r32 without writing operands", async () => {
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), zeroLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroLogicFlags);
 });
 
 test("executes TEST r/m32, r32 without writing operands", async () => {
@@ -134,5 +133,5 @@ test("executes TEST r/m32, r32 without writing operands", async () => {
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuFlagsOf(state), signLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), signLogicFlags);
 });

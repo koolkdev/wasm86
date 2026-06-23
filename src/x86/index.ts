@@ -6,7 +6,7 @@ import { LEA } from "./defs/lea.js";
 import { INT, NOP } from "./defs/misc.js";
 import { CMOVCC, MOV, MOVSX, MOVZX } from "./defs/mov.js";
 import { SETCC } from "./defs/setcc.js";
-import { LEAVE, POP, PUSH } from "./defs/stack.js";
+import { LEAVE, POP, PUSH, PUSHFD } from "./defs/stack.js";
 import { XCHG } from "./defs/xchg.js";
 
 export const X86_32_CORE = defineIsa({
@@ -33,6 +33,7 @@ export const X86_32_CORE = defineIsa({
     TEST,
     PUSH,
     POP,
+    PUSHFD,
     LEAVE,
     JMP,
     CALL,

@@ -7,7 +7,7 @@ import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { x86Flags } from "#x86/flags.js";
+import { x86StatusFlags, type X86Flag } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
@@ -16,6 +16,24 @@ import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags } from "./reference.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
+const noFlagsSet = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const satisfies AluFlags;
+const pushfdFlagMasks = {
+  CF: 1 << 0,
+  PF: 1 << 2,
+  AF: 1 << 4,
+  ZF: 1 << 6,
+  SF: 1 << 7,
+  TF: 1 << 8,
+  DF: 1 << 10,
+  OF: 1 << 11,
+  NT: 1 << 14,
+  AC: 1 << 18,
+  ID: 1 << 21
+} as const satisfies Readonly<Record<X86Flag, number>>;
+
+const allPushfdFlagsSet = Object.fromEntries(
+  Object.keys(pushfdFlagMasks).map((flag) => [flag, 1])
+) as Readonly<Record<X86Flag, number>>;
 
 // Memory cases with explicit state, guest bytes, and fault expectations.
 
@@ -206,6 +224,69 @@ test("a narrow access faults with its byte length", async () => {
   );
 });
 
+test("pushfd stores the usermode eflags image", async () => {
+  const instruction = ok(decodeBytes([0x9c]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x40,
+    eip: instruction.address,
+    ...allPushfdFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint32(0x3c, true), expectedPushfdImage(allPushfdFlagsSet));
+  assertState(
+    stateView,
+    { regs: { esp: 0x3c }, eip: instruction.nextEip, flags: allFlagsSet },
+    "pushfd"
+  );
+});
+
+test("pushfd stores the fixed usermode image when no state flags are set", async () => {
+  const instruction = ok(decodeBytes([0x9c]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x40,
+    eip: instruction.address
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint32(0x3c, true), 0x202);
+  assertState(
+    stateView,
+    { regs: { esp: 0x3c }, eip: instruction.nextEip, flags: noFlagsSet },
+    "pushfd fixed image"
+  );
+});
+
+test("a faulting pushfd write reports its eip with prior state flushed", async () => {
+  // add eax, 1; pushfd with esp too close to zero for a dword stack write.
+  const instructions = decodeSequence([
+    [0x83, 0xc0, 0x01],
+    [0x9c]
+  ]);
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0xffff_ffff,
+    esp: 2,
+    eip: instructions[0]!.address
+  };
+  const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
+  const reference = aluReference("add", 32, 0xffff_ffff, 1);
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, 0xffff_fffe, 4, "pushfd fault");
+  assertState(
+    stateView,
+    { regs: { eax: reference.result, esp: 2 }, eip: instructions[1]!.address, flags: reference.flags },
+    "pushfd fault"
+  );
+});
+
 test("a faulting pop [mem] restores esp to its pre-instruction value", async () => {
   // add esp, 4; pop [ebx] with an out-of-bounds destination: the write guard
   // faults after the template advanced esp, so the edge must flush the
@@ -308,7 +389,19 @@ function assertState(
 
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
 
-  for (const flag of x86Flags) {
+  for (const flag of x86StatusFlags) {
     strictEqual(readWasmCpuFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);
   }
+}
+
+function expectedPushfdImage(flags: Partial<Record<X86Flag, number>>): number {
+  let image = 0x202;
+
+  for (const flag of Object.keys(pushfdFlagMasks) as X86Flag[]) {
+    if (flags[flag] !== undefined && flags[flag] !== 0) {
+      image |= pushfdFlagMasks[flag];
+    }
+  }
+
+  return image >>> 0;
 }

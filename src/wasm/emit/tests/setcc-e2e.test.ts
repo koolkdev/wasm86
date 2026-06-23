@@ -5,7 +5,7 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { immBinding, regBinding } from "#ir/operands.js";
 import { gprChannel } from "#ir/slots.js";
 import { CONDITIONS, type FlagBoolExpr } from "#x86/conditions.js";
-import type { X86Flag } from "#x86/flags.js";
+import type { X86StatusFlag } from "#x86/flags.js";
 import type { ConditionCode } from "#x86/conditions.js";
 
 import { cmpSemantic } from "#x86/semantics/cmp.js";
@@ -76,7 +76,7 @@ for (const [cc, predicate] of comparePredicates) {
   });
 }
 
-function evaluateCondition(expr: FlagBoolExpr, flags: ReadonlySet<X86Flag>): boolean {
+function evaluateCondition(expr: FlagBoolExpr, flags: ReadonlySet<X86StatusFlag>): boolean {
   switch (expr.kind) {
     case "flag":
       return flags.has(expr.flag);

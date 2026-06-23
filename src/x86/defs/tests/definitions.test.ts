@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import { x86Flags } from "#x86/flags.js";
+import { x86StatusFlags } from "#x86/flags.js";
 import { X86_32_CORE } from "#x86/index.js";
 import { expandInstructionSpec } from "#x86/schema/builders.js";
 import type { InstructionSpec } from "#x86/schema/types.js";
@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 231);
+  strictEqual(X86_32_CORE.instructions.length, 232);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -73,6 +73,7 @@ test("x86-32 core registers the initial instruction surface", () => {
     "push.r32",
     "pop.r32",
     "pop.rm32",
+    "pushfd.dword",
     "leave.near",
     "jmp.rel8",
     "call.rm32",
@@ -176,6 +177,14 @@ test("leave is a no-operand stack frame instruction", () => {
   deepStrictEqual(spec.opcode, [0xc9]);
   strictEqual(spec.operands, undefined);
   deepStrictEqual(spec.format, { syntax: "leave" });
+});
+
+test("pushfd is a no-operand dword flags push", () => {
+  const spec = instruction("pushfd.dword");
+
+  deepStrictEqual(spec.opcode, [0x9c]);
+  strictEqual(spec.operands, undefined);
+  deepStrictEqual(spec.format, { syntax: "pushfd" });
 });
 
 test("slash-r forms use ModRM operands without an explicit ModRM match", () => {
@@ -349,7 +358,7 @@ test("unary ALU semantics lower to flagless not and sub-flags neg", () => {
     "flags AF,CF,OF,PF,SF,ZF"
   ]);
   strictEqual(neg.defs[1], "sub(0, %0)");
-  deepStrictEqual(Object.keys(neg.flagWrites[0]!.cells).sort(), [...x86Flags].sort());
+  deepStrictEqual(Object.keys(neg.flagWrites[0]!.cells).sort(), [...x86StatusFlags].sort());
   ok(neg.events.includes("set op0:8 <- %1"));
 });
 

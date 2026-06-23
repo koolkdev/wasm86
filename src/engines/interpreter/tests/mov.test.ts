@@ -1,8 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { wasmCpuFlagsOf,
-  createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { createWasmCpuStateSnapshot, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -98,22 +97,22 @@ test("executes MOVZX and MOVSX register forms without modifying flags", async ()
 
   assertSingleInstructionExit(zeroExtend.exit);
   strictEqual(zeroExtend.state.eax, 0x80);
-  deepStrictEqual(wasmCpuFlagsOf(zeroExtend.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(zeroExtend.state), flags);
   assertCompletedInstruction(zeroExtend.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(signExtend.exit);
   strictEqual(signExtend.state.ecx, 0xffff_ff80);
-  deepStrictEqual(wasmCpuFlagsOf(signExtend.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(signExtend.state), flags);
   assertCompletedInstruction(signExtend.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(zeroExtendWordDestination.exit);
   strictEqual(zeroExtendWordDestination.state.eax, 0x1234_0080);
-  deepStrictEqual(wasmCpuFlagsOf(zeroExtendWordDestination.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(zeroExtendWordDestination.state), flags);
   assertCompletedInstruction(zeroExtendWordDestination.state, startAddress + 4, 8);
 
   assertSingleInstructionExit(signExtendWordDestination.exit);
   strictEqual(signExtendWordDestination.state.eax, 0x1234_ff80);
-  deepStrictEqual(wasmCpuFlagsOf(signExtendWordDestination.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(signExtendWordDestination.state), flags);
   assertCompletedInstruction(signExtendWordDestination.state, startAddress + 4, 8);
 });
 
@@ -167,7 +166,7 @@ test("executes MOVSX from a word register copy", async () => {
   strictEqual(state.eax, 0x1234_8001);
   strictEqual(state.ebx, 0x0000_8001);
   strictEqual(state.ecx, 0xffff_8001);
-  deepStrictEqual(wasmCpuFlagsOf(state), allFlagsSet);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
   assertCompletedInstruction(state, startAddress + bytes.length, 9);
 });
 
@@ -196,22 +195,22 @@ test("executes MOVZX and MOVSX memory forms", async () => {
 
   assertSingleInstructionExit(zeroExtendByte.exit);
   strictEqual(zeroExtendByte.state.eax, 0xfe);
-  deepStrictEqual(wasmCpuFlagsOf(zeroExtendByte.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(zeroExtendByte.state), flags);
   assertCompletedInstruction(zeroExtendByte.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(zeroExtend.exit);
   strictEqual(zeroExtend.state.eax, 0x80ff);
-  deepStrictEqual(wasmCpuFlagsOf(zeroExtend.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(zeroExtend.state), flags);
   assertCompletedInstruction(zeroExtend.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(signExtendByte.exit);
   strictEqual(signExtendByte.state.eax, 0xffff_ff80);
-  deepStrictEqual(wasmCpuFlagsOf(signExtendByte.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(signExtendByte.state), flags);
   assertCompletedInstruction(signExtendByte.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(signExtend.exit);
   strictEqual(signExtend.state.eax, 0xffff_8001);
-  deepStrictEqual(wasmCpuFlagsOf(signExtend.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(signExtend.state), flags);
   assertCompletedInstruction(signExtend.state, startAddress + 3, 8);
 });
 
@@ -238,12 +237,12 @@ test("executes CMOVcc r16 as a conditional partial register write", async () => 
 
   assertSingleInstructionExit(taken.exit);
   strictEqual(taken.state.edx, 0xaaaa_2222);
-  deepStrictEqual(wasmCpuFlagsOf(taken.state), zeroFlag);
+  deepStrictEqual(wasmCpuStatusFlagsOf(taken.state), zeroFlag);
   assertCompletedInstruction(taken.state, startAddress + 4, 8);
 
   assertSingleInstructionExit(notTaken.exit);
   strictEqual(notTaken.state.edx, 0xaaaa_1111);
-  deepStrictEqual(wasmCpuFlagsOf(notTaken.state), noFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(notTaken.state), noFlags);
   assertCompletedInstruction(notTaken.state, startAddress + 4, 8);
 });
 
@@ -259,7 +258,7 @@ test("CMOVcc r16 memory source faults even when condition is false", async () =>
 
   deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x1_0000, detail: 2 });
   strictEqual(state.edx, initial.edx);
-  deepStrictEqual(wasmCpuFlagsOf(state), wasmCpuFlagsOf(initial));
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(initial));
   strictEqual(state.eip, initial.eip);
   strictEqual(state.instructionCount, initial.instructionCount);
 });
@@ -280,17 +279,17 @@ test("executes register-only SETcc without modifying flags", async () => {
 
   assertSingleInstructionExit(taken.exit);
   strictEqual(taken.state.eax, 0x1234_5601);
-  deepStrictEqual(wasmCpuFlagsOf(taken.state), zeroFlag);
+  deepStrictEqual(wasmCpuStatusFlagsOf(taken.state), zeroFlag);
   assertCompletedInstruction(taken.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(notTaken.exit);
   strictEqual(notTaken.state.eax, 0x1234_5600);
-  deepStrictEqual(wasmCpuFlagsOf(notTaken.state), noFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(notTaken.state), noFlags);
   assertCompletedInstruction(notTaken.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(highByte.exit);
   strictEqual(highByte.state.eax, 0x1234_0178);
-  deepStrictEqual(wasmCpuFlagsOf(highByte.state), noFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(highByte.state), noFlags);
   assertCompletedInstruction(highByte.state, startAddress + 3, 8);
 });
 
@@ -308,12 +307,12 @@ test("executes memory SETcc as a selected byte store", async () => {
 
   assertSingleInstructionExit(taken.exit);
   strictEqual(taken.guestView.getUint8(0x20), 1);
-  deepStrictEqual(wasmCpuFlagsOf(taken.state), zeroFlag);
+  deepStrictEqual(wasmCpuStatusFlagsOf(taken.state), zeroFlag);
   assertCompletedInstruction(taken.state, startAddress + 3, 8);
 
   assertSingleInstructionExit(notTaken.exit);
   strictEqual(notTaken.guestView.getUint8(0x20), 0);
-  deepStrictEqual(wasmCpuFlagsOf(notTaken.state), noFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(notTaken.state), noFlags);
   assertCompletedInstruction(notTaken.state, startAddress + 3, 8);
 });
 
@@ -329,11 +328,11 @@ test("executes multi-byte NOP without reading memory or modifying flags", async 
   );
 
   assertSingleInstructionExit(dword.exit);
-  deepStrictEqual(wasmCpuFlagsOf(dword.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(dword.state), flags);
   assertCompletedInstruction(dword.state, startAddress + 4, 8);
 
   assertSingleInstructionExit(word.exit);
-  deepStrictEqual(wasmCpuFlagsOf(word.state), flags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(word.state), flags);
   assertCompletedInstruction(word.state, startAddress + 4, 8);
 });
 

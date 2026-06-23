@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert";
 
 import type { StateChannel } from "#ir/slots.js";
-import type { X86Flag } from "#x86/flags.js";
+import { x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
 import { u32 } from "#x86/numeric.js";
 import type { WasmCpuState, WasmCpuStateInit, WasmCpuStateSnapshot } from "#wasm/host/cpu-state.js";
 import {
@@ -10,13 +10,13 @@ import {
   WASM_CPU_STATE_BYTE_LENGTH,
   WASM_CPU_STATE_FIELDS,
   WASM_CPU_STATE_LAYOUT,
-  WASM_CPU_FLAG_BYTE_OFFSETS,
+  wasmCpuFlagByteOffset,
   type WasmCpuStateField
 } from "#wasm/cpu-state-layout.js";
 
 export type { WasmCpuStateInit, WasmCpuStateSnapshot } from "#wasm/host/cpu-state.js";
 export type { WasmCpuStateField } from "#wasm/cpu-state-layout.js";
-export type WasmCpuStateFlag = X86Flag;
+export type WasmCpuStatusFlag = X86StatusFlag;
 
 export const wasmCpuStateSnapshotFields = WASM_CPU_STATE_FIELDS;
 
@@ -107,17 +107,23 @@ export function writeWasmCpuStateChannel(view: DataView, channel: StateChannel, 
 }
 
 export function readWasmCpuFlagByte(view: DataView, flag: X86Flag): number {
-  return view.getUint8(WASM_CPU_FLAG_BYTE_OFFSETS[flag]);
+  return view.getUint8(wasmCpuFlagByteOffset(flag));
 }
 
 export function writeWasmCpuFlagByte(view: DataView, flag: X86Flag, value: number): void {
-  view.setUint8(WASM_CPU_FLAG_BYTE_OFFSETS[flag], value === 0 ? 0 : 1);
+  view.setUint8(wasmCpuFlagByteOffset(flag), value === 0 ? 0 : 1);
 }
 
-export function wasmCpuFlagsOf(
-  state: Pick<WasmCpuStateSnapshot, X86Flag>
-): Readonly<Record<X86Flag, number>> {
-  return { CF: state.CF, PF: state.PF, AF: state.AF, ZF: state.ZF, SF: state.SF, OF: state.OF };
+export function wasmCpuStatusFlagsOf(
+  state: Pick<WasmCpuStateSnapshot, X86StatusFlag>
+): Readonly<Record<X86StatusFlag, number>> {
+  const flags = {} as Record<X86StatusFlag, number>;
+
+  for (const flag of x86StatusFlags) {
+    flags[flag] = state[flag];
+  }
+
+  return flags;
 }
 
 export function wasmCpuStateSnapshotsEqual(left: WasmCpuStateSnapshot, right: WasmCpuStateSnapshot): boolean {

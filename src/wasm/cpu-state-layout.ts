@@ -24,7 +24,12 @@ export const WASM_CPU_STATE_LAYOUT = {
   AF: { offset: 46, byteLength: 1 },
   ZF: { offset: 47, byteLength: 1 },
   SF: { offset: 48, byteLength: 1 },
-  OF: { offset: 49, byteLength: 1 }
+  OF: { offset: 49, byteLength: 1 },
+  DF: { offset: 50, byteLength: 1 },
+  TF: { offset: 51, byteLength: 1 },
+  NT: { offset: 52, byteLength: 1 },
+  AC: { offset: 53, byteLength: 1 },
+  ID: { offset: 54, byteLength: 1 }
 } as const satisfies Readonly<Record<string, WasmCpuStateLayoutEntry>>;
 
 export type WasmCpuStateField = keyof typeof WASM_CPU_STATE_LAYOUT;

@@ -1,6 +1,5 @@
-import type { X86Flag } from "#x86/flags.js";
+import { x86Flags, type X86Flag } from "#x86/flags.js";
 import { registerAlias } from "#x86/registers.js";
-import { x86Flags } from "#x86/flags.js";
 import { reg16, reg32, reg8, type Reg32, type RegName } from "#x86/types.js";
 
 export type GprChannel = Readonly<{

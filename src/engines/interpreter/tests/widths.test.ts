@@ -3,8 +3,11 @@ import { test } from "node:test";
 
 import { ExitReason } from "#wasm/exit.js";
 import { startAddress } from "#wasm/tests/helpers.js";
-import { wasmCpuFlagsOf,
-  createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import {
+  createWasmCpuStateSnapshot,
+  wasmCpuStatusFlagsOf,
+  type WasmCpuStateSnapshot
+} from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -108,7 +111,7 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(add8.exit);
   strictEqual(add8.state.eax, 0xffff_ff00);
-  deepStrictEqual(wasmCpuFlagsOf(add8.state), addWraparoundFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(add8.state), addWraparoundFlags);
 
   const sub16 = await executeInstruction([0x66, 0x2d, 0x01, 0x00], createWasmCpuStateSnapshot({
     eax: 0xffff_0000,
@@ -119,7 +122,7 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(sub16.exit);
   strictEqual(sub16.state.eax, 0xffff_ffff);
-  deepStrictEqual(wasmCpuFlagsOf(sub16.state), subBorrowFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(sub16.state), subBorrowFlags);
 
   const cmp8 = await executeInstruction([0x3c, 0x80], createWasmCpuStateSnapshot({
     eax: 0x80,
@@ -130,7 +133,7 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(cmp8.exit);
   strictEqual(cmp8.state.eax, 0x80);
-  deepStrictEqual(wasmCpuFlagsOf(cmp8.state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(cmp8.state), zeroResultFlags);
 
   const test16 = await executeInstruction([0x66, 0xa9, 0x00, 0x80], createWasmCpuStateSnapshot({
     eax: 0x8000,
@@ -141,7 +144,7 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(test16.exit);
   strictEqual(test16.state.eax, 0x8000);
-  deepStrictEqual(wasmCpuFlagsOf(test16.state), signLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(test16.state), signLogicFlags);
 });
 
 test("unsupported prefixed opcode streams terminate without changing architectural state", async () => {
