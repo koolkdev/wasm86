@@ -114,6 +114,117 @@ export const ADD = mnemonic("add", [
   })
 ]);
 
+export const ADC = mnemonic("adc", [
+  // 10 /r: ADC r/m8, r8
+  form("rm8_r8", {
+    opcode: [0x10],
+    operands: [modrmRm("rm8"), modrmReg("r8")],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 8)
+  }),
+  // 12 /r: ADC r8, r/m8
+  form("r8_rm8", {
+    opcode: [0x12],
+    operands: [modrmReg("r8"), modrmRm("rm8")],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 8)
+  }),
+  // 14 ib: ADC AL, imm8
+  form("al_imm8", {
+    opcode: [0x14],
+    operands: [implicitReg("al"), imm(8)],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 8)
+  }),
+  // 80 /2 ib: ADC r/m8, imm8
+  form("rm8_imm8", {
+    opcode: [0x80],
+    modrm: { match: { reg: 2 } },
+    operands: [modrmRm("rm8"), imm(8)],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 8)
+  }),
+  // 66 11 /r: ADC r/m16, r16
+  form("rm16_r16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x11],
+    operands: [modrmRm("rm16"), modrmReg("r16")],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 16)
+  }),
+  // 66 13 /r: ADC r16, r/m16
+  form("r16_rm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x13],
+    operands: [modrmReg("r16"), modrmRm("rm16")],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 16)
+  }),
+  // 11 /r: ADC r/m32, r32
+  form("rm32_r32", {
+    opcode: [0x11],
+    operands: [modrmRm("rm32"), modrmReg("r32")],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 32)
+  }),
+  // 13 /r: ADC r32, r/m32
+  form("r32_rm32", {
+    opcode: [0x13],
+    operands: [modrmReg("r32"), modrmRm("rm32")],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 32)
+  }),
+  // 15 id: ADC EAX, imm32
+  form("eax_imm32", {
+    opcode: [0x15],
+    operands: [implicitReg("eax"), imm(32)],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 32)
+  }),
+  // 66 15 iw: ADC AX, imm16
+  form("ax_imm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x15],
+    operands: [implicitReg("ax"), imm(16)],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 16)
+  }),
+  // 66 81 /2 iw: ADC r/m16, imm16
+  form("rm16_imm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x81],
+    modrm: { match: { reg: 2 } },
+    operands: [modrmRm("rm16"), imm(16)],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 16)
+  }),
+  // 81 /2 id: ADC r/m32, imm32
+  form("rm32_imm32", {
+    opcode: [0x81],
+    modrm: { match: { reg: 2 } },
+    operands: [modrmRm("rm32"), imm(32)],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 32)
+  }),
+  // 66 83 /2 ib: ADC r/m16, sign-extended imm8
+  form("rm16_imm8", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x83],
+    modrm: { match: { reg: 2 } },
+    operands: [modrmRm("rm16"), imm(8, "sign", 16)],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 16)
+  }),
+  // 83 /2 ib: ADC r/m32, sign-extended imm8
+  form("rm32_imm8", {
+    opcode: [0x83],
+    modrm: { match: { reg: 2 } },
+    operands: [modrmRm("rm32"), imm(8, "sign", 32)],
+    format: { syntax: "adc {0}, {1}" },
+    semantics: aluSemantic("adc", 32)
+  })
+]);
+
 export const OR = mnemonic("or", [
   // 08 /r: OR r/m8, r8
   form("rm8_r8", {
@@ -222,6 +333,117 @@ export const OR = mnemonic("or", [
     operands: [modrmRm("rm32"), imm(8, "sign", 32)],
     format: { syntax: "or {0}, {1}" },
     semantics: aluSemantic("or", 32)
+  })
+]);
+
+export const SBB = mnemonic("sbb", [
+  // 18 /r: SBB r/m8, r8
+  form("rm8_r8", {
+    opcode: [0x18],
+    operands: [modrmRm("rm8"), modrmReg("r8")],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 8)
+  }),
+  // 1A /r: SBB r8, r/m8
+  form("r8_rm8", {
+    opcode: [0x1a],
+    operands: [modrmReg("r8"), modrmRm("rm8")],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 8)
+  }),
+  // 1C ib: SBB AL, imm8
+  form("al_imm8", {
+    opcode: [0x1c],
+    operands: [implicitReg("al"), imm(8)],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 8)
+  }),
+  // 80 /3 ib: SBB r/m8, imm8
+  form("rm8_imm8", {
+    opcode: [0x80],
+    modrm: { match: { reg: 3 } },
+    operands: [modrmRm("rm8"), imm(8)],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 8)
+  }),
+  // 66 19 /r: SBB r/m16, r16
+  form("rm16_r16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x19],
+    operands: [modrmRm("rm16"), modrmReg("r16")],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 16)
+  }),
+  // 66 1B /r: SBB r16, r/m16
+  form("r16_rm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x1b],
+    operands: [modrmReg("r16"), modrmRm("rm16")],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 16)
+  }),
+  // 19 /r: SBB r/m32, r32
+  form("rm32_r32", {
+    opcode: [0x19],
+    operands: [modrmRm("rm32"), modrmReg("r32")],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 32)
+  }),
+  // 1B /r: SBB r32, r/m32
+  form("r32_rm32", {
+    opcode: [0x1b],
+    operands: [modrmReg("r32"), modrmRm("rm32")],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 32)
+  }),
+  // 1D id: SBB EAX, imm32
+  form("eax_imm32", {
+    opcode: [0x1d],
+    operands: [implicitReg("eax"), imm(32)],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 32)
+  }),
+  // 66 1D iw: SBB AX, imm16
+  form("ax_imm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x1d],
+    operands: [implicitReg("ax"), imm(16)],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 16)
+  }),
+  // 66 81 /3 iw: SBB r/m16, imm16
+  form("rm16_imm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x81],
+    modrm: { match: { reg: 3 } },
+    operands: [modrmRm("rm16"), imm(16)],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 16)
+  }),
+  // 81 /3 id: SBB r/m32, imm32
+  form("rm32_imm32", {
+    opcode: [0x81],
+    modrm: { match: { reg: 3 } },
+    operands: [modrmRm("rm32"), imm(32)],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 32)
+  }),
+  // 66 83 /3 ib: SBB r/m16, sign-extended imm8
+  form("rm16_imm8", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x83],
+    modrm: { match: { reg: 3 } },
+    operands: [modrmRm("rm16"), imm(8, "sign", 16)],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 16)
+  }),
+  // 83 /3 ib: SBB r/m32, sign-extended imm8
+  form("rm32_imm8", {
+    opcode: [0x83],
+    modrm: { match: { reg: 3 } },
+    operands: [modrmRm("rm32"), imm(8, "sign", 32)],
+    format: { syntax: "sbb {0}, {1}" },
+    semantics: aluSemantic("sbb", 32)
   })
 ]);
 

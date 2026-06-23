@@ -12,7 +12,7 @@ import {
 } from "./flag-helpers.js";
 import { guardStorageRead, guardStorageReadWrite } from "./memory.js";
 
-export type AluOp = "add" | "sub" | "xor" | "and" | "or";
+export type AluOp = "add" | "adc" | "sub" | "sbb" | "xor" | "and" | "or";
 export type UnaryAluOp = "inc" | "dec" | "not" | "neg";
 
 export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
@@ -73,8 +73,18 @@ function aluResultAndFlags(
   switch (op) {
     case "add":
       return buildAddResultAndFlags(s, { width, left, right });
+    case "adc": {
+      const oldCf = s.readFlag("CF");
+
+      return buildAddResultAndFlags(s, { width, left, right, carryIn: oldCf });
+    }
     case "sub":
       return buildSubResultAndFlags(s, { width, left, right });
+    case "sbb": {
+      const oldCf = s.readFlag("CF");
+
+      return buildSubResultAndFlags(s, { width, left, right, borrowIn: oldCf });
+    }
     case "xor":
     case "and":
     case "or":

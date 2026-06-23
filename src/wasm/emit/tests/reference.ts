@@ -4,7 +4,7 @@ import { widthMask, type OperandWidth } from "#x86/types.js";
 // Test-local arithmetic-flag reference for action e2e ALU cases. It avoids
 // production flag helpers and records AF = 0 for logic ops.
 
-export type AluOp = "add" | "or" | "and" | "sub" | "xor" | "cmp" | "test";
+export type AluOp = "add" | "adc" | "or" | "and" | "sub" | "sbb" | "xor" | "cmp" | "test";
 
 export type FlagByte = 0 | 1;
 
@@ -17,16 +17,27 @@ export type AluReference = Readonly<{
   flags: AluFlags;
 }>;
 
-export function aluReference(op: AluOp, width: OperandWidth, left: number, right: number): AluReference {
+export function aluReference(
+  op: AluOp,
+  width: OperandWidth,
+  left: number,
+  right: number,
+  carryOrBorrow = 0
+): AluReference {
   const a = mask(width, left);
   const b = mask(width, right);
+  const oldCf = carryOrBorrow === 0 ? 0 : 1;
 
   switch (op) {
     case "add":
       return addReference(width, a, b);
+    case "adc":
+      return addReference(width, a, b, oldCf);
     case "sub":
     case "cmp":
       return subReference(width, a, b, op === "cmp");
+    case "sbb":
+      return subReference(width, a, b, false, oldCf);
     case "and":
     case "or":
     case "xor":
@@ -35,28 +46,28 @@ export function aluReference(op: AluOp, width: OperandWidth, left: number, right
   }
 }
 
-function addReference(width: OperandWidth, a: number, b: number): AluReference {
-  const result = mask(width, a + b);
+function addReference(width: OperandWidth, a: number, b: number, carryIn = 0): AluReference {
+  const result = mask(width, a + b + carryIn);
 
   return {
     result,
     flags: {
       ...zsp(width, result),
-      CF: a + b > widthMask(width) ? 1 : 0,
+      CF: a + b + carryIn > widthMask(width) ? 1 : 0,
       AF: nibbleCarry(a, b, result),
       OF: signBit(width, (a ^ result) & (b ^ result))
     }
   };
 }
 
-function subReference(width: OperandWidth, a: number, b: number, discard: boolean): AluReference {
-  const result = mask(width, a - b);
+function subReference(width: OperandWidth, a: number, b: number, discard: boolean, borrowIn = 0): AluReference {
+  const result = mask(width, a - b - borrowIn);
 
   return {
     result: discard ? a : result,
     flags: {
       ...zsp(width, result),
-      CF: a < b ? 1 : 0,
+      CF: a < b + borrowIn ? 1 : 0,
       AF: nibbleCarry(a, b, result),
       OF: signBit(width, (a ^ b) & (a ^ result))
     }

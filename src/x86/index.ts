@@ -1,5 +1,5 @@
 import { defineIsa } from "./schema/builders.js";
-import { ADD, AND, DEC, INC, NEG, NOT, OR, SUB, XOR } from "./defs/alu.js";
+import { ADC, ADD, AND, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR } from "./defs/alu.js";
 import { CALL, JCC, JMP, RET } from "./defs/control.js";
 import { CMP, TEST } from "./defs/cmp-test.js";
 import { LEA } from "./defs/lea.js";
@@ -21,7 +21,9 @@ export const X86_32_CORE = defineIsa({
     XCHG,
     LEA,
     ADD,
+    ADC,
     OR,
+    SBB,
     AND,
     SUB,
     XOR,

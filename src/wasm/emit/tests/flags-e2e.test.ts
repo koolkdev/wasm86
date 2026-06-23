@@ -25,11 +25,14 @@ const aluCases: readonly Readonly<{
   name: string;
   op: AluOp;
   bytes: readonly number[];
+  carryIn?: number;
 }>[] = [
   { name: "add ebx, ecx", op: "add", bytes: [0x01, 0xcb] },
+  { name: "adc ebx, ecx", op: "adc", bytes: [0x11, 0xcb], carryIn: 1 },
   { name: "or ebx, ecx", op: "or", bytes: [0x09, 0xcb] },
   { name: "and ebx, ecx", op: "and", bytes: [0x21, 0xcb] },
   { name: "sub ebx, ecx", op: "sub", bytes: [0x29, 0xcb] },
+  { name: "sbb ebx, ecx", op: "sbb", bytes: [0x19, 0xcb], carryIn: 1 },
   { name: "xor ebx, ecx", op: "xor", bytes: [0x31, 0xcb] },
   { name: "cmp ebx, ecx", op: "cmp", bytes: [0x39, 0xcb] },
   { name: "test ebx, ecx", op: "test", bytes: [0x85, 0xcb] }
@@ -59,7 +62,7 @@ for (const aluCase of aluCases) {
         eip: instruction.address,
         ...allFlagsSet
       };
-      const reference = aluReference(aluCase.op, 32, pair.left, pair.right);
+      const reference = aluReference(aluCase.op, 32, pair.left, pair.right, aluCase.carryIn ?? 0);
 
       const builder = createIrBlockBuilder();
 

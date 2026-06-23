@@ -1,4 +1,4 @@
-import { imm16, imm32, mem, mem32, reg, reg32, signImm8, testDecodeFixtures, type DecoderFixture } from "./helpers.js";
+import { imm8, imm16, imm32, mem, mem32, reg, reg32, signImm8, testDecodeFixtures, type DecoderFixture } from "./helpers.js";
 
 const fixtures: readonly DecoderFixture[] = [
   {
@@ -23,6 +23,27 @@ const fixtures: readonly DecoderFixture[] = [
     id: "add.r32_rm32"
   },
   {
+    name: "adc al, imm8",
+    bytes: [0x14, 0x7f],
+    mnemonic: "adc",
+    operands: [reg("al"), imm8(0x7f)],
+    id: "adc.al_imm8"
+  },
+  {
+    name: "adc eax, imm32",
+    bytes: [0x15, 0x78, 0x56, 0x34, 0x12],
+    mnemonic: "adc",
+    operands: [reg32("eax"), imm32(0x1234_5678)],
+    id: "adc.eax_imm32"
+  },
+  {
+    name: "adc eax, ebx",
+    bytes: [0x11, 0xd8],
+    mnemonic: "adc",
+    operands: [reg32("eax"), reg32("ebx")],
+    id: "adc.rm32_r32"
+  },
+  {
     name: "or eax, ebx",
     bytes: [0x09, 0xd8],
     mnemonic: "or",
@@ -35,6 +56,27 @@ const fixtures: readonly DecoderFixture[] = [
     mnemonic: "or",
     operands: [reg32("ebx"), reg32("eax")],
     id: "or.r32_rm32"
+  },
+  {
+    name: "sbb ax, imm16 with operand-size override",
+    bytes: [0x66, 0x1d, 0x34, 0x12],
+    mnemonic: "sbb",
+    operands: [reg("ax"), imm16(0x1234)],
+    id: "sbb.ax_imm16"
+  },
+  {
+    name: "sbb eax, imm32",
+    bytes: [0x1d, 0x01, 0x00, 0x00, 0x00],
+    mnemonic: "sbb",
+    operands: [reg32("eax"), imm32(1)],
+    id: "sbb.eax_imm32"
+  },
+  {
+    name: "sbb ebx, eax",
+    bytes: [0x1b, 0xd8],
+    mnemonic: "sbb",
+    operands: [reg32("ebx"), reg32("eax")],
+    id: "sbb.r32_rm32"
   },
   {
     name: "and eax, ebx",
@@ -184,6 +226,20 @@ const fixtures: readonly DecoderFixture[] = [
     id: "or.rm32_imm32"
   },
   {
+    name: "group 81 adc eax, imm32",
+    bytes: [0x81, 0xd0, 0x78, 0x56, 0x34, 0x12],
+    mnemonic: "adc",
+    operands: [reg32("eax"), imm32(0x1234_5678)],
+    id: "adc.rm32_imm32"
+  },
+  {
+    name: "group 81 sbb eax, imm32",
+    bytes: [0x81, 0xd8, 0x01, 0x00, 0x00, 0x00],
+    mnemonic: "sbb",
+    operands: [reg32("eax"), imm32(1)],
+    id: "sbb.rm32_imm32"
+  },
+  {
     name: "group 81 and eax, imm32",
     bytes: [0x81, 0xe0, 0x78, 0x56, 0x34, 0x12],
     mnemonic: "and",
@@ -217,6 +273,20 @@ const fixtures: readonly DecoderFixture[] = [
     mnemonic: "or",
     operands: [reg32("eax"), signImm8(0xffff_ffff)],
     id: "or.rm32_imm8"
+  },
+  {
+    name: "group 83 adc eax, imm8",
+    bytes: [0x83, 0xd0, 0xff],
+    mnemonic: "adc",
+    operands: [reg32("eax"), signImm8(0xffff_ffff)],
+    id: "adc.rm32_imm8"
+  },
+  {
+    name: "group 83 sbb ebx, imm8",
+    bytes: [0x83, 0xdb, 0x80],
+    mnemonic: "sbb",
+    operands: [reg32("ebx"), signImm8(0xffff_ff80)],
+    id: "sbb.rm32_imm8"
   },
   {
     name: "group 83 and eax, imm8",

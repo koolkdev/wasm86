@@ -33,6 +33,15 @@ export async function executeInstruction(
   initialState: WasmCpuStateSnapshot,
   memory: readonly GuestMemoryBytes[] = []
 ): Promise<ExecutedInstruction> {
+  return executeProgram(bytes, initialState, 1, memory);
+}
+
+export async function executeProgram(
+  bytes: readonly number[],
+  initialState: WasmCpuStateSnapshot,
+  fuel: number,
+  memory: readonly GuestMemoryBytes[] = []
+): Promise<ExecutedInstruction> {
   const interpreter = await instantiateWasmInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
@@ -41,7 +50,7 @@ export async function executeInstruction(
     writeGuestBytes(interpreter.guestView, entry.address, entry.bytes);
   }
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.run(fuel);
   const state = readInterpreterState(interpreter.stateView);
 
   return { exit, state, guestView: interpreter.guestView };

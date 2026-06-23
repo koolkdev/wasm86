@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 233);
+  strictEqual(X86_32_CORE.instructions.length, 261);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -48,7 +48,11 @@ test("x86-32 core registers the initial instruction surface", () => {
     "add.rm16_imm8",
     "add.ax_imm16",
     "add.rm32_imm8",
+    "adc.eax_imm32",
+    "adc.rm32_imm8",
     "or.rm32_imm8",
+    "sbb.eax_imm32",
+    "sbb.rm32_imm8",
     "and.rm32_imm8",
     "sub.rm32_imm8",
     "xor.eax_imm32",
@@ -251,6 +255,8 @@ test("xchg semantics read both operands before writing either operand", () => {
 
 test("group opcode forms use modrm.match.reg for Intel slash-digit notation", () => {
   const or = instruction("or.rm32_imm8");
+  const adc = instruction("adc.rm32_imm8");
+  const sbb = instruction("sbb.rm32_imm32");
   const and = instruction("and.rm32_imm32");
   const sub = instruction("sub.rm32_imm8");
   const not = instruction("not.rm32");
@@ -262,6 +268,20 @@ test("group opcode forms use modrm.match.reg for Intel slash-digit notation", ()
   deepStrictEqual(or.operands, [
     { kind: "modrm.rm", type: "rm32" },
     { kind: "imm", width: 8, semanticWidth: 32, extension: "sign" }
+  ]);
+
+  deepStrictEqual(adc.opcode, [0x83]);
+  deepStrictEqual(adc.modrm, { match: { reg: 2 } });
+  deepStrictEqual(adc.operands, [
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "imm", width: 8, semanticWidth: 32, extension: "sign" }
+  ]);
+
+  deepStrictEqual(sbb.opcode, [0x81]);
+  deepStrictEqual(sbb.modrm, { match: { reg: 3 } });
+  deepStrictEqual(sbb.operands, [
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "imm", width: 32 }
   ]);
 
   deepStrictEqual(and.opcode, [0x81]);

@@ -105,6 +105,10 @@ test("uses ModRM match fields for slash-digit groups", () => {
   const sub = ok(decodeBytes([0x83, 0xeb, 0xff]));
   // 83 /1 ib: OR r/m32, sign-extended imm8
   const or = ok(decodeBytes([0x83, 0xcb, 0x7f]));
+  // 83 /2 ib: ADC r/m32, sign-extended imm8
+  const adc = ok(decodeBytes([0x83, 0xd3, 0xff]));
+  // 83 /3 ib: SBB r/m32, sign-extended imm8
+  const sbb = ok(decodeBytes([0x83, 0xdb, 0x80]));
   // 81 /4 id: AND r/m32, imm32
   const and = ok(decodeBytes([0x81, 0xe3, 0x78, 0x56, 0x34, 0x12]));
   // 81 /6 id: XOR r/m32, imm32
@@ -118,6 +122,14 @@ test("uses ModRM match fields for slash-digit groups", () => {
   strictEqual(or.spec.format.syntax, "or {0}, {1}");
   deepStrictEqual(or.operands, [reg32("ebx"), signImm8(0x7f)]);
 
+  strictEqual(adc.spec.id, "adc.rm32_imm8");
+  strictEqual(adc.spec.format.syntax, "adc {0}, {1}");
+  deepStrictEqual(adc.operands, [reg32("ebx"), signImm8(0xffff_ffff)]);
+
+  strictEqual(sbb.spec.id, "sbb.rm32_imm8");
+  strictEqual(sbb.spec.format.syntax, "sbb {0}, {1}");
+  deepStrictEqual(sbb.operands, [reg32("ebx"), signImm8(0xffff_ff80)]);
+
   strictEqual(and.spec.id, "and.rm32_imm32");
   strictEqual(and.spec.format.syntax, "and {0}, {1}");
   deepStrictEqual(and.operands, [reg32("ebx"), imm32(0x1234_5678)]);
@@ -128,14 +140,14 @@ test("uses ModRM match fields for slash-digit groups", () => {
 });
 
 test("rejects unregistered grouped opcodes after ModRM.reg dispatch", () => {
-  // 83 /2 ib is not registered in the current ISA subset.
-  const decoded = decodeBytes([0x83, 0xd0, 0x01]);
+  // F7 /1 remains unregistered in the current ISA subset.
+  const decoded = decodeBytes([0xf7, 0xc8]);
 
   strictEqual(decoded.kind, "unsupported");
   if (decoded.kind === "unsupported") {
     strictEqual(decoded.length, 2);
-    deepStrictEqual(decoded.raw, [0x83, 0xd0]);
-    strictEqual(decoded.unsupportedByte, 0x83);
+    deepStrictEqual(decoded.raw, [0xf7, 0xc8]);
+    strictEqual(decoded.unsupportedByte, 0xf7);
   }
 });
 

@@ -12,7 +12,7 @@ import { leaveSemantic, popSemantic } from "#x86/semantics/stack.js";
 import { testSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 
-import { buildSemanticTrace, operands, regOperands } from "./test-semantics-trace.js";
+import { buildSemanticTrace, flagCell, operands, regOperands, type SemanticTrace } from "./test-semantics-trace.js";
 
 test("mov semantic gets the source, sets the destination, and falls through", () => {
   const trace = buildSemanticTrace(movSemantic(), regOperands(2));
@@ -77,17 +77,47 @@ test("mov semantic guards memory source and destination operands explicitly", ()
   ]);
 });
 
-test("add semantic guards memory read-modify-write before operand reads", () => {
-  const trace = buildSemanticTrace(aluSemantic("add", 32), operands("mem", "reg"));
+test("binary ALU semantics guard memory read-modify-write before operand reads", () => {
+  for (const op of ["add", "adc", "sbb"] as const) {
+    const trace = buildSemanticTrace(aluSemantic(op, 32), operands("mem", "reg"));
 
-  deepStrictEqual(trace.events.slice(0, 5), [
-    "%0 = addr op0",
-    "guard read %0:4",
-    "guard write %0:4",
-    "%1 = get op0:32",
-    "%2 = get op1:32"
-  ]);
-  strictEqual(trace.events.some((event) => event.startsWith("set op0:32 <- %")), true);
+    deepStrictEqual(trace.events.slice(0, 5), [
+      "%0 = addr op0",
+      "guard read %0:4",
+      "guard write %0:4",
+      "%1 = get op0:32",
+      "%2 = get op1:32"
+    ], op);
+    strictEqual(trace.events.some((event) => event.startsWith("set op0:32 <- %")), true, op);
+  }
+});
+
+test("adc and sbb read old CF after operands and before replacing arithmetic flags", () => {
+  for (const op of ["adc", "sbb"] as const) {
+    const trace = buildSemanticTrace(aluSemantic(op, 32), regOperands(2));
+    const flagReadIndex = trace.events.findIndex((event) => event.endsWith(" = flag CF"));
+    const flagsIndex = trace.events.indexOf("flags AF,CF,OF,PF,SF,ZF");
+    const setEvent = trace.events.find((event) => event.startsWith("set op0:32 <- "));
+
+    strictEqual(trace.events[0], "%0 = get op0:32", op);
+    strictEqual(trace.events[1], "%1 = get op1:32", op);
+    strictEqual(flagReadIndex, 2, op);
+    strictEqual(flagsIndex, 3, op);
+    ok(setEvent !== undefined, op);
+
+    const oldCfValue = trace.events[flagReadIndex]!.split(" = ")[0]!;
+    const resultValue = setEvent.split(" <- ")[1]!;
+    const write = trace.flagWrites[0]!;
+    const resultDerivedFlags = op === "adc"
+      ? x86StatusFlags
+      : x86StatusFlags.filter((flag) => flag !== "CF");
+
+    deepStrictEqual(Object.keys(write.cells).sort(), [...x86StatusFlags].sort(), op);
+    for (const flag of resultDerivedFlags) {
+      strictEqual(referencesValue(trace, trace.def(flagCell(write, flag)), resultValue), true, `${op} ${flag}`);
+    }
+    strictEqual(referencesValue(trace, trace.def(flagCell(write, "CF")), oldCfValue), true, `${op} CF input`);
+  }
 });
 
 test("xchg semantic reads both operands before writing either operand", () => {
@@ -206,3 +236,29 @@ test("inc writes partial flags and preserves CF by omitting it", () => {
   strictEqual(trace.flagWrites.length, 1);
   deepStrictEqual(Object.keys(trace.flagWrites[0]!.cells).sort(), ["AF", "OF", "PF", "SF", "ZF"].sort());
 });
+
+function referencesValue(trace: SemanticTrace, definition: string, value: string, seen = new Set<string>()): boolean {
+  if (referencedValues(definition).includes(value)) {
+    return true;
+  }
+
+  for (const display of referencedValues(definition)) {
+    if (seen.has(display)) {
+      continue;
+    }
+    seen.add(display);
+
+    const index = Number(display.slice(1));
+    const nested = trace.defs[index];
+
+    if (nested !== undefined && referencesValue(trace, nested, value, seen)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function referencedValues(definition: string): string[] {
+  return Array.from(definition.matchAll(/%\d+/g), (match) => match[0]);
+}
