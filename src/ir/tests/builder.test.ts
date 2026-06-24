@@ -623,7 +623,7 @@ test("ops after a control terminator in one template fail loudly", () => {
   );
 });
 
-test("jcc after concrete cmp branches through pending ZF with per-edge eip and flag flushes", () => {
+test("jcc after cmp source uses the source-derived condition with per-edge flag flushes", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
@@ -636,7 +636,7 @@ test("jcc after concrete cmp branches through pending ZF with per-edge eip and f
   strictEqual(block.regions.length, 3);
   deepStrictEqual(actions[actions.length - 1], {
     kind: "branch",
-    condition: v.internCompare("eq", v.internBinary("sub", 0, v.internConst(5)), v.internConst(0)),
+    condition: v.internCompare("eq", 0, v.internConst(5)),
     taken: 1,
     notTaken: 2
   });
@@ -710,7 +710,7 @@ test("a block ended by a host trap rejects further instructions", () => {
   );
 });
 
-test("setcc after concrete cmp consumes the pending flag expression", () => {
+test("setcc after cmp source consumes the source-derived condition", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], loc(0x1000, 0x1003));
@@ -718,7 +718,7 @@ test("setcc after concrete cmp consumes the pending flag expression", () => {
 
   const block = builder.finish();
   const v = block.values;
-  // B is the pending CF expression from the cmp; no flag byte is read.
+  // B is derived directly from the cmp source; no flag byte is read.
   const condition = v.internCompare("lt_u", 0, v.internConst(5));
 
   strictEqual(
@@ -784,7 +784,7 @@ test("setcc with no pending flag value builds from flag byte reads", () => {
   );
 });
 
-test("setcc after an intervening add uses the latest pending flag expression", () => {
+test("setcc after an intervening add uses the latest source-expanded flag expression", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], loc(0x1000, 0x1003));
@@ -795,7 +795,7 @@ test("setcc after an intervening add uses the latest pending flag expression", (
   const v = block.values;
   const actions = entryActions(block);
 
-  // E rebuilds from the add's pending ZF expression — no flag byte load.
+  // E rebuilds from the add's source-expanded ZF expression; no flag byte load.
   strictEqual(
     actions.filter((action) => action.kind === "readState" && action.slot.kind === "flag").length,
     0

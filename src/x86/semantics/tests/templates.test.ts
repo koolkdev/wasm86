@@ -134,15 +134,18 @@ test("xchg semantic reads both operands before writing either operand", () => {
   ]);
 });
 
-test("cmp and test semantics write flags without setting operands", () => {
-  for (const [name, template] of [
-    ["cmp", cmpSemantic()],
-    ["test", testSemantic()]
+test("cmp and test semantics emit flag sources without setting operands", () => {
+  for (const [name, template, kind] of [
+    ["cmp", cmpSemantic(), "sub"],
+    ["test", testSemantic(), "logic"]
   ] as const) {
     const trace = buildSemanticTrace(template, regOperands(2));
+    const sources = flagSourceEvents(trace);
 
     strictEqual(trace.events.some((event) => event.startsWith("set ")), false, name);
-    strictEqual(trace.flagWrites.length, 1, name);
+    strictEqual(trace.flagWrites.length, 0, name);
+    strictEqual(sources.length, 1, name);
+    strictEqual(sources[0]!.startsWith(`flagSource ${kind}:32`), true, name);
     deepStrictEqual(trace.events.at(-1), "next");
   }
 });
@@ -217,14 +220,32 @@ test("ret semantic jumps to the popped value after incrementing esp", () => {
   strictEqual(trace.defs[2], "add(%0, 4)");
 });
 
-test("flag-writing templates write the six architectural flag values", () => {
-  for (const [name, template, operands] of [
-    ["add", aluSemantic("add", 32), regOperands(2)],
-    ["cmp", cmpSemantic(), regOperands(2)],
-    ["test", testSemantic(), regOperands(2)],
+test("common flag-producing templates emit flag sources", () => {
+  for (const [name, template, operandInfo, kind] of [
+    ["add", aluSemantic("add", 32), regOperands(2), "add"],
+    ["sub", aluSemantic("sub", 32), regOperands(2), "sub"],
+    ["cmp", cmpSemantic(), regOperands(2), "sub"],
+    ["test", testSemantic(), regOperands(2), "logic"],
+    ["and", aluSemantic("and", 32), regOperands(2), "logic"],
+    ["or", aluSemantic("or", 32), regOperands(2), "logic"],
+    ["xor", aluSemantic("xor", 32), regOperands(2), "logic"]
+  ] as const) {
+    const trace = buildSemanticTrace(template, operandInfo);
+    const sources = flagSourceEvents(trace);
+
+    strictEqual(trace.flagWrites.length, 0, name);
+    strictEqual(sources.length, 1, name);
+    strictEqual(sources[0]!.startsWith(`flagSource ${kind}:32`), true, name);
+  }
+});
+
+test("remaining concrete flag-writing templates write the six architectural flag values", () => {
+  for (const [name, template, operandInfo] of [
+    ["adc", aluSemantic("adc", 32), regOperands(2)],
+    ["sbb", aluSemantic("sbb", 32), regOperands(2)],
     ["neg", unaryAluSemantic("neg", 32), regOperands(1)]
   ] as const) {
-    const trace = buildSemanticTrace(template, operands);
+    const trace = buildSemanticTrace(template, operandInfo);
 
     strictEqual(trace.flagWrites.length, 1, name);
     deepStrictEqual(statusFlagKeys(trace.flagWrites[0]!).sort(), [...x86StatusFlags].sort(), name);
@@ -274,4 +295,8 @@ function directFlagWrites(trace: SemanticTrace): string[] {
 
     return match === null ? [] : [match[1]!];
   });
+}
+
+function flagSourceEvents(trace: SemanticTrace): string[] {
+  return trace.events.filter((event) => event.startsWith("flagSource "));
 }

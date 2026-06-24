@@ -6,11 +6,12 @@ import type { ValueInput } from "#x86/semantics/refs.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import {
   buildAddResultAndFlags,
-  buildCmpFlags,
-  buildLogicResultAndFlags,
+  buildCmpFlagSource,
+  buildFlagSourceValues,
+  buildLogicResultAndFlagSource,
   buildNegFlags,
   buildSubResultAndFlags,
-  buildTestFlags,
+  buildTestFlagSource,
   writeDecFlags,
   writeIncFlags
 } from "#x86/semantics/flag-helpers.js";
@@ -38,27 +39,28 @@ test("ADD and SUB helpers build every arithmetic flag value", () => {
   }
 });
 
-test("CMP helper builds concrete flag values without a result payload", () => {
-  let flags: ReturnType<typeof buildCmpFlags> | undefined;
+test("CMP source materializes all arithmetic flag values without setting a result", () => {
+  let source: ReturnType<typeof buildCmpFlagSource> | undefined;
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 16);
     const right = s.get(s.operand(1), 16);
 
-    flags = buildCmpFlags(s, { width: 16, left, right });
-    s.writeFlags(flags);
+    source = buildCmpFlagSource(s, { width: 16, left, right });
+    s.writeFlags(buildFlagSourceValues(s, source));
   }, regOperands(2));
   const write = onlyFlagWrite(trace);
 
-  strictEqual(flags === undefined ? false : "result" in flags, false);
+  strictEqual(source?.kind, "sub");
+  strictEqual(trace.events.some((event) => event.startsWith("set ")), false);
   assertFlagSet(write, x86StatusFlags);
 });
 
-test("TEST helper builds logic flag values and clears AF", () => {
+test("TEST source materialization builds logic flag values and clears AF", () => {
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
 
-    s.writeFlags(buildTestFlags(s, { width: 32, left, right }));
+    s.writeFlags(buildFlagSourceValues(s, buildTestFlagSource(s, { width: 32, left, right })));
   });
   const write = onlyFlagWrite(trace);
 
@@ -111,7 +113,7 @@ test("parity formulas use popcnt over only the low byte", () => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
 
-    s.writeFlags(buildTestFlags(s, { width: 32, left, right }));
+    s.writeFlags(buildFlagSourceValues(s, buildTestFlagSource(s, { width: 32, left, right })));
   });
   const pf = trace.def(flagCell(onlyFlagWrite(trace), "PF"));
 
@@ -199,15 +201,15 @@ test("result helpers share destination writeback result with flag values", () =>
   ok(trace.def(flagCell(write, "CF")).startsWith(`cmp16.lt_u(${resultValue}, `));
 });
 
-test("logic result helpers produce concrete status flags without direct conditions", () => {
+test("logic source helpers materialize concrete status flags without direct conditions", () => {
   for (const op of ["and", "or", "xor"] as const) {
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), 8);
       const right = s.get(s.operand(1), 8);
-      const built = buildLogicResultAndFlags(s, { width: 8, op, left, right });
+      const built = buildLogicResultAndFlagSource(s, { width: 8, op, left, right });
 
       s.set(s.operand(0), built.result, 8);
-      s.writeFlags(built.flags);
+      s.writeFlags(buildFlagSourceValues(s, built.source));
     });
     const write = onlyFlagWrite(trace);
 

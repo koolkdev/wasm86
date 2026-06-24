@@ -13,7 +13,7 @@ import { setccSemantic } from "#x86/semantics/setcc.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
-// cmp + setcc consumes pending cmp flag expressions, and standalone setcc
+// cmp + setcc consumes source-derived cmp conditions, and standalone setcc
 // rebuilds the condition from flag bytes.
 
 const comparePredicates: ReadonlyArray<
@@ -54,7 +54,7 @@ for (const [cc, predicate] of comparePredicates) {
 
       ok(entry.kind === "entry", "first region is the entry");
 
-      // Pending cmp flag expressions serve setcc: no flag byte is read back.
+      // Source-derived cmp conditions serve setcc: no flag byte is read back.
       strictEqual(
         entry.actions.some(
           (action) => action.kind === "readState" && action.slot.kind === "flag"

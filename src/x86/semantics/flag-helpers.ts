@@ -13,6 +13,11 @@ export type ResultAndFlags = Readonly<{
   flags: StatusFlagValues;
 }>;
 
+export type ResultAndFlagSource = Readonly<{
+  result: Value;
+  source: SimpleFlagSource;
+}>;
+
 export type AddResultAndFlagsInput = Readonly<{
   width: OperandWidth;
   left: ValueInput;
@@ -27,7 +32,7 @@ export type SubResultAndFlagsInput = Readonly<{
   borrowIn?: ValueInput;
 }>;
 
-export type LogicResultAndFlagsInput = Readonly<{
+export type LogicResultInput = Readonly<{
   width: OperandWidth;
   op: LogicFlagOp;
   left: ValueInput;
@@ -96,19 +101,71 @@ export function buildSubResultAndFlags(s: SemanticsBuilder, input: SubResultAndF
   };
 }
 
-export function buildLogicResultAndFlags(s: SemanticsBuilder, input: LogicResultAndFlagsInput): ResultAndFlags {
+export function buildAddResultAndFlagSource(
+  s: SemanticsBuilder,
+  input: BinaryFlagInput
+): ResultAndFlagSource {
   const width = input.width;
   const left = projectInput(s, width, input.left);
   const right = projectInput(s, width, input.right);
-  const rawResult = logicResult(s, input.op, left, right);
-  const result = projectResult(s, width, rawResult);
+  const result = projectResult(s, width, s.i32Add(left, right));
 
   return {
     result,
-    flags: logicFlags(s, width, result)
+    source: { kind: "add", width, left, right, result }
   };
 }
 
+export function buildSubResultAndFlagSource(
+  s: SemanticsBuilder,
+  input: BinaryFlagInput
+): ResultAndFlagSource {
+  const width = input.width;
+  const left = projectInput(s, width, input.left);
+  const right = projectInput(s, width, input.right);
+  const result = projectResult(s, width, s.i32Sub(left, right));
+
+  return {
+    result,
+    source: { kind: "sub", width, left, right, result }
+  };
+}
+
+export function buildLogicResultAndFlagSource(
+  s: SemanticsBuilder,
+  input: LogicResultInput
+): ResultAndFlagSource {
+  const width = input.width;
+  const left = projectInput(s, width, input.left);
+  const right = projectInput(s, width, input.right);
+  const result = projectResult(s, width, logicResult(s, input.op, left, right));
+
+  return {
+    result,
+    source: { kind: "logic", width, result }
+  };
+}
+
+export function buildCmpFlagSource(s: SemanticsBuilder, input: BinaryFlagInput): SimpleFlagSource {
+  const width = input.width;
+  const left = projectInput(s, width, input.left);
+  const right = projectInput(s, width, input.right);
+  const result = projectResult(s, width, s.i32Sub(left, right));
+
+  return { kind: "sub", width, left, right, result };
+}
+
+export function buildTestFlagSource(s: SemanticsBuilder, input: BinaryFlagInput): SimpleFlagSource {
+  return buildLogicResultAndFlagSource(s, {
+    width: input.width,
+    op: "and",
+    left: input.left,
+    right: input.right
+  }).source;
+}
+
+// Transitional eager source materialization. Later stages keep sources pending
+// and resolve only the requested flag or condition.
 export function buildFlagSourceValues(
   s: SemanticsBuilder,
   source: SimpleFlagSource
@@ -140,27 +197,6 @@ export function buildFlagSourceValues(
       return logicFlags(s, source.width, result);
     }
   }
-}
-
-export function buildCmpFlags(s: SemanticsBuilder, input: BinaryFlagInput): StatusFlagValues {
-  const width = input.width;
-  const a = projectInput(s, width, input.left);
-  const b = projectInput(s, width, input.right);
-  const dag = buildBinaryFlagDag(s, width, a, b, s.i32Sub(a, b));
-
-  return {
-    ...zspValues(s, dag),
-    ...subCarryValues(s, dag)
-  };
-}
-
-export function buildTestFlags(s: SemanticsBuilder, input: BinaryFlagInput): StatusFlagValues {
-  const width = input.width;
-  const left = projectInput(s, width, input.left);
-  const right = projectInput(s, width, input.right);
-  const result = projectResult(s, width, s.i32And(left, right));
-
-  return logicFlags(s, width, result);
 }
 
 export function writeIncFlags(

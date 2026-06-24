@@ -1,12 +1,12 @@
-import type { SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
-import type { Value } from "#x86/semantics/refs.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import {
   buildAddResultAndFlags,
-  buildLogicResultAndFlags,
+  buildAddResultAndFlagSource,
+  buildLogicResultAndFlagSource,
   buildNegFlags,
+  buildSubResultAndFlagSource,
   buildSubResultAndFlags,
-  type ResultAndFlags,
   writeDecFlags,
   writeIncFlags
 } from "./flag-helpers.js";
@@ -25,10 +25,48 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
 
     const left = s.get(dst, width);
     const right = s.get(src, width);
-    const { result, flags } = aluResultAndFlags(s, op, width, left, right);
 
-    s.writeFlags(flags);
-    s.set(dst, result, width);
+    switch (op) {
+      case "add": {
+        const { result, source } = buildAddResultAndFlagSource(s, { width, left, right });
+
+        s.writeFlagSource(source);
+        s.set(dst, result, width);
+        return;
+      }
+      case "sub": {
+        const { result, source } = buildSubResultAndFlagSource(s, { width, left, right });
+
+        s.writeFlagSource(source);
+        s.set(dst, result, width);
+        return;
+      }
+      case "xor":
+      case "and":
+      case "or": {
+        const { result, source } = buildLogicResultAndFlagSource(s, { width, op, left, right });
+
+        s.writeFlagSource(source);
+        s.set(dst, result, width);
+        return;
+      }
+      case "adc": {
+        const oldCf = s.readFlag("CF");
+        const { result, flags } = buildAddResultAndFlags(s, { width, left, right, carryIn: oldCf });
+
+        s.writeFlags(flags);
+        s.set(dst, result, width);
+        return;
+      }
+      case "sbb": {
+        const oldCf = s.readFlag("CF");
+        const { result, flags } = buildSubResultAndFlags(s, { width, left, right, borrowIn: oldCf });
+
+        s.writeFlags(flags);
+        s.set(dst, result, width);
+        return;
+      }
+    }
   };
 }
 
@@ -61,33 +99,4 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
 
     s.set(dst, result, width);
   };
-}
-
-function aluResultAndFlags(
-  s: SemanticsBuilder,
-  op: AluOp,
-  width: OperandWidth,
-  left: Value,
-  right: Value
-): ResultAndFlags {
-  switch (op) {
-    case "add":
-      return buildAddResultAndFlags(s, { width, left, right });
-    case "adc": {
-      const oldCf = s.readFlag("CF");
-
-      return buildAddResultAndFlags(s, { width, left, right, carryIn: oldCf });
-    }
-    case "sub":
-      return buildSubResultAndFlags(s, { width, left, right });
-    case "sbb": {
-      const oldCf = s.readFlag("CF");
-
-      return buildSubResultAndFlags(s, { width, left, right, borrowIn: oldCf });
-    }
-    case "xor":
-    case "and":
-    case "or":
-      return buildLogicResultAndFlags(s, { width, op, left, right });
-  }
 }
