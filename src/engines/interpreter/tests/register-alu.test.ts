@@ -7,11 +7,10 @@ import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruc
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
-const addWraparoundFlags = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 } as const;
 const zeroLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
 const signLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 
-test("executes ADD r32, r/m32 and materializes add flags", async () => {
+test("executes ADD r32, r/m32 and commits lazy add flags", async () => {
   const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
     ebx: 1,
@@ -26,7 +25,8 @@ test("executes ADD r32, r/m32 and materializes add flags", async () => {
   strictEqual(state.eax, 0);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), addWraparoundFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 });
 });
 
 test("executes SUB r/m32, r32 and commits lazy sub flags", async () => {

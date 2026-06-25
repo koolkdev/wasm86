@@ -78,13 +78,17 @@ for (const aluCase of aluCases) {
 
       writeWasmCpuStateSnapshot(stateView, initial);
       strictEqual(run(), irBlockCompleted, label);
-      if (aluCase.op === "sub" || aluCase.op === "cmp") {
+      if (aluCase.op === "add" || aluCase.op === "sub" || aluCase.op === "cmp") {
         assertState(
           stateView,
           { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: allFlagsSet },
           label
         );
-        assertLazyFlagState(stateView, { kind: "SUB", width: 32, a: pair.left, b: pair.right }, label);
+        assertLazyFlagState(
+          stateView,
+          { kind: aluCase.op === "add" ? "ADD" : "SUB", width: 32, a: pair.left, b: pair.right },
+          label
+        );
       } else {
         assertState(
           stateView,
@@ -97,7 +101,7 @@ for (const aluCase of aluCases) {
   });
 }
 
-test("two adds in one block store each flag byte once, with the second add's flags", async () => {
+test("two adds in one block store one lazy add record, with the second add's source", async () => {
   // 0x7fff_fffe + 1 + 1: the adds disagree on SF/OF/AF/PF, so the collapsed
   // stores observably carry the second instruction's values.
   const first = ok(decodeBytes([0x01, 0xcb]));
@@ -109,8 +113,8 @@ test("two adds in one block store each flag byte once, with the second add's fla
 
   const block = builder.finish();
 
-  // Dead flag writes collapse in the contract: one writeState per status flag
-  // plus one lazy header clear.
+  // Dead flag writes collapse in the contract: one lazy ADD record for the
+  // final source, with no concrete status flag stores.
   const entry = block.regions[0]!;
 
   assertOk(entry.kind === "entry", "first region is the entry");
@@ -119,17 +123,17 @@ test("two adds in one block store each flag byte once, with the second add's fla
     (action) => action.kind === "writeState" && action.slot.kind === "flag" ? [action.slot.flag] : []
   );
 
-  strictEqual(flagWrites.length, x86StatusFlags.length);
-  strictEqual(new Set(flagWrites).size, x86StatusFlags.length);
+  strictEqual(flagWrites.length, 0);
+  strictEqual(new Set(flagWrites).size, 0);
   strictEqual(
     entry.actions.filter((action) => action.kind === "writeState" && action.slot === lazyFlagsHeaderChannel).length,
     1
   );
 
-  // ...and in the encoding: exactly six flag byte stores plus one lazy header clear.
+  // ...and in the encoding: no flag byte stores plus one lazy header write.
   const body = irBlockBody(block).encode();
 
-  strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Store8).length, 6);
+  strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Store8).length, 0);
   strictEqual(
     wasmBodyMemoryAccesses(body).filter(
       (access) =>
@@ -158,10 +162,10 @@ test("two adds in one block store each flag byte once, with the second add's fla
   strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
-    { regs: { ebx: reference.result, ecx: 0x0000_0001 }, eip: second.nextEip, flags: reference.flags },
+    { regs: { ebx: reference.result, ecx: 0x0000_0001 }, eip: second.nextEip, flags: allFlagsSet },
     "two adds"
   );
-  assertLazyFlagState(stateView, { kind: "NONE", width: 0 }, "two adds");
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: afterFirst.result, b: 0x0000_0001 }, "two adds");
 });
 
 function assertState(

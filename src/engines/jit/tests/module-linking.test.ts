@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { ExitReason } from "#wasm/exit.js";
 import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
-import { readWasmCpuState, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
+import { assertLazyFlagState, readWasmCpuState, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
 import { jitModuleLinkFallbackExportName } from "#engines/jit/compiled-blocks/module-link-table.js";
 import type { WasmCompiledBlockCodeMap } from "#engines/jit/compiled-blocks/block-cache.js";
 import { WasmCompiledBlockCache } from "#engines/jit/compiled-blocks/wasm-cache.js";
@@ -16,7 +16,6 @@ import {
 const aEip = 0x1000;
 const bEip = 0x2000;
 const cEip = 0x3000;
-const addWraparoundFlags = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 } as const;
 const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 
 test("unlinked final static jmp uses module-local fallback stub", () => {
@@ -195,6 +194,7 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
   deepStrictEqual(takenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(takenState.eax, 1);
   deepStrictEqual(wasmCpuStatusFlagsOf(takenState), noFlags);
+  assertLazyFlagState(takenState, { kind: "ADD", width: 32, a: 0, b: 1 }, "taken");
 
   fixture.memories.cpuState.load({ eip: aEip, eax: 0xffff_ffff });
 
@@ -203,7 +203,8 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
 
   deepStrictEqual(notTakenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
   strictEqual(notTakenState.eax, 0);
-  deepStrictEqual(wasmCpuStatusFlagsOf(notTakenState), addWraparoundFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(notTakenState), noFlags);
+  assertLazyFlagState(notTakenState, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 }, "not taken");
 });
 
 test("invalidating compiled target restores dependent module-local fallback", () => {

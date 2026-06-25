@@ -111,8 +111,8 @@ export class PendingStatusFlags {
     if (state.lazySource !== undefined) {
       const source = this.#source(state.lazySource);
 
-      if (source.kind === "sub") {
-        return this.#lazySubSourceFlushes(source);
+      if (source.kind === "add" || source.kind === "sub") {
+        return this.#lazyBinarySourceFlushes(source);
       }
     }
 
@@ -142,7 +142,9 @@ export class PendingStatusFlags {
     return actions;
   }
 
-  #lazySubSourceFlushes(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "sub" }>): readonly WriteStateAction[] {
+  #lazyBinarySourceFlushes(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "add" | "sub" }>): readonly WriteStateAction[] {
+    const kind = source.kind === "add" ? LAZY_FLAGS_KIND.ADD : LAZY_FLAGS_KIND.SUB;
+
     return [
       {
         kind: "writeState",
@@ -157,7 +159,7 @@ export class PendingStatusFlags {
       {
         kind: "writeState",
         slot: lazyFlagsHeaderChannel,
-        value: this.#values.internConst(lazyFlagsHeader(LAZY_FLAGS_KIND.SUB, source.width))
+        value: this.#values.internConst(lazyFlagsHeader(kind, source.width))
       }
     ];
   }

@@ -191,7 +191,7 @@ test("byte-register forms touch only their byte of the register file", async () 
   strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 0x11220744);
   strictEqual(readRegister(interpreter.stateView, "ebx"), 0x77);
-  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "CF"), 1);
+  assertLazyFlagState(interpreter.stateView, { kind: "ADD", width: 8, a: 0x77, b: 0x90 });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 3);
 });
 

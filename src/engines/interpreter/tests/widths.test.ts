@@ -25,7 +25,6 @@ import {
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
-const addWraparoundFlags = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 } as const;
 const signLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 
 test("executes MOV into AL, AH, and prefixed AX register views", async () => {
@@ -110,7 +109,8 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(add8.exit);
   strictEqual(add8.state.eax, 0xffff_ff00);
-  deepStrictEqual(wasmCpuStatusFlagsOf(add8.state), addWraparoundFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(add8.state), allFlagsSet);
+  assertLazyFlagState(add8.state, { kind: "ADD", width: 8, a: 0xff, b: 1 });
 
   const sub16 = await executeInstruction([0x66, 0x2d, 0x01, 0x00], createWasmCpuStateSnapshot({
     eax: 0xffff_0000,

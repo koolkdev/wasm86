@@ -57,8 +57,11 @@ function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncod
   });
 
   for (const width of [8, 16, 32] as const) {
+    emitResolverCase(body, headerLocal, lazyFlagsHeader(WASM_CPU_LAZY_FLAGS_KIND.ADD, width), () => {
+      emitBinaryFlag(body, scratch, helper, "add", width);
+    });
     emitResolverCase(body, headerLocal, lazyFlagsHeader(WASM_CPU_LAZY_FLAGS_KIND.SUB, width), () => {
-      emitSubFlag(body, scratch, helper, width);
+      emitBinaryFlag(body, scratch, helper, "sub", width);
     });
   }
 
@@ -80,13 +83,14 @@ function emitResolverCase(
   body.endBlock();
 }
 
-function emitSubFlag(
+function emitBinaryFlag(
   body: WasmFunctionBodyEncoder,
   scratch: WasmLocalScratchAllocator,
   flag: LazyFlagHelper,
+  kind: "add" | "sub",
   width: OperandWidth
 ): void {
-  const fragment = subFlagFragment(flag, width);
+  const fragment = binaryFlagFragment(flag, kind, width);
 
   scratch.withLocals([wasmValueType.i32], ([outputLocal]) => {
     emitActionFragment(fragment.block, {
@@ -111,13 +115,17 @@ function emitLazyFieldLoad(
   });
 }
 
-function subFlagFragment(flag: LazyFlagHelper, width: OperandWidth): Readonly<{ block: IrBlock; value: ValueId }> {
+function binaryFlagFragment(
+  flag: LazyFlagHelper,
+  kind: "add" | "sub",
+  width: OperandWidth
+): Readonly<{ block: IrBlock; value: ValueId }> {
   const values = new ValueTable();
   const left = values.addActionOutput();
   const right = values.addActionOutput();
-  const result = values.internBinary("sub", left, right);
+  const result = values.internBinary(kind, left, right);
   const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
-    kind: "sub",
+    kind,
     width,
     left,
     right,

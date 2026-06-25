@@ -23,7 +23,7 @@ import { xchgSemantic } from "#x86/semantics/xchg.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
 import {
-  readWasmCpuFlagByte,
+  assertLazyFlagState,
   readWasmCpuStateChannel,
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot
@@ -310,8 +310,7 @@ test("add al, imm8 stays on the byte channel with byte-wide flags", async () => 
   assertCompleted(run());
   // 0xf0 + 0x70 = 0x160: the byte wraps and carries out.
   strictEqual(readRegister(stateView, "eax"), 0x12345660);
-  strictEqual(readWasmCpuFlagByte(stateView, "CF"), 1);
-  strictEqual(readWasmCpuFlagByte(stateView, "ZF"), 0);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 8, a: 0xf0, b: 0x70 });
 });
 
 test("add ax, imm16 stays on the word channel", async () => {
@@ -329,7 +328,7 @@ test("add ax, imm16 stays on the word channel", async () => {
   assertCompleted(run());
   // 0xf00f + 0x2001 = 0x11010: the word wraps and carries out.
   strictEqual(readRegister(stateView, "eax"), 0x12341010);
-  strictEqual(readWasmCpuFlagByte(stateView, "CF"), 1);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 16, a: 0xf00f, b: 0x2001 });
 });
 
 test("mov ah and mov al merge through memory for a final 32-bit read", async () => {
@@ -363,7 +362,7 @@ test("mov ah and mov al merge through memory for a final 32-bit read", async () 
 test("zero compares encode as eqz", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
+  builder.addInstruction(aluSemantic("xor", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
 
   const body = irBlockBody(builder.finish()).encode();
   const opcodes = wasmBodyOpcodes(body);

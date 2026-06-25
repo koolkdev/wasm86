@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { assertLazyFlagState, createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -214,8 +214,9 @@ test("a faulting PUSHFD write reports its eip with prior state flushed", async (
   strictEqual(state.instructionCount, 8);
   deepStrictEqual(
     { CF: state.CF, PF: state.PF, AF: state.AF, ZF: state.ZF, SF: state.SF, OF: state.OF },
-    { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 }
+    { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 }
   );
+  assertLazyFlagState(state, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 });
 });
 
 test("a faulting POPFD read reports its eip with prior state flushed", async () => {
@@ -240,8 +241,9 @@ test("a faulting POPFD read reports its eip with prior state flushed", async () 
   strictEqual(state.instructionCount, 8);
   deepStrictEqual(
     { CF: state.CF, PF: state.PF, AF: state.AF, ZF: state.ZF, SF: state.SF, OF: state.OF },
-    { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 }
+    { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 }
   );
+  assertLazyFlagState(state, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 });
 });
 
 test("executes POP r32 by loading from ESP then incrementing ESP", async () => {

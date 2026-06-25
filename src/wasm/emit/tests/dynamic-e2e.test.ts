@@ -10,7 +10,7 @@ import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic } from "#x86/semantics/mov.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
-import { readWasmCpuFlagByte, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { assertLazyFlagState, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 // One emitted handler body per op+width, with the register indices arriving
@@ -35,21 +35,20 @@ test("one add r/m32, r32 body serves several runtime register pairs", async () =
   assertCompleted(run(0, 1));
   strictEqual(readRegister(stateView, "eax"), 12);
   strictEqual(readRegister(stateView, "ecx"), 7);
-  strictEqual(readWasmCpuFlagByte(stateView, "ZF"), 0);
-  strictEqual(readWasmCpuFlagByte(stateView, "CF"), 0);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 5, b: 7 });
 
   // The far end of the word table, wrapping into CF and ZF.
   writeWasmCpuStateSnapshot(stateView, { edi: 0xffffffff, esp: 1 });
   assertCompleted(run(7, 4));
   strictEqual(readRegister(stateView, "edi"), 0);
   strictEqual(readRegister(stateView, "esp"), 1);
-  strictEqual(readWasmCpuFlagByte(stateView, "ZF"), 1);
-  strictEqual(readWasmCpuFlagByte(stateView, "CF"), 1);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 });
 
   // Indices are masked to 0..7: 8 and 9 land on eax and ecx.
   writeWasmCpuStateSnapshot(stateView, { eax: 2, ecx: 3 });
   assertCompleted(run(8, 9));
   strictEqual(readRegister(stateView, "eax"), 5);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 2, b: 3 });
 });
 
 test("dst == src reads the original value for the result and the flags", async () => {
@@ -62,15 +61,14 @@ test("dst == src reads the original value for the result and the flags", async (
   writeWasmCpuStateSnapshot(stateView, { ebx: 0x21 });
   assertCompleted(run(3, 3));
   strictEqual(readRegister(stateView, "ebx"), 0x42);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 0x21, b: 0x21 });
 
   // The flag expressions consume the dynamic read after the dynamic store:
   // a reload there would see the doubled value and lose the carry.
   writeWasmCpuStateSnapshot(stateView, { ebx: 0x80000000 });
   assertCompleted(run(3, 3));
   strictEqual(readRegister(stateView, "ebx"), 0);
-  strictEqual(readWasmCpuFlagByte(stateView, "CF"), 1);
-  strictEqual(readWasmCpuFlagByte(stateView, "OF"), 1);
-  strictEqual(readWasmCpuFlagByte(stateView, "ZF"), 1);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 0x8000_0000, b: 0x8000_0000 });
 });
 
 test("a static read before a dynamic write to the same register keeps the old value", async () => {
@@ -122,17 +120,19 @@ test("one add r/m8, r8 body serves low and high byte registers", async () => {
   writeWasmCpuStateSnapshot(stateView, { eax: 0x1111f011, ecx: 0x22223022 });
   assertCompleted(run(4, 5));
   strictEqual(readRegister(stateView, "eax"), 0x11112011);
-  strictEqual(readWasmCpuFlagByte(stateView, "CF"), 1);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 8, a: 0xf0, b: 0x30 });
 
   // bh += al: a high destination with a low source in another word.
   writeWasmCpuStateSnapshot(stateView, { ebx: 0x11110711, eax: 2 });
   assertCompleted(run(7, 0));
   strictEqual(readRegister(stateView, "ebx"), 0x11110911);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 8, a: 7, b: 2 });
 
   // ah += ah: the self-aliasing high-byte case.
   writeWasmCpuStateSnapshot(stateView, { eax: 0x2100 });
   assertCompleted(run(4, 4));
   strictEqual(readRegister(stateView, "eax"), 0x4200);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 8, a: 0x21, b: 0x21 });
 });
 
 // The index can be any expression, not just a bound external: here the
@@ -213,5 +213,5 @@ test("a 16-bit dynamic access touches two bytes of the indexed word", async () =
   assertCompleted(run(6, 2));
   strictEqual(readRegister(stateView, "esi"), 0xaaaa0003);
   strictEqual(readRegister(stateView, "edx"), 0xbbbb8002);
-  strictEqual(readWasmCpuFlagByte(stateView, "CF"), 1);
+  assertLazyFlagState(stateView, { kind: "ADD", width: 16, a: 0x8001, b: 0x8002 });
 });

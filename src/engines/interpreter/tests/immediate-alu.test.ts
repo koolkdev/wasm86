@@ -45,7 +45,8 @@ test("executes ADD EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), addWraparoundFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 });
 });
 
 test("executes SUB EAX, imm32", async () => {
@@ -141,6 +142,7 @@ test("executes ADD AX, imm16 with 16-bit wraparound", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_0000);
   assertCompletedInstruction(state, startAddress + 4, 8);
+  assertLazyFlagState(state, { kind: "ADD", width: 16, a: 1, b: 0xffff });
 });
 
 test("executes ADD AX, imm16 without leaking carry into high EAX", async () => {
@@ -155,6 +157,7 @@ test("executes ADD AX, imm16 without leaking carry into high EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x1234_0000);
   assertCompletedInstruction(state, startAddress + 4, 8);
+  assertLazyFlagState(state, { kind: "ADD", width: 16, a: 0xffff, b: 1 });
 });
 
 test("executes SUB AX, imm16 without borrowing from high EAX", async () => {
@@ -184,6 +187,7 @@ test("executes ADD AL, imm8 without leaking carry into high EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_0000);
   assertCompletedInstruction(state, startAddress + 2, 8);
+  assertLazyFlagState(state, { kind: "ADD", width: 8, a: 0xff, b: 1 });
 });
 
 test("executes SUB AL, imm8 without borrowing from high EAX", async () => {

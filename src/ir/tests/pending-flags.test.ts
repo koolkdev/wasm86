@@ -53,17 +53,17 @@ function lazyFlushValue(
   return actions.find((action) => action.slot === slot)?.value;
 }
 
-function assertSubLazyCommit(
+function assertLazyCommit(
   actions: readonly EdgeFlushAction[],
   values: ValueTable,
-  expected: Readonly<{ width: 8 | 16 | 32; left: ValueId; right: ValueId }>
+  expected: Readonly<{ kind: "ADD" | "SUB"; width: 8 | 16 | 32; left: ValueId; right: ValueId }>
 ): void {
   deepStrictEqual(flagFlushEntries(actions), []);
   strictEqual(lazyFlushValue(actions, lazyFlagsAChannel), values.projectTo(expected.width, expected.left));
   strictEqual(lazyFlushValue(actions, lazyFlagsBChannel), values.projectTo(expected.width, expected.right));
   strictEqual(
     lazyFlushValue(actions, lazyFlagsHeaderChannel),
-    values.internConst(lazyFlagsHeader(LAZY_FLAGS_KIND.SUB, expected.width))
+    values.internConst(lazyFlagsHeader(LAZY_FLAGS_KIND[expected.kind], expected.width))
   );
   strictEqual(actions.length, 3);
 }
@@ -96,10 +96,25 @@ test("a sub source commits a lazy runtime record", () => {
 
   const completedFlushes = flags.flushesForEdge("completed");
 
-  assertSubLazyCommit(completedFlushes, values, { width: 32, left, right });
+  assertLazyCommit(completedFlushes, values, { kind: "SUB", width: 32, left, right });
   strictEqual(
     flagValue(flags, "ZF"),
     values.internCompare("eq", result, values.internConst(0))
+  );
+});
+
+test("an add source commits a lazy runtime record", () => {
+  const { values, flags } = createHarness();
+  const left = values.internConst(0xffff_ffff);
+  const right = values.internConst(1);
+  const result = values.internBinary("add", left, right);
+
+  flags.writeStatusFlagsSource({ kind: "add", width: 32, left, right, result });
+
+  assertLazyCommit(flags.flushesForEdge("completed"), values, { kind: "ADD", width: 32, left, right });
+  strictEqual(
+    flagValue(flags, "CF"),
+    values.internCompare("lt_u", values.projectTo(32, result), values.projectTo(32, left))
   );
 });
 
@@ -111,7 +126,18 @@ test("sub lazy commits project narrow operands", () => {
 
   flags.writeStatusFlagsSource({ kind: "sub", width: 16, left, right, result });
 
-  assertSubLazyCommit(flags.flushesForEdge("completed"), values, { width: 16, left, right });
+  assertLazyCommit(flags.flushesForEdge("completed"), values, { kind: "SUB", width: 16, left, right });
+});
+
+test("add lazy commits project narrow operands", () => {
+  const { values, flags } = createHarness();
+  const left = values.internConst(0x1234_5678);
+  const right = values.internConst(0x8765_4321);
+  const result = values.internBinary("add", left, right);
+
+  flags.writeStatusFlagsSource({ kind: "add", width: 8, left, right, result });
+
+  assertLazyCommit(flags.flushesForEdge("completed"), values, { kind: "ADD", width: 8, left, right });
 });
 
 test("condition uses the current sub source directly", () => {
@@ -176,7 +202,7 @@ test("fault edge preserves a clean sub source while direct flag writes update co
   const faultFlushes = flags.flushesForEdge("fault");
   const completedFlushes = flags.flushesForEdge("completed");
 
-  assertSubLazyCommit(faultFlushes, values, { width: 32, left, right });
+  assertLazyCommit(faultFlushes, values, { kind: "SUB", width: 32, left, right });
   assertFullConcreteFlush(completedFlushes, values);
   strictEqual(
     flagFlushValue(completedFlushes, "ZF"),

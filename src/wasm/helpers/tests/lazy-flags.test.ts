@@ -102,11 +102,48 @@ test("lazy flag helpers resolve seeded SUB runtime state", async () => {
   }
 });
 
+test("lazy flag helpers resolve seeded ADD runtime state", async () => {
+  const runtime = await instantiateLazyFlagHelpers();
+  const cases: ReadonlyArray<Readonly<{ width: OperandWidth; left: number; right: number }>> = [
+    { width: 8, left: 0xff, right: 0x01 },
+    { width: 8, left: 0x7f, right: 0x01 },
+    { width: 16, left: 0xffff, right: 0x0001 },
+    { width: 16, left: 0x7fff, right: 0x0001 },
+    { width: 32, left: 0xffff_ffff, right: 0x0000_0001 },
+    { width: 32, left: 0x7fff_ffff, right: 0x0000_0001 }
+  ];
+
+  for (const entry of cases) {
+    writeWasmCpuStateSnapshot(runtime.stateView, {
+      lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.ADD,
+      lazyFlagsWidth: entry.width,
+      lazyFlagsA: entry.left,
+      lazyFlagsB: entry.right,
+      CF: 0,
+      PF: 0,
+      AF: 0,
+      ZF: 0,
+      SF: 0,
+      OF: 0
+    });
+
+    const expected = aluReference("add", entry.width, entry.left, entry.right).flags;
+
+    for (const flag of x86StatusFlags) {
+      strictEqual(
+        runtime.resolve(flag),
+        expected[flag],
+        `${entry.width}-bit ${entry.left.toString(16)} + ${entry.right.toString(16)} ${flag}`
+      );
+    }
+  }
+});
+
 test("lazy flag helpers trap on unsupported runtime metadata", async () => {
   const runtime = await instantiateLazyFlagHelpers();
 
   writeWasmCpuStateSnapshot(runtime.stateView, {
-    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.ADD,
+    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT,
     lazyFlagsWidth: 32,
     ZF: 1
   });

@@ -11,7 +11,12 @@ import { x86Flags, x86StatusFlags, type X86Flag } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
-import { readWasmCpuFlagByte, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import {
+  assertLazyFlagState,
+  readWasmCpuFlagByte,
+  readWasmCpuStateChannel,
+  writeWasmCpuStateSnapshot
+} from "#runtime/tests/fixtures/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags } from "./reference.js";
 
@@ -97,9 +102,10 @@ test("add [mem], r32 read-modify-writes the cell with reference flags", async ()
   strictEqual(guestView.getUint32(0x20, true), reference.result);
   assertState(
     stateView,
-    { regs: { eax: 0x20, ebx: 0xffff_ffff }, eip: instruction.nextEip, flags: reference.flags },
+    { regs: { eax: 0x20, ebx: 0xffff_ffff }, eip: instruction.nextEip, flags: noFlagsSet },
     "add [eax], ebx"
   );
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 1, b: 0xffff_ffff }, "add [eax], ebx");
 });
 
 test("add r32, [mem] loads the operand with reference flags", async () => {
@@ -120,9 +126,10 @@ test("add r32, [mem] loads the operand with reference flags", async () => {
   strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
-    { regs: { eax: 0x20, ebx: reference.result }, eip: instruction.nextEip, flags: reference.flags },
+    { regs: { eax: 0x20, ebx: reference.result }, eip: instruction.nextEip, flags: noFlagsSet },
     "add ebx, [eax]"
   );
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 0x7fff_ffff, b: 1 }, "add ebx, [eax]");
 });
 
 test("byte and word guest accesses load and store at their widths", async () => {
@@ -372,9 +379,10 @@ test("a faulting pushfd write reports its eip with prior state flushed", async (
   assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, 0xffff_fffe, 4, "pushfd fault");
   assertState(
     stateView,
-    { regs: { eax: reference.result, esp: 2 }, eip: instructions[1]!.address, flags: reference.flags },
+    { regs: { eax: reference.result, esp: 2 }, eip: instructions[1]!.address, flags: noFlagsSet },
     "pushfd fault"
   );
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 }, "pushfd fault");
 });
 
 test("a faulting popfd read reports its eip with prior state flushed", async () => {
@@ -396,9 +404,10 @@ test("a faulting popfd read reports its eip with prior state flushed", async () 
   assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength - 2, 4, "popfd fault");
   assertState(
     stateView,
-    { regs: { eax: reference.result, esp: guestByteLength - 2 }, eip: instructions[1]!.address, flags: reference.flags },
+    { regs: { eax: reference.result, esp: guestByteLength - 2 }, eip: instructions[1]!.address, flags: noFlagsSet },
     "popfd fault"
   );
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 }, "popfd fault");
 });
 
 test("a faulting pop [mem] restores esp to its pre-instruction value", async () => {
@@ -427,9 +436,10 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
   strictEqual(guestView.getUint32(0x20, true), 0xcafe_1234);
   assertState(
     stateView,
-    { regs: { esp: reference.result, ebx: guestByteLength - 2 }, eip: instructions[1]!.address, flags: reference.flags },
+    { regs: { esp: reference.result, ebx: guestByteLength - 2 }, eip: instructions[1]!.address, flags: allFlagsSet },
     "pop [mem] fault"
   );
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 0x1c, b: 4 }, "pop [mem] fault");
 });
 
 function blockOf(instructions: readonly IsaDecodedInstruction[]): IrBlock {

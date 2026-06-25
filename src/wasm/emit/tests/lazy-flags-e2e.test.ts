@@ -21,7 +21,7 @@ import {
 import { aluReference, type AluFlags } from "./reference.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
-type SubLazyFlagsCase = Readonly<{ width: OperandWidth; left: number; right: number }>;
+type BinaryLazyFlagsCase = Readonly<{ width: OperandWidth; left: number; right: number }>;
 
 test("jcc resolves seeded SUB32 lazy flag metadata", async () => {
   const cases = [
@@ -53,8 +53,36 @@ test("jcc resolves seeded SUB32 lazy flag metadata", async () => {
   }
 });
 
+test("jcc resolves seeded ADD32 lazy flag metadata", async () => {
+  const cases = [
+    { name: "je taken", bytes: [0x74, 0x20], left: 0xffff_ffff, right: 0x0000_0001, taken: true },
+    { name: "je not taken", bytes: [0x74, 0x20], left: 0x0000_0001, right: 0x0000_0001, taken: false }
+  ] as const;
+
+  for (const entry of cases) {
+    const instruction = ok(decodeBytes(entry.bytes));
+    const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+    const lazyFlags = aluReference("add", 32, entry.left, entry.right).flags;
+    const concreteFlags = oppositeStatusFlags(lazyFlags);
+
+    writeWasmCpuStateSnapshot(stateView, {
+      eip: instruction.address,
+      ...addLazyFlagsState({ width: 32, left: entry.left, right: entry.right }),
+      ...concreteFlags
+    });
+
+    strictEqual(run(), irBlockCompleted, entry.name);
+    strictEqual(
+      readWasmCpuStateChannel(stateView, eipChannel),
+      entry.taken ? relTarget(instruction) : instruction.nextEip,
+      `${entry.name} eip`
+    );
+    assertStatusFlags(stateView, concreteFlags, entry.name);
+  }
+});
+
 test("setcc resolves seeded SUB32 lazy flag metadata", async () => {
-  const cases: readonly SubLazyFlagsCase[] = [
+  const cases: readonly BinaryLazyFlagsCase[] = [
     { width: 32, left: 0x0000_0000, right: 0x0000_0001 },
     { width: 32, left: 0x8000_0000, right: 0x0000_0001 },
     { width: 32, left: 0x1234_5678, right: 0x1234_5678 }
@@ -85,7 +113,7 @@ test("setcc resolves seeded SUB32 lazy flag metadata", async () => {
 });
 
 test("setcc resolves seeded SUB8 and SUB16 lazy flag metadata", async () => {
-  const cases: readonly SubLazyFlagsCase[] = [
+  const cases: readonly BinaryLazyFlagsCase[] = [
     { width: 8, left: 0x1200, right: 0x3401 },
     { width: 8, left: 0x1280, right: 0x3401 },
     { width: 16, left: 0x9999_1234, right: 0x7777_1234 },
@@ -138,6 +166,50 @@ test("pushfd resolves seeded SUB32 lazy flag metadata", async () => {
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esp")), 0x3c);
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
   assertStatusFlags(stateView, concreteFlags, "pushfd");
+});
+
+test("pushfd consumes ADD8, ADD16, and ADD32 records committed by previous add blocks", async () => {
+  const cases = [
+    { name: "ADD8", bytes: [0x00, 0xd8], width: 8, left: 0xff, right: 1 },
+    { name: "ADD16", bytes: [0x66, 0x01, 0xd8], width: 16, left: 0xffff, right: 1 },
+    { name: "ADD32", bytes: [0x01, 0xd8], width: 32, left: 0xffff_ffff, right: 1 }
+  ] as const;
+  const nonStatusFlags = { TF: 1, DF: 1, NT: 1, AC: 1, ID: 1 } as const;
+
+  for (const entry of cases) {
+    const producer = ok(decodeBytes(entry.bytes));
+    const producerRun = await instantiateIrBlock(blockOf([producer]));
+    const lazyFlags = aluReference("add", entry.width, entry.left, entry.right).flags;
+    const concreteFlags = oppositeStatusFlags(lazyFlags);
+
+    writeWasmCpuStateSnapshot(producerRun.stateView, {
+      eax: entry.left,
+      ebx: entry.right,
+      esp: 0x40,
+      eip: producer.address,
+      ...concreteFlags,
+      ...nonStatusFlags
+    });
+
+    strictEqual(producerRun.run(), irBlockCompleted, `${entry.name} producer`);
+    strictEqual(readWasmCpuStateChannel(producerRun.stateView, gprChannel("eax")), 0, `${entry.name} producer eax`);
+    assertLazyFlagState(
+      producerRun.stateView,
+      { kind: "ADD", width: entry.width, a: entry.left, b: entry.right },
+      `${entry.name} producer`
+    );
+    assertStatusFlags(producerRun.stateView, concreteFlags, `${entry.name} producer`);
+
+    const consumer = ok(decodeBytes([0x9c], producer.nextEip)); // pushfd
+    const consumerRun = await instantiateIrBlock(blockOf([consumer]));
+
+    writeWasmCpuStateSnapshot(consumerRun.stateView, readWasmCpuStateSnapshot(producerRun.stateView));
+
+    strictEqual(consumerRun.run(), irBlockCompleted, `${entry.name} consumer`);
+    strictEqual(consumerRun.guestView.getUint32(0x3c, true), expectedPushfdImage({ ...lazyFlags, ...nonStatusFlags }));
+    strictEqual(readWasmCpuStateChannel(consumerRun.stateView, gprChannel("esp")), 0x3c);
+    assertStatusFlags(consumerRun.stateView, concreteFlags, `${entry.name} consumer`);
+  }
 });
 
 test("jcc consumes a SUB32 record committed by a previous cmp block", async () => {
@@ -262,6 +334,40 @@ test("partial flag writer after incoming SUB record materializes preserved CF", 
   assertLazyFlagState(consumerRun.stateView, { kind: "NONE", width: 0 }, "partial consumer");
 });
 
+test("partial flag writer after incoming ADD record materializes preserved CF", async () => {
+  const producer = ok(decodeBytes([0x01, 0xd8])); // add eax, ebx
+  const producerRun = await instantiateIrBlock(blockOf([producer]));
+  const lazyFlags = aluReference("add", 32, 0xffff_ffff, 1).flags;
+  const concreteFlags = oppositeStatusFlags(lazyFlags);
+
+  writeWasmCpuStateSnapshot(producerRun.stateView, {
+    eax: 0xffff_ffff,
+    ebx: 1,
+    ecx: 0xffff_ffff,
+    eip: producer.address,
+    ...concreteFlags
+  });
+
+  strictEqual(producerRun.run(), irBlockCompleted);
+  assertLazyFlagState(producerRun.stateView, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 }, "partial add producer");
+  assertStatusFlags(producerRun.stateView, concreteFlags, "partial add producer");
+
+  const consumer = ok(decodeBytes([0x41], producer.nextEip)); // inc ecx
+  const consumerRun = await instantiateIrBlock(blockOf([consumer]));
+
+  writeWasmCpuStateSnapshot(consumerRun.stateView, readWasmCpuStateSnapshot(producerRun.stateView));
+
+  strictEqual(consumerRun.run(), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, gprChannel("ecx")), 0, "partial add consumer ecx");
+  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, eipChannel), consumer.nextEip, "partial add consumer eip");
+  assertStatusFlags(
+    consumerRun.stateView,
+    { CF: lazyFlags.CF, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 },
+    "partial add consumer"
+  );
+  assertLazyFlagState(consumerRun.stateView, { kind: "NONE", width: 0 }, "partial add consumer");
+});
+
 function setbeBlock(): IrBlock {
   return blockOf([ok(decodeBytes([0x0f, 0x96, 0xc0]))]);
 }
@@ -301,9 +407,18 @@ function relTarget(instruction: IsaDecodedInstruction): number {
   return target.target;
 }
 
-function subLazyFlagsState(entry: SubLazyFlagsCase) {
+function subLazyFlagsState(entry: BinaryLazyFlagsCase) {
   return {
     lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.SUB,
+    lazyFlagsWidth: entry.width,
+    lazyFlagsA: entry.left,
+    lazyFlagsB: entry.right
+  };
+}
+
+function addLazyFlagsState(entry: BinaryLazyFlagsCase) {
+  return {
+    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.ADD,
     lazyFlagsWidth: entry.width,
     lazyFlagsA: entry.left,
     lazyFlagsB: entry.right
