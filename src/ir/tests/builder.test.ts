@@ -38,6 +38,7 @@ import { intSemantic } from "#x86/semantics/misc.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 import { popfdSemantic, popSemantic, pushfdSemantic } from "#x86/semantics/stack.js";
+import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 
 // Every instruction advances the count channel; the dedicated tests at the
@@ -662,6 +663,23 @@ test("jcc after cmp source uses the source-derived condition with per-edge flag 
   deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "continue" });
 });
 
+test("jcc after test source uses the source-derived condition with no flag byte reads", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(testInstructionSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
+  builder.addInstruction(jccSemantic("E"), [immBinding(0x2000)], loc(0x1002, 0x1004));
+
+  const block = builder.finish();
+  const v = block.values;
+  const result = v.internBinary("and", 0, 1);
+
+  strictEqual(branchAction(block).condition, v.internCompare("eq", result, v.internConst(0)));
+  strictEqual(
+    entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
+    false
+  );
+});
+
 const subSourceThenJccTemplate: SemanticTemplate = (s) => {
   const left = s.get(s.reg("eax"), 32);
   const right = s.get(s.reg("ebx"), 32);
@@ -679,6 +697,69 @@ test("jcc after a sub flag source uses the source-derived condition", () => {
   const block = builder.finish();
 
   strictEqual(branchAction(block).condition, block.values.internCompare("eq", 0, 1));
+});
+
+test("jcc after 16-bit cmp source sign-extends operands for signed direct conditions", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(cmpSemantic(16), [regBinding("ax"), regBinding("bx")], loc(0x1000, 0x1002));
+  builder.addInstruction(jccSemantic("L"), [immBinding(0x2000)], loc(0x1002, 0x1004));
+
+  const block = builder.finish();
+  const v = block.values;
+  const condition = v.internCompare(
+    "lt_s",
+    v.internUnary("extend16_s", 0),
+    v.internUnary("extend16_s", 1)
+  );
+
+  strictEqual(branchAction(block).condition, condition);
+  strictEqual(
+    entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
+    false
+  );
+});
+
+test("jcc after 8-bit cmp source sign-extends operands for signed direct conditions", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(cmpSemantic(8), [regBinding("al"), regBinding("bl")], loc(0x1000, 0x1002));
+  builder.addInstruction(jccSemantic("GE"), [immBinding(0x2000)], loc(0x1002, 0x1004));
+
+  const block = builder.finish();
+  const v = block.values;
+  const condition = v.internCompare(
+    "ge_s",
+    v.internUnary("extend8_s", 0),
+    v.internUnary("extend8_s", 1)
+  );
+
+  strictEqual(branchAction(block).condition, condition);
+  strictEqual(
+    entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
+    false
+  );
+});
+
+test("jcc after 16-bit cmp immediate source sign-extends immediates for signed direct conditions", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(cmpSemantic(16), [regBinding("ax"), immBinding(0x8000)], loc(0x1000, 0x1004));
+  builder.addInstruction(jccSemantic("LE"), [immBinding(0x2000)], loc(0x1004, 0x1006));
+
+  const block = builder.finish();
+  const v = block.values;
+  const condition = v.internCompare(
+    "le_s",
+    v.internUnary("extend16_s", 0),
+    v.internUnary("extend16_s", v.internConst(0x8000))
+  );
+
+  strictEqual(branchAction(block).condition, condition);
+  strictEqual(
+    entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
+    false
+  );
 });
 
 test("int flushes pending state with the resume eip before a host trap exit", () => {

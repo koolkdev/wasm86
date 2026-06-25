@@ -73,6 +73,38 @@ test("a sub source materializes every status flag", () => {
   );
 });
 
+test("condition uses the current sub source directly", () => {
+  const { values, actions, flags } = createHarness();
+  const left = values.internConst(7);
+  const right = values.internConst(3);
+  const result = values.internBinary("sub", left, right);
+
+  flags.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
+
+  strictEqual(flags.condition("E"), values.internCompare("eq", left, right));
+  strictEqual(flags.condition("B"), values.internCompare("lt_u", left, right));
+  strictEqual(flags.condition("L"), values.internCompare("lt_s", left, right));
+  deepStrictEqual(actions, []);
+});
+
+test("condition falls back to live flag backings after a direct flag write", () => {
+  const { values, actions, flags } = createHarness();
+  const left = values.internConst(7);
+  const right = values.internConst(3);
+  const result = values.internBinary("sub", left, right);
+  const zero = values.internConst(0);
+
+  flags.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
+  flags.writeFlag("ZF", zero);
+
+  strictEqual(flags.condition("E"), zero);
+  strictEqual(
+    flags.condition("NE"),
+    values.internCompare("eq", zero, zero)
+  );
+  deepStrictEqual(actions, []);
+});
+
 test("a logic source materializes fixed, undefined, and derived flag values", () => {
   const { values, actions, flags } = createHarness();
   const result = values.internConst(0x80);

@@ -1,4 +1,5 @@
 import type { SimpleFlagSource } from "#x86/flag-sources.js";
+import type { ConditionCode } from "#x86/conditions.js";
 import type { X86Flag } from "#x86/flags.js";
 import type { Action, GprDynamicSlot } from "../actions.js";
 import {
@@ -67,6 +68,10 @@ export class PendingState {
 
   readFlag(flag: X86Flag): ValueId {
     return this.#flags.readFlag(flag);
+  }
+
+  condition(cc: ConditionCode): ValueId {
+    return this.#flags.condition(cc);
   }
 
   writeFlag(flag: X86Flag, value: ValueId): void {

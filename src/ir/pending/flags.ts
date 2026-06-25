@@ -1,4 +1,5 @@
 import type { SimpleFlagSource } from "#x86/flag-sources.js";
+import type { ConditionCode } from "#x86/conditions.js";
 import { x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
 import { flagChannel, type FlagChannel } from "../slots.js";
 import type { ValueId, ValueTable } from "../values.js";
@@ -24,6 +25,10 @@ export class PendingFlags {
     return isStatusFlag(flag)
       ? this.#status.readFlag(flag)
       : this.#cells.read(flagChannel(flag));
+  }
+
+  condition(cc: ConditionCode): ValueId {
+    return this.#status.condition(cc);
   }
 
   writeFlag(flag: X86Flag, value: ValueId): void {

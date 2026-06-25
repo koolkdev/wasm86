@@ -1,11 +1,16 @@
 import { assert } from "#common/assert.js";
+import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
-import type { SimpleFlagSource } from "#x86/flag-sources.js";
+import {
+  simpleFlagSourceConditionOperators,
+  type SimpleFlagSource
+} from "#x86/flag-sources.js";
 import {
   statusFlagValuesForSource,
   type FlagValueOps,
   type StatusFlagValues
 } from "#x86/flag-values.js";
+import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
 import { flagChannel, type FlagChannel } from "../slots.js";
 import { fitsUnsigned, type ValueId, type ValueTable } from "../values.js";
 import { StateAccess } from "./state-access.js";
@@ -34,6 +39,7 @@ export class PendingStatusFlags {
   readonly #flagBackings = initialBackings();
   readonly #dirty = new Set<X86StatusFlag>();
   readonly #valueOps: FlagValueOps<ValueId>;
+  #currentSource: FlagSourceId | undefined;
   #boundaryFlagBackings = new Map(this.#flagBackings);
   #boundaryDirty = new Set(this.#dirty);
 
@@ -47,10 +53,15 @@ export class PendingStatusFlags {
     return this.#resolveBacking(flag, getBacking(this.#flagBackings, flag), new Map());
   }
 
+  condition(cc: ConditionCode): ValueId {
+    return this.#directCondition(cc) ?? this.#flagBoolExpr(CONDITIONS[cc].expr, new Map());
+  }
+
   writeStatusFlagsSource(source: SimpleFlagSource<ValueId>): void {
     const sourceId = this.#sources.length;
 
     this.#sources.push(source);
+    this.#currentSource = sourceId;
 
     switch (source.kind) {
       case "add":
@@ -74,6 +85,7 @@ export class PendingStatusFlags {
   }
 
   writeFlag(flag: X86StatusFlag, value: ValueId): void {
+    this.#currentSource = undefined;
     this.#setBacking(flag, { kind: "value", value });
   }
 
@@ -122,8 +134,68 @@ export class PendingStatusFlags {
     }
   }
 
+  #directCondition(cc: ConditionCode): ValueId | undefined {
+    if (this.#currentSource === undefined) {
+      return undefined;
+    }
+
+    const source = this.#source(this.#currentSource);
+    const operator = simpleFlagSourceConditionOperators[source.kind][cc];
+
+    if (operator === undefined) {
+      return undefined;
+    }
+
+    switch (source.kind) {
+      case "add":
+      case "sub":
+        return this.#compare(source.width, operator, source.left, source.right);
+      case "logic":
+        return this.#compare(source.width, operator, source.result, this.#values.internConst(0));
+    }
+  }
+
+  #flagBoolExpr(expr: FlagBoolExpr, cache: SourceExpansionCache): ValueId {
+    switch (expr.kind) {
+      case "flag":
+        return this.#resolveBacking(expr.flag, getBacking(this.#flagBackings, expr.flag), cache);
+      case "not":
+        return this.#values.internCompare(
+          "eq",
+          this.#flagBoolExpr(expr.value, cache),
+          this.#values.internConst(0)
+        );
+      case "and":
+        return this.#values.internBinary(
+          "and",
+          this.#flagBoolExpr(expr.a, cache),
+          this.#flagBoolExpr(expr.b, cache)
+        );
+      case "or":
+        return this.#values.internBinary(
+          "or",
+          this.#flagBoolExpr(expr.a, cache),
+          this.#flagBoolExpr(expr.b, cache)
+        );
+      case "xor":
+        return this.#values.internBinary(
+          "xor",
+          this.#flagBoolExpr(expr.a, cache),
+          this.#flagBoolExpr(expr.b, cache)
+        );
+    }
+  }
+
   #readInputFlag(flag: X86StatusFlag): ValueId {
     return this.#state.readInput(flagChannel(flag), fitsUnsigned(1));
+  }
+
+  #source(sourceId: FlagSourceId): SimpleFlagSource<ValueId> {
+    const source = this.#sources[sourceId];
+
+    assert(source !== undefined, `unknown flag source ${sourceId}`);
+
+    return source;
   }
 
   #sourceValues(sourceId: FlagSourceId, cache: SourceExpansionCache): StatusFlagValueIds {
@@ -133,11 +205,7 @@ export class PendingStatusFlags {
       return cached;
     }
 
-    const source = this.#sources[sourceId];
-
-    assert(source !== undefined, `unknown flag source ${sourceId}`);
-
-    const materialized = this.#materializeSource(source);
+    const materialized = this.#materializeSource(this.#source(sourceId));
 
     cache.set(sourceId, materialized);
     return materialized;
@@ -175,6 +243,14 @@ export class PendingStatusFlags {
     return statusFlagValuesForSource(this.#valueOps, source, {
       undefinedAF: this.#materializeUndef(logicUndefFlagPolicy)
     });
+  }
+
+  #compare(width: SimpleFlagSource<ValueId>["width"], operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
+    const lower = signedComparePredicates.has(operator)
+      ? (id: ValueId) => this.#values.extendTo(width, id)
+      : (id: ValueId) => this.#values.projectTo(width, id);
+
+    return this.#values.internCompare(operator, lower(a), lower(b));
   }
 }
 

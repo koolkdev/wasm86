@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
+import type { ConditionCode } from "#x86/conditions.js";
 import type { X86Flag } from "#x86/flags.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
@@ -113,11 +113,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = createValueTable();
   readonly #actions: Action[] = [];
   readonly #pending = new PendingState(this.#values, (action) => this.#actions.push(action));
-  // Fused condition expressions from the latest writeStatusFlagsSource; condition()
-  // prefers these over recomputing from flag bytes. Any flag write
-  // invalidates all earlier entries: they were derived from flag state that
-  // is now stale.
-  readonly #conditions = new Map<ConditionCode, ValueId>();
   readonly #edgeRegions: EdgeRegion[] = [];
   // An effective address is computed once per operand, at its first use —
   // x86 computes an EA once, so later uses (the store) see the same address
@@ -408,57 +403,16 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   writeFlag(flag: X86Flag, value: ValueInput): void {
     this.#beforeOp("writeFlag");
     this.#pending.writeFlag(flag, value);
-    this.#conditions.clear();
   }
 
   writeStatusFlagsSource(source: SimpleFlagSource): void {
     this.#beforeOp("writeStatusFlagsSource");
     this.#pending.writeStatusFlagsSource(source);
-    this.#conditions.clear();
-    this.#recordSourceConditionHints(source);
   }
 
   condition(cc: ConditionCode): Value {
     this.#beforeOp("condition");
-
-    const recorded = this.#conditions.get(cc);
-
-    if (recorded !== undefined) {
-      return valueFromId(recorded);
-    }
-
-    return valueFromId(this.#flagBoolExpr(CONDITIONS[cc].expr));
-  }
-
-  #recordSourceConditionHints(source: SimpleFlagSource): void {
-    switch (source.kind) {
-      case "add":
-        return;
-      case "sub": {
-        const a = this.project(source.width, source.left);
-        const b = this.project(source.width, source.right);
-
-        this.#conditions.set("E", this.compare(source.width, "eq", a, b));
-        this.#conditions.set("NE", this.compare(source.width, "ne", a, b));
-        this.#conditions.set("B", this.compare(source.width, "lt_u", a, b));
-        this.#conditions.set("AE", this.compare(source.width, "ge_u", a, b));
-        this.#conditions.set("BE", this.compare(source.width, "le_u", a, b));
-        this.#conditions.set("A", this.compare(source.width, "gt_u", a, b));
-        this.#conditions.set("L", this.compare(source.width, "lt_s", a, b));
-        this.#conditions.set("GE", this.compare(source.width, "ge_s", a, b));
-        this.#conditions.set("LE", this.compare(source.width, "le_s", a, b));
-        this.#conditions.set("G", this.compare(source.width, "gt_s", a, b));
-        return;
-      }
-      case "logic": {
-        const result = this.project(source.width, source.result);
-        const zero = this.const32(0);
-
-        this.#conditions.set("E", this.compare(source.width, "eq", result, zero));
-        this.#conditions.set("NE", this.compare(source.width, "ne", result, zero));
-        return;
-      }
-    }
+    return valueFromId(this.#pending.condition(cc));
   }
 
   jump(target: TargetInput): void {
@@ -507,23 +461,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #unary(op: string, operator: UnaryOperator, value: ValueInput): Value {
     this.#beforeOp(op);
     return valueFromId(this.#values.internUnary(operator, value));
-  }
-
-  // Flag channel values are 0/1 bytes, so the boolean algebra is plain
-  // bitwise math and "not" is a compare against zero.
-  #flagBoolExpr(expr: FlagBoolExpr): ValueId {
-    switch (expr.kind) {
-      case "flag":
-        return this.#pending.readFlag(expr.flag);
-      case "not":
-        return this.#values.internCompare("eq", this.#flagBoolExpr(expr.value), this.#values.internConst(0));
-      case "and":
-        return this.#values.internBinary("and", this.#flagBoolExpr(expr.a), this.#flagBoolExpr(expr.b));
-      case "or":
-        return this.#values.internBinary("or", this.#flagBoolExpr(expr.a), this.#flagBoolExpr(expr.b));
-      case "xor":
-        return this.#values.internBinary("xor", this.#flagBoolExpr(expr.a), this.#flagBoolExpr(expr.b));
-    }
   }
 
   // The snapshot leaves the main-path map untouched. Pending eip holds the
