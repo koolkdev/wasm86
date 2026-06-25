@@ -17,19 +17,22 @@ import {
 
 test("cpu state layout fields and flag offsets are stable", () => {
   deepStrictEqual(WASM_CPU_FLAG_BYTE_OFFSETS, {
-    CF: 44,
-    PF: 45,
-    AF: 46,
-    ZF: 47,
-    SF: 48,
-    OF: 49,
-    DF: 50,
-    TF: 51,
-    NT: 52,
-    AC: 53,
-    ID: 54
+    CF: 41,
+    PF: 42,
+    AF: 43,
+    ZF: 44,
+    SF: 45,
+    OF: 46,
+    DF: 47,
+    TF: 48,
+    NT: 49,
+    AC: 50,
+    ID: 51
   });
-  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 55);
+  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsKind, 40);
+  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsA, 52);
+  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsB, 56);
+  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 60);
 
   for (const field of WASM_CPU_STATE_FIELDS) {
     strictEqual(WASM_CPU_STATE_OFFSETS[field], WASM_CPU_STATE_LAYOUT[field].offset);

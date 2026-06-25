@@ -10,6 +10,8 @@ import type { EdgeRegion, IrBlock, RegionId } from "#ir/block.js";
 import { flagChannel } from "#ir/slots.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
+import { wasmMemoryIndex } from "#wasm/abi.js";
+import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
@@ -206,7 +208,15 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         for (const { flag, value } of action.snapshot.values) {
           emitSlotStore(body, flagChannel(flag), value, valueStack.emitUse);
         }
+        emitNoLazyFlagsKind();
     }
+  }
+
+  function emitNoLazyFlagsKind(): void {
+    body
+      .i32Const(0)
+      .i32Const(WASM_CPU_LAZY_FLAGS_KIND.NONE)
+      .i32Store8({ align: 0, offset: WASM_CPU_STATE_OFFSETS.lazyFlagsKind, memoryIndex: wasmMemoryIndex.cpuState });
   }
 
   for (const action of entry.actions.slice(0, -1)) {

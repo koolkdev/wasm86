@@ -9,9 +9,16 @@ import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type Reg32 } from "#x86/types.js";
+import { wasmMemoryIndex } from "#wasm/abi.js";
+import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
-import { readWasmCpuFlagByte, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
-import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import {
+  readWasmCpuFlagByte,
+  readWasmCpuStateChannel,
+  readWasmCpuStateField,
+  writeWasmCpuStateSnapshot
+} from "#runtime/tests/fixtures/cpu-state.js";
+import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";
 
@@ -105,15 +112,25 @@ test("two adds in one block store each flag byte once, with the second add's fla
   strictEqual(flagCommits[0]!.snapshot.values.length, x86StatusFlags.length);
   strictEqual(new Set(flagCommits[0]!.snapshot.values.map(({ flag }) => flag)).size, x86StatusFlags.length);
 
-  // ...and in the encoding: exactly six byte stores.
+  // ...and in the encoding: exactly six flag byte stores plus one lazy-kind clear.
   const body = irBlockBody(block).encode();
 
-  strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Store8).length, 6);
+  strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Store8).length, 7);
+  strictEqual(
+    wasmBodyMemoryAccesses(body).filter(
+      (access) =>
+        access.opcode === wasmOpcode.i32Store8 &&
+        access.memoryIndex === wasmMemoryIndex.cpuState &&
+        access.offset === WASM_CPU_STATE_OFFSETS.lazyFlagsKind
+    ).length,
+    1
+  );
 
   const initial: Partial<WasmCpuStateSnapshot> = {
     ebx: 0x7fff_fffe,
     ecx: 0x0000_0001,
     eip: first.address,
+    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.SUB32,
     ...allFlagsSet
   };
   // ebx threads through the two adds; the block ends with the second add's flags.
@@ -129,6 +146,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
     { regs: { ebx: reference.result, ecx: 0x0000_0001 }, eip: second.nextEip, flags: reference.flags },
     "two adds"
   );
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), WASM_CPU_LAZY_FLAGS_KIND.NONE);
 });
 
 function assertState(

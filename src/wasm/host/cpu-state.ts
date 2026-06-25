@@ -6,6 +6,7 @@ import {
   WASM_CPU_STATE_BYTE_LENGTH,
   WASM_CPU_STATE_FIELDS,
   WASM_CPU_STATE_LAYOUT,
+  wasmCpuStateFieldIsBitField,
   wasmCpuFlagByteOffset,
   type WasmCpuStateField
 } from "#wasm/cpu-state-layout.js";
@@ -76,7 +77,7 @@ export class WasmCpuState implements MutableCpuStateView {
 
     switch (layout.byteLength) {
       case 1:
-        view.setUint8(layout.offset, value === 0 ? 0 : 1);
+        view.setUint8(layout.offset, wasmCpuStateFieldIsBitField(field) ? (value === 0 ? 0 : 1) : (u32(value) & 0xff));
         break;
       case 4:
         view.setUint32(layout.offset, u32(value), true);

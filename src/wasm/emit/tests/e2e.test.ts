@@ -11,8 +11,14 @@ import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
+import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
-import { readWasmCpuFlagByte, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import {
+  readWasmCpuFlagByte,
+  readWasmCpuStateChannel,
+  readWasmCpuStateField,
+  writeWasmCpuStateSnapshot
+} from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
@@ -66,6 +72,26 @@ test("mov r32, r32 copies the source register and leaves it intact", async () =>
   strictEqual(readRegister(stateView, "eax"), 0xcafe1234);
   strictEqual(readRegister(stateView, "ebx"), 0xcafe1234);
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x1002);
+});
+
+test("ordinary state writes leave lazy flag metadata untouched", async () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
+
+  const { stateView, run } = await instantiateIrBlock(builder.finish());
+
+  writeWasmCpuStateSnapshot(stateView, {
+    eax: 0xcafe1234,
+    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.SUB32,
+    lazyFlagsA: 0x1111_2222,
+    lazyFlagsB: 0x3333_4444
+  });
+  assertCompleted(run());
+  strictEqual(readRegister(stateView, "ebx"), 0xcafe1234);
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), WASM_CPU_LAZY_FLAGS_KIND.SUB32);
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsA"), 0x1111_2222);
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsB"), 0x3333_4444);
 });
 
 test("chained movs forward one read to both destinations", async () => {

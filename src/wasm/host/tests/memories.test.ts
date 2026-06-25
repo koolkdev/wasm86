@@ -42,19 +42,22 @@ test("runtime Wasm memories expose raw cpu state field offsets", () => {
     edi: 28,
     eip: 32,
     instructionCount: 36,
-    CF: 44,
-    PF: 45,
-    AF: 46,
-    ZF: 47,
-    SF: 48,
-    OF: 49,
-    DF: 50,
-    TF: 51,
-    NT: 52,
-    AC: 53,
-    ID: 54
+    lazyFlagsKind: 40,
+    CF: 41,
+    PF: 42,
+    AF: 43,
+    ZF: 44,
+    SF: 45,
+    OF: 46,
+    DF: 47,
+    TF: 48,
+    NT: 49,
+    AC: 50,
+    ID: 51,
+    lazyFlagsA: 52,
+    lazyFlagsB: 56
   });
-  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 55);
+  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 60);
 });
 
 test("runtime Wasm guest memory reads writes and reports faults", () => {

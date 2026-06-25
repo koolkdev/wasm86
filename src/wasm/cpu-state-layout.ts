@@ -19,20 +19,31 @@ export const WASM_CPU_STATE_LAYOUT = {
   edi: { offset: 28, byteLength: 4 },
   eip: { offset: 32, byteLength: 4 },
   instructionCount: { offset: 36, byteLength: 4 },
-  CF: { offset: 44, byteLength: 1 },
-  PF: { offset: 45, byteLength: 1 },
-  AF: { offset: 46, byteLength: 1 },
-  ZF: { offset: 47, byteLength: 1 },
-  SF: { offset: 48, byteLength: 1 },
-  OF: { offset: 49, byteLength: 1 },
-  DF: { offset: 50, byteLength: 1 },
-  TF: { offset: 51, byteLength: 1 },
-  NT: { offset: 52, byteLength: 1 },
-  AC: { offset: 53, byteLength: 1 },
-  ID: { offset: 54, byteLength: 1 }
+  lazyFlagsKind: { offset: 40, byteLength: 1 },
+  CF: { offset: 41, byteLength: 1 },
+  PF: { offset: 42, byteLength: 1 },
+  AF: { offset: 43, byteLength: 1 },
+  ZF: { offset: 44, byteLength: 1 },
+  SF: { offset: 45, byteLength: 1 },
+  OF: { offset: 46, byteLength: 1 },
+  DF: { offset: 47, byteLength: 1 },
+  TF: { offset: 48, byteLength: 1 },
+  NT: { offset: 49, byteLength: 1 },
+  AC: { offset: 50, byteLength: 1 },
+  ID: { offset: 51, byteLength: 1 },
+  lazyFlagsA: { offset: 52, byteLength: 4 },
+  lazyFlagsB: { offset: 56, byteLength: 4 }
 } as const satisfies Readonly<Record<string, WasmCpuStateLayoutEntry>>;
 
 export type WasmCpuStateField = keyof typeof WASM_CPU_STATE_LAYOUT;
+
+export const WASM_CPU_LAZY_FLAGS_KIND = {
+  NONE: 0,
+  SUB32: 1,
+  LOGIC_RESULT32: 2
+} as const;
+
+export type WasmCpuLazyFlagsKind = (typeof WASM_CPU_LAZY_FLAGS_KIND)[keyof typeof WASM_CPU_LAZY_FLAGS_KIND];
 
 export const WASM_CPU_STATE_FIELDS = Object.keys(WASM_CPU_STATE_LAYOUT) as readonly WasmCpuStateField[];
 export const WASM_CPU_STATE_OFFSETS = Object.fromEntries(
@@ -62,6 +73,10 @@ for (const [index, reg] of reg32.entries()) {
 
 export function wasmCpuFlagByteOffset(flag: X86Flag): number {
   return WASM_CPU_FLAG_BYTE_OFFSETS[flag];
+}
+
+export function wasmCpuStateFieldIsBitField(field: WasmCpuStateField): field is X86Flag {
+  return (x86Flags as readonly string[]).includes(field);
 }
 
 export function wasmCpuStateChannelOffset(channel: StateChannel): number {
