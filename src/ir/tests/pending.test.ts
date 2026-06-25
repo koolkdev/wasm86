@@ -1,7 +1,7 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { createPendingChannels, type PendingChannels } from "#ir/pending.js";
+import { PendingState } from "#ir/pending.js";
 import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
 import type { Action, GprDynamicSlot } from "#ir/actions.js";
 import { createValueTable, type ValueId, type ValueTable } from "#ir/values.js";
@@ -9,14 +9,14 @@ import { createValueTable, type ValueId, type ValueTable } from "#ir/values.js";
 type Harness = Readonly<{
   values: ValueTable;
   actions: Action[];
-  pending: PendingChannels;
+  pending: PendingState;
 }>;
 
 function createHarness(): Harness {
   const values = createValueTable();
   const actions: Action[] = [];
 
-  return { values, actions, pending: createPendingChannels(values, (action) => actions.push(action)) };
+  return { values, actions, pending: new PendingState(values, (action) => actions.push(action)) };
 }
 
 function dynamicGpr(index: ValueId, byteLength: 1 | 2 | 4 = 4): GprDynamicSlot {
@@ -123,7 +123,7 @@ test("disjoint byte pendings coexist and flush together on an ax read", () => {
   const high = values.internConst(0x34);
   const flag = values.internConst(1);
 
-  pending.write(flagChannel("ZF"), flag);
+  pending.write(flagChannel("ID"), flag);
   pending.write(gprChannel("al"), low);
   pending.write(gprChannel("ah"), high);
   deepStrictEqual(actions, []);
@@ -137,8 +137,8 @@ test("disjoint byte pendings coexist and flush together on an ax read", () => {
   ]);
 
   // Flag pendings are untouched by register traffic.
-  strictEqual(pending.has(flagChannel("ZF")), true);
-  strictEqual(pending.read(flagChannel("ZF")), flag);
+  strictEqual(pending.has(flagChannel("ID")), true);
+  strictEqual(pending.read(flagChannel("ID")), flag);
 });
 
 test("flag and eip pendings hit exactly and never interact with registers", () => {
@@ -149,6 +149,20 @@ test("flag and eip pendings hit exactly and never interact with registers", () =
   pending.write(gprChannel("eax"), values.internConst(7));
   strictEqual(pending.read(eipChannel), eip);
   deepStrictEqual(actions, []);
+});
+
+test("status flag channels route through pending flags", () => {
+  const { values, actions, pending } = createHarness();
+  const zf = values.internConst(1);
+
+  pending.write(flagChannel("ZF"), zf);
+
+  strictEqual(pending.has(flagChannel("ZF")), true);
+  strictEqual(pending.read(flagChannel("ZF")), zf);
+
+  pending.flushAll();
+
+  deepStrictEqual(actions, [{ kind: "writeState", slot: flagChannel("ZF"), value: zf }]);
 });
 
 test("a flush invalidates read leaves of overlapping channels only", () => {
@@ -206,22 +220,22 @@ test("an exact narrow hit normalizes values whose high bits are unproven", () =>
   strictEqual(pending.read(gprChannel("ah")), byte);
 });
 
-test("flushAll materializes every dirty pending in insertion order", () => {
+test("flushAll materializes dirty pendings in owner order", () => {
   const { values, actions, pending } = createHarness();
   const flag = values.internConst(1);
   const word = values.internConst(7);
 
-  pending.write(flagChannel("CF"), flag);
+  pending.write(flagChannel("DF"), flag);
   pending.write(gprChannel("esi"), word);
   pending.flushAll();
 
   deepStrictEqual(actions, [
-    { kind: "writeState", slot: flagChannel("CF"), value: flag },
-    { kind: "writeState", slot: gprChannel("esi"), value: word }
+    { kind: "writeState", slot: gprChannel("esi"), value: word },
+    { kind: "writeState", slot: flagChannel("DF"), value: flag }
   ]);
 
   // Everything is clean now: reads still hit, nothing stores twice.
-  strictEqual(pending.read(flagChannel("CF")), flag);
+  strictEqual(pending.read(flagChannel("DF")), flag);
   strictEqual(pending.read(gprChannel("esi")), word);
   pending.flushAll();
   strictEqual(actions.length, 2);
@@ -341,11 +355,11 @@ test("entries lists only dirty pendings", () => {
   const flag = values.internConst(1);
 
   pending.write(gprChannel("al"), byte);
-  pending.write(flagChannel("ZF"), flag);
+  pending.write(flagChannel("ID"), flag);
   pending.read(gprChannel("ax"));
 
   // The ax read flushed al; only the flag is still dirty.
-  deepStrictEqual(pending.entries(), [[flagChannel("ZF"), flag]]);
+  deepStrictEqual(pending.entries(), [[flagChannel("ID"), flag]]);
 });
 
 test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
@@ -355,7 +369,7 @@ test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
   const index = values.internExternal(0);
 
   pending.write(gprChannel("eax"), word);
-  pending.write(flagChannel("ZF"), flag);
+  pending.write(flagChannel("ID"), flag);
 
   const first = pending.readDynamicGpr(dynamicGpr(index));
 
@@ -373,7 +387,7 @@ test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
   notStrictEqual(second, first);
   deepStrictEqual(actions[2], { kind: "readState", output: second, slot: dynamicGpr(index) });
   strictEqual(actions.length, 3);
-  strictEqual(pending.read(flagChannel("ZF")), flag);
+  strictEqual(pending.read(flagChannel("ID")), flag);
 });
 
 test("a dynamic write stores immediately and invalidates every GPR pending", () => {
@@ -385,7 +399,7 @@ test("a dynamic write stores immediately and invalidates every GPR pending", () 
   const index = values.internExternal(0);
 
   pending.write(gprChannel("eax"), word);
-  pending.write(flagChannel("CF"), flag);
+  pending.write(flagChannel("DF"), flag);
   pending.write(eipChannel, eip);
   pending.writeDynamicGpr(dynamicGpr(index), stored);
 
@@ -399,7 +413,7 @@ test("a dynamic write stores immediately and invalidates every GPR pending", () 
   const reload = pending.read(gprChannel("eax"));
 
   deepStrictEqual(actions[2], { kind: "readState", output: reload, slot: gprChannel("eax") });
-  strictEqual(pending.read(flagChannel("CF")), flag);
+  strictEqual(pending.read(flagChannel("DF")), flag);
   strictEqual(pending.read(eipChannel), eip);
 });
 
@@ -407,12 +421,12 @@ test("a dynamic write invalidates cached GPR read leaves but not flag leaves", (
   const { values, pending } = createHarness();
   const index = values.internExternal(0);
   const eaxRead = pending.read(gprChannel("eax"));
-  const zfRead = pending.read(flagChannel("ZF"));
+  const zfRead = pending.read(flagChannel("ID"));
 
   pending.writeDynamicGpr(dynamicGpr(index), values.internConst(1));
 
   notStrictEqual(pending.read(gprChannel("eax")), eaxRead);
-  strictEqual(pending.read(flagChannel("ZF")), zfRead);
+  strictEqual(pending.read(flagChannel("ID")), zfRead);
 });
 
 test("a dynamic write makes the boundary snapshot unrestorable", () => {

@@ -5,16 +5,15 @@ import type { SemanticTemplate, StatusFlagValues } from "#x86/semantics/builder.
 import type { ValueInput } from "#x86/semantics/refs.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import {
-  buildAddResultAndFlags,
+  buildAddResultAndWriteFlags,
   buildCmpFlagSource,
-  buildFlagSourceValues,
   buildLogicResultAndFlagSource,
-  buildNegFlags,
-  buildSubResultAndFlags,
+  buildSubResultAndWriteFlags,
   buildTestFlagSource,
   writeDecFlags,
-  writeIncFlags
-} from "#x86/semantics/flag-helpers.js";
+  writeIncFlags,
+  writeNegFlags
+} from "#x86/semantics/alu-flags.js";
 
 import {
   buildSemanticTrace,
@@ -23,15 +22,14 @@ import {
   type SemanticTrace
 } from "./test-semantics-trace.js";
 
-test("ADD and SUB helpers build every arithmetic flag value", () => {
-  for (const helper of [buildAddResultAndFlags, buildSubResultAndFlags]) {
+test("ADD and SUB helpers write every arithmetic flag value", () => {
+  for (const helper of [buildAddResultAndWriteFlags, buildSubResultAndWriteFlags]) {
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), 32);
       const right = s.get(s.operand(1), 32);
-      const { result, flags } = helper(s, { width: 32, left, right });
+      const result = helper(s, { width: 32, left, right });
 
       s.set(s.operand(0), result);
-      s.writeFlags(flags);
     });
     const write = onlyFlagWrite(trace);
 
@@ -39,34 +37,33 @@ test("ADD and SUB helpers build every arithmetic flag value", () => {
   }
 });
 
-test("CMP source materializes all arithmetic flag values without setting a result", () => {
+test("CMP source helper builds an arithmetic flag source without setting a result", () => {
   let source: ReturnType<typeof buildCmpFlagSource> | undefined;
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 16);
     const right = s.get(s.operand(1), 16);
 
     source = buildCmpFlagSource(s, { width: 16, left, right });
-    s.writeFlags(buildFlagSourceValues(s, source));
+    s.writeStatusFlagsSource(source);
   }, regOperands(2));
-  const write = onlyFlagWrite(trace);
 
   strictEqual(source?.kind, "sub");
   strictEqual(trace.events.some((event) => event.startsWith("set ")), false);
-  assertFlagSet(write, x86StatusFlags);
+  strictEqual(trace.flagWrites.length, 0);
+  strictEqual(flagSourceEvents(trace).length, 1);
+  strictEqual(flagSourceEvents(trace)[0]!.startsWith("flagSource sub:16"), true);
 });
 
-test("TEST source materialization builds logic flag values and clears AF", () => {
+test("TEST source helper builds a logic flag source", () => {
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
 
-    s.writeFlags(buildFlagSourceValues(s, buildTestFlagSource(s, { width: 32, left, right })));
+    s.writeStatusFlagsSource(buildTestFlagSource(s, { width: 32, left, right }));
   });
-  const write = onlyFlagWrite(trace);
 
-  strictEqual(trace.def(flagCell(write, "AF")), "0");
-  strictEqual(trace.def(flagCell(write, "CF")), "0");
-  strictEqual(trace.def(flagCell(write, "OF")), "0");
+  strictEqual(flagSourceEvents(trace).length, 1);
+  strictEqual(flagSourceEvents(trace)[0]!.startsWith("flagSource logic:32"), true);
 });
 
 test("INC and DEC helpers preserve CF by writing only the other status flags", () => {
@@ -96,7 +93,7 @@ test("NEG helper follows x86 CF and OF rules", () => {
     const input = s.get(s.operand(0), 8);
     const result = s.i32Sub(s.const32(0), input);
 
-    s.writeFlags(buildNegFlags(s, { width: 8, input, result }));
+    writeNegFlags(s, { width: 8, input, result });
   }, regOperands(1));
   const write = onlyFlagWrite(trace);
 
@@ -113,7 +110,7 @@ test("parity formulas use popcnt over only the low byte", () => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
 
-    s.writeFlags(buildFlagSourceValues(s, buildTestFlagSource(s, { width: 32, left, right })));
+    buildAddResultAndWriteFlags(s, { width: 32, left, right });
   });
   const pf = trace.def(flagCell(onlyFlagWrite(trace), "PF"));
 
@@ -129,7 +126,7 @@ test("sign and overflow formulas consume the operation sign bit", () => {
       const left = s.get(s.operand(0), width);
       const right = s.get(s.operand(1), width);
 
-      s.writeFlags(buildAddResultAndFlags(s, { width, left, right }).flags);
+      buildAddResultAndWriteFlags(s, { width, left, right });
     }, regOperands(2));
     const write = onlyFlagWrite(trace);
 
@@ -145,7 +142,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const right = s.get(s.operand(1), 8);
 
     addCarryIn = s.compare(8, "ne", left, s.const32(0));
-    s.writeFlags(buildAddResultAndFlags(s, { width: 8, left, right, carryIn: addCarryIn }).flags);
+    buildAddResultAndWriteFlags(s, { width: 8, left, right, carryIn: addCarryIn });
   });
   const addCf = addTrace.def(flagCell(onlyFlagWrite(addTrace), "CF"));
 
@@ -163,7 +160,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const right = s.get(s.operand(1), 8);
 
     subBorrowIn = s.compare(8, "ne", right, s.const32(0));
-    s.writeFlags(buildSubResultAndFlags(s, { width: 8, left, right, borrowIn: subBorrowIn }).flags);
+    buildSubResultAndWriteFlags(s, { width: 8, left, right, borrowIn: subBorrowIn });
   });
   const subCf = subTrace.def(flagCell(onlyFlagWrite(subTrace), "CF"));
 
@@ -181,11 +178,10 @@ test("result helpers share destination writeback result with flag values", () =>
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 16);
     const right = s.get(s.operand(1), 16);
-    const built = buildAddResultAndFlags(s, { width: 16, left, right });
+    const built = buildAddResultAndWriteFlags(s, { width: 16, left, right });
 
-    result = built.result;
-    s.set(s.operand(0), built.result, 16);
-    s.writeFlags(built.flags);
+    result = built;
+    s.set(s.operand(0), built, 16);
   });
 
   if (result === undefined) {
@@ -201,7 +197,7 @@ test("result helpers share destination writeback result with flag values", () =>
   ok(trace.def(flagCell(write, "CF")).startsWith(`cmp16.lt_u(${resultValue}, `));
 });
 
-test("logic source helpers materialize concrete status flags without direct conditions", () => {
+test("logic source helpers build source-backed results without direct conditions", () => {
   for (const op of ["and", "or", "xor"] as const) {
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), 8);
@@ -209,12 +205,11 @@ test("logic source helpers materialize concrete status flags without direct cond
       const built = buildLogicResultAndFlagSource(s, { width: 8, op, left, right });
 
       s.set(s.operand(0), built.result, 8);
-      s.writeFlags(buildFlagSourceValues(s, built.source));
+      s.writeStatusFlagsSource(built.source);
     });
-    const write = onlyFlagWrite(trace);
 
-    assertFlagSet(write, x86StatusFlags);
-    strictEqual(trace.def(flagCell(write, "AF")), "0");
+    strictEqual(flagSourceEvents(trace).length, 1);
+    strictEqual(trace.flagWrites.length, 0);
   }
 });
 
@@ -266,6 +261,10 @@ function directFlagDefinition(trace: SemanticTrace, flag: X86StatusFlag): string
   const display = /^%(\d+)$/.exec(value);
 
   return display === null ? value : expectDefined(trace.defs[Number(display[1]!)]);
+}
+
+function flagSourceEvents(trace: SemanticTrace): string[] {
+  return trace.events.filter((event) => event.startsWith("flagSource "));
 }
 
 function expectDefined<T>(value: T | undefined): T {

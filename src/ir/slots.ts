@@ -9,7 +9,7 @@ export type GprChannel = Readonly<{
   byteLength: 1 | 2 | 4;
 }>;
 
-export type FlagChannel = Readonly<{ kind: "flag"; flag: X86Flag }>;
+export type FlagChannel<TFlag extends X86Flag = X86Flag> = Readonly<{ kind: "flag"; flag: TFlag }>;
 export type EipChannel = Readonly<{ kind: "eip" }>;
 export type InstructionCountChannel = Readonly<{ kind: "instructionCount" }>;
 export type StateChannel = GprChannel | FlagChannel | EipChannel | InstructionCountChannel;
@@ -47,14 +47,14 @@ export function gprChannel(name: RegName): GprChannel {
   return channel;
 }
 
-export function flagChannel(flag: X86Flag): FlagChannel {
+export function flagChannel<TFlag extends X86Flag>(flag: TFlag): FlagChannel<TFlag> {
   const channel = flagChannels.get(flag);
 
   if (channel === undefined) {
     throw new Error(`unknown flag channel: ${flag}`);
   }
 
-  return channel;
+  return channel as FlagChannel<TFlag>;
 }
 
 export function channelsOverlap(a: StateChannel, b: StateChannel): boolean {

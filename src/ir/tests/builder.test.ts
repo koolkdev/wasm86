@@ -144,8 +144,8 @@ test("pending writes overwrite per channel and consts intern across instructions
 
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("eax"), value: block.values.internConst(9) },
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x100f) },
     { kind: "writeState", slot: gprChannel("ecx"), value: block.values.internConst(7) },
+    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x100f) },
     { kind: "continue" }
   ]);
 
@@ -185,8 +185,8 @@ test("repeated get of an unwritten channel returns the same leaf across instruct
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 0, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 0 },
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1004) },
     { kind: "writeState", slot: gprChannel("ecx"), value: 0 },
+    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1004) },
     { kind: "continue" }
   ]);
 });
@@ -346,8 +346,8 @@ test("write al then read eax flushes the byte and reloads the word", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("al"), value: v.internConst(0x12) },
     { kind: "readState", output: 5, slot: gprChannel("eax") },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1004) },
     { kind: "writeState", slot: gprChannel("ebx"), value: 5 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1004) },
     { kind: "continue" }
   ]);
 });
@@ -364,8 +364,8 @@ test("write eax then read al flushes the word and reloads the byte", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
     { kind: "readState", output: 5, slot: gprChannel("al") },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
     { kind: "writeState", slot: gprChannel("bl"), value: 5 },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
     { kind: "continue" }
   ]);
 });
@@ -380,8 +380,8 @@ test("write al then write eax drops the byte pending with no flush", () => {
   const v = block.values;
 
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
+    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
     { kind: "continue" }
   ]);
 });
@@ -667,7 +667,7 @@ const subSourceThenJccTemplate: SemanticTemplate = (s) => {
   const right = s.get(s.reg("ebx"), 32);
   const result = s.i32Sub(left, right);
 
-  s.writeFlagSource({ kind: "sub", width: 32, left, right, result });
+  s.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
   s.conditionalJump(s.condition("E"), s.const32(0x2000), s.const32(0x1005));
 };
 
@@ -733,7 +733,7 @@ const logicSourceThenSetccTemplate: SemanticTemplate = (s) => {
   const right = s.get(s.reg("ebx"), 32);
   const result = s.i32And(left, right);
 
-  s.writeFlagSource({ kind: "logic", width: 32, result });
+  s.writeStatusFlagsSource({ kind: "logic", width: 32, result });
   s.set(s.reg("al"), s.i32Select(s.condition("NE"), s.const32(1), s.const32(0)), 8);
 };
 
@@ -857,7 +857,8 @@ test("popfd writes every stored flag from the popped image", () => {
 
   strictEqual(writes[0]?.slot, gprChannel("esp"));
   strictEqual(writes[0]?.value, v.internBinary("add", espRead.output, v.internConst(4)));
-  deepStrictEqual(flagWrites.map((write) => write.slot.flag), [...x86Flags]);
+  deepStrictEqual(flagWrites.map((write) => write.slot.flag).sort(), [...x86Flags].sort());
+  strictEqual(new Set(flagWrites.map((write) => write.slot.flag)).size, x86Flags.length);
 
   for (const write of flagWrites) {
     const offset = x86EflagsBitOffset[write.slot.flag];

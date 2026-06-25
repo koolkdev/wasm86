@@ -97,13 +97,13 @@ test("adc and sbb read old CF after operands and before replacing arithmetic fla
   for (const op of ["adc", "sbb"] as const) {
     const trace = buildSemanticTrace(aluSemantic(op, 32), regOperands(2));
     const flagReadIndex = trace.events.findIndex((event) => event.endsWith(" = flag CF"));
-    const flagsIndex = trace.events.indexOf("flags AF,CF,OF,PF,SF,ZF");
+    const firstFlagWrite = trace.events.findIndex((event) => event.startsWith("flag "));
     const setEvent = trace.events.find((event) => event.startsWith("set op0:32 <- "));
 
     strictEqual(trace.events[0], "%0 = get op0:32", op);
     strictEqual(trace.events[1], "%1 = get op1:32", op);
     strictEqual(flagReadIndex, 2, op);
-    strictEqual(flagsIndex, 3, op);
+    strictEqual(firstFlagWrite, 3, op);
     ok(setEvent !== undefined, op);
 
     const oldCfValue = trace.events[flagReadIndex]!.split(" = ")[0]!;

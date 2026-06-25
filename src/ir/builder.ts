@@ -1,8 +1,7 @@
 import { assert } from "#common/assert.js";
 import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
-import { x86StatusFlags, type X86Flag } from "#x86/flags.js";
+import type { X86Flag } from "#x86/flags.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
-import { buildFlagSourceValues } from "#x86/semantics/flag-helpers.js";
 import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
   SemanticsBuilder,
@@ -11,8 +10,7 @@ import type {
   SemanticOperandInfo,
   SemanticOperandInput,
   SemanticTemplate,
-  SimpleFlagSource,
-  StatusFlagValues
+  SimpleFlagSource
 } from "#x86/semantics/builder.js";
 import type {
   MemRef,
@@ -32,10 +30,9 @@ import type {
   OperandBinding,
   RegDynamicOperandBinding
 } from "./operands.js";
-import { createPendingChannels } from "./pending.js";
+import { PendingState } from "./pending.js";
 import {
   eipChannel,
-  flagChannel,
   gprChannel,
   instructionCountChannel,
   type GprChannel,
@@ -115,8 +112,8 @@ function valueFromId(id: ValueId): Value {
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = createValueTable();
   readonly #actions: Action[] = [];
-  readonly #pending = createPendingChannels(this.#values, (action) => this.#actions.push(action));
-  // Fused condition expressions from the latest writeFlagSource; condition()
+  readonly #pending = new PendingState(this.#values, (action) => this.#actions.push(action));
+  // Fused condition expressions from the latest writeStatusFlagsSource; condition()
   // prefers these over recomputing from flag bytes. Any flag write
   // invalidates all earlier entries: they were derived from flag state that
   // is now stale.
@@ -177,7 +174,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       case "jump":
         assert(this.#pending.has(eipChannel), "IR block did not advance eip; no instructions were added");
         continuation = this.#pending.read(eipChannel);
-        this.#pending.flushAll();
+        this.#flushCompletedState();
         this.#actions.push({ kind: "continue" });
         break;
       case "terminated":
@@ -405,32 +402,20 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   readFlag(flag: X86Flag): Value {
     this.#beforeOp("readFlag");
-    return valueFromId(this.#pending.read(flagChannel(flag)));
+    return valueFromId(this.#pending.readFlag(flag));
   }
 
   writeFlag(flag: X86Flag, value: ValueInput): void {
     this.#beforeOp("writeFlag");
-    this.#pending.write(flagChannel(flag), value);
+    this.#pending.writeFlag(flag, value);
     this.#conditions.clear();
   }
 
-  writeFlagSource(source: SimpleFlagSource): void {
-    this.#beforeOp("writeFlagSource");
-    this.#writeFlags(buildFlagSourceValues(this, source));
+  writeStatusFlagsSource(source: SimpleFlagSource): void {
+    this.#beforeOp("writeStatusFlagsSource");
+    this.#pending.writeStatusFlagsSource(source);
+    this.#conditions.clear();
     this.#recordSourceConditionHints(source);
-  }
-
-  writeFlags(flags: StatusFlagValues): void {
-    this.#beforeOp("writeFlags");
-    this.#writeFlags(flags);
-  }
-
-  #writeFlags(flags: StatusFlagValues): void {
-    for (const flag of x86StatusFlags) {
-      this.#pending.write(flagChannel(flag), flags[flag]);
-    }
-
-    this.#conditions.clear();
   }
 
   condition(cc: ConditionCode): Value {
@@ -508,7 +493,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const vectorId = vector;
 
     this.#pending.write(eipChannel, this.#location().nextEip());
-    this.#pending.flushAll();
+    this.#flushCompletedState();
     this.#actions.push({ kind: "exit", reason: "hostTrap", payload: vectorId });
     this.#blockEnd = "terminated";
     this.#terminated = true;
@@ -529,7 +514,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #flagBoolExpr(expr: FlagBoolExpr): ValueId {
     switch (expr.kind) {
       case "flag":
-        return this.#pending.read(flagChannel(expr.flag));
+        return this.#pending.readFlag(expr.flag);
       case "not":
         return this.#values.internCompare("eq", this.#flagBoolExpr(expr.value), this.#values.internConst(0));
       case "and":
@@ -554,7 +539,15 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // Branch edges observe the completed instruction, so they flush live
   // pendings.
   #branchEdge(target: TargetInput): RegionId {
-    return this.#edgeRegion({ kind: "continue" }, this.#pending.entries(), target);
+    return this.#edgeRegion(
+      { kind: "continue" },
+      this.#pending.entries(),
+      target
+    );
+  }
+
+  #flushCompletedState(): void {
+    this.#pending.flushAll();
   }
 
   #edgeRegion(

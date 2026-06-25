@@ -1,0 +1,111 @@
+import type { SimpleFlagSource } from "#x86/flag-sources.js";
+import type { X86Flag } from "#x86/flags.js";
+import type { Action, GprDynamicSlot } from "../actions.js";
+import {
+  PendingCells
+} from "./cells.js";
+import {
+  PendingFlags
+} from "./flags.js";
+import {
+  PendingGprs,
+  type PendingReadOptions
+} from "./gprs.js";
+import { type EipChannel, type InstructionCountChannel, type StateChannel } from "../slots.js";
+import type { ValueId, ValueTable } from "../values.js";
+import { StateAccess } from "./state-access.js";
+
+export type PendingStateEntry = readonly [StateChannel, ValueId];
+
+export class PendingState {
+  readonly #cells: PendingCells<EipChannel | InstructionCountChannel>;
+  readonly #gprs: PendingGprs;
+  readonly #flags: PendingFlags;
+
+  constructor(values: ValueTable, emit: (action: Action) => void) {
+    const state = new StateAccess(values, emit);
+
+    this.#cells = new PendingCells(state);
+    this.#gprs = new PendingGprs(values, state);
+    this.#flags = new PendingFlags(values, state);
+  }
+
+  read(channel: StateChannel, options?: PendingReadOptions): ValueId {
+    switch (channel.kind) {
+      case "gpr":
+        return this.#gprs.read(channel, options);
+      case "flag":
+        return this.#flags.readFlag(channel.flag);
+      case "eip":
+      case "instructionCount":
+        return this.#cells.read(channel);
+    }
+  }
+
+  write(channel: StateChannel, value: ValueId): void {
+    switch (channel.kind) {
+      case "gpr":
+        this.#gprs.write(channel, value);
+        break;
+      case "flag":
+        this.#flags.writeFlag(channel.flag, value);
+        break;
+      case "eip":
+      case "instructionCount":
+        this.#cells.write(channel, value);
+        break;
+    }
+  }
+
+  readDynamicGpr(slot: GprDynamicSlot, options?: PendingReadOptions): ValueId {
+    return this.#gprs.readDynamic(slot, options);
+  }
+
+  writeDynamicGpr(slot: GprDynamicSlot, value: ValueId): void {
+    this.#gprs.writeDynamic(slot, value);
+  }
+
+  readFlag(flag: X86Flag): ValueId {
+    return this.#flags.readFlag(flag);
+  }
+
+  writeFlag(flag: X86Flag, value: ValueId): void {
+    this.#flags.writeFlag(flag, value);
+  }
+
+  writeStatusFlagsSource(source: SimpleFlagSource<ValueId>): void {
+    this.#flags.writeStatusFlagsSource(source);
+  }
+
+  has(channel: StateChannel): boolean {
+    switch (channel.kind) {
+      case "gpr":
+        return this.#gprs.has(channel);
+      case "flag":
+        return this.#flags.has(channel.flag);
+      case "eip":
+      case "instructionCount":
+        return this.#cells.has(channel);
+    }
+  }
+
+  beginInstruction(): void {
+    this.#gprs.beginInstruction();
+    this.#cells.beginInstruction();
+    this.#flags.beginInstruction();
+  }
+
+  snapshot(): readonly PendingStateEntry[] {
+    return [...this.#gprs.snapshot(), ...this.#cells.snapshot(), ...this.#flags.snapshot()];
+  }
+
+  entries(): readonly PendingStateEntry[] {
+    return [...this.#gprs.entries(), ...this.#cells.entries(), ...this.#flags.entries()];
+  }
+
+  flushAll(): void {
+    this.#gprs.flushAll();
+    this.#cells.flushAll();
+    this.#flags.flushAll();
+  }
+}

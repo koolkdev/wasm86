@@ -1,15 +1,15 @@
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import {
-  buildAddResultAndFlags,
   buildAddResultAndFlagSource,
+  buildAddResultAndWriteFlags,
   buildLogicResultAndFlagSource,
-  buildNegFlags,
   buildSubResultAndFlagSource,
-  buildSubResultAndFlags,
+  buildSubResultAndWriteFlags,
   writeDecFlags,
-  writeIncFlags
-} from "./flag-helpers.js";
+  writeIncFlags,
+  writeNegFlags
+} from "./alu-flags.js";
 import { guardStorageRead, guardStorageReadWrite } from "./memory.js";
 
 export type AluOp = "add" | "adc" | "sub" | "sbb" | "xor" | "and" | "or";
@@ -30,14 +30,14 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
       case "add": {
         const { result, source } = buildAddResultAndFlagSource(s, { width, left, right });
 
-        s.writeFlagSource(source);
+        s.writeStatusFlagsSource(source);
         s.set(dst, result, width);
         return;
       }
       case "sub": {
         const { result, source } = buildSubResultAndFlagSource(s, { width, left, right });
 
-        s.writeFlagSource(source);
+        s.writeStatusFlagsSource(source);
         s.set(dst, result, width);
         return;
       }
@@ -46,23 +46,21 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
       case "or": {
         const { result, source } = buildLogicResultAndFlagSource(s, { width, op, left, right });
 
-        s.writeFlagSource(source);
+        s.writeStatusFlagsSource(source);
         s.set(dst, result, width);
         return;
       }
       case "adc": {
         const oldCf = s.readFlag("CF");
-        const { result, flags } = buildAddResultAndFlags(s, { width, left, right, carryIn: oldCf });
+        const result = buildAddResultAndWriteFlags(s, { width, left, right, carryIn: oldCf });
 
-        s.writeFlags(flags);
         s.set(dst, result, width);
         return;
       }
       case "sbb": {
         const oldCf = s.readFlag("CF");
-        const { result, flags } = buildSubResultAndFlags(s, { width, left, right, borrowIn: oldCf });
+        const result = buildSubResultAndWriteFlags(s, { width, left, right, borrowIn: oldCf });
 
-        s.writeFlags(flags);
         s.set(dst, result, width);
         return;
       }
@@ -93,7 +91,7 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
         break;
       case "neg":
         result = s.i32Sub(s.const32(0), value);
-        s.writeFlags(buildNegFlags(s, { width, input: value, result }));
+        writeNegFlags(s, { width, input: value, result });
         break;
     }
 

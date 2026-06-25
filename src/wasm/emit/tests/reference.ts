@@ -2,7 +2,7 @@ import type { X86StatusFlag } from "#x86/flags.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 
 // Test-local arithmetic-flag reference for action e2e ALU cases. It avoids
-// production flag helpers and records AF = 0 for logic ops.
+// production flag-value formulas and records AF = 0 for logic ops.
 
 export type AluOp = "add" | "adc" | "or" | "and" | "sub" | "sbb" | "xor" | "cmp" | "test";
 

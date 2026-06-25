@@ -80,6 +80,7 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
   readonly #events: string[] = [];
   readonly #defs: string[] = [];
   readonly #flagWrites: StatusFlagValues[] = [];
+  readonly #pendingStatusFlags = new Map<X86StatusFlag, ValueInput>();
   readonly #operandInfo: readonly SemanticOperandInfo[];
   readonly #constValues = new Map<number, Value>();
   readonly #inlineValues = new Map<Value, string>();
@@ -229,19 +230,25 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
 
   writeFlag(flag: X86Flag, value: ValueInput): void {
     this.#emit(`flag ${flag} <- ${this.#value(value)}`);
+
+    if (isStatusFlag(flag)) {
+      this.#pendingStatusFlags.set(flag, value);
+
+      if (this.#pendingStatusFlags.size === x86StatusFlags.length) {
+        this.#flagWrites.push(statusFlagValues(Object.fromEntries(this.#pendingStatusFlags) as StatusFlagValues));
+        this.#pendingStatusFlags.clear();
+      }
+    } else {
+      this.#pendingStatusFlags.clear();
+    }
   }
 
-  writeFlagSource(source: SimpleFlagSource): void {
+  writeStatusFlagsSource(source: SimpleFlagSource): void {
     this.#emit(
       source.kind === "logic"
         ? `flagSource ${source.kind}:${source.width} result=${this.#value(source.result)}`
         : `flagSource ${source.kind}:${source.width} left=${this.#value(source.left)} right=${this.#value(source.right)} result=${this.#value(source.result)}`
     );
-  }
-
-  writeFlags(flags: StatusFlagValues): void {
-    this.#flagWrites.push(statusFlagValues(flags));
-    this.#emit(`flags ${[...x86StatusFlags].sort().join(",")}`);
   }
 
   condition(cc: ConditionCode): Value {
@@ -365,4 +372,8 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     this.#nextValueId += 1;
     return handle;
   }
+}
+
+function isStatusFlag(flag: X86Flag): flag is X86StatusFlag {
+  return (x86StatusFlags as readonly X86Flag[]).includes(flag);
 }

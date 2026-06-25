@@ -70,8 +70,7 @@ export interface SemanticsBuilder {
 
   readFlag(flag: X86Flag): Value;
   writeFlag(flag: X86Flag, value: ValueInput): void;
-  writeFlagSource(source: SimpleFlagSource): void;
-  writeFlags(flags: StatusFlagValues): void;
+  writeStatusFlagsSource(source: SimpleFlagSource): void;
   condition(cc: ConditionCode): Value;
 
   next(): void;

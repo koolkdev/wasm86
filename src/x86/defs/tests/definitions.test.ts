@@ -382,10 +382,7 @@ test("unary ALU semantics lower to flagless not and sub-flags neg", () => {
 
   const neg = buildSemanticTrace(semanticsOf(instruction("neg.rm8")), regOperands(1));
 
-  deepStrictEqual(neg.events.slice(0, 2), [
-    "%0 = get op0:8",
-    "flags AF,CF,OF,PF,SF,ZF"
-  ]);
+  strictEqual(neg.events[0], "%0 = get op0:8");
   strictEqual(neg.defs[1], "sub(0, %0)");
   deepStrictEqual(statusFlagKeys(neg.flagWrites[0]!).sort(), [...x86StatusFlags].sort());
   ok(neg.events.includes("set op0:8 <- %1"));
