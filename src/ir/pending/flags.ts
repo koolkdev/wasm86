@@ -18,7 +18,7 @@ export class PendingFlags {
 
   constructor(values: ValueTable, state: PendingStateAccess) {
     this.#cells = new PendingCells(state);
-    this.#status = new PendingStatusFlags(values, state);
+    this.#status = new PendingStatusFlags(values);
   }
 
   readFlag(flag: X86Flag): ValueId {

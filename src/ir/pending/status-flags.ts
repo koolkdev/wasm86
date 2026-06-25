@@ -7,14 +7,13 @@ import {
 } from "#x86/flag-sources.js";
 import {
   statusFlagValuesForSource,
-  type FlagValueOps,
   type StatusFlagValues
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
+import { valueTableFlagOps } from "../flag-value-ops.js";
 import { flagChannel, lazyFlagsHeaderChannel } from "../slots.js";
 import type { WriteStateAction } from "../actions.js";
-import { fitsUnsigned, type ValueId, type ValueTable } from "../values.js";
-import { PendingStateAccess } from "./state-access.js";
+import { type ValueId, type ValueTable } from "../values.js";
 import type { PendingEdgeKind } from "./state.js";
 
 export type FlagSourceId = number;
@@ -39,16 +38,14 @@ const logicUndefFlagPolicy: UndefFlagPolicy = "zero";
 
 export class PendingStatusFlags {
   readonly #values: ValueTable;
-  readonly #state: PendingStateAccess;
   readonly #sources: SimpleFlagSource<ValueId>[] = [];
   readonly #current = initialStatusFlagState();
-  readonly #valueOps: FlagValueOps<ValueId>;
+  readonly #valueOps: ReturnType<typeof valueTableFlagOps>;
   #boundary = cloneStatusFlagState(this.#current);
 
-  constructor(values: ValueTable, state: PendingStateAccess) {
+  constructor(values: ValueTable) {
     this.#values = values;
-    this.#state = state;
-    this.#valueOps = flagValueOps(values);
+    this.#valueOps = valueTableFlagOps(values);
   }
 
   readFlag(flag: X86StatusFlag): ValueId {
@@ -205,7 +202,7 @@ export class PendingStatusFlags {
   }
 
   #readInputFlag(flag: X86StatusFlag): ValueId {
-    return this.#state.readInput(flagChannel(flag), fitsUnsigned(1));
+    return this.#values.addHelperCall({ kind: "lazyFlag", flag });
   }
 
   #source(sourceId: FlagSourceId): SimpleFlagSource<ValueId> {
@@ -276,23 +273,6 @@ function cloneStatusFlagState(state: PendingStatusFlagState): PendingStatusFlagS
     backings: new Map(state.backings),
     dirty: new Set(state.dirty),
     lazySource: state.lazySource
-  };
-}
-
-function flagValueOps(values: ValueTable): FlagValueOps<ValueId> {
-  return {
-    const32: (value) => values.internConst(value),
-    project: (width, value) => values.projectTo(width, value),
-    and: (a, b) => values.internBinary("and", a, b),
-    xor: (a, b) => values.internBinary("xor", a, b),
-    shrU: (a, b) => values.internBinary("shr_u", a, b),
-    popcnt: (value) => values.internUnary("popcnt", value),
-    compare: (width, operator, a, b) => (
-      values.internCompare(operator, values.projectTo(width, a), values.projectTo(width, b))
-    ),
-    select: (condition, whenTrue, whenFalse) => (
-      values.internSelect(condition, whenTrue, whenFalse)
-    )
   };
 }
 

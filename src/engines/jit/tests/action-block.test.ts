@@ -29,6 +29,15 @@ test("JIT module emits a referenced lazy flag helper before block functions", ()
   strictEqual(wasmDefinedFunctionCount(bytes), 2);
 });
 
+test("JIT module includes helpers introduced by input flag reads", () => {
+  // seta al reads CF and ZF when there is no same-block flag source; int
+  // terminates the block so the test does not need a fallthrough link target.
+  const block = buildIrBlock(decodeBlock([0x0f, 0x97, 0xc0, 0xcd, 0x2e]).instructions);
+  const bytes = encodeActionJitModule([{ entryEip: startEip, actions: block }]);
+
+  strictEqual(wasmDefinedFunctionCount(bytes), 3);
+});
+
 test("a repeated add compiles to one eax read and one eax write", () => {
   // add eax, 1; add eax, 1.
   const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);

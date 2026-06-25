@@ -11,7 +11,7 @@ import {
   lazyFlagsKindChannel,
   lazyFlagsWidthChannel
 } from "#ir/slots.js";
-import type { Action, EdgeFlushAction, GprDynamicSlot, ReadStateAction, StateSlot } from "#ir/actions.js";
+import type { Action, EdgeFlushAction, GprDynamicSlot, StateSlot } from "#ir/actions.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 import { x86StatusFlags } from "#x86/flags.js";
 
@@ -243,13 +243,12 @@ test("status flag channels route through pending flags", () => {
   strictEqual(completedFlushes.find((action) => action.slot === flagChannel("ZF"))?.value, zf);
 
   for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
-    const read = actions.find((action): action is ReadStateAction =>
-      action.kind === "readState" && action.slot === flagChannel(flag)
-    );
+    const value = completedFlushes.find((action) => action.slot === flagChannel(flag))?.value;
 
-    ok(read !== undefined, `expected ${flag} to be read from input state`);
-    strictEqual(completedFlushes.find((action) => action.slot === flagChannel(flag))?.value, read.output);
+    ok(value !== undefined, `expected ${flag} to be flushed`);
+    deepStrictEqual(values.node(value), { kind: "helperCall", helper: { kind: "lazyFlag", flag } });
   }
+  deepStrictEqual(actions, []);
 });
 
 test("a flush invalidates read leaves of overlapping channels only", () => {

@@ -14,7 +14,7 @@ import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tes
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 // cmp + setcc consumes source-derived cmp conditions, and standalone setcc
-// rebuilds the condition from flag bytes.
+// rebuilds the condition through lazy flag helper calls.
 
 const comparePredicates: ReadonlyArray<
   readonly [ConditionCode, (left: number, right: number) => boolean]

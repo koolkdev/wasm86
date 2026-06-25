@@ -1,10 +1,10 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { Action, EdgeFlushAction, ReadStateAction } from "#ir/actions.js";
+import type { Action, EdgeFlushAction } from "#ir/actions.js";
 import { PendingFlags } from "#ir/pending/flags.js";
 import { PendingStateAccess } from "#ir/pending/state-access.js";
-import { flagChannel, lazyFlagsHeaderChannel } from "#ir/slots.js";
+import { lazyFlagsHeaderChannel } from "#ir/slots.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 
@@ -47,13 +47,15 @@ test("new pending flags start with no dirty entries", () => {
   deepStrictEqual(flags.flushesForEdge("completed"), []);
 });
 
-test("input flags read through cached state bytes", () => {
-  const { actions, flags } = createHarness();
+test("input status flags read through helper calls", () => {
+  const { values, actions, flags } = createHarness();
   const first = flags.readFlag("ZF");
   const second = flags.readFlag("ZF");
 
-  strictEqual(first, second);
-  deepStrictEqual(actions, [{ kind: "readState", output: first, slot: flagChannel("ZF") }]);
+  notStrictEqual(first, second);
+  deepStrictEqual(actions, []);
+  deepStrictEqual(values.node(first), { kind: "helperCall", helper: { kind: "lazyFlag", flag: "ZF" } });
+  deepStrictEqual(values.node(second), { kind: "helperCall", helper: { kind: "lazyFlag", flag: "ZF" } });
 });
 
 test("a sub source materializes every status flag", () => {
@@ -115,6 +117,22 @@ test("condition falls back to live flag backings after a direct flag write", () 
     flags.condition("NE"),
     values.internCompare("eq", zero, zero)
   );
+  deepStrictEqual(actions, []);
+});
+
+test("mixed pending and input condition combines pending values with helper calls", () => {
+  const { values, actions, flags } = createHarness();
+  const zf = values.internConst(1);
+
+  flags.writeFlag("ZF", zf);
+
+  const condition = flags.condition("BE");
+  const node = values.node(condition);
+
+  ok(node.kind === "binary", "expected BE condition to lower to CF | ZF");
+  strictEqual(node.operator, "or");
+  deepStrictEqual(values.node(node.a), { kind: "helperCall", helper: { kind: "lazyFlag", flag: "CF" } });
+  strictEqual(node.b, zf);
   deepStrictEqual(actions, []);
 });
 
@@ -222,13 +240,12 @@ test("a direct flag write from input state flushes a full concrete image", () =>
   strictEqual(flagFlushValue(completedFlushes, "ZF"), zf);
 
   for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
-    const read = actions.find((action): action is ReadStateAction =>
-      action.kind === "readState" && action.slot === flagChannel(flag)
-    );
+    const value = flagFlushValue(completedFlushes, flag);
 
-    ok(read !== undefined, `expected ${flag} to be read from input state`);
-    strictEqual(flagFlushValue(completedFlushes, flag), read.output);
+    ok(value !== undefined, `expected ${flag} to be flushed`);
+    deepStrictEqual(values.node(value), { kind: "helperCall", helper: { kind: "lazyFlag", flag } });
   }
+  deepStrictEqual(actions, []);
 });
 
 function flagValue(flags: PendingFlags, flag: X86StatusFlag): ValueId {

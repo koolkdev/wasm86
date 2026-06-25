@@ -6,6 +6,13 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { emitActionFragment } from "#wasm/emit/emit.js";
+import { analyzeBlockValues, type BlockValueAnalysis } from "#wasm/emit/values.js";
+import {
+  createWasmHelperRegistry,
+  defineRequiredHelpers,
+  helperCallsForBlock,
+  type WasmHelperRegistry
+} from "#wasm/helpers/module.js";
 
 // Test-only module wrapper around the action emitter: imported state + guest
 // memories, one run export returning the encoded i64 exit. The harness
@@ -25,6 +32,15 @@ export type InstantiatedIrBlock = Readonly<{
 
 // The fragment with a fallthrough completion, then the sentinel tail.
 export function irBlockBody(block: IrBlock, externalParamCount = 0): WasmFunctionBodyEncoder {
+  return emitIrBlockBody(block, externalParamCount);
+}
+
+function emitIrBlockBody(
+  block: IrBlock,
+  externalParamCount: number,
+  helpers?: WasmHelperRegistry,
+  analysis?: BlockValueAnalysis
+): WasmFunctionBodyEncoder {
   const body = new WasmFunctionBodyEncoder(externalParamCount);
   const scratch = new WasmLocalScratchAllocator(body);
 
@@ -32,6 +48,8 @@ export function irBlockBody(block: IrBlock, externalParamCount = 0): WasmFunctio
     body,
     scratch,
     externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
+    helpers,
+    analysis,
     embedding: { completion: { kind: "fallthrough" } }
   });
   scratch.assertClear();
@@ -42,7 +60,26 @@ export async function instantiateIrBlock(
   block: IrBlock,
   externalParamCount = 0
 ): Promise<InstantiatedIrBlock> {
-  return instantiateFunctionBody(irBlockBody(block, externalParamCount), externalParamCount);
+  const state = new WebAssembly.Memory({ initial: 1 });
+  const guest = new WebAssembly.Memory({ initial: wasmGuestMemoryMinPages });
+  const instance = await WebAssembly.instantiate(
+    await WebAssembly.compile(encodeIrBlockModule(block, externalParamCount)),
+    {
+      [wasmImport.namespace]: {
+        [wasmImport.cpuStateMemoryName]: state,
+        [wasmImport.guestMemoryName]: guest
+      }
+    }
+  );
+  const run = instance.exports[wasmBlockExportName];
+
+  assert(typeof run === "function", `missing Wasm ${wasmBlockExportName} export`);
+
+  return {
+    stateView: new DataView(state.buffer),
+    guestView: new DataView(guest.buffer),
+    run: (...externals) => (run as (...args: number[]) => bigint)(...externals)
+  };
 }
 
 // Same wrapper around an already finished body — typically a hand-written
@@ -75,6 +112,27 @@ export async function instantiateFunctionBody(
 
 function encodeFunctionBodyModule(body: WasmFunctionBodyEncoder, paramCount: number): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
+  const typeIndex = initializeTestModule(module, paramCount);
+
+  module.exportFunction(wasmBlockExportName, module.addFunction(typeIndex, body));
+  return module.encode();
+}
+
+function encodeIrBlockModule(block: IrBlock, externalParamCount: number): Uint8Array<ArrayBuffer> {
+  const module = new WasmModuleEncoder();
+  const typeIndex = initializeTestModule(module, externalParamCount);
+  const analysis = analyzeBlockValues(block);
+  const helpers = createWasmHelperRegistry(module);
+
+  defineRequiredHelpers(helpers, helperCallsForBlock(block, analysis));
+  module.exportFunction(
+    wasmBlockExportName,
+    module.addFunction(typeIndex, emitIrBlockBody(block, externalParamCount, helpers, analysis))
+  );
+  return module.encode();
+}
+
+function initializeTestModule(module: WasmModuleEncoder, paramCount: number): number {
   const cpuStateMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.cpuStateMemoryName, { minPages: 1 });
   const guestMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.guestMemoryName, {
     minPages: wasmGuestMemoryMinPages
@@ -90,6 +148,5 @@ function encodeFunctionBodyModule(body: WasmFunctionBodyEncoder, paramCount: num
     results: [wasmValueType.i64]
   });
 
-  module.exportFunction(wasmBlockExportName, module.addFunction(typeIndex, body));
-  return module.encode();
+  return typeIndex;
 }

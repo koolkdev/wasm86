@@ -15,7 +15,7 @@ import {
   regBinding,
   regDynamicBinding
 } from "#ir/operands.js";
-import { eipChannel, flagChannel, gprChannel, instructionCountChannel, lazyFlagsHeaderChannel } from "#ir/slots.js";
+import { eipChannel, gprChannel, instructionCountChannel, lazyFlagsHeaderChannel } from "#ir/slots.js";
 import type {
   Action,
   BranchAction,
@@ -120,6 +120,19 @@ function flagWriteValue(block: IrBlock, flag: X86StatusFlag): ValueId {
 
   strictEqual(writes.length, 1, `expected exactly one ${flag} write`);
   return writes[0]!.value;
+}
+
+function assertNegatedHelperFlag(values: IrBlock["values"], id: ValueId, flag: X86StatusFlag): void {
+  const node = values.node(id);
+
+  ok(node.kind === "compare", `expected ${flag} helper to be compared against zero`);
+  strictEqual(node.operator, "eq");
+  assertHelperFlag(values, node.a, flag);
+  strictEqual(node.b, values.internConst(0));
+}
+
+function assertHelperFlag(values: IrBlock["values"], id: ValueId, flag: X86StatusFlag): void {
+  deepStrictEqual(values.node(id), { kind: "helperCall", helper: { kind: "lazyFlag", flag } });
 }
 
 test("mov r32, imm32 flushes the register write, the eip advance, and a continue", () => {
@@ -256,19 +269,19 @@ test("two adds in one block flush exactly one write per channel, second instruct
   strictEqual(flagWriteValue(block, "ZF"), v.internCompare("eq", sum2, v.internConst(0)));
 });
 
-test("inc flushes a full concrete image with CF preserved from input", () => {
+test("inc flushes a full concrete image with CF preserved through a helper call", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(unaryAluSemantic("inc", 32), [regBinding("eax")], loc(0x1000, 0x1001));
 
   const block = builder.finish();
-  const cfRead = entryActions(block).find(
-    (action): action is ReadStateAction => action.kind === "readState" && action.slot === flagChannel("CF")
-  );
 
-  ok(cfRead !== undefined, "expected INC to preserve CF from the live input byte");
+  strictEqual(
+    entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
+    false
+  );
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
-  strictEqual(flagWriteValue(block, "CF"), cfRead.output);
+  assertHelperFlag(block.values, flagWriteValue(block, "CF"), "CF");
   strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsHeaderChannel)?.value, block.values.internConst(0));
 });
 
@@ -285,13 +298,13 @@ test("cmp writes flags but no register", () => {
   strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
 });
 
-// A template writing only ZF; omitted status flags are preserved by reading
-// their live input bytes into the full concrete image.
+// A template writing only ZF; omitted status flags are preserved by resolving
+// their live input backing into the full concrete image.
 const directZfTemplate: SemanticTemplate = (s) => {
   s.writeFlag("ZF", s.const32(1));
 };
 
-test("writeFlag flushes a full concrete image with omitted flags preserved from input", () => {
+test("writeFlag flushes a full concrete image with omitted flags preserved through helper calls", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(directZfTemplate, [], loc(0x1000, 0x1002));
@@ -302,13 +315,12 @@ test("writeFlag flushes a full concrete image with omitted flags preserved from 
   strictEqual(flagWriteValue(block, "ZF"), block.values.internConst(1));
 
   for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
-    const read = entryActions(block).find((action): action is ReadStateAction =>
-      action.kind === "readState" && action.slot === flagChannel(flag)
-    );
-
-    ok(read !== undefined, `expected ${flag} to be read from input state`);
-    strictEqual(flagWriteValue(block, flag), read.output);
+    assertHelperFlag(block.values, flagWriteValue(block, flag), flag);
   }
+  strictEqual(
+    entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
+    false
+  );
 
   strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsHeaderChannel)?.value, block.values.internConst(0));
 });
@@ -931,31 +943,35 @@ test("setcc after a logic flag source uses the source-derived condition", () => 
   );
 });
 
-test("setcc with no pending flag value builds from flag byte reads", () => {
+test("setcc with no pending flag value builds from helper calls", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(setccSemantic("A"), [regBinding("al")], loc(0x1000, 0x1003));
 
   const block = builder.finish();
   const v = block.values;
-  const reads = entryActions(block).filter(
-    (action): action is ReadStateAction => action.kind === "readState"
-  );
-
-  deepStrictEqual(reads.map((read) => read.slot), [flagChannel("CF"), flagChannel("ZF")]);
-
-  // A = !CF && !ZF over the two 0/1 flag bytes.
-  const zero = v.internConst(0);
-  const condition = v.internBinary(
-    "and",
-    v.internCompare("eq", reads[0]!.output, zero),
-    v.internCompare("eq", reads[1]!.output, zero)
-  );
 
   strictEqual(
-    stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
-    v.internSelect(condition, v.internConst(1), zero)
+    entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
+    false
   );
+
+  const zero = v.internConst(0);
+  const write = stateWrites(block).find((write) => write.slot === gprChannel("al"));
+
+  ok(write !== undefined, "expected setcc to write al");
+  const select = v.node(write.value);
+
+  ok(select.kind === "select", "expected setcc to write a select value");
+  strictEqual(select.whenTrue, v.internConst(1));
+  strictEqual(select.whenFalse, zero);
+
+  const condition = v.node(select.condition);
+
+  ok(condition.kind === "binary", "expected A condition to lower to !CF && !ZF");
+  strictEqual(condition.operator, "and");
+  assertNegatedHelperFlag(v, condition.a, "CF");
+  assertNegatedHelperFlag(v, condition.b, "ZF");
 });
 
 test("setcc after an intervening add uses the latest source-expanded flag expression", () => {
