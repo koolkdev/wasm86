@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { wasmImport } from "#wasm/abi.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
+import { wasmOpcode } from "#wasm/encoder/types.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import {
   defineLazyFlagHelper,
@@ -15,6 +16,7 @@ import { writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js"
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import type { OperandWidth } from "#x86/types.js";
 import { aluReference } from "#wasm/emit/tests/reference.js";
+import { extractOnlyWasmFunctionBody, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 
 test("lazy flag helper names are stable", () => {
   strictEqual(lazyFlagHelperName("CF"), "resolveCF");
@@ -42,6 +44,18 @@ test("lazy flag helper bodies compile", async () => {
   defineLazyFlagHelper(registry, "ZF");
 
   await WebAssembly.compile(module.encode());
+});
+
+test("lazy flag helper dispatches through br_table", () => {
+  const module = moduleWithCpuMemory();
+  const registry = createWasmHelperRegistry(module);
+
+  defineLazyFlagHelper(registry, "CF");
+
+  const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(module.encode()));
+
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.brTable).length, 1);
+  strictEqual(opcodes.includes(wasmOpcode.i32Eq), false);
 });
 
 test("lazy flag helpers resolve explicit NONE flag bytes", async () => {

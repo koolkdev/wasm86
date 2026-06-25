@@ -111,6 +111,7 @@ export function wasmBodyOpcodes(functionBody: Uint8Array<ArrayBuffer>): readonly
         offset = skipMemoryImmediate(functionBody, offset);
         break;
       case wasmOpcode.else:
+      case wasmOpcode.unreachable:
       case wasmOpcode.return:
       case wasmOpcode.drop:
       case wasmOpcode.select:
@@ -278,6 +279,7 @@ export function wasmBodyMemoryAccesses(functionBody: Uint8Array<ArrayBuffer>): r
         }
         break;
       case wasmOpcode.else:
+      case wasmOpcode.unreachable:
       case wasmOpcode.return:
       case wasmOpcode.drop:
       case wasmOpcode.select:

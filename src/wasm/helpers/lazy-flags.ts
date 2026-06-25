@@ -17,6 +17,11 @@ import type { HelperRegistry } from "./registry.js";
 
 export type LazyFlagHelper = X86StatusFlag;
 
+type ResolverCase = Readonly<{
+  kindByte: number;
+  emitValue: () => void;
+}>;
+
 export function lazyFlagHelperKey(flag: LazyFlagHelper): HelperCallKey {
   return { kind: "lazyFlag", flag };
 }
@@ -50,37 +55,63 @@ function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncod
   emitLazyFieldLoad(body, helper, lazyFlagsKindChannel);
   body.localSet(kindLocal);
 
-  emitResolverCase(body, kindLocal, lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0), () => {
-    emitSlotLoad(body, flagChannel(helper), false, (id) => {
-      assert(false, `${lazyFlagHelperName(helper)} unexpectedly needed value operand ${id}`);
-    });
-  });
+  const cases = resolverCases(body, scratch, helper);
 
-  for (const width of [8, 16, 32] as const) {
-    emitResolverCase(body, kindLocal, lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, width), () => {
-      emitBinaryFlag(body, scratch, helper, "add", width);
-    });
-    emitResolverCase(body, kindLocal, lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, width), () => {
-      emitBinaryFlag(body, scratch, helper, "sub", width);
-    });
+  for (let index = 0; index <= cases.length; index += 1) {
+    body.block();
   }
 
+  body.localGet(kindLocal).brTable(lazyKindDispatchTable(cases), cases.length);
+
+  for (let index = cases.length - 1; index >= 0; index -= 1) {
+    body.endBlock();
+    cases[index]!.emitValue();
+    body.returnFromFunction();
+  }
+
+  body.endBlock();
   body.unreachable();
   scratch.assertClear();
   return body.end();
 }
 
-function emitResolverCase(
+function resolverCases(
   body: WasmFunctionBodyEncoder,
-  kindLocal: number,
-  expected: number,
-  emitValue: () => void
-): void {
-  body.localGet(kindLocal).i32Const(expected).i32Eq();
-  body.ifBlock();
-  emitValue();
-  body.returnFromFunction();
-  body.endBlock();
+  scratch: WasmLocalScratchAllocator,
+  helper: LazyFlagHelper
+): readonly ResolverCase[] {
+  return [
+    {
+      kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
+      emitValue: () => {
+        emitSlotLoad(body, flagChannel(helper), false, (id) => {
+          assert(false, `${lazyFlagHelperName(helper)} unexpectedly needed value operand ${id}`);
+        });
+      }
+    },
+    ...([8, 16, 32] as const).flatMap((width) => [
+      {
+        kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, width),
+        emitValue: () => emitBinaryFlag(body, scratch, helper, "add", width)
+      },
+      {
+        kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, width),
+        emitValue: () => emitBinaryFlag(body, scratch, helper, "sub", width)
+      }
+    ])
+  ];
+}
+
+function lazyKindDispatchTable(cases: readonly ResolverCase[]): number[] {
+  const maxKindByte = Math.max(...cases.map((entry) => entry.kindByte));
+  const table = new Array<number>(maxKindByte + 1).fill(cases.length);
+
+  for (const [index, entry] of cases.entries()) {
+    assert(table[entry.kindByte] === cases.length, `duplicate lazy flag kind byte ${entry.kindByte}`);
+    table[entry.kindByte] = cases.length - 1 - index;
+  }
+
+  return table;
 }
 
 function emitBinaryFlag(
