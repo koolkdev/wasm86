@@ -81,7 +81,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     body,
     completion: embedding.completion,
     emitPayload: valueStack.emitUse,
-    constValue: block.values.constValue
+    constValue: (id) => block.values.constValue(id)
   });
 
   function emitEntryAction(action: Action): void {

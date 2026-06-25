@@ -4,7 +4,7 @@ import { eipChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { EdgeRegion, IrBlock, RegionId } from "#ir/block.js";
 import {
-  createValueTable,
+  ValueTable,
   fitsUnsigned,
   signExtended,
   type ValueId,
@@ -34,7 +34,7 @@ export type DecodeCursor =
 const entryRegionId: RegionId = 0;
 
 class DecodeFragment {
-  readonly #values = createValueTable();
+  readonly #values = new ValueTable();
   readonly #actions: Action[] = [];
   readonly #edges: EdgeRegion[] = [];
   readonly #externalLocals = new Map<ExternalValueId, number>();

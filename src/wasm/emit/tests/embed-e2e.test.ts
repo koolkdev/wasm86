@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { createValueTable, type ValueId } from "#ir/values.js";
+import { ValueTable, type ValueId } from "#ir/values.js";
 import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -26,7 +26,7 @@ type DecodeReadFragment = Readonly<{
 // The fault edge restores eip, leaving the faulting instruction's address
 // visible.
 function decodeReadFragment(k: number): DecodeReadFragment {
-  const values = createValueTable();
+  const values = new ValueTable();
   const eipValue = values.addActionOutput();
   const address = values.internBinary("add", eipValue, values.internConst(k));
   const fetched = values.addActionOutput();
@@ -168,7 +168,7 @@ test("consecutive fragments share the embedder's scratch locals", async () => {
 });
 
 test("an exported register read pins across a later overlapping store", async () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const readValue = values.addActionOutput();
   const incremented = values.internBinary("add", readValue, values.internConst(1));
   const block: IrBlock = {

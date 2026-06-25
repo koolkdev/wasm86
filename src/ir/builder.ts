@@ -47,7 +47,7 @@ import type {
 } from "./actions.js";
 import type { EdgeRegion, IrBlock, RegionId } from "./block.js";
 import {
-  createValueTable,
+  ValueTable,
   fitsUnsigned,
   signExtended,
   type ValueId,
@@ -110,7 +110,7 @@ function valueFromId(id: ValueId): Value {
 }
 
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
-  readonly #values = createValueTable();
+  readonly #values = new ValueTable();
   readonly #actions: Action[] = [];
   readonly #pending = new PendingState(this.#values, (action) => this.#actions.push(action));
   readonly #edgeRegions: EdgeRegion[] = [];

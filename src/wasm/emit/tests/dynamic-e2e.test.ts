@@ -5,7 +5,7 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { regDynamicBinding, immBinding, regBinding } from "#ir/operands.js";
 import { gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { createValueTable, type ValueId, type ValueTable } from "#ir/values.js";
+import { ValueTable, type ValueId } from "#ir/values.js";
 import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic } from "#x86/semantics/mov.js";
@@ -146,7 +146,7 @@ function modrmRegField(values: ValueTable, modrm: ValueId): ValueId {
 }
 
 test("a computed index extracts the registers from a modrm-style external", async () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const modrm = values.internExternal(0);
   const reg = modrmRegField(values, modrm);
   const rm = values.internBinary("and", modrm, values.internConst(7));
@@ -177,7 +177,7 @@ test("a computed index extracts the registers from a modrm-style external", asyn
 });
 
 test("a computed index drives byte access through its two address pushes", async () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const reg = modrmRegField(values, values.internExternal(0));
   const block: IrBlock = {
     entry: 0,

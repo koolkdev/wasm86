@@ -75,321 +75,307 @@ function clampedBounds(unsignedBits: number, signedBits: number): WidthBounds {
   };
 }
 
-export type ValueTable = Readonly<{
-  internConst(value: number): ValueId;
-  internExternal(external: ExternalValueId): ValueId;
-  addActionOutput(bounds?: WidthBounds): ValueId;
-  internBinary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId;
-  internUnary(operator: UnaryOperator, value: ValueId): ValueId;
-  internCompare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId;
-  internSelect(condition: ValueId, whenTrue: ValueId, whenFalse: ValueId): ValueId;
-  internProject(width: OperandWidth, value: ValueId): ValueId;
-  // Smart constructors: the interned projection/extension, or the value
-  // itself when its width bounds already cover the request.
-  projectTo(width: OperandWidth, value: ValueId): ValueId;
-  extendTo(width: OperandWidth, value: ValueId): ValueId;
-  node(id: ValueId): ValueNode;
-  // The node's compile-time constant, when it is one; i32-canonical.
-  constValue(id: ValueId): number | undefined;
-  size(): number;
-}>;
-
-export function createValueTable(): ValueTable {
-  const nodes: ValueNode[] = [];
+export class ValueTable {
+  readonly #nodes: ValueNode[] = [];
   // Derived on first query, memoized per node.
-  const widthBounds: (WidthBounds | undefined)[] = [];
-  const constIds = new Map<number, ValueId>();
-  const externalIds = new Map<ExternalValueId, ValueId>();
-  const binaryIds: Map3<BinaryOperator, ValueId, ValueId, ValueId> = new Map();
-  const unaryIds: Map2<UnaryOperator, ValueId, ValueId> = new Map();
-  const compareIds: Map3<CompareOperator, ValueId, ValueId, ValueId> = new Map();
-  const selectIds: Map3<ValueId, ValueId, ValueId, ValueId> = new Map();
-  const projectIds: Map2<OperandWidth, ValueId, ValueId> = new Map();
+  readonly #widthBounds: (WidthBounds | undefined)[] = [];
+  readonly #constIds = new Map<number, ValueId>();
+  readonly #externalIds = new Map<ExternalValueId, ValueId>();
+  readonly #binaryIds: Map3<BinaryOperator, ValueId, ValueId, ValueId> = new Map();
+  readonly #unaryIds: Map2<UnaryOperator, ValueId, ValueId> = new Map();
+  readonly #compareIds: Map3<CompareOperator, ValueId, ValueId, ValueId> = new Map();
+  readonly #selectIds: Map3<ValueId, ValueId, ValueId, ValueId> = new Map();
+  readonly #projectIds: Map2<OperandWidth, ValueId, ValueId> = new Map();
 
-  function add(node: ValueNode, children: readonly ValueId[]): ValueId {
+  #add(node: ValueNode, children: readonly ValueId[]): ValueId {
     for (const child of children) {
-      assert(nodes[child] !== undefined, `unknown value id ${child}`);
+      assert(this.#nodes[child] !== undefined, `unknown value id ${child}`);
     }
 
-    const id = nodes.length;
+    const id = this.#nodes.length;
 
-    nodes.push(Object.freeze(node));
-    widthBounds.push(undefined);
+    this.#nodes.push(Object.freeze(node));
+    this.#widthBounds.push(undefined);
 
     return id;
   }
 
-  function node(id: ValueId): ValueNode {
-    const found = nodes[id];
+  node(id: ValueId): ValueNode {
+    const found = this.#nodes[id];
 
     assert(found !== undefined, `unknown value id ${id}`);
     return found;
   }
 
-  function widthBoundsOf(id: ValueId): WidthBounds {
-    const existing = widthBounds[id];
+  #widthBoundsOf(id: ValueId): WidthBounds {
+    const existing = this.#widthBounds[id];
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const derived = deriveWidthBounds(node(id), widthBoundsOf);
+    const derived = ValueTable.#deriveWidthBounds(this.node(id), (child) => this.#widthBoundsOf(child));
 
-    widthBounds[id] = derived;
+    this.#widthBounds[id] = derived;
     return derived;
   }
 
-  function internConst(value: number): ValueId {
+  internConst(value: number): ValueId {
     const canonical = i32(value);
-    const existing = constIds.get(canonical);
+    const existing = this.#constIds.get(canonical);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = add({ kind: "const", value: canonical }, []);
+    const id = this.#add({ kind: "const", value: canonical }, []);
 
-    constIds.set(canonical, id);
+    this.#constIds.set(canonical, id);
     return id;
   }
 
-  function internExternal(external: ExternalValueId): ValueId {
-    const existing = externalIds.get(external);
+  internExternal(external: ExternalValueId): ValueId {
+    const existing = this.#externalIds.get(external);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = add({ kind: "external", external }, []);
+    const id = this.#add({ kind: "external", external }, []);
 
-    externalIds.set(external, id);
+    this.#externalIds.set(external, id);
     return id;
   }
 
-  function addActionOutput(bounds?: WidthBounds): ValueId {
+  addActionOutput(bounds?: WidthBounds): ValueId {
     // Each action produces a distinct value; outputs are never deduped.
-    const id = add({ kind: "actionOutput" }, []);
+    const id = this.#add({ kind: "actionOutput" }, []);
 
-    widthBounds[id] = bounds ?? unbounded;
+    this.#widthBounds[id] = bounds ?? unbounded;
     return id;
   }
 
-  function internBinary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
-    const existing = get3(binaryIds, operator, a, b);
+  internBinary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
+    const existing = get3(this.#binaryIds, operator, a, b);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = add({ kind: "binary", operator, a, b }, [a, b]);
+    const id = this.#add({ kind: "binary", operator, a, b }, [a, b]);
 
-    put3(binaryIds, operator, a, b, id);
+    put3(this.#binaryIds, operator, a, b, id);
     return id;
   }
 
-  function internUnary(operator: UnaryOperator, value: ValueId): ValueId {
-    const existing = get2(unaryIds, operator, value);
+  internUnary(operator: UnaryOperator, value: ValueId): ValueId {
+    const existing = get2(this.#unaryIds, operator, value);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = add({ kind: "unary", operator, value }, [value]);
+    const id = this.#add({ kind: "unary", operator, value }, [value]);
 
-    put2(unaryIds, operator, value, id);
+    put2(this.#unaryIds, operator, value, id);
     return id;
   }
 
-  function internCompare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
-    const existing = get3(compareIds, operator, a, b);
+  internCompare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
+    const existing = get3(this.#compareIds, operator, a, b);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = add({ kind: "compare", operator, a, b }, [a, b]);
+    const id = this.#add({ kind: "compare", operator, a, b }, [a, b]);
 
-    put3(compareIds, operator, a, b, id);
+    put3(this.#compareIds, operator, a, b, id);
     return id;
   }
 
-  function internSelect(condition: ValueId, whenTrue: ValueId, whenFalse: ValueId): ValueId {
-    const existing = get3(selectIds, condition, whenTrue, whenFalse);
+  internSelect(condition: ValueId, whenTrue: ValueId, whenFalse: ValueId): ValueId {
+    const existing = get3(this.#selectIds, condition, whenTrue, whenFalse);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = add({ kind: "select", condition, whenTrue, whenFalse }, [
+    const id = this.#add({ kind: "select", condition, whenTrue, whenFalse }, [
       condition,
       whenTrue,
       whenFalse
     ]);
 
-    put3(selectIds, condition, whenTrue, whenFalse, id);
+    put3(this.#selectIds, condition, whenTrue, whenFalse, id);
     return id;
   }
 
-  function internProject(width: OperandWidth, value: ValueId): ValueId {
-    const existing = get2(projectIds, width, value);
+  internProject(width: OperandWidth, value: ValueId): ValueId {
+    const existing = get2(this.#projectIds, width, value);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = add({ kind: "project", width, value }, [value]);
+    const id = this.#add({ kind: "project", width, value }, [value]);
 
-    put2(projectIds, width, value, id);
+    put2(this.#projectIds, width, value, id);
     return id;
   }
 
-  function projectTo(width: OperandWidth, value: ValueId): ValueId {
-    const found = node(value);
+  // Smart constructor: the interned projection, or the value itself when its
+  // width bounds already cover the request.
+  projectTo(width: OperandWidth, value: ValueId): ValueId {
+    const found = this.node(value);
 
     if (found.kind === "const") {
-      return internConst(projectConst(width, found.value));
+      return this.internConst(ValueTable.#projectConst(width, found.value));
     }
 
-    if (width === 32 || widthBoundsOf(value).unsignedBits <= width) {
+    if (width === 32 || this.#widthBoundsOf(value).unsignedBits <= width) {
       return value;
     }
 
-    return internProject(width, value);
+    return this.internProject(width, value);
   }
 
-  function extendTo(width: OperandWidth, value: ValueId): ValueId {
-    const found = node(value);
+  // Smart constructor: the interned extension, or the value itself when its
+  // width bounds already cover the request.
+  extendTo(width: OperandWidth, value: ValueId): ValueId {
+    const found = this.node(value);
 
     if (found.kind === "const") {
-      return internConst(extendConst(width, found.value));
+      return this.internConst(ValueTable.#extendConst(width, found.value));
     }
 
-    if (width === 32 || widthBoundsOf(value).signedBits <= width) {
+    if (width === 32 || this.#widthBoundsOf(value).signedBits <= width) {
       return value;
     }
 
-    return internUnary(width === 8 ? "extend8_s" : "extend16_s", value);
+    return this.internUnary(width === 8 ? "extend8_s" : "extend16_s", value);
   }
 
-  return {
-    internConst,
-    internExternal,
-    addActionOutput,
-    internBinary,
-    internUnary,
-    internCompare,
-    internSelect,
-    internProject,
-    projectTo,
-    extendTo,
-    node,
-    constValue(id: ValueId): number | undefined {
-      const found = node(id);
+  // The node's compile-time constant, when it is one; i32-canonical.
+  constValue(id: ValueId): number | undefined {
+    const found = this.node(id);
 
-      return found.kind === "const" ? found.value : undefined;
-    },
-    size(): number {
-      return nodes.length;
+    return found.kind === "const" ? found.value : undefined;
+  }
+
+  size(): number {
+    return this.#nodes.length;
+  }
+
+  static #deriveWidthBounds(
+    node: ValueNode,
+    widthBoundsOf: (id: ValueId) => WidthBounds
+  ): WidthBounds {
+    switch (node.kind) {
+      case "const":
+        return ValueTable.#constWidthBounds(node.value);
+      case "actionOutput":
+      case "external":
+        // Action outputs carry their bounds from creation; externals are opaque.
+        return unbounded;
+      case "binary":
+        return ValueTable.#binaryWidthBounds(node, widthBoundsOf);
+      case "select":
+        return ValueTable.#selectWidthBounds(node, widthBoundsOf);
+      case "unary":
+        return ValueTable.#unaryWidthBounds(node, widthBoundsOf);
+      case "compare":
+        return fitsUnsigned(1);
+      case "project":
+        return fitsUnsigned(Math.min(node.width, widthBoundsOf(node.value).unsignedBits));
     }
-  };
-}
-
-function deriveWidthBounds(node: ValueNode, widthBoundsOf: (id: ValueId) => WidthBounds): WidthBounds {
-  switch (node.kind) {
-    case "const":
-      return constWidthBounds(node.value);
-    case "actionOutput":
-    case "external":
-      // Action outputs carry their bounds from creation; externals are opaque.
-      return unbounded;
-    case "binary":
-      return binaryWidthBounds(node, widthBoundsOf);
-    case "select":
-      return selectWidthBounds(node, widthBoundsOf);
-    case "unary":
-      return unaryWidthBounds(node, widthBoundsOf);
-    case "compare":
-      return fitsUnsigned(1);
-    case "project":
-      return fitsUnsigned(Math.min(node.width, widthBoundsOf(node.value).unsignedBits));
   }
-}
 
-function projectConst(width: OperandWidth, value: number): number {
-  switch (width) {
-    case 8:
-      return value & 0xff;
-    case 16:
-      return value & 0xffff;
-    case 32:
-      return i32(value);
+  static #projectConst(width: OperandWidth, value: number): number {
+    switch (width) {
+      case 8:
+        return value & 0xff;
+      case 16:
+        return value & 0xffff;
+      case 32:
+        return i32(value);
+    }
   }
-}
 
-function extendConst(width: OperandWidth, value: number): number {
-  switch (width) {
-    case 8:
-      return (value << 24) >> 24;
-    case 16:
-      return (value << 16) >> 16;
-    case 32:
-      return i32(value);
+  static #extendConst(width: OperandWidth, value: number): number {
+    switch (width) {
+      case 8:
+        return (value << 24) >> 24;
+      case 16:
+        return (value << 16) >> 16;
+      case 32:
+        return i32(value);
+    }
   }
-}
 
-function binaryWidthBounds(node: BinaryValueNode, widthBoundsOf: (id: ValueId) => WidthBounds): WidthBounds {
-  const a = widthBoundsOf(node.a);
-  const b = widthBoundsOf(node.b);
-  // Bitwise ops preserve sign extension: when the bits from position w - 1 up
-  // are sign-bit copies in both operands, they still are in the result.
-  const bitwiseSignedBits = Math.max(a.signedBits, b.signedBits);
+  static #binaryWidthBounds(
+    node: BinaryValueNode,
+    widthBoundsOf: (id: ValueId) => WidthBounds
+  ): WidthBounds {
+    const a = widthBoundsOf(node.a);
+    const b = widthBoundsOf(node.b);
+    // Bitwise ops preserve sign extension: when the bits from position w - 1 up
+    // are sign-bit copies in both operands, they still are in the result.
+    const bitwiseSignedBits = Math.max(a.signedBits, b.signedBits);
 
-  switch (node.operator) {
-    case "and":
-      // Can only clear bits: the tighter operand bounds the result.
-      return clampedBounds(Math.min(a.unsignedBits, b.unsignedBits), bitwiseSignedBits);
-    case "or":
-    case "xor":
-      // Cannot set a bit above either operand's bound.
-      return clampedBounds(Math.max(a.unsignedBits, b.unsignedBits), bitwiseSignedBits);
-    case "shr_u":
-      // A logical right shift never increases the value.
-      return clampedBounds(a.unsignedBits, 32);
-    case "add":
-    case "sub":
-    case "shl":
-      // Wrapping arithmetic has no cheap bound.
-      return unbounded;
+    switch (node.operator) {
+      case "and":
+        // Can only clear bits: the tighter operand bounds the result.
+        return clampedBounds(Math.min(a.unsignedBits, b.unsignedBits), bitwiseSignedBits);
+      case "or":
+      case "xor":
+        // Cannot set a bit above either operand's bound.
+        return clampedBounds(Math.max(a.unsignedBits, b.unsignedBits), bitwiseSignedBits);
+      case "shr_u":
+        // A logical right shift never increases the value.
+        return clampedBounds(a.unsignedBits, 32);
+      case "add":
+      case "sub":
+      case "shl":
+        // Wrapping arithmetic has no cheap bound.
+        return unbounded;
+    }
   }
-}
 
-function selectWidthBounds(node: SelectValueNode, widthBoundsOf: (id: ValueId) => WidthBounds): WidthBounds {
-  // The result is one of the two arms, so the weaker arm bound holds.
-  const whenTrue = widthBoundsOf(node.whenTrue);
-  const whenFalse = widthBoundsOf(node.whenFalse);
+  static #selectWidthBounds(
+    node: SelectValueNode,
+    widthBoundsOf: (id: ValueId) => WidthBounds
+  ): WidthBounds {
+    // The result is one of the two arms, so the weaker arm bound holds.
+    const whenTrue = widthBoundsOf(node.whenTrue);
+    const whenFalse = widthBoundsOf(node.whenFalse);
 
-  return clampedBounds(
-    Math.max(whenTrue.unsignedBits, whenFalse.unsignedBits),
-    Math.max(whenTrue.signedBits, whenFalse.signedBits)
-  );
-}
-
-function unaryWidthBounds(node: UnaryValueNode, widthBoundsOf: (id: ValueId) => WidthBounds): WidthBounds {
-  switch (node.operator) {
-    case "extend8_s":
-      return signExtended(Math.min(8, widthBoundsOf(node.value).signedBits));
-    case "extend16_s":
-      return signExtended(Math.min(16, widthBoundsOf(node.value).signedBits));
-    case "popcnt":
-      return unbounded;
+    return clampedBounds(
+      Math.max(whenTrue.unsignedBits, whenFalse.unsignedBits),
+      Math.max(whenTrue.signedBits, whenFalse.signedBits)
+    );
   }
-}
 
-function constWidthBounds(value: number): WidthBounds {
-  return {
-    // Position of the highest set bit; negative values use the sign bit.
-    unsignedBits: value < 0 ? 32 : Math.max(1, 32 - Math.clz32(value)),
-    // Significant bits plus the sign bit.
-    signedBits: Math.min(32, 33 - Math.clz32(value ^ (value >> 31)))
-  };
+  static #unaryWidthBounds(
+    node: UnaryValueNode,
+    widthBoundsOf: (id: ValueId) => WidthBounds
+  ): WidthBounds {
+    switch (node.operator) {
+      case "extend8_s":
+        return signExtended(Math.min(8, widthBoundsOf(node.value).signedBits));
+      case "extend16_s":
+        return signExtended(Math.min(16, widthBoundsOf(node.value).signedBits));
+      case "popcnt":
+        return unbounded;
+    }
+  }
+
+  static #constWidthBounds(value: number): WidthBounds {
+    return {
+      // Position of the highest set bit; negative values use the sign bit.
+      unsignedBits: value < 0 ? 32 : Math.max(1, 32 - Math.clz32(value)),
+      // Significant bits plus the sign bit.
+      signedBits: Math.min(32, 33 - Math.clz32(value ^ (value >> 31)))
+    };
+  }
 }

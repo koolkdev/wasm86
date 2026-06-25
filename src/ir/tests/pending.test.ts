@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { PendingState } from "#ir/pending.js";
 import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
 import type { Action, GprDynamicSlot } from "#ir/actions.js";
-import { createValueTable, type ValueId, type ValueTable } from "#ir/values.js";
+import { ValueTable, type ValueId } from "#ir/values.js";
 
 type Harness = Readonly<{
   values: ValueTable;
@@ -13,7 +13,7 @@ type Harness = Readonly<{
 }>;
 
 function createHarness(): Harness {
-  const values = createValueTable();
+  const values = new ValueTable();
   const actions: Action[] = [];
 
   return { values, actions, pending: new PendingState(values, (action) => actions.push(action)) };

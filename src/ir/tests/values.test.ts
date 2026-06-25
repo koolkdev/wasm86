@@ -1,10 +1,10 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { createValueTable, fitsUnsigned, signExtended } from "#ir/values.js";
+import { ValueTable, fitsUnsigned, signExtended } from "#ir/values.js";
 
 test("value table interns constants by canonical i32 value", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
 
   strictEqual(table.internConst(7), table.internConst(7));
   strictEqual(table.internConst(-1), table.internConst(0xffff_ffff));
@@ -13,7 +13,7 @@ test("value table interns constants by canonical i32 value", () => {
 });
 
 test("value table exposes interned nodes by id", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
 
   deepStrictEqual(table.node(table.internConst(7)), { kind: "const", value: 7 });
   deepStrictEqual(table.node(table.internConst(0xdeadbeef)), { kind: "const", value: 0xdeadbeef | 0 });
@@ -21,7 +21,7 @@ test("value table exposes interned nodes by id", () => {
 });
 
 test("building the same expression twice yields the same node id", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const a = table.internConst(1);
   const b = table.internConst(2);
   const add = table.internBinary("add", a, b);
@@ -33,7 +33,7 @@ test("building the same expression twice yields the same node id", () => {
 });
 
 test("each compound kind interns on its full key", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const a = table.internConst(1);
   const b = table.internConst(2);
 
@@ -63,7 +63,7 @@ test("each compound kind interns on its full key", () => {
 });
 
 test("action outputs are distinct leaves, never deduped", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const first = table.addActionOutput();
   const second = table.addActionOutput();
 
@@ -73,7 +73,7 @@ test("action outputs are distinct leaves, never deduped", () => {
 });
 
 test("external leaves intern by external id", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
 
   strictEqual(table.internExternal(3), table.internExternal(3));
   notStrictEqual(table.internExternal(3), table.internExternal(4));
@@ -81,7 +81,7 @@ test("external leaves intern by external id", () => {
 });
 
 test("compound nodes reject unknown children", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const a = table.internConst(1);
 
   throws(() => table.internBinary("add", a, 99), /unknown value id 99/);
@@ -90,7 +90,7 @@ test("compound nodes reject unknown children", () => {
 });
 
 test("projectTo folds constants and elides projections covered by bounds", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
 
   strictEqual(table.projectTo(8, table.internConst(0xff)), table.internConst(0xff));
   strictEqual(table.projectTo(16, table.internConst(0xffff)), table.internConst(0xffff));
@@ -101,7 +101,7 @@ test("projectTo folds constants and elides projections covered by bounds", () =>
 });
 
 test("extendTo folds constants and elides extensions covered by bounds", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
 
   strictEqual(table.extendTo(8, table.internConst(127)), table.internConst(127));
   strictEqual(table.extendTo(8, table.internConst(-128)), table.internConst(-128));
@@ -112,7 +112,7 @@ test("extendTo folds constants and elides extensions covered by bounds", () => {
 });
 
 test("compare results fit a single bit either way", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const compare = table.internCompare("eq", table.internConst(1), table.internConst(2));
 
   strictEqual(table.projectTo(8, compare), compare);
@@ -120,7 +120,7 @@ test("compare results fit a single bit either way", () => {
 });
 
 test("projections and extensions cover follow-up requests they imply", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const unproven = table.addActionOutput();
   const low8 = table.internProject(8, unproven);
 
@@ -136,7 +136,7 @@ test("projections and extensions cover follow-up requests they imply", () => {
 });
 
 test("action outputs carry their declared bounds", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const byteRead = table.addActionOutput(fitsUnsigned(8));
 
   strictEqual(table.projectTo(8, byteRead), byteRead);
@@ -155,7 +155,7 @@ test("action outputs carry their declared bounds", () => {
 });
 
 test("unbounded results stay wrapped", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const sum = table.internBinary("add", table.internConst(1), table.internConst(2));
 
   strictEqual(table.node(table.projectTo(8, sum)).kind, "project");
@@ -163,7 +163,7 @@ test("unbounded results stay wrapped", () => {
 });
 
 test("bitwise results inherit their operands' bounds", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const opaque = table.addActionOutput();
   const byte = table.addActionOutput(fitsUnsigned(8));
 
@@ -189,7 +189,7 @@ test("bitwise results inherit their operands' bounds", () => {
 });
 
 test("a select is bounded by the weaker of its arms", () => {
-  const table = createValueTable();
+  const table = new ValueTable();
   const condition = table.addActionOutput();
   const bit = table.internSelect(condition, table.internConst(1), table.internConst(0));
 

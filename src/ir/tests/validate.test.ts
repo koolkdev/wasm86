@@ -4,13 +4,13 @@ import { test } from "node:test";
 import { eipChannel } from "#ir/slots.js";
 import type { IrBlock, IrRegion } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { createValueTable } from "#ir/values.js";
+import { ValueTable } from "#ir/values.js";
 
 // Validation checks shape only, so the value table can stay empty and value
 // ids are arbitrary.
 
 function blockWith(regions: readonly IrRegion[], entry = 0): IrBlock {
-  return { entry, regions, values: createValueTable() };
+  return { entry, regions, values: new ValueTable() };
 }
 
 const continueAction = { kind: "continue" } as const;

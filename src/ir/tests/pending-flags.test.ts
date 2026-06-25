@@ -5,7 +5,7 @@ import type { Action, WriteStateAction } from "#ir/actions.js";
 import { PendingFlags } from "#ir/pending/flags.js";
 import { StateAccess } from "#ir/pending/state-access.js";
 import { flagChannel } from "#ir/slots.js";
-import { createValueTable, type ValueId, type ValueTable } from "#ir/values.js";
+import { ValueTable, type ValueId } from "#ir/values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 
 type Harness = Readonly<{
@@ -15,7 +15,7 @@ type Harness = Readonly<{
 }>;
 
 function createHarness(): Harness {
-  const values = createValueTable();
+  const values = new ValueTable();
   const actions: Action[] = [];
   const state = new StateAccess(values, (action) => actions.push(action));
 

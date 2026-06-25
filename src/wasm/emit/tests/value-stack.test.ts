@@ -9,7 +9,7 @@ import type {
   ReadStateAction
 } from "#ir/actions.js";
 import type { EdgeRegion, EntryRegion } from "#ir/block.js";
-import { createValueTable, type ValueTable } from "#ir/values.js";
+import { ValueTable } from "#ir/values.js";
 import { createValueStack, type ValueStack } from "#wasm/emit/value-stack.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -50,7 +50,7 @@ function createTestEmitter(
 }
 
 test("single-use values emit inline with no locals", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.internConst(5);
   const sum = values.internBinary("add", read, five);
@@ -82,7 +82,7 @@ test("single-use values emit inline with no locals", () => {
 });
 
 test("a multi-use value tees once and replays from one freed local", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.internConst(5);
   const sum = values.internBinary("add", read, five);
@@ -118,7 +118,7 @@ test("a multi-use value tees once and replays from one freed local", () => {
 });
 
 test("a pinned read loads once at its action point and replays past the store", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const eax = values.addActionOutput();
   const ebx = values.addActionOutput();
   const readEax: ReadStateAction = { kind: "readState", output: eax, slot: gprChannel("eax") };
@@ -158,7 +158,7 @@ test("a pinned read loads once at its action point and replays past the store", 
 });
 
 test("a dead read emits nothing", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const read = values.addActionOutput();
   const seven = values.internConst(7);
   const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
@@ -182,7 +182,7 @@ test("a dead read emits nothing", () => {
 });
 
 test("constant and external leaves re-emit per use without scratch locals", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const seven = values.internConst(7);
   const external = values.internExternal(3);
   const { body, scratch, valueStack } = createTestEmitter(
@@ -218,7 +218,7 @@ test("constant and external leaves re-emit per use without scratch locals", () =
 });
 
 test("an external without a bound local fails loudly", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const external = values.internExternal(3);
   const { valueStack } = createTestEmitter(
     values,
@@ -232,7 +232,7 @@ test("an external without a bound local fails loudly", () => {
 });
 
 test("select pushes whenTrue, whenFalse, then condition", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const one = values.internConst(1);
   const two = values.internConst(2);
   const whenTrue = values.internUnary("popcnt", one);
@@ -262,7 +262,7 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
 });
 
 test("operators map to their wasm opcodes", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const one = values.internConst(1);
   const two = values.internConst(2);
   const shifted = values.internBinary("shl", one, two);
@@ -319,7 +319,7 @@ test("operators map to their wasm opcodes", () => {
 });
 
 test("project masks to the requested width", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const read = values.addActionOutput();
   const low8 = values.internProject(8, read);
   const low16 = values.internProject(16, read);
@@ -358,7 +358,7 @@ test("project masks to the requested width", () => {
 });
 
 test("equality against constant zero emits eqz from either side", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const external = values.internExternal(3);
   const zero = values.internConst(0);
   const left = values.internCompare("eq", external, zero);
@@ -387,7 +387,7 @@ test("equality against constant zero emits eqz from either side", () => {
 });
 
 test("ne and non-zero equality keep the generic compare", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const external = values.internExternal(3);
   const notZero = values.internCompare("ne", external, values.internConst(0));
   const one = values.internCompare("eq", external, values.internConst(1));
@@ -417,7 +417,7 @@ test("ne and non-zero equality keep the generic compare", () => {
 });
 
 test("a loaded value pins to a local at its action point and replays", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const address = values.internConst(0x2000);
   const loaded = values.addActionOutput();
   const readAction: ReadMemoryAction = { kind: "readMemory", output: loaded, address, width: 32 };
@@ -451,7 +451,7 @@ test("a loaded value pins to a local at its action point and replays", () => {
 });
 
 test("a dead load emits nothing", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const address = values.internConst(0x2000);
   const loaded = values.addActionOutput();
   const readAction: ReadMemoryAction = { kind: "readMemory", output: loaded, address, width: 32 };
@@ -468,7 +468,7 @@ test("a dead load emits nothing", () => {
 });
 
 test("captureForEdge computes an untouched compound into a local for later uses", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.internConst(5);
   const sum = values.internBinary("add", read, five);
@@ -520,7 +520,7 @@ test("captureForEdge computes an untouched compound into a local for later uses"
 });
 
 test("unconsumed captures fail assertClear and hold their scratch local", () => {
-  const values = createValueTable();
+  const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.internConst(5);
   const sum = values.internBinary("add", read, five);
