@@ -30,20 +30,19 @@ import type {
   OperandBinding,
   RegDynamicOperandBinding
 } from "./operands.js";
-import { PendingState } from "./pending.js";
+import { PendingState } from "./pending/state.js";
 import {
   eipChannel,
   gprChannel,
   instructionCountChannel,
-  type GprChannel,
-  type StateChannel
+  type GprChannel
 } from "./slots.js";
 import type {
   Action,
+  EdgeFlushAction,
   ContinueAction,
   ExitAction,
-  GprDynamicSlot,
-  WriteStateAction
+  GprDynamicSlot
 } from "./actions.js";
 import type { EdgeRegion, IrBlock, RegionId } from "./block.js";
 import {
@@ -143,6 +142,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#instructionLocation = this.#internLocation(location);
     this.#terminated = false;
     this.#wroteMemory = false;
+    this.#pending.write(eipChannel, this.#location().eip());
     this.#pending.beginInstruction();
 
     template(this, this);
@@ -169,7 +169,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       case "jump":
         assert(this.#pending.has(eipChannel), "IR block did not advance eip; no instructions were added");
         continuation = this.#pending.read(eipChannel);
-        this.#flushCompletedState();
+        this.#actions.push(...this.#pending.flushesForEdge("completed"));
         this.#actions.push({ kind: "continue" });
         break;
       case "terminated":
@@ -447,7 +447,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const vectorId = vector;
 
     this.#pending.write(eipChannel, this.#location().nextEip());
-    this.#flushCompletedState();
+    this.#actions.push(...this.#pending.flushesForEdge("completed"));
     this.#actions.push({ kind: "exit", reason: "hostTrap", payload: vectorId });
     this.#blockEnd = "terminated";
     this.#terminated = true;
@@ -463,66 +463,59 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return valueFromId(this.#values.internUnary(operator, value));
   }
 
-  // The snapshot leaves the main-path map untouched. Pending eip holds the
-  // previous instruction's nextEip; the edge stores the faulting eip instead.
+  // Fault edges restore the instruction-start state captured by
+  // beginInstruction, including the faulting instruction's eip.
   #faultEdge(reason: "memoryReadFault" | "memoryWriteFault", address: ValueId): RegionId {
     return this.#edgeRegion(
       { kind: "exit", reason, payload: address },
-      this.#pending.snapshot(),
-      this.#location().eip()
+      this.#pending.flushesForEdge("fault")
     );
   }
 
-  // Branch edges observe the completed instruction, so they flush live
-  // pendings.
+  // Branch edges observe the completed instruction.
   #branchEdge(target: TargetInput): RegionId {
+    this.#pending.write(eipChannel, target);
+
     return this.#edgeRegion(
       { kind: "continue" },
-      this.#pending.entries(),
+      this.#pending.flushesForEdge("completed"),
       target
     );
   }
 
-  #flushCompletedState(): void {
-    this.#pending.flushAll();
-  }
-
   #edgeRegion(
     terminator: ExitAction | ContinueAction,
-    pendings: ReadonlyArray<readonly [StateChannel, ValueId]>,
-    eipValue: ValueId
+    flushes: readonly EdgeFlushAction[],
+    continuation?: ValueId
   ): RegionId {
-    const flushes: WriteStateAction[] = [];
-    let wroteEip = false;
-
-    for (const [slot, value] of pendings) {
-      if (slot === eipChannel) {
-        wroteEip = true;
-        flushes.push({ kind: "writeState", slot, value: eipValue });
-      } else {
-        flushes.push({ kind: "writeState", slot, value });
-      }
-    }
-
-    if (!wroteEip) {
-      flushes.push({ kind: "writeState", slot: eipChannel, value: eipValue });
-    }
-
     const id = this.#nextRegionId;
 
     this.#nextRegionId += 1;
-    this.#edgeRegions.push({
-      id,
-      kind: "edge",
-      flushes,
-      terminator,
-      ...(terminator.kind === "continue" ? { continuation: eipValue } : {})
-    });
+
+    if (terminator.kind === "continue") {
+      assert(continuation !== undefined, "continue edge missing continuation value");
+
+      this.#edgeRegions.push({
+        id,
+        kind: "edge",
+        flushes,
+        terminator,
+        continuation
+      });
+    } else {
+      this.#edgeRegions.push({
+        id,
+        kind: "edge",
+        flushes,
+        terminator
+      });
+    }
+
     return id;
   }
 
-  // Every terminator advances the count: fault edges snapshot the
-  // instruction boundary, so a faulting instruction never counts. The value
+  // Every terminator advances the count: fault edges commit instruction-start
+  // state, so a faulting instruction never counts. The value
   // is always base + completed off the block's one read, so a flush stores
   // a single folded add.
   #advanceInstructionCount(): void {

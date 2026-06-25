@@ -1,7 +1,7 @@
 import type { SimpleFlagSource } from "#x86/flag-sources.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import type { X86Flag } from "#x86/flags.js";
-import type { Action, GprDynamicSlot } from "../actions.js";
+import type { Action, EdgeFlushAction, GprDynamicSlot } from "../actions.js";
 import {
   PendingCells
 } from "./cells.js";
@@ -12,11 +12,15 @@ import {
   PendingGprs,
   type PendingReadOptions
 } from "./gprs.js";
-import { type EipChannel, type InstructionCountChannel, type StateChannel } from "../slots.js";
+import {
+  type EipChannel,
+  type InstructionCountChannel,
+  type StateChannel
+} from "../slots.js";
 import type { ValueId, ValueTable } from "../values.js";
-import { StateAccess } from "./state-access.js";
+import { PendingStateAccess } from "./state-access.js";
 
-export type PendingStateEntry = readonly [StateChannel, ValueId];
+export type PendingEdgeKind = "fault" | "completed";
 
 export class PendingState {
   readonly #cells: PendingCells<EipChannel | InstructionCountChannel>;
@@ -24,7 +28,7 @@ export class PendingState {
   readonly #flags: PendingFlags;
 
   constructor(values: ValueTable, emit: (action: Action) => void) {
-    const state = new StateAccess(values, emit);
+    const state = new PendingStateAccess(values, emit);
 
     this.#cells = new PendingCells(state);
     this.#gprs = new PendingGprs(values, state);
@@ -100,17 +104,11 @@ export class PendingState {
     this.#flags.beginInstruction();
   }
 
-  snapshot(): readonly PendingStateEntry[] {
-    return [...this.#gprs.snapshot(), ...this.#cells.snapshot(), ...this.#flags.snapshot()];
-  }
-
-  entries(): readonly PendingStateEntry[] {
-    return [...this.#gprs.entries(), ...this.#cells.entries(), ...this.#flags.entries()];
-  }
-
-  flushAll(): void {
-    this.#gprs.flushAll();
-    this.#cells.flushAll();
-    this.#flags.flushAll();
+  flushesForEdge(edge: PendingEdgeKind): readonly EdgeFlushAction[] {
+    return [
+      ...this.#gprs.flushesForEdge(edge),
+      ...this.#cells.flushesForEdge(edge),
+      ...this.#flags.flushesForEdge(edge)
+    ];
   }
 }

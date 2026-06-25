@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { slotsMayAlias } from "#ir/aliasing.js";
+import { actionMayWriteStateSlot } from "#ir/aliasing.js";
 import type { Action, ReadStateAction, StateSlot } from "#ir/actions.js";
 import type {
   IrBlock,
@@ -188,7 +188,7 @@ class BlockValueUsage implements BlockValueAnalysis {
       for (let index = actionIndex + 1; index < lastUse; index += 1) {
         const later = entry.actions[index]!;
 
-        if (later.kind === "writeState" && slotsMayAlias(later.slot, action.slot)) {
+        if (actionMayWriteStateSlot(later, action.slot)) {
           this.#pinned.add(action.output);
           break;
         }
@@ -212,7 +212,7 @@ class BlockValueUsage implements BlockValueAnalysis {
       for (const value of edgeValues(edge)) {
         const read = readsByOutput.get(value);
 
-        if (read !== undefined && edge.flushes.some((flush) => slotsMayAlias(flush.slot, read.slot))) {
+        if (read !== undefined && edge.flushes.some((flush) => actionMayWriteStateSlot(flush, read.slot))) {
           this.#pinned.add(read.output);
         }
       }
@@ -222,7 +222,7 @@ class BlockValueUsage implements BlockValueAnalysis {
 
 // Everything an edge consumes: its flush values and the exit payload.
 export function edgeValues(edge: EdgeRegion): readonly ValueId[] {
-  const values = edge.flushes.map((flush) => flush.value);
+  const values = edge.flushes.flatMap(actionOperands);
 
   switch (edge.terminator.kind) {
     case "exit":
@@ -246,6 +246,11 @@ function actionOperands(action: Action): readonly ValueId[] {
       return [action.address];
     case "writeState":
       return [...slotOperands(action.slot), action.value];
+    case "commitFlags":
+      switch (action.snapshot.kind) {
+        case "values":
+          return action.snapshot.values.map(({ value }) => value);
+      }
     case "writeMemory":
       return [action.address, action.value];
     case "guardMemory":
@@ -285,6 +290,7 @@ function actionOutput(action: Action): ValueId | undefined {
     case "readMemory":
       return action.output;
     case "writeState":
+    case "commitFlags":
     case "writeMemory":
     case "guardMemory":
     case "branch":

@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
-import type { WriteStateAction } from "#ir/actions.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86StatusFlags } from "#x86/flags.js";
@@ -93,17 +92,18 @@ test("two adds in one block store each flag byte once, with the second add's fla
 
   const block = builder.finish();
 
-  // Dead flag writes collapse in the contract: one writeState per flag...
+  // Dead flag writes collapse in the contract: one commitFlags action with one value per flag...
   const entry = block.regions[0]!;
 
   assertOk(entry.kind === "entry", "first region is the entry");
 
-  const flagWrites = entry.actions.filter(
-    (action): action is WriteStateAction => action.kind === "writeState" && action.slot.kind === "flag"
+  const flagCommits = entry.actions.filter(
+    (action) => action.kind === "commitFlags"
   );
 
-  strictEqual(flagWrites.length, x86StatusFlags.length);
-  strictEqual(new Set(flagWrites.map((write) => write.slot)).size, x86StatusFlags.length);
+  strictEqual(flagCommits.length, 1);
+  strictEqual(flagCommits[0]!.snapshot.values.length, x86StatusFlags.length);
+  strictEqual(new Set(flagCommits[0]!.snapshot.values.map(({ flag }) => flag)).size, x86StatusFlags.length);
 
   // ...and in the encoding: exactly six byte stores.
   const body = irBlockBody(block).encode();

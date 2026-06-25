@@ -1,5 +1,6 @@
 import { channelsOverlap } from "./slots.js";
 import type { Action, StateSlot } from "./actions.js";
+import { x86StatusFlags, type X86Flag } from "#x86/flags.js";
 
 // Effects are derived from action kind + slot, never stored per-action.
 // One aliasing rule over the address spaces: static channels alias iff their
@@ -9,7 +10,8 @@ import type { Action, StateSlot } from "./actions.js";
 
 export type StorageEffect =
   | Readonly<{ space: "state"; slot: StateSlot }>
-  | Readonly<{ space: "memory" }>;
+  | Readonly<{ space: "memory" }>
+  | Readonly<{ space: "statusFlags" }>;
 
 export type ActionEffects = Readonly<{
   reads?: StorageEffect;
@@ -25,6 +27,8 @@ export function effectsOf(action: Action): ActionEffects {
       return { reads: { space: "state", slot: action.slot } };
     case "writeState":
       return { writes: { space: "state", slot: action.slot } };
+    case "commitFlags":
+      return { writes: { space: "statusFlags" } };
     case "readMemory":
       return { reads: memoryEffect };
     case "writeMemory":
@@ -43,8 +47,12 @@ export function mayAlias(a: StorageEffect, b: StorageEffect): boolean {
   switch (a.space) {
     case "memory":
       return b.space === "memory";
+    case "statusFlags":
+      return b.space === "statusFlags" || (b.space === "state" && isStatusFlagSlot(b.slot));
     case "state":
-      return b.space === "state" && slotsMayAlias(a.slot, b.slot);
+      return b.space === "statusFlags"
+        ? isStatusFlagSlot(a.slot)
+        : b.space === "state" && slotsMayAlias(a.slot, b.slot);
   }
 }
 
@@ -59,4 +67,25 @@ export function slotsMayAlias(a: StateSlot, b: StateSlot): boolean {
     case "instructionCount":
       return b.kind !== "gprDynamic" && channelsOverlap(a, b);
   }
+}
+
+export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolean {
+  switch (action.kind) {
+    case "writeState":
+      return slotsMayAlias(action.slot, slot);
+    case "commitFlags":
+      return slot.kind === "flag" && action.snapshot.values.some(({ flag }) => flag === slot.flag);
+    case "readState":
+    case "readMemory":
+    case "writeMemory":
+    case "guardMemory":
+    case "branch":
+    case "exit":
+    case "continue":
+      return false;
+  }
+}
+
+function isStatusFlagSlot(slot: StateSlot): boolean {
+  return slot.kind === "flag" && (x86StatusFlags as readonly X86Flag[]).includes(slot.flag);
 }

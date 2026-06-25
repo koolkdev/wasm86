@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { GprDynamicSlot } from "../actions.js";
+import type { GprDynamicSlot, WriteStateAction } from "../actions.js";
 import {
   channelCovers,
   channelsOverlap,
@@ -12,7 +12,8 @@ import {
   type ValueTable,
   type WidthBounds
 } from "../values.js";
-import { StateAccess } from "./state-access.js";
+import { PendingStateAccess } from "./state-access.js";
+import type { PendingEdgeKind } from "./state.js";
 
 export type PendingReadOptions = Readonly<{ signed?: boolean }>;
 
@@ -22,14 +23,14 @@ type PendingEntry = { value: ValueId; dirty: boolean };
 // rules that exact state channels do not.
 export class PendingGprs {
   readonly #values: ValueTable;
-  readonly #state: StateAccess;
+  readonly #state: PendingStateAccess;
   readonly #pending = new Map<GprChannel, PendingEntry>();
   readonly #reads = new Map<GprChannel, ValueId>();
   readonly #signedReads = new Map<GprChannel, ValueId>();
   #boundary = new Map<GprChannel, ValueId>();
   #unrestorableStore = false;
 
-  constructor(values: ValueTable, state: StateAccess) {
+  constructor(values: ValueTable, state: PendingStateAccess) {
     this.#values = values;
     this.#state = state;
   }
@@ -105,7 +106,15 @@ export class PendingGprs {
     this.#unrestorableStore = false;
   }
 
-  snapshot(): ReadonlyArray<readonly [GprChannel, ValueId]> {
+  flushesForEdge(edge: PendingEdgeKind): readonly WriteStateAction[] {
+    const entries = edge === "fault"
+      ? this.#snapshotEntries()
+      : this.#currentEntries();
+
+    return entries.map(([slot, value]) => ({ kind: "writeState", slot, value }));
+  }
+
+  #snapshotEntries(): ReadonlyArray<readonly [GprChannel, ValueId]> {
     assert(
       !this.#unrestorableStore,
       "a store this instruction overwrote bytes absent from the boundary snapshot; the pre-instruction state is unrestorable"
@@ -114,16 +123,10 @@ export class PendingGprs {
     return [...this.#boundary];
   }
 
-  entries(): ReadonlyArray<readonly [GprChannel, ValueId]> {
+  #currentEntries(): ReadonlyArray<readonly [GprChannel, ValueId]> {
     return [...this.#pending].flatMap(([channel, entry]) => (
       entry.dirty ? [[channel, entry.value] as const] : []
     ));
-  }
-
-  flushAll(): void {
-    for (const [channel, entry] of this.#pending) {
-      this.#flush(channel, entry);
-    }
   }
 
   #flush(channel: GprChannel, entry: PendingEntry): void {

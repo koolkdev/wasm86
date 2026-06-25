@@ -12,8 +12,10 @@ import {
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
 import { flagChannel, type FlagChannel } from "../slots.js";
+import type { CommitFlagsAction, StatusFlagsSnapshot } from "../actions.js";
 import { fitsUnsigned, type ValueId, type ValueTable } from "../values.js";
-import { StateAccess } from "./state-access.js";
+import { PendingStateAccess } from "./state-access.js";
+import type { PendingEdgeKind } from "./state.js";
 
 export type FlagSourceId = number;
 
@@ -25,32 +27,33 @@ type FlagBacking =
   | Readonly<{ kind: "input"; flag: X86StatusFlag }>
   | Readonly<{ kind: "undef"; policy: UndefFlagPolicy }>;
 
-export type PendingStatusFlagEntry = readonly [FlagChannel<X86StatusFlag>, ValueId];
-
 type StatusFlagValueIds = StatusFlagValues<ValueId>;
 type SourceExpansionCache = Map<FlagSourceId, StatusFlagValueIds>;
+type PendingStatusFlagEntry = readonly [FlagChannel<X86StatusFlag>, ValueId];
+type PendingStatusFlagState = {
+  backings: Map<X86StatusFlag, FlagBacking>;
+  dirty: Set<X86StatusFlag>;
+  lazySource: FlagSourceId | undefined;
+};
 
 const logicUndefFlagPolicy: UndefFlagPolicy = "zero";
 
 export class PendingStatusFlags {
   readonly #values: ValueTable;
-  readonly #state: StateAccess;
+  readonly #state: PendingStateAccess;
   readonly #sources: SimpleFlagSource<ValueId>[] = [];
-  readonly #flagBackings = initialBackings();
-  readonly #dirty = new Set<X86StatusFlag>();
+  readonly #current = initialStatusFlagState();
   readonly #valueOps: FlagValueOps<ValueId>;
-  #currentSource: FlagSourceId | undefined;
-  #boundaryFlagBackings = new Map(this.#flagBackings);
-  #boundaryDirty = new Set(this.#dirty);
+  #boundary = cloneStatusFlagState(this.#current);
 
-  constructor(values: ValueTable, state: StateAccess) {
+  constructor(values: ValueTable, state: PendingStateAccess) {
     this.#values = values;
     this.#state = state;
     this.#valueOps = flagValueOps(values);
   }
 
   readFlag(flag: X86StatusFlag): ValueId {
-    return this.#resolveBacking(flag, getBacking(this.#flagBackings, flag), new Map());
+    return this.#resolveBacking(flag, getBacking(this.#current.backings, flag), new Map());
   }
 
   condition(cc: ConditionCode): ValueId {
@@ -61,7 +64,7 @@ export class PendingStatusFlags {
     const sourceId = this.#sources.length;
 
     this.#sources.push(source);
-    this.#currentSource = sourceId;
+    this.#current.lazySource = sourceId;
 
     switch (source.kind) {
       case "add":
@@ -85,17 +88,17 @@ export class PendingStatusFlags {
   }
 
   writeFlag(flag: X86StatusFlag, value: ValueId): void {
-    this.#currentSource = undefined;
+    this.#current.lazySource = undefined;
     this.#setBacking(flag, { kind: "value", value });
   }
 
   has(flag: X86StatusFlag): boolean {
-    return getBacking(this.#flagBackings, flag).kind !== "input";
+    return getBacking(this.#current.backings, flag).kind !== "input";
   }
 
   #setBacking(flag: X86StatusFlag, backing: FlagBacking): void {
-    this.#flagBackings.set(flag, backing);
-    this.#dirty.add(flag);
+    this.#current.backings.set(flag, backing);
+    this.#current.dirty.add(flag);
   }
 
   #entriesFrom(
@@ -135,11 +138,11 @@ export class PendingStatusFlags {
   }
 
   #directCondition(cc: ConditionCode): ValueId | undefined {
-    if (this.#currentSource === undefined) {
+    if (this.#current.lazySource === undefined) {
       return undefined;
     }
 
-    const source = this.#source(this.#currentSource);
+    const source = this.#source(this.#current.lazySource);
     const operator = simpleFlagSourceConditionOperators[source.kind][cc];
 
     if (operator === undefined) {
@@ -158,7 +161,7 @@ export class PendingStatusFlags {
   #flagBoolExpr(expr: FlagBoolExpr, cache: SourceExpansionCache): ValueId {
     switch (expr.kind) {
       case "flag":
-        return this.#resolveBacking(expr.flag, getBacking(this.#flagBackings, expr.flag), cache);
+        return this.#resolveBacking(expr.flag, getBacking(this.#current.backings, expr.flag), cache);
       case "not":
         return this.#values.internCompare(
           "eq",
@@ -219,24 +222,37 @@ export class PendingStatusFlags {
   }
 
   beginInstruction(): void {
-    this.#boundaryFlagBackings = new Map(this.#flagBackings);
-    this.#boundaryDirty = new Set(this.#dirty);
+    this.#boundary = cloneStatusFlagState(this.#current);
   }
 
-  snapshot(): readonly PendingStatusFlagEntry[] {
-    return this.#entriesFrom(this.#boundaryFlagBackings, this.#boundaryDirty);
+  snapshot(): StatusFlagsSnapshot {
+    return this.#snapshotFrom(this.#boundary);
   }
 
-  entries(): readonly PendingStatusFlagEntry[] {
-    return this.#entriesFrom(this.#flagBackings, this.#dirty);
+  currentSnapshot(): StatusFlagsSnapshot {
+    return this.#snapshotFrom(this.#current);
   }
 
-  flushAll(): void {
-    for (const [slot, value] of this.#entriesFrom(this.#flagBackings, this.#dirty)) {
-      this.#state.write(slot, value);
-    }
+  flushesForEdge(edge: PendingEdgeKind): readonly CommitFlagsAction[] {
+    const snapshot = edge === "fault"
+      ? this.snapshot()
+      : this.currentSnapshot();
 
-    this.#dirty.clear();
+    return snapshot.values.length === 0
+      ? []
+      : [{ kind: "commitFlags", snapshot }];
+  }
+
+  #snapshotFrom(state: PendingStatusFlagState): StatusFlagsSnapshot {
+    const values = this.#entriesFrom(state.backings, state.dirty).map(([slot, value]) => ({
+      flag: slot.flag,
+      value
+    }));
+
+    return {
+      kind: "values",
+      values
+    };
   }
 
   #materializeSource(source: SimpleFlagSource<ValueId>): StatusFlagValueIds {
@@ -256,6 +272,22 @@ export class PendingStatusFlags {
 
 function initialBackings(): Map<X86StatusFlag, FlagBacking> {
   return new Map(x86StatusFlags.map((flag) => [flag, { kind: "input", flag }]));
+}
+
+function initialStatusFlagState(): PendingStatusFlagState {
+  return {
+    backings: initialBackings(),
+    dirty: new Set(),
+    lazySource: undefined
+  };
+}
+
+function cloneStatusFlagState(state: PendingStatusFlagState): PendingStatusFlagState {
+  return {
+    backings: new Map(state.backings),
+    dirty: new Set(state.dirty),
+    lazySource: state.lazySource
+  };
 }
 
 function flagValueOps(values: ValueTable): FlagValueOps<ValueId> {

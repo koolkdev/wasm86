@@ -1,4 +1,4 @@
-import type { Action, ContinueAction, ExitAction, WriteStateAction } from "./actions.js";
+import type { Action, ContinueAction, EdgeFlushAction, ExitAction } from "./actions.js";
 import type { ValueId, ValueTable } from "./values.js";
 
 export type RegionId = number;
@@ -16,7 +16,7 @@ export type EntryRegion = Readonly<{
 export type EdgeRegion = Readonly<{
   id: RegionId;
   kind: "edge";
-  flushes: readonly WriteStateAction[];
+  flushes: readonly EdgeFlushAction[];
   terminator: ExitAction | ContinueAction;
   continuation?: ValueId;
 }>;

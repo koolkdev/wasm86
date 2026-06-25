@@ -1,5 +1,6 @@
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type { OperandWidth } from "#x86/types.js";
+import type { X86StatusFlag } from "#x86/flags.js";
 import type { RegionId } from "./block.js";
 import type { StateChannel } from "./slots.js";
 import type { ValueId } from "./values.js";
@@ -46,6 +47,21 @@ export type WriteStateAction = Readonly<{
   value: ValueId;
 }>;
 
+export type StatusFlagValue = Readonly<{
+  flag: X86StatusFlag;
+  value: ValueId;
+}>;
+
+export type StatusFlagsSnapshot = Readonly<{
+  kind: "values";
+  values: readonly StatusFlagValue[];
+}>;
+
+export type CommitFlagsAction = Readonly<{
+  kind: "commitFlags";
+  snapshot: StatusFlagsSnapshot;
+}>;
+
 export type WriteMemoryAction = Readonly<{
   kind: "writeMemory";
   address: ValueId;
@@ -83,8 +99,11 @@ export type Action =
   | ReadStateAction
   | ReadMemoryAction
   | WriteStateAction
+  | CommitFlagsAction
   | WriteMemoryAction
   | GuardMemoryAction
   | BranchAction
   | ExitAction
   | ContinueAction;
+
+export type EdgeFlushAction = WriteStateAction | CommitFlagsAction;

@@ -3,9 +3,11 @@ import type { ExternalValueId } from "#ir/operands.js";
 import type {
   Action,
   BranchAction,
+  CommitFlagsAction,
   GuardMemoryAction
 } from "#ir/actions.js";
 import type { EdgeRegion, IrBlock, RegionId } from "#ir/block.js";
+import { flagChannel } from "#ir/slots.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -95,6 +97,9 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "writeState":
         emitSlotStore(body, action.slot, action.value, valueStack.emitUse);
         return;
+      case "commitFlags":
+        emitCommitFlags(action);
+        return;
       case "writeMemory":
         valueStack.emitUse(action.address);
         valueStack.emitUse(action.value);
@@ -168,7 +173,14 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     assert(detail !== undefined, `edge region ${edge.id} was never targeted by the entry`);
 
     for (const flush of edge.flushes) {
-      emitSlotStore(body, flush.slot, flush.value, valueStack.emitUse);
+      switch (flush.kind) {
+        case "writeState":
+          emitSlotStore(body, flush.slot, flush.value, valueStack.emitUse);
+          break;
+        case "commitFlags":
+          emitCommitFlags(flush);
+          break;
+      }
     }
 
     switch (edge.terminator.kind) {
@@ -186,6 +198,15 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
 
     assert(edge !== undefined, `no edge region ${id} in this block`);
     return edge;
+  }
+
+  function emitCommitFlags(action: CommitFlagsAction): void {
+    switch (action.snapshot.kind) {
+      case "values":
+        for (const { flag, value } of action.snapshot.values) {
+          emitSlotStore(body, flagChannel(flag), value, valueStack.emitUse);
+        }
+    }
   }
 
   for (const action of entry.actions.slice(0, -1)) {

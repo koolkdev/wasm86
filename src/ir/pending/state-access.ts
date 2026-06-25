@@ -4,7 +4,7 @@ import type { ValueId, ValueTable, WidthBounds } from "../values.js";
 
 export type CachedStateInput = FlagChannel | EipChannel | InstructionCountChannel;
 
-export class StateAccess {
+export class PendingStateAccess {
   readonly #values: ValueTable;
   readonly #emit: (action: Action) => void;
   readonly #inputReads = new Map<CachedStateInput, ValueId>();

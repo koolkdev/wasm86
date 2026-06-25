@@ -27,7 +27,9 @@ test("cross-instruction dead flag and eip writes are absent from the action list
   const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
   const actions = entryActions(block);
   const flagWrites = actions.flatMap((action) =>
-    action.kind === "writeState" && action.slot.kind === "flag" ? [action.slot.flag] : []
+    action.kind === "commitFlags"
+      ? action.snapshot.values.map(({ flag }) => flag)
+      : action.kind === "writeState" && action.slot.kind === "flag" ? [action.slot.flag] : []
   );
 
   strictEqual(flagWrites.length, 6);

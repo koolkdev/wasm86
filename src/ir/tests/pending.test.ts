@@ -1,9 +1,9 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { PendingState } from "#ir/pending.js";
+import { PendingState } from "#ir/pending/state.js";
 import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
-import type { Action, GprDynamicSlot } from "#ir/actions.js";
+import type { Action, EdgeFlushAction, GprDynamicSlot, StateSlot } from "#ir/actions.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 
 type Harness = Readonly<{
@@ -21,6 +21,29 @@ function createHarness(): Harness {
 
 function dynamicGpr(index: ValueId, byteLength: 1 | 2 | 4 = 4): GprDynamicSlot {
   return { kind: "gprDynamic", index, byteLength };
+}
+
+function faultEdgeEntries(pending: PendingState): ReadonlyArray<readonly [StateSlot, ValueId]> {
+  return edgeEntries(pending.flushesForEdge("fault"));
+}
+
+function completedEdgeEntries(pending: PendingState): ReadonlyArray<readonly [StateSlot, ValueId]> {
+  return edgeEntries(pending.flushesForEdge("completed"));
+}
+
+function edgeEntries(
+  actions: readonly EdgeFlushAction[]
+): ReadonlyArray<readonly [StateSlot, ValueId]> {
+  return actions.flatMap((action) => {
+    switch (action.kind) {
+      case "writeState":
+        return [[action.slot, action.value] as const];
+      case "commitFlags":
+        return action.snapshot.values.map(
+          ({ flag, value }) => [flagChannel(flag), value] as const
+        );
+    }
+  });
 }
 
 test("an exact pending hit returns the value with no actions", () => {
@@ -60,7 +83,7 @@ test("write al then read eax flushes the byte and reloads the word", () => {
   // actions and never needs storing again.
   strictEqual(pending.has(gprChannel("al")), true);
   strictEqual(pending.read(gprChannel("al")), byte);
-  pending.flushAll();
+  deepStrictEqual(pending.flushesForEdge("completed"), []);
   strictEqual(actions.length, 2);
 });
 
@@ -99,8 +122,8 @@ test("a covering write drops the pending with no flush", () => {
   pending.write(gprChannel("ah"), values.internConst(0x34));
   pending.write(gprChannel("eax"), word);
 
-  deepStrictEqual(actions, []);
-  pending.flushAll();
+  strictEqual(actions.length, 0);
+  actions.push(...pending.flushesForEdge("completed"));
   deepStrictEqual(actions, [{ kind: "writeState", slot: gprChannel("eax"), value: word }]);
 });
 
@@ -113,7 +136,7 @@ test("a partially overlapping write flushes the wider pending first", () => {
   pending.write(gprChannel("al"), byte);
 
   deepStrictEqual(actions, [{ kind: "writeState", slot: gprChannel("ax"), value: word }]);
-  pending.flushAll();
+  actions.push(...pending.flushesForEdge("completed"));
   deepStrictEqual(actions[1], { kind: "writeState", slot: gprChannel("al"), value: byte });
 });
 
@@ -160,9 +183,10 @@ test("status flag channels route through pending flags", () => {
   strictEqual(pending.has(flagChannel("ZF")), true);
   strictEqual(pending.read(flagChannel("ZF")), zf);
 
-  pending.flushAll();
-
-  deepStrictEqual(actions, [{ kind: "writeState", slot: flagChannel("ZF"), value: zf }]);
+  deepStrictEqual(pending.flushesForEdge("completed"), [
+    { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: zf }] } }
+  ]);
+  deepStrictEqual(actions, []);
 });
 
 test("a flush invalidates read leaves of overlapping channels only", () => {
@@ -220,28 +244,24 @@ test("an exact narrow hit normalizes values whose high bits are unproven", () =>
   strictEqual(pending.read(gprChannel("ah")), byte);
 });
 
-test("flushAll materializes dirty pendings in owner order", () => {
-  const { values, actions, pending } = createHarness();
+test("completed edge flushes dirty pendings in owner order", () => {
+  const { values, pending } = createHarness();
   const flag = values.internConst(1);
   const word = values.internConst(7);
 
   pending.write(flagChannel("DF"), flag);
   pending.write(gprChannel("esi"), word);
-  pending.flushAll();
 
-  deepStrictEqual(actions, [
+  deepStrictEqual(pending.flushesForEdge("completed"), [
     { kind: "writeState", slot: gprChannel("esi"), value: word },
     { kind: "writeState", slot: flagChannel("DF"), value: flag }
   ]);
 
-  // Everything is clean now: reads still hit, nothing stores twice.
   strictEqual(pending.read(flagChannel("DF")), flag);
   strictEqual(pending.read(gprChannel("esi")), word);
-  pending.flushAll();
-  strictEqual(actions.length, 2);
 });
 
-test("snapshot lists instruction-start values without consuming the map", () => {
+test("fault boundary lists instruction-start values without consuming the map", () => {
   const { values, actions, pending } = createHarness();
   const byte = values.internConst(0x12);
   const eip = values.internConst(0x1000);
@@ -250,7 +270,7 @@ test("snapshot lists instruction-start values without consuming the map", () => 
   pending.write(eipChannel, eip);
   pending.beginInstruction();
 
-  deepStrictEqual(pending.snapshot(), [
+  deepStrictEqual(faultEdgeEntries(pending), [
     [gprChannel("al"), byte],
     [eipChannel, eip]
   ]);
@@ -259,7 +279,7 @@ test("snapshot lists instruction-start values without consuming the map", () => 
   strictEqual(pending.has(eipChannel), true);
 });
 
-test("snapshot keeps a rewritten channel's instruction-start value", () => {
+test("fault boundary keeps a rewritten channel's instruction-start value", () => {
   const { values, pending } = createHarness();
   const before = values.internConst(1);
   const after = values.internConst(2);
@@ -268,20 +288,20 @@ test("snapshot keeps a rewritten channel's instruction-start value", () => {
   pending.beginInstruction();
   pending.write(gprChannel("eax"), after);
 
-  deepStrictEqual(pending.snapshot(), [[gprChannel("eax"), before]]);
+  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("eax"), before]]);
   strictEqual(pending.read(gprChannel("eax")), after);
 });
 
-test("snapshot omits a channel first written this instruction", () => {
+test("fault boundary omits a channel first written this instruction", () => {
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
   pending.write(gprChannel("eax"), values.internConst(1));
 
-  deepStrictEqual(pending.snapshot(), []);
+  deepStrictEqual(faultEdgeEntries(pending), []);
 });
 
-test("a covering write keeps the dropped channel's start value in the snapshot", () => {
+test("a covering write keeps the dropped channel's start value in the fault boundary", () => {
   const { values, pending } = createHarness();
   const byte = values.internConst(0x12);
 
@@ -291,25 +311,25 @@ test("a covering write keeps the dropped channel's start value in the snapshot",
 
   // eax had no start pending (omitted); the dropped al still must reach
   // cpu state memory on the fault path.
-  deepStrictEqual(pending.snapshot(), [[gprChannel("al"), byte]]);
+  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), byte]]);
 });
 
-test("flushing a channel first written this instruction makes the snapshot unrestorable", () => {
+test("flushing a channel first written this instruction makes the fault boundary unrestorable", () => {
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
   pending.write(gprChannel("al"), values.internConst(1));
   pending.read(gprChannel("ax"));
 
-  throws(() => pending.snapshot(), /unrestorable/);
+  throws(() => pending.flushesForEdge("fault"), /unrestorable/);
 
   // The next instruction boundary takes a fresh copy; the flushed al is
   // clean but still pending, so it joins the new boundary.
   pending.beginInstruction();
-  deepStrictEqual(pending.snapshot(), [[gprChannel("al"), values.internConst(1)]]);
+  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), values.internConst(1)]]);
 });
 
-test("flushing a channel rewritten this instruction keeps its start value in the snapshot", () => {
+test("flushing a channel rewritten this instruction keeps its start value in the fault boundary", () => {
   const { values, pending } = createHarness();
   const before = values.internConst(0x111);
 
@@ -318,10 +338,10 @@ test("flushing a channel rewritten this instruction keeps its start value in the
   pending.write(gprChannel("eax"), values.internConst(0x222));
   pending.read(gprChannel("al"));
 
-  deepStrictEqual(pending.snapshot(), [[gprChannel("eax"), before]]);
+  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("eax"), before]]);
 });
 
-test("flushing a channel untouched this instruction keeps it in the snapshot", () => {
+test("flushing a channel untouched this instruction keeps it in the fault boundary", () => {
   const { values, pending } = createHarness();
   const byte = values.internConst(0x12);
 
@@ -330,7 +350,7 @@ test("flushing a channel untouched this instruction keeps it in the snapshot", (
   pending.read(gprChannel("ax"));
 
   // The flush already stored this value; rewriting it is harmless.
-  deepStrictEqual(pending.snapshot(), [[gprChannel("al"), byte]]);
+  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), byte]]);
 });
 
 test("a covering write drops a clean pending without a store", () => {
@@ -340,7 +360,7 @@ test("a covering write drops a clean pending without a store", () => {
   pending.write(gprChannel("al"), values.internConst(0x12));
   pending.read(gprChannel("eax"));
   pending.write(gprChannel("eax"), word);
-  pending.flushAll();
+  actions.push(...pending.flushesForEdge("completed"));
 
   // One al store (the flush before the read); the covering eax write drops
   // the clean al, so only eax flushes at the end.
@@ -349,7 +369,7 @@ test("a covering write drops a clean pending without a store", () => {
   strictEqual(actions.length, 3);
 });
 
-test("entries lists only dirty pendings", () => {
+test("completed edge lists only dirty pendings", () => {
   const { values, pending } = createHarness();
   const byte = values.internConst(0x12);
   const flag = values.internConst(1);
@@ -359,7 +379,7 @@ test("entries lists only dirty pendings", () => {
   pending.read(gprChannel("ax"));
 
   // The ax read flushed al; only the flag is still dirty.
-  deepStrictEqual(pending.entries(), [[flagChannel("ID"), flag]]);
+  deepStrictEqual(completedEdgeEntries(pending), [[flagChannel("ID"), flag]]);
 });
 
 test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
@@ -429,30 +449,30 @@ test("a dynamic write invalidates cached GPR read leaves but not flag leaves", (
   strictEqual(pending.read(flagChannel("ID")), zfRead);
 });
 
-test("a dynamic write makes the boundary snapshot unrestorable", () => {
+test("a dynamic write makes the fault boundary unrestorable", () => {
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
   pending.writeDynamicGpr(dynamicGpr(values.internExternal(0)), values.internConst(1));
 
-  throws(() => pending.snapshot(), /unrestorable/);
+  throws(() => pending.flushesForEdge("fault"), /unrestorable/);
 
   // The next instruction boundary takes a fresh copy.
   pending.beginInstruction();
-  deepStrictEqual(pending.snapshot(), []);
+  deepStrictEqual(faultEdgeEntries(pending), []);
 });
 
-test("a dynamic read flushing a channel first written this instruction is unrestorable", () => {
+test("a dynamic read flushing a channel first written this instruction makes the fault boundary unrestorable", () => {
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
   pending.write(gprChannel("ebx"), values.internConst(0x111));
   pending.readDynamicGpr(dynamicGpr(values.internExternal(0)));
 
-  throws(() => pending.snapshot(), /unrestorable/);
+  throws(() => pending.flushesForEdge("fault"), /unrestorable/);
 });
 
-test("a dynamic read flushing a boundary pending keeps the snapshot restorable", () => {
+test("a dynamic read flushing a boundary pending keeps the fault boundary restorable", () => {
   const { values, pending } = createHarness();
   const before = values.internConst(0x111);
 
@@ -460,10 +480,10 @@ test("a dynamic read flushing a boundary pending keeps the snapshot restorable",
   pending.beginInstruction();
   pending.readDynamicGpr(dynamicGpr(values.internExternal(0)));
 
-  deepStrictEqual(pending.snapshot(), [[gprChannel("ebx"), before]]);
+  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("ebx"), before]]);
 });
 
-test("a destructive flush served by a cached read keeps the snapshot restorable", () => {
+test("a destructive flush served by a cached read keeps the fault boundary restorable", () => {
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
@@ -476,7 +496,7 @@ test("a destructive flush served by a cached read keeps the snapshot restorable"
   // The cached read is the pre-instruction value — no store hit esp before
   // its first flush — so it joins the boundary instead of latching the
   // unrestorable assert.
-  deepStrictEqual(pending.snapshot(), [[gprChannel("esp"), before]]);
+  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("esp"), before]]);
 });
 
 test("a signed cached read serves a destructive flush of its channel", () => {
@@ -491,7 +511,7 @@ test("a signed cached read serves a destructive flush of its channel", () => {
 
   // The sign-extended read's low channel-width bits are the memory bytes;
   // the channel-width boundary store masks the rest.
-  deepStrictEqual(pending.snapshot(), [[gprChannel("al"), before]]);
+  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), before]]);
 });
 
 test("narrow dynamic reads carry their byte length, bounds, and sign marker", () => {
