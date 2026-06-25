@@ -244,6 +244,12 @@ export function createValueTable(): ValueTable {
   }
 
   function projectTo(width: OperandWidth, value: ValueId): ValueId {
+    const found = node(value);
+
+    if (found.kind === "const") {
+      return internConst(projectConst(width, found.value));
+    }
+
     if (width === 32 || widthBoundsOf(value).unsignedBits <= width) {
       return value;
     }
@@ -252,6 +258,12 @@ export function createValueTable(): ValueTable {
   }
 
   function extendTo(width: OperandWidth, value: ValueId): ValueId {
+    const found = node(value);
+
+    if (found.kind === "const") {
+      return internConst(extendConst(width, found.value));
+    }
+
     if (width === 32 || widthBoundsOf(value).signedBits <= width) {
       return value;
     }
@@ -300,6 +312,28 @@ function deriveWidthBounds(node: ValueNode, widthBoundsOf: (id: ValueId) => Widt
       return fitsUnsigned(1);
     case "project":
       return fitsUnsigned(Math.min(node.width, widthBoundsOf(node.value).unsignedBits));
+  }
+}
+
+function projectConst(width: OperandWidth, value: number): number {
+  switch (width) {
+    case 8:
+      return value & 0xff;
+    case 16:
+      return value & 0xffff;
+    case 32:
+      return i32(value);
+  }
+}
+
+function extendConst(width: OperandWidth, value: number): number {
+  switch (width) {
+    case 8:
+      return (value << 24) >> 24;
+    case 16:
+      return (value << 16) >> 16;
+    case 32:
+      return i32(value);
   }
 }
 

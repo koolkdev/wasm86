@@ -752,7 +752,7 @@ test("jcc after 16-bit cmp immediate source sign-extends immediates for signed d
   const condition = v.internCompare(
     "le_s",
     v.internUnary("extend16_s", 0),
-    v.internUnary("extend16_s", v.internConst(0x8000))
+    v.internConst(-0x8000)
   );
 
   strictEqual(branchAction(block).condition, condition);

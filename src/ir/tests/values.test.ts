@@ -89,32 +89,26 @@ test("compound nodes reject unknown children", () => {
   throws(() => table.internSelect(99, a, a), /unknown value id 99/);
 });
 
-test("projectTo elides projections covered by constant bounds", () => {
+test("projectTo folds constants and elides projections covered by bounds", () => {
   const table = createValueTable();
 
   strictEqual(table.projectTo(8, table.internConst(0xff)), table.internConst(0xff));
   strictEqual(table.projectTo(16, table.internConst(0xffff)), table.internConst(0xffff));
   strictEqual(table.projectTo(32, table.internConst(-1)), table.internConst(-1));
-
-  const wide = table.projectTo(8, table.internConst(0x100));
-
-  deepStrictEqual(table.node(wide), { kind: "project", width: 8, value: table.internConst(0x100) });
-  deepStrictEqual(table.node(table.projectTo(8, table.internConst(-1))).kind, "project");
+  strictEqual(table.projectTo(8, table.internConst(0x100)), table.internConst(0));
+  strictEqual(table.projectTo(8, table.internConst(-1)), table.internConst(0xff));
+  strictEqual(table.projectTo(16, table.internConst(-1)), table.internConst(0xffff));
 });
 
-test("extendTo elides extensions covered by constant bounds", () => {
+test("extendTo folds constants and elides extensions covered by bounds", () => {
   const table = createValueTable();
 
   strictEqual(table.extendTo(8, table.internConst(127)), table.internConst(127));
   strictEqual(table.extendTo(8, table.internConst(-128)), table.internConst(-128));
   strictEqual(table.extendTo(32, table.internConst(0x12345678)), table.internConst(0x12345678));
-
-  deepStrictEqual(table.node(table.extendTo(8, table.internConst(128))), {
-    kind: "unary",
-    operator: "extend8_s",
-    value: table.internConst(128)
-  });
-  deepStrictEqual(table.node(table.extendTo(8, table.internConst(-129))).kind, "unary");
+  strictEqual(table.extendTo(8, table.internConst(128)), table.internConst(-128));
+  strictEqual(table.extendTo(8, table.internConst(-129)), table.internConst(127));
+  strictEqual(table.extendTo(16, table.internConst(0x8000)), table.internConst(-0x8000));
 });
 
 test("compare results fit a single bit either way", () => {
