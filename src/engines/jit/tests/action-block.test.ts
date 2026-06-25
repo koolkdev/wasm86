@@ -2,16 +2,32 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { buildIrBlock } from "#engines/jit/action-compiler.js";
+import { encodeActionJitModule } from "#engines/jit/action-module.js";
 import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
 import type { Action, StateSlot } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
+import { ValueTable } from "#ir/values.js";
+import { gprChannel } from "#ir/slots.js";
 import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
 import { ExitReason } from "#wasm/exit.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
+import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
 
 const startEip = 0x1000;
+
+test("JIT module emits no helper functions for ordinary blocks", () => {
+  const bytes = encodeActionJitModule([{ entryEip: startEip, actions: syntheticBlock(false) }]);
+
+  strictEqual(wasmDefinedFunctionCount(bytes), 1);
+});
+
+test("JIT module emits a referenced lazy flag helper before block functions", () => {
+  const bytes = encodeActionJitModule([{ entryEip: startEip, actions: syntheticBlock(true) }]);
+
+  strictEqual(wasmDefinedFunctionCount(bytes), 2);
+});
 
 test("a repeated add compiles to one eax read and one eax write", () => {
   // add eax, 1; add eax, 1.
@@ -115,4 +131,24 @@ function entryActions(block: IrBlock): readonly Action[] {
 
 function isEaxWordSlot(slot: StateSlot): boolean {
   return slot.kind === "gpr" && slot.reg === "eax" && slot.byteOffsetInReg === 0 && slot.byteLength === 4;
+}
+
+function syntheticBlock(withHelper: boolean): IrBlock {
+  const values = new ValueTable();
+  const stored = withHelper ? values.addHelperCall({ kind: "lazyFlag", flag: "ZF" }) : values.internConst(7);
+
+  return {
+    entry: 0,
+    regions: [
+      {
+        id: 0,
+        kind: "entry",
+        actions: [
+          { kind: "writeState", slot: gprChannel("eax"), value: stored },
+          { kind: "exit", reason: "hostTrap" }
+        ]
+      }
+    ],
+    values
+  };
 }

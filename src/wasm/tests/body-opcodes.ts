@@ -40,6 +40,25 @@ export function extractOnlyWasmFunctionBody(moduleBytes: Uint8Array<ArrayBuffer>
   throw new Error("missing Wasm code section");
 }
 
+export function wasmDefinedFunctionCount(moduleBytes: Uint8Array<ArrayBuffer>): number {
+  let offset = 8;
+
+  while (offset < moduleBytes.length) {
+    const sectionId = requiredByte(moduleBytes, offset);
+    const sectionSize = readU32Leb128(moduleBytes, offset + 1);
+    const sectionStart = sectionSize.nextOffset;
+    const sectionEnd = sectionStart + sectionSize.value;
+
+    if (sectionId === wasmSectionId.function) {
+      return readU32Leb128(moduleBytes, sectionStart).value;
+    }
+
+    offset = sectionEnd;
+  }
+
+  throw new Error("missing Wasm function section");
+}
+
 export function wasmBodyOpcodes(functionBody: Uint8Array<ArrayBuffer>): readonly number[] {
   const opcodes: number[] = [];
   let offset = skipLocalDeclarations(functionBody);

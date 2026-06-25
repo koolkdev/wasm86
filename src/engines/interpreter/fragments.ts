@@ -14,6 +14,7 @@ import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/emit.js";
+import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
 // Decode reads as action fragments: a guarded guest fetch is guardMemory +
 // readMemory with a decode-fault edge, and the decoded values leave through
@@ -23,6 +24,7 @@ import { emitActionFragment } from "#wasm/emit/emit.js";
 export type FragmentEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
+  helpers?: WasmHelperRegistry | undefined;
 }>;
 
 // Byte offset of the next undecoded byte from the instruction start: a
@@ -137,6 +139,7 @@ class DecodeFragment {
       body: context.body,
       scratch: context.scratch,
       externalLocals: this.#externalLocals,
+      helpers: context.helpers,
       embedding: { completion: { kind: "fallthrough" }, outputs: this.#outputs }
     });
   }

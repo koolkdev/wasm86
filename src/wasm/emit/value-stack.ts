@@ -5,6 +5,7 @@ import type { EdgeRegion } from "#ir/block.js";
 import type {
   BinaryValueNode,
   CompareValueNode,
+  HelperCallValueNode,
   ProjectValueNode,
   SelectValueNode,
   UnaryValueNode,
@@ -16,6 +17,7 @@ import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
+import { helperFunctionName, type WasmHelperRegistry } from "#wasm/helpers/module.js";
 import { edgeValues, type BlockValueAnalysis } from "./values.js";
 
 // Turns analysis + the value graph into stack code. emitUse pushes exactly
@@ -36,6 +38,7 @@ export type ValueStackContext = Readonly<{
   loadSlot(slot: StateSlot, signed: boolean, emitUse: (id: ValueId) => void): void;
   // Loads guest memory at the address already on the stack.
   loadGuest(width: OperandWidth, signed: boolean): void;
+  helpers?: WasmHelperRegistry | undefined;
 }>;
 
 export type ValueStack = Readonly<{
@@ -57,7 +60,8 @@ type CompoundValueNode =
   | UnaryValueNode
   | CompareValueNode
   | SelectValueNode
-  | ProjectValueNode;
+  | ProjectValueNode
+  | HelperCallValueNode;
 
 export function createValueStack(context: ValueStackContext): ValueStack {
   const { body, values, analysis } = context;
@@ -141,6 +145,13 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         emitUse(node.value);
         emitProjection(body, node.width);
         return;
+      case "helperCall": {
+        const displayName = helperFunctionName(node.helper);
+
+        assert(context.helpers !== undefined, `missing Wasm helper ${displayName} in module registry`);
+        body.callFunction(context.helpers.requireFunctionIndex(node.helper, displayName));
+        return;
+      }
     }
   }
 

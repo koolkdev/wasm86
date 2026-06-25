@@ -15,6 +15,9 @@ import { analyzeBlockValues } from "#wasm/emit/values.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
+import { WasmModuleEncoder } from "#wasm/encoder/module.js";
+import { defineLazyFlagHelper } from "#wasm/helpers/lazy-flags.js";
+import { createWasmHelperRegistry } from "#wasm/helpers/module.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 
 function entryRegion(actions: readonly Action[]): EntryRegion {
@@ -30,7 +33,8 @@ type TestEmitter = Readonly<{
 function createTestEmitter(
   values: ValueTable,
   region: EntryRegion,
-  externalIds: readonly ExternalValueId[] = []
+  externalIds: readonly ExternalValueId[] = [],
+  helpers = createWasmHelperRegistry(new WasmModuleEncoder())
 ): TestEmitter {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
@@ -41,6 +45,7 @@ function createTestEmitter(
     values,
     analysis: analyzeBlockValues({ entry: region.id, regions: [region], values }),
     externalLocals,
+    helpers,
     // Stand-ins for the state and guest access layers: plain loads.
     loadSlot: () => body.i32Const(0).i32Load({ align: 2, offset: 0, memoryIndex: 0 }),
     loadGuest: () => body.i32Load({ align: 2, offset: 0, memoryIndex: 1 })
@@ -48,6 +53,44 @@ function createTestEmitter(
 
   return { body, scratch, valueStack };
 }
+
+test("helper calls lower to Wasm calls through the helper registry", () => {
+  const values = new ValueTable();
+  const helper = values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });
+  const helpers = createWasmHelperRegistry(new WasmModuleEncoder());
+  const helperIndex = defineLazyFlagHelper(helpers, "ZF");
+  const { body, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: helper },
+      { kind: "continue" }
+    ]),
+    [],
+    helpers
+  );
+
+  strictEqual(helperIndex, 0);
+  valueStack.emitUse(helper);
+  valueStack.assertClear();
+
+  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [wasmOpcode.call, wasmOpcode.end]);
+});
+
+test("helper calls fail clearly when the helper is missing", () => {
+  const values = new ValueTable();
+  const helper = values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });
+  const { valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: helper },
+      { kind: "continue" }
+    ]),
+    [],
+    createWasmHelperRegistry(new WasmModuleEncoder())
+  );
+
+  throws(() => valueStack.emitUse(helper), /missing Wasm helper resolveZF/);
+});
 
 test("single-use values emit inline with no locals", () => {
   const values = new ValueTable();

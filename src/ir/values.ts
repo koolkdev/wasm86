@@ -8,6 +8,7 @@ import {
   type Map3
 } from "#common/nested-map.js";
 import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
+import type { X86StatusFlag } from "#x86/flags.js";
 import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { ExternalValueId } from "./operands.js";
@@ -40,6 +41,8 @@ export type SelectValueNode = Readonly<{
   whenFalse: ValueId;
 }>;
 export type ProjectValueNode = Readonly<{ kind: "project"; width: OperandWidth; value: ValueId }>;
+export type HelperCallKey = Readonly<{ kind: "lazyFlag"; flag: X86StatusFlag }>;
+export type HelperCallValueNode = Readonly<{ kind: "helperCall"; helper: HelperCallKey }>;
 
 export type ValueNode =
   | ConstValueNode
@@ -49,7 +52,8 @@ export type ValueNode =
   | UnaryValueNode
   | CompareValueNode
   | SelectValueNode
-  | ProjectValueNode;
+  | ProjectValueNode
+  | HelperCallValueNode;
 
 // What is provably known about a node's value: the smallest width it fits
 // unsigned (all higher bits zero) and the smallest width it equals its own
@@ -224,6 +228,10 @@ export class ValueTable {
     return id;
   }
 
+  addHelperCall(helper: HelperCallKey): ValueId {
+    return this.#add({ kind: "helperCall", helper }, []);
+  }
+
   // Smart constructor: the interned projection, or the value itself when its
   // width bounds already cover the request.
   projectTo(width: OperandWidth, value: ValueId): ValueId {
@@ -288,6 +296,8 @@ export class ValueTable {
         return fitsUnsigned(1);
       case "project":
         return fitsUnsigned(Math.min(node.width, widthBoundsOf(node.value).unsignedBits));
+      case "helperCall":
+        return ValueTable.#helperCallWidthBounds(node.helper);
     }
   }
 
@@ -367,6 +377,13 @@ export class ValueTable {
         return signExtended(Math.min(16, widthBoundsOf(node.value).signedBits));
       case "popcnt":
         return unbounded;
+    }
+  }
+
+  static #helperCallWidthBounds(helper: HelperCallKey): WidthBounds {
+    switch (helper.kind) {
+      case "lazyFlag":
+        return fitsUnsigned(1);
     }
   }
 

@@ -7,7 +7,16 @@ import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import type { LinkCompletion } from "#wasm/emit/embed.js";
 import { emitActionFunction } from "#wasm/emit/emit.js";
+import {
+  analyzeBlockValues,
+  type BlockValueAnalysis
+} from "#wasm/emit/values.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
+import {
+  createWasmHelperRegistry,
+  defineRequiredHelpers,
+  helperCallsForBlock
+} from "#wasm/helpers/module.js";
 import {
   jitModuleLinkFallbackExportName,
   type JitModuleLinkTable
@@ -20,6 +29,12 @@ import {
 export type ActionJitBlock = Readonly<{
   entryEip: number;
   actions: IrBlock;
+}>;
+
+type AnalyzedActionJitBlock = Readonly<{
+  entryEip: number;
+  actions: IrBlock;
+  analysis: BlockValueAnalysis;
 }>;
 
 export type EncodeActionJitModuleOptions = Readonly<{
@@ -104,23 +119,37 @@ export function encodeActionJitModule(
     module.exportFunction(jitModuleLinkFallbackExportName(targetEip), stubIndex);
   }
 
-  const blockFunctionIndices = new Map<number, number>();
+  const analyzedBlocks = blocks.map((block): AnalyzedActionJitBlock => ({
+    ...block,
+    analysis: analyzeBlockValues(block.actions)
+  }));
+  const helpers = createWasmHelperRegistry(module);
+  const helperCalls = analyzedBlocks.flatMap((block) =>
+    helperCallsForBlock(block.actions, block.analysis)
+  );
 
-  for (const block of blocks) {
+  defineRequiredHelpers(helpers, helperCalls);
+
+  const blockFunctionIndices = new Map<number, number>();
+  const functionIndexBase = tableTargetEips.length + helpers.helpers().length;
+
+  for (const block of analyzedBlocks) {
     const entryEip = u32(block.entryEip);
 
     assert(
       !blockFunctionIndices.has(entryEip),
       `duplicate JIT block module entry EIP: 0x${entryEip.toString(16)}`
     );
-    blockFunctionIndices.set(entryEip, tableTargetEips.length + blockFunctionIndices.size);
+    blockFunctionIndices.set(entryEip, functionIndexBase + blockFunctionIndices.size);
   }
 
   const completion = linkCompletion(blockFunctionIndices, options.moduleLinkTable, typeIndex, tableIndex);
 
-  for (const block of blocks) {
+  for (const block of analyzedBlocks) {
     const body = emitActionFunction(block.actions, {
       body: new WasmFunctionBodyEncoder(),
+      helpers,
+      analysis: block.analysis,
       embedding: { completion }
     });
     const functionIndex = module.addFunction(typeIndex, body);

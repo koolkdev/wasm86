@@ -5,6 +5,7 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
+import { createWasmHelperRegistry, defineAllHelpers, type WasmHelperRegistry } from "#wasm/helpers/module.js";
 import { RmDecodeHelpers } from "./decode.js";
 import { emitOpcodeDispatch } from "./dispatch.js";
 import { emitOpcodeFetch } from "./fragments.js";
@@ -36,8 +37,12 @@ export function encodeInterpreterModule(): InterpreterModule {
     results: [wasmValueType.i64]
   });
   const rmDecode = new RmDecodeHelpers(module);
+  const helpers = createWasmHelperRegistry(module);
+
+  defineAllHelpers(helpers);
+
   // Emitting the run loop adds the rm-decode helpers it uses to the module.
-  const { body, handlers } = encodeRunLoopBody(rmDecode);
+  const { body, handlers } = encodeRunLoopBody(rmDecode, helpers);
   const functionIndex = module.addFunction(typeIndex, body);
 
   module.exportFunction(wasmBlockExportName, functionIndex);
@@ -59,7 +64,8 @@ function importInterpreterMemories(module: WasmModuleEncoder): void {
 }
 
 function encodeRunLoopBody(
-  rmDecode: RmDecodeHelpers
+  rmDecode: RmDecodeHelpers,
+  helpers: WasmHelperRegistry
 ): Readonly<{ body: WasmFunctionBodyEncoder; handlers: InterpreterHandler[] }> {
   const body = new WasmFunctionBodyEncoder(1);
   const locals = new InterpreterLocals(body);
@@ -74,8 +80,8 @@ function encodeRunLoopBody(
   // Completed instructions land on this block's end; faults and unsupported
   // opcodes return from inside.
   body.block();
-  emitOpcodeFetch({ body, scratch }, { eipLocal: locals.eip, byteLocal: locals.byte });
-  emitOpcodeDispatch({ body, scratch, locals, handlers, continueDepth: 0, rmDecode });
+  emitOpcodeFetch({ body, scratch, helpers }, { eipLocal: locals.eip, byteLocal: locals.byte });
+  emitOpcodeDispatch({ body, scratch, helpers, locals, handlers, continueDepth: 0, rmDecode });
   body.endBlock();
 
   body.localGet(fuelParam).i32Const(1).i32Sub().localSet(fuelParam);

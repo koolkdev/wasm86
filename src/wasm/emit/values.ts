@@ -300,6 +300,7 @@ function valueChildren(node: ValueNode): readonly ValueId[] {
     case "const":
     case "actionOutput":
     case "external":
+    case "helperCall":
       return [];
     case "binary":
     case "compare":

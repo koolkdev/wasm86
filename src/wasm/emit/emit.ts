@@ -15,7 +15,8 @@ import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { emitGuardChecks, emitGuestLoad, emitGuestStore } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";
 import { createValueStack } from "./value-stack.js";
-import { analyzeBlockValues } from "./values.js";
+import { analyzeBlockValues, type BlockValueAnalysis } from "./values.js";
+import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
 // The emitter driver: walks an IrBlock in action order and fills the
 // given function body. Its product is a function body, never a module —
@@ -29,11 +30,15 @@ export type ActionFragmentContext = Readonly<{
   // takes.
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
+  helpers?: WasmHelperRegistry | undefined;
+  analysis?: BlockValueAnalysis | undefined;
   embedding: FragmentEmbedding;
 }>;
 
 export type ActionFunctionContext = Readonly<{
   body: WasmFunctionBodyEncoder;
+  helpers?: WasmHelperRegistry | undefined;
+  analysis?: BlockValueAnalysis | undefined;
   embedding: FunctionEmbedding;
 }>;
 
@@ -44,6 +49,8 @@ export function emitActionFunction(block: IrBlock, context: ActionFunctionContex
   emitActionFragment(block, {
     body: context.body,
     scratch,
+    helpers: context.helpers,
+    analysis: context.analysis,
     embedding: context.embedding
   });
   scratch.assertClear();
@@ -60,12 +67,14 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
 
   const edges = block.regions.filter((region): region is EdgeRegion => region.kind === "edge");
   const outputs = embedding.outputs ?? new Map<ValueId, number>();
+  const analysis = context.analysis ?? analyzeBlockValues(block, outputs.keys());
   const valueStack = createValueStack({
     body,
     scratch: context.scratch,
     values: block.values,
-    analysis: analyzeBlockValues(block, outputs.keys()),
+    analysis,
     externalLocals: context.externalLocals ?? new Map(),
+    helpers: context.helpers,
     loadSlot: (slot, signed, emitUse) => emitSlotLoad(body, slot, signed, emitUse),
     loadGuest: (width, signed) => emitGuestLoad(body, width, signed)
   });

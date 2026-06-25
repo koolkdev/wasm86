@@ -12,6 +12,8 @@ import { wasmImport } from "#wasm/abi.js";
 import { ExitReason } from "#wasm/exit.js";
 import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";
+import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
+import { allHelpers } from "#wasm/helpers/module.js";
 
 test("imports cpu state and guest memories in ABI order", () => {
   const module = new WebAssembly.Module(encodeInterpreterModule().bytes);
@@ -27,6 +29,15 @@ test("exports run(fuel) -> i64", async () => {
   strictEqual(
     WebAssembly.Module.exports(interpreter.module).some((entry) => entry.kind === "function" && entry.name === "run"),
     true
+  );
+});
+
+test("includes lazy flag helpers in the module", () => {
+  const encoded = encodeInterpreterModule();
+
+  strictEqual(
+    wasmDefinedFunctionCount(encoded.bytes),
+    1 + encoded.rmDecodeHelpers.length + allHelpers().length
   );
 });
 

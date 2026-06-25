@@ -15,6 +15,7 @@ import { reg16, reg32, reg8, type RegName } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/emit.js";
+import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 import {
   emitImmediateFetch,
   emitRelTargetFetch,
@@ -40,6 +41,7 @@ export type HandlerEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   locals: InterpreterLocals;
+  helpers: WasmHelperRegistry;
   // Label depth from the emission point to the instruction-complete target.
   continueDepth: number;
   handlers: InterpreterHandler[];
@@ -85,6 +87,7 @@ export function emitInstructionHandler(
     body: context.body,
     scratch: context.scratch,
     externalLocals: externals.locals,
+    helpers: context.helpers,
     embedding: { completion: { kind: "br", depth: context.continueDepth } }
   });
   context.handlers.push({ instructionId: instruction.spec.id, opcode: instruction.opcode, form });
