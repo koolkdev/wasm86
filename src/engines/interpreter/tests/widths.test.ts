@@ -25,8 +25,6 @@ import {
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
-const signLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
-
 test("executes MOV into AL, AH, and prefixed AX register views", async () => {
   const movAl = await executeInstruction([0xb0, 0x44], createWasmCpuStateSnapshot({
     eax: 0x1122_3300,
@@ -145,7 +143,8 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(test16.exit);
   strictEqual(test16.state.eax, 0x8000);
-  deepStrictEqual(wasmCpuStatusFlagsOf(test16.state), signLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(test16.state), allFlagsSet);
+  assertLazyFlagState(test16.state, { kind: "LOGIC_RESULT", width: 16, a: 0x8000 });
 });
 
 test("unsupported prefixed opcode streams terminate without changing architectural state", async () => {

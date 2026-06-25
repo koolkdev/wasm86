@@ -90,6 +90,17 @@ for (const aluCase of aluCases) {
           { kind: aluCase.op === "add" ? "ADD" : "SUB", width: 32, a: pair.left, b: pair.right },
           label
         );
+      } else if (aluCase.op === "and" || aluCase.op === "or" || aluCase.op === "xor" || aluCase.op === "test") {
+        assertState(
+          stateView,
+          { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: allFlagsSet },
+          label
+        );
+        assertLazyFlagState(
+          stateView,
+          { kind: "LOGIC_RESULT", width: 32, a: logicLazyResult(aluCase.op, pair.left, pair.right) },
+          label
+        );
       } else {
         assertState(
           stateView,
@@ -191,6 +202,24 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
 
     return regBinding(operand.alias.base);
   });
+}
+
+function logicLazyResult(op: AluOp, left: number, right: number): number {
+  switch (op) {
+    case "and":
+    case "test":
+      return (left & right) >>> 0;
+    case "or":
+      return (left | right) >>> 0;
+    case "xor":
+      return (left ^ right) >>> 0;
+    case "add":
+    case "adc":
+    case "sub":
+    case "sbb":
+    case "cmp":
+      throw new Error(`unsupported logic lazy result op: ${op}`);
+  }
 }
 
 function hex(value: number): string {

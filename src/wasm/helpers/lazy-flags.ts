@@ -97,6 +97,10 @@ function resolverCases(
       {
         kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, width),
         emitValue: () => emitBinaryFlag(body, scratch, helper, "sub", width)
+      },
+      {
+        kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, width),
+        emitValue: () => emitLogicFlag(body, scratch, helper, width)
       }
     ])
   ];
@@ -122,6 +126,27 @@ function emitBinaryFlag(
   width: OperandWidth
 ): void {
   const fragment = binaryFlagFragment(flag, kind, width);
+
+  scratch.withLocals([wasmValueType.i32], ([outputLocal]) => {
+    emitActionFragment(fragment.block, {
+      body,
+      scratch,
+      embedding: {
+        completion: { kind: "fallthrough" },
+        outputs: new Map([[fragment.value, outputLocal]])
+      }
+    });
+    body.localGet(outputLocal);
+  });
+}
+
+function emitLogicFlag(
+  body: WasmFunctionBodyEncoder,
+  scratch: WasmLocalScratchAllocator,
+  flag: LazyFlagHelper,
+  width: OperandWidth
+): void {
+  const fragment = logicFlagFragment(flag, width);
 
   scratch.withLocals([wasmValueType.i32], ([outputLocal]) => {
     emitActionFragment(fragment.block, {
@@ -174,6 +199,37 @@ function binaryFlagFragment(
           actions: [
             { kind: "readState", output: left, slot: lazyFlagsAChannel },
             { kind: "readState", output: right, slot: lazyFlagsBChannel },
+            { kind: "continue" }
+          ]
+        }
+      ],
+      values
+    }
+  };
+}
+
+function logicFlagFragment(
+  flag: LazyFlagHelper,
+  width: OperandWidth
+): Readonly<{ block: IrBlock; value: ValueId }> {
+  const values = new ValueTable();
+  const result = values.addActionOutput();
+  const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
+    kind: "logic",
+    width,
+    result
+  }, { undefinedAF: values.internConst(0) })[flag];
+
+  return {
+    value: formula,
+    block: {
+      entry: 0,
+      regions: [
+        {
+          id: 0,
+          kind: "entry",
+          actions: [
+            { kind: "readState", output: result, slot: lazyFlagsAChannel },
             { kind: "continue" }
           ]
         }

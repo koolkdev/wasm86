@@ -19,8 +19,6 @@ import {
   eipChannel,
   gprChannel,
   instructionCountChannel,
-  lazyFlagsAChannel,
-  lazyFlagsBChannel,
   lazyFlagsKindChannel
 } from "#ir/slots.js";
 import type {
@@ -36,7 +34,6 @@ import type {
 import type { EdgeRegion, IrBlock } from "#ir/block.js";
 import type { ValueId, ValueNode } from "#ir/values.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
-import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
@@ -49,6 +46,7 @@ import { setccSemantic } from "#x86/semantics/setcc.js";
 import { popfdSemantic, popSemantic, pushfdSemantic } from "#x86/semantics/stack.js";
 import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
+import { assertLazyRecord } from "./lazy-flags.js";
 
 // Every instruction advances the count channel; the dedicated tests at the
 // end cover that bookkeeping, the shape tests assert around it.
@@ -128,24 +126,6 @@ function flagWriteValue(block: IrBlock, flag: X86StatusFlag): ValueId {
 
   strictEqual(writes.length, 1, `expected exactly one ${flag} write`);
   return writes[0]!.value;
-}
-
-function stateWriteValue(actions: readonly WriteStateAction[], slot: WriteStateAction["slot"]): ValueId | undefined {
-  return actions.find((write) => write.slot === slot)?.value;
-}
-
-function assertLazyRecord(
-  actions: readonly WriteStateAction[],
-  values: IrBlock["values"],
-  expected: Readonly<{ kind: "ADD" | "SUB"; width: 8 | 16 | 32; left: ValueId; right: ValueId }>
-): void {
-  strictEqual(actions.filter((write) => write.slot.kind === "flag").length, 0);
-  strictEqual(stateWriteValue(actions, lazyFlagsAChannel), values.projectTo(expected.width, expected.left));
-  strictEqual(stateWriteValue(actions, lazyFlagsBChannel), values.projectTo(expected.width, expected.right));
-  strictEqual(
-    stateWriteValue(actions, lazyFlagsKindChannel),
-    values.internConst(lazyFlagsKindByte(LAZY_FLAGS_KIND[expected.kind], expected.width))
-  );
 }
 
 function assertNegatedHelperFlag(values: IrBlock["values"], id: ValueId, flag: X86StatusFlag): void {
@@ -786,6 +766,15 @@ test("jcc after test source uses the source-derived condition with no flag byte 
     entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
     false
   );
+  strictEqual(stateWrites(block).length, 0);
+
+  for (const flushes of [edgeWriteFlushes(block, 1), edgeWriteFlushes(block, 2)]) {
+    assertLazyRecord(flushes.filter((flush) => flush.slot.kind === "lazyFlags"), v, {
+      kind: "LOGIC_RESULT",
+      width: 32,
+      result
+    });
+  }
 });
 
 const subSourceThenJccTemplate: SemanticTemplate = (s) => {

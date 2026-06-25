@@ -7,9 +7,6 @@ import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruc
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
-const zeroLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
-const signLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
-
 test("executes ADD r32, r/m32 and commits lazy add flags", async () => {
   const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
@@ -48,7 +45,7 @@ test("executes SUB r/m32, r32 and commits lazy sub flags", async () => {
   assertLazyFlagState(state, { kind: "SUB", width: 32, a: 0, b: 1 });
 });
 
-test("executes XOR r/m32, r32 and materializes logic flags", async () => {
+test("executes XOR r/m32, r32 and commits lazy logic flags", async () => {
   const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
     eip: startAddress,
@@ -61,10 +58,11 @@ test("executes XOR r/m32, r32 and materializes logic flags", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0 });
 });
 
-test("executes OR r32, r/m32 and materializes logic flags", async () => {
+test("executes OR r32, r/m32 and commits lazy logic flags", async () => {
   const initialState = createWasmCpuStateSnapshot({
     eax: 0x8000_0000,
     ebx: 0x100,
@@ -79,10 +77,11 @@ test("executes OR r32, r/m32 and materializes logic flags", async () => {
   strictEqual(state.eax, 0x8000_0100);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), signLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0x8000_0100 });
 });
 
-test("executes AND r/m32, r32 and materializes logic flags", async () => {
+test("executes AND r/m32, r32 and commits lazy logic flags", async () => {
   const initialState = createWasmCpuStateSnapshot({
     eax: 0xffff_ffff,
     ebx: 0,
@@ -97,7 +96,8 @@ test("executes AND r/m32, r32 and materializes logic flags", async () => {
   strictEqual(state.eax, 0);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0 });
 });
 
 test("executes CMP r/m32, r32 without writing operands", async () => {
@@ -134,5 +134,6 @@ test("executes TEST r/m32, r32 without writing operands", async () => {
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress + 2, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), signLogicFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0x8000_0000 });
 });

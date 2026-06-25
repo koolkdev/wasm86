@@ -151,11 +151,47 @@ test("lazy flag helpers resolve seeded ADD runtime state", async () => {
   }
 });
 
+test("lazy flag helpers resolve seeded LOGIC_RESULT runtime state", async () => {
+  const runtime = await instantiateLazyFlagHelpers();
+  const cases: ReadonlyArray<Readonly<{ width: OperandWidth; result: number }>> = [
+    { width: 8, result: 0x00 },
+    { width: 8, result: 0x80 },
+    { width: 16, result: 0x8000 },
+    { width: 16, result: 0x1234 },
+    { width: 32, result: 0x8000_0000 },
+    { width: 32, result: 0x1234_5678 }
+  ];
+
+  for (const entry of cases) {
+    writeWasmCpuStateSnapshot(runtime.stateView, {
+      lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, entry.width),
+      lazyFlagsA: entry.result,
+      lazyFlagsB: 0xffff_ffff,
+      CF: 1,
+      PF: 0,
+      AF: 1,
+      ZF: 1,
+      SF: 0,
+      OF: 1
+    });
+
+    const expected = aluReference("or", entry.width, entry.result, 0).flags;
+
+    for (const flag of x86StatusFlags) {
+      strictEqual(
+        runtime.resolve(flag),
+        expected[flag],
+        `${entry.width}-bit logic result ${entry.result.toString(16)} ${flag}`
+      );
+    }
+  }
+});
+
 test("lazy flag helpers trap on unsupported runtime metadata", async () => {
   const runtime = await instantiateLazyFlagHelpers();
 
   writeWasmCpuStateSnapshot(runtime.stateView, {
-    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, 32),
+    lazyFlagsKind: 0xff,
     ZF: 1
   });
 

@@ -21,10 +21,7 @@ const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
 const addWraparoundFlags = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 } as const;
 const subBorrowFlags = { CF: 1, PF: 1, AF: 1, ZF: 0, SF: 1, OF: 0 } as const;
-const zeroResultFlags = { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
 const carryAuxFlags = { CF: 1, PF: 0, AF: 1, ZF: 0, SF: 0, OF: 0 } as const;
-const parityOnlyFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
-const signParityFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 const adcNoCarryFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 const adcWithCarryFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 const adcSignedOverflowFlags = { CF: 0, PF: 1, AF: 1, ZF: 0, SF: 1, OF: 1 } as const;
@@ -250,7 +247,8 @@ test("executes XOR EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0 });
 });
 
 test("executes OR EAX, imm32", async () => {
@@ -266,7 +264,8 @@ test("executes OR EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x8000_0100);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), signParityFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0x8000_0100 });
 });
 
 test("executes AND EAX, imm32", async () => {
@@ -282,7 +281,8 @@ test("executes AND EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0 });
 });
 
 test("executes CMP EAX, imm32 without writing EAX", async () => {
@@ -315,7 +315,8 @@ test("executes TEST EAX, imm32 without writing EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), parityOnlyFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0xff });
 });
 
 test("executes 81 /7 CMP r/m32, imm32 for register operands", async () => {
@@ -365,7 +366,8 @@ test("executes 83 /6 XOR r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_ffff);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), signParityFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0xffff_ffff });
 });
 
 test("executes 83 /4 AND r/m32, sign-extended imm8 for register operands", async () => {
@@ -381,7 +383,8 @@ test("executes 83 /4 AND r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "LOGIC_RESULT", width: 32, a: 0 });
 });
 
 test("executes 83 /2 ADC and 83 /3 SBB sign-extended imm8 for register operands", async () => {

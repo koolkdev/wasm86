@@ -198,7 +198,7 @@ test("byte-register forms touch only their byte of the register file", async () 
 test("test writes flags without touching its operands", async () => {
   const interpreter = await instantiate();
 
-  writeWasmCpuStateSnapshot(interpreter.stateView, { eax: 0xf0, eip: startAddress });
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eax: 0xf0, eip: startAddress, ZF: 0 });
   writeProgram(interpreter.guestView, startAddress, [
     0xa8, 0x0f, // test al, 0x0f
     haltByte
@@ -208,7 +208,8 @@ test("test writes flags without touching its operands", async () => {
 
   strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 0xf0);
-  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 1);
+  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 0);
+  assertLazyFlagState(interpreter.stateView, { kind: "LOGIC_RESULT", width: 8, a: 0 });
 });
 
 test("exhausted fuel exits with the instruction limit and the count preserved", async () => {

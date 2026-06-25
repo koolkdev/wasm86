@@ -309,14 +309,19 @@ test("mov ah and mov al merge through memory for a final 32-bit read", async () 
 
 test("zero compares encode as eqz", () => {
   const builder = createIrBlockBuilder();
+  const logicConditionTemplate: SemanticTemplate = (s) => {
+    const result = s.i32Xor(s.get(s.reg("eax"), 32), s.const32(5));
 
-  builder.addInstruction(aluSemantic("xor", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
+    s.writeStatusFlagsSource({ kind: "logic", width: 32, result });
+    s.set(s.reg("ebx"), s.i32Select(s.condition("E"), s.const32(1), s.const32(0)), 32);
+  };
+
+  builder.addInstruction(logicConditionTemplate, [], loc(0x1000, 0x1003));
 
   const body = irBlockBody(builder.finish()).encode();
   const opcodes = wasmBodyOpcodes(body);
 
-  // ZF and parity both compare against zero; nothing else compares equal.
-  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Eqz).length, 2);
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Eqz).length, 1);
   strictEqual(opcodes.includes(wasmOpcode.i32Eq), false);
 });
 

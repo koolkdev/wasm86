@@ -84,24 +84,15 @@ export class StatusFlags {
         this.#setBacking("ZF", { kind: "source", source: sourceId });
         this.#setBacking("SF", { kind: "source", source: sourceId });
         this.#setBacking("OF", { kind: "value", value: zero });
-        this.#writeExplicitValues(this.#currentValues(), sourceId);
+        this.#writeLazyLogicSource(source);
         return;
       }
     }
   }
 
-  writeFlag(flag: X86StatusFlag, value: ValueId): void {
-    const cache: SourceExpansionCache = new Map();
-    const explicit = Object.fromEntries(
-      x86StatusFlags.map((currentFlag) => [
-        currentFlag,
-        currentFlag === flag
-          ? value
-          : this.#resolveFlagFrom(this.#current, currentFlag, cache)
-      ])
-    ) as StatusFlagValueIds;
-
-    this.#writeExplicitValues(explicit, undefined);
+  writeFlag(targetFlag: X86StatusFlag, value: ValueId): void {
+    this.#flushBeforeDirectFlagWrite();
+    this.#writeExplicitFlag(targetFlag, value);
   }
 
   has(flag: X86StatusFlag): boolean {
@@ -112,20 +103,40 @@ export class StatusFlags {
     this.#current.backings.set(flag, backing);
   }
 
-  #writeExplicitValues(values: StatusFlagValueIds, directSource: FlagSourceId | undefined): void {
-    this.#current.directSource = directSource;
-
-    for (const flag of x86StatusFlags) {
-      this.#current.backings.set(flag, { kind: "value", value: values[flag] });
+  #flushBeforeDirectFlagWrite(): void {
+    if (this.#current.directSource !== undefined || this.#hasInputBackings()) {
+      this.#flushExplicitFlagsFromBackings();
     }
+  }
 
+  #flushExplicitFlagsFromBackings(): void {
+    const cache: SourceExpansionCache = new Map();
+    const values = Object.fromEntries(
+      x86StatusFlags.map((flag) => [
+        flag,
+        this.#resolveFlagFrom(this.#current, flag, cache)
+      ])
+    ) as StatusFlagValueIds;
+
+    // Direct flag writes switch status flags into explicit mode. The first
+    // write must publish a complete status image before overriding one flag,
+    // otherwise later edges could mix stale explicit bytes with invalidated
+    // lazy metadata.
+    this.#current.directSource = undefined;
     this.#invalidateLazyChannels();
-
     for (const flag of x86StatusFlags) {
-      this.#pending.write(flagChannel(flag), values[flag]);
+      this.#writeExplicitFlag(flag, values[flag]);
     }
-
     this.#pending.write(lazyFlagsKindChannel, this.#values.internConst(0));
+  }
+
+  #writeExplicitFlag(flag: X86StatusFlag, value: ValueId): void {
+    this.#setBacking(flag, { kind: "value", value });
+    this.#pending.write(flagChannel(flag), value);
+  }
+
+  #hasInputBackings(): boolean {
+    return x86StatusFlags.some((flag) => getBacking(this.#current.backings, flag).kind === "input");
   }
 
   #writeLazyBinarySource(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "add" | "sub" }>): void {
@@ -138,6 +149,17 @@ export class StatusFlags {
     this.#pending.write(
       lazyFlagsKindChannel,
       this.#values.internConst(lazyFlagsKindByte(kind, source.width))
+    );
+  }
+
+  #writeLazyLogicSource(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "logic" }>): void {
+    this.#invalidateExplicitFlagChannels();
+    this.#pending.invalidate(lazyFlagsKindChannel);
+    this.#pending.write(lazyFlagsAChannel, this.#values.projectTo(source.width, source.result));
+    this.#pending.invalidate(lazyFlagsBChannel);
+    this.#pending.write(
+      lazyFlagsKindChannel,
+      this.#values.internConst(lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, source.width))
     );
   }
 
@@ -253,17 +275,6 @@ export class StatusFlags {
 
     cache.set(sourceId, materialized);
     return materialized;
-  }
-
-  #currentValues(): StatusFlagValueIds {
-    const cache: SourceExpansionCache = new Map();
-
-    return Object.fromEntries(
-      x86StatusFlags.map((flag) => [
-        flag,
-        this.#resolveFlagFrom(this.#current, flag, cache)
-      ])
-    ) as StatusFlagValueIds;
   }
 
   #materializeUndef(policy: UndefFlagPolicy): ValueId {
