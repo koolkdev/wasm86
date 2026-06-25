@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { Action, EdgeFlushAction, ReadStateAction } from "#ir/actions.js";
 import { PendingFlags } from "#ir/pending/flags.js";
 import { PendingStateAccess } from "#ir/pending/state-access.js";
-import { flagChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import { flagChannel, lazyFlagsHeaderChannel } from "#ir/slots.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 
@@ -36,7 +36,7 @@ function flagFlushValue(actions: readonly EdgeFlushAction[], flag: X86StatusFlag
 
 function assertFullConcreteFlush(actions: readonly EdgeFlushAction[], values: ValueTable): void {
   deepStrictEqual(flagFlushEntries(actions).map((entry) => entry.flag), x86StatusFlags);
-  strictEqual(actions.find((action) => action.slot === lazyFlagsKindChannel)?.value, values.internConst(0));
+  strictEqual(actions.find((action) => action.slot === lazyFlagsHeaderChannel)?.value, values.internConst(0));
   strictEqual(actions.length, x86StatusFlags.length + 1);
 }
 

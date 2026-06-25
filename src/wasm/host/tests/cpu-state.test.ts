@@ -32,16 +32,20 @@ test("host view initializes lazy flag metadata to none", () => {
   const snapshot = readWasmCpuState(state);
 
   strictEqual(snapshot.lazyFlagsKind, WASM_CPU_LAZY_FLAGS_KIND.NONE);
+  strictEqual(snapshot.lazyFlagsWidth, 0);
   strictEqual(snapshot.lazyFlagsA, 0);
   strictEqual(snapshot.lazyFlagsB, 0);
 });
 
-test("host view stores lazy flag kind as a byte, not a bit", () => {
+test("host view stores lazy flag header fields as bytes, not bits", () => {
   const { cpuState: state } = createWasmHostMemories();
 
-  state.load({ lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT32 });
+  state.load({ lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, lazyFlagsWidth: 32 });
 
-  strictEqual(readWasmCpuState(state).lazyFlagsKind, WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT32);
+  const snapshot = readWasmCpuState(state);
+
+  strictEqual(snapshot.lazyFlagsKind, WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT);
+  strictEqual(snapshot.lazyFlagsWidth, 32);
 });
 
 test("host view stores flag fields as flag bytes and reads them back", () => {

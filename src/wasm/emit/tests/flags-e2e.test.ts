@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { regBinding, type OperandBinding } from "#ir/operands.js";
-import { eipChannel, gprChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import { eipChannel, gprChannel, lazyFlagsHeaderChannel } from "#ir/slots.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86StatusFlags } from "#x86/flags.js";
@@ -100,7 +100,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
   const block = builder.finish();
 
   // Dead flag writes collapse in the contract: one writeState per status flag
-  // plus one lazy-kind clear.
+  // plus one lazy header clear.
   const entry = block.regions[0]!;
 
   assertOk(entry.kind === "entry", "first region is the entry");
@@ -112,18 +112,18 @@ test("two adds in one block store each flag byte once, with the second add's fla
   strictEqual(flagWrites.length, x86StatusFlags.length);
   strictEqual(new Set(flagWrites).size, x86StatusFlags.length);
   strictEqual(
-    entry.actions.filter((action) => action.kind === "writeState" && action.slot === lazyFlagsKindChannel).length,
+    entry.actions.filter((action) => action.kind === "writeState" && action.slot === lazyFlagsHeaderChannel).length,
     1
   );
 
-  // ...and in the encoding: exactly six flag byte stores plus one lazy-kind clear.
+  // ...and in the encoding: exactly six flag byte stores plus one lazy header clear.
   const body = irBlockBody(block).encode();
 
-  strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Store8).length, 7);
+  strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Store8).length, 6);
   strictEqual(
     wasmBodyMemoryAccesses(body).filter(
       (access) =>
-        access.opcode === wasmOpcode.i32Store8 &&
+        access.opcode === wasmOpcode.i32Store16 &&
         access.memoryIndex === wasmMemoryIndex.cpuState &&
         access.offset === WASM_CPU_STATE_OFFSETS.lazyFlagsKind
     ).length,
@@ -134,7 +134,8 @@ test("two adds in one block store each flag byte once, with the second add's fla
     ebx: 0x7fff_fffe,
     ecx: 0x0000_0001,
     eip: first.address,
-    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.SUB32,
+    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.SUB,
+    lazyFlagsWidth: 32,
     ...allFlagsSet
   };
   // ebx threads through the two adds; the block ends with the second add's flags.
@@ -151,6 +152,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
     "two adds"
   );
   strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), WASM_CPU_LAZY_FLAGS_KIND.NONE);
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsWidth"), 0);
 });
 
 function assertState(

@@ -1,7 +1,16 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import {
+  eipChannel,
+  flagChannel,
+  gprChannel,
+  lazyFlagsAChannel,
+  lazyFlagsBChannel,
+  lazyFlagsHeaderChannel,
+  lazyFlagsKindChannel,
+  lazyFlagsWidthChannel
+} from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
 import { reg16, reg32, reg8 } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
@@ -18,22 +27,23 @@ import {
 
 test("cpu state layout fields and flag offsets are stable", () => {
   deepStrictEqual(WASM_CPU_FLAG_BYTE_OFFSETS, {
-    CF: 41,
-    PF: 42,
-    AF: 43,
-    ZF: 44,
-    SF: 45,
-    OF: 46,
-    DF: 47,
-    TF: 48,
-    NT: 49,
-    AC: 50,
-    ID: 51
+    CF: 52,
+    PF: 53,
+    AF: 54,
+    ZF: 55,
+    SF: 56,
+    OF: 57,
+    DF: 58,
+    TF: 59,
+    NT: 60,
+    AC: 61,
+    ID: 62
   });
   strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsKind, 40);
-  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsA, 52);
-  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsB, 56);
-  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 60);
+  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsWidth, 41);
+  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsA, 44);
+  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsB, 48);
+  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 63);
 
   for (const field of WASM_CPU_STATE_FIELDS) {
     strictEqual(WASM_CPU_STATE_OFFSETS[field], WASM_CPU_STATE_LAYOUT[field].offset);
@@ -60,9 +70,13 @@ test("channel offsets derive from the register word offset plus the byte offset"
   }
 
   strictEqual(wasmCpuStateChannelOffset(lazyFlagsKindChannel), WASM_CPU_STATE_OFFSETS.lazyFlagsKind);
+  strictEqual(wasmCpuStateChannelOffset(lazyFlagsWidthChannel), WASM_CPU_STATE_OFFSETS.lazyFlagsWidth);
+  strictEqual(wasmCpuStateChannelOffset(lazyFlagsHeaderChannel), WASM_CPU_STATE_OFFSETS.lazyFlagsKind);
   strictEqual(wasmCpuStateChannelOffset(lazyFlagsAChannel), WASM_CPU_STATE_OFFSETS.lazyFlagsA);
   strictEqual(wasmCpuStateChannelOffset(lazyFlagsBChannel), WASM_CPU_STATE_OFFSETS.lazyFlagsB);
   strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsKindChannel), 1);
+  strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsWidthChannel), 1);
+  strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsHeaderChannel), 2);
   strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsAChannel), 4);
   strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsBChannel), 4);
 });

@@ -15,7 +15,7 @@ import {
   regBinding,
   regDynamicBinding
 } from "#ir/operands.js";
-import { eipChannel, flagChannel, gprChannel, instructionCountChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import { eipChannel, flagChannel, gprChannel, instructionCountChannel, lazyFlagsHeaderChannel } from "#ir/slots.js";
 import type {
   Action,
   BranchAction,
@@ -239,12 +239,12 @@ test("two adds in one block flush exactly one write per channel, second instruct
   const v = block.values;
 
   // One read feeds both adds; flags flush as a full concrete image, plus eax,
-  // eip, and a lazy-kind clear.
+  // eip, and a lazy header clear.
   strictEqual(actions.filter((action) => action.kind === "readState").length, 1);
   strictEqual(writes.length, x86StatusFlags.length + 3);
   strictEqual(new Set(writes.map((write) => write.slot)).size, x86StatusFlags.length + 3);
   strictEqual(writes.filter((write) => write.slot.kind === "flag").length, x86StatusFlags.length);
-  strictEqual(writes.find((write) => write.slot === lazyFlagsKindChannel)?.value, v.internConst(0));
+  strictEqual(writes.find((write) => write.slot === lazyFlagsHeaderChannel)?.value, v.internConst(0));
 
   const eax = actions.find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
@@ -269,7 +269,7 @@ test("inc flushes a full concrete image with CF preserved from input", () => {
   ok(cfRead !== undefined, "expected INC to preserve CF from the live input byte");
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
   strictEqual(flagWriteValue(block, "CF"), cfRead.output);
-  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.internConst(0));
+  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsHeaderChannel)?.value, block.values.internConst(0));
 });
 
 test("cmp writes flags but no register", () => {
@@ -310,7 +310,7 @@ test("writeFlag flushes a full concrete image with omitted flags preserved from 
     strictEqual(flagWriteValue(block, flag), read.output);
   }
 
-  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.internConst(0));
+  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsHeaderChannel)?.value, block.values.internConst(0));
 });
 
 test("an omitted direct flag write preserves the previous instruction's pending flag", () => {
@@ -459,11 +459,11 @@ test("ax and al pendings mix without touching flag pendings", () => {
   const alFlush = indexOf((a) => a.kind === "writeState" && a.slot === gprChannel("al"));
   const ahFlush = indexOf((a) => a.kind === "writeState" && a.slot === gprChannel("ah"));
   const axRead = indexOf((a) => a.kind === "readState" && a.slot === gprChannel("ax"));
-  const lazyKindClear = indexOf((a) => a.kind === "writeState" && a.slot === lazyFlagsKindChannel);
+  const lazyHeaderClear = indexOf((a) => a.kind === "writeState" && a.slot === lazyFlagsHeaderChannel);
 
   ok(alFlush !== -1 && ahFlush !== -1 && axRead !== -1, "expected al/ah flushes and an ax read");
   ok(alFlush < axRead && ahFlush < axRead, "the ax read must flush al and ah first");
-  ok(axRead < lazyKindClear, "flag image flush stays at the end of the block");
+  ok(axRead < lazyHeaderClear, "flag image flush stays at the end of the block");
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
 
   // The flushed al carries the add's projected result.
@@ -716,7 +716,7 @@ test("jcc after cmp source uses the source-derived condition with per-edge flag 
   // The branch is the entry's terminator: nothing flushes on the main path.
   strictEqual(stateWrites(block).length, 0);
 
-  // Each edge flushes the cmp's six flags, clears lazy-kind, and writes its own eip.
+  // Each edge flushes the cmp's six flags, clears the lazy header, and writes its own eip.
   const taken = edgeFlushes(block, 1);
   const notTaken = edgeFlushes(block, 2);
 
@@ -726,7 +726,7 @@ test("jcc after cmp source uses the source-derived condition with per-edge flag 
       flushes.flatMap((flush) => flush.slot.kind === "flag" ? [flush.slot.flag] : []).sort(),
       [...x86StatusFlags].sort()
     );
-    strictEqual(flushes.find((flush) => flush.slot === lazyFlagsKindChannel)?.value, v.internConst(0));
+    strictEqual(flushes.find((flush) => flush.slot === lazyFlagsHeaderChannel)?.value, v.internConst(0));
   }
 
   strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.internConst(0x2000));
@@ -1235,7 +1235,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
     flushes.flatMap((flush) => flush.slot.kind === "flag" ? [flush.slot.flag] : []).sort(),
     [...x86StatusFlags].sort()
   );
-  strictEqual(flushes.find((flush) => flush.slot === lazyFlagsKindChannel)?.value, v.internConst(0));
+  strictEqual(flushes.find((flush) => flush.slot === lazyFlagsHeaderChannel)?.value, v.internConst(0));
   strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === gprChannel("eax"))?.value, sum);
   strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.internConst(0x1003));
   deepStrictEqual(edgeRegion(block, 1).terminator, {
@@ -1723,11 +1723,11 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
   const actions = entryActions(block);
   const eaxFlush = actions.findIndex((a) => a.kind === "writeState" && a.slot === gprChannel("eax"));
   const dynamicWrite = actions.findIndex((a) => a.kind === "writeState" && a.slot.kind === "gprDynamic");
-  const lazyKindClear = actions.findIndex((a) => a.kind === "writeState" && a.slot === lazyFlagsKindChannel);
+  const lazyHeaderClear = actions.findIndex((a) => a.kind === "writeState" && a.slot === lazyFlagsHeaderChannel);
 
   ok(eaxFlush !== -1 && dynamicWrite !== -1, "expected an eax flush and a dynamic write");
   ok(eaxFlush < dynamicWrite, "the dirty eax pending must flush before the dynamic write");
-  ok(dynamicWrite < lazyKindClear, "flag pendings ride through and flush at the end");
+  ok(dynamicWrite < lazyHeaderClear, "flag pendings ride through and flush at the end");
   strictEqual(stateWrites(block).filter((write) => write.slot === gprChannel("eax")).length, 1);
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, sum);
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());

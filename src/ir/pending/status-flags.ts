@@ -11,7 +11,7 @@ import {
   type StatusFlagValues
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
-import { flagChannel, lazyFlagsKindChannel } from "../slots.js";
+import { flagChannel, lazyFlagsHeaderChannel } from "../slots.js";
 import type { WriteStateAction } from "../actions.js";
 import { fitsUnsigned, type ValueId, type ValueTable } from "../values.js";
 import { PendingStateAccess } from "./state-access.js";
@@ -120,7 +120,7 @@ export class PendingStatusFlags {
 
     actions.push({
       kind: "writeState",
-      slot: lazyFlagsKindChannel,
+      slot: lazyFlagsHeaderChannel,
       value: this.#values.internConst(0)
     });
 

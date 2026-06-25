@@ -2,7 +2,15 @@ import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:a
 import { test } from "node:test";
 
 import { PendingState } from "#ir/pending/state.js";
-import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import {
+  eipChannel,
+  flagChannel,
+  gprChannel,
+  lazyFlagsAChannel,
+  lazyFlagsHeaderChannel,
+  lazyFlagsKindChannel,
+  lazyFlagsWidthChannel
+} from "#ir/slots.js";
 import type { Action, EdgeFlushAction, GprDynamicSlot, ReadStateAction, StateSlot } from "#ir/actions.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 import { x86StatusFlags } from "#x86/flags.js";
@@ -169,19 +177,52 @@ test("flag and eip pendings hit exactly and never interact with registers", () =
 test("lazy flag metadata channels are cached raw state cells", () => {
   const { values, actions, pending } = createHarness();
   const kind = pending.read(lazyFlagsKindChannel);
+  const width = pending.read(lazyFlagsWidthChannel);
+  const header = pending.read(lazyFlagsHeaderChannel);
   const lazyA = values.internConst(0x1234_5678);
 
   strictEqual(pending.read(lazyFlagsKindChannel), kind);
   strictEqual(values.projectTo(8, kind), kind);
+  strictEqual(pending.read(lazyFlagsWidthChannel), width);
+  strictEqual(values.projectTo(8, width), width);
+  strictEqual(pending.read(lazyFlagsHeaderChannel), header);
+  strictEqual(values.projectTo(16, header), header);
 
   pending.write(lazyFlagsAChannel, lazyA);
 
   strictEqual(pending.has(lazyFlagsAChannel), true);
   strictEqual(pending.read(lazyFlagsAChannel), lazyA);
-  deepStrictEqual(actions, [{ kind: "readState", output: kind, slot: lazyFlagsKindChannel }]);
+  deepStrictEqual(actions, [
+    { kind: "readState", output: kind, slot: lazyFlagsKindChannel },
+    { kind: "readState", output: width, slot: lazyFlagsWidthChannel },
+    { kind: "readState", output: header, slot: lazyFlagsHeaderChannel }
+  ]);
   deepStrictEqual(pending.flushesForEdge("completed"), [
     { kind: "writeState", slot: lazyFlagsAChannel, value: lazyA }
   ]);
+});
+
+test("overlapping lazy metadata pendings fail loudly", () => {
+  const first = createHarness();
+
+  first.pending.write(lazyFlagsKindChannel, first.values.internConst(0));
+
+  throws(
+    () => first.pending.read(lazyFlagsHeaderChannel),
+    /overlapping pending cells are unsupported/
+  );
+  throws(
+    () => first.pending.write(lazyFlagsHeaderChannel, first.values.internConst(0)),
+    /overlapping pending cells are unsupported/
+  );
+
+  const second = createHarness();
+
+  second.pending.write(lazyFlagsHeaderChannel, second.values.internConst(0));
+  throws(
+    () => second.pending.read(lazyFlagsWidthChannel),
+    /overlapping pending cells are unsupported/
+  );
 });
 
 test("status flag channels route through pending flags", () => {

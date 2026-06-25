@@ -12,7 +12,7 @@ export type GprChannel = Readonly<{
 export type FlagChannel<TFlag extends X86Flag = X86Flag> = Readonly<{ kind: "flag"; flag: TFlag }>;
 export type EipChannel = Readonly<{ kind: "eip" }>;
 export type InstructionCountChannel = Readonly<{ kind: "instructionCount" }>;
-type LazyFlagsField = "lazyFlagsKind" | "lazyFlagsA" | "lazyFlagsB";
+type LazyFlagsField = "lazyFlagsKind" | "lazyFlagsWidth" | "lazyFlagsHeader" | "lazyFlagsA" | "lazyFlagsB";
 export type LazyFlagsChannel<TField extends LazyFlagsField = LazyFlagsField> = Readonly<{
   kind: "lazyFlags";
   field: TField;
@@ -44,6 +44,14 @@ export const instructionCountChannel: InstructionCountChannel = { kind: "instruc
 export const lazyFlagsKindChannel: LazyFlagsChannel<"lazyFlagsKind"> = {
   kind: "lazyFlags",
   field: "lazyFlagsKind"
+};
+export const lazyFlagsWidthChannel: LazyFlagsChannel<"lazyFlagsWidth"> = {
+  kind: "lazyFlags",
+  field: "lazyFlagsWidth"
+};
+export const lazyFlagsHeaderChannel: LazyFlagsChannel<"lazyFlagsHeader"> = {
+  kind: "lazyFlags",
+  field: "lazyFlagsHeader"
 };
 export const lazyFlagsAChannel: LazyFlagsChannel<"lazyFlagsA"> = {
   kind: "lazyFlags",
@@ -81,6 +89,12 @@ export function channelsOverlap(a: StateChannel, b: StateChannel): boolean {
       b.byteOffsetInReg < a.byteOffsetInReg + a.byteLength;
   }
 
+  if (a.kind === "lazyFlags" && b.kind === "lazyFlags") {
+    return a.field === b.field ||
+      (a.field === "lazyFlagsHeader" && isLazyFlagsHeaderField(b.field)) ||
+      (b.field === "lazyFlagsHeader" && isLazyFlagsHeaderField(a.field));
+  }
+
   return sameChannel(a, b);
 }
 
@@ -92,7 +106,16 @@ export function channelCovers(outer: StateChannel, inner: StateChannel): boolean
       inner.byteOffsetInReg + inner.byteLength <= outer.byteOffsetInReg + outer.byteLength;
   }
 
+  if (outer.kind === "lazyFlags" && inner.kind === "lazyFlags") {
+    return outer.field === inner.field ||
+      (outer.field === "lazyFlagsHeader" && isLazyFlagsHeaderField(inner.field));
+  }
+
   return sameChannel(outer, inner);
+}
+
+function isLazyFlagsHeaderField(field: LazyFlagsField): boolean {
+  return field === "lazyFlagsKind" || field === "lazyFlagsWidth";
 }
 
 function sameChannel(a: StateChannel, b: StateChannel): boolean {

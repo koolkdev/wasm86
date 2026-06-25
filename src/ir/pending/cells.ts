@@ -1,9 +1,11 @@
+import { assert } from "#common/assert.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import {
   type FlagChannel,
   type EipChannel,
   type InstructionCountChannel,
-  type LazyFlagsChannel
+  type LazyFlagsChannel,
+  channelsOverlap
 } from "../slots.js";
 import {
   fitsUnsigned,
@@ -36,10 +38,13 @@ export class PendingCells<TCell extends PendingCell = PendingCell> {
       return exact.value;
     }
 
+    this.#assertNoOverlappingPending(channel);
+
     return this.#state.readInput(channel, channelReadBounds(channel));
   }
 
   write(channel: TCell, value: ValueId): void {
+    this.#assertNoOverlappingPending(channel);
     this.#pending.set(channel, { value, dirty: true });
   }
 
@@ -70,6 +75,15 @@ export class PendingCells<TCell extends PendingCell = PendingCell> {
       entry.dirty ? [[channel, entry.value] as const] : []
     ));
   }
+
+  #assertNoOverlappingPending(channel: TCell): void {
+    for (const other of this.#pending.keys()) {
+      assert(
+        other === channel || !channelsOverlap(other, channel),
+        `overlapping pending cells are unsupported: ${JSON.stringify(other)} and ${JSON.stringify(channel)}`
+      );
+    }
+  }
 }
 
 function channelReadBounds(channel: PendingCell): WidthBounds | undefined {
@@ -77,7 +91,11 @@ function channelReadBounds(channel: PendingCell): WidthBounds | undefined {
     case "flag":
       return fitsUnsigned(1);
     case "lazyFlags":
-      return channel.field === "lazyFlagsKind" ? fitsUnsigned(8) : undefined;
+      return channel.field === "lazyFlagsKind" || channel.field === "lazyFlagsWidth"
+        ? fitsUnsigned(8)
+        : channel.field === "lazyFlagsHeader"
+          ? fitsUnsigned(16)
+          : undefined;
     case "eip":
     case "instructionCount":
       return undefined;
