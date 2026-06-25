@@ -11,11 +11,17 @@ import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
-import { readWasmCpuFlagByte, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import {
+  assertLazyFlagState,
+  readWasmCpuFlagByte,
+  readWasmCpuStateChannel,
+  writeWasmCpuStateSnapshot
+} from "#runtime/tests/fixtures/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
-import { aluReference, type AluFlags } from "./reference.js";
+import type { AluFlags } from "./reference.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
+const noFlagsSet = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const satisfies AluFlags;
 
 // Control-flow cases with explicit eip, register, and flag expectations.
 
@@ -33,9 +39,10 @@ test("cmp + jcc taken continues at the target with flushed flags", async () => {
   strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
-    { regs: { eax: 5 }, eip: 0x1025, flags: aluReference("cmp", 32, 5, 5).flags },
+    { regs: { eax: 5 }, eip: 0x1025, flags: noFlagsSet },
     "jcc taken"
   );
+  assertLazyFlagState(stateView, { kind: "SUB", width: 32, a: 5, b: 5 }, "jcc taken");
 });
 
 test("cmp + jcc not taken continues at the fall-through with flushed flags", async () => {
@@ -56,9 +63,10 @@ test("cmp + jcc not taken continues at the fall-through with flushed flags", asy
   strictEqual(run(), irBlockCompleted);
   assertState(
     stateView,
-    { regs: { eax: 6 }, eip: instructions[1]!.nextEip, flags: aluReference("cmp", 32, 6, 5).flags },
+    { regs: { eax: 6 }, eip: instructions[1]!.nextEip, flags: allFlagsSet },
     "jcc not taken"
   );
+  assertLazyFlagState(stateView, { kind: "SUB", width: 32, a: 6, b: 5 }, "jcc not taken");
 });
 
 test("jmp rel32 continues at the target with earlier pendings flushed", async () => {

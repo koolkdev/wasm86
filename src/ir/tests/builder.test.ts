@@ -15,7 +15,14 @@ import {
   regBinding,
   regDynamicBinding
 } from "#ir/operands.js";
-import { eipChannel, gprChannel, instructionCountChannel, lazyFlagsHeaderChannel } from "#ir/slots.js";
+import {
+  eipChannel,
+  gprChannel,
+  instructionCountChannel,
+  lazyFlagsAChannel,
+  lazyFlagsBChannel,
+  lazyFlagsHeaderChannel
+} from "#ir/slots.js";
 import type {
   Action,
   BranchAction,
@@ -29,6 +36,7 @@ import type {
 import type { EdgeRegion, IrBlock } from "#ir/block.js";
 import type { ValueId, ValueNode } from "#ir/values.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
+import { LAZY_FLAGS_KIND, lazyFlagsHeader } from "#ir/lazy-flags.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
@@ -120,6 +128,24 @@ function flagWriteValue(block: IrBlock, flag: X86StatusFlag): ValueId {
 
   strictEqual(writes.length, 1, `expected exactly one ${flag} write`);
   return writes[0]!.value;
+}
+
+function stateWriteValue(actions: readonly WriteStateAction[], slot: WriteStateAction["slot"]): ValueId | undefined {
+  return actions.find((write) => write.slot === slot)?.value;
+}
+
+function assertSubLazyRecord(
+  actions: readonly WriteStateAction[],
+  values: IrBlock["values"],
+  expected: Readonly<{ width: 8 | 16 | 32; left: ValueId; right: ValueId }>
+): void {
+  strictEqual(actions.filter((write) => write.slot.kind === "flag").length, 0);
+  strictEqual(stateWriteValue(actions, lazyFlagsAChannel), values.projectTo(expected.width, expected.left));
+  strictEqual(stateWriteValue(actions, lazyFlagsBChannel), values.projectTo(expected.width, expected.right));
+  strictEqual(
+    stateWriteValue(actions, lazyFlagsHeaderChannel),
+    values.internConst(lazyFlagsHeader(LAZY_FLAGS_KIND.SUB, expected.width))
+  );
 }
 
 function assertNegatedHelperFlag(values: IrBlock["values"], id: ValueId, flag: X86StatusFlag): void {
@@ -285,15 +311,18 @@ test("inc flushes a full concrete image with CF preserved through a helper call"
   strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsHeaderChannel)?.value, block.values.internConst(0));
 });
 
-test("cmp writes flags but no register", () => {
+test("cmp commits a lazy sub record but no register or concrete flags", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
 
   const block = builder.finish();
   const writes = stateWrites(block);
+  const reads = entryActions(block).filter(
+    (action): action is ReadStateAction => action.kind === "readState"
+  );
 
-  deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
+  assertSubLazyRecord(writes, block.values, { width: 32, left: reads[0]!.output, right: reads[1]!.output });
   strictEqual(writes.some((write) => write.slot.kind === "gpr"), false);
   strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
 });
@@ -704,7 +733,7 @@ test("ops after a control terminator in one template fail loudly", () => {
   );
 });
 
-test("jcc after cmp source uses the source-derived condition with per-edge flag commits", () => {
+test("jcc after cmp source uses the source-derived condition with per-edge lazy commits", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
@@ -728,17 +757,13 @@ test("jcc after cmp source uses the source-derived condition with per-edge flag 
   // The branch is the entry's terminator: nothing flushes on the main path.
   strictEqual(stateWrites(block).length, 0);
 
-  // Each edge flushes the cmp's six flags, clears the lazy header, and writes its own eip.
+  // Each edge flushes the cmp's lazy record and writes its own eip.
   const taken = edgeFlushes(block, 1);
   const notTaken = edgeFlushes(block, 2);
 
   for (const flushes of [taken, notTaken]) {
-    strictEqual(flushes.length, x86StatusFlags.length + 2);
-    deepStrictEqual(
-      flushes.flatMap((flush) => flush.slot.kind === "flag" ? [flush.slot.flag] : []).sort(),
-      [...x86StatusFlags].sort()
-    );
-    strictEqual(flushes.find((flush) => flush.slot === lazyFlagsHeaderChannel)?.value, v.internConst(0));
+    strictEqual(flushes.length, 4);
+    assertSubLazyRecord(flushes, v, { width: 32, left: eax, right: v.internConst(5) });
   }
 
   strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.internConst(0x2000));

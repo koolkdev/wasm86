@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { ExitReason } from "#wasm/exit.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import {
+  assertLazyFlagState,
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf,
   type WasmCpuStateSnapshot
@@ -25,8 +26,6 @@ import {
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
 const addWraparoundFlags = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 } as const;
-const subBorrowFlags = { CF: 1, PF: 1, AF: 1, ZF: 0, SF: 1, OF: 0 } as const;
-const zeroResultFlags = { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
 const signLogicFlags = { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 } as const;
 
 test("executes MOV into AL, AH, and prefixed AX register views", async () => {
@@ -122,7 +121,8 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(sub16.exit);
   strictEqual(sub16.state.eax, 0xffff_ffff);
-  deepStrictEqual(wasmCpuStatusFlagsOf(sub16.state), subBorrowFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(sub16.state), allFlagsSet);
+  assertLazyFlagState(sub16.state, { kind: "SUB", width: 16, a: 0, b: 1 });
 
   const cmp8 = await executeInstruction([0x3c, 0x80], createWasmCpuStateSnapshot({
     eax: 0x80,
@@ -133,7 +133,8 @@ test("materializes representative 8/16-bit ALU flags", async () => {
 
   assertSingleInstructionExit(cmp8.exit);
   strictEqual(cmp8.state.eax, 0x80);
-  deepStrictEqual(wasmCpuStatusFlagsOf(cmp8.state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(cmp8.state), allFlagsSet);
+  assertLazyFlagState(cmp8.state, { kind: "SUB", width: 8, a: 0x80, b: 0x80 });
 
   const test16 = await executeInstruction([0x66, 0xa9, 0x00, 0x80], createWasmCpuStateSnapshot({
     eax: 0x8000,

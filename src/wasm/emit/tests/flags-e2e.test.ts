@@ -13,9 +13,9 @@ import { wasmMemoryIndex } from "#wasm/abi.js";
 import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
 import {
+  assertLazyFlagState,
   readWasmCpuFlagByte,
   readWasmCpuStateChannel,
-  readWasmCpuStateField,
   writeWasmCpuStateSnapshot
 } from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
@@ -78,11 +78,21 @@ for (const aluCase of aluCases) {
 
       writeWasmCpuStateSnapshot(stateView, initial);
       strictEqual(run(), irBlockCompleted, label);
-      assertState(
-        stateView,
-        { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: reference.flags },
-        label
-      );
+      if (aluCase.op === "sub" || aluCase.op === "cmp") {
+        assertState(
+          stateView,
+          { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: allFlagsSet },
+          label
+        );
+        assertLazyFlagState(stateView, { kind: "SUB", width: 32, a: pair.left, b: pair.right }, label);
+      } else {
+        assertState(
+          stateView,
+          { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: reference.flags },
+          label
+        );
+        assertLazyFlagState(stateView, { kind: "NONE", width: 0 }, label);
+      }
     }
   });
 }
@@ -151,8 +161,7 @@ test("two adds in one block store each flag byte once, with the second add's fla
     { regs: { ebx: reference.result, ecx: 0x0000_0001 }, eip: second.nextEip, flags: reference.flags },
     "two adds"
   );
-  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), WASM_CPU_LAZY_FLAGS_KIND.NONE);
-  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsWidth"), 0);
+  assertLazyFlagState(stateView, { kind: "NONE", width: 0 }, "two adds");
 });
 
 function assertState(

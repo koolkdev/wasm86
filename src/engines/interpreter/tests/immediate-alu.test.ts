@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createWasmCpuStateSnapshot, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
+import { assertLazyFlagState, createWasmCpuStateSnapshot, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   writeInterpreterState
@@ -61,7 +61,8 @@ test("executes SUB EAX, imm32", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_ffff);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), subBorrowFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "SUB", width: 32, a: 0, b: 1 });
 });
 
 test("executes ADC EAX, imm32 with old CF clear or set", async () => {
@@ -168,6 +169,7 @@ test("executes SUB AX, imm16 without borrowing from high EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x1234_ffff);
   assertCompletedInstruction(state, startAddress + 4, 8);
+  assertLazyFlagState(state, { kind: "SUB", width: 16, a: 0, b: 1 });
 });
 
 test("executes ADD AL, imm8 without leaking carry into high EAX", async () => {
@@ -196,6 +198,7 @@ test("executes SUB AL, imm8 without borrowing from high EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0xffff_00ff);
   assertCompletedInstruction(state, startAddress + 2, 8);
+  assertLazyFlagState(state, { kind: "SUB", width: 8, a: 0, b: 1 });
 });
 
 test("executes ADC AL, imm8 without leaking carry into high EAX", async () => {
@@ -291,7 +294,8 @@ test("executes CMP EAX, imm32 without writing EAX", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 5, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "SUB", width: 32, a: 5, b: 5 });
 });
 
 test("executes TEST EAX, imm32 without writing EAX", async () => {
@@ -323,7 +327,8 @@ test("executes 81 /7 CMP r/m32, imm32 for register operands", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, initialState.eax);
   assertCompletedInstruction(state, startAddress + 6, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), zeroResultFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "SUB", width: 32, a: 0, b: 0 });
 });
 
 test("executes 83 /5 SUB r/m32, sign-extended imm8 for register operands", async () => {
@@ -339,7 +344,8 @@ test("executes 83 /5 SUB r/m32, sign-extended imm8 for register operands", async
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 2);
   assertCompletedInstruction(state, startAddress + 3, 8);
-  deepStrictEqual(wasmCpuStatusFlagsOf(state), carryAuxFlags);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+  assertLazyFlagState(state, { kind: "SUB", width: 32, a: 1, b: 0xffff_ffff });
 });
 
 test("executes 83 /6 XOR r/m32, sign-extended imm8 for register operands", async () => {

@@ -5,6 +5,7 @@ import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsHeaderChann
 import { ValueTable, type ValueId, type HelperCallKey } from "#ir/values.js";
 import { statusFlagValuesForSource } from "#x86/flag-values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
+import { lazyFlagsHeader } from "#ir/lazy-flags.js";
 import type { OperandWidth } from "#x86/types.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -49,14 +50,14 @@ function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncod
   emitLazyFieldLoad(body, helper, lazyFlagsHeaderChannel);
   body.localSet(headerLocal);
 
-  emitResolverCase(body, headerLocal, discriminator(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0), () => {
+  emitResolverCase(body, headerLocal, lazyFlagsHeader(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0), () => {
     emitSlotLoad(body, flagChannel(helper), false, (id) => {
       assert(false, `${lazyFlagHelperName(helper)} unexpectedly needed value operand ${id}`);
     });
   });
 
   for (const width of [8, 16, 32] as const) {
-    emitResolverCase(body, headerLocal, discriminator(WASM_CPU_LAZY_FLAGS_KIND.SUB, width), () => {
+    emitResolverCase(body, headerLocal, lazyFlagsHeader(WASM_CPU_LAZY_FLAGS_KIND.SUB, width), () => {
       emitSubFlag(body, scratch, helper, width);
     });
   }
@@ -141,8 +142,4 @@ function subFlagFragment(flag: LazyFlagHelper, width: OperandWidth): Readonly<{ 
       values
     }
   };
-}
-
-function discriminator(kind: number, width: 0 | OperandWidth): number {
-  return kind | (width << 8);
 }

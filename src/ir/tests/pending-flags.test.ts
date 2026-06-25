@@ -4,9 +4,15 @@ import { test } from "node:test";
 import type { Action, EdgeFlushAction } from "#ir/actions.js";
 import { PendingFlags } from "#ir/pending/flags.js";
 import { PendingStateAccess } from "#ir/pending/state-access.js";
-import { lazyFlagsHeaderChannel } from "#ir/slots.js";
+import {
+  lazyFlagsAChannel,
+  lazyFlagsBChannel,
+  lazyFlagsHeaderChannel,
+  type LazyFlagsChannel
+} from "#ir/slots.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
+import { LAZY_FLAGS_KIND, lazyFlagsHeader } from "#ir/lazy-flags.js";
 
 type Harness = Readonly<{
   values: ValueTable;
@@ -40,6 +46,28 @@ function assertFullConcreteFlush(actions: readonly EdgeFlushAction[], values: Va
   strictEqual(actions.length, x86StatusFlags.length + 1);
 }
 
+function lazyFlushValue(
+  actions: readonly EdgeFlushAction[],
+  slot: LazyFlagsChannel
+): ValueId | undefined {
+  return actions.find((action) => action.slot === slot)?.value;
+}
+
+function assertSubLazyCommit(
+  actions: readonly EdgeFlushAction[],
+  values: ValueTable,
+  expected: Readonly<{ width: 8 | 16 | 32; left: ValueId; right: ValueId }>
+): void {
+  deepStrictEqual(flagFlushEntries(actions), []);
+  strictEqual(lazyFlushValue(actions, lazyFlagsAChannel), values.projectTo(expected.width, expected.left));
+  strictEqual(lazyFlushValue(actions, lazyFlagsBChannel), values.projectTo(expected.width, expected.right));
+  strictEqual(
+    lazyFlushValue(actions, lazyFlagsHeaderChannel),
+    values.internConst(lazyFlagsHeader(LAZY_FLAGS_KIND.SUB, expected.width))
+  );
+  strictEqual(actions.length, 3);
+}
+
 test("new pending flags start with no dirty entries", () => {
   const { flags } = createHarness();
 
@@ -58,7 +86,7 @@ test("input status flags read through helper calls", () => {
   deepStrictEqual(values.node(second), { kind: "helperCall", helper: { kind: "lazyFlag", flag: "ZF" } });
 });
 
-test("a sub source materializes every status flag", () => {
+test("a sub source commits a lazy runtime record", () => {
   const { values, flags } = createHarness();
   const left = values.internConst(7);
   const right = values.internConst(3);
@@ -67,25 +95,23 @@ test("a sub source materializes every status flag", () => {
   flags.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
 
   const completedFlushes = flags.flushesForEdge("completed");
-  const pendingValues = flagFlushEntries(completedFlushes);
 
-  deepStrictEqual(pendingValues.map((entry) => entry.flag), x86StatusFlags);
-  assertFullConcreteFlush(completedFlushes, values);
+  assertSubLazyCommit(completedFlushes, values, { width: 32, left, right });
   strictEqual(
     flagValue(flags, "ZF"),
     values.internCompare("eq", result, values.internConst(0))
   );
+});
 
-  const snapshotValues = flagFlushEntries(completedFlushes);
+test("sub lazy commits project narrow operands", () => {
+  const { values, flags } = createHarness();
+  const left = values.internConst(0x1234_5678);
+  const right = values.internConst(0x8765_4321);
+  const result = values.internBinary("sub", left, right);
 
-  deepStrictEqual(
-    snapshotValues.map((entry) => entry.flag),
-    x86StatusFlags
-  );
-  strictEqual(
-    flagFlushValue(completedFlushes, "ZF"),
-    values.internCompare("eq", result, values.internConst(0))
-  );
+  flags.writeStatusFlagsSource({ kind: "sub", width: 16, left, right, result });
+
+  assertSubLazyCommit(flags.flushesForEdge("completed"), values, { width: 16, left, right });
 });
 
 test("condition uses the current sub source directly", () => {
@@ -136,7 +162,7 @@ test("mixed pending and input condition combines pending values with helper call
   deepStrictEqual(actions, []);
 });
 
-test("fault edge preserves source-materialized values while direct flag writes update completed values", () => {
+test("fault edge preserves a clean sub source while direct flag writes update completed fallback values", () => {
   const { values, flags } = createHarness();
   const left = values.internConst(7);
   const right = values.internConst(3);
@@ -150,12 +176,8 @@ test("fault edge preserves source-materialized values while direct flag writes u
   const faultFlushes = flags.flushesForEdge("fault");
   const completedFlushes = flags.flushesForEdge("completed");
 
-  assertFullConcreteFlush(faultFlushes, values);
+  assertSubLazyCommit(faultFlushes, values, { width: 32, left, right });
   assertFullConcreteFlush(completedFlushes, values);
-  strictEqual(
-    flagFlushValue(faultFlushes, "ZF"),
-    values.internCompare("eq", result, values.internConst(0))
-  );
   strictEqual(
     flagFlushValue(completedFlushes, "ZF"),
     values.internConst(0)

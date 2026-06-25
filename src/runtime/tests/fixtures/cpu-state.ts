@@ -12,12 +12,24 @@ import {
   WASM_CPU_STATE_LAYOUT,
   wasmCpuStateFieldIsBitField,
   wasmCpuFlagByteOffset,
+  WASM_CPU_LAZY_FLAGS_KIND,
   type WasmCpuStateField
 } from "#wasm/cpu-state-layout.js";
 
 export type { WasmCpuStateInit, WasmCpuStateSnapshot } from "#wasm/host/cpu-state.js";
 export type { WasmCpuStateField } from "#wasm/cpu-state-layout.js";
 export type WasmCpuStatusFlag = X86StatusFlag;
+export type WasmCpuExpectedLazyFlagState = Readonly<{
+  kind: keyof typeof WASM_CPU_LAZY_FLAGS_KIND;
+  width: 0 | 8 | 16 | 32;
+  a?: number;
+  b?: number;
+}>;
+
+type WasmCpuLazyFlagStateSnapshot = Pick<
+  WasmCpuStateSnapshot,
+  "lazyFlagsKind" | "lazyFlagsWidth" | "lazyFlagsA" | "lazyFlagsB"
+>;
 
 export const wasmCpuStateSnapshotFields = WASM_CPU_STATE_FIELDS;
 
@@ -70,6 +82,32 @@ export function writeWasmCpuStateField(view: DataView, field: WasmCpuStateField,
     case 4:
       view.setUint32(layout.offset, u32(value), true);
       break;
+  }
+}
+
+export function assertLazyFlagState(
+  state: DataView | WasmCpuLazyFlagStateSnapshot,
+  expected: WasmCpuExpectedLazyFlagState,
+  label = "lazy flags"
+): void {
+  const actual = state instanceof DataView
+    ? {
+        lazyFlagsKind: readWasmCpuStateField(state, "lazyFlagsKind"),
+        lazyFlagsWidth: readWasmCpuStateField(state, "lazyFlagsWidth"),
+        lazyFlagsA: readWasmCpuStateField(state, "lazyFlagsA"),
+        lazyFlagsB: readWasmCpuStateField(state, "lazyFlagsB")
+      }
+    : state;
+
+  strictEqual(actual.lazyFlagsKind, WASM_CPU_LAZY_FLAGS_KIND[expected.kind], `${label} lazy kind`);
+  strictEqual(actual.lazyFlagsWidth, expected.width, `${label} lazy width`);
+
+  if (expected.a !== undefined) {
+    strictEqual(actual.lazyFlagsA, expected.a >>> 0, `${label} lazy A`);
+  }
+
+  if (expected.b !== undefined) {
+    strictEqual(actual.lazyFlagsB, expected.b >>> 0, `${label} lazy B`);
   }
 }
 

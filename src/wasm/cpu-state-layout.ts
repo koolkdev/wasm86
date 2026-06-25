@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { StateChannel } from "#ir/slots.js";
 import { x86Flags, type X86Flag } from "#x86/flags.js";
+import { LAZY_FLAGS_KIND } from "#ir/lazy-flags.js";
 import { reg32 } from "#x86/types.js";
 
 type WasmCpuStateLayoutEntry = Readonly<{
@@ -38,14 +39,7 @@ export const WASM_CPU_STATE_LAYOUT = {
 
 export type WasmCpuStateField = keyof typeof WASM_CPU_STATE_LAYOUT;
 
-export const WASM_CPU_LAZY_FLAGS_KIND = {
-  NONE: 0,
-  SUB: 1,
-  ADD: 2,
-  LOGIC_RESULT: 3
-} as const;
-
-export type WasmCpuLazyFlagsKind = (typeof WASM_CPU_LAZY_FLAGS_KIND)[keyof typeof WASM_CPU_LAZY_FLAGS_KIND];
+export const WASM_CPU_LAZY_FLAGS_KIND = LAZY_FLAGS_KIND;
 
 export const WASM_CPU_STATE_FIELDS = Object.keys(WASM_CPU_STATE_LAYOUT) as readonly WasmCpuStateField[];
 export const WASM_CPU_STATE_OFFSETS = Object.fromEntries(

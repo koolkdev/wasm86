@@ -10,8 +10,14 @@ import {
   type StatusFlagValues
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
+import { LAZY_FLAGS_KIND, lazyFlagsHeader } from "../lazy-flags.js";
 import { valueTableFlagOps } from "../flag-value-ops.js";
-import { flagChannel, lazyFlagsHeaderChannel } from "../slots.js";
+import {
+  flagChannel,
+  lazyFlagsAChannel,
+  lazyFlagsBChannel,
+  lazyFlagsHeaderChannel
+} from "../slots.js";
 import type { WriteStateAction } from "../actions.js";
 import { type ValueId, type ValueTable } from "../values.js";
 import type { PendingEdgeKind } from "./state.js";
@@ -102,6 +108,18 @@ export class PendingStatusFlags {
       return [];
     }
 
+    if (state.lazySource !== undefined) {
+      const source = this.#source(state.lazySource);
+
+      if (source.kind === "sub") {
+        return this.#lazySubSourceFlushes(source);
+      }
+    }
+
+    return this.#explicitFlushesFrom(state);
+  }
+
+  #explicitFlushesFrom(state: PendingStatusFlagState): readonly WriteStateAction[] {
     const cache: SourceExpansionCache = new Map();
     const actions: WriteStateAction[] = [];
 
@@ -122,6 +140,26 @@ export class PendingStatusFlags {
     });
 
     return actions;
+  }
+
+  #lazySubSourceFlushes(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "sub" }>): readonly WriteStateAction[] {
+    return [
+      {
+        kind: "writeState",
+        slot: lazyFlagsAChannel,
+        value: this.#values.projectTo(source.width, source.left)
+      },
+      {
+        kind: "writeState",
+        slot: lazyFlagsBChannel,
+        value: this.#values.projectTo(source.width, source.right)
+      },
+      {
+        kind: "writeState",
+        slot: lazyFlagsHeaderChannel,
+        value: this.#values.internConst(lazyFlagsHeader(LAZY_FLAGS_KIND.SUB, source.width))
+      }
+    ];
   }
 
   #resolveFlagFrom(

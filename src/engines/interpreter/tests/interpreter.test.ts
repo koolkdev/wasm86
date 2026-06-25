@@ -5,6 +5,7 @@ import { gprChannel } from "#ir/slots.js";
 import type { RegName } from "#x86/types.js";
 import { ExitReason } from "#wasm/exit.js";
 import {
+  assertLazyFlagState,
   readWasmCpuFlagByte,
   readWasmCpuStateChannel,
   readWasmCpuStateField,
@@ -70,8 +71,7 @@ test("a program mixing mov, ALU, cmp, and jcc runs to its halt byte", async () =
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x11);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 17);
-  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 1);
-  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "CF"), 0);
+  assertLazyFlagState(interpreter.stateView, { kind: "SUB", width: 32, a: 1, b: 1 });
 });
 
 test("cmp against an immediate steers a two-byte jcc when taken", async () => {
@@ -92,7 +92,7 @@ test("cmp against an immediate steers a two-byte jcc when taken", async () => {
   strictEqual(readRegister(interpreter.stateView, "eax"), 42);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x11);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 3);
-  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 1);
+  assertLazyFlagState(interpreter.stateView, { kind: "SUB", width: 32, a: 7, b: 7 });
 });
 
 test("a not-taken jcc falls through to the next instruction", async () => {
@@ -111,7 +111,7 @@ test("a not-taken jcc falls through to the next instruction", async () => {
   strictEqual(readRegister(interpreter.stateView, "eax"), 8);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x0b);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 2);
-  strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 0);
+  assertLazyFlagState(interpreter.stateView, { kind: "SUB", width: 32, a: 8, b: 7 });
 });
 
 test("memory operands round-trip through the ModRM addressing forms", async () => {

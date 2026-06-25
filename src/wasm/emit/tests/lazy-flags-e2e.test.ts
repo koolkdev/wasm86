@@ -12,8 +12,10 @@ import { x86EflagsBitOffset, x86Flags, x86StatusFlags, type X86Flag, type X86Sta
 import type { OperandWidth } from "#x86/types.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import {
+  assertLazyFlagState,
   readWasmCpuFlagByte,
   readWasmCpuStateChannel,
+  readWasmCpuStateSnapshot,
   writeWasmCpuStateSnapshot
 } from "#runtime/tests/fixtures/cpu-state.js";
 import { aluReference, type AluFlags } from "./reference.js";
@@ -136,6 +138,128 @@ test("pushfd resolves seeded SUB32 lazy flag metadata", async () => {
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esp")), 0x3c);
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
   assertStatusFlags(stateView, concreteFlags, "pushfd");
+});
+
+test("jcc consumes a SUB32 record committed by a previous cmp block", async () => {
+  const producer = ok(decodeBytes([0x39, 0xd8])); // cmp eax, ebx
+  const producerRun = await instantiateIrBlock(blockOf([producer]));
+  const concreteFlags = oppositeStatusFlags(aluReference("cmp", 32, 0x1234_5678, 0x1234_5678).flags);
+
+  writeWasmCpuStateSnapshot(producerRun.stateView, {
+    eax: 0x1234_5678,
+    ebx: 0x1234_5678,
+    eip: producer.address,
+    ...concreteFlags
+  });
+
+  strictEqual(producerRun.run(), irBlockCompleted);
+  assertLazyFlagState(producerRun.stateView, { kind: "SUB", width: 32, a: 0x1234_5678, b: 0x1234_5678 }, "cmp32 producer");
+  assertStatusFlags(producerRun.stateView, concreteFlags, "cmp32 producer");
+
+  const consumer = ok(decodeBytes([0x74, 0x20], producer.nextEip)); // je +0x20
+  const consumerRun = await instantiateIrBlock(blockOf([consumer]));
+
+  writeWasmCpuStateSnapshot(consumerRun.stateView, readWasmCpuStateSnapshot(producerRun.stateView));
+
+  strictEqual(consumerRun.run(), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, eipChannel), relTarget(consumer), "cmp32 consumer eip");
+  assertStatusFlags(consumerRun.stateView, concreteFlags, "cmp32 consumer");
+});
+
+test("setcc consumes a SUB16 record committed by a previous sub block", async () => {
+  const producer = ok(decodeBytes([0x66, 0x29, 0xd8])); // sub ax, bx
+  const producerRun = await instantiateIrBlock(blockOf([producer]));
+  const lazyFlags = aluReference("sub", 16, 0, 1).flags;
+  const concreteFlags = oppositeStatusFlags(lazyFlags);
+
+  writeWasmCpuStateSnapshot(producerRun.stateView, {
+    eax: 0,
+    ebx: 1,
+    eip: producer.address,
+    ...concreteFlags
+  });
+
+  strictEqual(producerRun.run(), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(producerRun.stateView, gprChannel("eax")), 0xffff);
+  assertLazyFlagState(producerRun.stateView, { kind: "SUB", width: 16, a: 0, b: 1 }, "sub16 producer");
+  assertStatusFlags(producerRun.stateView, concreteFlags, "sub16 producer");
+
+  const consumer = ok(decodeBytes([0x0f, 0x96, 0xc0], producer.nextEip)); // setbe al
+  const consumerRun = await instantiateIrBlock(blockOf([consumer]));
+
+  writeWasmCpuStateSnapshot(consumerRun.stateView, readWasmCpuStateSnapshot(producerRun.stateView));
+
+  strictEqual(consumerRun.run(), irBlockCompleted);
+  strictEqual(
+    readWasmCpuStateChannel(consumerRun.stateView, gprChannel("eax")),
+    0xff00 + (evaluateCondition(CONDITIONS.BE.expr, flagSet(lazyFlags)) ? 1 : 0),
+    "sub16 consumer eax"
+  );
+  assertStatusFlags(consumerRun.stateView, concreteFlags, "sub16 consumer");
+});
+
+test("pushfd consumes a SUB8 record committed by a previous cmp block", async () => {
+  const producer = ok(decodeBytes([0x3c, 0x80])); // cmp al, 0x80
+  const producerRun = await instantiateIrBlock(blockOf([producer]));
+  const lazyFlags = aluReference("cmp", 8, 0x80, 0x80).flags;
+  const concreteFlags = oppositeStatusFlags(lazyFlags);
+  const nonStatusFlags = { TF: 1, DF: 1, NT: 1, AC: 1, ID: 1 } as const;
+
+  writeWasmCpuStateSnapshot(producerRun.stateView, {
+    eax: 0x80,
+    esp: 0x40,
+    eip: producer.address,
+    ...concreteFlags,
+    ...nonStatusFlags
+  });
+
+  strictEqual(producerRun.run(), irBlockCompleted);
+  assertLazyFlagState(producerRun.stateView, { kind: "SUB", width: 8, a: 0x80, b: 0x80 }, "cmp8 producer");
+  assertStatusFlags(producerRun.stateView, concreteFlags, "cmp8 producer");
+
+  const consumer = ok(decodeBytes([0x9c], producer.nextEip)); // pushfd
+  const consumerRun = await instantiateIrBlock(blockOf([consumer]));
+
+  writeWasmCpuStateSnapshot(consumerRun.stateView, readWasmCpuStateSnapshot(producerRun.stateView));
+
+  strictEqual(consumerRun.run(), irBlockCompleted);
+  strictEqual(consumerRun.guestView.getUint32(0x3c, true), expectedPushfdImage({ ...lazyFlags, ...nonStatusFlags }));
+  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, gprChannel("esp")), 0x3c);
+  assertStatusFlags(consumerRun.stateView, concreteFlags, "cmp8 consumer");
+});
+
+test("partial flag writer after incoming SUB record materializes preserved CF", async () => {
+  const producer = ok(decodeBytes([0x39, 0xd8])); // cmp eax, ebx
+  const producerRun = await instantiateIrBlock(blockOf([producer]));
+  const lazyFlags = aluReference("cmp", 32, 0, 1).flags;
+  const concreteFlags = oppositeStatusFlags(lazyFlags);
+
+  writeWasmCpuStateSnapshot(producerRun.stateView, {
+    eax: 0,
+    ebx: 1,
+    ecx: 0xffff_ffff,
+    eip: producer.address,
+    ...concreteFlags
+  });
+
+  strictEqual(producerRun.run(), irBlockCompleted);
+  assertLazyFlagState(producerRun.stateView, { kind: "SUB", width: 32, a: 0, b: 1 }, "partial producer");
+  assertStatusFlags(producerRun.stateView, concreteFlags, "partial producer");
+
+  const consumer = ok(decodeBytes([0x41], producer.nextEip)); // inc ecx
+  const consumerRun = await instantiateIrBlock(blockOf([consumer]));
+
+  writeWasmCpuStateSnapshot(consumerRun.stateView, readWasmCpuStateSnapshot(producerRun.stateView));
+
+  strictEqual(consumerRun.run(), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, gprChannel("ecx")), 0, "partial consumer ecx");
+  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, eipChannel), consumer.nextEip, "partial consumer eip");
+  assertStatusFlags(
+    consumerRun.stateView,
+    { CF: lazyFlags.CF, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 },
+    "partial consumer"
+  );
+  assertLazyFlagState(consumerRun.stateView, { kind: "NONE", width: 0 }, "partial consumer");
 });
 
 function setbeBlock(): IrBlock {
