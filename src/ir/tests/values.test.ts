@@ -80,25 +80,6 @@ test("external leaves intern by external id", () => {
   deepStrictEqual(table.node(table.internExternal(3)), { kind: "external", external: 3 });
 });
 
-test("use counts reflect graph edges, not interning hits", () => {
-  const table = createValueTable();
-  const a = table.internConst(1);
-  const b = table.internConst(2);
-  const add = table.internBinary("add", a, b);
-
-  strictEqual(table.useCount(a), 1);
-  strictEqual(table.useCount(b), 1);
-
-  table.internBinary("add", a, b);
-  strictEqual(table.useCount(a), 1);
-
-  const doubled = table.internBinary("add", add, add);
-
-  strictEqual(table.useCount(add), 2);
-  strictEqual(table.useCount(doubled), 0);
-  throws(() => table.useCount(99), /unknown value id 99/);
-});
-
 test("compound nodes reject unknown children", () => {
   const table = createValueTable();
   const a = table.internConst(1);

@@ -91,15 +91,11 @@ export type ValueTable = Readonly<{
   node(id: ValueId): ValueNode;
   // The node's compile-time constant, when it is one; i32-canonical.
   constValue(id: ValueId): number | undefined;
-  // References from other nodes in this table; action and region uses are
-  // the consumer's to count.
-  useCount(id: ValueId): number;
   size(): number;
 }>;
 
 export function createValueTable(): ValueTable {
   const nodes: ValueNode[] = [];
-  const useCounts: number[] = [];
   // Derived on first query, memoized per node.
   const widthBounds: (WidthBounds | undefined)[] = [];
   const constIds = new Map<number, ValueId>();
@@ -118,12 +114,7 @@ export function createValueTable(): ValueTable {
     const id = nodes.length;
 
     nodes.push(Object.freeze(node));
-    useCounts.push(0);
     widthBounds.push(undefined);
-
-    for (const child of children) {
-      useCounts[child]! += 1;
-    }
 
     return id;
   }
@@ -284,10 +275,6 @@ export function createValueTable(): ValueTable {
       const found = node(id);
 
       return found.kind === "const" ? found.value : undefined;
-    },
-    useCount(id: ValueId): number {
-      node(id);
-      return useCounts[id]!;
     },
     size(): number {
       return nodes.length;
