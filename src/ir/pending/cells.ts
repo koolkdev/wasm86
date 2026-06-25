@@ -2,7 +2,8 @@ import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import {
   type FlagChannel,
   type EipChannel,
-  type InstructionCountChannel
+  type InstructionCountChannel,
+  type LazyFlagsChannel
 } from "../slots.js";
 import {
   fitsUnsigned,
@@ -14,7 +15,7 @@ import type { PendingEdgeKind } from "./state.js";
 import { PendingStateAccess } from "./state-access.js";
 
 type X86NonStatusFlag = Exclude<X86Flag, X86StatusFlag>;
-export type PendingCell = FlagChannel<X86NonStatusFlag> | EipChannel | InstructionCountChannel;
+export type PendingCell = FlagChannel<X86NonStatusFlag> | EipChannel | InstructionCountChannel | LazyFlagsChannel;
 
 type PendingEntry = { value: ValueId; dirty: boolean };
 
@@ -75,6 +76,8 @@ function channelReadBounds(channel: PendingCell): WidthBounds | undefined {
   switch (channel.kind) {
     case "flag":
       return fitsUnsigned(1);
+    case "lazyFlags":
+      return channel.field === "lazyFlagsKind" ? fitsUnsigned(8) : undefined;
     case "eip":
     case "instructionCount":
       return undefined;

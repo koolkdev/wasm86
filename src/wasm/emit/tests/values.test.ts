@@ -1,7 +1,7 @@
 import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
+import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { EdgeRegion } from "#ir/block.js";
 import { ValueTable } from "#ir/values.js";
@@ -188,6 +188,24 @@ test("an edge use past an overlapping store pins the read", () => {
   // eax before the guard: reloading in the edge would observe it, so the
   // read pins at its action point.
   strictEqual(analysis.isPinned(read), true);
+});
+
+test("a lazy kind read crossing commitFlags pins, but lazy operands do not", () => {
+  const values = new ValueTable();
+  const kind = values.addActionOutput();
+  const lazyA = values.addActionOutput();
+  const zf = values.internConst(1);
+  const analysis = analyze(values, [
+    { kind: "readState", output: kind, slot: lazyFlagsKindChannel },
+    { kind: "readState", output: lazyA, slot: lazyFlagsAChannel },
+    { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: zf }] } },
+    { kind: "writeState", slot: gprChannel("eax"), value: kind },
+    { kind: "writeState", slot: gprChannel("ebx"), value: lazyA },
+    { kind: "continue" }
+  ]);
+
+  strictEqual(analysis.isPinned(kind), true);
+  strictEqual(analysis.isPinned(lazyA), false);
 });
 
 test("an edge value reloading a channel the edge flushes pins the read", () => {

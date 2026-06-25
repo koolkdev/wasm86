@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
+import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
 import { reg16, reg32, reg8 } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
@@ -11,6 +11,7 @@ import {
   WASM_CPU_STATE_FIELDS,
   WASM_CPU_STATE_LAYOUT,
   WASM_CPU_STATE_OFFSETS,
+  wasmCpuStateChannelAccessByteLength,
   wasmCpuStateChannelOffset,
   wasmCpuFlagByteOffset
 } from "#wasm/cpu-state-layout.js";
@@ -57,4 +58,11 @@ test("channel offsets derive from the register word offset plus the byte offset"
   for (const flag of x86Flags) {
     strictEqual(wasmCpuStateChannelOffset(flagChannel(flag)), WASM_CPU_FLAG_BYTE_OFFSETS[flag]);
   }
+
+  strictEqual(wasmCpuStateChannelOffset(lazyFlagsKindChannel), WASM_CPU_STATE_OFFSETS.lazyFlagsKind);
+  strictEqual(wasmCpuStateChannelOffset(lazyFlagsAChannel), WASM_CPU_STATE_OFFSETS.lazyFlagsA);
+  strictEqual(wasmCpuStateChannelOffset(lazyFlagsBChannel), WASM_CPU_STATE_OFFSETS.lazyFlagsB);
+  strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsKindChannel), 1);
+  strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsAChannel), 4);
+  strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsBChannel), 4);
 });

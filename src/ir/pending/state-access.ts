@@ -1,8 +1,8 @@
 import type { Action, StateSlot } from "../actions.js";
-import type { EipChannel, FlagChannel, InstructionCountChannel } from "../slots.js";
+import type { EipChannel, FlagChannel, InstructionCountChannel, LazyFlagsChannel } from "../slots.js";
 import type { ValueId, ValueTable, WidthBounds } from "../values.js";
 
-export type CachedStateInput = FlagChannel | EipChannel | InstructionCountChannel;
+export type CachedStateInput = FlagChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
 
 export class PendingStateAccess {
   readonly #values: ValueTable;

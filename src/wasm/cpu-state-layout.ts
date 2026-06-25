@@ -89,6 +89,8 @@ export function wasmCpuStateChannelOffset(channel: StateChannel): number {
       return WASM_CPU_STATE_OFFSETS.eip;
     case "instructionCount":
       return WASM_CPU_STATE_OFFSETS.instructionCount;
+    case "lazyFlags":
+      return WASM_CPU_STATE_OFFSETS[channel.field];
   }
 }
 
@@ -98,6 +100,8 @@ export function wasmCpuStateChannelAccessByteLength(channel: StateChannel): 1 | 
       return channel.byteLength;
     case "flag":
       return 1;
+    case "lazyFlags":
+      return WASM_CPU_STATE_LAYOUT[channel.field].byteLength;
     case "eip":
     case "instructionCount":
       return 4;

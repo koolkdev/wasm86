@@ -3,9 +3,10 @@ import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc, type IrBlockBuilder } from "#ir/builder.js";
 import { immBinding, regBinding } from "#ir/operands.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { eipChannel, gprChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { Action, StateSlot } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
+import { ValueTable } from "#ir/values.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
@@ -92,6 +93,44 @@ test("ordinary state writes leave lazy flag metadata untouched", async () => {
   strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), WASM_CPU_LAZY_FLAGS_KIND.SUB32);
   strictEqual(readWasmCpuStateField(stateView, "lazyFlagsA"), 0x1111_2222);
   strictEqual(readWasmCpuStateField(stateView, "lazyFlagsB"), 0x3333_4444);
+});
+
+test("generic state actions load and store lazy flag metadata channels", async () => {
+  const values = new ValueTable();
+  const oldKind = values.addActionOutput();
+  const newKindValue = 0xab;
+  const newAValue = 0x89ab_cdef;
+  const newKind = values.internConst(newKindValue);
+  const newA = values.internConst(newAValue);
+  const block: IrBlock = {
+    entry: 0,
+    regions: [
+      {
+        id: 0,
+        kind: "entry",
+        actions: [
+          { kind: "readState", output: oldKind, slot: lazyFlagsKindChannel },
+          { kind: "writeState", slot: lazyFlagsBChannel, value: oldKind },
+          { kind: "writeState", slot: lazyFlagsKindChannel, value: newKind },
+          { kind: "writeState", slot: lazyFlagsAChannel, value: newA },
+          { kind: "continue" }
+        ]
+      }
+    ],
+    values
+  };
+  const { stateView, run } = await instantiateIrBlock(block);
+
+  writeWasmCpuStateSnapshot(stateView, {
+    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.SUB32,
+    lazyFlagsA: 0x1111_2222,
+    lazyFlagsB: 0x3333_4444
+  });
+
+  assertCompleted(run());
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), newKindValue);
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsA"), newAValue);
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsB"), WASM_CPU_LAZY_FLAGS_KIND.SUB32);
 });
 
 test("chained movs forward one read to both destinations", async () => {

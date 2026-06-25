@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { actionMayWriteStateSlot, effectsOf, mayAlias, type StorageEffect } from "#ir/aliasing.js";
-import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
+import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { StateSlot } from "#ir/actions.js";
 
 const memory: StorageEffect = { space: "memory" };
@@ -60,20 +60,25 @@ test("static channels alias iff their byte ranges intersect", () => {
   strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ebx"))), false);
   strictEqual(mayAlias(state(flagChannel("ZF")), state(flagChannel("ZF"))), true);
   strictEqual(mayAlias(state(flagChannel("ZF")), state(gprChannel("eax"))), false);
+  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsKindChannel)), true);
+  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsAChannel)), false);
+  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(flagChannel("ZF"))), false);
 });
 
-test("a dynamic GPR slot may-aliases every GPR word and never flags or eip", () => {
+test("a dynamic GPR slot may-aliases every GPR word and never flags, lazy metadata, or eip", () => {
   strictEqual(mayAlias(state(dynamicGpr(0)), state(gprChannel("eax"))), true);
   strictEqual(mayAlias(state(gprChannel("bl")), state(dynamicGpr(0))), true);
   strictEqual(mayAlias(state(dynamicGpr(0)), state(dynamicGpr(1))), true);
   strictEqual(mayAlias(state(dynamicGpr(0, 1)), state(gprChannel("esi"))), true);
   strictEqual(mayAlias(state(dynamicGpr(0)), state(flagChannel("ZF"))), false);
   strictEqual(mayAlias(state(flagChannel("CF")), state(dynamicGpr(0))), false);
+  strictEqual(mayAlias(state(dynamicGpr(0)), state(lazyFlagsKindChannel)), false);
+  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(dynamicGpr(0))), false);
   strictEqual(mayAlias(state(dynamicGpr(0)), state(eipChannel)), false);
   strictEqual(mayAlias(state(eipChannel), state(dynamicGpr(0))), false);
 });
 
-test("action writes include raw slots and committed status flags only", () => {
+test("action writes include raw slots, committed status flags, and commit lazy-kind clears", () => {
   strictEqual(
     actionMayWriteStateSlot({ kind: "writeState", slot: gprChannel("eax"), value: 0 }, gprChannel("ax")),
     true
@@ -89,6 +94,20 @@ test("action writes include raw slots and committed status flags only", () => {
     actionMayWriteStateSlot(
       { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: 0 }] } },
       flagChannel("CF")
+    ),
+    false
+  );
+  strictEqual(
+    actionMayWriteStateSlot(
+      { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: 0 }] } },
+      lazyFlagsKindChannel
+    ),
+    true
+  );
+  strictEqual(
+    actionMayWriteStateSlot(
+      { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: 0 }] } },
+      lazyFlagsAChannel
     ),
     false
   );

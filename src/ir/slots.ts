@@ -12,7 +12,12 @@ export type GprChannel = Readonly<{
 export type FlagChannel<TFlag extends X86Flag = X86Flag> = Readonly<{ kind: "flag"; flag: TFlag }>;
 export type EipChannel = Readonly<{ kind: "eip" }>;
 export type InstructionCountChannel = Readonly<{ kind: "instructionCount" }>;
-export type StateChannel = GprChannel | FlagChannel | EipChannel | InstructionCountChannel;
+type LazyFlagsField = "lazyFlagsKind" | "lazyFlagsA" | "lazyFlagsB";
+export type LazyFlagsChannel<TField extends LazyFlagsField = LazyFlagsField> = Readonly<{
+  kind: "lazyFlags";
+  field: TField;
+}>;
+export type StateChannel = GprChannel | FlagChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
 
 const byteOffsetFromBitOffset = { 0: 0, 8: 1 } as const;
 const byteLengthFromWidth = { 8: 1, 16: 2, 32: 4 } as const;
@@ -36,6 +41,18 @@ const flagChannels = new Map<X86Flag, FlagChannel>(
 
 export const eipChannel: EipChannel = { kind: "eip" };
 export const instructionCountChannel: InstructionCountChannel = { kind: "instructionCount" };
+export const lazyFlagsKindChannel: LazyFlagsChannel<"lazyFlagsKind"> = {
+  kind: "lazyFlags",
+  field: "lazyFlagsKind"
+};
+export const lazyFlagsAChannel: LazyFlagsChannel<"lazyFlagsA"> = {
+  kind: "lazyFlags",
+  field: "lazyFlagsA"
+};
+export const lazyFlagsBChannel: LazyFlagsChannel<"lazyFlagsB"> = {
+  kind: "lazyFlags",
+  field: "lazyFlagsB"
+};
 
 export function gprChannel(name: RegName): GprChannel {
   const channel = gprChannels.get(name);
@@ -91,5 +108,7 @@ function sameChannel(a: StateChannel, b: StateChannel): boolean {
       return b.kind === "eip";
     case "instructionCount":
       return b.kind === "instructionCount";
+    case "lazyFlags":
+      return b.kind === "lazyFlags" && a.field === b.field;
   }
 }

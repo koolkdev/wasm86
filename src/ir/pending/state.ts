@@ -15,6 +15,7 @@ import {
 import {
   type EipChannel,
   type InstructionCountChannel,
+  type LazyFlagsChannel,
   type StateChannel
 } from "../slots.js";
 import type { ValueId, ValueTable } from "../values.js";
@@ -23,7 +24,7 @@ import { PendingStateAccess } from "./state-access.js";
 export type PendingEdgeKind = "fault" | "completed";
 
 export class PendingState {
-  readonly #cells: PendingCells<EipChannel | InstructionCountChannel>;
+  readonly #cells: PendingCells<EipChannel | InstructionCountChannel | LazyFlagsChannel>;
   readonly #gprs: PendingGprs;
   readonly #flags: PendingFlags;
 
@@ -43,6 +44,7 @@ export class PendingState {
         return this.#flags.readFlag(channel.flag);
       case "eip":
       case "instructionCount":
+      case "lazyFlags":
         return this.#cells.read(channel);
     }
   }
@@ -57,6 +59,7 @@ export class PendingState {
         break;
       case "eip":
       case "instructionCount":
+      case "lazyFlags":
         this.#cells.write(channel, value);
         break;
     }
@@ -94,6 +97,7 @@ export class PendingState {
         return this.#flags.has(channel.flag);
       case "eip":
       case "instructionCount":
+      case "lazyFlags":
         return this.#cells.has(channel);
     }
   }

@@ -7,6 +7,10 @@ import {
   eipChannel,
   flagChannel,
   gprChannel,
+  instructionCountChannel,
+  lazyFlagsAChannel,
+  lazyFlagsBChannel,
+  lazyFlagsKindChannel,
   type StateChannel
 } from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
@@ -34,6 +38,13 @@ test("flag and eip channels are atomic units", () => {
   }
 
   deepStrictEqual(eipChannel, { kind: "eip" });
+  deepStrictEqual(instructionCountChannel, { kind: "instructionCount" });
+});
+
+test("lazy flag metadata channels are raw state fields", () => {
+  deepStrictEqual(lazyFlagsKindChannel, { kind: "lazyFlags", field: "lazyFlagsKind" });
+  deepStrictEqual(lazyFlagsAChannel, { kind: "lazyFlags", field: "lazyFlagsA" });
+  deepStrictEqual(lazyFlagsBChannel, { kind: "lazyFlags", field: "lazyFlagsB" });
 });
 
 test("channelsOverlap matches byte-range intersection for gpr channels", () => {
@@ -82,18 +93,26 @@ test("channelCovers requires full byte-range containment", () => {
   strictEqual(channelCovers(flagChannel("CF"), flagChannel("ZF")), false);
   strictEqual(channelCovers(eipChannel, eipChannel), true);
   strictEqual(channelCovers(eipChannel, gprChannel("eax")), false);
+  strictEqual(channelCovers(lazyFlagsKindChannel, lazyFlagsKindChannel), true);
+  strictEqual(channelCovers(lazyFlagsKindChannel, lazyFlagsAChannel), false);
 });
 
 test("channelsOverlap keeps flags and eip disjoint from everything else", () => {
   strictEqual(channelsOverlap(flagChannel("CF"), flagChannel("CF")), true);
   strictEqual(channelsOverlap(flagChannel("CF"), flagChannel("ZF")), false);
   strictEqual(channelsOverlap(eipChannel, eipChannel), true);
+  strictEqual(channelsOverlap(lazyFlagsKindChannel, lazyFlagsKindChannel), true);
+  strictEqual(channelsOverlap(lazyFlagsKindChannel, lazyFlagsAChannel), false);
 
-  for (const other of [gprChannel("eax"), gprChannel("ah"), flagChannel("OF")]) {
+  for (const other of [gprChannel("eax"), gprChannel("ah"), flagChannel("OF"), lazyFlagsKindChannel]) {
     strictEqual(channelsOverlap(eipChannel, other), false);
     strictEqual(channelsOverlap(other, eipChannel), false);
   }
 
   strictEqual(channelsOverlap(flagChannel("CF"), gprChannel("eax")), false);
   strictEqual(channelsOverlap(gprChannel("eax"), flagChannel("CF")), false);
+  strictEqual(channelsOverlap(lazyFlagsAChannel, gprChannel("eax")), false);
+  strictEqual(channelsOverlap(gprChannel("eax"), lazyFlagsBChannel), false);
+  strictEqual(channelsOverlap(lazyFlagsKindChannel, flagChannel("CF")), false);
+  strictEqual(channelsOverlap(flagChannel("CF"), lazyFlagsKindChannel), false);
 });

@@ -5,7 +5,7 @@ import { x86StatusFlags, type X86Flag } from "#x86/flags.js";
 // Effects are derived from action kind + slot, never stored per-action.
 // One aliasing rule over the address spaces: static channels alias iff their
 // byte ranges intersect; a dynamic GPR slot may alias every GPR word and
-// never flags or eip; guest memory may-alias guest memory (no
+// never flags, lazy metadata, or eip; guest memory may-alias guest memory (no
 // disambiguation); guest memory and state never alias.
 
 export type StorageEffect =
@@ -48,10 +48,10 @@ export function mayAlias(a: StorageEffect, b: StorageEffect): boolean {
     case "memory":
       return b.space === "memory";
     case "statusFlags":
-      return b.space === "statusFlags" || (b.space === "state" && isStatusFlagSlot(b.slot));
+      return b.space === "statusFlags" || (b.space === "state" && isCommitFlagsSlot(b.slot));
     case "state":
       return b.space === "statusFlags"
-        ? isStatusFlagSlot(a.slot)
+        ? isCommitFlagsSlot(a.slot)
         : b.space === "state" && slotsMayAlias(a.slot, b.slot);
   }
 }
@@ -65,6 +65,7 @@ export function slotsMayAlias(a: StateSlot, b: StateSlot): boolean {
     case "flag":
     case "eip":
     case "instructionCount":
+    case "lazyFlags":
       return b.kind !== "gprDynamic" && channelsOverlap(a, b);
   }
 }
@@ -74,7 +75,8 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
     case "writeState":
       return slotsMayAlias(action.slot, slot);
     case "commitFlags":
-      return slot.kind === "flag" && action.snapshot.values.some(({ flag }) => flag === slot.flag);
+      return (slot.kind === "flag" && action.snapshot.values.some(({ flag }) => flag === slot.flag)) ||
+        (slot.kind === "lazyFlags" && slot.field === "lazyFlagsKind");
     case "readState":
     case "readMemory":
     case "writeMemory":
@@ -88,4 +90,8 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
 
 function isStatusFlagSlot(slot: StateSlot): boolean {
   return slot.kind === "flag" && (x86StatusFlags as readonly X86Flag[]).includes(slot.flag);
+}
+
+function isCommitFlagsSlot(slot: StateSlot): boolean {
+  return isStatusFlagSlot(slot) || (slot.kind === "lazyFlags" && slot.field === "lazyFlagsKind");
 }

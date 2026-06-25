@@ -2,7 +2,7 @@ import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:asser
 import { test } from "node:test";
 
 import { PendingState } from "#ir/pending/state.js";
-import { eipChannel, flagChannel, gprChannel } from "#ir/slots.js";
+import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { Action, EdgeFlushAction, GprDynamicSlot, StateSlot } from "#ir/actions.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 
@@ -172,6 +172,24 @@ test("flag and eip pendings hit exactly and never interact with registers", () =
   pending.write(gprChannel("eax"), values.internConst(7));
   strictEqual(pending.read(eipChannel), eip);
   deepStrictEqual(actions, []);
+});
+
+test("lazy flag metadata channels are cached raw state cells", () => {
+  const { values, actions, pending } = createHarness();
+  const kind = pending.read(lazyFlagsKindChannel);
+  const lazyA = values.internConst(0x1234_5678);
+
+  strictEqual(pending.read(lazyFlagsKindChannel), kind);
+  strictEqual(values.projectTo(8, kind), kind);
+
+  pending.write(lazyFlagsAChannel, lazyA);
+
+  strictEqual(pending.has(lazyFlagsAChannel), true);
+  strictEqual(pending.read(lazyFlagsAChannel), lazyA);
+  deepStrictEqual(actions, [{ kind: "readState", output: kind, slot: lazyFlagsKindChannel }]);
+  deepStrictEqual(pending.flushesForEdge("completed"), [
+    { kind: "writeState", slot: lazyFlagsAChannel, value: lazyA }
+  ]);
 });
 
 test("status flag channels route through pending flags", () => {

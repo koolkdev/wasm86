@@ -68,6 +68,7 @@ function emitSlotAddress(body: WasmFunctionBodyEncoder, slot: StateSlot, emitUse
     case "flag":
     case "eip":
     case "instructionCount":
+    case "lazyFlags":
       body.i32Const(0);
       return;
   }
@@ -115,6 +116,7 @@ function slotBaseOffset(slot: StateSlot): number {
     case "flag":
     case "eip":
     case "instructionCount":
+    case "lazyFlags":
       return wasmCpuStateChannelOffset(slot);
   }
 }
@@ -127,6 +129,7 @@ function slotAccessByteLength(slot: StateSlot): 1 | 2 | 4 {
     case "flag":
     case "eip":
     case "instructionCount":
+    case "lazyFlags":
       return wasmCpuStateChannelAccessByteLength(slot);
   }
 }
