@@ -246,11 +246,6 @@ function actionOperands(action: Action): readonly ValueId[] {
       return [action.address];
     case "writeState":
       return [...slotOperands(action.slot), action.value];
-    case "commitFlags":
-      switch (action.snapshot.kind) {
-        case "values":
-          return action.snapshot.values.map(({ value }) => value);
-      }
     case "writeMemory":
       return [action.address, action.value];
     case "guardMemory":
@@ -291,7 +286,6 @@ function actionOutput(action: Action): ValueId | undefined {
     case "readMemory":
       return action.output;
     case "writeState":
-    case "commitFlags":
     case "writeMemory":
     case "guardMemory":
     case "branch":

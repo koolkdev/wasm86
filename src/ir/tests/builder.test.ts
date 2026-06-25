@@ -15,11 +15,10 @@ import {
   regBinding,
   regDynamicBinding
 } from "#ir/operands.js";
-import { eipChannel, flagChannel, gprChannel, instructionCountChannel } from "#ir/slots.js";
+import { eipChannel, flagChannel, gprChannel, instructionCountChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type {
   Action,
   BranchAction,
-  CommitFlagsAction,
   EdgeFlushAction,
   GuardMemoryAction,
   ReadMemoryAction,
@@ -89,12 +88,6 @@ function stateWrites(block: IrBlock): WriteStateAction[] {
   );
 }
 
-function commitFlagsActions(block: IrBlock): CommitFlagsAction[] {
-  return entryActions(block).filter(
-    (action): action is CommitFlagsAction => action.kind === "commitFlags"
-  );
-}
-
 function branchAction(block: IrBlock): BranchAction {
   const action = entryActions(block).find((entry): entry is BranchAction => entry.kind === "branch");
 
@@ -117,14 +110,9 @@ function writtenFlags(block: IrBlock): X86Flag[] {
 }
 
 function flagWriteEntries(block: IrBlock): ReadonlyArray<Readonly<{ flag: X86Flag; value: ValueId }>> {
-  return [
-    ...stateWrites(block).flatMap((write) =>
-      write.slot.kind === "flag" ? [{ flag: write.slot.flag, value: write.value }] : []
-    ),
-    ...commitFlagsActions(block).flatMap((commit) =>
-      commit.snapshot.values
-    )
-  ];
+  return stateWrites(block).flatMap((write) =>
+    write.slot.kind === "flag" ? [{ flag: write.slot.flag, value: write.value }] : []
+  );
 }
 
 function flagWriteValue(block: IrBlock, flag: X86StatusFlag): ValueId {
@@ -248,15 +236,16 @@ test("two adds in one block flush exactly one write per channel, second instruct
   const block = builder.finish();
   const actions = entryActions(block);
   const writes = stateWrites(block);
-
-  // One read feeds both adds; one commit for the flags, plus eax and eip stores.
-  strictEqual(actions.filter((action) => action.kind === "readState").length, 1);
-  strictEqual(writes.length, 2);
-  strictEqual(new Set(writes.map((write) => write.slot)).size, 2);
-  strictEqual(commitFlagsActions(block).length, 1);
-  strictEqual(commitFlagsActions(block)[0]!.snapshot.values.length, x86StatusFlags.length);
-
   const v = block.values;
+
+  // One read feeds both adds; flags flush as a full concrete image, plus eax,
+  // eip, and a lazy-kind clear.
+  strictEqual(actions.filter((action) => action.kind === "readState").length, 1);
+  strictEqual(writes.length, x86StatusFlags.length + 3);
+  strictEqual(new Set(writes.map((write) => write.slot)).size, x86StatusFlags.length + 3);
+  strictEqual(writes.filter((write) => write.slot.kind === "flag").length, x86StatusFlags.length);
+  strictEqual(writes.find((write) => write.slot === lazyFlagsKindChannel)?.value, v.internConst(0));
+
   const eax = actions.find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
   )!.output;
@@ -267,14 +256,20 @@ test("two adds in one block flush exactly one write per channel, second instruct
   strictEqual(flagWriteValue(block, "ZF"), v.internCompare("eq", sum2, v.internConst(0)));
 });
 
-test("inc leaves CF unwritten", () => {
+test("inc flushes a full concrete image with CF preserved from input", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(unaryAluSemantic("inc", 32), [regBinding("eax")], loc(0x1000, 0x1001));
 
   const block = builder.finish();
+  const cfRead = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === flagChannel("CF")
+  );
 
-  deepStrictEqual([...writtenFlags(block)].sort(), ["AF", "OF", "PF", "SF", "ZF"]);
+  ok(cfRead !== undefined, "expected INC to preserve CF from the live input byte");
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
+  strictEqual(flagWriteValue(block, "CF"), cfRead.output);
+  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.internConst(0));
 });
 
 test("cmp writes flags but no register", () => {
@@ -290,20 +285,32 @@ test("cmp writes flags but no register", () => {
   strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
 });
 
-// A template writing only ZF; omitted status flags are preserved by using the
-// singular flag-write API instead of a full flag image.
+// A template writing only ZF; omitted status flags are preserved by reading
+// their live input bytes into the full concrete image.
 const directZfTemplate: SemanticTemplate = (s) => {
   s.writeFlag("ZF", s.const32(1));
 };
 
-test("writeFlag updates only the requested flag", () => {
+test("writeFlag flushes a full concrete image with omitted flags preserved from input", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(directZfTemplate, [], loc(0x1000, 0x1002));
 
   const block = builder.finish();
 
-  deepStrictEqual([...writtenFlags(block)].sort(), ["ZF"]);
+  deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
+  strictEqual(flagWriteValue(block, "ZF"), block.values.internConst(1));
+
+  for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
+    const read = entryActions(block).find((action): action is ReadStateAction =>
+      action.kind === "readState" && action.slot === flagChannel(flag)
+    );
+
+    ok(read !== undefined, `expected ${flag} to be read from input state`);
+    strictEqual(flagWriteValue(block, flag), read.output);
+  }
+
+  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.internConst(0));
 });
 
 test("an omitted direct flag write preserves the previous instruction's pending flag", () => {
@@ -452,11 +459,11 @@ test("ax and al pendings mix without touching flag pendings", () => {
   const alFlush = indexOf((a) => a.kind === "writeState" && a.slot === gprChannel("al"));
   const ahFlush = indexOf((a) => a.kind === "writeState" && a.slot === gprChannel("ah"));
   const axRead = indexOf((a) => a.kind === "readState" && a.slot === gprChannel("ax"));
-  const flagCommit = indexOf((a) => a.kind === "commitFlags");
+  const lazyKindClear = indexOf((a) => a.kind === "writeState" && a.slot === lazyFlagsKindChannel);
 
   ok(alFlush !== -1 && ahFlush !== -1 && axRead !== -1, "expected al/ah flushes and an ax read");
   ok(alFlush < axRead && ahFlush < axRead, "the ax read must flush al and ah first");
-  ok(axRead < flagCommit, "flag commit stays at the end of the block");
+  ok(axRead < lazyKindClear, "flag image flush stays at the end of the block");
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
 
   // The flushed al carries the add's projected result.
@@ -709,21 +716,17 @@ test("jcc after cmp source uses the source-derived condition with per-edge flag 
   // The branch is the entry's terminator: nothing flushes on the main path.
   strictEqual(stateWrites(block).length, 0);
 
-  // Each edge commits the cmp's six flags as one action plus its own eip.
+  // Each edge flushes the cmp's six flags, clears lazy-kind, and writes its own eip.
   const taken = edgeFlushes(block, 1);
   const notTaken = edgeFlushes(block, 2);
 
   for (const flushes of [taken, notTaken]) {
-    strictEqual(flushes.length, 2);
-    const commit = flushes.find(
-      (flush): flush is CommitFlagsAction => flush.kind === "commitFlags"
-    );
-
-    ok(commit !== undefined, "expected a flag commit");
+    strictEqual(flushes.length, x86StatusFlags.length + 2);
     deepStrictEqual(
-      commit.snapshot.values.map(({ flag }) => flag).sort(),
+      flushes.flatMap((flush) => flush.slot.kind === "flag" ? [flush.slot.flag] : []).sort(),
       [...x86StatusFlags].sort()
     );
+    strictEqual(flushes.find((flush) => flush.slot === lazyFlagsKindChannel)?.value, v.internConst(0));
   }
 
   strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.internConst(0x2000));
@@ -1227,14 +1230,12 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
   // flag image and eax sum — plus the faulting instruction's eip.
   const flushes = edgeFlushes(block, 1);
 
-  strictEqual(flushes.length, 3);
-  const commit = flushes.find((flush): flush is CommitFlagsAction => flush.kind === "commitFlags");
-
-  ok(commit !== undefined, "expected a flag commit");
+  strictEqual(flushes.length, x86StatusFlags.length + 3);
   deepStrictEqual(
-    commit.snapshot.values.map(({ flag }) => flag).sort(),
+    flushes.flatMap((flush) => flush.slot.kind === "flag" ? [flush.slot.flag] : []).sort(),
     [...x86StatusFlags].sort()
   );
+  strictEqual(flushes.find((flush) => flush.slot === lazyFlagsKindChannel)?.value, v.internConst(0));
   strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === gprChannel("eax"))?.value, sum);
   strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.internConst(0x1003));
   deepStrictEqual(edgeRegion(block, 1).terminator, {
@@ -1722,11 +1723,11 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
   const actions = entryActions(block);
   const eaxFlush = actions.findIndex((a) => a.kind === "writeState" && a.slot === gprChannel("eax"));
   const dynamicWrite = actions.findIndex((a) => a.kind === "writeState" && a.slot.kind === "gprDynamic");
-  const flagCommit = actions.findIndex((a) => a.kind === "commitFlags");
+  const lazyKindClear = actions.findIndex((a) => a.kind === "writeState" && a.slot === lazyFlagsKindChannel);
 
   ok(eaxFlush !== -1 && dynamicWrite !== -1, "expected an eax flush and a dynamic write");
   ok(eaxFlush < dynamicWrite, "the dirty eax pending must flush before the dynamic write");
-  ok(dynamicWrite < flagCommit, "flag pendings ride through and commit at the end");
+  ok(dynamicWrite < lazyKindClear, "flag pendings ride through and flush at the end");
   strictEqual(stateWrites(block).filter((write) => write.slot === gprChannel("eax")).length, 1);
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, sum);
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());

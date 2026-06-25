@@ -1,10 +1,10 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { Action, CommitFlagsAction, EdgeFlushAction } from "#ir/actions.js";
+import type { Action, EdgeFlushAction, ReadStateAction } from "#ir/actions.js";
 import { PendingFlags } from "#ir/pending/flags.js";
 import { PendingStateAccess } from "#ir/pending/state-access.js";
-import { flagChannel } from "#ir/slots.js";
+import { flagChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 
@@ -22,8 +22,22 @@ function createHarness(): Harness {
   return { values, actions, flags: new PendingFlags(values, state) };
 }
 
-function commitFlagsFlushes(actions: readonly EdgeFlushAction[]): CommitFlagsAction[] {
-  return actions.filter((action): action is CommitFlagsAction => action.kind === "commitFlags");
+function flagFlushEntries(actions: readonly EdgeFlushAction[]): ReadonlyArray<Readonly<{ flag: X86StatusFlag; value: ValueId }>> {
+  return actions.flatMap((action) =>
+    action.slot.kind === "flag" && (x86StatusFlags as readonly string[]).includes(action.slot.flag)
+      ? [{ flag: action.slot.flag as X86StatusFlag, value: action.value }]
+      : []
+  );
+}
+
+function flagFlushValue(actions: readonly EdgeFlushAction[], flag: X86StatusFlag): ValueId | undefined {
+  return flagFlushEntries(actions).find((entry) => entry.flag === flag)?.value;
+}
+
+function assertFullConcreteFlush(actions: readonly EdgeFlushAction[], values: ValueTable): void {
+  deepStrictEqual(flagFlushEntries(actions).map((entry) => entry.flag), x86StatusFlags);
+  strictEqual(actions.find((action) => action.slot === lazyFlagsKindChannel)?.value, values.internConst(0));
+  strictEqual(actions.length, x86StatusFlags.length + 1);
 }
 
 test("new pending flags start with no dirty entries", () => {
@@ -50,24 +64,24 @@ test("a sub source materializes every status flag", () => {
 
   flags.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
 
-  const completedCommit = commitFlagsFlushes(flags.flushesForEdge("completed"))[0]!;
-  const pendingValues = completedCommit.snapshot.values;
+  const completedFlushes = flags.flushesForEdge("completed");
+  const pendingValues = flagFlushEntries(completedFlushes);
 
-  strictEqual(completedCommit.snapshot.kind, "values");
   deepStrictEqual(pendingValues.map((entry) => entry.flag), x86StatusFlags);
+  assertFullConcreteFlush(completedFlushes, values);
   strictEqual(
     flagValue(flags, "ZF"),
     values.internCompare("eq", result, values.internConst(0))
   );
 
-  const snapshotValues = completedCommit.snapshot.values;
+  const snapshotValues = flagFlushEntries(completedFlushes);
 
   deepStrictEqual(
     snapshotValues.map((entry) => entry.flag),
     x86StatusFlags
   );
   strictEqual(
-    snapshotValues.find((entry) => entry.flag === "ZF")?.value,
+    flagFlushValue(completedFlushes, "ZF"),
     values.internCompare("eq", result, values.internConst(0))
   );
 });
@@ -115,17 +129,17 @@ test("fault edge preserves source-materialized values while direct flag writes u
   flags.beginInstruction();
   flags.writeFlag("ZF", values.internConst(0));
 
-  const faultCommit = commitFlagsFlushes(flags.flushesForEdge("fault"))[0]!;
-  const completedCommit = commitFlagsFlushes(flags.flushesForEdge("completed"))[0]!;
+  const faultFlushes = flags.flushesForEdge("fault");
+  const completedFlushes = flags.flushesForEdge("completed");
 
-  strictEqual(faultCommit.snapshot.kind, "values");
-  strictEqual(completedCommit.snapshot.kind, "values");
+  assertFullConcreteFlush(faultFlushes, values);
+  assertFullConcreteFlush(completedFlushes, values);
   strictEqual(
-    faultCommit.snapshot.values.find((entry) => entry.flag === "ZF")?.value,
+    flagFlushValue(faultFlushes, "ZF"),
     values.internCompare("eq", result, values.internConst(0))
   );
   strictEqual(
-    completedCommit.snapshot.values.find((entry) => entry.flag === "ZF")?.value,
+    flagFlushValue(completedFlushes, "ZF"),
     values.internConst(0)
   );
 });
@@ -144,8 +158,10 @@ test("a logic source materializes fixed, undefined, and derived flag values", ()
   strictEqual(flagValue(flags, "ZF"), values.internCompare("eq", projected, zero));
   strictEqual(flagValue(flags, "SF"), values.internBinary("shr_u", projected, values.internConst(7)));
 
-  const snapshotValues = commitFlagsFlushes(flags.flushesForEdge("completed"))[0]!.snapshot.values;
+  const completedFlushes = flags.flushesForEdge("completed");
+  const snapshotValues = flagFlushEntries(completedFlushes);
 
+  assertFullConcreteFlush(completedFlushes, values);
   strictEqual(snapshotValues.find((entry) => entry.flag === "CF")?.value, zero);
   strictEqual(snapshotValues.find((entry) => entry.flag === "AF")?.value, zero);
   strictEqual(snapshotValues.find((entry) => entry.flag === "OF")?.value, zero);
@@ -165,8 +181,10 @@ test("direct status flag writes set concrete pending values", () => {
     strictEqual(flagValue(flags, flag), concrete[flag]);
   }
 
-  const snapshotValues = commitFlagsFlushes(flags.flushesForEdge("completed"))[0]!.snapshot.values;
+  const completedFlushes = flags.flushesForEdge("completed");
+  const snapshotValues = flagFlushEntries(completedFlushes);
 
+  assertFullConcreteFlush(completedFlushes, values);
   strictEqual(snapshotValues.length, x86StatusFlags.length);
   strictEqual(snapshotValues.find((entry) => entry.flag === "ZF")?.value, concrete.ZF);
 });
@@ -184,21 +202,33 @@ test("writeFlag updates one status flag while preserving other pending values", 
   strictEqual(flagValue(flags, "CF"), values.internCompare("lt_u", left, right));
   strictEqual(flagValue(flags, "ZF"), zf);
 
-  const snapshotValues = commitFlagsFlushes(flags.flushesForEdge("completed"))[0]!.snapshot.values;
+  const completedFlushes = flags.flushesForEdge("completed");
+  const snapshotValues = flagFlushEntries(completedFlushes);
 
+  assertFullConcreteFlush(completedFlushes, values);
   strictEqual(snapshotValues.length, x86StatusFlags.length);
   strictEqual(snapshotValues.find((entry) => entry.flag === "ZF")?.value, zf);
 });
 
-test("a direct flag write from input state flushes only that flag", () => {
-  const { values, flags } = createHarness();
+test("a direct flag write from input state flushes a full concrete image", () => {
+  const { values, actions, flags } = createHarness();
   const zf = values.internConst(1);
 
   flags.writeFlag("ZF", zf);
 
-  deepStrictEqual(flags.flushesForEdge("completed"), [
-    { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: zf }] } }
-  ]);
+  const completedFlushes = flags.flushesForEdge("completed");
+
+  assertFullConcreteFlush(completedFlushes, values);
+  strictEqual(flagFlushValue(completedFlushes, "ZF"), zf);
+
+  for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
+    const read = actions.find((action): action is ReadStateAction =>
+      action.kind === "readState" && action.slot === flagChannel(flag)
+    );
+
+    ok(read !== undefined, `expected ${flag} to be read from input state`);
+    strictEqual(flagFlushValue(completedFlushes, flag), read.output);
+  }
 });
 
 function flagValue(flags: PendingFlags, flag: X86StatusFlag): ValueId {

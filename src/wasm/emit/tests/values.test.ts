@@ -190,15 +190,15 @@ test("an edge use past an overlapping store pins the read", () => {
   strictEqual(analysis.isPinned(read), true);
 });
 
-test("a lazy kind read crossing commitFlags pins, but lazy operands do not", () => {
+test("a lazy kind read crossing a lazy-kind write pins, but lazy operands do not", () => {
   const values = new ValueTable();
   const kind = values.addActionOutput();
   const lazyA = values.addActionOutput();
-  const zf = values.internConst(1);
+  const reset = values.internConst(0);
   const analysis = analyze(values, [
     { kind: "readState", output: kind, slot: lazyFlagsKindChannel },
     { kind: "readState", output: lazyA, slot: lazyFlagsAChannel },
-    { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: zf }] } },
+    { kind: "writeState", slot: lazyFlagsKindChannel, value: reset },
     { kind: "writeState", slot: gprChannel("eax"), value: kind },
     { kind: "writeState", slot: gprChannel("ebx"), value: lazyA },
     { kind: "continue" }

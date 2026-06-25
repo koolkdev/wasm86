@@ -75,7 +75,6 @@ function validateEntryActions(
       case "readState":
       case "readMemory":
       case "writeState":
-      case "commitFlags":
       case "writeMemory":
       case "exit":
       case "continue":
@@ -101,7 +100,6 @@ function isRegionTerminator(action: Action): boolean {
     case "readState":
     case "readMemory":
     case "writeState":
-    case "commitFlags":
     case "writeMemory":
     case "guardMemory":
       return false;

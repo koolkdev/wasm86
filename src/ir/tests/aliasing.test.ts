@@ -31,10 +31,6 @@ test("effects derive from action kind and slot", () => {
   deepStrictEqual(effectsOf({ kind: "writeMemory", address: 0, value: 1, width: 32 }), {
     writes: memory
   });
-  deepStrictEqual(
-    effectsOf({ kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: 0 }] } }),
-    { writes: { space: "statusFlags" } }
-  );
 });
 
 test("guards, branches, exits, and continues touch no data", () => {
@@ -78,44 +74,29 @@ test("a dynamic GPR slot may-aliases every GPR word and never flags, lazy metada
   strictEqual(mayAlias(state(eipChannel), state(dynamicGpr(0))), false);
 });
 
-test("action writes include raw slots, committed status flags, and commit lazy-kind clears", () => {
+test("action writes include raw state slots", () => {
   strictEqual(
     actionMayWriteStateSlot({ kind: "writeState", slot: gprChannel("eax"), value: 0 }, gprChannel("ax")),
     true
   );
   strictEqual(
-    actionMayWriteStateSlot(
-      { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: 0 }] } },
-      flagChannel("ZF")
-    ),
+    actionMayWriteStateSlot({ kind: "writeState", slot: flagChannel("ZF"), value: 0 }, flagChannel("ZF")),
     true
   );
   strictEqual(
-    actionMayWriteStateSlot(
-      { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: 0 }] } },
-      flagChannel("CF")
-    ),
+    actionMayWriteStateSlot({ kind: "writeState", slot: flagChannel("ZF"), value: 0 }, flagChannel("CF")),
     false
   );
   strictEqual(
-    actionMayWriteStateSlot(
-      { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: 0 }] } },
-      lazyFlagsKindChannel
-    ),
+    actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsKindChannel, value: 0 }, lazyFlagsKindChannel),
     true
   );
   strictEqual(
-    actionMayWriteStateSlot(
-      { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: 0 }] } },
-      lazyFlagsAChannel
-    ),
+    actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsKindChannel, value: 0 }, lazyFlagsAChannel),
     false
   );
   strictEqual(
-    actionMayWriteStateSlot(
-      { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: 0 }] } },
-      gprChannel("eax")
-    ),
+    actionMayWriteStateSlot({ kind: "writeState", slot: flagChannel("ZF"), value: 0 }, gprChannel("eax")),
     false
   );
 });

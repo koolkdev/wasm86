@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { regBinding, type OperandBinding } from "#ir/operands.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { eipChannel, gprChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86StatusFlags } from "#x86/flags.js";
@@ -99,18 +99,22 @@ test("two adds in one block store each flag byte once, with the second add's fla
 
   const block = builder.finish();
 
-  // Dead flag writes collapse in the contract: one commitFlags action with one value per flag...
+  // Dead flag writes collapse in the contract: one writeState per status flag
+  // plus one lazy-kind clear.
   const entry = block.regions[0]!;
 
   assertOk(entry.kind === "entry", "first region is the entry");
 
-  const flagCommits = entry.actions.filter(
-    (action) => action.kind === "commitFlags"
+  const flagWrites = entry.actions.flatMap(
+    (action) => action.kind === "writeState" && action.slot.kind === "flag" ? [action.slot.flag] : []
   );
 
-  strictEqual(flagCommits.length, 1);
-  strictEqual(flagCommits[0]!.snapshot.values.length, x86StatusFlags.length);
-  strictEqual(new Set(flagCommits[0]!.snapshot.values.map(({ flag }) => flag)).size, x86StatusFlags.length);
+  strictEqual(flagWrites.length, x86StatusFlags.length);
+  strictEqual(new Set(flagWrites).size, x86StatusFlags.length);
+  strictEqual(
+    entry.actions.filter((action) => action.kind === "writeState" && action.slot === lazyFlagsKindChannel).length,
+    1
+  );
 
   // ...and in the encoding: exactly six flag byte stores plus one lazy-kind clear.
   const body = irBlockBody(block).encode();

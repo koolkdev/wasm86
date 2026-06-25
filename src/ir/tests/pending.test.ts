@@ -1,10 +1,11 @@
-import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { PendingState } from "#ir/pending/state.js";
 import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsKindChannel } from "#ir/slots.js";
-import type { Action, EdgeFlushAction, GprDynamicSlot, StateSlot } from "#ir/actions.js";
+import type { Action, EdgeFlushAction, GprDynamicSlot, ReadStateAction, StateSlot } from "#ir/actions.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
+import { x86StatusFlags } from "#x86/flags.js";
 
 type Harness = Readonly<{
   values: ValueTable;
@@ -34,16 +35,7 @@ function completedEdgeEntries(pending: PendingState): ReadonlyArray<readonly [St
 function edgeEntries(
   actions: readonly EdgeFlushAction[]
 ): ReadonlyArray<readonly [StateSlot, ValueId]> {
-  return actions.flatMap((action) => {
-    switch (action.kind) {
-      case "writeState":
-        return [[action.slot, action.value] as const];
-      case "commitFlags":
-        return action.snapshot.values.map(
-          ({ flag, value }) => [flagChannel(flag), value] as const
-        );
-    }
-  });
+  return actions.map((action) => [action.slot, action.value] as const);
 }
 
 test("an exact pending hit returns the value with no actions", () => {
@@ -201,10 +193,22 @@ test("status flag channels route through pending flags", () => {
   strictEqual(pending.has(flagChannel("ZF")), true);
   strictEqual(pending.read(flagChannel("ZF")), zf);
 
-  deepStrictEqual(pending.flushesForEdge("completed"), [
-    { kind: "commitFlags", snapshot: { kind: "values", values: [{ flag: "ZF", value: zf }] } }
-  ]);
-  deepStrictEqual(actions, []);
+  const completedFlushes = pending.flushesForEdge("completed");
+
+  deepStrictEqual(
+    completedFlushes.flatMap((action) => action.slot.kind === "flag" ? [action.slot.flag] : []),
+    x86StatusFlags
+  );
+  strictEqual(completedFlushes.find((action) => action.slot === flagChannel("ZF"))?.value, zf);
+
+  for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
+    const read = actions.find((action): action is ReadStateAction =>
+      action.kind === "readState" && action.slot === flagChannel(flag)
+    );
+
+    ok(read !== undefined, `expected ${flag} to be read from input state`);
+    strictEqual(completedFlushes.find((action) => action.slot === flagChannel(flag))?.value, read.output);
+  }
 });
 
 test("a flush invalidates read leaves of overlapping channels only", () => {

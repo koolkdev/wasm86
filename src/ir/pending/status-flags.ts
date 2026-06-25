@@ -11,8 +11,8 @@ import {
   type StatusFlagValues
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
-import { flagChannel, type FlagChannel } from "../slots.js";
-import type { CommitFlagsAction, StatusFlagsSnapshot } from "../actions.js";
+import { flagChannel, lazyFlagsKindChannel } from "../slots.js";
+import type { WriteStateAction } from "../actions.js";
 import { fitsUnsigned, type ValueId, type ValueTable } from "../values.js";
 import { PendingStateAccess } from "./state-access.js";
 import type { PendingEdgeKind } from "./state.js";
@@ -29,7 +29,6 @@ type FlagBacking =
 
 type StatusFlagValueIds = StatusFlagValues<ValueId>;
 type SourceExpansionCache = Map<FlagSourceId, StatusFlagValueIds>;
-type PendingStatusFlagEntry = readonly [FlagChannel<X86StatusFlag>, ValueId];
 type PendingStatusFlagState = {
   backings: Map<X86StatusFlag, FlagBacking>;
   dirty: Set<X86StatusFlag>;
@@ -53,7 +52,7 @@ export class PendingStatusFlags {
   }
 
   readFlag(flag: X86StatusFlag): ValueId {
-    return this.#resolveBacking(flag, getBacking(this.#current.backings, flag), new Map());
+    return this.#resolveFlagFrom(this.#current, flag, new Map());
   }
 
   condition(cc: ConditionCode): ValueId {
@@ -101,23 +100,39 @@ export class PendingStatusFlags {
     this.#current.dirty.add(flag);
   }
 
-  #entriesFrom(
-    sourceBackings: ReadonlyMap<X86StatusFlag, FlagBacking>,
-    sourceDirty: ReadonlySet<X86StatusFlag>
-  ): readonly PendingStatusFlagEntry[] {
-    const cache: SourceExpansionCache = new Map();
-    const entries: PendingStatusFlagEntry[] = [];
-
-    for (const flag of x86StatusFlags) {
-      if (sourceDirty.has(flag)) {
-        entries.push([
-          flagChannel(flag),
-          this.#resolveBacking(flag, getBacking(sourceBackings, flag), cache)
-        ]);
-      }
+  #flushesFrom(state: PendingStatusFlagState): readonly WriteStateAction[] {
+    if (state.dirty.size === 0) {
+      return [];
     }
 
-    return entries;
+    const cache: SourceExpansionCache = new Map();
+    const actions: WriteStateAction[] = [];
+
+    // Concrete boundaries need a complete architectural flag image, so omitted
+    // partial-producer flags are preserved from their current backing.
+    for (const flag of x86StatusFlags) {
+      actions.push({
+        kind: "writeState",
+        slot: flagChannel(flag),
+        value: this.#resolveFlagFrom(state, flag, cache)
+      });
+    }
+
+    actions.push({
+      kind: "writeState",
+      slot: lazyFlagsKindChannel,
+      value: this.#values.internConst(0)
+    });
+
+    return actions;
+  }
+
+  #resolveFlagFrom(
+    state: PendingStatusFlagState,
+    flag: X86StatusFlag,
+    cache: SourceExpansionCache
+  ): ValueId {
+    return this.#resolveBacking(flag, getBacking(state.backings, flag), cache);
   }
 
   #resolveBacking(
@@ -161,7 +176,7 @@ export class PendingStatusFlags {
   #flagBoolExpr(expr: FlagBoolExpr, cache: SourceExpansionCache): ValueId {
     switch (expr.kind) {
       case "flag":
-        return this.#resolveBacking(expr.flag, getBacking(this.#current.backings, expr.flag), cache);
+        return this.#resolveFlagFrom(this.#current, expr.flag, cache);
       case "not":
         return this.#values.internCompare(
           "eq",
@@ -225,34 +240,8 @@ export class PendingStatusFlags {
     this.#boundary = cloneStatusFlagState(this.#current);
   }
 
-  snapshot(): StatusFlagsSnapshot {
-    return this.#snapshotFrom(this.#boundary);
-  }
-
-  currentSnapshot(): StatusFlagsSnapshot {
-    return this.#snapshotFrom(this.#current);
-  }
-
-  flushesForEdge(edge: PendingEdgeKind): readonly CommitFlagsAction[] {
-    const snapshot = edge === "fault"
-      ? this.snapshot()
-      : this.currentSnapshot();
-
-    return snapshot.values.length === 0
-      ? []
-      : [{ kind: "commitFlags", snapshot }];
-  }
-
-  #snapshotFrom(state: PendingStatusFlagState): StatusFlagsSnapshot {
-    const values = this.#entriesFrom(state.backings, state.dirty).map(([slot, value]) => ({
-      flag: slot.flag,
-      value
-    }));
-
-    return {
-      kind: "values",
-      values
-    };
+  flushesForEdge(edge: PendingEdgeKind): readonly WriteStateAction[] {
+    return this.#flushesFrom(edge === "fault" ? this.#boundary : this.#current);
   }
 
   #materializeSource(source: SimpleFlagSource<ValueId>): StatusFlagValueIds {
