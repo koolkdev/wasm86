@@ -7,9 +7,7 @@ import {
   flagChannel,
   gprChannel,
   lazyFlagsAChannel,
-  lazyFlagsHeaderChannel,
-  lazyFlagsKindChannel,
-  lazyFlagsWidthChannel
+  lazyFlagsKindChannel
 } from "#ir/slots.js";
 import type { StateSlot } from "#ir/actions.js";
 
@@ -65,11 +63,6 @@ test("static channels alias iff their byte ranges intersect", () => {
   strictEqual(mayAlias(state(flagChannel("ZF")), state(flagChannel("ZF"))), true);
   strictEqual(mayAlias(state(flagChannel("ZF")), state(gprChannel("eax"))), false);
   strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsKindChannel)), true);
-  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsWidthChannel)), false);
-  strictEqual(mayAlias(state(lazyFlagsHeaderChannel), state(lazyFlagsKindChannel)), true);
-  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsHeaderChannel)), true);
-  strictEqual(mayAlias(state(lazyFlagsHeaderChannel), state(lazyFlagsWidthChannel)), true);
-  strictEqual(mayAlias(state(lazyFlagsHeaderChannel), state(lazyFlagsAChannel)), false);
   strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsAChannel)), false);
   strictEqual(mayAlias(state(lazyFlagsKindChannel), state(flagChannel("ZF"))), false);
 });
@@ -103,18 +96,6 @@ test("action writes include raw state slots", () => {
   strictEqual(
     actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsKindChannel, value: 0 }, lazyFlagsKindChannel),
     true
-  );
-  strictEqual(
-    actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsHeaderChannel, value: 0 }, lazyFlagsKindChannel),
-    true
-  );
-  strictEqual(
-    actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsKindChannel, value: 0 }, lazyFlagsHeaderChannel),
-    true
-  );
-  strictEqual(
-    actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsKindChannel, value: 0 }, lazyFlagsWidthChannel),
-    false
   );
   strictEqual(
     actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsKindChannel, value: 0 }, lazyFlagsAChannel),

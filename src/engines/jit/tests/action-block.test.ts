@@ -7,7 +7,7 @@ import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
 import type { Action, StateSlot } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#ir/values.js";
-import { gprChannel, lazyFlagsHeaderChannel } from "#ir/slots.js";
+import { gprChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
 import { ExitReason } from "#wasm/exit.js";
@@ -54,13 +54,13 @@ test("cross-instruction dead flag and eip writes are absent from the action list
   const flagWrites = actions.flatMap((action) =>
     action.kind === "writeState" && action.slot.kind === "flag" ? [action.slot.flag] : []
   );
-  const lazyHeaderWrites = actions.filter(
-    (action) => action.kind === "writeState" && action.slot === lazyFlagsHeaderChannel
+  const lazyKindWrites = actions.filter(
+    (action) => action.kind === "writeState" && action.slot === lazyFlagsKindChannel
   );
 
   strictEqual(flagWrites.length, 0);
   strictEqual(new Set(flagWrites).size, flagWrites.length);
-  strictEqual(lazyHeaderWrites.length, 1);
+  strictEqual(lazyKindWrites.length, 1);
   strictEqual(actions.filter((action) => action.kind === "writeState" && action.slot.kind === "eip").length, 1);
 });
 

@@ -190,21 +190,21 @@ test("an edge use past an overlapping store pins the read", () => {
   strictEqual(analysis.isPinned(read), true);
 });
 
-test("a lazy kind read crossing a lazy-kind write pins, but lazy operands do not", () => {
+test("a lazy kind byte read crossing a lazy-kind-byte write pins, but lazy operands do not", () => {
   const values = new ValueTable();
-  const kind = values.addActionOutput();
+  const kindByte = values.addActionOutput();
   const lazyA = values.addActionOutput();
   const reset = values.internConst(0);
   const analysis = analyze(values, [
-    { kind: "readState", output: kind, slot: lazyFlagsKindChannel },
+    { kind: "readState", output: kindByte, slot: lazyFlagsKindChannel },
     { kind: "readState", output: lazyA, slot: lazyFlagsAChannel },
     { kind: "writeState", slot: lazyFlagsKindChannel, value: reset },
-    { kind: "writeState", slot: gprChannel("eax"), value: kind },
+    { kind: "writeState", slot: gprChannel("eax"), value: kindByte },
     { kind: "writeState", slot: gprChannel("ebx"), value: lazyA },
     { kind: "continue" }
   ]);
 
-  strictEqual(analysis.isPinned(kind), true);
+  strictEqual(analysis.isPinned(kindByte), true);
   strictEqual(analysis.isPinned(lazyA), false);
 });
 

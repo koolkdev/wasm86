@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import {
   type FlagChannel,
   type EipChannel,
@@ -16,8 +15,7 @@ import type { WriteStateAction } from "../actions.js";
 import type { PendingEdgeKind } from "./state.js";
 import { PendingStateAccess } from "./state-access.js";
 
-type X86NonStatusFlag = Exclude<X86Flag, X86StatusFlag>;
-export type PendingCell = FlagChannel<X86NonStatusFlag> | EipChannel | InstructionCountChannel | LazyFlagsChannel;
+export type PendingCell = FlagChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
 
 type PendingEntry = { value: ValueId; dirty: boolean };
 
@@ -46,6 +44,11 @@ export class PendingCells<TCell extends PendingCell = PendingCell> {
   write(channel: TCell, value: ValueId): void {
     this.#assertNoOverlappingPending(channel);
     this.#pending.set(channel, { value, dirty: true });
+  }
+
+  invalidate(channel: TCell): void {
+    this.#pending.delete(channel);
+    this.#state.invalidateInput(channel);
   }
 
   has(channel: TCell): boolean {
@@ -91,11 +94,7 @@ function channelReadBounds(channel: PendingCell): WidthBounds | undefined {
     case "flag":
       return fitsUnsigned(1);
     case "lazyFlags":
-      return channel.field === "lazyFlagsKind" || channel.field === "lazyFlagsWidth"
-        ? fitsUnsigned(8)
-        : channel.field === "lazyFlagsHeader"
-          ? fitsUnsigned(16)
-          : undefined;
+      return channel.field === "lazyFlagsKind" ? fitsUnsigned(8) : undefined;
     case "eip":
     case "instructionCount":
       return undefined;

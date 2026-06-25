@@ -10,17 +10,16 @@ import {
   type StatusFlagValues
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
-import { LAZY_FLAGS_KIND, lazyFlagsHeader } from "../lazy-flags.js";
-import { valueTableFlagOps } from "../flag-value-ops.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "./lazy-flags.js";
+import { valueTableFlagOps } from "./flag-value-ops.js";
 import {
   flagChannel,
   lazyFlagsAChannel,
   lazyFlagsBChannel,
-  lazyFlagsHeaderChannel
-} from "../slots.js";
-import type { WriteStateAction } from "../actions.js";
-import { type ValueId, type ValueTable } from "../values.js";
-import type { PendingEdgeKind } from "./state.js";
+  lazyFlagsKindChannel
+} from "./slots.js";
+import { type ValueId, type ValueTable } from "./values.js";
+import type { PendingState } from "./pending/state.js";
 
 export type FlagSourceId = number;
 
@@ -34,23 +33,23 @@ type FlagBacking =
 
 type StatusFlagValueIds = StatusFlagValues<ValueId>;
 type SourceExpansionCache = Map<FlagSourceId, StatusFlagValueIds>;
-type PendingStatusFlagState = {
+type StatusFlagState = {
   backings: Map<X86StatusFlag, FlagBacking>;
-  dirty: Set<X86StatusFlag>;
-  lazySource: FlagSourceId | undefined;
+  directSource: FlagSourceId | undefined;
 };
 
 const logicUndefFlagPolicy: UndefFlagPolicy = "zero";
 
-export class PendingStatusFlags {
+export class StatusFlags {
   readonly #values: ValueTable;
+  readonly #pending: PendingState;
   readonly #sources: SimpleFlagSource<ValueId>[] = [];
   readonly #current = initialStatusFlagState();
   readonly #valueOps: ReturnType<typeof valueTableFlagOps>;
-  #boundary = cloneStatusFlagState(this.#current);
 
-  constructor(values: ValueTable) {
+  constructor(values: ValueTable, pending: PendingState) {
     this.#values = values;
+    this.#pending = pending;
     this.#valueOps = valueTableFlagOps(values);
   }
 
@@ -66,7 +65,7 @@ export class PendingStatusFlags {
     const sourceId = this.#sources.length;
 
     this.#sources.push(source);
-    this.#current.lazySource = sourceId;
+    this.#current.directSource = sourceId;
 
     switch (source.kind) {
       case "add":
@@ -74,6 +73,7 @@ export class PendingStatusFlags {
         for (const flag of x86StatusFlags) {
           this.#setBacking(flag, { kind: "source", source: sourceId });
         }
+        this.#writeLazyBinarySource(source);
         return;
       case "logic": {
         const zero = this.#values.internConst(0);
@@ -84,14 +84,24 @@ export class PendingStatusFlags {
         this.#setBacking("ZF", { kind: "source", source: sourceId });
         this.#setBacking("SF", { kind: "source", source: sourceId });
         this.#setBacking("OF", { kind: "value", value: zero });
+        this.#writeExplicitValues(this.#currentValues(), sourceId);
         return;
       }
     }
   }
 
   writeFlag(flag: X86StatusFlag, value: ValueId): void {
-    this.#current.lazySource = undefined;
-    this.#setBacking(flag, { kind: "value", value });
+    const cache: SourceExpansionCache = new Map();
+    const explicit = Object.fromEntries(
+      x86StatusFlags.map((currentFlag) => [
+        currentFlag,
+        currentFlag === flag
+          ? value
+          : this.#resolveFlagFrom(this.#current, currentFlag, cache)
+      ])
+    ) as StatusFlagValueIds;
+
+    this.#writeExplicitValues(explicit, undefined);
   }
 
   has(flag: X86StatusFlag): boolean {
@@ -100,72 +110,51 @@ export class PendingStatusFlags {
 
   #setBacking(flag: X86StatusFlag, backing: FlagBacking): void {
     this.#current.backings.set(flag, backing);
-    this.#current.dirty.add(flag);
   }
 
-  #flushesFrom(state: PendingStatusFlagState): readonly WriteStateAction[] {
-    if (state.dirty.size === 0) {
-      return [];
-    }
+  #writeExplicitValues(values: StatusFlagValueIds, directSource: FlagSourceId | undefined): void {
+    this.#current.directSource = directSource;
 
-    if (state.lazySource !== undefined) {
-      const source = this.#source(state.lazySource);
-
-      if (source.kind === "add" || source.kind === "sub") {
-        return this.#lazyBinarySourceFlushes(source);
-      }
-    }
-
-    return this.#explicitFlushesFrom(state);
-  }
-
-  #explicitFlushesFrom(state: PendingStatusFlagState): readonly WriteStateAction[] {
-    const cache: SourceExpansionCache = new Map();
-    const actions: WriteStateAction[] = [];
-
-    // Concrete boundaries need a complete architectural flag image, so omitted
-    // partial-producer flags are preserved from their current backing.
     for (const flag of x86StatusFlags) {
-      actions.push({
-        kind: "writeState",
-        slot: flagChannel(flag),
-        value: this.#resolveFlagFrom(state, flag, cache)
-      });
+      this.#current.backings.set(flag, { kind: "value", value: values[flag] });
     }
 
-    actions.push({
-      kind: "writeState",
-      slot: lazyFlagsHeaderChannel,
-      value: this.#values.internConst(0)
-    });
+    this.#invalidateLazyChannels();
 
-    return actions;
+    for (const flag of x86StatusFlags) {
+      this.#pending.write(flagChannel(flag), values[flag]);
+    }
+
+    this.#pending.write(lazyFlagsKindChannel, this.#values.internConst(0));
   }
 
-  #lazyBinarySourceFlushes(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "add" | "sub" }>): readonly WriteStateAction[] {
+  #writeLazyBinarySource(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "add" | "sub" }>): void {
     const kind = source.kind === "add" ? LAZY_FLAGS_KIND.ADD : LAZY_FLAGS_KIND.SUB;
 
-    return [
-      {
-        kind: "writeState",
-        slot: lazyFlagsAChannel,
-        value: this.#values.projectTo(source.width, source.left)
-      },
-      {
-        kind: "writeState",
-        slot: lazyFlagsBChannel,
-        value: this.#values.projectTo(source.width, source.right)
-      },
-      {
-        kind: "writeState",
-        slot: lazyFlagsHeaderChannel,
-        value: this.#values.internConst(lazyFlagsHeader(kind, source.width))
-      }
-    ];
+    this.#invalidateExplicitFlagChannels();
+    this.#pending.invalidate(lazyFlagsKindChannel);
+    this.#pending.write(lazyFlagsAChannel, this.#values.projectTo(source.width, source.left));
+    this.#pending.write(lazyFlagsBChannel, this.#values.projectTo(source.width, source.right));
+    this.#pending.write(
+      lazyFlagsKindChannel,
+      this.#values.internConst(lazyFlagsKindByte(kind, source.width))
+    );
+  }
+
+  #invalidateExplicitFlagChannels(): void {
+    for (const flag of x86StatusFlags) {
+      this.#pending.invalidate(flagChannel(flag));
+    }
+  }
+
+  #invalidateLazyChannels(): void {
+    this.#pending.invalidate(lazyFlagsAChannel);
+    this.#pending.invalidate(lazyFlagsBChannel);
+    this.#pending.invalidate(lazyFlagsKindChannel);
   }
 
   #resolveFlagFrom(
-    state: PendingStatusFlagState,
+    state: StatusFlagState,
     flag: X86StatusFlag,
     cache: SourceExpansionCache
   ): ValueId {
@@ -190,11 +179,11 @@ export class PendingStatusFlags {
   }
 
   #directCondition(cc: ConditionCode): ValueId | undefined {
-    if (this.#current.lazySource === undefined) {
+    if (this.#current.directSource === undefined) {
       return undefined;
     }
 
-    const source = this.#source(this.#current.lazySource);
+    const source = this.#source(this.#current.directSource);
     const operator = simpleFlagSourceConditionOperators[source.kind][cc];
 
     if (operator === undefined) {
@@ -266,19 +255,22 @@ export class PendingStatusFlags {
     return materialized;
   }
 
+  #currentValues(): StatusFlagValueIds {
+    const cache: SourceExpansionCache = new Map();
+
+    return Object.fromEntries(
+      x86StatusFlags.map((flag) => [
+        flag,
+        this.#resolveFlagFrom(this.#current, flag, cache)
+      ])
+    ) as StatusFlagValueIds;
+  }
+
   #materializeUndef(policy: UndefFlagPolicy): ValueId {
     switch (policy) {
       case "zero":
         return this.#values.internConst(0);
     }
-  }
-
-  beginInstruction(): void {
-    this.#boundary = cloneStatusFlagState(this.#current);
-  }
-
-  flushesForEdge(edge: PendingEdgeKind): readonly WriteStateAction[] {
-    return this.#flushesFrom(edge === "fault" ? this.#boundary : this.#current);
   }
 
   #materializeSource(source: SimpleFlagSource<ValueId>): StatusFlagValueIds {
@@ -300,19 +292,10 @@ function initialBackings(): Map<X86StatusFlag, FlagBacking> {
   return new Map(x86StatusFlags.map((flag) => [flag, { kind: "input", flag }]));
 }
 
-function initialStatusFlagState(): PendingStatusFlagState {
+function initialStatusFlagState(): StatusFlagState {
   return {
     backings: initialBackings(),
-    dirty: new Set(),
-    lazySource: undefined
-  };
-}
-
-function cloneStatusFlagState(state: PendingStatusFlagState): PendingStatusFlagState {
-  return {
-    backings: new Map(state.backings),
-    dirty: new Set(state.dirty),
-    lazySource: state.lazySource
+    directSource: undefined
   };
 }
 

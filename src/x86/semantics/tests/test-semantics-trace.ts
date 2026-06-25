@@ -1,4 +1,4 @@
-import { x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
+import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
 import { mem, operand, reg } from "#x86/semantics/refs.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
@@ -231,7 +231,7 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
   writeFlag(flag: X86Flag, value: ValueInput): void {
     this.#emit(`flag ${flag} <- ${this.#value(value)}`);
 
-    if (isStatusFlag(flag)) {
+    if (isX86StatusFlag(flag)) {
       this.#pendingStatusFlags.set(flag, value);
 
       if (this.#pendingStatusFlags.size === x86StatusFlags.length) {
@@ -372,8 +372,4 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     this.#nextValueId += 1;
     return handle;
   }
-}
-
-function isStatusFlag(flag: X86Flag): flag is X86StatusFlag {
-  return (x86StatusFlags as readonly X86Flag[]).includes(flag);
 }

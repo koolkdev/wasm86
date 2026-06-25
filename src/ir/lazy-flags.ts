@@ -9,6 +9,6 @@ export const LAZY_FLAGS_KIND = {
 
 export type LazyFlagsKind = (typeof LAZY_FLAGS_KIND)[keyof typeof LAZY_FLAGS_KIND];
 
-export function lazyFlagsHeader(kind: LazyFlagsKind, width: 0 | OperandWidth): number {
-  return kind | (width << 8);
+export function lazyFlagsKindByte(kind: LazyFlagsKind, width: 0 | OperandWidth): number {
+  return kind | (width << 2);
 }

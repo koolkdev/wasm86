@@ -1,5 +1,6 @@
 import { strictEqual } from "node:assert";
 
+import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { StateChannel } from "#ir/slots.js";
 import { x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
 import { u32 } from "#x86/numeric.js";
@@ -28,7 +29,7 @@ export type WasmCpuExpectedLazyFlagState = Readonly<{
 
 type WasmCpuLazyFlagStateSnapshot = Pick<
   WasmCpuStateSnapshot,
-  "lazyFlagsKind" | "lazyFlagsWidth" | "lazyFlagsA" | "lazyFlagsB"
+  "lazyFlagsKind" | "lazyFlagsA" | "lazyFlagsB"
 >;
 
 export const wasmCpuStateSnapshotFields = WASM_CPU_STATE_FIELDS;
@@ -93,14 +94,16 @@ export function assertLazyFlagState(
   const actual = state instanceof DataView
     ? {
         lazyFlagsKind: readWasmCpuStateField(state, "lazyFlagsKind"),
-        lazyFlagsWidth: readWasmCpuStateField(state, "lazyFlagsWidth"),
         lazyFlagsA: readWasmCpuStateField(state, "lazyFlagsA"),
         lazyFlagsB: readWasmCpuStateField(state, "lazyFlagsB")
       }
     : state;
 
-  strictEqual(actual.lazyFlagsKind, WASM_CPU_LAZY_FLAGS_KIND[expected.kind], `${label} lazy kind`);
-  strictEqual(actual.lazyFlagsWidth, expected.width, `${label} lazy width`);
+  strictEqual(
+    actual.lazyFlagsKind,
+    lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND[expected.kind], expected.width),
+    `${label} lazy kind byte`
+  );
 
   if (expected.a !== undefined) {
     strictEqual(actual.lazyFlagsA, expected.a >>> 0, `${label} lazy A`);

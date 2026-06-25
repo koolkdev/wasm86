@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { readRegisterAlias, writeRegisterAlias } from "#x86/cpu-state.js";
+import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { x86Flags } from "#x86/flags.js";
 import { registerAlias } from "#x86/registers.js";
 import { readWasmCpuState, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
@@ -31,21 +32,20 @@ test("host view initializes lazy flag metadata to none", () => {
 
   const snapshot = readWasmCpuState(state);
 
-  strictEqual(snapshot.lazyFlagsKind, WASM_CPU_LAZY_FLAGS_KIND.NONE);
-  strictEqual(snapshot.lazyFlagsWidth, 0);
+  strictEqual(snapshot.lazyFlagsKind, lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0));
   strictEqual(snapshot.lazyFlagsA, 0);
   strictEqual(snapshot.lazyFlagsB, 0);
 });
 
-test("host view stores lazy flag header fields as bytes, not bits", () => {
+test("host view stores lazy flag kind byte fields as bytes, not bits", () => {
   const { cpuState: state } = createWasmHostMemories();
+  const kindByte = lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, 32);
 
-  state.load({ lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, lazyFlagsWidth: 32 });
+  state.load({ lazyFlagsKind: kindByte });
 
   const snapshot = readWasmCpuState(state);
 
-  strictEqual(snapshot.lazyFlagsKind, WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT);
-  strictEqual(snapshot.lazyFlagsWidth, 32);
+  strictEqual(snapshot.lazyFlagsKind, kindByte);
 });
 
 test("host view stores flag fields as flag bytes and reads them back", () => {

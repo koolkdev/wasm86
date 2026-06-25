@@ -10,9 +10,7 @@ import {
   instructionCountChannel,
   lazyFlagsAChannel,
   lazyFlagsBChannel,
-  lazyFlagsHeaderChannel,
   lazyFlagsKindChannel,
-  lazyFlagsWidthChannel,
   type StateChannel
 } from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
@@ -45,8 +43,6 @@ test("flag and eip channels are atomic units", () => {
 
 test("lazy flag metadata channels are raw state fields", () => {
   deepStrictEqual(lazyFlagsKindChannel, { kind: "lazyFlags", field: "lazyFlagsKind" });
-  deepStrictEqual(lazyFlagsWidthChannel, { kind: "lazyFlags", field: "lazyFlagsWidth" });
-  deepStrictEqual(lazyFlagsHeaderChannel, { kind: "lazyFlags", field: "lazyFlagsHeader" });
   deepStrictEqual(lazyFlagsAChannel, { kind: "lazyFlags", field: "lazyFlagsA" });
   deepStrictEqual(lazyFlagsBChannel, { kind: "lazyFlags", field: "lazyFlagsB" });
 });
@@ -98,13 +94,8 @@ test("channelCovers requires full byte-range containment", () => {
   strictEqual(channelCovers(eipChannel, eipChannel), true);
   strictEqual(channelCovers(eipChannel, gprChannel("eax")), false);
   strictEqual(channelCovers(lazyFlagsKindChannel, lazyFlagsKindChannel), true);
-  strictEqual(channelCovers(lazyFlagsKindChannel, lazyFlagsWidthChannel), false);
-  strictEqual(channelCovers(lazyFlagsHeaderChannel, lazyFlagsKindChannel), true);
-  strictEqual(channelCovers(lazyFlagsHeaderChannel, lazyFlagsWidthChannel), true);
-  strictEqual(channelCovers(lazyFlagsKindChannel, lazyFlagsHeaderChannel), false);
-  strictEqual(channelCovers(lazyFlagsWidthChannel, lazyFlagsHeaderChannel), false);
-  strictEqual(channelCovers(lazyFlagsHeaderChannel, lazyFlagsAChannel), false);
   strictEqual(channelCovers(lazyFlagsKindChannel, lazyFlagsAChannel), false);
+  strictEqual(channelCovers(lazyFlagsAChannel, lazyFlagsKindChannel), false);
 });
 
 test("channelsOverlap keeps flags and eip disjoint from everything else", () => {
@@ -112,13 +103,8 @@ test("channelsOverlap keeps flags and eip disjoint from everything else", () => 
   strictEqual(channelsOverlap(flagChannel("CF"), flagChannel("ZF")), false);
   strictEqual(channelsOverlap(eipChannel, eipChannel), true);
   strictEqual(channelsOverlap(lazyFlagsKindChannel, lazyFlagsKindChannel), true);
-  strictEqual(channelsOverlap(lazyFlagsKindChannel, lazyFlagsWidthChannel), false);
-  strictEqual(channelsOverlap(lazyFlagsHeaderChannel, lazyFlagsKindChannel), true);
-  strictEqual(channelsOverlap(lazyFlagsKindChannel, lazyFlagsHeaderChannel), true);
-  strictEqual(channelsOverlap(lazyFlagsHeaderChannel, lazyFlagsWidthChannel), true);
-  strictEqual(channelsOverlap(lazyFlagsWidthChannel, lazyFlagsHeaderChannel), true);
-  strictEqual(channelsOverlap(lazyFlagsHeaderChannel, lazyFlagsAChannel), false);
   strictEqual(channelsOverlap(lazyFlagsKindChannel, lazyFlagsAChannel), false);
+  strictEqual(channelsOverlap(lazyFlagsAChannel, lazyFlagsKindChannel), false);
 
   for (const other of [gprChannel("eax"), gprChannel("ah"), flagChannel("OF"), lazyFlagsKindChannel]) {
     strictEqual(channelsOverlap(eipChannel, other), false);
@@ -131,5 +117,4 @@ test("channelsOverlap keeps flags and eip disjoint from everything else", () => 
   strictEqual(channelsOverlap(gprChannel("eax"), lazyFlagsBChannel), false);
   strictEqual(channelsOverlap(lazyFlagsKindChannel, flagChannel("CF")), false);
   strictEqual(channelsOverlap(flagChannel("CF"), lazyFlagsKindChannel), false);
-  strictEqual(channelsOverlap(lazyFlagsHeaderChannel, flagChannel("CF")), false);
 });

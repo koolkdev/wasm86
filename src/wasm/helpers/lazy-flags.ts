@@ -1,11 +1,11 @@
 import { assert } from "#common/assert.js";
 import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { IrBlock } from "#ir/block.js";
-import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsHeaderChannel, type LazyFlagsChannel } from "#ir/slots.js";
+import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type LazyFlagsChannel } from "#ir/slots.js";
 import { ValueTable, type ValueId, type HelperCallKey } from "#ir/values.js";
 import { statusFlagValuesForSource } from "#x86/flag-values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
-import { lazyFlagsHeader } from "#ir/lazy-flags.js";
+import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { OperandWidth } from "#x86/types.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -45,22 +45,22 @@ export function defineLazyFlagHelpers(
 function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncoder {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
-  const headerLocal = body.addLocal(wasmValueType.i32);
+  const kindLocal = body.addLocal(wasmValueType.i32);
 
-  emitLazyFieldLoad(body, helper, lazyFlagsHeaderChannel);
-  body.localSet(headerLocal);
+  emitLazyFieldLoad(body, helper, lazyFlagsKindChannel);
+  body.localSet(kindLocal);
 
-  emitResolverCase(body, headerLocal, lazyFlagsHeader(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0), () => {
+  emitResolverCase(body, kindLocal, lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0), () => {
     emitSlotLoad(body, flagChannel(helper), false, (id) => {
       assert(false, `${lazyFlagHelperName(helper)} unexpectedly needed value operand ${id}`);
     });
   });
 
   for (const width of [8, 16, 32] as const) {
-    emitResolverCase(body, headerLocal, lazyFlagsHeader(WASM_CPU_LAZY_FLAGS_KIND.ADD, width), () => {
+    emitResolverCase(body, kindLocal, lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, width), () => {
       emitBinaryFlag(body, scratch, helper, "add", width);
     });
-    emitResolverCase(body, headerLocal, lazyFlagsHeader(WASM_CPU_LAZY_FLAGS_KIND.SUB, width), () => {
+    emitResolverCase(body, kindLocal, lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, width), () => {
       emitBinaryFlag(body, scratch, helper, "sub", width);
     });
   }
@@ -72,11 +72,11 @@ function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncod
 
 function emitResolverCase(
   body: WasmFunctionBodyEncoder,
-  headerLocal: number,
+  kindLocal: number,
   expected: number,
   emitValue: () => void
 ): void {
-  body.localGet(headerLocal).i32Const(expected).i32Eq();
+  body.localGet(kindLocal).i32Const(expected).i32Eq();
   body.ifBlock();
   emitValue();
   body.returnFromFunction();

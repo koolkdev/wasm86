@@ -21,7 +21,7 @@ import {
   instructionCountChannel,
   lazyFlagsAChannel,
   lazyFlagsBChannel,
-  lazyFlagsHeaderChannel
+  lazyFlagsKindChannel
 } from "#ir/slots.js";
 import type {
   Action,
@@ -36,7 +36,7 @@ import type {
 import type { EdgeRegion, IrBlock } from "#ir/block.js";
 import type { ValueId, ValueNode } from "#ir/values.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
-import { LAZY_FLAGS_KIND, lazyFlagsHeader } from "#ir/lazy-flags.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
@@ -143,8 +143,8 @@ function assertLazyRecord(
   strictEqual(stateWriteValue(actions, lazyFlagsAChannel), values.projectTo(expected.width, expected.left));
   strictEqual(stateWriteValue(actions, lazyFlagsBChannel), values.projectTo(expected.width, expected.right));
   strictEqual(
-    stateWriteValue(actions, lazyFlagsHeaderChannel),
-    values.internConst(lazyFlagsHeader(LAZY_FLAGS_KIND[expected.kind], expected.width))
+    stateWriteValue(actions, lazyFlagsKindChannel),
+    values.internConst(lazyFlagsKindByte(LAZY_FLAGS_KIND[expected.kind], expected.width))
   );
 }
 
@@ -290,7 +290,7 @@ test("two adds in one block flush one lazy add record, second instruction wins",
   assertLazyRecord(writes, v, { kind: "ADD", width: 32, left: sum1, right: v.internConst(7) });
 });
 
-test("inc flushes a full concrete image with CF preserved through a helper call", () => {
+test("inc flushes a full explicit image with CF preserved through a helper call", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(unaryAluSemantic("inc", 32), [regBinding("eax")], loc(0x1000, 0x1001));
@@ -303,10 +303,10 @@ test("inc flushes a full concrete image with CF preserved through a helper call"
   );
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
   assertHelperFlag(block.values, flagWriteValue(block, "CF"), "CF");
-  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsHeaderChannel)?.value, block.values.internConst(0));
+  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.internConst(0));
 });
 
-test("cmp commits a lazy sub record but no register or concrete flags", () => {
+test("cmp commits a lazy sub record but no register or explicit flags", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
@@ -323,12 +323,12 @@ test("cmp commits a lazy sub record but no register or concrete flags", () => {
 });
 
 // A template writing only ZF; omitted status flags are preserved by resolving
-// their live input backing into the full concrete image.
+// their live input backing into the full explicit image.
 const directZfTemplate: SemanticTemplate = (s) => {
   s.writeFlag("ZF", s.const32(1));
 };
 
-test("writeFlag flushes a full concrete image with omitted flags preserved through helper calls", () => {
+test("writeFlag flushes a full explicit image with omitted flags preserved through helper calls", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(directZfTemplate, [], loc(0x1000, 0x1002));
@@ -346,7 +346,7 @@ test("writeFlag flushes a full concrete image with omitted flags preserved throu
     false
   );
 
-  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsHeaderChannel)?.value, block.values.internConst(0));
+  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.internConst(0));
 });
 
 test("an omitted direct flag write preserves the previous instruction's pending flag", () => {
@@ -495,11 +495,11 @@ test("ax and al pendings mix without touching flag pendings", () => {
   const alFlush = indexOf((a) => a.kind === "writeState" && a.slot === gprChannel("al"));
   const ahFlush = indexOf((a) => a.kind === "writeState" && a.slot === gprChannel("ah"));
   const axRead = indexOf((a) => a.kind === "readState" && a.slot === gprChannel("ax"));
-  const lazyHeaderFlush = indexOf((a) => a.kind === "writeState" && a.slot === lazyFlagsHeaderChannel);
+  const lazyKindFlush = indexOf((a) => a.kind === "writeState" && a.slot === lazyFlagsKindChannel);
 
   ok(alFlush !== -1 && ahFlush !== -1 && axRead !== -1, "expected al/ah flushes and an ax read");
   ok(alFlush < axRead && ahFlush < axRead, "the ax read must flush al and ah first");
-  ok(axRead < lazyHeaderFlush, "lazy flag flush stays at the end of the block");
+  ok(axRead < lazyKindFlush, "lazy flag flush stays at the end of the block");
   deepStrictEqual([...writtenFlags(block)], []);
 
   // The flushed al carries the add's projected result.
@@ -1764,11 +1764,11 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
   const actions = entryActions(block);
   const eaxFlush = actions.findIndex((a) => a.kind === "writeState" && a.slot === gprChannel("eax"));
   const dynamicWrite = actions.findIndex((a) => a.kind === "writeState" && a.slot.kind === "gprDynamic");
-  const lazyHeaderFlush = actions.findIndex((a) => a.kind === "writeState" && a.slot === lazyFlagsHeaderChannel);
+  const lazyKindFlush = actions.findIndex((a) => a.kind === "writeState" && a.slot === lazyFlagsKindChannel);
 
   ok(eaxFlush !== -1 && dynamicWrite !== -1, "expected an eax flush and a dynamic write");
   ok(eaxFlush < dynamicWrite, "the dirty eax pending must flush before the dynamic write");
-  ok(dynamicWrite < lazyHeaderFlush, "lazy flags ride through and flush at the end");
+  ok(dynamicWrite < lazyKindFlush, "lazy flags ride through and flush at the end");
   strictEqual(stateWrites(block).filter((write) => write.slot === gprChannel("eax")).length, 1);
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, sum);
   deepStrictEqual([...writtenFlags(block)], []);

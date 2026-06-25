@@ -43,7 +43,6 @@ test("runtime Wasm memories expose raw cpu state field offsets", () => {
     eip: 32,
     instructionCount: 36,
     lazyFlagsKind: 40,
-    lazyFlagsWidth: 41,
     lazyFlagsA: 44,
     lazyFlagsB: 48,
     CF: 52,

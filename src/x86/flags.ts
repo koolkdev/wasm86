@@ -21,6 +21,10 @@ export const x86Flags = [
 export type X86StatusFlag = (typeof x86StatusFlags)[number];
 export type X86Flag = (typeof x86Flags)[number];
 
+export function isX86StatusFlag(flag: X86Flag): flag is X86StatusFlag {
+  return (x86StatusFlags as readonly X86Flag[]).includes(flag);
+}
+
 export const x86EflagsBitOffset = {
   CF: 0,
   PF: 2,

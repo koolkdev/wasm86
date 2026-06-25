@@ -1,4 +1,4 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { PendingState } from "#ir/pending/state.js";
@@ -7,13 +7,10 @@ import {
   flagChannel,
   gprChannel,
   lazyFlagsAChannel,
-  lazyFlagsHeaderChannel,
-  lazyFlagsKindChannel,
-  lazyFlagsWidthChannel
+  lazyFlagsKindChannel
 } from "#ir/slots.js";
 import type { Action, EdgeFlushAction, GprDynamicSlot, StateSlot } from "#ir/actions.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
-import { x86StatusFlags } from "#x86/flags.js";
 
 type Harness = Readonly<{
   values: ValueTable;
@@ -176,56 +173,25 @@ test("flag and eip pendings hit exactly and never interact with registers", () =
 
 test("lazy flag metadata channels are cached raw state cells", () => {
   const { values, actions, pending } = createHarness();
-  const kind = pending.read(lazyFlagsKindChannel);
-  const width = pending.read(lazyFlagsWidthChannel);
-  const header = pending.read(lazyFlagsHeaderChannel);
+  const kindByte = pending.read(lazyFlagsKindChannel);
   const lazyA = values.internConst(0x1234_5678);
 
-  strictEqual(pending.read(lazyFlagsKindChannel), kind);
-  strictEqual(values.projectTo(8, kind), kind);
-  strictEqual(pending.read(lazyFlagsWidthChannel), width);
-  strictEqual(values.projectTo(8, width), width);
-  strictEqual(pending.read(lazyFlagsHeaderChannel), header);
-  strictEqual(values.projectTo(16, header), header);
+  strictEqual(pending.read(lazyFlagsKindChannel), kindByte);
+  strictEqual(values.projectTo(8, kindByte), kindByte);
 
   pending.write(lazyFlagsAChannel, lazyA);
 
   strictEqual(pending.has(lazyFlagsAChannel), true);
   strictEqual(pending.read(lazyFlagsAChannel), lazyA);
   deepStrictEqual(actions, [
-    { kind: "readState", output: kind, slot: lazyFlagsKindChannel },
-    { kind: "readState", output: width, slot: lazyFlagsWidthChannel },
-    { kind: "readState", output: header, slot: lazyFlagsHeaderChannel }
+    { kind: "readState", output: kindByte, slot: lazyFlagsKindChannel }
   ]);
   deepStrictEqual(pending.flushesForEdge("completed"), [
     { kind: "writeState", slot: lazyFlagsAChannel, value: lazyA }
   ]);
 });
 
-test("overlapping lazy metadata pendings fail loudly", () => {
-  const first = createHarness();
-
-  first.pending.write(lazyFlagsKindChannel, first.values.internConst(0));
-
-  throws(
-    () => first.pending.read(lazyFlagsHeaderChannel),
-    /overlapping pending cells are unsupported/
-  );
-  throws(
-    () => first.pending.write(lazyFlagsHeaderChannel, first.values.internConst(0)),
-    /overlapping pending cells are unsupported/
-  );
-
-  const second = createHarness();
-
-  second.pending.write(lazyFlagsHeaderChannel, second.values.internConst(0));
-  throws(
-    () => second.pending.read(lazyFlagsWidthChannel),
-    /overlapping pending cells are unsupported/
-  );
-});
-
-test("status flag channels route through pending flags", () => {
+test("flag channels are exact raw pending cells", () => {
   const { values, actions, pending } = createHarness();
   const zf = values.internConst(1);
 
@@ -234,20 +200,9 @@ test("status flag channels route through pending flags", () => {
   strictEqual(pending.has(flagChannel("ZF")), true);
   strictEqual(pending.read(flagChannel("ZF")), zf);
 
-  const completedFlushes = pending.flushesForEdge("completed");
-
-  deepStrictEqual(
-    completedFlushes.flatMap((action) => action.slot.kind === "flag" ? [action.slot.flag] : []),
-    x86StatusFlags
-  );
-  strictEqual(completedFlushes.find((action) => action.slot === flagChannel("ZF"))?.value, zf);
-
-  for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
-    const value = completedFlushes.find((action) => action.slot === flagChannel(flag))?.value;
-
-    ok(value !== undefined, `expected ${flag} to be flushed`);
-    deepStrictEqual(values.node(value), { kind: "helperCall", helper: { kind: "lazyFlag", flag } });
-  }
+  deepStrictEqual(pending.flushesForEdge("completed"), [
+    { kind: "writeState", slot: flagChannel("ZF"), value: zf }
+  ]);
   deepStrictEqual(actions, []);
 });
 

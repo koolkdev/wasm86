@@ -21,7 +21,6 @@ export const WASM_CPU_STATE_LAYOUT = {
   eip: { offset: 32, byteLength: 4 },
   instructionCount: { offset: 36, byteLength: 4 },
   lazyFlagsKind: { offset: 40, byteLength: 1 },
-  lazyFlagsWidth: { offset: 41, byteLength: 1 },
   lazyFlagsA: { offset: 44, byteLength: 4 },
   lazyFlagsB: { offset: 48, byteLength: 4 },
   CF: { offset: 52, byteLength: 1 },
@@ -86,10 +85,6 @@ export function wasmCpuStateChannelOffset(channel: StateChannel): number {
     case "instructionCount":
       return WASM_CPU_STATE_OFFSETS.instructionCount;
     case "lazyFlags":
-      if (channel.field === "lazyFlagsHeader") {
-        return WASM_CPU_STATE_OFFSETS.lazyFlagsKind;
-      }
-
       return WASM_CPU_STATE_OFFSETS[channel.field];
   }
 }
@@ -101,10 +96,6 @@ export function wasmCpuStateChannelAccessByteLength(channel: StateChannel): 1 | 
     case "flag":
       return 1;
     case "lazyFlags":
-      if (channel.field === "lazyFlagsHeader") {
-        return 2;
-      }
-
       return WASM_CPU_STATE_LAYOUT[channel.field].byteLength;
     case "eip":
     case "instructionCount":

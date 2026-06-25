@@ -1,5 +1,10 @@
 import type { Action, StateSlot } from "../actions.js";
-import type { EipChannel, FlagChannel, InstructionCountChannel, LazyFlagsChannel } from "../slots.js";
+import {
+  type EipChannel,
+  type FlagChannel,
+  type InstructionCountChannel,
+  type LazyFlagsChannel
+} from "../slots.js";
 import type { ValueId, ValueTable, WidthBounds } from "../values.js";
 
 export type CachedStateInput = FlagChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;

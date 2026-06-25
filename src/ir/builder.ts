@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ConditionCode } from "#x86/conditions.js";
-import type { X86Flag } from "#x86/flags.js";
+import { isX86StatusFlag, type X86Flag } from "#x86/flags.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
@@ -31,8 +31,10 @@ import type {
   RegDynamicOperandBinding
 } from "./operands.js";
 import { PendingState } from "./pending/state.js";
+import { StatusFlags } from "./status-flags.js";
 import {
   eipChannel,
+  flagChannel,
   gprChannel,
   instructionCountChannel,
   type GprChannel
@@ -112,6 +114,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = new ValueTable();
   readonly #actions: Action[] = [];
   readonly #pending = new PendingState(this.#values, (action) => this.#actions.push(action));
+  readonly #statusFlags = new StatusFlags(this.#values, this.#pending);
   readonly #edgeRegions: EdgeRegion[] = [];
   // An effective address is computed once per operand, at its first use —
   // x86 computes an EA once, so later uses (the store) see the same address
@@ -397,22 +400,31 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   readFlag(flag: X86Flag): Value {
     this.#beforeOp("readFlag");
-    return valueFromId(this.#pending.readFlag(flag));
+    return valueFromId(
+      isX86StatusFlag(flag)
+        ? this.#statusFlags.readFlag(flag)
+        : this.#pending.read(flagChannel(flag))
+    );
   }
 
   writeFlag(flag: X86Flag, value: ValueInput): void {
     this.#beforeOp("writeFlag");
-    this.#pending.writeFlag(flag, value);
+    if (isX86StatusFlag(flag)) {
+      this.#statusFlags.writeFlag(flag, value);
+      return;
+    }
+
+    this.#pending.write(flagChannel(flag), value);
   }
 
   writeStatusFlagsSource(source: SimpleFlagSource): void {
     this.#beforeOp("writeStatusFlagsSource");
-    this.#pending.writeStatusFlagsSource(source);
+    this.#statusFlags.writeStatusFlagsSource(source);
   }
 
   condition(cc: ConditionCode): Value {
     this.#beforeOp("condition");
-    return valueFromId(this.#pending.condition(cc));
+    return valueFromId(this.#statusFlags.condition(cc));
   }
 
   jump(target: TargetInput): void {

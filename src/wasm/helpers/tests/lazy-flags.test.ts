@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { wasmImport } from "#wasm/abi.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
+import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import {
   defineLazyFlagHelper,
@@ -43,9 +44,9 @@ test("lazy flag helper bodies compile", async () => {
   await WebAssembly.compile(module.encode());
 });
 
-test("lazy flag helpers resolve concrete NONE flag bytes", async () => {
+test("lazy flag helpers resolve explicit NONE flag bytes", async () => {
   const runtime = await instantiateLazyFlagHelpers();
-  const concreteFlags = {
+  const explicitFlags = {
     CF: 1,
     PF: 0,
     AF: 1,
@@ -55,13 +56,12 @@ test("lazy flag helpers resolve concrete NONE flag bytes", async () => {
   } as const satisfies Readonly<Record<X86StatusFlag, number>>;
 
   writeWasmCpuStateSnapshot(runtime.stateView, {
-    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.NONE,
-    lazyFlagsWidth: 0,
-    ...concreteFlags
+    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
+    ...explicitFlags
   });
 
   for (const flag of x86StatusFlags) {
-    strictEqual(runtime.resolve(flag), concreteFlags[flag], flag);
+    strictEqual(runtime.resolve(flag), explicitFlags[flag], flag);
   }
 });
 
@@ -78,8 +78,7 @@ test("lazy flag helpers resolve seeded SUB runtime state", async () => {
 
   for (const entry of cases) {
     writeWasmCpuStateSnapshot(runtime.stateView, {
-      lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.SUB,
-      lazyFlagsWidth: entry.width,
+      lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, entry.width),
       lazyFlagsA: entry.left,
       lazyFlagsB: entry.right,
       CF: 0,
@@ -115,8 +114,7 @@ test("lazy flag helpers resolve seeded ADD runtime state", async () => {
 
   for (const entry of cases) {
     writeWasmCpuStateSnapshot(runtime.stateView, {
-      lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.ADD,
-      lazyFlagsWidth: entry.width,
+      lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, entry.width),
       lazyFlagsA: entry.left,
       lazyFlagsB: entry.right,
       CF: 0,
@@ -143,8 +141,7 @@ test("lazy flag helpers trap on unsupported runtime metadata", async () => {
   const runtime = await instantiateLazyFlagHelpers();
 
   writeWasmCpuStateSnapshot(runtime.stateView, {
-    lazyFlagsKind: WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT,
-    lazyFlagsWidth: 32,
+    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, 32),
     ZF: 1
   });
 
