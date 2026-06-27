@@ -16,8 +16,7 @@ test("helperCallsForBlock reports live helper calls", () => {
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "writeState", slot: gprChannel("eax"), value: zf },
-          { kind: "continue" }
+          { kind: "writeState", slot: gprChannel("eax"), value: zf }
         ]
       }
     ],
@@ -36,7 +35,7 @@ test("helperCallsForBlock omits dead helper calls", () => {
 
   const block = {
     entry: 0,
-    regions: [{ id: 0, kind: "entry", actions: [{ kind: "continue" }] }],
+    regions: [{ id: 0, kind: "entry", actions: [] }],
     values
   } as const;
 

@@ -4,14 +4,14 @@ import type { ValueId } from "#ir/values.js";
 import { u32 } from "#x86/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
-import type { CompletionPolicy, LinkCompletion } from "./embed.js";
+import type { DispatchTarget, FallthroughTarget, LinkCompletion } from "./embed.js";
 
 // Report and completion lowering for edge bodies emitted inline by emit.ts.
 
 export type ControlFrameContext = Readonly<{
   body: WasmFunctionBodyEncoder;
-  // Where a completed block lands.
-  completion: CompletionPolicy;
+  dispatch: DispatchTarget | undefined;
+  fallthrough: FallthroughTarget | undefined;
   // Pushes an exit payload value.
   emitPayload(id: ValueId): void;
   constValue(id: ValueId): number | undefined;
@@ -20,8 +20,10 @@ export type ControlFrameContext = Readonly<{
 export type ControlFrame = Readonly<{
   // Detail is the guard's byte length on fault edges.
   emitReport(exit: ExitAction, detail?: number): void;
-  // Continuation is the region's flushed eip.
-  emitCompletion(continuation: ValueId | undefined): void;
+  // Applies the embedding's dispatch target for dispatch.targetEip.
+  emitDispatch(targetEip: ValueId): void;
+  // Applies the embedding to a natural action-body fallthrough.
+  emitFallthrough(): void;
   // Runs emitBody while completions account for one enclosing Wasm control
   // construct, so `br` completions can escape inline guard or branch bodies.
   withNestedControl(emitBody: () => void): void;
@@ -38,26 +40,42 @@ type LinkedTarget = Readonly<
 // completion lowering. A `br` completion inside an inline if must skip that
 // if before it can target the embedder's label.
 export function createControlFrame(context: ControlFrameContext): ControlFrame {
-  const { body, completion } = context;
+  const { body } = context;
   let inlineControlDepth = 0;
 
-  function emitCompletion(continuation: ValueId | undefined): void {
-    switch (completion.kind) {
+  function emitFallthrough(): void {
+    const target = context.fallthrough;
+
+    assert(target !== undefined, "action body has no fallthrough target");
+
+    switch (target.kind) {
       case "fallthrough":
         return;
       case "br":
-        body.br(completion.depth + inlineControlDepth);
-        return;
-      case "link":
-        emitLinkedCompletion(resolveLinkedTarget(completion, continuation));
+        body.br(target.depth + inlineControlDepth);
         return;
     }
   }
 
-  function resolveLinkedTarget(link: LinkCompletion, continuation: ValueId | undefined): LinkedTarget {
-    assert(continuation !== undefined, "a linked completion needs the region's eip flush");
+  function emitDispatch(targetEip: ValueId): void {
+    const target = context.dispatch;
 
-    const target = context.constValue(continuation);
+    assert(target !== undefined, "dispatch action requires embedding.dispatch");
+
+    switch (target.kind) {
+      case "fallthrough":
+        return;
+      case "br":
+        body.br(target.depth + inlineControlDepth);
+        return;
+      case "link":
+        emitLinkedCompletion(resolveLinkedTarget(target, targetEip));
+        return;
+    }
+  }
+
+  function resolveLinkedTarget(link: LinkCompletion, eip: ValueId): LinkedTarget {
+    const target = context.constValue(eip);
 
     if (target === undefined) {
       return { kind: "dynamic" };
@@ -78,7 +96,8 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     return { kind: "table", slot, typeIndex: link.table.typeIndex, tableIndex: link.table.tableIndex };
   }
 
-  // State is already flushed, so a constant target is a bare tail call.
+  // State, including EIP, is already flushed by ordinary actions, so a
+  // constant target is a bare tail call.
   function emitLinkedCompletion(target: LinkedTarget): void {
     switch (target.kind) {
       case "dynamic":
@@ -107,7 +126,8 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
 
   return {
     emitReport,
-    emitCompletion,
+    emitDispatch,
+    emitFallthrough,
     withNestedControl(emitBody: () => void): void {
       inlineControlDepth += 1;
       try {

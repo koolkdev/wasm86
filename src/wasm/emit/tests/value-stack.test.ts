@@ -62,8 +62,7 @@ test("helper calls lower to Wasm calls through the helper registry", () => {
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: helper },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("eax"), value: helper }
     ]),
     [],
     helpers
@@ -82,8 +81,7 @@ test("helper calls fail clearly when the helper is missing", () => {
   const { valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: helper },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("eax"), value: helper }
     ]),
     [],
     createWasmHelperRegistry(new WasmModuleEncoder())
@@ -102,8 +100,7 @@ test("single-use values emit inline with no locals", () => {
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("ebx"), value: sum }
     ])
   );
 
@@ -135,8 +132,7 @@ test("a multi-use value tees once and replays from one freed local", () => {
     entryRegion([
       readAction,
       { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-      { kind: "writeState", slot: gprChannel("ecx"), value: sum },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("ecx"), value: sum }
     ])
   );
 
@@ -172,8 +168,7 @@ test("a pinned read loads once at its action point and replays past the store", 
       readEax,
       readEbx,
       { kind: "writeState", slot: gprChannel("ebx"), value: eax },
-      { kind: "writeState", slot: gprChannel("eax"), value: ebx },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("eax"), value: ebx }
     ])
   );
 
@@ -209,8 +204,7 @@ test("a dead read emits nothing", () => {
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("eax"), value: seven },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("eax"), value: seven }
     ])
   );
 
@@ -234,8 +228,7 @@ test("constant and external leaves re-emit per use without scratch locals", () =
       { kind: "writeState", slot: gprChannel("eax"), value: seven },
       { kind: "writeState", slot: gprChannel("ebx"), value: seven },
       { kind: "writeState", slot: gprChannel("ecx"), value: external },
-      { kind: "writeState", slot: gprChannel("edx"), value: external },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("edx"), value: external }
     ]),
     [3]
   );
@@ -266,8 +259,7 @@ test("an external without a bound local fails loudly", () => {
   const { valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: external },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("eax"), value: external }
     ])
   );
 
@@ -284,8 +276,7 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: select },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("eax"), value: select }
     ])
   );
 
@@ -321,8 +312,7 @@ test("operators map to their wasm opcodes", () => {
       { kind: "writeState", slot: gprChannel("ebx"), value: extended },
       { kind: "writeState", slot: gprChannel("ecx"), value: masked },
       { kind: "writeState", slot: gprChannel("edx"), value: equal },
-      { kind: "writeState", slot: gprChannel("esi"), value: signed },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("esi"), value: signed }
     ])
   );
 
@@ -374,8 +364,7 @@ test("project masks to the requested width", () => {
       readAction,
       { kind: "writeState", slot: gprChannel("ebx"), value: low8 },
       { kind: "writeState", slot: gprChannel("ecx"), value: low16 },
-      { kind: "writeState", slot: gprChannel("edx"), value: full },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("edx"), value: full }
     ])
   );
 
@@ -410,8 +399,7 @@ test("equality against constant zero emits eqz from either side", () => {
     values,
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: left },
-      { kind: "writeState", slot: gprChannel("ebx"), value: right },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("ebx"), value: right }
     ]),
     [3]
   );
@@ -438,8 +426,7 @@ test("ne and non-zero equality keep the generic compare", () => {
     values,
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: notZero },
-      { kind: "writeState", slot: gprChannel("ebx"), value: one },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("ebx"), value: one }
     ]),
     [3]
   );
@@ -469,8 +456,7 @@ test("a loaded value pins to a local at its action point and replays", () => {
     entryRegion([
       readAction,
       { kind: "writeState", slot: gprChannel("eax"), value: loaded },
-      { kind: "writeState", slot: gprChannel("ebx"), value: loaded },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("ebx"), value: loaded }
     ])
   );
 
@@ -500,7 +486,7 @@ test("a dead load emits nothing", () => {
   const readAction: ReadMemoryAction = { kind: "readMemory", output: loaded, address, width: 32 };
   const { body, scratch, valueStack } = createTestEmitter(
     values,
-    entryRegion([readAction, { kind: "continue" }])
+    entryRegion([readAction])
   );
 
   valueStack.readMemory(readAction);
@@ -521,8 +507,7 @@ test("captureForEdge computes an untouched compound into a local for later uses"
     entryRegion([
       readAction,
       { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-      { kind: "writeState", slot: gprChannel("ecx"), value: sum },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("ecx"), value: sum }
     ])
   );
   // An edge consuming the compound twice plus both leaves: one capture, the
@@ -573,8 +558,7 @@ test("unconsumed captures fail assertClear and hold their scratch local", () => 
     entryRegion([
       readAction,
       { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-      { kind: "writeState", slot: gprChannel("ecx"), value: sum },
-      { kind: "continue" }
+      { kind: "writeState", slot: gprChannel("ecx"), value: sum }
     ])
   );
 

@@ -115,8 +115,7 @@ test("generic state actions load and store the lazy flags kind byte channel", as
         actions: [
           { kind: "readState", output: oldKindByte, slot: lazyFlagsKindChannel },
           { kind: "writeState", slot: lazyFlagsBChannel, value: oldKindByte },
-          { kind: "writeState", slot: lazyFlagsKindChannel, value: newKindByte },
-          { kind: "continue" }
+          { kind: "writeState", slot: lazyFlagsKindChannel, value: newKindByte }
         ]
       }
     ],

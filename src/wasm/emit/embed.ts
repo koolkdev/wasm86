@@ -17,7 +17,7 @@ export type LinkTable = Readonly<{
   tableIndex: number;
 }>;
 
-// A constant continuation tail-calls its target's function or table slot;
+// A constant dispatch target tail-calls its target's function or table slot;
 // a dynamic one reports DYNAMIC_JUMP.
 export type LinkCompletion = Readonly<{
   kind: "link";
@@ -26,19 +26,18 @@ export type LinkCompletion = Readonly<{
   table?: LinkTable;
 }>;
 
-// An open completion lands in embedder code; a closed one leaves the
-// function itself, so it works anywhere.
-export type OpenCompletion = FallthroughCompletion | BrCompletion;
-export type ClosedCompletion = LinkCompletion;
-export type CompletionPolicy = OpenCompletion | ClosedCompletion;
+export type FallthroughTarget = FallthroughCompletion | BrCompletion;
+export type DispatchTarget = FallthroughTarget | LinkCompletion;
 
-export type FragmentEmbedding = Readonly<{
-  // Where a completed block lands. Exits always return the encoded i64
+export type ActionEmbedding = Readonly<{
+  // Where dispatch(targetEip) lands. Exits always return the encoded i64
   // report, payload included.
-  completion: CompletionPolicy;
-  // Value -> embedder local, set right before the entry terminator.
+  dispatch?: DispatchTarget;
+  // Where an action body with no terminator lands.
+  fallthrough?: FallthroughTarget;
+  // Value -> embedder local, set at the action body boundary.
   outputs?: ReadonlyMap<ValueId, number>;
 }>;
 
-// No embedder code to land in: the completion must close the function.
-export type FunctionEmbedding = Readonly<{ completion: ClosedCompletion }>;
+export type FragmentEmbedding = ActionEmbedding;
+export type FunctionEmbedding = Readonly<{ dispatch: LinkCompletion }>;

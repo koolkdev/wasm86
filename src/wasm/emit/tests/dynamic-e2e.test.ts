@@ -159,8 +159,7 @@ test("a computed index extracts the registers from a modrm-style external", asyn
         kind: "entry",
         actions: [
           { kind: "readState", output: loaded, slot: { kind: "gprDynamic", index: reg, byteLength: 4 } },
-          { kind: "writeState", slot: { kind: "gprDynamic", index: rm, byteLength: 4 }, value: loaded },
-          { kind: "continue" }
+          { kind: "writeState", slot: { kind: "gprDynamic", index: rm, byteLength: 4 }, value: loaded }
         ]
       }
     ],
@@ -186,8 +185,7 @@ test("a computed index drives byte access through its two address pushes", async
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "writeState", slot: { kind: "gprDynamic", index: reg, byteLength: 1 }, value: values.internConst(0x7f) },
-          { kind: "continue" }
+          { kind: "writeState", slot: { kind: "gprDynamic", index: reg, byteLength: 1 }, value: values.internConst(0x7f) }
         ]
       }
     ],

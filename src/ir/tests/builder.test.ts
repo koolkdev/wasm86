@@ -141,7 +141,7 @@ function assertHelperFlag(values: IrBlock["values"], id: ValueId, flag: X86Statu
   deepStrictEqual(values.node(id), { kind: "helperCall", helper: { kind: "lazyFlag", flag } });
 }
 
-test("mov r32, imm32 flushes the register write, the eip advance, and a continue", () => {
+test("mov r32, imm32 flushes the register write and dispatches at the next eip", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], loc(0x401000, 0x401005));
@@ -158,7 +158,7 @@ test("mov r32, imm32 flushes the register write, the eip advance, and a continue
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x401005) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x401005) }
   ]);
   deepStrictEqual(v.node(v.internConst(0x12345678)), { kind: "const", value: 0x12345678 });
   // The instruction-start eip, immediate, next eip, and count advance.
@@ -179,7 +179,7 @@ test("pending writes overwrite per channel and consts intern across instructions
     { kind: "writeState", slot: gprChannel("eax"), value: block.values.internConst(9) },
     { kind: "writeState", slot: gprChannel("ecx"), value: block.values.internConst(7) },
     { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x100f) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: block.values.internConst(0x100f) }
   ]);
 
   // 7, 9, the four eip constants, and the count read with its three folded
@@ -199,7 +199,7 @@ test("mov r32, r32 records one readState and forwards its leaf", () => {
     { kind: "readState", output: 1, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1002) }
   ]);
   deepStrictEqual(v.node(1), { kind: "actionOutput" });
   // The instruction-start eip, read leaf, next eip, and count advance.
@@ -220,7 +220,7 @@ test("repeated get of an unwritten channel returns the same leaf across instruct
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
     { kind: "writeState", slot: gprChannel("ecx"), value: 1 },
     { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1004) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: block.values.internConst(0x1004) }
   ]);
 });
 
@@ -300,6 +300,7 @@ test("cmp commits a lazy sub record but no register or explicit flags", () => {
   assertLazyRecord(writes, block.values, { kind: "SUB", width: 32, left: reads[0]!.output, right: reads[1]!.output });
   strictEqual(writes.some((write) => write.slot.kind === "gpr"), false);
   strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
+  deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: block.values.internConst(0x1002) });
 });
 
 // A template writing only ZF; omitted status flags are preserved by resolving
@@ -367,7 +368,7 @@ test("xchg eax, ebx swaps pendings through two reads with no temporaries", () =>
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
     { kind: "writeState", slot: gprChannel("eax"), value: 2 },
     { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1002) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: block.values.internConst(0x1002) }
   ]);
 
   // The instruction-start eip, two read leaves, next eip, and count advance — no
@@ -386,7 +387,7 @@ test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
     { kind: "readState", output: 1, slot: gprChannel("ah") },
     { kind: "writeState", slot: gprChannel("bl"), value: 1 },
     { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1002) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: block.values.internConst(0x1002) }
   ]);
   // The instruction-start eip, read leaf, next eip, and count advance — no
   // masks or shifts were created.
@@ -407,7 +408,7 @@ test("write al then read eax flushes the byte and reloads the word", () => {
     { kind: "readState", output: 6, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 6 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1004) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1004) }
   ]);
 });
 
@@ -425,7 +426,7 @@ test("write eax then read al flushes the word and reloads the byte", () => {
     { kind: "readState", output: 6, slot: gprChannel("al") },
     { kind: "writeState", slot: gprChannel("bl"), value: 6 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1007) }
   ]);
 });
 
@@ -441,7 +442,7 @@ test("write al then write eax drops the byte pending with no flush", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1007) }
   ]);
 });
 
@@ -504,7 +505,7 @@ test("movzx r32, r8 forwards the unsigned byte read unmasked", () => {
     { kind: "readState", output: 1, slot: gprChannel("al") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
     { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1003) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: block.values.internConst(0x1003) }
   ]);
   strictEqual(block.values.size(), 6);
 });
@@ -520,7 +521,7 @@ test("movsx r32, r8 marks the read for a sign-extending load", () => {
     { kind: "readState", output: 1, slot: gprChannel("al"), signed: true },
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
     { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1003) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: block.values.internConst(0x1003) }
   ]);
   strictEqual(block.values.size(), 6);
 });
@@ -645,14 +646,14 @@ test("value methods intern through the builder", () => {
     { kind: "readState", output: read.output, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("eax"), value: selected },
     { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1003) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: block.values.internConst(0x1003) }
   ]);
   deepStrictEqual(block.values.node(compare), { kind: "compare", operator: "lt_s", a: read.output, b: zero });
   deepStrictEqual(block.values.node(negated), { kind: "binary", operator: "sub", a: zero, b: read.output });
   deepStrictEqual(block.values.node(selected), { kind: "select", condition: compare, whenTrue: negated, whenFalse: read.output });
 });
 
-test("jmp redirects the eip flush and continues at the target", () => {
+test("jmp dispatches at the target", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(jmpSemantic(), [immBinding(0x2000)], loc(0x1000, 0x1005));
@@ -662,11 +663,11 @@ test("jmp redirects the eip flush and continues at the target", () => {
   strictEqual(block.regions.length, 1);
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x2000) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: block.values.internConst(0x2000) }
   ]);
 });
 
-test("a jump flushes earlier pendings with the target eip", () => {
+test("a jump flushes earlier pendings and dispatches at the target eip", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
@@ -678,7 +679,7 @@ test("a jump flushes earlier pendings with the target eip", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x77) },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x2000) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x2000) }
   ]);
 });
 
@@ -733,7 +734,7 @@ test("jcc after cmp source uses the source-derived condition with per-edge lazy 
   // The branch is the entry's terminator: nothing flushes on the main path.
   strictEqual(stateWrites(block).length, 0);
 
-  // Each edge flushes the cmp's lazy record and writes its own eip.
+  // Each edge flushes the cmp's lazy record and dispatches at its own eip.
   const taken = edgeFlushes(block, 1);
   const notTaken = edgeFlushes(block, 2);
 
@@ -743,9 +744,9 @@ test("jcc after cmp source uses the source-derived condition with per-edge lazy 
   }
 
   strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.internConst(0x2000));
-  deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "continue" });
+  deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "dispatch", targetEip: v.internConst(0x2000) });
   strictEqual(edgeWriteFlushes(block, 2).find((write) => write.slot === eipChannel)?.value, v.internConst(0x1005));
-  deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "continue" });
+  deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "dispatch", targetEip: v.internConst(0x1005) });
 });
 
 test("jcc after test source uses the source-derived condition with no flag byte reads", () => {
@@ -1171,7 +1172,7 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
     { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 },
     { kind: "writeMemory", address, value: eax.output, width: 32 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1003) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1003) }
   ]);
 
   const edge = edgeRegion(block, 1);
@@ -1280,6 +1281,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
 
   strictEqual(mainWrites.find((write) => write.slot === gprChannel("eax"))?.value, sum);
   strictEqual(mainWrites.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1006));
+  deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: v.internConst(0x1006) });
 
   const store = entryActions(block).find(
     (action): action is WriteMemoryAction => action.kind === "writeMemory"
@@ -1315,7 +1317,7 @@ test("lea builds general modrm addresses from channel reads", () => {
     { kind: "readState", output: esi, slot: gprChannel("esi") },
     { kind: "writeState", slot: gprChannel("eax"), value: address },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1007) }
   ]);
 });
 
@@ -1337,7 +1339,7 @@ test("an absolute address is just its displacement constant", () => {
     { kind: "readMemory", output: 2, address, width: 32 },
     { kind: "writeState", slot: gprChannel("eax"), value: 2 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1005) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).flushes, [
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
@@ -1424,7 +1426,7 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
     { kind: "writeMemory", address: ebx, value: ebx, width: 32 },
     { kind: "writeState", slot: gprChannel("ebx"), value: load },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1002) }
   ]);
 });
 
@@ -1451,7 +1453,7 @@ test("get and set through s.mem lower to memory actions at the given address", (
     { kind: "readMemory", output: 2, address, width: 32 },
     { kind: "writeMemory", address, value: v.internBinary("add", 2, v.internConst(1)), width: 32 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1006) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1006) }
   ]);
 });
 
@@ -1556,7 +1558,7 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
     { kind: "writeMemory", address: ebx, value: popValue, width: 32 },
     { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1002) }
   ]);
 
   // esp was boundary-absent, so neither edge writes it — not even the write
@@ -1621,7 +1623,7 @@ test("pop [esp] builds the destination address from the incremented esp", () => 
     { kind: "writeMemory", address: nextEsp, value: popValue, width: 32 },
     { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1003) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1003) }
   ]);
 });
 
@@ -1734,7 +1736,7 @@ test("a static register read keeps its order across a dynamic write", () => {
       value: read.output
     },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1002) }
   ]);
 });
 
@@ -1848,7 +1850,7 @@ test("pop r/mDyn flushes the incremented esp before the dynamic store, after the
       value: popValue
     },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1002) }
   ]);
 });
 
@@ -1868,7 +1870,7 @@ test("an 8-bit template width lowers a one-byte dynamic slot", () => {
     },
     { kind: "writeState", slot: gprChannel("bl"), value: 2 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1002) }
   ]);
 });
 
@@ -1947,7 +1949,7 @@ test("an external location flushes eip as the nextEip external", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(5) },
     { kind: "writeState", slot: eipChannel, value: v.internExternal(1) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internExternal(1) }
   ]);
 });
 
@@ -1971,10 +1973,8 @@ test("a fault edge restores an external eip", () => {
     reason: "memoryReadFault",
     payload: v.internConst(0x2000)
   });
-  strictEqual(
-    stateWrites(block).find((write) => write.slot === eipChannel)?.value,
-    v.internExternal(5)
-  );
+  strictEqual(stateWrites(block).find((write) => write.slot === eipChannel)?.value, v.internExternal(5));
+  deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: v.internExternal(5) });
 });
 
 // The memDynamic address: the in-block base register read plus the
@@ -2008,7 +2008,7 @@ test("a memStatic operand guards and accesses the external address", () => {
     { kind: "readMemory", output: 2, address, width: 32 },
     { kind: "writeState", slot: gprChannel("eax"), value: 2 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1006) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1006) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).terminator, {
     kind: "exit",
@@ -2040,7 +2040,7 @@ test("a memDynamic operand reads the base register inside the block", () => {
     { kind: "readMemory", output: load.output, address, width: 32 },
     { kind: "writeState", slot: gprChannel("eax"), value: load.output },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1006) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1006) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).terminator, {
     kind: "exit",
@@ -2097,7 +2097,7 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
     { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
     { kind: "writeMemory", address, value: popValue, width: 32 },
     { kind: "writeState", slot: eipChannel, value: v.internConst(0x1003) },
-    { kind: "continue" }
+    { kind: "dispatch", targetEip: v.internConst(0x1003) }
   ]);
 
   // The read guard predates the flush: its edge omits esp (cpu state memory

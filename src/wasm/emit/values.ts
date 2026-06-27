@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { actionMayWriteStateSlot } from "#ir/aliasing.js";
-import type { Action, ReadStateAction, StateSlot } from "#ir/actions.js";
+import { isTerminatorAction, type Action, type ReadStateAction, type StateSlot } from "#ir/actions.js";
 import type {
   IrBlock,
   EdgeRegion,
@@ -117,12 +117,17 @@ class BlockValueUsage implements BlockValueAnalysis {
     });
   }
 
-  // Exported outputs materialize right before the entry terminator, so they
-  // count as uses there — like edge captures at their branch point.
+  // Exported outputs materialize after the action body and before the
+  // embedding handles its dispatch or fallthrough.
   #chargeExportedUses(entry: EntryRegion, exported: Iterable<ValueId>): void {
+    const lastActionIndex = entry.actions.length - 1;
+    const lastAction = entry.actions[lastActionIndex];
+    const actionIndex =
+      lastAction !== undefined && isTerminatorAction(lastAction) ? lastActionIndex : entry.actions.length;
+
     for (const id of exported) {
       this.#values.node(id);
-      this.#addUse(id, entry.actions.length - 1);
+      this.#addUse(id, actionIndex);
     }
   }
 
@@ -231,7 +236,7 @@ export function edgeValues(edge: EdgeRegion): readonly ValueId[] {
       }
 
       break;
-    case "continue":
+    case "dispatch":
       break;
   }
 
@@ -254,7 +259,7 @@ function actionOperands(action: Action): readonly ValueId[] {
       return [action.condition];
     case "exit":
       return action.payload === undefined ? [] : [action.payload];
-    case "continue":
+    case "dispatch":
       return [];
   }
 }
@@ -290,7 +295,7 @@ function actionOutput(action: Action): ValueId | undefined {
     case "guardMemory":
     case "branch":
     case "exit":
-    case "continue":
+    case "dispatch":
       return undefined;
   }
 }

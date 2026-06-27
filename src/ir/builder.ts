@@ -41,8 +41,8 @@ import {
 } from "./slots.js";
 import type {
   Action,
+  DispatchAction,
   EdgeFlushAction,
-  ContinueAction,
   ExitAction,
   GprDynamicSlot
 } from "./actions.js";
@@ -165,15 +165,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     assert(this.#instructionLocation === undefined, "IR block builder has an incomplete instruction");
     this.#finished = true;
 
-    let continuation: ValueId | undefined;
-
     switch (this.#blockEnd) {
       case "fallthrough":
       case "jump":
         assert(this.#pending.has(eipChannel), "IR block did not advance eip; no instructions were added");
-        continuation = this.#pending.read(eipChannel);
         this.#actions.push(...this.#pending.flushesForEdge("completed"));
-        this.#actions.push({ kind: "continue" });
+        this.#actions.push({ kind: "dispatch", targetEip: this.#pending.read(eipChannel) });
         break;
       case "terminated":
         break;
@@ -185,8 +182,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         {
           id: entryRegionId,
           kind: "entry",
-          actions: this.#actions,
-          ...(continuation === undefined ? {} : { continuation })
+          actions: this.#actions
         },
         ...this.#edgeRegions
       ],
@@ -489,39 +485,25 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#pending.write(eipChannel, target);
 
     return this.#edgeRegion(
-      { kind: "continue" },
-      this.#pending.flushesForEdge("completed"),
-      target
+      { kind: "dispatch", targetEip: target },
+      this.#pending.flushesForEdge("completed")
     );
   }
 
   #edgeRegion(
-    terminator: ExitAction | ContinueAction,
-    flushes: readonly EdgeFlushAction[],
-    continuation?: ValueId
+    terminator: ExitAction | DispatchAction,
+    flushes: readonly EdgeFlushAction[]
   ): RegionId {
     const id = this.#nextRegionId;
 
     this.#nextRegionId += 1;
 
-    if (terminator.kind === "continue") {
-      assert(continuation !== undefined, "continue edge missing continuation value");
-
-      this.#edgeRegions.push({
-        id,
-        kind: "edge",
-        flushes,
-        terminator,
-        continuation
-      });
-    } else {
-      this.#edgeRegions.push({
-        id,
-        kind: "edge",
-        flushes,
-        terminator
-      });
-    }
+    this.#edgeRegions.push({
+      id,
+      kind: "edge",
+      flushes,
+      terminator
+    });
 
     return id;
   }

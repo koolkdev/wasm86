@@ -1,11 +1,16 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
-import type {
-  Action,
-  BranchAction,
-  GuardMemoryAction
+import {
+  isTerminatorAction,
+  type Action,
+  type BranchAction,
+  type GuardMemoryAction
 } from "#ir/actions.js";
-import type { EdgeRegion, IrBlock, RegionId } from "#ir/block.js";
+import type {
+  EdgeRegion,
+  IrBlock,
+  RegionId
+} from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -58,7 +63,7 @@ export function emitActionFunction(block: IrBlock, context: ActionFunctionContex
 }
 
 export function emitActionFragment(block: IrBlock, context: ActionFragmentContext): void {
-  validateIrBlock(block);
+  validateIrBlock(block, { allowImplicitEntryFallthrough: context.embedding.fallthrough !== undefined });
 
   const { body, embedding } = context;
   const entry = block.regions.find((region) => region.id === block.entry);
@@ -82,13 +87,12 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   // a zero that only marks them as targeted.
   const edgeExitDetails = new Map<RegionId, number>();
   const terminator = entry.actions[entry.actions.length - 1];
-  const entryContinuation = entry.continuation;
-
-  assert(terminator !== undefined, "entry region does not end with a terminator");
+  const hasTerminator = terminator !== undefined && isTerminatorAction(terminator);
 
   const frame = createControlFrame({
     body,
-    completion: embedding.completion,
+    dispatch: embedding.dispatch,
+    fallthrough: embedding.fallthrough,
     emitPayload: valueStack.emitUse,
     constValue: (id) => block.values.constValue(id)
   });
@@ -115,8 +119,8 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "exit":
         frame.emitReport(action);
         return;
-      case "continue":
-        frame.emitCompletion(entryContinuation);
+      case "dispatch":
+        frame.emitDispatch(action.targetEip);
         return;
       case "branch":
         emitBranch(action);
@@ -157,7 +161,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     });
     body.endBlock();
 
-    if (embedding.completion.kind === "link") {
+    if (embedding.dispatch?.kind === "link") {
       body.unreachable();
     }
   }
@@ -184,8 +188,8 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "exit":
         frame.emitReport(edge.terminator, detail);
         return;
-      case "continue":
-        frame.emitCompletion(edge.continuation);
+      case "dispatch":
+        frame.emitDispatch(edge.terminator.targetEip);
         return;
     }
   }
@@ -197,12 +201,16 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     return edge;
   }
 
-  for (const action of entry.actions.slice(0, -1)) {
+  for (const action of hasTerminator ? entry.actions.slice(0, -1) : entry.actions) {
     emitEntryAction(action);
   }
 
   emitExportedOutputs();
-  emitEntryAction(terminator);
+  if (hasTerminator) {
+    emitEntryAction(terminator);
+  } else {
+    frame.emitFallthrough();
+  }
 
   valueStack.assertClear();
 }

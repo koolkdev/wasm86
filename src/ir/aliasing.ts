@@ -34,7 +34,7 @@ export function effectsOf(action: Action): ActionEffects {
       return noEffects;
     case "branch":
     case "exit":
-    case "continue":
+    case "dispatch":
       return noEffects;
   }
 }
@@ -72,7 +72,7 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
     case "guardMemory":
     case "branch":
     case "exit":
-    case "continue":
+    case "dispatch":
       return false;
   }
 }

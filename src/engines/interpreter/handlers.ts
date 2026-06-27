@@ -88,7 +88,7 @@ export function emitInstructionHandler(
     scratch: context.scratch,
     externalLocals: externals.locals,
     helpers: context.helpers,
-    embedding: { completion: { kind: "br", depth: context.continueDepth } }
+    embedding: { dispatch: { kind: "br", depth: context.continueDepth } }
   });
   context.handlers.push({ instructionId: instruction.spec.id, opcode: instruction.opcode, form });
 }

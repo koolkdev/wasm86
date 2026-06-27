@@ -1,5 +1,5 @@
-import type { Action, ContinueAction, EdgeFlushAction, ExitAction } from "./actions.js";
-import type { ValueId, ValueTable } from "./values.js";
+import type { Action, DispatchAction, EdgeFlushAction, ExitAction } from "./actions.js";
+import type { ValueTable } from "./values.js";
 
 export type RegionId = number;
 
@@ -7,9 +7,6 @@ export type EntryRegion = Readonly<{
   id: RegionId;
   kind: "entry";
   actions: readonly Action[];
-  // The flushed eip a completed region continues at; a continue without
-  // one stays at the current eip.
-  continuation?: ValueId;
 }>;
 
 // Edge bodies flush state and leave.
@@ -17,8 +14,7 @@ export type EdgeRegion = Readonly<{
   id: RegionId;
   kind: "edge";
   flushes: readonly EdgeFlushAction[];
-  terminator: ExitAction | ContinueAction;
-  continuation?: ValueId;
+  terminator: ExitAction | DispatchAction;
 }>;
 
 export type IrRegion = EntryRegion | EdgeRegion;

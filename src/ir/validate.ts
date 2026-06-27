@@ -1,21 +1,22 @@
 import { assert } from "#common/assert.js";
-import type { Action } from "./actions.js";
+import { isTerminatorAction, type Action, type DispatchAction, type ExitAction } from "./actions.js";
 import type { EdgeRegion, EntryRegion, IrBlock, IrRegion, RegionId } from "./block.js";
-import type { ValueId } from "./values.js";
 
-// Structural checks: regions terminate exactly once, every region reference
-// resolves, and cached continuations match the flushes.
+export type ValidateIrBlockOptions = Readonly<{
+  allowImplicitEntryFallthrough?: boolean;
+}>;
 
-export function validateIrBlock(block: IrBlock): void {
+// Structural checks: regions terminate consistently, every region reference
+// resolves, dispatch targets are real values with matching EIP commits, and
+// legacy continuation/continue shapes are rejected at runtime even if a
+// caller bypasses TypeScript.
+export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
   const edgeIds = new Set<RegionId>();
   const edgeById = new Map<RegionId, EdgeRegion>();
   let entry: EntryRegion | undefined;
 
   for (const region of block.regions) {
-    assert(
-      region.continuation === continuationOf(region),
-      `region ${region.id} continuation does not match its flushed eip`
-    );
+    assertNoContinuationField(region);
 
     switch (region.kind) {
       case "entry":
@@ -23,6 +24,8 @@ export function validateIrBlock(block: IrBlock): void {
         entry = region;
         break;
       case "edge":
+        validateEdgeTerminator(block, region.terminator);
+        validateEdgeFlushes(block, region);
         edgeIds.add(region.id);
         edgeById.set(region.id, region);
         break;
@@ -33,16 +36,18 @@ export function validateIrBlock(block: IrBlock): void {
   assert(edgeIds.size + 1 === block.regions.length, "IR block region ids are not unique");
   assert(!edgeIds.has(entry.id), "IR block region ids are not unique");
 
-  validateEntryActions(entry, edgeIds, edgeById);
+  validateEntryActions(block, entry, edgeIds, edgeById, options);
 }
 
-// Branch, exit, and continue are region terminators; edge bodies always
-// branch off the entry, so every edge is targeted by exactly one guard or
-// branch.
+// Branch, exit, and dispatch are closed-region terminators; edge bodies
+// always branch off the entry, so every edge is targeted by exactly one guard
+// or branch.
 function validateEntryActions(
+  block: IrBlock,
   entry: EntryRegion,
   edgeIds: ReadonlySet<RegionId>,
-  edgeById: ReadonlyMap<RegionId, EdgeRegion>
+  edgeById: ReadonlyMap<RegionId, EdgeRegion>,
+  options: ValidateIrBlockOptions
 ): void {
   const targeted = new Set<RegionId>();
 
@@ -53,7 +58,10 @@ function validateEntryActions(
   }
 
   for (const [index, action] of entry.actions.entries()) {
-    if (isRegionTerminator(action)) {
+    assertKnownEntryAction(action);
+    validateActionValues(block, action);
+
+    if (isTerminatorAction(action)) {
       assert(
         index === entry.actions.length - 1,
         `entry region continues after its ${action.kind} terminator`
@@ -72,67 +80,145 @@ function validateEntryActions(
         target(action.taken, action.kind);
         target(action.notTaken, action.kind);
         break;
+      case "dispatch":
+        assertEntryDispatchEipFlushed(entry.actions, index, action);
+        break;
       case "readState":
       case "readMemory":
       case "writeState":
       case "writeMemory":
       case "exit":
-      case "continue":
         break;
     }
   }
 
   const last = entry.actions[entry.actions.length - 1];
 
-  assert(last !== undefined && isRegionTerminator(last), "entry region does not end with a terminator");
+  assert(
+    (last !== undefined && isTerminatorAction(last)) || options.allowImplicitEntryFallthrough === true,
+    "entry region does not end with a terminator"
+  );
 
   for (const id of edgeIds) {
     assert(targeted.has(id), `edge region ${id} is not targeted by any entry action`);
   }
 }
 
-function isRegionTerminator(action: Action): boolean {
-  switch (action.kind) {
-    case "branch":
+function validateEdgeTerminator(block: IrBlock, terminator: EdgeRegion["terminator"]): void {
+  assertKnownEdgeTerminator(terminator);
+
+  switch (terminator.kind) {
+    case "dispatch":
+      block.values.node(terminator.targetEip);
+      return;
     case "exit":
-    case "continue":
-      return true;
-    case "readState":
-    case "readMemory":
-    case "writeState":
-    case "writeMemory":
-    case "guardMemory":
-      return false;
-  }
-}
-
-function continuationOf(region: IrRegion): ValueId | undefined {
-  switch (region.kind) {
-    case "entry": {
-      const terminator = region.actions[region.actions.length - 1];
-
-      return terminator !== undefined && terminator.kind === "continue"
-        ? flushedEip(region.actions)
-        : undefined;
-    }
-    case "edge":
-      switch (region.terminator.kind) {
-        case "continue":
-          return flushedEip(region.flushes);
-        case "exit":
-          return undefined;
+      if (terminator.payload !== undefined) {
+        block.values.node(terminator.payload);
       }
+      return;
   }
 }
 
-function flushedEip(actions: readonly Action[]): ValueId | undefined {
-  let flushed: ValueId | undefined;
+function validateEdgeFlushes(block: IrBlock, edge: EdgeRegion): void {
+  for (const flush of edge.flushes) {
+    block.values.node(flush.value);
+  }
 
-  for (const action of actions) {
+  if (edge.terminator.kind === "dispatch") {
+    const eipFlush = lastEipWrite(edge.flushes);
+
+    assert(eipFlush !== undefined, `dispatch edge ${edge.id} must flush EIP state`);
+    assert(
+      eipFlush.value === edge.terminator.targetEip,
+      `dispatch edge ${edge.id} EIP flush does not match dispatch.targetEip`
+    );
+  }
+}
+
+function validateActionValues(block: IrBlock, action: Action): void {
+  switch (action.kind) {
+    case "readState":
+      block.values.node(action.output);
+      return;
+    case "readMemory":
+      block.values.node(action.output);
+      block.values.node(action.address);
+      return;
+    case "writeState":
+      block.values.node(action.value);
+      return;
+    case "writeMemory":
+      block.values.node(action.address);
+      block.values.node(action.value);
+      return;
+    case "guardMemory":
+      block.values.node(action.address);
+      return;
+    case "branch":
+      block.values.node(action.condition);
+      return;
+    case "exit":
+      if (action.payload !== undefined) {
+        block.values.node(action.payload);
+      }
+      return;
+    case "dispatch":
+      block.values.node(action.targetEip);
+      return;
+  }
+}
+
+function assertEntryDispatchEipFlushed(
+  actions: readonly Action[],
+  dispatchIndex: number,
+  dispatch: DispatchAction
+): void {
+  const previous = actions.slice(0, dispatchIndex);
+  const eipWrite = lastEipWrite(previous);
+
+  assert(eipWrite !== undefined, "dispatch entry path must flush EIP state");
+  assert(eipWrite.value === dispatch.targetEip, "dispatch entry EIP flush does not match dispatch.targetEip");
+}
+
+function assertNoContinuationField(region: IrRegion): void {
+  assert(
+    !Object.prototype.hasOwnProperty.call(region, "continuation"),
+    `region ${region.id} continuation fields are no longer supported`
+  );
+}
+
+function assertKnownEntryAction(action: Action): void {
+  const kind = (action as { kind?: unknown }).kind;
+
+  assert(kind !== "continue", "continue action is no longer supported; use dispatch(targetEip)");
+  assert(
+    kind === "readState" ||
+      kind === "readMemory" ||
+      kind === "writeState" ||
+      kind === "writeMemory" ||
+      kind === "guardMemory" ||
+      kind === "branch" ||
+      kind === "exit" ||
+      kind === "dispatch",
+    `unknown IR action kind ${String(kind)}`
+  );
+}
+
+function assertKnownEdgeTerminator(terminator: ExitAction | DispatchAction): void {
+  const kind = (terminator as { kind?: unknown }).kind;
+
+  assert(kind !== "continue", "continue action is no longer supported; use dispatch(targetEip)");
+  assert(kind === "exit" || kind === "dispatch", `edge region terminator must be dispatch or exit, got ${String(kind)}`);
+}
+
+function lastEipWrite(actions: readonly Action[]): Extract<Action, { kind: "writeState" }> | undefined {
+  for (let index = actions.length - 1; index >= 0; index -= 1) {
+    const action = actions[index]!;
+
     if (action.kind === "writeState" && action.slot.kind === "eip") {
-      flushed = action.value;
+      return action;
     }
   }
 
-  return flushed;
+  return undefined;
 }

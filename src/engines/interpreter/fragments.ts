@@ -19,7 +19,7 @@ import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 // Decode reads as action fragments: a guarded guest fetch is guardMemory +
 // readMemory with a decode-fault edge, and the decoded values leave through
 // exported outputs. This file builds the blocks; everything is emitted by
-// the action emitter and the continues fall through.
+// the action emitter and fragment bodies fall through naturally.
 
 export type FragmentEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -128,7 +128,7 @@ class DecodeFragment {
         {
           id: entryRegionId,
           kind: "entry",
-          actions: [...this.#actions, { kind: "continue" }]
+          actions: this.#actions
         },
         ...this.#edges
       ],
@@ -140,7 +140,7 @@ class DecodeFragment {
       scratch: context.scratch,
       externalLocals: this.#externalLocals,
       helpers: context.helpers,
-      embedding: { completion: { kind: "fallthrough" }, outputs: this.#outputs }
+      embedding: { fallthrough: { kind: "fallthrough" }, outputs: this.#outputs }
     });
   }
 }

@@ -132,7 +132,7 @@ function emitBinaryFlag(
       body,
       scratch,
       embedding: {
-        completion: { kind: "fallthrough" },
+        fallthrough: { kind: "fallthrough" },
         outputs: new Map([[fragment.value, outputLocal]])
       }
     });
@@ -153,7 +153,7 @@ function emitLogicFlag(
       body,
       scratch,
       embedding: {
-        completion: { kind: "fallthrough" },
+        fallthrough: { kind: "fallthrough" },
         outputs: new Map([[fragment.value, outputLocal]])
       }
     });
@@ -198,8 +198,7 @@ function binaryFlagFragment(
           kind: "entry",
           actions: [
             { kind: "readState", output: left, slot: lazyFlagsAChannel },
-            { kind: "readState", output: right, slot: lazyFlagsBChannel },
-            { kind: "continue" }
+            { kind: "readState", output: right, slot: lazyFlagsBChannel }
           ]
         }
       ],
@@ -229,8 +228,7 @@ function logicFlagFragment(
           id: 0,
           kind: "entry",
           actions: [
-            { kind: "readState", output: result, slot: lazyFlagsAChannel },
-            { kind: "continue" }
+            { kind: "readState", output: result, slot: lazyFlagsAChannel }
           ]
         }
       ],

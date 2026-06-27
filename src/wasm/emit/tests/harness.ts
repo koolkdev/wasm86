@@ -16,7 +16,8 @@ import {
 
 // Test-only module wrapper around the action emitter: imported state + guest
 // memories, one run export returning the encoded i64 exit. The harness
-// embeds like any host — a fallthrough continue lands on its sentinel tail,
+// embeds like any host — a completed dispatch or bare action-body fallthrough
+// lands on its sentinel tail,
 // reports return their real encoded exits. External value n is the
 // function's n-th i32 parameter. Module assembly for real use is the
 // engines' job.
@@ -30,7 +31,7 @@ export type InstantiatedIrBlock = Readonly<{
   run(...externals: number[]): bigint;
 }>;
 
-// The fragment with a fallthrough completion, then the sentinel tail.
+// The fragment with direct exits to the sentinel tail.
 export function irBlockBody(block: IrBlock, externalParamCount = 0): WasmFunctionBodyEncoder {
   return emitIrBlockBody(block, externalParamCount);
 }
@@ -50,7 +51,10 @@ function emitIrBlockBody(
     externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
     helpers,
     analysis,
-    embedding: { completion: { kind: "fallthrough" } }
+    embedding: {
+      dispatch: { kind: "fallthrough" },
+      fallthrough: { kind: "fallthrough" }
+    }
   });
   scratch.assertClear();
   return body.i64Const(irBlockCompleted).end();

@@ -45,7 +45,7 @@ export function jitBlockExportName(eip: number): string {
   return `block_${u32(eip).toString(16)}`;
 }
 
-// The emitter's link arm walks the same continuations, so every external
+// The emitter's link arm walks the same dispatch targets, so every external
 // constant target it meets has a slot here.
 export function actionJitModuleLinkTargets(blocks: readonly ActionJitBlock[]): readonly number[] {
   const internalEips = new Set(blocks.map((block) => u32(block.entryEip)));
@@ -53,7 +53,7 @@ export function actionJitModuleLinkTargets(blocks: readonly ActionJitBlock[]): r
   const seen = new Set<number>();
 
   for (const block of blocks) {
-    for (const targetEip of constantContinuations(block.actions)) {
+    for (const targetEip of constantDispatchTargets(block.actions)) {
       if (!internalEips.has(targetEip) && !seen.has(targetEip)) {
         targetEips.push(targetEip);
         seen.add(targetEip);
@@ -64,16 +64,33 @@ export function actionJitModuleLinkTargets(blocks: readonly ActionJitBlock[]): r
   return targetEips;
 }
 
-function constantContinuations(actions: IrBlock): readonly number[] {
+function constantDispatchTargets(actions: IrBlock): readonly number[] {
   const targets: number[] = [];
 
   for (const region of actions.regions) {
-    const target = region.continuation === undefined
-      ? undefined
-      : actions.values.constValue(region.continuation);
+    switch (region.kind) {
+      case "entry":
+        for (const action of region.actions) {
+          if (action.kind === "dispatch") {
+            const target = actions.values.constValue(action.targetEip);
 
-    if (target !== undefined) {
-      targets.push(u32(target));
+            if (target !== undefined) {
+              targets.push(u32(target));
+            }
+          }
+        }
+
+        break;
+      case "edge":
+        if (region.terminator.kind === "dispatch") {
+          const target = actions.values.constValue(region.terminator.targetEip);
+
+          if (target !== undefined) {
+            targets.push(u32(target));
+          }
+        }
+
+        break;
     }
   }
 
@@ -150,7 +167,7 @@ export function encodeActionJitModule(
       body: new WasmFunctionBodyEncoder(),
       helpers,
       analysis: block.analysis,
-      embedding: { completion }
+      embedding: { dispatch: completion }
     });
     const functionIndex = module.addFunction(typeIndex, body);
 

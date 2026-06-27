@@ -74,9 +74,11 @@ export type ExitAction = Readonly<{
   payload?: ValueId;
 }>;
 
-// The block completed; execution continues from the flushed state.
-export type ContinueAction = Readonly<{
-  kind: "continue";
+// The block completed guest execution and asks the embedding to dispatch to
+// this already-committed target EIP.
+export type DispatchAction = Readonly<{
+  kind: "dispatch";
+  targetEip: ValueId;
 }>;
 
 export type Action =
@@ -87,6 +89,23 @@ export type Action =
   | GuardMemoryAction
   | BranchAction
   | ExitAction
-  | ContinueAction;
+  | DispatchAction;
 
 export type EdgeFlushAction = WriteStateAction;
+
+export type TerminatorAction = BranchAction | ExitAction | DispatchAction;
+
+export function isTerminatorAction(action: Action): action is TerminatorAction {
+  switch (action.kind) {
+    case "branch":
+    case "exit":
+    case "dispatch":
+      return true;
+    case "readState":
+    case "readMemory":
+    case "writeState":
+    case "writeMemory":
+    case "guardMemory":
+      return false;
+  }
+}

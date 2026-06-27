@@ -8,7 +8,7 @@ import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { irBlockBody } from "./harness.js";
 
-// Pinned harness-embedded bodies (fallthrough continue + sentinel tail):
+// Pinned harness-embedded bodies (dispatch fallthrough + sentinel tail):
 // these bytes may only change when the emission itself deliberately does.
 
 test("an alu pair emits its golden body", () => {
