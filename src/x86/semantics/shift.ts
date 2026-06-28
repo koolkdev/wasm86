@@ -22,9 +22,9 @@ export function shiftSemantic(
 
     const value = s.project(width, s.get(dst, width));
     const rawCount = readCount(s, countSource);
-    const count = s.i32And(rawCount, s.const32(0x1f));
+    const count = s.binary("and", rawCount, s.const32(0x1f));
     const shiftedResult = s.project(width, shiftResult(s, op, width, value, count));
-    const result = s.i32Select(s.compare(32, "ne", count, s.const32(0)), shiftedResult, value);
+    const result = s.select(s.compare(32, "ne", count, s.const32(0)), shiftedResult, value);
 
     writeShiftFlags(s, { op, width, value, count, result });
     s.set(dst, result, width);
@@ -51,11 +51,11 @@ function shiftResult(
 ): Value {
   switch (op) {
     case "shl":
-      return s.i32Shl(value, count);
+      return s.binary("shl", value, count);
     case "shr":
-      return s.i32ShrU(value, count);
+      return s.binary("shr_u", value, count);
     case "sar":
-      return s.i32ShrS(sarShiftInput(s, width, value), count);
+      return s.binary("shr_s", sarShiftInput(s, width, value), count);
   }
 }
 
@@ -66,9 +66,9 @@ function sarShiftInput(
 ): Value {
   switch (width) {
     case 8:
-      return s.i32Extend8S(value);
+      return s.extend(8, value);
     case 16:
-      return s.i32Extend16S(value);
+      return s.extend(16, value);
     case 32:
       return value;
   }

@@ -1,6 +1,7 @@
 export type BinaryOperator =
   | "add"
   | "sub"
+  | "mul"
   | "xor"
   | "or"
   | "and"

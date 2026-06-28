@@ -29,14 +29,14 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
 
     switch (op) {
       case "add": {
-        const result = s.project(width, s.i32Add(left, right));
+        const result = s.project(width, s.binary("add", left, right));
 
         s.writeStatusFlagsSource(addFlagSource({ width, left, right, result }));
         s.set(dst, result, width);
         return;
       }
       case "sub": {
-        const result = s.project(width, s.i32Sub(left, right));
+        const result = s.project(width, s.binary("sub", left, right));
 
         s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
         s.set(dst, result, width);
@@ -53,7 +53,7 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
       }
       case "adc": {
         const oldCf = s.readFlag("CF");
-        const result = s.project(width, s.i32Add(s.i32Add(left, right), oldCf));
+        const result = s.project(width, s.binary("add", s.binary("add", left, right), oldCf));
 
         writeAddFlags(s, { width, left, right, result, carryIn: oldCf });
         s.set(dst, result, width);
@@ -61,7 +61,7 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
       }
       case "sbb": {
         const oldCf = s.readFlag("CF");
-        const result = s.project(width, s.i32Sub(s.i32Sub(left, right), oldCf));
+        const result = s.project(width, s.binary("sub", s.binary("sub", left, right), oldCf));
 
         writeSubFlags(s, { width, left, right, result, borrowIn: oldCf });
         s.set(dst, result, width);
@@ -82,18 +82,18 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
 
     switch (op) {
       case "inc":
-        result = s.i32Add(value, s.const32(1));
+        result = s.binary("add", value, s.const32(1));
         writeIncFlags(s, { width, input: value, result });
         break;
       case "dec":
-        result = s.i32Sub(value, s.const32(1));
+        result = s.binary("sub", value, s.const32(1));
         writeDecFlags(s, { width, input: value, result });
         break;
       case "not":
-        result = s.i32Xor(value, s.const32(widthMask(width)));
+        result = s.binary("xor", value, s.const32(widthMask(width)));
         break;
       case "neg":
-        result = s.i32Sub(s.const32(0), value);
+        result = s.binary("sub", s.const32(0), value);
         writeNegFlags(s, { width, input: value, result });
         break;
     }
@@ -105,10 +105,10 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
 function logicResult(s: SemanticsBuilder, op: "and" | "or" | "xor", left: Value, right: Value): Value {
   switch (op) {
     case "and":
-      return s.i32And(left, right);
+      return s.binary("and", left, right);
     case "or":
-      return s.i32Or(left, right);
+      return s.binary("or", left, right);
     case "xor":
-      return s.i32Xor(left, right);
+      return s.binary("xor", left, right);
   }
 }

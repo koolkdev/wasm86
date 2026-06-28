@@ -23,7 +23,12 @@ import type {
   ValueInput
 } from "#x86/semantics/refs.js";
 import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
-import { signedComparePredicates, type BinaryOperator, type CompareOperator, type UnaryOperator } from "#x86/semantics/ops.js";
+import {
+  signedComparePredicates,
+  type BinaryOperator,
+  type CompareOperator,
+  type UnaryOperator
+} from "#x86/semantics/ops.js";
 import type {
   ExternalValueId,
   MemDynamicOperandBinding,
@@ -329,60 +334,49 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return valueFromId(this.#operandAddress(operandRef.index));
   }
 
-  i32Add(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("i32Add", "add", a, b);
+  binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
+    this.#beforeOp("binary");
+    return valueFromId(this.#values.binary(operator, a, b));
   }
 
-  i32Sub(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("i32Sub", "sub", a, b);
+  unary(operator: UnaryOperator, value: ValueInput): Value {
+    this.#beforeOp("unary");
+    return valueFromId(this.#values.unary(operator, value));
   }
 
-  i32Xor(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("i32Xor", "xor", a, b);
+  binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
+    this.#beforeOp("binary64");
+    return valueFromId(this.#values.binary64(operator, a, b));
   }
 
-  i32Or(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("i32Or", "or", a, b);
+  compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
+    this.#beforeOp("compare64");
+    return valueFromId(this.#values.compare64(operator, a, b));
   }
 
-  i32And(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("i32And", "and", a, b);
+  project64(width: OperandWidth, value: ValueInput): Value {
+    this.#beforeOp("project64");
+    return valueFromId(this.#values.project64(width, value));
   }
 
-  i32Shl(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("i32Shl", "shl", a, b);
+  extend64(width: OperandWidth, value: ValueInput): Value {
+    this.#beforeOp("extend64");
+    return valueFromId(this.#values.extend64(width, value));
   }
 
-  i32ShrS(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("i32ShrS", "shr_s", a, b);
-  }
-
-  i32ShrU(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("i32ShrU", "shr_u", a, b);
-  }
-
-  i32Extend8S(value: ValueInput): Value {
-    this.#beforeOp("i32Extend8S");
-    return valueFromId(this.#values.extend(8, value));
-  }
-
-  i32Extend16S(value: ValueInput): Value {
-    this.#beforeOp("i32Extend16S");
-    return valueFromId(this.#values.extend(16, value));
-  }
-
-  i32Popcnt(value: ValueInput): Value {
-    return this.#unary("i32Popcnt", "popcnt", value);
-  }
-
-  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
-    this.#beforeOp("i32Select");
+  select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
+    this.#beforeOp("select");
     return valueFromId(this.#values.select(condition, whenTrue, whenFalse));
   }
 
   project(width: OperandWidth, value: ValueInput): Value {
     this.#beforeOp("project");
     return valueFromId(this.#values.project(width, value));
+  }
+
+  extend(width: OperandWidth, value: ValueInput): Value {
+    this.#beforeOp("extend");
+    return valueFromId(this.#values.extend(width, value));
   }
 
   compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
@@ -463,16 +457,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#actions.push({ kind: "exit", reason: "hostTrap", payload: vectorId });
     this.#blockEnd = "terminated";
     this.#terminated = true;
-  }
-
-  #binary(op: string, operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
-    this.#beforeOp(op);
-    return valueFromId(this.#values.binary(operator, a, b));
-  }
-
-  #unary(op: string, operator: UnaryOperator, value: ValueInput): Value {
-    this.#beforeOp(op);
-    return valueFromId(this.#values.unary(operator, value));
   }
 
   // Fault edges restore the instruction-start state captured by

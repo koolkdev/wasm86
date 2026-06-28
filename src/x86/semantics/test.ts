@@ -13,7 +13,7 @@ export function testSemantic(width: OperandWidth = 32): SemanticTemplate {
 
     const left = s.project(width, s.get(leftOperand, width));
     const right = s.project(width, s.get(rightOperand, width));
-    const result = s.project(width, s.i32And(left, right));
+    const result = s.project(width, s.binary("and", left, right));
 
     s.writeStatusFlagsSource(logicFlagSource({ width, result }));
   };

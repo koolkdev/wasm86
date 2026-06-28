@@ -304,6 +304,7 @@ test("operators map to their wasm opcodes", () => {
   const signedShifted = values.binary("shr_s", one, two);
   const unsignedShifted = values.binary("shr_u", one, two);
   const mixed = values.binary("xor", shifted, values.binary("xor", signedShifted, unsignedShifted));
+  const product = values.binary("mul", one, two);
   const extended = values.unary("extend16_s", values.unary("extend8_s", one));
   const masked = values.binary("sub", values.binary("and", one, two), values.binary("or", one, two));
   const equal = values.compare("eq", one, two);
@@ -312,6 +313,7 @@ test("operators map to their wasm opcodes", () => {
     values,
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: mixed },
+      { kind: "writeState", slot: gprChannel("esi"), value: product },
       { kind: "writeState", slot: gprChannel("ebx"), value: extended },
       { kind: "writeState", slot: gprChannel("ecx"), value: masked },
       { kind: "writeState", slot: gprChannel("edx"), value: equal },
@@ -321,6 +323,7 @@ test("operators map to their wasm opcodes", () => {
   );
 
   valueStack.emitUse(mixed);
+  valueStack.emitUse(product);
   valueStack.emitUse(extended);
   valueStack.emitUse(masked);
   valueStack.emitUse(equal);
@@ -340,6 +343,9 @@ test("operators map to their wasm opcodes", () => {
     wasmOpcode.i32Xor,
     wasmOpcode.i32Xor,
     wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Mul,
+    wasmOpcode.localGet,
     wasmOpcode.i32Extend8S,
     wasmOpcode.i32Extend16S,
     wasmOpcode.localGet,
@@ -357,6 +363,92 @@ test("operators map to their wasm opcodes", () => {
     wasmOpcode.i32GeS,
     wasmOpcode.end
   ]);
+});
+
+test("signed multiply overflow expressions lower through typed i64 products", () => {
+  const values = new ValueTable();
+  const one = values.external(0);
+  const two = values.external(1);
+  const left16 = values.extend64(16, one);
+  const right16 = values.extend64(16, two);
+  const product16 = values.binary64("mul", left16, right16);
+  const truncated16 = values.extend64(16, values.project64(16, product16));
+  const overflow16 = values.compare64("ne", product16, truncated16);
+  const left32 = values.extend64(32, one);
+  const right32 = values.extend64(32, two);
+  const product32 = values.binary64("mul", left32, right32);
+  const truncated32 = values.extend64(32, values.project64(32, product32));
+  const overflow32 = values.compare64("ne", product32, truncated32);
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: overflow16 },
+      { kind: "writeState", slot: gprChannel("ebx"), value: overflow32 }
+    ]),
+    [0, 1]
+  );
+
+  valueStack.emitUse(overflow16);
+  valueStack.emitUse(overflow32);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.localGet,
+    wasmOpcode.i32Extend16S,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Extend16S,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.i64Mul,
+    wasmOpcode.localTee,
+    wasmOpcode.localGet,
+    wasmOpcode.i32WrapI64,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32And,
+    wasmOpcode.i32Extend16S,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.i64Ne,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.i64Mul,
+    wasmOpcode.localTee,
+    wasmOpcode.localGet,
+    wasmOpcode.i32WrapI64,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.i64Ne,
+    wasmOpcode.end
+  ]);
+  strictEqual(wasmBodyLocalCount(encoded), 3);
+});
+
+test("unsupported i64 operators fail at wasm lowering", () => {
+  const values = new ValueTable();
+  const one = values.extend64(32, values.external(0));
+  const two = values.extend64(32, values.external(1));
+  const sum = values.binary64("add", one, two);
+  const equal = values.compare64("eq", one, two);
+  const sumEmitter = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: sum }
+    ]),
+    [0, 1]
+  );
+  const equalEmitter = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: equal }
+    ]),
+    [0, 1]
+  );
+
+  throws(() => sumEmitter.valueStack.emitUse(sum), /unsupported i64 binary operator add/);
+  throws(() => equalEmitter.valueStack.emitUse(equal), /unsupported i64 compare operator eq/);
 });
 
 test("project masks to the requested width", () => {

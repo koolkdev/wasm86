@@ -574,7 +574,7 @@ test("an 8-bit unsigned compare of covered operands creates no projections", () 
 
 test("an 8-bit equality on an unproven value keeps its mask", () => {
   const cmpSum: SemanticTemplate = (s) => {
-    const sum = s.i32Add(s.get(s.operand(0), 8), s.get(s.operand(1), 8));
+    const sum = s.binary("add", s.get(s.operand(0), 8), s.get(s.operand(1), 8));
 
     s.set(s.operand(0), s.compare(8, "eq", sum, s.const32(0)), 8);
   };
@@ -627,7 +627,7 @@ test("value methods build through the builder", () => {
     const zero = s.const32(0);
     const negative = s.compare(32, "lt_s", value, zero);
 
-    s.set(s.operand(0), s.i32Select(negative, s.i32Sub(zero, value), value), 32);
+    s.set(s.operand(0), s.select(negative, s.binary("sub", zero, value), value), 32);
   };
   const builder = createIrBlockBuilder();
 
@@ -648,8 +648,8 @@ test("value methods build through the builder", () => {
     { kind: "writeState", slot: eipChannel, value: block.values.const(0x1003) },
     { kind: "dispatch", targetEip: block.values.const(0x1003) }
   ]);
-  deepStrictEqual(block.values.node(compare), { kind: "compare", operator: "lt_s", a: read.output, b: zero });
-  deepStrictEqual(block.values.node(negated), { kind: "binary", operator: "sub", a: zero, b: read.output });
+  deepStrictEqual(block.values.node(compare), { kind: "compare", type: "i32", operator: "lt_s", a: read.output, b: zero });
+  deepStrictEqual(block.values.node(negated), { kind: "binary", type: "i32", operator: "sub", a: zero, b: read.output });
   deepStrictEqual(block.values.node(selected), { kind: "select", condition: compare, whenTrue: negated, whenFalse: read.output });
 });
 
@@ -781,7 +781,7 @@ test("jcc after test source uses the source-derived condition with no flag byte 
 const subSourceThenJccTemplate: SemanticTemplate = (s) => {
   const left = s.get(s.reg("eax"), 32);
   const right = s.get(s.reg("ebx"), 32);
-  const result = s.i32Sub(left, right);
+  const result = s.binary("sub", left, right);
 
   s.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
   s.conditionalJump(s.condition("E"), s.const32(0x2000), s.const32(0x1005));
@@ -925,10 +925,10 @@ test("setcc after cmp source consumes the source-derived condition", () => {
 const logicSourceThenSetccTemplate: SemanticTemplate = (s) => {
   const left = s.get(s.reg("eax"), 32);
   const right = s.get(s.reg("ebx"), 32);
-  const result = s.i32And(left, right);
+  const result = s.binary("and", left, right);
 
   s.writeStatusFlagsSource({ kind: "logic", width: 32, result });
-  s.set(s.reg("al"), s.i32Select(s.condition("NE"), s.const32(1), s.const32(0)), 8);
+  s.set(s.reg("al"), s.select(s.condition("NE"), s.const32(1), s.const32(0)), 8);
 };
 
 test("setcc after a logic flag source uses the source-derived condition", () => {
@@ -1506,7 +1506,7 @@ test("get and set through s.mem lower to memory actions at the given address", (
 
     s.memoryGuard(address, 4, "read");
     s.memoryGuard(address, 4, "write");
-    s.set(target, s.i32Add(s.get(target, 32), s.const32(1)), 32);
+    s.set(target, s.binary("add", s.get(target, 32), s.const32(1)), 32);
   };
   const builder = createIrBlockBuilder();
 
@@ -2211,6 +2211,7 @@ test("a narrow immExternal get projects to the access width", () => {
 
   deepStrictEqual(v.node(write!.value), {
     kind: "project",
+    sourceType: "i32",
     width: 8,
     value: v.external(0)
   });

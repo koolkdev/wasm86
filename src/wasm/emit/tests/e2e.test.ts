@@ -309,10 +309,10 @@ test("mov ah and mov al merge through memory for a final 32-bit read", async () 
 test("zero compares encode as eqz", () => {
   const builder = createIrBlockBuilder();
   const logicConditionTemplate: SemanticTemplate = (s) => {
-    const result = s.i32Xor(s.get(s.reg("eax"), 32), s.const32(5));
+    const result = s.binary("xor", s.get(s.reg("eax"), 32), s.const32(5));
 
     s.writeStatusFlagsSource({ kind: "logic", width: 32, result });
-    s.set(s.reg("ebx"), s.i32Select(s.condition("E"), s.const32(1), s.const32(0)), 32);
+    s.set(s.reg("ebx"), s.select(s.condition("E"), s.const32(1), s.const32(0)), 32);
   };
 
   builder.addInstruction(logicConditionTemplate, [], loc(0x1000, 0x1003));
@@ -327,7 +327,7 @@ test("zero compares encode as eqz", () => {
 test("a value used twice computes once and both uses observe it", async () => {
   // eax = ebx = eax + ebx: one shared add consumed by both stores.
   const sumIntoBoth: SemanticTemplate = (s) => {
-    const sum = s.i32Add(s.get(s.operand(0), 32), s.get(s.operand(1), 32));
+    const sum = s.binary("add", s.get(s.operand(0), 32), s.get(s.operand(1), 32));
 
     s.set(s.operand(0), sum, 32);
     s.set(s.operand(1), sum, 32);

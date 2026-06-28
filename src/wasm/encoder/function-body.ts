@@ -267,6 +267,11 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i32Mul(): this {
+    this.#writeInstruction(wasmOpcode.i32Mul);
+    return this;
+  }
+
   i32And(): this {
     this.#writeInstruction(wasmOpcode.i32And);
     return this;
@@ -366,8 +371,28 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i64Ne(): this {
+    this.#writeInstruction(wasmOpcode.i64Ne);
+    return this;
+  }
+
+  i64Mul(): this {
+    this.#writeInstruction(wasmOpcode.i64Mul);
+    return this;
+  }
+
   i64Or(): this {
     this.#writeInstruction(wasmOpcode.i64Or);
+    return this;
+  }
+
+  i32WrapI64(): this {
+    this.#writeInstruction(wasmOpcode.i32WrapI64);
+    return this;
+  }
+
+  i64ExtendI32S(): this {
+    this.#writeInstruction(wasmOpcode.i64ExtendI32S);
     return this;
   }
 

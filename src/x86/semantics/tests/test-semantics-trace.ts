@@ -24,7 +24,11 @@ import type {
   ValueInput
 } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
-import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
+import type {
+  BinaryOperator,
+  CompareOperator,
+  UnaryOperator
+} from "#x86/semantics/ops.js";
 
 export type SemanticTrace = Readonly<{
   events: readonly string[];
@@ -167,51 +171,31 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return out;
   }
 
-  i32Add(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("add", a, b);
+  binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
+    return this.#binary(operator, a, b);
   }
 
-  i32Sub(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("sub", a, b);
+  unary(operator: UnaryOperator, value: ValueInput): Value {
+    return this.#unary(operator, value);
   }
 
-  i32Xor(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("xor", a, b);
+  binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
+    return this.#alloc(`${operator}64(${this.#value(a)}, ${this.#value(b)})`);
   }
 
-  i32Or(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("or", a, b);
+  compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
+    return this.#alloc(`cmp64.${operator}(${this.#value(a)}, ${this.#value(b)})`);
   }
 
-  i32And(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("and", a, b);
+  project64(width: OperandWidth, value: ValueInput): Value {
+    return this.#alloc(`project64.${width}(${this.#value(value)})`);
   }
 
-  i32Shl(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("shl", a, b);
+  extend64(width: OperandWidth, value: ValueInput): Value {
+    return this.#alloc(`extend64.${width}(${this.#value(value)})`);
   }
 
-  i32ShrS(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("shr_s", a, b);
-  }
-
-  i32ShrU(a: ValueInput, b: ValueInput): Value {
-    return this.#binary("shr_u", a, b);
-  }
-
-  i32Extend8S(value: ValueInput): Value {
-    return this.#unary("extend8_s", value);
-  }
-
-  i32Extend16S(value: ValueInput): Value {
-    return this.#unary("extend16_s", value);
-  }
-
-  i32Popcnt(value: ValueInput): Value {
-    return this.#unary("popcnt", value);
-  }
-
-  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
+  select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
     return this.#alloc(
       `select(${this.#value(condition)}, ${this.#value(whenTrue)}, ${this.#value(whenFalse)})`
     );
@@ -219,6 +203,10 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
 
   project(width: OperandWidth, value: ValueInput): Value {
     return this.#alloc(`project${width}(${this.#value(value)})`);
+  }
+
+  extend(width: OperandWidth, value: ValueInput): Value {
+    return this.#alloc(`extend${width}(${this.#value(value)})`);
   }
 
   compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {

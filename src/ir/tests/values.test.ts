@@ -29,7 +29,20 @@ test("building the same expression twice yields the same node id", () => {
   strictEqual(table.binary("add", a, b), add);
   notStrictEqual(table.binary("add", b, a), add);
   notStrictEqual(table.binary("sub", a, b), add);
-  deepStrictEqual(table.node(add), { kind: "binary", operator: "add", a, b });
+  deepStrictEqual(table.node(add), { kind: "binary", type: "i32", operator: "add", a, b });
+});
+
+test("multiply expressions intern and fold as i32 low products", () => {
+  const table = new ValueTable();
+  const a = table.addActionOutput();
+  const b = table.external(0);
+  const product = table.binary("mul", a, b);
+
+  strictEqual(table.binary("mul", a, b), product);
+  deepStrictEqual(table.node(product), { kind: "binary", type: "i32", operator: "mul", a, b });
+  strictEqual(table.binary("mul", table.const(0x7fff_ffff), table.const(2)), table.const(-2));
+  strictEqual(table.binary("mul", a, table.const(1)), a);
+  strictEqual(table.binary("mul", table.const(0), b), table.const(0));
 });
 
 test("signed right shift is a distinct binary operator", () => {
@@ -40,7 +53,7 @@ test("signed right shift is a distinct binary operator", () => {
 
   strictEqual(table.binary("shr_s", a, b), shifted);
   notStrictEqual(table.binary("shr_u", a, b), shifted);
-  deepStrictEqual(table.node(shifted), { kind: "binary", operator: "shr_s", a, b });
+  deepStrictEqual(table.node(shifted), { kind: "binary", type: "i32", operator: "shr_s", a, b });
 });
 
 test("each compound kind deduplicates on its full key", () => {
@@ -58,7 +71,7 @@ test("each compound kind deduplicates on its full key", () => {
 
   strictEqual(table.compare("eq", a, b), compare);
   notStrictEqual(table.compare("ne", a, b), compare);
-  deepStrictEqual(table.node(compare), { kind: "compare", operator: "eq", a, b });
+  deepStrictEqual(table.node(compare), { kind: "compare", type: "i32", operator: "eq", a, b });
 
   const select = table.select(compare, a, b);
 
@@ -70,7 +83,41 @@ test("each compound kind deduplicates on its full key", () => {
 
   strictEqual(table.project(16, a), project);
   notStrictEqual(table.project(8, a), project);
-  deepStrictEqual(table.node(project), { kind: "project", width: 16, value: a });
+  deepStrictEqual(table.node(project), { kind: "project", sourceType: "i32", width: 16, value: a });
+});
+
+test("i64 values deduplicate on their typed operation keys", () => {
+  const table = new ValueTable();
+  const a = table.addActionOutput();
+  const b = table.external(0);
+  const extendedA = table.extend64(32, a);
+  const extendedB = table.extend64(32, b);
+  const product = table.binary64("mul", extendedA, extendedB);
+  const low = table.project64(32, product);
+  const low16 = table.project64(16, product);
+  const notEqual = table.compare64("ne", product, extendedA);
+
+  strictEqual(table.valueType(a), "i32");
+  strictEqual(table.valueType(extendedA), "i64");
+  strictEqual(table.valueType(product), "i64");
+  strictEqual(table.valueType(low), "i32");
+  strictEqual(table.valueType(notEqual), "i32");
+  strictEqual(table.extend64(32, a), extendedA);
+  strictEqual(table.binary64("mul", extendedA, extendedB), product);
+  notStrictEqual(table.binary64("mul", extendedB, extendedA), product);
+  strictEqual(table.project64(32, product), low);
+  notStrictEqual(table.project64(16, product), low);
+  strictEqual(table.compare64("ne", product, extendedA), notEqual);
+  notStrictEqual(table.compare64("ne", extendedA, product), notEqual);
+  strictEqual(table.compare64("eq", product, product), table.const(1));
+  strictEqual(table.compare64("ne", product, product), table.const(0));
+  strictEqual(table.project64(32, extendedA), a);
+
+  deepStrictEqual(table.node(extendedA), { kind: "extend64", width: 32, value: a });
+  deepStrictEqual(table.node(product), { kind: "binary", type: "i64", operator: "mul", a: extendedA, b: extendedB });
+  deepStrictEqual(table.node(low), { kind: "project", sourceType: "i64", width: 32, value: product });
+  deepStrictEqual(table.node(low16), { kind: "project", sourceType: "i64", width: 16, value: product });
+  deepStrictEqual(table.node(notEqual), { kind: "compare", type: "i64", operator: "ne", a: product, b: extendedA });
 });
 
 test("binary operations fold constant operands", () => {
@@ -81,6 +128,7 @@ test("binary operations fold constant operands", () => {
 
   strictEqual(table.binary("add", one, two), table.const(3));
   strictEqual(table.binary("sub", one, two), table.const(-1));
+  strictEqual(table.binary("mul", table.const(0x4000_0000), two), table.const(0x8000_0000));
   strictEqual(table.binary("xor", minusOne, table.const(0xff)), table.const(-0x100));
   strictEqual(table.binary("or", table.const(0x100), table.const(0xff)), table.const(0x1ff));
   strictEqual(table.binary("and", table.const(0x1ff), table.const(0xff)), table.const(0xff));
@@ -175,12 +223,22 @@ test("external leaves deduplicate by external id", () => {
 test("compound nodes reject unknown children", () => {
   const table = new ValueTable();
   const a = table.const(1);
+  const wide = table.extend64(32, a);
 
   throws(() => table.binary("add", a, 99), /unknown value id 99/);
   throws(() => table.unary("popcnt", 99), /unknown value id 99/);
   throws(() => table.select(99, a, a), /unknown value id 99/);
   throws(() => table.project(8, 99), /unknown value id 99/);
   throws(() => table.extend(8, 99), /unknown value id 99/);
+  throws(() => table.extend64(32, 99), /unknown value id 99/);
+  throws(() => table.binary64("mul", wide, 99), /unknown value id 99/);
+  throws(() => table.project64(32, 99), /unknown value id 99/);
+  throws(() => table.binary("add", wide, a), /value \d+ must be i32, got i64/);
+  throws(() => table.project(8, wide), /value \d+ must be i32, got i64/);
+  throws(() => table.binary64("mul", wide, a), /value \d+ must be i64, got i32/);
+  throws(() => table.compare64("ne", wide, a), /value \d+ must be i64, got i32/);
+  throws(() => table.project64(32, a), /value \d+ must be i64, got i32/);
+  throws(() => table.extend64(32, wide), /value \d+ must be i32, got i64/);
 });
 
 test("project folds constants and elides projections covered by bounds", () => {
@@ -208,9 +266,14 @@ test("extend folds constants and elides extensions covered by bounds", () => {
 test("compare results fit a single bit either way", () => {
   const table = new ValueTable();
   const compare = table.compare("eq", table.addActionOutput(), table.external(0));
+  const wide = table.extend64(32, table.addActionOutput());
+  const product = table.binary64("mul", wide, table.extend64(32, table.external(1)));
+  const i64Compare = table.compare64("ne", wide, product);
 
   strictEqual(table.project(8, compare), compare);
   strictEqual(table.extend(8, compare), compare);
+  strictEqual(table.project(8, i64Compare), i64Compare);
+  strictEqual(table.extend(8, i64Compare), i64Compare);
 });
 
 test("projections and extensions cover follow-up requests they imply", () => {

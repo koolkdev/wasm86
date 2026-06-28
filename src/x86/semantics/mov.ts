@@ -53,7 +53,7 @@ export function cmovSemantic(cc: ConditionCode, width: OperandWidth = 32): Seman
     const value = s.get(src, width);
     const condition = s.condition(cc);
     const fallback = s.get(dst, width);
-    const selected = s.i32Select(condition, value, fallback);
+    const selected = s.select(condition, value, fallback);
 
     guardStorageWrite(s, context, dst, width);
     s.set(dst, selected, width);

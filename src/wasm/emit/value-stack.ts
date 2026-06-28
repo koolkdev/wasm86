@@ -5,18 +5,20 @@ import type { EdgeRegion } from "#ir/block.js";
 import type {
   BinaryValueNode,
   CompareValueNode,
+  Extend64ValueNode,
   HelperCallValueNode,
   ProjectValueNode,
   SelectValueNode,
   UnaryValueNode,
   ValueId,
+  ValueType,
   ValueTable
 } from "#ir/values.js";
-import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
+import type { UnaryOperator } from "#x86/semantics/ops.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 import { helperFunctionName, type WasmHelperRegistry } from "#wasm/helpers/module.js";
 import { edgeValues, type BlockValueAnalysis } from "./values.js";
 
@@ -61,6 +63,7 @@ type CompoundValueNode =
   | CompareValueNode
   | SelectValueNode
   | ProjectValueNode
+  | Extend64ValueNode
   | HelperCallValueNode;
 
 export function createValueStack(context: ValueStackContext): ValueStack {
@@ -100,7 +103,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         const uses = analysis.useCount(id);
 
         if (uses > 1) {
-          registry.captureTee(id, uses - 1);
+          registry.captureTee(id, uses - 1, wasmTypeForValue(values.valueType(id)));
         }
 
         return;
@@ -113,7 +116,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       case "binary":
         emitUse(node.a);
         emitUse(node.b);
-        emitBinaryOperator(body, node.operator);
+        emitBinaryOperator(body, node);
         return;
       case "unary":
         emitUse(node.value);
@@ -122,7 +125,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       case "compare": {
         // eq against zero is wasm's eqz; the other zero compares have no
         // dedicated opcode.
-        const eqzOperand = zeroEqualityOperand(node);
+        const eqzOperand = node.type === "i32" ? zeroEqualityOperand(node) : undefined;
 
         if (eqzOperand !== undefined) {
           emitUse(eqzOperand);
@@ -132,7 +135,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
 
         emitUse(node.a);
         emitUse(node.b);
-        emitCompareOperator(body, node.operator);
+        emitCompareOperator(body, node);
         return;
       }
       case "select":
@@ -143,7 +146,11 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         return;
       case "project":
         emitUse(node.value);
-        emitProjection(body, node.width);
+        emitProjection(body, node);
+        return;
+      case "extend64":
+        emitUse(node.value);
+        emitExtend64(body, node.width);
         return;
       case "helperCall": {
         const displayName = helperFunctionName(node.helper);
@@ -195,7 +202,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         // edge use keeps a consumed multi-use compound captured), so every
         // counted use is still to come.
         emitCompute(node);
-        registry.captureSet(id, analysis.useCount(id));
+        registry.captureSet(id, analysis.useCount(id), wasmTypeForValue(values.valueType(id)));
         return;
       }
     }
@@ -219,7 +226,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       }
 
       context.loadSlot(action.slot, action.signed === true, emitUse);
-      registry.captureSet(action.output, uses);
+      registry.captureSet(action.output, uses, wasmTypeForValue(values.valueType(action.output)));
     },
     readMemory(action: ReadMemoryAction): void {
       const uses = analysis.useCount(action.output);
@@ -231,7 +238,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       // Boring policy: every loaded value pins at its action point.
       emitUse(action.address);
       context.loadGuest(action.width, action.signed === true);
-      registry.captureSet(action.output, uses);
+      registry.captureSet(action.output, uses, wasmTypeForValue(values.valueType(action.output)));
     },
     captureForEdge(edge: EdgeRegion): void {
       for (const id of edgeValues(edge)) {
@@ -249,9 +256,9 @@ export function createValueStack(context: ValueStackContext): ValueStack {
 // policy-only.
 type LocalRegistry = Readonly<{
   // Pops the stack top into a fresh local.
-  captureSet(id: ValueId, remainingUses: number): void;
+  captureSet(id: ValueId, remainingUses: number, type: WasmValueType): void;
   // Copies the stack top into a fresh local, leaving it pushed as one use.
-  captureTee(id: ValueId, remainingUses: number): void;
+  captureTee(id: ValueId, remainingUses: number, type: WasmValueType): void;
   replay(id: ValueId): boolean;
   has(id: ValueId): boolean;
   assertClear(): void;
@@ -263,22 +270,22 @@ function createLocalRegistry(
 ): LocalRegistry {
   const entries = new Map<ValueId, { local: number; remainingUses: number }>();
 
-  function capture(id: ValueId, remainingUses: number): number {
+  function capture(id: ValueId, remainingUses: number, type: WasmValueType): number {
     assert(remainingUses > 0, `cannot capture value ${id} without remaining uses`);
     assert(!entries.has(id), `value ${id} is already captured`);
 
-    const local = scratch.allocLocal(wasmValueType.i32);
+    const local = scratch.allocLocal(type);
 
     entries.set(id, { local, remainingUses });
     return local;
   }
 
   return {
-    captureSet(id: ValueId, remainingUses: number): void {
-      body.localSet(capture(id, remainingUses));
+    captureSet(id: ValueId, remainingUses: number, type: WasmValueType): void {
+      body.localSet(capture(id, remainingUses, type));
     },
-    captureTee(id: ValueId, remainingUses: number): void {
-      body.localTee(capture(id, remainingUses));
+    captureTee(id: ValueId, remainingUses: number, type: WasmValueType): void {
+      body.localTee(capture(id, remainingUses, type));
     },
     replay(id: ValueId): boolean {
       const entry = entries.get(id);
@@ -307,13 +314,26 @@ function createLocalRegistry(
   };
 }
 
-function emitBinaryOperator(body: WasmFunctionBodyEncoder, operator: BinaryOperator): void {
-  switch (operator) {
+function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryValueNode): void {
+  if (node.type === "i64") {
+    switch (node.operator) {
+      case "mul":
+        body.i64Mul();
+        return;
+    }
+
+    assert(false, `unsupported i64 binary operator ${node.operator}`);
+  }
+
+  switch (node.operator) {
     case "add":
       body.i32Add();
       return;
     case "sub":
       body.i32Sub();
+      return;
+    case "mul":
+      body.i32Mul();
       return;
     case "xor":
       body.i32Xor();
@@ -350,8 +370,27 @@ function emitUnaryOperator(body: WasmFunctionBodyEncoder, operator: UnaryOperato
   }
 }
 
-function emitCompareOperator(body: WasmFunctionBodyEncoder, operator: CompareOperator): void {
-  switch (operator) {
+function wasmTypeForValue(type: ValueType): WasmValueType {
+  switch (type) {
+    case "i32":
+      return wasmValueType.i32;
+    case "i64":
+      return wasmValueType.i64;
+  }
+}
+
+function emitCompareOperator(body: WasmFunctionBodyEncoder, node: CompareValueNode): void {
+  if (node.type === "i64") {
+    switch (node.operator) {
+      case "ne":
+        body.i64Ne();
+        return;
+    }
+
+    assert(false, `unsupported i64 compare operator ${node.operator}`);
+  }
+
+  switch (node.operator) {
     case "eq":
       body.i32Eq();
       return;
@@ -385,8 +424,12 @@ function emitCompareOperator(body: WasmFunctionBodyEncoder, operator: CompareOpe
   }
 }
 
-function emitProjection(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
-  switch (width) {
+function emitProjection(body: WasmFunctionBodyEncoder, node: ProjectValueNode): void {
+  if (node.sourceType === "i64") {
+    body.i32WrapI64();
+  }
+
+  switch (node.width) {
     case 32:
       // A full-width projection is the value itself.
       return;
@@ -397,4 +440,19 @@ function emitProjection(body: WasmFunctionBodyEncoder, width: OperandWidth): voi
       body.i32Const(0xff).i32And();
       return;
   }
+}
+
+function emitExtend64(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
+  switch (width) {
+    case 8:
+      body.i32Extend8S();
+      break;
+    case 16:
+      body.i32Extend16S();
+      break;
+    case 32:
+      break;
+  }
+
+  body.i64ExtendI32S();
 }

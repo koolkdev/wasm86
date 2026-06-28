@@ -2,7 +2,7 @@ import type { ConditionCode } from "#x86/conditions.js";
 import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#x86/flag-sources.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { MemoryAccessKind } from "#x86/memory-access.js";
-import type { CompareOperator } from "#x86/semantics/ops.js";
+import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
 import type {
   MemRef,
@@ -54,20 +54,16 @@ export interface SemanticsBuilder {
   memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void;
   address(operand: OperandInput): Value;
 
-  i32Add(a: ValueInput, b: ValueInput): Value;
-  i32Sub(a: ValueInput, b: ValueInput): Value;
-  i32Xor(a: ValueInput, b: ValueInput): Value;
-  i32Or(a: ValueInput, b: ValueInput): Value;
-  i32And(a: ValueInput, b: ValueInput): Value;
-  i32Shl(a: ValueInput, b: ValueInput): Value;
-  i32ShrS(a: ValueInput, b: ValueInput): Value;
-  i32ShrU(a: ValueInput, b: ValueInput): Value;
-  i32Extend8S(value: ValueInput): Value;
-  i32Extend16S(value: ValueInput): Value;
-  i32Popcnt(value: ValueInput): Value;
-  i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value;
+  binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value;
+  unary(operator: UnaryOperator, value: ValueInput): Value;
+  select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value;
   project(width: OperandWidth, value: ValueInput): Value;
+  extend(width: OperandWidth, value: ValueInput): Value;
   compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value;
+  binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value;
+  compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value;
+  project64(width: OperandWidth, value: ValueInput): Value;
+  extend64(width: OperandWidth, value: ValueInput): Value;
 
   readFlag(flag: X86Flag): Value;
   writeFlag(flag: X86Flag, value: ValueInput): void;

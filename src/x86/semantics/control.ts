@@ -35,7 +35,7 @@ export function retImmSemantic(): SemanticTemplate {
     const target = popStack(s, context, 32);
     const bytes = s.get(s.operand(0));
     const esp = s.get(s.reg("esp"));
-    const adjustedEsp = s.i32Add(esp, bytes);
+    const adjustedEsp = s.binary("add", esp, bytes);
 
     s.set(s.reg("esp"), adjustedEsp);
     s.jump(target);

@@ -35,7 +35,7 @@ export function pushStack(
   value: ValueInput
 ): void {
   const esp = s.get(s.reg("esp"));
-  const nextEsp = s.i32Sub(esp, s.const32(stackByteLength(width)));
+  const nextEsp = s.binary("sub", esp, s.const32(stackByteLength(width)));
   const stack = s.mem(nextEsp);
 
   guardStorageWrite(s, context, stack, width);
@@ -53,7 +53,7 @@ export function popStack(
 
   guardStorageRead(s, context, stack, width);
   const value = s.get(stack, width);
-  const nextEsp = s.i32Add(esp, s.const32(stackByteLength(width)));
+  const nextEsp = s.binary("add", esp, s.const32(stackByteLength(width)));
 
   s.set(s.reg("esp"), nextEsp);
   return value;
@@ -120,7 +120,7 @@ function pushAll(s: SemanticsBuilder, width: StackOperandWidth): void {
   const esp = s.get(s.reg("esp"));
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
-  const nextEsp = s.i32Sub(esp, s.const32(totalBytes));
+  const nextEsp = s.binary("sub", esp, s.const32(totalBytes));
 
   s.memoryGuard(nextEsp, totalBytes, "write");
 
@@ -129,7 +129,7 @@ function pushAll(s: SemanticsBuilder, width: StackOperandWidth): void {
     : pushaRegisters.map((reg) => reg === "sp" ? s.project(16, esp) : s.get(s.reg(reg), 16));
 
   values.forEach((value, index) => {
-    const address = s.i32Sub(esp, s.const32(cellBytes * (index + 1)));
+    const address = s.binary("sub", esp, s.const32(cellBytes * (index + 1)));
 
     s.set(s.mem(address), value, width);
   });
@@ -146,7 +146,7 @@ function popAll(s: SemanticsBuilder, width: StackOperandWidth): void {
   const loaded = width === 32
     ? popCells(s, esp, 32, popadCells)
     : popCells(s, esp, 16, popaCells);
-  const nextEsp = s.i32Add(esp, s.const32(totalBytes));
+  const nextEsp = s.binary("add", esp, s.const32(totalBytes));
 
   for (const { reg, value } of loaded) {
     s.set(s.reg(reg), value, width);
@@ -163,7 +163,7 @@ function popCells<TReg extends RegName>(
 ): ReadonlyArray<Readonly<{ reg: TReg; value: Value }>> {
   return cells.map(([reg, offset]) => ({
     reg,
-    value: s.get(s.mem(offset === 0 ? esp : s.i32Add(esp, s.const32(offset))), width)
+    value: s.get(s.mem(offset === 0 ? esp : s.binary("add", esp, s.const32(offset))), width)
   }));
 }
 
@@ -180,7 +180,7 @@ function pushFlags(
     const bit = s.readFlag(flag);
     const offset = x86EflagsBitOffset[flag];
 
-    image = s.i32Or(image, offset === 0 ? bit : s.i32Shl(bit, s.const32(offset)));
+    image = s.binary("or", image, offset === 0 ? bit : s.binary("shl", bit, s.const32(offset)));
   }
 
   pushStack(s, context, width, image);
@@ -197,9 +197,9 @@ function popFlags(
 
   for (const flag of flags) {
     const offset = x86EflagsBitOffset[flag];
-    const shifted = offset === 0 ? image : s.i32ShrU(image, s.const32(offset));
+    const shifted = offset === 0 ? image : s.binary("shr_u", image, s.const32(offset));
 
-    s.writeFlag(flag, s.i32And(shifted, one));
+    s.writeFlag(flag, s.binary("and", shifted, one));
   }
 }
 
@@ -221,7 +221,7 @@ export function leaveSemantic(): SemanticTemplate {
 
     guardStorageRead(s, context, savedFrameStorage, 32);
     const savedFrame = s.get(savedFrameStorage);
-    const nextEsp = s.i32Add(frame, s.const32(4));
+    const nextEsp = s.binary("add", frame, s.const32(4));
 
     s.set(s.reg("esp"), nextEsp);
     s.set(s.reg("ebp"), savedFrame);

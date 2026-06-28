@@ -29,8 +29,8 @@ test("ADD and SUB flag writers write every arithmetic flag value from caller-pro
       const left = s.get(s.operand(0), 32);
       const right = s.get(s.operand(1), 32);
       const result = op === "add"
-        ? s.project(32, s.i32Add(left, right))
-        : s.project(32, s.i32Sub(left, right));
+        ? s.project(32, s.binary("add", left, right))
+        : s.project(32, s.binary("sub", left, right));
 
       if (op === "add") {
         writeAddFlags(s, { width: 32, left, right, result });
@@ -52,8 +52,8 @@ test("arithmetic flag source helpers wrap precomputed results without setting op
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 16);
     const right = s.get(s.operand(1), 16);
-    const addResult = s.project(16, s.i32Add(left, right));
-    const subResult = s.project(16, s.i32Sub(left, right));
+    const addResult = s.project(16, s.binary("add", left, right));
+    const subResult = s.project(16, s.binary("sub", left, right));
 
     addSource = addFlagSource({ width: 16, left, right, result: addResult });
     subSource = subFlagSource({ width: 16, left, right, result: subResult });
@@ -74,7 +74,7 @@ test("logic flag source helper wraps a precomputed logic result", () => {
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
-    const result = s.project(32, s.i32And(left, right));
+    const result = s.project(32, s.binary("and", left, right));
 
     s.writeStatusFlagsSource(logicFlagSource({ width: 32, result }));
   });
@@ -92,7 +92,7 @@ test("INC and DEC helpers preserve CF by writing only the other status flags", (
     const trace = buildHelperTrace((s) => {
       const input = s.get(s.operand(0), 8);
       const one = s.const32(1);
-      const result = name === "inc" ? s.i32Add(input, one) : s.i32Sub(input, one);
+      const result = name === "inc" ? s.binary("add", input, one) : s.binary("sub", input, one);
 
       helper(s, { width: 8, input, result });
     }, regOperands(1));
@@ -109,7 +109,7 @@ test("INC and DEC helpers preserve CF by writing only the other status flags", (
 test("NEG helper follows x86 CF and OF rules", () => {
   const trace = buildHelperTrace((s) => {
     const input = s.get(s.operand(0), 8);
-    const result = s.i32Sub(s.const32(0), input);
+    const result = s.binary("sub", s.const32(0), input);
 
     writeNegFlags(s, { width: 8, input, result });
   }, regOperands(1));
@@ -127,7 +127,7 @@ test("parity formulas use popcnt over only the low byte", () => {
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
-    const result = s.project(32, s.i32Add(left, right));
+    const result = s.project(32, s.binary("add", left, right));
 
     writeAddFlags(s, { width: 32, left, right, result });
   });
@@ -144,7 +144,7 @@ test("sign and overflow formulas consume the operation sign bit", () => {
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), width);
       const right = s.get(s.operand(1), width);
-      const result = s.project(width, s.i32Add(left, right));
+      const result = s.project(width, s.binary("add", left, right));
 
       writeAddFlags(s, { width, left, right, result });
     }, regOperands(2));
@@ -162,7 +162,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const right = s.get(s.operand(1), 8);
 
     addCarryIn = s.compare(8, "ne", left, s.const32(0));
-    const result = s.project(8, s.i32Add(s.i32Add(left, right), addCarryIn));
+    const result = s.project(8, s.binary("add", s.binary("add", left, right), addCarryIn));
 
     writeAddFlags(s, { width: 8, left, right, result, carryIn: addCarryIn });
   });
@@ -180,7 +180,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const right = s.get(s.operand(1), 8);
 
     subBorrowIn = s.compare(8, "ne", right, s.const32(0));
-    const result = s.project(8, s.i32Sub(s.i32Sub(left, right), subBorrowIn));
+    const result = s.project(8, s.binary("sub", s.binary("sub", left, right), subBorrowIn));
 
     writeSubFlags(s, { width: 8, left, right, result, borrowIn: subBorrowIn });
   });
@@ -199,7 +199,7 @@ test("flag writers use the supplied result value for result-derived flags", () =
     const left = s.get(s.operand(0), 16);
     const right = s.get(s.operand(1), 16);
 
-    result = s.project(16, s.i32Add(left, right));
+    result = s.project(16, s.binary("add", left, right));
     writeAddFlags(s, { width: 16, left, right, result });
     s.set(s.operand(0), result, 16);
   });
@@ -221,10 +221,10 @@ test("logic source helpers build source-backed results without direct conditions
       const left = s.get(s.operand(0), 8);
       const right = s.get(s.operand(1), 8);
       const result = op === "and"
-        ? s.i32And(left, right)
+        ? s.binary("and", left, right)
         : op === "or"
-          ? s.i32Or(left, right)
-          : s.i32Xor(left, right);
+          ? s.binary("or", left, right)
+          : s.binary("xor", left, right);
 
       s.set(s.operand(0), result, 8);
       s.writeStatusFlagsSource(logicFlagSource({ width: 8, result }));
@@ -238,7 +238,7 @@ test("logic source helpers build source-backed results without direct conditions
 test("shift flag writer consumes the masked count and supplied result", () => {
   const trace = buildHelperTrace((s) => {
     const value = s.project(16, s.get(s.operand(0), 16));
-    const count = s.i32And(s.get(s.operand(1), 8), s.const32(0x1f));
+    const count = s.binary("and", s.get(s.operand(1), 8), s.const32(0x1f));
     const result = s.get(s.operand(2), 16);
 
     writeShiftFlags(s, {

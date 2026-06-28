@@ -13,7 +13,7 @@ export function cmpSemantic(width: OperandWidth = 32): SemanticTemplate {
 
     const left = s.project(width, s.get(leftOperand, width));
     const right = s.project(width, s.get(rightOperand, width));
-    const result = s.project(width, s.i32Sub(left, right));
+    const result = s.project(width, s.binary("sub", left, right));
 
     s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
   };

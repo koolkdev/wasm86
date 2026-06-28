@@ -45,6 +45,20 @@ export function foldBinary(
       }
 
       return undefined;
+    case "mul":
+      if (right === 1) {
+        return a;
+      }
+
+      if (left === 1) {
+        return b;
+      }
+
+      if (right === 0 || left === 0) {
+        return context.const(0);
+      }
+
+      return undefined;
     case "xor":
       if (right === 0) {
         return a;
@@ -206,6 +220,8 @@ function evalBinary(operator: BinaryOperator, a: number, b: number): number {
       return i32(a + b);
     case "sub":
       return i32(a - b);
+    case "mul":
+      return Math.imul(a, b);
     case "xor":
       return a ^ b;
     case "or":

@@ -125,12 +125,12 @@ function semanticFlagOps(s: SemanticsBuilder): FlagValueOps<Value> {
   return {
     const32: (value) => s.const32(value),
     project: (width, value) => s.project(width, value),
-    and: (a, b) => s.i32And(a, b),
-    sub: (a, b) => s.i32Sub(a, b),
-    xor: (a, b) => s.i32Xor(a, b),
-    shrU: (a, b) => s.i32ShrU(a, b),
-    popcnt: (value) => s.i32Popcnt(value),
+    and: (a, b) => s.binary("and", a, b),
+    sub: (a, b) => s.binary("sub", a, b),
+    xor: (a, b) => s.binary("xor", a, b),
+    shrU: (a, b) => s.binary("shr_u", a, b),
+    popcnt: (value) => s.unary("popcnt", value),
     compare: (width, operator, a, b) => s.compare(width, operator, a, b),
-    select: (condition, whenTrue, whenFalse) => s.i32Select(condition, whenTrue, whenFalse)
+    select: (condition, whenTrue, whenFalse) => s.select(condition, whenTrue, whenFalse)
   };
 }

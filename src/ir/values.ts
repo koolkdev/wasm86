@@ -2,12 +2,19 @@ import { assert } from "#common/assert.js";
 import {
   get2,
   get3,
+  get4,
   put2,
   put3,
+  put4,
   type Map2,
-  type Map3
+  type Map3,
+  type Map4
 } from "#common/nested-map.js";
-import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
+import type {
+  BinaryOperator,
+  CompareOperator,
+  UnaryOperator
+} from "#x86/semantics/ops.js";
 import type { X86StatusFlag } from "#x86/flags.js";
 import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/types.js";
@@ -23,6 +30,7 @@ import {
 } from "./value-folding.js";
 
 export type ValueId = number;
+export type ValueType = "i32" | "i64";
 
 // Nodes reference children by ValueId only; there is no nested-tree form.
 // Actions are not expressions: a readState/readMemory output enters the
@@ -32,6 +40,7 @@ export type ActionOutputValueNode = Readonly<{ kind: "actionOutput" }>;
 export type ExternalValueNode = Readonly<{ kind: "external"; external: ExternalValueId }>;
 export type BinaryValueNode = Readonly<{
   kind: "binary";
+  type: ValueType;
   operator: BinaryOperator;
   a: ValueId;
   b: ValueId;
@@ -39,6 +48,7 @@ export type BinaryValueNode = Readonly<{
 export type UnaryValueNode = Readonly<{ kind: "unary"; operator: UnaryOperator; value: ValueId }>;
 export type CompareValueNode = Readonly<{
   kind: "compare";
+  type: ValueType;
   operator: CompareOperator;
   a: ValueId;
   b: ValueId;
@@ -49,7 +59,13 @@ export type SelectValueNode = Readonly<{
   whenTrue: ValueId;
   whenFalse: ValueId;
 }>;
-export type ProjectValueNode = Readonly<{ kind: "project"; width: OperandWidth; value: ValueId }>;
+export type ProjectValueNode = Readonly<{
+  kind: "project";
+  sourceType: ValueType;
+  width: OperandWidth;
+  value: ValueId;
+}>;
+export type Extend64ValueNode = Readonly<{ kind: "extend64"; width: OperandWidth; value: ValueId }>;
 export type HelperCallKey = Readonly<{ kind: "lazyFlag"; flag: X86StatusFlag }>;
 export type HelperCallValueNode = Readonly<{ kind: "helperCall"; helper: HelperCallKey }>;
 
@@ -62,6 +78,7 @@ export type ValueNode =
   | CompareValueNode
   | SelectValueNode
   | ProjectValueNode
+  | Extend64ValueNode
   | HelperCallValueNode;
 
 // What is provably known about a node's value: the smallest width it fits
@@ -94,11 +111,12 @@ export class ValueTable {
   readonly #widthBounds: (WidthBounds | undefined)[] = [];
   readonly #constIds = new Map<number, ValueId>();
   readonly #externalIds = new Map<ExternalValueId, ValueId>();
-  readonly #binaryIds: Map3<BinaryOperator, ValueId, ValueId, ValueId> = new Map();
+  readonly #binaryIds: Map4<ValueType, BinaryOperator, ValueId, ValueId, ValueId> = new Map();
   readonly #unaryIds: Map2<UnaryOperator, ValueId, ValueId> = new Map();
-  readonly #compareIds: Map3<CompareOperator, ValueId, ValueId, ValueId> = new Map();
+  readonly #compareIds: Map4<ValueType, CompareOperator, ValueId, ValueId, ValueId> = new Map();
   readonly #selectIds: Map3<ValueId, ValueId, ValueId, ValueId> = new Map();
-  readonly #projectIds: Map2<OperandWidth, ValueId, ValueId> = new Map();
+  readonly #projectIds: Map3<ValueType, OperandWidth, ValueId, ValueId> = new Map();
+  readonly #extend64Ids: Map2<OperandWidth, ValueId, ValueId> = new Map();
 
   node(id: ValueId): ValueNode {
     const found = this.#nodes[id];
@@ -116,6 +134,10 @@ export class ValueTable {
 
   size(): number {
     return this.#nodes.length;
+  }
+
+  valueType(id: ValueId): ValueType {
+    return ValueTable.#valueTypeOf(this.node(id));
   }
 
   const(value: number): ValueId {
@@ -140,24 +162,51 @@ export class ValueTable {
 
   binary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
     this.#assertKnownChildren([a, b]);
+    this.#assertValueType(a, "i32");
+    this.#assertValueType(b, "i32");
 
-    return foldBinary(this.#foldContext(), operator, a, b) ?? this.#internBinary(operator, a, b);
+    return foldBinary(this.#foldContext(), operator, a, b) ??
+      this.#internBinary("i32", operator, a, b);
+  }
+
+  binary64(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
+    this.#assertKnownChildren([a, b]);
+    this.#assertValueType(a, "i64");
+    this.#assertValueType(b, "i64");
+
+    return this.#internBinary("i64", operator, a, b);
   }
 
   unary(operator: UnaryOperator, value: ValueId): ValueId {
     this.#assertKnownChildren([value]);
+    this.#assertValueType(value, "i32");
 
     return foldUnary(this.#foldContext(), operator, value) ?? this.#internUnary(operator, value);
   }
 
   compare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
     this.#assertKnownChildren([a, b]);
+    this.#assertValueType(a, "i32");
+    this.#assertValueType(b, "i32");
 
-    return foldCompare(this.#foldContext(), operator, a, b) ?? this.#internCompare(operator, a, b);
+    return foldCompare(this.#foldContext(), operator, a, b) ??
+      this.#internCompare("i32", operator, a, b);
+  }
+
+  compare64(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
+    this.#assertKnownChildren([a, b]);
+    this.#assertValueType(a, "i64");
+    this.#assertValueType(b, "i64");
+
+    return foldCompare(this.#foldContext(), operator, a, b) ??
+      this.#internCompare("i64", operator, a, b);
   }
 
   select(condition: ValueId, whenTrue: ValueId, whenFalse: ValueId): ValueId {
     this.#assertKnownChildren([condition, whenTrue, whenFalse]);
+    this.#assertValueType(condition, "i32");
+    this.#assertValueType(whenTrue, "i32");
+    this.#assertValueType(whenFalse, "i32");
 
     return foldSelect(this.#foldContext(), condition, whenTrue, whenFalse) ??
       this.#internSelect(condition, whenTrue, whenFalse);
@@ -165,15 +214,35 @@ export class ValueTable {
 
   project(width: OperandWidth, value: ValueId): ValueId {
     this.#assertKnownChildren([value]);
+    this.#assertValueType(value, "i32");
 
-    return foldProject(this.#foldContext(), width, value) ?? this.#internProject(width, value);
+    return foldProject(this.#foldContext(), width, value) ?? this.#internProject("i32", width, value);
+  }
+
+  project64(width: OperandWidth, value: ValueId): ValueId {
+    this.#assertKnownChildren([value]);
+    this.#assertValueType(value, "i64");
+
+    const node = this.node(value);
+
+    return node.kind === "extend64" && node.width === width
+      ? this.project(width, node.value)
+      : this.#internProject("i64", width, value);
   }
 
   extend(width: OperandWidth, value: ValueId): ValueId {
     this.#assertKnownChildren([value]);
+    this.#assertValueType(value, "i32");
 
     return foldExtend(this.#foldContext(), width, value) ??
       this.#internUnary(width === 8 ? "extend8_s" : "extend16_s", value);
+  }
+
+  extend64(width: OperandWidth, value: ValueId): ValueId {
+    this.#assertKnownChildren([value]);
+    this.#assertValueType(value, "i32");
+
+    return this.#internExtend64(width, value);
   }
 
   #add(node: ValueNode, children: readonly ValueId[]): ValueId {
@@ -214,16 +283,21 @@ export class ValueTable {
     return id;
   }
 
-  #internBinary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
-    const existing = get3(this.#binaryIds, operator, a, b);
+  #internBinary(
+    type: ValueType,
+    operator: BinaryOperator,
+    a: ValueId,
+    b: ValueId
+  ): ValueId {
+    const existing = get4(this.#binaryIds, type, operator, a, b);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = this.#add({ kind: "binary", operator, a, b }, [a, b]);
+    const id = this.#add({ kind: "binary", type, operator, a, b }, [a, b]);
 
-    put3(this.#binaryIds, operator, a, b, id);
+    put4(this.#binaryIds, type, operator, a, b, id);
     return id;
   }
 
@@ -240,16 +314,21 @@ export class ValueTable {
     return id;
   }
 
-  #internCompare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
-    const existing = get3(this.#compareIds, operator, a, b);
+  #internCompare(
+    type: ValueType,
+    operator: CompareOperator,
+    a: ValueId,
+    b: ValueId
+  ): ValueId {
+    const existing = get4(this.#compareIds, type, operator, a, b);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = this.#add({ kind: "compare", operator, a, b }, [a, b]);
+    const id = this.#add({ kind: "compare", type, operator, a, b }, [a, b]);
 
-    put3(this.#compareIds, operator, a, b, id);
+    put4(this.#compareIds, type, operator, a, b, id);
     return id;
   }
 
@@ -270,16 +349,29 @@ export class ValueTable {
     return id;
   }
 
-  #internProject(width: OperandWidth, value: ValueId): ValueId {
-    const existing = get2(this.#projectIds, width, value);
+  #internProject(sourceType: ValueType, width: OperandWidth, value: ValueId): ValueId {
+    const existing = get3(this.#projectIds, sourceType, width, value);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = this.#add({ kind: "project", width, value }, [value]);
+    const id = this.#add({ kind: "project", sourceType, width, value }, [value]);
 
-    put2(this.#projectIds, width, value, id);
+    put3(this.#projectIds, sourceType, width, value, id);
+    return id;
+  }
+
+  #internExtend64(width: OperandWidth, value: ValueId): ValueId {
+    const existing = get2(this.#extend64Ids, width, value);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const id = this.#add({ kind: "extend64", width, value }, [value]);
+
+    put2(this.#extend64Ids, width, value, id);
     return id;
   }
 
@@ -287,6 +379,12 @@ export class ValueTable {
     for (const child of children) {
       assert(this.#nodes[child] !== undefined, `unknown value id ${child}`);
     }
+  }
+
+  #assertValueType(id: ValueId, expected: ValueType): void {
+    const actual = this.valueType(id);
+
+    assert(actual === expected, `value ${id} must be ${expected}, got ${actual}`);
   }
 
   #widthBoundsOf(id: ValueId): WidthBounds {
@@ -322,6 +420,7 @@ export class ValueTable {
         // Action outputs carry their bounds from creation; externals are opaque.
         return unbounded;
       case "binary":
+        assert(node.type === "i32", `width bounds requested for ${node.type} binary value`);
         return ValueTable.#binaryWidthBounds(node, widthBoundsOf);
       case "select":
         return ValueTable.#selectWidthBounds(node, widthBoundsOf);
@@ -330,7 +429,11 @@ export class ValueTable {
       case "compare":
         return fitsUnsigned(1);
       case "project":
-        return fitsUnsigned(Math.min(node.width, widthBoundsOf(node.value).unsignedBits));
+        return node.sourceType === "i32"
+          ? fitsUnsigned(Math.min(node.width, widthBoundsOf(node.value).unsignedBits))
+          : fitsUnsigned(node.width);
+      case "extend64":
+        assert(false, "width bounds requested for i64 extension value");
       case "helperCall":
         return ValueTable.#helperCallWidthBounds(node.helper);
     }
@@ -359,6 +462,7 @@ export class ValueTable {
         return clampedBounds(a.unsignedBits, 32);
       case "add":
       case "sub":
+      case "mul":
       case "shl":
       case "shr_s":
         // Wrapping arithmetic has no cheap bound.
@@ -408,5 +512,23 @@ export class ValueTable {
       // Significant bits plus the sign bit.
       signedBits: Math.min(32, 33 - Math.clz32(value ^ (value >> 31)))
     };
+  }
+
+  static #valueTypeOf(node: ValueNode): ValueType {
+    switch (node.kind) {
+      case "binary":
+        return node.type;
+      case "extend64":
+        return "i64";
+      case "const":
+      case "actionOutput":
+      case "external":
+      case "unary":
+      case "compare":
+      case "select":
+      case "project":
+      case "helperCall":
+        return "i32";
+    }
   }
 }

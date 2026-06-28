@@ -216,7 +216,7 @@ test("sar semantics use signed right shift after width sign extension", () => {
 
   strictEqual(trace.defs[1], "project16(%0)");
   strictEqual(trace.defs[3], "and(%2, 31)");
-  strictEqual(trace.defs[4], "extend16_s(%1)");
+  strictEqual(trace.defs[4], "extend16(%1)");
   strictEqual(trace.defs[5], "shr_s(%4, %3)");
 });
 
