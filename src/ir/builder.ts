@@ -67,7 +67,7 @@ export type InstructionLocation = Readonly<{
   nextEip: InstructionAddressSource;
 }>;
 
-type InternedInstructionLocation = Readonly<{ eip(): ValueId; nextEip(): ValueId }>;
+type InstructionLocationValues = Readonly<{ eip(): ValueId; nextEip(): ValueId }>;
 
 export type IrBlockBuilder = Readonly<{
   addInstruction(
@@ -122,7 +122,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #operandAddresses = new Map<number, ValueId>();
   #nextRegionId: RegionId = entryRegionId + 1;
   #bindings: readonly OperandBinding[] = [];
-  #instructionLocation: InternedInstructionLocation | undefined;
+  #instructionLocation: InstructionLocationValues | undefined;
   #instructionCountBase: ValueId | undefined;
   #instructionsCompleted = 0;
   #terminated = false;
@@ -142,7 +142,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     this.#bindings = bindings;
     this.#operandAddresses.clear();
-    this.#instructionLocation = this.#internLocation(location);
+    this.#instructionLocation = this.#locationValues(location);
     this.#terminated = false;
     this.#wroteMemory = false;
     this.#pending.write(eipChannel, this.#location().eip());
@@ -218,7 +218,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   const32(value: number): Value {
     this.#beforeOp("const32");
-    return valueFromId(this.#values.internConst(value));
+    return valueFromId(this.#values.const(value));
   }
 
   nextEip(): Value {
@@ -248,9 +248,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
         switch (binding.kind) {
           case "imm":
-            return valueFromId(this.#widthAdjusted(this.#values.internConst(binding.value), accessWidth, options));
+            return valueFromId(this.#widthAdjusted(this.#values.const(binding.value), accessWidth, options));
           case "immExternal":
-            return valueFromId(this.#widthAdjusted(this.#values.internExternal(binding.value), accessWidth, options));
+            return valueFromId(this.#widthAdjusted(this.#values.external(binding.value), accessWidth, options));
           case "reg":
             return valueFromId(this.#readChannel(binding.channel, accessWidth, options));
           case "mem":
@@ -363,12 +363,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   i32Extend8S(value: ValueInput): Value {
     this.#beforeOp("i32Extend8S");
-    return valueFromId(this.#values.extendTo(8, value));
+    return valueFromId(this.#values.extend(8, value));
   }
 
   i32Extend16S(value: ValueInput): Value {
     this.#beforeOp("i32Extend16S");
-    return valueFromId(this.#values.extendTo(16, value));
+    return valueFromId(this.#values.extend(16, value));
   }
 
   i32Popcnt(value: ValueInput): Value {
@@ -377,12 +377,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   i32Select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
     this.#beforeOp("i32Select");
-    return valueFromId(this.#values.internSelect(condition, whenTrue, whenFalse));
+    return valueFromId(this.#values.select(condition, whenTrue, whenFalse));
   }
 
   project(width: OperandWidth, value: ValueInput): Value {
     this.#beforeOp("project");
-    return valueFromId(this.#values.projectTo(width, value));
+    return valueFromId(this.#values.project(width, value));
   }
 
   compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
@@ -390,11 +390,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     // Narrow compares lower by predicate class: signed predicates need
     // sign-extended operands, the rest masked ones.
     const lower = signedComparePredicates.has(operator)
-      ? (id: ValueId) => this.#values.extendTo(width, id)
-      : (id: ValueId) => this.#values.projectTo(width, id);
+      ? (id: ValueId) => this.#values.extend(width, id)
+      : (id: ValueId) => this.#values.project(width, id);
 
     return valueFromId(
-      this.#values.internCompare(operator, lower(a), lower(b))
+      this.#values.compare(operator, lower(a), lower(b))
     );
   }
 
@@ -467,12 +467,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   #binary(op: string, operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
     this.#beforeOp(op);
-    return valueFromId(this.#values.internBinary(operator, a, b));
+    return valueFromId(this.#values.binary(operator, a, b));
   }
 
   #unary(op: string, operator: UnaryOperator, value: ValueInput): Value {
     this.#beforeOp(op);
-    return valueFromId(this.#values.internUnary(operator, value));
+    return valueFromId(this.#values.unary(operator, value));
   }
 
   // Fault edges restore the instruction-start state captured by
@@ -521,10 +521,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#instructionsCompleted += 1;
     this.#pending.write(
       instructionCountChannel,
-      this.#values.internBinary(
+      this.#values.binary(
         "add",
         this.#instructionCountBase,
-        this.#values.internConst(this.#instructionsCompleted)
+        this.#values.const(this.#instructionsCompleted)
       )
     );
   }
@@ -532,15 +532,15 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #dynamicGprSlot(binding: RegDynamicOperandBinding, accessWidth: OperandWidth): GprDynamicSlot {
     return {
       kind: "gprDynamic",
-      index: this.#values.internExternal(binding.index),
+      index: this.#values.external(binding.index),
       byteLength: dynamicGprByteLength[accessWidth]
     };
   }
 
   #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: GetOptions): ValueId {
     return options.signed === true
-      ? this.#values.extendTo(accessWidth, value)
-      : this.#values.projectTo(accessWidth, value);
+      ? this.#values.extend(accessWidth, value)
+      : this.#values.project(accessWidth, value);
   }
 
   #readChannel(channel: GprChannel, accessWidth: OperandWidth, options: GetOptions): ValueId {
@@ -601,7 +601,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       case "mem":
         return this.#effectiveAddress(binding.address);
       case "memStatic":
-        return this.#values.internExternal(binding.address);
+        return this.#values.external(binding.address);
       case "memDynamic":
         return this.#dynamicAddress(binding);
     }
@@ -610,11 +610,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #dynamicAddress(binding: MemDynamicOperandBinding): ValueId {
     const base = this.#pending.readDynamicGpr({
       kind: "gprDynamic",
-      index: this.#values.internExternal(binding.base),
+      index: this.#values.external(binding.base),
       byteLength: 4
     });
 
-    return this.#values.internBinary("add", base, this.#values.internExternal(binding.offset));
+    return this.#values.binary("add", base, this.#values.external(binding.offset));
   }
 
   #effectiveAddress(ea: EffectiveAddress): ValueId {
@@ -628,18 +628,18 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       const index = this.#pending.read(gprChannel(ea.index));
       const scaled = ea.scale === 1
         ? index
-        : this.#values.internBinary("shl", index, this.#values.internConst(scaleShift[ea.scale]));
+        : this.#values.binary("shl", index, this.#values.const(scaleShift[ea.scale]));
 
-      address = address === undefined ? scaled : this.#values.internBinary("add", address, scaled);
+      address = address === undefined ? scaled : this.#values.binary("add", address, scaled);
     }
 
     if (address === undefined) {
-      return this.#values.internConst(ea.disp);
+      return this.#values.const(ea.disp);
     }
 
     return ea.disp === 0
       ? address
-      : this.#values.internBinary("add", address, this.#values.internConst(ea.disp));
+      : this.#values.binary("add", address, this.#values.const(ea.disp));
   }
 
   #binding(index: number): OperandBinding {
@@ -649,33 +649,23 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return binding;
   }
 
-  #internLocation(location: InstructionLocation): InternedInstructionLocation {
+  #locationValues(location: InstructionLocation): InstructionLocationValues {
     return {
-      eip: this.#internLocationValue(location.eip),
-      nextEip: this.#internLocationValue(location.nextEip)
+      eip: this.#locationValue(location.eip),
+      nextEip: this.#locationValue(location.nextEip)
     };
   }
 
-  #internLocationValue(source: InstructionAddressSource): () => ValueId {
-    let interned: ValueId | undefined;
-
-    return () => {
-      if (interned !== undefined) {
-        return interned;
-      }
-
-      switch (source.kind) {
-        case "const":
-          interned = this.#values.internConst(source.address);
-          return interned;
-        case "external":
-          interned = this.#values.internExternal(source.external);
-          return interned;
-      }
-    };
+  #locationValue(source: InstructionAddressSource): () => ValueId {
+    switch (source.kind) {
+      case "const":
+        return () => this.#values.const(source.address);
+      case "external":
+        return () => this.#values.external(source.external);
+    }
   }
 
-  #location(): InternedInstructionLocation {
+  #location(): InstructionLocationValues {
     assert(this.#instructionLocation !== undefined, "IR block builder has no current instruction");
     return this.#instructionLocation;
   }

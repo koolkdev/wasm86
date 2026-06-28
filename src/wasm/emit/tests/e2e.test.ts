@@ -105,7 +105,7 @@ test("generic state actions load and store the lazy flags kind byte channel", as
   const values = new ValueTable();
   const oldKindByte = values.addActionOutput();
   const newKindByteValue = lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, 16);
-  const newKindByte = values.internConst(newKindByteValue);
+  const newKindByte = values.const(newKindByteValue);
   const block: IrBlock = {
     entry: 0,
     regions: [
@@ -325,7 +325,7 @@ test("zero compares encode as eqz", () => {
 });
 
 test("a value used twice computes once and both uses observe it", async () => {
-  // eax = ebx = eax + ebx: one interned add consumed by both stores.
+  // eax = ebx = eax + ebx: one shared add consumed by both stores.
   const sumIntoBoth: SemanticTemplate = (s) => {
     const sum = s.i32Add(s.get(s.operand(0), 32), s.get(s.operand(1), 32));
 

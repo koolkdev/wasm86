@@ -50,7 +50,7 @@ class DecodeFragment {
       return existing;
     }
 
-    const id = this.#values.internExternal(this.#externalLocals.size);
+    const id = this.#values.external(this.#externalLocals.size);
 
     this.#externalLocals.set(this.#externalLocals.size, local);
     this.#externalsByLocal.set(local, id);
@@ -58,17 +58,17 @@ class DecodeFragment {
   }
 
   const32(value: number): ValueId {
-    return this.#values.internConst(value);
+    return this.#values.const(value);
   }
 
   add(a: ValueId, b: ValueId): ValueId {
-    return this.#values.internBinary("add", a, b);
+    return this.#values.binary("add", a, b);
   }
 
   shiftField(value: ValueId, shift: number, mask?: number): ValueId {
-    const shifted = shift === 0 ? value : this.#values.internBinary("shr_u", value, this.const32(shift));
+    const shifted = shift === 0 ? value : this.#values.binary("shr_u", value, this.const32(shift));
 
-    return mask === undefined ? shifted : this.#values.internBinary("and", shifted, this.const32(mask));
+    return mask === undefined ? shifted : this.#values.binary("and", shifted, this.const32(mask));
   }
 
   readEip(): ValueId {
@@ -87,10 +87,10 @@ class DecodeFragment {
 
   // The scaled-index term: zero when the index field selects "none" (4).
   scaledIndex(index: ValueId, shift: ValueId): ValueId {
-    return this.#values.internSelect(
-      this.#values.internCompare("eq", index, this.const32(4)),
+    return this.#values.select(
+      this.#values.compare("eq", index, this.const32(4)),
       this.const32(0),
-      this.#values.internBinary("shl", this.readGprWord(index), shift)
+      this.#values.binary("shl", this.readGprWord(index), shift)
     );
   }
 

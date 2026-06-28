@@ -22,16 +22,16 @@ export function assertLazyRecord(
   strictEqual(actions.filter((write) => write.slot.kind === "flag").length, 0);
 
   if (expected.kind === "LOGIC_RESULT") {
-    strictEqual(stateWriteValue(actions, lazyFlagsAChannel), values.projectTo(expected.width, expected.result));
+    strictEqual(stateWriteValue(actions, lazyFlagsAChannel), values.project(expected.width, expected.result));
     strictEqual(stateWriteValue(actions, lazyFlagsBChannel), undefined);
   } else {
-    strictEqual(stateWriteValue(actions, lazyFlagsAChannel), values.projectTo(expected.width, expected.left));
-    strictEqual(stateWriteValue(actions, lazyFlagsBChannel), values.projectTo(expected.width, expected.right));
+    strictEqual(stateWriteValue(actions, lazyFlagsAChannel), values.project(expected.width, expected.left));
+    strictEqual(stateWriteValue(actions, lazyFlagsBChannel), values.project(expected.width, expected.right));
   }
 
   strictEqual(
     stateWriteValue(actions, lazyFlagsKindChannel),
-    values.internConst(lazyFlagsKindByte(LAZY_FLAGS_KIND[expected.kind], expected.width))
+    values.const(lazyFlagsKindByte(LAZY_FLAGS_KIND[expected.kind], expected.width))
   );
 }
 

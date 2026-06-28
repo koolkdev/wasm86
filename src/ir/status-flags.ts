@@ -76,7 +76,7 @@ export class StatusFlags {
         this.#writeLazyBinarySource(source);
         return;
       case "logic": {
-        const zero = this.#values.internConst(0);
+        const zero = this.#values.const(0);
 
         this.#setBacking("CF", { kind: "value", value: zero });
         this.#setBacking("PF", { kind: "source", source: sourceId });
@@ -127,7 +127,7 @@ export class StatusFlags {
     for (const flag of x86StatusFlags) {
       this.#writeExplicitFlag(flag, values[flag]);
     }
-    this.#pending.write(lazyFlagsKindChannel, this.#values.internConst(0));
+    this.#pending.write(lazyFlagsKindChannel, this.#values.const(0));
   }
 
   #writeExplicitFlag(flag: X86StatusFlag, value: ValueId): void {
@@ -144,22 +144,22 @@ export class StatusFlags {
 
     this.#invalidateExplicitFlagChannels();
     this.#pending.invalidate(lazyFlagsKindChannel);
-    this.#pending.write(lazyFlagsAChannel, this.#values.projectTo(source.width, source.left));
-    this.#pending.write(lazyFlagsBChannel, this.#values.projectTo(source.width, source.right));
+    this.#pending.write(lazyFlagsAChannel, this.#values.project(source.width, source.left));
+    this.#pending.write(lazyFlagsBChannel, this.#values.project(source.width, source.right));
     this.#pending.write(
       lazyFlagsKindChannel,
-      this.#values.internConst(lazyFlagsKindByte(kind, source.width))
+      this.#values.const(lazyFlagsKindByte(kind, source.width))
     );
   }
 
   #writeLazyLogicSource(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "logic" }>): void {
     this.#invalidateExplicitFlagChannels();
     this.#pending.invalidate(lazyFlagsKindChannel);
-    this.#pending.write(lazyFlagsAChannel, this.#values.projectTo(source.width, source.result));
+    this.#pending.write(lazyFlagsAChannel, this.#values.project(source.width, source.result));
     this.#pending.invalidate(lazyFlagsBChannel);
     this.#pending.write(
       lazyFlagsKindChannel,
-      this.#values.internConst(lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, source.width))
+      this.#values.const(lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, source.width))
     );
   }
 
@@ -217,7 +217,7 @@ export class StatusFlags {
       case "sub":
         return this.#compare(source.width, operator, source.left, source.right);
       case "logic":
-        return this.#compare(source.width, operator, source.result, this.#values.internConst(0));
+        return this.#compare(source.width, operator, source.result, this.#values.const(0));
     }
   }
 
@@ -226,25 +226,25 @@ export class StatusFlags {
       case "flag":
         return this.#resolveFlagFrom(this.#current, expr.flag, cache);
       case "not":
-        return this.#values.internCompare(
+        return this.#values.compare(
           "eq",
           this.#flagBoolExpr(expr.value, cache),
-          this.#values.internConst(0)
+          this.#values.const(0)
         );
       case "and":
-        return this.#values.internBinary(
+        return this.#values.binary(
           "and",
           this.#flagBoolExpr(expr.a, cache),
           this.#flagBoolExpr(expr.b, cache)
         );
       case "or":
-        return this.#values.internBinary(
+        return this.#values.binary(
           "or",
           this.#flagBoolExpr(expr.a, cache),
           this.#flagBoolExpr(expr.b, cache)
         );
       case "xor":
-        return this.#values.internBinary(
+        return this.#values.binary(
           "xor",
           this.#flagBoolExpr(expr.a, cache),
           this.#flagBoolExpr(expr.b, cache)
@@ -280,7 +280,7 @@ export class StatusFlags {
   #materializeUndef(policy: UndefFlagPolicy): ValueId {
     switch (policy) {
       case "zero":
-        return this.#values.internConst(0);
+        return this.#values.const(0);
     }
   }
 
@@ -292,10 +292,10 @@ export class StatusFlags {
 
   #compare(width: SimpleFlagSource<ValueId>["width"], operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
     const lower = signedComparePredicates.has(operator)
-      ? (id: ValueId) => this.#values.extendTo(width, id)
-      : (id: ValueId) => this.#values.projectTo(width, id);
+      ? (id: ValueId) => this.#values.extend(width, id)
+      : (id: ValueId) => this.#values.project(width, id);
 
-    return this.#values.internCompare(operator, lower(a), lower(b));
+    return this.#values.compare(operator, lower(a), lower(b));
   }
 }
 

@@ -92,7 +92,7 @@ class BlockValueUsage implements BlockValueAnalysis {
       if (output !== undefined) {
         // The descending walk settles an output before its operands.
         for (const operand of actionOperands(action)) {
-          assert(operand < output, `producer operand ${operand} interned after its output ${output}`);
+          assert(operand < output, `producer operand ${operand} created after its output ${output}`);
         }
 
         this.#producers.set(output, { action, actionIndex });

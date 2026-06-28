@@ -25,7 +25,7 @@ type DecodeReadFragment = Readonly<{
 
 function dispatchFragment(targetEip: number): IrBlock {
   const values = new ValueTable();
-  const target = values.internConst(targetEip);
+  const target = values.const(targetEip);
 
   return {
     entry: 0,
@@ -48,7 +48,7 @@ function dispatchFragment(targetEip: number): IrBlock {
 function decodeReadFragment(k: number): DecodeReadFragment {
   const values = new ValueTable();
   const eipValue = values.addActionOutput();
-  const address = values.internBinary("add", eipValue, values.internConst(k));
+  const address = values.binary("add", eipValue, values.const(k));
   const fetched = values.addActionOutput();
   const block: IrBlock = {
     entry: 0,
@@ -228,7 +228,7 @@ test("consecutive fragments share the embedder's scratch locals", async () => {
 test("an exported register read pins across a later overlapping store", async () => {
   const values = new ValueTable();
   const readValue = values.addActionOutput();
-  const incremented = values.internBinary("add", readValue, values.internConst(1));
+  const incremented = values.binary("add", readValue, values.const(1));
   const block: IrBlock = {
     entry: 0,
     regions: [

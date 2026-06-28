@@ -42,7 +42,7 @@ test("helperCallsForBlock omits dead helper calls", () => {
   deepStrictEqual(helperCallsForBlock(block, analyzeBlockValues(block)), []);
 });
 
-test("helper calls are not interned", () => {
+test("helper calls are not deduplicated", () => {
   const values = new ValueTable();
   const first = values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });
   const second = values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });

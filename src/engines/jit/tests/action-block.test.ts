@@ -149,7 +149,7 @@ function isEaxWordSlot(slot: StateSlot): boolean {
 
 function syntheticBlock(withHelper: boolean): IrBlock {
   const values = new ValueTable();
-  const stored = withHelper ? values.addHelperCall({ kind: "lazyFlag", flag: "ZF" }) : values.internConst(7);
+  const stored = withHelper ? values.addHelperCall({ kind: "lazyFlag", flag: "ZF" }) : values.const(7);
 
   return {
     entry: 0,

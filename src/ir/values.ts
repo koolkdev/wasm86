@@ -12,6 +12,15 @@ import type { X86StatusFlag } from "#x86/flags.js";
 import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { ExternalValueId } from "./operands.js";
+import {
+  foldBinary,
+  foldCompare,
+  foldExtend,
+  foldProject,
+  foldSelect,
+  foldUnary,
+  type ValueFoldContext
+} from "./value-folding.js";
 
 export type ValueId = number;
 
@@ -91,10 +100,84 @@ export class ValueTable {
   readonly #selectIds: Map3<ValueId, ValueId, ValueId, ValueId> = new Map();
   readonly #projectIds: Map2<OperandWidth, ValueId, ValueId> = new Map();
 
+  node(id: ValueId): ValueNode {
+    const found = this.#nodes[id];
+
+    assert(found !== undefined, `unknown value id ${id}`);
+    return found;
+  }
+
+  // The node's compile-time constant, when it is one; i32-canonical.
+  constValue(id: ValueId): number | undefined {
+    const found = this.node(id);
+
+    return found.kind === "const" ? found.value : undefined;
+  }
+
+  size(): number {
+    return this.#nodes.length;
+  }
+
+  const(value: number): ValueId {
+    return this.#internConst(value);
+  }
+
+  external(external: ExternalValueId): ValueId {
+    return this.#internExternal(external);
+  }
+
+  addActionOutput(bounds?: WidthBounds): ValueId {
+    // Each action produces a distinct value; outputs are never deduped.
+    const id = this.#add({ kind: "actionOutput" }, []);
+
+    this.#widthBounds[id] = bounds ?? unbounded;
+    return id;
+  }
+
+  addHelperCall(helper: HelperCallKey): ValueId {
+    return this.#add({ kind: "helperCall", helper }, []);
+  }
+
+  binary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
+    this.#assertKnownChildren([a, b]);
+
+    return foldBinary(this.#foldContext(), operator, a, b) ?? this.#internBinary(operator, a, b);
+  }
+
+  unary(operator: UnaryOperator, value: ValueId): ValueId {
+    this.#assertKnownChildren([value]);
+
+    return foldUnary(this.#foldContext(), operator, value) ?? this.#internUnary(operator, value);
+  }
+
+  compare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
+    this.#assertKnownChildren([a, b]);
+
+    return foldCompare(this.#foldContext(), operator, a, b) ?? this.#internCompare(operator, a, b);
+  }
+
+  select(condition: ValueId, whenTrue: ValueId, whenFalse: ValueId): ValueId {
+    this.#assertKnownChildren([condition, whenTrue, whenFalse]);
+
+    return foldSelect(this.#foldContext(), condition, whenTrue, whenFalse) ??
+      this.#internSelect(condition, whenTrue, whenFalse);
+  }
+
+  project(width: OperandWidth, value: ValueId): ValueId {
+    this.#assertKnownChildren([value]);
+
+    return foldProject(this.#foldContext(), width, value) ?? this.#internProject(width, value);
+  }
+
+  extend(width: OperandWidth, value: ValueId): ValueId {
+    this.#assertKnownChildren([value]);
+
+    return foldExtend(this.#foldContext(), width, value) ??
+      this.#internUnary(width === 8 ? "extend8_s" : "extend16_s", value);
+  }
+
   #add(node: ValueNode, children: readonly ValueId[]): ValueId {
-    for (const child of children) {
-      assert(this.#nodes[child] !== undefined, `unknown value id ${child}`);
-    }
+    this.#assertKnownChildren(children);
 
     const id = this.#nodes.length;
 
@@ -104,27 +187,7 @@ export class ValueTable {
     return id;
   }
 
-  node(id: ValueId): ValueNode {
-    const found = this.#nodes[id];
-
-    assert(found !== undefined, `unknown value id ${id}`);
-    return found;
-  }
-
-  #widthBoundsOf(id: ValueId): WidthBounds {
-    const existing = this.#widthBounds[id];
-
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const derived = ValueTable.#deriveWidthBounds(this.node(id), (child) => this.#widthBoundsOf(child));
-
-    this.#widthBounds[id] = derived;
-    return derived;
-  }
-
-  internConst(value: number): ValueId {
+  #internConst(value: number): ValueId {
     const canonical = i32(value);
     const existing = this.#constIds.get(canonical);
 
@@ -138,7 +201,7 @@ export class ValueTable {
     return id;
   }
 
-  internExternal(external: ExternalValueId): ValueId {
+  #internExternal(external: ExternalValueId): ValueId {
     const existing = this.#externalIds.get(external);
 
     if (existing !== undefined) {
@@ -151,15 +214,7 @@ export class ValueTable {
     return id;
   }
 
-  addActionOutput(bounds?: WidthBounds): ValueId {
-    // Each action produces a distinct value; outputs are never deduped.
-    const id = this.#add({ kind: "actionOutput" }, []);
-
-    this.#widthBounds[id] = bounds ?? unbounded;
-    return id;
-  }
-
-  internBinary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
+  #internBinary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
     const existing = get3(this.#binaryIds, operator, a, b);
 
     if (existing !== undefined) {
@@ -172,7 +227,7 @@ export class ValueTable {
     return id;
   }
 
-  internUnary(operator: UnaryOperator, value: ValueId): ValueId {
+  #internUnary(operator: UnaryOperator, value: ValueId): ValueId {
     const existing = get2(this.#unaryIds, operator, value);
 
     if (existing !== undefined) {
@@ -185,7 +240,7 @@ export class ValueTable {
     return id;
   }
 
-  internCompare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
+  #internCompare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
     const existing = get3(this.#compareIds, operator, a, b);
 
     if (existing !== undefined) {
@@ -198,7 +253,7 @@ export class ValueTable {
     return id;
   }
 
-  internSelect(condition: ValueId, whenTrue: ValueId, whenFalse: ValueId): ValueId {
+  #internSelect(condition: ValueId, whenTrue: ValueId, whenFalse: ValueId): ValueId {
     const existing = get3(this.#selectIds, condition, whenTrue, whenFalse);
 
     if (existing !== undefined) {
@@ -215,7 +270,7 @@ export class ValueTable {
     return id;
   }
 
-  internProject(width: OperandWidth, value: ValueId): ValueId {
+  #internProject(width: OperandWidth, value: ValueId): ValueId {
     const existing = get2(this.#projectIds, width, value);
 
     if (existing !== undefined) {
@@ -228,51 +283,31 @@ export class ValueTable {
     return id;
   }
 
-  addHelperCall(helper: HelperCallKey): ValueId {
-    return this.#add({ kind: "helperCall", helper }, []);
+  #assertKnownChildren(children: readonly ValueId[]): void {
+    for (const child of children) {
+      assert(this.#nodes[child] !== undefined, `unknown value id ${child}`);
+    }
   }
 
-  // Smart constructor: the interned projection, or the value itself when its
-  // width bounds already cover the request.
-  projectTo(width: OperandWidth, value: ValueId): ValueId {
-    const found = this.node(value);
+  #widthBoundsOf(id: ValueId): WidthBounds {
+    const existing = this.#widthBounds[id];
 
-    if (found.kind === "const") {
-      return this.internConst(ValueTable.#projectConst(width, found.value));
+    if (existing !== undefined) {
+      return existing;
     }
 
-    if (width === 32 || this.#widthBoundsOf(value).unsignedBits <= width) {
-      return value;
-    }
+    const derived = ValueTable.#deriveWidthBounds(this.node(id), (child) => this.#widthBoundsOf(child));
 
-    return this.internProject(width, value);
+    this.#widthBounds[id] = derived;
+    return derived;
   }
 
-  // Smart constructor: the interned extension, or the value itself when its
-  // width bounds already cover the request.
-  extendTo(width: OperandWidth, value: ValueId): ValueId {
-    const found = this.node(value);
-
-    if (found.kind === "const") {
-      return this.internConst(ValueTable.#extendConst(width, found.value));
-    }
-
-    if (width === 32 || this.#widthBoundsOf(value).signedBits <= width) {
-      return value;
-    }
-
-    return this.internUnary(width === 8 ? "extend8_s" : "extend16_s", value);
-  }
-
-  // The node's compile-time constant, when it is one; i32-canonical.
-  constValue(id: ValueId): number | undefined {
-    const found = this.node(id);
-
-    return found.kind === "const" ? found.value : undefined;
-  }
-
-  size(): number {
-    return this.#nodes.length;
+  #foldContext(): ValueFoldContext {
+    return {
+      constValue: (id) => this.constValue(id),
+      const: (value) => this.#internConst(value),
+      widthBounds: (id) => this.#widthBoundsOf(id)
+    };
   }
 
   static #deriveWidthBounds(
@@ -298,28 +333,6 @@ export class ValueTable {
         return fitsUnsigned(Math.min(node.width, widthBoundsOf(node.value).unsignedBits));
       case "helperCall":
         return ValueTable.#helperCallWidthBounds(node.helper);
-    }
-  }
-
-  static #projectConst(width: OperandWidth, value: number): number {
-    switch (width) {
-      case 8:
-        return value & 0xff;
-      case 16:
-        return value & 0xffff;
-      case 32:
-        return i32(value);
-    }
-  }
-
-  static #extendConst(width: OperandWidth, value: number): number {
-    switch (width) {
-      case 8:
-        return (value << 24) >> 24;
-      case 16:
-        return (value << 16) >> 16;
-      case 32:
-        return i32(value);
     }
   }
 

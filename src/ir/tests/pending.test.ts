@@ -45,7 +45,7 @@ function edgeEntries(
 
 test("an exact pending hit returns the value with no actions", () => {
   const { values, actions, pending } = createHarness();
-  const value = values.internConst(0x12345678);
+  const value = values.const(0x12345678);
 
   pending.write(gprChannel("eax"), value);
   strictEqual(pending.read(gprChannel("eax")), value);
@@ -55,7 +55,7 @@ test("an exact pending hit returns the value with no actions", () => {
 test("a read disjoint from all pendings loads through one cached readState", () => {
   const { values, actions, pending } = createHarness();
 
-  pending.write(gprChannel("eax"), values.internConst(1));
+  pending.write(gprChannel("eax"), values.const(1));
 
   const first = pending.read(gprChannel("ebx"));
 
@@ -65,7 +65,7 @@ test("a read disjoint from all pendings loads through one cached readState", () 
 
 test("write al then read eax flushes the byte and reloads the word", () => {
   const { values, actions, pending } = createHarness();
-  const byte = values.internConst(0x12);
+  const byte = values.const(0x12);
 
   pending.write(gprChannel("al"), byte);
 
@@ -86,7 +86,7 @@ test("write al then read eax flushes the byte and reloads the word", () => {
 
 test("write eax then read al flushes the word and reloads the byte", () => {
   const { values, actions, pending } = createHarness();
-  const word = values.internConst(0x12345678);
+  const word = values.const(0x12345678);
 
   pending.write(gprChannel("eax"), word);
 
@@ -103,7 +103,7 @@ test("write eax then read al flushes the word and reloads the byte", () => {
 test("write eax then read ah reloads through the high-byte channel", () => {
   const { values, actions, pending } = createHarness();
 
-  pending.write(gprChannel("eax"), values.internConst(0x12345678));
+  pending.write(gprChannel("eax"), values.const(0x12345678));
 
   const high = pending.read(gprChannel("ah"));
 
@@ -113,10 +113,10 @@ test("write eax then read ah reloads through the high-byte channel", () => {
 
 test("a covering write drops the pending with no flush", () => {
   const { values, actions, pending } = createHarness();
-  const word = values.internConst(0x12345678);
+  const word = values.const(0x12345678);
 
-  pending.write(gprChannel("al"), values.internConst(0x12));
-  pending.write(gprChannel("ah"), values.internConst(0x34));
+  pending.write(gprChannel("al"), values.const(0x12));
+  pending.write(gprChannel("ah"), values.const(0x34));
   pending.write(gprChannel("eax"), word);
 
   strictEqual(actions.length, 0);
@@ -126,8 +126,8 @@ test("a covering write drops the pending with no flush", () => {
 
 test("a partially overlapping write flushes the wider pending first", () => {
   const { values, actions, pending } = createHarness();
-  const word = values.internConst(0x12345678);
-  const byte = values.internConst(0x9a);
+  const word = values.const(0x12345678);
+  const byte = values.const(0x9a);
 
   pending.write(gprChannel("ax"), word);
   pending.write(gprChannel("al"), byte);
@@ -139,9 +139,9 @@ test("a partially overlapping write flushes the wider pending first", () => {
 
 test("disjoint byte pendings coexist and flush together on an ax read", () => {
   const { values, actions, pending } = createHarness();
-  const low = values.internConst(0x12);
-  const high = values.internConst(0x34);
-  const flag = values.internConst(1);
+  const low = values.const(0x12);
+  const high = values.const(0x34);
+  const flag = values.const(1);
 
   pending.write(flagChannel("ID"), flag);
   pending.write(gprChannel("al"), low);
@@ -163,10 +163,10 @@ test("disjoint byte pendings coexist and flush together on an ax read", () => {
 
 test("flag and eip pendings hit exactly and never interact with registers", () => {
   const { values, actions, pending } = createHarness();
-  const eip = values.internConst(0x401000);
+  const eip = values.const(0x401000);
 
   pending.write(eipChannel, eip);
-  pending.write(gprChannel("eax"), values.internConst(7));
+  pending.write(gprChannel("eax"), values.const(7));
   strictEqual(pending.read(eipChannel), eip);
   deepStrictEqual(actions, []);
 });
@@ -174,10 +174,10 @@ test("flag and eip pendings hit exactly and never interact with registers", () =
 test("lazy flag metadata channels are cached raw state cells", () => {
   const { values, actions, pending } = createHarness();
   const kindByte = pending.read(lazyFlagsKindChannel);
-  const lazyA = values.internConst(0x1234_5678);
+  const lazyA = values.const(0x1234_5678);
 
   strictEqual(pending.read(lazyFlagsKindChannel), kindByte);
-  strictEqual(values.projectTo(8, kindByte), kindByte);
+  strictEqual(values.project(8, kindByte), kindByte);
 
   pending.write(lazyFlagsAChannel, lazyA);
 
@@ -193,7 +193,7 @@ test("lazy flag metadata channels are cached raw state cells", () => {
 
 test("flag channels are exact raw pending cells", () => {
   const { values, actions, pending } = createHarness();
-  const zf = values.internConst(1);
+  const zf = values.const(1);
 
   pending.write(flagChannel("ZF"), zf);
 
@@ -211,7 +211,7 @@ test("a flush invalidates read leaves of overlapping channels only", () => {
   const eaxRead = pending.read(gprChannel("eax"));
   const ecxRead = pending.read(gprChannel("ecx"));
 
-  pending.write(gprChannel("al"), values.internConst(0x12));
+  pending.write(gprChannel("al"), values.const(0x12));
 
   // The al flush makes the cached eax leaf stale; ecx is unaffected.
   const reloaded = pending.read(gprChannel("eax"));
@@ -248,14 +248,14 @@ test("an exact narrow hit normalizes values whose high bits are unproven", () =>
   const unproven = values.addActionOutput();
 
   pending.write(gprChannel("al"), unproven);
-  strictEqual(pending.read(gprChannel("al")), values.internProject(8, unproven));
+  strictEqual(pending.read(gprChannel("al")), values.project(8, unproven));
   strictEqual(
     pending.read(gprChannel("al"), { signed: true }),
-    values.internUnary("extend8_s", unproven)
+    values.unary("extend8_s", unproven)
   );
 
   // A value that provably fits the channel passes through untouched.
-  const byte = values.internConst(0x12);
+  const byte = values.const(0x12);
 
   pending.write(gprChannel("ah"), byte);
   strictEqual(pending.read(gprChannel("ah")), byte);
@@ -263,8 +263,8 @@ test("an exact narrow hit normalizes values whose high bits are unproven", () =>
 
 test("completed edge flushes dirty pendings in owner order", () => {
   const { values, pending } = createHarness();
-  const flag = values.internConst(1);
-  const word = values.internConst(7);
+  const flag = values.const(1);
+  const word = values.const(7);
 
   pending.write(flagChannel("DF"), flag);
   pending.write(gprChannel("esi"), word);
@@ -280,8 +280,8 @@ test("completed edge flushes dirty pendings in owner order", () => {
 
 test("fault boundary lists instruction-start values without consuming the map", () => {
   const { values, actions, pending } = createHarness();
-  const byte = values.internConst(0x12);
-  const eip = values.internConst(0x1000);
+  const byte = values.const(0x12);
+  const eip = values.const(0x1000);
 
   pending.write(gprChannel("al"), byte);
   pending.write(eipChannel, eip);
@@ -298,8 +298,8 @@ test("fault boundary lists instruction-start values without consuming the map", 
 
 test("fault boundary keeps a rewritten channel's instruction-start value", () => {
   const { values, pending } = createHarness();
-  const before = values.internConst(1);
-  const after = values.internConst(2);
+  const before = values.const(1);
+  const after = values.const(2);
 
   pending.write(gprChannel("eax"), before);
   pending.beginInstruction();
@@ -313,18 +313,18 @@ test("fault boundary omits a channel first written this instruction", () => {
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
-  pending.write(gprChannel("eax"), values.internConst(1));
+  pending.write(gprChannel("eax"), values.const(1));
 
   deepStrictEqual(faultEdgeEntries(pending), []);
 });
 
 test("a covering write keeps the dropped channel's start value in the fault boundary", () => {
   const { values, pending } = createHarness();
-  const byte = values.internConst(0x12);
+  const byte = values.const(0x12);
 
   pending.write(gprChannel("al"), byte);
   pending.beginInstruction();
-  pending.write(gprChannel("eax"), values.internConst(0x12345678));
+  pending.write(gprChannel("eax"), values.const(0x12345678));
 
   // eax had no start pending (omitted); the dropped al still must reach
   // cpu state memory on the fault path.
@@ -335,7 +335,7 @@ test("flushing a channel first written this instruction makes the fault boundary
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
-  pending.write(gprChannel("al"), values.internConst(1));
+  pending.write(gprChannel("al"), values.const(1));
   pending.read(gprChannel("ax"));
 
   throws(() => pending.flushesForEdge("fault"), /unrestorable/);
@@ -343,16 +343,16 @@ test("flushing a channel first written this instruction makes the fault boundary
   // The next instruction boundary takes a fresh copy; the flushed al is
   // clean but still pending, so it joins the new boundary.
   pending.beginInstruction();
-  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), values.internConst(1)]]);
+  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), values.const(1)]]);
 });
 
 test("flushing a channel rewritten this instruction keeps its start value in the fault boundary", () => {
   const { values, pending } = createHarness();
-  const before = values.internConst(0x111);
+  const before = values.const(0x111);
 
   pending.write(gprChannel("eax"), before);
   pending.beginInstruction();
-  pending.write(gprChannel("eax"), values.internConst(0x222));
+  pending.write(gprChannel("eax"), values.const(0x222));
   pending.read(gprChannel("al"));
 
   deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("eax"), before]]);
@@ -360,7 +360,7 @@ test("flushing a channel rewritten this instruction keeps its start value in the
 
 test("flushing a channel untouched this instruction keeps it in the fault boundary", () => {
   const { values, pending } = createHarness();
-  const byte = values.internConst(0x12);
+  const byte = values.const(0x12);
 
   pending.write(gprChannel("al"), byte);
   pending.beginInstruction();
@@ -372,9 +372,9 @@ test("flushing a channel untouched this instruction keeps it in the fault bounda
 
 test("a covering write drops a clean pending without a store", () => {
   const { values, actions, pending } = createHarness();
-  const word = values.internConst(0x12345678);
+  const word = values.const(0x12345678);
 
-  pending.write(gprChannel("al"), values.internConst(0x12));
+  pending.write(gprChannel("al"), values.const(0x12));
   pending.read(gprChannel("eax"));
   pending.write(gprChannel("eax"), word);
   actions.push(...pending.flushesForEdge("completed"));
@@ -388,8 +388,8 @@ test("a covering write drops a clean pending without a store", () => {
 
 test("completed edge lists only dirty pendings", () => {
   const { values, pending } = createHarness();
-  const byte = values.internConst(0x12);
-  const flag = values.internConst(1);
+  const byte = values.const(0x12);
+  const flag = values.const(1);
 
   pending.write(gprChannel("al"), byte);
   pending.write(flagChannel("ID"), flag);
@@ -401,9 +401,9 @@ test("completed edge lists only dirty pendings", () => {
 
 test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
   const { values, actions, pending } = createHarness();
-  const word = values.internConst(0x77);
-  const flag = values.internConst(1);
-  const index = values.internExternal(0);
+  const word = values.const(0x77);
+  const flag = values.const(1);
+  const index = values.external(0);
 
   pending.write(gprChannel("eax"), word);
   pending.write(flagChannel("ID"), flag);
@@ -429,11 +429,11 @@ test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
 
 test("a dynamic write stores immediately and invalidates every GPR pending", () => {
   const { values, actions, pending } = createHarness();
-  const word = values.internConst(0x77);
-  const flag = values.internConst(1);
-  const eip = values.internConst(0x1000);
-  const stored = values.internConst(0x222);
-  const index = values.internExternal(0);
+  const word = values.const(0x77);
+  const flag = values.const(1);
+  const eip = values.const(0x1000);
+  const stored = values.const(0x222);
+  const index = values.external(0);
 
   pending.write(gprChannel("eax"), word);
   pending.write(flagChannel("DF"), flag);
@@ -456,11 +456,11 @@ test("a dynamic write stores immediately and invalidates every GPR pending", () 
 
 test("a dynamic write invalidates cached GPR read leaves but not flag leaves", () => {
   const { values, pending } = createHarness();
-  const index = values.internExternal(0);
+  const index = values.external(0);
   const eaxRead = pending.read(gprChannel("eax"));
   const zfRead = pending.read(flagChannel("ID"));
 
-  pending.writeDynamicGpr(dynamicGpr(index), values.internConst(1));
+  pending.writeDynamicGpr(dynamicGpr(index), values.const(1));
 
   notStrictEqual(pending.read(gprChannel("eax")), eaxRead);
   strictEqual(pending.read(flagChannel("ID")), zfRead);
@@ -470,7 +470,7 @@ test("a dynamic write makes the fault boundary unrestorable", () => {
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
-  pending.writeDynamicGpr(dynamicGpr(values.internExternal(0)), values.internConst(1));
+  pending.writeDynamicGpr(dynamicGpr(values.external(0)), values.const(1));
 
   throws(() => pending.flushesForEdge("fault"), /unrestorable/);
 
@@ -483,19 +483,19 @@ test("a dynamic read flushing a channel first written this instruction makes the
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
-  pending.write(gprChannel("ebx"), values.internConst(0x111));
-  pending.readDynamicGpr(dynamicGpr(values.internExternal(0)));
+  pending.write(gprChannel("ebx"), values.const(0x111));
+  pending.readDynamicGpr(dynamicGpr(values.external(0)));
 
   throws(() => pending.flushesForEdge("fault"), /unrestorable/);
 });
 
 test("a dynamic read flushing a boundary pending keeps the fault boundary restorable", () => {
   const { values, pending } = createHarness();
-  const before = values.internConst(0x111);
+  const before = values.const(0x111);
 
   pending.write(gprChannel("ebx"), before);
   pending.beginInstruction();
-  pending.readDynamicGpr(dynamicGpr(values.internExternal(0)));
+  pending.readDynamicGpr(dynamicGpr(values.external(0)));
 
   deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("ebx"), before]]);
 });
@@ -507,8 +507,8 @@ test("a destructive flush served by a cached read keeps the fault boundary resto
 
   const before = pending.read(gprChannel("esp"));
 
-  pending.write(gprChannel("esp"), values.internConst(0x44));
-  pending.readDynamicGpr(dynamicGpr(values.internExternal(0)));
+  pending.write(gprChannel("esp"), values.const(0x44));
+  pending.readDynamicGpr(dynamicGpr(values.external(0)));
 
   // The cached read is the pre-instruction value — no store hit esp before
   // its first flush — so it joins the boundary instead of latching the
@@ -523,7 +523,7 @@ test("a signed cached read serves a destructive flush of its channel", () => {
 
   const before = pending.read(gprChannel("al"), { signed: true });
 
-  pending.write(gprChannel("al"), values.internConst(0x12));
+  pending.write(gprChannel("al"), values.const(0x12));
   pending.read(gprChannel("ax"));
 
   // The sign-extended read's low channel-width bits are the memory bytes;
@@ -533,7 +533,7 @@ test("a signed cached read serves a destructive flush of its channel", () => {
 
 test("narrow dynamic reads carry their byte length, bounds, and sign marker", () => {
   const { values, actions, pending } = createHarness();
-  const index = values.internExternal(0);
+  const index = values.external(0);
   const unsigned = pending.readDynamicGpr(dynamicGpr(index, 1));
   const signed = pending.readDynamicGpr(dynamicGpr(index, 1), { signed: true });
 
@@ -543,13 +543,13 @@ test("narrow dynamic reads carry their byte length, bounds, and sign marker", ()
   ]);
 
   // Bounds match static narrow channels: no masks or extends downstream.
-  strictEqual(values.projectTo(8, unsigned), unsigned);
-  strictEqual(values.extendTo(8, signed), signed);
+  strictEqual(values.project(8, unsigned), unsigned);
+  strictEqual(values.extend(8, signed), signed);
 });
 
 test("a signed dynamic word read is the plain read", () => {
   const { values, actions, pending } = createHarness();
-  const index = values.internExternal(0);
+  const index = values.external(0);
   const read = pending.readDynamicGpr(dynamicGpr(index), { signed: true });
 
   deepStrictEqual(actions, [{ kind: "readState", output: read, slot: dynamicGpr(index) }]);
@@ -557,9 +557,9 @@ test("a signed dynamic word read is the plain read", () => {
 
 test("a narrow dynamic write barriers word pendings all the same", () => {
   const { values, actions, pending } = createHarness();
-  const word = values.internConst(0x12345678);
-  const byte = values.internConst(0x9a);
-  const index = values.internExternal(0);
+  const word = values.const(0x12345678);
+  const byte = values.const(0x9a);
+  const index = values.external(0);
 
   pending.write(gprChannel("eax"), word);
   pending.writeDynamicGpr(dynamicGpr(index, 1), byte);

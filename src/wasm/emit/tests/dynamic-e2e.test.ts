@@ -138,18 +138,18 @@ test("one add r/m8, r8 body serves low and high byte registers", async () => {
 // The index can be any expression, not just a bound external: here the
 // register fields are computed from a raw modrm byte inside the block.
 function modrmRegField(values: ValueTable, modrm: ValueId): ValueId {
-  return values.internBinary(
+  return values.binary(
     "and",
-    values.internBinary("shr_u", modrm, values.internConst(3)),
-    values.internConst(7)
+    values.binary("shr_u", modrm, values.const(3)),
+    values.const(7)
   );
 }
 
 test("a computed index extracts the registers from a modrm-style external", async () => {
   const values = new ValueTable();
-  const modrm = values.internExternal(0);
+  const modrm = values.external(0);
   const reg = modrmRegField(values, modrm);
-  const rm = values.internBinary("and", modrm, values.internConst(7));
+  const rm = values.binary("and", modrm, values.const(7));
   const loaded = values.addActionOutput();
   const block: IrBlock = {
     entry: 0,
@@ -177,7 +177,7 @@ test("a computed index extracts the registers from a modrm-style external", asyn
 
 test("a computed index drives byte access through its two address pushes", async () => {
   const values = new ValueTable();
-  const reg = modrmRegField(values, values.internExternal(0));
+  const reg = modrmRegField(values, values.external(0));
   const block: IrBlock = {
     entry: 0,
     regions: [
@@ -185,7 +185,7 @@ test("a computed index drives byte access through its two address pushes", async
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "writeState", slot: { kind: "gprDynamic", index: reg, byteLength: 1 }, value: values.internConst(0x7f) }
+          { kind: "writeState", slot: { kind: "gprDynamic", index: reg, byteLength: 1 }, value: values.const(0x7f) }
         ]
       }
     ],

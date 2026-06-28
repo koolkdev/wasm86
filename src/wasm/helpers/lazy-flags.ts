@@ -179,14 +179,14 @@ function binaryFlagFragment(
   const values = new ValueTable();
   const left = values.addActionOutput();
   const right = values.addActionOutput();
-  const result = values.internBinary(kind, left, right);
+  const result = values.binary(kind, left, right);
   const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
     kind,
     width,
     left,
     right,
     result
-  }, { undefinedAF: values.internConst(0) })[flag];
+  }, { undefinedAF: values.const(0) })[flag];
 
   return {
     value: formula,
@@ -217,7 +217,7 @@ function logicFlagFragment(
     kind: "logic",
     width,
     result
-  }, { undefinedAF: values.internConst(0) })[flag];
+  }, { undefinedAF: values.const(0) })[flag];
 
   return {
     value: formula,

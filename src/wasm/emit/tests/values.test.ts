@@ -26,12 +26,12 @@ function analyze(
 test("action operand edges count at their action index", () => {
   const values = new ValueTable();
   const readOutput = values.addActionOutput();
-  const address = values.internConst(0x1000);
+  const address = values.const(0x1000);
   const memoryOutput = values.addActionOutput();
-  const stored = values.internConst(1);
-  const guarded = values.internConst(0x2000);
-  const condition = values.internConst(0);
-  const payload = values.internConst(7);
+  const stored = values.const(1);
+  const guarded = values.const(0x2000);
+  const condition = values.const(0);
+  const payload = values.const(7);
   const analysis = analyze(
     values,
     [
@@ -65,7 +65,7 @@ test("action operand edges count at their action index", () => {
 
 test("a live load consumes its address at the load's index", () => {
   const values = new ValueTable();
-  const address = values.internConst(0x2000);
+  const address = values.const(0x2000);
   const loaded = values.addActionOutput();
   const analysis = analyze(values, [
     { kind: "readMemory", output: loaded, address, width: 32 },
@@ -79,7 +79,7 @@ test("a live load consumes its address at the load's index", () => {
 
 test("a chain of dead loads stays wholly uncounted", () => {
   const values = new ValueTable();
-  const base = values.internConst(0x2000);
+  const base = values.const(0x2000);
   const pointer = values.addActionOutput();
   const loaded = values.addActionOutput();
   const analysis = analyze(values, [
@@ -97,7 +97,7 @@ test("a chain of dead loads stays wholly uncounted", () => {
 test("fault edge operands count at their guard's entry index", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const address = values.internConst(0x2000);
+  const address = values.const(0x2000);
   const analysis = analyze(
     values,
     [
@@ -125,9 +125,9 @@ test("fault edge operands count at their guard's entry index", () => {
 test("branch edge values count once per edge, at the branch's entry index", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const condition = values.internConst(1);
-  const target = values.internConst(0x2000);
-  const fallthrough = values.internConst(0x2004);
+  const condition = values.const(1);
+  const target = values.const(0x2000);
+  const fallthrough = values.const(0x2004);
   const analysis = analyze(
     values,
     [
@@ -166,8 +166,8 @@ test("branch edge values count once per edge, at the branch's entry index", () =
 test("an edge use past an overlapping store pins the read", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const five = values.internConst(5);
-  const address = values.internConst(0x2000);
+  const five = values.const(5);
+  const address = values.const(0x2000);
   const analysis = analyze(
     values,
     [
@@ -195,7 +195,7 @@ test("a lazy kind byte read crossing a lazy-kind-byte write pins, but lazy opera
   const values = new ValueTable();
   const kindByte = values.addActionOutput();
   const lazyA = values.addActionOutput();
-  const reset = values.internConst(0);
+  const reset = values.const(0);
   const analysis = analyze(values, [
     { kind: "readState", output: kindByte, slot: lazyFlagsKindChannel },
     { kind: "readState", output: lazyA, slot: lazyFlagsAChannel },
@@ -211,8 +211,8 @@ test("a lazy kind byte read crossing a lazy-kind-byte write pins, but lazy opera
 test("an edge value reloading a channel the edge flushes pins the read", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const five = values.internConst(5);
-  const address = values.internConst(0x2000);
+  const five = values.const(5);
+  const address = values.const(0x2000);
   const analysis = analyze(
     values,
     [
@@ -241,8 +241,8 @@ test("an edge value reloading a channel the edge flushes pins the read", () => {
 test("compound children count once per parent, at the parent's first use", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const five = values.internConst(5);
-  const sum = values.internBinary("add", read, five);
+  const five = values.const(5);
+  const sum = values.binary("add", read, five);
   const analysis = analyze(values, [
     { kind: "readState", output: read, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: sum },
@@ -263,7 +263,7 @@ test("compound children count once per parent, at the parent's first use", () =>
 test("repeated child edges within one parent count per edge", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const doubled = values.internBinary("add", read, read);
+  const doubled = values.binary("add", read, read);
   const analysis = analyze(values, [
     { kind: "readState", output: read, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("eax"), value: doubled }
@@ -277,9 +277,9 @@ test("repeated child edges within one parent count per edge", () => {
 test("compounds nothing references contribute no uses", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const five = values.internConst(5);
-  const sum = values.internBinary("add", read, five);
-  const dead = values.internBinary("xor", read, five);
+  const five = values.const(5);
+  const sum = values.binary("add", read, five);
+  const dead = values.binary("xor", read, five);
   const analysis = analyze(values, [
     { kind: "readState", output: read, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: sum }
@@ -294,10 +294,10 @@ test("compounds nothing references contribute no uses", () => {
 test("last use flows through nested compounds from the outermost first use", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const one = values.internConst(1);
-  const two = values.internConst(2);
-  const inner = values.internBinary("add", read, one);
-  const outer = values.internBinary("add", inner, two);
+  const one = values.const(1);
+  const two = values.const(2);
+  const inner = values.binary("add", read, one);
+  const outer = values.binary("add", inner, two);
   const analysis = analyze(values, [
     { kind: "readState", output: read, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: outer },
@@ -332,8 +332,8 @@ test("a dynamic store pins a GPR read used later, never a flag read", () => {
   const values = new ValueTable();
   const gprRead = values.addActionOutput();
   const flagRead = values.addActionOutput();
-  const index = values.internExternal(0);
-  const stored = values.internConst(5);
+  const index = values.external(0);
+  const stored = values.const(5);
   const analysis = analyze(values, [
     { kind: "readState", output: gprRead, slot: gprChannel("eax") },
     { kind: "readState", output: flagRead, slot: flagChannel("ZF") },
@@ -350,9 +350,9 @@ test("a dynamic store pins a GPR read used later, never a flag read", () => {
 
 test("a dynamic slot consumes its index once per address push", () => {
   const values = new ValueTable();
-  const index = values.internExternal(0);
+  const index = values.external(0);
   const wordRead = values.addActionOutput();
-  const stored = values.internConst(5);
+  const stored = values.const(5);
   const analysis = analyze(values, [
     { kind: "readState", output: wordRead, slot: { kind: "gprDynamic", index, byteLength: 4 } },
     { kind: "writeState", slot: gprChannel("eax"), value: wordRead },
@@ -366,7 +366,7 @@ test("a dynamic slot consumes its index once per address push", () => {
 
 test("a dead dynamic read never consumes its computed index", () => {
   const values = new ValueTable();
-  const index = values.internBinary("and", values.internExternal(0), values.internConst(7));
+  const index = values.binary("and", values.external(0), values.const(7));
   const dead = values.addActionOutput();
   const analysis = analyze(values, [
     { kind: "readState", output: dead, slot: { kind: "gprDynamic", index, byteLength: 4 } }
@@ -379,7 +379,7 @@ test("a dead dynamic read never consumes its computed index", () => {
 test("an overlapping partial-channel store pins a wider read used later", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const low = values.internConst(0x1234);
+  const low = values.const(0x1234);
   const analysis = analyze(values, [
     { kind: "readState", output: read, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ax"), value: low },
@@ -392,8 +392,8 @@ test("an overlapping partial-channel store pins a wider read used later", () => 
 test("a store at the value's final use does not pin it", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const one = values.internConst(1);
-  const sum = values.internBinary("add", read, one);
+  const one = values.const(1);
+  const sum = values.binary("add", read, one);
   const analysis = analyze(values, [
     { kind: "readState", output: read, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("eax"), value: sum }
@@ -406,7 +406,7 @@ test("a store at the value's final use does not pin it", () => {
 test("a dead read counts zero, has no last use, and never pins", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const seven = values.internConst(7);
+  const seven = values.const(7);
   const analysis = analyze(values, [
     { kind: "readState", output: read, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("eax"), value: seven }
@@ -429,20 +429,20 @@ test("analysis rejects unknown value ids", () => {
 test("a producer whose operand follows its output fails loudly", () => {
   const values = new ValueTable();
   const loaded = values.addActionOutput();
-  const address = values.internConst(0x2000);
+  const address = values.const(0x2000);
 
   throws(
     () =>
       analyze(values, [
         { kind: "readMemory", output: loaded, address, width: 32 }
       ]),
-    /interned after its output/
+    /created after its output/
   );
 });
 
 test("a guard targeting a missing edge region fails loudly", () => {
   const values = new ValueTable();
-  const address = values.internConst(0x2000);
+  const address = values.const(0x2000);
 
   throws(
     () =>
@@ -474,7 +474,7 @@ test("an exported output counts as a use at the action body boundary", () => {
 test("an exported read crossing an overlapping store pins", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const seven = values.internConst(7);
+  const seven = values.const(7);
   const analysis = analyze(
     values,
     [

@@ -11,7 +11,7 @@ function blockWith(regions: readonly IrRegion[], entry = 0): IrBlock {
   const values = new ValueTable();
 
   for (let value = 0; value < 10; value += 1) {
-    values.internConst(value);
+    values.const(value);
   }
 
   return { entry, regions, values };

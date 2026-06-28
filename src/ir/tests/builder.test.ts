@@ -134,7 +134,7 @@ function assertNegatedHelperFlag(values: IrBlock["values"], id: ValueId, flag: X
   ok(node.kind === "compare", `expected ${flag} helper to be compared against zero`);
   strictEqual(node.operator, "eq");
   assertHelperFlag(values, node.a, flag);
-  strictEqual(node.b, values.internConst(0));
+  strictEqual(node.b, values.const(0));
 }
 
 function assertHelperFlag(values: IrBlock["values"], id: ValueId, flag: X86StatusFlag): void {
@@ -156,16 +156,16 @@ test("mov r32, imm32 flushes the register write and dispatches at the next eip",
   strictEqual(entry.id, block.entry);
   strictEqual(entry.kind, "entry");
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x401005) },
-    { kind: "dispatch", targetEip: v.internConst(0x401005) }
+    { kind: "writeState", slot: gprChannel("eax"), value: v.const(0x12345678) },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x401005) },
+    { kind: "dispatch", targetEip: v.const(0x401005) }
   ]);
-  deepStrictEqual(v.node(v.internConst(0x12345678)), { kind: "const", value: 0x12345678 });
+  deepStrictEqual(v.node(v.const(0x12345678)), { kind: "const", value: 0x12345678 });
   // The instruction-start eip, immediate, next eip, and count advance.
   strictEqual(v.size(), 6);
 });
 
-test("pending writes overwrite per channel and consts intern across instructions", () => {
+test("pending writes overwrite per channel and consts deduplicate across instructions", () => {
   const builder = createIrBlockBuilder();
   const mov = movSemantic(32);
 
@@ -176,10 +176,10 @@ test("pending writes overwrite per channel and consts intern across instructions
   const block = builder.finish();
 
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: gprChannel("eax"), value: block.values.internConst(9) },
-    { kind: "writeState", slot: gprChannel("ecx"), value: block.values.internConst(7) },
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x100f) },
-    { kind: "dispatch", targetEip: block.values.internConst(0x100f) }
+    { kind: "writeState", slot: gprChannel("eax"), value: block.values.const(9) },
+    { kind: "writeState", slot: gprChannel("ecx"), value: block.values.const(7) },
+    { kind: "writeState", slot: eipChannel, value: block.values.const(0x100f) },
+    { kind: "dispatch", targetEip: block.values.const(0x100f) }
   ]);
 
   // 7, 9, the four eip constants, and the count read with its three folded
@@ -198,8 +198,8 @@ test("mov r32, r32 records one readState and forwards its leaf", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 1, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "dispatch", targetEip: v.internConst(0x1002) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1002) },
+    { kind: "dispatch", targetEip: v.const(0x1002) }
   ]);
   deepStrictEqual(v.node(1), { kind: "actionOutput" });
   // The instruction-start eip, read leaf, next eip, and count advance.
@@ -219,8 +219,8 @@ test("repeated get of an unwritten channel returns the same leaf across instruct
     { kind: "readState", output: 1, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
     { kind: "writeState", slot: gprChannel("ecx"), value: 1 },
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1004) },
-    { kind: "dispatch", targetEip: block.values.internConst(0x1004) }
+    { kind: "writeState", slot: eipChannel, value: block.values.const(0x1004) },
+    { kind: "dispatch", targetEip: block.values.const(0x1004) }
   ]);
 });
 
@@ -234,10 +234,10 @@ test("add eax, imm32 commits a lazy add record and writes the register", () => {
   const eax = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
   )!.output;
-  const sum = v.internBinary("add", eax, v.internConst(5));
+  const sum = v.binary("add", eax, v.const(5));
   const writes = stateWrites(block);
 
-  assertLazyRecord(writes, v, { kind: "ADD", width: 32, left: eax, right: v.internConst(5) });
+  assertLazyRecord(writes, v, { kind: "ADD", width: 32, left: eax, right: v.const(5) });
   strictEqual(writes.find((write) => write.slot === gprChannel("eax"))?.value, sum);
 });
 
@@ -263,11 +263,11 @@ test("two adds in one block flush one lazy add record, second instruction wins",
   const eax = actions.find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
   )!.output;
-  const sum1 = v.internBinary("add", eax, v.internConst(5));
-  const sum2 = v.internBinary("add", sum1, v.internConst(7));
+  const sum1 = v.binary("add", eax, v.const(5));
+  const sum2 = v.binary("add", sum1, v.const(7));
 
   strictEqual(writes.find((write) => write.slot === gprChannel("eax"))?.value, sum2);
-  assertLazyRecord(writes, v, { kind: "ADD", width: 32, left: sum1, right: v.internConst(7) });
+  assertLazyRecord(writes, v, { kind: "ADD", width: 32, left: sum1, right: v.const(7) });
 });
 
 test("inc flushes a full explicit image with CF preserved through a helper call", () => {
@@ -283,7 +283,7 @@ test("inc flushes a full explicit image with CF preserved through a helper call"
   );
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
   assertHelperFlag(block.values, flagWriteValue(block, "CF"), "CF");
-  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.internConst(0));
+  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.const(0));
 });
 
 test("cmp commits a lazy sub record but no register or explicit flags", () => {
@@ -300,7 +300,7 @@ test("cmp commits a lazy sub record but no register or explicit flags", () => {
   assertLazyRecord(writes, block.values, { kind: "SUB", width: 32, left: reads[0]!.output, right: reads[1]!.output });
   strictEqual(writes.some((write) => write.slot.kind === "gpr"), false);
   strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
-  deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: block.values.internConst(0x1002) });
+  deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: block.values.const(0x1002) });
 });
 
 // A template writing only ZF; omitted status flags are preserved by resolving
@@ -317,7 +317,7 @@ test("writeFlag flushes a full explicit image with omitted flags preserved throu
   const block = builder.finish();
 
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
-  strictEqual(flagWriteValue(block, "ZF"), block.values.internConst(1));
+  strictEqual(flagWriteValue(block, "ZF"), block.values.const(1));
 
   for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
     assertHelperFlag(block.values, flagWriteValue(block, flag), flag);
@@ -327,7 +327,7 @@ test("writeFlag flushes a full explicit image with omitted flags preserved throu
     false
   );
 
-  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.internConst(0));
+  strictEqual(stateWrites(block).find((write) => write.slot === lazyFlagsKindChannel)?.value, block.values.const(0));
 });
 
 test("an omitted direct flag write preserves the previous instruction's pending flag", () => {
@@ -344,15 +344,15 @@ test("an omitted direct flag write preserves the previous instruction's pending 
   const a = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
   )!.output;
-  const b = v.internConst(5);
-  const result = v.internBinary("add", a, b);
-  const carryChain = v.internBinary("xor", v.internBinary("xor", a, b), result);
-  const af = v.internBinary("and", v.internBinary("shr_u", carryChain, v.internConst(4)), v.internConst(1));
+  const b = v.const(5);
+  const result = v.binary("add", a, b);
+  const carryChain = v.binary("xor", v.binary("xor", a, b), result);
+  const af = v.binary("and", v.binary("shr_u", carryChain, v.const(4)), v.const(1));
 
   strictEqual(flagWriteValue(block, "AF"), af);
 
   // The second instruction's constant ZF write wins over the add's expression.
-  strictEqual(flagWriteValue(block, "ZF"), v.internConst(1));
+  strictEqual(flagWriteValue(block, "ZF"), v.const(1));
 });
 
 test("xchg eax, ebx swaps pendings through two reads with no temporaries", () => {
@@ -367,8 +367,8 @@ test("xchg eax, ebx swaps pendings through two reads with no temporaries", () =>
     { kind: "readState", output: 2, slot: gprChannel("ebx") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
     { kind: "writeState", slot: gprChannel("eax"), value: 2 },
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1002) },
-    { kind: "dispatch", targetEip: block.values.internConst(0x1002) }
+    { kind: "writeState", slot: eipChannel, value: block.values.const(0x1002) },
+    { kind: "dispatch", targetEip: block.values.const(0x1002) }
   ]);
 
   // The instruction-start eip, two read leaves, next eip, and count advance — no
@@ -386,8 +386,8 @@ test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 1, slot: gprChannel("ah") },
     { kind: "writeState", slot: gprChannel("bl"), value: 1 },
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1002) },
-    { kind: "dispatch", targetEip: block.values.internConst(0x1002) }
+    { kind: "writeState", slot: eipChannel, value: block.values.const(0x1002) },
+    { kind: "dispatch", targetEip: block.values.const(0x1002) }
   ]);
   // The instruction-start eip, read leaf, next eip, and count advance — no
   // masks or shifts were created.
@@ -404,11 +404,11 @@ test("write al then read eax flushes the byte and reloads the word", () => {
   const v = block.values;
 
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: gprChannel("al"), value: v.internConst(0x12) },
+    { kind: "writeState", slot: gprChannel("al"), value: v.const(0x12) },
     { kind: "readState", output: 6, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 6 },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1004) },
-    { kind: "dispatch", targetEip: v.internConst(0x1004) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1004) },
+    { kind: "dispatch", targetEip: v.const(0x1004) }
   ]);
 });
 
@@ -422,11 +422,11 @@ test("write eax then read al flushes the word and reloads the byte", () => {
   const v = block.values;
 
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
+    { kind: "writeState", slot: gprChannel("eax"), value: v.const(0x12345678) },
     { kind: "readState", output: 6, slot: gprChannel("al") },
     { kind: "writeState", slot: gprChannel("bl"), value: 6 },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
-    { kind: "dispatch", targetEip: v.internConst(0x1007) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1007) },
+    { kind: "dispatch", targetEip: v.const(0x1007) }
   ]);
 });
 
@@ -440,9 +440,9 @@ test("write al then write eax drops the byte pending with no flush", () => {
   const v = block.values;
 
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x12345678) },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
-    { kind: "dispatch", targetEip: v.internConst(0x1007) }
+    { kind: "writeState", slot: gprChannel("eax"), value: v.const(0x12345678) },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1007) },
+    { kind: "dispatch", targetEip: v.const(0x1007) }
   ]);
 });
 
@@ -488,7 +488,7 @@ test("ax and al pendings mix without touching flag pendings", () => {
   const reads = actions.filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
-  const sum = v.internProject(8, v.internBinary("add", reads[0]!.output, reads[1]!.output));
+  const sum = v.project(8, v.binary("add", reads[0]!.output, reads[1]!.output));
 
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value, sum);
   assertLazyRecord(stateWrites(block), v, { kind: "ADD", width: 8, left: reads[0]!.output, right: reads[1]!.output });
@@ -504,8 +504,8 @@ test("movzx r32, r8 forwards the unsigned byte read unmasked", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 1, slot: gprChannel("al") },
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1003) },
-    { kind: "dispatch", targetEip: block.values.internConst(0x1003) }
+    { kind: "writeState", slot: eipChannel, value: block.values.const(0x1003) },
+    { kind: "dispatch", targetEip: block.values.const(0x1003) }
   ]);
   strictEqual(block.values.size(), 6);
 });
@@ -520,8 +520,8 @@ test("movsx r32, r8 marks the read for a sign-extending load", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: 1, slot: gprChannel("al"), signed: true },
     { kind: "writeState", slot: gprChannel("ebx"), value: 1 },
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1003) },
-    { kind: "dispatch", targetEip: block.values.internConst(0x1003) }
+    { kind: "writeState", slot: eipChannel, value: block.values.const(0x1003) },
+    { kind: "dispatch", targetEip: block.values.const(0x1003) }
   ]);
   strictEqual(block.values.size(), 6);
 });
@@ -539,10 +539,10 @@ test("narrow signed compares sign-extend both operands", () => {
   const reads = entryActions(block).filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
-  const compare = v.internCompare(
+  const compare = v.compare(
     "lt_s",
-    v.internUnary("extend8_s", reads[0]!.output),
-    v.internUnary("extend8_s", reads[1]!.output)
+    v.unary("extend8_s", reads[0]!.output),
+    v.unary("extend8_s", reads[1]!.output)
   );
 
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, compare);
@@ -560,14 +560,14 @@ test("an 8-bit unsigned compare of covered operands creates no projections", () 
   const v = block.values;
 
   // The al read fits unsigned 8 and the constant fits by value, so the
-  // compare interns on the raw operands.
+  // compare uses the raw operands.
   const al = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("al")
   )!.output;
 
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
-    v.internCompare("lt_u", al, v.internConst(5))
+    v.compare("lt_u", al, v.const(5))
   );
   ok(!nodeKinds(block).includes("project"), "no projections expected");
 });
@@ -587,11 +587,11 @@ test("an 8-bit equality on an unproven value keeps its mask", () => {
   const reads = entryActions(block).filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
-  const sum = v.internBinary("add", reads[0]!.output, reads[1]!.output);
+  const sum = v.binary("add", reads[0]!.output, reads[1]!.output);
 
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
-    v.internCompare("eq", v.internProject(8, sum), v.internConst(0))
+    v.compare("eq", v.project(8, sum), v.const(0))
   );
 });
 
@@ -616,12 +616,12 @@ test("a signed byte get feeds a signed compare with no extra extends", () => {
   deepStrictEqual(actions[1], { kind: "readState", output: reads[1]!.output, slot: gprChannel("bl"), signed: true });
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
-    block.values.internCompare("lt_s", reads[0]!.output, reads[1]!.output)
+    block.values.compare("lt_s", reads[0]!.output, reads[1]!.output)
   );
   ok(!nodeKinds(block).includes("unary"), "no extends expected");
 });
 
-test("value methods intern through the builder", () => {
+test("value methods build through the builder", () => {
   const abs: SemanticTemplate = (s) => {
     const value = s.get(s.operand(0), 32);
     const zero = s.const32(0);
@@ -637,16 +637,16 @@ test("value methods intern through the builder", () => {
   const read = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
   )!;
-  const zero = block.values.internConst(0);
-  const compare = block.values.internCompare("lt_s", read.output, zero);
-  const negated = block.values.internBinary("sub", zero, read.output);
-  const selected = block.values.internSelect(compare, negated, read.output);
+  const zero = block.values.const(0);
+  const compare = block.values.compare("lt_s", read.output, zero);
+  const negated = block.values.binary("sub", zero, read.output);
+  const selected = block.values.select(compare, negated, read.output);
 
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: read.output, slot: gprChannel("eax") },
     { kind: "writeState", slot: gprChannel("eax"), value: selected },
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x1003) },
-    { kind: "dispatch", targetEip: block.values.internConst(0x1003) }
+    { kind: "writeState", slot: eipChannel, value: block.values.const(0x1003) },
+    { kind: "dispatch", targetEip: block.values.const(0x1003) }
   ]);
   deepStrictEqual(block.values.node(compare), { kind: "compare", operator: "lt_s", a: read.output, b: zero });
   deepStrictEqual(block.values.node(negated), { kind: "binary", operator: "sub", a: zero, b: read.output });
@@ -662,8 +662,8 @@ test("jmp dispatches at the target", () => {
 
   strictEqual(block.regions.length, 1);
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: eipChannel, value: block.values.internConst(0x2000) },
-    { kind: "dispatch", targetEip: block.values.internConst(0x2000) }
+    { kind: "writeState", slot: eipChannel, value: block.values.const(0x2000) },
+    { kind: "dispatch", targetEip: block.values.const(0x2000) }
   ]);
 });
 
@@ -677,9 +677,9 @@ test("a jump flushes earlier pendings and dispatches at the target eip", () => {
   const v = block.values;
 
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x77) },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x2000) },
-    { kind: "dispatch", targetEip: v.internConst(0x2000) }
+    { kind: "writeState", slot: gprChannel("eax"), value: v.const(0x77) },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x2000) },
+    { kind: "dispatch", targetEip: v.const(0x2000) }
   ]);
 });
 
@@ -726,7 +726,7 @@ test("jcc after cmp source uses the source-derived condition with per-edge lazy 
   strictEqual(block.regions.length, 3);
   deepStrictEqual(actions[actions.length - 1], {
     kind: "branch",
-    condition: v.internCompare("eq", eax, v.internConst(5)),
+    condition: v.compare("eq", eax, v.const(5)),
     taken: 1,
     notTaken: 2
   });
@@ -740,13 +740,13 @@ test("jcc after cmp source uses the source-derived condition with per-edge lazy 
 
   for (const flushes of [taken, notTaken]) {
     strictEqual(flushes.length, 4);
-    assertLazyRecord(flushes, v, { kind: "SUB", width: 32, left: eax, right: v.internConst(5) });
+    assertLazyRecord(flushes, v, { kind: "SUB", width: 32, left: eax, right: v.const(5) });
   }
 
-  strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.internConst(0x2000));
-  deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "dispatch", targetEip: v.internConst(0x2000) });
-  strictEqual(edgeWriteFlushes(block, 2).find((write) => write.slot === eipChannel)?.value, v.internConst(0x1005));
-  deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "dispatch", targetEip: v.internConst(0x1005) });
+  strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.const(0x2000));
+  deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "dispatch", targetEip: v.const(0x2000) });
+  strictEqual(edgeWriteFlushes(block, 2).find((write) => write.slot === eipChannel)?.value, v.const(0x1005));
+  deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "dispatch", targetEip: v.const(0x1005) });
 });
 
 test("jcc after test source uses the source-derived condition with no flag byte reads", () => {
@@ -760,9 +760,9 @@ test("jcc after test source uses the source-derived condition with no flag byte 
   const reads = entryActions(block).filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
-  const result = v.internBinary("and", reads[0]!.output, reads[1]!.output);
+  const result = v.binary("and", reads[0]!.output, reads[1]!.output);
 
-  strictEqual(branchAction(block).condition, v.internCompare("eq", result, v.internConst(0)));
+  strictEqual(branchAction(block).condition, v.compare("eq", result, v.const(0)));
   strictEqual(
     entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
     false
@@ -797,7 +797,7 @@ test("jcc after a sub flag source uses the source-derived condition", () => {
     (action): action is ReadStateAction => action.kind === "readState"
   );
 
-  strictEqual(branchAction(block).condition, block.values.internCompare("eq", reads[0]!.output, reads[1]!.output));
+  strictEqual(branchAction(block).condition, block.values.compare("eq", reads[0]!.output, reads[1]!.output));
 });
 
 test("jcc after 16-bit cmp source sign-extends operands for signed direct conditions", () => {
@@ -811,10 +811,10 @@ test("jcc after 16-bit cmp source sign-extends operands for signed direct condit
   const reads = entryActions(block).filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
-  const condition = v.internCompare(
+  const condition = v.compare(
     "lt_s",
-    v.internUnary("extend16_s", reads[0]!.output),
-    v.internUnary("extend16_s", reads[1]!.output)
+    v.unary("extend16_s", reads[0]!.output),
+    v.unary("extend16_s", reads[1]!.output)
   );
 
   strictEqual(branchAction(block).condition, condition);
@@ -835,10 +835,10 @@ test("jcc after 8-bit cmp source sign-extends operands for signed direct conditi
   const reads = entryActions(block).filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
-  const condition = v.internCompare(
+  const condition = v.compare(
     "ge_s",
-    v.internUnary("extend8_s", reads[0]!.output),
-    v.internUnary("extend8_s", reads[1]!.output)
+    v.unary("extend8_s", reads[0]!.output),
+    v.unary("extend8_s", reads[1]!.output)
   );
 
   strictEqual(branchAction(block).condition, condition);
@@ -859,10 +859,10 @@ test("jcc after 16-bit cmp immediate source sign-extends immediates for signed d
   const ax = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ax")
   )!.output;
-  const condition = v.internCompare(
+  const condition = v.compare(
     "le_s",
-    v.internUnary("extend16_s", ax),
-    v.internConst(-0x8000)
+    v.unary("extend16_s", ax),
+    v.const(-0x8000)
   );
 
   strictEqual(branchAction(block).condition, condition);
@@ -883,9 +883,9 @@ test("int flushes pending state with the resume eip before a host trap exit", ()
 
   strictEqual(block.regions.length, 1);
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x77) },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
-    { kind: "exit", reason: "hostTrap", payload: v.internConst(0x21) }
+    { kind: "writeState", slot: gprChannel("eax"), value: v.const(0x77) },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1007) },
+    { kind: "exit", reason: "hostTrap", payload: v.const(0x21) }
   ]);
 });
 
@@ -913,11 +913,11 @@ test("setcc after cmp source consumes the source-derived condition", () => {
   const ebx = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
   )!.output;
-  const condition = v.internCompare("lt_u", ebx, v.internConst(5));
+  const condition = v.compare("lt_u", ebx, v.const(5));
 
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
-    v.internSelect(condition, v.internConst(1), v.internConst(0))
+    v.select(condition, v.const(1), v.const(0))
   );
   strictEqual(entryActions(block).filter((action) => action.kind === "readState").length, 1);
 });
@@ -941,12 +941,12 @@ test("setcc after a logic flag source uses the source-derived condition", () => 
   const reads = entryActions(block).filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
-  const result = v.internBinary("and", reads[0]!.output, reads[1]!.output);
-  const condition = v.internCompare("ne", result, v.internConst(0));
+  const result = v.binary("and", reads[0]!.output, reads[1]!.output);
+  const condition = v.compare("ne", result, v.const(0));
 
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
-    v.internSelect(condition, v.internConst(1), v.internConst(0))
+    v.select(condition, v.const(1), v.const(0))
   );
   strictEqual(
     entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "flag"),
@@ -967,14 +967,14 @@ test("setcc with no pending flag value builds from helper calls", () => {
     false
   );
 
-  const zero = v.internConst(0);
+  const zero = v.const(0);
   const write = stateWrites(block).find((write) => write.slot === gprChannel("al"));
 
   ok(write !== undefined, "expected setcc to write al");
   const select = v.node(write.value);
 
   ok(select.kind === "select", "expected setcc to write a select value");
-  strictEqual(select.whenTrue, v.internConst(1));
+  strictEqual(select.whenTrue, v.const(1));
   strictEqual(select.whenFalse, zero);
 
   const condition = v.node(select.condition);
@@ -1005,12 +1005,12 @@ test("setcc after an intervening add uses the latest source-expanded flag expres
   const ecxRead = actions.filter(
     (action): action is ReadStateAction => action.kind === "readState"
   )[1]!.output;
-  const sum = v.internBinary("add", ecxRead, v.internConst(1));
-  const zf = v.internCompare("eq", sum, v.internConst(0));
+  const sum = v.binary("add", ecxRead, v.const(1));
+  const zf = v.compare("eq", sum, v.const(0));
 
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
-    v.internSelect(zf, v.internConst(1), v.internConst(0))
+    v.select(zf, v.const(1), v.const(0))
   );
 });
 
@@ -1033,7 +1033,7 @@ test("pushfd reuses pending arithmetic flags and reads non-arithmetic flags", ()
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
   )!.output;
 
-  assertLazyRecord(stateWrites(block), v, { kind: "ADD", width: 32, left: eax, right: v.internConst(1) });
+  assertLazyRecord(stateWrites(block), v, { kind: "ADD", width: 32, left: eax, right: v.const(1) });
 });
 
 test("popfd writes every stored flag from the popped image", () => {
@@ -1062,7 +1062,7 @@ test("popfd writes every stored flag from the popped image", () => {
   const flagWrites = flagWriteEntries(block);
 
   strictEqual(writes[0]?.slot, gprChannel("esp"));
-  strictEqual(writes[0]?.value, v.internBinary("add", espRead.output, v.internConst(4)));
+  strictEqual(writes[0]?.value, v.binary("add", espRead.output, v.const(4)));
   deepStrictEqual(flagWrites.map((write) => write.flag).sort(), [...x86Flags].sort());
   strictEqual(new Set(flagWrites.map((write) => write.flag)).size, x86Flags.length);
 
@@ -1070,9 +1070,9 @@ test("popfd writes every stored flag from the popped image", () => {
     const offset = x86EflagsBitOffset[write.flag];
     const shifted: ValueId = offset === 0
       ? popRead.output
-      : v.internBinary("shr_u", popRead.output, v.internConst(offset));
+      : v.binary("shr_u", popRead.output, v.const(offset));
 
-    strictEqual(write.value, v.internBinary("and", shifted, v.internConst(1)), write.flag);
+    strictEqual(write.value, v.binary("and", shifted, v.const(1)), write.flag);
   }
 });
 
@@ -1163,7 +1163,7 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
   const ebx = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
   )!;
-  const address = v.internBinary("add", ebx.output, v.internConst(8));
+  const address = v.binary("add", ebx.output, v.const(8));
 
   strictEqual(block.regions.length, 2);
   deepStrictEqual(entryActions(block), [
@@ -1171,15 +1171,15 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
     { kind: "readState", output: ebx.output, slot: gprChannel("ebx") },
     { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 },
     { kind: "writeMemory", address, value: eax.output, width: 32 },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1003) },
-    { kind: "dispatch", targetEip: v.internConst(0x1003) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1003) },
+    { kind: "dispatch", targetEip: v.const(0x1003) }
   ]);
 
   const edge = edgeRegion(block, 1);
 
   strictEqual(edge.id, 1);
   deepStrictEqual(edge.flushes, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1000) }
   ]);
   deepStrictEqual(edge.terminator, { kind: "exit", reason: "memoryWriteFault", payload: address });
 });
@@ -1223,13 +1223,13 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
   deepStrictEqual(actions[writeIndex], {
     kind: "writeMemory",
     address,
-    value: v.internBinary("add", loaded, ecx),
+    value: v.binary("add", loaded, ecx),
     width: 32
   });
 
   // Each guard owns an edge with its own fault reason; nothing was pending
   // at guard time, so both flush only the instruction's eip.
-  const eipFlushes = [{ kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }];
+  const eipFlushes = [{ kind: "writeState", slot: eipChannel, value: v.const(0x1000) }];
 
   deepStrictEqual(edgeRegion(block, 1).flushes, eipFlushes);
   deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: address });
@@ -1252,11 +1252,11 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
   const eax = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
   )!.output;
-  const sum = v.internBinary("add", eax, v.internConst(5));
+  const sum = v.binary("add", eax, v.const(5));
   const ebxRead = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
   )!;
-  const address = v.internBinary("add", ebxRead.output, v.internConst(8));
+  const address = v.binary("add", ebxRead.output, v.const(8));
 
   strictEqual(block.regions.length, 2);
 
@@ -1266,9 +1266,9 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
 
   strictEqual(flushes.length, 5);
   deepStrictEqual(flushes.flatMap((flush) => flush.slot.kind === "flag" ? [flush.slot.flag] : []), []);
-  assertLazyRecord(flushes, v, { kind: "ADD", width: 32, left: eax, right: v.internConst(5) });
+  assertLazyRecord(flushes, v, { kind: "ADD", width: 32, left: eax, right: v.const(5) });
   strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === gprChannel("eax"))?.value, sum);
-  strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.internConst(0x1003));
+  strictEqual(edgeWriteFlushes(block, 1).find((write) => write.slot === eipChannel)?.value, v.const(0x1003));
   deepStrictEqual(edgeRegion(block, 1).terminator, {
     kind: "exit",
     reason: "memoryWriteFault",
@@ -1280,8 +1280,8 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
   const mainWrites = stateWrites(block);
 
   strictEqual(mainWrites.find((write) => write.slot === gprChannel("eax"))?.value, sum);
-  strictEqual(mainWrites.find((write) => write.slot === eipChannel)?.value, v.internConst(0x1006));
-  deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: v.internConst(0x1006) });
+  strictEqual(mainWrites.find((write) => write.slot === eipChannel)?.value, v.const(0x1006));
+  deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: v.const(0x1006) });
 
   const store = entryActions(block).find(
     (action): action is WriteMemoryAction => action.kind === "writeMemory"
@@ -1308,16 +1308,16 @@ test("lea builds general modrm addresses from channel reads", () => {
   const esi = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("esi")
   )!.output;
-  const scaled = v.internBinary("shl", esi, v.internConst(2));
-  const address = v.internBinary("add", v.internBinary("add", ebx, scaled), v.internConst(0x10));
+  const scaled = v.binary("shl", esi, v.const(2));
+  const address = v.binary("add", v.binary("add", ebx, scaled), v.const(0x10));
 
   strictEqual(block.regions.length, 1);
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: ebx, slot: gprChannel("ebx") },
     { kind: "readState", output: esi, slot: gprChannel("esi") },
     { kind: "writeState", slot: gprChannel("eax"), value: address },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1007) },
-    { kind: "dispatch", targetEip: v.internConst(0x1007) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1007) },
+    { kind: "dispatch", targetEip: v.const(0x1007) }
   ]);
 });
 
@@ -1332,17 +1332,17 @@ test("an absolute address is just its displacement constant", () => {
 
   const block = builder.finish();
   const v = block.values;
-  const address = v.internConst(0x2000);
+  const address = v.const(0x2000);
 
   deepStrictEqual(entryActions(block), [
     { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
     { kind: "readMemory", output: 2, address, width: 32 },
     { kind: "writeState", slot: gprChannel("eax"), value: 2 },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) },
-    { kind: "dispatch", targetEip: v.internConst(0x1005) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1005) },
+    { kind: "dispatch", targetEip: v.const(0x1005) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).flushes, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1000) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: address });
 });
@@ -1425,8 +1425,8 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
     { kind: "readMemory", output: load, address: ebx, width: 32 },
     { kind: "writeMemory", address: ebx, value: ebx, width: 32 },
     { kind: "writeState", slot: gprChannel("ebx"), value: load },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "dispatch", targetEip: v.internConst(0x1002) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1002) },
+    { kind: "dispatch", targetEip: v.const(0x1002) }
   ]);
 });
 
@@ -1445,15 +1445,15 @@ test("get and set through s.mem lower to memory actions at the given address", (
 
   const block = builder.finish();
   const v = block.values;
-  const address = v.internConst(0x2000);
+  const address = v.const(0x2000);
 
   deepStrictEqual(entryActions(block), [
     { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
     { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
     { kind: "readMemory", output: 2, address, width: 32 },
-    { kind: "writeMemory", address, value: v.internBinary("add", 2, v.internConst(1)), width: 32 },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1006) },
-    { kind: "dispatch", targetEip: v.internConst(0x1006) }
+    { kind: "writeMemory", address, value: v.binary("add", 2, v.const(1)), width: 32 },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1006) },
+    { kind: "dispatch", targetEip: v.const(0x1006) }
   ]);
 });
 
@@ -1491,13 +1491,13 @@ test("a guard after a register write restores the pre-instruction value in its e
   // The edge flushes eax's value as of instruction start — never the 0x222
   // this instruction wrote before guarding.
   deepStrictEqual(edgeFlushes(block, 1), [
-    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(0x111) },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) }
+    { kind: "writeState", slot: gprChannel("eax"), value: v.const(0x111) },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1005) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).terminator, {
     kind: "exit",
     reason: "memoryWriteFault",
-    payload: v.internConst(0x2000)
+    payload: v.const(0x2000)
   });
 
   // The main path keeps the new value: the store and the flush carry 0x222.
@@ -1505,8 +1505,8 @@ test("a guard after a register write restores the pre-instruction value in its e
     (action): action is WriteMemoryAction => action.kind === "writeMemory"
   )!;
 
-  strictEqual(store.value, v.internConst(0x222));
-  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, v.internConst(0x222));
+  strictEqual(store.value, v.const(0x222));
+  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, v.const(0x222));
 });
 
 test("a guard after writing a previously-clean register omits the channel from its edge", () => {
@@ -1520,14 +1520,14 @@ test("a guard after writing a previously-clean register omits the channel from i
   // eax had no pending at instruction start: cpu state memory already holds the
   // right bytes, so the edge writes only the eip.
   deepStrictEqual(edgeRegion(block, 1).flushes, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1000) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).terminator, {
     kind: "exit",
     reason: "memoryWriteFault",
-    payload: v.internConst(0x2000)
+    payload: v.const(0x2000)
   });
-  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, v.internConst(0x222));
+  strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, v.const(0x222));
 });
 
 test("pop [ebx] guards the stack read first and omits boundary-absent esp from its write edge", () => {
@@ -1546,7 +1546,7 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
   const popValue = entryActions(block).find(
     (action): action is ReadMemoryAction => action.kind === "readMemory"
   )!.output;
-  const nextEsp = v.internBinary("add", esp, v.internConst(4));
+  const nextEsp = v.binary("add", esp, v.const(4));
 
   strictEqual(block.regions.length, 3);
   deepStrictEqual(entryActions(block), [
@@ -1557,13 +1557,13 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
     { kind: "guardMemory", address: ebx, byteLength: 4, access: "write", faultEdge: 2 },
     { kind: "writeMemory", address: ebx, value: popValue, width: 32 },
     { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "dispatch", targetEip: v.internConst(0x1002) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1002) },
+    { kind: "dispatch", targetEip: v.const(0x1002) }
   ]);
 
   // esp was boundary-absent, so neither edge writes it — not even the write
   // guard's, where esp is already pending with the incremented value.
-  const eipFlushes = [{ kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }];
+  const eipFlushes = [{ kind: "writeState", slot: eipChannel, value: v.const(0x1000) }];
 
   deepStrictEqual(edgeRegion(block, 1).flushes, eipFlushes);
   deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: esp });
@@ -1586,8 +1586,8 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
   // The edge restores the boundary esp — the mov's 0x30, not the pop's
   // incremented value.
   deepStrictEqual(edgeFlushes(block, 2), [
-    { kind: "writeState", slot: gprChannel("esp"), value: v.internConst(0x30) },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1005) }
+    { kind: "writeState", slot: gprChannel("esp"), value: v.const(0x30) },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1005) }
   ]);
   deepStrictEqual(edgeRegion(block, 2).terminator, {
     kind: "exit",
@@ -1596,7 +1596,7 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
   });
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("esp"))?.value,
-    v.internBinary("add", v.internConst(0x30), v.internConst(4))
+    v.binary("add", v.const(0x30), v.const(4))
   );
 });
 
@@ -1613,7 +1613,7 @@ test("pop [esp] builds the destination address from the incremented esp", () => 
   const popValue = entryActions(block).find(
     (action): action is ReadMemoryAction => action.kind === "readMemory"
   )!.output;
-  const nextEsp = v.internBinary("add", esp, v.internConst(4));
+  const nextEsp = v.binary("add", esp, v.const(4));
 
   deepStrictEqual(entryActions(block), [
     { kind: "readState", output: esp, slot: gprChannel("esp") },
@@ -1622,8 +1622,8 @@ test("pop [esp] builds the destination address from the incremented esp", () => 
     { kind: "guardMemory", address: nextEsp, byteLength: 4, access: "write", faultEdge: 2 },
     { kind: "writeMemory", address: nextEsp, value: popValue, width: 32 },
     { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1003) },
-    { kind: "dispatch", targetEip: v.internConst(0x1003) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1003) },
+    { kind: "dispatch", targetEip: v.const(0x1003) }
   ]);
 });
 
@@ -1637,7 +1637,7 @@ test("pop [esp+k] adds the displacement to the incremented esp", () => {
   const esp = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("esp")
   )!.output;
-  const address = v.internBinary("add", v.internBinary("add", esp, v.internConst(4)), v.internConst(8));
+  const address = v.binary("add", v.binary("add", esp, v.const(4)), v.const(8));
   const writeGuard = entryActions(block).find(
     (action): action is GuardMemoryAction => action.kind === "guardMemory" && action.access === "write"
   )!;
@@ -1686,13 +1686,13 @@ test("add r/m32, r32 with both operands dynamic reads, then writes, in one block
 
   const block = builder.finish();
   const v = block.values;
-  const dst = v.internExternal(0);
-  const src = v.internExternal(1);
+  const dst = v.external(0);
+  const src = v.external(1);
   const actions = entryActions(block);
   const reads = actions.filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
-  const sum = v.internBinary("add", reads[0]!.output, reads[1]!.output);
+  const sum = v.binary("add", reads[0]!.output, reads[1]!.output);
 
   strictEqual(block.regions.length, 1);
   deepStrictEqual(block.values.node(dst), { kind: "external", external: 0 });
@@ -1732,11 +1732,11 @@ test("a static register read keeps its order across a dynamic write", () => {
     { kind: "readState", output: read.output, slot: gprChannel("ebx") },
     {
       kind: "writeState",
-      slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 4 },
+      slot: { kind: "gprDynamic", index: v.external(0), byteLength: 4 },
       value: read.output
     },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "dispatch", targetEip: v.internConst(0x1002) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1002) },
+    { kind: "dispatch", targetEip: v.const(0x1002) }
   ]);
 });
 
@@ -1751,7 +1751,7 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
   const eax = entryActions(block).find(
     (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
   )!.output;
-  const sum = v.internBinary("add", eax, v.internConst(5));
+  const sum = v.binary("add", eax, v.const(5));
   const actions = entryActions(block);
   const eaxFlush = actions.findIndex((a) => a.kind === "writeState" && a.slot === gprChannel("eax"));
   const dynamicWrite = actions.findIndex((a) => a.kind === "writeState" && a.slot.kind === "gprDynamic");
@@ -1763,12 +1763,12 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
   strictEqual(stateWrites(block).filter((write) => write.slot === gprChannel("eax")).length, 1);
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, sum);
   deepStrictEqual([...writtenFlags(block)], []);
-  assertLazyRecord(stateWrites(block), v, { kind: "ADD", width: 32, left: eax, right: v.internConst(5) });
+  assertLazyRecord(stateWrites(block), v, { kind: "ADD", width: 32, left: eax, right: v.const(5) });
 
   const eipWrites = stateWrites(block).filter((write) => write.slot === eipChannel);
 
   strictEqual(eipWrites.length, 1);
-  strictEqual(eipWrites[0]!.value, v.internConst(0x1005));
+  strictEqual(eipWrites[0]!.value, v.const(0x1005));
 });
 
 test("a dynamic write invalidates static GPR pendings for later instructions", () => {
@@ -1816,7 +1816,7 @@ test("a dynamic read leaves flushed pendings serving later static reads", () => 
   );
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("ecx"))?.value,
-    v.internConst(0x77)
+    v.const(0x77)
   );
 });
 
@@ -1833,7 +1833,7 @@ test("pop r/mDyn flushes the incremented esp before the dynamic store, after the
   const popValue = entryActions(block).find(
     (action): action is ReadMemoryAction => action.kind === "readMemory"
   )!.output;
-  const nextEsp = v.internBinary("add", esp, v.internConst(4));
+  const nextEsp = v.binary("add", esp, v.const(4));
 
   // Values-first: the guard (and its snapshot) precedes the esp flush the
   // dynamic store forces, so the unrestorable store happens after the last
@@ -1846,11 +1846,11 @@ test("pop r/mDyn flushes the incremented esp before the dynamic store, after the
     { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
     {
       kind: "writeState",
-      slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 4 },
+      slot: { kind: "gprDynamic", index: v.external(0), byteLength: 4 },
       value: popValue
     },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "dispatch", targetEip: v.internConst(0x1002) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1002) },
+    { kind: "dispatch", targetEip: v.const(0x1002) }
   ]);
 });
 
@@ -1866,11 +1866,11 @@ test("an 8-bit template width lowers a one-byte dynamic slot", () => {
     {
       kind: "readState",
       output: 2,
-      slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 1 }
+      slot: { kind: "gprDynamic", index: v.external(0), byteLength: 1 }
     },
     { kind: "writeState", slot: gprChannel("bl"), value: 2 },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1002) },
-    { kind: "dispatch", targetEip: v.internConst(0x1002) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1002) },
+    { kind: "dispatch", targetEip: v.const(0x1002) }
   ]);
 });
 
@@ -1884,8 +1884,8 @@ test("a 16-bit set through a dynamic register stores a two-byte slot", () => {
 
   deepStrictEqual(entryActions(block)[0], {
     kind: "writeState",
-    slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 2 },
-    value: v.internConst(0x1234)
+    slot: { kind: "gprDynamic", index: v.external(0), byteLength: 2 },
+    value: v.const(0x1234)
   });
 });
 
@@ -1900,7 +1900,7 @@ test("movsx r32, r8 from a dynamic register marks the read signed with no extra 
   deepStrictEqual(entryActions(block)[0], {
     kind: "readState",
     output: 2,
-    slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 1 },
+    slot: { kind: "gprDynamic", index: v.external(0), byteLength: 1 },
     signed: true
   });
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, 2);
@@ -1947,9 +1947,9 @@ test("an external location flushes eip as the nextEip external", () => {
   const v = block.values;
 
   deepStrictEqual(entryActions(block), [
-    { kind: "writeState", slot: gprChannel("eax"), value: v.internConst(5) },
-    { kind: "writeState", slot: eipChannel, value: v.internExternal(1) },
-    { kind: "dispatch", targetEip: v.internExternal(1) }
+    { kind: "writeState", slot: gprChannel("eax"), value: v.const(5) },
+    { kind: "writeState", slot: eipChannel, value: v.external(1) },
+    { kind: "dispatch", targetEip: v.external(1) }
   ]);
 });
 
@@ -1966,15 +1966,15 @@ test("a fault edge restores an external eip", () => {
   const v = block.values;
 
   deepStrictEqual(edgeRegion(block, 1).flushes, [
-    { kind: "writeState", slot: eipChannel, value: v.internExternal(4) }
+    { kind: "writeState", slot: eipChannel, value: v.external(4) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).terminator, {
     kind: "exit",
     reason: "memoryReadFault",
-    payload: v.internConst(0x2000)
+    payload: v.const(0x2000)
   });
-  strictEqual(stateWrites(block).find((write) => write.slot === eipChannel)?.value, v.internExternal(5));
-  deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: v.internExternal(5) });
+  strictEqual(stateWrites(block).find((write) => write.slot === eipChannel)?.value, v.external(5));
+  deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: v.external(5) });
 });
 
 // The memDynamic address: the in-block base register read plus the
@@ -1982,7 +1982,7 @@ test("a fault edge restores an external eip", () => {
 function dynamicAddress(block: IrBlock, baseRead: ReadStateAction): ValueId {
   const v = block.values;
 
-  return v.internBinary("add", baseRead.output, v.internExternal(1));
+  return v.binary("add", baseRead.output, v.external(1));
 }
 
 function dynamicBaseRead(block: IrBlock): ReadStateAction {
@@ -2001,14 +2001,14 @@ test("a memStatic operand guards and accesses the external address", () => {
 
   const block = builder.finish();
   const v = block.values;
-  const address = v.internExternal(7);
+  const address = v.external(7);
 
   deepStrictEqual(entryActions(block), [
     { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
     { kind: "readMemory", output: 2, address, width: 32 },
     { kind: "writeState", slot: gprChannel("eax"), value: 2 },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1006) },
-    { kind: "dispatch", targetEip: v.internConst(0x1006) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1006) },
+    { kind: "dispatch", targetEip: v.const(0x1006) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).terminator, {
     kind: "exit",
@@ -2034,13 +2034,13 @@ test("a memDynamic operand reads the base register inside the block", () => {
     {
       kind: "readState",
       output: baseRead.output,
-      slot: { kind: "gprDynamic", index: v.internExternal(0), byteLength: 4 }
+      slot: { kind: "gprDynamic", index: v.external(0), byteLength: 4 }
     },
     { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
     { kind: "readMemory", output: load.output, address, width: 32 },
     { kind: "writeState", slot: gprChannel("eax"), value: load.output },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1006) },
-    { kind: "dispatch", targetEip: v.internConst(0x1006) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1006) },
+    { kind: "dispatch", targetEip: v.const(0x1006) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).terminator, {
     kind: "exit",
@@ -2080,7 +2080,7 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
   const popValue = entryActions(block).find(
     (action): action is ReadMemoryAction => action.kind === "readMemory"
   )!.output;
-  const nextEsp = v.internBinary("add", esp, v.internConst(4));
+  const nextEsp = v.binary("add", esp, v.const(4));
   const baseRead = dynamicBaseRead(block);
   const address = dynamicAddress(block, baseRead);
 
@@ -2096,20 +2096,20 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
     { kind: "readState", output: baseRead.output, slot: baseRead.slot },
     { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
     { kind: "writeMemory", address, value: popValue, width: 32 },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1003) },
-    { kind: "dispatch", targetEip: v.internConst(0x1003) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1003) },
+    { kind: "dispatch", targetEip: v.const(0x1003) }
   ]);
 
   // The read guard predates the flush: its edge omits esp (cpu state memory
   // still holds it on that path). The write guard's edge restores the
   // pre-instruction esp read the flush destroyed.
   deepStrictEqual(edgeRegion(block, 1).flushes, [
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1000) }
   ]);
   deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: esp });
   deepStrictEqual(edgeFlushes(block, 2), [
     { kind: "writeState", slot: gprChannel("esp"), value: esp },
-    { kind: "writeState", slot: eipChannel, value: v.internConst(0x1000) }
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1000) }
   ]);
   deepStrictEqual(edgeRegion(block, 2).terminator, {
     kind: "exit",
@@ -2143,7 +2143,7 @@ test("a narrow immExternal get projects to the access width", () => {
   deepStrictEqual(v.node(write!.value), {
     kind: "project",
     width: 8,
-    value: v.internExternal(0)
+    value: v.external(0)
   });
 });
 
@@ -2159,7 +2159,7 @@ test("a signed immExternal get sign-extends instead of masking", () => {
   deepStrictEqual(v.node(write!.value), {
     kind: "unary",
     operator: "extend8_s",
-    value: v.internExternal(0)
+    value: v.external(0)
   });
 });
 
@@ -2192,7 +2192,7 @@ test("every instruction advances the count channel once, flushed once", () => {
     {
       kind: "writeState",
       slot: instructionCountChannel,
-      value: v.internBinary("add", instructionCountRead(block).output, v.internConst(2))
+      value: v.binary("add", instructionCountRead(block).output, v.const(2))
     }
   ]);
 });
@@ -2204,7 +2204,7 @@ test("branch edges flush the advanced count", () => {
 
   const block = builder.finish();
   const v = block.values;
-  const advanced = v.internBinary("add", instructionCountRead(block).output, v.internConst(1));
+  const advanced = v.binary("add", instructionCountRead(block).output, v.const(1));
 
   for (const index of [1, 2]) {
     strictEqual(
@@ -2237,7 +2237,7 @@ test("a fault edge restores the boundary count", () => {
       (flush): flush is WriteStateAction =>
         flush.kind === "writeState" && flush.slot === instructionCountChannel
     )?.value,
-    v.internBinary("add", instructionCountRead(block).output, v.internConst(1))
+    v.binary("add", instructionCountRead(block).output, v.const(1))
   );
 });
 
@@ -2257,7 +2257,7 @@ test("a host trap flushes the advanced count", () => {
     {
       kind: "writeState",
       slot: instructionCountChannel,
-      value: v.internBinary("add", instructionCountRead(block).output, v.internConst(1))
+      value: v.binary("add", instructionCountRead(block).output, v.const(1))
     }
   ]);
 });
