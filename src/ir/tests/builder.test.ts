@@ -43,7 +43,7 @@ import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic } from "#x86/semantics/misc.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
-import { popfdSemantic, popSemantic, pushfdSemantic } from "#x86/semantics/stack.js";
+import { popfdSemantic, popfSemantic, popSemantic, pushfdSemantic, pushfSemantic } from "#x86/semantics/stack.js";
 import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import { assertLazyRecord } from "./lazy-flags.js";
@@ -1036,6 +1036,33 @@ test("pushfd reuses pending arithmetic flags and reads non-arithmetic flags", ()
   assertLazyRecord(stateWrites(block), v, { kind: "ADD", width: 32, left: eax, right: v.const(1) });
 });
 
+test("pushf reuses pending arithmetic flags and reads only low non-arithmetic flags", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(1)], loc(0x1000, 0x1003));
+  builder.addInstruction(pushfSemantic(), [], loc(0x1003, 0x1005));
+
+  const block = builder.finish();
+  const flagReads = entryActions(block).flatMap((action) =>
+    action.kind === "readState" && action.slot.kind === "flag" ? [action.slot.flag] : []
+  );
+  const stackWrite = entryActions(block).find(
+    (action): action is WriteMemoryAction => action.kind === "writeMemory"
+  );
+
+  deepStrictEqual(flagReads, ["TF", "DF", "NT"]);
+  deepStrictEqual([...writtenFlags(block)], []);
+  ok(stackWrite !== undefined, "expected pushf to write stack memory");
+  strictEqual(stackWrite.width, 16);
+
+  const v = block.values;
+  const eax = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("eax")
+  )!.output;
+
+  assertLazyRecord(stateWrites(block), v, { kind: "ADD", width: 32, left: eax, right: v.const(1) });
+});
+
 test("popfd writes every stored flag from the popped image", () => {
   const builder = createIrBlockBuilder();
 
@@ -1065,6 +1092,48 @@ test("popfd writes every stored flag from the popped image", () => {
   strictEqual(writes[0]?.value, v.binary("add", espRead.output, v.const(4)));
   deepStrictEqual(flagWrites.map((write) => write.flag).sort(), [...x86Flags].sort());
   strictEqual(new Set(flagWrites.map((write) => write.flag)).size, x86Flags.length);
+
+  for (const write of flagWrites) {
+    const offset = x86EflagsBitOffset[write.flag];
+    const shifted: ValueId = offset === 0
+      ? popRead.output
+      : v.binary("shr_u", popRead.output, v.const(offset));
+
+    strictEqual(write.value, v.binary("and", shifted, v.const(1)), write.flag);
+  }
+});
+
+test("popf writes only stored low-16 modeled flags", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(popfSemantic(), [], loc(0x1000, 0x1002));
+
+  const block = builder.finish();
+  const v = block.values;
+  const actions = entryActions(block);
+  const espRead = actions.find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("esp")
+  );
+  const popRead = actions.find(
+    (action): action is ReadMemoryAction => action.kind === "readMemory"
+  );
+
+  ok(espRead !== undefined, "expected popf to read esp");
+  ok(popRead !== undefined, "expected popf to read stack memory");
+  strictEqual(popRead.width, 16);
+  strictEqual(
+    actions.filter((action) => action.kind === "readState" && action.slot.kind === "flag").length,
+    0
+  );
+
+  const writes = stateWrites(block);
+  const flagWrites = flagWriteEntries(block);
+  const low16Flags = x86Flags.filter((flag) => x86EflagsBitOffset[flag] < 16);
+
+  strictEqual(writes[0]?.slot, gprChannel("esp"));
+  strictEqual(writes[0]?.value, v.binary("add", espRead.output, v.const(2)));
+  deepStrictEqual(flagWrites.map((write) => write.flag).sort(), [...low16Flags].sort());
+  strictEqual(new Set(flagWrites.map((write) => write.flag)).size, low16Flags.length);
 
   for (const write of flagWrites) {
     const offset = x86EflagsBitOffset[write.flag];

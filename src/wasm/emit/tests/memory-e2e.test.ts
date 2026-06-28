@@ -461,6 +461,26 @@ test("pushfd stores the fixed usermode image when no state flags are set", async
   );
 });
 
+test("pushf stores the low usermode flags image", async () => {
+  const instruction = ok(decodeBytes([0x66, 0x9c]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x40,
+    eip: instruction.address,
+    ...allPushfdFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint16(0x3e, true), expectedPushfdImage(allPushfdFlagsSet) & 0xffff);
+  assertState(
+    stateView,
+    { regs: { esp: 0x3e }, eip: instruction.nextEip, flags: allFlagsSet },
+    "pushf"
+  );
+});
+
 test("popfd distributes stored flags and ignores privileged bits", async () => {
   const instruction = ok(decodeBytes([0x9d]));
   const privilegedBits = (1 << 9) | (3 << 12) | (1 << 16) | (1 << 17) | (1 << 19) | (1 << 20);
@@ -481,6 +501,28 @@ test("popfd distributes stored flags and ignores privileged bits", async () => {
     "popfd"
   );
   assertStoredFlags(stateView, storedFlagsFromImage(0), "popfd");
+});
+
+test("popf distributes low flags and preserves AC/ID", async () => {
+  const instruction = ok(decodeBytes([0x66, 0x9d]));
+  const privilegedBits = (1 << 9) | (3 << 12);
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x40,
+    eip: instruction.address,
+    ...allPushfdFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+  guestView.setUint16(0x40, privilegedBits, true);
+
+  strictEqual(run(), irBlockCompleted);
+  assertState(
+    stateView,
+    { regs: { esp: 0x42 }, eip: instruction.nextEip, flags: noFlagsSet },
+    "popf"
+  );
+  assertStoredFlags(stateView, { ...storedFlagsFromImage(0), AC: 1, ID: 1 }, "popf");
 });
 
 test("popfd/pushfd round-trips stored flags", async () => {
@@ -518,6 +560,45 @@ test("popfd/pushfd round-trips stored flags", async () => {
     "popfd/pushfd"
   );
   assertStoredFlags(stateView, storedFlagsFromImage(image), "popfd/pushfd");
+});
+
+test("popf/pushf round-trips low flags while preserving AC/ID", async () => {
+  const instructions = decodeSequence([
+    [0x66, 0x9d],
+    [0x66, 0x9c]
+  ]);
+  const image = expectedPushfdImage({ CF: 1, AF: 1, DF: 1, NT: 1 }) | (1 << 9) | (3 << 12);
+  const expectedImage = expectedPushfdImage(storedFlagsFromImage(image)) & 0xffff;
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x40,
+    AC: 1,
+    ID: 1,
+    eip: instructions[0]!.address
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+  guestView.setUint16(0x40, image, true);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint16(0x40, true), expectedImage);
+  assertState(
+    stateView,
+    {
+      regs: { esp: 0x40 },
+      eip: instructions[1]!.nextEip,
+      flags: {
+        CF: 1,
+        PF: 0,
+        AF: 1,
+        ZF: 0,
+        SF: 0,
+        OF: 0
+      }
+    },
+    "popf/pushf"
+  );
+  assertStoredFlags(stateView, { ...storedFlagsFromImage(image), AC: 1, ID: 1 }, "popf/pushf");
 });
 
 test("popfd makes AC and ID toggle detection stick", async () => {

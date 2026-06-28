@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 300);
+  strictEqual(X86_32_CORE.instructions.length, 302);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -94,7 +94,9 @@ test("x86-32 core registers the initial instruction surface", () => {
     "pop.r32",
     "pop.rm16",
     "pop.rm32",
+    "pushf.word",
     "pushfd.dword",
+    "popf.word",
     "popfd.dword",
     "leave.near",
     "jmp.rel8",
@@ -256,12 +258,30 @@ test("pushfd is a no-operand dword flags push", () => {
   deepStrictEqual(spec.format, { syntax: "pushfd" });
 });
 
+test("pushf is an operand-size word flags push", () => {
+  const spec = instruction("pushf.word");
+
+  deepStrictEqual(spec.prefixes, { operandSize: "override" });
+  deepStrictEqual(spec.opcode, [0x9c]);
+  strictEqual(spec.operands, undefined);
+  deepStrictEqual(spec.format, { syntax: "pushf" });
+});
+
 test("popfd is a no-operand dword flags pop", () => {
   const spec = instruction("popfd.dword");
 
   deepStrictEqual(spec.opcode, [0x9d]);
   strictEqual(spec.operands, undefined);
   deepStrictEqual(spec.format, { syntax: "popfd" });
+});
+
+test("popf is an operand-size word flags pop", () => {
+  const spec = instruction("popf.word");
+
+  deepStrictEqual(spec.prefixes, { operandSize: "override" });
+  deepStrictEqual(spec.opcode, [0x9d]);
+  strictEqual(spec.operands, undefined);
+  deepStrictEqual(spec.format, { syntax: "popf" });
 });
 
 test("operand-size stack forms use word operands with 32-bit ESP semantics", () => {

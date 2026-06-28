@@ -160,6 +160,21 @@ test("executes PUSHFD with the fixed usermode image when no state flags are set"
   assertCompletedInstruction(state, startAddress + 1, 8);
 });
 
+test("executes PUSHF by storing the low usermode flags image", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0x40,
+    ...allPushfdFlagsSet,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { interpreter, state } = await executeStackInstruction([0x66, 0x9c], initialState);
+
+  strictEqual(state.esp, 0x3e);
+  strictEqual(interpreter.guestView.getUint16(0x3e, true), expectedPushfdImage(allPushfdFlagsSet) & 0xffff);
+  assertCompletedInstruction(state, startAddress + 2, 8);
+});
+
 test("executes POPFD by distributing stored flags and ignoring privileged bits", async () => {
   const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
@@ -178,6 +193,26 @@ test("executes POPFD by distributing stored flags and ignoring privileged bits",
   strictEqual(state.esp, 0x44);
   deepStrictEqual(storedFlagsOf(state), storedFlagsFromImage(0));
   assertCompletedInstruction(state, startAddress + 1, 8);
+});
+
+test("executes POPF by distributing low flags and preserving AC/ID", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0x40,
+    ...allPushfdFlagsSet,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const privilegedBits = (1 << 9) | (3 << 12);
+
+  const { state } = await executeStackInstruction(
+    [0x66, 0x9d],
+    initialState,
+    (guest) => guest.setUint16(0x40, privilegedBits, true)
+  );
+
+  strictEqual(state.esp, 0x42);
+  deepStrictEqual(storedFlagsOf(state), { ...storedFlagsFromImage(0), AC: 1, ID: 1 });
+  assertCompletedInstruction(state, startAddress + 2, 8);
 });
 
 test("executes POPFD/PUSHFD as a stored-flag round trip", async () => {
@@ -202,6 +237,32 @@ test("executes POPFD/PUSHFD as a stored-flag round trip", async () => {
   strictEqual(interpreter.guestView.getUint32(0x40, true), expectedImage);
   deepStrictEqual(storedFlagsOf(state), storedFlagsFromImage(image));
   assertCompletedInstruction(state, startAddress + 2, 9);
+});
+
+test("executes POPF/PUSHF as a low-flags round trip while preserving AC/ID", async () => {
+  const image = expectedPushfdImage({ CF: 1, AF: 1, DF: 1, NT: 1 }) | (1 << 9) | (3 << 12);
+  const expectedImage = expectedPushfdImage(storedFlagsFromImage(image)) & 0xffff;
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0x40,
+    AC: 1,
+    ID: 1,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const interpreter = await instantiateWasmInterpreter();
+
+  writeInterpreterState(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, startAddress, [0x66, 0x9d, 0x66, 0x9c]);
+  interpreter.guestView.setUint16(0x40, image, true);
+
+  const exit = interpreter.run(2);
+  const state = readInterpreterState(interpreter.stateView);
+
+  assertSingleInstructionExit(exit);
+  strictEqual(state.esp, 0x40);
+  strictEqual(interpreter.guestView.getUint16(0x40, true), expectedImage);
+  deepStrictEqual(storedFlagsOf(state), { ...storedFlagsFromImage(image), AC: 1, ID: 1 });
+  assertCompletedInstruction(state, startAddress + 4, 9);
 });
 
 test("executes the AC and ID POPFD toggle detection idiom", async () => {
