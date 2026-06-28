@@ -347,6 +347,7 @@ export class ValueTable {
       case "add":
       case "sub":
       case "shl":
+      case "shr_s":
         // Wrapping arithmetic has no cheap bound.
         return unbounded;
     }

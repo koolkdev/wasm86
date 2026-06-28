@@ -300,7 +300,9 @@ test("operators map to their wasm opcodes", () => {
   const one = values.internConst(1);
   const two = values.internConst(2);
   const shifted = values.internBinary("shl", one, two);
-  const mixed = values.internBinary("xor", shifted, values.internBinary("shr_u", one, two));
+  const signedShifted = values.internBinary("shr_s", one, two);
+  const unsignedShifted = values.internBinary("shr_u", one, two);
+  const mixed = values.internBinary("xor", shifted, values.internBinary("xor", signedShifted, unsignedShifted));
   const extended = values.internUnary("extend16_s", values.internUnary("extend8_s", one));
   const masked = values.internBinary("sub", values.internBinary("and", one, two), values.internBinary("or", one, two));
   const equal = values.internCompare("eq", one, two);
@@ -329,7 +331,11 @@ test("operators map to their wasm opcodes", () => {
     wasmOpcode.i32Shl,
     wasmOpcode.i32Const,
     wasmOpcode.i32Const,
+    wasmOpcode.i32ShrS,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Const,
     wasmOpcode.i32ShrU,
+    wasmOpcode.i32Xor,
     wasmOpcode.i32Xor,
     wasmOpcode.i32Const,
     wasmOpcode.i32Extend8S,

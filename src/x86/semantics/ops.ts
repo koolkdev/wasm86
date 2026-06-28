@@ -5,6 +5,7 @@ export type BinaryOperator =
   | "or"
   | "and"
   | "shl"
+  | "shr_s"
   | "shr_u";
 
 export type CompareOperator =

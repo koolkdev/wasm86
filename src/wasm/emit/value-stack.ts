@@ -327,6 +327,9 @@ function emitBinaryOperator(body: WasmFunctionBodyEncoder, operator: BinaryOpera
     case "shl":
       body.i32Shl();
       return;
+    case "shr_s":
+      body.i32ShrS();
+      return;
     case "shr_u":
       body.i32ShrU();
       return;

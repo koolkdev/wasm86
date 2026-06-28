@@ -353,6 +353,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return this.#binary("i32Shl", "shl", a, b);
   }
 
+  i32ShrS(a: ValueInput, b: ValueInput): Value {
+    return this.#binary("i32ShrS", "shr_s", a, b);
+  }
+
   i32ShrU(a: ValueInput, b: ValueInput): Value {
     return this.#binary("i32ShrU", "shr_u", a, b);
   }

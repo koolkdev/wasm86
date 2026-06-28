@@ -32,6 +32,17 @@ test("building the same expression twice yields the same node id", () => {
   deepStrictEqual(table.node(add), { kind: "binary", operator: "add", a, b });
 });
 
+test("signed right shift is a distinct interned binary operator", () => {
+  const table = new ValueTable();
+  const a = table.internConst(-16);
+  const b = table.internConst(2);
+  const shifted = table.internBinary("shr_s", a, b);
+
+  strictEqual(table.internBinary("shr_s", a, b), shifted);
+  notStrictEqual(table.internBinary("shr_u", a, b), shifted);
+  deepStrictEqual(table.node(shifted), { kind: "binary", operator: "shr_s", a, b });
+});
+
 test("each compound kind interns on its full key", () => {
   const table = new ValueTable();
   const a = table.internConst(1);
@@ -157,9 +168,13 @@ test("action outputs carry their declared bounds", () => {
 test("unbounded results stay wrapped", () => {
   const table = new ValueTable();
   const sum = table.internBinary("add", table.internConst(1), table.internConst(2));
+  const byte = table.addActionOutput(fitsUnsigned(8));
+  const signedShift = table.internBinary("shr_s", byte, table.internConst(2));
 
   strictEqual(table.node(table.projectTo(8, sum)).kind, "project");
   strictEqual(table.node(table.extendTo(16, sum)).kind, "unary");
+  strictEqual(table.node(table.projectTo(8, signedShift)).kind, "project");
+  strictEqual(table.node(table.extendTo(16, signedShift)).kind, "unary");
 });
 
 test("bitwise results inherit their operands' bounds", () => {

@@ -191,6 +191,10 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return this.#binary("shl", a, b);
   }
 
+  i32ShrS(a: ValueInput, b: ValueInput): Value {
+    return this.#binary("shr_s", a, b);
+  }
+
   i32ShrU(a: ValueInput, b: ValueInput): Value {
     return this.#binary("shr_u", a, b);
   }

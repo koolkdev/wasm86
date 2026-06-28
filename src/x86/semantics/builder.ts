@@ -60,6 +60,7 @@ export interface SemanticsBuilder {
   i32Or(a: ValueInput, b: ValueInput): Value;
   i32And(a: ValueInput, b: ValueInput): Value;
   i32Shl(a: ValueInput, b: ValueInput): Value;
+  i32ShrS(a: ValueInput, b: ValueInput): Value;
   i32ShrU(a: ValueInput, b: ValueInput): Value;
   i32Extend8S(value: ValueInput): Value;
   i32Extend16S(value: ValueInput): Value;
