@@ -19,6 +19,7 @@ import {
   accumulatorSignExtendSemantic,
   highAccumulatorSignExtendSemantic
 } from "#x86/semantics/sign-extend.js";
+import { rotateSemantic } from "#x86/semantics/rotate.js";
 import {
   leaveSemantic,
   popadSemantic,
@@ -370,6 +371,57 @@ test("sar semantics use signed right shift after width sign extension", () => {
   strictEqual(trace.defs[5], "shr_s(%4, %3)");
 });
 
+test("plain rotate semantics write only carry and overflow flags", () => {
+  const trace = buildSemanticTrace(rotateSemantic("rol", 8, "imm8"), operands("reg", "imm"));
+
+  deepStrictEqual(directFlagWrites(trace).sort(), ["CF", "OF"]);
+  strictEqual(trace.flagWrites.length, 0);
+  strictEqual(directFlagWrites(trace).some((flag) => ["AF", "PF", "SF", "ZF"].includes(flag)), false);
+});
+
+test("rotate count zero preserves destination, CF, and OF", () => {
+  const trace = buildSemanticTrace(rotateSemantic("ror", 16, "cl"), regOperands(1));
+  const set = trace.events.find((event) => event.startsWith("set op0:16 <- "));
+  const oldCfRead = trace.events.find((event) => event.endsWith(" = flag CF"));
+  const oldOfRead = trace.events.find((event) => event.endsWith(" = flag OF"));
+  const cfWrite = trace.events.find((event) => event.startsWith("flag CF <- "));
+  const ofWrite = trace.events.find((event) => event.startsWith("flag OF <- "));
+
+  ok(set !== undefined);
+  ok(oldCfRead !== undefined);
+  ok(oldOfRead !== undefined);
+  ok(cfWrite !== undefined);
+  ok(ofWrite !== undefined);
+
+  const result = set.split(" <- ")[1]!;
+  const oldCf = oldCfRead.split(" = ")[0]!;
+  const oldOf = oldOfRead.split(" = ")[0]!;
+  const cfValue = cfWrite.split(" <- ")[1]!;
+  const ofValue = ofWrite.split(" <- ")[1]!;
+
+  strictEqual(referencesValue(trace, definitionForDisplay(trace, result), "%1"), true);
+  strictEqual(referencesValue(trace, definitionForDisplay(trace, cfValue), oldCf), true);
+  strictEqual(referencesValue(trace, definitionForDisplay(trace, ofValue), oldOf), true);
+});
+
+test("rotate counts greater than one write OF as zero", () => {
+  const trace = buildSemanticTrace(rotateSemantic("rol", 32, "cl"), regOperands(1));
+
+  strictEqual(trace.defs.some((definition) => /^select\(%\d+, %\d+, 0\)$/.test(definition)), true);
+});
+
+test("rotate-through-carry semantics read old CF before writing flags", () => {
+  for (const op of ["rcl", "rcr"] as const) {
+    const trace = buildSemanticTrace(rotateSemantic(op, 32, "cl"), regOperands(1));
+    const cfReadIndex = trace.events.findIndex((event) => event.endsWith(" = flag CF"));
+    const firstFlagWrite = trace.events.findIndex((event) => event.startsWith("flag "));
+
+    strictEqual(cfReadIndex > -1, true, op);
+    strictEqual(firstFlagWrite > cfReadIndex, true, op);
+    deepStrictEqual(directFlagWrites(trace).sort(), ["CF", "OF"], op);
+  }
+});
+
 test("xchg semantic reads both operands before writing either operand", () => {
   const trace = buildSemanticTrace(xchgSemantic(), regOperands(2));
   const firstSet = trace.events.findIndex((event) => event.startsWith("set "));
@@ -624,6 +676,14 @@ function referencesValue(trace: SemanticTrace, definition: string, value: string
   }
 
   return false;
+}
+
+function definitionForDisplay(trace: SemanticTrace, value: string): string {
+  const index = Number(value.slice(1));
+  const definition = trace.defs[index];
+
+  ok(definition !== undefined, `expected definition for ${value}`);
+  return definition;
 }
 
 function referencedValues(definition: string): string[] {

@@ -12,6 +12,7 @@ import {
   writeDecFlags,
   writeIncFlags,
   writeNegFlags,
+  writeRotateFlags,
   writeShiftFlags,
   writeSubFlags
 } from "#x86/semantics/flag-writes.js";
@@ -256,6 +257,29 @@ test("shift flag writer consumes the masked count and supplied result", () => {
   strictEqual(trace.defs.some((def) => def.startsWith("shr_s(")), false);
   ok(trace.def(flagCell(write, "CF")).startsWith("select("));
   ok(trace.def(flagCell(write, "OF")).startsWith("select("));
+});
+
+test("rotate flag writer updates only carry and overflow", () => {
+  const trace = buildHelperTrace((s) => {
+    const result = s.get(s.operand(0), 8);
+    const count = s.get(s.operand(1), 8);
+    const carry = s.binary("and", result, s.const32(1));
+    const carryDefined = s.compare(32, "ne", count, s.const32(0));
+
+    writeRotateFlags(s, {
+      op: "rol",
+      width: 8,
+      count,
+      result,
+      carry,
+      carryDefined
+    });
+  }, regOperands(2));
+
+  strictEqual(trace.flagWrites.length, 0);
+  deepStrictEqual(directFlagWrites(trace).sort(), ["CF", "OF"]);
+  ok(directFlagDefinition(trace, "CF").startsWith("select("));
+  ok(directFlagDefinition(trace, "OF").startsWith("select("));
 });
 
 function buildHelperTrace(

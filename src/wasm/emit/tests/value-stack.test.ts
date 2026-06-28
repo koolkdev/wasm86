@@ -305,6 +305,7 @@ test("operators map to their wasm opcodes", () => {
   const unsignedShifted = values.binary("shr_u", one, two);
   const mixed = values.binary("xor", shifted, values.binary("xor", signedShifted, unsignedShifted));
   const product = values.binary("mul", one, two);
+  const remainder = values.binary("rem_u", one, two);
   const extended8 = values.extend(8, one, true);
   const extended16 = values.extend(16, two, true);
   const masked = values.binary("sub", values.binary("and", one, two), values.binary("or", one, two));
@@ -315,6 +316,7 @@ test("operators map to their wasm opcodes", () => {
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: mixed },
       { kind: "writeState", slot: gprChannel("esi"), value: product },
+      { kind: "writeState", slot: gprChannel("esi"), value: remainder },
       { kind: "writeState", slot: gprChannel("ebx"), value: extended8 },
       { kind: "writeState", slot: gprChannel("edi"), value: extended16 },
       { kind: "writeState", slot: gprChannel("ecx"), value: masked },
@@ -326,6 +328,7 @@ test("operators map to their wasm opcodes", () => {
 
   valueStack.emitUse(mixed);
   valueStack.emitUse(product);
+  valueStack.emitUse(remainder);
   valueStack.emitUse(extended8);
   valueStack.emitUse(extended16);
   valueStack.emitUse(masked);
@@ -348,6 +351,9 @@ test("operators map to their wasm opcodes", () => {
     wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.i32Mul,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.i32RemU,
     wasmOpcode.localGet,
     wasmOpcode.i32Extend8S,
     wasmOpcode.localGet,
@@ -428,6 +434,43 @@ test("signed multiply overflow expressions lower through typed i64 products", ()
     wasmOpcode.end
   ]);
   strictEqual(wasmBodyLocalCount(encoded), 3);
+});
+
+test("i64 binary operators lower to wasm i64 opcodes", () => {
+  const values = new ValueTable();
+  const one = values.extend64(32, values.external(0), false);
+  const two = values.extend64(32, values.external(1), false);
+  const three = values.extend64(32, values.external(2), false);
+  const four = values.extend64(32, values.external(3), false);
+  const either = values.binary64("or", one, two);
+  const remainder = values.binary64("rem_u", three, four);
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: either },
+      { kind: "writeState", slot: gprChannel("ebx"), value: remainder }
+    ]),
+    [0, 1, 2, 3]
+  );
+
+  valueStack.emitUse(either);
+  valueStack.emitUse(remainder);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32U,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32U,
+    wasmOpcode.i64Or,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32U,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32U,
+    wasmOpcode.i64RemU,
+    wasmOpcode.end
+  ]);
 });
 
 test("unsupported i64 operators fail at wasm lowering", () => {

@@ -21,7 +21,7 @@ export function shiftSemantic(
     guardStorageReadWrite(s, context, dst, width);
 
     const value = s.project(width, s.get(dst, width));
-    const rawCount = readCount(s, countSource);
+    const rawCount = readShiftCount(s, countSource);
     const count = s.binary("and", rawCount, s.const32(0x1f));
     const shiftedResult = s.project(width, shiftResult(s, op, width, value, count));
     const result = s.select(s.compare(32, "ne", count, s.const32(0)), shiftedResult, value);
@@ -31,7 +31,7 @@ export function shiftSemantic(
   };
 }
 
-function readCount(s: SemanticsBuilder, countSource: ShiftCountSource): Value {
+export function readShiftCount(s: SemanticsBuilder, countSource: ShiftCountSource): Value {
   switch (countSource) {
     case "one":
       return s.const32(1);

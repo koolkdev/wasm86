@@ -143,6 +143,12 @@ test("binary operations fold constant operands", () => {
   strictEqual(table.binary("add", one, two), table.const(3));
   strictEqual(table.binary("sub", one, two), table.const(-1));
   strictEqual(table.binary("mul", table.const(0x4000_0000), two), table.const(0x8000_0000));
+  strictEqual(table.binary("rem_u", table.const(31), table.const(9)), table.const(4));
+  strictEqual(table.binary("rem_u", table.const(-1), table.const(10)), table.const(5));
+  throws(
+    () => table.binary("rem_u", table.const(1), table.const(0)),
+    /rem_u divisor must be non-zero/
+  );
   strictEqual(table.binary("xor", minusOne, table.const(0xff)), table.const(-0x100));
   strictEqual(table.binary("or", table.const(0x100), table.const(0xff)), table.const(0x1ff));
   strictEqual(table.binary("and", table.const(0x1ff), table.const(0xff)), table.const(0xff));
@@ -173,6 +179,9 @@ test("binary operations fold local identities", () => {
   strictEqual(table.binary("and", minusOne, value), value);
   strictEqual(table.binary("and", value, zero), zero);
   strictEqual(table.binary("and", value, value), value);
+  strictEqual(table.binary("rem_u", value, table.const(1)), zero);
+  strictEqual(table.node(table.binary("rem_u", zero, value)).kind, "binary");
+  strictEqual(table.node(table.binary("rem_u", value, zero)).kind, "binary");
   strictEqual(table.binary("shl", value, zero), value);
   strictEqual(table.binary("shr_s", value, zero), value);
   strictEqual(table.binary("shr_u", value, zero), value);

@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 322);
+  strictEqual(X86_32_CORE.instructions.length, 358);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -92,6 +92,10 @@ test("x86-32 core registers the initial instruction surface", () => {
     "cwde.dword",
     "cwd.word",
     "cdq.dword",
+    "rol.rm32_1",
+    "ror.rm16_imm8",
+    "rcl.rm8_cl",
+    "rcr.rm32_cl",
     "shl.rm8_1",
     "shl.rm16_cl",
     "shl.rm32_imm8",
@@ -528,6 +532,43 @@ test("accumulator sign-extension forms are no-operand instructions", () => {
   deepStrictEqual(cdq.opcode, [0x99]);
   strictEqual(cdq.operands, undefined);
   deepStrictEqual(cdq.format, { syntax: "cdq" });
+});
+
+test("rotate forms share group-2 count and width shapes", () => {
+  const rol = instruction("rol.rm32_1");
+  const ror = instruction("ror.rm16_imm8");
+  const rcl = instruction("rcl.rm8_cl");
+  const rcr = instruction("rcr.rm32_cl");
+
+  deepStrictEqual(rol.opcode, [0xd1]);
+  deepStrictEqual(rol.modrm, { match: { reg: 0 } });
+  deepStrictEqual(rol.operands, [{ kind: "modrm.rm", type: "rm32" }]);
+  deepStrictEqual(rol.format, { syntax: "rol {0}, 1" });
+
+  deepStrictEqual(ror.prefixes, { operandSize: "override" });
+  deepStrictEqual(ror.opcode, [0xc1]);
+  deepStrictEqual(ror.modrm, { match: { reg: 1 } });
+  deepStrictEqual(ror.operands, [
+    { kind: "modrm.rm", type: "rm16" },
+    { kind: "imm", width: 8 }
+  ]);
+  deepStrictEqual(ror.format, { syntax: "ror {0}, {1}" });
+
+  deepStrictEqual(rcl.opcode, [0xd2]);
+  deepStrictEqual(rcl.modrm, { match: { reg: 2 } });
+  deepStrictEqual(rcl.operands, [
+    { kind: "modrm.rm", type: "rm8" },
+    { kind: "implicit.reg", reg: "cl", type: "r8" }
+  ]);
+  deepStrictEqual(rcl.format, { syntax: "rcl {0}, {1}" });
+
+  deepStrictEqual(rcr.opcode, [0xd3]);
+  deepStrictEqual(rcr.modrm, { match: { reg: 3 } });
+  deepStrictEqual(rcr.operands, [
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "implicit.reg", reg: "cl", type: "r8" }
+  ]);
+  deepStrictEqual(rcr.format, { syntax: "rcr {0}, {1}" });
 });
 
 test("group opcode forms use modrm.match.reg for Intel slash-digit notation", () => {

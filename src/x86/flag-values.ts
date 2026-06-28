@@ -19,6 +19,7 @@ export type StatusFlagValues<TValue extends number> =
   Readonly<Record<X86StatusFlag, TValue>>;
 
 export type ShiftFlagOp = "shl" | "shr" | "sar";
+export type RotateFlagOp = "rol" | "ror" | "rcl" | "rcr";
 
 export function statusFlagValuesForSource<TValue extends number>(
   ops: FlagValueOps<TValue>,
@@ -187,6 +188,30 @@ export function shiftStatusFlagValues<TValue extends number>(
   };
 }
 
+export function rotateStatusFlagValues<TValue extends number>(
+  ops: FlagValueOps<TValue>,
+  input: Readonly<{
+    op: RotateFlagOp;
+    width: OperandWidth;
+    count: TValue;
+    result: TValue;
+    carry: TValue;
+    carryDefined: TValue;
+    oldFlags: Pick<StatusFlagValues<TValue>, "CF" | "OF">;
+  }>
+): Pick<StatusFlagValues<TValue>, "CF" | "OF"> {
+  const zero = ops.const32(0);
+  const countIsNonZero = ops.compare(32, "ne", input.count, zero);
+  const countIsOne = ops.compare(32, "eq", input.count, ops.const32(1));
+  const definedOf = rotateOverflow(ops, input);
+  const nonzeroOf = ops.select(countIsOne, definedOf, zero);
+
+  return {
+    CF: ops.select(input.carryDefined, input.carry, input.oldFlags.CF),
+    OF: ops.select(countIsNonZero, nonzeroOf, input.oldFlags.OF)
+  };
+}
+
 type ResultFlagDag<TValue extends number> = Readonly<{
   width: OperandWidth;
   result: TValue;
@@ -301,6 +326,23 @@ function shiftOverflow<TValue extends number>(
   }
 }
 
+function rotateOverflow<TValue extends number>(
+  ops: FlagValueOps<TValue>,
+  input: Readonly<{ op: RotateFlagOp; width: OperandWidth; result: TValue; carry: TValue }>
+): TValue {
+  switch (input.op) {
+    case "rol":
+    case "rcl":
+      return ops.xor(signBit(ops, input.width, input.result), input.carry);
+    case "ror":
+    case "rcr":
+      return ops.xor(
+        signBit(ops, input.width, input.result),
+        nextSignBit(ops, input.width, input.result)
+      );
+  }
+}
+
 function parityFlag<TValue extends number>(
   ops: FlagValueOps<TValue>,
   value: TValue
@@ -311,7 +353,15 @@ function parityFlag<TValue extends number>(
   return ops.compare(32, "eq", odd, ops.const32(0));
 }
 
-function signBit<TValue extends number>(
+export function bitAt<TValue extends number>(
+  ops: FlagValueOps<TValue>,
+  value: TValue,
+  bit: number
+): TValue {
+  return lowBit(ops, ops.shrU(value, ops.const32(bit)));
+}
+
+export function signBit<TValue extends number>(
   ops: FlagValueOps<TValue>,
   width: OperandWidth,
   value: TValue
@@ -319,7 +369,15 @@ function signBit<TValue extends number>(
   return ops.shrU(value, ops.const32(width - 1));
 }
 
-function lowBit<TValue extends number>(
+export function nextSignBit<TValue extends number>(
+  ops: FlagValueOps<TValue>,
+  width: OperandWidth,
+  value: TValue
+): TValue {
+  return bitAt(ops, value, width - 2);
+}
+
+export function lowBit<TValue extends number>(
   ops: FlagValueOps<TValue>,
   value: TValue
 ): TValue {

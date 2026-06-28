@@ -272,6 +272,11 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i32RemU(): this {
+    this.#writeInstruction(wasmOpcode.i32RemU);
+    return this;
+  }
+
   i32And(): this {
     this.#writeInstruction(wasmOpcode.i32And);
     return this;
@@ -378,6 +383,11 @@ export class WasmFunctionBodyEncoder {
 
   i64Mul(): this {
     this.#writeInstruction(wasmOpcode.i64Mul);
+    return this;
+  }
+
+  i64RemU(): this {
+    this.#writeInstruction(wasmOpcode.i64RemU);
     return this;
   }
 

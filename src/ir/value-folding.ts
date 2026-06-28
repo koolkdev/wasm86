@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import { i32 } from "#x86/numeric.js";
 import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
 import type { OperandWidth } from "#x86/types.js";
@@ -55,6 +56,12 @@ export function foldBinary(
       }
 
       if (right === 0 || left === 0) {
+        return context.const(0);
+      }
+
+      return undefined;
+    case "rem_u":
+      if (right === 1) {
         return context.const(0);
       }
 
@@ -222,6 +229,10 @@ function evalBinary(operator: BinaryOperator, a: number, b: number): number {
       return i32(a - b);
     case "mul":
       return Math.imul(a, b);
+    case "rem_u": {
+      assert((b >>> 0) !== 0, "rem_u divisor must be non-zero");
+      return i32((a >>> 0) % (b >>> 0));
+    }
     case "xor":
       return a ^ b;
     case "or":

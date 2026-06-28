@@ -468,6 +468,9 @@ export class ValueTable {
       case "shr_u":
         // A logical right shift never increases the value.
         return clampedBounds(a.unsignedBits, 32);
+      case "rem_u":
+        // Unsigned remainder is strictly below the divisor when it completes.
+        return fitsUnsigned(b.unsignedBits);
       case "add":
       case "sub":
       case "mul":

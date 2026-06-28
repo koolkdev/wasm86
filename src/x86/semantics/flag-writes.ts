@@ -3,9 +3,10 @@ import {
   decStatusFlagValues,
   incStatusFlagValues,
   negStatusFlagValues,
+  rotateStatusFlagValues,
   shiftStatusFlagValues,
   subStatusFlagValues,
-  type FlagValueOps,
+  type RotateFlagOp,
   type ShiftFlagOp,
   type StatusFlagValues
 } from "#x86/flag-values.js";
@@ -16,6 +17,7 @@ import type {
   SimpleFlagSource
 } from "#x86/semantics/builder.js";
 import type { Value, ValueInput } from "#x86/semantics/refs.js";
+import { semanticFlagOps } from "./flag-value-ops.js";
 
 export function addFlagSource(
   input: Readonly<{ width: OperandWidth; left: ValueInput; right: ValueInput; result: ValueInput }>
@@ -77,6 +79,27 @@ export function writeShiftFlags(
   }));
 }
 
+export function writeRotateFlags(
+  s: SemanticsBuilder,
+  input: Readonly<{
+    op: RotateFlagOp;
+    width: OperandWidth;
+    count: ValueInput;
+    result: ValueInput;
+    carry: ValueInput;
+    carryDefined: ValueInput;
+    oldCf?: ValueInput;
+  }>
+): void {
+  writeStatusFlagValues(s, rotateStatusFlagValues(semanticFlagOps(s), {
+    ...input,
+    oldFlags: {
+      CF: input.oldCf ?? s.readFlag("CF"),
+      OF: s.readFlag("OF")
+    }
+  }));
+}
+
 export function writeIncFlags(
   s: SemanticsBuilder,
   input: Readonly<{ width: OperandWidth; input: ValueInput; result: ValueInput }>
@@ -119,18 +142,4 @@ function writeStatusFlagValues(
       s.writeFlag(flag, value);
     }
   }
-}
-
-function semanticFlagOps(s: SemanticsBuilder): FlagValueOps<Value> {
-  return {
-    const32: (value) => s.const32(value),
-    project: (width, value) => s.project(width, value),
-    and: (a, b) => s.binary("and", a, b),
-    sub: (a, b) => s.binary("sub", a, b),
-    xor: (a, b) => s.binary("xor", a, b),
-    shrU: (a, b) => s.binary("shr_u", a, b),
-    popcnt: (value) => s.unary("popcnt", value),
-    compare: (width, operator, a, b) => s.compare(width, operator, a, b),
-    select: (condition, whenTrue, whenFalse) => s.select(condition, whenTrue, whenFalse)
-  };
 }

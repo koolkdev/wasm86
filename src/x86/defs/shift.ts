@@ -2,90 +2,112 @@ import { form, mnemonic } from "#x86/schema/builders.js";
 import { imm, implicitReg, modrmRm } from "#x86/schema/operands.js";
 import type { InstructionMnemonic } from "#x86/schema/types.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import { shiftSemantic, type ShiftOp } from "#x86/semantics/shift.js";
+import { rotateSemantic, type RotateOp } from "#x86/semantics/rotate.js";
+import { shiftSemantic, type ShiftCountSource, type ShiftOp } from "#x86/semantics/shift.js";
+import type { OperandWidth } from "#x86/types.js";
 
+type Group2 = 0 | 1 | 2 | 3 | 4 | 5 | 7;
 type ShiftGroup = 4 | 5 | 7;
+type RotateGroup = 0 | 1 | 2 | 3;
 
+export const ROL = rotateMnemonic("rol", 0);
+export const ROR = rotateMnemonic("ror", 1);
+export const RCL = rotateMnemonic("rcl", 2);
+export const RCR = rotateMnemonic("rcr", 3);
 export const SHL = shiftMnemonic("shl", 4);
 export const SHR = shiftMnemonic("shr", 5);
 export const SAR = shiftMnemonic("sar", 7);
 
+type Group2Semantic = (width: OperandWidth, countSource: ShiftCountSource) => SemanticTemplate;
+
 function shiftMnemonic(op: ShiftOp, group: ShiftGroup): InstructionMnemonic<SemanticTemplate> {
+  return group2Mnemonic(op, group, (width, countSource) => shiftSemantic(op, width, countSource));
+}
+
+function rotateMnemonic(op: RotateOp, group: RotateGroup): InstructionMnemonic<SemanticTemplate> {
+  return group2Mnemonic(op, group, (width, countSource) => rotateSemantic(op, width, countSource));
+}
+
+function group2Mnemonic(
+  op: ShiftOp | RotateOp,
+  group: Group2,
+  semantic: Group2Semantic
+): InstructionMnemonic<SemanticTemplate> {
   return mnemonic(op, [
-    // D0 /n: shift r/m8 by 1
+    // D0 /n: group-2 r/m8 by 1
     form("rm8_1", {
       opcode: [0xd0],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm8")],
       format: { syntax: `${op} {0}, 1` },
-      semantics: shiftSemantic(op, 8, "one")
+      semantics: semantic(8, "one")
     }),
-    // 66 D1 /n: shift r/m16 by 1
+    // 66 D1 /n: group-2 r/m16 by 1
     form("rm16_1", {
       prefixes: { operandSize: "override" },
       opcode: [0xd1],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm16")],
       format: { syntax: `${op} {0}, 1` },
-      semantics: shiftSemantic(op, 16, "one")
+      semantics: semantic(16, "one")
     }),
-    // D1 /n: shift r/m32 by 1
+    // D1 /n: group-2 r/m32 by 1
     form("rm32_1", {
       opcode: [0xd1],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm32")],
       format: { syntax: `${op} {0}, 1` },
-      semantics: shiftSemantic(op, 32, "one")
+      semantics: semantic(32, "one")
     }),
-    // D2 /n: shift r/m8 by CL
+    // D2 /n: group-2 r/m8 by CL
     form("rm8_cl", {
       opcode: [0xd2],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm8"), implicitReg("cl")],
       format: { syntax: `${op} {0}, {1}` },
-      semantics: shiftSemantic(op, 8, "cl")
+      semantics: semantic(8, "cl")
     }),
-    // 66 D3 /n: shift r/m16 by CL
+    // 66 D3 /n: group-2 r/m16 by CL
     form("rm16_cl", {
       prefixes: { operandSize: "override" },
       opcode: [0xd3],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm16"), implicitReg("cl")],
       format: { syntax: `${op} {0}, {1}` },
-      semantics: shiftSemantic(op, 16, "cl")
+      semantics: semantic(16, "cl")
     }),
-    // D3 /n: shift r/m32 by CL
+    // D3 /n: group-2 r/m32 by CL
     form("rm32_cl", {
       opcode: [0xd3],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm32"), implicitReg("cl")],
       format: { syntax: `${op} {0}, {1}` },
-      semantics: shiftSemantic(op, 32, "cl")
+      semantics: semantic(32, "cl")
     }),
-    // C0 /n ib: shift r/m8 by imm8
+    // C0 /n ib: group-2 r/m8 by imm8
     form("rm8_imm8", {
       opcode: [0xc0],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm8"), imm(8)],
       format: { syntax: `${op} {0}, {1}` },
-      semantics: shiftSemantic(op, 8, "imm8")
+      semantics: semantic(8, "imm8")
     }),
-    // 66 C1 /n ib: shift r/m16 by imm8
+    // 66 C1 /n ib: group-2 r/m16 by imm8
     form("rm16_imm8", {
       prefixes: { operandSize: "override" },
       opcode: [0xc1],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm16"), imm(8)],
       format: { syntax: `${op} {0}, {1}` },
-      semantics: shiftSemantic(op, 16, "imm8")
+      semantics: semantic(16, "imm8")
     }),
-    // C1 /n ib: shift r/m32 by imm8
+    // C1 /n ib: group-2 r/m32 by imm8
     form("rm32_imm8", {
       opcode: [0xc1],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm32"), imm(8)],
       format: { syntax: `${op} {0}, {1}` },
-      semantics: shiftSemantic(op, 32, "imm8")
+      semantics: semantic(32, "imm8")
     })
   ]);
 }

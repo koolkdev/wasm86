@@ -319,6 +319,12 @@ function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryValueNode
       case "mul":
         body.i64Mul();
         return;
+      case "rem_u":
+        body.i64RemU();
+        return;
+      case "or":
+        body.i64Or();
+        return;
       case "shl":
         body.i64Shl();
         return;
@@ -342,6 +348,9 @@ function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryValueNode
       return;
     case "mul":
       body.i32Mul();
+      return;
+    case "rem_u":
+      body.i32RemU();
       return;
     case "xor":
       body.i32Xor();
