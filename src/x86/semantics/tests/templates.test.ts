@@ -16,6 +16,10 @@ import {
 } from "#x86/semantics/mul.js";
 import { shiftSemantic } from "#x86/semantics/shift.js";
 import {
+  accumulatorSignExtendSemantic,
+  highAccumulatorSignExtendSemantic
+} from "#x86/semantics/sign-extend.js";
+import {
   leaveSemantic,
   popadSemantic,
   popaSemantic,
@@ -316,6 +320,45 @@ test("implicit multiply memory source is guarded before accumulator reads", () =
     "%1 = get op0:16",
     "%2 = get ax:16"
   ]);
+});
+
+test("accumulator sign-extension forms are flagless", () => {
+  const cbw = buildSemanticTrace(accumulatorSignExtendSemantic(8));
+  const cwde = buildSemanticTrace(accumulatorSignExtendSemantic(16));
+
+  deepStrictEqual(cbw.events, [
+    "%0 = get al:8:signed",
+    "set ax:16 <- %0",
+    "next"
+  ]);
+  deepStrictEqual(cwde.events, [
+    "%0 = get ax:16:signed",
+    "set eax:32 <- %0",
+    "next"
+  ]);
+  strictEqual(cbw.flagWrites.length, 0);
+  strictEqual(cwde.flagWrites.length, 0);
+});
+
+test("high accumulator sign-extension forms are flagless", () => {
+  const cwd = buildSemanticTrace(highAccumulatorSignExtendSemantic(16));
+  const cdq = buildSemanticTrace(highAccumulatorSignExtendSemantic(32));
+
+  deepStrictEqual(cwd.events, [
+    "%0 = get ax:16:signed",
+    "set dx:16 <- %2",
+    "next"
+  ]);
+  strictEqual(cwd.defs[1], "shr_s(%0, 15)");
+  strictEqual(cwd.defs[2], "project16(%1)");
+  deepStrictEqual(cdq.events, [
+    "%0 = get eax:32",
+    "set edx:32 <- %1",
+    "next"
+  ]);
+  strictEqual(cdq.defs[1], "shr_s(%0, 31)");
+  strictEqual(cwd.flagWrites.length, 0);
+  strictEqual(cdq.flagWrites.length, 0);
 });
 
 test("sar semantics use signed right shift after width sign extension", () => {

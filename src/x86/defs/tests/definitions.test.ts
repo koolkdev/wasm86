@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 318);
+  strictEqual(X86_32_CORE.instructions.length, 322);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -88,6 +88,10 @@ test("x86-32 core registers the initial instruction surface", () => {
     "imul.r32_rm32_imm32",
     "imul.r16_rm16_imm8",
     "imul.r32_rm32_imm8",
+    "cbw.word",
+    "cwde.dword",
+    "cwd.word",
+    "cdq.dword",
     "shl.rm8_1",
     "shl.rm16_cl",
     "shl.rm32_imm8",
@@ -499,6 +503,31 @@ test("implicit multiply forms use one source operand and grouped opcodes", () =>
   deepStrictEqual(imulDword.opcode, [0xf7]);
   deepStrictEqual(imulDword.modrm, { match: { reg: 5 } });
   deepStrictEqual(imulDword.operands, [{ kind: "modrm.rm", type: "rm32" }]);
+});
+
+test("accumulator sign-extension forms are no-operand instructions", () => {
+  const cbw = instruction("cbw.word");
+  const cwde = instruction("cwde.dword");
+  const cwd = instruction("cwd.word");
+  const cdq = instruction("cdq.dword");
+
+  deepStrictEqual(cbw.prefixes, { operandSize: "override" });
+  deepStrictEqual(cbw.opcode, [0x98]);
+  strictEqual(cbw.operands, undefined);
+  deepStrictEqual(cbw.format, { syntax: "cbw" });
+
+  deepStrictEqual(cwde.opcode, [0x98]);
+  strictEqual(cwde.operands, undefined);
+  deepStrictEqual(cwde.format, { syntax: "cwde" });
+
+  deepStrictEqual(cwd.prefixes, { operandSize: "override" });
+  deepStrictEqual(cwd.opcode, [0x99]);
+  strictEqual(cwd.operands, undefined);
+  deepStrictEqual(cwd.format, { syntax: "cwd" });
+
+  deepStrictEqual(cdq.opcode, [0x99]);
+  strictEqual(cdq.operands, undefined);
+  deepStrictEqual(cdq.format, { syntax: "cdq" });
 });
 
 test("group opcode forms use modrm.match.reg for Intel slash-digit notation", () => {

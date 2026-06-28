@@ -233,6 +233,34 @@ const fixtures: readonly DecoderFixture[] = [
     format: "popf"
   },
   {
+    name: "cwde",
+    bytes: [0x98],
+    mnemonic: "cwde",
+    id: "cwde.dword",
+    format: "cwde"
+  },
+  {
+    name: "cbw",
+    bytes: [0x66, 0x98],
+    mnemonic: "cbw",
+    id: "cbw.word",
+    format: "cbw"
+  },
+  {
+    name: "cdq",
+    bytes: [0x99],
+    mnemonic: "cdq",
+    id: "cdq.dword",
+    format: "cdq"
+  },
+  {
+    name: "cwd",
+    bytes: [0x66, 0x99],
+    mnemonic: "cwd",
+    id: "cwd.word",
+    format: "cwd"
+  },
+  {
     name: "pushad",
     bytes: [0x60],
     mnemonic: "pushad",

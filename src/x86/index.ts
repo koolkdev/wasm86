@@ -8,6 +8,7 @@ import { CMOVCC, MOV, MOVSX, MOVZX } from "./defs/mov.js";
 import { IMUL, MUL } from "./defs/mul.js";
 import { SETCC } from "./defs/setcc.js";
 import { SAR, SHL, SHR } from "./defs/shift.js";
+import { CBW, CDQ, CWD, CWDE } from "./defs/sign-extend.js";
 import { LEAVE, POP, POPA, POPAD, POPF, POPFD, PUSH, PUSHA, PUSHAD, PUSHF, PUSHFD } from "./defs/stack.js";
 import { XCHG } from "./defs/xchg.js";
 
@@ -35,6 +36,10 @@ export const X86_32_CORE = defineIsa({
     NEG,
     MUL,
     IMUL,
+    CBW,
+    CWDE,
+    CWD,
+    CDQ,
     SHL,
     SHR,
     SAR,
