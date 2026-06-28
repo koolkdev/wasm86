@@ -63,8 +63,6 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     assert(target !== undefined, "dispatch action requires embedding.dispatch");
 
     switch (target.kind) {
-      case "fallthrough":
-        return;
       case "br":
         body.br(target.depth + inlineControlDepth);
         return;

@@ -27,7 +27,7 @@ export type LinkCompletion = Readonly<{
 }>;
 
 export type FallthroughTarget = FallthroughCompletion | BrCompletion;
-export type DispatchTarget = FallthroughTarget | LinkCompletion;
+export type DispatchTarget = BrCompletion | LinkCompletion;
 
 export type ActionEmbedding = Readonly<{
   // Where dispatch(targetEip) lands. Exits always return the encoded i64

@@ -23,6 +23,26 @@ type DecodeReadFragment = Readonly<{
   fetched: ValueId;
 }>;
 
+function dispatchFragment(targetEip: number): IrBlock {
+  const values = new ValueTable();
+  const target = values.internConst(targetEip);
+
+  return {
+    entry: 0,
+    regions: [
+      {
+        id: 0,
+        kind: "entry",
+        actions: [
+          { kind: "writeState", slot: eipChannel, value: target },
+          { kind: "dispatch", targetEip: target }
+        ]
+      }
+    ],
+    values
+  };
+}
+
 // The fault edge restores eip, leaving the faulting instruction's address
 // visible.
 function decodeReadFragment(k: number): DecodeReadFragment {
@@ -83,28 +103,12 @@ test("a decode-read fragment exports the byte and falls through implicitly", asy
 });
 
 test("a dispatching fragment requires a dispatch embedding", () => {
-  const values = new ValueTable();
-  const target = values.internConst(0x20);
-  const block: IrBlock = {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          { kind: "writeState", slot: eipChannel, value: target },
-          { kind: "dispatch", targetEip: target }
-        ]
-      }
-    ],
-    values
-  };
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
 
   throws(
     () =>
-      emitActionFragment(block, {
+      emitActionFragment(dispatchFragment(0x20), {
         body,
         scratch,
         embedding: {}
@@ -112,6 +116,29 @@ test("a dispatching fragment requires a dispatch embedding", () => {
     /dispatch action requires embedding\.dispatch/
   );
   scratch.assertClear();
+});
+
+test("dispatch br target skips later enclosing harness-style actions", async () => {
+  const body = new WasmFunctionBodyEncoder();
+  const scratch = new WasmLocalScratchAllocator(body);
+
+  body.block();
+  emitActionFragment(dispatchFragment(0x20), {
+    body,
+    scratch,
+    embedding: {
+      dispatch: { kind: "br", depth: 0 },
+      fallthrough: { kind: "fallthrough" }
+    }
+  });
+  body.i64Const(0x41n).returnFromFunction();
+  body.endBlock();
+  body.i64Const(0x42n).end();
+  scratch.assertClear();
+
+  const { run } = await instantiateFunctionBody(body);
+
+  strictEqual(run(), 0x42n);
 });
 
 test("the decode-fault edge keeps the encoded return", async () => {

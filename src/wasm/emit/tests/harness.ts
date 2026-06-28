@@ -16,8 +16,8 @@ import {
 
 // Test-only module wrapper around the action emitter: imported state + guest
 // memories, one run export returning the encoded i64 exit. The harness
-// embeds like any host — a completed dispatch or bare action-body fallthrough
-// lands on its sentinel tail,
+// embeds like any host: dispatch escapes through an explicit block branch,
+// bare action-body fallthrough reaches the sentinel tail lexically, and
 // reports return their real encoded exits. External value n is the
 // function's n-th i32 parameter. Module assembly for real use is the
 // engines' job.
@@ -45,6 +45,7 @@ function emitIrBlockBody(
   const body = new WasmFunctionBodyEncoder(externalParamCount);
   const scratch = new WasmLocalScratchAllocator(body);
 
+  body.block();
   emitActionFragment(block, {
     body,
     scratch,
@@ -52,10 +53,11 @@ function emitIrBlockBody(
     helpers,
     analysis,
     embedding: {
-      dispatch: { kind: "fallthrough" },
+      dispatch: { kind: "br", depth: 0 },
       fallthrough: { kind: "fallthrough" }
     }
   });
+  body.endBlock();
   scratch.assertClear();
   return body.i64Const(irBlockCompleted).end();
 }
