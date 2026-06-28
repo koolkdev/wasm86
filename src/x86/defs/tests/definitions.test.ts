@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 358);
+  strictEqual(X86_32_CORE.instructions.length, 359);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -88,6 +88,7 @@ test("x86-32 core registers the initial instruction surface", () => {
     "imul.r32_rm32_imm32",
     "imul.r16_rm16_imm8",
     "imul.r32_rm32_imm8",
+    "bswap.r32",
     "cbw.word",
     "cwde.dword",
     "cwd.word",
@@ -778,8 +779,29 @@ test("extension move semantics are flagless and encode source and destination wi
   strictEqual(movsx.flagWrites.length, 0);
 });
 
+test("bswap is a flagless opcode-register dword byte swap", () => {
+  const spec = instruction("bswap.r32");
+  const trace = buildSemanticTrace(semanticsOf(spec), regOperands(1));
+
+  deepStrictEqual(spec.opcode, [0x0f, { byte: 0xc8, bits: 5 }]);
+  deepStrictEqual(spec.operands, [{ kind: "opcode.reg", type: "r32" }]);
+  deepStrictEqual(spec.format, { syntax: "bswap {0}" });
+  deepStrictEqual(trace.events, [
+    "%0 = get op0:32",
+    "set op0:32 <- %5",
+    "next"
+  ]);
+  strictEqual(trace.defs[1], "and(%0, 16711935)");
+  strictEqual(trace.defs[2], "and(%0, 4278255360)");
+  strictEqual(trace.defs[3], "rotr(%1, 8)");
+  strictEqual(trace.defs[4], "rotl(%2, 8)");
+  strictEqual(trace.defs[5], "or(%3, %4)");
+  strictEqual(trace.flagWrites.length, 0);
+});
+
 test("opcode-encoded register forms expand through opcode low bits", () => {
   const mov = instruction("mov.r32_imm32");
+  const bswap = instruction("bswap.r32");
   const pushWord = instruction("push.r16");
   const push = instruction("push.r32");
   const popWord = instruction("pop.r16");
@@ -794,6 +816,16 @@ test("opcode-encoded register forms expand through opcode low bits", () => {
     [0xbd],
     [0xbe],
     [0xbf]
+  ]);
+  deepStrictEqual(expandInstructionSpec(bswap).map((entry) => entry.opcode), [
+    [0x0f, 0xc8],
+    [0x0f, 0xc9],
+    [0x0f, 0xca],
+    [0x0f, 0xcb],
+    [0x0f, 0xcc],
+    [0x0f, 0xcd],
+    [0x0f, 0xce],
+    [0x0f, 0xcf]
   ]);
   deepStrictEqual(expandInstructionSpec(push).map((entry) => entry.opcode), [
     [0x50],
