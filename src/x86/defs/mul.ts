@@ -1,0 +1,51 @@
+import { form, mnemonic } from "#x86/schema/builders.js";
+import { imm, modrmReg, modrmRm } from "#x86/schema/operands.js";
+import { imulRegRmImmSemantic, imulRegRmSemantic } from "#x86/semantics/mul.js";
+
+export const IMUL = mnemonic("imul", [
+  // 66 0F AF /r: IMUL r16, r/m16
+  form("r16_rm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x0f, 0xaf],
+    operands: [modrmReg("r16"), modrmRm("rm16")],
+    format: { syntax: "imul {0}, {1}" },
+    semantics: imulRegRmSemantic(16)
+  }),
+  // 0F AF /r: IMUL r32, r/m32
+  form("r32_rm32", {
+    opcode: [0x0f, 0xaf],
+    operands: [modrmReg("r32"), modrmRm("rm32")],
+    format: { syntax: "imul {0}, {1}" },
+    semantics: imulRegRmSemantic(32)
+  }),
+  // 66 69 /r iw: IMUL r16, r/m16, imm16
+  form("r16_rm16_imm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x69],
+    operands: [modrmReg("r16"), modrmRm("rm16"), imm(16)],
+    format: { syntax: "imul {0}, {1}, {2}" },
+    semantics: imulRegRmImmSemantic(16)
+  }),
+  // 69 /r id: IMUL r32, r/m32, imm32
+  form("r32_rm32_imm32", {
+    opcode: [0x69],
+    operands: [modrmReg("r32"), modrmRm("rm32"), imm(32)],
+    format: { syntax: "imul {0}, {1}, {2}" },
+    semantics: imulRegRmImmSemantic(32)
+  }),
+  // 66 6B /r ib: IMUL r16, r/m16, sign-extended imm8
+  form("r16_rm16_imm8", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x6b],
+    operands: [modrmReg("r16"), modrmRm("rm16"), imm(8, "sign", 16)],
+    format: { syntax: "imul {0}, {1}, {2}" },
+    semantics: imulRegRmImmSemantic(16)
+  }),
+  // 6B /r ib: IMUL r32, r/m32, sign-extended imm8
+  form("r32_rm32_imm8", {
+    opcode: [0x6b],
+    operands: [modrmReg("r32"), modrmRm("rm32"), imm(8, "sign", 32)],
+    format: { syntax: "imul {0}, {1}, {2}" },
+    semantics: imulRegRmImmSemantic(32)
+  })
+]);

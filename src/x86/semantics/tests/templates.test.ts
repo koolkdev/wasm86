@@ -8,6 +8,7 @@ import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
+import { imulRegRmImmSemantic, imulRegRmSemantic } from "#x86/semantics/mul.js";
 import { shiftSemantic } from "#x86/semantics/shift.js";
 import {
   leaveSemantic,
@@ -209,6 +210,55 @@ test("runtime shift counts greater than one write OF as zero", () => {
   strictEqual(trace.defs[14], "cmp32.eq(%3, 1)");
   strictEqual(trace.defs[29], "select(%14, %19, 0)");
   strictEqual(trace.def(flagCell(write, "OF")), "select(%20, %29, %13)");
+});
+
+test("imul reg-rm semantics use a signed full product and explicit status flags", () => {
+  const trace = buildSemanticTrace(imulRegRmSemantic(32), regOperands(2));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get op1:32",
+    "%1 = get op0:32",
+    "flag CF <- %7",
+    "flag PF <- 1",
+    "flag AF <- 0",
+    "flag ZF <- 0",
+    "flag SF <- 0",
+    "flag OF <- %7",
+    "set op0:32 <- %5",
+    "next"
+  ]);
+  strictEqual(trace.defs[2], "extend64.32(%1)");
+  strictEqual(trace.defs[3], "extend64.32(%0)");
+  strictEqual(trace.defs[4], "mul64(%2, %3)");
+  strictEqual(trace.defs[5], "project64.32(%4)");
+  strictEqual(trace.defs[6], "extend64.32(%5)");
+  strictEqual(trace.defs[7], "cmp64.ne(%4, %6)");
+  deepStrictEqual(statusFlagKeys(trace.flagWrites[0]!).sort(), [...x86StatusFlags].sort());
+});
+
+test("imul reg-rm-imm semantics read the r/m source and immediate before writing the destination", () => {
+  const trace = buildSemanticTrace(imulRegRmImmSemantic(16), operands("reg", "reg", "imm"));
+
+  deepStrictEqual(trace.events.slice(0, 2), [
+    "%0 = get op1:16",
+    "%1 = get op2:16"
+  ]);
+  ok(trace.events.includes("set op0:16 <- %5"));
+  strictEqual(trace.defs[2], "extend16(%0)");
+  strictEqual(trace.defs[3], "extend16(%1)");
+  strictEqual(trace.defs[4], "mul(%2, %3)");
+  strictEqual(trace.defs[7], "cmp32.ne(%4, %6)");
+});
+
+test("imul memory source is guarded and read before destination state", () => {
+  const trace = buildSemanticTrace(imulRegRmSemantic(32), operands("reg", "mem"));
+
+  deepStrictEqual(trace.events.slice(0, 4), [
+    "%0 = addr op1",
+    "guard read %0:4",
+    "%1 = get op1:32",
+    "%2 = get op0:32"
+  ]);
 });
 
 test("sar semantics use signed right shift after width sign extension", () => {
@@ -437,6 +487,7 @@ test("remaining concrete flag-writing templates write the six architectural flag
   for (const [name, template, operandInfo] of [
     ["adc", aluSemantic("adc", 32), regOperands(2)],
     ["sbb", aluSemantic("sbb", 32), regOperands(2)],
+    ["imul", imulRegRmSemantic(32), regOperands(2)],
     ["neg", unaryAluSemantic("neg", 32), regOperands(1)]
   ] as const) {
     const trace = buildSemanticTrace(template, operandInfo);

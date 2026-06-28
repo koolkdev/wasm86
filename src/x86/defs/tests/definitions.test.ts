@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 306);
+  strictEqual(X86_32_CORE.instructions.length, 312);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -76,6 +76,12 @@ test("x86-32 core registers the initial instruction surface", () => {
     "neg.rm8",
     "neg.rm16",
     "neg.rm32",
+    "imul.r16_rm16",
+    "imul.r32_rm32",
+    "imul.r16_rm16_imm16",
+    "imul.r32_rm32_imm32",
+    "imul.r16_rm16_imm8",
+    "imul.r32_rm32_imm8",
     "shl.rm8_1",
     "shl.rm16_cl",
     "shl.rm32_imm8",
@@ -402,6 +408,56 @@ test("xchg semantics read both operands before writing either operand", () => {
   ]);
 });
 
+test("explicit imul forms use register destinations and signed immediates", () => {
+  const regDword = instruction("imul.r32_rm32");
+  const regWord = instruction("imul.r16_rm16");
+  const immDword = instruction("imul.r32_rm32_imm32");
+  const immWord = instruction("imul.r16_rm16_imm16");
+  const imm8Dword = instruction("imul.r32_rm32_imm8");
+  const imm8Word = instruction("imul.r16_rm16_imm8");
+
+  deepStrictEqual(regDword.opcode, [0x0f, 0xaf]);
+  strictEqual(regDword.modrm, undefined);
+  deepStrictEqual(regDword.operands, [
+    { kind: "modrm.reg", type: "r32" },
+    { kind: "modrm.rm", type: "rm32" }
+  ]);
+  deepStrictEqual(regDword.format, { syntax: "imul {0}, {1}" });
+
+  deepStrictEqual(regWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(regWord.opcode, [0x0f, 0xaf]);
+  deepStrictEqual(regWord.operands, [
+    { kind: "modrm.reg", type: "r16" },
+    { kind: "modrm.rm", type: "rm16" }
+  ]);
+
+  deepStrictEqual(immDword.opcode, [0x69]);
+  deepStrictEqual(immDword.operands, [
+    { kind: "modrm.reg", type: "r32" },
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "imm", width: 32 }
+  ]);
+  deepStrictEqual(immDword.format, { syntax: "imul {0}, {1}, {2}" });
+
+  deepStrictEqual(immWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(immWord.operands, [
+    { kind: "modrm.reg", type: "r16" },
+    { kind: "modrm.rm", type: "rm16" },
+    { kind: "imm", width: 16 }
+  ]);
+
+  deepStrictEqual(imm8Dword.operands, [
+    { kind: "modrm.reg", type: "r32" },
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "imm", width: 8, semanticWidth: 32, extension: "sign" }
+  ]);
+  deepStrictEqual(imm8Word.operands, [
+    { kind: "modrm.reg", type: "r16" },
+    { kind: "modrm.rm", type: "rm16" },
+    { kind: "imm", width: 8, semanticWidth: 16, extension: "sign" }
+  ]);
+});
+
 test("group opcode forms use modrm.match.reg for Intel slash-digit notation", () => {
   const or = instruction("or.rm32_imm8");
   const adc = instruction("adc.rm32_imm8");
@@ -492,6 +548,7 @@ test("width-specific decode forms record operand-size metadata", () => {
   const cmp16 = instruction("cmp.rm16_imm16");
   const not16 = instruction("not.rm16");
   const neg16 = instruction("neg.rm16");
+  const imul16 = instruction("imul.r16_rm16");
   const shl16 = instruction("shl.rm16_1");
 
   deepStrictEqual(mov8.operands, [
@@ -539,6 +596,12 @@ test("width-specific decode forms record operand-size metadata", () => {
 
   deepStrictEqual(neg16.prefixes, { operandSize: "override" });
   deepStrictEqual(neg16.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+
+  deepStrictEqual(imul16.prefixes, { operandSize: "override" });
+  deepStrictEqual(imul16.operands, [
+    { kind: "modrm.reg", type: "r16" },
+    { kind: "modrm.rm", type: "rm16" }
+  ]);
 
   deepStrictEqual(shl16.prefixes, { operandSize: "override" });
   deepStrictEqual(shl16.operands, [{ kind: "modrm.rm", type: "rm16" }]);
