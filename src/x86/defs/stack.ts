@@ -3,11 +3,15 @@ import { imm, modrmRm, opReg } from "#x86/schema/operands.js";
 import { opcodePlusReg } from "#x86/schema/opcodes.js";
 import {
   leaveSemantic,
+  popadSemantic,
   popfdSemantic,
   popfSemantic,
+  popaSemantic,
   popSemantic,
+  pushadSemantic,
   pushfdSemantic,
   pushfSemantic,
+  pushaSemantic,
   pushSemantic
 } from "#x86/semantics/stack.js";
 
@@ -108,6 +112,44 @@ export const POP = mnemonic("pop", [
     operands: [modrmRm("rm32")],
     format: { syntax: "pop {0}" },
     semantics: popSemantic()
+  })
+]);
+
+export const PUSHAD = mnemonic("pushad", [
+  // 60: PUSHAD
+  form("dword", {
+    opcode: [0x60],
+    format: { syntax: "pushad" },
+    semantics: pushadSemantic()
+  })
+]);
+
+export const PUSHA = mnemonic("pusha", [
+  // 66 60: PUSHA
+  form("word", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x60],
+    format: { syntax: "pusha" },
+    semantics: pushaSemantic()
+  })
+]);
+
+export const POPAD = mnemonic("popad", [
+  // 61: POPAD
+  form("dword", {
+    opcode: [0x61],
+    format: { syntax: "popad" },
+    semantics: popadSemantic()
+  })
+]);
+
+export const POPA = mnemonic("popa", [
+  // 66 61: POPA
+  form("word", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x61],
+    format: { syntax: "popa" },
+    semantics: popaSemantic()
   })
 ]);
 

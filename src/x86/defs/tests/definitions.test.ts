@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 302);
+  strictEqual(X86_32_CORE.instructions.length, 306);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -94,6 +94,10 @@ test("x86-32 core registers the initial instruction surface", () => {
     "pop.r32",
     "pop.rm16",
     "pop.rm32",
+    "pushad.dword",
+    "pusha.word",
+    "popad.dword",
+    "popa.word",
     "pushf.word",
     "pushfd.dword",
     "popf.word",
@@ -273,6 +277,34 @@ test("popfd is a no-operand dword flags pop", () => {
   deepStrictEqual(spec.opcode, [0x9d]);
   strictEqual(spec.operands, undefined);
   deepStrictEqual(spec.format, { syntax: "popfd" });
+});
+
+test("pushad and popad are no-operand dword stack-all forms", () => {
+  const pushad = instruction("pushad.dword");
+  const popad = instruction("popad.dword");
+
+  deepStrictEqual(pushad.opcode, [0x60]);
+  strictEqual(pushad.operands, undefined);
+  deepStrictEqual(pushad.format, { syntax: "pushad" });
+
+  deepStrictEqual(popad.opcode, [0x61]);
+  strictEqual(popad.operands, undefined);
+  deepStrictEqual(popad.format, { syntax: "popad" });
+});
+
+test("pusha and popa are operand-size word stack-all forms", () => {
+  const pusha = instruction("pusha.word");
+  const popa = instruction("popa.word");
+
+  deepStrictEqual(pusha.prefixes, { operandSize: "override" });
+  deepStrictEqual(pusha.opcode, [0x60]);
+  strictEqual(pusha.operands, undefined);
+  deepStrictEqual(pusha.format, { syntax: "pusha" });
+
+  deepStrictEqual(popa.prefixes, { operandSize: "override" });
+  deepStrictEqual(popa.opcode, [0x61]);
+  strictEqual(popa.operands, undefined);
+  deepStrictEqual(popa.format, { syntax: "popa" });
 });
 
 test("popf is an operand-size word flags pop", () => {

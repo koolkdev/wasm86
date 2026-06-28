@@ -7,7 +7,7 @@ import { INT, NOP } from "./defs/misc.js";
 import { CMOVCC, MOV, MOVSX, MOVZX } from "./defs/mov.js";
 import { SETCC } from "./defs/setcc.js";
 import { SAR, SHL, SHR } from "./defs/shift.js";
-import { LEAVE, POP, POPF, POPFD, PUSH, PUSHF, PUSHFD } from "./defs/stack.js";
+import { LEAVE, POP, POPA, POPAD, POPF, POPFD, PUSH, PUSHA, PUSHAD, PUSHF, PUSHFD } from "./defs/stack.js";
 import { XCHG } from "./defs/xchg.js";
 
 export const X86_32_CORE = defineIsa({
@@ -39,6 +39,10 @@ export const X86_32_CORE = defineIsa({
     TEST,
     PUSH,
     POP,
+    PUSHAD,
+    PUSHA,
+    POPAD,
+    POPA,
     PUSHF,
     PUSHFD,
     POPF,

@@ -231,6 +231,34 @@ const fixtures: readonly DecoderFixture[] = [
     mnemonic: "popf",
     id: "popf.word",
     format: "popf"
+  },
+  {
+    name: "pushad",
+    bytes: [0x60],
+    mnemonic: "pushad",
+    id: "pushad.dword",
+    format: "pushad"
+  },
+  {
+    name: "pusha",
+    bytes: [0x66, 0x60],
+    mnemonic: "pusha",
+    id: "pusha.word",
+    format: "pusha"
+  },
+  {
+    name: "popad",
+    bytes: [0x61],
+    mnemonic: "popad",
+    id: "popad.dword",
+    format: "popad"
+  },
+  {
+    name: "popa",
+    bytes: [0x66, 0x61],
+    mnemonic: "popa",
+    id: "popa.word",
+    format: "popa"
   }
 ];
 

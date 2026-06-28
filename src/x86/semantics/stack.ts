@@ -1,12 +1,32 @@
 import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, type X86Flag } from "#x86/flags.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth, Reg16, Reg32, RegName } from "#x86/types.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
 export type StackOperandWidth = Extract<OperandWidth, 16 | 32>;
 
 const x86Low16Flags = x86Flags.filter((flag) => x86EflagsBitOffset[flag] < 16);
+const pushadRegisters = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"] as const satisfies readonly Reg32[];
+const pushaRegisters = ["ax", "cx", "dx", "bx", "sp", "bp", "si", "di"] as const satisfies readonly Reg16[];
+const popadCells = [
+  ["edi", 0],
+  ["esi", 4],
+  ["ebp", 8],
+  ["ebx", 16],
+  ["edx", 20],
+  ["ecx", 24],
+  ["eax", 28]
+] as const satisfies readonly (readonly [Reg32, number])[];
+const popaCells = [
+  ["di", 0],
+  ["si", 2],
+  ["bp", 4],
+  ["bx", 8],
+  ["dx", 10],
+  ["cx", 12],
+  ["ax", 14]
+] as const satisfies readonly (readonly [Reg16, number])[];
 
 export function pushStack(
   s: SemanticsBuilder,
@@ -70,6 +90,81 @@ export function popfSemantic(): SemanticTemplate {
   return (s, context) => {
     popFlags(s, context, 16, x86Low16Flags);
   };
+}
+
+export function pushadSemantic(): SemanticTemplate {
+  return (s) => {
+    pushAll(s, 32);
+  };
+}
+
+export function pushaSemantic(): SemanticTemplate {
+  return (s) => {
+    pushAll(s, 16);
+  };
+}
+
+export function popadSemantic(): SemanticTemplate {
+  return (s) => {
+    popAll(s, 32);
+  };
+}
+
+export function popaSemantic(): SemanticTemplate {
+  return (s) => {
+    popAll(s, 16);
+  };
+}
+
+function pushAll(s: SemanticsBuilder, width: StackOperandWidth): void {
+  const esp = s.get(s.reg("esp"));
+  const cellBytes = stackByteLength(width);
+  const totalBytes = cellBytes * 8;
+  const nextEsp = s.i32Sub(esp, s.const32(totalBytes));
+
+  s.memoryGuard(nextEsp, totalBytes, "write");
+
+  const values = width === 32
+    ? pushadRegisters.map((reg) => reg === "esp" ? esp : s.get(s.reg(reg)))
+    : pushaRegisters.map((reg) => reg === "sp" ? s.project(16, esp) : s.get(s.reg(reg), 16));
+
+  values.forEach((value, index) => {
+    const address = s.i32Sub(esp, s.const32(cellBytes * (index + 1)));
+
+    s.set(s.mem(address), value, width);
+  });
+  s.set(s.reg("esp"), nextEsp);
+}
+
+function popAll(s: SemanticsBuilder, width: StackOperandWidth): void {
+  const esp = s.get(s.reg("esp"));
+  const cellBytes = stackByteLength(width);
+  const totalBytes = cellBytes * 8;
+
+  s.memoryGuard(esp, totalBytes, "read");
+
+  const loaded = width === 32
+    ? popCells(s, esp, 32, popadCells)
+    : popCells(s, esp, 16, popaCells);
+  const nextEsp = s.i32Add(esp, s.const32(totalBytes));
+
+  for (const { reg, value } of loaded) {
+    s.set(s.reg(reg), value, width);
+  }
+
+  s.set(s.reg("esp"), nextEsp);
+}
+
+function popCells<TReg extends RegName>(
+  s: SemanticsBuilder,
+  esp: ValueInput,
+  width: StackOperandWidth,
+  cells: readonly (readonly [TReg, number])[]
+): ReadonlyArray<Readonly<{ reg: TReg; value: Value }>> {
+  return cells.map(([reg, offset]) => ({
+    reg,
+    value: s.get(s.mem(offset === 0 ? esp : s.i32Add(esp, s.const32(offset))), width)
+  }));
 }
 
 function pushFlags(

@@ -9,7 +9,15 @@ import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
 import { shiftSemantic } from "#x86/semantics/shift.js";
-import { leaveSemantic, popSemantic, pushSemantic } from "#x86/semantics/stack.js";
+import {
+  leaveSemantic,
+  popadSemantic,
+  popaSemantic,
+  popSemantic,
+  pushadSemantic,
+  pushaSemantic,
+  pushSemantic
+} from "#x86/semantics/stack.js";
 import { testSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import type { ValueInput } from "#x86/semantics/refs.js";
@@ -298,6 +306,73 @@ test("pop memory destination computes the destination address after esp update",
   ]);
 });
 
+test("pushad and pusha preflight one range and save the original stack pointer", () => {
+  const pushad = buildSemanticTrace(pushadSemantic());
+  const pusha = buildSemanticTrace(pushaSemantic());
+
+  deepStrictEqual(pushad.events.slice(0, 2), [
+    "%0 = get esp:32",
+    "guard write %1:32"
+  ]);
+  strictEqual(pushad.defs[1], "sub(%0, 32)");
+  strictEqual(pushad.events.filter((event) => event.startsWith("guard ")).length, 1);
+  strictEqual(pushad.events.some((event, index) => index > firstMemoryWrite(pushad) && event.startsWith("guard ")), false);
+  ok(pushad.events.includes("set mem(%13):32 <- %0"));
+  strictEqual(pushad.defs[13], "sub(%0, 20)");
+
+  deepStrictEqual(pusha.events.slice(0, 2), [
+    "%0 = get esp:32",
+    "guard write %1:16"
+  ]);
+  strictEqual(pusha.defs[1], "sub(%0, 16)");
+  strictEqual(pusha.events.filter((event) => event.startsWith("guard ")).length, 1);
+  strictEqual(pusha.events.some((event, index) => index > firstMemoryWrite(pusha) && event.startsWith("guard ")), false);
+  ok(pusha.events.includes("set mem(%14):16 <- %6"));
+  strictEqual(pusha.defs[6], "project16(%0)");
+  strictEqual(pusha.defs[14], "sub(%0, 10)");
+});
+
+test("popad and popa preflight one range and skip the saved stack pointer slot", () => {
+  const popad = buildSemanticTrace(popadSemantic());
+  const popa = buildSemanticTrace(popaSemantic());
+
+  deepStrictEqual(popad.events.slice(0, 2), [
+    "%0 = get esp:32",
+    "guard read %0:32"
+  ]);
+  strictEqual(popad.events.filter((event) => event.startsWith("guard ")).length, 1);
+  strictEqual(popad.events.some((event, index) => index > firstMemoryWrite(popad) && event.startsWith("guard ")), false);
+  strictEqual(popad.defs.includes("add(%0, 12)"), false);
+  deepStrictEqual(popad.events.filter((event) => event.startsWith("set ")), [
+    "set edi:32 <- %1",
+    "set esi:32 <- %3",
+    "set ebp:32 <- %5",
+    "set ebx:32 <- %7",
+    "set edx:32 <- %9",
+    "set ecx:32 <- %11",
+    "set eax:32 <- %13",
+    "set esp:32 <- %14"
+  ]);
+
+  deepStrictEqual(popa.events.slice(0, 2), [
+    "%0 = get esp:32",
+    "guard read %0:16"
+  ]);
+  strictEqual(popa.events.filter((event) => event.startsWith("guard ")).length, 1);
+  strictEqual(popa.events.some((event, index) => index > firstMemoryWrite(popa) && event.startsWith("guard ")), false);
+  strictEqual(popa.defs.includes("add(%0, 6)"), false);
+  deepStrictEqual(popa.events.filter((event) => event.startsWith("set ")), [
+    "set di:16 <- %1",
+    "set si:16 <- %3",
+    "set bp:16 <- %5",
+    "set bx:16 <- %7",
+    "set dx:16 <- %9",
+    "set cx:16 <- %11",
+    "set ax:16 <- %13",
+    "set esp:32 <- %14"
+  ]);
+});
+
 test("leave semantic reads saved frame before updating esp and ebp", () => {
   const trace = buildSemanticTrace(leaveSemantic());
 
@@ -414,6 +489,12 @@ function directFlagWrites(trace: SemanticTrace): string[] {
 
     return match === null ? [] : [match[1]!];
   });
+}
+
+function firstMemoryWrite(trace: SemanticTrace): number {
+  const index = trace.events.findIndex((event) => event.startsWith("set mem("));
+
+  return index === -1 ? trace.events.length : index;
 }
 
 function flagSourceEvents(trace: SemanticTrace): string[] {

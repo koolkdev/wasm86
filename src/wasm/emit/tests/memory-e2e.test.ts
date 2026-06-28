@@ -5,7 +5,7 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
+import { decodeBytes, ok, startAddress } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags, x86StatusFlags, type X86Flag } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
@@ -420,6 +420,240 @@ test("a faulting word push reports a word-sized stack write", async () => {
     { regs: { eax: 0x1234, esp: 1 }, eip: instruction.address, flags: allFlagsSet },
     "word push fault"
   );
+});
+
+test("pushad stores all dword registers and original ESP", async () => {
+  const instruction = ok(decodeBytes([0x60]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0x1111_1111,
+    ecx: 0x2222_2222,
+    edx: 0x3333_3333,
+    ebx: 0x4444_4444,
+    esp: 0x40,
+    ebp: 0x5555_5555,
+    esi: 0x6666_6666,
+    edi: 0x7777_7777,
+    eip: instruction.address,
+    ...allPushfdFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint32(0x20, true), 0x7777_7777);
+  strictEqual(guestView.getUint32(0x24, true), 0x6666_6666);
+  strictEqual(guestView.getUint32(0x28, true), 0x5555_5555);
+  strictEqual(guestView.getUint32(0x2c, true), 0x40);
+  strictEqual(guestView.getUint32(0x30, true), 0x4444_4444);
+  strictEqual(guestView.getUint32(0x34, true), 0x3333_3333);
+  strictEqual(guestView.getUint32(0x38, true), 0x2222_2222);
+  strictEqual(guestView.getUint32(0x3c, true), 0x1111_1111);
+  assertState(
+    stateView,
+    {
+      regs: {
+        eax: 0x1111_1111,
+        ecx: 0x2222_2222,
+        edx: 0x3333_3333,
+        ebx: 0x4444_4444,
+        esp: 0x20,
+        ebp: 0x5555_5555,
+        esi: 0x6666_6666,
+        edi: 0x7777_7777
+      },
+      eip: instruction.nextEip,
+      flags: allFlagsSet
+    },
+    "pushad"
+  );
+  assertStoredFlags(stateView, allPushfdFlagsSet, "pushad");
+});
+
+test("pusha stores all word registers and original SP", async () => {
+  const instruction = ok(decodeBytes([0x66, 0x60]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0xaaaa_1111,
+    ecx: 0xbbbb_2222,
+    edx: 0xcccc_3333,
+    ebx: 0xdddd_4444,
+    esp: 0x40,
+    ebp: 0xeeee_5555,
+    esi: 0xffff_6666,
+    edi: 0x9999_7777,
+    eip: instruction.address,
+    ...allPushfdFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint16(0x30, true), 0x7777);
+  strictEqual(guestView.getUint16(0x32, true), 0x6666);
+  strictEqual(guestView.getUint16(0x34, true), 0x5555);
+  strictEqual(guestView.getUint16(0x36, true), 0x0040);
+  strictEqual(guestView.getUint16(0x38, true), 0x4444);
+  strictEqual(guestView.getUint16(0x3a, true), 0x3333);
+  strictEqual(guestView.getUint16(0x3c, true), 0x2222);
+  strictEqual(guestView.getUint16(0x3e, true), 0x1111);
+  assertState(
+    stateView,
+    {
+      regs: {
+        eax: 0xaaaa_1111,
+        ecx: 0xbbbb_2222,
+        edx: 0xcccc_3333,
+        ebx: 0xdddd_4444,
+        esp: 0x30,
+        ebp: 0xeeee_5555,
+        esi: 0xffff_6666,
+        edi: 0x9999_7777
+      },
+      eip: instruction.nextEip,
+      flags: allFlagsSet
+    },
+    "pusha"
+  );
+  assertStoredFlags(stateView, allPushfdFlagsSet, "pusha");
+});
+
+test("popad restores dword registers and skips saved ESP", async () => {
+  const instruction = ok(decodeBytes([0x61]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x20,
+    eip: instruction.address,
+    ...allPushfdFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+  guestView.setUint32(0x20, 0x7777_7777, true);
+  guestView.setUint32(0x24, 0x6666_6666, true);
+  guestView.setUint32(0x28, 0x5555_5555, true);
+  guestView.setUint32(0x2c, 0xdead_beef, true);
+  guestView.setUint32(0x30, 0x4444_4444, true);
+  guestView.setUint32(0x34, 0x3333_3333, true);
+  guestView.setUint32(0x38, 0x2222_2222, true);
+  guestView.setUint32(0x3c, 0x1111_1111, true);
+
+  strictEqual(run(), irBlockCompleted);
+  assertState(
+    stateView,
+    {
+      regs: {
+        eax: 0x1111_1111,
+        ecx: 0x2222_2222,
+        edx: 0x3333_3333,
+        ebx: 0x4444_4444,
+        esp: 0x40,
+        ebp: 0x5555_5555,
+        esi: 0x6666_6666,
+        edi: 0x7777_7777
+      },
+      eip: instruction.nextEip,
+      flags: allFlagsSet
+    },
+    "popad"
+  );
+  assertStoredFlags(stateView, allPushfdFlagsSet, "popad");
+});
+
+test("popa restores word registers and skips saved SP", async () => {
+  const instruction = ok(decodeBytes([0x66, 0x61]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0xaaaa_0000,
+    ecx: 0xbbbb_0000,
+    edx: 0xcccc_0000,
+    ebx: 0xdddd_0000,
+    esp: 0x30,
+    ebp: 0xeeee_0000,
+    esi: 0xffff_0000,
+    edi: 0x9999_0000,
+    eip: instruction.address,
+    ...allPushfdFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+  guestView.setUint16(0x30, 0x7777, true);
+  guestView.setUint16(0x32, 0x6666, true);
+  guestView.setUint16(0x34, 0x5555, true);
+  guestView.setUint16(0x36, 0xbeef, true);
+  guestView.setUint16(0x38, 0x4444, true);
+  guestView.setUint16(0x3a, 0x3333, true);
+  guestView.setUint16(0x3c, 0x2222, true);
+  guestView.setUint16(0x3e, 0x1111, true);
+
+  strictEqual(run(), irBlockCompleted);
+  assertState(
+    stateView,
+    {
+      regs: {
+        eax: 0xaaaa_1111,
+        ecx: 0xbbbb_2222,
+        edx: 0xcccc_3333,
+        ebx: 0xdddd_4444,
+        esp: 0x40,
+        ebp: 0xeeee_5555,
+        esi: 0xffff_6666,
+        edi: 0x9999_7777
+      },
+      eip: instruction.nextEip,
+      flags: allFlagsSet
+    },
+    "popa"
+  );
+  assertStoredFlags(stateView, allPushfdFlagsSet, "popa");
+});
+
+test("stack-all range guards report full dword and word ranges", async () => {
+  for (const [name, bytes, initial, reason, address, size] of [
+    [
+      "pushad",
+      [0x60],
+      { eax: 0x1111_1111, esp: 0x10, eip: startAddress, ...allFlagsSet },
+      ExitReason.MEMORY_WRITE_FAULT,
+      0xffff_fff0,
+      32
+    ],
+    [
+      "popad",
+      [0x61],
+      { eax: 0x1111_1111, esp: guestByteLength - 16, eip: startAddress, ...allFlagsSet },
+      ExitReason.MEMORY_READ_FAULT,
+      guestByteLength - 16,
+      32
+    ],
+    [
+      "pusha",
+      [0x66, 0x60],
+      { eax: 0x1111_1111, esp: 8, eip: startAddress, ...allFlagsSet },
+      ExitReason.MEMORY_WRITE_FAULT,
+      0xffff_fff8,
+      16
+    ],
+    [
+      "popa",
+      [0x66, 0x61],
+      { eax: 0x1111_1111, esp: guestByteLength - 8, eip: startAddress, ...allFlagsSet },
+      ExitReason.MEMORY_READ_FAULT,
+      guestByteLength - 8,
+      16
+    ]
+  ] as const) {
+    const instruction = ok(decodeBytes(bytes));
+    const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+    writeWasmCpuStateSnapshot(stateView, initial);
+
+    assertFaultExit(run(), reason, address, size, name);
+    assertState(
+      stateView,
+      { regs: { eax: 0x1111_1111, esp: initial.esp }, eip: instruction.address, flags: allFlagsSet },
+      name
+    );
+  }
 });
 
 test("pushfd stores the usermode eflags image", async () => {
