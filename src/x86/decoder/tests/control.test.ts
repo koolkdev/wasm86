@@ -1,4 +1,4 @@
-import { imm8, imm16, imm32, mem32, reg32, relTarget, signImm8, testDecodeFixtures, type DecoderFixture } from "./helpers.js";
+import { imm8, imm16, imm32, mem, mem32, reg, reg32, relTarget, signImm8, testDecodeFixtures, type DecoderFixture } from "./helpers.js";
 
 const fixtures: readonly DecoderFixture[] = [
   {
@@ -121,6 +121,13 @@ const fixtures: readonly DecoderFixture[] = [
     id: "push.r32"
   },
   {
+    name: "push ax",
+    bytes: [0x66, 0x50],
+    mnemonic: "push",
+    operands: [reg("ax")],
+    id: "push.r16"
+  },
+  {
     name: "pop ecx",
     bytes: [0x59],
     mnemonic: "pop",
@@ -135,11 +142,25 @@ const fixtures: readonly DecoderFixture[] = [
     id: "pop.r32"
   },
   {
+    name: "pop ax",
+    bytes: [0x66, 0x58],
+    mnemonic: "pop",
+    operands: [reg("ax")],
+    id: "pop.r16"
+  },
+  {
     name: "pop [eax]",
     bytes: [0x8f, 0x00],
     mnemonic: "pop",
     operands: [mem32({ base: "eax", scale: 1, disp: 0 })],
     id: "pop.rm32"
+  },
+  {
+    name: "pop word [eax]",
+    bytes: [0x66, 0x8f, 0x00],
+    mnemonic: "pop",
+    operands: [mem(16, { base: "eax", scale: 1, disp: 0 })],
+    id: "pop.rm16"
   },
   {
     name: "leave",
@@ -156,11 +177,32 @@ const fixtures: readonly DecoderFixture[] = [
     id: "push.imm32"
   },
   {
+    name: "push word [eax]",
+    bytes: [0x66, 0xff, 0x30],
+    mnemonic: "push",
+    operands: [mem(16, { base: "eax", scale: 1, disp: 0 })],
+    id: "push.rm16"
+  },
+  {
+    name: "push imm16",
+    bytes: [0x66, 0x68, 0x34, 0x12],
+    mnemonic: "push",
+    operands: [imm16(0x1234)],
+    id: "push.imm16"
+  },
+  {
     name: "push imm8",
     bytes: [0x6a, 0xff],
     mnemonic: "push",
     operands: [signImm8(0xffff_ffff)],
     id: "push.imm8"
+  },
+  {
+    name: "push operand-size imm8",
+    bytes: [0x66, 0x6a, 0xff],
+    mnemonic: "push",
+    operands: [{ kind: "imm", value: 0xffff_ffff, encodedWidth: 8, semanticWidth: 16, extension: "sign" }],
+    id: "push.imm8_o16"
   },
   {
     name: "pushfd",

@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 294);
+  strictEqual(X86_32_CORE.instructions.length, 300);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -85,8 +85,14 @@ test("x86-32 core registers the initial instruction surface", () => {
     "cmp.rm16_imm16",
     "test.al_imm8",
     "test.rm32_imm32",
+    "push.r16",
     "push.r32",
+    "push.rm16",
+    "push.imm16",
+    "push.imm8_o16",
+    "pop.r16",
     "pop.r32",
+    "pop.rm16",
     "pop.rm32",
     "pushfd.dword",
     "popfd.dword",
@@ -256,6 +262,39 @@ test("popfd is a no-operand dword flags pop", () => {
   deepStrictEqual(spec.opcode, [0x9d]);
   strictEqual(spec.operands, undefined);
   deepStrictEqual(spec.format, { syntax: "popfd" });
+});
+
+test("operand-size stack forms use word operands with 32-bit ESP semantics", () => {
+  const pushReg = instruction("push.r16");
+  const pushMem = instruction("push.rm16");
+  const pushImm = instruction("push.imm16");
+  const pushSignImm = instruction("push.imm8_o16");
+  const popReg = instruction("pop.r16");
+  const popMem = instruction("pop.rm16");
+
+  deepStrictEqual(pushReg.prefixes, { operandSize: "override" });
+  deepStrictEqual(pushReg.operands, [{ kind: "opcode.reg", type: "r16" }]);
+
+  deepStrictEqual(pushMem.prefixes, { operandSize: "override" });
+  deepStrictEqual(pushMem.opcode, [0xff]);
+  deepStrictEqual(pushMem.modrm, { match: { reg: 6 } });
+  deepStrictEqual(pushMem.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+
+  deepStrictEqual(pushImm.prefixes, { operandSize: "override" });
+  deepStrictEqual(pushImm.opcode, [0x68]);
+  deepStrictEqual(pushImm.operands, [{ kind: "imm", width: 16 }]);
+
+  deepStrictEqual(pushSignImm.prefixes, { operandSize: "override" });
+  deepStrictEqual(pushSignImm.opcode, [0x6a]);
+  deepStrictEqual(pushSignImm.operands, [{ kind: "imm", width: 8, semanticWidth: 16, extension: "sign" }]);
+
+  deepStrictEqual(popReg.prefixes, { operandSize: "override" });
+  deepStrictEqual(popReg.operands, [{ kind: "opcode.reg", type: "r16" }]);
+
+  deepStrictEqual(popMem.prefixes, { operandSize: "override" });
+  deepStrictEqual(popMem.opcode, [0x8f]);
+  deepStrictEqual(popMem.modrm, { match: { reg: 0 } });
+  deepStrictEqual(popMem.operands, [{ kind: "modrm.rm", type: "rm16" }]);
 });
 
 test("slash-r forms use ModRM operands without an explicit ModRM match", () => {
@@ -503,7 +542,9 @@ test("extension move semantics are flagless and encode source and destination wi
 
 test("opcode-encoded register forms expand through opcode low bits", () => {
   const mov = instruction("mov.r32_imm32");
+  const pushWord = instruction("push.r16");
   const push = instruction("push.r32");
+  const popWord = instruction("pop.r16");
   const pop = instruction("pop.r32");
 
   deepStrictEqual(expandInstructionSpec(mov).map((entry) => entry.opcode), [
@@ -526,7 +567,27 @@ test("opcode-encoded register forms expand through opcode low bits", () => {
     [0x56],
     [0x57]
   ]);
+  deepStrictEqual(expandInstructionSpec(pushWord).map((entry) => entry.opcode), [
+    [0x50],
+    [0x51],
+    [0x52],
+    [0x53],
+    [0x54],
+    [0x55],
+    [0x56],
+    [0x57]
+  ]);
   deepStrictEqual(expandInstructionSpec(pop).map((entry) => entry.opcode), [
+    [0x58],
+    [0x59],
+    [0x5a],
+    [0x5b],
+    [0x5c],
+    [0x5d],
+    [0x5e],
+    [0x5f]
+  ]);
+  deepStrictEqual(expandInstructionSpec(popWord).map((entry) => entry.opcode), [
     [0x58],
     [0x59],
     [0x5a],

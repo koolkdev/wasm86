@@ -1,6 +1,6 @@
 import type { ConditionCode } from "#x86/conditions.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import { pop32, push32 } from "./stack.js";
+import { popStack, pushStack } from "./stack.js";
 import { guardStorageRead } from "./memory.js";
 
 export function jmpSemantic(): SemanticTemplate {
@@ -19,20 +19,20 @@ export function callSemantic(): SemanticTemplate {
     guardStorageRead(s, context, targetOperand, 32);
     const target = s.get(targetOperand);
 
-    push32(s, context, s.nextEip());
+    pushStack(s, context, 32, s.nextEip());
     s.jump(target);
   };
 }
 
 export function retSemantic(): SemanticTemplate {
   return (s, context) => {
-    s.jump(pop32(s, context));
+    s.jump(popStack(s, context, 32));
   };
 }
 
 export function retImmSemantic(): SemanticTemplate {
   return (s, context) => {
-    const target = pop32(s, context);
+    const target = popStack(s, context, 32);
     const bytes = s.get(s.operand(0));
     const esp = s.get(s.reg("esp"));
     const adjustedEsp = s.i32Add(esp, bytes);

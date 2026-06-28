@@ -77,6 +77,22 @@ test("executes PUSH r32 by decrementing ESP and storing the value", async () => 
   assertCompletedInstruction(state, startAddress + 1, 8);
 });
 
+test("executes PUSH r16 by decrementing ESP by two and storing a word", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0x1122_3344,
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { interpreter, state } = await executeStackInstruction([0x66, 0x50], initialState);
+
+  strictEqual(state.eax, initialState.eax);
+  strictEqual(state.esp, 0x3e);
+  strictEqual(interpreter.guestView.getUint16(0x3e, true), 0x3344);
+  assertCompletedInstruction(state, startAddress + 2, 8);
+});
+
 test("executes PUSH sign-extended imm8", async () => {
   const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
@@ -89,6 +105,30 @@ test("executes PUSH sign-extended imm8", async () => {
   strictEqual(state.esp, 0x3c);
   strictEqual(interpreter.guestView.getUint32(0x3c, true), 0xffff_ffff);
   assertCompletedInstruction(state, startAddress + 2, 8);
+});
+
+test("executes operand-size PUSH immediates as word stack cells", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const interpreter = await instantiateWasmInterpreter();
+
+  writeInterpreterState(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, startAddress, [
+    0x66, 0x68, 0x34, 0x12,
+    0x66, 0x6a, 0xff
+  ]);
+
+  const exit = interpreter.run(2);
+  const state = readInterpreterState(interpreter.stateView);
+
+  assertSingleInstructionExit(exit);
+  strictEqual(state.esp, 0x3c);
+  strictEqual(interpreter.guestView.getUint16(0x3e, true), 0x1234);
+  strictEqual(interpreter.guestView.getUint16(0x3c, true), 0xffff);
+  assertCompletedInstruction(state, startAddress + 7, 9);
 });
 
 test("executes PUSHFD by storing the usermode eflags image", async () => {
@@ -264,6 +304,25 @@ test("executes POP r32 by loading from ESP then incrementing ESP", async () => {
   assertCompletedInstruction(state, startAddress + 1, 8);
 });
 
+test("executes POP r16 by loading a word and incrementing ESP by two", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0xaaaa_0000,
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { state } = await executeStackInstruction(
+    [0x66, 0x58],
+    initialState,
+    (guest) => guest.setUint16(0x40, 0xbeef, true)
+  );
+
+  strictEqual(state.eax, 0xaaaa_beef);
+  strictEqual(state.esp, 0x42);
+  assertCompletedInstruction(state, startAddress + 2, 8);
+});
+
 test("executes POP ESP with popped value as final ESP", async () => {
   const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
@@ -279,6 +338,23 @@ test("executes POP ESP with popped value as final ESP", async () => {
 
   strictEqual(state.esp, 0x80);
   assertCompletedInstruction(state, startAddress + 1, 8);
+});
+
+test("executes POP SP as a low-word write after the stack increment", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { state } = await executeStackInstruction(
+    [0x66, 0x5c],
+    initialState,
+    (guest) => guest.setUint16(0x40, 0x1234, true)
+  );
+
+  strictEqual(state.esp, 0x1234);
+  assertCompletedInstruction(state, startAddress + 2, 8);
 });
 
 test("executes LEAVE by restoring EBP and ESP from the frame", async () => {
@@ -316,6 +392,24 @@ test("executes POP [ESP] by writing at the incremented ESP", async () => {
   strictEqual(state.esp, 0x44);
   strictEqual(interpreter.guestView.getUint32(0x44, true), 0x5566_7788);
   assertCompletedInstruction(state, startAddress + 3, 8);
+});
+
+test("executes POP word [ESP] by writing at the incremented ESP", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { interpreter, state } = await executeStackInstruction(
+    [0x66, 0x8f, 0x04, 0x24],
+    initialState,
+    (guest) => guest.setUint16(0x40, 0xbeef, true)
+  );
+
+  strictEqual(state.esp, 0x42);
+  strictEqual(interpreter.guestView.getUint16(0x42, true), 0xbeef);
+  assertCompletedInstruction(state, startAddress + 4, 8);
 });
 
 function expectedPushfdImage(flags: Partial<Record<X86Flag, number>>): number {
@@ -360,6 +454,24 @@ test("executes POP [ESP + disp8] against the incremented ESP", async () => {
   assertCompletedInstruction(state, startAddress + 4, 8);
 });
 
+test("executes POP word [ESP + disp8] against the incremented ESP", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { interpreter, state } = await executeStackInstruction(
+    [0x66, 0x8f, 0x44, 0x24, 0x08],
+    initialState,
+    (guest) => guest.setUint16(0x40, 0xbeef, true)
+  );
+
+  strictEqual(state.esp, 0x42);
+  strictEqual(interpreter.guestView.getUint16(0x4a, true), 0xbeef);
+  assertCompletedInstruction(state, startAddress + 5, 8);
+});
+
 test("a faulting POP [mem] write leaves ESP, EIP, and the stack untouched", async () => {
   const initialState = createWasmCpuStateSnapshot({
     ebx: 0xfffd,
@@ -382,6 +494,26 @@ test("a faulting POP [mem] write leaves ESP, EIP, and the stack untouched", asyn
   strictEqual(interpreter.guestView.getUint32(0x40, true), 0x5566_7788);
 });
 
+test("a faulting POP word [mem] write leaves ESP, EIP, and the stack untouched", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    ebx: 0xffff,
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const interpreter = await instantiateWasmInterpreter();
+
+  writeInterpreterState(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, initialState.eip, [0x66, 0x8f, 0x03]);
+  interpreter.guestView.setUint16(0x40, 0xbeef, true);
+
+  const exit = interpreter.run(1);
+
+  deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_WRITE_FAULT, payload: 0xffff, detail: 2 });
+  assertInterpreterStateEquals(interpreter.stateView, initialState);
+  strictEqual(interpreter.guestView.getUint16(0x40, true), 0xbeef);
+});
+
 test("executes PUSH [ESP] by reading the source before writing the new stack slot", async () => {
   const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,
@@ -399,4 +531,58 @@ test("executes PUSH [ESP] by reading the source before writing the new stack slo
   strictEqual(interpreter.guestView.getUint32(0x3c, true), 0xaabb_ccdd);
   strictEqual(interpreter.guestView.getUint32(0x40, true), 0xaabb_ccdd);
   assertCompletedInstruction(state, startAddress + 3, 8);
+});
+
+test("executes PUSH word [ESP] by reading the source before writing the new stack slot", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0x40,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { interpreter, state } = await executeStackInstruction(
+    [0x66, 0xff, 0x34, 0x24],
+    initialState,
+    (guest) => guest.setUint16(0x40, 0xbeef, true)
+  );
+
+  strictEqual(state.esp, 0x3e);
+  strictEqual(interpreter.guestView.getUint16(0x3e, true), 0xbeef);
+  strictEqual(interpreter.guestView.getUint16(0x40, true), 0xbeef);
+  assertCompletedInstruction(state, startAddress + 4, 8);
+});
+
+test("a faulting PUSH r16 write reports a word-sized fault", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0x1234,
+    esp: 1,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const interpreter = await instantiateWasmInterpreter();
+
+  writeInterpreterState(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, initialState.eip, [0x66, 0x50]);
+
+  const exit = interpreter.run(1);
+
+  deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_WRITE_FAULT, payload: 0xffff_ffff, detail: 2 });
+  assertInterpreterStateEquals(interpreter.stateView, initialState);
+});
+
+test("a faulting POP r16 read reports a word-sized fault", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0xffff,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const interpreter = await instantiateWasmInterpreter();
+
+  writeInterpreterState(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, initialState.eip, [0x66, 0x58]);
+
+  const exit = interpreter.run(1);
+
+  deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0xffff, detail: 2 });
+  assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

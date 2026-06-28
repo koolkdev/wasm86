@@ -9,7 +9,7 @@ import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
 import { shiftSemantic } from "#x86/semantics/shift.js";
-import { leaveSemantic, popSemantic } from "#x86/semantics/stack.js";
+import { leaveSemantic, popSemantic, pushSemantic } from "#x86/semantics/stack.js";
 import { testSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import type { ValueInput } from "#x86/semantics/refs.js";
@@ -253,6 +253,34 @@ test("pop semantic loads from old esp, increments esp, then writes the destinati
     "next"
   ]);
   strictEqual(trace.defs[2], "add(%0, 4)");
+});
+
+test("push semantic accepts 16-bit stack cells with 32-bit esp", () => {
+  const trace = buildSemanticTrace(pushSemantic(16), operands("reg"));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get op0:16",
+    "%1 = get esp:32",
+    "guard write %2:2",
+    "set mem(%2):16 <- %0",
+    "set esp:32 <- %2",
+    "next"
+  ]);
+  strictEqual(trace.defs[2], "sub(%1, 2)");
+});
+
+test("pop semantic accepts 16-bit stack cells with 32-bit esp", () => {
+  const trace = buildSemanticTrace(popSemantic(16), operands("reg"));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get esp:32",
+    "guard read %0:2",
+    "%1 = get mem(%0):16",
+    "set esp:32 <- %2",
+    "set op0:16 <- %1",
+    "next"
+  ]);
+  strictEqual(trace.defs[2], "add(%0, 2)");
 });
 
 test("pop memory destination computes the destination address after esp update", () => {

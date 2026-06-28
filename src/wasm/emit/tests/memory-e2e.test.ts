@@ -306,6 +306,122 @@ test("a narrow access faults with its byte length", async () => {
   );
 });
 
+test("word push/pop forms use 16-bit stack cells with 32-bit ESP", async () => {
+  const instructions = decodeSequence([
+    [0x66, 0x50],
+    [0x66, 0x59]
+  ]);
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0xaaaa_beef,
+    ecx: 0x1111_2222,
+    esp: 0x40,
+    eip: instructions[0]!.address,
+    ...allFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint16(0x3e, true), 0xbeef);
+  assertState(
+    stateView,
+    {
+      regs: { eax: 0xaaaa_beef, ecx: 0x1111_beef, esp: 0x40 },
+      eip: instructions[1]!.nextEip,
+      flags: allFlagsSet
+    },
+    "word push/pop"
+  );
+});
+
+test("operand-size push immediates write word stack cells", async () => {
+  const instructions = decodeSequence([
+    [0x66, 0x68, 0x34, 0x12],
+    [0x66, 0x6a, 0xff]
+  ]);
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x40,
+    eip: instructions[0]!.address,
+    ...allFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint16(0x3e, true), 0x1234);
+  strictEqual(guestView.getUint16(0x3c, true), 0xffff);
+  assertState(
+    stateView,
+    { regs: { esp: 0x3c }, eip: instructions[1]!.nextEip, flags: allFlagsSet },
+    "word push immediates"
+  );
+});
+
+test("word push memory source writes a 16-bit stack cell", async () => {
+  const instruction = ok(decodeBytes([0x66, 0xff, 0x33]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    ebx: 0x20,
+    esp: 0x40,
+    eip: instruction.address,
+    ...allFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+  guestView.setUint16(0x20, 0xbeef, true);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint16(0x3e, true), 0xbeef);
+  assertState(
+    stateView,
+    { regs: { ebx: 0x20, esp: 0x3e }, eip: instruction.nextEip, flags: allFlagsSet },
+    "word push [mem]"
+  );
+});
+
+test("word pop memory destination computes the address after incrementing ESP", async () => {
+  const instruction = ok(decodeBytes([0x66, 0x8f, 0x04, 0x24]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    esp: 0x40,
+    eip: instruction.address,
+    ...allFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+  guestView.setUint16(0x40, 0xbeef, true);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint16(0x42, true), 0xbeef);
+  assertState(
+    stateView,
+    { regs: { esp: 0x42 }, eip: instruction.nextEip, flags: allFlagsSet },
+    "word pop [esp]"
+  );
+});
+
+test("a faulting word push reports a word-sized stack write", async () => {
+  const instruction = ok(decodeBytes([0x66, 0x50]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0x1234,
+    esp: 1,
+    eip: instruction.address,
+    ...allFlagsSet
+  };
+  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, 0xffff_ffff, 2, "word push fault");
+  assertState(
+    stateView,
+    { regs: { eax: 0x1234, esp: 1 }, eip: instruction.address, flags: allFlagsSet },
+    "word push fault"
+  );
+});
+
 test("pushfd stores the usermode eflags image", async () => {
   const instruction = ok(decodeBytes([0x9c]));
   const initial: Partial<WasmCpuStateSnapshot> = {

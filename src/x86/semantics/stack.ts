@@ -1,36 +1,48 @@
 import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags } from "#x86/flags.js";
+import type { OperandWidth } from "#x86/types.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
-export function push32(s: SemanticsBuilder, context: SemanticBuildContext, value: ValueInput): void {
+export type StackOperandWidth = Extract<OperandWidth, 16 | 32>;
+
+export function pushStack(
+  s: SemanticsBuilder,
+  context: SemanticBuildContext,
+  width: StackOperandWidth,
+  value: ValueInput
+): void {
   const esp = s.get(s.reg("esp"));
-  const nextEsp = s.i32Sub(esp, s.const32(4));
+  const nextEsp = s.i32Sub(esp, s.const32(stackByteLength(width)));
   const stack = s.mem(nextEsp);
 
-  guardStorageWrite(s, context, stack, 32);
-  s.set(stack, value);
+  guardStorageWrite(s, context, stack, width);
+  s.set(stack, value, width);
   s.set(s.reg("esp"), nextEsp);
 }
 
-export function pop32(s: SemanticsBuilder, context: SemanticBuildContext): Value {
+export function popStack(
+  s: SemanticsBuilder,
+  context: SemanticBuildContext,
+  width: StackOperandWidth
+): Value {
   const esp = s.get(s.reg("esp"));
   const stack = s.mem(esp);
 
-  guardStorageRead(s, context, stack, 32);
-  const value = s.get(stack);
-  const nextEsp = s.i32Add(esp, s.const32(4));
+  guardStorageRead(s, context, stack, width);
+  const value = s.get(stack, width);
+  const nextEsp = s.i32Add(esp, s.const32(stackByteLength(width)));
 
   s.set(s.reg("esp"), nextEsp);
   return value;
 }
 
-export function pushSemantic(): SemanticTemplate {
+export function pushSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, context) => {
     const src = s.operand(0);
 
-    guardStorageRead(s, context, src, 32);
-    push32(s, context, s.get(src));
+    guardStorageRead(s, context, src, width);
+    pushStack(s, context, width, s.get(src, width));
   };
 }
 
@@ -46,13 +58,13 @@ export function pushfdSemantic(): SemanticTemplate {
       image = s.i32Or(image, offset === 0 ? bit : s.i32Shl(bit, s.const32(offset)));
     }
 
-    push32(s, context, image);
+    pushStack(s, context, 32, image);
   };
 }
 
 export function popfdSemantic(): SemanticTemplate {
   return (s, context) => {
-    const image = pop32(s, context);
+    const image = popStack(s, context, 32);
     const one = s.const32(1);
 
     for (const flag of x86Flags) {
@@ -64,14 +76,14 @@ export function popfdSemantic(): SemanticTemplate {
   };
 }
 
-export function popSemantic(): SemanticTemplate {
+export function popSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, context) => {
     const dst = s.operand(0);
     // SDM order: esp is incremented before the destination EA is computed,
     // so an esp-based destination sees the new esp.
-    const value = pop32(s, context);
+    const value = popStack(s, context, width);
 
-    s.set(popTargetStorage(s, context, dst), value);
+    s.set(popTargetStorage(s, context, width, dst), value, width);
   };
 }
 
@@ -89,14 +101,23 @@ export function leaveSemantic(): SemanticTemplate {
   };
 }
 
-function popTargetStorage(s: SemanticsBuilder, context: SemanticBuildContext, dst: OperandRef): StorageInput {
+function popTargetStorage(
+  s: SemanticsBuilder,
+  context: SemanticBuildContext,
+  width: StackOperandWidth,
+  dst: OperandRef
+): StorageInput {
   if (context.operandInfo(dst).storage === "mem") {
     const target = s.mem(s.address(dst));
 
-    guardStorageWrite(s, context, target, 32);
+    guardStorageWrite(s, context, target, width);
     return target;
   }
 
-  guardStorageWrite(s, context, dst, 32);
+  guardStorageWrite(s, context, dst, width);
   return dst;
+}
+
+function stackByteLength(width: StackOperandWidth): 2 | 4 {
+  return width === 16 ? 2 : 4;
 }
