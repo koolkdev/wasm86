@@ -1,6 +1,6 @@
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandWidth } from "#x86/types.js";
-import { buildCmpFlagSource } from "./alu-flags.js";
+import { subFlagSource } from "./flag-writes.js";
 import { guardStorageRead } from "./memory.js";
 
 export function cmpSemantic(width: OperandWidth = 32): SemanticTemplate {
@@ -11,9 +11,10 @@ export function cmpSemantic(width: OperandWidth = 32): SemanticTemplate {
     guardStorageRead(s, context, leftOperand, width);
     guardStorageRead(s, context, rightOperand, width);
 
-    const left = s.get(leftOperand, width);
-    const right = s.get(rightOperand, width);
+    const left = s.project(width, s.get(leftOperand, width));
+    const right = s.project(width, s.get(rightOperand, width));
+    const result = s.project(width, s.i32Sub(left, right));
 
-    s.writeStatusFlagsSource(buildCmpFlagSource(s, { width, left, right }));
+    s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
   };
 }

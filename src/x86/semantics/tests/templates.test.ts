@@ -89,13 +89,13 @@ test("binary ALU semantics guard memory read-modify-write before operand reads",
   for (const op of ["add", "adc", "sbb"] as const) {
     const trace = buildSemanticTrace(aluSemantic(op, 32), operands("mem", "reg"));
 
-    deepStrictEqual(trace.events.slice(0, 5), [
+    deepStrictEqual(trace.events.slice(0, 3), [
       "%0 = addr op0",
       "guard read %0:4",
-      "guard write %0:4",
-      "%1 = get op0:32",
-      "%2 = get op1:32"
+      "guard write %0:4"
     ], op);
+    ok(trace.events[3]?.endsWith(" = get op0:32"), op);
+    ok(trace.events[4]?.endsWith(" = get op1:32"), op);
     strictEqual(trace.events.some((event) => event.startsWith("set op0:32 <- %")), true, op);
   }
 });
@@ -107,8 +107,8 @@ test("adc and sbb read old CF after operands and before replacing arithmetic fla
     const firstFlagWrite = trace.events.findIndex((event) => event.startsWith("flag "));
     const setEvent = trace.events.find((event) => event.startsWith("set op0:32 <- "));
 
-    strictEqual(trace.events[0], "%0 = get op0:32", op);
-    strictEqual(trace.events[1], "%1 = get op1:32", op);
+    ok(trace.events[0]?.endsWith(" = get op0:32"), op);
+    ok(trace.events[1]?.endsWith(" = get op1:32"), op);
     strictEqual(flagReadIndex, 2, op);
     strictEqual(firstFlagWrite, 3, op);
     ok(setEvent !== undefined, op);
@@ -148,33 +148,33 @@ test("shift semantics cover operations, widths, and count sources", () => {
 test("shift semantics guard and read operands in ALU order", () => {
   const immTrace = buildSemanticTrace(shiftSemantic("shl", 32, "imm8"), operands("mem", "imm"));
 
-  deepStrictEqual(immTrace.events.slice(0, 5), [
+  deepStrictEqual(immTrace.events.slice(0, 3), [
     "%0 = addr op0",
     "guard read %0:4",
-    "guard write %0:4",
-    "%1 = get op0:32",
-    "%2 = get op1:8"
+    "guard write %0:4"
   ]);
+  ok(immTrace.events[3]?.endsWith(" = get op0:32"));
+  ok(immTrace.events[4]?.endsWith(" = get op1:8"));
 
   const clTrace = buildSemanticTrace(shiftSemantic("shr", 16, "cl"), operands("mem"));
 
-  deepStrictEqual(clTrace.events.slice(0, 5), [
+  deepStrictEqual(clTrace.events.slice(0, 3), [
     "%0 = addr op0",
     "guard read %0:2",
-    "guard write %0:2",
-    "%1 = get op0:16",
-    "%2 = get cl:8"
+    "guard write %0:2"
   ]);
+  ok(clTrace.events[3]?.endsWith(" = get op0:16"));
+  ok(clTrace.events[4]?.endsWith(" = get cl:8"));
 });
 
 test("runtime shift counts are masked before result and flag use", () => {
   const trace = buildSemanticTrace(shiftSemantic("shl", 8, "cl"), regOperands(1));
 
-  strictEqual(trace.defs[2], "project8(%0)");
-  strictEqual(trace.defs[3], "and(%1, 31)");
-  strictEqual(trace.defs[4], "shl(%2, %3)");
+  strictEqual(trace.defs[1], "project8(%0)");
+  strictEqual(trace.defs[3], "and(%2, 31)");
+  strictEqual(trace.defs[4], "shl(%1, %3)");
   strictEqual(trace.defs[5], "project8(%4)");
-  strictEqual(trace.defs[7], "select(%6, %5, %2)");
+  strictEqual(trace.defs[7], "select(%6, %5, %1)");
   strictEqual(trace.defs[14], "cmp32.eq(%3, 1)");
   strictEqual(trace.defs[15], "sub(8, %3)");
   strictEqual(trace.defs[21], "cmp32.le_u(%3, 8)");
@@ -185,7 +185,7 @@ test("runtime shift count zero selects the original destination and old flags", 
   const trace = buildSemanticTrace(shiftSemantic("shr", 16, "imm8"), operands("reg", "imm"));
   const write = trace.flagWrites[0]!;
 
-  strictEqual(trace.defs[7], "select(%6, %5, %2)");
+  strictEqual(trace.defs[7], "select(%6, %5, %1)");
   strictEqual(trace.def(flagCell(write, "CF")), "select(%21, %17, %8)");
   strictEqual(trace.def(flagCell(write, "PF")), "select(%19, %27, %9)");
   strictEqual(trace.def(flagCell(write, "AF")), "select(%19, 0, %10)");
@@ -206,9 +206,9 @@ test("runtime shift counts greater than one write OF as zero", () => {
 test("sar semantics use signed right shift after width sign extension", () => {
   const trace = buildSemanticTrace(shiftSemantic("sar", 16, "imm8"), operands("reg", "imm"));
 
-  strictEqual(trace.defs[2], "project16(%0)");
-  strictEqual(trace.defs[3], "and(%1, 31)");
-  strictEqual(trace.defs[4], "extend16_s(%2)");
+  strictEqual(trace.defs[1], "project16(%0)");
+  strictEqual(trace.defs[3], "and(%2, 31)");
+  strictEqual(trace.defs[4], "extend16_s(%1)");
   strictEqual(trace.defs[5], "shr_s(%4, %3)");
 });
 

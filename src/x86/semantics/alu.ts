@@ -1,15 +1,16 @@
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
+import type { Value } from "#x86/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import {
-  buildAddResultAndFlagSource,
-  buildAddResultAndWriteFlags,
-  buildLogicResultAndFlagSource,
-  buildSubResultAndFlagSource,
-  buildSubResultAndWriteFlags,
+  addFlagSource,
+  logicFlagSource,
+  subFlagSource,
+  writeAddFlags,
   writeDecFlags,
   writeIncFlags,
-  writeNegFlags
-} from "./alu-flags.js";
+  writeNegFlags,
+  writeSubFlags
+} from "./flag-writes.js";
 import { guardStorageRead, guardStorageReadWrite } from "./memory.js";
 
 export type AluOp = "add" | "adc" | "sub" | "sbb" | "xor" | "and" | "or";
@@ -23,44 +24,46 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
     guardStorageReadWrite(s, context, dst, width);
     guardStorageRead(s, context, src, width);
 
-    const left = s.get(dst, width);
-    const right = s.get(src, width);
+    const left = s.project(width, s.get(dst, width));
+    const right = s.project(width, s.get(src, width));
 
     switch (op) {
       case "add": {
-        const { result, source } = buildAddResultAndFlagSource(s, { width, left, right });
+        const result = s.project(width, s.i32Add(left, right));
 
-        s.writeStatusFlagsSource(source);
+        s.writeStatusFlagsSource(addFlagSource({ width, left, right, result }));
         s.set(dst, result, width);
         return;
       }
       case "sub": {
-        const { result, source } = buildSubResultAndFlagSource(s, { width, left, right });
+        const result = s.project(width, s.i32Sub(left, right));
 
-        s.writeStatusFlagsSource(source);
+        s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
         s.set(dst, result, width);
         return;
       }
       case "xor":
       case "and":
       case "or": {
-        const { result, source } = buildLogicResultAndFlagSource(s, { width, op, left, right });
+        const result = s.project(width, logicResult(s, op, left, right));
 
-        s.writeStatusFlagsSource(source);
+        s.writeStatusFlagsSource(logicFlagSource({ width, result }));
         s.set(dst, result, width);
         return;
       }
       case "adc": {
         const oldCf = s.readFlag("CF");
-        const result = buildAddResultAndWriteFlags(s, { width, left, right, carryIn: oldCf });
+        const result = s.project(width, s.i32Add(s.i32Add(left, right), oldCf));
 
+        writeAddFlags(s, { width, left, right, result, carryIn: oldCf });
         s.set(dst, result, width);
         return;
       }
       case "sbb": {
         const oldCf = s.readFlag("CF");
-        const result = buildSubResultAndWriteFlags(s, { width, left, right, borrowIn: oldCf });
+        const result = s.project(width, s.i32Sub(s.i32Sub(left, right), oldCf));
 
+        writeSubFlags(s, { width, left, right, result, borrowIn: oldCf });
         s.set(dst, result, width);
         return;
       }
@@ -97,4 +100,15 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
 
     s.set(dst, result, width);
   };
+}
+
+function logicResult(s: SemanticsBuilder, op: "and" | "or" | "xor", left: Value, right: Value): Value {
+  switch (op) {
+    case "and":
+      return s.i32And(left, right);
+    case "or":
+      return s.i32Or(left, right);
+    case "xor":
+      return s.i32Xor(left, right);
+  }
 }

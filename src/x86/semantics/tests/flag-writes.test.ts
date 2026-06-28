@@ -5,16 +5,16 @@ import type { SemanticTemplate, StatusFlagValues } from "#x86/semantics/builder.
 import type { ValueInput } from "#x86/semantics/refs.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import {
-  buildAddResultAndWriteFlags,
-  buildCmpFlagSource,
-  buildLogicResultAndFlagSource,
-  buildShiftResultAndWriteFlags,
-  buildSubResultAndWriteFlags,
-  buildTestFlagSource,
+  addFlagSource,
+  logicFlagSource,
+  subFlagSource,
+  writeAddFlags,
   writeDecFlags,
   writeIncFlags,
-  writeNegFlags
-} from "#x86/semantics/alu-flags.js";
+  writeNegFlags,
+  writeShiftFlags,
+  writeSubFlags
+} from "#x86/semantics/flag-writes.js";
 
 import {
   buildSemanticTrace,
@@ -23,12 +23,20 @@ import {
   type SemanticTrace
 } from "./test-semantics-trace.js";
 
-test("ADD and SUB helpers write every arithmetic flag value", () => {
-  for (const helper of [buildAddResultAndWriteFlags, buildSubResultAndWriteFlags]) {
+test("ADD and SUB flag writers write every arithmetic flag value from caller-provided results", () => {
+  for (const op of ["add", "sub"] as const) {
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), 32);
       const right = s.get(s.operand(1), 32);
-      const result = helper(s, { width: 32, left, right });
+      const result = op === "add"
+        ? s.project(32, s.i32Add(left, right))
+        : s.project(32, s.i32Sub(left, right));
+
+      if (op === "add") {
+        writeAddFlags(s, { width: 32, left, right, result });
+      } else {
+        writeSubFlags(s, { width: 32, left, right, result });
+      }
 
       s.set(s.operand(0), result);
     });
@@ -38,33 +46,42 @@ test("ADD and SUB helpers write every arithmetic flag value", () => {
   }
 });
 
-test("CMP source helper builds an arithmetic flag source without setting a result", () => {
-  let source: ReturnType<typeof buildCmpFlagSource> | undefined;
+test("arithmetic flag source helpers wrap precomputed results without setting operands", () => {
+  let addSource: ReturnType<typeof addFlagSource> | undefined;
+  let subSource: ReturnType<typeof subFlagSource> | undefined;
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 16);
     const right = s.get(s.operand(1), 16);
+    const addResult = s.project(16, s.i32Add(left, right));
+    const subResult = s.project(16, s.i32Sub(left, right));
 
-    source = buildCmpFlagSource(s, { width: 16, left, right });
-    s.writeStatusFlagsSource(source);
+    addSource = addFlagSource({ width: 16, left, right, result: addResult });
+    subSource = subFlagSource({ width: 16, left, right, result: subResult });
+    s.writeStatusFlagsSource(addSource);
+    s.writeStatusFlagsSource(subSource);
   }, regOperands(2));
 
-  strictEqual(source?.kind, "sub");
+  strictEqual(addSource?.kind, "add");
+  strictEqual(subSource?.kind, "sub");
   strictEqual(trace.events.some((event) => event.startsWith("set ")), false);
   strictEqual(trace.flagWrites.length, 0);
-  strictEqual(flagSourceEvents(trace).length, 1);
-  strictEqual(flagSourceEvents(trace)[0]!.startsWith("flagSource sub:16"), true);
+  strictEqual(flagSourceEvents(trace).length, 2);
+  strictEqual(flagSourceEvents(trace)[0]!.startsWith("flagSource add:16"), true);
+  strictEqual(flagSourceEvents(trace)[1]!.startsWith("flagSource sub:16"), true);
 });
 
-test("TEST source helper builds a logic flag source", () => {
+test("logic flag source helper wraps a precomputed logic result", () => {
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
+    const result = s.project(32, s.i32And(left, right));
 
-    s.writeStatusFlagsSource(buildTestFlagSource(s, { width: 32, left, right }));
+    s.writeStatusFlagsSource(logicFlagSource({ width: 32, result }));
   });
 
   strictEqual(flagSourceEvents(trace).length, 1);
   strictEqual(flagSourceEvents(trace)[0]!.startsWith("flagSource logic:32"), true);
+  strictEqual(trace.flagWrites.length, 0);
 });
 
 test("INC and DEC helpers preserve CF by writing only the other status flags", () => {
@@ -110,8 +127,9 @@ test("parity formulas use popcnt over only the low byte", () => {
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
+    const result = s.project(32, s.i32Add(left, right));
 
-    buildAddResultAndWriteFlags(s, { width: 32, left, right });
+    writeAddFlags(s, { width: 32, left, right, result });
   });
   const pf = trace.def(flagCell(onlyFlagWrite(trace), "PF"));
 
@@ -126,8 +144,9 @@ test("sign and overflow formulas consume the operation sign bit", () => {
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), width);
       const right = s.get(s.operand(1), width);
+      const result = s.project(width, s.i32Add(left, right));
 
-      buildAddResultAndWriteFlags(s, { width, left, right });
+      writeAddFlags(s, { width, left, right, result });
     }, regOperands(2));
     const write = onlyFlagWrite(trace);
 
@@ -143,7 +162,9 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const right = s.get(s.operand(1), 8);
 
     addCarryIn = s.compare(8, "ne", left, s.const32(0));
-    buildAddResultAndWriteFlags(s, { width: 8, left, right, carryIn: addCarryIn });
+    const result = s.project(8, s.i32Add(s.i32Add(left, right), addCarryIn));
+
+    writeAddFlags(s, { width: 8, left, right, result, carryIn: addCarryIn });
   });
   const addCf = addTrace.def(flagCell(onlyFlagWrite(addTrace), "CF"));
 
@@ -159,7 +180,9 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const right = s.get(s.operand(1), 8);
 
     subBorrowIn = s.compare(8, "ne", right, s.const32(0));
-    buildSubResultAndWriteFlags(s, { width: 8, left, right, borrowIn: subBorrowIn });
+    const result = s.project(8, s.i32Sub(s.i32Sub(left, right), subBorrowIn));
+
+    writeSubFlags(s, { width: 8, left, right, result, borrowIn: subBorrowIn });
   });
   const subCf = subTrace.def(flagCell(onlyFlagWrite(subTrace), "CF"));
 
@@ -170,18 +193,18 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
   ok(subTrace.defs.some((def) => def.startsWith("cmp8.lt_u(")));
 });
 
-test("result helpers share destination writeback result with flag values", () => {
+test("flag writers use the supplied result value for result-derived flags", () => {
   let result: ValueInput | undefined;
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 16);
     const right = s.get(s.operand(1), 16);
-    const built = buildAddResultAndWriteFlags(s, { width: 16, left, right });
 
-    result = built;
-    s.set(s.operand(0), built, 16);
+    result = s.project(16, s.i32Add(left, right));
+    writeAddFlags(s, { width: 16, left, right, result });
+    s.set(s.operand(0), result, 16);
   });
 
-  ok(result !== undefined, "expected captured helper result");
+  ok(result !== undefined, "expected captured result");
 
   const resultValue = trace.value(result);
   const write = onlyFlagWrite(trace);
@@ -197,10 +220,14 @@ test("logic source helpers build source-backed results without direct conditions
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), 8);
       const right = s.get(s.operand(1), 8);
-      const built = buildLogicResultAndFlagSource(s, { width: 8, op, left, right });
+      const result = op === "and"
+        ? s.i32And(left, right)
+        : op === "or"
+          ? s.i32Or(left, right)
+          : s.i32Xor(left, right);
 
-      s.set(s.operand(0), built.result, 8);
-      s.writeStatusFlagsSource(built.source);
+      s.set(s.operand(0), result, 8);
+      s.writeStatusFlagsSource(logicFlagSource({ width: 8, result }));
     });
 
     strictEqual(flagSourceEvents(trace).length, 1);
@@ -208,66 +235,27 @@ test("logic source helpers build source-backed results without direct conditions
   }
 });
 
-test("shift helper masks counts, selects preserved zero-count state, and writes undefined flags deterministically", () => {
+test("shift flag writer consumes the masked count and supplied result", () => {
   const trace = buildHelperTrace((s) => {
-    const value = s.get(s.operand(0), 16);
-    const count = s.get(s.operand(1), 8);
-    const result = buildShiftResultAndWriteFlags(s, {
+    const value = s.project(16, s.get(s.operand(0), 16));
+    const count = s.i32And(s.get(s.operand(1), 8), s.const32(0x1f));
+    const result = s.get(s.operand(2), 16);
+
+    writeShiftFlags(s, {
       op: "shl",
       width: 16,
       value,
-      rawCount: count
+      count,
+      result
     });
-
-    s.set(s.operand(0), result, 16);
-  }, regOperands(2));
+  }, regOperands(3));
   const write = onlyFlagWrite(trace);
 
-  strictEqual(trace.defs[2], "project16(%0)");
-  strictEqual(trace.defs[3], "and(%1, 31)");
-  strictEqual(trace.defs[7], "select(%6, %5, %2)");
-  strictEqual(trace.events[14], "set op0:16 <- %7");
-  strictEqual(trace.defs[22], "and(%20, %21)");
-  strictEqual(trace.def(flagCell(write, "CF")), "select(%22, %17, %8)");
-  strictEqual(trace.def(flagCell(write, "AF")), "select(%20, 0, %10)");
-  strictEqual(trace.def(flagCell(write, "OF")), "select(%20, %29, %13)");
-});
-
-test("shift helper uses count-one overflow and zero for greater counts", () => {
-  const trace = buildHelperTrace((s) => {
-    const value = s.get(s.operand(0), 32);
-    const count = s.get(s.operand(1), 8);
-
-    buildShiftResultAndWriteFlags(s, {
-      op: "shr",
-      width: 32,
-      value,
-      rawCount: count
-    });
-  }, regOperands(2));
-  const write = onlyFlagWrite(trace);
-
-  strictEqual(trace.defs[14], "cmp32.eq(%3, 1)");
-  strictEqual(trace.defs[28], "select(%14, %18, 0)");
-  strictEqual(trace.def(flagCell(write, "OF")), "select(%19, %28, %13)");
-});
-
-test("shift helper computes sar result with signed shift after width extension", () => {
-  const trace = buildHelperTrace((s) => {
-    const value = s.get(s.operand(0), 8);
-    const count = s.get(s.operand(1), 8);
-
-    buildShiftResultAndWriteFlags(s, {
-      op: "sar",
-      width: 8,
-      value,
-      rawCount: count
-    });
-  }, regOperands(2));
-  strictEqual(trace.defs[2], "project8(%0)");
-  strictEqual(trace.defs[3], "and(%1, 31)");
-  strictEqual(trace.defs[4], "extend8_s(%2)");
-  strictEqual(trace.defs[5], "shr_s(%4, %3)");
+  assertFlagSet(write, x86StatusFlags);
+  strictEqual(trace.defs.some((def) => def.startsWith("shl(")), false);
+  strictEqual(trace.defs.some((def) => def.startsWith("shr_s(")), false);
+  ok(trace.def(flagCell(write, "CF")).startsWith("select("));
+  ok(trace.def(flagCell(write, "OF")).startsWith("select("));
 });
 
 function buildHelperTrace(
