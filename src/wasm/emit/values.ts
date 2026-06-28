@@ -311,7 +311,7 @@ function valueChildren(node: ValueNode): readonly ValueId[] {
     case "compare":
       return [node.a, node.b];
     case "unary":
-    case "extend64":
+    case "extend":
     case "project":
       return [node.value];
     case "select":

@@ -359,9 +359,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return valueFromId(this.#values.project64(width, value));
   }
 
-  extend64(width: OperandWidth, value: ValueInput): Value {
+  extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value {
     this.#beforeOp("extend64");
-    return valueFromId(this.#values.extend64(width, value));
+    return valueFromId(this.#values.extend64(width, value, signed));
   }
 
   select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
@@ -374,9 +374,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return valueFromId(this.#values.project(width, value));
   }
 
-  extend(width: OperandWidth, value: ValueInput): Value {
+  extend(width: OperandWidth, value: ValueInput, signed: boolean): Value {
     this.#beforeOp("extend");
-    return valueFromId(this.#values.extend(width, value));
+    return valueFromId(this.#values.extend(width, value, signed));
   }
 
   compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
@@ -384,7 +384,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     // Narrow compares lower by predicate class: signed predicates need
     // sign-extended operands, the rest masked ones.
     const lower = signedComparePredicates.has(operator)
-      ? (id: ValueId) => this.#values.extend(width, id)
+      ? (id: ValueId) => this.#values.extend(width, id, true)
       : (id: ValueId) => this.#values.project(width, id);
 
     return valueFromId(
@@ -523,7 +523,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: GetOptions): ValueId {
     return options.signed === true
-      ? this.#values.extend(accessWidth, value)
+      ? this.#values.extend(accessWidth, value, true)
       : this.#values.project(accessWidth, value);
   }
 

@@ -66,9 +66,9 @@ function sarShiftInput(
 ): Value {
   switch (width) {
     case 8:
-      return s.extend(8, value);
+      return s.extend(8, value, true);
     case 16:
-      return s.extend(16, value);
+      return s.extend(16, value, true);
     case 32:
       return value;
   }

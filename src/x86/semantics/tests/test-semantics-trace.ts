@@ -191,8 +191,8 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return this.#alloc(`project64.${width}(${this.#value(value)})`);
   }
 
-  extend64(width: OperandWidth, value: ValueInput): Value {
-    return this.#alloc(`extend64.${width}(${this.#value(value)})`);
+  extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value {
+    return this.#alloc(`extend64.${signed ? "s" : "u"}${width}(${this.#value(value)})`);
   }
 
   select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
@@ -205,8 +205,8 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return this.#alloc(`project${width}(${this.#value(value)})`);
   }
 
-  extend(width: OperandWidth, value: ValueInput): Value {
-    return this.#alloc(`extend${width}(${this.#value(value)})`);
+  extend(width: OperandWidth, value: ValueInput, signed: boolean): Value {
+    return this.#alloc(`extend.${signed ? "s" : "u"}${width}(${this.#value(value)})`);
   }
 
   compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {

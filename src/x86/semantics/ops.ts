@@ -21,10 +21,7 @@ export type CompareOperator =
   | "gt_s"
   | "ge_s";
 
-export type UnaryOperator =
-  | "extend8_s"
-  | "extend16_s"
-  | "popcnt";
+export type UnaryOperator = "popcnt";
 
 export const signedComparePredicates: ReadonlySet<CompareOperator> = new Set([
   "lt_s",

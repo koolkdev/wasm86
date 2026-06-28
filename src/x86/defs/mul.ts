@@ -1,8 +1,66 @@
 import { form, mnemonic } from "#x86/schema/builders.js";
 import { imm, modrmReg, modrmRm } from "#x86/schema/operands.js";
-import { imulRegRmImmSemantic, imulRegRmSemantic } from "#x86/semantics/mul.js";
+import {
+  imulImplicitSemantic,
+  imulRegRmImmSemantic,
+  imulRegRmSemantic,
+  mulImplicitSemantic
+} from "#x86/semantics/mul.js";
+
+export const MUL = mnemonic("mul", [
+  // F6 /4: MUL r/m8
+  form("rm8", {
+    opcode: [0xf6],
+    modrm: { match: { reg: 4 } },
+    operands: [modrmRm("rm8")],
+    format: { syntax: "mul {0}" },
+    semantics: mulImplicitSemantic(8)
+  }),
+  // 66 F7 /4: MUL r/m16
+  form("rm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0xf7],
+    modrm: { match: { reg: 4 } },
+    operands: [modrmRm("rm16")],
+    format: { syntax: "mul {0}" },
+    semantics: mulImplicitSemantic(16)
+  }),
+  // F7 /4: MUL r/m32
+  form("rm32", {
+    opcode: [0xf7],
+    modrm: { match: { reg: 4 } },
+    operands: [modrmRm("rm32")],
+    format: { syntax: "mul {0}" },
+    semantics: mulImplicitSemantic(32)
+  })
+]);
 
 export const IMUL = mnemonic("imul", [
+  // F6 /5: IMUL r/m8
+  form("rm8", {
+    opcode: [0xf6],
+    modrm: { match: { reg: 5 } },
+    operands: [modrmRm("rm8")],
+    format: { syntax: "imul {0}" },
+    semantics: imulImplicitSemantic(8)
+  }),
+  // 66 F7 /5: IMUL r/m16
+  form("rm16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0xf7],
+    modrm: { match: { reg: 5 } },
+    operands: [modrmRm("rm16")],
+    format: { syntax: "imul {0}" },
+    semantics: imulImplicitSemantic(16)
+  }),
+  // F7 /5: IMUL r/m32
+  form("rm32", {
+    opcode: [0xf7],
+    modrm: { match: { reg: 5 } },
+    operands: [modrmRm("rm32")],
+    format: { syntax: "imul {0}" },
+    semantics: imulImplicitSemantic(32)
+  }),
   // 66 0F AF /r: IMUL r16, r/m16
   form("r16_rm16", {
     prefixes: { operandSize: "override" },

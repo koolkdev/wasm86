@@ -386,6 +386,21 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i64Shl(): this {
+    this.#writeInstruction(wasmOpcode.i64Shl);
+    return this;
+  }
+
+  i64ShrS(): this {
+    this.#writeInstruction(wasmOpcode.i64ShrS);
+    return this;
+  }
+
+  i64ShrU(): this {
+    this.#writeInstruction(wasmOpcode.i64ShrU);
+    return this;
+  }
+
   i32WrapI64(): this {
     this.#writeInstruction(wasmOpcode.i32WrapI64);
     return this;

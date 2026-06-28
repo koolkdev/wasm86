@@ -179,7 +179,7 @@ export class PendingGprs {
       return value;
     }
 
-    return signed ? this.#values.extend(bits, value) : this.#values.project(bits, value);
+    return signed ? this.#values.extend(bits, value, true) : this.#values.project(bits, value);
   }
 }
 

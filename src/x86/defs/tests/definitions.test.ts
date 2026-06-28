@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 312);
+  strictEqual(X86_32_CORE.instructions.length, 318);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -76,6 +76,12 @@ test("x86-32 core registers the initial instruction surface", () => {
     "neg.rm8",
     "neg.rm16",
     "neg.rm32",
+    "mul.rm8",
+    "mul.rm16",
+    "mul.rm32",
+    "imul.rm8",
+    "imul.rm16",
+    "imul.rm32",
     "imul.r16_rm16",
     "imul.r32_rm32",
     "imul.r16_rm16_imm16",
@@ -458,6 +464,43 @@ test("explicit imul forms use register destinations and signed immediates", () =
   ]);
 });
 
+test("implicit multiply forms use one source operand and grouped opcodes", () => {
+  const mulByte = instruction("mul.rm8");
+  const mulWord = instruction("mul.rm16");
+  const mulDword = instruction("mul.rm32");
+  const imulByte = instruction("imul.rm8");
+  const imulWord = instruction("imul.rm16");
+  const imulDword = instruction("imul.rm32");
+
+  deepStrictEqual(mulByte.opcode, [0xf6]);
+  deepStrictEqual(mulByte.modrm, { match: { reg: 4 } });
+  deepStrictEqual(mulByte.operands, [{ kind: "modrm.rm", type: "rm8" }]);
+  deepStrictEqual(mulByte.format, { syntax: "mul {0}" });
+
+  deepStrictEqual(mulWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(mulWord.opcode, [0xf7]);
+  deepStrictEqual(mulWord.modrm, { match: { reg: 4 } });
+  deepStrictEqual(mulWord.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+
+  deepStrictEqual(mulDword.opcode, [0xf7]);
+  deepStrictEqual(mulDword.modrm, { match: { reg: 4 } });
+  deepStrictEqual(mulDword.operands, [{ kind: "modrm.rm", type: "rm32" }]);
+
+  deepStrictEqual(imulByte.opcode, [0xf6]);
+  deepStrictEqual(imulByte.modrm, { match: { reg: 5 } });
+  deepStrictEqual(imulByte.operands, [{ kind: "modrm.rm", type: "rm8" }]);
+  deepStrictEqual(imulByte.format, { syntax: "imul {0}" });
+
+  deepStrictEqual(imulWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(imulWord.opcode, [0xf7]);
+  deepStrictEqual(imulWord.modrm, { match: { reg: 5 } });
+  deepStrictEqual(imulWord.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+
+  deepStrictEqual(imulDword.opcode, [0xf7]);
+  deepStrictEqual(imulDword.modrm, { match: { reg: 5 } });
+  deepStrictEqual(imulDword.operands, [{ kind: "modrm.rm", type: "rm32" }]);
+});
+
 test("group opcode forms use modrm.match.reg for Intel slash-digit notation", () => {
   const or = instruction("or.rm32_imm8");
   const adc = instruction("adc.rm32_imm8");
@@ -466,6 +509,8 @@ test("group opcode forms use modrm.match.reg for Intel slash-digit notation", ()
   const sub = instruction("sub.rm32_imm8");
   const not = instruction("not.rm32");
   const neg = instruction("neg.rm8");
+  const mul = instruction("mul.rm32");
+  const imul = instruction("imul.rm8");
   const shl = instruction("shl.rm32_imm8");
   const shr = instruction("shr.rm16_cl");
   const sar = instruction("sar.rm8_1");
@@ -513,6 +558,14 @@ test("group opcode forms use modrm.match.reg for Intel slash-digit notation", ()
   deepStrictEqual(neg.opcode, [0xf6]);
   deepStrictEqual(neg.modrm, { match: { reg: 3 } });
   deepStrictEqual(neg.operands, [{ kind: "modrm.rm", type: "rm8" }]);
+
+  deepStrictEqual(mul.opcode, [0xf7]);
+  deepStrictEqual(mul.modrm, { match: { reg: 4 } });
+  deepStrictEqual(mul.operands, [{ kind: "modrm.rm", type: "rm32" }]);
+
+  deepStrictEqual(imul.opcode, [0xf6]);
+  deepStrictEqual(imul.modrm, { match: { reg: 5 } });
+  deepStrictEqual(imul.operands, [{ kind: "modrm.rm", type: "rm8" }]);
 
   deepStrictEqual(shl.opcode, [0xc1]);
   deepStrictEqual(shl.modrm, { match: { reg: 4 } });

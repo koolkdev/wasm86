@@ -251,7 +251,7 @@ test("an exact narrow hit normalizes values whose high bits are unproven", () =>
   strictEqual(pending.read(gprChannel("al")), values.project(8, unproven));
   strictEqual(
     pending.read(gprChannel("al"), { signed: true }),
-    values.unary("extend8_s", unproven)
+    values.extend(8, unproven, true)
   );
 
   // A value that provably fits the channel passes through untouched.
@@ -544,7 +544,7 @@ test("narrow dynamic reads carry their byte length, bounds, and sign marker", ()
 
   // Bounds match static narrow channels: no masks or extends downstream.
   strictEqual(values.project(8, unsigned), unsigned);
-  strictEqual(values.extend(8, signed), signed);
+  strictEqual(values.extend(8, signed, true), signed);
 });
 
 test("a signed dynamic word read is the plain read", () => {

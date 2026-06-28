@@ -8,7 +8,12 @@ import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
-import { imulRegRmImmSemantic, imulRegRmSemantic } from "#x86/semantics/mul.js";
+import {
+  imulImplicitSemantic,
+  imulRegRmImmSemantic,
+  imulRegRmSemantic,
+  mulImplicitSemantic
+} from "#x86/semantics/mul.js";
 import { shiftSemantic } from "#x86/semantics/shift.js";
 import {
   leaveSemantic,
@@ -218,21 +223,22 @@ test("imul reg-rm semantics use a signed full product and explicit status flags"
   deepStrictEqual(trace.events, [
     "%0 = get op1:32",
     "%1 = get op0:32",
-    "flag CF <- %7",
+    "flag CF <- %10",
     "flag PF <- 1",
     "flag AF <- 0",
     "flag ZF <- 0",
     "flag SF <- 0",
-    "flag OF <- %7",
+    "flag OF <- %10",
     "set op0:32 <- %5",
     "next"
   ]);
-  strictEqual(trace.defs[2], "extend64.32(%1)");
-  strictEqual(trace.defs[3], "extend64.32(%0)");
+  strictEqual(trace.defs[2], "extend64.s32(%1)");
+  strictEqual(trace.defs[3], "extend64.s32(%0)");
   strictEqual(trace.defs[4], "mul64(%2, %3)");
   strictEqual(trace.defs[5], "project64.32(%4)");
-  strictEqual(trace.defs[6], "extend64.32(%5)");
-  strictEqual(trace.defs[7], "cmp64.ne(%4, %6)");
+  strictEqual(trace.defs[8], "project64.32(%7)");
+  strictEqual(trace.defs[9], "extend64.s32(%5)");
+  strictEqual(trace.defs[10], "cmp64.ne(%4, %9)");
   deepStrictEqual(statusFlagKeys(trace.flagWrites[0]!).sort(), [...x86StatusFlags].sort());
 });
 
@@ -244,10 +250,10 @@ test("imul reg-rm-imm semantics read the r/m source and immediate before writing
     "%1 = get op2:16"
   ]);
   ok(trace.events.includes("set op0:16 <- %5"));
-  strictEqual(trace.defs[2], "extend16(%0)");
-  strictEqual(trace.defs[3], "extend16(%1)");
+  strictEqual(trace.defs[2], "extend.s16(%0)");
+  strictEqual(trace.defs[3], "extend.s16(%1)");
   strictEqual(trace.defs[4], "mul(%2, %3)");
-  strictEqual(trace.defs[7], "cmp32.ne(%4, %6)");
+  strictEqual(trace.defs[9], "cmp32.ne(%4, %8)");
 });
 
 test("imul memory source is guarded and read before destination state", () => {
@@ -261,12 +267,63 @@ test("imul memory source is guarded and read before destination state", () => {
   ]);
 });
 
+test("implicit mul byte writes AX and deterministic multiply flags", () => {
+  const trace = buildSemanticTrace(mulImplicitSemantic(8), regOperands(1));
+
+  deepStrictEqual(trace.events.slice(0, 2), [
+    "%0 = get op0:8",
+    "%1 = get al:8"
+  ]);
+  ok(trace.defs.includes("extend.u8(%1)"));
+  ok(trace.defs.includes("extend.u8(%0)"));
+  ok(trace.defs.some((entry) => entry.startsWith("shr_u(")));
+  strictEqual(trace.events.some((event) => event.startsWith("set ax:16 <- ")), true);
+
+  const write = trace.flagWrites[0]!;
+
+  strictEqual(trace.value(write.CF), trace.value(write.OF));
+  strictEqual(trace.value(write.PF), "1");
+  strictEqual(trace.value(write.AF), "0");
+  strictEqual(trace.value(write.ZF), "0");
+  strictEqual(trace.value(write.SF), "0");
+});
+
+test("implicit imul dword writes EDX:EAX from a signed full product", () => {
+  const trace = buildSemanticTrace(imulImplicitSemantic(32), regOperands(1));
+
+  deepStrictEqual(trace.events.slice(0, 2), [
+    "%0 = get op0:32",
+    "%1 = get eax:32"
+  ]);
+  ok(trace.defs.includes("extend64.s32(%1)"));
+  ok(trace.defs.includes("extend64.s32(%0)"));
+  ok(trace.defs.some((entry) => entry.startsWith("shr_u64(")));
+  strictEqual(trace.events.some((event) => event.startsWith("set eax:32 <- ")), true);
+  strictEqual(trace.events.some((event) => event.startsWith("set edx:32 <- ")), true);
+
+  const write = trace.flagWrites[0]!;
+
+  strictEqual(trace.value(write.CF), trace.value(write.OF));
+  strictEqual(trace.value(write.PF), "1");
+});
+
+test("implicit multiply memory source is guarded before accumulator reads", () => {
+  const trace = buildSemanticTrace(mulImplicitSemantic(16), operands("mem"));
+
+  deepStrictEqual(trace.events.slice(0, 4), [
+    "%0 = addr op0",
+    "guard read %0:2",
+    "%1 = get op0:16",
+    "%2 = get ax:16"
+  ]);
+});
+
 test("sar semantics use signed right shift after width sign extension", () => {
   const trace = buildSemanticTrace(shiftSemantic("sar", 16, "imm8"), operands("reg", "imm"));
 
   strictEqual(trace.defs[1], "project16(%0)");
   strictEqual(trace.defs[3], "and(%2, 31)");
-  strictEqual(trace.defs[4], "extend16(%1)");
+  strictEqual(trace.defs[4], "extend.s16(%1)");
   strictEqual(trace.defs[5], "shr_s(%4, %3)");
 });
 

@@ -61,11 +61,13 @@ test("each compound kind deduplicates on its full key", () => {
   const a = table.addActionOutput();
   const b = table.external(0);
 
-  const extend = table.unary("extend8_s", a);
+  const extend = table.extend(8, a, true);
 
-  strictEqual(table.unary("extend8_s", a), extend);
+  strictEqual(table.extend(8, a, true), extend);
   notStrictEqual(table.unary("popcnt", a), extend);
-  deepStrictEqual(table.node(extend), { kind: "unary", operator: "extend8_s", value: a });
+  notStrictEqual(table.extend(16, a, true), extend);
+  notStrictEqual(table.extend(8, a, false), extend);
+  deepStrictEqual(table.node(extend), { kind: "extend", type: "i32", signed: true, width: 8, value: a });
 
   const compare = table.compare("eq", a, b);
 
@@ -90,21 +92,30 @@ test("i64 values deduplicate on their typed operation keys", () => {
   const table = new ValueTable();
   const a = table.addActionOutput();
   const b = table.external(0);
-  const extendedA = table.extend64(32, a);
-  const extendedB = table.extend64(32, b);
+  const extendedA = table.extend64(32, a, true);
+  const extendedB = table.extend64(32, b, true);
+  const zeroExtendedA = table.extend64(32, a, false);
   const product = table.binary64("mul", extendedA, extendedB);
+  const shift = table.extend64(32, table.const(32), false);
+  const high = table.binary64("shr_u", product, shift);
   const low = table.project64(32, product);
   const low16 = table.project64(16, product);
   const notEqual = table.compare64("ne", product, extendedA);
 
   strictEqual(table.valueType(a), "i32");
   strictEqual(table.valueType(extendedA), "i64");
+  strictEqual(table.valueType(zeroExtendedA), "i64");
   strictEqual(table.valueType(product), "i64");
+  strictEqual(table.valueType(high), "i64");
   strictEqual(table.valueType(low), "i32");
   strictEqual(table.valueType(notEqual), "i32");
-  strictEqual(table.extend64(32, a), extendedA);
+  strictEqual(table.extend64(32, a, true), extendedA);
+  strictEqual(table.extend64(32, a, false), zeroExtendedA);
   strictEqual(table.binary64("mul", extendedA, extendedB), product);
+  strictEqual(table.binary64("shr_u", product, shift), high);
   notStrictEqual(table.binary64("mul", extendedB, extendedA), product);
+  notStrictEqual(table.extend64(16, a, false), zeroExtendedA);
+  notStrictEqual(table.extend64(32, a, false), extendedA);
   strictEqual(table.project64(32, product), low);
   notStrictEqual(table.project64(16, product), low);
   strictEqual(table.compare64("ne", product, extendedA), notEqual);
@@ -112,9 +123,12 @@ test("i64 values deduplicate on their typed operation keys", () => {
   strictEqual(table.compare64("eq", product, product), table.const(1));
   strictEqual(table.compare64("ne", product, product), table.const(0));
   strictEqual(table.project64(32, extendedA), a);
+  strictEqual(table.project64(32, zeroExtendedA), a);
 
-  deepStrictEqual(table.node(extendedA), { kind: "extend64", width: 32, value: a });
+  deepStrictEqual(table.node(extendedA), { kind: "extend", type: "i64", signed: true, width: 32, value: a });
+  deepStrictEqual(table.node(zeroExtendedA), { kind: "extend", type: "i64", signed: false, width: 32, value: a });
   deepStrictEqual(table.node(product), { kind: "binary", type: "i64", operator: "mul", a: extendedA, b: extendedB });
+  deepStrictEqual(table.node(high), { kind: "binary", type: "i64", operator: "shr_u", a: product, b: shift });
   deepStrictEqual(table.node(low), { kind: "project", sourceType: "i64", width: 32, value: product });
   deepStrictEqual(table.node(low16), { kind: "project", sourceType: "i64", width: 16, value: product });
   deepStrictEqual(table.node(notEqual), { kind: "compare", type: "i64", operator: "ne", a: product, b: extendedA });
@@ -168,9 +182,16 @@ test("binary operations fold local identities", () => {
 test("unary operations fold constants", () => {
   const table = new ValueTable();
 
-  strictEqual(table.unary("extend8_s", table.const(0x80)), table.const(-0x80));
-  strictEqual(table.unary("extend16_s", table.const(0x8000)), table.const(-0x8000));
   strictEqual(table.unary("popcnt", table.const(0xf0f0)), table.const(8));
+});
+
+test("extend folds constants", () => {
+  const table = new ValueTable();
+
+  strictEqual(table.extend(8, table.const(0x80), true), table.const(-0x80));
+  strictEqual(table.extend(16, table.const(0x8000), true), table.const(-0x8000));
+  strictEqual(table.extend(8, table.const(0xff), false), table.const(0xff));
+  strictEqual(table.extend(8, table.const(-1), false), table.const(0xff));
 });
 
 test("compares fold constants and same-value predicates", () => {
@@ -223,22 +244,25 @@ test("external leaves deduplicate by external id", () => {
 test("compound nodes reject unknown children", () => {
   const table = new ValueTable();
   const a = table.const(1);
-  const wide = table.extend64(32, a);
+  const wide = table.extend64(32, a, true);
 
   throws(() => table.binary("add", a, 99), /unknown value id 99/);
   throws(() => table.unary("popcnt", 99), /unknown value id 99/);
   throws(() => table.select(99, a, a), /unknown value id 99/);
   throws(() => table.project(8, 99), /unknown value id 99/);
-  throws(() => table.extend(8, 99), /unknown value id 99/);
-  throws(() => table.extend64(32, 99), /unknown value id 99/);
+  throws(() => table.extend(8, 99, true), /unknown value id 99/);
+  throws(() => table.extend64(32, 99, true), /unknown value id 99/);
+  throws(() => table.extend64(32, 99, false), /unknown value id 99/);
   throws(() => table.binary64("mul", wide, 99), /unknown value id 99/);
   throws(() => table.project64(32, 99), /unknown value id 99/);
   throws(() => table.binary("add", wide, a), /value \d+ must be i32, got i64/);
   throws(() => table.project(8, wide), /value \d+ must be i32, got i64/);
   throws(() => table.binary64("mul", wide, a), /value \d+ must be i64, got i32/);
+  throws(() => table.binary64("shr_u", wide, a), /value \d+ must be i64, got i32/);
   throws(() => table.compare64("ne", wide, a), /value \d+ must be i64, got i32/);
   throws(() => table.project64(32, a), /value \d+ must be i64, got i32/);
-  throws(() => table.extend64(32, wide), /value \d+ must be i32, got i64/);
+  throws(() => table.extend64(32, wide, true), /value \d+ must be i32, got i64/);
+  throws(() => table.extend64(32, wide, false), /value \d+ must be i32, got i64/);
 });
 
 test("project folds constants and elides projections covered by bounds", () => {
@@ -255,25 +279,25 @@ test("project folds constants and elides projections covered by bounds", () => {
 test("extend folds constants and elides extensions covered by bounds", () => {
   const table = new ValueTable();
 
-  strictEqual(table.extend(8, table.const(127)), table.const(127));
-  strictEqual(table.extend(8, table.const(-128)), table.const(-128));
-  strictEqual(table.extend(32, table.const(0x12345678)), table.const(0x12345678));
-  strictEqual(table.extend(8, table.const(128)), table.const(-128));
-  strictEqual(table.extend(8, table.const(-129)), table.const(127));
-  strictEqual(table.extend(16, table.const(0x8000)), table.const(-0x8000));
+  strictEqual(table.extend(8, table.const(127), true), table.const(127));
+  strictEqual(table.extend(8, table.const(-128), true), table.const(-128));
+  strictEqual(table.extend(32, table.const(0x12345678), true), table.const(0x12345678));
+  strictEqual(table.extend(8, table.const(128), true), table.const(-128));
+  strictEqual(table.extend(8, table.const(-129), true), table.const(127));
+  strictEqual(table.extend(16, table.const(0x8000), true), table.const(-0x8000));
 });
 
 test("compare results fit a single bit either way", () => {
   const table = new ValueTable();
   const compare = table.compare("eq", table.addActionOutput(), table.external(0));
-  const wide = table.extend64(32, table.addActionOutput());
-  const product = table.binary64("mul", wide, table.extend64(32, table.external(1)));
+  const wide = table.extend64(32, table.addActionOutput(), true);
+  const product = table.binary64("mul", wide, table.extend64(32, table.external(1), true));
   const i64Compare = table.compare64("ne", wide, product);
 
   strictEqual(table.project(8, compare), compare);
-  strictEqual(table.extend(8, compare), compare);
+  strictEqual(table.extend(8, compare, true), compare);
   strictEqual(table.project(8, i64Compare), i64Compare);
-  strictEqual(table.extend(8, i64Compare), i64Compare);
+  strictEqual(table.extend(8, i64Compare, true), i64Compare);
 });
 
 test("projections and extensions cover follow-up requests they imply", () => {
@@ -283,12 +307,12 @@ test("projections and extensions cover follow-up requests they imply", () => {
 
   // An 8-bit projection fits unsigned 16 and is sign-extended from 9 bits up.
   strictEqual(table.project(16, low8), low8);
-  strictEqual(table.extend(16, low8), low8);
-  strictEqual(table.node(table.extend(8, low8)).kind, "unary");
+  strictEqual(table.extend(16, low8, true), low8);
+  strictEqual(table.node(table.extend(8, low8, true)).kind, "extend");
 
-  const extended = table.unary("extend8_s", unproven);
+  const extended = table.extend(8, unproven, true);
 
-  strictEqual(table.extend(16, extended), extended);
+  strictEqual(table.extend(16, extended, true), extended);
   strictEqual(table.node(table.project(8, extended)).kind, "project");
 });
 
@@ -297,18 +321,18 @@ test("action outputs carry their declared bounds", () => {
   const byteRead = table.addActionOutput(fitsUnsigned(8));
 
   strictEqual(table.project(8, byteRead), byteRead);
-  strictEqual(table.node(table.extend(8, byteRead)).kind, "unary");
+  strictEqual(table.node(table.extend(8, byteRead, true)).kind, "extend");
 
   const signedRead = table.addActionOutput(signExtended(8));
 
-  strictEqual(table.extend(8, signedRead), signedRead);
-  strictEqual(table.extend(16, signedRead), signedRead);
+  strictEqual(table.extend(8, signedRead, true), signedRead);
+  strictEqual(table.extend(16, signedRead, true), signedRead);
   strictEqual(table.node(table.project(8, signedRead)).kind, "project");
 
   const opaque = table.addActionOutput();
 
   strictEqual(table.node(table.project(8, opaque)).kind, "project");
-  strictEqual(table.node(table.extend(8, opaque)).kind, "unary");
+  strictEqual(table.node(table.extend(8, opaque, true)).kind, "extend");
 });
 
 test("unbounded results stay wrapped", () => {
@@ -318,9 +342,9 @@ test("unbounded results stay wrapped", () => {
   const signedShift = table.binary("shr_s", byte, table.const(2));
 
   strictEqual(table.node(table.project(8, sum)).kind, "project");
-  strictEqual(table.node(table.extend(16, sum)).kind, "unary");
+  strictEqual(table.node(table.extend(16, sum, true)).kind, "extend");
   strictEqual(table.node(table.project(8, signedShift)).kind, "project");
-  strictEqual(table.node(table.extend(16, signedShift)).kind, "unary");
+  strictEqual(table.node(table.extend(16, signedShift, true)).kind, "extend");
 });
 
 test("bitwise results inherit their operands' bounds", () => {
@@ -345,7 +369,7 @@ test("bitwise results inherit their operands' bounds", () => {
   const signedByte = table.addActionOutput(signExtended(8));
   const inverted = table.binary("xor", signedByte, table.const(-1));
 
-  strictEqual(table.extend(8, inverted), inverted);
+  strictEqual(table.extend(8, inverted, true), inverted);
   strictEqual(table.node(table.project(8, inverted)).kind, "project");
 });
 
@@ -355,7 +379,7 @@ test("a select is bounded by the weaker of its arms", () => {
   const bit = table.select(condition, table.const(1), table.const(0));
 
   strictEqual(table.project(8, bit), bit);
-  strictEqual(table.extend(8, bit), bit);
+  strictEqual(table.extend(8, bit, true), bit);
 
   const wide = table.select(condition, table.const(1), table.const(0x100));
 

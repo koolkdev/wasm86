@@ -98,6 +98,95 @@ test("executes IMUL immediate forms with signed immediates", async () => {
   deepStrictEqual(wasmCpuStatusFlagsOf(imm8.state), imulNoOverflowFlags);
 });
 
+test("executes implicit MUL byte form into AX", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0xaaaa_0012,
+    ebx: 3,
+    eip: startAddress,
+    ...allFlagsSet,
+    instructionCount: 7
+  });
+
+  const { exit, state } = await executeInstruction([0xf6, 0xe3], initialState);
+
+  assertSingleInstructionExit(exit);
+  strictEqual(state.eax, 0xaaaa_0036);
+  strictEqual(state.ebx, initialState.ebx);
+  assertCompletedInstruction(state, startAddress + 2, 8);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), imulNoOverflowFlags);
+});
+
+test("executes overflowing implicit MUL word form into DX:AX", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0xaaaa_ffff,
+    ebx: 2,
+    edx: 0xbbbb_1234,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { exit, state } = await executeInstruction([0x66, 0xf7, 0xe3], initialState);
+
+  assertSingleInstructionExit(exit);
+  strictEqual(state.eax, 0xaaaa_fffe);
+  strictEqual(state.edx, 0xbbbb_0001);
+  assertCompletedInstruction(state, startAddress + 3, 8);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), imulOverflowFlags);
+});
+
+test("executes implicit MUL dword form into EDX:EAX", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0xffff_ffff,
+    ebx: 2,
+    edx: 0x1234_5678,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { exit, state } = await executeInstruction([0xf7, 0xe3], initialState);
+
+  assertSingleInstructionExit(exit);
+  strictEqual(state.eax, 0xffff_fffe);
+  strictEqual(state.edx, 1);
+  assertCompletedInstruction(state, startAddress + 2, 8);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), imulOverflowFlags);
+});
+
+test("executes implicit IMUL byte form with a negative product", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0xaaaa_00fe,
+    ebx: 3,
+    eip: startAddress,
+    ...allFlagsSet,
+    instructionCount: 7
+  });
+
+  const { exit, state } = await executeInstruction([0xf6, 0xeb], initialState);
+
+  assertSingleInstructionExit(exit);
+  strictEqual(state.eax, 0xaaaa_fffa);
+  assertCompletedInstruction(state, startAddress + 2, 8);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), imulNoOverflowFlags);
+});
+
+test("executes overflowing implicit IMUL dword form into EDX:EAX", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0x4000_0000,
+    ebx: 2,
+    edx: 0x1234_5678,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { exit, state } = await executeInstruction([0xf7, 0xeb], initialState);
+
+  assertSingleInstructionExit(exit);
+  strictEqual(state.eax, 0x8000_0000);
+  strictEqual(state.edx, 0);
+  assertCompletedInstruction(state, startAddress + 2, 8);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), imulOverflowFlags);
+});
+
 test("faulting IMUL memory source leaves destination and flags unchanged", async () => {
   const faultAddress = 0x1_0000;
   const initialState = createWasmCpuStateSnapshot({
@@ -113,6 +202,27 @@ test("faulting IMUL memory source leaves destination and flags unchanged", async
   deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: faultAddress, detail: 4 });
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
+  assertCompletedInstruction(state, startAddress, 7);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
+});
+
+test("faulting implicit MUL memory source leaves accumulator, high register, and flags unchanged", async () => {
+  const faultAddress = 0x1_0000;
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0x1234_5678,
+    ebx: faultAddress,
+    edx: 0x89ab_cdef,
+    eip: startAddress,
+    ...allFlagsSet,
+    instructionCount: 7
+  });
+
+  const { exit, state } = await executeInstruction([0xf7, 0x23], initialState);
+
+  deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: faultAddress, detail: 4 });
+  strictEqual(state.eax, initialState.eax);
+  strictEqual(state.ebx, initialState.ebx);
+  strictEqual(state.edx, initialState.edx);
   assertCompletedInstruction(state, startAddress, 7);
   deepStrictEqual(wasmCpuStatusFlagsOf(state), allFlagsSet);
 });

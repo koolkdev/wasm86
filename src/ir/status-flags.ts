@@ -292,7 +292,7 @@ export class StatusFlags {
 
   #compare(width: SimpleFlagSource<ValueId>["width"], operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
     const lower = signedComparePredicates.has(operator)
-      ? (id: ValueId) => this.#values.extend(width, id)
+      ? (id: ValueId) => this.#values.extend(width, id, true)
       : (id: ValueId) => this.#values.project(width, id);
 
     return this.#values.compare(operator, lower(a), lower(b));

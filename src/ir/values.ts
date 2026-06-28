@@ -65,7 +65,13 @@ export type ProjectValueNode = Readonly<{
   width: OperandWidth;
   value: ValueId;
 }>;
-export type Extend64ValueNode = Readonly<{ kind: "extend64"; width: OperandWidth; value: ValueId }>;
+export type ExtendValueNode = Readonly<{
+  kind: "extend";
+  type: ValueType;
+  signed: boolean;
+  width: OperandWidth;
+  value: ValueId;
+}>;
 export type HelperCallKey = Readonly<{ kind: "lazyFlag"; flag: X86StatusFlag }>;
 export type HelperCallValueNode = Readonly<{ kind: "helperCall"; helper: HelperCallKey }>;
 
@@ -78,7 +84,7 @@ export type ValueNode =
   | CompareValueNode
   | SelectValueNode
   | ProjectValueNode
-  | Extend64ValueNode
+  | ExtendValueNode
   | HelperCallValueNode;
 
 // What is provably known about a node's value: the smallest width it fits
@@ -116,7 +122,7 @@ export class ValueTable {
   readonly #compareIds: Map4<ValueType, CompareOperator, ValueId, ValueId, ValueId> = new Map();
   readonly #selectIds: Map3<ValueId, ValueId, ValueId, ValueId> = new Map();
   readonly #projectIds: Map3<ValueType, OperandWidth, ValueId, ValueId> = new Map();
-  readonly #extend64Ids: Map2<OperandWidth, ValueId, ValueId> = new Map();
+  readonly #extendIds: Map4<ValueType, boolean, OperandWidth, ValueId, ValueId> = new Map();
 
   node(id: ValueId): ValueNode {
     const found = this.#nodes[id];
@@ -225,24 +231,25 @@ export class ValueTable {
 
     const node = this.node(value);
 
-    return node.kind === "extend64" && node.width === width
+    return node.kind === "extend" && node.type === "i64" && node.width === width
       ? this.project(width, node.value)
       : this.#internProject("i64", width, value);
   }
 
-  extend(width: OperandWidth, value: ValueId): ValueId {
+  extend(width: OperandWidth, value: ValueId, signed: boolean): ValueId {
     this.#assertKnownChildren([value]);
     this.#assertValueType(value, "i32");
 
-    return foldExtend(this.#foldContext(), width, value) ??
-      this.#internUnary(width === 8 ? "extend8_s" : "extend16_s", value);
+    const fold = signed ? foldExtend : foldProject;
+
+    return fold(this.#foldContext(), width, value) ?? this.#internExtend("i32", signed, width, value);
   }
 
-  extend64(width: OperandWidth, value: ValueId): ValueId {
+  extend64(width: OperandWidth, value: ValueId, signed: boolean): ValueId {
     this.#assertKnownChildren([value]);
     this.#assertValueType(value, "i32");
 
-    return this.#internExtend64(width, value);
+    return this.#internExtend("i64", signed, width, value);
   }
 
   #add(node: ValueNode, children: readonly ValueId[]): ValueId {
@@ -362,16 +369,16 @@ export class ValueTable {
     return id;
   }
 
-  #internExtend64(width: OperandWidth, value: ValueId): ValueId {
-    const existing = get2(this.#extend64Ids, width, value);
+  #internExtend(type: ValueType, signed: boolean, width: OperandWidth, value: ValueId): ValueId {
+    const existing = get4(this.#extendIds, type, signed, width, value);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = this.#add({ kind: "extend64", width, value }, [value]);
+    const id = this.#add({ kind: "extend", type, signed, width, value }, [value]);
 
-    put2(this.#extend64Ids, width, value, id);
+    put4(this.#extendIds, type, signed, width, value, id);
     return id;
   }
 
@@ -432,8 +439,9 @@ export class ValueTable {
         return node.sourceType === "i32"
           ? fitsUnsigned(Math.min(node.width, widthBoundsOf(node.value).unsignedBits))
           : fitsUnsigned(node.width);
-      case "extend64":
-        assert(false, "width bounds requested for i64 extension value");
+      case "extend":
+        assert(node.type === "i32", "width bounds requested for i64 extension value");
+        return ValueTable.#extendWidthBounds(node, widthBoundsOf);
       case "helperCall":
         return ValueTable.#helperCallWidthBounds(node.helper);
     }
@@ -486,16 +494,23 @@ export class ValueTable {
 
   static #unaryWidthBounds(
     node: UnaryValueNode,
-    widthBoundsOf: (id: ValueId) => WidthBounds
+    _widthBoundsOf: (id: ValueId) => WidthBounds
   ): WidthBounds {
     switch (node.operator) {
-      case "extend8_s":
-        return signExtended(Math.min(8, widthBoundsOf(node.value).signedBits));
-      case "extend16_s":
-        return signExtended(Math.min(16, widthBoundsOf(node.value).signedBits));
       case "popcnt":
         return unbounded;
     }
+  }
+
+  static #extendWidthBounds(
+    node: ExtendValueNode,
+    widthBoundsOf: (id: ValueId) => WidthBounds
+  ): WidthBounds {
+    const childBounds = widthBoundsOf(node.value);
+
+    return node.signed
+      ? signExtended(Math.min(node.width, childBounds.signedBits))
+      : fitsUnsigned(Math.min(node.width, childBounds.unsignedBits));
   }
 
   static #helperCallWidthBounds(helper: HelperCallKey): WidthBounds {
@@ -518,8 +533,8 @@ export class ValueTable {
     switch (node.kind) {
       case "binary":
         return node.type;
-      case "extend64":
-        return "i64";
+      case "extend":
+        return node.type;
       case "const":
       case "actionOutput":
       case "external":

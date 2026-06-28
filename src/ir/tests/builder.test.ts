@@ -541,8 +541,8 @@ test("narrow signed compares sign-extend both operands", () => {
   );
   const compare = v.compare(
     "lt_s",
-    v.unary("extend8_s", reads[0]!.output),
-    v.unary("extend8_s", reads[1]!.output)
+    v.extend(8, reads[0]!.output, true),
+    v.extend(8, reads[1]!.output, true)
   );
 
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, compare);
@@ -813,8 +813,8 @@ test("jcc after 16-bit cmp source sign-extends operands for signed direct condit
   );
   const condition = v.compare(
     "lt_s",
-    v.unary("extend16_s", reads[0]!.output),
-    v.unary("extend16_s", reads[1]!.output)
+    v.extend(16, reads[0]!.output, true),
+    v.extend(16, reads[1]!.output, true)
   );
 
   strictEqual(branchAction(block).condition, condition);
@@ -837,8 +837,8 @@ test("jcc after 8-bit cmp source sign-extends operands for signed direct conditi
   );
   const condition = v.compare(
     "ge_s",
-    v.unary("extend8_s", reads[0]!.output),
-    v.unary("extend8_s", reads[1]!.output)
+    v.extend(8, reads[0]!.output, true),
+    v.extend(8, reads[1]!.output, true)
   );
 
   strictEqual(branchAction(block).condition, condition);
@@ -861,7 +861,7 @@ test("jcc after 16-bit cmp immediate source sign-extends immediates for signed d
   )!.output;
   const condition = v.compare(
     "le_s",
-    v.unary("extend16_s", ax),
+    v.extend(16, ax, true),
     v.const(-0x8000)
   );
 
@@ -2227,8 +2227,10 @@ test("a signed immExternal get sign-extends instead of masking", () => {
   const write = stateWrites(block).find((entry) => entry.slot === gprChannel("eax"));
 
   deepStrictEqual(v.node(write!.value), {
-    kind: "unary",
-    operator: "extend8_s",
+    kind: "extend",
+    type: "i32",
+    signed: true,
+    width: 8,
     value: v.external(0)
   });
 });

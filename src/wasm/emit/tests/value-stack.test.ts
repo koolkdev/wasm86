@@ -305,7 +305,8 @@ test("operators map to their wasm opcodes", () => {
   const unsignedShifted = values.binary("shr_u", one, two);
   const mixed = values.binary("xor", shifted, values.binary("xor", signedShifted, unsignedShifted));
   const product = values.binary("mul", one, two);
-  const extended = values.unary("extend16_s", values.unary("extend8_s", one));
+  const extended8 = values.extend(8, one, true);
+  const extended16 = values.extend(16, two, true);
   const masked = values.binary("sub", values.binary("and", one, two), values.binary("or", one, two));
   const equal = values.compare("eq", one, two);
   const signed = values.compare("ge_s", one, two);
@@ -314,7 +315,8 @@ test("operators map to their wasm opcodes", () => {
     entryRegion([
       { kind: "writeState", slot: gprChannel("eax"), value: mixed },
       { kind: "writeState", slot: gprChannel("esi"), value: product },
-      { kind: "writeState", slot: gprChannel("ebx"), value: extended },
+      { kind: "writeState", slot: gprChannel("ebx"), value: extended8 },
+      { kind: "writeState", slot: gprChannel("edi"), value: extended16 },
       { kind: "writeState", slot: gprChannel("ecx"), value: masked },
       { kind: "writeState", slot: gprChannel("edx"), value: equal },
       { kind: "writeState", slot: gprChannel("esi"), value: signed }
@@ -324,7 +326,8 @@ test("operators map to their wasm opcodes", () => {
 
   valueStack.emitUse(mixed);
   valueStack.emitUse(product);
-  valueStack.emitUse(extended);
+  valueStack.emitUse(extended8);
+  valueStack.emitUse(extended16);
   valueStack.emitUse(masked);
   valueStack.emitUse(equal);
   valueStack.emitUse(signed);
@@ -347,6 +350,7 @@ test("operators map to their wasm opcodes", () => {
     wasmOpcode.i32Mul,
     wasmOpcode.localGet,
     wasmOpcode.i32Extend8S,
+    wasmOpcode.localGet,
     wasmOpcode.i32Extend16S,
     wasmOpcode.localGet,
     wasmOpcode.localGet,
@@ -369,15 +373,15 @@ test("signed multiply overflow expressions lower through typed i64 products", ()
   const values = new ValueTable();
   const one = values.external(0);
   const two = values.external(1);
-  const left16 = values.extend64(16, one);
-  const right16 = values.extend64(16, two);
+  const left16 = values.extend64(16, one, true);
+  const right16 = values.extend64(16, two, true);
   const product16 = values.binary64("mul", left16, right16);
-  const truncated16 = values.extend64(16, values.project64(16, product16));
+  const truncated16 = values.extend64(16, values.project64(16, product16), true);
   const overflow16 = values.compare64("ne", product16, truncated16);
-  const left32 = values.extend64(32, one);
-  const right32 = values.extend64(32, two);
+  const left32 = values.extend64(32, one, true);
+  const right32 = values.extend64(32, two, true);
   const product32 = values.binary64("mul", left32, right32);
-  const truncated32 = values.extend64(32, values.project64(32, product32));
+  const truncated32 = values.extend64(32, values.project64(32, product32), true);
   const overflow32 = values.compare64("ne", product32, truncated32);
   const { body, scratch, valueStack } = createTestEmitter(
     values,
@@ -428,8 +432,8 @@ test("signed multiply overflow expressions lower through typed i64 products", ()
 
 test("unsupported i64 operators fail at wasm lowering", () => {
   const values = new ValueTable();
-  const one = values.extend64(32, values.external(0));
-  const two = values.extend64(32, values.external(1));
+  const one = values.extend64(32, values.external(0), true);
+  const two = values.extend64(32, values.external(1), true);
   const sum = values.binary64("add", one, two);
   const equal = values.compare64("eq", one, two);
   const sumEmitter = createTestEmitter(

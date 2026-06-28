@@ -139,6 +139,9 @@ export function wasmBodyOpcodes(functionBody: Uint8Array<ArrayBuffer>): readonly
       case wasmOpcode.i32ShrU:
       case wasmOpcode.i64Mul:
       case wasmOpcode.i64Or:
+      case wasmOpcode.i64Shl:
+      case wasmOpcode.i64ShrS:
+      case wasmOpcode.i64ShrU:
       case wasmOpcode.i32WrapI64:
       case wasmOpcode.i64ExtendI32S:
       case wasmOpcode.i64ExtendI32U:
@@ -313,6 +316,9 @@ export function wasmBodyMemoryAccesses(functionBody: Uint8Array<ArrayBuffer>): r
       case wasmOpcode.i32ShrU:
       case wasmOpcode.i64Mul:
       case wasmOpcode.i64Or:
+      case wasmOpcode.i64Shl:
+      case wasmOpcode.i64ShrS:
+      case wasmOpcode.i64ShrU:
       case wasmOpcode.i32WrapI64:
       case wasmOpcode.i64ExtendI32S:
       case wasmOpcode.i64ExtendI32U:

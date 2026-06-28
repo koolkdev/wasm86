@@ -5,7 +5,7 @@ import { CMP, TEST } from "./defs/cmp-test.js";
 import { LEA } from "./defs/lea.js";
 import { INT, NOP } from "./defs/misc.js";
 import { CMOVCC, MOV, MOVSX, MOVZX } from "./defs/mov.js";
-import { IMUL } from "./defs/mul.js";
+import { IMUL, MUL } from "./defs/mul.js";
 import { SETCC } from "./defs/setcc.js";
 import { SAR, SHL, SHR } from "./defs/shift.js";
 import { LEAVE, POP, POPA, POPAD, POPF, POPFD, PUSH, PUSHA, PUSHAD, PUSHF, PUSHFD } from "./defs/stack.js";
@@ -33,6 +33,7 @@ export const X86_32_CORE = defineIsa({
     DEC,
     NOT,
     NEG,
+    MUL,
     IMUL,
     SHL,
     SHR,

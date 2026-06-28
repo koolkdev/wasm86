@@ -5,7 +5,7 @@ import type { EdgeRegion } from "#ir/block.js";
 import type {
   BinaryValueNode,
   CompareValueNode,
-  Extend64ValueNode,
+  ExtendValueNode,
   HelperCallValueNode,
   ProjectValueNode,
   SelectValueNode,
@@ -14,7 +14,6 @@ import type {
   ValueType,
   ValueTable
 } from "#ir/values.js";
-import type { UnaryOperator } from "#x86/semantics/ops.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -63,7 +62,7 @@ type CompoundValueNode =
   | CompareValueNode
   | SelectValueNode
   | ProjectValueNode
-  | Extend64ValueNode
+  | ExtendValueNode
   | HelperCallValueNode;
 
 export function createValueStack(context: ValueStackContext): ValueStack {
@@ -120,7 +119,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         return;
       case "unary":
         emitUse(node.value);
-        emitUnaryOperator(body, node.operator);
+        emitUnaryOperator(body, node);
         return;
       case "compare": {
         // eq against zero is wasm's eqz; the other zero compares have no
@@ -148,9 +147,9 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         emitUse(node.value);
         emitProjection(body, node);
         return;
-      case "extend64":
+      case "extend":
         emitUse(node.value);
-        emitExtend64(body, node.width);
+        emitExtend(body, node);
         return;
       case "helperCall": {
         const displayName = helperFunctionName(node.helper);
@@ -320,6 +319,15 @@ function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryValueNode
       case "mul":
         body.i64Mul();
         return;
+      case "shl":
+        body.i64Shl();
+        return;
+      case "shr_s":
+        body.i64ShrS();
+        return;
+      case "shr_u":
+        body.i64ShrU();
+        return;
     }
 
     assert(false, `unsupported i64 binary operator ${node.operator}`);
@@ -356,17 +364,38 @@ function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryValueNode
   }
 }
 
-function emitUnaryOperator(body: WasmFunctionBodyEncoder, operator: UnaryOperator): void {
-  switch (operator) {
-    case "extend8_s":
-      body.i32Extend8S();
-      return;
-    case "extend16_s":
-      body.i32Extend16S();
-      return;
+function emitUnaryOperator(body: WasmFunctionBodyEncoder, node: UnaryValueNode): void {
+  switch (node.operator) {
     case "popcnt":
       body.i32Popcnt();
       return;
+  }
+}
+
+function emitExtend(body: WasmFunctionBodyEncoder, node: ExtendValueNode): void {
+  if (!node.signed) {
+    emitProjectionFromI32(body, node.width);
+
+    if (node.type === "i64") {
+      body.i64ExtendI32U();
+    }
+
+    return;
+  }
+
+  switch (node.width) {
+    case 8:
+      body.i32Extend8S();
+      break;
+    case 16:
+      body.i32Extend16S();
+      break;
+    case 32:
+      break;
+  }
+
+  if (node.type === "i64") {
+    body.i64ExtendI32S();
   }
 }
 
@@ -429,7 +458,11 @@ function emitProjection(body: WasmFunctionBodyEncoder, node: ProjectValueNode): 
     body.i32WrapI64();
   }
 
-  switch (node.width) {
+  emitProjectionFromI32(body, node.width);
+}
+
+function emitProjectionFromI32(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
+  switch (width) {
     case 32:
       // A full-width projection is the value itself.
       return;
@@ -440,19 +473,4 @@ function emitProjection(body: WasmFunctionBodyEncoder, node: ProjectValueNode): 
       body.i32Const(0xff).i32And();
       return;
   }
-}
-
-function emitExtend64(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
-  switch (width) {
-    case 8:
-      body.i32Extend8S();
-      break;
-    case 16:
-      body.i32Extend16S();
-      break;
-    case 32:
-      break;
-  }
-
-  body.i64ExtendI32S();
 }

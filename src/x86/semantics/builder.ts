@@ -58,12 +58,12 @@ export interface SemanticsBuilder {
   unary(operator: UnaryOperator, value: ValueInput): Value;
   select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value;
   project(width: OperandWidth, value: ValueInput): Value;
-  extend(width: OperandWidth, value: ValueInput): Value;
+  extend(width: OperandWidth, value: ValueInput, signed: boolean): Value;
   compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value;
   binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value;
   compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value;
   project64(width: OperandWidth, value: ValueInput): Value;
-  extend64(width: OperandWidth, value: ValueInput): Value;
+  extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value;
 
   readFlag(flag: X86Flag): Value;
   writeFlag(flag: X86Flag, value: ValueInput): void;

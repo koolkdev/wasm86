@@ -239,10 +239,6 @@ function evalBinary(operator: BinaryOperator, a: number, b: number): number {
 
 function evalUnary(operator: UnaryOperator, value: number): number {
   switch (operator) {
-    case "extend8_s":
-      return extendConst(8, value);
-    case "extend16_s":
-      return extendConst(16, value);
     case "popcnt":
       return popCount32(value);
   }
