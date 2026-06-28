@@ -186,6 +186,12 @@ function decodeOperand(
         : { kind: "ok", binding: registerBinding(operandWidth(operand.type), expanded.opcodeLowBits), cursor };
     case "implicit.reg":
       return { kind: "ok", binding: { kind: "reg", alias: registerAlias(operand.reg) }, cursor };
+    case "moffs":
+      return {
+        kind: "ok",
+        binding: { kind: "mem", accessWidth: operand.width, scale: 1, disp: readU32LE(reader, cursor) },
+        cursor: cursor + 4
+      };
     case "imm": {
       const immediate = readImmediate(reader, cursor, operand.width, operand.extension);
       const semanticWidth = operand.semanticWidth ?? operand.width;

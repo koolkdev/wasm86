@@ -154,6 +154,130 @@ test("executes MOV r32, [disp32]", async () => {
   assertCompletedInstruction(state, startAddress + 6, 8);
 });
 
+test("executes MOV AL/AX/EAX from direct offsets without modifying flags", async () => {
+  const cases = [
+    {
+      name: "al",
+      bytes: [0xa0, ...disp32(0x20)],
+      eax: 0xaaaa_aa00,
+      setup: (guest: DataView) => guest.setUint8(0x20, 0x7f),
+      expectedEax: 0xaaaa_aa7f
+    },
+    {
+      name: "ax",
+      bytes: [0x66, 0xa1, ...disp32(0x22)],
+      eax: 0xaaaa_0000,
+      setup: (guest: DataView) => guest.setUint16(0x22, 0xbeef, true),
+      expectedEax: 0xaaaa_beef
+    },
+    {
+      name: "eax",
+      bytes: [0xa1, ...disp32(0x24)],
+      eax: 0,
+      setup: (guest: DataView) => guest.setUint32(0x24, 0xc001_cafe, true),
+      expectedEax: 0xc001_cafe
+    }
+  ] as const;
+
+  for (const entry of cases) {
+    const initialState = createWasmCpuStateSnapshot({
+      eax: entry.eax,
+      ...allFlagsSet,
+      eip: startAddress,
+      instructionCount: 7
+    });
+
+    const { exit, state } = await executeMemoryInstruction(entry.bytes, initialState, entry.setup);
+
+    assertSingleInstructionExit(exit);
+    strictEqual(state.eax, entry.expectedEax, entry.name);
+    deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(initialState), entry.name);
+    assertCompletedInstruction(state, startAddress + entry.bytes.length, 8);
+  }
+});
+
+test("executes MOV direct offsets from AL/AX/EAX without modifying flags", async () => {
+  const cases = [
+    {
+      name: "al",
+      bytes: [0xa2, ...disp32(0x20)],
+      eax: 0xaaaa_aa7f,
+      read: (guest: DataView) => guest.getUint8(0x20),
+      expected: 0x7f
+    },
+    {
+      name: "ax",
+      bytes: [0x66, 0xa3, ...disp32(0x22)],
+      eax: 0xaaaa_beef,
+      read: (guest: DataView) => guest.getUint16(0x22, true),
+      expected: 0xbeef
+    },
+    {
+      name: "eax",
+      bytes: [0xa3, ...disp32(0x24)],
+      eax: 0xc001_cafe,
+      read: (guest: DataView) => guest.getUint32(0x24, true),
+      expected: 0xc001_cafe
+    }
+  ] as const;
+
+  for (const entry of cases) {
+    const initialState = createWasmCpuStateSnapshot({
+      eax: entry.eax,
+      ...allFlagsSet,
+      eip: startAddress,
+      instructionCount: 7
+    });
+
+    const { interpreter, exit, state } = await executeMemoryInstruction(entry.bytes, initialState);
+
+    assertSingleInstructionExit(exit);
+    strictEqual(entry.read(interpreter.guestView), entry.expected, entry.name);
+    strictEqual(state.eax, initialState.eax, entry.name);
+    deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(initialState), entry.name);
+    assertCompletedInstruction(state, startAddress + entry.bytes.length, 8);
+  }
+});
+
+test("MOV EAX from a direct offset read fault leaves architectural state unchanged", async () => {
+  const faultAddress = 0x1_0000 - 2;
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0xaaaa_aaaa,
+    ...allFlagsSet,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { interpreter, exit } = await executeMemoryInstruction([0xa1, ...disp32(faultAddress)], initialState);
+
+  deepStrictEqual(exit, {
+    exitReason: ExitReason.MEMORY_READ_FAULT,
+    payload: faultAddress,
+    detail: 4
+  });
+  assertInterpreterStateEquals(interpreter.stateView, initialState);
+});
+
+test("MOV direct offset from EAX write fault leaves architectural state unchanged", async () => {
+  const faultAddress = 0x1_0000 - 2;
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0x1234_5678,
+    ...allFlagsSet,
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { interpreter, exit } = await executeMemoryInstruction([0xa3, ...disp32(faultAddress)], initialState);
+
+  deepStrictEqual(exit, {
+    exitReason: ExitReason.MEMORY_WRITE_FAULT,
+    payload: faultAddress,
+    detail: 4
+  });
+  strictEqual(interpreter.guestView.getUint32(0x1_0000 - 4, true), 0);
+  assertInterpreterStateEquals(interpreter.stateView, initialState);
+});
+
 test("memory read guards report 1, 2, and 4 byte fault ranges", async () => {
   for (const width of [8, 16, 32] as const) {
     const faultAddress = 0x1_0000 - width / 8 + 1;

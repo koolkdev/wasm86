@@ -24,6 +24,10 @@ export function implicitReg(reg: RegName): OperandSpec {
   return { kind: "implicit.reg", reg, type: regTypeForWidth(registerAlias(reg).width) };
 }
 
+export function moffs(width: OperandWidth): OperandSpec {
+  return { kind: "moffs", width };
+}
+
 export function imm(
   width: OperandWidth,
   extension?: ImmediateExtension,

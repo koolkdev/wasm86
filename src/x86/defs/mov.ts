@@ -1,6 +1,6 @@
 import { CONDITION_CODE_DESCRIPTORS } from "#x86/defs/condition-codes.js";
 import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm, modrmReg, modrmRm, opReg } from "#x86/schema/operands.js";
+import { imm, implicitReg, modrmReg, modrmRm, moffs, opReg } from "#x86/schema/operands.js";
 import { opcodePlusReg } from "#x86/schema/opcodes.js";
 import { cmovSemantic, movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 
@@ -46,6 +46,50 @@ export const MOV = mnemonic("mov", [
   form("rm32_r32", {
     opcode: [0x89],
     operands: [modrmRm("rm32"), modrmReg("r32")],
+    format: { syntax: "mov {0}, {1}" },
+    semantics: movSemantic(32)
+  }),
+  // A0: MOV AL, moffs8
+  form("al_moffs8", {
+    opcode: [0xa0],
+    operands: [implicitReg("al"), moffs(8)],
+    format: { syntax: "mov {0}, {1}" },
+    semantics: movSemantic(8)
+  }),
+  // 66 A1: MOV AX, moffs16
+  form("ax_moffs16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0xa1],
+    operands: [implicitReg("ax"), moffs(16)],
+    format: { syntax: "mov {0}, {1}" },
+    semantics: movSemantic(16)
+  }),
+  // A1: MOV EAX, moffs32
+  form("eax_moffs32", {
+    opcode: [0xa1],
+    operands: [implicitReg("eax"), moffs(32)],
+    format: { syntax: "mov {0}, {1}" },
+    semantics: movSemantic(32)
+  }),
+  // A2: MOV moffs8, AL
+  form("moffs8_al", {
+    opcode: [0xa2],
+    operands: [moffs(8), implicitReg("al")],
+    format: { syntax: "mov {0}, {1}" },
+    semantics: movSemantic(8)
+  }),
+  // 66 A3: MOV moffs16, AX
+  form("moffs16_ax", {
+    prefixes: { operandSize: "override" },
+    opcode: [0xa3],
+    operands: [moffs(16), implicitReg("ax")],
+    format: { syntax: "mov {0}, {1}" },
+    semantics: movSemantic(16)
+  }),
+  // A3: MOV moffs32, EAX
+  form("moffs32_eax", {
+    opcode: [0xa3],
+    operands: [moffs(32), implicitReg("eax")],
     format: { syntax: "mov {0}, {1}" },
     semantics: movSemantic(32)
   }),

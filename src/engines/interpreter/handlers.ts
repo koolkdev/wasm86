@@ -120,6 +120,12 @@ function decodeOperand(
     }
     case "implicit.reg":
       return { binding: regBinding(operand.reg), cursor };
+    case "moffs":
+      emitImmediateFetch(context, locals.eip, cursor, 32, false, locals.offset);
+      return {
+        binding: memStaticBinding(externals.bind(locals.offset)),
+        cursor: advanceCursor(context, cursor, 4)
+      };
     case "imm":
       emitImmediateFetch(
         context,

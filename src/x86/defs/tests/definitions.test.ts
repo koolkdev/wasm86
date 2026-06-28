@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 288);
+  strictEqual(X86_32_CORE.instructions.length, 294);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -23,6 +23,12 @@ test("x86-32 core registers the initial instruction surface", () => {
     "mov.r16_rm16",
     "mov.r8_imm8",
     "mov.r16_imm16",
+    "mov.al_moffs8",
+    "mov.eax_moffs32",
+    "mov.ax_moffs16",
+    "mov.moffs8_al",
+    "mov.moffs32_eax",
+    "mov.moffs16_ax",
     "nop.near",
     "nop.operand_size_override",
     "nop.rm16",
@@ -161,6 +167,53 @@ test("cmovcc forms are concrete specs with select-value semantics", () => {
     "next"
   ]);
   strictEqual(wordTrace.defs[3], "select(%1, %0, %2)");
+});
+
+test("mov moffs forms use accumulator direct-offset operands", () => {
+  const alLoad = instruction("mov.al_moffs8");
+  const eaxLoad = instruction("mov.eax_moffs32");
+  const axLoad = instruction("mov.ax_moffs16");
+  const byteStore = instruction("mov.moffs8_al");
+  const dwordStore = instruction("mov.moffs32_eax");
+  const wordStore = instruction("mov.moffs16_ax");
+
+  deepStrictEqual(alLoad.opcode, [0xa0]);
+  deepStrictEqual(alLoad.operands, [
+    { kind: "implicit.reg", reg: "al", type: "r8" },
+    { kind: "moffs", width: 8 }
+  ]);
+
+  deepStrictEqual(eaxLoad.opcode, [0xa1]);
+  deepStrictEqual(eaxLoad.operands, [
+    { kind: "implicit.reg", reg: "eax", type: "r32" },
+    { kind: "moffs", width: 32 }
+  ]);
+
+  deepStrictEqual(axLoad.prefixes, { operandSize: "override" });
+  deepStrictEqual(axLoad.opcode, [0xa1]);
+  deepStrictEqual(axLoad.operands, [
+    { kind: "implicit.reg", reg: "ax", type: "r16" },
+    { kind: "moffs", width: 16 }
+  ]);
+
+  deepStrictEqual(byteStore.opcode, [0xa2]);
+  deepStrictEqual(byteStore.operands, [
+    { kind: "moffs", width: 8 },
+    { kind: "implicit.reg", reg: "al", type: "r8" }
+  ]);
+
+  deepStrictEqual(dwordStore.opcode, [0xa3]);
+  deepStrictEqual(dwordStore.operands, [
+    { kind: "moffs", width: 32 },
+    { kind: "implicit.reg", reg: "eax", type: "r32" }
+  ]);
+
+  deepStrictEqual(wordStore.prefixes, { operandSize: "override" });
+  deepStrictEqual(wordStore.opcode, [0xa3]);
+  deepStrictEqual(wordStore.operands, [
+    { kind: "moffs", width: 16 },
+    { kind: "implicit.reg", reg: "ax", type: "r16" }
+  ]);
 });
 
 test("setcc forms use select-value semantics for register or memory destinations", () => {

@@ -11,7 +11,7 @@ import {
   validateInstructionSet
 } from "#x86/schema/builders.js";
 import { opcodePathMatches, opcodePlusReg, validateOpcodePath } from "#x86/schema/opcodes.js";
-import { imm, modrmReg, modrmRm, opReg } from "#x86/schema/operands.js";
+import { imm, modrmReg, modrmRm, moffs, opReg } from "#x86/schema/operands.js";
 import type { InstructionSpec } from "#x86/schema/types.js";
 
 const semantics = { test: "semantics-placeholder" } as const;
@@ -159,6 +159,7 @@ test("schema operand helpers support byte and word ModRM forms", () => {
   deepStrictEqual(modrmReg("r8"), { kind: "modrm.reg", type: "r8" });
   deepStrictEqual(modrmRm("rm16"), { kind: "modrm.rm", type: "rm16" });
   deepStrictEqual(modrmRm("m8"), { kind: "modrm.rm", type: "m8" });
+  deepStrictEqual(moffs(32), { kind: "moffs", width: 32 });
 });
 
 test("instruction set validation treats slash-r as overlapping group matches on same opcode", () => {

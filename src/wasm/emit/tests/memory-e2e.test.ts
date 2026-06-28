@@ -82,6 +82,42 @@ test("mov [ebx+disp], r32 stores the guest cell", async () => {
   );
 });
 
+test("mov moffs accumulator forms load and store at their widths", async () => {
+  const instructions = decodeSequence([
+    [0xa0, 0x20, 0x00, 0x00, 0x00],
+    [0xa3, 0x38, 0x00, 0x00, 0x00],
+    [0xa2, 0x30, 0x00, 0x00, 0x00],
+    [0x66, 0xa1, 0x22, 0x00, 0x00, 0x00],
+    [0xa3, 0x3c, 0x00, 0x00, 0x00],
+    [0x66, 0xa3, 0x32, 0x00, 0x00, 0x00],
+    [0xa1, 0x24, 0x00, 0x00, 0x00],
+    [0xa3, 0x34, 0x00, 0x00, 0x00]
+  ]);
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0xaaaa_0000,
+    eip: instructions[0]!.address,
+    ...allFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf(instructions));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+  guestView.setUint8(0x20, 0x7f);
+  guestView.setUint16(0x22, 0xbeef, true);
+  guestView.setUint32(0x24, 0xc001_cafe, true);
+
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(guestView.getUint32(0x38, true), 0xaaaa_007f);
+  strictEqual(guestView.getUint8(0x30), 0x7f);
+  strictEqual(guestView.getUint32(0x3c, true), 0xaaaa_beef);
+  strictEqual(guestView.getUint16(0x32, true), 0xbeef);
+  strictEqual(guestView.getUint32(0x34, true), 0xc001_cafe);
+  assertState(
+    stateView,
+    { regs: { eax: 0xc001_cafe }, eip: instructions[7]!.nextEip, flags: allFlagsSet },
+    "mov moffs accumulator forms"
+  );
+});
+
 test("add [mem], r32 read-modify-writes the cell with reference flags", async () => {
   // add [eax], ebx with a wrap to zero: CF and ZF both come out set.
   const instruction = ok(decodeBytes([0x01, 0x18]));
@@ -189,6 +225,25 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
   );
 });
 
+test("a direct-offset read fault reports the offset and leaves state unchanged", async () => {
+  const instruction = ok(decodeBytes([0xa1, 0xfe, 0xff, 0x00, 0x00]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0x1234_5678,
+    eip: instruction.address,
+    ...allFlagsSet
+  };
+  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength - 2, 4, "moffs read fault");
+  assertState(
+    stateView,
+    { regs: { eax: 0x1234_5678 }, eip: instruction.address, flags: allFlagsSet },
+    "moffs read fault"
+  );
+});
+
 test("a write fault leaves guest memory untouched", async () => {
   // mov [ebx], eax with the range crossing the guest end.
   const instruction = ok(decodeBytes([0x89, 0x03]));
@@ -208,6 +263,26 @@ test("a write fault leaves guest memory untouched", async () => {
     stateView,
     { regs: { eax: 0xdead_beef, ebx: guestByteLength - 2 }, eip: instruction.address, flags: allFlagsSet },
     "write fault"
+  );
+});
+
+test("a direct-offset write fault reports the offset and leaves state unchanged", async () => {
+  const instruction = ok(decodeBytes([0xa3, 0xfe, 0xff, 0x00, 0x00]));
+  const initial: Partial<WasmCpuStateSnapshot> = {
+    eax: 0xdead_beef,
+    eip: instruction.address,
+    ...allFlagsSet
+  };
+  const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, initial);
+
+  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "moffs write fault");
+  strictEqual(guestView.getUint32(guestByteLength - 4, true), 0);
+  assertState(
+    stateView,
+    { regs: { eax: 0xdead_beef }, eip: instruction.address, flags: allFlagsSet },
+    "moffs write fault"
   );
 });
 
@@ -470,11 +545,7 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
   return instruction.operands.map((operand) => {
     switch (operand.kind) {
       case "reg":
-        if (operand.alias.width !== 32) {
-          throw new Error("only 32-bit register operands are bound in the memory e2e");
-        }
-
-        return regBinding(operand.alias.base);
+        return regBinding(operand.alias.name);
       case "imm":
         return immBinding(operand.value);
       case "mem":

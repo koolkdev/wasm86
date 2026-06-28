@@ -23,6 +23,7 @@ export type OperandSpec =
   | Readonly<{ kind: "modrm.rm"; type: RmOperandType | MemOperandType }>
   | Readonly<{ kind: "opcode.reg"; type: RegOperandType }>
   | Readonly<{ kind: "implicit.reg"; reg: RegName; type: RegOperandType }>
+  | Readonly<{ kind: "moffs"; width: OperandWidth }>
   | Readonly<{ kind: "imm"; width: OperandWidth; semanticWidth?: OperandWidth; extension?: ImmediateExtension }>
   | Readonly<{ kind: "rel"; width: 8 | 32 }>;
 
