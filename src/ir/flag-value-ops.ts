@@ -6,6 +6,7 @@ export function valueTableFlagOps(values: ValueTable): FlagValueOps<ValueId> {
     const32: (value) => values.internConst(value),
     project: (width, value) => values.projectTo(width, value),
     and: (a, b) => values.internBinary("and", a, b),
+    sub: (a, b) => values.internBinary("sub", a, b),
     xor: (a, b) => values.internBinary("xor", a, b),
     shrU: (a, b) => values.internBinary("shr_u", a, b),
     popcnt: (value) => values.internUnary("popcnt", value),

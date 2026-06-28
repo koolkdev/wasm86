@@ -8,12 +8,19 @@ import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
+import { shiftSemantic } from "#x86/semantics/shift.js";
 import { leaveSemantic, popSemantic } from "#x86/semantics/stack.js";
 import { testSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import type { ValueInput } from "#x86/semantics/refs.js";
 
-import { buildSemanticTrace, flagCell, operands, regOperands, type SemanticTrace } from "./test-semantics-trace.js";
+import {
+  buildSemanticTrace,
+  flagCell,
+  operands,
+  regOperands,
+  type SemanticTrace
+} from "./test-semantics-trace.js";
 
 test("mov semantic gets the source, sets the destination, and falls through", () => {
   const trace = buildSemanticTrace(movSemantic(), regOperands(2));
@@ -119,6 +126,90 @@ test("adc and sbb read old CF after operands and before replacing arithmetic fla
     }
     strictEqual(referencesValue(trace, trace.def(flagCell(write, "CF")), oldCfValue), true, `${op} CF input`);
   }
+});
+
+test("shift semantics cover operations, widths, and count sources", () => {
+  for (const op of ["shl", "shr", "sar"] as const) {
+    for (const width of [8, 16, 32] as const) {
+      for (const countSource of ["one", "cl", "imm8"] as const) {
+        const trace = buildSemanticTrace(
+          shiftSemantic(op, width, countSource),
+          countSource === "imm8" ? operands("reg", "imm") : regOperands(1)
+        );
+
+        strictEqual(trace.events.some((event) => event.startsWith(`set op0:${width} <- `)), true, `${op} ${width} ${countSource}`);
+        strictEqual(trace.flagWrites.length, 1, `${op} ${width} ${countSource}`);
+        deepStrictEqual(statusFlagKeys(trace.flagWrites[0]!).sort(), [...x86StatusFlags].sort(), `${op} ${width} ${countSource}`);
+      }
+    }
+  }
+});
+
+test("shift semantics guard and read operands in ALU order", () => {
+  const immTrace = buildSemanticTrace(shiftSemantic("shl", 32, "imm8"), operands("mem", "imm"));
+
+  deepStrictEqual(immTrace.events.slice(0, 5), [
+    "%0 = addr op0",
+    "guard read %0:4",
+    "guard write %0:4",
+    "%1 = get op0:32",
+    "%2 = get op1:8"
+  ]);
+
+  const clTrace = buildSemanticTrace(shiftSemantic("shr", 16, "cl"), operands("mem"));
+
+  deepStrictEqual(clTrace.events.slice(0, 5), [
+    "%0 = addr op0",
+    "guard read %0:2",
+    "guard write %0:2",
+    "%1 = get op0:16",
+    "%2 = get cl:8"
+  ]);
+});
+
+test("runtime shift counts are masked before result and flag use", () => {
+  const trace = buildSemanticTrace(shiftSemantic("shl", 8, "cl"), regOperands(1));
+
+  strictEqual(trace.defs[2], "project8(%0)");
+  strictEqual(trace.defs[3], "and(%1, 31)");
+  strictEqual(trace.defs[4], "shl(%2, %3)");
+  strictEqual(trace.defs[5], "project8(%4)");
+  strictEqual(trace.defs[7], "select(%6, %5, %2)");
+  strictEqual(trace.defs[14], "cmp32.eq(%3, 1)");
+  strictEqual(trace.defs[15], "sub(8, %3)");
+  strictEqual(trace.defs[21], "cmp32.le_u(%3, 8)");
+  strictEqual(trace.events[14], "set op0:8 <- %7");
+});
+
+test("runtime shift count zero selects the original destination and old flags", () => {
+  const trace = buildSemanticTrace(shiftSemantic("shr", 16, "imm8"), operands("reg", "imm"));
+  const write = trace.flagWrites[0]!;
+
+  strictEqual(trace.defs[7], "select(%6, %5, %2)");
+  strictEqual(trace.def(flagCell(write, "CF")), "select(%21, %17, %8)");
+  strictEqual(trace.def(flagCell(write, "PF")), "select(%19, %27, %9)");
+  strictEqual(trace.def(flagCell(write, "AF")), "select(%19, 0, %10)");
+  strictEqual(trace.def(flagCell(write, "ZF")), "select(%19, %22, %11)");
+  strictEqual(trace.def(flagCell(write, "SF")), "select(%19, %23, %12)");
+  strictEqual(trace.def(flagCell(write, "OF")), "select(%19, %28, %13)");
+});
+
+test("runtime shift counts greater than one write OF as zero", () => {
+  const trace = buildSemanticTrace(shiftSemantic("shl", 32, "cl"), regOperands(1));
+  const write = trace.flagWrites[0]!;
+
+  strictEqual(trace.defs[14], "cmp32.eq(%3, 1)");
+  strictEqual(trace.defs[29], "select(%14, %19, 0)");
+  strictEqual(trace.def(flagCell(write, "OF")), "select(%20, %29, %13)");
+});
+
+test("sar semantics use signed right shift after width sign extension", () => {
+  const trace = buildSemanticTrace(shiftSemantic("sar", 16, "imm8"), operands("reg", "imm"));
+
+  strictEqual(trace.defs[2], "project16(%0)");
+  strictEqual(trace.defs[3], "and(%1, 31)");
+  strictEqual(trace.defs[4], "extend16_s(%2)");
+  strictEqual(trace.defs[5], "shr_s(%4, %3)");
 });
 
 test("xchg semantic reads both operands before writing either operand", () => {

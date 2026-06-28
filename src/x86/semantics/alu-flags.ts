@@ -3,10 +3,13 @@ import {
   decStatusFlagValues,
   incStatusFlagValues,
   negStatusFlagValues,
+  shiftStatusFlagValues,
   subStatusFlagValues,
-  type FlagValueOps
+  type FlagValueOps,
+  type ShiftFlagOp,
+  type StatusFlagValues
 } from "#x86/flag-values.js";
-import type { X86StatusFlag } from "#x86/flags.js";
+import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import type { OperandWidth } from "#x86/types.js";
 import type {
   SemanticsBuilder,
@@ -124,6 +127,34 @@ export function buildLogicResultAndFlagSource(
   };
 }
 
+export function buildShiftResultAndWriteFlags(
+  s: SemanticsBuilder,
+  input: Readonly<{
+    op: ShiftFlagOp;
+    width: OperandWidth;
+    value: ValueInput;
+    rawCount: ValueInput;
+  }>
+): Value {
+  const width = input.width;
+  const value = s.project(width, input.value);
+  const count = s.i32And(input.rawCount, s.const32(0x1f));
+  const shiftedResult = s.project(width, shiftResult(s, input.op, width, value, count));
+  const result = s.i32Select(s.compare(32, "ne", count, s.const32(0)), shiftedResult, value);
+  const oldFlags = readStatusFlags(s);
+  const flags = shiftStatusFlagValues(semanticFlagOps(s), {
+    op: input.op,
+    width,
+    value,
+    count,
+    result,
+    oldFlags
+  });
+
+  writeStatusFlagValues(s, flags);
+  return result;
+}
+
 export function buildCmpFlagSource(
   s: SemanticsBuilder,
   input: Readonly<{ width: OperandWidth; left: ValueInput; right: ValueInput }>
@@ -169,6 +200,38 @@ export function writeNegFlags(
   writeStatusFlagValues(s, negStatusFlagValues(semanticFlagOps(s), input));
 }
 
+function shiftResult(
+  s: SemanticsBuilder,
+  op: ShiftFlagOp,
+  width: OperandWidth,
+  value: Value,
+  count: Value
+): Value {
+  switch (op) {
+    case "shl":
+      return s.i32Shl(value, count);
+    case "shr":
+      return s.i32ShrU(value, count);
+    case "sar":
+      return s.i32ShrS(signExtendForWidth(s, width, value), count);
+  }
+}
+
+function signExtendForWidth(
+  s: SemanticsBuilder,
+  width: OperandWidth,
+  value: Value
+): Value {
+  switch (width) {
+    case 8:
+      return s.i32Extend8S(value);
+    case 16:
+      return s.i32Extend16S(value);
+    case 32:
+      return value;
+  }
+}
+
 function logicResult(s: SemanticsBuilder, op: "and" | "or" | "xor", left: Value, right: Value): Value {
   switch (op) {
     case "and":
@@ -178,6 +241,16 @@ function logicResult(s: SemanticsBuilder, op: "and" | "or" | "xor", left: Value,
     case "xor":
       return s.i32Xor(left, right);
   }
+}
+
+function readStatusFlags(s: SemanticsBuilder): StatusFlagValues<Value> {
+  const flags: Partial<Record<X86StatusFlag, Value>> = {};
+
+  for (const flag of x86StatusFlags) {
+    flags[flag] = s.readFlag(flag);
+  }
+
+  return flags as StatusFlagValues<Value>;
 }
 
 function writeStatusFlagValues(
@@ -198,6 +271,7 @@ function semanticFlagOps(s: SemanticsBuilder): FlagValueOps<Value> {
     const32: (value) => s.const32(value),
     project: (width, value) => s.project(width, value),
     and: (a, b) => s.i32And(a, b),
+    sub: (a, b) => s.i32Sub(a, b),
     xor: (a, b) => s.i32Xor(a, b),
     shrU: (a, b) => s.i32ShrU(a, b),
     popcnt: (value) => s.i32Popcnt(value),

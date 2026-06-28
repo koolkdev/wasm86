@@ -212,6 +212,45 @@ const fixtures: readonly DecoderFixture[] = [
     id: "neg.rm32"
   },
   {
+    name: "shl ebx, 1",
+    bytes: [0xd1, 0xe3],
+    mnemonic: "shl",
+    operands: [reg32("ebx")],
+    id: "shl.rm32_1",
+    format: "shl {0}, 1"
+  },
+  {
+    name: "shl byte [eax], imm8",
+    bytes: [0xc0, 0x20, 0x03],
+    mnemonic: "shl",
+    operands: [
+      mem(8, { base: "eax", scale: 1, disp: 0 }),
+      imm8(3)
+    ],
+    id: "shl.rm8_imm8"
+  },
+  {
+    name: "shr ebx, cl",
+    bytes: [0xd3, 0xeb],
+    mnemonic: "shr",
+    operands: [reg32("ebx"), reg("cl")],
+    id: "shr.rm32_cl"
+  },
+  {
+    name: "sar bx, cl with operand-size override",
+    bytes: [0x66, 0xd3, 0xfb],
+    mnemonic: "sar",
+    operands: [reg("bx"), reg("cl")],
+    id: "sar.rm16_cl"
+  },
+  {
+    name: "sar ebx, imm8",
+    bytes: [0xc1, 0xfb, 0x04],
+    mnemonic: "sar",
+    operands: [reg32("ebx"), imm8(4)],
+    id: "sar.rm32_imm8"
+  },
+  {
     name: "group 81 add eax, imm32",
     bytes: [0x81, 0xc0, 0x78, 0x56, 0x34, 0x12],
     mnemonic: "add",

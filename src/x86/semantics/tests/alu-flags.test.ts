@@ -8,6 +8,7 @@ import {
   buildAddResultAndWriteFlags,
   buildCmpFlagSource,
   buildLogicResultAndFlagSource,
+  buildShiftResultAndWriteFlags,
   buildSubResultAndWriteFlags,
   buildTestFlagSource,
   writeDecFlags,
@@ -146,9 +147,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
   });
   const addCf = addTrace.def(flagCell(onlyFlagWrite(addTrace), "CF"));
 
-  if (addCarryIn === undefined) {
-    throw new Error("expected captured add carry input");
-  }
+  ok(addCarryIn !== undefined, "expected captured add carry input");
 
   ok(addCf.startsWith(`select(${addTrace.value(addCarryIn)}, `));
   ok(addTrace.defs.some((def) => def.startsWith("cmp8.le_u(")));
@@ -164,9 +163,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
   });
   const subCf = subTrace.def(flagCell(onlyFlagWrite(subTrace), "CF"));
 
-  if (subBorrowIn === undefined) {
-    throw new Error("expected captured sub borrow input");
-  }
+  ok(subBorrowIn !== undefined, "expected captured sub borrow input");
 
   ok(subCf.startsWith(`select(${subTrace.value(subBorrowIn)}, `));
   ok(subTrace.defs.some((def) => def.startsWith("cmp8.le_u(")));
@@ -184,9 +181,7 @@ test("result helpers share destination writeback result with flag values", () =>
     s.set(s.operand(0), built, 16);
   });
 
-  if (result === undefined) {
-    throw new Error("expected captured helper result");
-  }
+  ok(result !== undefined, "expected captured helper result");
 
   const resultValue = trace.value(result);
   const write = onlyFlagWrite(trace);
@@ -211,6 +206,68 @@ test("logic source helpers build source-backed results without direct conditions
     strictEqual(flagSourceEvents(trace).length, 1);
     strictEqual(trace.flagWrites.length, 0);
   }
+});
+
+test("shift helper masks counts, selects preserved zero-count state, and writes undefined flags deterministically", () => {
+  const trace = buildHelperTrace((s) => {
+    const value = s.get(s.operand(0), 16);
+    const count = s.get(s.operand(1), 8);
+    const result = buildShiftResultAndWriteFlags(s, {
+      op: "shl",
+      width: 16,
+      value,
+      rawCount: count
+    });
+
+    s.set(s.operand(0), result, 16);
+  }, regOperands(2));
+  const write = onlyFlagWrite(trace);
+
+  strictEqual(trace.defs[2], "project16(%0)");
+  strictEqual(trace.defs[3], "and(%1, 31)");
+  strictEqual(trace.defs[7], "select(%6, %5, %2)");
+  strictEqual(trace.events[14], "set op0:16 <- %7");
+  strictEqual(trace.defs[22], "and(%20, %21)");
+  strictEqual(trace.def(flagCell(write, "CF")), "select(%22, %17, %8)");
+  strictEqual(trace.def(flagCell(write, "AF")), "select(%20, 0, %10)");
+  strictEqual(trace.def(flagCell(write, "OF")), "select(%20, %29, %13)");
+});
+
+test("shift helper uses count-one overflow and zero for greater counts", () => {
+  const trace = buildHelperTrace((s) => {
+    const value = s.get(s.operand(0), 32);
+    const count = s.get(s.operand(1), 8);
+
+    buildShiftResultAndWriteFlags(s, {
+      op: "shr",
+      width: 32,
+      value,
+      rawCount: count
+    });
+  }, regOperands(2));
+  const write = onlyFlagWrite(trace);
+
+  strictEqual(trace.defs[14], "cmp32.eq(%3, 1)");
+  strictEqual(trace.defs[28], "select(%14, %18, 0)");
+  strictEqual(trace.def(flagCell(write, "OF")), "select(%19, %28, %13)");
+});
+
+test("shift helper computes sar result with signed shift after width extension", () => {
+  const trace = buildHelperTrace((s) => {
+    const value = s.get(s.operand(0), 8);
+    const count = s.get(s.operand(1), 8);
+
+    buildShiftResultAndWriteFlags(s, {
+      op: "sar",
+      width: 8,
+      value,
+      rawCount: count
+    });
+  }, regOperands(2));
+  strictEqual(trace.defs[2], "project8(%0)");
+  strictEqual(trace.defs[3], "and(%1, 31)");
+  strictEqual(trace.defs[4], "extend8_s(%2)");
+  strictEqual(trace.defs[5], "shr_s(%4, %3)");
 });
 
 function buildHelperTrace(
@@ -253,24 +310,22 @@ function directFlagDefinition(trace: SemanticTrace, flag: X86StatusFlag): string
   const prefix = `flag ${flag} <- `;
   const event = trace.events.find((entry) => entry.startsWith(prefix));
 
-  if (event === undefined) {
-    throw new Error(`expected direct ${flag} flag write`);
-  }
+  ok(event !== undefined, `expected direct ${flag} flag write`);
 
   const value = event.slice(prefix.length);
   const display = /^%(\d+)$/.exec(value);
 
-  return display === null ? value : expectDefined(trace.defs[Number(display[1]!)]);
+  if (display === null) {
+    return value;
+  }
+
+  const definition = trace.defs[Number(display[1]!)];
+
+  ok(definition !== undefined, `missing definition for ${value}`);
+
+  return definition;
 }
 
 function flagSourceEvents(trace: SemanticTrace): string[] {
   return trace.events.filter((event) => event.startsWith("flagSource "));
-}
-
-function expectDefined<T>(value: T | undefined): T {
-  if (value === undefined) {
-    throw new Error("expected value to be captured");
-  }
-
-  return value;
 }

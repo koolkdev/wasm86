@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 261);
+  strictEqual(X86_32_CORE.instructions.length, 288);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -70,6 +70,11 @@ test("x86-32 core registers the initial instruction surface", () => {
     "neg.rm8",
     "neg.rm16",
     "neg.rm32",
+    "shl.rm8_1",
+    "shl.rm16_cl",
+    "shl.rm32_imm8",
+    "shr.rm32_cl",
+    "sar.rm8_imm8",
     "cmp.rm32_imm8",
     "cmp.rm16_imm16",
     "test.al_imm8",
@@ -261,6 +266,9 @@ test("group opcode forms use modrm.match.reg for Intel slash-digit notation", ()
   const sub = instruction("sub.rm32_imm8");
   const not = instruction("not.rm32");
   const neg = instruction("neg.rm8");
+  const shl = instruction("shl.rm32_imm8");
+  const shr = instruction("shr.rm16_cl");
+  const sar = instruction("sar.rm8_1");
   const call = instruction("call.rm32");
 
   deepStrictEqual(or.opcode, [0x83]);
@@ -306,6 +314,25 @@ test("group opcode forms use modrm.match.reg for Intel slash-digit notation", ()
   deepStrictEqual(neg.modrm, { match: { reg: 3 } });
   deepStrictEqual(neg.operands, [{ kind: "modrm.rm", type: "rm8" }]);
 
+  deepStrictEqual(shl.opcode, [0xc1]);
+  deepStrictEqual(shl.modrm, { match: { reg: 4 } });
+  deepStrictEqual(shl.operands, [
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "imm", width: 8 }
+  ]);
+
+  deepStrictEqual(shr.opcode, [0xd3]);
+  deepStrictEqual(shr.prefixes, { operandSize: "override" });
+  deepStrictEqual(shr.modrm, { match: { reg: 5 } });
+  deepStrictEqual(shr.operands, [
+    { kind: "modrm.rm", type: "rm16" },
+    { kind: "implicit.reg", reg: "cl", type: "r8" }
+  ]);
+
+  deepStrictEqual(sar.opcode, [0xd0]);
+  deepStrictEqual(sar.modrm, { match: { reg: 7 } });
+  deepStrictEqual(sar.operands, [{ kind: "modrm.rm", type: "rm8" }]);
+
   deepStrictEqual(call.opcode, [0xff]);
   deepStrictEqual(call.modrm, { match: { reg: 2 } });
   deepStrictEqual(call.operands, [{ kind: "modrm.rm", type: "rm32" }]);
@@ -321,6 +348,7 @@ test("width-specific decode forms record operand-size metadata", () => {
   const cmp16 = instruction("cmp.rm16_imm16");
   const not16 = instruction("not.rm16");
   const neg16 = instruction("neg.rm16");
+  const shl16 = instruction("shl.rm16_1");
 
   deepStrictEqual(mov8.operands, [
     { kind: "modrm.reg", type: "r8" },
@@ -367,6 +395,9 @@ test("width-specific decode forms record operand-size metadata", () => {
 
   deepStrictEqual(neg16.prefixes, { operandSize: "override" });
   deepStrictEqual(neg16.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+
+  deepStrictEqual(shl16.prefixes, { operandSize: "override" });
+  deepStrictEqual(shl16.operands, [{ kind: "modrm.rm", type: "rm16" }]);
 });
 
 test("unary ALU semantics lower to flagless not and sub-flags neg", () => {
@@ -491,9 +522,7 @@ test("jcc forms are concrete specs with condition-specific semantics", () => {
 function instruction(id: string): InstructionSpec {
   const spec = X86_32_CORE.instructions.find((entry) => entry.id === id);
 
-  if (spec === undefined) {
-    throw new Error(`missing instruction ${id}`);
-  }
+  ok(spec !== undefined, `missing instruction ${id}`);
 
   return spec;
 }

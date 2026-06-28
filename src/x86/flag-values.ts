@@ -7,6 +7,7 @@ export type FlagValueOps<TValue extends number> = Readonly<{
   const32(value: number): TValue;
   project(width: OperandWidth, value: TValue): TValue;
   and(a: TValue, b: TValue): TValue;
+  sub(a: TValue, b: TValue): TValue;
   xor(a: TValue, b: TValue): TValue;
   shrU(a: TValue, b: TValue): TValue;
   popcnt(value: TValue): TValue;
@@ -16,6 +17,8 @@ export type FlagValueOps<TValue extends number> = Readonly<{
 
 export type StatusFlagValues<TValue extends number> =
   Readonly<Record<X86StatusFlag, TValue>>;
+
+export type ShiftFlagOp = "shl" | "shr" | "sar";
 
 export function statusFlagValuesForSource<TValue extends number>(
   ops: FlagValueOps<TValue>,
@@ -152,6 +155,38 @@ export function negStatusFlagValues<TValue extends number>(
   };
 }
 
+export function shiftStatusFlagValues<TValue extends number>(
+  ops: FlagValueOps<TValue>,
+  input: Readonly<{
+    op: ShiftFlagOp;
+    width: OperandWidth;
+    value: TValue;
+    count: TValue;
+    result: TValue;
+    oldFlags: StatusFlagValues<TValue>;
+  }>
+): StatusFlagValues<TValue> {
+  const zero = ops.const32(0);
+  const one = ops.const32(1);
+  const countIsOne = ops.compare(32, "eq", input.count, one);
+  const cf = shiftCarry(ops, input);
+  const of = shiftOverflow(ops, { ...input, cf });
+  const countNonZero = ops.compare(32, "ne", input.count, zero);
+  const countLeWidth = ops.compare(32, "le_u", input.count, ops.const32(input.width));
+  const cfDefined = ops.and(countNonZero, countLeWidth);
+  const zsp = zspValues(ops, { width: input.width, result: input.result });
+  const nonzeroOf = ops.select(countIsOne, of, zero);
+
+  return {
+    CF: ops.select(cfDefined, cf, input.oldFlags.CF),
+    PF: ops.select(countNonZero, zsp.PF, input.oldFlags.PF),
+    AF: ops.select(countNonZero, zero, input.oldFlags.AF),
+    ZF: ops.select(countNonZero, zsp.ZF, input.oldFlags.ZF),
+    SF: ops.select(countNonZero, zsp.SF, input.oldFlags.SF),
+    OF: ops.select(countNonZero, nonzeroOf, input.oldFlags.OF)
+  };
+}
+
 type ResultFlagDag<TValue extends number> = Readonly<{
   width: OperandWidth;
   result: TValue;
@@ -233,6 +268,37 @@ function auxCarry<TValue extends number>(
   dag: BinaryFlagDag<TValue>
 ): TValue {
   return lowBit(ops, ops.shrU(dag.leftXorRightXorResult, ops.const32(4)));
+}
+
+function shiftCarry<TValue extends number>(
+  ops: FlagValueOps<TValue>,
+  input: Readonly<{ op: ShiftFlagOp; width: OperandWidth; value: TValue; count: TValue }>
+): TValue {
+  const shift = input.op === "shl"
+    ? ops.sub(ops.const32(input.width), input.count)
+    : ops.sub(input.count, ops.const32(1));
+
+  return lowBit(ops, ops.shrU(input.value, shift));
+}
+
+function shiftOverflow<TValue extends number>(
+  ops: FlagValueOps<TValue>,
+  input: Readonly<{
+    op: ShiftFlagOp;
+    width: OperandWidth;
+    value: TValue;
+    result: TValue;
+    cf: TValue;
+  }>
+): TValue {
+  switch (input.op) {
+    case "shl":
+      return ops.xor(signBit(ops, input.width, input.result), input.cf);
+    case "shr":
+      return signBit(ops, input.width, input.value);
+    case "sar":
+      return ops.const32(0);
+  }
 }
 
 function parityFlag<TValue extends number>(
