@@ -109,6 +109,8 @@ export function foldBinary(
 
       return undefined;
     case "shl":
+    case "rotl":
+    case "rotr":
     case "shr_s":
     case "shr_u":
       if (right !== undefined && (right & 31) === 0) {
@@ -241,11 +243,27 @@ function evalBinary(operator: BinaryOperator, a: number, b: number): number {
       return a & b;
     case "shl":
       return a << (b & 31);
+    case "rotl":
+      return rotateLeft32(a, b);
+    case "rotr":
+      return rotateRight32(a, b);
     case "shr_s":
       return a >> (b & 31);
     case "shr_u":
       return i32(a >>> (b & 31));
   }
+}
+
+function rotateLeft32(value: number, count: number): number {
+  const shift = count & 31;
+
+  return i32((value << shift) | (value >>> ((32 - shift) & 31)));
+}
+
+function rotateRight32(value: number, count: number): number {
+  const shift = count & 31;
+
+  return i32((value >>> shift) | (value << ((32 - shift) & 31)));
 }
 
 function evalUnary(operator: UnaryOperator, value: number): number {

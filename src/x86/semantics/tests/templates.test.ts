@@ -379,6 +379,16 @@ test("plain rotate semantics write only carry and overflow flags", () => {
   strictEqual(directFlagWrites(trace).some((flag) => ["AF", "PF", "SF", "ZF"].includes(flag)), false);
 });
 
+test("plain dword rotate semantics use IR rotate operators", () => {
+  const rol = buildSemanticTrace(rotateSemantic("rol", 32, "cl"), regOperands(1));
+  const ror = buildSemanticTrace(rotateSemantic("ror", 32, "cl"), regOperands(1));
+  const byte = buildSemanticTrace(rotateSemantic("rol", 8, "cl"), regOperands(1));
+
+  strictEqual(rol.defs.some((definition) => definition.startsWith("rotl(")), true);
+  strictEqual(ror.defs.some((definition) => definition.startsWith("rotr(")), true);
+  strictEqual(byte.defs.some((definition) => definition.startsWith("rotl(")), false);
+});
+
 test("rotate count zero preserves destination, CF, and OF", () => {
   const trace = buildSemanticTrace(rotateSemantic("ror", 16, "cl"), regOperands(1));
   const set = trace.events.find((event) => event.startsWith("set op0:16 <- "));

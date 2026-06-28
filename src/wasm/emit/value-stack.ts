@@ -364,6 +364,12 @@ function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryValueNode
     case "shl":
       body.i32Shl();
       return;
+    case "rotl":
+      body.i32Rotl();
+      return;
+    case "rotr":
+      body.i32Rotr();
+      return;
     case "shr_s":
       body.i32ShrS();
       return;

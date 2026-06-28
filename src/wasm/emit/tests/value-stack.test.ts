@@ -306,6 +306,8 @@ test("operators map to their wasm opcodes", () => {
   const mixed = values.binary("xor", shifted, values.binary("xor", signedShifted, unsignedShifted));
   const product = values.binary("mul", one, two);
   const remainder = values.binary("rem_u", one, two);
+  const rotatedLeft = values.binary("rotl", one, two);
+  const rotatedRight = values.binary("rotr", one, two);
   const extended8 = values.extend(8, one, true);
   const extended16 = values.extend(16, two, true);
   const masked = values.binary("sub", values.binary("and", one, two), values.binary("or", one, two));
@@ -317,6 +319,8 @@ test("operators map to their wasm opcodes", () => {
       { kind: "writeState", slot: gprChannel("eax"), value: mixed },
       { kind: "writeState", slot: gprChannel("esi"), value: product },
       { kind: "writeState", slot: gprChannel("esi"), value: remainder },
+      { kind: "writeState", slot: gprChannel("esi"), value: rotatedLeft },
+      { kind: "writeState", slot: gprChannel("esi"), value: rotatedRight },
       { kind: "writeState", slot: gprChannel("ebx"), value: extended8 },
       { kind: "writeState", slot: gprChannel("edi"), value: extended16 },
       { kind: "writeState", slot: gprChannel("ecx"), value: masked },
@@ -329,6 +333,8 @@ test("operators map to their wasm opcodes", () => {
   valueStack.emitUse(mixed);
   valueStack.emitUse(product);
   valueStack.emitUse(remainder);
+  valueStack.emitUse(rotatedLeft);
+  valueStack.emitUse(rotatedRight);
   valueStack.emitUse(extended8);
   valueStack.emitUse(extended16);
   valueStack.emitUse(masked);
@@ -354,6 +360,12 @@ test("operators map to their wasm opcodes", () => {
     wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.i32RemU,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Rotl,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Rotr,
     wasmOpcode.localGet,
     wasmOpcode.i32Extend8S,
     wasmOpcode.localGet,

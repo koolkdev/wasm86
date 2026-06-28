@@ -7,6 +7,8 @@ export type BinaryOperator =
   | "or"
   | "and"
   | "shl"
+  | "rotl"
+  | "rotr"
   | "shr_s"
   | "shr_u";
 

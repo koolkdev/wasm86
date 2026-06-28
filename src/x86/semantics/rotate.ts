@@ -98,6 +98,10 @@ function rotateI32(
   value: Value,
   count: Value
 ): Value {
+  if (bits === 32) {
+    return s.binary(direction === "left" ? "rotl" : "rotr", value, count);
+  }
+
   const backCount = s.binary("sub", s.const32(bits), count);
 
   return direction === "left"

@@ -307,6 +307,16 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i32Rotl(): this {
+    this.#writeInstruction(wasmOpcode.i32Rotl);
+    return this;
+  }
+
+  i32Rotr(): this {
+    this.#writeInstruction(wasmOpcode.i32Rotr);
+    return this;
+  }
+
   i32Extend8S(): this {
     this.#writeInstruction(wasmOpcode.i32Extend8S);
     return this;
