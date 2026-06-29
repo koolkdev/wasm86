@@ -50,6 +50,7 @@ test("accepts a maximum length prefixed instruction", () => {
 test("overlong instructions report instruction-too-long decode faults", () => {
   assertInstructionTooLong([...new Array<number>(13).fill(0x66), 0xb8, 0x34, 0x12]);
   assertInstructionTooLong(new Array<number>(15).fill(0x66));
+  assertInstructionTooLong([...new Array<number>(15).fill(0x64), 0x8b, 0x03]);
   assertInstructionTooLong([...new Array<number>(14).fill(0x66), 0x0f, 0x90]);
 });
 

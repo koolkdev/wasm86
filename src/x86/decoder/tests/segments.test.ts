@@ -25,6 +25,25 @@ test("lea source operands still decode a segment even though semantics use only 
   strictEqual(memoryOperand([0x8d, 0x45, 0x00]).segment, "ss");
 });
 
+test("decodes segment override prefixes onto memory operands", () => {
+  strictEqual(memoryOperand([0x26, 0x8b, 0x03]).segment, "es");
+  strictEqual(memoryOperand([0x2e, 0x8b, 0x03]).segment, "cs");
+  strictEqual(memoryOperand([0x36, 0x8b, 0x03]).segment, "ss");
+  strictEqual(memoryOperand([0x3e, 0x8b, 0x45, 0x00]).segment, "ds");
+  strictEqual(memoryOperand([0x64, 0x8b, 0x03]).segment, "fs");
+  strictEqual(memoryOperand([0x65, 0x8b, 0x03]).segment, "gs");
+});
+
+test("segment override prefixes compose with operand-size prefixes and moffs", () => {
+  strictEqual(memoryOperand([0x64, 0x66, 0x8b, 0x03]).segment, "fs");
+  strictEqual(memoryOperand([0x66, 0x64, 0x8b, 0x03]).segment, "fs");
+  strictEqual(memoryOperand([0x64, 0xa1, 0x78, 0x56, 0x34, 0x12]).segment, "fs");
+});
+
+test("last segment override prefix wins", () => {
+  strictEqual(memoryOperand([0x64, 0x65, 0x8b, 0x03]).segment, "gs");
+});
+
 function memoryOperand(bytes: readonly number[]): Extract<IsaOperandBinding, { kind: "mem" }> {
   const operand = ok(decodeBytes(bytes)).operands.find((entry) => entry.kind === "mem");
 
