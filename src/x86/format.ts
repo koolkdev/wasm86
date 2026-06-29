@@ -1,4 +1,5 @@
 import type { IsaDecodedInstruction, IsaOperandBinding } from "./decoder/types.js";
+import { defaultSegmentForBase } from "./types.js";
 
 export function formatIsaInstruction(instruction: IsaDecodedInstruction): string {
   return instruction.spec.format.syntax.replace(/\{([^{}]+)\}/g, (_match, placeholder: string) => {
@@ -44,7 +45,12 @@ function formatMemOperand(operand: Extract<IsaOperandBinding, { kind: "mem" }>):
     terms.push(hex32(operand.disp));
   }
 
-  return `[${terms.join(" + ")}]`;
+  const formatted = `[${terms.join(" + ")}]`;
+  const defaultSegment = defaultSegmentForBase(operand.base);
+
+  return operand.segment === undefined || operand.segment === defaultSegment
+    ? formatted
+    : `${operand.segment}:${formatted}`;
 }
 
 function hex32(value: number): string {

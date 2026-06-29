@@ -47,7 +47,26 @@ import { shiftSemantic } from "#x86/semantics/shift.js";
 import { popfdSemantic, popfSemantic, popSemantic, pushfdSemantic, pushfSemantic } from "#x86/semantics/stack.js";
 import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
+import { defaultSegmentForBase, type EffectiveAddress } from "#x86/types.js";
 import { assertLazyRecord } from "./lazy-flags.js";
+
+function mem(
+  address: Readonly<{
+    segment?: EffectiveAddress["segment"];
+    base?: EffectiveAddress["base"];
+    index?: EffectiveAddress["index"];
+    scale: EffectiveAddress["scale"];
+    disp: number;
+  }>
+): ReturnType<typeof memBinding> {
+  return memBinding({
+    segment: address.segment ?? defaultSegmentForBase(address.base),
+    base: address.base,
+    index: address.index,
+    scale: address.scale,
+    disp: address.disp
+  });
+}
 
 // Every instruction advances the count channel; the dedicated tests at the
 // end cover that bookkeeping, the shape tests assert around it.
@@ -1274,7 +1293,7 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
 
   builder.addInstruction(
     movSemantic(32),
-    [memBinding({ base: "ebx", scale: 1, disp: 8 }), regBinding("eax")],
+    [mem({ base: "ebx", scale: 1, disp: 8 }), regBinding("eax")],
     loc(0x1000, 0x1003)
   );
 
@@ -1312,7 +1331,7 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
 
   builder.addInstruction(
     aluSemantic("add", 32),
-    [memBinding({ base: "ebx", scale: 1, disp: 0 }), regBinding("ecx")],
+    [mem({ base: "ebx", scale: 1, disp: 0 }), regBinding("ecx")],
     loc(0x1000, 0x1002)
   );
 
@@ -1366,7 +1385,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
   builder.addInstruction(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
   builder.addInstruction(
     movSemantic(32),
-    [memBinding({ base: "ebx", scale: 1, disp: 8 }), regBinding("eax")],
+    [mem({ base: "ebx", scale: 1, disp: 8 }), regBinding("eax")],
     loc(0x1003, 0x1006)
   );
 
@@ -1418,7 +1437,7 @@ test("lea builds general modrm addresses from channel reads", () => {
 
   builder.addInstruction(
     leaSemantic(32),
-    [regBinding("eax"), memBinding({ base: "ebx", index: "esi", scale: 4, disp: 0x10 })],
+    [regBinding("eax"), mem({ base: "ebx", index: "esi", scale: 4, disp: 0x10 })],
     loc(0x1000, 0x1007)
   );
 
@@ -1449,7 +1468,7 @@ test("an absolute address is just its displacement constant", () => {
 
   builder.addInstruction(
     movSemantic(32),
-    [regBinding("eax"), memBinding({ scale: 1, disp: 0x2000 })],
+    [regBinding("eax"), mem({ scale: 1, disp: 0x2000 })],
     loc(0x1000, 0x1005)
   );
 
@@ -1475,7 +1494,7 @@ test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
 
   builder.addInstruction(
     movzxSemantic(8, 32),
-    [regBinding("eax"), memBinding({ base: "ebx", scale: 1, disp: 0 })],
+    [regBinding("eax"), mem({ base: "ebx", scale: 1, disp: 0 })],
     loc(0x1000, 0x1003)
   );
 
@@ -1497,7 +1516,7 @@ test("movsx r32, byte [mem] marks the load signed with no extra extend", () => {
 
   builder.addInstruction(
     movsxSemantic(8, 32),
-    [regBinding("eax"), memBinding({ base: "ebx", scale: 1, disp: 0 })],
+    [regBinding("eax"), mem({ base: "ebx", scale: 1, disp: 0 })],
     loc(0x1000, 0x1003)
   );
 
@@ -1525,7 +1544,7 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
 
   builder.addInstruction(
     xchgSemantic(32),
-    [memBinding({ base: "ebx", scale: 1, disp: 0 }), regBinding("ebx")],
+    [mem({ base: "ebx", scale: 1, disp: 0 }), regBinding("ebx")],
     loc(0x1000, 0x1002)
   );
 
@@ -1656,7 +1675,7 @@ test("a guard after writing a previously-clean register omits the channel from i
 test("pop [ebx] guards the stack read first and omits boundary-absent esp from its write edge", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(popSemantic(), [memBinding({ base: "ebx", scale: 1, disp: 0 })], loc(0x1000, 0x1002));
+  builder.addInstruction(popSemantic(), [mem({ base: "ebx", scale: 1, disp: 0 })], loc(0x1000, 0x1002));
 
   const block = builder.finish();
   const v = block.values;
@@ -1698,7 +1717,7 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(32), [regBinding("esp"), immBinding(0x30)], loc(0x1000, 0x1005));
-  builder.addInstruction(popSemantic(), [memBinding({ base: "ebx", scale: 1, disp: 0 })], loc(0x1005, 0x1007));
+  builder.addInstruction(popSemantic(), [mem({ base: "ebx", scale: 1, disp: 0 })], loc(0x1005, 0x1007));
 
   const block = builder.finish();
   const v = block.values;
@@ -1726,7 +1745,7 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
 test("pop [esp] builds the destination address from the incremented esp", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(popSemantic(), [memBinding({ base: "esp", scale: 1, disp: 0 })], loc(0x1000, 0x1003));
+  builder.addInstruction(popSemantic(), [mem({ base: "esp", scale: 1, disp: 0 })], loc(0x1000, 0x1003));
 
   const block = builder.finish();
   const v = block.values;
@@ -1753,7 +1772,7 @@ test("pop [esp] builds the destination address from the incremented esp", () => 
 test("pop [esp+k] adds the displacement to the incremented esp", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(popSemantic(), [memBinding({ base: "esp", scale: 1, disp: 8 })], loc(0x1000, 0x1004));
+  builder.addInstruction(popSemantic(), [mem({ base: "esp", scale: 1, disp: 8 })], loc(0x1000, 0x1004));
 
   const block = builder.finish();
   const v = block.values;
@@ -2081,7 +2100,7 @@ test("a fault edge restores an external eip", () => {
 
   builder.addInstruction(
     movSemantic(32),
-    [regBinding("eax"), memBinding({ scale: 1, disp: 0x2000 })],
+    [regBinding("eax"), mem({ scale: 1, disp: 0x2000 })],
     externalInstructionLocation(4, 5)
   );
 
@@ -2349,7 +2368,7 @@ test("a fault edge restores the boundary count", () => {
   builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
   builder.addInstruction(
     movSemantic(32),
-    [memBinding({ base: "ebx", scale: 1, disp: 0 }), regBinding("eax")],
+    [mem({ base: "ebx", scale: 1, disp: 0 }), regBinding("eax")],
     loc(0x1005, 0x1007)
   );
 

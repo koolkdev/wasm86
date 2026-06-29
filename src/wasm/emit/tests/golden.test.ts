@@ -75,8 +75,9 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
         return immBinding(operand.target);
       case "mem":
         return memBinding({
-          ...(operand.base === undefined ? {} : { base: operand.base }),
-          ...(operand.index === undefined ? {} : { index: operand.index }),
+          segment: operand.segment,
+          base: operand.base,
+          index: operand.index,
           scale: operand.scale,
           disp: operand.disp
         });

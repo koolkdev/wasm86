@@ -197,8 +197,9 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
 
 function effectiveAddressOf(operand: MemOperand): EffectiveAddress {
   return {
-    ...(operand.base === undefined ? {} : { base: operand.base }),
-    ...(operand.index === undefined ? {} : { index: operand.index }),
+    segment: operand.segment,
+    base: operand.base,
+    index: operand.index,
     scale: operand.scale,
     disp: operand.disp
   };

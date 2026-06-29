@@ -1,7 +1,14 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { EffectiveAddress, MemOperand, OperandWidth, Reg32, RegName } from "#x86/types.js";
+import {
+  defaultSegmentForBase,
+  type EffectiveAddress,
+  type MemOperand,
+  type OperandWidth,
+  type Reg32,
+  type RegName
+} from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import {
   decodeFault,
@@ -101,12 +108,29 @@ export function reg(regName: RegName): IsaOperandBinding {
   return { kind: "reg", alias: registerAlias(regName) };
 }
 
-export function mem32(operand: EffectiveAddress): MemOperand {
-  return mem(32, operand);
+export function mem(
+  width: OperandWidth,
+  operand: Readonly<{
+    segment?: EffectiveAddress["segment"];
+    base?: EffectiveAddress["base"];
+    index?: EffectiveAddress["index"];
+    scale: EffectiveAddress["scale"];
+    disp: number;
+  }>
+): MemOperand {
+  return {
+    kind: "mem",
+    accessWidth: width,
+    segment: operand.segment ?? defaultSegmentForBase(operand.base),
+    base: operand.base,
+    index: operand.index,
+    scale: operand.scale,
+    disp: operand.disp
+  };
 }
 
-export function mem(width: OperandWidth, operand: EffectiveAddress): MemOperand {
-  return { kind: "mem", accessWidth: width, ...operand };
+export function mem32(operand: Parameters<typeof mem>[1]): MemOperand {
+  return mem(32, operand);
 }
 
 export function imm32(value: number): IsaOperandBinding {

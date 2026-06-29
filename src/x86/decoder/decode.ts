@@ -189,7 +189,15 @@ function decodeOperand(
     case "moffs":
       return {
         kind: "ok",
-        binding: { kind: "mem", accessWidth: operand.width, scale: 1, disp: readU32LE(reader, cursor) },
+        binding: {
+          kind: "mem",
+          accessWidth: operand.width,
+          segment: "ds",
+          base: undefined,
+          index: undefined,
+          scale: 1,
+          disp: readU32LE(reader, cursor)
+        },
         cursor: cursor + 4
       };
     case "imm": {

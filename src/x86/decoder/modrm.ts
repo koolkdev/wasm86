@@ -1,7 +1,12 @@
 import type { IsaDecodeReader } from "./reader.js";
 import { readU32LE } from "./reader.js";
 import { signedImm8, signedImm32 } from "./immediate.js";
-import { reg32, type EffectiveAddress, type Reg32 } from "#x86/types.js";
+import {
+  defaultSegmentForBase,
+  reg32,
+  type EffectiveAddress,
+  type Reg32
+} from "#x86/types.js";
 
 type Scale = EffectiveAddress["scale"];
 type Sib = Readonly<{
@@ -115,20 +120,13 @@ function effectiveAddress(
   scale: Scale,
   disp: number
 ): EffectiveAddress {
-  const mem: { base?: Reg32; index?: Reg32; scale: Scale; disp: number } = {
+  return {
+    segment: defaultSegmentForBase(base),
+    base,
+    index,
     scale: index === undefined ? 1 : scale,
     disp
   };
-
-  if (base !== undefined) {
-    mem.base = base;
-  }
-
-  if (index !== undefined) {
-    mem.index = index;
-  }
-
-  return mem;
 }
 
 function decodeSib(value: number): Sib {
