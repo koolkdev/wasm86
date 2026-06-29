@@ -11,6 +11,7 @@ import {
   type FlagChannel,
   type InstructionCountChannel,
   type LazyFlagsChannel,
+  type SegmentChannel,
   type StateChannel
 } from "../slots.js";
 import type { ValueId, ValueTable } from "../values.js";
@@ -19,7 +20,7 @@ import { PendingStateAccess } from "./state-access.js";
 export type PendingEdgeKind = "fault" | "completed";
 
 export class PendingState {
-  readonly #cells: PendingCells<FlagChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel>;
+  readonly #cells: PendingCells<FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel>;
   readonly #gprs: PendingGprs;
 
   constructor(values: ValueTable, emit: (action: Action) => void) {
@@ -34,6 +35,7 @@ export class PendingState {
       case "gpr":
         return this.#gprs.read(channel, options);
       case "flag":
+      case "segment":
       case "eip":
       case "instructionCount":
       case "lazyFlags":
@@ -47,6 +49,7 @@ export class PendingState {
         this.#gprs.write(channel, value);
         break;
       case "flag":
+      case "segment":
       case "eip":
       case "instructionCount":
       case "lazyFlags":
@@ -55,7 +58,7 @@ export class PendingState {
     }
   }
 
-  invalidate(channel: FlagChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel): void {
+  invalidate(channel: FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel): void {
     this.#cells.invalidate(channel);
   }
 
@@ -72,6 +75,7 @@ export class PendingState {
       case "gpr":
         return this.#gprs.has(channel);
       case "flag":
+      case "segment":
       case "eip":
       case "instructionCount":
       case "lazyFlags":

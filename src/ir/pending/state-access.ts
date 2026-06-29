@@ -3,11 +3,12 @@ import {
   type EipChannel,
   type FlagChannel,
   type InstructionCountChannel,
-  type LazyFlagsChannel
+  type LazyFlagsChannel,
+  type SegmentChannel
 } from "../slots.js";
 import type { ValueId, ValueTable, WidthBounds } from "../values.js";
 
-export type CachedStateInput = FlagChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
+export type CachedStateInput = FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
 
 export class PendingStateAccess {
   readonly #values: ValueTable;

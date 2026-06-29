@@ -1,6 +1,7 @@
+import { assert } from "#common/assert.js";
 import { x86Flags, type X86Flag } from "#x86/flags.js";
 import { registerAlias } from "#x86/registers.js";
-import { reg16, reg32, reg8, type Reg32, type RegName } from "#x86/types.js";
+import { reg16, reg32, reg8, segmentRegisters, type Reg32, type RegName, type SegmentRegister } from "#x86/types.js";
 
 export type GprChannel = Readonly<{
   kind: "gpr";
@@ -10,6 +11,15 @@ export type GprChannel = Readonly<{
 }>;
 
 export type FlagChannel<TFlag extends X86Flag = X86Flag> = Readonly<{ kind: "flag"; flag: TFlag }>;
+export type SegmentChannelField = "selector" | "base";
+export type SegmentChannel<
+  TSegment extends SegmentRegister = SegmentRegister,
+  TField extends SegmentChannelField = SegmentChannelField
+> = Readonly<{
+  kind: "segment";
+  reg: TSegment;
+  field: TField;
+}>;
 export type EipChannel = Readonly<{ kind: "eip" }>;
 export type InstructionCountChannel = Readonly<{ kind: "instructionCount" }>;
 type LazyFlagsField = "lazyFlagsKind" | "lazyFlagsA" | "lazyFlagsB";
@@ -17,7 +27,13 @@ export type LazyFlagsChannel<TField extends LazyFlagsField = LazyFlagsField> = R
   kind: "lazyFlags";
   field: TField;
 }>;
-export type StateChannel = GprChannel | FlagChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
+export type StateChannel =
+  | GprChannel
+  | FlagChannel
+  | SegmentChannel
+  | EipChannel
+  | InstructionCountChannel
+  | LazyFlagsChannel;
 
 const byteOffsetFromBitOffset = { 0: 0, 8: 1 } as const;
 const byteLengthFromWidth = { 8: 1, 16: 2, 32: 4 } as const;
@@ -37,6 +53,12 @@ const gprChannels = new Map<RegName, GprChannel>(
 
 const flagChannels = new Map<X86Flag, FlagChannel>(
   x86Flags.map((flag) => [flag, { kind: "flag", flag }])
+);
+const segmentSelectorChannels = new Map<SegmentRegister, SegmentChannel<SegmentRegister, "selector">>(
+  segmentRegisters.map((reg) => [reg, { kind: "segment", reg, field: "selector" }])
+);
+const segmentBaseChannels = new Map<SegmentRegister, SegmentChannel<SegmentRegister, "base">>(
+  segmentRegisters.map((reg) => [reg, { kind: "segment", reg, field: "base" }])
 );
 
 export const eipChannel: EipChannel = { kind: "eip" };
@@ -74,6 +96,24 @@ export function flagChannel<TFlag extends X86Flag>(flag: TFlag): FlagChannel<TFl
   return channel as FlagChannel<TFlag>;
 }
 
+export function segmentSelectorChannel<TSegment extends SegmentRegister>(
+  reg: TSegment
+): SegmentChannel<TSegment, "selector"> {
+  const channel = segmentSelectorChannels.get(reg);
+
+  assert(channel !== undefined, `unknown segment selector channel: ${reg}`);
+
+  return channel as SegmentChannel<TSegment, "selector">;
+}
+
+export function segmentBaseChannel<TSegment extends SegmentRegister>(reg: TSegment): SegmentChannel<TSegment, "base"> {
+  const channel = segmentBaseChannels.get(reg);
+
+  assert(channel !== undefined, `unknown segment base channel: ${reg}`);
+
+  return channel as SegmentChannel<TSegment, "base">;
+}
+
 export function channelsOverlap(a: StateChannel, b: StateChannel): boolean {
   if (a.kind === "gpr" && b.kind === "gpr") {
     return a.reg === b.reg &&
@@ -104,6 +144,8 @@ function sameChannel(a: StateChannel, b: StateChannel): boolean {
         a.byteLength === b.byteLength;
     case "flag":
       return b.kind === "flag" && a.flag === b.flag;
+    case "segment":
+      return b.kind === "segment" && a.reg === b.reg && a.field === b.field;
     case "eip":
       return b.kind === "eip";
     case "instructionCount":

@@ -1,12 +1,12 @@
 import { assert } from "#common/assert.js";
-import type { StateChannel } from "#ir/slots.js";
+import type { SegmentChannelField, StateChannel } from "#ir/slots.js";
 import { x86Flags, type X86Flag } from "#x86/flags.js";
 import { LAZY_FLAGS_KIND } from "#ir/lazy-flags.js";
-import { reg32 } from "#x86/types.js";
+import { reg32, type SegmentRegister } from "#x86/types.js";
 
 type WasmCpuStateLayoutEntry = Readonly<{
   offset: number;
-  byteLength: 1 | 4;
+  byteLength: 1 | 2 | 4;
 }>;
 
 export const WASM_CPU_STATE_LAYOUT = {
@@ -33,12 +33,32 @@ export const WASM_CPU_STATE_LAYOUT = {
   TF: { offset: 59, byteLength: 1 },
   NT: { offset: 60, byteLength: 1 },
   AC: { offset: 61, byteLength: 1 },
-  ID: { offset: 62, byteLength: 1 }
+  ID: { offset: 62, byteLength: 1 },
+  esSelector: { offset: 64, byteLength: 2 },
+  csSelector: { offset: 66, byteLength: 2 },
+  ssSelector: { offset: 68, byteLength: 2 },
+  dsSelector: { offset: 70, byteLength: 2 },
+  fsSelector: { offset: 72, byteLength: 2 },
+  gsSelector: { offset: 74, byteLength: 2 },
+  esBase: { offset: 76, byteLength: 4 },
+  csBase: { offset: 80, byteLength: 4 },
+  ssBase: { offset: 84, byteLength: 4 },
+  dsBase: { offset: 88, byteLength: 4 },
+  fsBase: { offset: 92, byteLength: 4 },
+  gsBase: { offset: 96, byteLength: 4 }
 } as const satisfies Readonly<Record<string, WasmCpuStateLayoutEntry>>;
 
 export type WasmCpuStateField = keyof typeof WASM_CPU_STATE_LAYOUT;
 
 export const WASM_CPU_LAZY_FLAGS_KIND = LAZY_FLAGS_KIND;
+export const WASM_CPU_SEGMENT_FIELDS = {
+  es: { selector: "esSelector", base: "esBase" },
+  cs: { selector: "csSelector", base: "csBase" },
+  ss: { selector: "ssSelector", base: "ssBase" },
+  ds: { selector: "dsSelector", base: "dsBase" },
+  fs: { selector: "fsSelector", base: "fsBase" },
+  gs: { selector: "gsSelector", base: "gsBase" }
+} as const satisfies Readonly<Record<SegmentRegister, Readonly<Record<SegmentChannelField, WasmCpuStateField>>>>;
 
 export const WASM_CPU_STATE_FIELDS = Object.keys(WASM_CPU_STATE_LAYOUT) as readonly WasmCpuStateField[];
 export const WASM_CPU_STATE_OFFSETS = Object.fromEntries(
@@ -70,6 +90,10 @@ export function wasmCpuFlagByteOffset(flag: X86Flag): number {
   return WASM_CPU_FLAG_BYTE_OFFSETS[flag];
 }
 
+export function wasmCpuSegmentField(reg: SegmentRegister, field: SegmentChannelField): WasmCpuStateField {
+  return WASM_CPU_SEGMENT_FIELDS[reg][field];
+}
+
 export function wasmCpuStateFieldIsBitField(field: WasmCpuStateField): field is X86Flag {
   return (x86Flags as readonly string[]).includes(field);
 }
@@ -80,6 +104,8 @@ export function wasmCpuStateChannelOffset(channel: StateChannel): number {
       return WASM_CPU_STATE_OFFSETS[channel.reg] + channel.byteOffsetInReg;
     case "flag":
       return wasmCpuFlagByteOffset(channel.flag);
+    case "segment":
+      return WASM_CPU_STATE_OFFSETS[wasmCpuSegmentField(channel.reg, channel.field)];
     case "eip":
       return WASM_CPU_STATE_OFFSETS.eip;
     case "instructionCount":
@@ -95,6 +121,8 @@ export function wasmCpuStateChannelAccessByteLength(channel: StateChannel): 1 | 
       return channel.byteLength;
     case "flag":
       return 1;
+    case "segment":
+      return WASM_CPU_STATE_LAYOUT[wasmCpuSegmentField(channel.reg, channel.field)].byteLength;
     case "lazyFlags":
       return WASM_CPU_STATE_LAYOUT[channel.field].byteLength;
     case "eip":

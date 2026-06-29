@@ -4,6 +4,7 @@ import {
   type EipChannel,
   type InstructionCountChannel,
   type LazyFlagsChannel,
+  type SegmentChannel,
   channelsOverlap
 } from "../slots.js";
 import {
@@ -15,7 +16,7 @@ import type { WriteStateAction } from "../actions.js";
 import type { PendingEdgeKind } from "./state.js";
 import { PendingStateAccess } from "./state-access.js";
 
-export type PendingCell = FlagChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
+export type PendingCell = FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
 
 type PendingEntry = { value: ValueId; dirty: boolean };
 
@@ -101,6 +102,8 @@ function channelReadBounds(channel: PendingCell): WidthBounds | undefined {
       return fitsUnsigned(1);
     case "lazyFlags":
       return channel.field === "lazyFlagsKind" ? fitsUnsigned(8) : undefined;
+    case "segment":
+      return channel.field === "selector" ? fitsUnsigned(16) : undefined;
     case "eip":
     case "instructionCount":
       return undefined;

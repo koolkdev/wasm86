@@ -1,11 +1,12 @@
 import type { MutableCpuStateView } from "#x86/cpu-state.js";
 import type { X86Flag } from "#x86/flags.js";
-import type { Reg32 } from "#x86/types.js";
+import type { Reg32, SegmentRegister } from "#x86/types.js";
 import { u32 } from "#x86/numeric.js";
 import {
   WASM_CPU_STATE_BYTE_LENGTH,
   WASM_CPU_STATE_FIELDS,
   WASM_CPU_STATE_LAYOUT,
+  wasmCpuSegmentField,
   wasmCpuStateFieldIsBitField,
   wasmCpuFlagByteOffset,
   type WasmCpuStateField
@@ -27,6 +28,22 @@ export class WasmCpuState implements MutableCpuStateView {
 
   writeReg32(reg: Reg32, value: number): void {
     this.#writeField(this.#view(), reg, value);
+  }
+
+  readSegmentSelector(reg: SegmentRegister): number {
+    return this.#readField(this.#view(), wasmCpuSegmentField(reg, "selector"));
+  }
+
+  writeSegmentSelector(reg: SegmentRegister, value: number): void {
+    this.#writeField(this.#view(), wasmCpuSegmentField(reg, "selector"), value);
+  }
+
+  readSegmentBase(reg: SegmentRegister): number {
+    return this.#readField(this.#view(), wasmCpuSegmentField(reg, "base"));
+  }
+
+  writeSegmentBase(reg: SegmentRegister, value: number): void {
+    this.#writeField(this.#view(), wasmCpuSegmentField(reg, "base"), value);
   }
 
   readFlag(flag: X86Flag): boolean {
@@ -67,6 +84,8 @@ export class WasmCpuState implements MutableCpuStateView {
     switch (layout.byteLength) {
       case 1:
         return view.getUint8(layout.offset);
+      case 2:
+        return view.getUint16(layout.offset, true);
       case 4:
         return view.getUint32(layout.offset, true);
     }
@@ -78,6 +97,9 @@ export class WasmCpuState implements MutableCpuStateView {
     switch (layout.byteLength) {
       case 1:
         view.setUint8(layout.offset, wasmCpuStateFieldIsBitField(field) ? (value === 0 ? 0 : 1) : (u32(value) & 0xff));
+        break;
+      case 2:
+        view.setUint16(layout.offset, u32(value) & 0xffff, true);
         break;
       case 4:
         view.setUint32(layout.offset, u32(value), true);

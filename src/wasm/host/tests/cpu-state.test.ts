@@ -148,3 +148,20 @@ test("narrow register alias writes truncate the value and leave neighbor bytes u
 
   strictEqual(state.readReg32("eax"), 0xdead_4321);
 });
+
+test("host view stores segment selectors separately from segment bases", () => {
+  const { cpuState: state } = createWasmHostMemories();
+
+  state.load({ fsSelector: 0x12345, fsBase: 0xaabb_ccdd, gsSelector: 0x33 });
+
+  strictEqual(state.readSegmentSelector("fs"), 0x2345);
+  strictEqual(state.readSegmentBase("fs"), 0xaabb_ccdd);
+  strictEqual(state.readSegmentSelector("gs"), 0x33);
+  strictEqual(state.readSegmentBase("gs"), 0);
+
+  state.writeSegmentSelector("fs", 0x1_0044);
+  state.writeSegmentBase("fs", 0xffff_0000);
+
+  strictEqual(state.readSegmentSelector("fs"), 0x44);
+  strictEqual(state.readSegmentBase("fs"), 0xffff_0000);
+});

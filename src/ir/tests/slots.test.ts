@@ -11,10 +11,12 @@ import {
   lazyFlagsAChannel,
   lazyFlagsBChannel,
   lazyFlagsKindChannel,
+  segmentBaseChannel,
+  segmentSelectorChannel,
   type StateChannel
 } from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
-import { reg16, reg32, reg8 } from "#x86/types.js";
+import { reg16, reg32, reg8, segmentRegisters } from "#x86/types.js";
 
 test("gpr channels describe byte ranges within their register", () => {
   deepStrictEqual(gprChannel("eax"), { kind: "gpr", reg: "eax", byteOffsetInReg: 0, byteLength: 4 });
@@ -45,6 +47,15 @@ test("lazy flag metadata channels are raw state fields", () => {
   deepStrictEqual(lazyFlagsKindChannel, { kind: "lazyFlags", field: "lazyFlagsKind" });
   deepStrictEqual(lazyFlagsAChannel, { kind: "lazyFlags", field: "lazyFlagsA" });
   deepStrictEqual(lazyFlagsBChannel, { kind: "lazyFlags", field: "lazyFlagsB" });
+});
+
+test("segment channels split visible selectors from hidden bases", () => {
+  for (const reg of segmentRegisters) {
+    deepStrictEqual(segmentSelectorChannel(reg), { kind: "segment", reg, field: "selector" });
+    deepStrictEqual(segmentBaseChannel(reg), { kind: "segment", reg, field: "base" });
+    strictEqual(segmentSelectorChannel(reg), segmentSelectorChannel(reg));
+    strictEqual(segmentBaseChannel(reg), segmentBaseChannel(reg));
+  }
 });
 
 test("channelsOverlap matches byte-range intersection for gpr channels", () => {
@@ -96,17 +107,24 @@ test("channelCovers requires full byte-range containment", () => {
   strictEqual(channelCovers(lazyFlagsKindChannel, lazyFlagsKindChannel), true);
   strictEqual(channelCovers(lazyFlagsKindChannel, lazyFlagsAChannel), false);
   strictEqual(channelCovers(lazyFlagsAChannel, lazyFlagsKindChannel), false);
+  strictEqual(channelCovers(segmentSelectorChannel("fs"), segmentSelectorChannel("fs")), true);
+  strictEqual(channelCovers(segmentBaseChannel("fs"), segmentBaseChannel("fs")), true);
+  strictEqual(channelCovers(segmentSelectorChannel("fs"), segmentBaseChannel("fs")), false);
+  strictEqual(channelCovers(segmentBaseChannel("fs"), segmentSelectorChannel("fs")), false);
 });
 
-test("channelsOverlap keeps flags and eip disjoint from everything else", () => {
+test("channelsOverlap keeps exact cells disjoint from everything else", () => {
   strictEqual(channelsOverlap(flagChannel("CF"), flagChannel("CF")), true);
   strictEqual(channelsOverlap(flagChannel("CF"), flagChannel("ZF")), false);
   strictEqual(channelsOverlap(eipChannel, eipChannel), true);
   strictEqual(channelsOverlap(lazyFlagsKindChannel, lazyFlagsKindChannel), true);
   strictEqual(channelsOverlap(lazyFlagsKindChannel, lazyFlagsAChannel), false);
   strictEqual(channelsOverlap(lazyFlagsAChannel, lazyFlagsKindChannel), false);
+  strictEqual(channelsOverlap(segmentSelectorChannel("fs"), segmentSelectorChannel("fs")), true);
+  strictEqual(channelsOverlap(segmentSelectorChannel("fs"), segmentBaseChannel("fs")), false);
+  strictEqual(channelsOverlap(segmentBaseChannel("fs"), segmentBaseChannel("gs")), false);
 
-  for (const other of [gprChannel("eax"), gprChannel("ah"), flagChannel("OF"), lazyFlagsKindChannel]) {
+  for (const other of [gprChannel("eax"), gprChannel("ah"), flagChannel("OF"), lazyFlagsKindChannel, segmentBaseChannel("fs")]) {
     strictEqual(channelsOverlap(eipChannel, other), false);
     strictEqual(channelsOverlap(other, eipChannel), false);
   }

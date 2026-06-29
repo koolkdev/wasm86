@@ -7,7 +7,9 @@ import {
   flagChannel,
   gprChannel,
   lazyFlagsAChannel,
-  lazyFlagsKindChannel
+  lazyFlagsKindChannel,
+  segmentBaseChannel,
+  segmentSelectorChannel
 } from "#ir/slots.js";
 import type { StateSlot } from "#ir/actions.js";
 
@@ -65,9 +67,12 @@ test("static channels alias iff their byte ranges intersect", () => {
   strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsKindChannel)), true);
   strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsAChannel)), false);
   strictEqual(mayAlias(state(lazyFlagsKindChannel), state(flagChannel("ZF"))), false);
+  strictEqual(mayAlias(state(segmentSelectorChannel("fs")), state(segmentSelectorChannel("fs"))), true);
+  strictEqual(mayAlias(state(segmentSelectorChannel("fs")), state(segmentBaseChannel("fs"))), false);
+  strictEqual(mayAlias(state(segmentBaseChannel("fs")), state(segmentBaseChannel("gs"))), false);
 });
 
-test("a dynamic GPR slot may-aliases every GPR word and never flags, lazy metadata, or eip", () => {
+test("a dynamic GPR slot may-aliases every GPR word and never exact cells", () => {
   strictEqual(mayAlias(state(dynamicGpr(0)), state(gprChannel("eax"))), true);
   strictEqual(mayAlias(state(gprChannel("bl")), state(dynamicGpr(0))), true);
   strictEqual(mayAlias(state(dynamicGpr(0)), state(dynamicGpr(1))), true);
@@ -78,6 +83,8 @@ test("a dynamic GPR slot may-aliases every GPR word and never flags, lazy metada
   strictEqual(mayAlias(state(lazyFlagsKindChannel), state(dynamicGpr(0))), false);
   strictEqual(mayAlias(state(dynamicGpr(0)), state(eipChannel)), false);
   strictEqual(mayAlias(state(eipChannel), state(dynamicGpr(0))), false);
+  strictEqual(mayAlias(state(dynamicGpr(0)), state(segmentSelectorChannel("fs"))), false);
+  strictEqual(mayAlias(state(segmentBaseChannel("fs")), state(dynamicGpr(0))), false);
 });
 
 test("action writes include raw state slots", () => {
@@ -99,6 +106,13 @@ test("action writes include raw state slots", () => {
   );
   strictEqual(
     actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsKindChannel, value: 0 }, lazyFlagsAChannel),
+    false
+  );
+  strictEqual(
+    actionMayWriteStateSlot(
+      { kind: "writeState", slot: segmentSelectorChannel("fs"), value: 0 },
+      segmentBaseChannel("fs")
+    ),
     false
   );
   strictEqual(

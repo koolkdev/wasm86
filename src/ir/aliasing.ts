@@ -4,8 +4,9 @@ import type { Action, StateSlot } from "./actions.js";
 // Effects are derived from action kind + slot, never stored per-action.
 // One aliasing rule over the address spaces: static channels alias iff their
 // byte ranges intersect; a dynamic GPR slot may alias every GPR word and
-// never flags, lazy metadata, or eip; guest memory may-alias guest memory (no
-// disambiguation); guest memory and state never alias.
+// never exact cells like flags, segment registers, lazy metadata, or eip;
+// guest memory may-alias guest memory (no disambiguation); guest memory and
+// state never alias.
 
 export type StorageEffect =
   | Readonly<{ space: "state"; slot: StateSlot }>
@@ -55,6 +56,7 @@ export function slotsMayAlias(a: StateSlot, b: StateSlot): boolean {
     case "gpr":
       return b.kind === "gprDynamic" || channelsOverlap(a, b);
     case "flag":
+    case "segment":
     case "eip":
     case "instructionCount":
     case "lazyFlags":

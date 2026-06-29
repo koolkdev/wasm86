@@ -66,6 +66,7 @@ function emitSlotAddress(body: WasmFunctionBodyEncoder, slot: StateSlot, emitUse
       return;
     case "gpr":
     case "flag":
+    case "segment":
     case "eip":
     case "instructionCount":
     case "lazyFlags":
@@ -114,6 +115,7 @@ function slotBaseOffset(slot: StateSlot): number {
       return WASM_CPU_GPR_BASE_OFFSET;
     case "gpr":
     case "flag":
+    case "segment":
     case "eip":
     case "instructionCount":
     case "lazyFlags":
@@ -127,6 +129,7 @@ function slotAccessByteLength(slot: StateSlot): 1 | 2 | 4 {
       return slot.byteLength;
     case "gpr":
     case "flag":
+    case "segment":
     case "eip":
     case "instructionCount":
     case "lazyFlags":

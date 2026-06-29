@@ -68,6 +68,8 @@ export function readWasmCpuStateField(view: DataView, field: WasmCpuStateField):
   switch (layout.byteLength) {
     case 1:
       return view.getUint8(layout.offset);
+    case 2:
+      return view.getUint16(layout.offset, true);
     case 4:
       return view.getUint32(layout.offset, true);
   }
@@ -79,6 +81,9 @@ export function writeWasmCpuStateField(view: DataView, field: WasmCpuStateField,
   switch (layout.byteLength) {
     case 1:
       view.setUint8(layout.offset, wasmCpuStateFieldIsBitField(field) ? (value === 0 ? 0 : 1) : (u32(value) & 0xff));
+      break;
+    case 2:
+      view.setUint16(layout.offset, u32(value) & 0xffff, true);
       break;
     case 4:
       view.setUint32(layout.offset, u32(value), true);
@@ -140,7 +145,7 @@ export function writeWasmCpuStateChannel(view: DataView, channel: StateChannel, 
       view.setUint8(offset, value);
       break;
     case 2:
-      view.setUint16(offset, value, true);
+      view.setUint16(offset, u32(value) & 0xffff, true);
       break;
     case 4:
       view.setUint32(offset, u32(value), true);

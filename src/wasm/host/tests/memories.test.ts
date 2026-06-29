@@ -55,9 +55,21 @@ test("runtime Wasm memories expose raw cpu state field offsets", () => {
     TF: 59,
     NT: 60,
     AC: 61,
-    ID: 62
+    ID: 62,
+    esSelector: 64,
+    csSelector: 66,
+    ssSelector: 68,
+    dsSelector: 70,
+    fsSelector: 72,
+    gsSelector: 74,
+    esBase: 76,
+    csBase: 80,
+    ssBase: 84,
+    dsBase: 88,
+    fsBase: 92,
+    gsBase: 96
   });
-  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 63);
+  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 100);
 });
 
 test("runtime Wasm guest memory reads writes and reports faults", () => {

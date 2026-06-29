@@ -7,10 +7,12 @@ import {
   gprChannel,
   lazyFlagsAChannel,
   lazyFlagsBChannel,
-  lazyFlagsKindChannel
+  lazyFlagsKindChannel,
+  segmentBaseChannel,
+  segmentSelectorChannel
 } from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
-import { reg16, reg32, reg8 } from "#x86/types.js";
+import { reg16, reg32, reg8, segmentRegisters } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import {
   WASM_CPU_FLAG_BYTE_OFFSETS,
@@ -40,7 +42,7 @@ test("cpu state layout fields and flag offsets are stable", () => {
   strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsKind, 40);
   strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsA, 44);
   strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsB, 48);
-  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 63);
+  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 100);
 
   for (const field of WASM_CPU_STATE_FIELDS) {
     strictEqual(WASM_CPU_STATE_OFFSETS[field], WASM_CPU_STATE_LAYOUT[field].offset);
@@ -72,4 +74,11 @@ test("channel offsets derive from the register word offset plus the byte offset"
   strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsKindChannel), 1);
   strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsAChannel), 4);
   strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsBChannel), 4);
+
+  for (const reg of segmentRegisters) {
+    strictEqual(wasmCpuStateChannelOffset(segmentSelectorChannel(reg)), WASM_CPU_STATE_OFFSETS[`${reg}Selector`]);
+    strictEqual(wasmCpuStateChannelOffset(segmentBaseChannel(reg)), WASM_CPU_STATE_OFFSETS[`${reg}Base`]);
+    strictEqual(wasmCpuStateChannelAccessByteLength(segmentSelectorChannel(reg)), 2);
+    strictEqual(wasmCpuStateChannelAccessByteLength(segmentBaseChannel(reg)), 4);
+  }
 });
