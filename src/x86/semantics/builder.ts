@@ -53,6 +53,7 @@ export interface SemanticsBuilder {
   set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
   memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void;
   address(operand: OperandInput): Value;
+  linearAddress(operand: OperandInput): Value;
 
   binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value;
   unary(operator: UnaryOperator, value: ValueInput): Value;

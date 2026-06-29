@@ -60,7 +60,7 @@ function memoryGuardAddress(
       switch (context.operandInfo(storage).storage) {
         case "mem":
         case "regOrMem":
-          return s.address(storage);
+          return s.linearAddress(storage);
         case "reg":
         case "imm":
         case "relTarget":

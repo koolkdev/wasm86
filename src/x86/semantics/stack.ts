@@ -235,7 +235,7 @@ function popTargetStorage(
   dst: OperandRef
 ): StorageInput {
   if (context.operandInfo(dst).storage === "mem") {
-    const target = s.mem(s.address(dst));
+    const target = s.mem(s.linearAddress(dst));
 
     guardStorageWrite(s, context, target, width);
     return target;

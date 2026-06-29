@@ -42,6 +42,7 @@ import {
   flagChannel,
   gprChannel,
   instructionCountChannel,
+  segmentBaseChannel,
   type GprChannel
 } from "./slots.js";
 import type {
@@ -121,10 +122,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #pending = new PendingState(this.#values, (action) => this.#actions.push(action));
   readonly #statusFlags = new StatusFlags(this.#values, this.#pending);
   readonly #edgeRegions: EdgeRegion[] = [];
-  // An effective address is computed once per operand, at its first use —
-  // x86 computes an EA once, so later uses (the store) see the same address
-  // even when the instruction rewrites a base register in between.
+  // An effective/linear address is computed once per operand, at its first
+  // use, so later uses see the same address even if the instruction rewrites
+  // a base register in between.
   readonly #operandAddresses = new Map<number, ValueId>();
+  readonly #operandLinearAddresses = new Map<number, ValueId>();
   #nextRegionId: RegionId = entryRegionId + 1;
   #bindings: readonly OperandBinding[] = [];
   #instructionLocation: InstructionLocationValues | undefined;
@@ -147,6 +149,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     this.#bindings = bindings;
     this.#operandAddresses.clear();
+    this.#operandLinearAddresses.clear();
     this.#instructionLocation = this.#locationValues(location);
     this.#terminated = false;
     this.#wroteMemory = false;
@@ -261,7 +264,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "mem":
           case "memStatic":
           case "memDynamic":
-            return valueFromId(this.#readMemory(this.#operandAddress(storage.index), accessWidth, options));
+            return valueFromId(this.#readMemory(this.#operandLinearAddress(storage.index), accessWidth, options));
           case "regDynamic":
             return valueFromId(
               this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options)
@@ -292,7 +295,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "mem":
           case "memStatic":
           case "memDynamic":
-            this.#writeMemory(this.#operandAddress(storage.index), value, accessWidth);
+            this.#writeMemory(this.#operandLinearAddress(storage.index), value, accessWidth);
             return;
           case "regDynamic":
             this.#pending.writeDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), value);
@@ -332,6 +335,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   address(operandRef: OperandInput): Value {
     this.#beforeOp("address");
     return valueFromId(this.#operandAddress(operandRef.index));
+  }
+
+  linearAddress(operandRef: OperandInput): Value {
+    this.#beforeOp("linearAddress");
+    return valueFromId(this.#operandLinearAddress(operandRef.index));
   }
 
   binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
@@ -575,6 +583,20 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return address;
   }
 
+  #operandLinearAddress(index: number): ValueId {
+    const cached = this.#operandLinearAddresses.get(index);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const binding = this.#binding(index);
+    const address = this.#bindingLinearAddress(binding);
+
+    this.#operandLinearAddresses.set(index, address);
+    return address;
+  }
+
   #bindingAddress(binding: OperandBinding): ValueId {
     assert(
       binding.kind === "mem" || binding.kind === "memStatic" || binding.kind === "memDynamic",
@@ -584,6 +606,22 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     switch (binding.kind) {
       case "mem":
         return this.#effectiveAddress(binding.address);
+      case "memStatic":
+        return this.#values.external(binding.address);
+      case "memDynamic":
+        return this.#dynamicAddress(binding);
+    }
+  }
+
+  #bindingLinearAddress(binding: OperandBinding): ValueId {
+    assert(
+      binding.kind === "mem" || binding.kind === "memStatic" || binding.kind === "memDynamic",
+      `linear address of a ${binding.kind} operand binding`
+    );
+
+    switch (binding.kind) {
+      case "mem":
+        return this.#linearAddress(binding.address);
       case "memStatic":
         return this.#values.external(binding.address);
       case "memDynamic":
@@ -624,6 +662,17 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return ea.disp === 0
       ? address
       : this.#values.binary("add", address, this.#values.const(ea.disp));
+  }
+
+  #linearAddress(ea: EffectiveAddress): ValueId {
+    const offset = this.#effectiveAddress(ea);
+
+    // Flat-memory assumption: CS/DS/ES/SS bases are zero; FS/GS may be non-zero.
+    if (ea.segment !== "fs" && ea.segment !== "gs") {
+      return offset;
+    }
+
+    return this.#values.binary("add", this.#pending.read(segmentBaseChannel(ea.segment)), offset);
   }
 
   #binding(index: number): OperandBinding {

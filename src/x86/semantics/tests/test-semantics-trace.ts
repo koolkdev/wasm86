@@ -171,6 +171,10 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return out;
   }
 
+  linearAddress(operandRef: OperandInput): Value {
+    return this.address(operandRef);
+  }
+
   binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
     return this.#binary(operator, a, b);
   }

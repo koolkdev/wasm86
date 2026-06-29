@@ -19,7 +19,8 @@ import {
   eipChannel,
   gprChannel,
   instructionCountChannel,
-  lazyFlagsKindChannel
+  lazyFlagsKindChannel,
+  segmentBaseChannel
 } from "#ir/slots.js";
 import type {
   Action,
@@ -1463,6 +1464,90 @@ test("lea builds general modrm addresses from channel reads", () => {
   ]);
 });
 
+test("lea uses the effective offset without adding segment bases", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    leaSemantic(32),
+    [regBinding("eax"), mem({ segment: "fs", base: "ebx", scale: 1, disp: 0 })],
+    loc(0x1000, 0x1004)
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  const ebx = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
+  )!.output;
+
+  deepStrictEqual(entryActions(block), [
+    { kind: "readState", output: ebx, slot: gprChannel("ebx") },
+    { kind: "writeState", slot: gprChannel("eax"), value: ebx },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1004) },
+    { kind: "dispatch", targetEip: v.const(0x1004) }
+  ]);
+});
+
+test("flat segment memory operands use the effective offset directly", () => {
+  for (const segment of ["cs", "ds", "es", "ss"] as const) {
+    const builder = createIrBlockBuilder();
+
+    builder.addInstruction(
+      movSemantic(32),
+      [regBinding("eax"), mem({ segment, base: "ebx", scale: 1, disp: 0 })],
+      loc(0x1000, 0x1003)
+    );
+
+    const block = builder.finish();
+    const ebx = entryActions(block).find(
+      (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
+    )!.output;
+    const read = entryActions(block).find(
+      (action): action is ReadMemoryAction => action.kind === "readMemory"
+    )!;
+
+    strictEqual(read.address, ebx, segment);
+    strictEqual(
+      entryActions(block).some((action) => action.kind === "readState" && action.slot.kind === "segment"),
+      false,
+      segment
+    );
+  }
+});
+
+test("fs and gs memory operands add the segment base to the effective offset", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    movSemantic(32),
+    [regBinding("eax"), mem({ segment: "fs", base: "ebx", scale: 1, disp: 8 })],
+    loc(0x1000, 0x1004)
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  const ebx = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
+  )!.output;
+  const fsBase = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === segmentBaseChannel("fs")
+  )!.output;
+  const offset = v.binary("add", ebx, v.const(8));
+  const address = v.binary("add", fsBase, offset);
+  const read = entryActions(block).find(
+    (action): action is ReadMemoryAction => action.kind === "readMemory"
+  )!;
+
+  deepStrictEqual(entryActions(block), [
+    { kind: "readState", output: ebx, slot: gprChannel("ebx") },
+    { kind: "readState", output: fsBase, slot: segmentBaseChannel("fs") },
+    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "readMemory", output: read.output, address, width: 32 },
+    { kind: "writeState", slot: gprChannel("eax"), value: read.output },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1004) },
+    { kind: "dispatch", targetEip: v.const(0x1004) }
+  ]);
+});
+
 test("an absolute address is just its displacement constant", () => {
   const builder = createIrBlockBuilder();
 
@@ -1711,6 +1796,43 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
   deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: esp });
   deepStrictEqual(edgeRegion(block, 2).flushes, eipFlushes);
   deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "exit", reason: "memoryWriteFault", payload: ebx });
+});
+
+test("pop fs:[ebx] writes to the linear destination address", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(popSemantic(), [mem({ segment: "fs", base: "ebx", scale: 1, disp: 0 })], loc(0x1000, 0x1002));
+
+  const block = builder.finish();
+  const v = block.values;
+  const esp = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("esp")
+  )!.output;
+  const ebx = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ebx")
+  )!.output;
+  const fsBase = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === segmentBaseChannel("fs")
+  )!.output;
+  const popValue = entryActions(block).find(
+    (action): action is ReadMemoryAction => action.kind === "readMemory"
+  )!.output;
+  const nextEsp = v.binary("add", esp, v.const(4));
+  const address = v.binary("add", fsBase, ebx);
+
+  deepStrictEqual(entryActions(block), [
+    { kind: "readState", output: esp, slot: gprChannel("esp") },
+    { kind: "guardMemory", address: esp, byteLength: 4, access: "read", faultEdge: 1 },
+    { kind: "readMemory", output: popValue, address: esp, width: 32 },
+    { kind: "readState", output: ebx, slot: gprChannel("ebx") },
+    { kind: "readState", output: fsBase, slot: segmentBaseChannel("fs") },
+    { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
+    { kind: "writeMemory", address, value: popValue, width: 32 },
+    { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1002) },
+    { kind: "dispatch", targetEip: v.const(0x1002) }
+  ]);
+  deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "exit", reason: "memoryWriteFault", payload: address });
 });
 
 test("pop [ebx] write edge restores a previous instruction's pending esp", () => {
