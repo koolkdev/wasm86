@@ -581,6 +581,8 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
     switch (operand.kind) {
       case "reg":
         return regBinding(operand.alias.name);
+      case "segment":
+        throw new Error(`unsupported segment operand in lazy flag e2e: ${instruction.spec.id}`);
       case "imm":
         return immBinding(operand.value);
       case "relTarget":

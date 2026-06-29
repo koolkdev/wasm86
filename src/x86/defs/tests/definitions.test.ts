@@ -14,7 +14,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 389);
+  strictEqual(X86_32_CORE.instructions.length, 403);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -30,6 +30,8 @@ test("x86-32 core registers the initial instruction surface", () => {
     "mov.moffs8_al",
     "mov.moffs32_eax",
     "mov.moffs16_ax",
+    "mov.rm16_sreg",
+    "mov.rm32_sreg",
     "nop.rm16",
     "nop.rm32",
     "mov.rm32_r32",
@@ -111,6 +113,9 @@ test("x86-32 core registers the initial instruction surface", () => {
     "test.rm32_imm32",
     "push.r16",
     "push.r32",
+    "push.es",
+    "push.fs",
+    "push.gs_o16",
     "push.rm16",
     "push.imm16",
     "push.imm8_o16",
@@ -145,6 +150,24 @@ test("x86-32 core registers the initial instruction surface", () => {
   ]) {
     strictEqual(ids.includes(id), true, `missing ${id}`);
   }
+});
+
+test("mov segment-register read forms use Sreg ModRM operands", () => {
+  const word = instruction("mov.rm16_sreg");
+  const dword = instruction("mov.rm32_sreg");
+
+  deepStrictEqual(word.prefixes, { operandSize: "override" });
+  deepStrictEqual(word.opcode, [0x8c]);
+  deepStrictEqual(word.operands, [
+    { kind: "modrm.rm", type: "rm16" },
+    { kind: "modrm.sreg" }
+  ]);
+
+  deepStrictEqual(dword.opcode, [0x8c]);
+  deepStrictEqual(dword.operands, [
+    { kind: "modrm.rm", type: "r32_m16" },
+    { kind: "modrm.sreg" }
+  ]);
 });
 
 test("multi-byte nop forms use slash-zero ModRM operands without side effects", () => {
@@ -336,6 +359,22 @@ test("popf is an operand-size word flags pop", () => {
   deepStrictEqual(spec.opcode, [0x9d]);
   strictEqual(spec.operands, undefined);
   deepStrictEqual(spec.format, { syntax: "popf" });
+});
+
+test("push segment forms name each fixed segment-register opcode", () => {
+  const es = instruction("push.es");
+  const fs = instruction("push.fs");
+  const gsWord = instruction("push.gs_o16");
+
+  deepStrictEqual(es.opcode, [0x06]);
+  deepStrictEqual(es.operands, [{ kind: "implicit.sreg", reg: "es" }]);
+
+  deepStrictEqual(fs.opcode, [0x0f, 0xa0]);
+  deepStrictEqual(fs.operands, [{ kind: "implicit.sreg", reg: "fs" }]);
+
+  deepStrictEqual(gsWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(gsWord.opcode, [0x0f, 0xa8]);
+  deepStrictEqual(gsWord.operands, [{ kind: "implicit.sreg", reg: "gs" }]);
 });
 
 test("operand-size stack forms use word operands with 32-bit ESP semantics", () => {

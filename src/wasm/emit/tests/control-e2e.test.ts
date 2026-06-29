@@ -184,6 +184,8 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
         }
 
         return regBinding(operand.alias.base);
+      case "segment":
+        throw new Error("segment operands not supported in the control e2e");
       case "imm":
         return immBinding(operand.value);
       case "relTarget":

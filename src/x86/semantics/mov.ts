@@ -16,6 +16,20 @@ export function movSemantic(width: OperandWidth = 32): SemanticTemplate {
   };
 }
 
+export function movSregSemantic(registerWidth: Extract<OperandWidth, 16 | 32>): SemanticTemplate {
+  return (s, context) => {
+    const dst = s.operand(0);
+    const src = s.operand(1);
+    const width = context.operandInfo(dst).storage === "mem" ? 16 : registerWidth;
+
+    guardStorageRead(s, context, src, width);
+    const value = s.get(src, width);
+
+    guardStorageWrite(s, context, dst, width);
+    s.set(dst, value, width);
+  };
+}
+
 export function movzxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
   return (s, context) => {
     const dst = s.operand(0);

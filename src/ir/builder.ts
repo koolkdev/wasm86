@@ -34,7 +34,8 @@ import type {
   MemDynamicSegment,
   MemDynamicOperandBinding,
   OperandBinding,
-  RegDynamicOperandBinding
+  RegDynamicOperandBinding,
+  SegmentDynamicOperandBinding
 } from "./operands.js";
 import { PendingState } from "./pending/state.js";
 import { StatusFlags } from "./status-flags.js";
@@ -206,6 +207,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     switch (binding.kind) {
       case "reg":
+      case "segment":
         return { storage: "reg" };
       case "imm":
         return { storage: "imm" };
@@ -215,6 +217,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         return { storage: "mem" };
       case "regDynamic":
         // A runtime register index: register storage, dynamic channel.
+        return { storage: "reg" };
+      case "segmentDynamic":
+        // A runtime segment index: register-like storage, selector channel.
         return { storage: "reg" };
       case "immExternal":
         // A runtime value with no storage cell, e.g. a decoded immediate.
@@ -264,6 +269,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
             return valueFromId(this.#widthAdjusted(this.#values.external(binding.value), accessWidth, options));
           case "reg":
             return valueFromId(this.#readChannel(binding.channel, accessWidth, options));
+          case "segment":
+            return valueFromId(this.#widthAdjusted(this.#pending.read(binding.channel), accessWidth, options));
           case "mem":
           case "memStatic":
           case "memDynamic":
@@ -272,6 +279,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
             return valueFromId(
               this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options)
             );
+          case "segmentDynamic":
+            return valueFromId(this.#dynamicSegmentSelector(binding, accessWidth, options));
         }
       }
     }
@@ -295,6 +304,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "reg":
             this.#writeChannel(binding.channel, value, accessWidth);
             return;
+          case "segment":
+          case "segmentDynamic":
+            throw notSupportedError(`set to ${binding.kind} operand binding`);
           case "mem":
           case "memStatic":
           case "memDynamic":
@@ -530,6 +542,18 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       index: this.#values.external(binding.index),
       byteLength: dynamicGprByteLength[accessWidth]
     };
+  }
+
+  #dynamicSegmentSelector(
+    binding: SegmentDynamicOperandBinding,
+    accessWidth: OperandWidth,
+    options: GetOptions
+  ): ValueId {
+    return this.#widthAdjusted(
+      this.#pending.readDynamicSegmentSelector(this.#values.external(binding.index)),
+      accessWidth,
+      options
+    );
   }
 
   #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: GetOptions): ValueId {

@@ -7,7 +7,8 @@ import {
   type MemOperand,
   type OperandWidth,
   type Reg32,
-  type RegName
+  type RegName,
+  type SegmentRegister
 } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import {
@@ -106,6 +107,10 @@ export function reg32(regName: Reg32): IsaOperandBinding {
 
 export function reg(regName: RegName): IsaOperandBinding {
   return { kind: "reg", alias: registerAlias(regName) };
+}
+
+export function sreg(regName: SegmentRegister): IsaOperandBinding {
+  return { kind: "segment", reg: regName };
 }
 
 export function mem(

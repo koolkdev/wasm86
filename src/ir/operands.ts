@@ -1,5 +1,5 @@
 import type { EffectiveAddress, RegName, SegmentRegister } from "#x86/types.js";
-import { gprChannel, type GprChannel } from "./slots.js";
+import { gprChannel, segmentSelectorChannel, type GprChannel, type SegmentChannel } from "./slots.js";
 
 export type ExternalValueId = number;
 
@@ -8,6 +8,8 @@ export type ExternalValueId = number;
 // (decoded immediate or resolved branch target), or a computed address.
 export type RegOperandBinding = Readonly<{ kind: "reg"; channel: GprChannel }>;
 export type RegDynamicOperandBinding = Readonly<{ kind: "regDynamic"; index: ExternalValueId }>;
+export type SegmentOperandBinding = Readonly<{ kind: "segment"; channel: SegmentChannel<SegmentRegister, "selector"> }>;
+export type SegmentDynamicOperandBinding = Readonly<{ kind: "segmentDynamic"; index: ExternalValueId }>;
 export type ImmOperandBinding = Readonly<{ kind: "imm"; value: number }>;
 export type ImmExternalOperandBinding = Readonly<{ kind: "immExternal"; value: ExternalValueId }>;
 export type MemOperandBinding = Readonly<{ kind: "mem"; address: EffectiveAddress }>;
@@ -29,6 +31,8 @@ export type MemDynamicOperandBinding = Readonly<{
 export type OperandBinding =
   | RegOperandBinding
   | RegDynamicOperandBinding
+  | SegmentOperandBinding
+  | SegmentDynamicOperandBinding
   | ImmOperandBinding
   | ImmExternalOperandBinding
   | MemOperandBinding
@@ -41,6 +45,14 @@ export function regBinding(name: RegName): RegOperandBinding {
 
 export function regDynamicBinding(index: ExternalValueId): RegDynamicOperandBinding {
   return { kind: "regDynamic", index };
+}
+
+export function segmentBinding(reg: SegmentRegister): SegmentOperandBinding {
+  return { kind: "segment", channel: segmentSelectorChannel(reg) };
+}
+
+export function segmentDynamicBinding(index: ExternalValueId): SegmentDynamicOperandBinding {
+  return { kind: "segmentDynamic", index };
 }
 
 export function immBinding(value: number): ImmOperandBinding {

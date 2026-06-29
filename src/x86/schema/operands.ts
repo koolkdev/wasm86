@@ -1,4 +1,4 @@
-import type { OperandWidth, RegName } from "#x86/types.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import type {
   ImmediateExtension,
@@ -12,6 +12,10 @@ export function modrmReg(type: RegOperandType): OperandSpec {
   return { kind: "modrm.reg", type };
 }
 
+export function modrmSreg(): OperandSpec {
+  return { kind: "modrm.sreg" };
+}
+
 export function modrmRm(type: RmOperandType | MemOperandType): OperandSpec {
   return { kind: "modrm.rm", type };
 }
@@ -22,6 +26,10 @@ export function opReg(type: RegOperandType = "r32"): OperandSpec {
 
 export function implicitReg(reg: RegName): OperandSpec {
   return { kind: "implicit.reg", reg, type: regTypeForWidth(registerAlias(reg).width) };
+}
+
+export function implicitSreg(reg: SegmentRegister): OperandSpec {
+  return { kind: "implicit.sreg", reg };
 }
 
 export function moffs(width: OperandWidth): OperandSpec {

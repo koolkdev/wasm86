@@ -59,6 +59,65 @@ test("executes MOV edi, imm32 through opcode register low bits", async () => {
   assertCompletedInstruction(state, startAddress + 5, 8);
 });
 
+test("executes MOV from segment selectors", async () => {
+  const wordDestination = await executeInstruction(
+    [0x66, 0x8c, 0xe0],
+    createWasmCpuStateSnapshot({
+      eax: 0xffff_0000,
+      fsSelector: 0x1234,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+  const dwordDestination = await executeInstruction(
+    [0x8c, 0xe0],
+    createWasmCpuStateSnapshot({
+      eax: 0xffff_ffff,
+      fsSelector: 0x4321,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+
+  assertSingleInstructionExit(wordDestination.exit);
+  strictEqual(wordDestination.state.eax, 0xffff_1234);
+  assertCompletedInstruction(wordDestination.state, startAddress + 3, 8);
+
+  assertSingleInstructionExit(dwordDestination.exit);
+  strictEqual(dwordDestination.state.eax, 0x4321);
+  assertCompletedInstruction(dwordDestination.state, startAddress + 2, 8);
+});
+
+test("executes MOV from segment selectors to memory as a word store", async () => {
+  const result = await executeInstruction(
+    [0x8c, 0x2b],
+    createWasmCpuStateSnapshot({
+      ebx: 0x20,
+      gsSelector: 0xabcd,
+      eip: startAddress,
+      instructionCount: 7
+    }),
+    [{ address: 0x20, bytes: [0x11, 0x22, 0x33, 0x44] }]
+  );
+
+  assertSingleInstructionExit(result.exit);
+  strictEqual(result.guestView.getUint32(0x20, true), 0x4433_abcd);
+  assertCompletedInstruction(result.state, startAddress + 2, 8);
+});
+
+test("faulting MOV segment selector to memory reports a word write", async () => {
+  const initial = createWasmCpuStateSnapshot({
+    ebx: 0xffff,
+    gsSelector: 0xabcd,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const { exit, state } = await executeInstruction([0x8c, 0x2b], initial);
+
+  deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_WRITE_FAULT, payload: 0xffff, detail: 2 });
+  deepStrictEqual(state, initial);
+});
+
 test("executes MOV r/m32, imm32 through C7 group", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const initialState = createWasmCpuStateSnapshot({

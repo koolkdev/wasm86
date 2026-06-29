@@ -981,6 +981,8 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
         return immBinding(operand.value);
       case "mem":
         return memBinding(effectiveAddressOf(operand));
+      case "segment":
+        throw new Error("segment operands not supported in the memory e2e");
       case "relTarget":
         throw new Error("relTarget operands not supported in the memory e2e");
     }

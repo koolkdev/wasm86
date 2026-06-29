@@ -16,7 +16,7 @@ import type {
   RmOperandType
 } from "#x86/schema/types.js";
 import { registerAlias, registerAliasByIndex } from "#x86/registers.js";
-import type { MemOperand, OperandWidth, SegmentRegister } from "#x86/types.js";
+import { segmentRegisters, type MemOperand, type OperandWidth, type SegmentRegister } from "#x86/types.js";
 import { signedImm8, signedImm32 } from "./immediate.js";
 import { decodeModRmAddressing, rm32ModRmByteLengthAt, type ModRmRm } from "./modrm.js";
 import { buildOpcodeDispatch, opcodeLeaf, type OpcodeDispatchLeaf } from "./opcode-dispatch.js";
@@ -196,9 +196,14 @@ class InstructionDecoder {
           ? { kind: "unsupported" }
           : {
             kind: "ok",
-            binding: InstructionDecoder.registerBinding(InstructionDecoder.operandWidth(operand.type), modrm.regField),
+            binding: InstructionDecoder.registerBinding(InstructionDecoder.registerOperandWidth(operand.type), modrm.regField),
             cursor
           };
+      case "modrm.sreg": {
+        const binding = modrm === undefined ? undefined : InstructionDecoder.segmentBinding(modrm.regField);
+
+        return binding === undefined ? { kind: "unsupported" } : { kind: "ok", binding, cursor };
+      }
       case "modrm.rm":
         if (modrm === undefined) {
           return { kind: "unsupported" };
@@ -211,13 +216,15 @@ class InstructionDecoder {
           : {
             kind: "ok",
             binding: InstructionDecoder.registerBinding(
-              InstructionDecoder.operandWidth(operand.type),
+              InstructionDecoder.registerOperandWidth(operand.type),
               expanded.opcodeLowBits
             ),
             cursor
           };
       case "implicit.reg":
         return { kind: "ok", binding: { kind: "reg", alias: registerAlias(operand.reg) }, cursor };
+      case "implicit.sreg":
+        return { kind: "ok", binding: { kind: "segment", reg: operand.reg }, cursor };
       case "moffs":
         return {
           kind: "ok",
@@ -286,19 +293,21 @@ class InstructionDecoder {
     operand: Extract<OperandSpec, { kind: "modrm.rm" }>,
     cursor: number
   ): Readonly<{ kind: "ok"; binding: IsaOperandBinding; cursor: number }> | Readonly<{ kind: "unsupported" }> {
-    const width = InstructionDecoder.operandWidth(operand.type);
-
     switch (rm.kind) {
       case "reg":
         return InstructionDecoder.isMemoryOnlyOperand(operand.type)
           ? { kind: "unsupported" }
-          : { kind: "ok", binding: InstructionDecoder.registerBinding(width, rm.index), cursor };
+          : {
+            kind: "ok",
+            binding: InstructionDecoder.registerBinding(InstructionDecoder.rmRegisterWidth(operand.type), rm.index),
+            cursor
+          };
       case "mem":
         return {
           kind: "ok",
           binding: {
             kind: "mem",
-            accessWidth: width,
+            accessWidth: InstructionDecoder.rmMemoryWidth(operand.type),
             ...rm.address,
             segment: this.segmentOverride ?? rm.address.segment
           } satisfies MemOperand,
@@ -433,17 +442,44 @@ class InstructionDecoder {
     return { kind: "reg", alias: registerAliasByIndex(width, index) };
   }
 
-  private static operandWidth(type: RegOperandType | RmOperandType | MemOperandType): OperandWidth {
+  private static segmentBinding(index: number): IsaOperandBinding | undefined {
+    const reg = segmentRegisters[index];
+
+    return reg === undefined ? undefined : { kind: "segment", reg };
+  }
+
+  private static registerOperandWidth(type: RegOperandType): OperandWidth {
     switch (type) {
       case "r8":
+        return 8;
+      case "r16":
+        return 16;
+      case "r32":
+        return 32;
+    }
+  }
+
+  private static rmRegisterWidth(type: RmOperandType): OperandWidth {
+    switch (type) {
+      case "rm8":
+        return 8;
+      case "rm16":
+        return 16;
+      case "rm32":
+      case "r32_m16":
+        return 32;
+    }
+  }
+
+  private static rmMemoryWidth(type: RmOperandType | MemOperandType): OperandWidth {
+    switch (type) {
       case "rm8":
       case "m8":
         return 8;
-      case "r16":
       case "rm16":
       case "m16":
+      case "r32_m16":
         return 16;
-      case "r32":
       case "rm32":
       case "m32":
         return 32;
@@ -459,6 +495,7 @@ class InstructionDecoder {
       case "rm8":
       case "rm16":
       case "rm32":
+      case "r32_m16":
         return false;
     }
   }

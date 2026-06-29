@@ -1,5 +1,5 @@
 import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm, modrmRm, opReg } from "#x86/schema/operands.js";
+import { imm, implicitSreg, modrmRm, opReg } from "#x86/schema/operands.js";
 import { opcodePlusReg } from "#x86/schema/opcodes.js";
 import {
   leaveSemantic,
@@ -30,6 +30,96 @@ export const PUSH = mnemonic("push", [
     operands: [opReg()],
     format: { syntax: "push {0}" },
     semantics: pushSemantic()
+  }),
+  // 06: PUSH ES
+  form("es", {
+    opcode: [0x06],
+    operands: [implicitSreg("es")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic()
+  }),
+  // 0E: PUSH CS
+  form("cs", {
+    opcode: [0x0e],
+    operands: [implicitSreg("cs")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic()
+  }),
+  // 16: PUSH SS
+  form("ss", {
+    opcode: [0x16],
+    operands: [implicitSreg("ss")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic()
+  }),
+  // 1E: PUSH DS
+  form("ds", {
+    opcode: [0x1e],
+    operands: [implicitSreg("ds")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic()
+  }),
+  // 0F A0: PUSH FS
+  form("fs", {
+    opcode: [0x0f, 0xa0],
+    operands: [implicitSreg("fs")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic()
+  }),
+  // 0F A8: PUSH GS
+  form("gs", {
+    opcode: [0x0f, 0xa8],
+    operands: [implicitSreg("gs")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic()
+  }),
+  // 66 06: PUSH ES
+  form("es_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x06],
+    operands: [implicitSreg("es")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic(16)
+  }),
+  // 66 0E: PUSH CS
+  form("cs_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x0e],
+    operands: [implicitSreg("cs")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic(16)
+  }),
+  // 66 16: PUSH SS
+  form("ss_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x16],
+    operands: [implicitSreg("ss")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic(16)
+  }),
+  // 66 1E: PUSH DS
+  form("ds_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x1e],
+    operands: [implicitSreg("ds")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic(16)
+  }),
+  // 66 0F A0: PUSH FS
+  form("fs_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x0f, 0xa0],
+    operands: [implicitSreg("fs")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic(16)
+  }),
+  // 66 0F A8: PUSH GS
+  form("gs_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x0f, 0xa8],
+    operands: [implicitSreg("gs")],
+    format: { syntax: "push {0}" },
+    semantics: pushSemantic(16)
   }),
   // 66 FF /6: PUSH r/m16
   form("rm16", {

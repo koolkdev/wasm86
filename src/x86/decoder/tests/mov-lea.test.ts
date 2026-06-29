@@ -1,4 +1,4 @@
-import { imm32, mem, mem32, reg, reg32, testDecodeFixtures, type DecoderFixture } from "./helpers.js";
+import { imm32, mem, mem32, reg, reg32, sreg, testDecodeFixtures, type DecoderFixture } from "./helpers.js";
 
 const fixtures: readonly DecoderFixture[] = [
   {
@@ -63,6 +63,27 @@ const fixtures: readonly DecoderFixture[] = [
     mnemonic: "mov",
     operands: [reg32("ebp"), reg32("esp")],
     id: "mov.rm32_r32"
+  },
+  {
+    name: "mov ax, fs with operand-size override",
+    bytes: [0x66, 0x8c, 0xe0],
+    mnemonic: "mov",
+    operands: [reg("ax"), sreg("fs")],
+    id: "mov.rm16_sreg"
+  },
+  {
+    name: "mov eax, fs",
+    bytes: [0x8c, 0xe0],
+    mnemonic: "mov",
+    operands: [reg32("eax"), sreg("fs")],
+    id: "mov.rm32_sreg"
+  },
+  {
+    name: "mov [ebx], gs",
+    bytes: [0x8c, 0x2b],
+    mnemonic: "mov",
+    operands: [mem(16, { base: "ebx", scale: 1, disp: 0 }), sreg("gs")],
+    id: "mov.rm32_sreg"
   },
   {
     name: "mov eax, [ebx]",

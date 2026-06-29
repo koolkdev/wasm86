@@ -1,8 +1,8 @@
 import { CONDITION_CODE_DESCRIPTORS } from "#x86/defs/condition-codes.js";
 import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm, implicitReg, modrmReg, modrmRm, moffs, opReg } from "#x86/schema/operands.js";
+import { imm, implicitReg, modrmReg, modrmRm, modrmSreg, moffs, opReg } from "#x86/schema/operands.js";
 import { opcodePlusReg } from "#x86/schema/opcodes.js";
-import { cmovSemantic, movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
+import { cmovSemantic, movSemantic, movSregSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 
 export const MOV = mnemonic("mov", [
   // 8A /r: MOV r8, r/m8
@@ -35,6 +35,14 @@ export const MOV = mnemonic("mov", [
     format: { syntax: "mov {0}, {1}" },
     semantics: movSemantic(16)
   }),
+  // 66 8C /r: MOV r/m16, Sreg
+  form("rm16_sreg", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x8c],
+    operands: [modrmRm("rm16"), modrmSreg()],
+    format: { syntax: "mov {0}, {1}" },
+    semantics: movSregSemantic(16)
+  }),
   // 8B /r: MOV r32, r/m32
   form("r32_rm32", {
     opcode: [0x8b],
@@ -48,6 +56,13 @@ export const MOV = mnemonic("mov", [
     operands: [modrmRm("rm32"), modrmReg("r32")],
     format: { syntax: "mov {0}, {1}" },
     semantics: movSemantic(32)
+  }),
+  // 8C /r: MOV r/m32, Sreg
+  form("rm32_sreg", {
+    opcode: [0x8c],
+    operands: [modrmRm("r32_m16"), modrmSreg()],
+    format: { syntax: "mov {0}, {1}" },
+    semantics: movSregSemantic(32)
   }),
   // A0: MOV AL, moffs8
   form("al_moffs8", {

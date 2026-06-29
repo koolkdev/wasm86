@@ -1,9 +1,10 @@
-import type { MemOperand, OperandWidth, RegisterAlias } from "#x86/types.js";
+import type { MemOperand, OperandWidth, RegisterAlias, SegmentRegister } from "#x86/types.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { InstructionSpec, ImmediateExtension } from "#x86/schema/types.js";
 
 export type IsaOperandBinding =
   | Readonly<{ kind: "reg"; alias: RegisterAlias }>
+  | Readonly<{ kind: "segment"; reg: SegmentRegister }>
   | MemOperand
   | Readonly<{
       kind: "imm";

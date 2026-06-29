@@ -216,7 +216,7 @@ function validateReg3Value(value: Reg3 | undefined, label: string): void {
 }
 
 function isModRmOperand(operand: OperandSpec): boolean {
-  return operand.kind === "modrm.reg" || operand.kind === "modrm.rm";
+  return operand.kind === "modrm.reg" || operand.kind === "modrm.sreg" || operand.kind === "modrm.rm";
 }
 
 function opcodeBytesEqual(left: readonly number[], right: readonly number[]): boolean {

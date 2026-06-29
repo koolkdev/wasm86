@@ -68,6 +68,8 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
     switch (operand.kind) {
       case "reg":
         return regBinding(operand.alias.base);
+      case "segment":
+        throw new Error("segment operands not supported in golden tests");
       case "imm":
         return immBinding(operand.value);
       case "relTarget":

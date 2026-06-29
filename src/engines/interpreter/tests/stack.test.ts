@@ -93,6 +93,37 @@ test("executes PUSH r16 by decrementing ESP by two and storing a word", async ()
   assertCompletedInstruction(state, startAddress + 2, 8);
 });
 
+test("executes PUSH segment selectors", async () => {
+  const pushFs = await executeStackInstruction(
+    [0x0f, 0xa0],
+    createWasmCpuStateSnapshot({
+      esp: 0x40,
+      fsSelector: 0x2345,
+      fsBase: 0x1000,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+  const pushGsWord = await executeStackInstruction(
+    [0x66, 0x0f, 0xa8],
+    createWasmCpuStateSnapshot({
+      esp: 0x40,
+      gsSelector: 0xabcd,
+      gsBase: 0x2000,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+
+  strictEqual(pushFs.state.esp, 0x3c);
+  strictEqual(pushFs.interpreter.guestView.getUint32(0x3c, true), 0x2345);
+  assertCompletedInstruction(pushFs.state, startAddress + 2, 8);
+
+  strictEqual(pushGsWord.state.esp, 0x3e);
+  strictEqual(pushGsWord.interpreter.guestView.getUint16(0x3e, true), 0xabcd);
+  assertCompletedInstruction(pushGsWord.state, startAddress + 3, 8);
+});
+
 test("executes PUSH sign-extended imm8", async () => {
   const initialState = createWasmCpuStateSnapshot({
     esp: 0x40,

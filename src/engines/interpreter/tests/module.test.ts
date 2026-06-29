@@ -139,7 +139,7 @@ test("unsupported two-byte opcode path dispatches before unsupported exit", asyn
     instructionCount: 7
   });
   writeInterpreterState(interpreter.stateView, initialState);
-  writeGuestBytes(interpreter.guestView, startAddress, [0x0f, 0xa0]);
+  writeGuestBytes(interpreter.guestView, startAddress, [0x0f, 0x0b]);
 
   const exit = interpreter.run(1);
 

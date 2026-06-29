@@ -6,6 +6,8 @@ import {
   memStaticBinding,
   regBinding,
   regDynamicBinding,
+  segmentBinding,
+  segmentDynamicBinding,
   type ExternalValueId,
   type OperandBinding
 } from "#ir/operands.js";
@@ -108,6 +110,8 @@ function decodeOperand(
   switch (operand.kind) {
     case "modrm.reg":
       return { binding: regDynamicBinding(externals.bind(locals.reg)), cursor };
+    case "modrm.sreg":
+      return { binding: segmentDynamicBinding(externals.bind(locals.reg)), cursor };
     case "modrm.rm":
       assert(form !== "plain", `${instruction.spec.id}: rm operand without a resolved form`);
       return { binding: rmBinding(form, locals, externals), cursor };
@@ -120,6 +124,8 @@ function decodeOperand(
     }
     case "implicit.reg":
       return { binding: regBinding(operand.reg), cursor };
+    case "implicit.sreg":
+      return { binding: segmentBinding(operand.reg), cursor };
     case "moffs":
       emitImmediateFetch(context, locals.eip, cursor, 32, false, locals.offset);
       return {

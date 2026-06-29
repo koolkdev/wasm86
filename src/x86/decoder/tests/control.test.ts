@@ -1,4 +1,4 @@
-import { imm8, imm16, imm32, mem, mem32, reg, reg32, relTarget, signImm8, testDecodeFixtures, type DecoderFixture } from "./helpers.js";
+import { imm8, imm16, imm32, mem, mem32, reg, reg32, relTarget, signImm8, sreg, testDecodeFixtures, type DecoderFixture } from "./helpers.js";
 
 const fixtures: readonly DecoderFixture[] = [
   {
@@ -160,6 +160,27 @@ const fixtures: readonly DecoderFixture[] = [
     mnemonic: "push",
     operands: [reg("ax")],
     id: "push.r16"
+  },
+  {
+    name: "push es",
+    bytes: [0x06],
+    mnemonic: "push",
+    operands: [sreg("es")],
+    id: "push.es"
+  },
+  {
+    name: "push fs",
+    bytes: [0x0f, 0xa0],
+    mnemonic: "push",
+    operands: [sreg("fs")],
+    id: "push.fs"
+  },
+  {
+    name: "push gs with operand-size override",
+    bytes: [0x66, 0x0f, 0xa8],
+    mnemonic: "push",
+    operands: [sreg("gs")],
+    id: "push.gs_o16"
   },
   {
     name: "pop ecx",

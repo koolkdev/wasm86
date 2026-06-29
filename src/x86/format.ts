@@ -21,6 +21,8 @@ export function formatIsaOperand(operand: IsaOperandBinding): string {
   switch (operand.kind) {
     case "reg":
       return operand.alias.name;
+    case "segment":
+      return operand.reg;
     case "imm":
       return hex32(operand.value);
     case "relTarget":

@@ -16,6 +16,11 @@ test("formats ModRM register operands positionally", () => {
   strictEqual(formatIsaInstruction(decode([0x89, 0xc3])), "mov ebx, eax");
 });
 
+test("formats segment register operands", () => {
+  strictEqual(formatIsaInstruction(decode([0x8c, 0xe0])), "mov eax, fs");
+  strictEqual(formatIsaInstruction(decode([0x0f, 0xa0])), "push fs");
+});
+
 test("formats relative targets as absolute addresses", () => {
   strictEqual(formatIsaInstruction(decode([0xeb, 0xfe])), "jmp 0x1000");
   strictEqual(formatIsaInstruction(decode([0x75, 0x05])), "jne 0x1007");

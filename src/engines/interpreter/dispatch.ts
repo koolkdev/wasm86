@@ -9,13 +9,13 @@ import {
 import type {
   ExpandedInstructionSpec,
   MemOperandType,
-  ModRmMatch,
   OperandSizePrefixMode,
   OperandSpec,
   Reg3,
   RmOperandType
 } from "#x86/schema/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { segmentRegisters } from "#x86/types.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
 import { noBaseRegister, type RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";
@@ -240,7 +240,7 @@ function modRmRegCases(candidates: OpcodeDispatchCandidateSet): readonly ModRmRe
 
   for (const reg of reg3Values) {
     const bucket = candidates.modRmByReg[reg] ?? [];
-    const instruction = bucket.find((candidate) => modRmRegMatches(candidate.spec.modrm?.match, reg));
+    const instruction = bucket.find((candidate) => modRmRegMatches(candidate.spec, reg));
 
     if (instruction === undefined) {
       continue;
@@ -258,8 +258,12 @@ function modRmRegCases(candidates: OpcodeDispatchCandidateSet): readonly ModRmRe
   return [...casesById.values()];
 }
 
-function modRmRegMatches(match: ModRmMatch | undefined, reg: Reg3): boolean {
-  return match?.reg === undefined || match.reg === reg;
+function modRmRegMatches(spec: ExpandedInstructionSpec<SemanticTemplate>["spec"], reg: Reg3): boolean {
+  return (spec.modrm?.match?.reg === undefined || spec.modrm.match.reg === reg) && isValidModRmReg(spec, reg);
+}
+
+function isValidModRmReg(spec: ExpandedInstructionSpec<SemanticTemplate>["spec"], reg: Reg3): boolean {
+  return !(spec.operands ?? []).some((operand) => operand.kind === "modrm.sreg") || reg < segmentRegisters.length;
 }
 
 function byteDispatchTable(bytes: readonly number[]): number[] {
@@ -301,6 +305,7 @@ function isMemoryOnlyRmType(type: RmOperandType | MemOperandType): type is MemOp
     case "rm8":
     case "rm16":
     case "rm32":
+    case "r32_m16":
       return false;
   }
 }

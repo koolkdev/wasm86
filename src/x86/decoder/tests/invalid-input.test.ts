@@ -35,6 +35,16 @@ test("truncated opcode escape reports decode fault", () => {
   assertDecodeFault([0x0f]);
 });
 
+test("reports unsupported segment-register ModRM indexes", () => {
+  const decoded = decodeBytes([0x8c, 0xf0]);
+
+  strictEqual(decoded.kind, "unsupported");
+  if (decoded.kind === "unsupported") {
+    strictEqual(decoded.length, 2);
+    strictEqual(decoded.unsupportedByte, 0x8c);
+  }
+});
+
 test("accepts a maximum length prefixed instruction", () => {
   const bytes = [...new Array<number>(12).fill(0x66), 0xb8, 0x34, 0x12];
   const decoded = decodeBytes(bytes);

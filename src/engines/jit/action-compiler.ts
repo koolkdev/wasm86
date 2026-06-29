@@ -1,5 +1,5 @@
 import { createIrBlockBuilder, staticInstructionLocation } from "#ir/builder.js";
-import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
+import { immBinding, memBinding, regBinding, segmentBinding, type OperandBinding } from "#ir/operands.js";
 import type { IrBlock } from "#ir/block.js";
 import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/decoder/types.js";
 
@@ -21,6 +21,8 @@ function staticBinding(operand: IsaOperandBinding): OperandBinding {
   switch (operand.kind) {
     case "reg":
       return regBinding(operand.alias.name);
+    case "segment":
+      return segmentBinding(operand.reg);
     case "imm":
       // The decoder already applied the immediate's extension.
       return immBinding(operand.value);
