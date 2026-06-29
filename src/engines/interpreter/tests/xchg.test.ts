@@ -63,6 +63,73 @@ test("executes register-only XCHG forms after reading both operands", async () =
   }
 });
 
+test("executes accumulator opcode XCHG forms", async () => {
+  const dwordSelf = await executeInstruction(
+    [0x90],
+    createWasmCpuStateSnapshot({
+      eax: 0x1111_1111,
+      ecx: 0x2222_2222,
+      ...allFlagsSet,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+  const dword = await executeInstruction(
+    [0x91],
+    createWasmCpuStateSnapshot({
+      eax: 0x1111_1111,
+      ecx: 0x2222_2222,
+      ...allFlagsSet,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+  const word = await executeInstruction(
+    [0x66, 0x93],
+    createWasmCpuStateSnapshot({
+      eax: 0xaaaa_1111,
+      ebx: 0xbbbb_2222,
+      ...allFlagsSet,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+  const wordSelf = await executeInstruction(
+    [0x66, 0x90],
+    createWasmCpuStateSnapshot({
+      eax: 0xaaaa_1111,
+      ebx: 0xbbbb_2222,
+      ...allFlagsSet,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+
+  assertSingleInstructionExit(dwordSelf.exit);
+  strictEqual(dwordSelf.state.eax, 0x1111_1111);
+  strictEqual(dwordSelf.state.ecx, 0x2222_2222);
+  deepStrictEqual(wasmCpuStatusFlagsOf(dwordSelf.state), allFlagsSet);
+  assertCompletedInstruction(dwordSelf.state, startAddress + 1, 8);
+
+  assertSingleInstructionExit(dword.exit);
+  strictEqual(dword.state.eax, 0x2222_2222);
+  strictEqual(dword.state.ecx, 0x1111_1111);
+  deepStrictEqual(wasmCpuStatusFlagsOf(dword.state), allFlagsSet);
+  assertCompletedInstruction(dword.state, startAddress + 1, 8);
+
+  assertSingleInstructionExit(word.exit);
+  strictEqual(word.state.eax, 0xaaaa_2222);
+  strictEqual(word.state.ebx, 0xbbbb_1111);
+  deepStrictEqual(wasmCpuStatusFlagsOf(word.state), allFlagsSet);
+  assertCompletedInstruction(word.state, startAddress + 2, 8);
+
+  assertSingleInstructionExit(wordSelf.exit);
+  strictEqual(wordSelf.state.eax, 0xaaaa_1111);
+  strictEqual(wordSelf.state.ebx, 0xbbbb_2222);
+  deepStrictEqual(wasmCpuStatusFlagsOf(wordSelf.state), allFlagsSet);
+  assertCompletedInstruction(wordSelf.state, startAddress + 2, 8);
+});
+
 test("executes same-register XCHG forms as flagless no-ops", async () => {
   const flags = allFlagsSet;
   const cases: readonly Readonly<{ name: string; bytes: readonly number[] }>[] = [

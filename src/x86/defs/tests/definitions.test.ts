@@ -29,8 +29,6 @@ test("x86-32 core registers the initial instruction surface", () => {
     "mov.moffs8_al",
     "mov.moffs32_eax",
     "mov.moffs16_ax",
-    "nop.near",
-    "nop.operand_size_override",
     "nop.rm16",
     "nop.rm32",
     "mov.rm32_r32",
@@ -48,6 +46,8 @@ test("x86-32 core registers the initial instruction surface", () => {
     "xchg.rm8_r8",
     "xchg.rm16_r16",
     "xchg.rm32_r32",
+    "xchg.ax_r16",
+    "xchg.eax_r32",
     "lea.r16_m16",
     "lea.r32_m32",
     "add.rm8_r8",
@@ -137,15 +137,6 @@ test("x86-32 core registers the initial instruction surface", () => {
   ]) {
     strictEqual(ids.includes(id), true, `missing ${id}`);
   }
-});
-
-test("operand-size prefixed nop is a temporary alias form", () => {
-  const spec = instruction("nop.operand_size_override");
-
-  deepStrictEqual(spec.opcode, [0x90]);
-  deepStrictEqual(spec.prefixes, { operandSize: "override" });
-  strictEqual(spec.operands, undefined);
-  deepStrictEqual(spec.format, { syntax: "nop" });
 });
 
 test("multi-byte nop forms use slash-zero ModRM operands without side effects", () => {
@@ -384,10 +375,12 @@ test("slash-r forms use ModRM operands without an explicit ModRM match", () => {
   deepStrictEqual(spec.format, { syntax: "mov {0}, {1}" });
 });
 
-test("xchg slash-r forms allow register or memory r/m operands", () => {
+test("xchg forms cover ModRM and accumulator opcodes", () => {
   const byte = instruction("xchg.rm8_r8");
   const word = instruction("xchg.rm16_r16");
   const dword = instruction("xchg.rm32_r32");
+  const ax = instruction("xchg.ax_r16");
+  const eax = instruction("xchg.eax_r32");
 
   deepStrictEqual(byte.opcode, [0x86]);
   strictEqual(byte.modrm, undefined);
@@ -411,6 +404,21 @@ test("xchg slash-r forms allow register or memory r/m operands", () => {
     { kind: "modrm.rm", type: "rm32" },
     { kind: "modrm.reg", type: "r32" }
   ]);
+
+  deepStrictEqual(ax.prefixes, { operandSize: "override" });
+  deepStrictEqual(ax.opcode, [{ byte: 0x90, bits: 5 }]);
+  deepStrictEqual(ax.operands, [
+    { kind: "implicit.reg", reg: "ax", type: "r16" },
+    { kind: "opcode.reg", type: "r16" }
+  ]);
+  deepStrictEqual(ax.format, { syntax: "xchg {0}, {1}" });
+
+  deepStrictEqual(eax.opcode, [{ byte: 0x90, bits: 5 }]);
+  deepStrictEqual(eax.operands, [
+    { kind: "implicit.reg", reg: "eax", type: "r32" },
+    { kind: "opcode.reg", type: "r32" }
+  ]);
+  deepStrictEqual(eax.format, { syntax: "xchg {0}, {1}" });
 });
 
 test("xchg semantics read both operands before writing either operand", () => {

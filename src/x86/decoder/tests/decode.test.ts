@@ -26,9 +26,10 @@ test("decodes directly from guest memory without requiring a full instruction sl
 
   const decoded = ok(decodeIsaInstructionFromReader(reader, startAddress));
 
-  strictEqual(decoded.spec.id, "nop.near");
+  strictEqual(decoded.spec.id, "xchg.eax_r32");
   strictEqual(decoded.length, 1);
   deepStrictEqual(decoded.raw, [0x90]);
+  deepStrictEqual(decoded.operands, [reg32("eax"), reg32("eax")]);
 });
 
 test("decodes multibyte ModRM/SIB instruction directly from guest memory", () => {
@@ -68,7 +69,7 @@ test("decodes slash-r register/register operands positionally", () => {
   deepStrictEqual(reverse.operands, [reg32("ebx"), reg32("eax")]);
 });
 
-test("decodes xchg ModRM register and memory forms", () => {
+test("decodes xchg ModRM and accumulator forms", () => {
   const dword = ok(decodeBytes([0x87, 0xd8]));
   const byte = ok(decodeBytes([0x86, 0xd8]));
   const word = ok(decodeBytes([0x66, 0x87, 0xd8]));
@@ -76,6 +77,9 @@ test("decodes xchg ModRM register and memory forms", () => {
   const dwordMem = ok(decodeBytes([0x87, 0x18]));
   const byteMem = ok(decodeBytes([0x86, 0x18]));
   const wordMem = ok(decodeBytes([0x66, 0x87, 0x18]));
+  const accumulatorDword = ok(decodeBytes([0x91]));
+  const accumulatorWord = ok(decodeBytes([0x66, 0x93]));
+  const accumulatorWordSelf = ok(decodeBytes([0x66, 0x90]));
 
   strictEqual(dword.spec.id, "xchg.rm32_r32");
   strictEqual(dword.spec.format.syntax, "xchg {0}, {1}");
@@ -98,6 +102,15 @@ test("decodes xchg ModRM register and memory forms", () => {
 
   strictEqual(wordMem.spec.id, "xchg.rm16_r16");
   deepStrictEqual(wordMem.operands, [mem(16, { base: "eax", scale: 1, disp: 0 }), reg("bx")]);
+
+  strictEqual(accumulatorDword.spec.id, "xchg.eax_r32");
+  deepStrictEqual(accumulatorDword.operands, [reg32("eax"), reg32("ecx")]);
+
+  strictEqual(accumulatorWord.spec.id, "xchg.ax_r16");
+  deepStrictEqual(accumulatorWord.operands, [reg("ax"), reg("bx")]);
+
+  strictEqual(accumulatorWordSelf.spec.id, "xchg.ax_r16");
+  deepStrictEqual(accumulatorWordSelf.operands, [reg("ax"), reg("ax")]);
 });
 
 test("uses ModRM match fields for slash-digit groups", () => {
@@ -187,16 +200,10 @@ test("decodes concrete jcc rel8 and rel32 forms", () => {
   ]);
 });
 
-test("decodes nop and int imm8 forms", () => {
-  const nop = ok(decodeBytes([0x90]));
+test("decodes multi-byte nop and int imm8 forms", () => {
   const multiByteNop = ok(decodeBytes([0x0f, 0x1f, 0x40, 0x00]));
   const wordNop = ok(decodeBytes([0x66, 0x0f, 0x1f, 0x00]));
   const trap = ok(decodeBytes([0xcd, 0x2e]));
-
-  strictEqual(nop.spec.id, "nop.near");
-  strictEqual(nop.spec.format.syntax, "nop");
-  strictEqual(nop.length, 1);
-  deepStrictEqual(nop.operands, []);
 
   strictEqual(multiByteNop.spec.id, "nop.rm32");
   strictEqual(multiByteNop.spec.format.syntax, "nop {0}");

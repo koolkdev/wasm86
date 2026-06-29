@@ -1,8 +1,24 @@
 import { form, mnemonic } from "#x86/schema/builders.js";
-import { modrmReg, modrmRm } from "#x86/schema/operands.js";
+import { implicitReg, modrmReg, modrmRm, opReg } from "#x86/schema/operands.js";
+import { opcodePlusReg } from "#x86/schema/opcodes.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 
 export const XCHG = mnemonic("xchg", [
+  // 66 90+rw: XCHG AX, r16.
+  form("ax_r16", {
+    opcode: [opcodePlusReg(0x90)],
+    prefixes: { operandSize: "override" },
+    operands: [implicitReg("ax"), opReg("r16")],
+    format: { syntax: "xchg {0}, {1}" },
+    semantics: xchgSemantic(16)
+  }),
+  // 90+rd: XCHG EAX, r32.
+  form("eax_r32", {
+    opcode: [opcodePlusReg(0x90)],
+    operands: [implicitReg("eax"), opReg()],
+    format: { syntax: "xchg {0}, {1}" },
+    semantics: xchgSemantic(32)
+  }),
   // 86 /r: XCHG r/m8, r8.
   form("rm8_r8", {
     opcode: [0x86],

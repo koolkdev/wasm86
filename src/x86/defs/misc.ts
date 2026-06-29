@@ -3,19 +3,19 @@ import { imm, modrmRm } from "#x86/schema/operands.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 
 export const NOP = mnemonic("nop", [
-  // 90: NOP
-  form("near", {
-    opcode: [0x90],
-    format: { syntax: "nop" },
-    semantics: nopSemantic()
-  }),
-  // 66 90: temporary NOP alias until xchg r16, r16 is modeled.
-  form("operand_size_override", {
-    opcode: [0x90],
-    prefixes: { operandSize: "override" },
-    format: { syntax: "nop" },
-    semantics: nopSemantic()
-  }),
+  // Alias for xchg eax, eax
+  // form("near", {
+  //   opcode: [0x90],
+  //   format: { syntax: "nop" },
+  //   semantics: nopSemantic()
+  // }),
+  // Alias for xchg ax, ax
+  // form("operand_size_override", {
+  //   opcode: [0x90],
+  //   prefixes: { operandSize: "override" },
+  //   format: { syntax: "nop" },
+  //   semantics: nopSemantic()
+  // }),
   // 66 0F 1F /0: multi-byte NOP r/m16
   form("rm16", {
     opcode: [0x0f, 0x1f],

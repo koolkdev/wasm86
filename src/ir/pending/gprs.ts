@@ -75,6 +75,11 @@ export class PendingGprs {
       this.#pending.delete(other);
     }
 
+    if (this.#isInputRestore(channel, value)) {
+      this.#pending.delete(channel);
+      return;
+    }
+
     this.#pending.set(channel, { value, dirty: true });
   }
 
@@ -166,6 +171,10 @@ export class PendingGprs {
         }
       }
     }
+  }
+
+  #isInputRestore(channel: GprChannel, value: ValueId): boolean {
+    return this.#reads.get(channel) === value || this.#signedReads.get(channel) === value;
   }
 
   // A pending narrow value is only contractually valid in its low bits - the

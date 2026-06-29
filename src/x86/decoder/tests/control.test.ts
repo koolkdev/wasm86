@@ -2,20 +2,6 @@ import { imm8, imm16, imm32, mem, mem32, reg, reg32, relTarget, signImm8, testDe
 
 const fixtures: readonly DecoderFixture[] = [
   {
-    name: "nop",
-    bytes: [0x90],
-    mnemonic: "nop",
-    id: "nop.near",
-    format: "nop"
-  },
-  {
-    name: "operand-size prefixed nop",
-    bytes: [0x66, 0x90],
-    mnemonic: "nop",
-    id: "nop.operand_size_override",
-    format: "nop"
-  },
-  {
     name: "int imm8",
     bytes: [0xcd, 0x2e],
     mnemonic: "int",

@@ -18,7 +18,8 @@ import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
-import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
+import { wasmMemoryIndex } from "#wasm/abi.js";
+import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
 import {
   assertLazyFlagState,
@@ -26,7 +27,7 @@ import {
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot
 } from "#runtime/tests/fixtures/cpu-state.js";
-import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 // The stage's end-to-end slice: semantics -> IrBlockBuilder -> emit ->
@@ -172,6 +173,31 @@ test("xchg eax, ebx swaps the registers", async () => {
   // observe the just-stored eax and leave both registers equal.
   strictEqual(readRegister(stateView, "eax"), 0x22222222);
   strictEqual(readRegister(stateView, "ebx"), 0x11111111);
+});
+
+test("xchg eax, eax emits no register-state Wasm access", async () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("eax")], loc(0x1000, 0x1001));
+
+  const block = builder.finish();
+  const body = irBlockBody(block).encode();
+
+  deepStrictEqual(
+    wasmBodyMemoryAccesses(body).filter(
+      (access) =>
+        access.memoryIndex === wasmMemoryIndex.cpuState &&
+        access.offset === WASM_CPU_STATE_OFFSETS.eax
+    ),
+    []
+  );
+
+  const { stateView, run } = await instantiateIrBlock(block);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 0x11111111 });
+  assertCompleted(run());
+  strictEqual(readRegister(stateView, "eax"), 0x11111111);
+  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x1001);
 });
 
 test("a mov before the xchg observes the pre-swap value", async () => {

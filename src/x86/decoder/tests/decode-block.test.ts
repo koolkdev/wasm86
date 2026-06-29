@@ -32,7 +32,7 @@ test("decodeIsaBlock_stops_after_ret_control_instruction", () => {
     0x90
   ]), startAddress);
 
-  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["nop.near", "ret.near"]);
+  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32", "ret.near"]);
   strictEqual(block.terminator.kind, "control");
 });
 
@@ -43,7 +43,7 @@ test("decodeIsaBlock_stops_after_int_control_instruction", () => {
     0x90
   ]), startAddress);
 
-  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["nop.near", "int.imm8"]);
+  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32", "int.imm8"]);
   strictEqual(block.terminator.kind, "control");
   if (block.terminator.kind === "control") {
     deepStrictEqual(block.terminator.instruction.operands, [imm8(0x2e)]);
@@ -57,7 +57,7 @@ test("decodeIsaBlock_returns_fallthrough_when_instruction_limit_ends_block", () 
     0xcd, 0x2e
   ]), startAddress, { maxInstructions: 2 });
 
-  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["nop.near", "nop.near"]);
+  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32", "xchg.eax_r32"]);
   deepStrictEqual(block.terminator, { kind: "fallthrough", nextEip: startAddress + 2 });
 });
 
@@ -81,7 +81,7 @@ test("decodeIsaBlock_reports_unsupported_after_valid_prefix_instructions", () =>
     0x90
   ]), startAddress);
 
-  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["nop.near"]);
+  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32"]);
   deepStrictEqual(block.terminator, {
     kind: "unsupported",
     address: startAddress + 1,
@@ -97,7 +97,7 @@ test("decodeIsaBlock_reports_decode_fault_after_valid_prefix_instructions", () =
     0xb8, 0x01
   ]), startAddress);
 
-  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["nop.near"]);
+  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32"]);
   strictEqual(block.terminator.kind, "decode-fault");
   strictEqual(block.terminator.fault.address, startAddress + 1);
   deepStrictEqual(block.terminator.fault.raw, [0xb8, 0x01]);
@@ -135,7 +135,7 @@ test("decodeIsaBlock_reports_guest_memory_decode_fault_without_byte_slice", () =
     startAddress
   );
 
-  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["nop.near"]);
+  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32"]);
   strictEqual(block.terminator.kind, "decode-fault");
   if (block.terminator.kind === "decode-fault") {
     strictEqual(block.terminator.fault.address, startAddress + 1);
