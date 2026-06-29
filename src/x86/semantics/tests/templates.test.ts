@@ -14,7 +14,7 @@ import {
   imulRegRmSemantic,
   mulImplicitSemantic
 } from "#x86/semantics/mul.js";
-import { shiftSemantic } from "#x86/semantics/shift.js";
+import { doubleShiftSemantic, shiftSemantic } from "#x86/semantics/shift.js";
 import {
   accumulatorSignExtendSemantic,
   highAccumulatorSignExtendSemantic
@@ -184,6 +184,47 @@ test("shift semantics guard and read operands in ALU order", () => {
   ]);
   ok(clTrace.events[3]?.endsWith(" = get op0:16"));
   ok(clTrace.events[4]?.endsWith(" = get cl:8"));
+});
+
+test("double-shift semantics read destination, source, and count in operand order", () => {
+  const immTrace = buildSemanticTrace(
+    doubleShiftSemantic("shld", 32, "imm8"),
+    operands("mem", "reg", "imm")
+  );
+
+  deepStrictEqual(immTrace.events.slice(0, 6), [
+    "%0 = addr op0",
+    "guard read %0:4",
+    "guard write %0:4",
+    "%1 = get op0:32",
+    "%3 = get op1:32",
+    "%5 = get op2:8"
+  ]);
+  ok(immTrace.events.some((event) => event.startsWith("set op0:32 <- ")));
+  deepStrictEqual(statusFlagKeys(immTrace.flagWrites[0]!).sort(), [...x86StatusFlags].sort());
+
+  const clTrace = buildSemanticTrace(doubleShiftSemantic("shrd", 16, "cl"), regOperands(2));
+
+  deepStrictEqual(clTrace.events.slice(0, 3), [
+    "%0 = get op0:16",
+    "%2 = get op1:16",
+    "%4 = get cl:8"
+  ]);
+  ok(clTrace.events.some((event) => event.startsWith("set op0:16 <- ")));
+  deepStrictEqual(statusFlagKeys(clTrace.flagWrites[0]!).sort(), [...x86StatusFlags].sort());
+});
+
+test("double-shift semantics combine the destination and source in the shift direction", () => {
+  const shld = buildSemanticTrace(doubleShiftSemantic("shld", 32, "imm8"), regOperands(3));
+  const shrd = buildSemanticTrace(doubleShiftSemantic("shrd", 32, "imm8"), regOperands(3));
+
+  strictEqual(shld.defs.some((definition) => definition.startsWith("shl(")), true);
+  strictEqual(shld.defs.some((definition) => definition.startsWith("shr_u(")), true);
+  ok(shld.defs.some((definition) => /^or\(%\d+, %\d+\)$/.test(definition)));
+
+  strictEqual(shrd.defs.some((definition) => definition.startsWith("shr_u(")), true);
+  strictEqual(shrd.defs.some((definition) => definition.startsWith("shl(")), true);
+  ok(shrd.defs.some((definition) => /^or\(%\d+, %\d+\)$/.test(definition)));
 });
 
 test("runtime shift counts are masked before result and flag use", () => {

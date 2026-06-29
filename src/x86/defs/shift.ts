@@ -1,9 +1,16 @@
 import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm, implicitReg, modrmRm } from "#x86/schema/operands.js";
+import { imm, implicitReg, modrmReg, modrmRm } from "#x86/schema/operands.js";
 import type { InstructionMnemonic } from "#x86/schema/types.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { rotateSemantic, type RotateOp } from "#x86/semantics/rotate.js";
-import { shiftSemantic, type ShiftCountSource, type ShiftOp } from "#x86/semantics/shift.js";
+import {
+  doubleShiftSemantic,
+  shiftSemantic,
+  type DoubleShiftCountSource,
+  type DoubleShiftOp,
+  type ShiftCountSource,
+  type ShiftOp
+} from "#x86/semantics/shift.js";
 import type { OperandWidth } from "#x86/types.js";
 
 type Group2 = 0 | 1 | 2 | 3 | 4 | 5 | 7;
@@ -17,6 +24,8 @@ export const RCR = rotateMnemonic("rcr", 3);
 export const SHL = shiftMnemonic("shl", 4);
 export const SHR = shiftMnemonic("shr", 5);
 export const SAR = shiftMnemonic("sar", 7);
+export const SHLD = doubleShiftMnemonic("shld", { imm8: 0xa4, cl: 0xa5 });
+export const SHRD = doubleShiftMnemonic("shrd", { imm8: 0xac, cl: 0xad });
 
 type Group2Semantic = (width: OperandWidth, countSource: ShiftCountSource) => SemanticTemplate;
 
@@ -26,6 +35,44 @@ function shiftMnemonic(op: ShiftOp, group: ShiftGroup): InstructionMnemonic<Sema
 
 function rotateMnemonic(op: RotateOp, group: RotateGroup): InstructionMnemonic<SemanticTemplate> {
   return group2Mnemonic(op, group, (width, countSource) => rotateSemantic(op, width, countSource));
+}
+
+function doubleShiftMnemonic(
+  op: DoubleShiftOp,
+  opcode: Readonly<Record<DoubleShiftCountSource, number>>
+): InstructionMnemonic<SemanticTemplate> {
+  return mnemonic(op, [
+    // 66 0F xx /r ib: double-precision shift r/m16, r16 by imm8
+    form("rm16_r16_imm8", {
+      prefixes: { operandSize: "override" },
+      opcode: [0x0f, opcode.imm8],
+      operands: [modrmRm("rm16"), modrmReg("r16"), imm(8)],
+      format: { syntax: `${op} {0}, {1}, {2}` },
+      semantics: doubleShiftSemantic(op, 16, "imm8")
+    }),
+    // 0F xx /r ib: double-precision shift r/m32, r32 by imm8
+    form("rm32_r32_imm8", {
+      opcode: [0x0f, opcode.imm8],
+      operands: [modrmRm("rm32"), modrmReg("r32"), imm(8)],
+      format: { syntax: `${op} {0}, {1}, {2}` },
+      semantics: doubleShiftSemantic(op, 32, "imm8")
+    }),
+    // 66 0F xx /r: double-precision shift r/m16, r16 by CL
+    form("rm16_r16_cl", {
+      prefixes: { operandSize: "override" },
+      opcode: [0x0f, opcode.cl],
+      operands: [modrmRm("rm16"), modrmReg("r16"), implicitReg("cl")],
+      format: { syntax: `${op} {0}, {1}, {2}` },
+      semantics: doubleShiftSemantic(op, 16, "cl")
+    }),
+    // 0F xx /r: double-precision shift r/m32, r32 by CL
+    form("rm32_r32_cl", {
+      opcode: [0x0f, opcode.cl],
+      operands: [modrmRm("rm32"), modrmReg("r32"), implicitReg("cl")],
+      format: { syntax: `${op} {0}, {1}, {2}` },
+      semantics: doubleShiftSemantic(op, 32, "cl")
+    })
+  ]);
 }
 
 function group2Mnemonic(

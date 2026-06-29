@@ -18,7 +18,7 @@ export type FlagValueOps<TValue extends number> = Readonly<{
 export type StatusFlagValues<TValue extends number> =
   Readonly<Record<X86StatusFlag, TValue>>;
 
-export type ShiftFlagOp = "shl" | "shr" | "sar";
+export type ShiftFlagOp = "shl" | "shr" | "sar" | "shld" | "shrd";
 export type RotateFlagOp = "rol" | "ror" | "rcl" | "rcr";
 
 export function statusFlagValuesForSource<TValue extends number>(
@@ -300,6 +300,7 @@ function shiftCarry<TValue extends number>(
   input: Readonly<{ op: ShiftFlagOp; width: OperandWidth; value: TValue; count: TValue }>
 ): TValue {
   const shift = input.op === "shl"
+    || input.op === "shld"
     ? ops.sub(ops.const32(input.width), input.count)
     : ops.sub(input.count, ops.const32(1));
 
@@ -318,9 +319,15 @@ function shiftOverflow<TValue extends number>(
 ): TValue {
   switch (input.op) {
     case "shl":
+    case "shld":
       return ops.xor(signBit(ops, input.width, input.result), input.cf);
     case "shr":
       return signBit(ops, input.width, input.value);
+    case "shrd":
+      return ops.xor(
+        signBit(ops, input.width, input.value),
+        signBit(ops, input.width, input.result)
+      );
     case "sar":
       return ops.const32(0);
   }

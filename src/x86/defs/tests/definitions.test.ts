@@ -13,7 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 359);
+  strictEqual(X86_32_CORE.instructions.length, 367);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -100,7 +100,9 @@ test("x86-32 core registers the initial instruction surface", () => {
     "shl.rm8_1",
     "shl.rm16_cl",
     "shl.rm32_imm8",
+    "shld.rm32_r32_imm8",
     "shr.rm32_cl",
+    "shrd.rm16_r16_cl",
     "sar.rm8_imm8",
     "cmp.rm32_imm8",
     "cmp.rm16_imm16",
@@ -570,6 +572,47 @@ test("rotate forms share group-2 count and width shapes", () => {
     { kind: "implicit.reg", reg: "cl", type: "r8" }
   ]);
   deepStrictEqual(rcr.format, { syntax: "rcr {0}, {1}" });
+});
+
+test("double-shift forms use two-byte ModRM source and count operands", () => {
+  const shldImm = instruction("shld.rm32_r32_imm8");
+  const shldCl = instruction("shld.rm16_r16_cl");
+  const shrdImm = instruction("shrd.rm16_r16_imm8");
+  const shrdCl = instruction("shrd.rm32_r32_cl");
+
+  deepStrictEqual(shldImm.opcode, [0x0f, 0xa4]);
+  deepStrictEqual(shldImm.operands, [
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "modrm.reg", type: "r32" },
+    { kind: "imm", width: 8 }
+  ]);
+  deepStrictEqual(shldImm.format, { syntax: "shld {0}, {1}, {2}" });
+
+  deepStrictEqual(shldCl.prefixes, { operandSize: "override" });
+  deepStrictEqual(shldCl.opcode, [0x0f, 0xa5]);
+  deepStrictEqual(shldCl.operands, [
+    { kind: "modrm.rm", type: "rm16" },
+    { kind: "modrm.reg", type: "r16" },
+    { kind: "implicit.reg", reg: "cl", type: "r8" }
+  ]);
+  deepStrictEqual(shldCl.format, { syntax: "shld {0}, {1}, {2}" });
+
+  deepStrictEqual(shrdImm.prefixes, { operandSize: "override" });
+  deepStrictEqual(shrdImm.opcode, [0x0f, 0xac]);
+  deepStrictEqual(shrdImm.operands, [
+    { kind: "modrm.rm", type: "rm16" },
+    { kind: "modrm.reg", type: "r16" },
+    { kind: "imm", width: 8 }
+  ]);
+  deepStrictEqual(shrdImm.format, { syntax: "shrd {0}, {1}, {2}" });
+
+  deepStrictEqual(shrdCl.opcode, [0x0f, 0xad]);
+  deepStrictEqual(shrdCl.operands, [
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "modrm.reg", type: "r32" },
+    { kind: "implicit.reg", reg: "cl", type: "r8" }
+  ]);
+  deepStrictEqual(shrdCl.format, { syntax: "shrd {0}, {1}, {2}" });
 });
 
 test("group opcode forms use modrm.match.reg for Intel slash-digit notation", () => {
