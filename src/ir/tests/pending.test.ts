@@ -76,6 +76,19 @@ test("writing a GPR input value back leaves no pending store", () => {
   deepStrictEqual(actions, [{ kind: "readState", output: read, slot: gprChannel("eax") }]);
 });
 
+test("writing an exact cell input value back leaves no pending store", () => {
+  const { values, actions, pending } = createHarness();
+  const read = pending.read(flagChannel("ZF"));
+
+  pending.write(flagChannel("ZF"), values.const(1));
+  pending.write(flagChannel("ZF"), read);
+
+  strictEqual(pending.has(flagChannel("ZF")), false);
+  actions.push(...pending.flushesForEdge("completed"));
+
+  deepStrictEqual(actions, [{ kind: "readState", output: read, slot: flagChannel("ZF") }]);
+});
+
 test("write al then read eax flushes the byte and reloads the word", () => {
   const { values, actions, pending } = createHarness();
   const byte = values.const(0x12);

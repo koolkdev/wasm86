@@ -43,6 +43,7 @@ import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic } from "#x86/semantics/misc.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
+import { shiftSemantic } from "#x86/semantics/shift.js";
 import { popfdSemantic, popfSemantic, popSemantic, pushfdSemantic, pushfSemantic } from "#x86/semantics/stack.js";
 import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
@@ -301,6 +302,19 @@ test("cmp commits a lazy sub record but no register or explicit flags", () => {
   strictEqual(writes.some((write) => write.slot.kind === "gpr"), false);
   strictEqual(writes.filter((write) => write.slot === eipChannel).length, 1);
   deepStrictEqual(entryActions(block).at(-1), { kind: "dispatch", targetEip: block.values.const(0x1002) });
+});
+
+test("zero-count shift writes neither the destination nor flags", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(shiftSemantic("shr", 32, "imm8"), [regBinding("eax"), immBinding(0)], loc(0x1000, 0x1003));
+
+  const block = builder.finish();
+  const writes = stateWrites(block);
+
+  deepStrictEqual(writes, [
+    { kind: "writeState", slot: eipChannel, value: block.values.const(0x1003) }
+  ]);
 });
 
 // A template writing only ZF; omitted status flags are preserved by resolving

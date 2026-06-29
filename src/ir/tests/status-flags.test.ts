@@ -60,6 +60,15 @@ test("input status flags read through helper calls", () => {
   deepStrictEqual(values.node(second), { kind: "helperCall", helper: { kind: "lazyFlag", flag: "ZF" } });
 });
 
+test("writing the current input status flag value is a no-op", () => {
+  const { pending, flags } = createHarness();
+  const zf = flags.readFlag("ZF");
+
+  flags.writeFlag("ZF", zf);
+
+  deepStrictEqual(pending.flushesForEdge("completed"), []);
+});
+
 test("a sub source commits a lazy runtime record", () => {
   const { values, pending, flags } = createHarness();
   const left = values.const(7);
@@ -75,6 +84,18 @@ test("a sub source commits a lazy runtime record", () => {
     flagValue(flags, "ZF"),
     values.compare("eq", result, values.const(0))
   );
+});
+
+test("writing the current source status flag value preserves the lazy source", () => {
+  const { values, pending, flags } = createHarness();
+  const left = values.const(7);
+  const right = values.const(3);
+  const result = values.binary("sub", left, right);
+
+  flags.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
+  flags.writeFlag("ZF", flags.readFlag("ZF"));
+
+  assertOnlyLazyRecord(pending.flushesForEdge("completed"), values, { kind: "SUB", width: 32, left, right });
 });
 
 test("an add source commits a lazy runtime record", () => {
@@ -171,7 +192,7 @@ test("fault edge preserves a clean sub source while direct flag writes update co
 
   flags.writeStatusFlagsSource(source);
   pending.beginInstruction();
-  flags.writeFlag("ZF", values.const(0));
+  flags.writeFlag("ZF", values.const(1));
 
   const faultFlushes = pending.flushesForEdge("fault");
   const completedFlushes = pending.flushesForEdge("completed");
@@ -180,7 +201,7 @@ test("fault edge preserves a clean sub source while direct flag writes update co
   assertFullExplicitFlush(completedFlushes, values);
   strictEqual(
     flagFlushValue(completedFlushes, "ZF"),
-    values.const(0)
+    values.const(1)
   );
 });
 

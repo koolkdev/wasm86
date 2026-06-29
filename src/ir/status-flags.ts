@@ -91,6 +91,10 @@ export class StatusFlags {
   }
 
   writeFlag(targetFlag: X86StatusFlag, value: ValueId): void {
+    if (this.#isCurrentFlagValue(targetFlag, value)) {
+      return;
+    }
+
     this.#flushBeforeDirectFlagWrite();
     this.#writeExplicitFlag(targetFlag, value);
   }
@@ -133,6 +137,27 @@ export class StatusFlags {
   #writeExplicitFlag(flag: X86StatusFlag, value: ValueId): void {
     this.#setBacking(flag, { kind: "value", value });
     this.#pending.write(flagChannel(flag), value);
+  }
+
+  #isCurrentFlagValue(flag: X86StatusFlag, value: ValueId): boolean {
+    const backing = getBacking(this.#current.backings, flag);
+
+    switch (backing.kind) {
+      case "source":
+        return this.#sourceValues(backing.source, new Map())[flag] === value;
+      case "value":
+        return backing.value === value;
+      case "input":
+        return this.#isInputFlagValue(backing.flag, value);
+      case "undef":
+        return backing.policy === "zero" && value === this.#values.const(0);
+    }
+  }
+
+  #isInputFlagValue(flag: X86StatusFlag, value: ValueId): boolean {
+    const node = this.#values.node(value);
+
+    return node.kind === "helperCall" && node.helper.kind === "lazyFlag" && node.helper.flag === flag;
   }
 
   #hasInputBackings(): boolean {

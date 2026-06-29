@@ -43,6 +43,12 @@ export class PendingCells<TCell extends PendingCell = PendingCell> {
 
   write(channel: TCell, value: ValueId): void {
     this.#assertNoOverlappingPending(channel);
+
+    if (this.#state.cachedInput(channel) === value) {
+      this.#pending.delete(channel);
+      return;
+    }
+
     this.#pending.set(channel, { value, dirty: true });
   }
 
