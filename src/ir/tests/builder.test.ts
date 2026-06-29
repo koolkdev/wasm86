@@ -7,20 +7,23 @@ import {
   staticInstructionLocation as loc
 } from "#ir/builder.js";
 import {
+  dynamicMemSegment,
   immBinding,
   immExternalBinding,
   memBinding,
   memDynamicBinding,
   memStaticBinding,
   regBinding,
-  regDynamicBinding
+  regDynamicBinding,
+  staticMemSegment
 } from "#ir/operands.js";
 import {
   eipChannel,
   gprChannel,
   instructionCountChannel,
   lazyFlagsKindChannel,
-  segmentBaseChannel
+  segmentBaseChannel,
+  type SegmentDynamicSlot
 } from "#ir/slots.js";
 import type {
   Action,
@@ -2258,6 +2261,16 @@ function dynamicBaseRead(block: IrBlock): ReadStateAction {
   return read;
 }
 
+function dynamicSegmentBaseRead(block: IrBlock): ReadStateAction & { slot: SegmentDynamicSlot } {
+  const read = entryActions(block).find(
+    (action): action is ReadStateAction & { slot: SegmentDynamicSlot } =>
+      action.kind === "readState" && action.slot.kind === "segmentDynamic" && action.slot.field === "base"
+  );
+
+  ok(read !== undefined, "expected a dynamic segment base read");
+  return read;
+}
+
 test("a memStatic operand guards and accesses the external address", () => {
   const builder = createIrBlockBuilder();
 
@@ -2284,7 +2297,7 @@ test("a memStatic operand guards and accesses the external address", () => {
 test("a memDynamic operand reads the base register inside the block", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(32), [regBinding("eax"), memDynamicBinding(0, 1)], loc(0x1000, 0x1006));
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), memDynamicBinding(0, 1, undefined)], loc(0x1000, 0x1006));
 
   const block = builder.finish();
   const v = block.values;
@@ -2313,10 +2326,108 @@ test("a memDynamic operand reads the base register inside the block", () => {
   });
 });
 
+test("fs memDynamic operands add the segment base to the dynamic effective address", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    aluSemantic("add", 32),
+    [memDynamicBinding(0, 1, staticMemSegment("fs")), immBinding(5)],
+    loc(0x1000, 0x1003)
+  );
+
+  const block = builder.finish();
+  const actions = entryActions(block);
+  const baseRead = dynamicBaseRead(block);
+  const fsBase = actions.find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === segmentBaseChannel("fs")
+  )!;
+  const offset = dynamicAddress(block, baseRead);
+  const address = block.values.binary("add", fsBase.output, offset);
+  const guards = actions.filter(
+    (action): action is GuardMemoryAction => action.kind === "guardMemory"
+  );
+  const load = actions.find((action): action is ReadMemoryAction => action.kind === "readMemory")!;
+  const store = actions.find((action): action is WriteMemoryAction => action.kind === "writeMemory")!;
+
+  strictEqual(actions.filter((action) => action.kind === "readState" && action.slot.kind === "gprDynamic").length, 1);
+  strictEqual(
+    actions.filter((action) => action.kind === "readState" && action.slot === segmentBaseChannel("fs")).length,
+    1
+  );
+  deepStrictEqual(guards.map((guard) => [guard.access, guard.address]), [
+    ["read", address],
+    ["write", address]
+  ]);
+  strictEqual(load.address, address);
+  strictEqual(store.address, address);
+});
+
+test("dynamic memDynamic segments read the selected segment base", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    aluSemantic("add", 32),
+    [memDynamicBinding(0, 1, dynamicMemSegment(2)), immBinding(5)],
+    loc(0x1000, 0x1003)
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  const actions = entryActions(block);
+  const baseRead = dynamicBaseRead(block);
+  const segmentBase = dynamicSegmentBaseRead(block);
+  const offset = dynamicAddress(block, baseRead);
+  const address = v.binary("add", segmentBase.output, offset);
+  const guards = actions.filter(
+    (action): action is GuardMemoryAction => action.kind === "guardMemory"
+  );
+  const load = actions.find((action): action is ReadMemoryAction => action.kind === "readMemory")!;
+  const store = actions.find((action): action is WriteMemoryAction => action.kind === "writeMemory")!;
+
+  deepStrictEqual(segmentBase.slot, { kind: "segmentDynamic", index: v.external(2), field: "base" });
+  strictEqual(
+    actions.filter((action) => action.kind === "readState" && action.slot.kind === "segmentDynamic").length,
+    1
+  );
+  strictEqual(actions.filter((action) => action.kind === "readState" && action.slot.kind === "segment").length, 0);
+  deepStrictEqual(guards.map((guard) => [guard.access, guard.address]), [
+    ["read", address],
+    ["write", address]
+  ]);
+  strictEqual(load.address, address);
+  strictEqual(store.address, address);
+});
+
+test("lea with memDynamic uses the dynamic effective address without segment bases", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    leaSemantic(32),
+    [regBinding("eax"), memDynamicBinding(0, 1, staticMemSegment("fs"))],
+    loc(0x1000, 0x1003)
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  const baseRead = dynamicBaseRead(block);
+  const address = dynamicAddress(block, baseRead);
+
+  deepStrictEqual(entryActions(block), [
+    { kind: "readState", output: baseRead.output, slot: baseRead.slot },
+    { kind: "writeState", slot: gprChannel("eax"), value: address },
+    { kind: "writeState", slot: eipChannel, value: v.const(0x1003) },
+    { kind: "dispatch", targetEip: v.const(0x1003) }
+  ]);
+});
+
 test("a read+write memDynamic operand reads the base once and reuses the address", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(aluSemantic("add", 32), [memDynamicBinding(0, 1), immBinding(5)], loc(0x1000, 0x1003));
+  builder.addInstruction(
+    aluSemantic("add", 32),
+    [memDynamicBinding(0, 1, undefined), immBinding(5)],
+    loc(0x1000, 0x1003)
+  );
 
   const block = builder.finish();
   const actions = entryActions(block);
@@ -2334,7 +2445,7 @@ test("a read+write memDynamic operand reads the base once and reuses the address
 test("pop [memDynamic] flushes esp before the base read and restores it on the write edge", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(popSemantic(), [memDynamicBinding(0, 1)], loc(0x1000, 0x1003));
+  builder.addInstruction(popSemantic(), [memDynamicBinding(0, 1, undefined)], loc(0x1000, 0x1003));
 
   const block = builder.finish();
   const v = block.values;
@@ -2390,7 +2501,11 @@ test("a guard after a memDynamic flush of a never-read register fails loudly", (
 
   throws(
     () =>
-      createIrBlockBuilder().addInstruction(blindWriteThenDynamicAddress, [memDynamicBinding(0, 1)], loc(0x1000, 0x1002)),
+      createIrBlockBuilder().addInstruction(
+        blindWriteThenDynamicAddress,
+        [memDynamicBinding(0, 1, undefined)],
+        loc(0x1000, 0x1002)
+      ),
     /unrestorable/
   );
 });

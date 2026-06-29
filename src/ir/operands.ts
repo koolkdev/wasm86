@@ -1,4 +1,4 @@
-import type { EffectiveAddress, RegName } from "#x86/types.js";
+import type { EffectiveAddress, RegName, SegmentRegister } from "#x86/types.js";
 import { gprChannel, type GprChannel } from "./slots.js";
 
 export type ExternalValueId = number;
@@ -13,12 +13,17 @@ export type ImmExternalOperandBinding = Readonly<{ kind: "immExternal"; value: E
 export type MemOperandBinding = Readonly<{ kind: "mem"; address: EffectiveAddress }>;
 // An address with no state-dependent term, resolved at decode.
 export type MemStaticOperandBinding = Readonly<{ kind: "memStatic"; address: ExternalValueId }>;
+export type MemDynamicSegment =
+  | Readonly<{ kind: "static"; reg: SegmentRegister }>
+  | Readonly<{ kind: "dynamic"; value: ExternalValueId }>;
 // base holds a GPR word index 0..7, read inside the instruction so pop's
 // esp-based EA sees the incremented esp; offset pre-sums the other terms.
+// Dynamic segment values use the segmentRegisters index order.
 export type MemDynamicOperandBinding = Readonly<{
   kind: "memDynamic";
   base: ExternalValueId;
   offset: ExternalValueId;
+  segment: MemDynamicSegment | undefined;
 }>;
 
 export type OperandBinding =
@@ -54,6 +59,18 @@ export function memStaticBinding(address: ExternalValueId): MemStaticOperandBind
   return { kind: "memStatic", address };
 }
 
-export function memDynamicBinding(base: ExternalValueId, offset: ExternalValueId): MemDynamicOperandBinding {
-  return { kind: "memDynamic", base, offset };
+export function staticMemSegment(reg: SegmentRegister): MemDynamicSegment {
+  return { kind: "static", reg };
+}
+
+export function dynamicMemSegment(value: ExternalValueId): MemDynamicSegment {
+  return { kind: "dynamic", value };
+}
+
+export function memDynamicBinding(
+  base: ExternalValueId,
+  offset: ExternalValueId,
+  segment: MemDynamicSegment | undefined
+): MemDynamicOperandBinding {
+  return { kind: "memDynamic", base, offset, segment };
 }

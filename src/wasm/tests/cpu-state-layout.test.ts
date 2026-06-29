@@ -16,6 +16,8 @@ import { reg16, reg32, reg8, segmentRegisters } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import {
   WASM_CPU_FLAG_BYTE_OFFSETS,
+  WASM_CPU_SEGMENT_BASE_OFFSET,
+  WASM_CPU_SEGMENT_SELECTOR_OFFSET,
   WASM_CPU_STATE_BYTE_LENGTH,
   WASM_CPU_STATE_FIELDS,
   WASM_CPU_STATE_LAYOUT,
@@ -76,8 +78,12 @@ test("channel offsets derive from the register word offset plus the byte offset"
   strictEqual(wasmCpuStateChannelAccessByteLength(lazyFlagsBChannel), 4);
 
   for (const reg of segmentRegisters) {
+    const index = segmentRegisters.indexOf(reg);
+
     strictEqual(wasmCpuStateChannelOffset(segmentSelectorChannel(reg)), WASM_CPU_STATE_OFFSETS[`${reg}Selector`]);
     strictEqual(wasmCpuStateChannelOffset(segmentBaseChannel(reg)), WASM_CPU_STATE_OFFSETS[`${reg}Base`]);
+    strictEqual(wasmCpuStateChannelOffset(segmentSelectorChannel(reg)), WASM_CPU_SEGMENT_SELECTOR_OFFSET + index * 2);
+    strictEqual(wasmCpuStateChannelOffset(segmentBaseChannel(reg)), WASM_CPU_SEGMENT_BASE_OFFSET + index * 4);
     strictEqual(wasmCpuStateChannelAccessByteLength(segmentSelectorChannel(reg)), 2);
     strictEqual(wasmCpuStateChannelAccessByteLength(segmentBaseChannel(reg)), 4);
   }

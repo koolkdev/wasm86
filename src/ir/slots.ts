@@ -2,6 +2,7 @@ import { assert } from "#common/assert.js";
 import { x86Flags, type X86Flag } from "#x86/flags.js";
 import { registerAlias } from "#x86/registers.js";
 import { reg16, reg32, reg8, segmentRegisters, type Reg32, type RegName, type SegmentRegister } from "#x86/types.js";
+import type { ValueId } from "./values.js";
 
 export type GprChannel = Readonly<{
   kind: "gpr";
@@ -34,6 +35,37 @@ export type StateChannel =
   | EipChannel
   | InstructionCountChannel
   | LazyFlagsChannel;
+
+// The index is the x86 register number for the access width (modrm encoding).
+export type GprDynamicSlot = Readonly<{
+  kind: "gprDynamic";
+  index: ValueId;
+  byteLength: 1 | 2 | 4;
+}>;
+
+export type SegmentDynamicSlot = Readonly<{
+  kind: "segmentDynamic";
+  index: ValueId;
+  field: SegmentChannelField;
+}>;
+
+export type DynamicStateSlot = GprDynamicSlot | SegmentDynamicSlot;
+export type StateSlot = StateChannel | DynamicStateSlot;
+
+export function isDynamicSlot(slot: StateSlot): slot is DynamicStateSlot {
+  switch (slot.kind) {
+    case "gprDynamic":
+    case "segmentDynamic":
+      return true;
+    case "gpr":
+    case "flag":
+    case "segment":
+    case "eip":
+    case "instructionCount":
+    case "lazyFlags":
+      return false;
+  }
+}
 
 const byteOffsetFromBitOffset = { 0: 0, 8: 1 } as const;
 const byteLengthFromWidth = { 8: 1, 16: 2, 32: 4 } as const;

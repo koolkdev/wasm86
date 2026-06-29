@@ -22,7 +22,7 @@ import type {
   Value,
   ValueInput
 } from "#x86/semantics/refs.js";
-import type { EffectiveAddress, OperandWidth, RegName } from "#x86/types.js";
+import type { EffectiveAddress, OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 import {
   signedComparePredicates,
   type BinaryOperator,
@@ -31,6 +31,7 @@ import {
 } from "#x86/semantics/ops.js";
 import type {
   ExternalValueId,
+  MemDynamicSegment,
   MemDynamicOperandBinding,
   OperandBinding,
   RegDynamicOperandBinding
@@ -43,14 +44,14 @@ import {
   gprChannel,
   instructionCountChannel,
   segmentBaseChannel,
+  type GprDynamicSlot,
   type GprChannel
 } from "./slots.js";
 import type {
   Action,
   DispatchAction,
   EdgeFlushAction,
-  ExitAction,
-  GprDynamicSlot
+  ExitAction
 } from "./actions.js";
 import type { EdgeRegion, IrBlock, RegionId } from "./block.js";
 import {
@@ -127,6 +128,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // a base register in between.
   readonly #operandAddresses = new Map<number, ValueId>();
   readonly #operandLinearAddresses = new Map<number, ValueId>();
+  readonly #dynamicSegmentBases = new Map<ExternalValueId, ValueId>();
   #nextRegionId: RegionId = entryRegionId + 1;
   #bindings: readonly OperandBinding[] = [];
   #instructionLocation: InstructionLocationValues | undefined;
@@ -150,6 +152,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#bindings = bindings;
     this.#operandAddresses.clear();
     this.#operandLinearAddresses.clear();
+    this.#dynamicSegmentBases.clear();
     this.#instructionLocation = this.#locationValues(location);
     this.#terminated = false;
     this.#wroteMemory = false;
@@ -591,7 +594,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     }
 
     const binding = this.#binding(index);
-    const address = this.#bindingLinearAddress(binding);
+    const address = this.#bindingLinearAddress(index, binding);
 
     this.#operandLinearAddresses.set(index, address);
     return address;
@@ -613,7 +616,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     }
   }
 
-  #bindingLinearAddress(binding: OperandBinding): ValueId {
+  #bindingLinearAddress(index: number, binding: OperandBinding): ValueId {
     assert(
       binding.kind === "mem" || binding.kind === "memStatic" || binding.kind === "memDynamic",
       `linear address of a ${binding.kind} operand binding`
@@ -621,11 +624,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     switch (binding.kind) {
       case "mem":
-        return this.#linearAddress(binding.address);
+        return this.#linearAddress(binding.address.segment, this.#operandAddress(index));
       case "memStatic":
-        return this.#values.external(binding.address);
+        return this.#operandAddress(index);
       case "memDynamic":
-        return this.#dynamicAddress(binding);
+        return this.#memDynamicLinearAddress(binding.segment, this.#operandAddress(index));
     }
   }
 
@@ -664,15 +667,35 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       : this.#values.binary("add", address, this.#values.const(ea.disp));
   }
 
-  #linearAddress(ea: EffectiveAddress): ValueId {
-    const offset = this.#effectiveAddress(ea);
-
+  #linearAddress(segment: SegmentRegister | undefined, offset: ValueId): ValueId {
     // Flat-memory assumption: CS/DS/ES/SS bases are zero; FS/GS may be non-zero.
-    if (ea.segment !== "fs" && ea.segment !== "gs") {
+    if (segment !== "fs" && segment !== "gs") {
       return offset;
     }
 
-    return this.#values.binary("add", this.#pending.read(segmentBaseChannel(ea.segment)), offset);
+    return this.#values.binary("add", this.#pending.read(segmentBaseChannel(segment)), offset);
+  }
+
+  #memDynamicLinearAddress(segment: MemDynamicSegment | undefined, offset: ValueId): ValueId {
+    switch (segment?.kind) {
+      case undefined:
+        return offset;
+      case "static":
+        return this.#linearAddress(segment.reg, offset);
+      case "dynamic":
+        return this.#dynamicSegmentLinearAddress(segment.value, offset);
+    }
+  }
+
+  #dynamicSegmentLinearAddress(segment: ExternalValueId, offset: ValueId): ValueId {
+    let base = this.#dynamicSegmentBases.get(segment);
+
+    if (base === undefined) {
+      base = this.#pending.readDynamicSegmentBase(this.#values.external(segment));
+      this.#dynamicSegmentBases.set(segment, base);
+    }
+
+    return this.#values.binary("add", base, offset);
   }
 
   #binding(index: number): OperandBinding {

@@ -7,9 +7,13 @@ import {
   flagChannel,
   gprChannel,
   lazyFlagsAChannel,
-  lazyFlagsKindChannel
+  lazyFlagsKindChannel,
+  segmentBaseChannel,
+  segmentSelectorChannel,
+  type GprDynamicSlot,
+  type StateSlot
 } from "#ir/slots.js";
-import type { Action, EdgeFlushAction, GprDynamicSlot, StateSlot } from "#ir/actions.js";
+import type { Action, EdgeFlushAction } from "#ir/actions.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 
 type Harness = Readonly<{
@@ -214,6 +218,42 @@ test("lazy flag metadata channels are cached raw state cells", () => {
   ]);
   deepStrictEqual(pending.flushesForEdge("completed"), [
     { kind: "writeState", slot: lazyFlagsAChannel, value: lazyA }
+  ]);
+});
+
+test("segment channels are read-only cached cells", () => {
+  const { values, actions, pending } = createHarness();
+  const fsBase = pending.read(segmentBaseChannel("fs"));
+  const fsSelector = pending.read(segmentSelectorChannel("fs"));
+
+  strictEqual(pending.read(segmentBaseChannel("fs")), fsBase);
+  strictEqual(pending.read(segmentSelectorChannel("fs")), fsSelector);
+  strictEqual(values.truncate(16, fsSelector), fsSelector);
+
+  throws(
+    () => pending.write(segmentBaseChannel("fs"), values.const(0x1000)),
+    /segment writes must use a segment-load host exit/
+  );
+  throws(
+    () => pending.write(segmentSelectorChannel("fs"), values.const(0x23)),
+    /segment writes must use a segment-load host exit/
+  );
+  deepStrictEqual(actions, [
+    { kind: "readState", output: fsBase, slot: segmentBaseChannel("fs") },
+    { kind: "readState", output: fsSelector, slot: segmentSelectorChannel("fs") }
+  ]);
+});
+
+test("dynamic segment reads keep selector and base fields separate", () => {
+  const { values, actions, pending } = createHarness();
+  const index = values.const(3);
+  const selector = pending.readDynamicSegmentSelector(index);
+  const base = pending.readDynamicSegmentBase(index);
+
+  strictEqual(values.truncate(16, selector), selector);
+  deepStrictEqual(actions, [
+    { kind: "readState", output: selector, slot: { kind: "segmentDynamic", index, field: "selector" } },
+    { kind: "readState", output: base, slot: { kind: "segmentDynamic", index, field: "base" } }
   ]);
 });
 

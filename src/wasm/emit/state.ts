@@ -1,15 +1,22 @@
 import { assert } from "#common/assert.js";
-import type { GprDynamicSlot, StateSlot } from "#ir/actions.js";
+import type { GprDynamicSlot, SegmentDynamicSlot, StateSlot } from "#ir/slots.js";
 import type { ValueId } from "#ir/values.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
-import { wasmCpuStateChannelAccessByteLength, wasmCpuStateChannelOffset, WASM_CPU_GPR_BASE_OFFSET } from "#wasm/cpu-state-layout.js";
+import {
+  wasmCpuStateChannelAccessByteLength,
+  wasmCpuStateChannelOffset,
+  WASM_CPU_GPR_BASE_OFFSET,
+  WASM_CPU_SEGMENT_BASE_OFFSET,
+  WASM_CPU_SEGMENT_SELECTOR_OFFSET
+} from "#wasm/cpu-state-layout.js";
 
 // State slot loads and stores. The layout owns offsets and widths; this file
 // only encodes the matching access. A dynamic slot lowers to address math
-// over the GPR words — the index is masked to 0..7, so a stray index stays
-// inside the register file.
+// over contiguous state arrays. Dynamic GPR indexes come from ModRM fields and
+// are masked to the register file. Dynamic segment indexes are produced by
+// prefix decode in segmentRegisters order.
 
 export function emitSlotLoad(
   body: WasmFunctionBodyEncoder,
@@ -64,6 +71,9 @@ function emitSlotAddress(body: WasmFunctionBodyEncoder, slot: StateSlot, emitUse
     case "gprDynamic":
       emitDynamicGprOffset(body, slot, emitUse);
       return;
+    case "segmentDynamic":
+      emitDynamicSegmentOffset(body, slot, emitUse);
+      return;
     case "gpr":
     case "flag":
     case "segment":
@@ -99,6 +109,15 @@ function emitDynamicGprOffset(
   }
 }
 
+function emitDynamicSegmentOffset(
+  body: WasmFunctionBodyEncoder,
+  slot: SegmentDynamicSlot,
+  emitUse: (id: ValueId) => void
+): void {
+  emitUse(slot.index);
+  body.i32Const(slot.field === "selector" ? 1 : 2).i32Shl();
+}
+
 function slotImmediate(slot: StateSlot): WasmMemoryImmediate {
   const offset = slotBaseOffset(slot);
 
@@ -113,6 +132,8 @@ function slotBaseOffset(slot: StateSlot): number {
   switch (slot.kind) {
     case "gprDynamic":
       return WASM_CPU_GPR_BASE_OFFSET;
+    case "segmentDynamic":
+      return slot.field === "selector" ? WASM_CPU_SEGMENT_SELECTOR_OFFSET : WASM_CPU_SEGMENT_BASE_OFFSET;
     case "gpr":
     case "flag":
     case "segment":
@@ -127,6 +148,8 @@ function slotAccessByteLength(slot: StateSlot): 1 | 2 | 4 {
   switch (slot.kind) {
     case "gprDynamic":
       return slot.byteLength;
+    case "segmentDynamic":
+      return slot.field === "selector" ? 2 : 4;
     case "gpr":
     case "flag":
     case "segment":
@@ -137,8 +160,8 @@ function slotAccessByteLength(slot: StateSlot): 1 | 2 | 4 {
   }
 }
 
-// Dynamic addresses are the base plus a multiple of 4, so the base offset's
-// alignment carries to every indexed address.
+// Dynamic state addresses add an aligned selector/base array offset, so the
+// selected field's alignment carries to every indexed address.
 function accessAlign(offset: number, byteLength: 1 | 2 | 4): 0 | 1 | 2 {
   switch (byteLength) {
     case 1:

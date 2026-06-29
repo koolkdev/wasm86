@@ -1,12 +1,13 @@
 import { assert } from "#common/assert.js";
 import { actionMayWriteStateSlot } from "#ir/aliasing.js";
-import { isTerminatorAction, type Action, type ReadStateAction, type StateSlot } from "#ir/actions.js";
+import { isTerminatorAction, type Action, type ReadStateAction } from "#ir/actions.js";
 import type {
   IrBlock,
   EdgeRegion,
   EntryRegion,
   RegionId
 } from "#ir/block.js";
+import type { StateSlot } from "#ir/slots.js";
 import type { ValueId, ValueNode, ValueTable } from "#ir/values.js";
 
 // Pure value analysis for the action emitter: everything is decided up front
@@ -276,6 +277,8 @@ function slotOperands(slot: StateSlot): readonly ValueId[] {
         case 4:
           return [slot.index];
       }
+    case "segmentDynamic":
+      return [slot.index];
     case "gpr":
     case "flag":
     case "segment":

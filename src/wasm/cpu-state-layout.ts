@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { SegmentChannelField, StateChannel } from "#ir/slots.js";
 import { x86Flags, type X86Flag } from "#x86/flags.js";
 import { LAZY_FLAGS_KIND } from "#ir/lazy-flags.js";
-import { reg32, type SegmentRegister } from "#x86/types.js";
+import { reg32, segmentRegisters, type SegmentRegister } from "#x86/types.js";
 
 type WasmCpuStateLayoutEntry = Readonly<{
   offset: number;
@@ -78,11 +78,24 @@ export const WASM_CPU_STATE_BYTE_LENGTH = Math.max(
 // Dynamic register access indexes the GPR words as one contiguous array in
 // modrm register order.
 export const WASM_CPU_GPR_BASE_OFFSET = WASM_CPU_STATE_OFFSETS.eax;
+export const WASM_CPU_SEGMENT_SELECTOR_OFFSET = WASM_CPU_STATE_OFFSETS.esSelector;
+export const WASM_CPU_SEGMENT_BASE_OFFSET = WASM_CPU_STATE_OFFSETS.esBase;
 
 for (const [index, reg] of reg32.entries()) {
   assert(
     WASM_CPU_STATE_OFFSETS[reg] === WASM_CPU_GPR_BASE_OFFSET + index * 4,
     "cpu state layout GPR words must be contiguous in modrm register order"
+  );
+}
+
+for (const [index, reg] of segmentRegisters.entries()) {
+  assert(
+    WASM_CPU_STATE_OFFSETS[WASM_CPU_SEGMENT_FIELDS[reg].selector] === WASM_CPU_SEGMENT_SELECTOR_OFFSET + index * 2,
+    "cpu state layout segment selectors must be contiguous in segment register order"
+  );
+  assert(
+    WASM_CPU_STATE_OFFSETS[WASM_CPU_SEGMENT_FIELDS[reg].base] === WASM_CPU_SEGMENT_BASE_OFFSET + index * 4,
+    "cpu state layout segment bases must be contiguous in segment register order"
   );
 }
 

@@ -1,10 +1,11 @@
-import { channelsOverlap } from "./slots.js";
-import type { Action, StateSlot } from "./actions.js";
+import { channelsOverlap, isDynamicSlot } from "./slots.js";
+import type { Action } from "./actions.js";
+import type { StateSlot } from "./slots.js";
 
 // Effects are derived from action kind + slot, never stored per-action.
 // One aliasing rule over the address spaces: static channels alias iff their
-// byte ranges intersect; a dynamic GPR slot may alias every GPR word and
-// never exact cells like flags, segment registers, lazy metadata, or eip;
+// byte ranges intersect; a dynamic GPR slot may alias every GPR word and a
+// dynamic segment slot may alias every segment channel for the same field;
 // guest memory may-alias guest memory (no disambiguation); guest memory and
 // state never alias.
 
@@ -53,14 +54,19 @@ export function slotsMayAlias(a: StateSlot, b: StateSlot): boolean {
   switch (a.kind) {
     case "gprDynamic":
       return b.kind === "gpr" || b.kind === "gprDynamic";
+    case "segmentDynamic":
+      return (b.kind === "segmentDynamic" || b.kind === "segment") && a.field === b.field;
     case "gpr":
-      return b.kind === "gprDynamic" || channelsOverlap(a, b);
+      return isDynamicSlot(b) ? b.kind === "gprDynamic" : channelsOverlap(a, b);
     case "flag":
-    case "segment":
     case "eip":
     case "instructionCount":
     case "lazyFlags":
-      return b.kind !== "gprDynamic" && channelsOverlap(a, b);
+      return !isDynamicSlot(b) && channelsOverlap(a, b);
+    case "segment":
+      return isDynamicSlot(b)
+        ? b.kind === "segmentDynamic" && a.field === b.field
+        : channelsOverlap(a, b);
   }
 }
 

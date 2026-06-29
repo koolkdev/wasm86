@@ -7,10 +7,11 @@ import {
   eipChannel,
   gprChannel,
   lazyFlagsBChannel,
-  lazyFlagsKindChannel
+  lazyFlagsKindChannel,
+  type StateSlot
 } from "#ir/slots.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
-import type { Action, StateSlot } from "#ir/actions.js";
+import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#ir/values.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";

@@ -1,17 +1,8 @@
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { RegionId } from "./block.js";
-import type { StateChannel } from "./slots.js";
+import type { StateSlot } from "./slots.js";
 import type { ValueId } from "./values.js";
-
-// The index is the x86 register number for the access width (modrm encoding).
-export type GprDynamicSlot = Readonly<{
-  kind: "gprDynamic";
-  index: ValueId;
-  byteLength: 1 | 2 | 4;
-}>;
-
-export type StateSlot = StateChannel | GprDynamicSlot;
 
 // Reports to the host; the action emitter owns the numeric encoding.
 export type ActionExitReason =

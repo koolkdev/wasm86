@@ -11,7 +11,7 @@ import {
   segmentBaseChannel,
   segmentSelectorChannel
 } from "#ir/slots.js";
-import type { StateSlot } from "#ir/actions.js";
+import type { StateSlot } from "#ir/slots.js";
 
 const memory: StorageEffect = { space: "memory" };
 
@@ -21,6 +21,14 @@ function state(slot: StateSlot): StorageEffect {
 
 function dynamicGpr(index: number, byteLength: 1 | 2 | 4 = 4): StateSlot {
   return { kind: "gprDynamic", index, byteLength };
+}
+
+function dynamicSegmentBase(index: number): StateSlot {
+  return { kind: "segmentDynamic", index, field: "base" };
+}
+
+function dynamicSegmentSelector(index: number): StateSlot {
+  return { kind: "segmentDynamic", index, field: "selector" };
 }
 
 test("effects derive from action kind and slot", () => {
@@ -85,6 +93,22 @@ test("a dynamic GPR slot may-aliases every GPR word and never exact cells", () =
   strictEqual(mayAlias(state(eipChannel), state(dynamicGpr(0))), false);
   strictEqual(mayAlias(state(dynamicGpr(0)), state(segmentSelectorChannel("fs"))), false);
   strictEqual(mayAlias(state(segmentBaseChannel("fs")), state(dynamicGpr(0))), false);
+});
+
+test("a dynamic segment slot may-aliases segment channels for the same field", () => {
+  strictEqual(mayAlias(state(dynamicSegmentBase(0)), state(segmentBaseChannel("fs"))), true);
+  strictEqual(mayAlias(state(segmentBaseChannel("gs")), state(dynamicSegmentBase(0))), true);
+  strictEqual(mayAlias(state(dynamicSegmentBase(0)), state(dynamicSegmentBase(1))), true);
+  strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(segmentSelectorChannel("fs"))), true);
+  strictEqual(mayAlias(state(segmentSelectorChannel("gs")), state(dynamicSegmentSelector(0))), true);
+  strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(dynamicSegmentSelector(1))), true);
+  strictEqual(mayAlias(state(dynamicSegmentBase(0)), state(segmentSelectorChannel("fs"))), false);
+  strictEqual(mayAlias(state(segmentSelectorChannel("fs")), state(dynamicSegmentBase(0))), false);
+  strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(segmentBaseChannel("fs"))), false);
+  strictEqual(mayAlias(state(segmentBaseChannel("fs")), state(dynamicSegmentSelector(0))), false);
+  strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(dynamicSegmentBase(0))), false);
+  strictEqual(mayAlias(state(dynamicSegmentBase(0)), state(gprChannel("eax"))), false);
+  strictEqual(mayAlias(state(gprChannel("eax")), state(dynamicSegmentBase(0))), false);
 });
 
 test("action writes include raw state slots", () => {

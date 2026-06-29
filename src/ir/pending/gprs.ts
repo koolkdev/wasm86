@@ -1,8 +1,9 @@
 import { assert } from "#common/assert.js";
-import type { GprDynamicSlot, WriteStateAction } from "../actions.js";
+import type { WriteStateAction } from "../actions.js";
 import {
   channelCovers,
   channelsOverlap,
+  type GprDynamicSlot,
   type GprChannel
 } from "../slots.js";
 import {

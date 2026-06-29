@@ -165,7 +165,7 @@ function rmBinding(
     case "memStatic":
       return memStaticBinding(externals.bind(locals.offset));
     case "memDynamic":
-      return memDynamicBinding(externals.bind(locals.base), externals.bind(locals.offset));
+      return memDynamicBinding(externals.bind(locals.base), externals.bind(locals.offset), undefined);
   }
 }
 

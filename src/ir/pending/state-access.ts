@@ -1,10 +1,11 @@
-import type { Action, StateSlot } from "../actions.js";
+import type { Action } from "../actions.js";
 import {
   type EipChannel,
   type FlagChannel,
   type InstructionCountChannel,
   type LazyFlagsChannel,
-  type SegmentChannel
+  type SegmentChannel,
+  type StateSlot
 } from "../slots.js";
 import type { ValueId, ValueTable, WidthBounds } from "../values.js";
 

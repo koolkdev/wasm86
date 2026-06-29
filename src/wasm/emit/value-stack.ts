@@ -1,7 +1,8 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
-import type { ReadMemoryAction, ReadStateAction, StateSlot } from "#ir/actions.js";
+import type { ReadMemoryAction, ReadStateAction } from "#ir/actions.js";
 import type { EdgeRegion } from "#ir/block.js";
+import { isDynamicSlot, type StateSlot } from "#ir/slots.js";
 import type {
   BinaryValueNode,
   CompareValueNode,
@@ -219,7 +220,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       // point, so the index is consumed exactly once per address push and
       // may be any expression. Static channels reload at use unless a later
       // overlapping store would corrupt the load.
-      if (action.slot.kind !== "gprDynamic" && !analysis.isPinned(action.output)) {
+      if (!isDynamicSlot(action.slot) && !analysis.isPinned(action.output)) {
         reads.set(action.output, action);
         return;
       }

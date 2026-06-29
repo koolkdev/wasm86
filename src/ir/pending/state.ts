@@ -1,4 +1,5 @@
-import type { Action, EdgeFlushAction, GprDynamicSlot } from "../actions.js";
+import { assert } from "#common/assert.js";
+import type { Action, EdgeFlushAction } from "../actions.js";
 import {
   PendingCells
 } from "./cells.js";
@@ -12,22 +13,24 @@ import {
   type InstructionCountChannel,
   type LazyFlagsChannel,
   type SegmentChannel,
+  type GprDynamicSlot,
   type StateChannel
 } from "../slots.js";
-import type { ValueId, ValueTable } from "../values.js";
+import { fitsUnsigned, type ValueId, type ValueTable } from "../values.js";
 import { PendingStateAccess } from "./state-access.js";
 
 export type PendingEdgeKind = "fault" | "completed";
 
 export class PendingState {
+  readonly #state: PendingStateAccess;
   readonly #cells: PendingCells<FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel>;
   readonly #gprs: PendingGprs;
 
   constructor(values: ValueTable, emit: (action: Action) => void) {
-    const state = new PendingStateAccess(values, emit);
+    this.#state = new PendingStateAccess(values, emit);
 
-    this.#cells = new PendingCells(state);
-    this.#gprs = new PendingGprs(values, state);
+    this.#cells = new PendingCells(this.#state);
+    this.#gprs = new PendingGprs(values, this.#state);
   }
 
   read(channel: StateChannel, options?: PendingReadOptions): ValueId {
@@ -49,11 +52,13 @@ export class PendingState {
         this.#gprs.write(channel, value);
         break;
       case "flag":
-      case "segment":
       case "eip":
       case "instructionCount":
       case "lazyFlags":
         this.#cells.write(channel, value);
+        break;
+      case "segment":
+        assert(false, "segment writes must use a segment-load host exit");
         break;
     }
   }
@@ -64,6 +69,14 @@ export class PendingState {
 
   readDynamicGpr(slot: GprDynamicSlot, options?: PendingReadOptions): ValueId {
     return this.#gprs.readDynamic(slot, options);
+  }
+
+  readDynamicSegmentBase(index: ValueId): ValueId {
+    return this.#state.read({ kind: "segmentDynamic", index, field: "base" });
+  }
+
+  readDynamicSegmentSelector(index: ValueId): ValueId {
+    return this.#state.read({ kind: "segmentDynamic", index, field: "selector" }, fitsUnsigned(16));
   }
 
   writeDynamicGpr(slot: GprDynamicSlot, value: ValueId): void {
