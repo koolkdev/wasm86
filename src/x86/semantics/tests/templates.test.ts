@@ -230,10 +230,10 @@ test("double-shift semantics combine the destination and source in the shift dir
 test("runtime shift counts are masked before result and flag use", () => {
   const trace = buildSemanticTrace(shiftSemantic("shl", 8, "cl"), regOperands(1));
 
-  strictEqual(trace.defs[1], "project8(%0)");
+  strictEqual(trace.defs[1], "truncate8(%0)");
   strictEqual(trace.defs[3], "and(%2, 31)");
   strictEqual(trace.defs[4], "shl(%1, %3)");
-  strictEqual(trace.defs[5], "project8(%4)");
+  strictEqual(trace.defs[5], "truncate8(%4)");
   strictEqual(trace.defs[7], "select(%6, %5, %1)");
   strictEqual(trace.defs[14], "cmp32.eq(%3, 1)");
   strictEqual(trace.defs[15], "sub(8, %3)");
@@ -281,8 +281,8 @@ test("imul reg-rm semantics use a signed full product and explicit status flags"
   strictEqual(trace.defs[2], "extend64.s32(%1)");
   strictEqual(trace.defs[3], "extend64.s32(%0)");
   strictEqual(trace.defs[4], "mul64(%2, %3)");
-  strictEqual(trace.defs[5], "project64.32(%4)");
-  strictEqual(trace.defs[8], "project64.32(%7)");
+  strictEqual(trace.defs[5], "truncate64.32(%4)");
+  strictEqual(trace.defs[8], "truncate64.32(%7)");
   strictEqual(trace.defs[9], "extend64.s32(%5)");
   strictEqual(trace.defs[10], "cmp64.ne(%4, %9)");
   deepStrictEqual(statusFlagKeys(trace.flagWrites[0]!).sort(), [...x86StatusFlags].sort());
@@ -392,7 +392,7 @@ test("high accumulator sign-extension forms are flagless", () => {
     "next"
   ]);
   strictEqual(cwd.defs[1], "shr_s(%0, 15)");
-  strictEqual(cwd.defs[2], "project16(%1)");
+  strictEqual(cwd.defs[2], "truncate16(%1)");
   deepStrictEqual(cdq.events, [
     "%0 = get eax:32",
     "set edx:32 <- %1",
@@ -406,7 +406,7 @@ test("high accumulator sign-extension forms are flagless", () => {
 test("sar semantics use signed right shift after width sign extension", () => {
   const trace = buildSemanticTrace(shiftSemantic("sar", 16, "imm8"), operands("reg", "imm"));
 
-  strictEqual(trace.defs[1], "project16(%0)");
+  strictEqual(trace.defs[1], "truncate16(%0)");
   strictEqual(trace.defs[3], "and(%2, 31)");
   strictEqual(trace.defs[4], "extend.s16(%1)");
   strictEqual(trace.defs[5], "shr_s(%4, %3)");
@@ -581,7 +581,7 @@ test("pushad and pusha preflight one range and save the original stack pointer",
   strictEqual(pusha.events.filter((event) => event.startsWith("guard ")).length, 1);
   strictEqual(pusha.events.some((event, index) => index > firstMemoryWrite(pusha) && event.startsWith("guard ")), false);
   ok(pusha.events.includes("set mem(%14):16 <- %6"));
-  strictEqual(pusha.defs[6], "project16(%0)");
+  strictEqual(pusha.defs[6], "truncate16(%0)");
   strictEqual(pusha.defs[14], "sub(%0, 10)");
 });
 

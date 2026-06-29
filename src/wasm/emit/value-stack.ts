@@ -7,7 +7,7 @@ import type {
   CompareValueNode,
   ExtendValueNode,
   HelperCallValueNode,
-  ProjectValueNode,
+  TruncateValueNode,
   SelectValueNode,
   UnaryValueNode,
   ValueId,
@@ -61,7 +61,7 @@ type CompoundValueNode =
   | UnaryValueNode
   | CompareValueNode
   | SelectValueNode
-  | ProjectValueNode
+  | TruncateValueNode
   | ExtendValueNode
   | HelperCallValueNode;
 
@@ -143,9 +143,9 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         emitUse(node.condition);
         body.select();
         return;
-      case "project":
+      case "truncate":
         emitUse(node.value);
-        emitProjection(body, node);
+        emitTruncate(body, node);
         return;
       case "extend":
         emitUse(node.value);
@@ -389,7 +389,7 @@ function emitUnaryOperator(body: WasmFunctionBodyEncoder, node: UnaryValueNode):
 
 function emitExtend(body: WasmFunctionBodyEncoder, node: ExtendValueNode): void {
   if (!node.signed) {
-    emitProjectionFromI32(body, node.width);
+    emitTruncateFromI32(body, node.width);
 
     if (node.type === "i64") {
       body.i64ExtendI32U();
@@ -468,18 +468,18 @@ function emitCompareOperator(body: WasmFunctionBodyEncoder, node: CompareValueNo
   }
 }
 
-function emitProjection(body: WasmFunctionBodyEncoder, node: ProjectValueNode): void {
+function emitTruncate(body: WasmFunctionBodyEncoder, node: TruncateValueNode): void {
   if (node.sourceType === "i64") {
     body.i32WrapI64();
   }
 
-  emitProjectionFromI32(body, node.width);
+  emitTruncateFromI32(body, node.width);
 }
 
-function emitProjectionFromI32(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
+function emitTruncateFromI32(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
   switch (width) {
     case 32:
-      // A full-width projection is the value itself.
+      // A full-width truncation is the value itself.
       return;
     case 16:
       body.i32Const(0xffff).i32And();

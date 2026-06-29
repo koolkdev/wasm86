@@ -20,7 +20,7 @@ export function highAccumulatorSignExtendSemantic(width: Extract<OperandWidth, 1
       case 16:
         s.set(
           s.reg("dx"),
-          s.project(16, s.binary("shr_s", s.get(s.reg("ax"), 16, { signed: true }), s.const32(15))),
+          s.truncate(16, s.binary("shr_s", s.get(s.reg("ax"), 16, { signed: true }), s.const32(15))),
           16
         );
         return;

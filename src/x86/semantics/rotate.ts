@@ -26,7 +26,7 @@ export function rotateSemantic(
 
     guardStorageReadWrite(s, context, dst, width);
 
-    const value = s.project(width, s.get(dst, width));
+    const value = s.truncate(width, s.get(dst, width));
     const rawCount = readShiftCount(s, countSource);
     const count = s.binary("and", rawCount, s.const32(0x1f));
 
@@ -48,7 +48,7 @@ function writePlainRotate(
   dst: StorageInput
 ): void {
   const effective = rotateCount(s, width, count);
-  const result = s.project(width, rotateI32(s, rotateDirection(op), width, value, effective));
+  const result = s.truncate(width, rotateI32(s, rotateDirection(op), width, value, effective));
   const ops = semanticFlagOps(s);
   const carry = op === "rol" ? lowBit(ops, result) : signBit(ops, width, result);
   const countIsNonZero = countNonZero(s, count);
@@ -164,7 +164,7 @@ function rotateThroughCarry32(
   const rotated = rotateRing32(s, op, ring, count);
 
   return {
-    result: s.project(width, rotated),
+    result: s.truncate(width, rotated),
     carry: bitAt(semanticFlagOps(s), rotated, width)
   };
 }
@@ -201,10 +201,10 @@ function rotateThroughCarry64(
   const rotated = rotateRing64(s, op, ring, count);
 
   return {
-    result: s.project64(32, rotated),
+    result: s.truncate64(32, rotated),
     carry: lowBit(
       semanticFlagOps(s),
-      s.project64(32, s.binary64("shr_u", rotated, extendU64(s, s.const32(32))))
+      s.truncate64(32, s.binary64("shr_u", rotated, extendU64(s, s.const32(32))))
     )
   };
 }

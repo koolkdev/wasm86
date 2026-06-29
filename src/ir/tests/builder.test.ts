@@ -497,12 +497,12 @@ test("ax and al pendings mix without touching flag pendings", () => {
   ok(axRead < lazyKindFlush, "lazy flag flush stays at the end of the block");
   deepStrictEqual([...writtenFlags(block)], []);
 
-  // The flushed al carries the add's projected result.
+  // The flushed al carries the add's truncated result.
   const v = block.values;
   const reads = actions.filter(
     (action): action is ReadStateAction => action.kind === "readState"
   );
-  const sum = v.project(8, v.binary("add", reads[0]!.output, reads[1]!.output));
+  const sum = v.truncate(8, v.binary("add", reads[0]!.output, reads[1]!.output));
 
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value, sum);
   assertLazyRecord(stateWrites(block), v, { kind: "ADD", width: 8, left: reads[0]!.output, right: reads[1]!.output });
@@ -562,7 +562,7 @@ test("narrow signed compares sign-extend both operands", () => {
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, compare);
 });
 
-test("an 8-bit unsigned compare of covered operands creates no projections", () => {
+test("an 8-bit unsigned compare of covered operands creates no truncations", () => {
   const cmpAl: SemanticTemplate = (s) => {
     s.set(s.operand(0), s.compare(8, "lt_u", s.get(s.operand(0), 8), s.get(s.operand(1), 8)), 8);
   };
@@ -583,7 +583,7 @@ test("an 8-bit unsigned compare of covered operands creates no projections", () 
     stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
     v.compare("lt_u", al, v.const(5))
   );
-  ok(!nodeKinds(block).includes("project"), "no projections expected");
+  ok(!nodeKinds(block).includes("truncate"), "no truncations expected");
 });
 
 test("an 8-bit equality on an unproven value keeps its mask", () => {
@@ -605,7 +605,7 @@ test("an 8-bit equality on an unproven value keeps its mask", () => {
 
   strictEqual(
     stateWrites(block).find((write) => write.slot === gprChannel("al"))?.value,
-    v.compare("eq", v.project(8, sum), v.const(0))
+    v.compare("eq", v.truncate(8, sum), v.const(0))
   );
 });
 
@@ -681,7 +681,7 @@ test("jmp dispatches at the target", () => {
   ]);
 });
 
-test("16-bit jmp projects the target before dispatch", () => {
+test("16-bit jmp truncates the target before dispatch", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(jmpSemantic(16), [immBinding(0x1234_2000)], loc(0x1000, 0x1004));
@@ -1489,7 +1489,7 @@ test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
 
   deepStrictEqual(read, { kind: "readMemory", output: read.output, address, width: 8 });
   strictEqual(stateWrites(block).find((write) => write.slot === gprChannel("eax"))?.value, read.output);
-  ok(!nodeKinds(block).includes("project"), "no projections expected");
+  ok(!nodeKinds(block).includes("truncate"), "no truncations expected");
 });
 
 test("movsx r32, byte [mem] marks the load signed with no extra extend", () => {
@@ -2254,7 +2254,7 @@ test("a guard after a memDynamic flush of a never-read register fails loudly", (
   );
 });
 
-test("a narrow immExternal get projects to the access width", () => {
+test("a narrow immExternal get truncates to the access width", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(movSemantic(8), [regBinding("bl"), immExternalBinding(0)], loc(0x1000, 0x1002));
@@ -2264,7 +2264,7 @@ test("a narrow immExternal get projects to the access width", () => {
   const write = stateWrites(block).find((entry) => entry.slot === gprChannel("bl"));
 
   deepStrictEqual(v.node(write!.value), {
-    kind: "project",
+    kind: "truncate",
     sourceType: "i32",
     width: 8,
     value: v.external(0)

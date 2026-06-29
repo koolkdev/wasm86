@@ -23,7 +23,7 @@ import {
   foldBinary,
   foldCompare,
   foldExtend,
-  foldProject,
+  foldTruncate,
   foldSelect,
   foldUnary,
   type ValueFoldContext
@@ -59,8 +59,8 @@ export type SelectValueNode = Readonly<{
   whenTrue: ValueId;
   whenFalse: ValueId;
 }>;
-export type ProjectValueNode = Readonly<{
-  kind: "project";
+export type TruncateValueNode = Readonly<{
+  kind: "truncate";
   sourceType: ValueType;
   width: OperandWidth;
   value: ValueId;
@@ -83,7 +83,7 @@ export type ValueNode =
   | UnaryValueNode
   | CompareValueNode
   | SelectValueNode
-  | ProjectValueNode
+  | TruncateValueNode
   | ExtendValueNode
   | HelperCallValueNode;
 
@@ -121,7 +121,7 @@ export class ValueTable {
   readonly #unaryIds: Map2<UnaryOperator, ValueId, ValueId> = new Map();
   readonly #compareIds: Map4<ValueType, CompareOperator, ValueId, ValueId, ValueId> = new Map();
   readonly #selectIds: Map3<ValueId, ValueId, ValueId, ValueId> = new Map();
-  readonly #projectIds: Map3<ValueType, OperandWidth, ValueId, ValueId> = new Map();
+  readonly #truncateIds: Map3<ValueType, OperandWidth, ValueId, ValueId> = new Map();
   readonly #extendIds: Map4<ValueType, boolean, OperandWidth, ValueId, ValueId> = new Map();
 
   node(id: ValueId): ValueNode {
@@ -218,29 +218,29 @@ export class ValueTable {
       this.#internSelect(condition, whenTrue, whenFalse);
   }
 
-  project(width: OperandWidth, value: ValueId): ValueId {
+  truncate(width: OperandWidth, value: ValueId): ValueId {
     this.#assertKnownChildren([value]);
     this.#assertValueType(value, "i32");
 
-    return foldProject(this.#foldContext(), width, value) ?? this.#internProject("i32", width, value);
+    return foldTruncate(this.#foldContext(), width, value) ?? this.#internTruncate("i32", width, value);
   }
 
-  project64(width: OperandWidth, value: ValueId): ValueId {
+  truncate64(width: OperandWidth, value: ValueId): ValueId {
     this.#assertKnownChildren([value]);
     this.#assertValueType(value, "i64");
 
     const node = this.node(value);
 
     return node.kind === "extend" && node.type === "i64" && node.width === width
-      ? this.project(width, node.value)
-      : this.#internProject("i64", width, value);
+      ? this.truncate(width, node.value)
+      : this.#internTruncate("i64", width, value);
   }
 
   extend(width: OperandWidth, value: ValueId, signed: boolean): ValueId {
     this.#assertKnownChildren([value]);
     this.#assertValueType(value, "i32");
 
-    const fold = signed ? foldExtend : foldProject;
+    const fold = signed ? foldExtend : foldTruncate;
 
     return fold(this.#foldContext(), width, value) ?? this.#internExtend("i32", signed, width, value);
   }
@@ -356,16 +356,16 @@ export class ValueTable {
     return id;
   }
 
-  #internProject(sourceType: ValueType, width: OperandWidth, value: ValueId): ValueId {
-    const existing = get3(this.#projectIds, sourceType, width, value);
+  #internTruncate(sourceType: ValueType, width: OperandWidth, value: ValueId): ValueId {
+    const existing = get3(this.#truncateIds, sourceType, width, value);
 
     if (existing !== undefined) {
       return existing;
     }
 
-    const id = this.#add({ kind: "project", sourceType, width, value }, [value]);
+    const id = this.#add({ kind: "truncate", sourceType, width, value }, [value]);
 
-    put3(this.#projectIds, sourceType, width, value, id);
+    put3(this.#truncateIds, sourceType, width, value, id);
     return id;
   }
 
@@ -435,7 +435,7 @@ export class ValueTable {
         return ValueTable.#unaryWidthBounds(node, widthBoundsOf);
       case "compare":
         return fitsUnsigned(1);
-      case "project":
+      case "truncate":
         return node.sourceType === "i32"
           ? fitsUnsigned(Math.min(node.width, widthBoundsOf(node.value).unsignedBits))
           : fitsUnsigned(node.width);
@@ -546,7 +546,7 @@ export class ValueTable {
       case "unary":
       case "compare":
       case "select":
-      case "project":
+      case "truncate":
       case "helperCall":
         return "i32";
     }

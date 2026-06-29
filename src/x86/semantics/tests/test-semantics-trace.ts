@@ -187,8 +187,8 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     return this.#alloc(`cmp64.${operator}(${this.#value(a)}, ${this.#value(b)})`);
   }
 
-  project64(width: OperandWidth, value: ValueInput): Value {
-    return this.#alloc(`project64.${width}(${this.#value(value)})`);
+  truncate64(width: OperandWidth, value: ValueInput): Value {
+    return this.#alloc(`truncate64.${width}(${this.#value(value)})`);
   }
 
   extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value {
@@ -201,8 +201,8 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     );
   }
 
-  project(width: OperandWidth, value: ValueInput): Value {
-    return this.#alloc(`project${width}(${this.#value(value)})`);
+  truncate(width: OperandWidth, value: ValueInput): Value {
+    return this.#alloc(`truncate${width}(${this.#value(value)})`);
   }
 
   extend(width: OperandWidth, value: ValueInput, signed: boolean): Value {

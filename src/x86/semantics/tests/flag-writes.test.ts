@@ -30,8 +30,8 @@ test("ADD and SUB flag writers write every arithmetic flag value from caller-pro
       const left = s.get(s.operand(0), 32);
       const right = s.get(s.operand(1), 32);
       const result = op === "add"
-        ? s.project(32, s.binary("add", left, right))
-        : s.project(32, s.binary("sub", left, right));
+        ? s.truncate(32, s.binary("add", left, right))
+        : s.truncate(32, s.binary("sub", left, right));
 
       if (op === "add") {
         writeAddFlags(s, { width: 32, left, right, result });
@@ -53,8 +53,8 @@ test("arithmetic flag source helpers wrap precomputed results without setting op
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 16);
     const right = s.get(s.operand(1), 16);
-    const addResult = s.project(16, s.binary("add", left, right));
-    const subResult = s.project(16, s.binary("sub", left, right));
+    const addResult = s.truncate(16, s.binary("add", left, right));
+    const subResult = s.truncate(16, s.binary("sub", left, right));
 
     addSource = addFlagSource({ width: 16, left, right, result: addResult });
     subSource = subFlagSource({ width: 16, left, right, result: subResult });
@@ -75,7 +75,7 @@ test("logic flag source helper wraps a precomputed logic result", () => {
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
-    const result = s.project(32, s.binary("and", left, right));
+    const result = s.truncate(32, s.binary("and", left, right));
 
     s.writeStatusFlagsSource(logicFlagSource({ width: 32, result }));
   });
@@ -128,7 +128,7 @@ test("parity formulas use popcnt over only the low byte", () => {
   const trace = buildHelperTrace((s) => {
     const left = s.get(s.operand(0), 32);
     const right = s.get(s.operand(1), 32);
-    const result = s.project(32, s.binary("add", left, right));
+    const result = s.truncate(32, s.binary("add", left, right));
 
     writeAddFlags(s, { width: 32, left, right, result });
   });
@@ -145,7 +145,7 @@ test("sign and overflow formulas consume the operation sign bit", () => {
     const trace = buildHelperTrace((s) => {
       const left = s.get(s.operand(0), width);
       const right = s.get(s.operand(1), width);
-      const result = s.project(width, s.binary("add", left, right));
+      const result = s.truncate(width, s.binary("add", left, right));
 
       writeAddFlags(s, { width, left, right, result });
     }, regOperands(2));
@@ -163,7 +163,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const right = s.get(s.operand(1), 8);
 
     addCarryIn = s.compare(8, "ne", left, s.const32(0));
-    const result = s.project(8, s.binary("add", s.binary("add", left, right), addCarryIn));
+    const result = s.truncate(8, s.binary("add", s.binary("add", left, right), addCarryIn));
 
     writeAddFlags(s, { width: 8, left, right, result, carryIn: addCarryIn });
   });
@@ -181,7 +181,7 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
     const right = s.get(s.operand(1), 8);
 
     subBorrowIn = s.compare(8, "ne", right, s.const32(0));
-    const result = s.project(8, s.binary("sub", s.binary("sub", left, right), subBorrowIn));
+    const result = s.truncate(8, s.binary("sub", s.binary("sub", left, right), subBorrowIn));
 
     writeSubFlags(s, { width: 8, left, right, result, borrowIn: subBorrowIn });
   });
@@ -200,7 +200,7 @@ test("flag writers use the supplied result value for result-derived flags", () =
     const left = s.get(s.operand(0), 16);
     const right = s.get(s.operand(1), 16);
 
-    result = s.project(16, s.binary("add", left, right));
+    result = s.truncate(16, s.binary("add", left, right));
     writeAddFlags(s, { width: 16, left, right, result });
     s.set(s.operand(0), result, 16);
   });
@@ -238,7 +238,7 @@ test("logic source helpers build source-backed results without direct conditions
 
 test("shift flag writer consumes the masked count and supplied result", () => {
   const trace = buildHelperTrace((s) => {
-    const value = s.project(16, s.get(s.operand(0), 16));
+    const value = s.truncate(16, s.get(s.operand(0), 16));
     const count = s.binary("and", s.get(s.operand(1), 8), s.const32(0x1f));
     const result = s.get(s.operand(2), 16);
 

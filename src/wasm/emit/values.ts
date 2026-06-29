@@ -312,7 +312,7 @@ function valueChildren(node: ValueNode): readonly ValueId[] {
       return [node.a, node.b];
     case "unary":
     case "extend":
-    case "project":
+    case "truncate":
       return [node.value];
     case "select":
       return [node.condition, node.whenTrue, node.whenFalse];

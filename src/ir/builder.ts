@@ -354,9 +354,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return valueFromId(this.#values.compare64(operator, a, b));
   }
 
-  project64(width: OperandWidth, value: ValueInput): Value {
-    this.#beforeOp("project64");
-    return valueFromId(this.#values.project64(width, value));
+  truncate64(width: OperandWidth, value: ValueInput): Value {
+    this.#beforeOp("truncate64");
+    return valueFromId(this.#values.truncate64(width, value));
   }
 
   extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value {
@@ -369,9 +369,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return valueFromId(this.#values.select(condition, whenTrue, whenFalse));
   }
 
-  project(width: OperandWidth, value: ValueInput): Value {
-    this.#beforeOp("project");
-    return valueFromId(this.#values.project(width, value));
+  truncate(width: OperandWidth, value: ValueInput): Value {
+    this.#beforeOp("truncate");
+    return valueFromId(this.#values.truncate(width, value));
   }
 
   extend(width: OperandWidth, value: ValueInput, signed: boolean): Value {
@@ -385,7 +385,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     // sign-extended operands, the rest masked ones.
     const lower = signedComparePredicates.has(operator)
       ? (id: ValueId) => this.#values.extend(width, id, true)
-      : (id: ValueId) => this.#values.project(width, id);
+      : (id: ValueId) => this.#values.truncate(width, id);
 
     return valueFromId(
       this.#values.compare(operator, lower(a), lower(b))
@@ -524,7 +524,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: GetOptions): ValueId {
     return options.signed === true
       ? this.#values.extend(accessWidth, value, true)
-      : this.#values.project(accessWidth, value);
+      : this.#values.truncate(accessWidth, value);
   }
 
   #readChannel(channel: GprChannel, accessWidth: OperandWidth, options: GetOptions): ValueId {

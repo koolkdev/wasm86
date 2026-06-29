@@ -979,7 +979,7 @@ test("operand-size near control forms use 16-bit targets and stack cells", () =>
     "%0 = get op0:16",
     "jump %1"
   ]);
-  strictEqual(trace.defs[1], "project16(%0)");
+  strictEqual(trace.defs[1], "truncate16(%0)");
 });
 
 test("jcc forms are concrete specs with condition-specific semantics", () => {

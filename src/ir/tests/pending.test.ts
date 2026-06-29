@@ -117,7 +117,7 @@ test("write eax then read al flushes the word and reloads the byte", () => {
   pending.write(gprChannel("eax"), word);
 
   // Deferred refinement: al could be served from the pending eax through a
-  // projection; ah always goes through memory.
+  // truncation; ah always goes through memory.
   const byte = pending.read(gprChannel("al"));
 
   deepStrictEqual(actions, [
@@ -203,7 +203,7 @@ test("lazy flag metadata channels are cached raw state cells", () => {
   const lazyA = values.const(0x1234_5678);
 
   strictEqual(pending.read(lazyFlagsKindChannel), kindByte);
-  strictEqual(values.project(8, kindByte), kindByte);
+  strictEqual(values.truncate(8, kindByte), kindByte);
 
   pending.write(lazyFlagsAChannel, lazyA);
 
@@ -274,7 +274,7 @@ test("an exact narrow hit normalizes values whose high bits are unproven", () =>
   const unproven = values.addActionOutput();
 
   pending.write(gprChannel("al"), unproven);
-  strictEqual(pending.read(gprChannel("al")), values.project(8, unproven));
+  strictEqual(pending.read(gprChannel("al")), values.truncate(8, unproven));
   strictEqual(
     pending.read(gprChannel("al"), { signed: true }),
     values.extend(8, unproven, true)
@@ -569,7 +569,7 @@ test("narrow dynamic reads carry their byte length, bounds, and sign marker", ()
   ]);
 
   // Bounds match static narrow channels: no masks or extends downstream.
-  strictEqual(values.project(8, unsigned), unsigned);
+  strictEqual(values.truncate(8, unsigned), unsigned);
   strictEqual(values.extend(8, signed, true), signed);
 });
 

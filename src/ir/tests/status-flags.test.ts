@@ -109,11 +109,11 @@ test("an add source commits a lazy runtime record", () => {
   assertOnlyLazyRecord(pending.flushesForEdge("completed"), values, { kind: "ADD", width: 32, left, right });
   strictEqual(
     flagValue(flags, "CF"),
-    values.compare("lt_u", values.project(32, result), values.project(32, left))
+    values.compare("lt_u", values.truncate(32, result), values.truncate(32, left))
   );
 });
 
-test("sub lazy commits project narrow operands", () => {
+test("sub lazy commits truncated narrow operands", () => {
   const { values, pending, flags } = createHarness();
   const left = values.const(0x1234_5678);
   const right = values.const(0x8765_4321);
@@ -124,7 +124,7 @@ test("sub lazy commits project narrow operands", () => {
   assertOnlyLazyRecord(pending.flushesForEdge("completed"), values, { kind: "SUB", width: 16, left, right });
 });
 
-test("add lazy commits project narrow operands", () => {
+test("add lazy commits truncated narrow operands", () => {
   const { values, pending, flags } = createHarness();
   const left = values.const(0x1234_5678);
   const right = values.const(0x8765_4321);
@@ -208,7 +208,7 @@ test("fault edge preserves a clean sub source while direct flag writes update co
 test("a logic source commits a lazy result record and resolves current values", () => {
   const { values, pending, flags } = createHarness();
   const result = values.const(0x80);
-  const projected = values.project(8, result);
+  const truncated = values.truncate(8, result);
   const zero = values.const(0);
 
   flags.writeStatusFlagsSource({ kind: "logic", width: 8, result });
@@ -216,8 +216,8 @@ test("a logic source commits a lazy result record and resolves current values", 
   strictEqual(flagValue(flags, "CF"), zero);
   strictEqual(flagValue(flags, "AF"), zero);
   strictEqual(flagValue(flags, "OF"), zero);
-  strictEqual(flagValue(flags, "ZF"), values.compare("eq", projected, zero));
-  strictEqual(flagValue(flags, "SF"), values.binary("shr_u", projected, values.const(7)));
+  strictEqual(flagValue(flags, "ZF"), values.compare("eq", truncated, zero));
+  strictEqual(flagValue(flags, "SF"), values.binary("shr_u", truncated, values.const(7)));
 
   const completedFlushes = pending.flushesForEdge("completed");
 

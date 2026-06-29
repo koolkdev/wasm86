@@ -191,7 +191,7 @@ export function foldSelect(
   return constant === 0 ? whenFalse : whenTrue;
 }
 
-export function foldProject(
+export function foldTruncate(
   context: ValueFoldContext,
   width: OperandWidth,
   value: ValueId
@@ -199,7 +199,7 @@ export function foldProject(
   const constant = context.constValue(value);
 
   if (constant !== undefined) {
-    return context.const(projectConst(width, constant));
+    return context.const(truncateConst(width, constant));
   }
 
   return width === 32 || context.widthBounds(value).unsignedBits <= width
@@ -273,7 +273,7 @@ function evalUnary(operator: UnaryOperator, value: number): number {
   }
 }
 
-function projectConst(width: OperandWidth, value: number): number {
+function truncateConst(width: OperandWidth, value: number): number {
   switch (width) {
     case 8:
       return value & 0xff;

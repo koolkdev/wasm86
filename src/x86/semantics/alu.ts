@@ -24,19 +24,19 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
     guardStorageReadWrite(s, context, dst, width);
     guardStorageRead(s, context, src, width);
 
-    const left = s.project(width, s.get(dst, width));
-    const right = s.project(width, s.get(src, width));
+    const left = s.truncate(width, s.get(dst, width));
+    const right = s.truncate(width, s.get(src, width));
 
     switch (op) {
       case "add": {
-        const result = s.project(width, s.binary("add", left, right));
+        const result = s.truncate(width, s.binary("add", left, right));
 
         s.writeStatusFlagsSource(addFlagSource({ width, left, right, result }));
         s.set(dst, result, width);
         return;
       }
       case "sub": {
-        const result = s.project(width, s.binary("sub", left, right));
+        const result = s.truncate(width, s.binary("sub", left, right));
 
         s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
         s.set(dst, result, width);
@@ -45,7 +45,7 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
       case "xor":
       case "and":
       case "or": {
-        const result = s.project(width, logicResult(s, op, left, right));
+        const result = s.truncate(width, logicResult(s, op, left, right));
 
         s.writeStatusFlagsSource(logicFlagSource({ width, result }));
         s.set(dst, result, width);
@@ -53,7 +53,7 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
       }
       case "adc": {
         const oldCf = s.readFlag("CF");
-        const result = s.project(width, s.binary("add", s.binary("add", left, right), oldCf));
+        const result = s.truncate(width, s.binary("add", s.binary("add", left, right), oldCf));
 
         writeAddFlags(s, { width, left, right, result, carryIn: oldCf });
         s.set(dst, result, width);
@@ -61,7 +61,7 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
       }
       case "sbb": {
         const oldCf = s.readFlag("CF");
-        const result = s.project(width, s.binary("sub", s.binary("sub", left, right), oldCf));
+        const result = s.truncate(width, s.binary("sub", s.binary("sub", left, right), oldCf));
 
         writeSubFlags(s, { width, left, right, result, borrowIn: oldCf });
         s.set(dst, result, width);

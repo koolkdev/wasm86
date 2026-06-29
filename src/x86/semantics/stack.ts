@@ -126,7 +126,7 @@ function pushAll(s: SemanticsBuilder, width: StackOperandWidth): void {
 
   const values = width === 32
     ? pushadRegisters.map((reg) => reg === "esp" ? esp : s.get(s.reg(reg)))
-    : pushaRegisters.map((reg) => reg === "sp" ? s.project(16, esp) : s.get(s.reg(reg), 16));
+    : pushaRegisters.map((reg) => reg === "sp" ? s.truncate(16, esp) : s.get(s.reg(reg), 16));
 
   values.forEach((value, index) => {
     const address = s.binary("sub", esp, s.const32(cellBytes * (index + 1)));

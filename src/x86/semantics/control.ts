@@ -10,7 +10,7 @@ export function jmpSemantic(width: StackOperandWidth = 32): SemanticTemplate {
     guardStorageRead(s, context, target, width);
     const value = s.get(target, width);
 
-    s.jump(width === 16 ? s.project(16, value) : value);
+    s.jump(width === 16 ? s.truncate(16, value) : value);
   };
 }
 
@@ -22,7 +22,7 @@ export function callSemantic(width: StackOperandWidth = 32): SemanticTemplate {
     const target = s.get(targetOperand, width);
 
     pushStack(s, context, width, s.nextEip());
-    s.jump(width === 16 ? s.project(16, target) : target);
+    s.jump(width === 16 ? s.truncate(16, target) : target);
   };
 }
 
@@ -30,7 +30,7 @@ export function retSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, context) => {
     const target = popStack(s, context, width);
 
-    s.jump(width === 16 ? s.project(16, target) : target);
+    s.jump(width === 16 ? s.truncate(16, target) : target);
   };
 }
 
@@ -42,7 +42,7 @@ export function retImmSemantic(width: StackOperandWidth = 32): SemanticTemplate 
     const adjustedEsp = s.binary("add", esp, bytes);
 
     s.set(s.reg("esp"), adjustedEsp);
-    s.jump(width === 16 ? s.project(16, target) : target);
+    s.jump(width === 16 ? s.truncate(16, target) : target);
   };
 }
 

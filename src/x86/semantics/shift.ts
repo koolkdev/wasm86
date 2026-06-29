@@ -22,10 +22,10 @@ export function shiftSemantic(
 
     guardStorageReadWrite(s, context, dst, width);
 
-    const value = s.project(width, s.get(dst, width));
+    const value = s.truncate(width, s.get(dst, width));
     const rawCount = readShiftCount(s, countSource);
     const count = s.binary("and", rawCount, s.const32(0x1f));
-    const shiftedResult = s.project(width, shiftResult(s, op, width, value, count));
+    const shiftedResult = s.truncate(width, shiftResult(s, op, width, value, count));
     const result = s.select(s.compare(32, "ne", count, s.const32(0)), shiftedResult, value);
 
     writeShiftFlags(s, { op, width, value, count, result });
@@ -44,11 +44,11 @@ export function doubleShiftSemantic(
 
     guardStorageReadWrite(s, context, dst, width);
 
-    const value = s.project(width, s.get(dst, width));
-    const source = s.project(width, s.get(src, width));
+    const value = s.truncate(width, s.get(dst, width));
+    const source = s.truncate(width, s.get(src, width));
     const rawCount = readDoubleShiftCount(s, countSource);
     const count = s.binary("and", rawCount, s.const32(0x1f));
-    const shiftedResult = s.project(width, doubleShiftResult(s, op, width, value, source, count));
+    const shiftedResult = s.truncate(width, doubleShiftResult(s, op, width, value, source, count));
     const result = s.select(s.compare(32, "ne", count, s.const32(0)), shiftedResult, value);
 
     writeShiftFlags(s, { op, width, value, count, result });

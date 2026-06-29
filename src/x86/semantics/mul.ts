@@ -73,7 +73,7 @@ function writeImulResult(
 function writeImplicitProduct(s: SemanticsBuilder, width: OperandWidth, product: MultiplyProduct): void {
   switch (width) {
     case 8:
-      s.set(s.reg("ax"), s.project(16, product.full), 16);
+      s.set(s.reg("ax"), s.truncate(16, product.full), 16);
       return;
     case 16:
       s.set(s.reg("ax"), product.low, 16);
@@ -113,8 +113,8 @@ function narrowProduct(
   const leftFull = s.extend(width, left, signed);
   const rightFull = s.extend(width, right, signed);
   const full = s.binary("mul", leftFull, rightFull);
-  const low = s.project(width, full);
-  const high = s.project(width, s.binary("shr_u", full, s.const32(width)));
+  const low = s.truncate(width, full);
+  const high = s.truncate(width, s.binary("shr_u", full, s.const32(width)));
   const overflow = signed
     ? s.compare(32, "ne", full, s.extend(width, low, true))
     : s.compare(width, "ne", high, s.const32(0));
@@ -132,8 +132,8 @@ function dwordProduct(
   const leftFull = s.extend64(32, left, signed);
   const rightFull = s.extend64(32, right, signed);
   const full = s.binary64("mul", leftFull, rightFull);
-  const low = s.project64(32, full);
-  const high = s.project64(32, s.binary64("shr_u", full, s.extend64(32, s.const32(32), false)));
+  const low = s.truncate64(32, full);
+  const high = s.truncate64(32, s.binary64("shr_u", full, s.extend64(32, s.const32(32), false)));
   const overflow = signed
     ? s.compare64("ne", full, s.extend64(32, low, true))
     : s.compare(32, "ne", high, s.const32(0));

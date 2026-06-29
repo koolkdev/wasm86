@@ -51,7 +51,7 @@ for (const entry of [
       const left = s.extend64(entry.width, s.get(s.reg("eax"), 32), true);
       const right = s.extend64(entry.width, s.get(s.reg("ebx"), 32), true);
       const fullProduct = s.binary64("mul", left, right);
-      const truncatedProduct = s.extend64(entry.width, s.project64(entry.width, fullProduct), true);
+      const truncatedProduct = s.extend64(entry.width, s.truncate64(entry.width, fullProduct), true);
       const truncatedDiffers = s.compare64("ne", fullProduct, truncatedProduct);
 
       s.set(s.reg("edx"), truncatedDiffers, 32);
@@ -97,7 +97,7 @@ test("unsigned dword product high-half lowering uses i64 shift", async () => {
     const left = s.extend64(32, s.get(s.reg("eax"), 32), false);
     const right = s.extend64(32, s.get(s.reg("ebx"), 32), false);
     const fullProduct = s.binary64("mul", left, right);
-    const high = s.project64(32, s.binary64("shr_u", fullProduct, s.extend64(32, s.const32(32), false)));
+    const high = s.truncate64(32, s.binary64("shr_u", fullProduct, s.extend64(32, s.const32(32), false)));
 
     s.set(s.reg("edx"), high, 32);
   };

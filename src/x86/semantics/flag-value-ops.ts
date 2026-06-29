@@ -5,7 +5,7 @@ import type { Value } from "#x86/semantics/refs.js";
 export function semanticFlagOps(s: SemanticsBuilder): FlagValueOps<Value> {
   return {
     const32: (value) => s.const32(value),
-    project: (width, value) => s.project(width, value),
+    truncate: (width, value) => s.truncate(width, value),
     and: (a, b) => s.binary("and", a, b),
     sub: (a, b) => s.binary("sub", a, b),
     xor: (a, b) => s.binary("xor", a, b),

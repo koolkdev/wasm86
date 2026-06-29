@@ -11,9 +11,9 @@ export function cmpSemantic(width: OperandWidth = 32): SemanticTemplate {
     guardStorageRead(s, context, leftOperand, width);
     guardStorageRead(s, context, rightOperand, width);
 
-    const left = s.project(width, s.get(leftOperand, width));
-    const right = s.project(width, s.get(rightOperand, width));
-    const result = s.project(width, s.binary("sub", left, right));
+    const left = s.truncate(width, s.get(leftOperand, width));
+    const right = s.truncate(width, s.get(rightOperand, width));
+    const result = s.truncate(width, s.binary("sub", left, right));
 
     s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
   };

@@ -5,7 +5,7 @@ import { widthMask, type OperandWidth } from "./types.js";
 
 export type FlagValueOps<TValue extends number> = Readonly<{
   const32(value: number): TValue;
-  project(width: OperandWidth, value: TValue): TValue;
+  truncate(width: OperandWidth, value: TValue): TValue;
   and(a: TValue, b: TValue): TValue;
   sub(a: TValue, b: TValue): TValue;
   xor(a: TValue, b: TValue): TValue;
@@ -30,21 +30,21 @@ export function statusFlagValuesForSource<TValue extends number>(
     case "add":
       return addStatusFlagValues(ops, {
         width: source.width,
-        left: ops.project(source.width, source.left),
-        right: ops.project(source.width, source.right),
-        result: ops.project(source.width, source.result)
+        left: ops.truncate(source.width, source.left),
+        right: ops.truncate(source.width, source.right),
+        result: ops.truncate(source.width, source.result)
       });
     case "sub":
       return subStatusFlagValues(ops, {
         width: source.width,
-        left: ops.project(source.width, source.left),
-        right: ops.project(source.width, source.right),
-        result: ops.project(source.width, source.result)
+        left: ops.truncate(source.width, source.left),
+        right: ops.truncate(source.width, source.right),
+        result: ops.truncate(source.width, source.result)
       });
     case "logic":
       return logicStatusFlagValues(ops, {
         width: source.width,
-        result: ops.project(source.width, source.result),
+        result: ops.truncate(source.width, source.result),
         undefinedAF: input.undefinedAF
       });
   }
@@ -113,8 +113,8 @@ export function incStatusFlagValues<TValue extends number>(
   input: Readonly<{ width: OperandWidth; input: TValue; result: TValue }>
 ): Pick<StatusFlagValues<TValue>, "PF" | "AF" | "ZF" | "SF" | "OF"> {
   const width = input.width;
-  const left = ops.project(width, input.input);
-  const result = ops.project(width, input.result);
+  const left = ops.truncate(width, input.input);
+  const result = ops.truncate(width, input.result);
 
   return {
     ...zspValues(ops, { width, result }),
@@ -128,8 +128,8 @@ export function decStatusFlagValues<TValue extends number>(
   input: Readonly<{ width: OperandWidth; input: TValue; result: TValue }>
 ): Pick<StatusFlagValues<TValue>, "PF" | "AF" | "ZF" | "SF" | "OF"> {
   const width = input.width;
-  const left = ops.project(width, input.input);
-  const result = ops.project(width, input.result);
+  const left = ops.truncate(width, input.input);
+  const result = ops.truncate(width, input.result);
   const zero = ops.const32(0);
 
   return {
@@ -144,8 +144,8 @@ export function negStatusFlagValues<TValue extends number>(
   input: Readonly<{ width: OperandWidth; input: TValue; result: TValue }>
 ): StatusFlagValues<TValue> {
   const width = input.width;
-  const value = ops.project(width, input.input);
-  const result = ops.project(width, input.result);
+  const value = ops.truncate(width, input.input);
+  const result = ops.truncate(width, input.result);
   const zero = ops.const32(0);
 
   return {

@@ -169,8 +169,8 @@ export class StatusFlags {
 
     this.#invalidateExplicitFlagChannels();
     this.#pending.invalidate(lazyFlagsKindChannel);
-    this.#pending.write(lazyFlagsAChannel, this.#values.project(source.width, source.left));
-    this.#pending.write(lazyFlagsBChannel, this.#values.project(source.width, source.right));
+    this.#pending.write(lazyFlagsAChannel, this.#values.truncate(source.width, source.left));
+    this.#pending.write(lazyFlagsBChannel, this.#values.truncate(source.width, source.right));
     this.#pending.write(
       lazyFlagsKindChannel,
       this.#values.const(lazyFlagsKindByte(kind, source.width))
@@ -180,7 +180,7 @@ export class StatusFlags {
   #writeLazyLogicSource(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "logic" }>): void {
     this.#invalidateExplicitFlagChannels();
     this.#pending.invalidate(lazyFlagsKindChannel);
-    this.#pending.write(lazyFlagsAChannel, this.#values.project(source.width, source.result));
+    this.#pending.write(lazyFlagsAChannel, this.#values.truncate(source.width, source.result));
     this.#pending.invalidate(lazyFlagsBChannel);
     this.#pending.write(
       lazyFlagsKindChannel,
@@ -318,7 +318,7 @@ export class StatusFlags {
   #compare(width: SimpleFlagSource<ValueId>["width"], operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
     const lower = signedComparePredicates.has(operator)
       ? (id: ValueId) => this.#values.extend(width, id, true)
-      : (id: ValueId) => this.#values.project(width, id);
+      : (id: ValueId) => this.#values.truncate(width, id);
 
     return this.#values.compare(operator, lower(a), lower(b));
   }

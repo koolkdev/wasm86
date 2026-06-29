@@ -394,12 +394,12 @@ test("signed multiply overflow expressions lower through typed i64 products", ()
   const left16 = values.extend64(16, one, true);
   const right16 = values.extend64(16, two, true);
   const product16 = values.binary64("mul", left16, right16);
-  const truncated16 = values.extend64(16, values.project64(16, product16), true);
+  const truncated16 = values.extend64(16, values.truncate64(16, product16), true);
   const overflow16 = values.compare64("ne", product16, truncated16);
   const left32 = values.extend64(32, one, true);
   const right32 = values.extend64(32, two, true);
   const product32 = values.binary64("mul", left32, right32);
-  const truncated32 = values.extend64(32, values.project64(32, product32), true);
+  const truncated32 = values.extend64(32, values.truncate64(32, product32), true);
   const overflow32 = values.compare64("ne", product32, truncated32);
   const { body, scratch, valueStack } = createTestEmitter(
     values,
@@ -510,12 +510,12 @@ test("unsupported i64 operators fail at wasm lowering", () => {
   throws(() => equalEmitter.valueStack.emitUse(equal), /unsupported i64 compare operator eq/);
 });
 
-test("project masks to the requested width", () => {
+test("truncate masks to the requested width", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
-  const low8 = values.project(8, read);
-  const low16 = values.project(16, read);
-  const full = values.project(32, read);
+  const low8 = values.truncate(8, read);
+  const low16 = values.truncate(16, read);
+  const full = values.truncate(32, read);
   const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
   const { body, valueStack } = createTestEmitter(
     values,
