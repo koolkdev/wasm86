@@ -93,11 +93,10 @@ test("operand-size prefix dispatches to the prefixed opcode form", async () => {
   strictEqual(state.instructionCount, 8);
 });
 
-test("non-canonical prefix encodings report unsupported instead of misdecoding", async () => {
+test("non-canonical prefix encoding reports unsupported instead of misdecoding", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const cases = [
-    [0x66, 0x66, 0xb8, 0x34, 0x12], // repeated operand-size prefix
-    [0x66, 0x0f, 0x84, 0x00, 0x00, 0x00, 0x00] // prefix on an unprefixed-only form
+    [0x66, 0x66, 0xb8, 0x34, 0x12] // repeated operand-size prefix
   ] as const;
 
   for (const bytes of cases) {

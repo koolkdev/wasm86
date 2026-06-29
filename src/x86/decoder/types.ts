@@ -14,7 +14,7 @@ export type IsaOperandBinding =
     }>
   | Readonly<{
       kind: "relTarget";
-      width: 8 | 32;
+      width: 8 | 16 | 32;
       displacement: number;
       target: number;
     }>;

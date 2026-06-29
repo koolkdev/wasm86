@@ -25,7 +25,7 @@ export type OperandSpec =
   | Readonly<{ kind: "implicit.reg"; reg: RegName; type: RegOperandType }>
   | Readonly<{ kind: "moffs"; width: OperandWidth }>
   | Readonly<{ kind: "imm"; width: OperandWidth; semanticWidth?: OperandWidth; extension?: ImmediateExtension }>
-  | Readonly<{ kind: "rel"; width: 8 | 32 }>;
+  | Readonly<{ kind: "rel"; width: 8 | 16 | 32 }>;
 
 export type ModRmMatch = Readonly<{
   mod?: Reg3;

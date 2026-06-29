@@ -8,12 +8,13 @@ import { expandInstructionSpec } from "#x86/schema/builders.js";
 import type { InstructionSpec } from "#x86/schema/types.js";
 import {
   buildSemanticTrace,
+  operands,
   regOperands
 } from "#x86/semantics/tests/test-semantics-trace.js";
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 367);
+  strictEqual(X86_32_CORE.instructions.length, 389);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -127,12 +128,19 @@ test("x86-32 core registers the initial instruction surface", () => {
     "popfd.dword",
     "leave.near",
     "jmp.rel8",
+    "jmp.rel16",
+    "jmp.rm16",
     "call.rm32",
+    "call.rel16",
+    "call.rm16",
+    "ret.near_o16",
     "ret.near",
+    "ret.imm16_o16",
     "ret.imm16",
     "int.imm8",
     "cmovne.r32_rm32",
     "jne.rel8",
+    "jne.rel16",
     "jne.rel32"
   ]) {
     strictEqual(ids.includes(id), true, `missing ${id}`);
@@ -933,13 +941,60 @@ test("ret imm16 records unsigned immediate and generic control semantics", () =>
   ok(trace.events.includes("%3 = get op0:32"));
 });
 
+test("operand-size near control forms use 16-bit targets and stack cells", () => {
+  const jmpRel = instruction("jmp.rel16");
+  const jmpRm = instruction("jmp.rm16");
+  const callRel = instruction("call.rel16");
+  const callRm = instruction("call.rm16");
+  const retNear = instruction("ret.near_o16");
+  const retImm = instruction("ret.imm16_o16");
+
+  deepStrictEqual(jmpRel.prefixes, { operandSize: "override" });
+  deepStrictEqual(jmpRel.opcode, [0xe9]);
+  deepStrictEqual(jmpRel.operands, [{ kind: "rel", width: 16 }]);
+
+  deepStrictEqual(jmpRm.prefixes, { operandSize: "override" });
+  deepStrictEqual(jmpRm.opcode, [0xff]);
+  deepStrictEqual(jmpRm.modrm, { match: { reg: 4 } });
+  deepStrictEqual(jmpRm.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+
+  deepStrictEqual(callRel.prefixes, { operandSize: "override" });
+  deepStrictEqual(callRel.opcode, [0xe8]);
+  deepStrictEqual(callRel.operands, [{ kind: "rel", width: 16 }]);
+
+  deepStrictEqual(callRm.prefixes, { operandSize: "override" });
+  deepStrictEqual(callRm.opcode, [0xff]);
+  deepStrictEqual(callRm.modrm, { match: { reg: 2 } });
+  deepStrictEqual(callRm.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+
+  deepStrictEqual(retNear.prefixes, { operandSize: "override" });
+  deepStrictEqual(retNear.opcode, [0xc3]);
+  deepStrictEqual(retImm.prefixes, { operandSize: "override" });
+  deepStrictEqual(retImm.opcode, [0xc2]);
+  deepStrictEqual(retImm.operands, [{ kind: "imm", width: 16 }]);
+
+  const trace = buildSemanticTrace(semanticsOf(jmpRel), operands("relTarget"));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get op0:16",
+    "jump %1"
+  ]);
+  strictEqual(trace.defs[1], "project16(%0)");
+});
+
 test("jcc forms are concrete specs with condition-specific semantics", () => {
   const short = instruction("jne.rel8");
+  const word = instruction("jne.rel16");
   const near = instruction("jne.rel32");
 
   deepStrictEqual(short.opcode, [0x75]);
   deepStrictEqual(short.operands, [{ kind: "rel", width: 8 }]);
   deepStrictEqual(short.format, { syntax: "jne {0}" });
+
+  deepStrictEqual(word.opcode, [0x0f, 0x85]);
+  deepStrictEqual(word.prefixes, { operandSize: "override" });
+  deepStrictEqual(word.operands, [{ kind: "rel", width: 16 }]);
+  deepStrictEqual(word.format, { syntax: "jne {0}" });
 
   deepStrictEqual(near.opcode, [0x0f, 0x85]);
   deepStrictEqual(near.operands, [{ kind: "rel", width: 32 }]);

@@ -1,44 +1,48 @@
 import type { ConditionCode } from "#x86/conditions.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import { popStack, pushStack } from "./stack.js";
+import { popStack, pushStack, type StackOperandWidth } from "./stack.js";
 import { guardStorageRead } from "./memory.js";
 
-export function jmpSemantic(): SemanticTemplate {
+export function jmpSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, context) => {
     const target = s.operand(0);
 
-    guardStorageRead(s, context, target, 32);
-    s.jump(s.get(target));
+    guardStorageRead(s, context, target, width);
+    const value = s.get(target, width);
+
+    s.jump(width === 16 ? s.project(16, value) : value);
   };
 }
 
-export function callSemantic(): SemanticTemplate {
+export function callSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, context) => {
     const targetOperand = s.operand(0);
 
-    guardStorageRead(s, context, targetOperand, 32);
-    const target = s.get(targetOperand);
+    guardStorageRead(s, context, targetOperand, width);
+    const target = s.get(targetOperand, width);
 
-    pushStack(s, context, 32, s.nextEip());
-    s.jump(target);
+    pushStack(s, context, width, s.nextEip());
+    s.jump(width === 16 ? s.project(16, target) : target);
   };
 }
 
-export function retSemantic(): SemanticTemplate {
+export function retSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, context) => {
-    s.jump(popStack(s, context, 32));
+    const target = popStack(s, context, width);
+
+    s.jump(width === 16 ? s.project(16, target) : target);
   };
 }
 
-export function retImmSemantic(): SemanticTemplate {
+export function retImmSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, context) => {
-    const target = popStack(s, context, 32);
+    const target = popStack(s, context, width);
     const bytes = s.get(s.operand(0));
     const esp = s.get(s.reg("esp"));
     const adjustedEsp = s.binary("add", esp, bytes);
 
     s.set(s.reg("esp"), adjustedEsp);
-    s.jump(target);
+    s.jump(width === 16 ? s.project(16, target) : target);
   };
 }
 

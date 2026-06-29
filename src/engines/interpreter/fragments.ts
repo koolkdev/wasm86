@@ -65,10 +65,14 @@ class DecodeFragment {
     return this.#values.binary("add", a, b);
   }
 
-  shiftField(value: ValueId, shift: number, mask?: number): ValueId {
+  extract(value: ValueId, shift: number, mask?: number): ValueId {
     const shifted = shift === 0 ? value : this.#values.binary("shr_u", value, this.const32(shift));
 
-    return mask === undefined ? shifted : this.#values.binary("and", shifted, this.const32(mask));
+    return mask === undefined ? shifted : this.and(shifted, mask);
+  }
+
+  and(value: ValueId, mask: number): ValueId {
+    return this.#values.binary("and", value, this.const32(mask));
   }
 
   readEip(): ValueId {
@@ -204,9 +208,9 @@ export function emitModRmFetch(
   const fragment = new DecodeFragment();
   const byte = fragment.readGuest(cursorAddress(fragment, eipLocal, { kind: "static", offset }), 8);
 
-  fragment.output(fragment.shiftField(byte, 6), outputs.modLocal);
-  fragment.output(fragment.shiftField(byte, 3, 0b111), outputs.regLocal);
-  fragment.output(fragment.shiftField(byte, 0, 0b111), outputs.rmLocal);
+  fragment.output(fragment.extract(byte, 6), outputs.modLocal);
+  fragment.output(fragment.extract(byte, 3, 0b111), outputs.regLocal);
+  fragment.output(fragment.extract(byte, 0, 0b111), outputs.rmLocal);
   fragment.emit(context);
 }
 
@@ -221,10 +225,10 @@ export function emitSibFetch(
   const byte = fragment.readGuest(cursorAddress(fragment, eipLocal, { kind: "static", offset }), 8);
 
   fragment.output(
-    fragment.scaledIndex(fragment.shiftField(byte, 3, 0b111), fragment.shiftField(byte, 6)),
+    fragment.scaledIndex(fragment.extract(byte, 3, 0b111), fragment.extract(byte, 6)),
     outputs.scaledIndexLocal
   );
-  fragment.output(fragment.shiftField(byte, 0, 0b111), outputs.baseLocal);
+  fragment.output(fragment.extract(byte, 0, 0b111), outputs.baseLocal);
   fragment.emit(context);
 }
 
@@ -289,7 +293,7 @@ export function emitRelTargetFetch(
   context: FragmentEmitContext,
   eipLocal: number,
   offset: number,
-  width: 8 | 32,
+  width: 8 | 16 | 32,
   instructionLength: number,
   targetLocal: number
 ): void {
@@ -300,7 +304,8 @@ export function emitRelTargetFetch(
     true
   );
   const nextEip = fragment.add(fragment.external(eipLocal), fragment.const32(instructionLength));
+  const target = fragment.add(nextEip, displacement);
 
-  fragment.output(fragment.add(nextEip, displacement), targetLocal);
+  fragment.output(width === 16 ? fragment.and(target, 0xffff) : target, targetLocal);
   fragment.emit(context);
 }

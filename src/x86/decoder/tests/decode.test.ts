@@ -166,6 +166,8 @@ test("rejects unregistered grouped opcodes after ModRM.reg dispatch", () => {
 
 test("decodes direct relative targets as absolute target operands", () => {
   const jmp8 = ok(decodeBytes([0xeb, 0xfe]));
+  const jmp16 = ok(decodeBytes([0x66, 0xe9, 0xfc, 0xff]));
+  const jmp16Wrap = ok(decodeBytes([0x66, 0xe9, 0x02, 0x00], 0xfffe));
   const jmp32 = ok(decodeBytes([0xe9, 0xfb, 0xff, 0xff, 0xff]));
 
   strictEqual(jmp8.spec.id, "jmp.rel8");
@@ -173,6 +175,18 @@ test("decodes direct relative targets as absolute target operands", () => {
   strictEqual(jmp8.nextEip, startAddress + 2);
   deepStrictEqual(jmp8.operands, [
     { kind: "relTarget", width: 8, displacement: -2, target: startAddress }
+  ]);
+
+  strictEqual(jmp16.spec.id, "jmp.rel16");
+  strictEqual(jmp16.spec.format.syntax, "jmp {0}");
+  strictEqual(jmp16.nextEip, startAddress + 4);
+  deepStrictEqual(jmp16.operands, [
+    { kind: "relTarget", width: 16, displacement: -4, target: startAddress }
+  ]);
+
+  strictEqual(jmp16Wrap.spec.id, "jmp.rel16");
+  deepStrictEqual(jmp16Wrap.operands, [
+    { kind: "relTarget", width: 16, displacement: 2, target: 0x0004 }
   ]);
 
   strictEqual(jmp32.spec.id, "jmp.rel32");
@@ -183,14 +197,27 @@ test("decodes direct relative targets as absolute target operands", () => {
   ]);
 });
 
-test("decodes concrete jcc rel8 and rel32 forms", () => {
+test("decodes concrete jcc rel8, rel16, and rel32 forms", () => {
   const rel8 = ok(decodeBytes([0x75, 0x05]));
+  const rel16 = ok(decodeBytes([0x66, 0x0f, 0x85, 0xfa, 0xff]));
+  const rel16Wrap = ok(decodeBytes([0x66, 0x0f, 0x84, 0x02, 0x00], 0xfffc));
   const rel32 = ok(decodeBytes([0x0f, 0x85, 0xfa, 0xff, 0xff, 0xff]));
 
   strictEqual(rel8.spec.id, "jne.rel8");
   strictEqual(rel8.spec.format.syntax, "jne {0}");
   deepStrictEqual(rel8.operands, [
     { kind: "relTarget", width: 8, displacement: 5, target: startAddress + 7 }
+  ]);
+
+  strictEqual(rel16.spec.id, "jne.rel16");
+  strictEqual(rel16.spec.format.syntax, "jne {0}");
+  deepStrictEqual(rel16.operands, [
+    { kind: "relTarget", width: 16, displacement: -6, target: startAddress - 1 }
+  ]);
+
+  strictEqual(rel16Wrap.spec.id, "je.rel16");
+  deepStrictEqual(rel16Wrap.operands, [
+    { kind: "relTarget", width: 16, displacement: 2, target: 0x0003 }
   ]);
 
   strictEqual(rel32.spec.id, "jne.rel32");

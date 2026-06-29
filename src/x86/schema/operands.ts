@@ -49,7 +49,7 @@ export function imm(
   return operand;
 }
 
-export function rel(width: 8 | 32): OperandSpec {
+export function rel(width: 8 | 16 | 32): OperandSpec {
   return { kind: "rel", width };
 }
 

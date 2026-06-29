@@ -24,11 +24,25 @@ const fixtures: readonly DecoderFixture[] = [
     id: "jmp.rel8"
   },
   {
+    name: "jmp rel16 -5",
+    bytes: [0x66, 0xe9, 0xfb, 0xff],
+    mnemonic: "jmp",
+    operands: [relTarget(16, -5, 0x0fff)],
+    id: "jmp.rel16"
+  },
+  {
     name: "jmp rel32 -5",
     bytes: [0xe9, 0xfb, 0xff, 0xff, 0xff],
     mnemonic: "jmp",
     operands: [relTarget(32, -5, 0x1000)],
     id: "jmp.rel32"
+  },
+  {
+    name: "jmp r/m16",
+    bytes: [0x66, 0xff, 0xe3],
+    mnemonic: "jmp",
+    operands: [reg("bx")],
+    id: "jmp.rm16"
   },
   {
     name: "call rel32",
@@ -38,10 +52,30 @@ const fixtures: readonly DecoderFixture[] = [
     id: "call.rel32"
   },
   {
+    name: "call rel16",
+    bytes: [0x66, 0xe8, 0x05, 0x00],
+    mnemonic: "call",
+    operands: [relTarget(16, 5, 0x1009)],
+    id: "call.rel16"
+  },
+  {
+    name: "call r/m16",
+    bytes: [0x66, 0xff, 0xd0],
+    mnemonic: "call",
+    operands: [reg("ax")],
+    id: "call.rm16"
+  },
+  {
     name: "ret",
     bytes: [0xc3],
     mnemonic: "ret",
     id: "ret.near"
+  },
+  {
+    name: "ret operand-size",
+    bytes: [0x66, 0xc3],
+    mnemonic: "ret",
+    id: "ret.near_o16"
   },
   {
     name: "ret imm16",
@@ -51,11 +85,25 @@ const fixtures: readonly DecoderFixture[] = [
     id: "ret.imm16"
   },
   {
+    name: "ret imm16 operand-size",
+    bytes: [0x66, 0xc2, 0x08, 0x00],
+    mnemonic: "ret",
+    operands: [imm16(8)],
+    id: "ret.imm16_o16"
+  },
+  {
     name: "je rel8",
     bytes: [0x74, 0x05],
     mnemonic: "je",
     operands: [relTarget(8, 5, 0x1007)],
     id: "je.rel8"
+  },
+  {
+    name: "je rel16",
+    bytes: [0x66, 0x0f, 0x84, 0x05, 0x00],
+    mnemonic: "je",
+    operands: [relTarget(16, 5, 0x100a)],
+    id: "je.rel16"
   },
   {
     name: "jne rel8",

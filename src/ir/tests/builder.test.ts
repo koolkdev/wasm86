@@ -38,7 +38,7 @@ import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
-import { jccSemantic, jmpSemantic } from "#x86/semantics/control.js";
+import { callSemantic, jccSemantic, jmpSemantic } from "#x86/semantics/control.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic } from "#x86/semantics/misc.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
@@ -664,6 +664,46 @@ test("jmp dispatches at the target", () => {
   deepStrictEqual(entryActions(block), [
     { kind: "writeState", slot: eipChannel, value: block.values.const(0x2000) },
     { kind: "dispatch", targetEip: block.values.const(0x2000) }
+  ]);
+});
+
+test("16-bit jmp projects the target before dispatch", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(jmpSemantic(16), [immBinding(0x1234_2000)], loc(0x1000, 0x1004));
+
+  const block = builder.finish();
+  const target = block.values.const(0x2000);
+
+  deepStrictEqual(entryActions(block), [
+    { kind: "writeState", slot: eipChannel, value: target },
+    { kind: "dispatch", targetEip: target }
+  ]);
+});
+
+test("16-bit call pushes a word return address and dispatches to a word target", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(callSemantic(16), [regBinding("ax")], loc(0x1000, 0x1004));
+
+  const block = builder.finish();
+  const v = block.values;
+  const esp = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("esp")
+  )!.output;
+  const ax = entryActions(block).find(
+    (action): action is ReadStateAction => action.kind === "readState" && action.slot === gprChannel("ax")
+  )!.output;
+  const nextEsp = v.binary("sub", esp, v.const(2));
+
+  deepStrictEqual(entryActions(block), [
+    { kind: "readState", output: ax, slot: gprChannel("ax") },
+    { kind: "readState", output: esp, slot: gprChannel("esp") },
+    { kind: "guardMemory", address: nextEsp, byteLength: 2, access: "write", faultEdge: 1 },
+    { kind: "writeMemory", address: nextEsp, value: v.const(0x1004), width: 16 },
+    { kind: "writeState", slot: gprChannel("esp"), value: nextEsp },
+    { kind: "writeState", slot: eipChannel, value: ax },
+    { kind: "dispatch", targetEip: ax }
   ]);
 });
 

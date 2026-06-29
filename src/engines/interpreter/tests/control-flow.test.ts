@@ -63,6 +63,18 @@ test("executes JMP rel32 to nextEip plus signed displacement", async () => {
   assertCompletedInstruction(state, startAddress + 1, 8);
 });
 
+test("executes operand-size JMP rel16 to nextEip plus signed displacement", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { exit, state } = await executeInstruction([0x66, 0xe9, 0xfc, 0xff], initialState);
+
+  assertSingleInstructionExit(exit);
+  assertCompletedInstruction(state, startAddress, 8);
+});
+
 test("executes JNE rel8 taken when ZF is clear", async () => {
   const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
@@ -86,6 +98,31 @@ test("executes JNE rel8 fallthrough when ZF is set", async () => {
 
   assertSingleInstructionExit(exit);
   assertCompletedInstruction(state, startAddress + 2, 8);
+});
+
+test("executes operand-size JNE rel16 taken when ZF is clear", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eip: startAddress,
+    instructionCount: 7
+  });
+
+  const { exit, state } = await executeInstruction([0x66, 0x0f, 0x85, 0x02, 0x00], initialState);
+
+  assertSingleInstructionExit(exit);
+  assertCompletedInstruction(state, startAddress + 7, 8);
+});
+
+test("executes operand-size JNE rel16 fallthrough when ZF is set", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eip: startAddress,
+    ZF: 1,
+    instructionCount: 7
+  });
+
+  const { exit, state } = await executeInstruction([0x66, 0x0f, 0x85, 0x02, 0x00], initialState);
+
+  assertSingleInstructionExit(exit);
+  assertCompletedInstruction(state, startAddress + 5, 8);
 });
 
 test("executes JNE rel32 with the same condition as rel8", async () => {

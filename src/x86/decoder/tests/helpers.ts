@@ -125,6 +125,6 @@ export function signImm8(value: number): IsaOperandBinding {
   return { kind: "imm", value: value >>> 0, encodedWidth: 8, semanticWidth: 32, extension: "sign" };
 }
 
-export function relTarget(width: 8 | 32, displacement: number, target: number): IsaOperandBinding {
+export function relTarget(width: 8 | 16 | 32, displacement: number, target: number): IsaOperandBinding {
   return { kind: "relTarget", width, displacement, target };
 }

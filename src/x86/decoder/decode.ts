@@ -220,7 +220,7 @@ function decodeOperand(
           kind: "relTarget",
           width: operand.width,
           displacement: relative.displacement,
-          target: u32(nextEip + relative.displacement)
+          target: relativeTarget(nextEip, relative.displacement, operand.width)
         },
         cursor: cursor + relative.byteLength
       };
@@ -284,11 +284,28 @@ function readImmediate(
 function readRelative(
   reader: IsaDecodeReader,
   address: number,
-  width: 8 | 32
+  width: 8 | 16 | 32
 ): Readonly<{ displacement: number; byteLength: number }> {
-  return width === 8
-    ? { displacement: signedImm8(reader.readU8(address)), byteLength: 1 }
-    : { displacement: signedImm32(readU32LE(reader, address)), byteLength: 4 };
+  switch (width) {
+    case 8:
+      return { displacement: signedImm8(reader.readU8(address)), byteLength: 1 };
+    case 16: {
+      const value = readU16LE(reader, address);
+
+      return {
+        displacement: (value & 0x8000) === 0 ? value : value - 0x1_0000,
+        byteLength: 2
+      };
+    }
+    case 32:
+      return { displacement: signedImm32(readU32LE(reader, address)), byteLength: 4 };
+  }
+}
+
+function relativeTarget(nextEip: number, displacement: number, width: 8 | 16 | 32): number {
+  const target = u32(nextEip + displacement);
+
+  return width === 16 ? target & 0xffff : target;
 }
 
 function registerBinding(width: OperandWidth, index: number): IsaOperandBinding {
