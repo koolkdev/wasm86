@@ -272,6 +272,11 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i32DivU(): this {
+    this.#writeInstruction(wasmOpcode.i32DivU);
+    return this;
+  }
+
   i32RemU(): this {
     this.#writeInstruction(wasmOpcode.i32RemU);
     return this;

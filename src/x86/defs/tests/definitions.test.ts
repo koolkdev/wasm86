@@ -14,7 +14,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 403);
+  strictEqual(X86_32_CORE.instructions.length, 409);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -64,7 +64,11 @@ test("x86-32 core registers the initial instruction surface", () => {
     "sbb.rm32_imm8",
     "and.rm32_imm8",
     "sub.rm32_imm8",
+    "daa.al",
+    "das.al",
     "xor.eax_imm32",
+    "aaa.al_ah",
+    "aas.al_ah",
     "inc.r32",
     "inc.rm8",
     "inc.rm16",
@@ -96,6 +100,8 @@ test("x86-32 core registers the initial instruction surface", () => {
     "cwde.dword",
     "cwd.word",
     "cdq.dword",
+    "aam.imm8",
+    "aad.imm8",
     "rol.rm32_1",
     "ror.rm16_imm8",
     "rcl.rm8_cl",

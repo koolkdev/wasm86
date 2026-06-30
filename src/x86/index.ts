@@ -1,5 +1,6 @@
 import { defineIsa } from "./schema/builders.js";
 import { ADC, ADD, AND, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR } from "./defs/alu.js";
+import { AAA, AAD, AAM, AAS, DAA, DAS } from "./defs/bcd-ascii.js";
 import { BSWAP } from "./defs/byte-swap.js";
 import { CALL, JCC, JMP, RET } from "./defs/control.js";
 import { CMP, TEST } from "./defs/cmp-test.js";
@@ -30,7 +31,11 @@ export const X86_32_CORE = defineIsa({
     SBB,
     AND,
     SUB,
+    DAA,
+    DAS,
     XOR,
+    AAA,
+    AAS,
     INC,
     DEC,
     NOT,
@@ -42,6 +47,8 @@ export const X86_32_CORE = defineIsa({
     CWDE,
     CWD,
     CDQ,
+    AAM,
+    AAD,
     ROL,
     ROR,
     RCL,

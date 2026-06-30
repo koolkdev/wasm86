@@ -131,7 +131,7 @@ function readStatusFlags(s: SemanticsBuilder): StatusFlagValues<Value> {
   return flags as StatusFlagValues<Value>;
 }
 
-function writeStatusFlagValues(
+export function writeStatusFlagValues(
   s: SemanticsBuilder,
   values: Readonly<Partial<Record<X86StatusFlag, ValueInput>>>
 ): void {

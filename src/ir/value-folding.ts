@@ -60,6 +60,12 @@ export function foldBinary(
       }
 
       return undefined;
+    case "div_u":
+      if (right === 1) {
+        return a;
+      }
+
+      return undefined;
     case "rem_u":
       if (right === 1) {
         return context.const(0);
@@ -231,6 +237,10 @@ function evalBinary(operator: BinaryOperator, a: number, b: number): number {
       return i32(a - b);
     case "mul":
       return Math.imul(a, b);
+    case "div_u": {
+      assert((b >>> 0) !== 0, "div_u divisor must be non-zero");
+      return i32(Math.floor((a >>> 0) / (b >>> 0)));
+    }
     case "rem_u": {
       assert((b >>> 0) !== 0, "rem_u divisor must be non-zero");
       return i32((a >>> 0) % (b >>> 0));

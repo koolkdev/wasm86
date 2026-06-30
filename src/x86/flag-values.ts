@@ -249,7 +249,7 @@ function binaryFlagDag<TValue extends number>(
   };
 }
 
-function zspValues<TValue extends number>(
+export function zspValues<TValue extends number>(
   ops: FlagValueOps<TValue>,
   dag: ResultFlagDag<TValue>
 ): Pick<StatusFlagValues<TValue>, "ZF" | "SF" | "PF"> {

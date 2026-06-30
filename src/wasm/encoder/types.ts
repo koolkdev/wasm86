@@ -61,6 +61,7 @@ export const wasmOpcode = {
   i32Add: 0x6a,
   i32Sub: 0x6b,
   i32Mul: 0x6c,
+  i32DivU: 0x6e,
   i32RemU: 0x70,
   i32And: 0x71,
   i32Or: 0x72,

@@ -2,6 +2,7 @@ export type BinaryOperator =
   | "add"
   | "sub"
   | "mul"
+  | "div_u"
   | "rem_u"
   | "xor"
   | "or"

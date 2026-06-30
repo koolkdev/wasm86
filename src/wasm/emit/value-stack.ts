@@ -350,6 +350,9 @@ function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryValueNode
     case "mul":
       body.i32Mul();
       return;
+    case "div_u":
+      body.i32DivU();
+      return;
     case "rem_u":
       body.i32RemU();
       return;

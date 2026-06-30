@@ -471,6 +471,8 @@ export class ValueTable {
       case "rem_u":
         // Unsigned remainder is strictly below the divisor when it completes.
         return fitsUnsigned(b.unsignedBits);
+      case "div_u":
+        return fitsUnsigned(a.unsignedBits);
       case "add":
       case "sub":
       case "mul":
