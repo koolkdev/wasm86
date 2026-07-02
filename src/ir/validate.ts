@@ -87,6 +87,7 @@ function validateEntryActions(
       case "readMemory":
       case "writeState":
       case "writeMemory":
+      case "op":
       case "exit":
         break;
     }
@@ -151,6 +152,9 @@ function validateActionValues(block: IrBlock, action: Action): void {
       block.values.node(action.address);
       block.values.node(action.value);
       return;
+    case "op":
+      assert(false, "op actions are not validated by the legacy validator yet");
+      return;
     case "guardMemory":
       block.values.node(action.address);
       return;
@@ -196,6 +200,7 @@ function assertKnownEntryAction(action: Action): void {
       kind === "readMemory" ||
       kind === "writeState" ||
       kind === "writeMemory" ||
+      kind === "op" ||
       kind === "guardMemory" ||
       kind === "branch" ||
       kind === "exit" ||

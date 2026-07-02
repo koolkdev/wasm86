@@ -113,6 +113,9 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         valueStack.emitUse(action.value);
         emitGuestStore(body, action.width);
         return;
+      case "op":
+        assert(false, "op actions are not lowered by the action emitter yet");
+        return;
       case "guardMemory":
         emitGuard(action);
         return;

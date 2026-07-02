@@ -1,6 +1,7 @@
 import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { RegionId } from "./block.js";
+import type { IrOp } from "./ops.js";
 import type { StateSlot } from "./slots.js";
 import type { ValueId } from "./values.js";
 
@@ -44,6 +45,8 @@ export type WriteMemoryAction = Readonly<{
   width: OperandWidth;
 }>;
 
+export type OpAction = Readonly<{ kind: "op"; op: IrOp; output?: ValueId }>;
+
 export type GuardMemoryAction = Readonly<{
   kind: "guardMemory";
   address: ValueId;
@@ -77,6 +80,7 @@ export type Action =
   | ReadMemoryAction
   | WriteStateAction
   | WriteMemoryAction
+  | OpAction
   | GuardMemoryAction
   | BranchAction
   | ExitAction
@@ -96,6 +100,7 @@ export function isTerminatorAction(action: Action): action is TerminatorAction {
     case "readMemory":
     case "writeState":
     case "writeMemory":
+    case "op":
     case "guardMemory":
       return false;
   }

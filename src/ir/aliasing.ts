@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import { channelsOverlap, isDynamicSlot } from "./slots.js";
 import type { Action } from "./actions.js";
 import type { StateSlot } from "./slots.js";
@@ -31,6 +32,9 @@ export function effectsOf(action: Action): ActionEffects {
       return { reads: memoryEffect };
     case "writeMemory":
       return { writes: memoryEffect };
+    case "op":
+      assert(false, "op actions are not part of legacy action effects yet");
+      return noEffects;
     case "guardMemory":
       // A guard checks bounds; it touches no data.
       return noEffects;
@@ -74,6 +78,9 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
   switch (action.kind) {
     case "writeState":
       return slotsMayAlias(action.slot, slot);
+    case "op":
+      assert(false, "op actions are not part of legacy action effects yet");
+      return false;
     case "readState":
     case "readMemory":
     case "writeMemory":

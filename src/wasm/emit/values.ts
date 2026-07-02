@@ -254,6 +254,9 @@ function actionOperands(action: Action): readonly ValueId[] {
       return [...slotOperands(action.slot), action.value];
     case "writeMemory":
       return [action.address, action.value];
+    case "op":
+      assert(false, "op actions are not analyzed by the legacy value-use pass yet");
+      return [];
     case "guardMemory":
       return [action.address];
     case "branch":
@@ -287,6 +290,9 @@ function actionOutput(action: Action): ValueId | undefined {
     case "readState":
     case "readMemory":
       return action.output;
+    case "op":
+      assert(false, "op actions are not analyzed by the legacy value-use pass yet");
+      return undefined;
     case "writeState":
     case "writeMemory":
     case "guardMemory":
