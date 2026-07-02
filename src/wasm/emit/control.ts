@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { ActionExitReason, ExitAction } from "#ir/actions.js";
+import type { ActionExitReason, DispatchFinish, ExitFinish } from "#ir/actions.js";
 import type { ValueId } from "#ir/values.js";
 import { u32 } from "#x86/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -19,9 +19,9 @@ export type ControlFrameContext = Readonly<{
 
 export type ControlFrame = Readonly<{
   // Detail is the guard's byte length on fault edges.
-  emitReport(exit: ExitAction, detail?: number): void;
+  emitReport(exit: ExitFinish, detail?: number): void;
   // Applies the embedding's dispatch target for dispatch.targetEip.
-  emitDispatch(targetEip: ValueId): void;
+  emitDispatch(dispatch: DispatchFinish): void;
   // Applies the embedding to a natural action-body fallthrough.
   emitFallthrough(): void;
   // Runs emitBody while completions account for one enclosing Wasm control
@@ -57,7 +57,7 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     }
   }
 
-  function emitDispatch(targetEip: ValueId): void {
+  function emitDispatch(dispatch: DispatchFinish): void {
     const target = context.dispatch;
 
     assert(target !== undefined, "dispatch action requires embedding.dispatch");
@@ -67,7 +67,7 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
         body.br(target.depth + inlineControlDepth);
         return;
       case "link":
-        emitLinkedCompletion(resolveLinkedTarget(target, targetEip));
+        emitLinkedCompletion(resolveLinkedTarget(target, dispatch.targetEip));
         return;
     }
   }
@@ -110,7 +110,7 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     }
   }
 
-  function emitReport(exit: ExitAction, detail = 0): void {
+  function emitReport(exit: ExitFinish, detail = 0): void {
     const reason = exitReasonCode(exit.reason);
 
     if (exit.payload === undefined) {

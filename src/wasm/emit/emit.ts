@@ -105,12 +105,15 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "guardMemory":
         emitGuard(action);
         return;
-      case "exit":
-        frame.emitReport(action);
-        return;
-      case "dispatch":
-        frame.emitDispatch(action.targetEip);
-        return;
+      case "finish":
+        switch (action.finish.kind) {
+          case "exit":
+            frame.emitReport(action.finish);
+            return;
+          case "dispatch":
+            frame.emitDispatch(action.finish);
+            return;
+        }
       case "branch":
         emitBranch(action);
         return;
@@ -196,7 +199,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         frame.emitReport(edge.terminator, detail);
         return;
       case "dispatch":
-        frame.emitDispatch(edge.terminator.targetEip);
+        frame.emitDispatch(edge.terminator);
         return;
     }
   }

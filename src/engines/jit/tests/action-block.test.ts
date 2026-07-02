@@ -63,7 +63,10 @@ test("cross-instruction dead flag writes are absent and EIP dispatch state is ex
   strictEqual(new Set(flagWrites).size, flagWrites.length);
   strictEqual(lazyKindWrites.length, 1);
   strictEqual(actions.filter((action) => isStateWrite(action) && action.op.slot.kind === "eip").length, 1);
-  strictEqual(actions.filter((action) => action.kind === "dispatch").length, 1);
+  strictEqual(
+    actions.filter((action) => action.kind === "finish" && action.finish.kind === "dispatch").length,
+    1
+  );
 });
 
 test("a guard fault mid-block reports the faulting eip with earlier state flushed", () => {
@@ -161,7 +164,7 @@ function syntheticBlock(withHelper: boolean): IrBlock {
         actions: [
           ...(withHelper ? [resolveFlag(stored, "ZF")] : []),
           stateWrite(gprChannel("eax"), stored),
-          { kind: "exit", reason: "hostTrap" }
+          { kind: "finish", finish: { kind: "exit", reason: "hostTrap" } }
         ]
       }
     ],

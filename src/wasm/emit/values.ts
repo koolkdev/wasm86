@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { actionMayWriteStateSlot } from "#ir/aliasing.js";
-import { isTerminatorAction, type Action } from "#ir/actions.js";
+import { isTerminatorAction, type Action, type Finish } from "#ir/actions.js";
 import type {
   IrBlock,
   EdgeRegion,
@@ -235,16 +235,7 @@ class BlockValueUsage implements BlockValueAnalysis {
 export function edgeValues(edge: EdgeRegion): readonly ValueId[] {
   const values = edge.flushes.flatMap(actionOperands);
 
-  switch (edge.terminator.kind) {
-    case "exit":
-      if (edge.terminator.payload !== undefined) {
-        values.push(edge.terminator.payload);
-      }
-
-      break;
-    case "dispatch":
-      break;
-  }
+  values.push(...finishOperands(edge.terminator));
 
   return values;
 }
@@ -257,8 +248,15 @@ function actionOperands(action: Action): readonly ValueId[] {
       return [action.address];
     case "branch":
       return [action.condition];
+    case "finish":
+      return finishOperands(action.finish);
+  }
+}
+
+function finishOperands(finish: Finish): readonly ValueId[] {
+  switch (finish.kind) {
     case "exit":
-      return action.payload === undefined ? [] : [action.payload];
+      return finish.payload === undefined ? [] : [finish.payload];
     case "dispatch":
       return [];
   }
@@ -276,8 +274,7 @@ function actionOutput(action: Action): ValueId | undefined {
     }
     case "guardMemory":
     case "branch":
-    case "exit":
-    case "dispatch":
+    case "finish":
       return undefined;
   }
 }

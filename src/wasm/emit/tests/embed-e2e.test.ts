@@ -36,7 +36,7 @@ function dispatchFragment(targetEip: number): IrBlock {
         kind: "entry",
         actions: [
           stateWrite(eipChannel, target),
-          { kind: "dispatch", targetEip: target }
+          { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
         ]
       }
     ],

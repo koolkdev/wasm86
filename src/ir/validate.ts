@@ -2,12 +2,12 @@ import { assert } from "#common/assert.js";
 import {
   isTerminatorAction,
   type Action,
-  type DispatchAction,
   type EdgeFlushAction,
-  type ExitAction,
+  type DispatchFinish,
+  type Finish,
   type OpAction
 } from "./actions.js";
-import type { EdgeRegion, EntryRegion, IrBlock, IrRegion, RegionId } from "./block.js";
+import type { EdgeRegion, EntryRegion, IrBlock, RegionId } from "./block.js";
 import { opAccess, type OpValueOutput } from "./ops.js";
 import { unboundedWidthBounds, type WidthBounds } from "./values.js";
 
@@ -17,16 +17,14 @@ export type ValidateIrBlockOptions = Readonly<{
 
 // Structural checks: regions terminate consistently, every region reference
 // resolves, dispatch targets are real values with matching EIP commits, and
-// legacy continuation/continue shapes are rejected at runtime even if a
-// caller bypasses TypeScript.
+// top-level finish payload shapes are rejected at runtime even if a caller
+// bypasses TypeScript.
 export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
   const edgeIds = new Set<RegionId>();
   const edgeById = new Map<RegionId, EdgeRegion>();
   let entry: EntryRegion | undefined;
 
   for (const region of block.regions) {
-    assertNoContinuationField(region);
-
     switch (region.kind) {
       case "entry":
         assert(entry === undefined, "IR block has more than one entry region");
@@ -48,9 +46,8 @@ export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions 
   validateEntryActions(block, entry, edgeIds, edgeById, options);
 }
 
-// Branch, exit, and dispatch are closed-region terminators; edge bodies
-// always branch off the entry, so every edge is targeted by exactly one guard
-// or branch.
+// Branch and finish are closed-region terminators; edge bodies always branch
+// off the entry, so every edge is targeted by exactly one guard or branch.
 function validateEntryActions(
   block: IrBlock,
   entry: EntryRegion,
@@ -73,7 +70,7 @@ function validateEntryActions(
     if (isTerminatorAction(action)) {
       assert(
         index === entry.actions.length - 1,
-        `entry region continues after its ${action.kind} terminator`
+        `entry region has actions after its ${action.kind} terminator`
       );
     }
 
@@ -89,11 +86,12 @@ function validateEntryActions(
         target(action.taken, action.kind);
         target(action.notTaken, action.kind);
         break;
-      case "dispatch":
-        assertEntryDispatchEipFlushed(entry.actions, index, action);
+      case "finish":
+        if (action.finish.kind === "dispatch") {
+          assertEntryDispatchEipFlushed(entry.actions, index, action.finish);
+        }
         break;
       case "op":
-      case "exit":
         break;
     }
   }
@@ -153,13 +151,21 @@ function validateActionValues(block: IrBlock, action: Action): void {
     case "branch":
       block.values.node(action.condition);
       return;
-    case "exit":
-      if (action.payload !== undefined) {
-        block.values.node(action.payload);
-      }
+    case "finish":
+      validateFinishValues(block, action.finish);
       return;
+  }
+}
+
+function validateFinishValues(block: IrBlock, finish: Finish): void {
+  switch (finish.kind) {
     case "dispatch":
-      block.values.node(action.targetEip);
+      block.values.node(finish.targetEip);
+      return;
+    case "exit":
+      if (finish.payload !== undefined) {
+        block.values.node(finish.payload);
+      }
       return;
   }
 }
@@ -211,7 +217,7 @@ function formatBounds(bounds: WidthBounds): string {
 function assertEntryDispatchEipFlushed(
   actions: readonly Action[],
   dispatchIndex: number,
-  dispatch: DispatchAction
+  dispatch: DispatchFinish
 ): void {
   const previous = actions.slice(0, dispatchIndex);
   const eipWrite = lastEipWrite(previous);
@@ -220,31 +226,21 @@ function assertEntryDispatchEipFlushed(
   assert(eipWrite.op.value === dispatch.targetEip, "dispatch entry EIP flush does not match dispatch.targetEip");
 }
 
-function assertNoContinuationField(region: IrRegion): void {
-  assert(
-    !Object.prototype.hasOwnProperty.call(region, "continuation"),
-    `region ${region.id} continuation fields are no longer supported`
-  );
-}
-
 function assertKnownEntryAction(action: Action): void {
   const kind = (action as { kind?: unknown }).kind;
 
-  assert(kind !== "continue", "continue action is no longer supported; use dispatch(targetEip)");
   assert(
     kind === "op" ||
       kind === "guardMemory" ||
       kind === "branch" ||
-      kind === "exit" ||
-      kind === "dispatch",
+      kind === "finish",
     `unknown IR action kind ${String(kind)}`
   );
 }
 
-function assertKnownEdgeTerminator(terminator: ExitAction | DispatchAction): void {
+function assertKnownEdgeTerminator(terminator: Finish): void {
   const kind = (terminator as { kind?: unknown }).kind;
 
-  assert(kind !== "continue", "continue action is no longer supported; use dispatch(targetEip)");
   assert(kind === "exit" || kind === "dispatch", `edge region terminator must be dispatch or exit, got ${String(kind)}`);
 }
 

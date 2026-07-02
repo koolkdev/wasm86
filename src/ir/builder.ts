@@ -50,9 +50,8 @@ import {
 } from "./slots.js";
 import type {
   Action,
-  DispatchAction,
   EdgeFlushAction,
-  ExitAction
+  Finish
 } from "./actions.js";
 import type { EdgeRegion, IrBlock, RegionId } from "./block.js";
 import {
@@ -182,7 +181,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       case "jump":
         assert(this.#pending.has(eipChannel), "IR block did not advance eip; no instructions were added");
         this.#actions.push(...this.#pending.flushesForEdge("completed"));
-        this.#actions.push({ kind: "dispatch", targetEip: this.#pending.read(eipChannel) });
+        this.#actions.push({
+          kind: "finish",
+          finish: { kind: "dispatch", targetEip: this.#pending.read(eipChannel) }
+        });
         break;
       case "terminated":
         break;
@@ -477,7 +479,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     this.#pending.write(eipChannel, this.#location().nextEip());
     this.#actions.push(...this.#pending.flushesForEdge("completed"));
-    this.#actions.push({ kind: "exit", reason: "hostTrap", payload: vectorId });
+    this.#actions.push({
+      kind: "finish",
+      finish: { kind: "exit", reason: "hostTrap", payload: vectorId }
+    });
     this.#blockEnd = "terminated";
     this.#terminated = true;
   }
@@ -502,7 +507,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   #edgeRegion(
-    terminator: ExitAction | DispatchAction,
+    terminator: Finish,
     flushes: readonly EdgeFlushAction[]
   ): RegionId {
     const id = this.#nextRegionId;

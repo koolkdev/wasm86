@@ -65,14 +65,20 @@ test("effects derive from action kind and slot", () => {
   });
 });
 
-test("guards, branches, exits, and dispatches touch no data", () => {
+test("guards, branches, and finishes touch no data", () => {
   deepStrictEqual(
     effectsOf({ kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 }),
     { reads: [], writes: [] }
   );
   deepStrictEqual(effectsOf({ kind: "branch", condition: 0, taken: 1, notTaken: 2 }), { reads: [], writes: [] });
-  deepStrictEqual(effectsOf({ kind: "exit", reason: "unsupported" }), { reads: [], writes: [] });
-  deepStrictEqual(effectsOf({ kind: "dispatch", targetEip: 0 }), { reads: [], writes: [] });
+  deepStrictEqual(
+    effectsOf({ kind: "finish", finish: { kind: "exit", reason: "unsupported" } }),
+    { reads: [], writes: [] }
+  );
+  deepStrictEqual(
+    effectsOf({ kind: "finish", finish: { kind: "dispatch", targetEip: 0 } }),
+    { reads: [], writes: [] }
+  );
 });
 
 test("guest memory may-aliases guest memory and never state", () => {

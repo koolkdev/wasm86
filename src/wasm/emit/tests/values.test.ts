@@ -41,7 +41,7 @@ test("action operand edges count at their action index", () => {
       memoryWrite(address, stored, 32),
       { kind: "guardMemory", address: guarded, byteLength: 4, access: "read", faultEdge: 1 },
       { kind: "branch", condition, taken: 1, notTaken: 2 },
-      { kind: "exit", reason: "hostTrap", payload }
+      { kind: "finish", finish: { kind: "exit", reason: "hostTrap", payload } }
     ],
     [
       { id: 1, kind: "edge", flushes: [], terminator: { kind: "exit", reason: "memoryReadFault" } },

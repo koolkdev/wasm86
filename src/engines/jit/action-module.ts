@@ -71,8 +71,8 @@ function constantDispatchTargets(actions: IrBlock): readonly number[] {
     switch (region.kind) {
       case "entry":
         for (const action of region.actions) {
-          if (action.kind === "dispatch") {
-            const target = actions.values.constValue(action.targetEip);
+          if (action.kind === "finish" && action.finish.kind === "dispatch") {
+            const target = actions.values.constValue(action.finish.targetEip);
 
             if (target !== undefined) {
               targets.push(u32(target));

@@ -30,8 +30,7 @@ export function effectsOf(action: Action): ActionEffects {
       // A guard checks bounds; it touches no data.
       return noEffects;
     case "branch":
-    case "exit":
-    case "dispatch":
+    case "finish":
       return noEffects;
   }
 }
@@ -71,8 +70,7 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
       return opWrites(action.op).some((write) => write.space === "state" && slotsMayAlias(write.slot, slot));
     case "guardMemory":
     case "branch":
-    case "exit":
-    case "dispatch":
+    case "finish":
       return false;
   }
 }

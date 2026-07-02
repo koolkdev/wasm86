@@ -1,4 +1,4 @@
-import type { Action, DispatchAction, EdgeFlushAction, ExitAction } from "./actions.js";
+import type { Action, EdgeFlushAction, Finish } from "./actions.js";
 import type { ValueTable } from "./values.js";
 
 export type RegionId = number;
@@ -14,7 +14,7 @@ export type EdgeRegion = Readonly<{
   id: RegionId;
   kind: "edge";
   flushes: readonly EdgeFlushAction[];
-  terminator: ExitAction | DispatchAction;
+  terminator: Finish;
 }>;
 
 export type IrRegion = EntryRegion | EdgeRegion;

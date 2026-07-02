@@ -28,35 +28,40 @@ export type BranchAction = Readonly<{
   notTaken: RegionId;
 }>;
 
-export type ExitAction = Readonly<{
-  kind: "exit";
-  reason: ActionExitReason;
-  payload?: ValueId;
+export type Finish =
+  | Readonly<{
+      kind: "dispatch";
+      targetEip: ValueId;
+    }>
+  | Readonly<{
+      kind: "exit";
+      reason: ActionExitReason;
+      payload?: ValueId;
+    }>;
+
+export type FinishAction = Readonly<{
+  kind: "finish";
+  finish: Finish;
 }>;
 
-// The block completed guest execution and asks the embedding to dispatch to
-// this already-committed target EIP.
-export type DispatchAction = Readonly<{
-  kind: "dispatch";
-  targetEip: ValueId;
-}>;
+export type ExitFinish = Extract<Finish, { kind: "exit" }>;
+
+export type DispatchFinish = Extract<Finish, { kind: "dispatch" }>;
 
 export type Action =
   | OpAction
   | GuardMemoryAction
   | BranchAction
-  | ExitAction
-  | DispatchAction;
+  | FinishAction;
 
 export type EdgeFlushAction = Readonly<{ kind: "op"; op: StateWriteOp }>;
 
-export type TerminatorAction = BranchAction | ExitAction | DispatchAction;
+export type TerminatorAction = BranchAction | FinishAction;
 
 export function isTerminatorAction(action: Action): action is TerminatorAction {
   switch (action.kind) {
     case "branch":
-    case "exit":
-    case "dispatch":
+    case "finish":
       return true;
     case "op":
     case "guardMemory":
