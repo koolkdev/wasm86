@@ -12,6 +12,7 @@ import {
   segmentSelectorChannel
 } from "#ir/slots.js";
 import type { StateSlot } from "#ir/slots.js";
+import { memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 const memory: StorageEffect = { space: "memory" };
 
@@ -32,19 +33,19 @@ function dynamicSegmentSelector(index: number): StateSlot {
 }
 
 test("effects derive from action kind and slot", () => {
-  deepStrictEqual(effectsOf({ kind: "readState", output: 0, slot: gprChannel("eax") }), {
+  deepStrictEqual(effectsOf(stateRead(0, gprChannel("eax"))), {
     reads: state(gprChannel("eax"))
   });
-  deepStrictEqual(effectsOf({ kind: "writeState", slot: flagChannel("ZF"), value: 0 }), {
+  deepStrictEqual(effectsOf(stateWrite(flagChannel("ZF"), 0)), {
     writes: state(flagChannel("ZF"))
   });
-  deepStrictEqual(effectsOf({ kind: "writeState", slot: dynamicGpr(3), value: 0 }), {
+  deepStrictEqual(effectsOf(stateWrite(dynamicGpr(3), 0)), {
     writes: state(dynamicGpr(3))
   });
-  deepStrictEqual(effectsOf({ kind: "readMemory", output: 0, address: 1, width: 32 }), {
+  deepStrictEqual(effectsOf(memoryRead(0, 1, 32)), {
     reads: memory
   });
-  deepStrictEqual(effectsOf({ kind: "writeMemory", address: 0, value: 1, width: 32 }), {
+  deepStrictEqual(effectsOf(memoryWrite(0, 1, 32)), {
     writes: memory
   });
 });
@@ -113,34 +114,34 @@ test("a dynamic segment slot may-aliases segment channels for the same field", (
 
 test("action writes include raw state slots", () => {
   strictEqual(
-    actionMayWriteStateSlot({ kind: "writeState", slot: gprChannel("eax"), value: 0 }, gprChannel("ax")),
+    actionMayWriteStateSlot(stateWrite(gprChannel("eax"), 0), gprChannel("ax")),
     true
   );
   strictEqual(
-    actionMayWriteStateSlot({ kind: "writeState", slot: flagChannel("ZF"), value: 0 }, flagChannel("ZF")),
+    actionMayWriteStateSlot(stateWrite(flagChannel("ZF"), 0), flagChannel("ZF")),
     true
   );
   strictEqual(
-    actionMayWriteStateSlot({ kind: "writeState", slot: flagChannel("ZF"), value: 0 }, flagChannel("CF")),
+    actionMayWriteStateSlot(stateWrite(flagChannel("ZF"), 0), flagChannel("CF")),
     false
   );
   strictEqual(
-    actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsKindChannel, value: 0 }, lazyFlagsKindChannel),
+    actionMayWriteStateSlot(stateWrite(lazyFlagsKindChannel, 0), lazyFlagsKindChannel),
     true
   );
   strictEqual(
-    actionMayWriteStateSlot({ kind: "writeState", slot: lazyFlagsKindChannel, value: 0 }, lazyFlagsAChannel),
+    actionMayWriteStateSlot(stateWrite(lazyFlagsKindChannel, 0), lazyFlagsAChannel),
     false
   );
   strictEqual(
     actionMayWriteStateSlot(
-      { kind: "writeState", slot: segmentSelectorChannel("fs"), value: 0 },
+      stateWrite(segmentSelectorChannel("fs"), 0),
       segmentBaseChannel("fs")
     ),
     false
   );
   strictEqual(
-    actionMayWriteStateSlot({ kind: "writeState", slot: flagChannel("ZF"), value: 0 }, gprChannel("eax")),
+    actionMayWriteStateSlot(stateWrite(flagChannel("ZF"), 0), gprChannel("eax")),
     false
   );
 });

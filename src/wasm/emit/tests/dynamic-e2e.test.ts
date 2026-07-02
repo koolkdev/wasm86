@@ -5,13 +5,14 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { regDynamicBinding, immBinding, regBinding } from "#ir/operands.js";
 import { gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { ValueTable, type ValueId } from "#ir/values.js";
+import { fitsUnsigned, ValueTable, type ValueId } from "#ir/values.js";
 import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic } from "#x86/semantics/mov.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import { assertLazyFlagState, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 // One emitted handler body per op+width, with the register indices arriving
 // as wasm params at run time.
@@ -158,8 +159,8 @@ test("a computed index extracts the registers from a modrm-style external", asyn
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "readState", output: loaded, slot: { kind: "gprDynamic", index: reg, byteLength: 4 } },
-          { kind: "writeState", slot: { kind: "gprDynamic", index: rm, byteLength: 4 }, value: loaded }
+          stateRead(loaded, { kind: "gprDynamic", index: reg, byteLength: 4 }),
+          stateWrite({ kind: "gprDynamic", index: rm, byteLength: 4 }, loaded)
         ]
       }
     ],
@@ -180,7 +181,7 @@ test("a computed index drives byte access on both the read and the write path", 
   const modrm = values.external(0);
   const reg = modrmRegField(values, modrm);
   const rm = values.binary("and", modrm, values.const(7));
-  const loaded = values.addActionOutput();
+  const loaded = values.addActionOutput(fitsUnsigned(8));
   const block: IrBlock = {
     entry: 0,
     regions: [
@@ -188,8 +189,8 @@ test("a computed index drives byte access on both the read and the write path", 
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "readState", output: loaded, slot: { kind: "gprDynamic", index: reg, byteLength: 1 } },
-          { kind: "writeState", slot: { kind: "gprDynamic", index: rm, byteLength: 1 }, value: loaded }
+          stateRead(loaded, { kind: "gprDynamic", index: reg, byteLength: 1 }),
+          stateWrite({ kind: "gprDynamic", index: rm, byteLength: 1 }, loaded)
         ]
       }
     ],

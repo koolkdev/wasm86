@@ -3,11 +3,7 @@ import { test } from "node:test";
 
 import type { ExternalValueId } from "#ir/operands.js";
 import { gprChannel } from "#ir/slots.js";
-import type {
-  Action,
-  ReadMemoryAction,
-  ReadStateAction
-} from "#ir/actions.js";
+import type { Action } from "#ir/actions.js";
 import type { EdgeRegion, EntryRegion } from "#ir/block.js";
 import { ValueTable } from "#ir/values.js";
 import { createValueStack, type ValueStack } from "#wasm/emit/value-stack.js";
@@ -19,6 +15,8 @@ import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { defineLazyFlagHelper } from "#wasm/helpers/lazy-flags.js";
 import { createWasmHelperRegistry } from "#wasm/helpers/module.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import type { MemoryReadAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
 
 function entryRegion(actions: readonly Action[]): EntryRegion {
   return { id: 0, kind: "entry", actions };
@@ -62,7 +60,7 @@ test("helper calls lower to Wasm calls through the helper registry", () => {
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: helper }
+      stateWrite(gprChannel("eax"), helper)
     ]),
     [],
     helpers
@@ -81,7 +79,7 @@ test("helper calls fail clearly when the helper is missing", () => {
   const { valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: helper }
+      stateWrite(gprChannel("eax"), helper)
     ]),
     [],
     createWasmHelperRegistry(new WasmModuleEncoder())
@@ -95,16 +93,16 @@ test("single-use values emit inline with no locals", () => {
   const read = values.addActionOutput();
   const five = values.const(5);
   const sum = values.binary("add", read, five);
-  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("ebx"), value: sum }
+      stateWrite(gprChannel("ebx"), sum)
     ])
   );
 
-  valueStack.readState(readAction);
+  valueStack.scheduledProducer(readAction);
   valueStack.emitUse(sum);
   valueStack.assertClear();
   scratch.assertClear();
@@ -126,17 +124,17 @@ test("a multi-use value tees once and replays from one freed local", () => {
   const read = values.addActionOutput();
   const five = values.const(5);
   const sum = values.binary("add", read, five);
-  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-      { kind: "writeState", slot: gprChannel("ecx"), value: sum }
+      stateWrite(gprChannel("ebx"), sum),
+      stateWrite(gprChannel("ecx"), sum)
     ])
   );
 
-  valueStack.readState(readAction);
+  valueStack.scheduledProducer(readAction);
   valueStack.emitUse(sum);
   valueStack.emitUse(sum);
   valueStack.assertClear();
@@ -160,20 +158,20 @@ test("a pinned read loads once at its action point and replays past the store", 
   const values = new ValueTable();
   const eax = values.addActionOutput();
   const ebx = values.addActionOutput();
-  const readEax: ReadStateAction = { kind: "readState", output: eax, slot: gprChannel("eax") };
-  const readEbx: ReadStateAction = { kind: "readState", output: ebx, slot: gprChannel("ebx") };
+  const readEax: StateReadAction = stateRead(eax, gprChannel("eax"));
+  const readEbx: StateReadAction = stateRead(ebx, gprChannel("ebx"));
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readEax,
       readEbx,
-      { kind: "writeState", slot: gprChannel("ebx"), value: eax },
-      { kind: "writeState", slot: gprChannel("eax"), value: ebx }
+      stateWrite(gprChannel("ebx"), eax),
+      stateWrite(gprChannel("eax"), ebx)
     ])
   );
 
-  valueStack.readState(readEax);
-  valueStack.readState(readEbx);
+  valueStack.scheduledProducer(readEax);
+  valueStack.scheduledProducer(readEbx);
   valueStack.emitUse(eax);
   valueStack.emitUse(ebx);
   valueStack.assertClear();
@@ -199,16 +197,16 @@ test("a dead read emits nothing", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const seven = values.const(7);
-  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("eax"), value: seven }
+      stateWrite(gprChannel("eax"), seven)
     ])
   );
 
-  valueStack.readState(readAction);
+  valueStack.scheduledProducer(readAction);
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -225,10 +223,10 @@ test("constant and external leaves re-emit per use without scratch locals", () =
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: seven },
-      { kind: "writeState", slot: gprChannel("ebx"), value: seven },
-      { kind: "writeState", slot: gprChannel("ecx"), value: external },
-      { kind: "writeState", slot: gprChannel("edx"), value: external }
+      stateWrite(gprChannel("eax"), seven),
+      stateWrite(gprChannel("ebx"), seven),
+      stateWrite(gprChannel("ecx"), external),
+      stateWrite(gprChannel("edx"), external)
     ]),
     [3]
   );
@@ -259,7 +257,7 @@ test("an external without a bound local fails loudly", () => {
   const { valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: external }
+      stateWrite(gprChannel("eax"), external)
     ])
   );
 
@@ -276,7 +274,7 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: select }
+      stateWrite(gprChannel("eax"), select)
     ]),
     [0, 1]
   );
@@ -316,16 +314,16 @@ test("operators map to their wasm opcodes", () => {
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: mixed },
-      { kind: "writeState", slot: gprChannel("esi"), value: product },
-      { kind: "writeState", slot: gprChannel("esi"), value: remainder },
-      { kind: "writeState", slot: gprChannel("esi"), value: rotatedLeft },
-      { kind: "writeState", slot: gprChannel("esi"), value: rotatedRight },
-      { kind: "writeState", slot: gprChannel("ebx"), value: extended8 },
-      { kind: "writeState", slot: gprChannel("edi"), value: extended16 },
-      { kind: "writeState", slot: gprChannel("ecx"), value: masked },
-      { kind: "writeState", slot: gprChannel("edx"), value: equal },
-      { kind: "writeState", slot: gprChannel("esi"), value: signed }
+      stateWrite(gprChannel("eax"), mixed),
+      stateWrite(gprChannel("esi"), product),
+      stateWrite(gprChannel("esi"), remainder),
+      stateWrite(gprChannel("esi"), rotatedLeft),
+      stateWrite(gprChannel("esi"), rotatedRight),
+      stateWrite(gprChannel("ebx"), extended8),
+      stateWrite(gprChannel("edi"), extended16),
+      stateWrite(gprChannel("ecx"), masked),
+      stateWrite(gprChannel("edx"), equal),
+      stateWrite(gprChannel("esi"), signed)
     ]),
     [0, 1]
   );
@@ -404,8 +402,8 @@ test("signed multiply overflow expressions lower through typed i64 products", ()
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: overflow16 },
-      { kind: "writeState", slot: gprChannel("ebx"), value: overflow32 }
+      stateWrite(gprChannel("eax"), overflow16),
+      stateWrite(gprChannel("ebx"), overflow32)
     ]),
     [0, 1]
   );
@@ -459,8 +457,8 @@ test("i64 binary operators lower to wasm i64 opcodes", () => {
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: either },
-      { kind: "writeState", slot: gprChannel("ebx"), value: remainder }
+      stateWrite(gprChannel("eax"), either),
+      stateWrite(gprChannel("ebx"), remainder)
     ]),
     [0, 1, 2, 3]
   );
@@ -494,14 +492,14 @@ test("unsupported i64 operators fail at wasm lowering", () => {
   const sumEmitter = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: sum }
+      stateWrite(gprChannel("eax"), sum)
     ]),
     [0, 1]
   );
   const equalEmitter = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: equal }
+      stateWrite(gprChannel("eax"), equal)
     ]),
     [0, 1]
   );
@@ -516,18 +514,18 @@ test("truncate masks to the requested width", () => {
   const low8 = values.truncate(8, read);
   const low16 = values.truncate(16, read);
   const full = values.truncate(32, read);
-  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("ebx"), value: low8 },
-      { kind: "writeState", slot: gprChannel("ecx"), value: low16 },
-      { kind: "writeState", slot: gprChannel("edx"), value: full }
+      stateWrite(gprChannel("ebx"), low8),
+      stateWrite(gprChannel("ecx"), low16),
+      stateWrite(gprChannel("edx"), full)
     ])
   );
 
-  valueStack.readState(readAction);
+  valueStack.scheduledProducer(readAction);
   valueStack.emitUse(low8);
   valueStack.emitUse(low16);
   valueStack.emitUse(full);
@@ -557,8 +555,8 @@ test("equality against constant zero emits eqz from either side", () => {
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: left },
-      { kind: "writeState", slot: gprChannel("ebx"), value: right }
+      stateWrite(gprChannel("eax"), left),
+      stateWrite(gprChannel("ebx"), right)
     ]),
     [3]
   );
@@ -584,8 +582,8 @@ test("ne and non-zero equality keep the generic compare", () => {
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: notZero },
-      { kind: "writeState", slot: gprChannel("ebx"), value: one }
+      stateWrite(gprChannel("eax"), notZero),
+      stateWrite(gprChannel("ebx"), one)
     ]),
     [3]
   );
@@ -609,17 +607,17 @@ test("a loaded value pins to a local at its action point and replays", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
-  const readAction: ReadMemoryAction = { kind: "readMemory", output: loaded, address, width: 32 };
+  const readAction: MemoryReadAction = memoryRead(loaded, address, 32);
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("eax"), value: loaded },
-      { kind: "writeState", slot: gprChannel("ebx"), value: loaded }
+      stateWrite(gprChannel("eax"), loaded),
+      stateWrite(gprChannel("ebx"), loaded)
     ])
   );
 
-  valueStack.readMemory(readAction);
+  valueStack.scheduledProducer(readAction);
   valueStack.emitUse(loaded);
   valueStack.emitUse(loaded);
   valueStack.assertClear();
@@ -642,13 +640,13 @@ test("a dead load emits nothing", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
-  const readAction: ReadMemoryAction = { kind: "readMemory", output: loaded, address, width: 32 };
+  const readAction: MemoryReadAction = memoryRead(loaded, address, 32);
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([readAction])
   );
 
-  valueStack.readMemory(readAction);
+  valueStack.scheduledProducer(readAction);
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -660,13 +658,13 @@ test("captureForEdge computes an untouched compound into a local for later uses"
   const read = values.addActionOutput();
   const five = values.const(5);
   const sum = values.binary("add", read, five);
-  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-      { kind: "writeState", slot: gprChannel("ecx"), value: sum }
+      stateWrite(gprChannel("ebx"), sum),
+      stateWrite(gprChannel("ecx"), sum)
     ])
   );
   // An edge consuming the compound twice plus both leaves: one capture, the
@@ -676,14 +674,14 @@ test("captureForEdge computes an untouched compound into a local for later uses"
     id: 1,
     kind: "edge",
     flushes: [
-      { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-      { kind: "writeState", slot: gprChannel("ecx"), value: sum },
-      { kind: "writeState", slot: gprChannel("edx"), value: read }
+      stateWrite(gprChannel("ebx"), sum),
+      stateWrite(gprChannel("ecx"), sum),
+      stateWrite(gprChannel("edx"), read)
     ],
     terminator: { kind: "exit", reason: "memoryWriteFault", payload: five }
   };
 
-  valueStack.readState(readAction);
+  valueStack.scheduledProducer(readAction);
   valueStack.captureForEdge(edge);
   valueStack.emitUse(sum);
   valueStack.emitUse(sum);
@@ -711,17 +709,17 @@ test("unconsumed captures fail assertClear and hold their scratch local", () => 
   const read = values.addActionOutput();
   const five = values.const(5);
   const sum = values.binary("add", read, five);
-  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
   const { scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-      { kind: "writeState", slot: gprChannel("ecx"), value: sum }
+      stateWrite(gprChannel("ebx"), sum),
+      stateWrite(gprChannel("ecx"), sum)
     ])
   );
 
-  valueStack.readState(readAction);
+  valueStack.scheduledProducer(readAction);
   valueStack.emitUse(sum);
 
   throws(() => valueStack.assertClear(), /captured values with unconsumed uses/);
@@ -733,16 +731,16 @@ test("a borrowed compound computes once and replays from a pinned local", () => 
   const read = values.addActionOutput();
   const five = values.const(5);
   const sum = values.binary("add", read, five);
-  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("ebx"), value: sum }
+      stateWrite(gprChannel("ebx"), sum)
     ])
   );
 
-  valueStack.readState(readAction);
+  valueStack.scheduledProducer(readAction);
 
   const borrow = valueStack.borrowUse(sum);
 
@@ -774,7 +772,7 @@ test("a borrowed leaf re-emits per push without scratch locals", () => {
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: external }
+      stateWrite(gprChannel("eax"), external)
     ]),
     [3]
   );
@@ -803,17 +801,17 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
   const read = values.addActionOutput();
   const five = values.const(5);
   const sum = values.binary("add", read, five);
-  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-      { kind: "writeState", slot: gprChannel("ecx"), value: sum }
+      stateWrite(gprChannel("ebx"), sum),
+      stateWrite(gprChannel("ecx"), sum)
     ])
   );
 
-  valueStack.readState(readAction);
+  valueStack.scheduledProducer(readAction);
 
   const borrow = valueStack.borrowUse(sum);
 
@@ -846,16 +844,16 @@ test("a borrow holds a spent registry local until release", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
-  const readAction: ReadMemoryAction = { kind: "readMemory", output: loaded, address, width: 32 };
+  const readAction: MemoryReadAction = memoryRead(loaded, address, 32);
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("eax"), value: loaded }
+      stateWrite(gprChannel("eax"), loaded)
     ])
   );
 
-  valueStack.readMemory(readAction);
+  valueStack.scheduledProducer(readAction);
 
   const borrow = valueStack.borrowUse(loaded);
 
@@ -885,16 +883,16 @@ test("a leaked borrow fails assertClear and holds its scratch local", () => {
   const read = values.addActionOutput();
   const five = values.const(5);
   const sum = values.binary("add", read, five);
-  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
   const { scratch, valueStack } = createTestEmitter(
     values,
     entryRegion([
       readAction,
-      { kind: "writeState", slot: gprChannel("ebx"), value: sum }
+      stateWrite(gprChannel("ebx"), sum)
     ])
   );
 
-  valueStack.readState(readAction);
+  valueStack.scheduledProducer(readAction);
 
   const borrow = valueStack.borrowUse(sum);
 
@@ -910,7 +908,7 @@ test("a released borrow refuses further pushes and releases", () => {
   const { valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: external }
+      stateWrite(gprChannel("eax"), external)
     ]),
     [0]
   );
@@ -929,7 +927,7 @@ test("a borrow must observe its value before release", () => {
   const { valueStack } = createTestEmitter(
     values,
     entryRegion([
-      { kind: "writeState", slot: gprChannel("eax"), value: external }
+      stateWrite(gprChannel("eax"), external)
     ]),
     [0]
   );

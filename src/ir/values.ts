@@ -33,7 +33,7 @@ export type ValueId = number;
 export type ValueType = "i32" | "i64";
 
 // Nodes reference children by ValueId only; there is no nested-tree form.
-// Actions are not expressions: a readState/readMemory output enters the
+// Actions are not expressions: a scheduled op output enters the
 // graph as an actionOutput leaf.
 export type ConstValueNode = Readonly<{ kind: "const"; value: number }>;
 export type ActionOutputValueNode = Readonly<{ kind: "actionOutput" }>;
@@ -93,7 +93,7 @@ export type ValueNode =
 // trivially satisfies both at 32.
 export type WidthBounds = Readonly<{ unsignedBits: number; signedBits: number }>;
 
-const unbounded: WidthBounds = { unsignedBits: 32, signedBits: 32 };
+export const unboundedWidthBounds: WidthBounds = { unsignedBits: 32, signedBits: 32 };
 
 export function fitsUnsigned(bits: number): WidthBounds {
   return clampedBounds(bits, 32);
@@ -146,6 +146,10 @@ export class ValueTable {
     return ValueTable.#valueTypeOf(this.node(id));
   }
 
+  widthBounds(id: ValueId): WidthBounds {
+    return this.#widthBoundsOf(id);
+  }
+
   const(value: number): ValueId {
     return this.#internConst(value);
   }
@@ -158,7 +162,7 @@ export class ValueTable {
     // Each action produces a distinct value; outputs are never deduped.
     const id = this.#add({ kind: "actionOutput" }, []);
 
-    this.#widthBounds[id] = bounds ?? unbounded;
+    this.#widthBounds[id] = bounds ?? unboundedWidthBounds;
     return id;
   }
 
@@ -425,7 +429,7 @@ export class ValueTable {
       case "actionOutput":
       case "external":
         // Action outputs carry their bounds from creation; externals are opaque.
-        return unbounded;
+        return unboundedWidthBounds;
       case "binary":
         assert(node.type === "i32", `width bounds requested for ${node.type} binary value`);
         return ValueTable.#binaryWidthBounds(node, widthBoundsOf);
@@ -481,7 +485,7 @@ export class ValueTable {
       case "rotr":
       case "shr_s":
         // Wrapping arithmetic has no cheap bound.
-        return unbounded;
+        return unboundedWidthBounds;
     }
   }
 
@@ -505,7 +509,7 @@ export class ValueTable {
   ): WidthBounds {
     switch (node.operator) {
       case "popcnt":
-        return unbounded;
+        return unboundedWidthBounds;
     }
   }
 

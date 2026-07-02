@@ -15,6 +15,7 @@ import {
 } from "#ir/slots.js";
 import type { Action, EdgeFlushAction } from "#ir/actions.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
+import { isStateRead, isStateWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 type Harness = Readonly<{
   values: ValueTable;
@@ -44,7 +45,7 @@ function completedEdgeEntries(pending: PendingState): ReadonlyArray<readonly [St
 function edgeEntries(
   actions: readonly EdgeFlushAction[]
 ): ReadonlyArray<readonly [StateSlot, ValueId]> {
-  return actions.map((action) => [action.slot, action.value] as const);
+  return actions.map((action) => [action.op.slot, action.op.value] as const);
 }
 
 test("an exact pending hit returns the value with no actions", () => {
@@ -56,7 +57,7 @@ test("an exact pending hit returns the value with no actions", () => {
   deepStrictEqual(actions, []);
 });
 
-test("a read disjoint from all pendings loads through one cached readState", () => {
+test("a read disjoint from all pendings loads through one cached state.read op", () => {
   const { values, actions, pending } = createHarness();
 
   pending.write(gprChannel("eax"), values.const(1));
@@ -64,7 +65,7 @@ test("a read disjoint from all pendings loads through one cached readState", () 
   const first = pending.read(gprChannel("ebx"));
 
   strictEqual(pending.read(gprChannel("ebx")), first);
-  deepStrictEqual(actions, [{ kind: "readState", output: first, slot: gprChannel("ebx") }]);
+  deepStrictEqual(actions, [stateRead(first, gprChannel("ebx"))]);
 });
 
 test("writing a GPR input value back leaves no pending store", () => {
@@ -77,7 +78,7 @@ test("writing a GPR input value back leaves no pending store", () => {
   strictEqual(pending.has(gprChannel("eax")), false);
   actions.push(...pending.flushesForEdge("completed"));
 
-  deepStrictEqual(actions, [{ kind: "readState", output: read, slot: gprChannel("eax") }]);
+  deepStrictEqual(actions, [stateRead(read, gprChannel("eax"))]);
 });
 
 test("writing an exact cell input value back leaves no pending store", () => {
@@ -90,7 +91,7 @@ test("writing an exact cell input value back leaves no pending store", () => {
   strictEqual(pending.has(flagChannel("ZF")), false);
   actions.push(...pending.flushesForEdge("completed"));
 
-  deepStrictEqual(actions, [{ kind: "readState", output: read, slot: flagChannel("ZF") }]);
+  deepStrictEqual(actions, [stateRead(read, flagChannel("ZF"))]);
 });
 
 test("write al then read eax flushes the byte and reloads the word", () => {
@@ -102,8 +103,8 @@ test("write al then read eax flushes the byte and reloads the word", () => {
   const word = pending.read(gprChannel("eax"));
 
   deepStrictEqual(actions, [
-    { kind: "writeState", slot: gprChannel("al"), value: byte },
-    { kind: "readState", output: word, slot: gprChannel("eax") }
+    stateWrite(gprChannel("al"), byte),
+    stateRead(word, gprChannel("eax"))
   ]);
 
   // The flushed al stays pending, clean: it serves reads with no new
@@ -125,8 +126,8 @@ test("write eax then read al flushes the word and reloads the byte", () => {
   const byte = pending.read(gprChannel("al"));
 
   deepStrictEqual(actions, [
-    { kind: "writeState", slot: gprChannel("eax"), value: word },
-    { kind: "readState", output: byte, slot: gprChannel("al") }
+    stateWrite(gprChannel("eax"), word),
+    stateRead(byte, gprChannel("al"))
   ]);
 });
 
@@ -138,7 +139,7 @@ test("write eax then read ah reloads through the high-byte channel", () => {
   const high = pending.read(gprChannel("ah"));
 
   strictEqual(actions.length, 2);
-  deepStrictEqual(actions[1], { kind: "readState", output: high, slot: gprChannel("ah") });
+  deepStrictEqual(actions[1], stateRead(high, gprChannel("ah")));
 });
 
 test("a covering write drops the pending with no flush", () => {
@@ -151,7 +152,7 @@ test("a covering write drops the pending with no flush", () => {
 
   strictEqual(actions.length, 0);
   actions.push(...pending.flushesForEdge("completed"));
-  deepStrictEqual(actions, [{ kind: "writeState", slot: gprChannel("eax"), value: word }]);
+  deepStrictEqual(actions, [stateWrite(gprChannel("eax"), word)]);
 });
 
 test("a partially overlapping write flushes the wider pending first", () => {
@@ -162,9 +163,9 @@ test("a partially overlapping write flushes the wider pending first", () => {
   pending.write(gprChannel("ax"), word);
   pending.write(gprChannel("al"), byte);
 
-  deepStrictEqual(actions, [{ kind: "writeState", slot: gprChannel("ax"), value: word }]);
+  deepStrictEqual(actions, [stateWrite(gprChannel("ax"), word)]);
   actions.push(...pending.flushesForEdge("completed"));
-  deepStrictEqual(actions[1], { kind: "writeState", slot: gprChannel("al"), value: byte });
+  deepStrictEqual(actions[1], stateWrite(gprChannel("al"), byte));
 });
 
 test("disjoint byte pendings coexist and flush together on an ax read", () => {
@@ -181,9 +182,9 @@ test("disjoint byte pendings coexist and flush together on an ax read", () => {
   const word = pending.read(gprChannel("ax"));
 
   deepStrictEqual(actions, [
-    { kind: "writeState", slot: gprChannel("al"), value: low },
-    { kind: "writeState", slot: gprChannel("ah"), value: high },
-    { kind: "readState", output: word, slot: gprChannel("ax") }
+    stateWrite(gprChannel("al"), low),
+    stateWrite(gprChannel("ah"), high),
+    stateRead(word, gprChannel("ax"))
   ]);
 
   // Flag pendings are untouched by register traffic.
@@ -214,10 +215,10 @@ test("lazy flag metadata channels are cached raw state cells", () => {
   strictEqual(pending.has(lazyFlagsAChannel), true);
   strictEqual(pending.read(lazyFlagsAChannel), lazyA);
   deepStrictEqual(actions, [
-    { kind: "readState", output: kindByte, slot: lazyFlagsKindChannel }
+    stateRead(kindByte, lazyFlagsKindChannel)
   ]);
   deepStrictEqual(pending.flushesForEdge("completed"), [
-    { kind: "writeState", slot: lazyFlagsAChannel, value: lazyA }
+    stateWrite(lazyFlagsAChannel, lazyA)
   ]);
 });
 
@@ -239,8 +240,8 @@ test("segment channels are read-only cached cells", () => {
     /segment writes must use a segment-load host exit/
   );
   deepStrictEqual(actions, [
-    { kind: "readState", output: fsBase, slot: segmentBaseChannel("fs") },
-    { kind: "readState", output: fsSelector, slot: segmentSelectorChannel("fs") }
+    stateRead(fsBase, segmentBaseChannel("fs")),
+    stateRead(fsSelector, segmentSelectorChannel("fs"))
   ]);
 });
 
@@ -252,8 +253,8 @@ test("dynamic segment reads keep selector and base fields separate", () => {
 
   strictEqual(values.truncate(16, selector), selector);
   deepStrictEqual(actions, [
-    { kind: "readState", output: selector, slot: { kind: "segmentDynamic", index, field: "selector" } },
-    { kind: "readState", output: base, slot: { kind: "segmentDynamic", index, field: "base" } }
+    stateRead(selector, { kind: "segmentDynamic", index, field: "selector" }),
+    stateRead(base, { kind: "segmentDynamic", index, field: "base" })
   ]);
 });
 
@@ -267,7 +268,7 @@ test("flag channels are exact raw pending cells", () => {
   strictEqual(pending.read(flagChannel("ZF")), zf);
 
   deepStrictEqual(pending.flushesForEdge("completed"), [
-    { kind: "writeState", slot: flagChannel("ZF"), value: zf }
+    stateWrite(flagChannel("ZF"), zf)
   ]);
   deepStrictEqual(actions, []);
 });
@@ -284,7 +285,7 @@ test("a flush invalidates read leaves of overlapping channels only", () => {
 
   notStrictEqual(reloaded, eaxRead);
   strictEqual(pending.read(gprChannel("ecx")), ecxRead);
-  strictEqual(actions.filter((action) => action.kind === "readState").length, 3);
+  strictEqual(actions.filter((action) => isStateRead(action)).length, 3);
 });
 
 test("signed and unsigned reads of one channel are separate marked loads", () => {
@@ -296,8 +297,8 @@ test("signed and unsigned reads of one channel are separate marked loads", () =>
   strictEqual(pending.read(gprChannel("al")), unsigned);
   strictEqual(pending.read(gprChannel("al"), { signed: true }), signed);
   deepStrictEqual(actions, [
-    { kind: "readState", output: unsigned, slot: gprChannel("al") },
-    { kind: "readState", output: signed, slot: gprChannel("al"), signed: true }
+    stateRead(unsigned, gprChannel("al")),
+    stateRead(signed, gprChannel("al"), true)
   ]);
 });
 
@@ -306,7 +307,7 @@ test("a signed read of a full-width channel is the plain read", () => {
   const read = pending.read(gprChannel("eax"), { signed: true });
 
   strictEqual(pending.read(gprChannel("eax")), read);
-  deepStrictEqual(actions, [{ kind: "readState", output: read, slot: gprChannel("eax") }]);
+  deepStrictEqual(actions, [stateRead(read, gprChannel("eax"))]);
 });
 
 test("an exact narrow hit normalizes values whose high bits are unproven", () => {
@@ -336,8 +337,8 @@ test("completed edge flushes dirty pendings in owner order", () => {
   pending.write(gprChannel("esi"), word);
 
   deepStrictEqual(pending.flushesForEdge("completed"), [
-    { kind: "writeState", slot: gprChannel("esi"), value: word },
-    { kind: "writeState", slot: flagChannel("DF"), value: flag }
+    stateWrite(gprChannel("esi"), word),
+    stateWrite(flagChannel("DF"), flag)
   ]);
 
   strictEqual(pending.read(flagChannel("DF")), flag);
@@ -447,8 +448,8 @@ test("a covering write drops a clean pending without a store", () => {
 
   // One al store (the flush before the read); the covering eax write drops
   // the clean al, so only eax flushes at the end.
-  strictEqual(actions[0]!.kind, "writeState");
-  deepStrictEqual(actions[2], { kind: "writeState", slot: gprChannel("eax"), value: word });
+  strictEqual(isStateWrite(actions[0]!), true);
+  deepStrictEqual(actions[2], stateWrite(gprChannel("eax"), word));
   strictEqual(actions.length, 3);
 });
 
@@ -477,8 +478,8 @@ test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
   const first = pending.readDynamicGpr(dynamicGpr(index));
 
   deepStrictEqual(actions, [
-    { kind: "writeState", slot: gprChannel("eax"), value: word },
-    { kind: "readState", output: first, slot: dynamicGpr(index) }
+    stateWrite(gprChannel("eax"), word),
+    stateRead(first, dynamicGpr(index))
   ]);
 
   // eax is clean: it still serves reads and the next dynamic read flushes
@@ -488,7 +489,7 @@ test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
   const second = pending.readDynamicGpr(dynamicGpr(index));
 
   notStrictEqual(second, first);
-  deepStrictEqual(actions[2], { kind: "readState", output: second, slot: dynamicGpr(index) });
+  deepStrictEqual(actions[2], stateRead(second, dynamicGpr(index)));
   strictEqual(actions.length, 3);
   strictEqual(pending.read(flagChannel("ID")), flag);
 });
@@ -507,15 +508,15 @@ test("a dynamic write stores immediately and invalidates every GPR pending", () 
   pending.writeDynamicGpr(dynamicGpr(index), stored);
 
   deepStrictEqual(actions, [
-    { kind: "writeState", slot: gprChannel("eax"), value: word },
-    { kind: "writeState", slot: dynamicGpr(index), value: stored }
+    stateWrite(gprChannel("eax"), word),
+    stateWrite(dynamicGpr(index), stored)
   ]);
 
   // The just-cleaned eax is gone too — the store may have hit its word —
   // while flag and eip pendings ride through.
   const reload = pending.read(gprChannel("eax"));
 
-  deepStrictEqual(actions[2], { kind: "readState", output: reload, slot: gprChannel("eax") });
+  deepStrictEqual(actions[2], stateRead(reload, gprChannel("eax")));
   strictEqual(pending.read(flagChannel("DF")), flag);
   strictEqual(pending.read(eipChannel), eip);
 });
@@ -604,8 +605,8 @@ test("narrow dynamic reads carry their byte length, bounds, and sign marker", ()
   const signed = pending.readDynamicGpr(dynamicGpr(index, 1), { signed: true });
 
   deepStrictEqual(actions, [
-    { kind: "readState", output: unsigned, slot: dynamicGpr(index, 1) },
-    { kind: "readState", output: signed, slot: dynamicGpr(index, 1), signed: true }
+    stateRead(unsigned, dynamicGpr(index, 1)),
+    stateRead(signed, dynamicGpr(index, 1), true)
   ]);
 
   // Bounds match static narrow channels: no masks or extends downstream.
@@ -618,7 +619,7 @@ test("a signed dynamic word read is the plain read", () => {
   const index = values.external(0);
   const read = pending.readDynamicGpr(dynamicGpr(index), { signed: true });
 
-  deepStrictEqual(actions, [{ kind: "readState", output: read, slot: dynamicGpr(index) }]);
+  deepStrictEqual(actions, [stateRead(read, dynamicGpr(index))]);
 });
 
 test("a narrow dynamic write barriers word pendings all the same", () => {
@@ -631,11 +632,11 @@ test("a narrow dynamic write barriers word pendings all the same", () => {
   pending.writeDynamicGpr(dynamicGpr(index, 1), byte);
 
   deepStrictEqual(actions, [
-    { kind: "writeState", slot: gprChannel("eax"), value: word },
-    { kind: "writeState", slot: dynamicGpr(index, 1), value: byte }
+    stateWrite(gprChannel("eax"), word),
+    stateWrite(dynamicGpr(index, 1), byte)
   ]);
 
   const reload = pending.read(gprChannel("eax"));
 
-  deepStrictEqual(actions[2], { kind: "readState", output: reload, slot: gprChannel("eax") });
+  deepStrictEqual(actions[2], stateRead(reload, gprChannel("eax")));
 });

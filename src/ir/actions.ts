@@ -1,8 +1,6 @@
 import type { MemoryAccessKind } from "#x86/memory-access.js";
-import type { OperandWidth } from "#x86/types.js";
 import type { RegionId } from "./block.js";
-import type { IrOp } from "./ops.js";
-import type { StateSlot } from "./slots.js";
+import type { IrOp, StateWriteOp } from "./ops.js";
 import type { ValueId } from "./values.js";
 
 // Reports to the host; the action emitter owns the numeric encoding.
@@ -12,38 +10,6 @@ export type ActionExitReason =
   | "decodeFault"
   | "memoryReadFault"
   | "memoryWriteFault";
-
-export type ReadStateAction = Readonly<{
-  kind: "readState";
-  output: ValueId;
-  slot: StateSlot;
-  // Present only on channels narrower than the word: the emitter lowers the
-  // read to a sign-extending load.
-  signed?: true;
-}>;
-
-export type ReadMemoryAction = Readonly<{
-  kind: "readMemory";
-  output: ValueId;
-  address: ValueId;
-  width: OperandWidth;
-  // Present only below the word width: the emitter lowers the read to a
-  // sign-extending load.
-  signed?: true;
-}>;
-
-export type WriteStateAction = Readonly<{
-  kind: "writeState";
-  slot: StateSlot;
-  value: ValueId;
-}>;
-
-export type WriteMemoryAction = Readonly<{
-  kind: "writeMemory";
-  address: ValueId;
-  value: ValueId;
-  width: OperandWidth;
-}>;
 
 export type OpAction = Readonly<{ kind: "op"; op: IrOp; output?: ValueId }>;
 
@@ -76,17 +42,13 @@ export type DispatchAction = Readonly<{
 }>;
 
 export type Action =
-  | ReadStateAction
-  | ReadMemoryAction
-  | WriteStateAction
-  | WriteMemoryAction
   | OpAction
   | GuardMemoryAction
   | BranchAction
   | ExitAction
   | DispatchAction;
 
-export type EdgeFlushAction = WriteStateAction;
+export type EdgeFlushAction = Readonly<{ kind: "op"; op: StateWriteOp }>;
 
 export type TerminatorAction = BranchAction | ExitAction | DispatchAction;
 
@@ -96,10 +58,6 @@ export function isTerminatorAction(action: Action): action is TerminatorAction {
     case "exit":
     case "dispatch":
       return true;
-    case "readState":
-    case "readMemory":
-    case "writeState":
-    case "writeMemory":
     case "op":
     case "guardMemory":
       return false;

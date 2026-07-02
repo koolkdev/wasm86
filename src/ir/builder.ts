@@ -258,7 +258,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       case "reg":
         return valueFromId(this.#readChannel(gprChannel(storage.reg), accessWidth, options));
       case "mem":
-        return valueFromId(this.#readMemory(storage.address, accessWidth, options));
+        return valueFromId(this.#readGuestMemory(storage.address, accessWidth, options));
       case "operand": {
         const binding = this.#binding(storage.index);
 
@@ -274,7 +274,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "mem":
           case "memStatic":
           case "memDynamic":
-            return valueFromId(this.#readMemory(this.#operandLinearAddress(storage.index), accessWidth, options));
+            return valueFromId(this.#readGuestMemory(this.#operandLinearAddress(storage.index), accessWidth, options));
           case "regDynamic":
             return valueFromId(
               this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options)
@@ -295,7 +295,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         this.#writeChannel(gprChannel(storage.reg), value, accessWidth);
         return;
       case "mem":
-        this.#writeMemory(storage.address, value, accessWidth);
+        this.#writeGuestMemory(storage.address, value, accessWidth);
         return;
       case "operand": {
         const binding = this.#binding(storage.index);
@@ -310,7 +310,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "mem":
           case "memStatic":
           case "memDynamic":
-            this.#writeMemory(this.#operandLinearAddress(storage.index), value, accessWidth);
+            this.#writeGuestMemory(this.#operandLinearAddress(storage.index), value, accessWidth);
             return;
           case "regDynamic":
             this.#pending.writeDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), value);
@@ -578,22 +578,22 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#pending.write(channel, value);
   }
 
-  #readMemory(address: ValueId, width: OperandWidth, options: GetOptions): ValueId {
+  #readGuestMemory(address: ValueId, width: OperandWidth, options: GetOptions): ValueId {
     // Sign-extension is meaningful only below the word, as in pending reads.
     const signed = options.signed === true && width !== 32;
     const output = this.#values.addActionOutput(memoryReadBounds(width, signed));
 
     this.#actions.push(
       signed
-        ? { kind: "readMemory", output, address, width, signed: true }
-        : { kind: "readMemory", output, address, width }
+        ? { kind: "op", output, op: { kind: "memory.read", address, width, signed: true } }
+        : { kind: "op", output, op: { kind: "memory.read", address, width } }
     );
     return output;
   }
 
-  #writeMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
+  #writeGuestMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
     this.#wroteMemory = true;
-    this.#actions.push({ kind: "writeMemory", address, value, width });
+    this.#actions.push({ kind: "op", op: { kind: "memory.write", address, value, width } });
   }
 
   #operandAddress(index: number): ValueId {

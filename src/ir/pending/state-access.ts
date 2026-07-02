@@ -26,8 +26,8 @@ export class PendingStateAccess {
 
     this.#emit(
       signed
-        ? { kind: "readState", output, slot, signed: true }
-        : { kind: "readState", output, slot }
+        ? { kind: "op", output, op: { kind: "state.read", slot, signed: true } }
+        : { kind: "op", output, op: { kind: "state.read", slot } }
     );
     return output;
   }
@@ -54,6 +54,6 @@ export class PendingStateAccess {
   }
 
   write(slot: StateSlot, value: ValueId): void {
-    this.#emit({ kind: "writeState", slot, value });
+    this.#emit({ kind: "op", op: { kind: "state.write", slot, value } });
   }
 }

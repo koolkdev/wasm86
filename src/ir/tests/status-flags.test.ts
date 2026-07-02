@@ -26,8 +26,8 @@ function createHarness(): Harness {
 
 function flagFlushEntries(actions: readonly EdgeFlushAction[]): ReadonlyArray<Readonly<{ flag: X86StatusFlag; value: ValueId }>> {
   return actions.flatMap((action) =>
-    action.slot.kind === "flag" && isX86StatusFlag(action.slot.flag)
-      ? [{ flag: action.slot.flag, value: action.value }]
+    action.op.slot.kind === "flag" && isX86StatusFlag(action.op.slot.flag)
+      ? [{ flag: action.op.slot.flag, value: action.op.value }]
       : []
   );
 }
@@ -38,7 +38,7 @@ function flagFlushValue(actions: readonly EdgeFlushAction[], flag: X86StatusFlag
 
 function assertFullExplicitFlush(actions: readonly EdgeFlushAction[], values: ValueTable): void {
   deepStrictEqual(flagFlushEntries(actions).map((entry) => entry.flag), x86StatusFlags);
-  strictEqual(actions.find((action) => action.slot === lazyFlagsKindChannel)?.value, values.const(0));
+  strictEqual(actions.find((action) => action.op.slot === lazyFlagsKindChannel)?.op.value, values.const(0));
   strictEqual(actions.length, x86StatusFlags.length + 1);
 }
 

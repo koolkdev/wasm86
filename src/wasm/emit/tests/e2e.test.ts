@@ -13,7 +13,7 @@ import {
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
-import { ValueTable } from "#ir/values.js";
+import { fitsUnsigned, ValueTable } from "#ir/values.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
@@ -30,6 +30,7 @@ import {
 } from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import { isStateRead, isStateWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 // The stage's end-to-end slice: semantics -> IrBlockBuilder -> emit ->
 // instantiate -> run -> assert cpu state memory through the host view.
@@ -47,8 +48,8 @@ function entryActions(block: IrBlock): readonly Action[] {
 
 function touchedGprSlots(block: IrBlock): StateSlot[] {
   return entryActions(block).flatMap((action) =>
-    (action.kind === "readState" || action.kind === "writeState") && action.slot.kind === "gpr"
-      ? [action.slot]
+    (isStateRead(action) || isStateWrite(action)) && action.op.slot.kind === "gpr"
+      ? [action.op.slot]
       : []
   );
 }
@@ -105,7 +106,7 @@ test("ordinary state writes leave lazy flag metadata untouched", async () => {
 
 test("generic state actions load and store the lazy flags kind byte channel", async () => {
   const values = new ValueTable();
-  const oldKindByte = values.addActionOutput();
+  const oldKindByte = values.addActionOutput(fitsUnsigned(8));
   const newKindByteValue = lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, 16);
   const newKindByte = values.const(newKindByteValue);
   const block: IrBlock = {
@@ -115,9 +116,9 @@ test("generic state actions load and store the lazy flags kind byte channel", as
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "readState", output: oldKindByte, slot: lazyFlagsKindChannel },
-          { kind: "writeState", slot: lazyFlagsBChannel, value: oldKindByte },
-          { kind: "writeState", slot: lazyFlagsKindChannel, value: newKindByte }
+          stateRead(oldKindByte, lazyFlagsKindChannel),
+          stateWrite(lazyFlagsBChannel, oldKindByte),
+          stateWrite(lazyFlagsKindChannel, newKindByte)
         ]
       }
     ],
@@ -147,7 +148,7 @@ test("chained movs forward one read to both destinations", async () => {
   // The second mov forwards the first read instead of reading ebx.
   strictEqual(
     entryActions(block).filter(
-      (action) => action.kind === "readState" && action.slot.kind === "gpr"
+      (action) => isStateRead(action) && action.op.slot.kind === "gpr"
     ).length,
     1
   );
@@ -317,9 +318,9 @@ test("mov ah and mov al merge through memory for a final 32-bit read", async () 
   // Pure moves: every flushed register value is a constant or read leaf —
   // no bit algebra on the register path.
   for (const action of entryActions(block)) {
-    if (action.kind === "writeState" && action.slot.kind === "gpr") {
+    if (isStateWrite(action) && action.op.slot.kind === "gpr") {
       ok(
-        ["const", "actionOutput"].includes(block.values.node(action.value).kind),
+        ["const", "actionOutput"].includes(block.values.node(action.op.value).kind),
         "register writes carry leaves"
       );
     }

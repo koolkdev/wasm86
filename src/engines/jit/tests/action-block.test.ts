@@ -14,6 +14,7 @@ import { ExitReason } from "#wasm/exit.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
+import { isStateRead, isStateWrite, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 const startEip = 0x1000;
 
@@ -43,8 +44,8 @@ test("a repeated add compiles to one eax read and one eax write", () => {
   const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
   const actions = entryActions(block);
 
-  strictEqual(actions.filter((action) => action.kind === "readState" && isEaxWordSlot(action.slot)).length, 1);
-  strictEqual(actions.filter((action) => action.kind === "writeState" && isEaxWordSlot(action.slot)).length, 1);
+  strictEqual(actions.filter((action) => isStateRead(action) && isEaxWordSlot(action.op.slot)).length, 1);
+  strictEqual(actions.filter((action) => isStateWrite(action) && isEaxWordSlot(action.op.slot)).length, 1);
 });
 
 test("cross-instruction dead flag writes are absent and EIP dispatch state is explicit", () => {
@@ -52,16 +53,16 @@ test("cross-instruction dead flag writes are absent and EIP dispatch state is ex
   const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
   const actions = entryActions(block);
   const flagWrites = actions.flatMap((action) =>
-    action.kind === "writeState" && action.slot.kind === "flag" ? [action.slot.flag] : []
+    isStateWrite(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
   );
   const lazyKindWrites = actions.filter(
-    (action) => action.kind === "writeState" && action.slot === lazyFlagsKindChannel
+    (action) => isStateWrite(action) && action.op.slot === lazyFlagsKindChannel
   );
 
   strictEqual(flagWrites.length, 0);
   strictEqual(new Set(flagWrites).size, flagWrites.length);
   strictEqual(lazyKindWrites.length, 1);
-  strictEqual(actions.filter((action) => action.kind === "writeState" && action.slot.kind === "eip").length, 1);
+  strictEqual(actions.filter((action) => isStateWrite(action) && action.op.slot.kind === "eip").length, 1);
   strictEqual(actions.filter((action) => action.kind === "dispatch").length, 1);
 });
 
@@ -158,7 +159,7 @@ function syntheticBlock(withHelper: boolean): IrBlock {
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "writeState", slot: gprChannel("eax"), value: stored },
+          stateWrite(gprChannel("eax"), stored),
           { kind: "exit", reason: "hostTrap" }
         ]
       }

@@ -1,6 +1,5 @@
 import { strictEqual } from "node:assert";
 
-import type { WriteStateAction } from "#ir/actions.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import {
   lazyFlagsAChannel,
@@ -8,6 +7,7 @@ import {
   lazyFlagsKindChannel
 } from "#ir/slots.js";
 import type { ValueId, ValueTable } from "#ir/values.js";
+import type { StateWriteAction } from "#ir/tests/storage-op-helpers.js";
 
 export type LazyRecordExpectation = Readonly<
   | { kind: "ADD" | "SUB"; width: 8 | 16 | 32; left: ValueId; right: ValueId }
@@ -15,11 +15,11 @@ export type LazyRecordExpectation = Readonly<
 >;
 
 export function assertLazyRecord(
-  actions: readonly WriteStateAction[],
+  actions: readonly StateWriteAction[],
   values: ValueTable,
   expected: LazyRecordExpectation
 ): void {
-  strictEqual(actions.filter((write) => write.slot.kind === "flag").length, 0);
+  strictEqual(actions.filter((write) => write.op.slot.kind === "flag").length, 0);
 
   if (expected.kind === "LOGIC_RESULT") {
     strictEqual(stateWriteValue(actions, lazyFlagsAChannel), values.truncate(expected.width, expected.result));
@@ -36,7 +36,7 @@ export function assertLazyRecord(
 }
 
 export function assertOnlyLazyRecord(
-  actions: readonly WriteStateAction[],
+  actions: readonly StateWriteAction[],
   values: ValueTable,
   expected: LazyRecordExpectation
 ): void {
@@ -44,6 +44,6 @@ export function assertOnlyLazyRecord(
   strictEqual(actions.length, expected.kind === "LOGIC_RESULT" ? 2 : 3);
 }
 
-function stateWriteValue(actions: readonly WriteStateAction[], slot: WriteStateAction["slot"]): ValueId | undefined {
-  return actions.find((write) => write.slot === slot)?.value;
+function stateWriteValue(actions: readonly StateWriteAction[], slot: StateWriteAction["op"]["slot"]): ValueId | undefined {
+  return actions.find((write) => write.op.slot === slot)?.op.value;
 }

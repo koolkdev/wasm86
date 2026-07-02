@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { WriteStateAction } from "../actions.js";
+import type { EdgeFlushAction } from "../actions.js";
 import {
   channelCovers,
   channelsOverlap,
@@ -112,12 +112,12 @@ export class PendingGprs {
     this.#unrestorableStore = false;
   }
 
-  flushesForEdge(edge: PendingEdgeKind): readonly WriteStateAction[] {
+  flushesForEdge(edge: PendingEdgeKind): readonly EdgeFlushAction[] {
     const entries = edge === "fault"
       ? this.#snapshotEntries()
       : this.#currentEntries();
 
-    return entries.map(([slot, value]) => ({ kind: "writeState", slot, value }));
+    return entries.map(([slot, value]) => ({ kind: "op", op: { kind: "state.write", slot, value } }));
   }
 
   #snapshotEntries(): ReadonlyArray<readonly [GprChannel, ValueId]> {

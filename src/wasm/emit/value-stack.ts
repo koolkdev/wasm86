@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
-import type { ReadMemoryAction, ReadStateAction } from "#ir/actions.js";
+import type { OpAction } from "#ir/actions.js";
+import type { MemoryReadOp } from "#ir/ops.js";
 import type { EdgeRegion } from "#ir/block.js";
 import { isDynamicSlot, type StateSlot } from "#ir/slots.js";
 import type {
@@ -60,10 +61,8 @@ export type ValueStackContext = Readonly<{
 }>;
 
 export type ValueStack = Readonly<{
-  // The driver calls this at each readState action point, in action order.
-  readState(action: ReadStateAction): void;
-  // The driver calls this at each readMemory action point, in action order.
-  readMemory(action: ReadMemoryAction): void;
+  // The driver calls this at each output-producing op action point, in action order.
+  scheduledProducer(action: OpAction): void;
   // Pushes one use of the value onto the stack.
   emitUse(id: ValueId): void;
   // Borrows one counted use of the value for repeated observation.
@@ -87,8 +86,8 @@ type CompoundValueNode =
 export function createValueStack(context: ValueStackContext): ValueStack {
   const { body, values, analysis } = context;
   const registry = createLocalRegistry(body, context.scratch);
-  // Unpinned readState outputs reload from their channel at every use.
-  const reads = new Map<ValueId, ReadStateAction>();
+  // Unpinned state.read outputs reload from their channel at every use.
+  const reads = new Map<ValueId, StateRead>();
   // Open borrows per value; assertClear reports leaks.
   const borrows = new Map<ValueId, number>();
   const operands: OperandUses = { emitUse, borrowUse };
@@ -114,8 +113,8 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       case "actionOutput": {
         const read = reads.get(id);
 
-        assert(read !== undefined, `action output ${id} has no readState source`);
-        context.loadSlot(read.slot, read.signed === true, operands);
+        assert(read !== undefined, `action output ${id} has no reloadable state.read source`);
+        context.loadSlot(read.slot, read.signed, operands);
         return;
       }
       default: {
@@ -214,7 +213,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         // Re-emittable anywhere.
         return;
       case "actionOutput":
-        // Unpinned reads reload their untouched channel; pinned reads and
+        // Unpinned state reads reload their untouched channel; pinned reads and
         // loaded values sit in the registry.
         assert(reads.has(id), `action output ${id} has no replay source`);
         return;
@@ -299,36 +298,27 @@ export function createValueStack(context: ValueStackContext): ValueStack {
   }
 
   return {
-    readState(action: ReadStateAction): void {
-      const uses = analysis.useCount(action.output);
+    scheduledProducer(action: OpAction): void {
+      switch (action.op.kind) {
+        case "state.read": {
+          const output = action.output;
 
-      if (uses === 0) {
-        return;
+          assert(output !== undefined, "state.read op action is missing its output");
+          captureStateRead({ output, slot: action.op.slot, signed: action.op.signed === true });
+          return;
+        }
+        case "memory.read": {
+          const output = action.output;
+
+          assert(output !== undefined, "memory.read op action is missing its output");
+          captureMemoryRead({ output, op: action.op });
+          return;
+        }
+        case "state.write":
+        case "memory.write":
+          assert(false, `${action.op.kind} op action does not produce an output`);
+          return;
       }
-
-      // Dynamic slots follow the guest-load policy and pin at their action
-      // point: a reload at use would consume the index a second time.
-      // Static channels reload at use unless a later overlapping store
-      // would corrupt the load.
-      if (!isDynamicSlot(action.slot) && !analysis.isPinned(action.output)) {
-        reads.set(action.output, action);
-        return;
-      }
-
-      context.loadSlot(action.slot, action.signed === true, operands);
-      registry.captureSet(action.output, uses, wasmTypeForValue(values.valueType(action.output)));
-    },
-    readMemory(action: ReadMemoryAction): void {
-      const uses = analysis.useCount(action.output);
-
-      if (uses === 0) {
-        return;
-      }
-
-      // Boring policy: every loaded value pins at its action point.
-      emitUse(action.address);
-      context.loadGuest(action.width, action.signed === true);
-      registry.captureSet(action.output, uses, wasmTypeForValue(values.valueType(action.output)));
     },
     captureForEdge(edge: EdgeRegion): void {
       for (const id of edgeValues(edge)) {
@@ -345,7 +335,43 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       registry.assertClear();
     }
   };
+
+  function captureStateRead(read: StateRead): void {
+    const uses = analysis.useCount(read.output);
+
+    if (uses === 0) {
+      return;
+    }
+
+    // Dynamic slots follow the guest-load policy and pin at their action
+    // point: a reload at use would consume the index a second time.
+    // Static channels reload at use unless a later overlapping store
+    // would corrupt the load.
+    if (!isDynamicSlot(read.slot) && !analysis.isPinned(read.output)) {
+      reads.set(read.output, read);
+      return;
+    }
+
+    context.loadSlot(read.slot, read.signed, operands);
+    registry.captureSet(read.output, uses, wasmTypeForValue(values.valueType(read.output)));
+  }
+
+  function captureMemoryRead(action: MemoryReadProducer): void {
+    const uses = analysis.useCount(action.output);
+
+    if (uses === 0) {
+      return;
+    }
+
+    // Boring policy: every loaded value pins at its action point.
+    emitUse(action.op.address);
+    context.loadGuest(action.op.width, action.op.signed === true);
+    registry.captureSet(action.output, uses, wasmTypeForValue(values.valueType(action.output)));
+  }
 }
+
+type StateRead = Readonly<{ output: ValueId; slot: StateSlot; signed: boolean }>;
+type MemoryReadProducer = Readonly<{ output: ValueId; op: MemoryReadOp }>;
 
 // All scratch-local bookkeeping in one place: which local replays a value,
 // how many uses remain, freeing at the last one — deferred while pins hold

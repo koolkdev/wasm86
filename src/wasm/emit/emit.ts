@@ -99,22 +99,8 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
 
   function emitEntryAction(action: Action): void {
     switch (action.kind) {
-      case "readState":
-        valueStack.readState(action);
-        return;
-      case "readMemory":
-        valueStack.readMemory(action);
-        return;
-      case "writeState":
-        emitSlotStore(body, action.slot, action.value, valueStack);
-        return;
-      case "writeMemory":
-        valueStack.emitUse(action.address);
-        valueStack.emitUse(action.value);
-        emitGuestStore(body, action.width);
-        return;
       case "op":
-        assert(false, "op actions are not lowered by the action emitter yet");
+        emitOp(action);
         return;
       case "guardMemory":
         emitGuard(action);
@@ -127,6 +113,23 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         return;
       case "branch":
         emitBranch(action);
+        return;
+    }
+  }
+
+  function emitOp(action: Extract<Action, { kind: "op" }>): void {
+    switch (action.op.kind) {
+      case "state.read":
+      case "memory.read":
+        valueStack.scheduledProducer(action);
+        return;
+      case "state.write":
+        emitSlotStore(body, action.op.slot, action.op.value, valueStack);
+        return;
+      case "memory.write":
+        valueStack.emitUse(action.op.address);
+        valueStack.emitUse(action.op.value);
+        emitGuestStore(body, action.op.width);
         return;
     }
   }
@@ -184,7 +187,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     assert(detail !== undefined, `edge region ${edge.id} was never targeted by the entry`);
 
     for (const flush of edge.flushes) {
-      emitSlotStore(body, flush.slot, flush.value, valueStack);
+      emitSlotStore(body, flush.op.slot, flush.op.value, valueStack);
     }
 
     switch (edge.terminator.kind) {

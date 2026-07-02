@@ -6,6 +6,7 @@ import type { Action } from "#ir/actions.js";
 import type { EdgeRegion } from "#ir/block.js";
 import { ValueTable } from "#ir/values.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
+import { memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function analyze(
   values: ValueTable,
@@ -35,9 +36,9 @@ test("action operand edges count at their action index", () => {
   const analysis = analyze(
     values,
     [
-      { kind: "readState", output: readOutput, slot: gprChannel("eax") },
-      { kind: "readMemory", output: memoryOutput, address, width: 32 },
-      { kind: "writeMemory", address, value: stored, width: 32 },
+      stateRead(readOutput, gprChannel("eax")),
+      memoryRead(memoryOutput, address, 32),
+      memoryWrite(address, stored, 32),
       { kind: "guardMemory", address: guarded, byteLength: 4, access: "read", faultEdge: 1 },
       { kind: "branch", condition, taken: 1, notTaken: 2 },
       { kind: "exit", reason: "hostTrap", payload }
@@ -68,8 +69,8 @@ test("a live load consumes its address at the load's index", () => {
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
   const analysis = analyze(values, [
-    { kind: "readMemory", output: loaded, address, width: 32 },
-    { kind: "writeState", slot: gprChannel("eax"), value: loaded }
+    memoryRead(loaded, address, 32),
+    stateWrite(gprChannel("eax"), loaded)
   ]);
 
   strictEqual(analysis.useCount(loaded), 1);
@@ -83,8 +84,8 @@ test("a chain of dead loads stays wholly uncounted", () => {
   const pointer = values.addActionOutput();
   const loaded = values.addActionOutput();
   const analysis = analyze(values, [
-    { kind: "readMemory", output: pointer, address: base, width: 32 },
-    { kind: "readMemory", output: loaded, address: pointer, width: 32 }
+    memoryRead(pointer, base, 32),
+    memoryRead(loaded, pointer, 32)
   ]);
 
   // The second load is dead, so it never consumes the first load's output,
@@ -101,14 +102,14 @@ test("fault edge operands count at their guard's entry index", () => {
   const analysis = analyze(
     values,
     [
-      { kind: "readState", output: read, slot: gprChannel("ebx") },
+      stateRead(read, gprChannel("ebx")),
       { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 }
     ],
     [
       {
         id: 1,
         kind: "edge",
-        flushes: [{ kind: "writeState", slot: gprChannel("eax"), value: read }],
+        flushes: [stateWrite(gprChannel("eax"), read)],
         terminator: { kind: "exit", reason: "memoryWriteFault", payload: address }
       }
     ]
@@ -131,7 +132,7 @@ test("branch edge values count once per edge, at the branch's entry index", () =
   const analysis = analyze(
     values,
     [
-      { kind: "readState", output: read, slot: gprChannel("ebx") },
+      stateRead(read, gprChannel("ebx")),
       { kind: "branch", condition, taken: 1, notTaken: 2 }
     ],
     [
@@ -139,8 +140,8 @@ test("branch edge values count once per edge, at the branch's entry index", () =
         id: 1,
         kind: "edge",
         flushes: [
-          { kind: "writeState", slot: gprChannel("eax"), value: read },
-          { kind: "writeState", slot: eipChannel, value: target }
+          stateWrite(gprChannel("eax"), read),
+          stateWrite(eipChannel, target)
         ],
         terminator: { kind: "dispatch", targetEip: target }
       },
@@ -148,8 +149,8 @@ test("branch edge values count once per edge, at the branch's entry index", () =
         id: 2,
         kind: "edge",
         flushes: [
-          { kind: "writeState", slot: gprChannel("eax"), value: read },
-          { kind: "writeState", slot: eipChannel, value: fallthrough }
+          stateWrite(gprChannel("eax"), read),
+          stateWrite(eipChannel, fallthrough)
         ],
         terminator: { kind: "dispatch", targetEip: fallthrough }
       }
@@ -171,15 +172,15 @@ test("an edge use past an overlapping store pins the read", () => {
   const analysis = analyze(
     values,
     [
-      { kind: "readState", output: read, slot: gprChannel("eax") },
-      { kind: "writeState", slot: gprChannel("eax"), value: five },
+      stateRead(read, gprChannel("eax")),
+      stateWrite(gprChannel("eax"), five),
       { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 }
     ],
     [
       {
         id: 1,
         kind: "edge",
-        flushes: [{ kind: "writeState", slot: gprChannel("ebx"), value: read }],
+        flushes: [stateWrite(gprChannel("ebx"), read)],
         terminator: { kind: "exit", reason: "memoryWriteFault", payload: address }
       }
     ]
@@ -197,11 +198,11 @@ test("a lazy kind byte read crossing a lazy-kind-byte write pins, but lazy opera
   const lazyA = values.addActionOutput();
   const reset = values.const(0);
   const analysis = analyze(values, [
-    { kind: "readState", output: kindByte, slot: lazyFlagsKindChannel },
-    { kind: "readState", output: lazyA, slot: lazyFlagsAChannel },
-    { kind: "writeState", slot: lazyFlagsKindChannel, value: reset },
-    { kind: "writeState", slot: gprChannel("eax"), value: kindByte },
-    { kind: "writeState", slot: gprChannel("ebx"), value: lazyA }
+    stateRead(kindByte, lazyFlagsKindChannel),
+    stateRead(lazyA, lazyFlagsAChannel),
+    stateWrite(lazyFlagsKindChannel, reset),
+    stateWrite(gprChannel("eax"), kindByte),
+    stateWrite(gprChannel("ebx"), lazyA)
   ]);
 
   strictEqual(analysis.isPinned(kindByte), true);
@@ -216,7 +217,7 @@ test("an edge value reloading a channel the edge flushes pins the read", () => {
   const analysis = analyze(
     values,
     [
-      { kind: "readState", output: read, slot: gprChannel("ebx") },
+      stateRead(read, gprChannel("ebx")),
       { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 }
     ],
     [
@@ -224,8 +225,8 @@ test("an edge value reloading a channel the edge flushes pins the read", () => {
         id: 1,
         kind: "edge",
         flushes: [
-          { kind: "writeState", slot: gprChannel("eax"), value: read },
-          { kind: "writeState", slot: gprChannel("ebx"), value: five }
+          stateWrite(gprChannel("eax"), read),
+          stateWrite(gprChannel("ebx"), five)
         ],
         terminator: { kind: "exit", reason: "memoryWriteFault", payload: address }
       }
@@ -244,9 +245,9 @@ test("compound children count once per parent, at the parent's first use", () =>
   const five = values.const(5);
   const sum = values.binary("add", read, five);
   const analysis = analyze(values, [
-    { kind: "readState", output: read, slot: gprChannel("eax") },
-    { kind: "writeState", slot: gprChannel("ebx"), value: sum },
-    { kind: "writeState", slot: gprChannel("ecx"), value: sum }
+    stateRead(read, gprChannel("eax")),
+    stateWrite(gprChannel("ebx"), sum),
+    stateWrite(gprChannel("ecx"), sum)
   ]);
 
   strictEqual(analysis.useCount(sum), 2);
@@ -265,8 +266,8 @@ test("repeated child edges within one parent count per edge", () => {
   const read = values.addActionOutput();
   const doubled = values.binary("add", read, read);
   const analysis = analyze(values, [
-    { kind: "readState", output: read, slot: gprChannel("eax") },
-    { kind: "writeState", slot: gprChannel("eax"), value: doubled }
+    stateRead(read, gprChannel("eax")),
+    stateWrite(gprChannel("eax"), doubled)
   ]);
 
   strictEqual(analysis.useCount(doubled), 1);
@@ -281,8 +282,8 @@ test("compounds nothing references contribute no uses", () => {
   const sum = values.binary("add", read, five);
   const dead = values.binary("xor", read, five);
   const analysis = analyze(values, [
-    { kind: "readState", output: read, slot: gprChannel("eax") },
-    { kind: "writeState", slot: gprChannel("ebx"), value: sum }
+    stateRead(read, gprChannel("eax")),
+    stateWrite(gprChannel("ebx"), sum)
   ]);
 
   strictEqual(analysis.useCount(dead), 0);
@@ -299,9 +300,9 @@ test("last use flows through nested compounds from the outermost first use", () 
   const inner = values.binary("add", read, one);
   const outer = values.binary("add", inner, two);
   const analysis = analyze(values, [
-    { kind: "readState", output: read, slot: gprChannel("eax") },
-    { kind: "writeState", slot: gprChannel("ebx"), value: outer },
-    { kind: "writeState", slot: gprChannel("ecx"), value: outer }
+    stateRead(read, gprChannel("eax")),
+    stateWrite(gprChannel("ebx"), outer),
+    stateWrite(gprChannel("ecx"), outer)
   ]);
 
   strictEqual(analysis.lastUse(outer), 2);
@@ -316,10 +317,10 @@ test("the xchg shape pins only the read whose use crosses the store", () => {
   const eax = values.addActionOutput();
   const ebx = values.addActionOutput();
   const analysis = analyze(values, [
-    { kind: "readState", output: eax, slot: gprChannel("eax") },
-    { kind: "readState", output: ebx, slot: gprChannel("ebx") },
-    { kind: "writeState", slot: gprChannel("ebx"), value: eax },
-    { kind: "writeState", slot: gprChannel("eax"), value: ebx }
+    stateRead(eax, gprChannel("eax")),
+    stateRead(ebx, gprChannel("ebx")),
+    stateWrite(gprChannel("ebx"), eax),
+    stateWrite(gprChannel("eax"), ebx)
   ]);
 
   // ebx is read before the ebx store and consumed after it: pinned. eax's
@@ -335,11 +336,11 @@ test("a dynamic store pins a GPR read used later, never a flag read", () => {
   const index = values.external(0);
   const stored = values.const(5);
   const analysis = analyze(values, [
-    { kind: "readState", output: gprRead, slot: gprChannel("eax") },
-    { kind: "readState", output: flagRead, slot: flagChannel("ZF") },
-    { kind: "writeState", slot: { kind: "gprDynamic", index, byteLength: 4 }, value: stored },
-    { kind: "writeState", slot: gprChannel("ebx"), value: gprRead },
-    { kind: "writeState", slot: gprChannel("ecx"), value: flagRead }
+    stateRead(gprRead, gprChannel("eax")),
+    stateRead(flagRead, flagChannel("ZF")),
+    stateWrite({ kind: "gprDynamic", index, byteLength: 4 }, stored),
+    stateWrite(gprChannel("ebx"), gprRead),
+    stateWrite(gprChannel("ecx"), flagRead)
   ]);
 
   // The dynamic store may hit any GPR word, so the eax read pins; flag
@@ -354,9 +355,9 @@ test("a dynamic slot consumes its index once per access", () => {
   const wordRead = values.addActionOutput();
   const stored = values.const(5);
   const analysis = analyze(values, [
-    { kind: "readState", output: wordRead, slot: { kind: "gprDynamic", index, byteLength: 4 } },
-    { kind: "writeState", slot: gprChannel("eax"), value: wordRead },
-    { kind: "writeState", slot: { kind: "gprDynamic", index, byteLength: 1 }, value: stored }
+    stateRead(wordRead, { kind: "gprDynamic", index, byteLength: 4 }),
+    stateWrite(gprChannel("eax"), wordRead),
+    stateWrite({ kind: "gprDynamic", index, byteLength: 1 }, stored)
   ]);
 
   // One use each for the word read and the byte store — the byte lowering's
@@ -370,7 +371,7 @@ test("a dead dynamic read never consumes its computed index", () => {
   const index = values.binary("and", values.external(0), values.const(7));
   const dead = values.addActionOutput();
   const analysis = analyze(values, [
-    { kind: "readState", output: dead, slot: { kind: "gprDynamic", index, byteLength: 4 } }
+    stateRead(dead, { kind: "gprDynamic", index, byteLength: 4 })
   ]);
 
   strictEqual(analysis.useCount(index), 0);
@@ -382,9 +383,9 @@ test("an overlapping partial-channel store pins a wider read used later", () => 
   const read = values.addActionOutput();
   const low = values.const(0x1234);
   const analysis = analyze(values, [
-    { kind: "readState", output: read, slot: gprChannel("eax") },
-    { kind: "writeState", slot: gprChannel("ax"), value: low },
-    { kind: "writeState", slot: gprChannel("ebx"), value: read }
+    stateRead(read, gprChannel("eax")),
+    stateWrite(gprChannel("ax"), low),
+    stateWrite(gprChannel("ebx"), read)
   ]);
 
   strictEqual(analysis.isPinned(read), true);
@@ -396,8 +397,8 @@ test("a store at the value's final use does not pin it", () => {
   const one = values.const(1);
   const sum = values.binary("add", read, one);
   const analysis = analyze(values, [
-    { kind: "readState", output: read, slot: gprChannel("eax") },
-    { kind: "writeState", slot: gprChannel("eax"), value: sum }
+    stateRead(read, gprChannel("eax")),
+    stateWrite(gprChannel("eax"), sum)
   ]);
 
   // The operand is pushed before the store executes.
@@ -409,8 +410,8 @@ test("a dead read counts zero, has no last use, and never pins", () => {
   const read = values.addActionOutput();
   const seven = values.const(7);
   const analysis = analyze(values, [
-    { kind: "readState", output: read, slot: gprChannel("eax") },
-    { kind: "writeState", slot: gprChannel("eax"), value: seven }
+    stateRead(read, gprChannel("eax")),
+    stateWrite(gprChannel("eax"), seven)
   ]);
 
   strictEqual(analysis.useCount(read), 0);
@@ -435,7 +436,7 @@ test("a producer whose operand follows its output fails loudly", () => {
   throws(
     () =>
       analyze(values, [
-        { kind: "readMemory", output: loaded, address, width: 32 }
+        memoryRead(loaded, address, 32)
       ]),
     /created after its output/
   );
@@ -460,7 +461,7 @@ test("an exported output counts as a use at the action body boundary", () => {
   const analysis = analyze(
     values,
     [
-      { kind: "readState", output: read, slot: gprChannel("eax") }
+      stateRead(read, gprChannel("eax"))
     ],
     [],
     [read]
@@ -479,8 +480,8 @@ test("an exported read crossing an overlapping store pins", () => {
   const analysis = analyze(
     values,
     [
-      { kind: "readState", output: read, slot: gprChannel("eax") },
-      { kind: "writeState", slot: gprChannel("eax"), value: seven }
+      stateRead(read, gprChannel("eax")),
+      stateWrite(gprChannel("eax"), seven)
     ],
     [],
     [read]

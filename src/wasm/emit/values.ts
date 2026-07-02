@@ -1,12 +1,13 @@
 import { assert } from "#common/assert.js";
 import { actionMayWriteStateSlot } from "#ir/aliasing.js";
-import { isTerminatorAction, type Action, type ReadStateAction } from "#ir/actions.js";
+import { isTerminatorAction, type Action } from "#ir/actions.js";
 import type {
   IrBlock,
   EdgeRegion,
   EntryRegion,
   RegionId
 } from "#ir/block.js";
+import { opAccess } from "#ir/ops.js";
 import type { StateSlot } from "#ir/slots.js";
 import type { ValueId, ValueNode, ValueTable } from "#ir/values.js";
 
@@ -22,7 +23,7 @@ export type BlockValueAnalysis = Readonly<{
   // stack: direct operand uses, plus the first use of each reachable
   // parent; edge uses count at their guard's index.
   lastUse(id: ValueId): number | undefined;
-  // readState outputs that must be captured to a local at their action
+  // state.read outputs that must be captured to a local at their action
   // point: a load at use would observe a later overlapping store.
   isPinned(id: ValueId): boolean;
 }>;
@@ -174,16 +175,18 @@ class BlockValueUsage implements BlockValueAnalysis {
     }
   }
 
-  // The one ordering rule: a readState whose value is consumed past a
+  // The one ordering rule: a state.read whose value is consumed past a
   // may-aliasing store pins at its action point. Guest memory never aliases
   // state, so slot may-alias is the whole aliasing story.
   #pinReadsCrossingStores(entry: EntryRegion): void {
     entry.actions.forEach((action, actionIndex) => {
-      if (action.kind !== "readState") {
+      const read = stateRead(action);
+
+      if (read === undefined) {
         return;
       }
 
-      const lastUse = this.#lastUses.get(action.output);
+      const lastUse = this.#lastUses.get(read.output);
 
       if (lastUse === undefined) {
         return;
@@ -194,8 +197,8 @@ class BlockValueUsage implements BlockValueAnalysis {
       for (let index = actionIndex + 1; index < lastUse; index += 1) {
         const later = entry.actions[index]!;
 
-        if (actionMayWriteStateSlot(later, action.slot)) {
-          this.#pinned.add(action.output);
+        if (actionMayWriteStateSlot(later, read.slot)) {
+          this.#pinned.add(read.output);
           break;
         }
       }
@@ -206,11 +209,13 @@ class BlockValueUsage implements BlockValueAnalysis {
   // edge itself flushes would reload the edge's restore, so it pins —
   // keeping the flushes and exit free to emit in any order.
   #pinReadsCrossingEdgeFlushes(entry: EntryRegion): void {
-    const readsByOutput = new Map<ValueId, ReadStateAction>();
+    const readsByOutput = new Map<ValueId, StateRead>();
 
     for (const action of entry.actions) {
-      if (action.kind === "readState") {
-        readsByOutput.set(action.output, action);
+      const read = stateRead(action);
+
+      if (read !== undefined) {
+        readsByOutput.set(read.output, read);
       }
     }
 
@@ -246,17 +251,8 @@ export function edgeValues(edge: EdgeRegion): readonly ValueId[] {
 
 function actionOperands(action: Action): readonly ValueId[] {
   switch (action.kind) {
-    case "readState":
-      return slotOperands(action.slot);
-    case "readMemory":
-      return [action.address];
-    case "writeState":
-      return [...slotOperands(action.slot), action.value];
-    case "writeMemory":
-      return [action.address, action.value];
     case "op":
-      assert(false, "op actions are not analyzed by the legacy value-use pass yet");
-      return [];
+      return opAccess(action.op).valueInputs;
     case "guardMemory":
       return [action.address];
     case "branch":
@@ -268,39 +264,36 @@ function actionOperands(action: Action): readonly ValueId[] {
   }
 }
 
-// Each semantic dependency exactly once, however often the lowering reads
-// it.
-function slotOperands(slot: StateSlot): readonly ValueId[] {
-  switch (slot.kind) {
-    case "gprDynamic":
-    case "segmentDynamic":
-      return [slot.index];
-    case "gpr":
-    case "flag":
-    case "segment":
-    case "eip":
-    case "instructionCount":
-    case "lazyFlags":
-      return [];
-  }
-}
-
 function actionOutput(action: Action): ValueId | undefined {
   switch (action.kind) {
-    case "readState":
-    case "readMemory":
+    case "op": {
+      if (opAccess(action.op).valueOutput === undefined) {
+        return undefined;
+      }
+
+      assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
       return action.output;
-    case "op":
-      assert(false, "op actions are not analyzed by the legacy value-use pass yet");
-      return undefined;
-    case "writeState":
-    case "writeMemory":
+    }
     case "guardMemory":
     case "branch":
     case "exit":
     case "dispatch":
       return undefined;
   }
+}
+
+type StateRead = Readonly<{ output: ValueId; slot: StateSlot }>;
+
+function stateRead(action: Action): StateRead | undefined {
+  if (action.kind !== "op" || action.op.kind !== "state.read") {
+    return undefined;
+  }
+
+  const output = actionOutput(action);
+
+  assert(output !== undefined, "state.read op action is missing its output");
+
+  return { output, slot: action.op.slot };
 }
 
 function valueChildren(node: ValueNode): readonly ValueId[] {

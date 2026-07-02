@@ -5,7 +5,8 @@ import type { Action } from "#ir/actions.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock, IrRegion } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { ValueTable } from "#ir/values.js";
+import { fitsUnsigned, ValueTable } from "#ir/values.js";
+import { stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function blockWith(regions: readonly IrRegion[], entry = 0): IrBlock {
   const values = new ValueTable();
@@ -17,10 +18,18 @@ function blockWith(regions: readonly IrRegion[], entry = 0): IrBlock {
   return { entry, regions, values };
 }
 
+function entryBlock(values: ValueTable, actions: readonly Action[]): IrBlock {
+  return {
+    entry: 0,
+    values,
+    regions: [{ id: 0, kind: "entry", actions }]
+  };
+}
+
 const dispatch0 = { kind: "dispatch", targetEip: 0 } as const;
 const dispatch1 = { kind: "dispatch", targetEip: 1 } as const;
-const writeEip0 = { kind: "writeState", slot: eipChannel, value: 0 } as const;
-const writeEip1 = { kind: "writeState", slot: eipChannel, value: 1 } as const;
+const writeEip0 = stateWrite(eipChannel, 0);
+const writeEip1 = stateWrite(eipChannel, 1);
 const edgeExit = { kind: "exit", reason: "memoryReadFault" } as const;
 const legacyContinue = { kind: "continue" } as unknown as Action;
 
@@ -43,7 +52,7 @@ test("an implicit fragment entry end validates only when allowed", () => {
     {
       id: 0,
       kind: "entry",
-      actions: [{ kind: "writeState", slot: gprChannel("eax"), value: 0 }]
+      actions: [stateWrite(gprChannel("eax"), 0)]
     }
   ]);
 
@@ -129,7 +138,7 @@ test("an action after the exit terminator is rejected", () => {
             kind: "entry",
             actions: [
               { kind: "exit", reason: "unsupported" },
-              { kind: "writeState", slot: eipChannel, value: 0 }
+              stateWrite(eipChannel, 0)
             ]
           }
         ])
@@ -146,7 +155,7 @@ test("an action after a dispatch terminator is rejected", () => {
           {
             id: 0,
             kind: "entry",
-            actions: [writeEip0, dispatch0, { kind: "writeState", slot: eipChannel, value: 0 }]
+            actions: [writeEip0, dispatch0, stateWrite(eipChannel, 0)]
           }
         ])
       ),
@@ -180,7 +189,7 @@ test("an entry that does not end with a terminator is rejected", () => {
           {
             id: 0,
             kind: "entry",
-            actions: [{ kind: "writeState", slot: eipChannel, value: 0 }]
+            actions: [stateWrite(eipChannel, 0)]
           }
         ])
       ),
@@ -198,6 +207,46 @@ test("dispatch target must be a known value", () => {
   );
 });
 
+test("op action output bounds must match the op signature", () => {
+  const missingBounds = new ValueTable();
+  const missingBoundsAddress = missingBounds.const(0);
+  const missingBoundsOutput = missingBounds.addActionOutput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(missingBounds, [
+          {
+            kind: "op",
+            output: missingBoundsOutput,
+            op: { kind: "memory.read", address: missingBoundsAddress, width: 8 }
+          },
+          { kind: "exit", reason: "unsupported" }
+        ])
+      ),
+    /memory\.read op action output \d+ has the wrong bounds/
+  );
+
+  const overlyNarrow = new ValueTable();
+  const overlyNarrowAddress = overlyNarrow.const(0);
+  const overlyNarrowOutput = overlyNarrow.addActionOutput(fitsUnsigned(8));
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(overlyNarrow, [
+          {
+            kind: "op",
+            output: overlyNarrowOutput,
+            op: { kind: "memory.read", address: overlyNarrowAddress, width: 32 }
+          },
+          { kind: "exit", reason: "unsupported" }
+        ])
+      ),
+    /memory\.read op action output \d+ has the wrong bounds/
+  );
+});
+
 test("an entry dispatch target write mismatch is rejected", () => {
   throws(
     () =>
@@ -207,8 +256,8 @@ test("an entry dispatch target write mismatch is rejected", () => {
             id: 0,
             kind: "entry",
             actions: [
-              { kind: "writeState", slot: eipChannel, value: 1 },
-              { kind: "writeState", slot: gprChannel("eax"), value: 1 },
+              stateWrite(eipChannel, 1),
+              stateWrite(gprChannel("eax"), 1),
               dispatch0
             ]
           }

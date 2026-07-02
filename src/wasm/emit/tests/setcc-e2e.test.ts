@@ -12,6 +12,7 @@ import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import { isStateRead } from "#ir/tests/storage-op-helpers.js";
 
 // cmp + setcc consumes source-derived cmp conditions, and standalone setcc
 // rebuilds the condition through lazy flag helper calls.
@@ -57,7 +58,7 @@ for (const [cc, predicate] of comparePredicates) {
       // Source-derived cmp conditions serve setcc: no flag byte is read back.
       strictEqual(
         entry.actions.some(
-          (action) => action.kind === "readState" && action.slot.kind === "flag"
+          (action) => isStateRead(action) && action.op.slot.kind === "flag"
         ),
         false
       );

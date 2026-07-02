@@ -186,8 +186,8 @@ function binaryFlagFragment(
           id: 0,
           kind: "entry",
           actions: [
-            { kind: "readState", output: left, slot: lazyFlagsAChannel },
-            { kind: "readState", output: right, slot: lazyFlagsBChannel }
+            { kind: "op", output: left, op: { kind: "state.read", slot: lazyFlagsAChannel } },
+            { kind: "op", output: right, op: { kind: "state.read", slot: lazyFlagsBChannel } }
           ]
         }
       ],
@@ -217,7 +217,7 @@ function logicFlagFragment(
           id: 0,
           kind: "entry",
           actions: [
-            { kind: "readState", output: result, slot: lazyFlagsAChannel }
+            { kind: "op", output: result, op: { kind: "state.read", slot: lazyFlagsAChannel } }
           ]
         }
       ],

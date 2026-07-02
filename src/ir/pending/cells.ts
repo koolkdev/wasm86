@@ -12,7 +12,7 @@ import {
   type ValueId,
   type WidthBounds
 } from "../values.js";
-import type { WriteStateAction } from "../actions.js";
+import type { EdgeFlushAction } from "../actions.js";
 import type { PendingEdgeKind } from "./state.js";
 import { PendingStateAccess } from "./state-access.js";
 
@@ -68,12 +68,12 @@ export class PendingCells<TCell extends PendingCell = PendingCell> {
     );
   }
 
-  flushesForEdge(edge: PendingEdgeKind): readonly WriteStateAction[] {
+  flushesForEdge(edge: PendingEdgeKind): readonly EdgeFlushAction[] {
     const entries = edge === "fault"
       ? this.#snapshotEntries()
       : this.#currentEntries();
 
-    return entries.map(([slot, value]) => ({ kind: "writeState", slot, value }));
+    return entries.map(([slot, value]) => ({ kind: "op", op: { kind: "state.write", slot, value } }));
   }
 
   #snapshotEntries(): ReadonlyArray<readonly [TCell, ValueId]> {

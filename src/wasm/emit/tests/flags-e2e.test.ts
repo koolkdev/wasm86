@@ -22,6 +22,7 @@ import {
 import { wasmBodyMemoryAccesses } from "#wasm/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";
+import { isStateWrite } from "#ir/tests/storage-op-helpers.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
 
@@ -132,13 +133,13 @@ test("two adds in one block store one lazy add record, with the second add's sou
   assertOk(entry.kind === "entry", "first region is the entry");
 
   const flagWrites = entry.actions.flatMap(
-    (action) => action.kind === "writeState" && action.slot.kind === "flag" ? [action.slot.flag] : []
+    (action) => isStateWrite(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
   );
 
   strictEqual(flagWrites.length, 0);
   strictEqual(new Set(flagWrites).size, 0);
   strictEqual(
-    entry.actions.filter((action) => action.kind === "writeState" && action.slot === lazyFlagsKindChannel).length,
+    entry.actions.filter((action) => isStateWrite(action) && action.op.slot === lazyFlagsKindChannel).length,
     1
   );
 

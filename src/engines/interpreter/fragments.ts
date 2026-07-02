@@ -17,7 +17,7 @@ import { emitActionFragment } from "#wasm/emit/emit.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
 // Decode reads as action fragments: a guarded guest fetch is guardMemory +
-// readMemory with a decode-fault edge, and the decoded values leave through
+// memory.read with a decode-fault edge, and the decoded values leave through
 // exported outputs. This file builds the blocks; everything is emitted by
 // the action emitter and fragment bodies fall through naturally.
 
@@ -78,14 +78,18 @@ class DecodeFragment {
   readEip(): ValueId {
     const output = this.#values.addActionOutput();
 
-    this.#actions.push({ kind: "readState", output, slot: eipChannel });
+    this.#actions.push({ kind: "op", output, op: { kind: "state.read", slot: eipChannel } });
     return output;
   }
 
   readGprWord(index: ValueId): ValueId {
     const output = this.#values.addActionOutput();
 
-    this.#actions.push({ kind: "readState", output, slot: { kind: "gprDynamic", index, byteLength: 4 } });
+    this.#actions.push({
+      kind: "op",
+      output,
+      op: { kind: "state.read", slot: { kind: "gprDynamic", index, byteLength: 4 } }
+    });
     return output;
   }
 
@@ -114,8 +118,8 @@ class DecodeFragment {
 
     this.#actions.push(
       signed && width !== 32
-        ? { kind: "readMemory", output, address, width, signed: true }
-        : { kind: "readMemory", output, address, width }
+        ? { kind: "op", output, op: { kind: "memory.read", address, width, signed: true } }
+        : { kind: "op", output, op: { kind: "memory.read", address, width } }
     );
     return output;
   }

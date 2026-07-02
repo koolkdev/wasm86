@@ -1,6 +1,15 @@
 import { assert } from "#common/assert.js";
-import { isTerminatorAction, type Action, type DispatchAction, type ExitAction } from "./actions.js";
+import {
+  isTerminatorAction,
+  type Action,
+  type DispatchAction,
+  type EdgeFlushAction,
+  type ExitAction,
+  type OpAction
+} from "./actions.js";
 import type { EdgeRegion, EntryRegion, IrBlock, IrRegion, RegionId } from "./block.js";
+import { opAccess, type OpValueOutput } from "./ops.js";
+import { unboundedWidthBounds, type WidthBounds } from "./values.js";
 
 export type ValidateIrBlockOptions = Readonly<{
   allowImplicitEntryFallthrough?: boolean;
@@ -83,10 +92,6 @@ function validateEntryActions(
       case "dispatch":
         assertEntryDispatchEipFlushed(entry.actions, index, action);
         break;
-      case "readState":
-      case "readMemory":
-      case "writeState":
-      case "writeMemory":
       case "op":
       case "exit":
         break;
@@ -122,7 +127,8 @@ function validateEdgeTerminator(block: IrBlock, terminator: EdgeRegion["terminat
 
 function validateEdgeFlushes(block: IrBlock, edge: EdgeRegion): void {
   for (const flush of edge.flushes) {
-    block.values.node(flush.value);
+    assertEdgeFlushAction(flush);
+    validateOpActionValues(block, flush);
   }
 
   if (edge.terminator.kind === "dispatch") {
@@ -130,7 +136,7 @@ function validateEdgeFlushes(block: IrBlock, edge: EdgeRegion): void {
 
     assert(eipFlush !== undefined, `dispatch edge ${edge.id} must flush EIP state`);
     assert(
-      eipFlush.value === edge.terminator.targetEip,
+      eipFlush.op.value === edge.terminator.targetEip,
       `dispatch edge ${edge.id} EIP flush does not match dispatch.targetEip`
     );
   }
@@ -138,22 +144,8 @@ function validateEdgeFlushes(block: IrBlock, edge: EdgeRegion): void {
 
 function validateActionValues(block: IrBlock, action: Action): void {
   switch (action.kind) {
-    case "readState":
-      block.values.node(action.output);
-      return;
-    case "readMemory":
-      block.values.node(action.output);
-      block.values.node(action.address);
-      return;
-    case "writeState":
-      block.values.node(action.value);
-      return;
-    case "writeMemory":
-      block.values.node(action.address);
-      block.values.node(action.value);
-      return;
     case "op":
-      assert(false, "op actions are not validated by the legacy validator yet");
+      validateOpActionValues(block, action);
       return;
     case "guardMemory":
       block.values.node(action.address);
@@ -172,6 +164,50 @@ function validateActionValues(block: IrBlock, action: Action): void {
   }
 }
 
+function validateOpActionValues(block: IrBlock, action: OpAction): void {
+  const access = opAccess(action.op);
+
+  for (const input of access.valueInputs) {
+    block.values.node(input);
+  }
+
+  if (access.valueOutput === undefined) {
+    assert(action.output === undefined, `${action.op.kind} op action must not declare an output`);
+    return;
+  }
+
+  assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
+  block.values.node(action.output);
+  assert(
+    block.values.valueType(action.output) === access.valueOutput.type,
+    `${action.op.kind} op action output ${action.output} has the wrong value type`
+  );
+  assertOutputBounds(block, action, action.output, access.valueOutput);
+}
+
+function assertOutputBounds(
+  block: IrBlock,
+  action: OpAction,
+  output: number,
+  expected: OpValueOutput
+): void {
+  const actualBounds = block.values.widthBounds(output);
+  const expectedBounds = expected.bounds ?? unboundedWidthBounds;
+
+  assert(
+    boundsEqual(actualBounds, expectedBounds),
+    `${action.op.kind} op action output ${output} has the wrong bounds: expected ${formatBounds(expectedBounds)}, got ${formatBounds(actualBounds)}`
+  );
+}
+
+function boundsEqual(a: WidthBounds, b: WidthBounds): boolean {
+  return a.unsignedBits === b.unsignedBits && a.signedBits === b.signedBits;
+}
+
+function formatBounds(bounds: WidthBounds): string {
+  return `{ unsignedBits: ${bounds.unsignedBits}, signedBits: ${bounds.signedBits} }`;
+}
+
 function assertEntryDispatchEipFlushed(
   actions: readonly Action[],
   dispatchIndex: number,
@@ -181,7 +217,7 @@ function assertEntryDispatchEipFlushed(
   const eipWrite = lastEipWrite(previous);
 
   assert(eipWrite !== undefined, "dispatch entry path must flush EIP state");
-  assert(eipWrite.value === dispatch.targetEip, "dispatch entry EIP flush does not match dispatch.targetEip");
+  assert(eipWrite.op.value === dispatch.targetEip, "dispatch entry EIP flush does not match dispatch.targetEip");
 }
 
 function assertNoContinuationField(region: IrRegion): void {
@@ -196,11 +232,7 @@ function assertKnownEntryAction(action: Action): void {
 
   assert(kind !== "continue", "continue action is no longer supported; use dispatch(targetEip)");
   assert(
-    kind === "readState" ||
-      kind === "readMemory" ||
-      kind === "writeState" ||
-      kind === "writeMemory" ||
-      kind === "op" ||
+    kind === "op" ||
       kind === "guardMemory" ||
       kind === "branch" ||
       kind === "exit" ||
@@ -216,11 +248,19 @@ function assertKnownEdgeTerminator(terminator: ExitAction | DispatchAction): voi
   assert(kind === "exit" || kind === "dispatch", `edge region terminator must be dispatch or exit, got ${String(kind)}`);
 }
 
-function lastEipWrite(actions: readonly Action[]): Extract<Action, { kind: "writeState" }> | undefined {
+function assertEdgeFlushAction(action: Action): asserts action is EdgeFlushAction {
+  assert(
+    action.kind === "op" && action.op.kind === "state.write" && action.output === undefined,
+    "edge flush entries must be state.write op actions"
+  );
+}
+
+function lastEipWrite(actions: readonly Action[]): EdgeFlushAction | undefined {
   for (let index = actions.length - 1; index >= 0; index -= 1) {
     const action = actions[index]!;
 
-    if (action.kind === "writeState" && action.slot.kind === "eip") {
+    if (action.kind === "op" && action.op.kind === "state.write" && action.op.slot.kind === "eip") {
+      assertEdgeFlushAction(action);
       return action;
     }
   }

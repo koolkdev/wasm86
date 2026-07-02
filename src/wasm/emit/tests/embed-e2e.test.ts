@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { ValueTable, type ValueId } from "#ir/values.js";
+import { fitsUnsigned, ValueTable, type ValueId } from "#ir/values.js";
 import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -13,6 +13,7 @@ import type { FallthroughTarget } from "#wasm/emit/embed.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
+import { memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 // Fragments emitted inline in hand-written function bodies. The fragments
 // here are decode reads — a guarded one-byte fetch at eip+k with a
@@ -34,7 +35,7 @@ function dispatchFragment(targetEip: number): IrBlock {
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "writeState", slot: eipChannel, value: target },
+          stateWrite(eipChannel, target),
           { kind: "dispatch", targetEip: target }
         ]
       }
@@ -49,7 +50,7 @@ function decodeReadFragment(k: number): DecodeReadFragment {
   const values = new ValueTable();
   const eipValue = values.addActionOutput();
   const address = values.binary("add", eipValue, values.const(k));
-  const fetched = values.addActionOutput();
+  const fetched = values.addActionOutput(fitsUnsigned(8));
   const block: IrBlock = {
     entry: 0,
     regions: [
@@ -57,15 +58,15 @@ function decodeReadFragment(k: number): DecodeReadFragment {
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "readState", output: eipValue, slot: eipChannel },
+          stateRead(eipValue, eipChannel),
           { kind: "guardMemory", address, byteLength: 1, access: "read", faultEdge: 1 },
-          { kind: "readMemory", output: fetched, address, width: 8 }
+          memoryRead(fetched, address, 8)
         ]
       },
       {
         id: 1,
         kind: "edge",
-        flushes: [{ kind: "writeState", slot: eipChannel, value: eipValue }],
+        flushes: [stateWrite(eipChannel, eipValue)],
         terminator: { kind: "exit", reason: "decodeFault" }
       }
     ],
@@ -236,8 +237,8 @@ test("an exported register read pins across a later overlapping store", async ()
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "readState", output: readValue, slot: gprChannel("eax") },
-          { kind: "writeState", slot: gprChannel("eax"), value: incremented }
+          stateRead(readValue, gprChannel("eax")),
+          stateWrite(gprChannel("eax"), incremented)
         ]
       }
     ],

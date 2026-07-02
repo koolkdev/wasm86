@@ -5,6 +5,7 @@ import { gprChannel } from "#ir/slots.js";
 import { ValueTable } from "#ir/values.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
 import { helperCallsForBlock } from "#wasm/helpers/module.js";
+import { stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 test("helperCallsForBlock reports live helper calls", () => {
   const values = new ValueTable();
@@ -16,7 +17,7 @@ test("helperCallsForBlock reports live helper calls", () => {
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "writeState", slot: gprChannel("eax"), value: zf }
+          stateWrite(gprChannel("eax"), zf)
         ]
       }
     ],
