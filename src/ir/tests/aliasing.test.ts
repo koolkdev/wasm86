@@ -65,11 +65,7 @@ test("effects derive from action kind and slot", () => {
   });
 });
 
-test("guards, ifs, and finishes touch no data", () => {
-  deepStrictEqual(
-    effectsOf({ kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultBody: { actions: [] } }),
-    { reads: [], writes: [] }
-  );
+test("ifs and finishes touch no data directly", () => {
   deepStrictEqual(
     effectsOf({ kind: "if", condition: 0, thenBody: { actions: [] }, elseBody: { actions: [] } }),
     { reads: [], writes: [] }

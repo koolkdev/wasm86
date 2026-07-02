@@ -67,66 +67,6 @@ test("a terminal if with both bodies complete validates", () => {
   );
 });
 
-test("a guard fault body must complete", () => {
-  throws(
-    () =>
-      validateIrBlock(
-        blockWith([
-          {
-            kind: "guardMemory",
-            address: 0,
-            byteLength: 4,
-            access: "read",
-            faultBody: { actions: [stateWrite(gprChannel("eax"), 0)] }
-          },
-          writeEip0,
-          finishDispatch0
-        ])
-      ),
-    /guardMemory\[0\]\.faultBody does not complete/
-  );
-});
-
-test("a guard fault body must terminate with an exit", () => {
-  throws(
-    () =>
-      validateIrBlock(
-        blockWith([
-          {
-            kind: "guardMemory",
-            address: 0,
-            byteLength: 4,
-            access: "read",
-            faultBody: { actions: [writeEip1, finishDispatch(1)] }
-          },
-          writeEip0,
-          finishDispatch0
-        ])
-      ),
-    /guardMemory\[0\]\.faultBody must terminate with exit/
-  );
-});
-
-test("a guard fault body exit detail must match its byte length", () => {
-  throws(
-    () =>
-      validateIrBlock(
-        blockWith([
-          {
-            kind: "guardMemory",
-            address: 0,
-            byteLength: 4,
-            access: "read",
-            faultBody: { actions: [{ kind: "finish", finish: { kind: "exit", reason: "memoryReadFault", detail: 2 } }] }
-          },
-          writeEip0,
-          finishDispatch0
-        ])
-      ),
-    /guardMemory\[0\]\.faultBody exit detail must match guard byte length/
-  );
-});
-
 test("an action after the finish exit terminator is rejected", () => {
   throws(
     () =>

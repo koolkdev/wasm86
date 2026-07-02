@@ -3,9 +3,9 @@ import { test } from "node:test";
 
 import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
-import { ValueTable } from "#ir/values.js";
+import { fitsUnsigned, ValueTable } from "#ir/values.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
-import { memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { memoryCheck, memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function analyze(
   values: ValueTable,
@@ -28,6 +28,7 @@ test("action operand edges count at their action index", () => {
   const memoryOutput = values.addActionOutput();
   const stored = values.const(1);
   const guarded = values.const(0x2000);
+  const fault = values.addActionOutput(fitsUnsigned(1));
   const condition = values.const(0);
   const payload = values.const(7);
   const analysis = analyze(
@@ -36,12 +37,11 @@ test("action operand edges count at their action index", () => {
       stateRead(readOutput, gprChannel("eax")),
       memoryRead(memoryOutput, address, 32),
       memoryWrite(address, stored, 32),
+      memoryCheck(fault, guarded, 4, "read"),
       {
-        kind: "guardMemory",
-        address: guarded,
-        byteLength: 4,
-        access: "read",
-        faultBody: { actions: [{ kind: "finish", finish: { kind: "exit", reason: "memoryReadFault" } }] }
+        kind: "if",
+        condition: fault,
+        thenBody: { actions: [{ kind: "finish", finish: { kind: "exit", reason: "memoryReadFault" } }] }
       },
       {
         kind: "if",
@@ -60,10 +60,12 @@ test("action operand edges count at their action index", () => {
   strictEqual(analysis.lastUse(stored), 2);
   strictEqual(analysis.useCount(guarded), 1);
   strictEqual(analysis.lastUse(guarded), 3);
+  strictEqual(analysis.useCount(fault), 1);
+  strictEqual(analysis.lastUse(fault), 4);
   strictEqual(analysis.useCount(condition), 1);
-  strictEqual(analysis.lastUse(condition), 4);
+  strictEqual(analysis.lastUse(condition), 5);
   strictEqual(analysis.useCount(payload), 1);
-  strictEqual(analysis.lastUse(payload), 5);
+  strictEqual(analysis.lastUse(payload), 6);
   strictEqual(analysis.useCount(readOutput), 0);
   strictEqual(analysis.lastUse(readOutput), undefined);
 });
@@ -99,20 +101,20 @@ test("a chain of dead loads stays wholly uncounted", () => {
   strictEqual(analysis.useCount(base), 0);
 });
 
-test("fault edge operands count at their guard's entry index", () => {
+test("fault body operands count at their if action index", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const address = values.const(0x2000);
+  const fault = values.addActionOutput(fitsUnsigned(1));
   const analysis = analyze(
     values,
     [
       stateRead(read, gprChannel("ebx")),
+      memoryCheck(fault, address, 4, "write"),
       {
-        kind: "guardMemory",
-        address,
-        byteLength: 4,
-        access: "write",
-        faultBody: {
+        kind: "if",
+        condition: fault,
+        thenBody: {
           actions: [
             stateWrite(gprChannel("eax"), read),
             { kind: "finish", finish: { kind: "exit", reason: "memoryWriteFault", payload: address } }
@@ -122,12 +124,14 @@ test("fault edge operands count at their guard's entry index", () => {
     ]
   );
 
-  // The edge branches off at the guard, so its uses land there: the read is
-  // consumed once, at index 1; the address by the guard and the payload.
+  // The nested body branches off at the if, so its uses land there: the read is
+  // consumed once at index 2; the address by the check and the payload.
   strictEqual(analysis.useCount(read), 1);
-  strictEqual(analysis.lastUse(read), 1);
+  strictEqual(analysis.lastUse(read), 2);
   strictEqual(analysis.useCount(address), 2);
-  strictEqual(analysis.lastUse(address), 1);
+  strictEqual(analysis.lastUse(address), 2);
+  strictEqual(analysis.useCount(fault), 1);
+  strictEqual(analysis.lastUse(fault), 2);
 });
 
 test("branch edge values count once per edge, at the branch's entry index", () => {
@@ -173,17 +177,17 @@ test("an edge use past an overlapping store pins the read", () => {
   const read = values.addActionOutput();
   const five = values.const(5);
   const address = values.const(0x2000);
+  const fault = values.addActionOutput(fitsUnsigned(1));
   const analysis = analyze(
     values,
     [
       stateRead(read, gprChannel("eax")),
       stateWrite(gprChannel("eax"), five),
+      memoryCheck(fault, address, 4, "write"),
       {
-        kind: "guardMemory",
-        address,
-        byteLength: 4,
-        access: "write",
-        faultBody: {
+        kind: "if",
+        condition: fault,
+        thenBody: {
           actions: [
             stateWrite(gprChannel("ebx"), read),
             { kind: "finish", finish: { kind: "exit", reason: "memoryWriteFault", payload: address } }
@@ -193,8 +197,8 @@ test("an edge use past an overlapping store pins the read", () => {
     ]
   );
 
-  // The fault edge consumes the read, but the entry already flushed a newer
-  // eax before the guard: reloading in the edge would observe it, so the
+  // The fault body consumes the read, but the entry already flushed a newer
+  // eax before the check-if: reloading in the body would observe it, so the
   // read pins at its action point.
   strictEqual(analysis.isPinned(read), true);
 });
@@ -221,16 +225,16 @@ test("an edge value reloading a channel the edge flushes pins the read", () => {
   const read = values.addActionOutput();
   const five = values.const(5);
   const address = values.const(0x2000);
+  const fault = values.addActionOutput(fitsUnsigned(1));
   const analysis = analyze(
     values,
     [
       stateRead(read, gprChannel("ebx")),
+      memoryCheck(fault, address, 4, "write"),
       {
-        kind: "guardMemory",
-        address,
-        byteLength: 4,
-        access: "write",
-        faultBody: {
+        kind: "if",
+        condition: fault,
+        thenBody: {
           actions: [
             stateWrite(gprChannel("eax"), read),
             stateWrite(gprChannel("ebx"), five),
@@ -454,16 +458,15 @@ test("a nested body producer whose operand follows its output fails loudly", () 
   const values = new ValueTable();
   const loaded = values.addActionOutput();
   const address = values.const(0x2000);
+  const condition = values.const(1);
 
   throws(
     () =>
       analyze(values, [
         {
-          kind: "guardMemory",
-          address,
-          byteLength: 4,
-          access: "read",
-          faultBody: {
+          kind: "if",
+          condition,
+          thenBody: {
             actions: [
               memoryRead(loaded, address, 32),
               stateWrite(gprChannel("eax"), loaded),

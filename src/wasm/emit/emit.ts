@@ -1,10 +1,10 @@
+import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import {
   actionCompletes,
   bodyFinal,
   type Action,
-  type BranchHint,
-  type GuardMemoryAction
+  type BranchHint
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
@@ -13,7 +13,7 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmBranchHint, type WasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
-import { emitGuardChecks, emitGuestLoad, emitGuestStore, emitMemoryCheckFromStack } from "./memory.js";
+import { emitGuestLoad, emitGuestStore, emitMemoryCheckFromStack } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";
 import { createValueStack } from "./value-stack.js";
 import { analyzeBlockValues, type BlockValueAnalysis } from "./values.js";
@@ -90,9 +90,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "op":
         emitOp(action);
         return;
-      case "guardMemory":
-        emitGuard(action);
-        return;
       case "finish":
         switch (action.finish.kind) {
           case "exit":
@@ -102,6 +99,8 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
             frame.emitDispatch(action.finish);
             return;
         }
+        assert(false, "unknown finish kind");
+        return;
       case "if":
         emitIf(action);
         return;
@@ -125,18 +124,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         emitGuestStore(body, action.op.width);
         return;
     }
-  }
-
-  function emitGuard(action: GuardMemoryAction): void {
-    valueStack.captureForBody(action.faultBody);
-    frame.withNestedControl(() => {
-      emitGuardChecks(
-        body,
-        action.byteLength,
-        () => valueStack.emitUse(action.address),
-        () => emitBody(action.faultBody)
-      );
-    });
   }
 
   // Both nested bodies' values are captured before any path leaves the parent.

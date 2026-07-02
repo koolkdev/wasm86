@@ -27,9 +27,6 @@ export function effectsOf(action: Action): ActionEffects {
         reads: opReads(action.op),
         writes: opWrites(action.op)
       };
-    case "guardMemory":
-      // A guard checks bounds; it touches no data.
-      return noEffects;
     case "if":
       return bodyEffects(action.thenBody, action.elseBody);
     case "finish":
@@ -92,8 +89,6 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
   switch (action.kind) {
     case "op":
       return opWrites(action.op).some((write) => write.space === "state" && slotsMayAlias(write.slot, slot));
-    case "guardMemory":
-      return false;
     case "if":
       return bodyMayWriteStateSlot(action.thenBody, slot) ||
         (action.elseBody !== undefined && bodyMayWriteStateSlot(action.elseBody, slot));

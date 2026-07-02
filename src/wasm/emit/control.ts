@@ -24,7 +24,7 @@ export type ControlFrame = Readonly<{
   // Applies the embedding to a natural action-body fallthrough.
   emitFallthrough(): void;
   // Runs emitBody while completions account for one enclosing Wasm control
-  // construct, so `br` completions can escape inline guard or branch bodies.
+  // construct, so `br` completions can escape inline if bodies.
   withNestedControl(emitBody: () => void): void;
 }>;
 
@@ -34,10 +34,10 @@ type LinkedTarget = Readonly<
   | { kind: "table"; slot: number; typeIndex: number; tableIndex: number }
 >;
 
-// One frame per emission. Nested bodies are emitted at their action site
-// (guard if body, branch if/else arms), while this helper owns report and
-// completion lowering. A `br` completion inside an inline if must skip that
-// if before it can target the embedder's label.
+// One frame per emission. Nested bodies are emitted at their action site,
+// while this helper owns report and completion lowering. A `br` completion
+// inside an inline if must skip that if before it can target the embedder's
+// label.
 export function createControlFrame(context: ControlFrameContext): ControlFrame {
   const { body } = context;
   let inlineControlDepth = 0;

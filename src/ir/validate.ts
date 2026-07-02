@@ -1,7 +1,6 @@
 import { assert } from "#common/assert.js";
 import {
   actionCompletes,
-  bodyFinal,
   bodyCompletes,
   type Action,
   type DispatchFinish,
@@ -56,14 +55,6 @@ function validateBody(
     };
 
     switch (action.kind) {
-      case "guardMemory":
-        validateBody(block, action.faultBody, prefixBeforeAction(), `${path}.guardMemory[${index}].faultBody`);
-        assert(
-          bodyCompletes(action.faultBody),
-          `${path}.guardMemory[${index}].faultBody does not complete`
-        );
-        assertGuardFaultBodyExits(action.faultBody, action.byteLength, `${path}.guardMemory[${index}].faultBody`);
-        break;
       case "if":
         validateBody(block, action.thenBody, prefixBeforeAction(), `${path}.if[${index}].thenBody`);
 
@@ -84,26 +75,10 @@ function validateBody(
   }
 }
 
-function assertGuardFaultBodyExits(body: Body, byteLength: number, path: string): void {
-  const final = bodyFinal(body);
-
-  assert(
-    final?.kind === "finish" && final.finish.kind === "exit",
-    `${path} must terminate with exit`
-  );
-  assert(
-    final.finish.detail === byteLength,
-    `${path} exit detail must match guard byte length`
-  );
-}
-
 function validateActionValues(block: IrBlock, action: Action): void {
   switch (action.kind) {
     case "op":
       validateOpActionValues(block, action);
-      return;
-    case "guardMemory":
-      block.values.node(action.address);
       return;
     case "if":
       block.values.node(action.condition);
@@ -193,7 +168,6 @@ function assertKnownAction(action: Action): void {
 
   assert(
     kind === "op" ||
-      kind === "guardMemory" ||
       kind === "if" ||
       kind === "finish",
     `unknown IR action kind ${String(kind)}`

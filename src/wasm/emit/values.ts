@@ -17,7 +17,7 @@ export type BlockValueAnalysis = Readonly<{
   useCount(id: ValueId): number;
   // Entry action index of the last point the value is pushed onto the
   // stack: direct operand uses, plus the first use of each reachable
-  // parent; nested-body uses count at their owning guard/if index.
+  // parent; nested-body uses count at their owning if index.
   lastUse(id: ValueId): number | undefined;
   // state.read outputs that must be captured to a local at their action
   // point: a load at use would observe a later overlapping store.
@@ -238,8 +238,6 @@ function actionOperands(action: Action): readonly ValueId[] {
   switch (action.kind) {
     case "op":
       return opAccess(action.op).valueInputs;
-    case "guardMemory":
-      return [action.address];
     case "if":
       return [action.condition];
     case "finish":
@@ -266,7 +264,6 @@ function actionOutput(action: Action): ValueId | undefined {
       assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
       return action.output;
     }
-    case "guardMemory":
     case "if":
     case "finish":
       return undefined;

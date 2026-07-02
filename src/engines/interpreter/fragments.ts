@@ -16,10 +16,10 @@ import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/emit.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
-// Decode reads as action fragments: a guarded guest fetch is guardMemory +
-// memory.read with a decode-fault body, and the decoded values leave through
-// exported outputs. This file builds the blocks; everything is emitted by
-// the action emitter and fragment bodies fall through naturally.
+// Decode reads as action fragments: a guarded guest fetch is memory.check +
+// if + memory.read with a decode-fault body, and the decoded values leave
+// through exported outputs. This file builds the blocks; everything is
+// emitted by the action emitter and fragment bodies fall through naturally.
 
 export type FragmentEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -102,13 +102,18 @@ class DecodeFragment {
   // A guarded guest fetch; the fault body reports the faulting address.
   readGuest(address: ValueId, width: OperandWidth, signed = false): ValueId {
     const byteLength = width / 8;
+    const fault = this.#values.addActionOutput(fitsUnsigned(1));
 
     this.#actions.push({
-      kind: "guardMemory",
-      address,
-      byteLength,
-      access: "read",
-      faultBody: {
+      kind: "op",
+      output: fault,
+      op: { kind: "memory.check", address, byteLength, access: "read" }
+    });
+    this.#actions.push({
+      kind: "if",
+      condition: fault,
+      hint: "unlikely",
+      thenBody: {
         actions: [
           { kind: "finish", finish: { kind: "exit", reason: "decodeFault", payload: address, detail: byteLength } }
         ]

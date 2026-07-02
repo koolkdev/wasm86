@@ -1,10 +1,10 @@
 import { assert } from "#common/assert.js";
 import { wasmGuestMemoryMinByteLength, wasmMemoryIndex } from "#wasm/abi.js";
-import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
 import type { OperandWidth } from "#x86/types.js";
 
-// Guard sequences and guest memory access. Guest addresses are arbitrary x86
+// Bounds checks and guest memory access. Guest addresses are arbitrary x86
 // pointers, so accesses carry no static offset and only natural alignment
 // hints.
 
@@ -14,27 +14,6 @@ const wasmPageShift = 16;
 // exceeds the last in-bounds one, guestByteLength - byteLength. Instantiation
 // enforces the guest import's declared minimum, so that subtraction cannot
 // underflow for the 1/2/4-byte accesses emitted by the current IR.
-export function emitGuardChecks(
-  body: WasmFunctionBodyEncoder,
-  byteLength: number,
-  emitAddress: () => void,
-  emitFaultBody: () => void
-): void {
-  emitMemoryCheck(body, byteLength, emitAddress);
-  body.ifBlock(wasmBranchHint.unlikely);
-  emitFaultBody();
-  body.endBlock();
-}
-
-export function emitMemoryCheck(
-  body: WasmFunctionBodyEncoder,
-  byteLength: number,
-  emitAddress: () => void
-): void {
-  emitAddress();
-  emitMemoryCheckFromStack(body, byteLength);
-}
-
 export function emitMemoryCheckFromStack(body: WasmFunctionBodyEncoder, byteLength: number): void {
   assert(byteLength <= wasmGuestMemoryMinByteLength, "guest access exceeds the minimum imported memory");
 

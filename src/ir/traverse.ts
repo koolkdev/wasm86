@@ -3,8 +3,6 @@ import type { Body } from "./block.js";
 
 export function nestedBodies(action: Action): readonly Body[] {
   switch (action.kind) {
-    case "guardMemory":
-      return [action.faultBody];
     case "if":
       return action.elseBody === undefined
         ? [action.thenBody]

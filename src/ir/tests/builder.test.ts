@@ -97,10 +97,6 @@ function nestedActionBodies(block: IrBlock): readonly Body[] {
   function collect(body: Body): void {
     for (const action of body.actions) {
       switch (action.kind) {
-        case "guardMemory":
-          bodies.push(action.faultBody);
-          collect(action.faultBody);
-          break;
         case "if":
           bodies.push(action.thenBody);
           collect(action.thenBody);

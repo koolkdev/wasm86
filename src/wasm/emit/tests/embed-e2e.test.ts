@@ -13,7 +13,7 @@ import type { FallthroughTarget } from "#wasm/emit/embed.js";
 import { decodeExit, ExitReason } from "#wasm/exit.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
-import { memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { memoryCheck, memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 // Fragments emitted inline in hand-written function bodies. The fragments
 // here are decode reads — a guarded one-byte fetch at eip+k with a
@@ -45,20 +45,21 @@ function decodeReadFragment(k: number): DecodeReadFragment {
   const values = new ValueTable();
   const eipValue = values.addActionOutput();
   const address = values.binary("add", eipValue, values.const(k));
+  const fault = values.addActionOutput(fitsUnsigned(1));
   const fetched = values.addActionOutput(fitsUnsigned(8));
   const block: IrBlock = {
     body: {
       actions: [
         stateRead(eipValue, eipChannel),
+        memoryCheck(fault, address, 1, "read"),
         {
-          kind: "guardMemory",
-          address,
-          byteLength: 1,
-          access: "read",
-          faultBody: {
+          kind: "if",
+          condition: fault,
+          hint: "unlikely",
+          thenBody: {
             actions: [
               stateWrite(eipChannel, eipValue),
-              { kind: "finish", finish: { kind: "exit", reason: "decodeFault", detail: 1 } }
+              { kind: "finish", finish: { kind: "exit", reason: "decodeFault", payload: address, detail: 1 } }
             ]
           }
         },
@@ -146,6 +147,7 @@ test("the decode-fault edge keeps the encoded return", async () => {
   const decoded = decodeExit(run());
 
   strictEqual(decoded.exitReason, ExitReason.DECODE_FAULT);
+  strictEqual(decoded.payload, eip + 2);
   strictEqual(decoded.detail, 1);
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), eip);
 });
