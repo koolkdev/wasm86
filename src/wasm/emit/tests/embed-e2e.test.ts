@@ -58,7 +58,7 @@ function decodeReadFragment(k: number): DecodeReadFragment {
           faultBody: {
             actions: [
               stateWrite(eipChannel, eipValue),
-              { kind: "finish", finish: { kind: "exit", reason: "decodeFault" } }
+              { kind: "finish", finish: { kind: "exit", reason: "decodeFault", detail: 1 } }
             ]
           }
         },

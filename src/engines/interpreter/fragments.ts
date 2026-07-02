@@ -101,14 +101,16 @@ class DecodeFragment {
 
   // A guarded guest fetch; the fault body reports the faulting address.
   readGuest(address: ValueId, width: OperandWidth, signed = false): ValueId {
+    const byteLength = width / 8;
+
     this.#actions.push({
       kind: "guardMemory",
       address,
-      byteLength: width / 8,
+      byteLength,
       access: "read",
       faultBody: {
         actions: [
-          { kind: "finish", finish: { kind: "exit", reason: "decodeFault", payload: address } }
+          { kind: "finish", finish: { kind: "exit", reason: "decodeFault", payload: address, detail: byteLength } }
         ]
       }
     });

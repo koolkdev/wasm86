@@ -1,5 +1,6 @@
 import type { OperandWidth } from "#x86/types.js";
 import type { X86StatusFlag } from "#x86/flags.js";
+import type { MemoryAccessKind } from "#x86/memory-access.js";
 import {
   flagChannel,
   lazyFlagsAChannel,
@@ -29,13 +30,26 @@ export type MemoryWriteOp = Readonly<{
   value: ValueId;
   width: OperandWidth;
 }>;
+export type MemoryCheckOp = Readonly<{
+  kind: "memory.check";
+  address: ValueId;
+  byteLength: number;
+  access: MemoryAccessKind;
+}>;
 export type CpuResolveFlagOp = Readonly<{ kind: "cpu.resolveFlag"; flag: X86StatusFlag }>;
 
-export type IrOp = StateReadOp | StateWriteOp | MemoryReadOp | MemoryWriteOp | CpuResolveFlagOp;
+export type IrOp =
+  | StateReadOp
+  | StateWriteOp
+  | MemoryReadOp
+  | MemoryWriteOp
+  | MemoryCheckOp
+  | CpuResolveFlagOp;
 
 export type StorageAccess =
   | Readonly<{ space: "state"; slot: StateSlot }>
-  | Readonly<{ space: "memory" }>;
+  | Readonly<{ space: "memory" }>
+  | Readonly<{ space: "memoryBounds" }>;
 
 export type OpValueOutput = Readonly<{ type: ValueType; bounds?: WidthBounds }>;
 
@@ -47,6 +61,7 @@ export type OpAccess = Readonly<{
 }>;
 
 const memoryAccess: StorageAccess = { space: "memory" };
+const memoryBoundsAccess: StorageAccess = { space: "memoryBounds" };
 
 export function opAccess(op: IrOp): OpAccess {
   switch (op.kind) {
@@ -75,6 +90,13 @@ export function opAccess(op: IrOp): OpAccess {
         valueInputs: [op.address, op.value],
         reads: [],
         writes: [memoryAccess]
+      };
+    case "memory.check":
+      return {
+        valueInputs: [op.address],
+        valueOutput: output(fitsUnsigned(1)),
+        reads: [memoryBoundsAccess],
+        writes: []
       };
     case "cpu.resolveFlag":
       return {

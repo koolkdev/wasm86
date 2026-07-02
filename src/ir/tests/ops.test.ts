@@ -23,6 +23,7 @@ import {
 import { fitsUnsigned, signExtended } from "#ir/values.js";
 
 const memory: StorageAccess = { space: "memory" };
+const memoryBounds: StorageAccess = { space: "memoryBounds" };
 
 function state(slot: StateSlot): StorageAccess {
   return { space: "state", slot };
@@ -78,6 +79,18 @@ test("memory ops expose address/value inputs and memory storage access", () => {
   });
   strictEqual(opMutates({ kind: "memory.read", address, width: 32 }), false);
   strictEqual(opMutates({ kind: "memory.write", address, value, width: 32 }), true);
+});
+
+test("memory.check observes memory bounds and produces a boolean predicate", () => {
+  const address = 5;
+
+  deepStrictEqual(opAccess({ kind: "memory.check", address, byteLength: 4, access: "read" }), {
+    valueInputs: [address],
+    valueOutput: { type: "i32", bounds: fitsUnsigned(1) },
+    reads: [memoryBounds],
+    writes: []
+  });
+  strictEqual(opMutates({ kind: "memory.check", address, byteLength: 4, access: "write" }), false);
 });
 
 test("cpu.resolveFlag exposes lazy flag channel reads and a boolean output", () => {

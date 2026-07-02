@@ -62,7 +62,7 @@ function validateBody(
           bodyCompletes(action.faultBody),
           `${path}.guardMemory[${index}].faultBody does not complete`
         );
-        assertGuardFaultBodyExits(action.faultBody, `${path}.guardMemory[${index}].faultBody`);
+        assertGuardFaultBodyExits(action.faultBody, action.byteLength, `${path}.guardMemory[${index}].faultBody`);
         break;
       case "if":
         validateBody(block, action.thenBody, prefixBeforeAction(), `${path}.if[${index}].thenBody`);
@@ -84,12 +84,16 @@ function validateBody(
   }
 }
 
-function assertGuardFaultBodyExits(body: Body, path: string): void {
+function assertGuardFaultBodyExits(body: Body, byteLength: number, path: string): void {
   const final = bodyFinal(body);
 
   assert(
     final?.kind === "finish" && final.finish.kind === "exit",
     `${path} must terminate with exit`
+  );
+  assert(
+    final.finish.detail === byteLength,
+    `${path} exit detail must match guard byte length`
   );
 }
 
@@ -118,6 +122,12 @@ function validateFinishValues(block: IrBlock, finish: Finish): void {
     case "exit":
       if (finish.payload !== undefined) {
         block.values.node(finish.payload);
+      }
+      if (finish.detail !== undefined) {
+        assert(
+          Number.isInteger(finish.detail) && finish.detail >= 0 && finish.detail <= 0xffff,
+          `exit detail out of range: ${finish.detail}`
+        );
       }
       return;
   }

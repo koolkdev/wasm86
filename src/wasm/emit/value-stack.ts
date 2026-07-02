@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import type { OpAction } from "#ir/actions.js";
-import type { CpuResolveFlagOp, MemoryReadOp } from "#ir/ops.js";
+import type { CpuResolveFlagOp, MemoryCheckOp, MemoryReadOp } from "#ir/ops.js";
 import type { Body } from "#ir/block.js";
 import { isDynamicSlot, type StateSlot } from "#ir/slots.js";
 import type {
@@ -56,6 +56,8 @@ export type ValueStackContext = Readonly<{
   loadSlot(slot: StateSlot, signed: boolean, operands: OperandUses): void;
   // Loads guest memory at the address already on the stack.
   loadGuest(width: OperandWidth, signed: boolean): void;
+  // Checks guest memory bounds for an address already on the stack.
+  checkGuest(byteLength: number): void;
   helpers?: WasmHelperRegistry | undefined;
 }>;
 
@@ -305,6 +307,13 @@ export function createValueStack(context: ValueStackContext): ValueStack {
           captureMemoryRead({ output, op: action.op });
           return;
         }
+        case "memory.check": {
+          const output = action.output;
+
+          assert(output !== undefined, "memory.check op action is missing its output");
+          captureMemoryCheck({ output, op: action.op });
+          return;
+        }
         case "cpu.resolveFlag": {
           const output = action.output;
 
@@ -361,6 +370,13 @@ export function createValueStack(context: ValueStackContext): ValueStack {
     });
   }
 
+  function captureMemoryCheck(action: MemoryCheckProducer): void {
+    captureAtProducer(action.output, () => {
+      emitUse(action.op.address);
+      context.checkGuest(action.op.byteLength);
+    });
+  }
+
   function captureResolveFlag(action: ResolveFlagProducer): void {
     const helper = { kind: "lazyFlag", flag: action.op.flag } as const;
     const displayName = helperFunctionName(helper);
@@ -385,6 +401,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
 
 type StateRead = Readonly<{ output: ValueId; slot: StateSlot; signed: boolean }>;
 type MemoryReadProducer = Readonly<{ output: ValueId; op: MemoryReadOp }>;
+type MemoryCheckProducer = Readonly<{ output: ValueId; op: MemoryCheckOp }>;
 type ResolveFlagProducer = Readonly<{ output: ValueId; op: CpuResolveFlagOp }>;
 
 // All scratch-local bookkeeping in one place: which local replays a value,

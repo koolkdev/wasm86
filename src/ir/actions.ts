@@ -21,9 +21,12 @@ export type GuardMemoryAction = Readonly<{
   faultBody: Body;
 }>;
 
+export type BranchHint = "unlikely" | "likely";
+
 export type IfAction = Readonly<{
   kind: "if";
   condition: ValueId;
+  hint?: BranchHint;
   thenBody: Body;
   elseBody?: Body;
 }>;
@@ -37,6 +40,7 @@ export type Finish =
       kind: "exit";
       reason: ActionExitReason;
       payload?: ValueId;
+      detail?: number;
     }>;
 
 export type FinishAction = Readonly<{

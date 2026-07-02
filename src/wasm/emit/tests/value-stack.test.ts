@@ -46,7 +46,8 @@ function createTestEmitter(
     helpers,
     // Stand-ins for the state and guest access layers: plain loads.
     loadSlot: () => body.i32Const(0).i32Load({ align: 2, offset: 0, memoryIndex: 0 }),
-    loadGuest: () => body.i32Load({ align: 2, offset: 0, memoryIndex: 1 })
+    loadGuest: () => body.i32Load({ align: 2, offset: 0, memoryIndex: 1 }),
+    checkGuest: () => body.drop().i32Const(0)
   });
 
   return { body, scratch, valueStack };

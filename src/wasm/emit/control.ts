@@ -18,8 +18,7 @@ export type ControlFrameContext = Readonly<{
 }>;
 
 export type ControlFrame = Readonly<{
-  // faultByteLength is the transitional guard detail encoded on fault exits.
-  emitReport(exit: ExitFinish, faultByteLength?: number): void;
+  emitReport(exit: ExitFinish): void;
   // Applies the embedding's dispatch target for dispatch.targetEip.
   emitDispatch(dispatch: DispatchFinish): void;
   // Applies the embedding to a natural action-body fallthrough.
@@ -110,16 +109,17 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     }
   }
 
-  function emitReport(exit: ExitFinish, faultByteLength = 0): void {
+  function emitReport(exit: ExitFinish): void {
     const reason = exitReasonCode(exit.reason);
+    const detail = exit.detail ?? 0;
 
     if (exit.payload === undefined) {
-      body.i64Const(encodeExit(reason, 0, faultByteLength)).returnFromFunction();
+      body.i64Const(encodeExit(reason, 0, detail)).returnFromFunction();
       return;
     }
 
     context.emitPayload(exit.payload);
-    body.i64ExtendI32U().i64Const(encodeExit(reason, 0, faultByteLength)).i64Or().returnFromFunction();
+    body.i64ExtendI32U().i64Const(encodeExit(reason, 0, detail)).i64Or().returnFromFunction();
   }
 
   return {

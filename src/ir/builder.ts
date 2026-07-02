@@ -326,13 +326,18 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     assert(!this.#wroteMemory, "a memory guard cannot follow a memory write in the same instruction");
 
     const addressId = address;
+    const fault = this.#values.addActionOutput(fitsUnsigned(1));
 
     this.#actions.push({
-      kind: "guardMemory",
-      address: addressId,
-      byteLength,
-      access,
-      faultBody: this.#faultBody(access === "read" ? "memoryReadFault" : "memoryWriteFault", addressId)
+      kind: "op",
+      output: fault,
+      op: { kind: "memory.check", address: addressId, byteLength, access }
+    });
+    this.#actions.push({
+      kind: "if",
+      condition: fault,
+      hint: "unlikely",
+      thenBody: this.#faultBody(access === "read" ? "memoryReadFault" : "memoryWriteFault", addressId, byteLength)
     });
   }
 
@@ -476,9 +481,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   // Fault bodies restore the instruction-start state captured by
   // beginInstruction, including the faulting instruction's eip.
-  #faultBody(reason: "memoryReadFault" | "memoryWriteFault", address: ValueId): Body {
+  #faultBody(reason: "memoryReadFault" | "memoryWriteFault", address: ValueId, byteLength: number): Body {
     return this.#terminatingBody(
-      { kind: "exit", reason, payload: address },
+      { kind: "exit", reason, payload: address, detail: byteLength },
       this.#pending.flushesForPath("fault")
     );
   }

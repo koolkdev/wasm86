@@ -1,7 +1,15 @@
 import type { Action, OpAction } from "#ir/actions.js";
-import type { CpuResolveFlagOp, MemoryReadOp, MemoryWriteOp, StateReadOp, StateWriteOp } from "#ir/ops.js";
+import type {
+  CpuResolveFlagOp,
+  MemoryCheckOp,
+  MemoryReadOp,
+  MemoryWriteOp,
+  StateReadOp,
+  StateWriteOp
+} from "#ir/ops.js";
 import type { StateSlot } from "#ir/slots.js";
 import type { ValueId } from "#ir/values.js";
+import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type { X86StatusFlag } from "#x86/flags.js";
 import type { OperandWidth } from "#x86/types.js";
 
@@ -29,10 +37,18 @@ export type MemoryWriteFact = Readonly<{
   width: OperandWidth;
 }>;
 
+export type MemoryCheckFact = Readonly<{
+  output: ValueId;
+  address: ValueId;
+  byteLength: number;
+  access: MemoryAccessKind;
+}>;
+
 export type StateReadAction = OpAction & Readonly<{ op: StateReadOp; output: ValueId }>;
 export type StateWriteAction = OpAction & Readonly<{ op: StateWriteOp }>;
 export type MemoryReadAction = OpAction & Readonly<{ op: MemoryReadOp; output: ValueId }>;
 export type MemoryWriteAction = OpAction & Readonly<{ op: MemoryWriteOp }>;
+export type MemoryCheckAction = OpAction & Readonly<{ op: MemoryCheckOp; output: ValueId }>;
 export type ResolveFlagAction = OpAction & Readonly<{ op: CpuResolveFlagOp; output: ValueId }>;
 
 export function stateRead(output: ValueId, slot: StateSlot): StateReadAction;
@@ -64,6 +80,15 @@ export function memoryWrite(address: ValueId, value: ValueId, width: OperandWidt
   return { kind: "op", op: { kind: "memory.write", address, value, width } };
 }
 
+export function memoryCheck(
+  output: ValueId,
+  address: ValueId,
+  byteLength: number,
+  access: MemoryAccessKind
+): MemoryCheckAction {
+  return { kind: "op", output, op: { kind: "memory.check", address, byteLength, access } };
+}
+
 export function resolveFlag(output: ValueId, flag: X86StatusFlag): ResolveFlagAction {
   return { kind: "op", output, op: { kind: "cpu.resolveFlag", flag } };
 }
@@ -82,6 +107,10 @@ export function isMemoryRead(action: Action): action is MemoryReadAction {
 
 export function isMemoryWrite(action: Action): action is MemoryWriteAction {
   return action.kind === "op" && action.op.kind === "memory.write";
+}
+
+export function isMemoryCheck(action: Action): action is MemoryCheckAction {
+  return action.kind === "op" && action.op.kind === "memory.check" && "output" in action && action.output !== undefined;
 }
 
 export function isResolveFlag(action: Action): action is ResolveFlagAction {
@@ -122,4 +151,17 @@ export function memoryWriteFact(action: OpAction): MemoryWriteFact | undefined {
   }
 
   return { address: action.op.address, value: action.op.value, width: action.op.width };
+}
+
+export function memoryCheckFact(action: OpAction): MemoryCheckFact | undefined {
+  if (action.op.kind !== "memory.check") {
+    return undefined;
+  }
+
+  return {
+    output: action.output!,
+    address: action.op.address,
+    byteLength: action.op.byteLength,
+    access: action.op.access
+  };
 }

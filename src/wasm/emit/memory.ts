@@ -20,13 +20,26 @@ export function emitGuardChecks(
   emitAddress: () => void,
   emitFaultBody: () => void
 ): void {
-  assert(byteLength <= wasmGuestMemoryMinByteLength, "guest access exceeds the minimum imported memory");
-
-  emitAddress();
-  emitGuestByteLength(body);
-  body.i32Const(byteLength).i32Sub().i32GtU().ifBlock(wasmBranchHint.unlikely);
+  emitMemoryCheck(body, byteLength, emitAddress);
+  body.ifBlock(wasmBranchHint.unlikely);
   emitFaultBody();
   body.endBlock();
+}
+
+export function emitMemoryCheck(
+  body: WasmFunctionBodyEncoder,
+  byteLength: number,
+  emitAddress: () => void
+): void {
+  emitAddress();
+  emitMemoryCheckFromStack(body, byteLength);
+}
+
+export function emitMemoryCheckFromStack(body: WasmFunctionBodyEncoder, byteLength: number): void {
+  assert(byteLength <= wasmGuestMemoryMinByteLength, "guest access exceeds the minimum imported memory");
+
+  emitGuestByteLength(body);
+  body.i32Const(byteLength).i32Sub().i32GtU();
 }
 
 export function emitGuestLoad(body: WasmFunctionBodyEncoder, width: OperandWidth, signed: boolean): void {

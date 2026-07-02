@@ -3,16 +3,17 @@ import {
   actionCompletes,
   bodyFinal,
   type Action,
+  type BranchHint,
   type GuardMemoryAction
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { wasmBranchHint, type WasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
-import { emitGuardChecks, emitGuestLoad, emitGuestStore } from "./memory.js";
+import { emitGuardChecks, emitGuestLoad, emitGuestStore, emitMemoryCheckFromStack } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";
 import { createValueStack } from "./value-stack.js";
 import { analyzeBlockValues, type BlockValueAnalysis } from "./values.js";
@@ -40,10 +41,6 @@ export type ActionFunctionContext = Readonly<{
   helpers?: WasmHelperRegistry | undefined;
   analysis?: BlockValueAnalysis | undefined;
   embedding: FunctionEmbedding;
-}>;
-
-type BodyEmitContext = Readonly<{
-  faultByteLength?: number;
 }>;
 
 // The function-shaped entry point: the block is the whole function body.
@@ -75,7 +72,8 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     externalLocals: context.externalLocals ?? new Map(),
     helpers: context.helpers,
     loadSlot: (slot, signed, operands) => emitSlotLoad(body, slot, signed, operands),
-    loadGuest: (width, signed) => emitGuestLoad(body, width, signed)
+    loadGuest: (width, signed) => emitGuestLoad(body, width, signed),
+    checkGuest: (byteLength) => emitMemoryCheckFromStack(body, byteLength)
   });
   const terminator = bodyFinal(block.body);
 
@@ -87,7 +85,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     constValue: (id) => block.values.constValue(id)
   });
 
-  function emitAction(action: Action, emitContext: BodyEmitContext): void {
+  function emitAction(action: Action): void {
     switch (action.kind) {
       case "op":
         emitOp(action);
@@ -98,14 +96,14 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "finish":
         switch (action.finish.kind) {
           case "exit":
-            frame.emitReport(action.finish, emitContext.faultByteLength);
+            frame.emitReport(action.finish);
             return;
           case "dispatch":
             frame.emitDispatch(action.finish);
             return;
         }
       case "if":
-        emitIf(action, emitContext);
+        emitIf(action);
         return;
     }
   }
@@ -114,6 +112,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     switch (action.op.kind) {
       case "state.read":
       case "memory.read":
+      case "memory.check":
       case "cpu.resolveFlag":
         valueStack.scheduledProducer(action);
         return;
@@ -135,13 +134,13 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         body,
         action.byteLength,
         () => valueStack.emitUse(action.address),
-        () => emitBody(action.faultBody, { faultByteLength: action.byteLength })
+        () => emitBody(action.faultBody)
       );
     });
   }
 
   // Both nested bodies' values are captured before any path leaves the parent.
-  function emitIf(action: Extract<Action, { kind: "if" }>, emitContext: BodyEmitContext): void {
+  function emitIf(action: Extract<Action, { kind: "if" }>): void {
     valueStack.captureForBody(action.thenBody);
 
     if (action.elseBody !== undefined) {
@@ -149,13 +148,13 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     }
 
     valueStack.emitUse(action.condition);
-    body.ifBlock();
+    body.ifBlock(wasmHint(action.hint));
     frame.withNestedControl(() => {
-      emitBody(action.thenBody, emitContext);
+      emitBody(action.thenBody);
 
       if (action.elseBody !== undefined) {
         body.elseBlock();
-        emitBody(action.elseBody, emitContext);
+        emitBody(action.elseBody);
       }
     });
     body.endBlock();
@@ -174,23 +173,34 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     }
   }
 
-  function emitBody(actionBody: Body, emitContext: BodyEmitContext = {}): void {
+  function emitBody(actionBody: Body): void {
     for (const action of actionBody.actions) {
-      emitAction(action, emitContext);
+      emitAction(action);
     }
   }
 
   for (const action of terminator === undefined ? block.body.actions : block.body.actions.slice(0, -1)) {
-    emitAction(action, {});
+    emitAction(action);
   }
 
   emitExportedOutputs();
 
   if (terminator !== undefined) {
-    emitAction(terminator, {});
+    emitAction(terminator);
   } else {
     frame.emitFallthrough();
   }
 
   valueStack.assertClear();
+}
+
+function wasmHint(hint: BranchHint | undefined): WasmBranchHint | undefined {
+  switch (hint) {
+    case undefined:
+      return undefined;
+    case "unlikely":
+      return wasmBranchHint.unlikely;
+    case "likely":
+      return wasmBranchHint.likely;
+  }
 }

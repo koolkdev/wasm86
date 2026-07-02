@@ -77,10 +77,7 @@ function actionHelper(action: OpAction): HelperCallKey | undefined {
   switch (action.op.kind) {
     case "cpu.resolveFlag":
       return { kind: "lazyFlag", flag: action.op.flag };
-    case "state.read":
-    case "state.write":
-    case "memory.read":
-    case "memory.write":
+    default:
       return undefined;
   }
 }
