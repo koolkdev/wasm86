@@ -1,4 +1,4 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { Action, EdgeFlushAction } from "#ir/actions.js";
@@ -8,6 +8,7 @@ import { lazyFlagsKindChannel } from "#ir/slots.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 import { isX86StatusFlag, x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import { assertOnlyLazyRecord } from "./lazy-flags.js";
+import { resolveFlag } from "./storage-op-helpers.js";
 
 type Harness = Readonly<{
   values: ValueTable;
@@ -42,6 +43,18 @@ function assertFullExplicitFlush(actions: readonly EdgeFlushAction[], values: Va
   strictEqual(actions.length, x86StatusFlags.length + 1);
 }
 
+function resolveOutput(actions: readonly Action[], flag: X86StatusFlag): ValueId | undefined {
+  const action = actions.find(
+    (action): action is Action & Readonly<{ kind: "op"; output: ValueId }> =>
+      action.kind === "op" &&
+      action.op.kind === "cpu.resolveFlag" &&
+      action.op.flag === flag &&
+      action.output !== undefined
+  );
+
+  return action?.output;
+}
+
 test("new status flags start with no dirty pending entries", () => {
   const { pending } = createHarness();
 
@@ -49,15 +62,14 @@ test("new status flags start with no dirty pending entries", () => {
   deepStrictEqual(pending.flushesForEdge("completed"), []);
 });
 
-test("input status flags read through helper calls", () => {
+test("input status flags read through scheduled resolve ops", () => {
   const { values, actions, flags } = createHarness();
   const first = flags.readFlag("ZF");
   const second = flags.readFlag("ZF");
 
-  notStrictEqual(first, second);
-  deepStrictEqual(actions, []);
-  deepStrictEqual(values.node(first), { kind: "helperCall", helper: { kind: "lazyFlag", flag: "ZF" } });
-  deepStrictEqual(values.node(second), { kind: "helperCall", helper: { kind: "lazyFlag", flag: "ZF" } });
+  strictEqual(first, second);
+  deepStrictEqual(actions, [resolveFlag(first, "ZF")]);
+  deepStrictEqual(values.node(first), { kind: "actionOutput" });
 });
 
 test("writing the current input status flag value is a no-op", () => {
@@ -167,7 +179,7 @@ test("condition falls back to live flag backings after a direct flag write", () 
   deepStrictEqual(actions, []);
 });
 
-test("mixed pending and input condition combines pending values with helper calls", () => {
+test("mixed pending and input condition combines pending values with resolve outputs", () => {
   const { values, actions, flags } = createHarness();
   const zf = values.const(1);
 
@@ -178,9 +190,9 @@ test("mixed pending and input condition combines pending values with helper call
 
   ok(node.kind === "binary", "expected BE condition to lower to CF | ZF");
   strictEqual(node.operator, "or");
-  deepStrictEqual(values.node(node.a), { kind: "helperCall", helper: { kind: "lazyFlag", flag: "CF" } });
+  deepStrictEqual(values.node(node.a), { kind: "actionOutput" });
+  strictEqual(resolveOutput(actions, "CF"), node.a);
   strictEqual(node.b, zf);
-  deepStrictEqual(actions, []);
 });
 
 test("fault edge preserves a clean sub source while direct flag writes update completed fallback values", () => {
@@ -267,7 +279,7 @@ test("writeFlag updates one status flag while preserving other pending values", 
   strictEqual(snapshotValues.find((entry) => entry.flag === "ZF")?.value, zf);
 });
 
-test("a direct flag write from input state flushes a full explicit image", () => {
+test("a direct flag write from input state flushes a full explicit image from resolve ops", () => {
   const { values, actions, pending, flags } = createHarness();
   const zf = values.const(1);
 
@@ -282,9 +294,13 @@ test("a direct flag write from input state flushes a full explicit image", () =>
     const value = flagFlushValue(completedFlushes, flag);
 
     ok(value !== undefined, `expected ${flag} to be flushed`);
-    deepStrictEqual(values.node(value), { kind: "helperCall", helper: { kind: "lazyFlag", flag } });
+    deepStrictEqual(values.node(value), { kind: "actionOutput" });
+    strictEqual(resolveOutput(actions, flag), value);
   }
-  deepStrictEqual(actions, []);
+  deepStrictEqual(
+    actions,
+    x86StatusFlags.map((flag) => resolveFlag(resolveOutput(actions, flag)!, flag))
+  );
 });
 
 function flagValue(flags: StatusFlags, flag: X86StatusFlag): ValueId {

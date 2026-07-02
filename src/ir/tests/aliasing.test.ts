@@ -7,6 +7,7 @@ import {
   flagChannel,
   gprChannel,
   lazyFlagsAChannel,
+  lazyFlagsBChannel,
   lazyFlagsKindChannel,
   segmentBaseChannel,
   segmentSelectorChannel
@@ -34,30 +35,44 @@ function dynamicSegmentSelector(index: number): StateSlot {
 
 test("effects derive from action kind and slot", () => {
   deepStrictEqual(effectsOf(stateRead(0, gprChannel("eax"))), {
-    reads: state(gprChannel("eax"))
+    reads: [state(gprChannel("eax"))],
+    writes: []
   });
   deepStrictEqual(effectsOf(stateWrite(flagChannel("ZF"), 0)), {
-    writes: state(flagChannel("ZF"))
+    reads: [],
+    writes: [state(flagChannel("ZF"))]
   });
   deepStrictEqual(effectsOf(stateWrite(dynamicGpr(3), 0)), {
-    writes: state(dynamicGpr(3))
+    reads: [],
+    writes: [state(dynamicGpr(3))]
   });
   deepStrictEqual(effectsOf(memoryRead(0, 1, 32)), {
-    reads: memory
+    reads: [memory],
+    writes: []
   });
   deepStrictEqual(effectsOf(memoryWrite(0, 1, 32)), {
-    writes: memory
+    reads: [],
+    writes: [memory]
+  });
+  deepStrictEqual(effectsOf({ kind: "op", output: 0, op: { kind: "cpu.resolveFlag", flag: "ZF" } }), {
+    reads: [
+      state(flagChannel("ZF")),
+      state(lazyFlagsKindChannel),
+      state(lazyFlagsAChannel),
+      state(lazyFlagsBChannel)
+    ],
+    writes: []
   });
 });
 
 test("guards, branches, exits, and dispatches touch no data", () => {
   deepStrictEqual(
     effectsOf({ kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 }),
-    {}
+    { reads: [], writes: [] }
   );
-  deepStrictEqual(effectsOf({ kind: "branch", condition: 0, taken: 1, notTaken: 2 }), {});
-  deepStrictEqual(effectsOf({ kind: "exit", reason: "unsupported" }), {});
-  deepStrictEqual(effectsOf({ kind: "dispatch", targetEip: 0 }), {});
+  deepStrictEqual(effectsOf({ kind: "branch", condition: 0, taken: 1, notTaken: 2 }), { reads: [], writes: [] });
+  deepStrictEqual(effectsOf({ kind: "exit", reason: "unsupported" }), { reads: [], writes: [] });
+  deepStrictEqual(effectsOf({ kind: "dispatch", targetEip: 0 }), { reads: [], writes: [] });
 });
 
 test("guest memory may-aliases guest memory and never state", () => {

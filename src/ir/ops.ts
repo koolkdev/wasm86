@@ -1,4 +1,11 @@
 import type { OperandWidth } from "#x86/types.js";
+import type { X86StatusFlag } from "#x86/flags.js";
+import {
+  flagChannel,
+  lazyFlagsAChannel,
+  lazyFlagsBChannel,
+  lazyFlagsKindChannel
+} from "./slots.js";
 import type { StateSlot } from "./slots.js";
 import {
   fitsUnsigned,
@@ -22,8 +29,9 @@ export type MemoryWriteOp = Readonly<{
   value: ValueId;
   width: OperandWidth;
 }>;
+export type CpuResolveFlagOp = Readonly<{ kind: "cpu.resolveFlag"; flag: X86StatusFlag }>;
 
-export type IrOp = StateReadOp | StateWriteOp | MemoryReadOp | MemoryWriteOp;
+export type IrOp = StateReadOp | StateWriteOp | MemoryReadOp | MemoryWriteOp | CpuResolveFlagOp;
 
 export type StorageAccess =
   | Readonly<{ space: "state"; slot: StateSlot }>
@@ -67,6 +75,18 @@ export function opAccess(op: IrOp): OpAccess {
         valueInputs: [op.address, op.value],
         reads: [],
         writes: [memoryAccess]
+      };
+    case "cpu.resolveFlag":
+      return {
+        valueInputs: [],
+        valueOutput: output(fitsUnsigned(1)),
+        reads: [
+          { space: "state", slot: flagChannel(op.flag) },
+          { space: "state", slot: lazyFlagsKindChannel },
+          { space: "state", slot: lazyFlagsAChannel },
+          { space: "state", slot: lazyFlagsBChannel }
+        ],
+        writes: []
       };
   }
 }

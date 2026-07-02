@@ -45,6 +45,7 @@ export class StatusFlags {
   readonly #pending: PendingState;
   readonly #sources: SimpleFlagSource<ValueId>[] = [];
   readonly #current = initialStatusFlagState();
+  readonly #inputFlags = new Map<X86StatusFlag, ValueId>();
   readonly #valueOps: ReturnType<typeof valueTableFlagOps>;
 
   constructor(values: ValueTable, pending: PendingState) {
@@ -148,16 +149,10 @@ export class StatusFlags {
       case "value":
         return backing.value === value;
       case "input":
-        return this.#isInputFlagValue(backing.flag, value);
+        return this.#inputFlags.get(backing.flag) === value;
       case "undef":
         return backing.policy === "zero" && value === this.#values.const(0);
     }
-  }
-
-  #isInputFlagValue(flag: X86StatusFlag, value: ValueId): boolean {
-    const node = this.#values.node(value);
-
-    return node.kind === "helperCall" && node.helper.kind === "lazyFlag" && node.helper.flag === flag;
   }
 
   #hasInputBackings(): boolean {
@@ -278,7 +273,16 @@ export class StatusFlags {
   }
 
   #readInputFlag(flag: X86StatusFlag): ValueId {
-    return this.#values.addHelperCall({ kind: "lazyFlag", flag });
+    const cached = this.#inputFlags.get(flag);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const resolved = this.#pending.resolveFlag(flag);
+
+    this.#inputFlags.set(flag, resolved);
+    return resolved;
   }
 
   #source(sourceId: FlagSourceId): SimpleFlagSource<ValueId> {

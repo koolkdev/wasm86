@@ -15,7 +15,6 @@ import type {
   CompareOperator,
   UnaryOperator
 } from "#x86/semantics/ops.js";
-import type { X86StatusFlag } from "#x86/flags.js";
 import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { ExternalValueId } from "./operands.js";
@@ -72,8 +71,6 @@ export type ExtendValueNode = Readonly<{
   width: OperandWidth;
   value: ValueId;
 }>;
-export type HelperCallKey = Readonly<{ kind: "lazyFlag"; flag: X86StatusFlag }>;
-export type HelperCallValueNode = Readonly<{ kind: "helperCall"; helper: HelperCallKey }>;
 
 export type ValueNode =
   | ConstValueNode
@@ -84,8 +81,7 @@ export type ValueNode =
   | CompareValueNode
   | SelectValueNode
   | TruncateValueNode
-  | ExtendValueNode
-  | HelperCallValueNode;
+  | ExtendValueNode;
 
 // What is provably known about a node's value: the smallest width it fits
 // unsigned (all higher bits zero) and the smallest width it equals its own
@@ -164,10 +160,6 @@ export class ValueTable {
 
     this.#widthBounds[id] = bounds ?? unboundedWidthBounds;
     return id;
-  }
-
-  addHelperCall(helper: HelperCallKey): ValueId {
-    return this.#add({ kind: "helperCall", helper }, []);
   }
 
   binary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId {
@@ -446,8 +438,6 @@ export class ValueTable {
       case "extend":
         assert(node.type === "i32", "width bounds requested for i64 extension value");
         return ValueTable.#extendWidthBounds(node, widthBoundsOf);
-      case "helperCall":
-        return ValueTable.#helperCallWidthBounds(node.helper);
     }
   }
 
@@ -524,13 +514,6 @@ export class ValueTable {
       : fitsUnsigned(Math.min(node.width, childBounds.unsignedBits));
   }
 
-  static #helperCallWidthBounds(helper: HelperCallKey): WidthBounds {
-    switch (helper.kind) {
-      case "lazyFlag":
-        return fitsUnsigned(1);
-    }
-  }
-
   static #constWidthBounds(value: number): WidthBounds {
     return {
       // Position of the highest set bit; negative values use the sign bit.
@@ -553,7 +536,6 @@ export class ValueTable {
       case "compare":
       case "select":
       case "truncate":
-      case "helperCall":
         return "i32";
     }
   }

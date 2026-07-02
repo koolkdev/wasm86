@@ -1,4 +1,3 @@
-import { assert } from "#common/assert.js";
 import { channelsOverlap, isDynamicSlot } from "./slots.js";
 import type { Action } from "./actions.js";
 import { opReads, opWrites, type StorageAccess } from "./ops.js";
@@ -14,16 +13,19 @@ import type { StateSlot } from "./slots.js";
 export type StorageEffect = StorageAccess;
 
 export type ActionEffects = Readonly<{
-  reads?: StorageEffect;
-  writes?: StorageEffect;
+  reads: readonly StorageEffect[];
+  writes: readonly StorageEffect[];
 }>;
 
-const noEffects: ActionEffects = {};
+const noEffects: ActionEffects = { reads: [], writes: [] };
 
 export function effectsOf(action: Action): ActionEffects {
   switch (action.kind) {
     case "op":
-      return actionEffectsFromAccess(opReads(action.op), opWrites(action.op));
+      return {
+        reads: opReads(action.op),
+        writes: opWrites(action.op)
+      };
     case "guardMemory":
       // A guard checks bounds; it touches no data.
       return noEffects;
@@ -32,18 +34,6 @@ export function effectsOf(action: Action): ActionEffects {
     case "dispatch":
       return noEffects;
   }
-}
-
-function actionEffectsFromAccess(
-  reads: readonly StorageAccess[],
-  writes: readonly StorageAccess[]
-): ActionEffects {
-  assert(reads.length <= 1 && writes.length <= 1, "action effects support at most one read and one write");
-
-  return {
-    ...(reads[0] === undefined ? {} : { reads: reads[0] }),
-    ...(writes[0] === undefined ? {} : { writes: writes[0] })
-  };
 }
 
 export function mayAlias(a: StorageEffect, b: StorageEffect): boolean {

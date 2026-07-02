@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import type { X86StatusFlag } from "#x86/flags.js";
 import type { Action, EdgeFlushAction } from "../actions.js";
 import {
   PendingCells
@@ -77,6 +78,10 @@ export class PendingState {
 
   readDynamicSegmentSelector(index: ValueId): ValueId {
     return this.#state.read({ kind: "segmentDynamic", index, field: "selector" }, fitsUnsigned(16));
+  }
+
+  resolveFlag(flag: X86StatusFlag): ValueId {
+    return this.#state.resolveFlag(flag);
   }
 
   writeDynamicGpr(slot: GprDynamicSlot, value: ValueId): void {

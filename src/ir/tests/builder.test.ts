@@ -49,8 +49,8 @@ import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js"
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import { defaultSegmentForBase, type EffectiveAddress } from "#x86/types.js";
 import { assertLazyRecord } from "./lazy-flags.js";
-import { isMemoryRead, isMemoryWrite, isStateRead, isStateWrite, memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import type { MemoryReadAction, MemoryWriteAction, StateReadAction, StateWriteAction } from "#ir/tests/storage-op-helpers.js";
+import { isMemoryRead, isMemoryWrite, isResolveFlag, isStateRead, isStateWrite, memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import type { MemoryReadAction, MemoryWriteAction, ResolveFlagAction, StateReadAction, StateWriteAction } from "#ir/tests/storage-op-helpers.js";
 
 function mem(
   address: Readonly<{
@@ -144,17 +144,27 @@ function flagWriteValue(block: IrBlock, flag: X86StatusFlag): ValueId {
   return writes[0]!.value;
 }
 
-function assertNegatedHelperFlag(values: IrBlock["values"], id: ValueId, flag: X86StatusFlag): void {
-  const node = values.node(id);
+function resolveFlagAction(block: IrBlock, flag: X86StatusFlag): ResolveFlagAction {
+  const action = entryActions(block).find(
+    (action): action is ResolveFlagAction => isResolveFlag(action) && action.op.flag === flag
+  );
 
-  ok(node.kind === "compare", `expected ${flag} helper to be compared against zero`);
-  strictEqual(node.operator, "eq");
-  assertHelperFlag(values, node.a, flag);
-  strictEqual(node.b, values.const(0));
+  ok(action !== undefined, `expected ${flag} resolve action`);
+  return action;
 }
 
-function assertHelperFlag(values: IrBlock["values"], id: ValueId, flag: X86StatusFlag): void {
-  deepStrictEqual(values.node(id), { kind: "helperCall", helper: { kind: "lazyFlag", flag } });
+function assertNegatedResolveFlag(block: IrBlock, id: ValueId, flag: X86StatusFlag): void {
+  const node = block.values.node(id);
+
+  ok(node.kind === "compare", `expected ${flag} resolve output to be compared against zero`);
+  strictEqual(node.operator, "eq");
+  assertResolveFlag(block, node.a, flag);
+  strictEqual(node.b, block.values.const(0));
+}
+
+function assertResolveFlag(block: IrBlock, id: ValueId, flag: X86StatusFlag): void {
+  strictEqual(resolveFlagAction(block, flag).output, id);
+  deepStrictEqual(block.values.node(id), { kind: "actionOutput" });
 }
 
 test("mov r32, imm32 flushes the register write and dispatches at the next eip", () => {
@@ -286,7 +296,7 @@ test("two adds in one block flush one lazy add record, second instruction wins",
   assertLazyRecord(writes, v, { kind: "ADD", width: 32, left: sum1, right: v.const(7) });
 });
 
-test("inc flushes a full explicit image with CF preserved through a helper call", () => {
+test("inc flushes a full explicit image with CF preserved through a resolve op", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(unaryAluSemantic("inc", 32), [regBinding("eax")], loc(0x1000, 0x1001));
@@ -298,7 +308,7 @@ test("inc flushes a full explicit image with CF preserved through a helper call"
     false
   );
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
-  assertHelperFlag(block.values, flagWriteValue(block, "CF"), "CF");
+  assertResolveFlag(block, flagWriteValue(block, "CF"), "CF");
   strictEqual(stateWrites(block).find((write) => write.op.slot === lazyFlagsKindChannel)?.op.value, block.values.const(0));
 });
 
@@ -338,7 +348,7 @@ const directZfTemplate: SemanticTemplate = (s) => {
   s.writeFlag("ZF", s.const32(1));
 };
 
-test("writeFlag flushes a full explicit image with omitted flags preserved through helper calls", () => {
+test("writeFlag flushes a full explicit image with omitted flags preserved through resolve ops", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(directZfTemplate, [], loc(0x1000, 0x1002));
@@ -349,7 +359,7 @@ test("writeFlag flushes a full explicit image with omitted flags preserved throu
   strictEqual(flagWriteValue(block, "ZF"), block.values.const(1));
 
   for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
-    assertHelperFlag(block.values, flagWriteValue(block, flag), flag);
+    assertResolveFlag(block, flagWriteValue(block, flag), flag);
   }
   strictEqual(
     entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
@@ -1023,7 +1033,7 @@ test("setcc after a logic flag source uses the source-derived condition", () => 
   );
 });
 
-test("setcc with no pending flag value builds from helper calls", () => {
+test("setcc with no pending flag value builds from resolve ops", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(setccSemantic("A"), [regBinding("al")], loc(0x1000, 0x1003));
@@ -1050,8 +1060,8 @@ test("setcc with no pending flag value builds from helper calls", () => {
 
   ok(condition.kind === "binary", "expected A condition to lower to !CF && !ZF");
   strictEqual(condition.operator, "and");
-  assertNegatedHelperFlag(v, condition.a, "CF");
-  assertNegatedHelperFlag(v, condition.b, "ZF");
+  assertNegatedResolveFlag(block, condition.a, "CF");
+  assertNegatedResolveFlag(block, condition.b, "ZF");
 });
 
 test("setcc after an intervening add uses the latest source-expanded flag expression", () => {

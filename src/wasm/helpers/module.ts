@@ -1,5 +1,6 @@
+import type { Action, OpAction } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
-import type { HelperCallKey } from "#ir/values.js";
+import { opMutates } from "#ir/ops.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#wasm/encoder/types.js";
@@ -7,6 +8,7 @@ import type { BlockValueAnalysis } from "#wasm/emit/values.js";
 import {
   defineLazyFlagHelpers,
   lazyFlagHelperName,
+  type HelperCallKey,
   type LazyFlagHelper
 } from "./lazy-flags.js";
 import { HelperRegistry } from "./registry.js";
@@ -34,19 +36,58 @@ export function helperCallsForBlock(
 ): readonly HelperCallKey[] {
   const helperCalls = new Map<string, HelperCallKey>();
 
-  for (let id = 0; id < block.values.size(); id += 1) {
-    if (analysis.useCount(id) === 0) {
+  for (const region of block.regions) {
+    if (region.kind !== "entry") {
       continue;
     }
 
-    const node = block.values.node(id);
+    for (const action of region.actions) {
+      const helper = liveActionHelper(action, analysis);
 
-    if (node.kind === "helperCall") {
-      helperCalls.set(helperFunctionName(node.helper), node.helper);
+      if (helper !== undefined) {
+        helperCalls.set(helperFunctionName(helper), helper);
+      }
     }
   }
 
   return [...helperCalls.values()];
+}
+
+function liveActionHelper(
+  action: Action,
+  analysis: BlockValueAnalysis
+): HelperCallKey | undefined {
+  if (action.kind !== "op") {
+    return undefined;
+  }
+
+  const helper = actionHelper(action);
+
+  if (helper === undefined) {
+    return undefined;
+  }
+
+  if (opMutates(action.op)) {
+    return helper;
+  }
+
+  const output = action.output;
+
+  return output !== undefined && analysis.useCount(output) > 0
+    ? helper
+    : undefined;
+}
+
+function actionHelper(action: OpAction): HelperCallKey | undefined {
+  switch (action.op.kind) {
+    case "cpu.resolveFlag":
+      return { kind: "lazyFlag", flag: action.op.flag };
+    case "state.read":
+    case "state.write":
+    case "memory.read":
+    case "memory.write":
+      return undefined;
+  }
 }
 
 export function defineRequiredHelpers(

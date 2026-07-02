@@ -1,4 +1,5 @@
 import type { Action } from "../actions.js";
+import type { X86StatusFlag } from "#x86/flags.js";
 import {
   type EipChannel,
   type FlagChannel,
@@ -7,7 +8,7 @@ import {
   type SegmentChannel,
   type StateSlot
 } from "../slots.js";
-import type { ValueId, ValueTable, WidthBounds } from "../values.js";
+import { fitsUnsigned, type ValueId, type ValueTable, type WidthBounds } from "../values.js";
 
 export type CachedStateInput = FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
 
@@ -51,6 +52,13 @@ export class PendingStateAccess {
 
   invalidateInput(slot: CachedStateInput): void {
     this.#inputReads.delete(slot);
+  }
+
+  resolveFlag(flag: X86StatusFlag): ValueId {
+    const output = this.#values.addActionOutput(fitsUnsigned(1));
+
+    this.#emit({ kind: "op", output, op: { kind: "cpu.resolveFlag", flag } });
+    return output;
   }
 
   write(slot: StateSlot, value: ValueId): void {

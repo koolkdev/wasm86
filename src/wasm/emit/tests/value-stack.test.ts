@@ -5,7 +5,7 @@ import type { ExternalValueId } from "#ir/operands.js";
 import { gprChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { EdgeRegion, EntryRegion } from "#ir/block.js";
-import { ValueTable } from "#ir/values.js";
+import { ValueTable, fitsUnsigned } from "#ir/values.js";
 import { createValueStack, type ValueStack } from "#wasm/emit/value-stack.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -15,8 +15,8 @@ import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { defineLazyFlagHelper } from "#wasm/helpers/lazy-flags.js";
 import { createWasmHelperRegistry } from "#wasm/helpers/module.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
-import { memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import type { MemoryReadAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
+import { memoryRead, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import type { MemoryReadAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
 
 function entryRegion(actions: readonly Action[]): EntryRegion {
   return { id: 0, kind: "entry", actions };
@@ -52,40 +52,71 @@ function createTestEmitter(
   return { body, scratch, valueStack };
 }
 
-test("helper calls lower to Wasm calls through the helper registry", () => {
+test("scheduled flag resolves lower to Wasm calls through the helper registry", () => {
   const values = new ValueTable();
-  const helper = values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });
+  const resolved = values.addActionOutput(fitsUnsigned(1));
+  const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
   const helpers = createWasmHelperRegistry(new WasmModuleEncoder());
   const helperIndex = defineLazyFlagHelper(helpers, "ZF");
   const { body, valueStack } = createTestEmitter(
     values,
     entryRegion([
-      stateWrite(gprChannel("eax"), helper)
+      resolveAction,
+      stateWrite(gprChannel("eax"), resolved)
     ]),
     [],
     helpers
   );
 
   strictEqual(helperIndex, 0);
-  valueStack.emitUse(helper);
+  valueStack.scheduledProducer(resolveAction);
+  valueStack.emitUse(resolved);
   valueStack.assertClear();
 
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [wasmOpcode.call, wasmOpcode.end]);
+  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+    wasmOpcode.call,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
 });
 
-test("helper calls fail clearly when the helper is missing", () => {
+test("scheduled flag resolves fail clearly when the helper is missing", () => {
   const values = new ValueTable();
-  const helper = values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });
+  const resolved = values.addActionOutput(fitsUnsigned(1));
+  const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
   const { valueStack } = createTestEmitter(
     values,
     entryRegion([
-      stateWrite(gprChannel("eax"), helper)
+      resolveAction,
+      stateWrite(gprChannel("eax"), resolved)
     ]),
     [],
     createWasmHelperRegistry(new WasmModuleEncoder())
   );
 
-  throws(() => valueStack.emitUse(helper), /missing Wasm helper resolveZF/);
+  throws(() => valueStack.scheduledProducer(resolveAction), /missing Wasm helper resolveZF/);
+});
+
+test("dead scheduled flag resolves emit nothing and require no helper", () => {
+  const values = new ValueTable();
+  const resolved = values.addActionOutput(fitsUnsigned(1));
+  const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([resolveAction]),
+    [],
+    createWasmHelperRegistry(new WasmModuleEncoder())
+  );
+
+  valueStack.scheduledProducer(resolveAction);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  deepStrictEqual(wasmBodyOpcodes(encoded), [wasmOpcode.end]);
+  strictEqual(wasmBodyLocalCount(encoded), 0);
 });
 
 test("single-use values emit inline with no locals", () => {

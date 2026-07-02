@@ -6,7 +6,7 @@ import { encodeActionJitModule } from "#engines/jit/action-module.js";
 import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
 import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
-import { ValueTable } from "#ir/values.js";
+import { ValueTable, fitsUnsigned } from "#ir/values.js";
 import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
@@ -14,7 +14,7 @@ import { ExitReason } from "#wasm/exit.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
-import { isStateRead, isStateWrite, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { isStateRead, isStateWrite, resolveFlag, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 const startEip = 0x1000;
 
@@ -150,7 +150,7 @@ function isEaxWordSlot(slot: StateSlot): boolean {
 
 function syntheticBlock(withHelper: boolean): IrBlock {
   const values = new ValueTable();
-  const stored = withHelper ? values.addHelperCall({ kind: "lazyFlag", flag: "ZF" }) : values.const(7);
+  const stored = withHelper ? values.addActionOutput(fitsUnsigned(1)) : values.const(7);
 
   return {
     entry: 0,
@@ -159,6 +159,7 @@ function syntheticBlock(withHelper: boolean): IrBlock {
         id: 0,
         kind: "entry",
         actions: [
+          ...(withHelper ? [resolveFlag(stored, "ZF")] : []),
           stateWrite(gprChannel("eax"), stored),
           { kind: "exit", reason: "hostTrap" }
         ]

@@ -1,15 +1,15 @@
-import { deepStrictEqual, notStrictEqual } from "node:assert";
+import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { gprChannel } from "#ir/slots.js";
-import { ValueTable } from "#ir/values.js";
+import { ValueTable, fitsUnsigned } from "#ir/values.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
 import { helperCallsForBlock } from "#wasm/helpers/module.js";
-import { stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { resolveFlag, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
-test("helperCallsForBlock reports live helper calls", () => {
+test("helperCallsForBlock reports live scheduled flag resolves", () => {
   const values = new ValueTable();
-  const zf = values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });
+  const zf = values.addActionOutput(fitsUnsigned(1));
   const block = {
     entry: 0,
     regions: [
@@ -17,6 +17,7 @@ test("helperCallsForBlock reports live helper calls", () => {
         id: 0,
         kind: "entry",
         actions: [
+          resolveFlag(zf, "ZF"),
           stateWrite(gprChannel("eax"), zf)
         ]
       }
@@ -29,24 +30,41 @@ test("helperCallsForBlock reports live helper calls", () => {
   ]);
 });
 
-test("helperCallsForBlock omits dead helper calls", () => {
+test("helperCallsForBlock omits dead scheduled flag resolves", () => {
   const values = new ValueTable();
-
-  values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });
+  const zf = values.addActionOutput(fitsUnsigned(1));
 
   const block = {
     entry: 0,
-    regions: [{ id: 0, kind: "entry", actions: [] }],
+    regions: [{ id: 0, kind: "entry", actions: [resolveFlag(zf, "ZF")] }],
     values
   } as const;
 
   deepStrictEqual(helperCallsForBlock(block, analyzeBlockValues(block)), []);
 });
 
-test("helper calls are not deduplicated", () => {
+test("helperCallsForBlock deduplicates repeated scheduled flag resolves", () => {
   const values = new ValueTable();
-  const first = values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });
-  const second = values.addHelperCall({ kind: "lazyFlag", flag: "ZF" });
+  const first = values.addActionOutput(fitsUnsigned(1));
+  const second = values.addActionOutput(fitsUnsigned(1));
+  const block = {
+    entry: 0,
+    regions: [
+      {
+        id: 0,
+        kind: "entry",
+        actions: [
+          resolveFlag(first, "ZF"),
+          resolveFlag(second, "ZF"),
+          stateWrite(gprChannel("eax"), first),
+          stateWrite(gprChannel("ebx"), second)
+        ]
+      }
+    ],
+    values
+  } as const;
 
-  notStrictEqual(first, second);
+  deepStrictEqual(helperCallsForBlock(block, analyzeBlockValues(block)), [
+    { kind: "lazyFlag", flag: "ZF" }
+  ]);
 });

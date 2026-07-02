@@ -121,6 +121,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     switch (action.op.kind) {
       case "state.read":
       case "memory.read":
+      case "cpu.resolveFlag":
         valueStack.scheduledProducer(action);
         return;
       case "state.write":

@@ -1,7 +1,8 @@
 import type { Action, EdgeFlushAction, OpAction } from "#ir/actions.js";
-import type { MemoryReadOp, MemoryWriteOp, StateReadOp, StateWriteOp } from "#ir/ops.js";
+import type { CpuResolveFlagOp, MemoryReadOp, MemoryWriteOp, StateReadOp, StateWriteOp } from "#ir/ops.js";
 import type { StateSlot } from "#ir/slots.js";
 import type { ValueId } from "#ir/values.js";
+import type { X86StatusFlag } from "#x86/flags.js";
 import type { OperandWidth } from "#x86/types.js";
 
 export type StateReadFact = Readonly<{
@@ -32,6 +33,7 @@ export type StateReadAction = OpAction & Readonly<{ op: StateReadOp; output: Val
 export type StateWriteAction = OpAction & Readonly<{ op: StateWriteOp }>;
 export type MemoryReadAction = OpAction & Readonly<{ op: MemoryReadOp; output: ValueId }>;
 export type MemoryWriteAction = OpAction & Readonly<{ op: MemoryWriteOp }>;
+export type ResolveFlagAction = OpAction & Readonly<{ op: CpuResolveFlagOp; output: ValueId }>;
 
 export function stateRead(output: ValueId, slot: StateSlot): StateReadAction;
 export function stateRead(output: ValueId, slot: StateSlot, signed: true): StateReadAction;
@@ -62,6 +64,10 @@ export function memoryWrite(address: ValueId, value: ValueId, width: OperandWidt
   return { kind: "op", op: { kind: "memory.write", address, value, width } };
 }
 
+export function resolveFlag(output: ValueId, flag: X86StatusFlag): ResolveFlagAction {
+  return { kind: "op", output, op: { kind: "cpu.resolveFlag", flag } };
+}
+
 export function isStateRead(action: Action | EdgeFlushAction): action is StateReadAction {
   return action.kind === "op" && action.op.kind === "state.read" && "output" in action && action.output !== undefined;
 }
@@ -76,6 +82,10 @@ export function isMemoryRead(action: Action | EdgeFlushAction): action is Memory
 
 export function isMemoryWrite(action: Action | EdgeFlushAction): action is MemoryWriteAction {
   return action.kind === "op" && action.op.kind === "memory.write";
+}
+
+export function isResolveFlag(action: Action | EdgeFlushAction): action is ResolveFlagAction {
+  return action.kind === "op" && action.op.kind === "cpu.resolveFlag" && "output" in action && action.output !== undefined;
 }
 
 export function stateReadFact(action: OpAction): StateReadFact | undefined {

@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { IrBlock } from "#ir/block.js";
 import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
-import { ValueTable, type ValueId, type HelperCallKey } from "#ir/values.js";
+import { ValueTable, type ValueId } from "#ir/values.js";
 import { statusFlagValuesForSource } from "#x86/flag-values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
@@ -16,22 +16,19 @@ import { emitSlotLoad } from "#wasm/emit/state.js";
 import type { HelperRegistry } from "./registry.js";
 
 export type LazyFlagHelper = X86StatusFlag;
+export type HelperCallKey = Readonly<{ kind: "lazyFlag"; flag: X86StatusFlag }>;
 
 type ResolverCase = Readonly<{
   kindByte: number;
   emitValue: () => void;
 }>;
 
-export function lazyFlagHelperKey(flag: LazyFlagHelper): HelperCallKey {
-  return { kind: "lazyFlag", flag };
-}
-
 export function lazyFlagHelperName(flag: LazyFlagHelper): string {
   return `resolve${flag}`;
 }
 
 export function defineLazyFlagHelper(registry: HelperRegistry<HelperCallKey>, flag: LazyFlagHelper): number {
-  return registry.define(lazyFlagHelperKey(flag), () => encodeLazyFlagHelperBody(flag));
+  return registry.define({ kind: "lazyFlag", flag }, () => encodeLazyFlagHelperBody(flag));
 }
 
 export function defineLazyFlagHelpers(

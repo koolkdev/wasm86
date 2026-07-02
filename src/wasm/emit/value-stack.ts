@@ -1,14 +1,13 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import type { OpAction } from "#ir/actions.js";
-import type { MemoryReadOp } from "#ir/ops.js";
+import type { CpuResolveFlagOp, MemoryReadOp } from "#ir/ops.js";
 import type { EdgeRegion } from "#ir/block.js";
 import { isDynamicSlot, type StateSlot } from "#ir/slots.js";
 import type {
   BinaryValueNode,
   CompareValueNode,
   ExtendValueNode,
-  HelperCallValueNode,
   TruncateValueNode,
   SelectValueNode,
   UnaryValueNode,
@@ -80,8 +79,7 @@ type CompoundValueNode =
   | CompareValueNode
   | SelectValueNode
   | TruncateValueNode
-  | ExtendValueNode
-  | HelperCallValueNode;
+  | ExtendValueNode;
 
 export function createValueStack(context: ValueStackContext): ValueStack {
   const { body, values, analysis } = context;
@@ -172,13 +170,6 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         emitUse(node.value);
         emitExtend(body, node);
         return;
-      case "helperCall": {
-        const displayName = helperFunctionName(node.helper);
-
-        assert(context.helpers !== undefined, `missing Wasm helper ${displayName} in module registry`);
-        body.callFunction(context.helpers.requireFunctionIndex(node.helper, displayName));
-        return;
-      }
     }
   }
 
@@ -314,6 +305,13 @@ export function createValueStack(context: ValueStackContext): ValueStack {
           captureMemoryRead({ output, op: action.op });
           return;
         }
+        case "cpu.resolveFlag": {
+          const output = action.output;
+
+          assert(output !== undefined, "cpu.resolveFlag op action is missing its output");
+          captureResolveFlag({ output, op: action.op });
+          return;
+        }
         case "state.write":
         case "memory.write":
           assert(false, `${action.op.kind} op action does not produce an output`);
@@ -352,26 +350,42 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       return;
     }
 
-    context.loadSlot(read.slot, read.signed, operands);
-    registry.captureSet(read.output, uses, wasmTypeForValue(values.valueType(read.output)));
+    captureAtProducer(read.output, () => context.loadSlot(read.slot, read.signed, operands));
   }
 
   function captureMemoryRead(action: MemoryReadProducer): void {
-    const uses = analysis.useCount(action.output);
+    // Boring policy: every loaded value pins at its action point.
+    captureAtProducer(action.output, () => {
+      emitUse(action.op.address);
+      context.loadGuest(action.op.width, action.op.signed === true);
+    });
+  }
+
+  function captureResolveFlag(action: ResolveFlagProducer): void {
+    const helper = { kind: "lazyFlag", flag: action.op.flag } as const;
+    const displayName = helperFunctionName(helper);
+
+    captureAtProducer(action.output, () => {
+      assert(context.helpers !== undefined, `missing Wasm helper ${displayName} in module registry`);
+      body.callFunction(context.helpers.requireFunctionIndex(helper, displayName));
+    });
+  }
+
+  function captureAtProducer(output: ValueId, emitValue: () => void): void {
+    const uses = analysis.useCount(output);
 
     if (uses === 0) {
       return;
     }
 
-    // Boring policy: every loaded value pins at its action point.
-    emitUse(action.op.address);
-    context.loadGuest(action.op.width, action.op.signed === true);
-    registry.captureSet(action.output, uses, wasmTypeForValue(values.valueType(action.output)));
+    emitValue();
+    registry.captureSet(output, uses, wasmTypeForValue(values.valueType(output)));
   }
 }
 
 type StateRead = Readonly<{ output: ValueId; slot: StateSlot; signed: boolean }>;
 type MemoryReadProducer = Readonly<{ output: ValueId; op: MemoryReadOp }>;
+type ResolveFlagProducer = Readonly<{ output: ValueId; op: CpuResolveFlagOp }>;
 
 // All scratch-local bookkeeping in one place: which local replays a value,
 // how many uses remain, freeing at the last one — deferred while pins hold
