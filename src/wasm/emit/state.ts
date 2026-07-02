@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
-import type { GprDynamicSlot, SegmentDynamicSlot, StateSlot } from "#ir/slots.js";
+import type { GprDynamicSlot, SegmentDynamicSlot, StateChannel, StateSlot } from "#ir/slots.js";
 import type { ValueId } from "#ir/values.js";
+import type { OperandUses } from "./value-stack.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
@@ -18,15 +19,23 @@ import {
 // are masked to the register file. Dynamic segment indexes are produced by
 // prefix decode in segmentRegisters order.
 
+// A channel's offset is static: nothing to consume.
+export function emitSlotLoad(body: WasmFunctionBodyEncoder, channel: StateChannel, signed: boolean): void;
 export function emitSlotLoad(
   body: WasmFunctionBodyEncoder,
   slot: StateSlot,
   signed: boolean,
-  emitUse: (id: ValueId) => void
+  operands: OperandUses
+): void;
+export function emitSlotLoad(
+  body: WasmFunctionBodyEncoder,
+  slot: StateSlot,
+  signed: boolean,
+  operands?: OperandUses
 ): void {
   const immediate = slotImmediate(slot);
 
-  emitSlotAddress(body, slot, emitUse);
+  emitSlotAddress(body, slot, operands);
 
   switch (slotAccessByteLength(slot)) {
     case 1:
@@ -46,12 +55,12 @@ export function emitSlotStore(
   body: WasmFunctionBodyEncoder,
   slot: StateSlot,
   value: ValueId,
-  emitUse: (id: ValueId) => void
+  operands: OperandUses
 ): void {
   const immediate = slotImmediate(slot);
 
-  emitSlotAddress(body, slot, emitUse);
-  emitUse(value);
+  emitSlotAddress(body, slot, operands);
+  operands.emitUse(value);
 
   switch (slotAccessByteLength(slot)) {
     case 1:
@@ -66,13 +75,21 @@ export function emitSlotStore(
   }
 }
 
-function emitSlotAddress(body: WasmFunctionBodyEncoder, slot: StateSlot, emitUse: (id: ValueId) => void): void {
+// Each slot operand is consumed exactly once; repeated observation goes
+// through a borrow.
+function emitSlotAddress(
+  body: WasmFunctionBodyEncoder,
+  slot: StateSlot,
+  operands: OperandUses | undefined
+): void {
   switch (slot.kind) {
     case "gprDynamic":
-      emitDynamicGprOffset(body, slot, emitUse);
+      assert(operands, "dynamic slot lowering needs operand uses");
+      emitDynamicGprOffset(body, slot, operands);
       return;
     case "segmentDynamic":
-      emitDynamicSegmentOffset(body, slot, emitUse);
+      assert(operands, "dynamic slot lowering needs operand uses");
+      emitDynamicSegmentOffset(body, slot, operands);
       return;
     case "gpr":
     case "flag":
@@ -87,34 +104,39 @@ function emitSlotAddress(body: WasmFunctionBodyEncoder, slot: StateSlot, emitUse
 
 // Word access: (index & 7) * 4. Byte access follows the byte-register
 // encoding — word index & 3, plus one for the high byte (indices 4..7):
-// (index & 3) * 4 + (index >> 2 & 1).
+// (index & 3) * 4 + (index >> 2 & 1). The byte case reads the index twice,
+// so it borrows it.
 function emitDynamicGprOffset(
   body: WasmFunctionBodyEncoder,
   slot: GprDynamicSlot,
-  emitUse: (id: ValueId) => void
+  operands: OperandUses
 ): void {
   switch (slot.byteLength) {
     case 4:
     case 2:
-      emitUse(slot.index);
+      operands.emitUse(slot.index);
       body.i32Const(7).i32And().i32Const(2).i32Shl();
       return;
-    case 1:
-      emitUse(slot.index);
+    case 1: {
+      const index = operands.borrowUse(slot.index);
+
+      index.push();
       body.i32Const(3).i32And().i32Const(2).i32Shl();
-      emitUse(slot.index);
+      index.push();
       body.i32Const(2).i32ShrU().i32Const(1).i32And();
       body.i32Add();
+      index.release();
       return;
+    }
   }
 }
 
 function emitDynamicSegmentOffset(
   body: WasmFunctionBodyEncoder,
   slot: SegmentDynamicSlot,
-  emitUse: (id: ValueId) => void
+  operands: OperandUses
 ): void {
-  emitUse(slot.index);
+  operands.emitUse(slot.index);
   body.i32Const(slot.field === "selector" ? 1 : 2).i32Shl();
 }
 

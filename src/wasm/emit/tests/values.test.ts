@@ -348,7 +348,7 @@ test("a dynamic store pins a GPR read used later, never a flag read", () => {
   strictEqual(analysis.isPinned(flagRead), false);
 });
 
-test("a dynamic slot consumes its index once per address push", () => {
+test("a dynamic slot consumes its index once per access", () => {
   const values = new ValueTable();
   const index = values.external(0);
   const wordRead = values.addActionOutput();
@@ -359,8 +359,9 @@ test("a dynamic slot consumes its index once per address push", () => {
     { kind: "writeState", slot: { kind: "gprDynamic", index, byteLength: 1 }, value: stored }
   ]);
 
-  // One use for the word read, two for the byte store's split address.
-  strictEqual(analysis.useCount(index), 3);
+  // One use each for the word read and the byte store — the byte lowering's
+  // repeated observation is a borrow, not a second counted use.
+  strictEqual(analysis.useCount(index), 2);
   strictEqual(analysis.lastUse(index), 2);
 });
 

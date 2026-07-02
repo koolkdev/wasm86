@@ -265,18 +265,11 @@ function actionOperands(action: Action): readonly ValueId[] {
   }
 }
 
-// One index use per address push, matching the state layer's lowering: byte
-// access pushes the index twice (word term and high-byte term).
+// Each semantic dependency exactly once, however often the lowering reads
+// it.
 function slotOperands(slot: StateSlot): readonly ValueId[] {
   switch (slot.kind) {
     case "gprDynamic":
-      switch (slot.byteLength) {
-        case 1:
-          return [slot.index, slot.index];
-        case 2:
-        case 4:
-          return [slot.index];
-      }
     case "segmentDynamic":
       return [slot.index];
     case "gpr":

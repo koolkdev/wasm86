@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { IrBlock } from "#ir/block.js";
-import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type LazyFlagsChannel } from "#ir/slots.js";
+import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { ValueTable, type ValueId, type HelperCallKey } from "#ir/values.js";
 import { statusFlagValuesForSource } from "#x86/flag-values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
@@ -52,7 +52,7 @@ function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncod
   const scratch = new WasmLocalScratchAllocator(body);
   const kindLocal = body.addLocal(wasmValueType.i32);
 
-  emitLazyFieldLoad(body, helper, lazyFlagsKindChannel);
+  emitSlotLoad(body, lazyFlagsKindChannel, false);
   body.localSet(kindLocal);
 
   const cases = resolverCases(body, scratch, helper);
@@ -84,9 +84,7 @@ function resolverCases(
     {
       kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
       emitValue: () => {
-        emitSlotLoad(body, flagChannel(helper), false, (id) => {
-          assert(false, `${lazyFlagHelperName(helper)} unexpectedly needed value operand ${id}`);
-        });
+        emitSlotLoad(body, flagChannel(helper), false);
       }
     },
     ...([8, 16, 32] as const).flatMap((width) => [
@@ -161,15 +159,6 @@ function emitLogicFlag(
   });
 }
 
-function emitLazyFieldLoad(
-  body: WasmFunctionBodyEncoder,
-  helper: LazyFlagHelper,
-  channel: LazyFlagsChannel
-): void {
-  emitSlotLoad(body, channel, false, (id: ValueId) => {
-    assert(false, `${lazyFlagHelperName(helper)} unexpectedly needed value operand ${id}`);
-  });
-}
 
 function binaryFlagFragment(
   flag: LazyFlagHelper,

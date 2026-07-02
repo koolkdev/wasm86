@@ -175,9 +175,12 @@ test("a computed index extracts the registers from a modrm-style external", asyn
   strictEqual(readRegister(stateView, "edx"), 0xfeedface);
 });
 
-test("a computed index drives byte access through its two address pushes", async () => {
+test("a computed index drives byte access on both the read and the write path", async () => {
   const values = new ValueTable();
-  const reg = modrmRegField(values, values.external(0));
+  const modrm = values.external(0);
+  const reg = modrmRegField(values, modrm);
+  const rm = values.binary("and", modrm, values.const(7));
+  const loaded = values.addActionOutput();
   const block: IrBlock = {
     entry: 0,
     regions: [
@@ -185,7 +188,8 @@ test("a computed index drives byte access through its two address pushes", async
         id: 0,
         kind: "entry",
         actions: [
-          { kind: "writeState", slot: { kind: "gprDynamic", index: reg, byteLength: 1 }, value: values.const(0x7f) }
+          { kind: "readState", output: loaded, slot: { kind: "gprDynamic", index: reg, byteLength: 1 } },
+          { kind: "writeState", slot: { kind: "gprDynamic", index: rm, byteLength: 1 }, value: loaded }
         ]
       }
     ],
@@ -194,9 +198,12 @@ test("a computed index drives byte access through its two address pushes", async
 
   const { stateView, run } = await instantiateIrBlock(block, 1);
 
-  writeWasmCpuStateSnapshot(stateView, { eax: 0x11110011 });
-  assertCompleted(run(4 << 3)); // reg field = ah
-  strictEqual(readRegister(stateView, "eax"), 0x11117f11);
+  // mov rm8, reg8 with modrm 0xe5: reg = ah, rm = ch — both high bytes, so
+  // both borrowed indices exercise the +1 term.
+  writeWasmCpuStateSnapshot(stateView, { eax: 0x1111ab11, ecx: 0x22222222 });
+  assertCompleted(run(0xe5));
+  strictEqual(readRegister(stateView, "ecx"), 0x2222ab22);
+  strictEqual(readRegister(stateView, "eax"), 0x1111ab11);
 });
 
 test("a 16-bit dynamic access touches two bytes of the indexed word", async () => {

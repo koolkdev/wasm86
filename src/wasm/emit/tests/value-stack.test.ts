@@ -727,3 +727,213 @@ test("unconsumed captures fail assertClear and hold their scratch local", () => 
   throws(() => valueStack.assertClear(), /captured values with unconsumed uses/);
   throws(() => scratch.assertClear(), /scratch locals still in use/);
 });
+
+test("a borrowed compound computes once and replays from a pinned local", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const five = values.const(5);
+  const sum = values.binary("add", read, five);
+  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      readAction,
+      { kind: "writeState", slot: gprChannel("ebx"), value: sum }
+    ])
+  );
+
+  valueStack.readState(readAction);
+
+  const borrow = valueStack.borrowUse(sum);
+
+  borrow.push();
+  borrow.push();
+  borrow.release();
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  // The first push tees the computed value into a local held only by the
+  // borrow's pin; the second peeks it.
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Add,
+    wasmOpcode.localTee,
+    wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
+});
+
+test("a borrowed leaf re-emits per push without scratch locals", () => {
+  const values = new ValueTable();
+  const external = values.external(3);
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: external }
+    ]),
+    [3]
+  );
+
+  const borrow = valueStack.borrowUse(external);
+
+  borrow.push();
+  borrow.push();
+  borrow.release();
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
+  // Only the external's binding local — the borrow held no scratch.
+  strictEqual(wasmBodyLocalCount(encoded), 1);
+});
+
+test("a borrow leaves registry lifetimes intact for later counted uses", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const five = values.const(5);
+  const sum = values.binary("add", read, five);
+  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      readAction,
+      { kind: "writeState", slot: gprChannel("ebx"), value: sum },
+      { kind: "writeState", slot: gprChannel("ecx"), value: sum }
+    ])
+  );
+
+  valueStack.readState(readAction);
+
+  const borrow = valueStack.borrowUse(sum);
+
+  borrow.push();
+  borrow.push();
+  borrow.release();
+  valueStack.emitUse(sum);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  // The borrow's first push takes one counted use of the compound the
+  // registry teed for its remaining use; the second push peeks that same
+  // local under the pin, and the last use replays and frees it.
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Add,
+    wasmOpcode.localTee,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
+});
+
+test("a borrow holds a spent registry local until release", () => {
+  const values = new ValueTable();
+  const address = values.const(0x2000);
+  const loaded = values.addActionOutput();
+  const readAction: ReadMemoryAction = { kind: "readMemory", output: loaded, address, width: 32 };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      readAction,
+      { kind: "writeState", slot: gprChannel("eax"), value: loaded }
+    ])
+  );
+
+  valueStack.readMemory(readAction);
+
+  const borrow = valueStack.borrowUse(loaded);
+
+  borrow.push();
+  borrow.push();
+  borrow.release();
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  // The first push consumes the load's only counted use; the pin keeps its
+  // local alive for the second push and frees it at release.
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
+});
+
+test("a leaked borrow fails assertClear and holds its scratch local", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const five = values.const(5);
+  const sum = values.binary("add", read, five);
+  const readAction: ReadStateAction = { kind: "readState", output: read, slot: gprChannel("eax") };
+  const { scratch, valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      readAction,
+      { kind: "writeState", slot: gprChannel("ebx"), value: sum }
+    ])
+  );
+
+  valueStack.readState(readAction);
+
+  const borrow = valueStack.borrowUse(sum);
+
+  borrow.push();
+
+  throws(() => valueStack.assertClear(), /borrowed values never released/);
+  throws(() => scratch.assertClear(), /scratch locals still in use/);
+});
+
+test("a released borrow refuses further pushes and releases", () => {
+  const values = new ValueTable();
+  const external = values.external(0);
+  const { valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: external }
+    ]),
+    [0]
+  );
+  const borrow = valueStack.borrowUse(external);
+
+  borrow.push();
+  borrow.release();
+
+  throws(() => borrow.push(), /pushed after release/);
+  throws(() => borrow.release(), /released twice/);
+});
+
+test("a borrow must observe its value before release", () => {
+  const values = new ValueTable();
+  const external = values.external(0);
+  const { valueStack } = createTestEmitter(
+    values,
+    entryRegion([
+      { kind: "writeState", slot: gprChannel("eax"), value: external }
+    ]),
+    [0]
+  );
+  const borrow = valueStack.borrowUse(external);
+
+  throws(() => borrow.release(), /released without a push/);
+});

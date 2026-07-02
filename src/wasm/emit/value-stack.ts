@@ -24,8 +24,24 @@ import { edgeValues, type BlockValueAnalysis } from "./values.js";
 
 // Turns analysis + the value graph into stack code. emitUse pushes exactly
 // one use of a value; anything needed more than once is captured into a
-// refcounted scratch local and replayed until its last counted use. The
-// registry below is the only scratch-local mechanism in the emitter.
+// refcounted scratch local and replayed until its last counted use. A
+// lowering that observes one operand several times borrows it instead of
+// consuming extra uses. The registry below is the only scratch-local
+// mechanism in the emitter; borrows pin its locals rather than copy them.
+
+// A borrowed operand: the first push() takes its one counted use; later
+// pushes replay it for free until release().
+export type BorrowedUse = Readonly<{
+  push(): void;
+  release(): void;
+}>;
+
+// How lowerings consume operands: push each one exactly once (emitUse) or
+// borrow it for repeated observation (borrowUse).
+export type OperandUses = Readonly<{
+  emitUse(id: ValueId): void;
+  borrowUse(id: ValueId): BorrowedUse;
+}>;
 
 export type ValueStackContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -36,8 +52,8 @@ export type ValueStackContext = Readonly<{
   externalLocals: ReadonlyMap<ExternalValueId, number>;
   // Pushes the slot's current value; the driver wires this to the state
   // access layer — the value stack never sees offsets. A dynamic slot's
-  // index value is consumed through the given emitter.
-  loadSlot(slot: StateSlot, signed: boolean, emitUse: (id: ValueId) => void): void;
+  // index value is consumed through the given operand uses.
+  loadSlot(slot: StateSlot, signed: boolean, operands: OperandUses): void;
   // Loads guest memory at the address already on the stack.
   loadGuest(width: OperandWidth, signed: boolean): void;
   helpers?: WasmHelperRegistry | undefined;
@@ -50,6 +66,8 @@ export type ValueStack = Readonly<{
   readMemory(action: ReadMemoryAction): void;
   // Pushes one use of the value onto the stack.
   emitUse(id: ValueId): void;
+  // Borrows one counted use of the value for repeated observation.
+  borrowUse(id: ValueId): BorrowedUse;
   // Called before any branch into the edge: its body is emitted later but
   // executes here, so anything it consumes must be replayable from a local.
   captureForEdge(edge: EdgeRegion): void;
@@ -71,6 +89,9 @@ export function createValueStack(context: ValueStackContext): ValueStack {
   const registry = createLocalRegistry(body, context.scratch);
   // Unpinned readState outputs reload from their channel at every use.
   const reads = new Map<ValueId, ReadStateAction>();
+  // Open borrows per value; assertClear reports leaks.
+  const borrows = new Map<ValueId, number>();
+  const operands: OperandUses = { emitUse, borrowUse };
 
   function emitUse(id: ValueId): void {
     if (registry.replay(id)) {
@@ -94,7 +115,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         const read = reads.get(id);
 
         assert(read !== undefined, `action output ${id} has no readState source`);
-        context.loadSlot(read.slot, read.signed === true, emitUse);
+        context.loadSlot(read.slot, read.signed === true, operands);
         return;
       }
       default: {
@@ -208,6 +229,75 @@ export function createValueStack(context: ValueStackContext): ValueStack {
     }
   }
 
+  function borrowUse(id: ValueId): BorrowedUse {
+    const node = values.node(id);
+
+    // Consts and externals re-emit freely; the borrow holds nothing.
+    if (node.kind === "const" || node.kind === "external") {
+      const reemit = () => emitUse(id);
+
+      return createBorrow(id, { first: reemit, repeat: reemit });
+    }
+
+    // Everything else consumes its counted use at the first push and pins
+    // the registry local it lands in until release.
+    return createBorrow(id, {
+      first: () => emitPinnedUse(id),
+      repeat: () => registry.peek(id),
+      close: () => registry.unpin(id)
+    });
+  }
+
+  // Tracks the borrow and enforces the push/release order; the policy says
+  // what to emit.
+  function createBorrow(
+    id: ValueId,
+    policy: Readonly<{ first(): void; repeat(): void; close?(): void }>
+  ): BorrowedUse {
+    let pushed = false;
+    let released = false;
+
+    borrows.set(id, (borrows.get(id) ?? 0) + 1);
+
+    return {
+      push(): void {
+        assert(!released, `borrowed value ${id} pushed after release`);
+        pushed ? policy.repeat() : policy.first();
+        pushed = true;
+      },
+      release(): void {
+        assert(!released, `borrowed value ${id} released twice`);
+        assert(pushed, `borrowed value ${id} released without a push`);
+        released = true;
+
+        const remaining = borrows.get(id)! - 1;
+
+        remaining === 0 ? borrows.delete(id) : borrows.set(id, remaining);
+        policy.close?.();
+      }
+    };
+  }
+
+  // Emits one counted use of the value and pins its registry local.
+  function emitPinnedUse(id: ValueId): void {
+    // Pin first: the replay below may consume the last counted use.
+    if (registry.has(id)) {
+      registry.pin(id);
+      emitUse(id);
+      return;
+    }
+
+    // A multi-use value tees itself into the registry when computed; a
+    // single-use one is captured under the pin alone.
+    emitUse(id);
+
+    if (registry.has(id)) {
+      registry.pin(id);
+    } else {
+      registry.capturePinned(id, wasmTypeForValue(values.valueType(id)));
+    }
+  }
+
   return {
     readState(action: ReadStateAction): void {
       const uses = analysis.useCount(action.output);
@@ -217,15 +307,15 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       }
 
       // Dynamic slots follow the guest-load policy and pin at their action
-      // point, so the index is consumed exactly once per address push and
-      // may be any expression. Static channels reload at use unless a later
-      // overlapping store would corrupt the load.
+      // point: a reload at use would consume the index a second time.
+      // Static channels reload at use unless a later overlapping store
+      // would corrupt the load.
       if (!isDynamicSlot(action.slot) && !analysis.isPinned(action.output)) {
         reads.set(action.output, action);
         return;
       }
 
-      context.loadSlot(action.slot, action.signed === true, emitUse);
+      context.loadSlot(action.slot, action.signed === true, operands);
       registry.captureSet(action.output, uses, wasmTypeForValue(values.valueType(action.output)));
     },
     readMemory(action: ReadMemoryAction): void {
@@ -246,46 +336,79 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       }
     },
     emitUse,
-    assertClear: () => registry.assertClear()
+    borrowUse,
+    assertClear(): void {
+      assert(
+        borrows.size === 0,
+        `borrowed values never released: ${[...borrows.keys()].join(", ")}`
+      );
+      registry.assertClear();
+    }
   };
 }
 
 // All scratch-local bookkeeping in one place: which local replays a value,
-// how many uses remain, freeing at the last one. Captures take the value on
-// top of the stack, so the walk above never sees a local index and stays
-// policy-only.
+// how many uses remain, freeing at the last one — deferred while pins hold
+// the local for a borrow. Captures take the value on top of the stack, so
+// the walk above never sees a local index and stays policy-only.
 type LocalRegistry = Readonly<{
   // Pops the stack top into a fresh local.
   captureSet(id: ValueId, remainingUses: number, type: WasmValueType): void;
   // Copies the stack top into a fresh local, leaving it pushed as one use.
   captureTee(id: ValueId, remainingUses: number, type: WasmValueType): void;
+  // Copies the stack top into a fresh local held only by a pin.
+  capturePinned(id: ValueId, type: WasmValueType): void;
   replay(id: ValueId): boolean;
+  // Replays without consuming a counted use; only sound under a pin.
+  peek(id: ValueId): void;
+  // Pins keep an entry alive past its last counted use until unpinned.
+  pin(id: ValueId): void;
+  unpin(id: ValueId): void;
   has(id: ValueId): boolean;
   assertClear(): void;
 }>;
+
+type RegistryEntry = { local: number; remainingUses: number; pins: number };
 
 function createLocalRegistry(
   body: WasmFunctionBodyEncoder,
   scratch: WasmLocalScratchAllocator
 ): LocalRegistry {
-  const entries = new Map<ValueId, { local: number; remainingUses: number }>();
+  const entries = new Map<ValueId, RegistryEntry>();
 
-  function capture(id: ValueId, remainingUses: number, type: WasmValueType): number {
-    assert(remainingUses > 0, `cannot capture value ${id} without remaining uses`);
+  function capture(id: ValueId, remainingUses: number, pins: number, type: WasmValueType): number {
+    assert(remainingUses > 0 || pins > 0, `cannot capture value ${id} without uses or pins`);
     assert(!entries.has(id), `value ${id} is already captured`);
 
     const local = scratch.allocLocal(type);
 
-    entries.set(id, { local, remainingUses });
+    entries.set(id, { local, remainingUses, pins });
     return local;
+  }
+
+  function getEntry(id: ValueId): RegistryEntry {
+    const entry = entries.get(id);
+
+    assert(entry !== undefined, `value ${id} is not captured`);
+    return entry;
+  }
+
+  function maybeFree(id: ValueId, entry: RegistryEntry): void {
+    if (entry.remainingUses === 0 && entry.pins === 0) {
+      entries.delete(id);
+      scratch.freeLocal(entry.local);
+    }
   }
 
   return {
     captureSet(id: ValueId, remainingUses: number, type: WasmValueType): void {
-      body.localSet(capture(id, remainingUses, type));
+      body.localSet(capture(id, remainingUses, 0, type));
     },
     captureTee(id: ValueId, remainingUses: number, type: WasmValueType): void {
-      body.localTee(capture(id, remainingUses, type));
+      body.localTee(capture(id, remainingUses, 0, type));
+    },
+    capturePinned(id: ValueId, type: WasmValueType): void {
+      body.localTee(capture(id, 0, 1, type));
     },
     replay(id: ValueId): boolean {
       const entry = entries.get(id);
@@ -294,15 +417,24 @@ function createLocalRegistry(
         return false;
       }
 
+      assert(entry.remainingUses > 0, `no counted uses of value ${id} remain`);
       body.localGet(entry.local);
       entry.remainingUses -= 1;
-
-      if (entry.remainingUses === 0) {
-        entries.delete(id);
-        scratch.freeLocal(entry.local);
-      }
-
+      maybeFree(id, entry);
       return true;
+    },
+    peek(id: ValueId): void {
+      body.localGet(getEntry(id).local);
+    },
+    pin(id: ValueId): void {
+      getEntry(id).pins += 1;
+    },
+    unpin(id: ValueId): void {
+      const entry = getEntry(id);
+
+      assert(entry.pins > 0, `value ${id} is not pinned`);
+      entry.pins -= 1;
+      maybeFree(id, entry);
     },
     has: (id) => entries.has(id),
     assertClear(): void {

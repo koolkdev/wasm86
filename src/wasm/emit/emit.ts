@@ -80,7 +80,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     analysis,
     externalLocals: context.externalLocals ?? new Map(),
     helpers: context.helpers,
-    loadSlot: (slot, signed, emitUse) => emitSlotLoad(body, slot, signed, emitUse),
+    loadSlot: (slot, signed, operands) => emitSlotLoad(body, slot, signed, operands),
     loadGuest: (width, signed) => emitGuestLoad(body, width, signed)
   });
   // Per-edge report detail (the guard's byte length); branch edges record
@@ -106,7 +106,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         valueStack.readMemory(action);
         return;
       case "writeState":
-        emitSlotStore(body, action.slot, action.value, valueStack.emitUse);
+        emitSlotStore(body, action.slot, action.value, valueStack);
         return;
       case "writeMemory":
         valueStack.emitUse(action.address);
@@ -181,7 +181,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     assert(detail !== undefined, `edge region ${edge.id} was never targeted by the entry`);
 
     for (const flush of edge.flushes) {
-      emitSlotStore(body, flush.slot, flush.value, valueStack.emitUse);
+      emitSlotStore(body, flush.slot, flush.value, valueStack);
     }
 
     switch (edge.terminator.kind) {
