@@ -29,17 +29,12 @@ function dispatchFragment(targetEip: number): IrBlock {
   const target = values.const(targetEip);
 
   return {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          stateWrite(eipChannel, target),
-          { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
-        ]
-      }
-    ],
+    body: {
+      actions: [
+        stateWrite(eipChannel, target),
+        { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
+      ]
+    },
     values
   };
 }
@@ -52,24 +47,24 @@ function decodeReadFragment(k: number): DecodeReadFragment {
   const address = values.binary("add", eipValue, values.const(k));
   const fetched = values.addActionOutput(fitsUnsigned(8));
   const block: IrBlock = {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          stateRead(eipValue, eipChannel),
-          { kind: "guardMemory", address, byteLength: 1, access: "read", faultEdge: 1 },
-          memoryRead(fetched, address, 8)
-        ]
-      },
-      {
-        id: 1,
-        kind: "edge",
-        flushes: [stateWrite(eipChannel, eipValue)],
-        terminator: { kind: "exit", reason: "decodeFault" }
-      }
-    ],
+    body: {
+      actions: [
+        stateRead(eipValue, eipChannel),
+        {
+          kind: "guardMemory",
+          address,
+          byteLength: 1,
+          access: "read",
+          faultBody: {
+            actions: [
+              stateWrite(eipChannel, eipValue),
+              { kind: "finish", finish: { kind: "exit", reason: "decodeFault" } }
+            ]
+          }
+        },
+        memoryRead(fetched, address, 8)
+      ]
+    },
     values
   };
 
@@ -231,17 +226,12 @@ test("an exported register read pins across a later overlapping store", async ()
   const readValue = values.addActionOutput();
   const incremented = values.binary("add", readValue, values.const(1));
   const block: IrBlock = {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          stateRead(readValue, gprChannel("eax")),
-          stateWrite(gprChannel("eax"), incremented)
-        ]
-      }
-    ],
+    body: {
+      actions: [
+        stateRead(readValue, gprChannel("eax")),
+        stateWrite(gprChannel("eax"), incremented)
+      ]
+    },
     values
   };
   const body = new WasmFunctionBodyEncoder();

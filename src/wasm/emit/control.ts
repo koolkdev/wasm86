@@ -6,7 +6,7 @@ import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { encodeExit, ExitReason } from "#wasm/exit.js";
 import type { DispatchTarget, FallthroughTarget, LinkCompletion } from "./embed.js";
 
-// Report and completion lowering for edge bodies emitted inline by emit.ts.
+// Report and completion lowering for nested bodies emitted inline by emit.ts.
 
 export type ControlFrameContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -18,8 +18,8 @@ export type ControlFrameContext = Readonly<{
 }>;
 
 export type ControlFrame = Readonly<{
-  // Detail is the guard's byte length on fault edges.
-  emitReport(exit: ExitFinish, detail?: number): void;
+  // faultByteLength is the transitional guard detail encoded on fault exits.
+  emitReport(exit: ExitFinish, faultByteLength?: number): void;
   // Applies the embedding's dispatch target for dispatch.targetEip.
   emitDispatch(dispatch: DispatchFinish): void;
   // Applies the embedding to a natural action-body fallthrough.
@@ -35,7 +35,7 @@ type LinkedTarget = Readonly<
   | { kind: "table"; slot: number; typeIndex: number; tableIndex: number }
 >;
 
-// One frame per emission. Edge bodies are emitted at their action site
+// One frame per emission. Nested bodies are emitted at their action site
 // (guard if body, branch if/else arms), while this helper owns report and
 // completion lowering. A `br` completion inside an inline if must skip that
 // if before it can target the embedder's label.
@@ -110,16 +110,16 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     }
   }
 
-  function emitReport(exit: ExitFinish, detail = 0): void {
+  function emitReport(exit: ExitFinish, faultByteLength = 0): void {
     const reason = exitReasonCode(exit.reason);
 
     if (exit.payload === undefined) {
-      body.i64Const(encodeExit(reason, 0, detail)).returnFromFunction();
+      body.i64Const(encodeExit(reason, 0, faultByteLength)).returnFromFunction();
       return;
     }
 
     context.emitPayload(exit.payload);
-    body.i64ExtendI32U().i64Const(encodeExit(reason, 0, detail)).i64Or().returnFromFunction();
+    body.i64ExtendI32U().i64Const(encodeExit(reason, 0, faultByteLength)).i64Or().returnFromFunction();
   }
 
   return {

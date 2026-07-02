@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { buildIrBlock } from "#engines/jit/action-compiler.js";
@@ -141,10 +141,7 @@ function decodeBlock(bytes: readonly number[], eip = startEip): IsaDecodedBlock 
 }
 
 function entryActions(block: IrBlock): readonly Action[] {
-  const entry = block.regions.find((region) => region.id === block.entry);
-
-  ok(entry !== undefined && entry.kind === "entry", "expected the IR block entry region");
-  return entry.actions;
+  return block.body.actions;
 }
 
 function isEaxWordSlot(slot: StateSlot): boolean {
@@ -156,18 +153,13 @@ function syntheticBlock(withHelper: boolean): IrBlock {
   const stored = withHelper ? values.addActionOutput(fitsUnsigned(1)) : values.const(7);
 
   return {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          ...(withHelper ? [resolveFlag(stored, "ZF")] : []),
-          stateWrite(gprChannel("eax"), stored),
-          { kind: "finish", finish: { kind: "exit", reason: "hostTrap" } }
-        ]
-      }
-    ],
+    body: {
+      actions: [
+        ...(withHelper ? [resolveFlag(stored, "ZF")] : []),
+        stateWrite(gprChannel("eax"), stored),
+        { kind: "finish", finish: { kind: "exit", reason: "hostTrap" } }
+      ]
+    },
     values
   };
 }

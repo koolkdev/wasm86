@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import type { OpAction } from "#ir/actions.js";
 import type { CpuResolveFlagOp, MemoryReadOp } from "#ir/ops.js";
-import type { EdgeRegion } from "#ir/block.js";
+import type { Body } from "#ir/block.js";
 import { isDynamicSlot, type StateSlot } from "#ir/slots.js";
 import type {
   BinaryValueNode,
@@ -20,7 +20,7 @@ import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 import { helperFunctionName, type WasmHelperRegistry } from "#wasm/helpers/module.js";
-import { edgeValues, type BlockValueAnalysis } from "./values.js";
+import { bodyInputValues, type BlockValueAnalysis } from "./values.js";
 
 // Turns analysis + the value graph into stack code. emitUse pushes exactly
 // one use of a value; anything needed more than once is captured into a
@@ -66,9 +66,9 @@ export type ValueStack = Readonly<{
   emitUse(id: ValueId): void;
   // Borrows one counted use of the value for repeated observation.
   borrowUse(id: ValueId): BorrowedUse;
-  // Called before any branch into the edge: its body is emitted later but
+  // Called before entering a nested body: its actions are emitted later but
   // executes here, so anything it consumes must be replayable from a local.
-  captureForEdge(edge: EdgeRegion): void;
+  captureForBody(body: Body): void;
   // Every captured value fully consumed, every scratch local returned.
   assertClear(): void;
 }>;
@@ -210,7 +210,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         return;
       default: {
         // Not in the registry means nothing consumed it yet (the pending
-        // edge use keeps a consumed multi-use compound captured), so every
+        // nested-body use keeps a consumed multi-use compound captured, so every
         // counted use is still to come.
         emitCompute(node);
         registry.captureSet(id, analysis.useCount(id), wasmTypeForValue(values.valueType(id)));
@@ -318,8 +318,8 @@ export function createValueStack(context: ValueStackContext): ValueStack {
           return;
       }
     },
-    captureForEdge(edge: EdgeRegion): void {
-      for (const id of edgeValues(edge)) {
+    captureForBody(body: Body): void {
+      for (const id of bodyInputValues(body)) {
         captureValue(id);
       }
     },

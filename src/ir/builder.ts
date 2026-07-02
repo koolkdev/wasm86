@@ -50,10 +50,9 @@ import {
 } from "./slots.js";
 import type {
   Action,
-  EdgeFlushAction,
   Finish
 } from "./actions.js";
-import type { EdgeRegion, IrBlock, RegionId } from "./block.js";
+import type { Body, IrBlock } from "./block.js";
 import {
   ValueTable,
   fitsUnsigned,
@@ -111,8 +110,6 @@ export function externalInstructionLocation(
   };
 }
 
-const entryRegionId: RegionId = 0;
-
 function valueFromId(id: ValueId): Value {
   return id as Value;
 }
@@ -122,14 +119,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #actions: Action[] = [];
   readonly #pending = new PendingState(this.#values, (action) => this.#actions.push(action));
   readonly #statusFlags = new StatusFlags(this.#values, this.#pending);
-  readonly #edgeRegions: EdgeRegion[] = [];
   // An effective/linear address is computed once per operand, at its first
   // use, so later uses see the same address even if the instruction rewrites
   // a base register in between.
   readonly #operandAddresses = new Map<number, ValueId>();
   readonly #operandLinearAddresses = new Map<number, ValueId>();
   readonly #dynamicSegmentBases = new Map<ExternalValueId, ValueId>();
-  #nextRegionId: RegionId = entryRegionId + 1;
   #bindings: readonly OperandBinding[] = [];
   #instructionLocation: InstructionLocationValues | undefined;
   #instructionCountBase: ValueId | undefined;
@@ -137,7 +132,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #terminated = false;
   #wroteMemory = false;
   #finished = false;
-  // "terminated" means the entry region already holds its terminator.
+  // "terminated" means the root body already holds its terminator.
   #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
 
   addInstruction(
@@ -180,7 +175,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       case "fallthrough":
       case "jump":
         assert(this.#pending.has(eipChannel), "IR block did not advance eip; no instructions were added");
-        this.#actions.push(...this.#pending.flushesForEdge("completed"));
+        this.#actions.push(...this.#pending.flushesForPath("completed"));
         this.#actions.push({
           kind: "finish",
           finish: { kind: "dispatch", targetEip: this.#pending.read(eipChannel) }
@@ -191,15 +186,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     }
 
     return {
-      entry: entryRegionId,
-      regions: [
-        {
-          id: entryRegionId,
-          kind: "entry",
-          actions: this.#actions
-        },
-        ...this.#edgeRegions
-      ],
+      body: { actions: this.#actions },
       values: this.#values
     };
   }
@@ -334,7 +321,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void {
     this.#beforeOp("memoryGuard");
-    // Guest memory cannot be rolled back by any scheme, so a fault edge
+    // Guest memory cannot be rolled back by any scheme, so a fault body
     // cannot restore the pre-instruction state once the instruction stored.
     assert(!this.#wroteMemory, "a memory guard cannot follow a memory write in the same instruction");
 
@@ -345,7 +332,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       address: addressId,
       byteLength,
       access,
-      faultEdge: this.#faultEdge(access === "read" ? "memoryReadFault" : "memoryWriteFault", addressId)
+      faultBody: this.#faultBody(access === "read" ? "memoryReadFault" : "memoryWriteFault", addressId)
     });
   }
 
@@ -461,10 +448,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const conditionId = condition;
 
     this.#actions.push({
-      kind: "branch",
+      kind: "if",
       condition: conditionId,
-      taken: this.#branchEdge(taken),
-      notTaken: this.#branchEdge(notTaken)
+      thenBody: this.#branchBody(taken),
+      elseBody: this.#branchBody(notTaken)
     });
     this.#blockEnd = "terminated";
     this.#terminated = true;
@@ -478,7 +465,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const vectorId = vector;
 
     this.#pending.write(eipChannel, this.#location().nextEip());
-    this.#actions.push(...this.#pending.flushesForEdge("completed"));
+    this.#actions.push(...this.#pending.flushesForPath("completed"));
     this.#actions.push({
       kind: "finish",
       finish: { kind: "exit", reason: "hostTrap", payload: vectorId }
@@ -487,44 +474,38 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#terminated = true;
   }
 
-  // Fault edges restore the instruction-start state captured by
+  // Fault bodies restore the instruction-start state captured by
   // beginInstruction, including the faulting instruction's eip.
-  #faultEdge(reason: "memoryReadFault" | "memoryWriteFault", address: ValueId): RegionId {
-    return this.#edgeRegion(
+  #faultBody(reason: "memoryReadFault" | "memoryWriteFault", address: ValueId): Body {
+    return this.#terminatingBody(
       { kind: "exit", reason, payload: address },
-      this.#pending.flushesForEdge("fault")
+      this.#pending.flushesForPath("fault")
     );
   }
 
-  // Branch edges observe the completed instruction.
-  #branchEdge(target: TargetInput): RegionId {
+  // Branch bodies observe the completed instruction.
+  #branchBody(target: TargetInput): Body {
     this.#pending.write(eipChannel, target);
 
-    return this.#edgeRegion(
+    return this.#terminatingBody(
       { kind: "dispatch", targetEip: target },
-      this.#pending.flushesForEdge("completed")
+      this.#pending.flushesForPath("completed")
     );
   }
 
-  #edgeRegion(
+  #terminatingBody(
     terminator: Finish,
-    flushes: readonly EdgeFlushAction[]
-  ): RegionId {
-    const id = this.#nextRegionId;
-
-    this.#nextRegionId += 1;
-
-    this.#edgeRegions.push({
-      id,
-      kind: "edge",
-      flushes,
-      terminator
-    });
-
-    return id;
+    actions: readonly Action[]
+  ): Body {
+    return {
+      actions: [
+        ...actions,
+        { kind: "finish", finish: terminator }
+      ]
+    };
   }
 
-  // Every terminator advances the count: fault edges commit instruction-start
+  // Every terminator advances the count: fault bodies commit instruction-start
   // state, so a faulting instruction never counts. The value
   // is always base + completed off the block's one read, so a flush stores
   // a single folded add.

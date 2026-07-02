@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { X86StatusFlag } from "#x86/flags.js";
-import type { Action, EdgeFlushAction } from "../actions.js";
+import type { Action, StateWriteAction } from "../actions.js";
 import {
   PendingCells
 } from "./cells.js";
@@ -20,7 +20,7 @@ import {
 import { fitsUnsigned, type ValueId, type ValueTable } from "../values.js";
 import { PendingStateAccess } from "./state-access.js";
 
-export type PendingEdgeKind = "fault" | "completed";
+export type PendingPathKind = "fault" | "completed";
 
 export class PendingState {
   readonly #state: PendingStateAccess;
@@ -106,10 +106,10 @@ export class PendingState {
     this.#cells.beginInstruction();
   }
 
-  flushesForEdge(edge: PendingEdgeKind): readonly EdgeFlushAction[] {
+  flushesForPath(path: PendingPathKind): readonly StateWriteAction[] {
     return [
-      ...this.#gprs.flushesForEdge(edge),
-      ...this.#cells.flushesForEdge(edge)
+      ...this.#gprs.flushesForPath(path),
+      ...this.#cells.flushesForPath(path)
     ];
   }
 }

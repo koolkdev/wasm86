@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import { eipChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
-import type { EdgeRegion, IrBlock, RegionId } from "#ir/block.js";
+import type { IrBlock } from "#ir/block.js";
 import {
   ValueTable,
   fitsUnsigned,
@@ -17,7 +17,7 @@ import { emitActionFragment } from "#wasm/emit/emit.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
 // Decode reads as action fragments: a guarded guest fetch is guardMemory +
-// memory.read with a decode-fault edge, and the decoded values leave through
+// memory.read with a decode-fault body, and the decoded values leave through
 // exported outputs. This file builds the blocks; everything is emitted by
 // the action emitter and fragment bodies fall through naturally.
 
@@ -33,12 +33,9 @@ export type DecodeCursor =
   | Readonly<{ kind: "static"; offset: number }>
   | Readonly<{ kind: "local"; local: number }>;
 
-const entryRegionId: RegionId = 0;
-
 class DecodeFragment {
   readonly #values = new ValueTable();
   readonly #actions: Action[] = [];
-  readonly #edges: EdgeRegion[] = [];
   readonly #externalLocals = new Map<ExternalValueId, number>();
   readonly #externalsByLocal = new Map<number, ValueId>();
   readonly #outputs = new Map<ValueId, number>();
@@ -102,17 +99,19 @@ class DecodeFragment {
     );
   }
 
-  // A guarded guest fetch; the fault edge reports the faulting address.
+  // A guarded guest fetch; the fault body reports the faulting address.
   readGuest(address: ValueId, width: OperandWidth, signed = false): ValueId {
-    const faultEdge = this.#edges.length + 1;
-
-    this.#edges.push({
-      id: faultEdge,
-      kind: "edge",
-      flushes: [],
-      terminator: { kind: "exit", reason: "decodeFault", payload: address }
+    this.#actions.push({
+      kind: "guardMemory",
+      address,
+      byteLength: width / 8,
+      access: "read",
+      faultBody: {
+        actions: [
+          { kind: "finish", finish: { kind: "exit", reason: "decodeFault", payload: address } }
+        ]
+      }
     });
-    this.#actions.push({ kind: "guardMemory", address, byteLength: width / 8, access: "read", faultEdge });
 
     const output = this.#values.addActionOutput(decodeReadBounds(width, signed));
 
@@ -131,15 +130,7 @@ class DecodeFragment {
 
   emit(context: FragmentEmitContext): void {
     const block: IrBlock = {
-      entry: entryRegionId,
-      regions: [
-        {
-          id: entryRegionId,
-          kind: "entry",
-          actions: this.#actions
-        },
-        ...this.#edges
-      ],
+      body: { actions: this.#actions },
       values: this.#values
     };
 

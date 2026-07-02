@@ -125,7 +125,7 @@ export class StatusFlags {
 
     // Direct flag writes switch status flags into explicit mode. The first
     // write must publish a complete status image before overriding one flag,
-    // otherwise later edges could mix stale explicit bytes with invalidated
+    // otherwise later paths could mix stale explicit bytes with invalidated
     // lazy metadata.
     this.#current.directSource = undefined;
     this.#invalidateLazyChannels();

@@ -12,8 +12,8 @@ import {
   type ValueId,
   type WidthBounds
 } from "../values.js";
-import type { EdgeFlushAction } from "../actions.js";
-import type { PendingEdgeKind } from "./state.js";
+import type { StateWriteAction } from "../actions.js";
+import type { PendingPathKind } from "./state.js";
 import { PendingStateAccess } from "./state-access.js";
 
 export type PendingCell = FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
@@ -68,8 +68,8 @@ export class PendingCells<TCell extends PendingCell = PendingCell> {
     );
   }
 
-  flushesForEdge(edge: PendingEdgeKind): readonly EdgeFlushAction[] {
-    const entries = edge === "fault"
+  flushesForPath(path: PendingPathKind): readonly StateWriteAction[] {
+    const entries = path === "fault"
       ? this.#snapshotEntries()
       : this.#currentEntries();
 

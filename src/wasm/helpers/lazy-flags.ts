@@ -177,17 +177,12 @@ function binaryFlagFragment(
   return {
     value: formula,
     block: {
-      entry: 0,
-      regions: [
-        {
-          id: 0,
-          kind: "entry",
-          actions: [
-            { kind: "op", output: left, op: { kind: "state.read", slot: lazyFlagsAChannel } },
-            { kind: "op", output: right, op: { kind: "state.read", slot: lazyFlagsBChannel } }
-          ]
-        }
-      ],
+      body: {
+        actions: [
+          { kind: "op", output: left, op: { kind: "state.read", slot: lazyFlagsAChannel } },
+          { kind: "op", output: right, op: { kind: "state.read", slot: lazyFlagsBChannel } }
+        ]
+      },
       values
     }
   };
@@ -208,16 +203,11 @@ function logicFlagFragment(
   return {
     value: formula,
     block: {
-      entry: 0,
-      regions: [
-        {
-          id: 0,
-          kind: "entry",
-          actions: [
-            { kind: "op", output: result, op: { kind: "state.read", slot: lazyFlagsAChannel } }
-          ]
-        }
-      ],
+      body: {
+        actions: [
+          { kind: "op", output: result, op: { kind: "state.read", slot: lazyFlagsAChannel } }
+        ]
+      },
       values
     }
   };

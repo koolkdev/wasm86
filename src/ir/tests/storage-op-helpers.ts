@@ -1,4 +1,4 @@
-import type { Action, EdgeFlushAction, OpAction } from "#ir/actions.js";
+import type { Action, OpAction } from "#ir/actions.js";
 import type { CpuResolveFlagOp, MemoryReadOp, MemoryWriteOp, StateReadOp, StateWriteOp } from "#ir/ops.js";
 import type { StateSlot } from "#ir/slots.js";
 import type { ValueId } from "#ir/values.js";
@@ -68,23 +68,23 @@ export function resolveFlag(output: ValueId, flag: X86StatusFlag): ResolveFlagAc
   return { kind: "op", output, op: { kind: "cpu.resolveFlag", flag } };
 }
 
-export function isStateRead(action: Action | EdgeFlushAction): action is StateReadAction {
+export function isStateRead(action: Action): action is StateReadAction {
   return action.kind === "op" && action.op.kind === "state.read" && "output" in action && action.output !== undefined;
 }
 
-export function isStateWrite(action: Action | EdgeFlushAction): action is StateWriteAction {
+export function isStateWrite(action: Action): action is StateWriteAction {
   return action.kind === "op" && action.op.kind === "state.write";
 }
 
-export function isMemoryRead(action: Action | EdgeFlushAction): action is MemoryReadAction {
+export function isMemoryRead(action: Action): action is MemoryReadAction {
   return action.kind === "op" && action.op.kind === "memory.read" && "output" in action && action.output !== undefined;
 }
 
-export function isMemoryWrite(action: Action | EdgeFlushAction): action is MemoryWriteAction {
+export function isMemoryWrite(action: Action): action is MemoryWriteAction {
   return action.kind === "op" && action.op.kind === "memory.write";
 }
 
-export function isResolveFlag(action: Action | EdgeFlushAction): action is ResolveFlagAction {
+export function isResolveFlag(action: Action): action is ResolveFlagAction {
   return action.kind === "op" && action.op.kind === "cpu.resolveFlag" && "output" in action && action.output !== undefined;
 }
 

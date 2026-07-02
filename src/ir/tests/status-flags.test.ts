@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { Action, EdgeFlushAction } from "#ir/actions.js";
+import type { Action, StateWriteAction } from "#ir/actions.js";
 import { PendingState } from "#ir/pending/state.js";
 import { StatusFlags } from "#ir/status-flags.js";
 import { lazyFlagsKindChannel } from "#ir/slots.js";
@@ -25,7 +25,7 @@ function createHarness(): Harness {
   return { values, actions, pending, flags: new StatusFlags(values, pending) };
 }
 
-function flagFlushEntries(actions: readonly EdgeFlushAction[]): ReadonlyArray<Readonly<{ flag: X86StatusFlag; value: ValueId }>> {
+function flagFlushEntries(actions: readonly StateWriteAction[]): ReadonlyArray<Readonly<{ flag: X86StatusFlag; value: ValueId }>> {
   return actions.flatMap((action) =>
     action.op.slot.kind === "flag" && isX86StatusFlag(action.op.slot.flag)
       ? [{ flag: action.op.slot.flag, value: action.op.value }]
@@ -33,11 +33,11 @@ function flagFlushEntries(actions: readonly EdgeFlushAction[]): ReadonlyArray<Re
   );
 }
 
-function flagFlushValue(actions: readonly EdgeFlushAction[], flag: X86StatusFlag): ValueId | undefined {
+function flagFlushValue(actions: readonly StateWriteAction[], flag: X86StatusFlag): ValueId | undefined {
   return flagFlushEntries(actions).find((entry) => entry.flag === flag)?.value;
 }
 
-function assertFullExplicitFlush(actions: readonly EdgeFlushAction[], values: ValueTable): void {
+function assertFullExplicitFlush(actions: readonly StateWriteAction[], values: ValueTable): void {
   deepStrictEqual(flagFlushEntries(actions).map((entry) => entry.flag), x86StatusFlags);
   strictEqual(actions.find((action) => action.op.slot === lazyFlagsKindChannel)?.op.value, values.const(0));
   strictEqual(actions.length, x86StatusFlags.length + 1);
@@ -58,8 +58,8 @@ function resolveOutput(actions: readonly Action[], flag: X86StatusFlag): ValueId
 test("new status flags start with no dirty pending entries", () => {
   const { pending } = createHarness();
 
-  deepStrictEqual(pending.flushesForEdge("fault"), []);
-  deepStrictEqual(pending.flushesForEdge("completed"), []);
+  deepStrictEqual(pending.flushesForPath("fault"), []);
+  deepStrictEqual(pending.flushesForPath("completed"), []);
 });
 
 test("input status flags read through scheduled resolve ops", () => {
@@ -78,7 +78,7 @@ test("writing the current input status flag value is a no-op", () => {
 
   flags.writeFlag("ZF", zf);
 
-  deepStrictEqual(pending.flushesForEdge("completed"), []);
+  deepStrictEqual(pending.flushesForPath("completed"), []);
 });
 
 test("a sub source commits a lazy runtime record", () => {
@@ -89,7 +89,7 @@ test("a sub source commits a lazy runtime record", () => {
 
   flags.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
 
-  const completedFlushes = pending.flushesForEdge("completed");
+  const completedFlushes = pending.flushesForPath("completed");
 
   assertOnlyLazyRecord(completedFlushes, values, { kind: "SUB", width: 32, left, right });
   strictEqual(
@@ -107,7 +107,7 @@ test("writing the current source status flag value preserves the lazy source", (
   flags.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
   flags.writeFlag("ZF", flags.readFlag("ZF"));
 
-  assertOnlyLazyRecord(pending.flushesForEdge("completed"), values, { kind: "SUB", width: 32, left, right });
+  assertOnlyLazyRecord(pending.flushesForPath("completed"), values, { kind: "SUB", width: 32, left, right });
 });
 
 test("an add source commits a lazy runtime record", () => {
@@ -118,7 +118,7 @@ test("an add source commits a lazy runtime record", () => {
 
   flags.writeStatusFlagsSource({ kind: "add", width: 32, left, right, result });
 
-  assertOnlyLazyRecord(pending.flushesForEdge("completed"), values, { kind: "ADD", width: 32, left, right });
+  assertOnlyLazyRecord(pending.flushesForPath("completed"), values, { kind: "ADD", width: 32, left, right });
   strictEqual(
     flagValue(flags, "CF"),
     values.compare("lt_u", values.truncate(32, result), values.truncate(32, left))
@@ -133,7 +133,7 @@ test("sub lazy commits truncated narrow operands", () => {
 
   flags.writeStatusFlagsSource({ kind: "sub", width: 16, left, right, result });
 
-  assertOnlyLazyRecord(pending.flushesForEdge("completed"), values, { kind: "SUB", width: 16, left, right });
+  assertOnlyLazyRecord(pending.flushesForPath("completed"), values, { kind: "SUB", width: 16, left, right });
 });
 
 test("add lazy commits truncated narrow operands", () => {
@@ -144,7 +144,7 @@ test("add lazy commits truncated narrow operands", () => {
 
   flags.writeStatusFlagsSource({ kind: "add", width: 8, left, right, result });
 
-  assertOnlyLazyRecord(pending.flushesForEdge("completed"), values, { kind: "ADD", width: 8, left, right });
+  assertOnlyLazyRecord(pending.flushesForPath("completed"), values, { kind: "ADD", width: 8, left, right });
 });
 
 test("condition uses the current sub source directly", () => {
@@ -206,8 +206,8 @@ test("fault edge preserves a clean sub source while direct flag writes update co
   pending.beginInstruction();
   flags.writeFlag("ZF", values.const(1));
 
-  const faultFlushes = pending.flushesForEdge("fault");
-  const completedFlushes = pending.flushesForEdge("completed");
+  const faultFlushes = pending.flushesForPath("fault");
+  const completedFlushes = pending.flushesForPath("completed");
 
   assertOnlyLazyRecord(faultFlushes, values, { kind: "SUB", width: 32, left, right });
   assertFullExplicitFlush(completedFlushes, values);
@@ -231,7 +231,7 @@ test("a logic source commits a lazy result record and resolves current values", 
   strictEqual(flagValue(flags, "ZF"), values.compare("eq", truncated, zero));
   strictEqual(flagValue(flags, "SF"), values.binary("shr_u", truncated, values.const(7)));
 
-  const completedFlushes = pending.flushesForEdge("completed");
+  const completedFlushes = pending.flushesForPath("completed");
 
   assertOnlyLazyRecord(completedFlushes, values, { kind: "LOGIC_RESULT", width: 8, result });
 });
@@ -250,7 +250,7 @@ test("direct status flag writes set explicit pending values", () => {
     strictEqual(flagValue(flags, flag), explicit[flag]);
   }
 
-  const completedFlushes = pending.flushesForEdge("completed");
+  const completedFlushes = pending.flushesForPath("completed");
   const snapshotValues = flagFlushEntries(completedFlushes);
 
   assertFullExplicitFlush(completedFlushes, values);
@@ -271,7 +271,7 @@ test("writeFlag updates one status flag while preserving other pending values", 
   strictEqual(flagValue(flags, "CF"), values.compare("lt_u", left, right));
   strictEqual(flagValue(flags, "ZF"), zf);
 
-  const completedFlushes = pending.flushesForEdge("completed");
+  const completedFlushes = pending.flushesForPath("completed");
   const snapshotValues = flagFlushEntries(completedFlushes);
 
   assertFullExplicitFlush(completedFlushes, values);
@@ -285,7 +285,7 @@ test("a direct flag write from input state flushes a full explicit image from re
 
   flags.writeFlag("ZF", zf);
 
-  const completedFlushes = pending.flushesForEdge("completed");
+  const completedFlushes = pending.flushesForPath("completed");
 
   assertFullExplicitFlush(completedFlushes, values);
   strictEqual(flagFlushValue(completedFlushes, "ZF"), zf);

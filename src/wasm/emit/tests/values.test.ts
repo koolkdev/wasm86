@@ -3,7 +3,6 @@ import { test } from "node:test";
 
 import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
-import type { EdgeRegion } from "#ir/block.js";
 import { ValueTable } from "#ir/values.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
 import { memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
@@ -11,13 +10,11 @@ import { memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storag
 function analyze(
   values: ValueTable,
   actions: readonly Action[],
-  edges: readonly EdgeRegion[] = [],
   exportedOutputs: readonly number[] = []
 ) {
   return analyzeBlockValues(
     {
-      entry: 0,
-      regions: [{ id: 0, kind: "entry", actions }, ...edges],
+      body: { actions },
       values
     },
     exportedOutputs
@@ -39,13 +36,20 @@ test("action operand edges count at their action index", () => {
       stateRead(readOutput, gprChannel("eax")),
       memoryRead(memoryOutput, address, 32),
       memoryWrite(address, stored, 32),
-      { kind: "guardMemory", address: guarded, byteLength: 4, access: "read", faultEdge: 1 },
-      { kind: "branch", condition, taken: 1, notTaken: 2 },
+      {
+        kind: "guardMemory",
+        address: guarded,
+        byteLength: 4,
+        access: "read",
+        faultBody: { actions: [{ kind: "finish", finish: { kind: "exit", reason: "memoryReadFault" } }] }
+      },
+      {
+        kind: "if",
+        condition,
+        thenBody: { actions: [{ kind: "finish", finish: { kind: "exit", reason: "hostTrap" } }] },
+        elseBody: { actions: [{ kind: "finish", finish: { kind: "exit", reason: "hostTrap" } }] }
+      },
       { kind: "finish", finish: { kind: "exit", reason: "hostTrap", payload } }
-    ],
-    [
-      { id: 1, kind: "edge", flushes: [], terminator: { kind: "exit", reason: "memoryReadFault" } },
-      { id: 2, kind: "edge", flushes: [], terminator: { kind: "exit", reason: "hostTrap" } }
     ]
   );
 
@@ -103,14 +107,17 @@ test("fault edge operands count at their guard's entry index", () => {
     values,
     [
       stateRead(read, gprChannel("ebx")),
-      { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 }
-    ],
-    [
       {
-        id: 1,
-        kind: "edge",
-        flushes: [stateWrite(gprChannel("eax"), read)],
-        terminator: { kind: "exit", reason: "memoryWriteFault", payload: address }
+        kind: "guardMemory",
+        address,
+        byteLength: 4,
+        access: "write",
+        faultBody: {
+          actions: [
+            stateWrite(gprChannel("eax"), read),
+            { kind: "finish", finish: { kind: "exit", reason: "memoryWriteFault", payload: address } }
+          ]
+        }
       }
     ]
   );
@@ -133,26 +140,23 @@ test("branch edge values count once per edge, at the branch's entry index", () =
     values,
     [
       stateRead(read, gprChannel("ebx")),
-      { kind: "branch", condition, taken: 1, notTaken: 2 }
-    ],
-    [
       {
-        id: 1,
-        kind: "edge",
-        flushes: [
-          stateWrite(gprChannel("eax"), read),
-          stateWrite(eipChannel, target)
-        ],
-        terminator: { kind: "dispatch", targetEip: target }
-      },
-      {
-        id: 2,
-        kind: "edge",
-        flushes: [
-          stateWrite(gprChannel("eax"), read),
-          stateWrite(eipChannel, fallthrough)
-        ],
-        terminator: { kind: "dispatch", targetEip: fallthrough }
+        kind: "if",
+        condition,
+        thenBody: {
+          actions: [
+            stateWrite(gprChannel("eax"), read),
+            stateWrite(eipChannel, target),
+            { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
+          ]
+        },
+        elseBody: {
+          actions: [
+            stateWrite(gprChannel("eax"), read),
+            stateWrite(eipChannel, fallthrough),
+            { kind: "finish", finish: { kind: "dispatch", targetEip: fallthrough } }
+          ]
+        }
       }
     ]
   );
@@ -174,14 +178,17 @@ test("an edge use past an overlapping store pins the read", () => {
     [
       stateRead(read, gprChannel("eax")),
       stateWrite(gprChannel("eax"), five),
-      { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 }
-    ],
-    [
       {
-        id: 1,
-        kind: "edge",
-        flushes: [stateWrite(gprChannel("ebx"), read)],
-        terminator: { kind: "exit", reason: "memoryWriteFault", payload: address }
+        kind: "guardMemory",
+        address,
+        byteLength: 4,
+        access: "write",
+        faultBody: {
+          actions: [
+            stateWrite(gprChannel("ebx"), read),
+            { kind: "finish", finish: { kind: "exit", reason: "memoryWriteFault", payload: address } }
+          ]
+        }
       }
     ]
   );
@@ -218,17 +225,18 @@ test("an edge value reloading a channel the edge flushes pins the read", () => {
     values,
     [
       stateRead(read, gprChannel("ebx")),
-      { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 }
-    ],
-    [
       {
-        id: 1,
-        kind: "edge",
-        flushes: [
-          stateWrite(gprChannel("eax"), read),
-          stateWrite(gprChannel("ebx"), five)
-        ],
-        terminator: { kind: "exit", reason: "memoryWriteFault", payload: address }
+        kind: "guardMemory",
+        address,
+        byteLength: 4,
+        access: "write",
+        faultBody: {
+          actions: [
+            stateWrite(gprChannel("eax"), read),
+            stateWrite(gprChannel("ebx"), five),
+            { kind: "finish", finish: { kind: "exit", reason: "memoryWriteFault", payload: address } }
+          ]
+        }
       }
     ]
   );
@@ -442,16 +450,29 @@ test("a producer whose operand follows its output fails loudly", () => {
   );
 });
 
-test("a guard targeting a missing edge region fails loudly", () => {
+test("a nested body producer whose operand follows its output fails loudly", () => {
   const values = new ValueTable();
+  const loaded = values.addActionOutput();
   const address = values.const(0x2000);
 
   throws(
     () =>
       analyze(values, [
-        { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 9 }
+        {
+          kind: "guardMemory",
+          address,
+          byteLength: 4,
+          access: "read",
+          faultBody: {
+            actions: [
+              memoryRead(loaded, address, 32),
+              stateWrite(gprChannel("eax"), loaded),
+              { kind: "finish", finish: { kind: "exit", reason: "memoryReadFault" } }
+            ]
+          }
+        }
       ]),
-    /unknown edge region 9/
+    /created after its output/
   );
 });
 
@@ -463,7 +484,6 @@ test("an exported output counts as a use at the action body boundary", () => {
     [
       stateRead(read, gprChannel("eax"))
     ],
-    [],
     [read]
   );
 
@@ -483,7 +503,6 @@ test("an exported read crossing an overlapping store pins", () => {
       stateRead(read, gprChannel("eax")),
       stateWrite(gprChannel("eax"), seven)
     ],
-    [],
     [read]
   );
 

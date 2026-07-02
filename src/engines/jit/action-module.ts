@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { IrBlock } from "#ir/block.js";
+import { walkBodyActions } from "#ir/traverse.js";
 import { u32 } from "#x86/numeric.js";
 import { wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -67,32 +68,15 @@ export function actionJitModuleLinkTargets(blocks: readonly ActionJitBlock[]): r
 function constantDispatchTargets(actions: IrBlock): readonly number[] {
   const targets: number[] = [];
 
-  for (const region of actions.regions) {
-    switch (region.kind) {
-      case "entry":
-        for (const action of region.actions) {
-          if (action.kind === "finish" && action.finish.kind === "dispatch") {
-            const target = actions.values.constValue(action.finish.targetEip);
+  walkBodyActions(actions.body, (action) => {
+    if (action.kind === "finish" && action.finish.kind === "dispatch") {
+      const target = actions.values.constValue(action.finish.targetEip);
 
-            if (target !== undefined) {
-              targets.push(u32(target));
-            }
-          }
-        }
-
-        break;
-      case "edge":
-        if (region.terminator.kind === "dispatch") {
-          const target = actions.values.constValue(region.terminator.targetEip);
-
-          if (target !== undefined) {
-            targets.push(u32(target));
-          }
-        }
-
-        break;
+      if (target !== undefined) {
+        targets.push(u32(target));
+      }
     }
-  }
+  });
 
   return targets;
 }

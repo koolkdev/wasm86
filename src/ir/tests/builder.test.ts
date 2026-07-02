@@ -27,11 +27,12 @@ import {
 } from "#ir/slots.js";
 import type {
   Action,
-  BranchAction,
-  EdgeFlushAction,
-  GuardMemoryAction
+  Finish,
+  GuardMemoryAction,
+  IfAction,
+  StateWriteAction
 } from "#ir/actions.js";
-import type { EdgeRegion, IrBlock } from "#ir/block.js";
+import type { Body, IrBlock } from "#ir/block.js";
 import type { ValueId, ValueNode } from "#ir/values.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
@@ -50,7 +51,7 @@ import { xchgSemantic } from "#x86/semantics/xchg.js";
 import { defaultSegmentForBase, type EffectiveAddress } from "#x86/types.js";
 import { assertLazyRecord } from "./lazy-flags.js";
 import { isMemoryRead, isMemoryWrite, isResolveFlag, isStateRead, isStateWrite, memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import type { MemoryReadAction, MemoryWriteAction, ResolveFlagAction, StateReadAction, StateWriteAction } from "#ir/tests/storage-op-helpers.js";
+import type { MemoryReadAction, MemoryWriteAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
 
 function mem(
   address: Readonly<{
@@ -72,7 +73,7 @@ function mem(
 
 // Every instruction advances the count channel; the dedicated tests at the
 // end cover that bookkeeping, the shape tests assert around it.
-function isInstructionCountAction(action: Action | EdgeFlushAction): boolean {
+function isInstructionCountAction(action: Action): boolean {
   return (isStateRead(action) || isStateWrite(action)) && action.op.slot.kind === "instructionCount";
 }
 
@@ -81,27 +82,92 @@ function entryActions(block: IrBlock): readonly Action[] {
 }
 
 function rawEntryActions(block: IrBlock): readonly Action[] {
-  const entry = block.regions[0]!;
-
-  ok(entry.kind === "entry", "first region is the entry");
-  return entry.actions;
+  return block.body.actions;
 }
 
-function edgeRegion(block: IrBlock, index: number): EdgeRegion {
-  const region = block.regions[index]!;
+type TerminatingBodyView = Readonly<{
+  actions: readonly Action[];
+  flushes: readonly StateWriteAction[];
+  terminator: Finish;
+}>;
 
-  ok(region.kind === "edge", `region ${index} is an edge`);
-  return region;
+function nestedActionBodies(block: IrBlock): readonly Body[] {
+  const bodies: Body[] = [];
+
+  function collect(body: Body): void {
+    for (const action of body.actions) {
+      switch (action.kind) {
+        case "guardMemory":
+          bodies.push(action.faultBody);
+          collect(action.faultBody);
+          break;
+        case "if":
+          bodies.push(action.thenBody);
+          collect(action.thenBody);
+
+          if (action.elseBody !== undefined) {
+            bodies.push(action.elseBody);
+            collect(action.elseBody);
+          }
+          break;
+        case "op":
+        case "finish":
+          break;
+      }
+    }
+  }
+
+  collect(block.body);
+  return bodies;
 }
 
-function edgeFlushes(block: IrBlock, index: number): EdgeFlushAction[] {
-  return edgeRegion(block, index).flushes.filter((flush) => !isInstructionCountAction(flush));
+function nestedBodyView(block: IrBlock, index: number): TerminatingBodyView {
+  const body = nestedActionBodies(block)[index - 1];
+
+  ok(body !== undefined, `nested body ${index} exists`);
+
+  const terminator = body.actions[body.actions.length - 1];
+
+  ok(terminator !== undefined && terminator.kind === "finish", `nested body ${index} ends with a finish`);
+  return {
+    actions: body.actions,
+    flushes: body.actions.slice(0, -1).filter(
+      (action): action is StateWriteAction => isStateWrite(action)
+    ),
+    terminator: terminator.finish
+  };
 }
 
-function edgeWriteFlushes(block: IrBlock, index: number): StateWriteAction[] {
-  return edgeFlushes(block, index).filter(
+function nestedBodyFlushes(block: IrBlock, index: number): StateWriteAction[] {
+  return nestedBodyView(block, index).flushes.filter((flush) => !isInstructionCountAction(flush));
+}
+
+function nestedBodyWriteFlushes(block: IrBlock, index: number): StateWriteAction[] {
+  return nestedBodyFlushes(block, index).filter(
     (flush): flush is StateWriteAction => isStateWrite(flush)
   );
+}
+
+function guardMemory(
+  block: IrBlock,
+  faultBodyIndex: number,
+  address: ValueId,
+  byteLength: number,
+  access: GuardMemoryAction["access"]
+): GuardMemoryAction {
+  const faultBody = nestedActionBodies(block)[faultBodyIndex - 1];
+
+  ok(faultBody !== undefined, `fault body ${faultBodyIndex} exists`);
+  return { kind: "guardMemory", address, byteLength, access, faultBody };
+}
+
+function terminalIf(block: IrBlock, condition: ValueId, thenBodyIndex = 1, elseBodyIndex = 2): IfAction {
+  const thenBody = nestedActionBodies(block)[thenBodyIndex - 1];
+  const elseBody = nestedActionBodies(block)[elseBodyIndex - 1];
+
+  ok(thenBody !== undefined, `then body ${thenBodyIndex} exists`);
+  ok(elseBody !== undefined, `else body ${elseBodyIndex} exists`);
+  return { kind: "if", condition, thenBody, elseBody };
 }
 
 function finishDispatch(targetEip: ValueId): Action {
@@ -118,10 +184,10 @@ function stateWrites(block: IrBlock): StateWriteAction[] {
   );
 }
 
-function branchAction(block: IrBlock): BranchAction {
-  const action = entryActions(block).find((entry): entry is BranchAction => entry.kind === "branch");
+function ifAction(block: IrBlock): IfAction {
+  const action = entryActions(block).find((entry): entry is IfAction => entry.kind === "if");
 
-  ok(action !== undefined, "expected branch action");
+  ok(action !== undefined, "expected if action");
   return action;
 }
 
@@ -183,12 +249,8 @@ test("mov r32, imm32 flushes the register write and dispatches at the next eip",
   const block = builder.finish();
   const v = block.values;
 
-  strictEqual(block.regions.length, 1);
+  strictEqual(nestedActionBodies(block).length, 0);
 
-  const entry = block.regions[0]!;
-
-  strictEqual(entry.id, block.entry);
-  strictEqual(entry.kind, "entry");
   deepStrictEqual(entryActions(block), [
     stateWrite(gprChannel("eax"), v.const(0x12345678)),
     stateWrite(eipChannel, v.const(0x401005)),
@@ -707,7 +769,7 @@ test("jmp dispatches at the target", () => {
 
   const block = builder.finish();
 
-  strictEqual(block.regions.length, 1);
+  strictEqual(nestedActionBodies(block).length, 0);
   deepStrictEqual(entryActions(block), [
     stateWrite(eipChannel, block.values.const(0x2000)),
     finishDispatch(block.values.const(0x2000))
@@ -746,7 +808,7 @@ test("16-bit call pushes a word return address and dispatches to a word target",
   deepStrictEqual(entryActions(block), [
     stateRead(ax, gprChannel("ax")),
     stateRead(esp, gprChannel("esp")),
-    { kind: "guardMemory", address: nextEsp, byteLength: 2, access: "write", faultEdge: 1 },
+    guardMemory(block, 1, nextEsp, 2, "write"),
     memoryWrite(nextEsp, v.const(0x1004), 16),
     stateWrite(gprChannel("esp"), nextEsp),
     stateWrite(eipChannel, ax),
@@ -810,30 +872,25 @@ test("jcc after cmp source uses the source-derived condition with per-edge lazy 
     (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("eax")
   )!.output;
 
-  strictEqual(block.regions.length, 3);
-  deepStrictEqual(actions[actions.length - 1], {
-    kind: "branch",
-    condition: v.compare("eq", eax, v.const(5)),
-    taken: 1,
-    notTaken: 2
-  });
+  strictEqual(nestedActionBodies(block).length, 2);
+  deepStrictEqual(actions[actions.length - 1], terminalIf(block, v.compare("eq", eax, v.const(5))));
 
   // The branch is the entry's terminator: nothing flushes on the main path.
   strictEqual(stateWrites(block).length, 0);
 
   // Each edge flushes the cmp's lazy record and dispatches at its own eip.
-  const taken = edgeFlushes(block, 1);
-  const notTaken = edgeFlushes(block, 2);
+  const taken = nestedBodyFlushes(block, 1);
+  const notTaken = nestedBodyFlushes(block, 2);
 
   for (const flushes of [taken, notTaken]) {
     strictEqual(flushes.length, 4);
     assertLazyRecord(flushes, v, { kind: "SUB", width: 32, left: eax, right: v.const(5) });
   }
 
-  strictEqual(edgeWriteFlushes(block, 1).find((write) => write.op.slot === eipChannel)?.op.value, v.const(0x2000));
-  deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "dispatch", targetEip: v.const(0x2000) });
-  strictEqual(edgeWriteFlushes(block, 2).find((write) => write.op.slot === eipChannel)?.op.value, v.const(0x1005));
-  deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "dispatch", targetEip: v.const(0x1005) });
+  strictEqual(nestedBodyWriteFlushes(block, 1).find((write) => write.op.slot === eipChannel)?.op.value, v.const(0x2000));
+  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: v.const(0x2000) });
+  strictEqual(nestedBodyWriteFlushes(block, 2).find((write) => write.op.slot === eipChannel)?.op.value, v.const(0x1005));
+  deepStrictEqual(nestedBodyView(block, 2).terminator, { kind: "dispatch", targetEip: v.const(0x1005) });
 });
 
 test("jcc after test source uses the source-derived condition with no flag byte reads", () => {
@@ -849,14 +906,14 @@ test("jcc after test source uses the source-derived condition with no flag byte 
   );
   const result = v.binary("and", reads[0]!.output, reads[1]!.output);
 
-  strictEqual(branchAction(block).condition, v.compare("eq", result, v.const(0)));
+  strictEqual(ifAction(block).condition, v.compare("eq", result, v.const(0)));
   strictEqual(
     entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
     false
   );
   strictEqual(stateWrites(block).length, 0);
 
-  for (const flushes of [edgeWriteFlushes(block, 1), edgeWriteFlushes(block, 2)]) {
+  for (const flushes of [nestedBodyWriteFlushes(block, 1), nestedBodyWriteFlushes(block, 2)]) {
     assertLazyRecord(flushes.filter((flush) => flush.op.slot.kind === "lazyFlags"), v, {
       kind: "LOGIC_RESULT",
       width: 32,
@@ -884,7 +941,7 @@ test("jcc after a sub flag source uses the source-derived condition", () => {
     (action): action is StateReadAction => isStateRead(action)
   );
 
-  strictEqual(branchAction(block).condition, block.values.compare("eq", reads[0]!.output, reads[1]!.output));
+  strictEqual(ifAction(block).condition, block.values.compare("eq", reads[0]!.output, reads[1]!.output));
 });
 
 test("jcc after 16-bit cmp source sign-extends operands for signed direct conditions", () => {
@@ -904,7 +961,7 @@ test("jcc after 16-bit cmp source sign-extends operands for signed direct condit
     v.extend(16, reads[1]!.output, true)
   );
 
-  strictEqual(branchAction(block).condition, condition);
+  strictEqual(ifAction(block).condition, condition);
   strictEqual(
     entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
     false
@@ -928,7 +985,7 @@ test("jcc after 8-bit cmp source sign-extends operands for signed direct conditi
     v.extend(8, reads[1]!.output, true)
   );
 
-  strictEqual(branchAction(block).condition, condition);
+  strictEqual(ifAction(block).condition, condition);
   strictEqual(
     entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
     false
@@ -952,7 +1009,7 @@ test("jcc after 16-bit cmp immediate source sign-extends immediates for signed d
     v.const(-0x8000)
   );
 
-  strictEqual(branchAction(block).condition, condition);
+  strictEqual(ifAction(block).condition, condition);
   strictEqual(
     entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
     false
@@ -968,7 +1025,7 @@ test("int flushes pending state with the resume eip before a host trap exit", ()
   const block = builder.finish();
   const v = block.values;
 
-  strictEqual(block.regions.length, 1);
+  strictEqual(nestedActionBodies(block).length, 0);
   deepStrictEqual(entryActions(block), [
     stateWrite(gprChannel("eax"), v.const(0x77)),
     stateWrite(eipChannel, v.const(0x1007)),
@@ -1321,19 +1378,18 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
   )!;
   const address = v.binary("add", ebx.output, v.const(8));
 
-  strictEqual(block.regions.length, 2);
+  strictEqual(nestedActionBodies(block).length, 1);
   deepStrictEqual(entryActions(block), [
     stateRead(eax.output, gprChannel("eax")),
     stateRead(ebx.output, gprChannel("ebx")),
-    { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 1 },
+    guardMemory(block, 1, address, 4, "write"),
     memoryWrite(address, eax.output, 32),
     stateWrite(eipChannel, v.const(0x1003)),
     finishDispatch(v.const(0x1003))
   ]);
 
-  const edge = edgeRegion(block, 1);
+  const edge = nestedBodyView(block, 1);
 
-  strictEqual(edge.id, 1);
   deepStrictEqual(edge.flushes, [
     stateWrite(eipChannel, v.const(0x1000))
   ]);
@@ -1360,8 +1416,8 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
     (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("ebx")
   )!.output;
   deepStrictEqual(guards, [
-    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
-    { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 }
+    guardMemory(block, 1, address, 4, "read"),
+    guardMemory(block, 2, address, 4, "write")
   ]);
 
   const readIndex = actions.findIndex((action) => isMemoryRead(action));
@@ -1382,10 +1438,10 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
   // at guard time, so both flush only the instruction's eip.
   const eipFlushes = [stateWrite(eipChannel, v.const(0x1000))];
 
-  deepStrictEqual(edgeRegion(block, 1).flushes, eipFlushes);
-  deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: address });
-  deepStrictEqual(edgeRegion(block, 2).flushes, eipFlushes);
-  deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "exit", reason: "memoryWriteFault", payload: address });
+  deepStrictEqual(nestedBodyView(block, 1).flushes, eipFlushes);
+  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: address });
+  deepStrictEqual(nestedBodyView(block, 2).flushes, eipFlushes);
+  deepStrictEqual(nestedBodyView(block, 2).terminator, { kind: "exit", reason: "memoryWriteFault", payload: address });
 });
 
 test("a later guard's edge flushes earlier pendings with the faulting eip", () => {
@@ -1409,18 +1465,18 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
   )!;
   const address = v.binary("add", ebxRead.output, v.const(8));
 
-  strictEqual(block.regions.length, 2);
+  strictEqual(nestedActionBodies(block).length, 1);
 
   // The edge snapshots everything dirty at the guard: the add's lazy flag
   // record, eax sum, and the faulting instruction's eip.
-  const flushes = edgeFlushes(block, 1);
+  const flushes = nestedBodyFlushes(block, 1);
 
   strictEqual(flushes.length, 5);
   deepStrictEqual(flushes.flatMap((flush) => flush.op.slot.kind === "flag" ? [flush.op.slot.flag] : []), []);
   assertLazyRecord(flushes, v, { kind: "ADD", width: 32, left: eax, right: v.const(5) });
-  strictEqual(edgeWriteFlushes(block, 1).find((write) => write.op.slot === gprChannel("eax"))?.op.value, sum);
-  strictEqual(edgeWriteFlushes(block, 1).find((write) => write.op.slot === eipChannel)?.op.value, v.const(0x1003));
-  deepStrictEqual(edgeRegion(block, 1).terminator, {
+  strictEqual(nestedBodyWriteFlushes(block, 1).find((write) => write.op.slot === gprChannel("eax"))?.op.value, sum);
+  strictEqual(nestedBodyWriteFlushes(block, 1).find((write) => write.op.slot === eipChannel)?.op.value, v.const(0x1003));
+  deepStrictEqual(nestedBodyView(block, 1).terminator, {
     kind: "exit",
     reason: "memoryWriteFault",
     payload: address
@@ -1462,7 +1518,7 @@ test("lea builds general modrm addresses from channel reads", () => {
   const scaled = v.binary("shl", esi, v.const(2));
   const address = v.binary("add", v.binary("add", ebx, scaled), v.const(0x10));
 
-  strictEqual(block.regions.length, 1);
+  strictEqual(nestedActionBodies(block).length, 0);
   deepStrictEqual(entryActions(block), [
     stateRead(ebx, gprChannel("ebx")),
     stateRead(esi, gprChannel("esi")),
@@ -1548,7 +1604,7 @@ test("fs and gs memory operands add the segment base to the effective offset", (
   deepStrictEqual(entryActions(block), [
     stateRead(ebx, gprChannel("ebx")),
     stateRead(fsBase, segmentBaseChannel("fs")),
-    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
+    guardMemory(block, 1, address, 4, "read"),
     memoryRead(read.output, address, 32),
     stateWrite(gprChannel("eax"), read.output),
     stateWrite(eipChannel, v.const(0x1004)),
@@ -1570,16 +1626,16 @@ test("an absolute address is just its displacement constant", () => {
   const address = v.const(0x2000);
 
   deepStrictEqual(entryActions(block), [
-    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
+    guardMemory(block, 1, address, 4, "read"),
     memoryRead(2, address, 32),
     stateWrite(gprChannel("eax"), 2),
     stateWrite(eipChannel, v.const(0x1005)),
     finishDispatch(v.const(0x1005))
   ]);
-  deepStrictEqual(edgeRegion(block, 1).flushes, [
+  deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(eipChannel, v.const(0x1000))
   ]);
-  deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: address });
+  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: address });
 });
 
 test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
@@ -1649,8 +1705,8 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
   // register flush carries the loaded value.
   deepStrictEqual(entryActions(block), [
     stateRead(ebx, gprChannel("ebx")),
-    { kind: "guardMemory", address: ebx, byteLength: 4, access: "read", faultEdge: 1 },
-    { kind: "guardMemory", address: ebx, byteLength: 4, access: "write", faultEdge: 2 },
+    guardMemory(block, 1, ebx, 4, "read"),
+    guardMemory(block, 2, ebx, 4, "write"),
     memoryRead(load, ebx, 32),
     memoryWrite(ebx, ebx, 32),
     stateWrite(gprChannel("ebx"), load),
@@ -1677,8 +1733,8 @@ test("get and set through s.mem lower to memory actions at the given address", (
   const address = v.const(0x2000);
 
   deepStrictEqual(entryActions(block), [
-    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
-    { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
+    guardMemory(block, 1, address, 4, "read"),
+    guardMemory(block, 2, address, 4, "write"),
     memoryRead(2, address, 32),
     memoryWrite(address, v.binary("add", 2, v.const(1)), 32),
     stateWrite(eipChannel, v.const(0x1006)),
@@ -1719,11 +1775,11 @@ test("a guard after a register write restores the pre-instruction value in its e
 
   // The edge flushes eax's value as of instruction start — never the 0x222
   // this instruction wrote before guarding.
-  deepStrictEqual(edgeFlushes(block, 1), [
+  deepStrictEqual(nestedBodyFlushes(block, 1), [
     stateWrite(gprChannel("eax"), v.const(0x111)),
     stateWrite(eipChannel, v.const(0x1005))
   ]);
-  deepStrictEqual(edgeRegion(block, 1).terminator, {
+  deepStrictEqual(nestedBodyView(block, 1).terminator, {
     kind: "exit",
     reason: "memoryWriteFault",
     payload: v.const(0x2000)
@@ -1748,10 +1804,10 @@ test("a guard after writing a previously-clean register omits the channel from i
 
   // eax had no pending at instruction start: cpu state memory already holds the
   // right bytes, so the edge writes only the eip.
-  deepStrictEqual(edgeRegion(block, 1).flushes, [
+  deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(eipChannel, v.const(0x1000))
   ]);
-  deepStrictEqual(edgeRegion(block, 1).terminator, {
+  deepStrictEqual(nestedBodyView(block, 1).terminator, {
     kind: "exit",
     reason: "memoryWriteFault",
     payload: v.const(0x2000)
@@ -1777,13 +1833,13 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
   )!.output;
   const nextEsp = v.binary("add", esp, v.const(4));
 
-  strictEqual(block.regions.length, 3);
+  strictEqual(nestedActionBodies(block).length, 2);
   deepStrictEqual(entryActions(block), [
     stateRead(esp, gprChannel("esp")),
-    { kind: "guardMemory", address: esp, byteLength: 4, access: "read", faultEdge: 1 },
+    guardMemory(block, 1, esp, 4, "read"),
     memoryRead(popValue, esp, 32),
     stateRead(ebx, gprChannel("ebx")),
-    { kind: "guardMemory", address: ebx, byteLength: 4, access: "write", faultEdge: 2 },
+    guardMemory(block, 2, ebx, 4, "write"),
     memoryWrite(ebx, popValue, 32),
     stateWrite(gprChannel("esp"), nextEsp),
     stateWrite(eipChannel, v.const(0x1002)),
@@ -1794,10 +1850,10 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
   // guard's, where esp is already pending with the incremented value.
   const eipFlushes = [stateWrite(eipChannel, v.const(0x1000))];
 
-  deepStrictEqual(edgeRegion(block, 1).flushes, eipFlushes);
-  deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: esp });
-  deepStrictEqual(edgeRegion(block, 2).flushes, eipFlushes);
-  deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "exit", reason: "memoryWriteFault", payload: ebx });
+  deepStrictEqual(nestedBodyView(block, 1).flushes, eipFlushes);
+  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: esp });
+  deepStrictEqual(nestedBodyView(block, 2).flushes, eipFlushes);
+  deepStrictEqual(nestedBodyView(block, 2).terminator, { kind: "exit", reason: "memoryWriteFault", payload: ebx });
 });
 
 test("pop fs:[ebx] writes to the linear destination address", () => {
@@ -1824,17 +1880,17 @@ test("pop fs:[ebx] writes to the linear destination address", () => {
 
   deepStrictEqual(entryActions(block), [
     stateRead(esp, gprChannel("esp")),
-    { kind: "guardMemory", address: esp, byteLength: 4, access: "read", faultEdge: 1 },
+    guardMemory(block, 1, esp, 4, "read"),
     memoryRead(popValue, esp, 32),
     stateRead(ebx, gprChannel("ebx")),
     stateRead(fsBase, segmentBaseChannel("fs")),
-    { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
+    guardMemory(block, 2, address, 4, "write"),
     memoryWrite(address, popValue, 32),
     stateWrite(gprChannel("esp"), nextEsp),
     stateWrite(eipChannel, v.const(0x1002)),
     finishDispatch(v.const(0x1002))
   ]);
-  deepStrictEqual(edgeRegion(block, 2).terminator, { kind: "exit", reason: "memoryWriteFault", payload: address });
+  deepStrictEqual(nestedBodyView(block, 2).terminator, { kind: "exit", reason: "memoryWriteFault", payload: address });
 });
 
 test("pop [ebx] write edge restores a previous instruction's pending esp", () => {
@@ -1851,11 +1907,11 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
 
   // The edge restores the boundary esp — the mov's 0x30, not the pop's
   // incremented value.
-  deepStrictEqual(edgeFlushes(block, 2), [
+  deepStrictEqual(nestedBodyFlushes(block, 2), [
     stateWrite(gprChannel("esp"), v.const(0x30)),
     stateWrite(eipChannel, v.const(0x1005))
   ]);
-  deepStrictEqual(edgeRegion(block, 2).terminator, {
+  deepStrictEqual(nestedBodyView(block, 2).terminator, {
     kind: "exit",
     reason: "memoryWriteFault",
     payload: ebxRead.output
@@ -1883,9 +1939,9 @@ test("pop [esp] builds the destination address from the incremented esp", () => 
 
   deepStrictEqual(entryActions(block), [
     stateRead(esp, gprChannel("esp")),
-    { kind: "guardMemory", address: esp, byteLength: 4, access: "read", faultEdge: 1 },
+    guardMemory(block, 1, esp, 4, "read"),
     memoryRead(popValue, esp, 32),
-    { kind: "guardMemory", address: nextEsp, byteLength: 4, access: "write", faultEdge: 2 },
+    guardMemory(block, 2, nextEsp, 4, "write"),
     memoryWrite(nextEsp, popValue, 32),
     stateWrite(gprChannel("esp"), nextEsp),
     stateWrite(eipChannel, v.const(0x1003)),
@@ -1960,7 +2016,7 @@ test("add r/m32, r32 with both operands dynamic reads, then writes, in one block
   );
   const sum = v.binary("add", reads[0]!.output, reads[1]!.output);
 
-  strictEqual(block.regions.length, 1);
+  strictEqual(nestedActionBodies(block).length, 0);
   deepStrictEqual(block.values.node(dst), { kind: "external", external: 0 });
   deepStrictEqual(actions[0], stateRead(reads[0]!.output, { kind: "gprDynamic", index: dst, byteLength: 4 }));
   deepStrictEqual(actions[1], stateRead(reads[1]!.output, { kind: "gprDynamic", index: src, byteLength: 4 }));
@@ -2088,10 +2144,10 @@ test("pop r/mDyn flushes the incremented esp before the dynamic store, after the
   // Values-first: the guard (and its snapshot) precedes the esp flush the
   // dynamic store forces, so the unrestorable store happens after the last
   // fault edge.
-  strictEqual(block.regions.length, 2);
+  strictEqual(nestedActionBodies(block).length, 1);
   deepStrictEqual(entryActions(block), [
     stateRead(esp, gprChannel("esp")),
-    { kind: "guardMemory", address: esp, byteLength: 4, access: "read", faultEdge: 1 },
+    guardMemory(block, 1, esp, 4, "read"),
     memoryRead(popValue, esp, 32),
     stateWrite(gprChannel("esp"), nextEsp),
     stateWrite({ kind: "gprDynamic", index: v.external(0), byteLength: 4 }, popValue),
@@ -2198,10 +2254,10 @@ test("a fault edge restores an external eip", () => {
   const block = builder.finish();
   const v = block.values;
 
-  deepStrictEqual(edgeRegion(block, 1).flushes, [
+  deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(eipChannel, v.external(4))
   ]);
-  deepStrictEqual(edgeRegion(block, 1).terminator, {
+  deepStrictEqual(nestedBodyView(block, 1).terminator, {
     kind: "exit",
     reason: "memoryReadFault",
     payload: v.const(0x2000)
@@ -2247,13 +2303,13 @@ test("a memStatic operand guards and accesses the external address", () => {
   const address = v.external(7);
 
   deepStrictEqual(entryActions(block), [
-    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
+    guardMemory(block, 1, address, 4, "read"),
     memoryRead(2, address, 32),
     stateWrite(gprChannel("eax"), 2),
     stateWrite(eipChannel, v.const(0x1006)),
     finishDispatch(v.const(0x1006))
   ]);
-  deepStrictEqual(edgeRegion(block, 1).terminator, {
+  deepStrictEqual(nestedBodyView(block, 1).terminator, {
     kind: "exit",
     reason: "memoryReadFault",
     payload: address
@@ -2275,13 +2331,13 @@ test("a memDynamic operand reads the base register inside the block", () => {
 
   deepStrictEqual(entryActions(block), [
     stateRead(baseRead.output, { kind: "gprDynamic", index: v.external(0), byteLength: 4 }),
-    { kind: "guardMemory", address, byteLength: 4, access: "read", faultEdge: 1 },
+    guardMemory(block, 1, address, 4, "read"),
     memoryRead(load.output, address, 32),
     stateWrite(gprChannel("eax"), load.output),
     stateWrite(eipChannel, v.const(0x1006)),
     finishDispatch(v.const(0x1006))
   ]);
-  deepStrictEqual(edgeRegion(block, 1).terminator, {
+  deepStrictEqual(nestedBodyView(block, 1).terminator, {
     kind: "exit",
     reason: "memoryReadFault",
     payload: address
@@ -2424,14 +2480,14 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
   // The main path stores the incremented esp before the base read, so an
   // esp-based destination follows the SDM; the value comes from the
   // pre-increment esp read.
-  strictEqual(block.regions.length, 3);
+  strictEqual(nestedActionBodies(block).length, 2);
   deepStrictEqual(entryActions(block), [
     stateRead(esp, gprChannel("esp")),
-    { kind: "guardMemory", address: esp, byteLength: 4, access: "read", faultEdge: 1 },
+    guardMemory(block, 1, esp, 4, "read"),
     memoryRead(popValue, esp, 32),
     stateWrite(gprChannel("esp"), nextEsp),
     stateRead(baseRead.output, baseRead.op.slot),
-    { kind: "guardMemory", address, byteLength: 4, access: "write", faultEdge: 2 },
+    guardMemory(block, 2, address, 4, "write"),
     memoryWrite(address, popValue, 32),
     stateWrite(eipChannel, v.const(0x1003)),
     finishDispatch(v.const(0x1003))
@@ -2440,15 +2496,15 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
   // The read guard predates the flush: its edge omits esp (cpu state memory
   // still holds it on that path). The write guard's edge restores the
   // pre-instruction esp read the flush destroyed.
-  deepStrictEqual(edgeRegion(block, 1).flushes, [
+  deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(eipChannel, v.const(0x1000))
   ]);
-  deepStrictEqual(edgeRegion(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: esp });
-  deepStrictEqual(edgeFlushes(block, 2), [
+  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "exit", reason: "memoryReadFault", payload: esp });
+  deepStrictEqual(nestedBodyFlushes(block, 2), [
     stateWrite(gprChannel("esp"), esp),
     stateWrite(eipChannel, v.const(0x1000))
   ]);
-  deepStrictEqual(edgeRegion(block, 2).terminator, {
+  deepStrictEqual(nestedBodyView(block, 2).terminator, {
     kind: "exit",
     reason: "memoryWriteFault",
     payload: address
@@ -2548,7 +2604,7 @@ test("branch edges flush the advanced count", () => {
 
   for (const index of [1, 2]) {
     strictEqual(
-      edgeRegion(block, index).flushes.find(
+      nestedBodyView(block, index).flushes.find(
         (flush): flush is StateWriteAction =>
           isStateWrite(flush) && flush.op.slot === instructionCountChannel
       )?.op.value,
@@ -2573,7 +2629,7 @@ test("a fault edge restores the boundary count", () => {
   // The faulting store's own advance never reaches the edge: it restores the
   // first instruction's count.
   strictEqual(
-    edgeRegion(block, 1).flushes.find(
+    nestedBodyView(block, 1).flushes.find(
       (flush): flush is StateWriteAction =>
         isStateWrite(flush) && flush.op.slot === instructionCountChannel
     )?.op.value,

@@ -11,17 +11,12 @@ test("helperCallsForBlock reports live scheduled flag resolves", () => {
   const values = new ValueTable();
   const zf = values.addActionOutput(fitsUnsigned(1));
   const block = {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          resolveFlag(zf, "ZF"),
-          stateWrite(gprChannel("eax"), zf)
-        ]
-      }
-    ],
+    body: {
+      actions: [
+        resolveFlag(zf, "ZF"),
+        stateWrite(gprChannel("eax"), zf)
+      ]
+    },
     values
   } as const;
 
@@ -35,8 +30,7 @@ test("helperCallsForBlock omits dead scheduled flag resolves", () => {
   const zf = values.addActionOutput(fitsUnsigned(1));
 
   const block = {
-    entry: 0,
-    regions: [{ id: 0, kind: "entry", actions: [resolveFlag(zf, "ZF")] }],
+    body: { actions: [resolveFlag(zf, "ZF")] },
     values
   } as const;
 
@@ -48,19 +42,14 @@ test("helperCallsForBlock deduplicates repeated scheduled flag resolves", () => 
   const first = values.addActionOutput(fitsUnsigned(1));
   const second = values.addActionOutput(fitsUnsigned(1));
   const block = {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          resolveFlag(first, "ZF"),
-          resolveFlag(second, "ZF"),
-          stateWrite(gprChannel("eax"), first),
-          stateWrite(gprChannel("ebx"), second)
-        ]
-      }
-    ],
+    body: {
+      actions: [
+        resolveFlag(first, "ZF"),
+        resolveFlag(second, "ZF"),
+        stateWrite(gprChannel("eax"), first),
+        stateWrite(gprChannel("ebx"), second)
+      ]
+    },
     values
   } as const;
 

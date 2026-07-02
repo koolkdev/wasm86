@@ -1,5 +1,6 @@
 import { channelsOverlap, isDynamicSlot } from "./slots.js";
 import type { Action } from "./actions.js";
+import type { Body } from "./block.js";
 import { opReads, opWrites, type StorageAccess } from "./ops.js";
 import type { StateSlot } from "./slots.js";
 
@@ -29,10 +30,31 @@ export function effectsOf(action: Action): ActionEffects {
     case "guardMemory":
       // A guard checks bounds; it touches no data.
       return noEffects;
-    case "branch":
+    case "if":
+      return bodyEffects(action.thenBody, action.elseBody);
     case "finish":
       return noEffects;
   }
+}
+
+function bodyEffects(...bodies: readonly (Body | undefined)[]): ActionEffects {
+  const reads: StorageEffect[] = [];
+  const writes: StorageEffect[] = [];
+
+  for (const body of bodies) {
+    if (body === undefined) {
+      continue;
+    }
+
+    for (const action of body.actions) {
+      const effects = effectsOf(action);
+
+      reads.push(...effects.reads);
+      writes.push(...effects.writes);
+    }
+  }
+
+  return { reads, writes };
 }
 
 export function mayAlias(a: StorageEffect, b: StorageEffect): boolean {
@@ -69,8 +91,15 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
     case "op":
       return opWrites(action.op).some((write) => write.space === "state" && slotsMayAlias(write.slot, slot));
     case "guardMemory":
-    case "branch":
+      return false;
+    case "if":
+      return bodyMayWriteStateSlot(action.thenBody, slot) ||
+        (action.elseBody !== undefined && bodyMayWriteStateSlot(action.elseBody, slot));
     case "finish":
       return false;
   }
+}
+
+export function bodyMayWriteStateSlot(body: Body, slot: StateSlot): boolean {
+  return body.actions.some((action) => actionMayWriteStateSlot(action, slot));
 }

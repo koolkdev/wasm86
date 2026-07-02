@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { EdgeFlushAction } from "../actions.js";
+import type { StateWriteAction } from "../actions.js";
 import {
   channelCovers,
   channelsOverlap,
@@ -14,7 +14,7 @@ import {
   type WidthBounds
 } from "../values.js";
 import { PendingStateAccess } from "./state-access.js";
-import type { PendingEdgeKind } from "./state.js";
+import type { PendingPathKind } from "./state.js";
 
 export type PendingReadOptions = Readonly<{ signed?: boolean }>;
 
@@ -112,8 +112,8 @@ export class PendingGprs {
     this.#unrestorableStore = false;
   }
 
-  flushesForEdge(edge: PendingEdgeKind): readonly EdgeFlushAction[] {
-    const entries = edge === "fault"
+  flushesForPath(path: PendingPathKind): readonly StateWriteAction[] {
+    const entries = path === "fault"
       ? this.#snapshotEntries()
       : this.#currentEntries();
 

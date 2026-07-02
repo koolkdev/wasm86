@@ -1,6 +1,7 @@
 import type { Action, OpAction } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { opMutates } from "#ir/ops.js";
+import { walkBodyActions } from "#ir/traverse.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#wasm/encoder/types.js";
@@ -36,19 +37,13 @@ export function helperCallsForBlock(
 ): readonly HelperCallKey[] {
   const helperCalls = new Map<string, HelperCallKey>();
 
-  for (const region of block.regions) {
-    if (region.kind !== "entry") {
-      continue;
-    }
+  walkBodyActions(block.body, (action) => {
+    const helper = liveActionHelper(action, analysis);
 
-    for (const action of region.actions) {
-      const helper = liveActionHelper(action, analysis);
-
-      if (helper !== undefined) {
-        helperCalls.set(helperFunctionName(helper), helper);
-      }
+    if (helper !== undefined) {
+      helperCalls.set(helperFunctionName(helper), helper);
     }
-  }
+  });
 
   return [...helperCalls.values()];
 }

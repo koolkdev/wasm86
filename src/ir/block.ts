@@ -1,26 +1,11 @@
-import type { Action, EdgeFlushAction, Finish } from "./actions.js";
+import type { Action } from "./actions.js";
 import type { ValueTable } from "./values.js";
 
-export type RegionId = number;
-
-export type EntryRegion = Readonly<{
-  id: RegionId;
-  kind: "entry";
+export type Body = Readonly<{
   actions: readonly Action[];
 }>;
 
-// Edge bodies flush state and leave.
-export type EdgeRegion = Readonly<{
-  id: RegionId;
-  kind: "edge";
-  flushes: readonly EdgeFlushAction[];
-  terminator: Finish;
-}>;
-
-export type IrRegion = EntryRegion | EdgeRegion;
-
 export type IrBlock = Readonly<{
-  entry: RegionId;
-  regions: readonly IrRegion[];
+  body: Body;
   values: ValueTable;
 }>;

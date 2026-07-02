@@ -153,17 +153,12 @@ test("a computed index extracts the registers from a modrm-style external", asyn
   const rm = values.binary("and", modrm, values.const(7));
   const loaded = values.addActionOutput();
   const block: IrBlock = {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          stateRead(loaded, { kind: "gprDynamic", index: reg, byteLength: 4 }),
-          stateWrite({ kind: "gprDynamic", index: rm, byteLength: 4 }, loaded)
-        ]
-      }
-    ],
+    body: {
+      actions: [
+        stateRead(loaded, { kind: "gprDynamic", index: reg, byteLength: 4 }),
+        stateWrite({ kind: "gprDynamic", index: rm, byteLength: 4 }, loaded)
+      ]
+    },
     values
   };
 
@@ -183,17 +178,12 @@ test("a computed index drives byte access on both the read and the write path", 
   const rm = values.binary("and", modrm, values.const(7));
   const loaded = values.addActionOutput(fitsUnsigned(8));
   const block: IrBlock = {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          stateRead(loaded, { kind: "gprDynamic", index: reg, byteLength: 1 }),
-          stateWrite({ kind: "gprDynamic", index: rm, byteLength: 1 }, loaded)
-        ]
-      }
-    ],
+    body: {
+      actions: [
+        stateRead(loaded, { kind: "gprDynamic", index: reg, byteLength: 1 }),
+        stateWrite({ kind: "gprDynamic", index: rm, byteLength: 1 }, loaded)
+      ]
+    },
     values
   };
 

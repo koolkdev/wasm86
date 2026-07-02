@@ -1,4 +1,4 @@
-import { ok as assertOk, strictEqual } from "node:assert";
+import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
@@ -128,18 +128,14 @@ test("two adds in one block store one lazy add record, with the second add's sou
 
   // Dead flag writes collapse in the contract: one lazy ADD record for the
   // final source, with no explicit status flag stores.
-  const entry = block.regions[0]!;
-
-  assertOk(entry.kind === "entry", "first region is the entry");
-
-  const flagWrites = entry.actions.flatMap(
+  const flagWrites = block.body.actions.flatMap(
     (action) => isStateWrite(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
   );
 
   strictEqual(flagWrites.length, 0);
   strictEqual(new Set(flagWrites).size, 0);
   strictEqual(
-    entry.actions.filter((action) => isStateWrite(action) && action.op.slot === lazyFlagsKindChannel).length,
+    block.body.actions.filter((action) => isStateWrite(action) && action.op.slot === lazyFlagsKindChannel).length,
     1
   );
 

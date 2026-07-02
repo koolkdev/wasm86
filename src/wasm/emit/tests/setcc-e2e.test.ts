@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert";
+import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
@@ -51,13 +51,10 @@ for (const [cc, predicate] of comparePredicates) {
       builder.addInstruction(setccSemantic(cc), [regBinding("al")], loc(0x1006, 0x1009));
 
       const block = builder.finish();
-      const entry = block.regions[0]!;
-
-      ok(entry.kind === "entry", "first region is the entry");
 
       // Source-derived cmp conditions serve setcc: no flag byte is read back.
       strictEqual(
-        entry.actions.some(
+        block.body.actions.some(
           (action) => isStateRead(action) && action.op.slot.kind === "flag"
         ),
         false

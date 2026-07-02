@@ -40,10 +40,7 @@ function readRegister(view: DataView, name: RegName): number {
 }
 
 function entryActions(block: IrBlock): readonly Action[] {
-  const entry = block.regions[0]!;
-
-  ok(entry.kind === "entry", "first region is the entry");
-  return entry.actions;
+  return block.body.actions;
 }
 
 function touchedGprSlots(block: IrBlock): StateSlot[] {
@@ -110,18 +107,13 @@ test("generic state actions load and store the lazy flags kind byte channel", as
   const newKindByteValue = lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, 16);
   const newKindByte = values.const(newKindByteValue);
   const block: IrBlock = {
-    entry: 0,
-    regions: [
-      {
-        id: 0,
-        kind: "entry",
-        actions: [
-          stateRead(oldKindByte, lazyFlagsKindChannel),
-          stateWrite(lazyFlagsBChannel, oldKindByte),
-          stateWrite(lazyFlagsKindChannel, newKindByte)
-        ]
-      }
-    ],
+    body: {
+      actions: [
+        stateRead(oldKindByte, lazyFlagsKindChannel),
+        stateWrite(lazyFlagsBChannel, oldKindByte),
+        stateWrite(lazyFlagsKindChannel, newKindByte)
+      ]
+    },
     values
   };
   const { stateView, run } = await instantiateIrBlock(block);

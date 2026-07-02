@@ -1,16 +1,11 @@
-import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import {
-  isTerminatorAction,
+  actionCompletes,
+  bodyFinal,
   type Action,
-  type BranchAction,
   type GuardMemoryAction
 } from "#ir/actions.js";
-import type {
-  EdgeRegion,
-  IrBlock,
-  RegionId
-} from "#ir/block.js";
+import type { Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -47,6 +42,10 @@ export type ActionFunctionContext = Readonly<{
   embedding: FunctionEmbedding;
 }>;
 
+type BodyEmitContext = Readonly<{
+  faultByteLength?: number;
+}>;
+
 // The function-shaped entry point: the block is the whole function body.
 export function emitActionFunction(block: IrBlock, context: ActionFunctionContext): WasmFunctionBodyEncoder {
   const scratch = new WasmLocalScratchAllocator(context.body);
@@ -66,11 +65,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   validateIrBlock(block, { allowImplicitEntryFallthrough: context.embedding.fallthrough !== undefined });
 
   const { body, embedding } = context;
-  const entry = block.regions.find((region) => region.id === block.entry);
-
-  assert(entry !== undefined && entry.kind === "entry", "IR block entry region is missing");
-
-  const edges = block.regions.filter((region): region is EdgeRegion => region.kind === "edge");
   const outputs = embedding.outputs ?? new Map<ValueId, number>();
   const analysis = context.analysis ?? analyzeBlockValues(block, outputs.keys());
   const valueStack = createValueStack({
@@ -83,11 +77,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     loadSlot: (slot, signed, operands) => emitSlotLoad(body, slot, signed, operands),
     loadGuest: (width, signed) => emitGuestLoad(body, width, signed)
   });
-  // Per-edge report detail (the guard's byte length); branch edges record
-  // a zero that only marks them as targeted.
-  const edgeExitDetails = new Map<RegionId, number>();
-  const terminator = entry.actions[entry.actions.length - 1];
-  const hasTerminator = terminator !== undefined && isTerminatorAction(terminator);
+  const terminator = bodyFinal(block.body);
 
   const frame = createControlFrame({
     body,
@@ -97,7 +87,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     constValue: (id) => block.values.constValue(id)
   });
 
-  function emitEntryAction(action: Action): void {
+  function emitAction(action: Action, emitContext: BodyEmitContext): void {
     switch (action.kind) {
       case "op":
         emitOp(action);
@@ -108,14 +98,14 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "finish":
         switch (action.finish.kind) {
           case "exit":
-            frame.emitReport(action.finish);
+            frame.emitReport(action.finish, emitContext.faultByteLength);
             return;
           case "dispatch":
             frame.emitDispatch(action.finish);
             return;
         }
-      case "branch":
-        emitBranch(action);
+      case "if":
+        emitIf(action, emitContext);
         return;
     }
   }
@@ -139,39 +129,38 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   }
 
   function emitGuard(action: GuardMemoryAction): void {
-    const edge = edgeById(action.faultEdge);
-
-    edgeExitDetails.set(edge.id, action.byteLength);
-    valueStack.captureForEdge(edge);
+    valueStack.captureForBody(action.faultBody);
     frame.withNestedControl(() => {
       emitGuardChecks(
         body,
         action.byteLength,
         () => valueStack.emitUse(action.address),
-        () => emitEdgeBody(edge)
+        () => emitBody(action.faultBody, { faultByteLength: action.byteLength })
       );
     });
   }
 
-  // Both edges' values are captured before any path leaves the entry.
-  function emitBranch(action: BranchAction): void {
-    const taken = edgeById(action.taken);
-    const notTaken = edgeById(action.notTaken);
+  // Both nested bodies' values are captured before any path leaves the parent.
+  function emitIf(action: Extract<Action, { kind: "if" }>, emitContext: BodyEmitContext): void {
+    valueStack.captureForBody(action.thenBody);
 
-    edgeExitDetails.set(taken.id, 0);
-    edgeExitDetails.set(notTaken.id, 0);
-    valueStack.captureForEdge(taken);
-    valueStack.captureForEdge(notTaken);
+    if (action.elseBody !== undefined) {
+      valueStack.captureForBody(action.elseBody);
+    }
+
     valueStack.emitUse(action.condition);
     body.ifBlock();
     frame.withNestedControl(() => {
-      emitEdgeBody(taken);
-      body.elseBlock();
-      emitEdgeBody(notTaken);
+      emitBody(action.thenBody, emitContext);
+
+      if (action.elseBody !== undefined) {
+        body.elseBlock();
+        emitBody(action.elseBody, emitContext);
+      }
     });
     body.endBlock();
 
-    if (embedding.dispatch?.kind === "link") {
+    if (actionCompletes(action) && embedding.dispatch?.kind === "link") {
       body.unreachable();
     }
   }
@@ -185,39 +174,20 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     }
   }
 
-  function emitEdgeBody(edge: EdgeRegion): void {
-    const detail = edgeExitDetails.get(edge.id);
-
-    assert(detail !== undefined, `edge region ${edge.id} was never targeted by the entry`);
-
-    for (const flush of edge.flushes) {
-      emitSlotStore(body, flush.op.slot, flush.op.value, valueStack);
-    }
-
-    switch (edge.terminator.kind) {
-      case "exit":
-        frame.emitReport(edge.terminator, detail);
-        return;
-      case "dispatch":
-        frame.emitDispatch(edge.terminator);
-        return;
+  function emitBody(actionBody: Body, emitContext: BodyEmitContext = {}): void {
+    for (const action of actionBody.actions) {
+      emitAction(action, emitContext);
     }
   }
 
-  function edgeById(id: RegionId): EdgeRegion {
-    const edge = edges.find((candidate) => candidate.id === id);
-
-    assert(edge !== undefined, `no edge region ${id} in this block`);
-    return edge;
-  }
-
-  for (const action of hasTerminator ? entry.actions.slice(0, -1) : entry.actions) {
-    emitEntryAction(action);
+  for (const action of terminator === undefined ? block.body.actions : block.body.actions.slice(0, -1)) {
+    emitAction(action, {});
   }
 
   emitExportedOutputs();
-  if (hasTerminator) {
-    emitEntryAction(terminator);
+
+  if (terminator !== undefined) {
+    emitAction(terminator, {});
   } else {
     frame.emitFallthrough();
   }

@@ -1,5 +1,5 @@
 import type { MemoryAccessKind } from "#x86/memory-access.js";
-import type { RegionId } from "./block.js";
+import type { Body } from "./block.js";
 import type { IrOp, StateWriteOp } from "./ops.js";
 import type { ValueId } from "./values.js";
 
@@ -18,14 +18,14 @@ export type GuardMemoryAction = Readonly<{
   address: ValueId;
   byteLength: number;
   access: MemoryAccessKind;
-  faultEdge: RegionId;
+  faultBody: Body;
 }>;
 
-export type BranchAction = Readonly<{
-  kind: "branch";
+export type IfAction = Readonly<{
+  kind: "if";
   condition: ValueId;
-  taken: RegionId;
-  notTaken: RegionId;
+  thenBody: Body;
+  elseBody?: Body;
 }>;
 
 export type Finish =
@@ -51,20 +51,31 @@ export type DispatchFinish = Extract<Finish, { kind: "dispatch" }>;
 export type Action =
   | OpAction
   | GuardMemoryAction
-  | BranchAction
+  | IfAction
   | FinishAction;
 
-export type EdgeFlushAction = Readonly<{ kind: "op"; op: StateWriteOp }>;
+export type StateWriteAction = Readonly<{ kind: "op"; op: StateWriteOp }>;
 
-export type TerminatorAction = BranchAction | FinishAction;
-
-export function isTerminatorAction(action: Action): action is TerminatorAction {
+export function actionCompletes(action: Action): boolean {
   switch (action.kind) {
-    case "branch":
-    case "finish":
-      return true;
     case "op":
     case "guardMemory":
       return false;
+    case "if":
+      return action.elseBody !== undefined &&
+        bodyCompletes(action.thenBody) &&
+        bodyCompletes(action.elseBody);
+    case "finish":
+      return true;
   }
+}
+
+export function bodyCompletes(body: Body): boolean {
+  return bodyFinal(body) !== undefined;
+}
+
+export function bodyFinal(body: Body): Action | undefined {
+  const last = body.actions[body.actions.length - 1];
+
+  return last !== undefined && actionCompletes(last) ? last : undefined;
 }

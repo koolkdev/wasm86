@@ -13,7 +13,7 @@ import {
   type GprDynamicSlot,
   type StateSlot
 } from "#ir/slots.js";
-import type { Action, EdgeFlushAction } from "#ir/actions.js";
+import type { Action, StateWriteAction } from "#ir/actions.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
 import { isStateRead, isStateWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
@@ -34,16 +34,16 @@ function dynamicGpr(index: ValueId, byteLength: 1 | 2 | 4 = 4): GprDynamicSlot {
   return { kind: "gprDynamic", index, byteLength };
 }
 
-function faultEdgeEntries(pending: PendingState): ReadonlyArray<readonly [StateSlot, ValueId]> {
-  return edgeEntries(pending.flushesForEdge("fault"));
+function faultFlushEntries(pending: PendingState): ReadonlyArray<readonly [StateSlot, ValueId]> {
+  return edgeEntries(pending.flushesForPath("fault"));
 }
 
 function completedEdgeEntries(pending: PendingState): ReadonlyArray<readonly [StateSlot, ValueId]> {
-  return edgeEntries(pending.flushesForEdge("completed"));
+  return edgeEntries(pending.flushesForPath("completed"));
 }
 
 function edgeEntries(
-  actions: readonly EdgeFlushAction[]
+  actions: readonly StateWriteAction[]
 ): ReadonlyArray<readonly [StateSlot, ValueId]> {
   return actions.map((action) => [action.op.slot, action.op.value] as const);
 }
@@ -76,7 +76,7 @@ test("writing a GPR input value back leaves no pending store", () => {
   pending.write(gprChannel("eax"), read);
 
   strictEqual(pending.has(gprChannel("eax")), false);
-  actions.push(...pending.flushesForEdge("completed"));
+  actions.push(...pending.flushesForPath("completed"));
 
   deepStrictEqual(actions, [stateRead(read, gprChannel("eax"))]);
 });
@@ -89,7 +89,7 @@ test("writing an exact cell input value back leaves no pending store", () => {
   pending.write(flagChannel("ZF"), read);
 
   strictEqual(pending.has(flagChannel("ZF")), false);
-  actions.push(...pending.flushesForEdge("completed"));
+  actions.push(...pending.flushesForPath("completed"));
 
   deepStrictEqual(actions, [stateRead(read, flagChannel("ZF"))]);
 });
@@ -111,7 +111,7 @@ test("write al then read eax flushes the byte and reloads the word", () => {
   // actions and never needs storing again.
   strictEqual(pending.has(gprChannel("al")), true);
   strictEqual(pending.read(gprChannel("al")), byte);
-  deepStrictEqual(pending.flushesForEdge("completed"), []);
+  deepStrictEqual(pending.flushesForPath("completed"), []);
   strictEqual(actions.length, 2);
 });
 
@@ -151,7 +151,7 @@ test("a covering write drops the pending with no flush", () => {
   pending.write(gprChannel("eax"), word);
 
   strictEqual(actions.length, 0);
-  actions.push(...pending.flushesForEdge("completed"));
+  actions.push(...pending.flushesForPath("completed"));
   deepStrictEqual(actions, [stateWrite(gprChannel("eax"), word)]);
 });
 
@@ -164,7 +164,7 @@ test("a partially overlapping write flushes the wider pending first", () => {
   pending.write(gprChannel("al"), byte);
 
   deepStrictEqual(actions, [stateWrite(gprChannel("ax"), word)]);
-  actions.push(...pending.flushesForEdge("completed"));
+  actions.push(...pending.flushesForPath("completed"));
   deepStrictEqual(actions[1], stateWrite(gprChannel("al"), byte));
 });
 
@@ -217,7 +217,7 @@ test("lazy flag metadata channels are cached raw state cells", () => {
   deepStrictEqual(actions, [
     stateRead(kindByte, lazyFlagsKindChannel)
   ]);
-  deepStrictEqual(pending.flushesForEdge("completed"), [
+  deepStrictEqual(pending.flushesForPath("completed"), [
     stateWrite(lazyFlagsAChannel, lazyA)
   ]);
 });
@@ -267,7 +267,7 @@ test("flag channels are exact raw pending cells", () => {
   strictEqual(pending.has(flagChannel("ZF")), true);
   strictEqual(pending.read(flagChannel("ZF")), zf);
 
-  deepStrictEqual(pending.flushesForEdge("completed"), [
+  deepStrictEqual(pending.flushesForPath("completed"), [
     stateWrite(flagChannel("ZF"), zf)
   ]);
   deepStrictEqual(actions, []);
@@ -336,7 +336,7 @@ test("completed edge flushes dirty pendings in owner order", () => {
   pending.write(flagChannel("DF"), flag);
   pending.write(gprChannel("esi"), word);
 
-  deepStrictEqual(pending.flushesForEdge("completed"), [
+  deepStrictEqual(pending.flushesForPath("completed"), [
     stateWrite(gprChannel("esi"), word),
     stateWrite(flagChannel("DF"), flag)
   ]);
@@ -354,7 +354,7 @@ test("fault boundary lists instruction-start values without consuming the map", 
   pending.write(eipChannel, eip);
   pending.beginInstruction();
 
-  deepStrictEqual(faultEdgeEntries(pending), [
+  deepStrictEqual(faultFlushEntries(pending), [
     [gprChannel("al"), byte],
     [eipChannel, eip]
   ]);
@@ -372,7 +372,7 @@ test("fault boundary keeps a rewritten channel's instruction-start value", () =>
   pending.beginInstruction();
   pending.write(gprChannel("eax"), after);
 
-  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("eax"), before]]);
+  deepStrictEqual(faultFlushEntries(pending), [[gprChannel("eax"), before]]);
   strictEqual(pending.read(gprChannel("eax")), after);
 });
 
@@ -382,7 +382,7 @@ test("fault boundary omits a channel first written this instruction", () => {
   pending.beginInstruction();
   pending.write(gprChannel("eax"), values.const(1));
 
-  deepStrictEqual(faultEdgeEntries(pending), []);
+  deepStrictEqual(faultFlushEntries(pending), []);
 });
 
 test("a covering write keeps the dropped channel's start value in the fault boundary", () => {
@@ -395,7 +395,7 @@ test("a covering write keeps the dropped channel's start value in the fault boun
 
   // eax had no start pending (omitted); the dropped al still must reach
   // cpu state memory on the fault path.
-  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), byte]]);
+  deepStrictEqual(faultFlushEntries(pending), [[gprChannel("al"), byte]]);
 });
 
 test("flushing a channel first written this instruction makes the fault boundary unrestorable", () => {
@@ -405,12 +405,12 @@ test("flushing a channel first written this instruction makes the fault boundary
   pending.write(gprChannel("al"), values.const(1));
   pending.read(gprChannel("ax"));
 
-  throws(() => pending.flushesForEdge("fault"), /unrestorable/);
+  throws(() => pending.flushesForPath("fault"), /unrestorable/);
 
   // The next instruction boundary takes a fresh copy; the flushed al is
   // clean but still pending, so it joins the new boundary.
   pending.beginInstruction();
-  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), values.const(1)]]);
+  deepStrictEqual(faultFlushEntries(pending), [[gprChannel("al"), values.const(1)]]);
 });
 
 test("flushing a channel rewritten this instruction keeps its start value in the fault boundary", () => {
@@ -422,7 +422,7 @@ test("flushing a channel rewritten this instruction keeps its start value in the
   pending.write(gprChannel("eax"), values.const(0x222));
   pending.read(gprChannel("al"));
 
-  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("eax"), before]]);
+  deepStrictEqual(faultFlushEntries(pending), [[gprChannel("eax"), before]]);
 });
 
 test("flushing a channel untouched this instruction keeps it in the fault boundary", () => {
@@ -434,7 +434,7 @@ test("flushing a channel untouched this instruction keeps it in the fault bounda
   pending.read(gprChannel("ax"));
 
   // The flush already stored this value; rewriting it is harmless.
-  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), byte]]);
+  deepStrictEqual(faultFlushEntries(pending), [[gprChannel("al"), byte]]);
 });
 
 test("a covering write drops a clean pending without a store", () => {
@@ -444,7 +444,7 @@ test("a covering write drops a clean pending without a store", () => {
   pending.write(gprChannel("al"), values.const(0x12));
   pending.read(gprChannel("eax"));
   pending.write(gprChannel("eax"), word);
-  actions.push(...pending.flushesForEdge("completed"));
+  actions.push(...pending.flushesForPath("completed"));
 
   // One al store (the flush before the read); the covering eax write drops
   // the clean al, so only eax flushes at the end.
@@ -539,11 +539,11 @@ test("a dynamic write makes the fault boundary unrestorable", () => {
   pending.beginInstruction();
   pending.writeDynamicGpr(dynamicGpr(values.external(0)), values.const(1));
 
-  throws(() => pending.flushesForEdge("fault"), /unrestorable/);
+  throws(() => pending.flushesForPath("fault"), /unrestorable/);
 
   // The next instruction boundary takes a fresh copy.
   pending.beginInstruction();
-  deepStrictEqual(faultEdgeEntries(pending), []);
+  deepStrictEqual(faultFlushEntries(pending), []);
 });
 
 test("a dynamic read flushing a channel first written this instruction makes the fault boundary unrestorable", () => {
@@ -553,7 +553,7 @@ test("a dynamic read flushing a channel first written this instruction makes the
   pending.write(gprChannel("ebx"), values.const(0x111));
   pending.readDynamicGpr(dynamicGpr(values.external(0)));
 
-  throws(() => pending.flushesForEdge("fault"), /unrestorable/);
+  throws(() => pending.flushesForPath("fault"), /unrestorable/);
 });
 
 test("a dynamic read flushing a boundary pending keeps the fault boundary restorable", () => {
@@ -564,7 +564,7 @@ test("a dynamic read flushing a boundary pending keeps the fault boundary restor
   pending.beginInstruction();
   pending.readDynamicGpr(dynamicGpr(values.external(0)));
 
-  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("ebx"), before]]);
+  deepStrictEqual(faultFlushEntries(pending), [[gprChannel("ebx"), before]]);
 });
 
 test("a destructive flush served by a cached read keeps the fault boundary restorable", () => {
@@ -580,7 +580,7 @@ test("a destructive flush served by a cached read keeps the fault boundary resto
   // The cached read is the pre-instruction value — no store hit esp before
   // its first flush — so it joins the boundary instead of latching the
   // unrestorable assert.
-  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("esp"), before]]);
+  deepStrictEqual(faultFlushEntries(pending), [[gprChannel("esp"), before]]);
 });
 
 test("a signed cached read serves a destructive flush of its channel", () => {
@@ -595,7 +595,7 @@ test("a signed cached read serves a destructive flush of its channel", () => {
 
   // The sign-extended read's low channel-width bits are the memory bytes;
   // the channel-width boundary store masks the rest.
-  deepStrictEqual(faultEdgeEntries(pending), [[gprChannel("al"), before]]);
+  deepStrictEqual(faultFlushEntries(pending), [[gprChannel("al"), before]]);
 });
 
 test("narrow dynamic reads carry their byte length, bounds, and sign marker", () => {

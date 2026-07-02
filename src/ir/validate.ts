@@ -1,13 +1,15 @@
 import { assert } from "#common/assert.js";
 import {
-  isTerminatorAction,
+  actionCompletes,
+  bodyFinal,
+  bodyCompletes,
   type Action,
-  type EdgeFlushAction,
   type DispatchFinish,
   type Finish,
-  type OpAction
+  type OpAction,
+  type StateWriteAction
 } from "./actions.js";
-import type { EdgeRegion, EntryRegion, IrBlock, RegionId } from "./block.js";
+import type { Body, IrBlock } from "./block.js";
 import { opAccess, type OpValueOutput } from "./ops.js";
 import { unboundedWidthBounds, type WidthBounds } from "./values.js";
 
@@ -15,129 +17,80 @@ export type ValidateIrBlockOptions = Readonly<{
   allowImplicitEntryFallthrough?: boolean;
 }>;
 
-// Structural checks: regions terminate consistently, every region reference
-// resolves, dispatch targets are real values with matching EIP commits, and
-// top-level finish payload shapes are rejected at runtime even if a caller
-// bypasses TypeScript.
+// Structural checks: bodies terminate consistently, nested bodies are closed
+// where their owner requires it, and dispatch targets are real values with
+// matching EIP commits on every path that dispatches.
 export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
-  const edgeIds = new Set<RegionId>();
-  const edgeById = new Map<RegionId, EdgeRegion>();
-  let entry: EntryRegion | undefined;
+  validateBody(block, block.body, [], "body");
 
-  for (const region of block.regions) {
-    switch (region.kind) {
-      case "entry":
-        assert(entry === undefined, "IR block has more than one entry region");
-        entry = region;
-        break;
-      case "edge":
-        validateEdgeTerminator(block, region.terminator);
-        validateEdgeFlushes(block, region);
-        edgeIds.add(region.id);
-        edgeById.set(region.id, region);
-        break;
-    }
-  }
-
-  assert(entry !== undefined && entry.id === block.entry, "IR block entry region is missing");
-  assert(edgeIds.size + 1 === block.regions.length, "IR block region ids are not unique");
-  assert(!edgeIds.has(entry.id), "IR block region ids are not unique");
-
-  validateEntryActions(block, entry, edgeIds, edgeById, options);
+  assert(
+    bodyCompletes(block.body) || options.allowImplicitEntryFallthrough === true,
+    "root body does not complete"
+  );
 }
 
-// Branch and finish are closed-region terminators; edge bodies always branch
-// off the entry, so every edge is targeted by exactly one guard or branch.
-function validateEntryActions(
+function validateBody(
   block: IrBlock,
-  entry: EntryRegion,
-  edgeIds: ReadonlySet<RegionId>,
-  edgeById: ReadonlyMap<RegionId, EdgeRegion>,
-  options: ValidateIrBlockOptions
+  body: Body,
+  ancestorPrefix: readonly Action[],
+  path: string
 ): void {
-  const targeted = new Set<RegionId>();
-
-  function target(edge: RegionId, by: Action["kind"]): void {
-    assert(edgeIds.has(edge), `${by} targets unknown edge region ${edge}`);
-    assert(!targeted.has(edge), `edge region ${edge} is targeted more than once`);
-    targeted.add(edge);
-  }
-
-  for (const [index, action] of entry.actions.entries()) {
-    assertKnownEntryAction(action);
+  for (const [index, action] of body.actions.entries()) {
+    assertKnownAction(action);
     validateActionValues(block, action);
 
-    if (isTerminatorAction(action)) {
+    if (actionCompletes(action)) {
       assert(
-        index === entry.actions.length - 1,
-        `entry region has actions after its ${action.kind} terminator`
+        index === body.actions.length - 1,
+        `${path} has actions after its terminal ${action.kind} action`
       );
     }
 
+    let prefix: readonly Action[] | undefined;
+    const prefixBeforeAction = () => {
+      prefix ??= [
+        ...ancestorPrefix,
+        ...body.actions.slice(0, index)
+      ];
+      return prefix;
+    };
+
     switch (action.kind) {
       case "guardMemory":
-        target(action.faultEdge, action.kind);
+        validateBody(block, action.faultBody, prefixBeforeAction(), `${path}.guardMemory[${index}].faultBody`);
         assert(
-          edgeById.get(action.faultEdge)?.terminator.kind === "exit",
-          `guardMemory fault edge ${action.faultEdge} must terminate with exit`
+          bodyCompletes(action.faultBody),
+          `${path}.guardMemory[${index}].faultBody does not complete`
         );
+        assertGuardFaultBodyExits(action.faultBody, `${path}.guardMemory[${index}].faultBody`);
         break;
-      case "branch":
-        target(action.taken, action.kind);
-        target(action.notTaken, action.kind);
+      case "if":
+        validateBody(block, action.thenBody, prefixBeforeAction(), `${path}.if[${index}].thenBody`);
+
+        if (action.elseBody !== undefined) {
+          validateBody(block, action.elseBody, prefixBeforeAction(), `${path}.if[${index}].elseBody`);
+        }
+
         break;
       case "finish":
         if (action.finish.kind === "dispatch") {
-          assertEntryDispatchEipFlushed(entry.actions, index, action.finish);
+          assertDispatchEipFlushed(prefixBeforeAction(), action.finish, path);
         }
+
         break;
       case "op":
         break;
     }
   }
+}
 
-  const last = entry.actions[entry.actions.length - 1];
+function assertGuardFaultBodyExits(body: Body, path: string): void {
+  const final = bodyFinal(body);
 
   assert(
-    (last !== undefined && isTerminatorAction(last)) || options.allowImplicitEntryFallthrough === true,
-    "entry region does not end with a terminator"
+    final?.kind === "finish" && final.finish.kind === "exit",
+    `${path} must terminate with exit`
   );
-
-  for (const id of edgeIds) {
-    assert(targeted.has(id), `edge region ${id} is not targeted by any entry action`);
-  }
-}
-
-function validateEdgeTerminator(block: IrBlock, terminator: EdgeRegion["terminator"]): void {
-  assertKnownEdgeTerminator(terminator);
-
-  switch (terminator.kind) {
-    case "dispatch":
-      block.values.node(terminator.targetEip);
-      return;
-    case "exit":
-      if (terminator.payload !== undefined) {
-        block.values.node(terminator.payload);
-      }
-      return;
-  }
-}
-
-function validateEdgeFlushes(block: IrBlock, edge: EdgeRegion): void {
-  for (const flush of edge.flushes) {
-    assertEdgeFlushAction(flush);
-    validateOpActionValues(block, flush);
-  }
-
-  if (edge.terminator.kind === "dispatch") {
-    const eipFlush = lastEipWrite(edge.flushes);
-
-    assert(eipFlush !== undefined, `dispatch edge ${edge.id} must flush EIP state`);
-    assert(
-      eipFlush.op.value === edge.terminator.targetEip,
-      `dispatch edge ${edge.id} EIP flush does not match dispatch.targetEip`
-    );
-  }
 }
 
 function validateActionValues(block: IrBlock, action: Action): void {
@@ -148,7 +101,7 @@ function validateActionValues(block: IrBlock, action: Action): void {
     case "guardMemory":
       block.values.node(action.address);
       return;
-    case "branch":
+    case "if":
       block.values.node(action.condition);
       return;
     case "finish":
@@ -214,52 +167,41 @@ function formatBounds(bounds: WidthBounds): string {
   return `{ unsignedBits: ${bounds.unsignedBits}, signedBits: ${bounds.signedBits} }`;
 }
 
-function assertEntryDispatchEipFlushed(
-  actions: readonly Action[],
-  dispatchIndex: number,
-  dispatch: DispatchFinish
+function assertDispatchEipFlushed(
+  prefix: readonly Action[],
+  dispatch: DispatchFinish,
+  path: string
 ): void {
-  const previous = actions.slice(0, dispatchIndex);
-  const eipWrite = lastEipWrite(previous);
+  const eipWrite = lastEipWrite(prefix);
 
-  assert(eipWrite !== undefined, "dispatch entry path must flush EIP state");
-  assert(eipWrite.op.value === dispatch.targetEip, "dispatch entry EIP flush does not match dispatch.targetEip");
+  assert(eipWrite !== undefined, `${path} dispatch path must flush EIP state`);
+  assert(eipWrite.op.value === dispatch.targetEip, `${path} dispatch EIP flush does not match dispatch.targetEip`);
 }
 
-function assertKnownEntryAction(action: Action): void {
+function assertKnownAction(action: Action): void {
   const kind = (action as { kind?: unknown }).kind;
 
   assert(
     kind === "op" ||
       kind === "guardMemory" ||
-      kind === "branch" ||
+      kind === "if" ||
       kind === "finish",
     `unknown IR action kind ${String(kind)}`
   );
 }
 
-function assertKnownEdgeTerminator(terminator: Finish): void {
-  const kind = (terminator as { kind?: unknown }).kind;
-
-  assert(kind === "exit" || kind === "dispatch", `edge region terminator must be dispatch or exit, got ${String(kind)}`);
-}
-
-function assertEdgeFlushAction(action: Action): asserts action is EdgeFlushAction {
-  assert(
-    action.kind === "op" && action.op.kind === "state.write" && action.output === undefined,
-    "edge flush entries must be state.write op actions"
-  );
-}
-
-function lastEipWrite(actions: readonly Action[]): EdgeFlushAction | undefined {
+function lastEipWrite(actions: readonly Action[]): StateWriteAction | undefined {
   for (let index = actions.length - 1; index >= 0; index -= 1) {
     const action = actions[index]!;
 
-    if (action.kind === "op" && action.op.kind === "state.write" && action.op.slot.kind === "eip") {
-      assertEdgeFlushAction(action);
+    if (isStateWriteAction(action) && action.op.slot.kind === "eip") {
       return action;
     }
   }
 
   return undefined;
+}
+
+function isStateWriteAction(action: Action): action is StateWriteAction {
+  return action.kind === "op" && action.op.kind === "state.write";
 }

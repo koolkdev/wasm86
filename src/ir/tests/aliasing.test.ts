@@ -65,12 +65,15 @@ test("effects derive from action kind and slot", () => {
   });
 });
 
-test("guards, branches, and finishes touch no data", () => {
+test("guards, ifs, and finishes touch no data", () => {
   deepStrictEqual(
-    effectsOf({ kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultEdge: 1 }),
+    effectsOf({ kind: "guardMemory", address: 0, byteLength: 4, access: "read", faultBody: { actions: [] } }),
     { reads: [], writes: [] }
   );
-  deepStrictEqual(effectsOf({ kind: "branch", condition: 0, taken: 1, notTaken: 2 }), { reads: [], writes: [] });
+  deepStrictEqual(
+    effectsOf({ kind: "if", condition: 0, thenBody: { actions: [] }, elseBody: { actions: [] } }),
+    { reads: [], writes: [] }
+  );
   deepStrictEqual(
     effectsOf({ kind: "finish", finish: { kind: "exit", reason: "unsupported" } }),
     { reads: [], writes: [] }
@@ -79,6 +82,22 @@ test("guards, branches, and finishes touch no data", () => {
     effectsOf({ kind: "finish", finish: { kind: "dispatch", targetEip: 0 } }),
     { reads: [], writes: [] }
   );
+});
+
+test("if effects aggregate nested body effects", () => {
+  const action = {
+    kind: "if",
+    condition: 0,
+    thenBody: { actions: [stateRead(1, gprChannel("eax")), stateWrite(gprChannel("ebx"), 1)] },
+    elseBody: { actions: [memoryWrite(2, 3, 32)] }
+  } as const;
+
+  deepStrictEqual(effectsOf(action), {
+    reads: [state(gprChannel("eax"))],
+    writes: [state(gprChannel("ebx")), memory]
+  });
+  strictEqual(actionMayWriteStateSlot(action, gprChannel("ebx")), true);
+  strictEqual(actionMayWriteStateSlot(action, gprChannel("eax")), false);
 });
 
 test("guest memory may-aliases guest memory and never state", () => {
