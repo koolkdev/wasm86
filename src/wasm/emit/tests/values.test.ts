@@ -6,7 +6,7 @@ import type { Action } from "#ir/actions.js";
 import { fitsUnsigned, ValueTable } from "#ir/values.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
 import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
-import { memoryCheck, memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { memoryCheck, memoryRead, memoryWrite, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function analyze(
   values: ValueTable,
@@ -90,6 +90,7 @@ test("action operand edges count at their action index", () => {
   strictEqual(analysis.lastUse(guarded), 4);
   strictEqual(analysis.useCount(fault), 1);
   strictEqual(analysis.lastUse(fault), 4);
+  strictEqual(analysis.outputPlacement(fault).kind, "captureAtProducer");
   strictEqual(analysis.useCount(condition), 1);
   strictEqual(analysis.lastUse(condition), 5);
   strictEqual(analysis.useCount(payload), 1);
@@ -110,6 +111,7 @@ test("a live load consumes its address at the load's index", () => {
   strictEqual(analysis.useCount(loaded), 1);
   strictEqual(analysis.useCount(address), 1);
   strictEqual(analysis.lastUse(address), 0);
+  strictEqual(analysis.outputPlacement(loaded).kind, "captureAtProducer");
 });
 
 test("a chain of dead loads stays wholly uncounted", () => {
@@ -200,7 +202,18 @@ test("branch edge values count once per edge, at the branch's entry index", () =
   strictEqual(analysis.useCount(fallthrough), 1);
 });
 
-test("an edge use past an overlapping store pins the read", () => {
+test("dispatch target references are not demand roots", () => {
+  const values = new ValueTable();
+  const target = values.const(0x2000);
+  const analysis = analyze(values, [
+    { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
+  ]);
+
+  strictEqual(analysis.useCount(target), 0);
+  strictEqual(analysis.lastUse(target), undefined);
+});
+
+test("an edge use past an overlapping store captures the read at its producer", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.const(5);
@@ -227,11 +240,11 @@ test("an edge use past an overlapping store pins the read", () => {
 
   // The fault body consumes the read, but the entry already flushed a newer
   // eax before the check-if: reloading in the body would observe it, so the
-  // read pins at its action point.
-  strictEqual(analysis.isPinned(read), true);
+  // read captures at its action point.
+  strictEqual(analysis.outputPlacement(read).kind, "captureAtProducer");
 });
 
-test("a lazy kind byte read crossing a lazy-kind-byte write pins, but lazy operands do not", () => {
+test("a lazy kind byte read crossing a lazy-kind-byte write captures, but lazy operands defer", () => {
   const values = new ValueTable();
   const kindByte = values.addActionOutput();
   const lazyA = values.addActionOutput();
@@ -244,11 +257,11 @@ test("a lazy kind byte read crossing a lazy-kind-byte write pins, but lazy opera
     stateWrite(gprChannel("ebx"), lazyA)
   ]);
 
-  strictEqual(analysis.isPinned(kindByte), true);
-  strictEqual(analysis.isPinned(lazyA), false);
+  strictEqual(analysis.outputPlacement(kindByte).kind, "captureAtProducer");
+  strictEqual(analysis.outputPlacement(lazyA).kind, "deferToUse");
 });
 
-test("an edge value reloading a channel the edge flushes pins the read", () => {
+test("an edge value reloading a channel the edge flushes captures the read", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.const(5);
@@ -274,9 +287,9 @@ test("an edge value reloading a channel the edge flushes pins the read", () => {
   );
 
   // The edge body restores ebx itself, so reloading the ebx read inside the
-  // edge would observe that store had it been emitted first: the read pins,
-  // leaving the edge free to order its flushes and exit.
-  strictEqual(analysis.isPinned(read), true);
+  // edge would observe that store had it been emitted first: the read
+  // captures, leaving the edge free to order its flushes and exit.
+  strictEqual(analysis.outputPlacement(read).kind, "captureAtProducer");
 });
 
 test("compound children count once per parent, at the parent's first use", () => {
@@ -352,7 +365,7 @@ test("last use flows through nested compounds from the outermost first use", () 
   strictEqual(analysis.lastUse(read), 1);
 });
 
-test("the xchg shape pins only the read whose use crosses the store", () => {
+test("the xchg shape captures only the read whose use crosses the store", () => {
   const values = new ValueTable();
   const eax = values.addActionOutput();
   const ebx = values.addActionOutput();
@@ -363,13 +376,13 @@ test("the xchg shape pins only the read whose use crosses the store", () => {
     stateWrite(gprChannel("eax"), ebx)
   ]);
 
-  // ebx is read before the ebx store and consumed after it: pinned. eax's
+  // ebx is read before the ebx store and consumed after it: captured. eax's
   // last use is the ebx store itself, before any eax store: load at use.
-  strictEqual(analysis.isPinned(ebx), true);
-  strictEqual(analysis.isPinned(eax), false);
+  strictEqual(analysis.outputPlacement(ebx).kind, "captureAtProducer");
+  strictEqual(analysis.outputPlacement(eax).kind, "deferToUse");
 });
 
-test("a dynamic store pins a GPR read used later, never a flag read", () => {
+test("a dynamic store captures a GPR read used later, never a flag read", () => {
   const values = new ValueTable();
   const gprRead = values.addActionOutput();
   const flagRead = values.addActionOutput();
@@ -383,10 +396,10 @@ test("a dynamic store pins a GPR read used later, never a flag read", () => {
     stateWrite(gprChannel("ecx"), flagRead)
   ]);
 
-  // The dynamic store may hit any GPR word, so the eax read pins; flag
+  // The dynamic store may hit any GPR word, so the eax read captures; flag
   // bytes never alias dynamic slots.
-  strictEqual(analysis.isPinned(gprRead), true);
-  strictEqual(analysis.isPinned(flagRead), false);
+  strictEqual(analysis.outputPlacement(gprRead).kind, "captureAtProducer");
+  strictEqual(analysis.outputPlacement(flagRead).kind, "deferToUse");
 });
 
 test("a dynamic slot consumes its index once per access", () => {
@@ -404,6 +417,7 @@ test("a dynamic slot consumes its index once per access", () => {
   // repeated observation is a borrow, not a second counted use.
   strictEqual(analysis.useCount(index), 2);
   strictEqual(analysis.lastUse(index), 2);
+  strictEqual(analysis.outputPlacement(wordRead).kind, "captureAtProducer");
 });
 
 test("a dead dynamic read never consumes its computed index", () => {
@@ -416,9 +430,21 @@ test("a dead dynamic read never consumes its computed index", () => {
 
   strictEqual(analysis.useCount(index), 0);
   strictEqual(analysis.lastUse(index), undefined);
+  strictEqual(analysis.outputPlacement(dead).kind, "captureAtProducer");
 });
 
-test("an overlapping partial-channel store pins a wider read used later", () => {
+test("flag resolve outputs capture at their producer", () => {
+  const values = new ValueTable();
+  const resolved = values.addActionOutput(fitsUnsigned(1));
+  const analysis = analyze(values, [
+    resolveFlag(resolved, "ZF"),
+    stateWrite(gprChannel("eax"), resolved)
+  ]);
+
+  strictEqual(analysis.outputPlacement(resolved).kind, "captureAtProducer");
+});
+
+test("an overlapping partial-channel store captures a wider read used later", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const low = values.const(0x1234);
@@ -428,10 +454,10 @@ test("an overlapping partial-channel store pins a wider read used later", () => 
     stateWrite(gprChannel("ebx"), read)
   ]);
 
-  strictEqual(analysis.isPinned(read), true);
+  strictEqual(analysis.outputPlacement(read).kind, "captureAtProducer");
 });
 
-test("a store at the value's final use does not pin it", () => {
+test("a store at the value's final use leaves the read deferred", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const one = values.const(1);
@@ -442,10 +468,10 @@ test("a store at the value's final use does not pin it", () => {
   ]);
 
   // The operand is pushed before the store executes.
-  strictEqual(analysis.isPinned(read), false);
+  strictEqual(analysis.outputPlacement(read).kind, "deferToUse");
 });
 
-test("a dead read counts zero, has no last use, and never pins", () => {
+test("a dead static read counts zero, has no last use, and stays deferred", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const seven = values.const(7);
@@ -456,7 +482,7 @@ test("a dead read counts zero, has no last use, and never pins", () => {
 
   strictEqual(analysis.useCount(read), 0);
   strictEqual(analysis.lastUse(read), undefined);
-  strictEqual(analysis.isPinned(read), false);
+  strictEqual(analysis.outputPlacement(read).kind, "deferToUse");
 });
 
 test("analysis rejects unknown value ids", () => {
@@ -465,7 +491,7 @@ test("analysis rejects unknown value ids", () => {
 
   throws(() => analysis.useCount(0), /unknown value id 0/);
   throws(() => analysis.lastUse(0), /unknown value id 0/);
-  throws(() => analysis.isPinned(0), /unknown value id 0/);
+  throws(() => analysis.outputPlacement(0), /unknown value id 0/);
 });
 
 test("a producer whose operand follows its output fails loudly", () => {
@@ -521,10 +547,10 @@ test("an exported output counts as a use at the action body boundary", () => {
   // Otherwise dead, the read stays live for the embedding alone.
   strictEqual(analysis.useCount(read), 1);
   strictEqual(analysis.lastUse(read), 1);
-  strictEqual(analysis.isPinned(read), false);
+  strictEqual(analysis.outputPlacement(read).kind, "deferToUse");
 });
 
-test("an exported read crossing an overlapping store pins", () => {
+test("an exported read crossing an overlapping store captures", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const seven = values.const(7);
@@ -538,6 +564,6 @@ test("an exported read crossing an overlapping store pins", () => {
   );
 
   // The export materializes after the store executed, so a load at the body
-  // boundary would observe the new eax: the read pins.
-  strictEqual(analysis.isPinned(read), true);
+  // boundary would observe the new eax: the read captures.
+  strictEqual(analysis.outputPlacement(read).kind, "captureAtProducer");
 });

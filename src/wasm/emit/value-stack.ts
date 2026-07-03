@@ -3,7 +3,7 @@ import type { ExternalValueId } from "#ir/operands.js";
 import type { OpAction } from "#ir/actions.js";
 import type { CpuResolveFlagOp, MemoryCheckOp, MemoryReadOp } from "#ir/ops.js";
 import type { Body } from "#ir/block.js";
-import { isDynamicSlot, type StateSlot } from "#ir/slots.js";
+import type { StateSlot } from "#ir/slots.js";
 import type {
   BinaryValueNode,
   CompareValueNode,
@@ -88,7 +88,7 @@ type CompoundValueNode =
 export function createValueStack(context: ValueStackContext): ValueStack {
   const { body, values, analysis } = context;
   const registry = createLocalRegistry(body, context.scratch);
-  // Unpinned state.read outputs reload from their channel at every use.
+  // Deferred state.read outputs reload from their channel at every use.
   const reads = new Map<ValueId, StateRead>();
   // Open borrows per value; assertClear reports leaks.
   const borrows = new Map<ValueId, number>();
@@ -211,8 +211,8 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         // Re-emittable anywhere.
         return;
       case "actionOutput":
-        // Unpinned state reads reload their untouched channel; pinned reads and
-        // loaded values sit in the registry.
+        // Deferred state reads reload their untouched channel; captured reads
+        // and loaded values sit in the registry.
         assert(reads.has(id), `action output ${id} has no replay source`);
         return;
       default: {
@@ -355,20 +355,18 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       return;
     }
 
-    // Dynamic slots follow the guest-load policy and pin at their action
-    // point: a reload at use would consume the index a second time.
-    // Static channels reload at use unless a later overlapping store
-    // would corrupt the load.
-    if (!isDynamicSlot(read.slot) && !analysis.isPinned(read.output)) {
-      reads.set(read.output, read);
-      return;
+    switch (analysis.outputPlacement(read.output).kind) {
+      case "deferToUse":
+        reads.set(read.output, read);
+        return;
+      case "captureAtProducer":
+        captureAtProducer(read.output, () => context.loadSlot(read.slot, read.signed, operands));
+        return;
     }
-
-    captureAtProducer(read.output, () => context.loadSlot(read.slot, read.signed, operands));
   }
 
   function captureMemoryRead(action: MemoryReadProducer): void {
-    // Boring policy: every loaded value pins at its action point.
+    // Boring policy: every loaded value captures at its action point.
     captureAtProducer(action.output, () => {
       emitUse(action.op.address);
       context.loadGuest(action.op.width, action.op.signed === true);
