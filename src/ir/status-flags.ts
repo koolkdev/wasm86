@@ -10,6 +10,7 @@ import {
   type StatusFlagValues
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
+import { createOpAction, type Action, type SwitchCase } from "./actions.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "./lazy-flags.js";
 import { valueTableFlagOps } from "./flag-value-ops.js";
 import {
@@ -18,7 +19,7 @@ import {
   lazyFlagsBChannel,
   lazyFlagsKindChannel
 } from "./slots.js";
-import { type ValueId, type ValueTable } from "./values.js";
+import { fitsUnsigned, type ValueId, type ValueTable } from "./values.js";
 import type { PendingState } from "./pending/state.js";
 
 export type FlagSourceId = number;
@@ -33,24 +34,33 @@ type FlagBacking =
 
 type StatusFlagValueIds = StatusFlagValues<ValueId>;
 type SourceExpansionCache = Map<FlagSourceId, StatusFlagValueIds>;
+type FlagBoolExprFlagResolver = (flag: X86StatusFlag) => ValueId;
 type StatusFlagState = {
   backings: Map<X86StatusFlag, FlagBacking>;
   directSource: FlagSourceId | undefined;
 };
 
 const logicUndefFlagPolicy: UndefFlagPolicy = "zero";
+const lazyConditionWidths = [8, 16, 32] as const;
+type LazyConditionCaseSpec = Readonly<{
+  kind: typeof LAZY_FLAGS_KIND.ADD | typeof LAZY_FLAGS_KIND.SUB | typeof LAZY_FLAGS_KIND.LOGIC_RESULT;
+  width: (typeof lazyConditionWidths)[number];
+  operator: CompareOperator;
+}>;
 
 export class StatusFlags {
   readonly #values: ValueTable;
   readonly #pending: PendingState;
+  readonly #emit: (action: Action) => void;
   readonly #sources: SimpleFlagSource<ValueId>[] = [];
   readonly #current = initialStatusFlagState();
   readonly #inputFlags = new Map<X86StatusFlag, ValueId>();
   readonly #valueOps: ReturnType<typeof valueTableFlagOps>;
 
-  constructor(values: ValueTable, pending: PendingState) {
+  constructor(values: ValueTable, pending: PendingState, emit: (action: Action) => void) {
     this.#values = values;
     this.#pending = pending;
+    this.#emit = emit;
     this.#valueOps = valueTableFlagOps(values);
   }
 
@@ -59,7 +69,24 @@ export class StatusFlags {
   }
 
   condition(cc: ConditionCode): ValueId {
-    return this.#directCondition(cc) ?? this.#flagBoolExpr(CONDITIONS[cc].expr, new Map());
+    const direct = this.#directCondition(cc);
+
+    if (direct !== undefined) {
+      return direct;
+    }
+
+    const lazy = this.#lazyInputCondition(cc);
+
+    if (lazy !== undefined) {
+      return lazy;
+    }
+
+    const cache: SourceExpansionCache = new Map();
+
+    return this.#flagBoolExpr(
+      CONDITIONS[cc].expr,
+      (flag) => this.#resolveFlagFrom(this.#current, flag, cache)
+    );
   }
 
   writeStatusFlagsSource(source: SimpleFlagSource<ValueId>): void {
@@ -241,33 +268,109 @@ export class StatusFlags {
     }
   }
 
-  #flagBoolExpr(expr: FlagBoolExpr, cache: SourceExpansionCache): ValueId {
+  #lazyInputCondition(cc: ConditionCode): ValueId | undefined {
+    const caseSpecs = lazyRuntimeConditionCaseSpecs(cc);
+
+    if (caseSpecs.length === 0 || !this.#conditionReadsOnlyInputFlags(cc)) {
+      return undefined;
+    }
+
+    const selector = this.#pending.read(lazyFlagsKindChannel);
+    const cases = caseSpecs.map((spec) => this.#lazyConditionArm(spec));
+    const defaultBody = this.#lazyConditionDefaultBody(CONDITIONS[cc].expr);
+    const output = this.#values.addActionOutput(fitsUnsigned(1));
+
+    this.#emit({
+      kind: "switch",
+      selector,
+      output,
+      cases,
+      defaultBody
+    });
+    return output;
+  }
+
+  #conditionReadsOnlyInputFlags(cc: ConditionCode): boolean {
+    return CONDITIONS[cc].reads.every((flag) => getBacking(this.#current.backings, flag).kind === "input");
+  }
+
+  #lazyConditionArm(spec: LazyConditionCaseSpec): SwitchCase {
+    const left = createOpAction(this.#values, { kind: "state.read", slot: lazyFlagsAChannel });
+
+    assert(left.output !== undefined, "lazy condition left read is missing its output");
+
+    if (spec.kind === LAZY_FLAGS_KIND.LOGIC_RESULT) {
+      return {
+        match: lazyFlagsKindByte(spec.kind, spec.width),
+        body: {
+          actions: [left],
+          result: this.#compare(spec.width, spec.operator, left.output, this.#values.const(0))
+        }
+      };
+    }
+
+    const right = createOpAction(this.#values, { kind: "state.read", slot: lazyFlagsBChannel });
+
+    assert(right.output !== undefined, "lazy condition right read is missing its output");
+
+    return {
+      match: lazyFlagsKindByte(spec.kind, spec.width),
+      body: {
+        actions: [left, right],
+        result: this.#compare(spec.width, spec.operator, left.output, right.output)
+      }
+    };
+  }
+
+  #lazyConditionDefaultBody(expr: FlagBoolExpr): Readonly<{ actions: readonly Action[]; result: ValueId }> {
+    const actions: Action[] = [];
+    const flags = new Map<X86StatusFlag, ValueId>();
+    const result = this.#flagBoolExpr(expr, (flag) => {
+      const cached = flags.get(flag);
+
+      if (cached !== undefined) {
+        return cached;
+      }
+
+      const action = createOpAction(this.#values, { kind: "cpu.resolveFlag", flag });
+
+      assert(action.output !== undefined, `${flag} resolver is missing its output`);
+
+      actions.push(action);
+      flags.set(flag, action.output);
+      return action.output;
+    });
+
+    return { actions, result };
+  }
+
+  #flagBoolExpr(expr: FlagBoolExpr, resolveFlag: FlagBoolExprFlagResolver): ValueId {
     switch (expr.kind) {
       case "flag":
-        return this.#resolveFlagFrom(this.#current, expr.flag, cache);
+        return resolveFlag(expr.flag);
       case "not":
         return this.#values.compare(
           "eq",
-          this.#flagBoolExpr(expr.value, cache),
+          this.#flagBoolExpr(expr.value, resolveFlag),
           this.#values.const(0)
         );
       case "and":
         return this.#values.binary(
           "and",
-          this.#flagBoolExpr(expr.a, cache),
-          this.#flagBoolExpr(expr.b, cache)
+          this.#flagBoolExpr(expr.a, resolveFlag),
+          this.#flagBoolExpr(expr.b, resolveFlag)
         );
       case "or":
         return this.#values.binary(
           "or",
-          this.#flagBoolExpr(expr.a, cache),
-          this.#flagBoolExpr(expr.b, cache)
+          this.#flagBoolExpr(expr.a, resolveFlag),
+          this.#flagBoolExpr(expr.b, resolveFlag)
         );
       case "xor":
         return this.#values.binary(
           "xor",
-          this.#flagBoolExpr(expr.a, cache),
-          this.#flagBoolExpr(expr.b, cache)
+          this.#flagBoolExpr(expr.a, resolveFlag),
+          this.#flagBoolExpr(expr.b, resolveFlag)
         );
     }
   }
@@ -330,6 +433,26 @@ export class StatusFlags {
 
 function initialBackings(): Map<X86StatusFlag, FlagBacking> {
   return new Map(x86StatusFlags.map((flag) => [flag, { kind: "input", flag }]));
+}
+
+function lazyRuntimeConditionCaseSpecs(cc: ConditionCode): readonly LazyConditionCaseSpec[] {
+  return lazyConditionWidths.flatMap((width) => [
+    ...lazyRuntimeConditionCase(LAZY_FLAGS_KIND.ADD, width, simpleFlagSourceConditionOperators.add[cc]),
+    ...lazyRuntimeConditionCase(LAZY_FLAGS_KIND.SUB, width, simpleFlagSourceConditionOperators.sub[cc]),
+    ...lazyRuntimeConditionCase(
+      LAZY_FLAGS_KIND.LOGIC_RESULT,
+      width,
+      simpleFlagSourceConditionOperators.logic[cc]
+    )
+  ]);
+}
+
+function lazyRuntimeConditionCase(
+  kind: LazyConditionCaseSpec["kind"],
+  width: LazyConditionCaseSpec["width"],
+  operator: CompareOperator | undefined
+): readonly LazyConditionCaseSpec[] {
+  return operator === undefined ? [] : [{ kind, width, operator }];
 }
 
 function initialStatusFlagState(): StatusFlagState {

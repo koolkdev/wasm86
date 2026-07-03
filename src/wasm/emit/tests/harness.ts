@@ -36,6 +36,15 @@ export function irBlockBody(block: IrBlock, externalParamCount = 0): WasmFunctio
   return emitIrBlockBody(block, externalParamCount);
 }
 
+export function irBlockBodyWithHelpers(block: IrBlock, externalParamCount = 0): WasmFunctionBodyEncoder {
+  const module = new WasmModuleEncoder();
+  const placement = analyzePlacement(block);
+  const helpers = createWasmHelperRegistry(module);
+
+  defineRequiredHelpers(helpers, helperCallsForBlock(block, placement));
+  return emitIrBlockBody(block, externalParamCount, helpers, placement);
+}
+
 function emitIrBlockBody(
   block: IrBlock,
   externalParamCount: number,

@@ -29,7 +29,8 @@ import type {
   Action,
   Finish,
   IfAction,
-  StateWriteAction
+  StateWriteAction,
+  SwitchAction
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import type { ValueId, ValueNode } from "#ir/values.js";
@@ -217,6 +218,13 @@ function ifAction(block: IrBlock): IfAction {
   return action;
 }
 
+function switchAction(block: IrBlock): SwitchAction {
+  const action = entryActions(block).find((entry): entry is SwitchAction => entry.kind === "switch");
+
+  ok(action !== undefined, "expected switch action");
+  return action;
+}
+
 function nodeKinds(block: IrBlock): ValueNode["kind"][] {
   const kinds: ValueNode["kind"][] = [];
 
@@ -251,15 +259,6 @@ function resolveFlagAction(block: IrBlock, flag: X86StatusFlag): ResolveFlagActi
 
   ok(action !== undefined, `expected ${flag} resolve action`);
   return action;
-}
-
-function assertNegatedResolveFlag(block: IrBlock, id: ValueId, flag: X86StatusFlag): void {
-  const node = block.values.node(id);
-
-  ok(node.kind === "compare", `expected ${flag} resolve output to be compared against zero`);
-  strictEqual(node.operator, "eq");
-  assertResolveFlag(block, node.a, flag);
-  strictEqual(node.b, block.values.const(0));
 }
 
 function assertResolveFlag(block: IrBlock, id: ValueId, flag: X86StatusFlag): void {
@@ -1124,18 +1123,20 @@ test("setcc after a logic flag source uses the source-derived condition", () => 
   );
 });
 
-test("setcc with no pending flag value builds from resolve ops", () => {
+test("setcc with no pending flag value builds a lazy condition switch", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(setccSemantic("A"), [regBinding("al")], loc(0x1000, 0x1003));
 
   const block = builder.finish();
   const v = block.values;
+  const conditionSwitch = switchAction(block);
 
   strictEqual(
     entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
     false
   );
+  strictEqual(entryActions(block).some((action) => isResolveFlag(action)), false);
 
   const zero = v.const(0);
   const write = stateWrites(block).find((write) => write.op.slot === gprChannel("al"));
@@ -1146,13 +1147,18 @@ test("setcc with no pending flag value builds from resolve ops", () => {
   ok(select.kind === "select", "expected setcc to write a select value");
   strictEqual(select.whenTrue, v.const(1));
   strictEqual(select.whenFalse, zero);
+  strictEqual(select.condition, conditionSwitch.output);
+  strictEqual(conditionSwitch.cases.length, 3);
+  strictEqual(
+    conditionSwitch.cases.some((switchCase) =>
+      switchCase.body.actions.some((action) => isResolveFlag(action))
+    ),
+    false
+  );
 
-  const condition = v.node(select.condition);
+  const defaultResolves = conditionSwitch.defaultBody.actions.filter(isResolveFlag);
 
-  ok(condition.kind === "binary", "expected A condition to lower to !CF && !ZF");
-  strictEqual(condition.operator, "and");
-  assertNegatedResolveFlag(block, condition.a, "CF");
-  assertNegatedResolveFlag(block, condition.b, "ZF");
+  deepStrictEqual(defaultResolves.map((action) => action.op.flag), ["CF", "ZF"]);
 });
 
 test("setcc after an intervening add uses the latest source-expanded flag expression", () => {

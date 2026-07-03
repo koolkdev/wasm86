@@ -6,7 +6,7 @@ import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/ope
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { irBlockBody } from "./harness.js";
+import { irBlockBody, irBlockBodyWithHelpers } from "./harness.js";
 
 // Pinned harness-embedded bodies (dispatch escape block + sentinel tail):
 // these bytes may only change when the emission itself deliberately does.
@@ -19,7 +19,7 @@ test("an alu pair emits its golden body", () => {
       [0x01, 0xd8]
     ]),
     "01027f024041004100280200410028020c22006a220120006a36020041004184203602204100200136022c410020003602304100" +
-      "410028022441026a36022441004182013a00280c000b427f0b"
+      "410028022441026a3602244100410a3a00280c000b427f0b"
   );
 });
 
@@ -40,8 +40,30 @@ test("a compare and branch emits its golden body", () => {
       [0x74, 0x20]
     ]),
     "01027f024041002802002200410546410028022441026a21010440410041a5203602204100200036022c410041053602304100" +
-      "4181013a0028410020013602240c010541004185203602204100200036022c4100410536023041004181013a00284100" +
+      "41093a0028410020013602240c010541004185203602204100200036022c41004105360230410041093a00284100" +
       "20013602240c010b0b427f0b"
+  );
+});
+
+test("a live-in branch condition emits its lazy switch golden body", () => {
+  // je +0x20.
+  strictEqual(
+    emitGoldenWithHelpers([[0x74, 0x20]]),
+    "01017f02400240024002400240024002400240024041002d00280e0c060006010602060306040605060b410028022c41ff017141002802" +
+      "3041ff01714621000c060b410028022c41ff01714521000c050b410028022c41ffff0371410028023041ffff03714621000c040b410028" +
+      "022c41ffff03714521000c030b410028022c41002802304621000c020b410028022c4521000c010b100021000b2000410028022441016a" +
+      "21000440410041a220360220410020003602240c01054100418220360220410020003602240c010b0b427f0b"
+  );
+});
+
+test("a live-in setcc condition emits its lazy switch golden body", () => {
+  // sete al.
+  strictEqual(
+    emitGoldenWithHelpers([[0x0f, 0x94, 0xc0]]),
+    "01017f02400240024002400240024002400240024041002d00280e0c060006010602060306040605060b410028022c41ff017141002802" +
+      "3041ff01714621000c060b410028022c41ff01714521000c050b410028022c41ffff0371410028023041ffff03714621000c040b410028" +
+      "022c41ffff03714521000c030b410028022c41002802304621000c020b410028022c4521000c010b100021000b41004101410020001b3a" +
+      "000041004183203602204100410028022441016a3602240c000b427f0b"
   );
 });
 
@@ -49,25 +71,39 @@ function emitGolden(byteLists: readonly (readonly number[])[]): string {
   return Buffer.from(irBlockBody(blockOf(byteLists)).encode()).toString("hex");
 }
 
-function blockOf(byteLists: readonly (readonly number[])[]): IrBlock {
+function emitGoldenWithHelpers(byteLists: readonly (readonly number[])[]): string {
+  return Buffer.from(irBlockBodyWithHelpers(blockOf(byteLists, "name")).encode()).toString("hex");
+}
+
+function blockOf(
+  byteLists: readonly (readonly number[])[],
+  registerAlias: "base" | "name" = "base"
+): IrBlock {
   const builder = createIrBlockBuilder();
   let address: number | undefined;
 
   for (const bytes of byteLists) {
     const instruction = address === undefined ? ok(decodeBytes(bytes)) : ok(decodeBytes(bytes, address));
 
-    builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
+    builder.addInstruction(
+      instruction.spec.semantics,
+      bindingsFor(instruction, registerAlias),
+      loc(instruction.address, instruction.nextEip)
+    );
     address = instruction.nextEip;
   }
 
   return builder.finish();
 }
 
-function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBinding[] {
+function bindingsFor(
+  instruction: IsaDecodedInstruction,
+  registerAlias: "base" | "name"
+): readonly OperandBinding[] {
   return instruction.operands.map((operand) => {
     switch (operand.kind) {
       case "reg":
-        return regBinding(operand.alias.base);
+        return regBinding(registerAlias === "base" ? operand.alias.base : operand.alias.name);
       case "segment":
         throw new Error("segment operands not supported in golden tests");
       case "imm":

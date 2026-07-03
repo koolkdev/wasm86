@@ -120,7 +120,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = new ValueTable();
   readonly #actions: Action[] = [];
   readonly #pending = new PendingState(this.#values, (action) => this.#actions.push(action));
-  readonly #statusFlags = new StatusFlags(this.#values, this.#pending);
+  readonly #statusFlags = new StatusFlags(this.#values, this.#pending, (action) => this.#actions.push(action));
   // An effective/linear address is computed once per operand, at its first
   // use, so later uses see the same address even if the instruction rewrites
   // a base register in between.

@@ -6,9 +6,10 @@ import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { IrBlock } from "#ir/block.js";
 import { immBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
-import { CONDITIONS, type FlagBoolExpr } from "#x86/conditions.js";
+import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
+import { CONDITION_CODE_DESCRIPTORS } from "#x86/defs/condition-codes.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
@@ -24,6 +25,84 @@ import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 type BinaryLazyFlagsCase = Readonly<{ width: OperandWidth; left: number; right: number }>;
 type LogicLazyFlagsCase = Readonly<{ width: OperandWidth; result: number }>;
+
+const compareFamilyConditionCodes = [
+  "E",
+  "NE",
+  "B",
+  "AE",
+  "BE",
+  "A",
+  "L",
+  "GE",
+  "LE",
+  "G"
+] as const satisfies readonly ConditionCode[];
+
+const directSubCases = [
+  { width: 8, left: 0x1234_5680, right: 0xdead_be7f },
+  { width: 16, left: 0x9999_7fff, right: 0x7777_8000 },
+  { width: 32, left: 0xffff_ffff, right: 0x0000_0000 }
+] as const satisfies readonly BinaryLazyFlagsCase[];
+
+test("jcc and setcc use direct lazy SUB arms for compare-family conditions", async () => {
+  for (const entry of directSubCases) {
+    const lazyFlags = aluReference("sub", entry.width, entry.left, entry.right).flags;
+    const explicitFlags = oppositeStatusFlags(lazyFlags);
+    const states = [
+      {
+        name: "seeded",
+        address: 0x1000,
+        state: {
+          ...subLazyFlagsState(entry),
+          ...explicitFlags
+        }
+      },
+      {
+        name: "produced",
+        address: 0x2000,
+        state: await producedSubState(entry, explicitFlags)
+      }
+    ] as const;
+
+    for (const state of states) {
+      for (const cc of compareFamilyConditionCodes) {
+        await assertJccReadsLazySub(cc, entry, state.state, state.address, `${state.name} SUB${entry.width} ${cc}`);
+        await assertSetccReadsLazySub(cc, entry, state.state, state.address, `${state.name} SUB${entry.width} ${cc}`);
+      }
+    }
+  }
+});
+
+test("direct-capable live-in conditions fall back to concrete flags for NONE lazy state", async () => {
+  const explicitFlags = { CF: 1, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
+  const state = {
+    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
+    lazyFlagsA: 0,
+    lazyFlagsB: 0,
+    ...explicitFlags
+  };
+  const jbe = ok(decodeBytes(jccBytes("BE")));
+  const setbe = ok(decodeBytes(setccBytes("BE")));
+
+  {
+    const { stateView, run } = await instantiateIrBlock(blockOf([jbe]));
+
+    writeWasmCpuStateSnapshot(stateView, { eip: jbe.address, ...state });
+    strictEqual(run(), irBlockCompleted, "jbe NONE fallback");
+    strictEqual(readWasmCpuStateChannel(stateView, eipChannel), relTarget(jbe), "jbe NONE fallback eip");
+    assertStatusFlags(stateView, explicitFlags, "jbe NONE fallback");
+  }
+
+  {
+    const { stateView, run } = await instantiateIrBlock(blockOf([setbe]));
+
+    writeWasmCpuStateSnapshot(stateView, { eax: 0x55aa_5500, eip: setbe.address, ...state });
+    strictEqual(run(), irBlockCompleted, "setbe NONE fallback");
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 0x55aa_5501, "setbe NONE fallback eax");
+    assertStatusFlags(stateView, explicitFlags, "setbe NONE fallback");
+  }
+});
 
 test("jcc resolves seeded SUB32 lazy flag metadata", async () => {
   const cases = [
@@ -564,6 +643,120 @@ test("partial flag writer after incoming LOGIC_RESULT record materializes preser
 
 function setbeBlock(): IrBlock {
   return blockOf([ok(decodeBytes([0x0f, 0x96, 0xc0]))]);
+}
+
+async function producedSubState(
+  entry: BinaryLazyFlagsCase,
+  explicitFlags: AluFlags
+): Promise<ReturnType<typeof readWasmCpuStateSnapshot>> {
+  const instruction = ok(decodeBytes(cmpRegBytes(entry.width)));
+  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const maskedLeft = (entry.left & widthMask(entry.width)) >>> 0;
+  const maskedRight = (entry.right & widthMask(entry.width)) >>> 0;
+
+  writeWasmCpuStateSnapshot(stateView, {
+    eax: entry.left,
+    ebx: entry.right,
+    eip: instruction.address,
+    ...explicitFlags
+  });
+
+  strictEqual(run(), irBlockCompleted, `produce SUB${entry.width} lazy state`);
+  assertLazyFlagState(
+    stateView,
+    { kind: "SUB", width: entry.width, a: maskedLeft, b: maskedRight },
+    `produce SUB${entry.width} lazy state`
+  );
+  assertStatusFlags(stateView, explicitFlags, `produce SUB${entry.width} lazy state`);
+  return readWasmCpuStateSnapshot(stateView);
+}
+
+async function assertJccReadsLazySub(
+  cc: ConditionCode,
+  entry: BinaryLazyFlagsCase,
+  state: ReturnType<typeof readWasmCpuStateSnapshot> | Record<string, number>,
+  address: number,
+  label: string
+): Promise<void> {
+  const instruction = ok(decodeBytes(jccBytes(cc), address));
+  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const lazyFlags = aluReference("sub", entry.width, entry.left, entry.right).flags;
+  const explicitFlags = oppositeStatusFlags(lazyFlags);
+  const taken = conditionValue(cc, lazyFlags);
+
+  writeWasmCpuStateSnapshot(stateView, {
+    ...state,
+    eip: instruction.address
+  });
+
+  strictEqual(run(), irBlockCompleted, `${label} jcc`);
+  strictEqual(
+    readWasmCpuStateChannel(stateView, eipChannel),
+    taken ? relTarget(instruction) : instruction.nextEip,
+    `${label} jcc eip`
+  );
+  assertStatusFlags(stateView, explicitFlags, `${label} jcc`);
+}
+
+async function assertSetccReadsLazySub(
+  cc: ConditionCode,
+  entry: BinaryLazyFlagsCase,
+  state: ReturnType<typeof readWasmCpuStateSnapshot> | Record<string, number>,
+  address: number,
+  label: string
+): Promise<void> {
+  const instruction = ok(decodeBytes(setccBytes(cc), address));
+  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const lazyFlags = aluReference("sub", entry.width, entry.left, entry.right).flags;
+  const explicitFlags = oppositeStatusFlags(lazyFlags);
+  const result = conditionValue(cc, lazyFlags) ? 1 : 0;
+
+  writeWasmCpuStateSnapshot(stateView, {
+    ...state,
+    eax: 0x55aa_5500,
+    eip: instruction.address
+  });
+
+  strictEqual(run(), irBlockCompleted, `${label} setcc`);
+  strictEqual(
+    readWasmCpuStateChannel(stateView, gprChannel("eax")),
+    0x55aa_5500 + result,
+    `${label} setcc eax`
+  );
+  assertStatusFlags(stateView, explicitFlags, `${label} setcc`);
+}
+
+function conditionValue(cc: ConditionCode, flags: AluFlags): boolean {
+  return evaluateCondition(CONDITIONS[cc].expr, flagSet(flags));
+}
+
+function jccBytes(cc: ConditionCode): readonly number[] {
+  return [0x70 + conditionOpcodeLow(cc), 0x20];
+}
+
+function setccBytes(cc: ConditionCode): readonly number[] {
+  return [0x0f, 0x90 + conditionOpcodeLow(cc), 0xc0];
+}
+
+function conditionOpcodeLow(cc: ConditionCode): number {
+  const descriptor = CONDITION_CODE_DESCRIPTORS.find((entry) => entry.cc === cc);
+
+  if (descriptor === undefined) {
+    throw new Error(`missing condition descriptor for ${cc}`);
+  }
+
+  return descriptor.opcodeLow;
+}
+
+function cmpRegBytes(width: OperandWidth): readonly number[] {
+  switch (width) {
+    case 8:
+      return [0x38, 0xd8];
+    case 16:
+      return [0x66, 0x39, 0xd8];
+    case 32:
+      return [0x39, 0xd8];
+  }
 }
 
 function blockOf(instructions: readonly IsaDecodedInstruction[]): IrBlock {

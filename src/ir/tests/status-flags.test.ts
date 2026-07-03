@@ -4,8 +4,11 @@ import { test } from "node:test";
 import type { Action, StateWriteAction } from "#ir/actions.js";
 import { PendingState } from "#ir/pending/state.js";
 import { StatusFlags } from "#ir/status-flags.js";
-import { lazyFlagsKindChannel } from "#ir/slots.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
+import { lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { ValueTable, type ValueId } from "#ir/values.js";
+import type { ConditionCode } from "#x86/conditions.js";
+import { simpleFlagSourceConditionOperators } from "#x86/flag-sources.js";
 import { isX86StatusFlag, x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import { assertOnlyLazyRecord } from "./lazy-flags.js";
 import { resolveFlag } from "./storage-op-helpers.js";
@@ -22,7 +25,7 @@ function createHarness(): Harness {
   const actions: Action[] = [];
   const pending = new PendingState(values, (action) => actions.push(action));
 
-  return { values, actions, pending, flags: new StatusFlags(values, pending) };
+  return { values, actions, pending, flags: new StatusFlags(values, pending, (action) => actions.push(action)) };
 }
 
 function flagFlushEntries(actions: readonly StateWriteAction[]): ReadonlyArray<Readonly<{ flag: X86StatusFlag; value: ValueId }>> {
@@ -53,6 +56,10 @@ function resolveOutput(actions: readonly Action[], flag: X86StatusFlag): ValueId
   );
 
   return action?.output;
+}
+
+function switchActions(actions: readonly Action[]): Extract<Action, { kind: "switch" }>[] {
+  return actions.filter((action): action is Extract<Action, { kind: "switch" }> => action.kind === "switch");
 }
 
 test("new status flags start with no dirty pending entries", () => {
@@ -161,6 +168,74 @@ test("condition uses the current sub source directly", () => {
   deepStrictEqual(actions, []);
 });
 
+test("input-backed compare-family condition builds a lazy SUB switch", () => {
+  const { values, actions, flags } = createHarness();
+  const condition = flags.condition("BE");
+  const switchAction = switchActions(actions)[0];
+
+  ok(switchAction !== undefined, "expected lazy condition switch");
+  strictEqual(condition, switchAction.output);
+  strictEqual(actions.length, 2);
+  deepStrictEqual(actions[0], {
+    kind: "op",
+    output: switchAction.selector,
+    op: { kind: "state.read", slot: lazyFlagsKindChannel }
+  });
+  deepStrictEqual(
+    switchAction.cases.map((entry) => entry.match),
+    [8, 16, 32].map((width) => lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, width as 8 | 16 | 32))
+  );
+
+  for (const switchCase of switchAction.cases) {
+    deepStrictEqual(switchCase.body.actions.map((action) => action.kind === "op" ? action.op : undefined), [
+      { kind: "state.read", slot: lazyFlagsAChannel },
+      { kind: "state.read", slot: lazyFlagsBChannel }
+    ]);
+
+    const result = values.node(switchCase.body.result!);
+
+    ok(result.kind === "compare", "expected direct arm compare");
+    strictEqual(result.operator, "le_u");
+  }
+
+  deepStrictEqual(
+    switchAction.defaultBody.actions.map((action) => action.kind === "op" ? action.op : undefined),
+    [
+      { kind: "cpu.resolveFlag", flag: "CF" },
+      { kind: "cpu.resolveFlag", flag: "ZF" }
+    ]
+  );
+
+  const fallback = values.node(switchAction.defaultBody.result!);
+
+  ok(fallback.kind === "binary", "expected fallback CF | ZF expression");
+  strictEqual(fallback.operator, "or");
+});
+
+test("input-backed equality condition builds lazy cases from the shared operator table", () => {
+  const { actions, flags } = createHarness();
+  const condition = flags.condition("E");
+  const switchAction = switchActions(actions)[0];
+
+  ok(switchAction !== undefined, "expected lazy condition switch");
+  strictEqual(condition, switchAction.output);
+  deepStrictEqual(switchAction.cases.map((entry) => entry.match), expectedLazyConditionCases("E"));
+  deepStrictEqual(
+    switchAction.cases.map((entry) => entry.body.actions.map((action) => {
+      ok(action.kind === "op" && action.op.kind === "state.read", "expected arm-local state read");
+      return action.op.slot;
+    })),
+    [
+      [lazyFlagsAChannel, lazyFlagsBChannel],
+      [lazyFlagsAChannel],
+      [lazyFlagsAChannel, lazyFlagsBChannel],
+      [lazyFlagsAChannel],
+      [lazyFlagsAChannel, lazyFlagsBChannel],
+      [lazyFlagsAChannel]
+    ]
+  );
+});
+
 test("condition falls back to live flag backings after a direct flag write", () => {
   const { values, actions, flags } = createHarness();
   const left = values.const(7);
@@ -193,6 +268,15 @@ test("mixed pending and input condition combines pending values with resolve out
   deepStrictEqual(values.node(node.a), { kind: "actionOutput" });
   strictEqual(resolveOutput(actions, "CF"), node.a);
   strictEqual(node.b, zf);
+  strictEqual(switchActions(actions).length, 0);
+});
+
+test("non-compare-family input condition stays on the helper-backed expression path", () => {
+  const { actions, flags } = createHarness();
+  const condition = flags.condition("S");
+
+  deepStrictEqual(actions, [resolveFlag(condition, "SF")]);
+  strictEqual(switchActions(actions).length, 0);
 });
 
 test("fault edge preserves a clean sub source while direct flag writes update completed fallback values", () => {
@@ -305,4 +389,24 @@ test("a direct flag write from input state flushes a full explicit image from re
 
 function flagValue(flags: StatusFlags, flag: X86StatusFlag): ValueId {
   return flags.readFlag(flag);
+}
+
+function expectedLazyConditionCases(cc: ConditionCode): readonly number[] {
+  return ([8, 16, 32] as const).flatMap((width) => [
+    ...expectedLazyConditionCase(LAZY_FLAGS_KIND.ADD, width, simpleFlagSourceConditionOperators.add[cc] !== undefined),
+    ...expectedLazyConditionCase(LAZY_FLAGS_KIND.SUB, width, simpleFlagSourceConditionOperators.sub[cc] !== undefined),
+    ...expectedLazyConditionCase(
+      LAZY_FLAGS_KIND.LOGIC_RESULT,
+      width,
+      simpleFlagSourceConditionOperators.logic[cc] !== undefined
+    )
+  ]);
+}
+
+function expectedLazyConditionCase(
+  kind: (typeof LAZY_FLAGS_KIND)[keyof typeof LAZY_FLAGS_KIND],
+  width: 8 | 16 | 32,
+  supported: boolean
+): readonly number[] {
+  return supported ? [lazyFlagsKindByte(kind, width)] : [];
 }
