@@ -1,8 +1,9 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import type { OpAction } from "#ir/actions.js";
-import type { CpuResolveFlagOp, MemoryCheckOp, MemoryReadOp } from "#ir/ops.js";
+import { opAccess } from "#ir/ops.js";
 import type { Body } from "#ir/block.js";
+import { nestedBodies } from "#ir/traverse.js";
 import type { StateSlot } from "#ir/slots.js";
 import type {
   BinaryValueNode,
@@ -21,12 +22,12 @@ import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 import { helperFunctionName, type WasmHelperRegistry } from "#wasm/helpers/module.js";
-import { bodyInputValues, type BlockValueAnalysis } from "./values.js";
+import { bodyInputValues, type BlockValueAnalysis, type ScheduledEmission } from "./values.js";
 
 // Turns analysis + the value graph into stack code. emitUse pushes exactly
 // one use of a value; anything needed more than once is captured into a
-// refcounted scratch local and replayed until its last counted use. A
-// lowering that observes one operand several times borrows it instead of
+// refcounted scratch local and replayed until its last counted use. An
+// emission that observes one operand several times borrows it instead of
 // consuming extra uses. The registry below is the only scratch-local
 // mechanism in the emitter; borrows pin its locals rather than copy them.
 
@@ -37,8 +38,8 @@ export type BorrowedUse = Readonly<{
   release(): void;
 }>;
 
-// How lowerings consume operands: push each one exactly once (emitUse) or
-// borrow it for repeated observation (borrowUse).
+// How op emissions consume operands: push each one exactly once (emitUse)
+// or borrow it for repeated observation (borrowUse).
 export type OperandUses = Readonly<{
   emitUse(id: ValueId): void;
   borrowUse(id: ValueId): BorrowedUse;
@@ -85,11 +86,33 @@ type CompoundValueNode =
   | TruncateValueNode
   | ExtendValueNode;
 
+// A deferred producer op awaiting its scheduled emissions, consumed in
+// emission order.
+type PendingProducer = { action: OpAction; emissions: ScheduledEmission[] };
+
+function bodyContains(root: Body, target: Body): boolean {
+  if (root === target) {
+    return true;
+  }
+
+  for (const action of root.actions) {
+    for (const nested of nestedBodies(action)) {
+      if (bodyContains(nested, target)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export function createValueStack(context: ValueStackContext): ValueStack {
   const { body, values, analysis } = context;
   const registry = createLocalRegistry(body, context.scratch);
-  // Deferred state.read outputs reload from their channel at every use.
-  const reads = new Map<ValueId, StateRead>();
+  // Deferred producer ops, recorded at their action point: each scope
+  // that itself demands the value emits the op once — at its first use
+  // there or at a subtree's entry — and every use replays that local.
+  const pending = new Map<ValueId, PendingProducer>();
   // Open borrows per value; assertClear reports leaks.
   const borrows = new Map<ValueId, number>();
   const operands: OperandUses = { emitUse, borrowUse };
@@ -112,11 +135,15 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         body.localGet(local);
         return;
       }
+      // A deferred producer executes here, at its scope's first use, and
+      // tees for the rest of that scope's uses.
       case "actionOutput": {
-        const read = reads.get(id);
+        const uses = emitPendingProducer(id);
 
-        assert(read !== undefined, `action output ${id} has no reloadable state.read source`);
-        context.loadSlot(read.slot, read.signed, operands);
+        if (uses > 1) {
+          registry.captureTee(id, uses - 1, wasmTypeForValue(values.valueType(id)));
+        }
+
         return;
       }
       default: {
@@ -130,6 +157,59 @@ export function createValueStack(context: ValueStackContext): ValueStack {
 
         return;
       }
+    }
+  }
+
+  // Executes one use-anchored emission of a deferred producer and returns
+  // the counted uses it covers.
+  function emitPendingProducer(id: ValueId): number {
+    const deferred = pending.get(id);
+
+    assert(deferred !== undefined, `action output ${id} has no deferred producer to emit`);
+
+    const emission = deferred.emissions.shift();
+
+    assert(emission !== undefined, `deferred producer ${id} has no scheduled emissions left`);
+    assert(
+      emission.anchor === "use",
+      `deferred producer ${id} reached a use before its scheduled body entry`
+    );
+    if (deferred.emissions.length === 0) {
+      pending.delete(id);
+    }
+
+    emitProducer(deferred.action);
+    return emission.uses;
+  }
+
+  // The one per-kind producer emission: executes the op, consuming its
+  // value inputs, and leaves the output on the stack. Placement decides
+  // when this runs — at the action point or at the first use — never how.
+  function emitProducer(action: OpAction): void {
+    const op = action.op;
+
+    switch (op.kind) {
+      case "state.read":
+        context.loadSlot(op.slot, op.signed === true, operands);
+        return;
+      case "memory.read":
+        emitUse(op.address);
+        context.loadGuest(op.width, op.signed === true);
+        return;
+      case "memory.check":
+        emitUse(op.address);
+        context.checkGuest(op.byteLength);
+        return;
+      case "cpu.resolveFlag": {
+        const helper = { kind: "lazyFlag", flag: op.flag } as const;
+        const displayName = helperFunctionName(helper);
+
+        assert(context.helpers !== undefined, `missing Wasm helper ${displayName} in module registry`);
+        body.callFunction(context.helpers.requireFunctionIndex(helper, displayName));
+        return;
+      }
+      default:
+        assert(false, `${op.kind} op action does not produce an output`);
     }
   }
 
@@ -198,7 +278,7 @@ export function createValueStack(context: ValueStackContext): ValueStack {
     return node.kind === "const" && node.value === 0;
   }
 
-  function captureValue(id: ValueId): void {
+  function captureValue(id: ValueId, forBody: Body): void {
     if (registry.has(id)) {
       return;
     }
@@ -210,11 +290,44 @@ export function createValueStack(context: ValueStackContext): ValueStack {
       case "external":
         // Re-emittable anywhere.
         return;
-      case "actionOutput":
-        // Deferred state reads reload their untouched channel; captured reads
-        // and loaded values sit in the registry.
-        assert(reads.has(id), `action output ${id} has no replay source`);
+      case "actionOutput": {
+        const deferred = pending.get(id);
+
+        assert(deferred !== undefined, `action output ${id} has no replay source`);
+
+        const index = deferred.emissions.findIndex((entry) => bodyContains(forBody, entry.body));
+
+        // No emission under this body: an earlier one on the enclosing
+        // flow serves its uses before the body runs.
+        if (index === -1) {
+          return;
+        }
+
+        const emission = deferred.emissions[index]!;
+
+        if (emission.anchor === "bodyEntry" && emission.body === forBody) {
+          // The scope's emission is anchored here: execute the op on the
+          // enclosing flow, before the owning control action, and let
+          // every use replay the local.
+          deferred.emissions.splice(index, 1);
+          if (deferred.emissions.length === 0) {
+            pending.delete(id);
+          }
+
+          emitProducer(deferred.action);
+          registry.captureSet(id, emission.uses, wasmTypeForValue(values.valueType(id)));
+          return;
+        }
+
+        // The emission lands inside the body: capture what re-emitting
+        // the op there needs — its transitive input closure — never the
+        // output itself.
+        for (const input of opAccess(deferred.action.op).valueInputs) {
+          captureValue(input, forBody);
+        }
+
         return;
+      }
       default: {
         // Not in the registry means nothing consumed it yet (the pending
         // nested-body use keeps a consumed multi-use compound captured, so every
@@ -297,44 +410,31 @@ export function createValueStack(context: ValueStackContext): ValueStack {
 
   return {
     scheduledProducer(action: OpAction): void {
-      switch (action.op.kind) {
-        case "state.read": {
-          const output = action.output;
+      const output = action.output;
 
-          assert(output !== undefined, "state.read op action is missing its output");
-          captureStateRead({ output, slot: action.op.slot, signed: action.op.signed === true });
-          return;
-        }
-        case "memory.read": {
-          const output = action.output;
+      assert(output !== undefined, `${action.op.kind} op action is missing its output`);
 
-          assert(output !== undefined, "memory.read op action is missing its output");
-          captureMemoryRead({ output, op: action.op });
-          return;
-        }
-        case "memory.check": {
-          const output = action.output;
+      const uses = analysis.useCount(output);
+      const placement = analysis.outputPlacement(output);
 
-          assert(output !== undefined, "memory.check op action is missing its output");
-          captureMemoryCheck({ output, op: action.op });
-          return;
-        }
-        case "cpu.resolveFlag": {
-          const output = action.output;
+      switch (placement.kind) {
+        case "deferToUse":
+          // Each demanding scope emits the op once; a dead pure op never
+          // executes.
+          if (uses > 0) {
+            pending.set(output, { action, emissions: [...placement.emissions] });
+          }
 
-          assert(output !== undefined, "cpu.resolveFlag op action is missing its output");
-          captureResolveFlag({ output, op: action.op });
           return;
-        }
-        case "state.write":
-        case "memory.write":
-          assert(false, `${action.op.kind} op action does not produce an output`);
+        case "captureAtProducer":
+          emitProducer(action);
+          registry.captureSet(output, uses, wasmTypeForValue(values.valueType(output)));
           return;
       }
     },
     captureForBody(body: Body): void {
       for (const id of bodyInputValues(body)) {
-        captureValue(id);
+        captureValue(id, body);
       }
     },
     emitUse,
@@ -344,68 +444,14 @@ export function createValueStack(context: ValueStackContext): ValueStack {
         borrows.size === 0,
         `borrowed values never released: ${[...borrows.keys()].join(", ")}`
       );
+      assert(
+        pending.size === 0,
+        `deferred producers never emitted: ${[...pending.keys()].join(", ")}`
+      );
       registry.assertClear();
     }
   };
-
-  function captureStateRead(read: StateRead): void {
-    const uses = analysis.useCount(read.output);
-
-    if (uses === 0) {
-      return;
-    }
-
-    switch (analysis.outputPlacement(read.output).kind) {
-      case "deferToUse":
-        reads.set(read.output, read);
-        return;
-      case "captureAtProducer":
-        captureAtProducer(read.output, () => context.loadSlot(read.slot, read.signed, operands));
-        return;
-    }
-  }
-
-  function captureMemoryRead(action: MemoryReadProducer): void {
-    // Boring policy: every loaded value captures at its action point.
-    captureAtProducer(action.output, () => {
-      emitUse(action.op.address);
-      context.loadGuest(action.op.width, action.op.signed === true);
-    });
-  }
-
-  function captureMemoryCheck(action: MemoryCheckProducer): void {
-    captureAtProducer(action.output, () => {
-      emitUse(action.op.address);
-      context.checkGuest(action.op.byteLength);
-    });
-  }
-
-  function captureResolveFlag(action: ResolveFlagProducer): void {
-    const helper = { kind: "lazyFlag", flag: action.op.flag } as const;
-    const displayName = helperFunctionName(helper);
-
-    captureAtProducer(action.output, () => {
-      assert(context.helpers !== undefined, `missing Wasm helper ${displayName} in module registry`);
-      body.callFunction(context.helpers.requireFunctionIndex(helper, displayName));
-    });
-  }
-
-  function captureAtProducer(output: ValueId, emitValue: () => void): void {
-    const uses = analysis.useCount(output);
-
-    if (uses === 0) {
-      return;
-    }
-
-    emitValue();
-    registry.captureSet(output, uses, wasmTypeForValue(values.valueType(output)));
-  }
 }
-
-type StateRead = Readonly<{ output: ValueId; slot: StateSlot; signed: boolean }>;
-type MemoryReadProducer = Readonly<{ output: ValueId; op: MemoryReadOp }>;
-type MemoryCheckProducer = Readonly<{ output: ValueId; op: MemoryCheckOp }>;
-type ResolveFlagProducer = Readonly<{ output: ValueId; op: CpuResolveFlagOp }>;
 
 // All scratch-local bookkeeping in one place: which local replays a value,
 // how many uses remain, freeing at the last one — deferred while pins hold

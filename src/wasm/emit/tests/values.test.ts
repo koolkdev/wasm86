@@ -1,7 +1,7 @@
-import { strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import { fitsUnsigned, ValueTable } from "#ir/values.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
@@ -49,7 +49,7 @@ function pageFaultExit(address: number, write = false): Action {
   };
 }
 
-test("action operand edges count at their action index", () => {
+test("action operands count one use per consuming action", () => {
   const values = new ValueTable();
   const readOutput = values.addActionOutput();
   const address = values.const(0x1000);
@@ -83,35 +83,67 @@ test("action operand edges count at their action index", () => {
 
   // The dead load contributes nothing — only the store consumes the address.
   strictEqual(analysis.useCount(address), 1);
-  strictEqual(analysis.lastUse(address), 2);
   strictEqual(analysis.useCount(stored), 1);
-  strictEqual(analysis.lastUse(stored), 2);
   strictEqual(analysis.useCount(guarded), 2);
-  strictEqual(analysis.lastUse(guarded), 4);
   strictEqual(analysis.useCount(fault), 1);
-  strictEqual(analysis.lastUse(fault), 4);
-  strictEqual(analysis.outputPlacement(fault).kind, "captureAtProducer");
+  strictEqual(analysis.outputPlacement(fault).kind, "deferToUse");
   strictEqual(analysis.useCount(condition), 1);
-  strictEqual(analysis.lastUse(condition), 5);
   strictEqual(analysis.useCount(payload), 1);
-  strictEqual(analysis.lastUse(payload), 6);
   strictEqual(analysis.useCount(readOutput), 0);
-  strictEqual(analysis.lastUse(readOutput), undefined);
 });
 
-test("a live load consumes its address at the load's index", () => {
+test("a deferred load charges its address once however many sites consume it", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
   const analysis = analyze(values, [
     memoryRead(loaded, address, 32),
+    stateWrite(gprChannel("eax"), loaded),
+    stateWrite(gprChannel("ebx"), loaded)
+  ]);
+
+  // No memory.write intervenes, so the load executes at its first use;
+  // however many sites consume the output, the address charges once, there.
+  strictEqual(analysis.outputPlacement(loaded).kind, "deferToUse");
+  strictEqual(analysis.useCount(loaded), 2);
+  strictEqual(analysis.useCount(address), 1);
+});
+
+test("a load captures across a memory.write", () => {
+  const values = new ValueTable();
+  const address = values.const(0x2000);
+  const stored = values.const(1);
+  const loaded = values.addActionOutput();
+  const analysis = analyze(values, [
+    memoryRead(loaded, address, 32),
+    memoryWrite(address, stored, 32),
     stateWrite(gprChannel("eax"), loaded)
   ]);
 
-  strictEqual(analysis.useCount(loaded), 1);
-  strictEqual(analysis.useCount(address), 1);
-  strictEqual(analysis.lastUse(address), 0);
+  // Deferring past the store would observe the new bytes: the load executes
+  // at its action point and charges its address there.
   strictEqual(analysis.outputPlacement(loaded).kind, "captureAtProducer");
+  strictEqual(analysis.useCount(address), 2);
+});
+
+test("a check defers across a memory.write", () => {
+  const values = new ValueTable();
+  const address = values.const(0x2000);
+  const stored = values.const(1);
+  const fault = values.addActionOutput(fitsUnsigned(1));
+  const analysis = analyze(values, [
+    memoryCheck(fault, address, 4, "write"),
+    memoryWrite(address, stored, 32),
+    {
+      kind: "if",
+      condition: fault,
+      thenBody: { actions: [pageFaultExit(address, true)] }
+    }
+  ]);
+
+  // The check reads only the memory bounds, which no store touches: the
+  // fault flag sinks into its if condition.
+  strictEqual(analysis.outputPlacement(fault).kind, "deferToUse");
 });
 
 test("a chain of dead loads stays wholly uncounted", () => {
@@ -131,7 +163,7 @@ test("a chain of dead loads stays wholly uncounted", () => {
   strictEqual(analysis.useCount(base), 0);
 });
 
-test("fault body operands count at their if action index", () => {
+test("fault body operands count once per edge use", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const address = values.const(0x2000);
@@ -154,17 +186,14 @@ test("fault body operands count at their if action index", () => {
     ]
   );
 
-  // The nested body branches off at the if, so its uses land there: the read is
-  // consumed once at index 2; the address by the check and the payload.
+  // The nested body's uses are ordinary demand: the read is consumed once,
+  // the address by the check and the fault payload.
   strictEqual(analysis.useCount(read), 1);
-  strictEqual(analysis.lastUse(read), 2);
   strictEqual(analysis.useCount(address), 2);
-  strictEqual(analysis.lastUse(address), 2);
   strictEqual(analysis.useCount(fault), 1);
-  strictEqual(analysis.lastUse(fault), 2);
 });
 
-test("branch edge values count once per edge, at the branch's entry index", () => {
+test("branch edge values count once per edge", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const condition = values.const(1);
@@ -196,7 +225,6 @@ test("branch edge values count once per edge, at the branch's entry index", () =
   );
 
   strictEqual(analysis.useCount(read), 2);
-  strictEqual(analysis.lastUse(read), 1);
   strictEqual(analysis.useCount(condition), 1);
   strictEqual(analysis.useCount(target), 1);
   strictEqual(analysis.useCount(fallthrough), 1);
@@ -210,7 +238,6 @@ test("dispatch target references are not demand roots", () => {
   ]);
 
   strictEqual(analysis.useCount(target), 0);
-  strictEqual(analysis.lastUse(target), undefined);
 });
 
 test("an edge use past an overlapping store captures the read at its producer", () => {
@@ -292,7 +319,7 @@ test("an edge value reloading a channel the edge flushes captures the read", () 
   strictEqual(analysis.outputPlacement(read).kind, "captureAtProducer");
 });
 
-test("compound children count once per parent, at the parent's first use", () => {
+test("compound children count once per parent, not per replay", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.const(5);
@@ -304,14 +331,11 @@ test("compound children count once per parent, at the parent's first use", () =>
   ]);
 
   strictEqual(analysis.useCount(sum), 2);
-  strictEqual(analysis.lastUse(sum), 2);
 
-  // sum computes once, at action 1 — its operands are not consumed again by
-  // the action-2 replay.
+  // sum computes once, at its first use — its operands are not consumed
+  // again by the later replay.
   strictEqual(analysis.useCount(read), 1);
-  strictEqual(analysis.lastUse(read), 1);
   strictEqual(analysis.useCount(five), 1);
-  strictEqual(analysis.lastUse(five), 1);
 });
 
 test("repeated child edges within one parent count per edge", () => {
@@ -325,7 +349,6 @@ test("repeated child edges within one parent count per edge", () => {
 
   strictEqual(analysis.useCount(doubled), 1);
   strictEqual(analysis.useCount(read), 2);
-  strictEqual(analysis.lastUse(read), 1);
 });
 
 test("compounds nothing references contribute no uses", () => {
@@ -340,12 +363,11 @@ test("compounds nothing references contribute no uses", () => {
   ]);
 
   strictEqual(analysis.useCount(dead), 0);
-  strictEqual(analysis.lastUse(dead), undefined);
   strictEqual(analysis.useCount(read), 1);
   strictEqual(analysis.useCount(five), 1);
 });
 
-test("last use flows through nested compounds from the outermost first use", () => {
+test("charging flows through nested compounds once", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const one = values.const(1);
@@ -358,11 +380,8 @@ test("last use flows through nested compounds from the outermost first use", () 
     stateWrite(gprChannel("ecx"), outer)
   ]);
 
-  strictEqual(analysis.lastUse(outer), 2);
   strictEqual(analysis.useCount(inner), 1);
-  strictEqual(analysis.lastUse(inner), 1);
   strictEqual(analysis.useCount(read), 1);
-  strictEqual(analysis.lastUse(read), 1);
 });
 
 test("the xchg shape captures only the read whose use crosses the store", () => {
@@ -413,11 +432,11 @@ test("a dynamic slot consumes its index once per access", () => {
     stateWrite({ kind: "gprDynamic", index, byteLength: 1 }, stored)
   ]);
 
-  // One use each for the word read and the byte store — the byte lowering's
-  // repeated observation is a borrow, not a second counted use.
+  // One use each for the word read and the byte store — the byte access's
+  // repeated observation is a borrow, not a second counted use. The read's
+  // use precedes the dynamic store, so it defers.
   strictEqual(analysis.useCount(index), 2);
-  strictEqual(analysis.lastUse(index), 2);
-  strictEqual(analysis.outputPlacement(wordRead).kind, "captureAtProducer");
+  strictEqual(analysis.outputPlacement(wordRead).kind, "deferToUse");
 });
 
 test("a dead dynamic read never consumes its computed index", () => {
@@ -429,19 +448,210 @@ test("a dead dynamic read never consumes its computed index", () => {
   ]);
 
   strictEqual(analysis.useCount(index), 0);
-  strictEqual(analysis.lastUse(index), undefined);
-  strictEqual(analysis.outputPlacement(dead).kind, "captureAtProducer");
+  strictEqual(analysis.outputPlacement(dead).kind, "deferToUse");
 });
 
-test("flag resolve outputs capture at their producer", () => {
+test("a flag resolve captures across a lazy-channel write and defers otherwise", () => {
+  const pinned = new ValueTable();
+  const observed = pinned.addActionOutput(fitsUnsigned(1));
+  const record = pinned.const(0);
+  const across = analyze(pinned, [
+    resolveFlag(observed, "ZF"),
+    stateWrite(lazyFlagsBChannel, record),
+    stateWrite(gprChannel("eax"), observed)
+  ]);
+
+  // The helper reads the lazy channels, so a lazy record between the
+  // resolve and its use pins the observation point.
+  strictEqual(across.outputPlacement(observed).kind, "captureAtProducer");
+
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
+  const five = values.const(5);
   const analysis = analyze(values, [
     resolveFlag(resolved, "ZF"),
+    stateWrite(gprChannel("ebx"), five),
     stateWrite(gprChannel("eax"), resolved)
   ]);
 
-  strictEqual(analysis.outputPlacement(resolved).kind, "captureAtProducer");
+  // GPR stores touch neither the flag byte nor the lazy channels: the pure
+  // helper call sinks to its use.
+  strictEqual(analysis.outputPlacement(resolved).kind, "deferToUse");
+});
+
+test("a dynamic read captures across an overlapping GPR write and defers otherwise", () => {
+  const pinned = new ValueTable();
+  const pinnedIndex = pinned.external(0);
+  const pinnedRead = pinned.addActionOutput();
+  const five = pinned.const(5);
+  const across = analyze(pinned, [
+    stateRead(pinnedRead, { kind: "gprDynamic", index: pinnedIndex, byteLength: 4 }),
+    stateWrite(gprChannel("eax"), five),
+    stateWrite(gprChannel("ebx"), pinnedRead)
+  ]);
+
+  // The dynamic slot may be any GPR word, so the eax store may overwrite
+  // what the read observes.
+  strictEqual(across.outputPlacement(pinnedRead).kind, "captureAtProducer");
+
+  const values = new ValueTable();
+  const index = values.external(0);
+  const read = values.addActionOutput();
+  const one = values.const(1);
+  const analysis = analyze(values, [
+    stateRead(read, { kind: "gprDynamic", index, byteLength: 4 }),
+    stateWrite(flagChannel("ZF"), one),
+    stateWrite(gprChannel("ebx"), read)
+  ]);
+
+  // Flag bytes never alias GPR words: the read executes once, at its use,
+  // consuming its index exactly once — there.
+  strictEqual(analysis.outputPlacement(read).kind, "deferToUse");
+  strictEqual(analysis.useCount(index), 1);
+});
+
+test("a store past the first use leaves a multi-use read deferred", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const seven = values.const(7);
+  const analysis = analyze(values, [
+    stateRead(read, gprChannel("eax")),
+    stateWrite(gprChannel("ebx"), read),
+    stateWrite(gprChannel("eax"), seven),
+    stateWrite(gprChannel("ecx"), read)
+  ]);
+
+  // The read materializes at its first use and tees; the later use replays
+  // the local, so the store in between clobbers nothing it observes.
+  strictEqual(analysis.outputPlacement(read).kind, "deferToUse");
+});
+
+test("a deferred output consumed only inside a fault body charges inputs there", () => {
+  const values = new ValueTable();
+  const address = values.const(0x2000);
+  const guarded = values.const(0x3000);
+  const loaded = values.addActionOutput();
+  const fault = values.addActionOutput(fitsUnsigned(1));
+  const analysis = analyze(values, [
+    memoryRead(loaded, address, 32),
+    memoryCheck(fault, guarded, 4, "write"),
+    {
+      kind: "if",
+      condition: fault,
+      thenBody: {
+        actions: [
+          stateWrite(gprChannel("eax"), loaded),
+          pageFaultExit(guarded, true)
+        ]
+      }
+    }
+  ]);
+
+  // The load's only consumer lives in the fault body, so the load executes
+  // there — nothing materializes on the non-fault path — and its address
+  // charges at that emission, counting at the owning if.
+  strictEqual(analysis.outputPlacement(loaded).kind, "deferToUse");
+  strictEqual(analysis.useCount(address), 1);
+});
+
+test("fault-only demand across sibling fault bodies sinks into each body", () => {
+  const values = new ValueTable();
+  const address = values.const(0x2000);
+  const first = values.const(0x3000);
+  const second = values.const(0x4000);
+  const loaded = values.addActionOutput();
+  const faultA = values.addActionOutput(fitsUnsigned(1));
+  const faultB = values.addActionOutput(fitsUnsigned(1));
+  const firstBody = {
+    actions: [
+      stateWrite(gprChannel("eax"), loaded),
+      pageFaultExit(first, true)
+    ]
+  };
+  const secondBody = {
+    actions: [
+      stateWrite(gprChannel("ebx"), loaded),
+      pageFaultExit(second, true)
+    ]
+  };
+  const analysis = analyze(values, [
+    memoryRead(loaded, address, 32),
+    memoryCheck(faultA, first, 4, "write"),
+    { kind: "if", condition: faultA, thenBody: firstBody },
+    memoryCheck(faultB, second, 4, "write"),
+    { kind: "if", condition: faultB, thenBody: secondBody }
+  ]);
+
+  // The enclosing scope has no demand of its own, so it hosts no emission:
+  // the load sinks into each fault body, and the address charges once per
+  // emission.
+  deepStrictEqual(analysis.outputPlacement(loaded), {
+    kind: "deferToUse",
+    emissions: [
+      { anchor: "use", body: firstBody, uses: 1 },
+      { anchor: "use", body: secondBody, uses: 1 }
+    ]
+  });
+  strictEqual(analysis.useCount(loaded), 2);
+  strictEqual(analysis.useCount(address), 2);
+});
+
+test("a direct use behind a demanding fault body emits once at the body's entry", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const address = values.const(0x2000);
+  const fault = values.addActionOutput(fitsUnsigned(1));
+  const faultBody = {
+    actions: [
+      stateWrite(lazyFlagsAChannel, read),
+      pageFaultExit(address, true)
+    ]
+  };
+  const analysis = analyze(values, [
+    stateRead(read, gprChannel("ebx")),
+    memoryCheck(fault, address, 4, "write"),
+    { kind: "if", condition: fault, thenBody: faultBody },
+    stateWrite(lazyFlagsAChannel, read)
+  ]);
+
+  // The scope's own flush demands the read after the fault body, so its
+  // flow pays for the value either way: one emission at the body's entry
+  // serves the fault flush and the completed flush from one local.
+  deepStrictEqual(analysis.outputPlacement(read), {
+    kind: "deferToUse",
+    emissions: [{ anchor: "bodyEntry", body: faultBody, uses: 2 }]
+  });
+});
+
+test("a body restoring a channel captures the read feeding its deferred load", () => {
+  const values = new ValueTable();
+  const base = values.addActionOutput();
+  const guarded = values.const(0x3000);
+  const five = values.const(5);
+  const loaded = values.addActionOutput();
+  const fault = values.addActionOutput(fitsUnsigned(1));
+  const analysis = analyze(values, [
+    stateRead(base, gprChannel("ebx")),
+    memoryRead(loaded, base, 32),
+    memoryCheck(fault, guarded, 4, "write"),
+    {
+      kind: "if",
+      condition: fault,
+      thenBody: {
+        actions: [
+          stateWrite(gprChannel("ebx"), five),
+          stateWrite(gprChannel("eax"), loaded),
+          pageFaultExit(guarded, true)
+        ]
+      }
+    }
+  ]);
+
+  // Re-emitting the load inside the body consumes its address there, and
+  // the body restores ebx: the ebx read pins to its action point while the
+  // load itself still sinks into the fault body.
+  strictEqual(analysis.outputPlacement(loaded).kind, "deferToUse");
+  strictEqual(analysis.outputPlacement(base).kind, "captureAtProducer");
 });
 
 test("an overlapping partial-channel store captures a wider read used later", () => {
@@ -481,7 +691,6 @@ test("a dead static read counts zero, has no last use, and stays deferred", () =
   ]);
 
   strictEqual(analysis.useCount(read), 0);
-  strictEqual(analysis.lastUse(read), undefined);
   strictEqual(analysis.outputPlacement(read).kind, "deferToUse");
 });
 
@@ -490,7 +699,6 @@ test("analysis rejects unknown value ids", () => {
   const analysis = analyze(values, []);
 
   throws(() => analysis.useCount(0), /unknown value id 0/);
-  throws(() => analysis.lastUse(0), /unknown value id 0/);
   throws(() => analysis.outputPlacement(0), /unknown value id 0/);
 });
 
@@ -533,7 +741,7 @@ test("a nested body producer whose operand follows its output fails loudly", () 
   );
 });
 
-test("an exported output counts as a use at the action body boundary", () => {
+test("an exported output keeps an otherwise dead value live", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const analysis = analyze(
@@ -546,7 +754,6 @@ test("an exported output counts as a use at the action body boundary", () => {
 
   // Otherwise dead, the read stays live for the embedding alone.
   strictEqual(analysis.useCount(read), 1);
-  strictEqual(analysis.lastUse(read), 1);
   strictEqual(analysis.outputPlacement(read).kind, "deferToUse");
 });
 

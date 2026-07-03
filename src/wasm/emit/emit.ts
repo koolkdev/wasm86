@@ -126,15 +126,17 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     }
   }
 
-  // Both nested bodies' values are captured before any path leaves the parent.
+  // The condition emits first so values it shares with the bodies tee at
+  // their first use; both bodies' values are then captured — stack-neutral
+  // sets under the pushed condition — before any path leaves the parent.
   function emitIf(action: Extract<Action, { kind: "if" }>): void {
+    valueStack.emitUse(action.condition);
     valueStack.captureForBody(action.thenBody);
 
     if (action.elseBody !== undefined) {
       valueStack.captureForBody(action.elseBody);
     }
 
-    valueStack.emitUse(action.condition);
     body.ifBlock(wasmHint(action.hint));
     frame.withNestedControl(() => {
       emitBody(action.thenBody);

@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import type { ExternalValueId } from "#ir/operands.js";
-import { gprChannel } from "#ir/slots.js";
+import { gprChannel, lazyFlagsBChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { Body } from "#ir/block.js";
 import { ValueTable, fitsUnsigned } from "#ir/values.js";
@@ -54,13 +54,13 @@ function createTestEmitter(
   return { body, scratch, valueStack };
 }
 
-test("scheduled flag resolves lower to Wasm calls through the helper registry", () => {
+test("a deferred flag resolve emits its Wasm call at first use", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
   const helpers = createWasmHelperRegistry(new WasmModuleEncoder());
   const helperIndex = defineLazyFlagHelper(helpers, "ZF");
-  const { body, valueStack } = createTestEmitter(
+  const { body, scratch, valueStack } = createTestEmitter(
     values,
     testBody([
       resolveAction,
@@ -74,7 +74,41 @@ test("scheduled flag resolves lower to Wasm calls through the helper registry", 
   valueStack.scheduledProducer(resolveAction);
   valueStack.emitUse(resolved);
   valueStack.assertClear();
+  scratch.assertClear();
 
+  // Nothing at the action point; the call sinks into the consumer.
+  const encoded = body.end().encode();
+
+  deepStrictEqual(wasmBodyOpcodes(encoded), [wasmOpcode.call, wasmOpcode.end]);
+  strictEqual(wasmBodyLocalCount(encoded), 0);
+});
+
+test("a captured flag resolve calls at its action point and replays", () => {
+  const values = new ValueTable();
+  const resolved = values.addActionOutput(fitsUnsigned(1));
+  const record = values.const(0);
+  const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
+  const helpers = createWasmHelperRegistry(new WasmModuleEncoder());
+
+  defineLazyFlagHelper(helpers, "ZF");
+
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    testBody([
+      resolveAction,
+      stateWrite(lazyFlagsBChannel, record),
+      stateWrite(gprChannel("eax"), resolved)
+    ]),
+    [],
+    helpers
+  );
+
+  valueStack.scheduledProducer(resolveAction);
+  valueStack.emitUse(resolved);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  // The lazy record between resolve and use pins the observation point.
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.call,
     wasmOpcode.localSet,
@@ -97,7 +131,9 @@ test("scheduled flag resolves fail clearly when the helper is missing", () => {
     createWasmHelperRegistry(new WasmModuleEncoder())
   );
 
-  throws(() => valueStack.scheduledProducer(resolveAction), /missing Wasm helper resolveZF/);
+  valueStack.scheduledProducer(resolveAction);
+
+  throws(() => valueStack.emitUse(resolved), /missing Wasm helper resolveZF/);
 });
 
 test("dead scheduled flag resolves emit nothing and require no helper", () => {
@@ -564,17 +600,18 @@ test("truncate masks to the requested width", () => {
   valueStack.emitUse(full);
   valueStack.assertClear();
 
+  // The deferred read materializes once, inside the first truncation, and
+  // the later ones replay its tee.
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
+    wasmOpcode.localTee,
     wasmOpcode.i32Const,
     wasmOpcode.i32And,
-    wasmOpcode.i32Const,
-    wasmOpcode.i32Load,
+    wasmOpcode.localGet,
     wasmOpcode.i32Const,
     wasmOpcode.i32And,
-    wasmOpcode.i32Const,
-    wasmOpcode.i32Load,
+    wasmOpcode.localGet,
     wasmOpcode.end
   ]);
 });
@@ -636,7 +673,7 @@ test("ne and non-zero equality keep the generic compare", () => {
   ]);
 });
 
-test("a loaded value pins to a local at its action point and replays", () => {
+test("a multi-use deferred load emits at its first use and tees", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
@@ -658,11 +695,44 @@ test("a loaded value pins to a local at its action point and replays", () => {
 
   const encoded = body.end().encode();
 
+  // Nothing at the action point: the load executes once at its first use
+  // and the remaining use replays the tee.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
-    wasmOpcode.localSet,
+    wasmOpcode.localTee,
     wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
+});
+
+test("a multi-use deferred static read emits one slot load and tees", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    testBody([
+      readAction,
+      stateWrite(gprChannel("ebx"), read),
+      stateWrite(gprChannel("ecx"), read)
+    ])
+  );
+
+  valueStack.scheduledProducer(readAction);
+  valueStack.emitUse(read);
+  valueStack.emitUse(read);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  // One tee'd slot load instead of a reload per use.
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.localTee,
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
@@ -686,6 +756,243 @@ test("a dead load emits nothing", () => {
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [wasmOpcode.end]);
 });
 
+test("a deferred producer consumed only inside a nested body emits there", () => {
+  const values = new ValueTable();
+  const address = values.const(0x2000);
+  const loaded = values.addActionOutput();
+  const condition = values.external(0);
+  const readAction: MemoryReadAction = memoryRead(loaded, address, 32);
+  const faultBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), loaded),
+      {
+        kind: "finish",
+        finish: {
+          kind: "exit",
+          exit: {
+            class: "cpuException",
+            exception: pageFault(address, PageFaultErrorCode.WRITE)
+          }
+        }
+      }
+    ]
+  };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    testBody([
+      readAction,
+      { kind: "if", condition, thenBody: faultBody }
+    ]),
+    [0]
+  );
+
+  valueStack.scheduledProducer(readAction);
+  valueStack.captureForBody(faultBody);
+  valueStack.emitUse(condition);
+  body.ifBlock();
+  valueStack.emitUse(loaded);
+  body.drop();
+  body.endBlock();
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  // Nothing materializes on the non-fault path: the load executes inside
+  // the body, at its use, without a scratch local.
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.localGet,
+    wasmOpcode.if,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.drop,
+    wasmOpcode.end,
+    wasmOpcode.end
+  ]);
+  // Only the external's binding local.
+  strictEqual(wasmBodyLocalCount(encoded), 1);
+});
+
+test("captureForBody captures a deferred output's input closure, not the output", () => {
+  const values = new ValueTable();
+  const base = values.external(0);
+  const four = values.const(4);
+  const address = values.binary("add", base, four);
+  const loaded = values.addActionOutput();
+  const condition = values.external(1);
+  const readAction: MemoryReadAction = memoryRead(loaded, address, 32);
+  const faultBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), loaded),
+      {
+        kind: "finish",
+        finish: {
+          kind: "exit",
+          exit: {
+            class: "cpuException",
+            exception: pageFault(four, PageFaultErrorCode.WRITE)
+          }
+        }
+      }
+    ]
+  };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    testBody([
+      readAction,
+      { kind: "if", condition, thenBody: faultBody }
+    ]),
+    [0, 1]
+  );
+
+  valueStack.scheduledProducer(readAction);
+  valueStack.captureForBody(faultBody);
+  valueStack.emitUse(condition);
+  body.ifBlock();
+  valueStack.emitUse(loaded);
+  body.drop();
+  body.endBlock();
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  // The address computes into a local before the branch — re-emitting the
+  // load inside the body needs it — while the load itself stays inside.
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.localGet,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Add,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.if,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Load,
+    wasmOpcode.drop,
+    wasmOpcode.end,
+    wasmOpcode.end
+  ]);
+  // The two external binding locals plus the captured address.
+  strictEqual(wasmBodyLocalCount(encoded), 3);
+});
+
+test("sibling fault bodies each emit a deferred producer, keeping the main path clean", () => {
+  const values = new ValueTable();
+  const address = values.const(0x2000);
+  const loaded = values.addActionOutput();
+  const firstCondition = values.external(0);
+  const secondCondition = values.external(1);
+  const readAction: MemoryReadAction = memoryRead(loaded, address, 32);
+  const hostTrap: Action = {
+    kind: "finish",
+    finish: { kind: "exit", exit: { class: "host", reason: "hostTrap" } }
+  };
+  const firstBody: Body = { actions: [stateWrite(gprChannel("eax"), loaded), hostTrap] };
+  const secondBody: Body = { actions: [stateWrite(gprChannel("ebx"), loaded), hostTrap] };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    testBody([
+      readAction,
+      { kind: "if", condition: firstCondition, thenBody: firstBody },
+      { kind: "if", condition: secondCondition, thenBody: secondBody }
+    ]),
+    [0, 1]
+  );
+
+  valueStack.scheduledProducer(readAction);
+  valueStack.captureForBody(firstBody);
+  valueStack.emitUse(firstCondition);
+  body.ifBlock();
+  valueStack.emitUse(loaded);
+  body.drop();
+  body.endBlock();
+  valueStack.captureForBody(secondBody);
+  valueStack.emitUse(secondCondition);
+  body.ifBlock();
+  valueStack.emitUse(loaded);
+  body.drop();
+  body.endBlock();
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  // Neither body's emission dominates the other's use, so each re-emits
+  // the load; no set, no tee, nothing outside the bodies.
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.localGet,
+    wasmOpcode.if,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.drop,
+    wasmOpcode.end,
+    wasmOpcode.localGet,
+    wasmOpcode.if,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.drop,
+    wasmOpcode.end,
+    wasmOpcode.end
+  ]);
+  // Only the externals' binding locals.
+  strictEqual(wasmBodyLocalCount(encoded), 2);
+});
+
+test("a direct use behind a fault body emits once at the body's entry and replays", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const condition = values.external(0);
+  const readAction: StateReadAction = stateRead(read, gprChannel("ebx"));
+  const faultBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), read),
+      { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "hostTrap" } } }
+    ]
+  };
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    testBody([
+      readAction,
+      { kind: "if", condition, thenBody: faultBody },
+      stateWrite(gprChannel("ecx"), read)
+    ]),
+    [0]
+  );
+
+  valueStack.scheduledProducer(readAction);
+  valueStack.captureForBody(faultBody);
+  valueStack.emitUse(condition);
+  body.ifBlock();
+  valueStack.emitUse(read);
+  body.drop();
+  body.endBlock();
+  valueStack.emitUse(read);
+  body.drop();
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  // The scope's own use means its flow pays for the value either way, so
+  // captureForBody realizes the emission: one slot load set to a local
+  // before the guard, replayed by the fault body and the later use.
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.if,
+    wasmOpcode.localGet,
+    wasmOpcode.drop,
+    wasmOpcode.end,
+    wasmOpcode.localGet,
+    wasmOpcode.drop,
+    wasmOpcode.end
+  ]);
+  // The external's binding local plus the one scratch local.
+  strictEqual(wasmBodyLocalCount(encoded), 2);
+});
+
 test("captureForBody computes an untouched compound into a local for later uses", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
@@ -700,14 +1007,12 @@ test("captureForBody computes an untouched compound into a local for later uses"
       stateWrite(gprChannel("ecx"), sum)
     ])
   );
-  // A nested body consuming the compound twice plus both leaves: one capture, the
-  // rest are no-ops (replay for the compound, reload and inline for the
-  // unpinned read and the const).
+  // A nested body consuming the compound twice plus a leaf: one capture,
+  // the rest are no-ops (replay for the compound, inline for the const).
   const nestedBody: Body = {
     actions: [
       stateWrite(gprChannel("ebx"), sum),
       stateWrite(gprChannel("ecx"), sum),
-      stateWrite(gprChannel("edx"), read),
       {
         kind: "finish",
         finish: {
@@ -905,13 +1210,13 @@ test("a borrow holds a spent registry local until release", () => {
 
   const encoded = body.end().encode();
 
-  // The first push consumes the load's only counted use; the pin keeps its
-  // local alive for the second push and frees it at release.
+  // The first push emits the deferred load and consumes its only counted
+  // use; the pin tees it into a local for the second push and frees it at
+  // release.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
-    wasmOpcode.localSet,
-    wasmOpcode.localGet,
+    wasmOpcode.localTee,
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);

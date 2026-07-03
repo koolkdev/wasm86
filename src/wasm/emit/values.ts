@@ -3,8 +3,7 @@ import { effectsOf, mayAlias } from "#ir/aliasing.js";
 import { bodyFinal, type Action, type Finish, type IrExit, type OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess, type OpAccess, type StorageAccess } from "#ir/ops.js";
-import { isDynamicSlot } from "#ir/slots.js";
-import { nestedBodies, walkBodyActions } from "#ir/traverse.js";
+import { nestedBodies } from "#ir/traverse.js";
 import type { ValueId, ValueNode, ValueTable } from "#ir/values.js";
 
 // Pure value analysis for the action emitter: everything is decided up front
@@ -12,22 +11,30 @@ import type { ValueId, ValueNode, ValueTable } from "#ir/values.js";
 // stack consumes this, the analysis never emits.
 
 export type OutputPlacement =
-  | Readonly<{ kind: "deferToUse" }>
+  | Readonly<{ kind: "deferToUse"; emissions: readonly ScheduledEmission[] }>
   | Readonly<{ kind: "captureAtProducer" }>;
 
-const deferToUsePlacement: OutputPlacement = { kind: "deferToUse" };
+// One scheduled emission of a deferred producer, serving `uses` counted
+// uses from one tee/local. "use": the op executes at its first use in
+// `body`. "bodyEntry": the op executes when the enclosing scope captures
+// `body`, on the owning scope's flow before the control action.
+export type ScheduledEmission = Readonly<{
+  anchor: "use" | "bodyEntry";
+  body: Body;
+  uses: number;
+}>;
+
+// Registration default: no demand, no scheduled emissions.
+const deferToUsePlacement: OutputPlacement = { kind: "deferToUse", emissions: [] };
 const captureAtProducerPlacement: OutputPlacement = { kind: "captureAtProducer" };
 
 export type BlockValueAnalysis = Readonly<{
   // Emission uses: demanded action operands plus the child inputs of every
   // reachable compound, counted once per parent per body scope.
   useCount(id: ValueId): number;
-  // Entry action index of the last point the value is pushed onto the
-  // stack: direct operand uses, plus the first use of each reachable
-  // parent; nested-body uses count at their owning if index.
-  lastUse(id: ValueId): number | undefined;
   // Scheduled producer outputs either materialize at their action point or
-  // defer to their use sites.
+  // defer to their use sites; a deferred placement carries the counted
+  // uses each scheduled emission covers, in emission order.
   outputPlacement(output: ValueId): OutputPlacement;
 }>;
 
@@ -40,64 +47,56 @@ export function analyzeBlockValues(
 
 type DemandSite = Readonly<{ body: Body; actionIndex: number }>;
 
-type BodyDemand = {
-  firstActionIndex: number;
-  lastActionIndex: number;
-};
-
-type DemandEdge = Readonly<{ value: ValueId; site: DemandSite }>;
+// One consumption of a value. `site` is where the value enters its scope's
+// index space — nested-body uses land at the owning action, as the registry
+// and the walks require; `use` is the action that actually consumes it, in
+// its own body's index space, which is what placement legality needs.
+type DemandEdge = Readonly<{ value: ValueId; site: DemandSite; use: DemandSite }>;
 
 type Producer = Readonly<{
   action: OpAction;
   access: OpAccess;
   output: ValueId;
+  site: DemandSite;
   operandDemands: readonly DemandEdge[];
 }>;
 
-type StateRead = Readonly<{ output: ValueId; access: StorageAccess }>;
+// Scheduling workspace for one emission: the public anchor plus where it
+// executes (`position`, carried on its input edges for nested placement
+// decisions) and where its demand enters the producer's own body
+// (`homeEntry` — the emission's deferral-window end and the point its
+// inputs materialize on the producer's flow).
+type PlannedEmission = Readonly<{
+  anchor: "use" | "bodyEntry";
+  body: Body;
+  uses: number;
+  homeEntry: number;
+  position: DemandSite;
+}>;
 
 class BlockValueDemand implements BlockValueAnalysis {
   readonly #values: ValueTable;
   readonly #demandCounts = new Map<ValueId, number>();
-  readonly #demandsByValue = new Map<ValueId, Map<Body, BodyDemand>>();
+  // First demand index per body scope, in that scope's index space:
+  // compound children charge there.
+  readonly #firstDemands = new Map<ValueId, Map<Body, number>>();
   readonly #producers = new Map<ValueId, Producer>();
+  readonly #outputUses = new Map<ValueId, DemandEdge[]>();
   readonly #outputPlacements = new Map<ValueId, OutputPlacement>();
+  readonly #bodyOwners = new Map<Body, DemandSite>();
 
   constructor(block: IrBlock, exportedOutputs: Iterable<ValueId>) {
     this.#values = block.values;
 
+    this.#recordBodyOwners(block.body);
     this.#recordActionDemandRoots(block.body);
     this.#recordExportedDemandRoots(block.body, exportedOutputs);
-    this.#propagateDemand();
-    this.#captureReadsCrossingStores(block.body);
-    this.#captureReadsCrossingNestedBodyWrites(block.body);
+    this.#propagateDemandAndPlace();
   }
 
   useCount(id: ValueId): number {
     this.#values.node(id);
     return this.#demandCounts.get(id) ?? 0;
-  }
-
-  lastUse(id: ValueId): number | undefined {
-    this.#values.node(id);
-    const demands = this.#demandsByValue.get(id);
-
-    if (demands === undefined) {
-      return undefined;
-    }
-
-    // Maxing across bodies assumes every demand site lives in the root
-    // body's index space, which holds while nested bodies contain no
-    // producers: parent-context demand lands at the owning action's root
-    // site. Arm-local producers would record sites in their own body's
-    // space, making this max meaningless across bodies.
-    let last: number | undefined;
-
-    for (const demand of demands.values()) {
-      last = Math.max(last ?? demand.lastActionIndex, demand.lastActionIndex);
-    }
-
-    return last;
   }
 
   outputPlacement(output: ValueId): OutputPlacement {
@@ -109,29 +108,43 @@ class BlockValueDemand implements BlockValueAnalysis {
     return placement;
   }
 
-  #addDemand(id: ValueId, site: DemandSite): void {
-    this.#values.node(id);
-    this.#demandCounts.set(id, (this.#demandCounts.get(id) ?? 0) + 1);
+  #recordBodyOwners(body: Body): void {
+    body.actions.forEach((action, actionIndex) => {
+      for (const nested of nestedBodies(action)) {
+        this.#bodyOwners.set(nested, { body, actionIndex });
+        this.#recordBodyOwners(nested);
+      }
+    });
+  }
 
-    let byBody = this.#demandsByValue.get(id);
+  #addDemand(edge: DemandEdge): void {
+    this.#values.node(edge.value);
+    this.#demandCounts.set(edge.value, (this.#demandCounts.get(edge.value) ?? 0) + 1);
+
+    if (this.#producers.has(edge.value)) {
+      let edges = this.#outputUses.get(edge.value);
+
+      if (edges === undefined) {
+        edges = [];
+        this.#outputUses.set(edge.value, edges);
+      }
+
+      edges.push(edge);
+    }
+
+    let byBody = this.#firstDemands.get(edge.value);
 
     if (byBody === undefined) {
       byBody = new Map();
-      this.#demandsByValue.set(id, byBody);
+      this.#firstDemands.set(edge.value, byBody);
     }
 
-    const demand = byBody.get(site.body);
+    const first = byBody.get(edge.site.body);
 
-    if (demand === undefined) {
-      byBody.set(site.body, {
-        firstActionIndex: site.actionIndex,
-        lastActionIndex: site.actionIndex
-      });
-      return;
-    }
-
-    demand.firstActionIndex = Math.min(demand.firstActionIndex, site.actionIndex);
-    demand.lastActionIndex = Math.max(demand.lastActionIndex, site.actionIndex);
+    byBody.set(
+      edge.site.body,
+      first === undefined ? edge.site.actionIndex : Math.min(first, edge.site.actionIndex)
+    );
   }
 
   #recordActionDemandRoots(body: Body, ownerSite?: DemandSite): void {
@@ -141,7 +154,8 @@ class BlockValueDemand implements BlockValueAnalysis {
       const actionSite = { body, actionIndex: localActionIndex };
       const demandEdge = (value: ValueId): DemandEdge => ({
         value,
-        site: produced.has(value) ? actionSite : ownerSite ?? actionSite
+        site: produced.has(value) ? actionSite : ownerSite ?? actionSite,
+        use: actionSite
       });
 
       switch (action.kind) {
@@ -161,26 +175,23 @@ class BlockValueDemand implements BlockValueAnalysis {
               action,
               access,
               output,
+              site: actionSite,
               operandDemands
             });
-            this.#outputPlacements.set(output, initialOutputPlacement(action));
+            this.#outputPlacements.set(output, deferToUsePlacement);
             produced.add(output);
           }
 
           if (access.writes.length > 0) {
             for (const operand of operandDemands) {
-              this.#addDemand(operand.value, operand.site);
+              this.#addDemand(operand);
             }
           }
 
           return;
         }
         case "if":
-          {
-            const condition = demandEdge(action.condition);
-
-            this.#addDemand(condition.value, condition.site);
-          }
+          this.#addDemand(demandEdge(action.condition));
 
           for (const nested of nestedBodies(action)) {
             this.#recordActionDemandRoots(nested, actionSite);
@@ -188,9 +199,7 @@ class BlockValueDemand implements BlockValueAnalysis {
           return;
         case "finish":
           for (const operand of finishOperands(action.finish)) {
-            const demand = demandEdge(operand);
-
-            this.#addDemand(demand.value, demand.site);
+            this.#addDemand(demandEdge(operand));
           }
           return;
       }
@@ -205,16 +214,20 @@ class BlockValueDemand implements BlockValueAnalysis {
     const site = { body, actionIndex };
 
     for (const id of exported) {
-      this.#addDemand(id, site);
+      this.#addDemand({ value: id, site, use: site });
     }
   }
 
   // Children always have lower ids than their parents, and a producer's
   // operands precede its output, so a descending walk sees every id's uses
-  // settled before recording what it consumes: a demanded compound demands
-  // its children at its first use in each body scope, and a demanded output
-  // demands its producer's operands at the producing action.
-  #propagateDemand(): void {
+  // settled before recording what it consumes. Placement rides the same
+  // walk: an output's demand is complete when the walk reaches it, so its
+  // producer's placement — and with it where the producer's operands are
+  // charged — is decided right there. A demanded compound demands its
+  // children at its first use in each body scope; a captured producer
+  // demands its operands at the producing action; a deferred producer
+  // demands them once, at the point it will execute.
+  #propagateDemandAndPlace(): void {
     for (let id = this.#values.size() - 1; id >= 0; id -= 1) {
       if ((this.#demandCounts.get(id) ?? 0) === 0) {
         continue;
@@ -223,101 +236,205 @@ class BlockValueDemand implements BlockValueAnalysis {
       const producer = this.#producers.get(id);
 
       if (producer !== undefined) {
-        for (const operand of producer.operandDemands) {
-          this.#addDemand(operand.value, operand.site);
-        }
-
+        this.#placeProducer(producer);
         continue;
       }
 
-      const demands = this.#demandsByValue.get(id);
+      const demands = this.#firstDemands.get(id);
 
       assert(demands !== undefined, `demanded value ${id} has no demand sites`);
-      for (const [body, demand] of demands) {
-        const computedAt = { body, actionIndex: demand.firstActionIndex };
+      for (const [body, firstActionIndex] of demands) {
+        const computedAt = { body, actionIndex: firstActionIndex };
 
         for (const child of valueChildren(this.#values.node(id))) {
-          this.#addDemand(child, computedAt);
+          this.#addDemand({ value: child, site: computedAt, use: computedAt });
         }
       }
     }
   }
 
-  // The one ordering rule: a state.read whose value is consumed past a
-  // may-aliasing store captures at its action point. Guest memory never
-  // aliases state, but the query still goes through opAccess-derived effects.
-  #captureReadsCrossingStores(body: Body): void {
-    body.actions.forEach((action, actionIndex) => {
-      const read = stateReadProducer(this.#producerForActionOutput(action));
+  // The placement rule, computed from the op's access signature: a pure
+  // producer whose reads survive untouched from its action point to each
+  // of its scheduled emissions defers; everything else captures at its
+  // producer.
+  #placeProducer(producer: Producer): void {
+    if (producer.access.writes.length > 0) {
+      // Mutating ops execute at their action point; their operands were
+      // already charged as demand roots when the action was recorded.
+      this.#outputPlacements.set(producer.output, captureAtProducerPlacement);
+      return;
+    }
 
-      if (read === undefined) {
-        return;
+    const edges = this.#outputUses.get(producer.output);
+
+    assert(edges !== undefined, `demanded output ${producer.output} has no recorded uses`);
+
+    const planned: PlannedEmission[] = [];
+
+    this.#scheduleScope(producer.site.body, edges, undefined, planned);
+
+    if (
+      // Home entries never decrease in emission order, so the last
+      // emission's entry bounds every emission's deferral window.
+      this.#writesCrossDeferralWindow(producer, planned[planned.length - 1]!.homeEntry) ||
+      this.#consumingBodiesWriteReads(producer)
+    ) {
+      this.#outputPlacements.set(producer.output, captureAtProducerPlacement);
+      for (const operand of producer.operandDemands) {
+        this.#addDemand(operand);
       }
 
-      const lastDemand = this.#demandsByValue.get(read.output)?.get(body)?.lastActionIndex;
+      return;
+    }
 
-      if (lastDemand === undefined) {
-        return;
-      }
-
-      // An operand of the store action itself is pushed before the store
-      // executes, so a use at the store's own index stays safe.
-      for (let index = actionIndex + 1; index < lastDemand; index += 1) {
-        const later = body.actions[index]!;
-
-        if (actionMayWrite(later, read.access)) {
-          this.#captureOutput(read.output);
-          break;
-        }
-      }
+    this.#outputPlacements.set(producer.output, {
+      kind: "deferToUse",
+      emissions: planned.map(({ anchor, body, uses }) => ({ anchor, body, uses }))
     });
 
-    for (const action of body.actions) {
-      for (const nested of nestedBodies(action)) {
-        this.#captureReadsCrossingStores(nested);
+    // Each scheduled emission charges the op's inputs once. A sunk
+    // emission's inputs materialize where the capture walk runs — the
+    // subtree's entry on the producer's flow — while its execution point
+    // carries the edges for nested placement decisions.
+    for (const emission of planned) {
+      const site = { body: producer.site.body, actionIndex: emission.homeEntry };
+
+      for (const value of producer.access.valueInputs) {
+        this.#addDemand({ value, site, use: emission.position });
       }
     }
   }
 
-  // The same rule from the nested body's viewpoint: a read of a channel the
-  // body itself writes would reload the nested body's restore, so it captures,
-  // keeping the body free to emit its writes and exit in any order.
-  #captureReadsCrossingNestedBodyWrites(body: Body): void {
-    const readsByOutput = new Map<ValueId, StateRead>();
+  // One emission per scope that itself demands the value, at the latest
+  // scope point dominating all of the scope's demand: the first direct
+  // use when no demanding subtree hangs earlier, else the entry of the
+  // earliest demanding subtree. A scope with subtree demand only hosts no
+  // emission — the op sinks into each demanding subtree, recursively, so
+  // demand confined to a subtree never costs the enclosing scope.
+  #scheduleScope(
+    scope: Body,
+    edges: readonly DemandEdge[],
+    homeEntry: number | undefined,
+    out: PlannedEmission[]
+  ): void {
+    let firstDirect: number | undefined;
+    const subtrees = new Map<Body, { entryIndex: number; edges: DemandEdge[] }>();
 
-    walkBodyActions(body, (action) => {
-      const read = stateReadProducer(this.#producerForActionOutput(action));
-
-      if (read !== undefined) {
-        readsByOutput.set(read.output, read);
+    for (const edge of edges) {
+      if (edge.use.body === scope) {
+        firstDirect =
+          firstDirect === undefined
+            ? edge.use.actionIndex
+            : Math.min(firstDirect, edge.use.actionIndex);
+        continue;
       }
+
+      const entry = this.#entryToward(scope, edge.use.body);
+      const subtree = subtrees.get(entry.body);
+
+      if (subtree === undefined) {
+        subtrees.set(entry.body, { entryIndex: entry.actionIndex, edges: [edge] });
+      } else {
+        subtree.edges.push(edge);
+      }
+    }
+
+    const ordered = [...subtrees].sort((a, b) => a[1].entryIndex - b[1].entryIndex);
+
+    if (firstDirect === undefined) {
+      for (const [body, subtree] of ordered) {
+        this.#scheduleScope(body, subtree.edges, homeEntry ?? subtree.entryIndex, out);
+      }
+
+      return;
+    }
+
+    const earliest = ordered[0];
+
+    if (earliest === undefined || firstDirect <= earliest[1].entryIndex) {
+      // A demanding subtree hanging at the first use's own index is the
+      // consuming if's arm: the condition materializes the value before
+      // the arms run.
+      out.push({
+        anchor: "use",
+        body: scope,
+        uses: edges.length,
+        homeEntry: homeEntry ?? firstDirect,
+        position: { body: scope, actionIndex: firstDirect }
+      });
+
+      return;
+    }
+
+    out.push({
+      anchor: "bodyEntry",
+      body: earliest[0],
+      uses: edges.length,
+      homeEntry: homeEntry ?? earliest[1].entryIndex,
+      position: { body: scope, actionIndex: earliest[1].entryIndex }
     });
+  }
 
-    walkBodyActions(body, (action) => {
-      for (const nested of nestedBodies(action)) {
-        for (const value of bodyInputValues(nested)) {
-          const read = readsByOutput.get(value);
+  // The nested body directly under `ancestor` on the way to `body`, with
+  // the index of the action that owns it.
+  #entryToward(ancestor: Body, body: Body): DemandSite {
+    for (let current = body; ; ) {
+      const owner = this.#bodyOwners.get(current);
 
-          if (read !== undefined && bodyMayWrite(nested, read.access)) {
-            this.#captureOutput(read.output);
+      assert(owner !== undefined, "demand edge body is not reachable from its producer's body");
+      if (owner.body === ancestor) {
+        return { body: current, actionIndex: owner.actionIndex };
+      }
+
+      current = owner.body;
+    }
+  }
+
+  // No action between the producer and any emission's entry into the
+  // producer's body may write anything the op reads: every emission must
+  // observe the action point's state. An operand of the final entry action
+  // itself is pushed before that action executes, so the walk stops short
+  // of it. Guest memory never aliases state, but the query still goes
+  // through opAccess-derived effects.
+  #writesCrossDeferralWindow(producer: Producer, entryIndex: number): boolean {
+    const actions = producer.site.body.actions;
+
+    for (let index = producer.site.actionIndex + 1; index < entryIndex; index += 1) {
+      if (actionMayWriteAny(actions[index]!, producer.access.reads)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // The same rule from the consuming bodies' viewpoint: executing the op in
+  // or past a body that writes what it reads would observe the body's own
+  // stores, so the producer captures, keeping bodies free to emit their
+  // writes and exits in any order. Charging deferred inputs at their
+  // consumer's emission point lands their edges in the consuming body, so
+  // this walk sees hazards through a deferred op's input closure too.
+  #consumingBodiesWriteReads(producer: Producer): boolean {
+    const edges = this.#outputUses.get(producer.output) ?? [];
+    const seen = new Set<Body>();
+
+    for (const edge of edges) {
+      for (let body = edge.use.body; body !== producer.site.body; ) {
+        if (!seen.has(body)) {
+          seen.add(body);
+          if (bodyMayWriteAny(body, producer.access.reads)) {
+            return true;
           }
         }
+
+        const owner = this.#bodyOwners.get(body);
+
+        assert(owner !== undefined, "demand edge body is not reachable from its producer's body");
+        body = owner.body;
       }
-    });
-  }
+    }
 
-  #producerForActionOutput(action: Action): Producer | undefined {
-    const output = actionOutput(action);
-
-    return output === undefined ? undefined : this.#producers.get(output);
-  }
-
-  #captureOutput(output: ValueId): void {
-    assert(
-      this.#outputPlacements.has(output),
-      `value ${output} is not a scheduled producer output`
-    );
-    this.#outputPlacements.set(output, captureAtProducerPlacement);
+    return false;
   }
 }
 
@@ -406,35 +523,14 @@ function actionOutput(action: Action, access?: OpAccess): ValueId | undefined {
   }
 }
 
-function initialOutputPlacement(action: OpAction): OutputPlacement {
-  if (action.op.kind === "state.read" && !isDynamicSlot(action.op.slot)) {
-    return deferToUsePlacement;
-  }
+function actionMayWriteAny(action: Action, reads: readonly StorageAccess[]): boolean {
+  const writes = effectsOf(action).writes;
 
-  return captureAtProducerPlacement;
+  return reads.some((read) => writes.some((write) => mayAlias(read, write)));
 }
 
-function stateReadProducer(producer: Producer | undefined): StateRead | undefined {
-  if (
-    producer === undefined ||
-    producer.action.op.kind !== "state.read" ||
-    isDynamicSlot(producer.action.op.slot)
-  ) {
-    return undefined;
-  }
-
-  const read = producer.access.reads.find((access) => access.space === "state");
-
-  assert(read !== undefined, "state.read producer has no state read access");
-  return { output: producer.output, access: read };
-}
-
-function actionMayWrite(action: Action, read: StorageAccess): boolean {
-  return effectsOf(action).writes.some((write) => mayAlias(read, write));
-}
-
-function bodyMayWrite(body: Body, read: StorageAccess): boolean {
-  return body.actions.some((action) => actionMayWrite(action, read));
+function bodyMayWriteAny(body: Body, reads: readonly StorageAccess[]): boolean {
+  return body.actions.some((action) => actionMayWriteAny(action, reads));
 }
 
 function valueChildren(node: ValueNode): readonly ValueId[] {
