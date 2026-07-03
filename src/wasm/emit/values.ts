@@ -260,6 +260,8 @@ function exitOperands(exit: IrExit): readonly ValueId[] {
       const exception = exit.exception;
 
       switch (exception.kind) {
+        case "DE":
+          return [];
         case "PF":
           return [exception.linearAddress];
       }
@@ -304,6 +306,7 @@ function valueChildren(node: ValueNode): readonly ValueId[] {
     case "const":
     case "actionOutput":
     case "external":
+    case "unreachable":
       return [];
     case "binary":
     case "compare":

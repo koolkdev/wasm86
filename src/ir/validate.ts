@@ -107,6 +107,8 @@ function validateExitValues(block: IrBlock, exit: IrExit): void {
       const exception = exit.exception;
 
       switch (exception.kind) {
+        case "DE":
+          return;
         case "PF":
           block.values.node(exception.linearAddress);
           return;

@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ConditionCode } from "#x86/conditions.js";
+import type { CpuException } from "#x86/exceptions.js";
 import { isX86StatusFlag, type X86Flag } from "#x86/flags.js";
 import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
@@ -457,6 +458,21 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     });
     this.#blockEnd = "terminated";
     this.#terminated = true;
+  }
+
+  cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {
+    this.#beforeOp("cpuExceptionIf");
+    assert(!this.#wroteMemory, "a CPU exception guard cannot follow a memory write in the same instruction");
+
+    this.#actions.push({
+      kind: "if",
+      condition,
+      hint: "unlikely",
+      thenBody: this.#terminatingBody(
+        { kind: "exit", exit: { class: "cpuException", exception } },
+        this.#pending.flushesForPath("fault")
+      )
+    });
   }
 
   // A trap resumes at the next instruction with all state observable.

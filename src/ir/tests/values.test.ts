@@ -145,10 +145,8 @@ test("binary operations fold constant operands", () => {
   strictEqual(table.binary("mul", table.const(0x4000_0000), two), table.const(0x8000_0000));
   strictEqual(table.binary("rem_u", table.const(31), table.const(9)), table.const(4));
   strictEqual(table.binary("rem_u", table.const(-1), table.const(10)), table.const(5));
-  throws(
-    () => table.binary("rem_u", table.const(1), table.const(0)),
-    /rem_u divisor must be non-zero/
-  );
+  strictEqual(table.node(table.binary("div_u", table.const(1), table.const(0))).kind, "unreachable");
+  strictEqual(table.node(table.binary("rem_u", table.const(1), table.const(0))).kind, "unreachable");
   strictEqual(table.binary("rotl", table.const(0x1234_5678), table.const(8)), table.const(0x3456_7812));
   strictEqual(table.binary("rotr", table.const(0x1234_5678), table.const(8)), table.const(0x7812_3456));
   strictEqual(table.binary("xor", minusOne, table.const(0xff)), table.const(-0x100));

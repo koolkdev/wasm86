@@ -5,13 +5,13 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { decodeBytes, ok, startAddress } from "#x86/decoder/tests/helpers.js";
+import { decodeBytes, ok as decodeOk, startAddress } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags, x86StatusFlags, type X86Flag } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, type DecodedCpuExceptionExit } from "#wasm/exit.js";
-import { readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { assertPageFaultException, readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -47,7 +47,7 @@ const allPushfdFlagsSet = Object.fromEntries(
 const guestByteLength = 0x10000;
 
 test("mov r32, [ebx+disp] loads the guest cell", async () => {
-  const instruction = ok(decodeBytes([0x8b, 0x43, 0x04]));
+  const instruction = decodeOk(decodeBytes([0x8b, 0x43, 0x04]));
   const initial: Partial<WasmCpuStateSnapshot> = { ebx: 0x20, eip: instruction.address, ...allFlagsSet };
   const { stateView, guestView, run } = await instantiateIrBlock(blockOf([instruction]));
 
@@ -63,7 +63,7 @@ test("mov r32, [ebx+disp] loads the guest cell", async () => {
 });
 
 test("mov [ebx+disp], r32 stores the guest cell", async () => {
-  const instruction = ok(decodeBytes([0x89, 0x43, 0x04]));
+  const instruction = decodeOk(decodeBytes([0x89, 0x43, 0x04]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xcafe_1234,
     ebx: 0x20,
@@ -121,7 +121,7 @@ test("mov moffs accumulator forms load and store at their widths", async () => {
 
 test("add [mem], r32 read-modify-writes the cell with reference flags", async () => {
   // add [eax], ebx with a wrap to zero: CF and ZF both come out set.
-  const instruction = ok(decodeBytes([0x01, 0x18]));
+  const instruction = decodeOk(decodeBytes([0x01, 0x18]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0x20,
     ebx: 0xffff_ffff,
@@ -146,7 +146,7 @@ test("add [mem], r32 read-modify-writes the cell with reference flags", async ()
 });
 
 test("add r32, [mem] loads the operand with reference flags", async () => {
-  const instruction = ok(decodeBytes([0x03, 0x18]));
+  const instruction = decodeOk(decodeBytes([0x03, 0x18]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0x20,
     ebx: 0x7fff_ffff,
@@ -227,7 +227,7 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
 });
 
 test("a direct-offset read fault reports the offset and leaves state unchanged", async () => {
-  const instruction = ok(decodeBytes([0xa1, 0xfe, 0xff, 0x00, 0x00]));
+  const instruction = decodeOk(decodeBytes([0xa1, 0xfe, 0xff, 0x00, 0x00]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0x1234_5678,
     eip: instruction.address,
@@ -247,7 +247,7 @@ test("a direct-offset read fault reports the offset and leaves state unchanged",
 
 test("a write fault leaves guest memory untouched", async () => {
   // mov [ebx], eax with the range crossing the guest end.
-  const instruction = ok(decodeBytes([0x89, 0x03]));
+  const instruction = decodeOk(decodeBytes([0x89, 0x03]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xdead_beef,
     ebx: guestByteLength - 2,
@@ -268,7 +268,7 @@ test("a write fault leaves guest memory untouched", async () => {
 });
 
 test("a direct-offset write fault reports the offset and leaves state unchanged", async () => {
-  const instruction = ok(decodeBytes([0xa3, 0xfe, 0xff, 0x00, 0x00]));
+  const instruction = decodeOk(decodeBytes([0xa3, 0xfe, 0xff, 0x00, 0x00]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xdead_beef,
     eip: instruction.address,
@@ -289,7 +289,7 @@ test("a direct-offset write fault reports the offset and leaves state unchanged"
 
 test("a narrow access faults with its byte length", async () => {
   // movzx eax, byte [ebx] one past the guest.
-  const instruction = ok(decodeBytes([0x0f, 0xb6, 0x03]));
+  const instruction = decodeOk(decodeBytes([0x0f, 0xb6, 0x03]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     ebx: guestByteLength,
     eip: instruction.address,
@@ -361,7 +361,7 @@ test("operand-size push immediates write word stack cells", async () => {
 });
 
 test("word push memory source writes a 16-bit stack cell", async () => {
-  const instruction = ok(decodeBytes([0x66, 0xff, 0x33]));
+  const instruction = decodeOk(decodeBytes([0x66, 0xff, 0x33]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     ebx: 0x20,
     esp: 0x40,
@@ -383,7 +383,7 @@ test("word push memory source writes a 16-bit stack cell", async () => {
 });
 
 test("word pop memory destination computes the address after incrementing ESP", async () => {
-  const instruction = ok(decodeBytes([0x66, 0x8f, 0x04, 0x24]));
+  const instruction = decodeOk(decodeBytes([0x66, 0x8f, 0x04, 0x24]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     esp: 0x40,
     eip: instruction.address,
@@ -404,7 +404,7 @@ test("word pop memory destination computes the address after incrementing ESP", 
 });
 
 test("a faulting word push reports a word-sized stack write", async () => {
-  const instruction = ok(decodeBytes([0x66, 0x50]));
+  const instruction = decodeOk(decodeBytes([0x66, 0x50]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0x1234,
     esp: 1,
@@ -424,7 +424,7 @@ test("a faulting word push reports a word-sized stack write", async () => {
 });
 
 test("pushad stores all dword registers and original ESP", async () => {
-  const instruction = ok(decodeBytes([0x60]));
+  const instruction = decodeOk(decodeBytes([0x60]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0x1111_1111,
     ecx: 0x2222_2222,
@@ -472,7 +472,7 @@ test("pushad stores all dword registers and original ESP", async () => {
 });
 
 test("pusha stores all word registers and original SP", async () => {
-  const instruction = ok(decodeBytes([0x66, 0x60]));
+  const instruction = decodeOk(decodeBytes([0x66, 0x60]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xaaaa_1111,
     ecx: 0xbbbb_2222,
@@ -520,7 +520,7 @@ test("pusha stores all word registers and original SP", async () => {
 });
 
 test("popad restores dword registers and skips saved ESP", async () => {
-  const instruction = ok(decodeBytes([0x61]));
+  const instruction = decodeOk(decodeBytes([0x61]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     esp: 0x20,
     eip: instruction.address,
@@ -561,7 +561,7 @@ test("popad restores dword registers and skips saved ESP", async () => {
 });
 
 test("popa restores word registers and skips saved SP", async () => {
-  const instruction = ok(decodeBytes([0x66, 0x61]));
+  const instruction = decodeOk(decodeBytes([0x66, 0x61]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xaaaa_0000,
     ecx: 0xbbbb_0000,
@@ -635,7 +635,7 @@ test("stack-all range guards report full dword and word ranges", async () => {
       readPageFaultExit(guestByteLength - 8)
     ]
   ] as const) {
-    const instruction = ok(decodeBytes(bytes));
+    const instruction = decodeOk(decodeBytes(bytes));
     const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
 
     writeWasmCpuStateSnapshot(stateView, initial);
@@ -650,7 +650,7 @@ test("stack-all range guards report full dword and word ranges", async () => {
 });
 
 test("pushfd stores the usermode eflags image", async () => {
-  const instruction = ok(decodeBytes([0x9c]));
+  const instruction = decodeOk(decodeBytes([0x9c]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     esp: 0x40,
     eip: instruction.address,
@@ -670,7 +670,7 @@ test("pushfd stores the usermode eflags image", async () => {
 });
 
 test("pushfd stores the fixed usermode image when no state flags are set", async () => {
-  const instruction = ok(decodeBytes([0x9c]));
+  const instruction = decodeOk(decodeBytes([0x9c]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     esp: 0x40,
     eip: instruction.address
@@ -689,7 +689,7 @@ test("pushfd stores the fixed usermode image when no state flags are set", async
 });
 
 test("pushf stores the low usermode flags image", async () => {
-  const instruction = ok(decodeBytes([0x66, 0x9c]));
+  const instruction = decodeOk(decodeBytes([0x66, 0x9c]));
   const initial: Partial<WasmCpuStateSnapshot> = {
     esp: 0x40,
     eip: instruction.address,
@@ -709,7 +709,7 @@ test("pushf stores the low usermode flags image", async () => {
 });
 
 test("popfd distributes stored flags and ignores privileged bits", async () => {
-  const instruction = ok(decodeBytes([0x9d]));
+  const instruction = decodeOk(decodeBytes([0x9d]));
   const privilegedBits = (1 << 9) | (3 << 12) | (1 << 16) | (1 << 17) | (1 << 19) | (1 << 20);
   const initial: Partial<WasmCpuStateSnapshot> = {
     esp: 0x40,
@@ -731,7 +731,7 @@ test("popfd distributes stored flags and ignores privileged bits", async () => {
 });
 
 test("popf distributes low flags and preserves AC/ID", async () => {
-  const instruction = ok(decodeBytes([0x66, 0x9d]));
+  const instruction = decodeOk(decodeBytes([0x66, 0x9d]));
   const privilegedBits = (1 << 9) | (3 << 12);
   const initial: Partial<WasmCpuStateSnapshot> = {
     esp: 0x40,
@@ -956,7 +956,7 @@ function decodeSequence(byteLists: readonly (readonly number[])[]): readonly Isa
   let address: number | undefined;
 
   for (const bytes of byteLists) {
-    const instruction = address === undefined ? ok(decodeBytes(bytes)) : ok(decodeBytes(bytes, address));
+    const instruction = address === undefined ? decodeOk(decodeBytes(bytes)) : decodeOk(decodeBytes(bytes, address));
 
     instructions.push(instruction);
     address = instruction.nextEip;
@@ -1001,6 +1001,8 @@ function assertFaultExit(exit: bigint, expected: DecodedCpuExceptionExit, label:
   }
 
   strictEqual(decoded.exception.kind, expected.exception.kind, `${label} exception`);
+  assertPageFaultException(decoded.exception, `${label} decoded page fault`);
+  assertPageFaultException(expected.exception, `${label} expected page fault`);
   strictEqual(decoded.exception.linearAddress, expected.exception.linearAddress, `${label} linear address`);
   strictEqual(decoded.exception.errorCode, expected.exception.errorCode, `${label} error code`);
 }

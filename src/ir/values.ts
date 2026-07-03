@@ -35,6 +35,7 @@ export type ValueType = "i32" | "i64";
 // Actions are not expressions: a scheduled op output enters the
 // graph as an actionOutput leaf.
 export type ConstValueNode = Readonly<{ kind: "const"; value: number }>;
+export type UnreachableValueNode = Readonly<{ kind: "unreachable"; type: ValueType }>;
 export type ActionOutputValueNode = Readonly<{ kind: "actionOutput" }>;
 export type ExternalValueNode = Readonly<{ kind: "external"; external: ExternalValueId }>;
 export type BinaryValueNode = Readonly<{
@@ -74,6 +75,7 @@ export type ExtendValueNode = Readonly<{
 
 export type ValueNode =
   | ConstValueNode
+  | UnreachableValueNode
   | ActionOutputValueNode
   | ExternalValueNode
   | BinaryValueNode
@@ -112,6 +114,7 @@ export class ValueTable {
   // Derived on first query, memoized per node.
   readonly #widthBounds: (WidthBounds | undefined)[] = [];
   readonly #constIds = new Map<number, ValueId>();
+  readonly #unreachableIds = new Map<ValueType, ValueId>();
   readonly #externalIds = new Map<ExternalValueId, ValueId>();
   readonly #binaryIds: Map4<ValueType, BinaryOperator, ValueId, ValueId, ValueId> = new Map();
   readonly #unaryIds: Map2<UnaryOperator, ValueId, ValueId> = new Map();
@@ -148,6 +151,10 @@ export class ValueTable {
 
   const(value: number): ValueId {
     return this.#internConst(value);
+  }
+
+  unreachable(type: ValueType = "i32"): ValueId {
+    return this.#internUnreachable(type);
   }
 
   external(external: ExternalValueId): ValueId {
@@ -270,6 +277,19 @@ export class ValueTable {
     const id = this.#add({ kind: "const", value: canonical }, []);
 
     this.#constIds.set(canonical, id);
+    return id;
+  }
+
+  #internUnreachable(type: ValueType): ValueId {
+    const existing = this.#unreachableIds.get(type);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const id = this.#add({ kind: "unreachable", type }, []);
+
+    this.#unreachableIds.set(type, id);
     return id;
   }
 
@@ -407,6 +427,7 @@ export class ValueTable {
     return {
       constValue: (id) => this.constValue(id),
       const: (value) => this.#internConst(value),
+      unreachable: (type) => this.#internUnreachable(type),
       widthBounds: (id) => this.#widthBoundsOf(id)
     };
   }
@@ -418,6 +439,8 @@ export class ValueTable {
     switch (node.kind) {
       case "const":
         return ValueTable.#constWidthBounds(node.value);
+      case "unreachable":
+        return unboundedWidthBounds;
       case "actionOutput":
       case "external":
         // Action outputs carry their bounds from creation; externals are opaque.
@@ -528,6 +551,8 @@ export class ValueTable {
       case "binary":
         return node.type;
       case "extend":
+        return node.type;
+      case "unreachable":
         return node.type;
       case "const":
       case "actionOutput":

@@ -13,7 +13,7 @@ import {
   HostExit,
   type DecodedExit
 } from "#wasm/exit.js";
-import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
+import { PageFaultErrorCode, divideError, pageFault } from "#x86/exceptions.js";
 
 const fixtures: readonly ExitFixture[] = [
   {
@@ -33,6 +33,11 @@ const fixtures: readonly ExitFixture[] = [
     family: "host",
     reason: HostExit.UNSUPPORTED,
     payload: 0x1000
+  },
+  {
+    name: "divide_error_decodes",
+    family: "cpuException",
+    exception: divideError()
   },
   {
     name: "page_fault_zero_error_code_decodes",
@@ -84,6 +89,14 @@ test("decode rejects unknown host subtype", () => {
 
 test("decode rejects unknown CPU exception subtype", () => {
   assertUnknownExit(0x03ffn << 32n, /unknown x86 CPU exception vector/);
+});
+
+test("decode rejects divide error exits with payload bits", () => {
+  assertUnknownExit((0x0300n << 32n) | 1n, /Wasm CPU exception exit payload must be zero/);
+});
+
+test("decode rejects divide error exits with detail bits", () => {
+  assertUnknownExit((1n << 48n) | (0x0300n << 32n), /Wasm CPU exception exit detail must be zero/);
 });
 
 test("decode rejects unknown completion subtype", () => {

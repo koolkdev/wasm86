@@ -5,13 +5,13 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
+import { decodeBytes, ok as decodeOk } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { HostExit, decodeExit } from "#wasm/exit.js";
-import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { assertPageFaultException, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -147,6 +147,8 @@ test("a faulting load before a branch exits through its fault edge", async () =>
   strictEqual(exit.family, "cpuException");
   if (exit.family === "cpuException") {
     strictEqual(exit.exception.kind, expected.exception.kind);
+    assertPageFaultException(exit.exception);
+    assertPageFaultException(expected.exception);
     strictEqual(exit.exception.linearAddress, expected.exception.linearAddress);
     strictEqual(exit.exception.errorCode, expected.exception.errorCode);
   }
@@ -172,7 +174,7 @@ function decodeSequence(byteLists: readonly (readonly number[])[]): readonly Isa
   let address: number | undefined;
 
   for (const bytes of byteLists) {
-    const instruction = address === undefined ? ok(decodeBytes(bytes)) : ok(decodeBytes(bytes, address));
+    const instruction = address === undefined ? decodeOk(decodeBytes(bytes)) : decodeOk(decodeBytes(bytes, address));
 
     instructions.push(instruction);
     address = instruction.nextEip;

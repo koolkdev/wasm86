@@ -10,6 +10,7 @@ import type {
   ExtendValueNode,
   TruncateValueNode,
   SelectValueNode,
+  UnreachableValueNode,
   UnaryValueNode,
   ValueId,
   ValueType,
@@ -77,6 +78,7 @@ export type ValueStack = Readonly<{
 
 type CompoundValueNode =
   | BinaryValueNode
+  | UnreachableValueNode
   | UnaryValueNode
   | CompareValueNode
   | SelectValueNode
@@ -133,6 +135,9 @@ export function createValueStack(context: ValueStackContext): ValueStack {
 
   function emitCompute(node: CompoundValueNode): void {
     switch (node.kind) {
+      case "unreachable":
+        body.unreachable();
+        return;
       case "binary":
         emitUse(node.a);
         emitUse(node.b);

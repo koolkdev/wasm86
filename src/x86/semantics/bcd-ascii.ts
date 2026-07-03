@@ -1,4 +1,5 @@
 import { zspValues } from "#x86/flag-values.js";
+import { divideError } from "#x86/exceptions.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#x86/semantics/builder.js";
 import type { Value, ValueInput } from "#x86/semantics/refs.js";
 import { writeAddFlags, writeStatusFlagValues } from "./flag-writes.js";
@@ -48,7 +49,9 @@ export function aamSemantic(): SemanticTemplate {
   return (s) => {
     const base = s.get(s.operand(0), 8);
     const oldAl = s.get(s.reg("al"), 8);
-    // AAM base 0 should raise #DE, but CPU exception exits are not modeled yet.
+
+    s.cpuExceptionIf(s.compare(8, "eq", base, s.const32(0)), divideError());
+
     const quotient = s.binary("div_u", oldAl, base);
     const remainder = s.binary("rem_u", oldAl, base);
 

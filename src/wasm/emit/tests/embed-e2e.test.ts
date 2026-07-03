@@ -12,6 +12,7 @@ import { emitActionFragment } from "#wasm/emit/emit.js";
 import type { FallthroughTarget } from "#wasm/emit/embed.js";
 import { decodeExit, type DecodedCpuExceptionExit, type DecodedExit } from "#wasm/exit.js";
 import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
+import { assertPageFaultException } from "#wasm/tests/exit-fixtures.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
 import { memoryCheck, memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
@@ -165,7 +166,7 @@ test("the instruction-fetch fault edge keeps the encoded return", async () => {
   const decoded = decodeExit(run());
 
   assertCpuException(decoded);
-  strictEqual(decoded.exception.kind, "PF");
+  assertPageFaultException(decoded.exception);
   strictEqual(decoded.exception.linearAddress, eip + 2);
   strictEqual(decoded.exception.errorCode, PageFaultErrorCode.INSTRUCTION_FETCH);
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), eip);

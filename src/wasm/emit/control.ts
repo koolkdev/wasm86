@@ -141,6 +141,9 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
 
   function emitCpuExceptionReport(exception: CpuException<ValueId>): void {
     switch (exception.kind) {
+      case "DE":
+        body.i64Const(encodeCpuExceptionExitBase(CpuExceptionVector.DE, 0)).returnFromFunction();
+        return;
       case "PF":
         context.emitPayload(exception.linearAddress);
         body

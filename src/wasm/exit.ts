@@ -1,6 +1,8 @@
+import { assert } from "#common/assert.js";
 import { u32 } from "#x86/numeric.js";
 import {
   CpuExceptionVector,
+  divideError,
   pageFault,
   type CpuException
 } from "#x86/exceptions.js";
@@ -76,6 +78,8 @@ export function encodeHostExit(reason: HostExit, payload: number): bigint {
 
 export function encodeCpuExceptionExit(exception: CpuException<number>): bigint {
   switch (exception.kind) {
+    case "DE":
+      return encodeExitCode(cpuExceptionFamily, CpuExceptionVector.DE, 0, 0);
     case "PF":
       return encodeExitCode(
         cpuExceptionFamily,
@@ -88,6 +92,7 @@ export function encodeCpuExceptionExit(exception: CpuException<number>): bigint 
 
 export function encodeCpuExceptionExitBase(vector: number, detail: number): bigint {
   assertCpuExceptionVector(vector);
+  assertCpuExceptionExitFields(vector, 0, detail);
 
   return encodeExitCode(cpuExceptionFamily, vector, 0, detail);
 }
@@ -157,8 +162,14 @@ function assertNoHostDetail(value: number): void {
 
 function decodeCpuExceptionExit(subtype: number, payload: number, detail: number): DecodedCpuExceptionExit {
   assertCpuExceptionVector(subtype);
+  assertCpuExceptionExitFields(subtype, payload, detail);
 
   switch (subtype) {
+    case CpuExceptionVector.DE:
+      return {
+        family: "cpuException",
+        exception: divideError()
+      };
     case CpuExceptionVector.PF:
       return {
         family: "cpuException",
@@ -193,10 +204,22 @@ function assertHostExit(value: number): asserts value is HostExit {
 
 function assertCpuExceptionVector(value: number): asserts value is CpuExceptionVector {
   switch (value) {
+    case CpuExceptionVector.DE:
     case CpuExceptionVector.PF:
       return;
     default:
       throw new RangeError(`unknown x86 CPU exception vector: ${value}`);
+  }
+}
+
+function assertCpuExceptionExitFields(vector: CpuExceptionVector, payload: number, detail: number): void {
+  switch (vector) {
+    case CpuExceptionVector.DE:
+      assert(payload === 0, `Wasm CPU exception exit payload must be zero: ${payload}`);
+      assert(detail === 0, `Wasm CPU exception exit detail must be zero: ${detail}`);
+      return;
+    case CpuExceptionVector.PF:
+      return;
   }
 }
 

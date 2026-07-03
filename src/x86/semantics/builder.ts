@@ -1,4 +1,5 @@
 import type { ConditionCode } from "#x86/conditions.js";
+import type { CpuException } from "#x86/exceptions.js";
 import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#x86/flag-sources.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
@@ -75,5 +76,6 @@ export interface SemanticsBuilder {
   next(): void;
   jump(target: TargetInput): void;
   conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void;
+  cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void;
   hostTrap(vector: ValueInput): void;
 }

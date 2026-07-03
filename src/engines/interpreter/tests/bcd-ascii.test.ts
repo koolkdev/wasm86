@@ -1,4 +1,4 @@
-import { deepStrictEqual, rejects, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -6,6 +6,7 @@ import {
   wasmCpuStatusFlagsOf
 } from "#runtime/tests/fixtures/cpu-state.js";
 import { startAddress } from "#wasm/tests/helpers.js";
+import { divideErrorExit } from "#wasm/tests/exit-fixtures.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
 test("executes DAA with low and high decimal adjustment", async () => {
@@ -158,18 +159,27 @@ test("executes AAM imm8 with decimal and non-decimal bases", async () => {
   deepStrictEqual(wasmCpuStatusFlagsOf(binary.state), { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 });
 });
 
-test("AAM base zero currently traps on division by zero", async () => {
-  await rejects(
-    () => executeInstruction(
-      [0xd4, 0x00],
-      createWasmCpuStateSnapshot({
-        eax: 0xaaaa_1234,
-        eip: startAddress,
-        instructionCount: 7
-      })
-    ),
-    /divide by zero/
+test("AAM base zero raises divide error without changing architectural state", async () => {
+  const { exit, state } = await executeInstruction(
+    [0xd4, 0x00],
+    createWasmCpuStateSnapshot({
+      eax: 0xaaaa_1234,
+      CF: 1,
+      PF: 1,
+      AF: 1,
+      ZF: 1,
+      SF: 1,
+      OF: 1,
+      eip: startAddress,
+      instructionCount: 7
+    })
   );
+
+  deepStrictEqual(exit, divideErrorExit());
+  strictEqual(state.eax, 0xaaaa_1234);
+  strictEqual(state.eip, startAddress);
+  strictEqual(state.instructionCount, 7);
+  deepStrictEqual(wasmCpuStatusFlagsOf(state), { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 });
 });
 
 test("executes AAD imm8 with internal add flag behavior", async () => {

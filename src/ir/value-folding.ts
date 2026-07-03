@@ -2,13 +2,14 @@ import { assert } from "#common/assert.js";
 import { i32 } from "#x86/numeric.js";
 import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
 import type { OperandWidth } from "#x86/types.js";
-import type { ValueId } from "./values.js";
+import type { ValueId, ValueType } from "./values.js";
 
 export type ValueFoldBounds = Readonly<{ unsignedBits: number; signedBits: number }>;
 
 export type ValueFoldContext = Readonly<{
   constValue(id: ValueId): number | undefined;
   const(value: number): ValueId;
+  unreachable(type: ValueType): ValueId;
   widthBounds(id: ValueId): ValueFoldBounds;
 }>;
 
@@ -22,6 +23,10 @@ export function foldBinary(
   const right = context.constValue(b);
 
   if (left !== undefined && right !== undefined) {
+    if ((operator === "div_u" || operator === "rem_u") && (right >>> 0) === 0) {
+      return context.unreachable("i32");
+    }
+
     return context.const(evalBinary(operator, left, right));
   }
 

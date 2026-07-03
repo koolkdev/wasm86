@@ -1,4 +1,5 @@
 import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
+import type { CpuException } from "#x86/exceptions.js";
 import { mem, operand, reg } from "#x86/semantics/refs.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import type {
@@ -266,6 +267,10 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     this.#emitTerminator(
       `branch ${this.#value(condition)} ? ${this.#value(taken)} : ${this.#value(notTaken)}`
     );
+  }
+
+  cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {
+    this.#emit(`cpuExceptionIf ${this.#value(condition)} ${exception.kind}`);
   }
 
   hostTrap(vector: ValueInput): void {
