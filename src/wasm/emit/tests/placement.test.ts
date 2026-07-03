@@ -741,6 +741,128 @@ test("a nested body producer whose operand follows its output fails loudly", () 
   );
 });
 
+test("a switch charges its selector and captures its output at the producer", () => {
+  const values = new ValueTable();
+  const selector = values.external(0);
+  const first = values.const(11);
+  const second = values.const(42);
+  const fallback = values.const(99);
+  const output = values.addActionOutput();
+  const analysis = analyze(
+    values,
+    [
+      {
+        kind: "switch",
+        selector,
+        output,
+        cases: [
+          { match: 0, body: { actions: [], result: first } },
+          { match: 2, body: { actions: [], result: second } }
+        ],
+        defaultBody: { actions: [], result: fallback }
+      }
+    ],
+    [output]
+  );
+
+  strictEqual(analysis.useCount(selector), 1);
+  strictEqual(analysis.outputPlacement(output).kind, "captureAtProducer");
+
+  // The demanded output charges each body's result at its fallthrough.
+  strictEqual(analysis.useCount(first), 1);
+  strictEqual(analysis.useCount(second), 1);
+  strictEqual(analysis.useCount(fallback), 1);
+});
+
+test("arm-local read demand stays in its arm", () => {
+  const values = new ValueTable();
+  const selector = values.external(0);
+  const read = values.addActionOutput();
+  const one = values.const(1);
+  const formula = values.binary("add", read, one);
+  const fallback = values.const(0);
+  const output = values.addActionOutput();
+  const armBody = { actions: [stateRead(read, gprChannel("ebx"))], result: formula };
+  const analysis = analyze(
+    values,
+    [
+      {
+        kind: "switch",
+        selector,
+        output,
+        cases: [{ match: 0, body: armBody }],
+        defaultBody: { actions: [], result: fallback }
+      }
+    ],
+    [output]
+  );
+
+  // The read executes inside its arm, at the formula's use; nothing
+  // materializes on the other paths.
+  deepStrictEqual(analysis.outputPlacement(read), {
+    kind: "deferToUse",
+    emissions: [{ anchor: "use", body: armBody, uses: 1 }]
+  });
+  strictEqual(analysis.useCount(formula), 1);
+});
+
+test("a parent compound consumed by two arms charges once at the switch", () => {
+  const values = new ValueTable();
+  const selector = values.external(0);
+  const base = values.external(1);
+  const shared = values.binary("add", base, values.const(5));
+  const fallback = values.const(0);
+  const output = values.addActionOutput();
+  const analysis = analyze(
+    values,
+    [
+      {
+        kind: "switch",
+        selector,
+        output,
+        cases: [
+          { match: 0, body: { actions: [], result: shared } },
+          { match: 1, body: { actions: [], result: shared } }
+        ],
+        defaultBody: { actions: [], result: fallback }
+      }
+    ],
+    [output]
+  );
+
+  // Both arms replay one capture made before the switch: two uses of the
+  // compound, but its children charge once, at the owning switch.
+  strictEqual(analysis.useCount(shared), 2);
+  strictEqual(analysis.useCount(base), 1);
+});
+
+test("a dead switch output leaves pure arms unemitted", () => {
+  const values = new ValueTable();
+  const selector = values.external(0);
+  const read = values.addActionOutput();
+  const one = values.const(1);
+  const formula = values.binary("add", read, one);
+  const fallback = values.const(0);
+  const output = values.addActionOutput();
+  const analysis = analyze(values, [
+    {
+      kind: "switch",
+      selector,
+      output,
+      cases: [{ match: 0, body: { actions: [stateRead(read, gprChannel("ebx"))], result: formula } }],
+      defaultBody: { actions: [], result: fallback }
+    }
+  ]);
+
+  // The switch still selects, but nothing demands its output, so no arm
+  // result — and no pure arm read — is ever charged.
+  strictEqual(analysis.useCount(selector), 1);
+  strictEqual(analysis.useCount(output), 0);
+  strictEqual(analysis.useCount(formula), 0);
+  strictEqual(analysis.useCount(read), 0);
+  strictEqual(analysis.outputPlacement(read).kind, "deferToUse");
+});
+
 test("an exported output keeps an otherwise dead value live", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();

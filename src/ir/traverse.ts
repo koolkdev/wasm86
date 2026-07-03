@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { Action, Finish, IrExit } from "./actions.js";
 import type { Body } from "./block.js";
 import { opAccess, type OpAccess } from "./ops.js";
-import type { ValueId } from "./values.js";
+import { valueChildren, type ValueId, type ValueTable } from "./values.js";
 
 export function nestedBodies(action: Action): readonly Body[] {
   switch (action.kind) {
@@ -10,6 +10,8 @@ export function nestedBodies(action: Action): readonly Body[] {
       return action.elseBody === undefined
         ? [action.thenBody]
         : [action.thenBody, action.elseBody];
+    case "switch":
+      return [...action.cases.map((switchCase) => switchCase.body), action.defaultBody];
     case "op":
     case "finish":
       return [];
@@ -52,6 +54,8 @@ export function actionOperands(action: Action): readonly ValueId[] {
       return opAccess(action.op).valueInputs;
     case "if":
       return [action.condition];
+    case "switch":
+      return [action.selector];
     case "finish":
       return finishOperands(action.finish);
   }
@@ -83,7 +87,8 @@ function exitOperands(exit: IrExit): readonly ValueId[] {
   }
 }
 
-// An op action's declared output, present iff its op produces a value.
+// An action's declared output: an op action's iff its op produces a value,
+// a switch's always — the selected body's result.
 export function actionOutput(action: Action, access?: OpAccess): ValueId | undefined {
   switch (action.kind) {
     case "op": {
@@ -94,34 +99,20 @@ export function actionOutput(action: Action, access?: OpAccess): ValueId | undef
       assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
       return action.output;
     }
+    case "switch":
+      return action.output;
     case "if":
     case "finish":
       return undefined;
   }
 }
 
-// Everything a nested body consumes from its parent context. Values produced
-// inside the body are deliberately excluded; their consumers run after the
-// producer action has executed.
-export function bodyInputValues(body: Body): readonly ValueId[] {
+// The action outputs a body's own actions produce; values computed from
+// them are body-internal and can only materialize inside the body.
+export function bodyProducedOutputs(body: Body): ReadonlySet<ValueId> {
   const produced = new Set<ValueId>();
-  const values: ValueId[] = [];
 
   for (const action of body.actions) {
-    for (const operand of actionOperands(action)) {
-      if (!produced.has(operand)) {
-        values.push(operand);
-      }
-    }
-
-    for (const nested of nestedBodies(action)) {
-      for (const operand of bodyInputValues(nested)) {
-        if (!produced.has(operand)) {
-          values.push(operand);
-        }
-      }
-    }
-
     const output = actionOutput(action);
 
     if (output !== undefined) {
@@ -129,5 +120,79 @@ export function bodyInputValues(body: Body): readonly ValueId[] {
     }
   }
 
-  return values;
+  return produced;
+}
+
+// True when the value is, or is computed from, any of the given ids.
+export function valueDependsOn(
+  values: ValueTable,
+  id: ValueId,
+  roots: ReadonlySet<ValueId>
+): boolean {
+  if (roots.size === 0) {
+    return false;
+  }
+
+  const visited = new Set<ValueId>();
+  const walk = (current: ValueId): boolean => {
+    if (roots.has(current)) {
+      return true;
+    }
+
+    if (visited.has(current)) {
+      return false;
+    }
+
+    visited.add(current);
+    return valueChildren(values.node(current)).some(walk);
+  };
+
+  return walk(id);
+}
+
+// Everything a nested body consumes from its parent context, its result
+// included. The walk stops at values transitively produced inside the body;
+// a body-internal compound decomposes into its parent-context children.
+export function bodyInputValues(body: Body, values: ValueTable): readonly ValueId[] {
+  const produced = bodyProducedOutputs(body);
+  const inputs: ValueId[] = [];
+  const decomposed = new Set<ValueId>();
+
+  const collect = (id: ValueId): void => {
+    if (produced.has(id)) {
+      return;
+    }
+
+    if (!valueDependsOn(values, id, produced)) {
+      inputs.push(id);
+      return;
+    }
+
+    if (decomposed.has(id)) {
+      return;
+    }
+
+    decomposed.add(id);
+    for (const child of valueChildren(values.node(id))) {
+      collect(child);
+    }
+  };
+
+  for (const action of body.actions) {
+    for (const operand of actionOperands(action)) {
+      collect(operand);
+    }
+
+    for (const nested of nestedBodies(action)) {
+      for (const input of bodyInputValues(nested, values)) {
+        collect(input);
+      }
+    }
+  }
+
+  if (body.result !== undefined) {
+    collect(body.result);
+  }
+
+  return inputs;
 }

@@ -36,6 +36,12 @@ export class LocalRegistry {
     this.#body.localTee(this.#capture(id, 0, 1, type));
   }
 
+  // Claims a fresh local the caller stores into itself — a control join's
+  // output; replays consume it like any capture.
+  claim(id: ValueId, remainingUses: number, type: WasmValueType): number {
+    return this.#capture(id, remainingUses, 0, type);
+  }
+
   replay(id: ValueId): boolean {
     const entry = this.#entries.get(id);
 

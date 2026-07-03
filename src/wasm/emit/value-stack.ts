@@ -176,12 +176,24 @@ export class ValueStack implements OperandUses {
   }
 
   // Called before entering a nested body: its actions are emitted later
-  // but executes here, so anything it consumes must be replayable from a
-  // local.
+  // but executes here, so anything it consumes from the parent context must
+  // be replayable from a local.
   captureForBody(body: Body): void {
-    for (const id of bodyInputValues(body)) {
+    for (const id of bodyInputValues(body, this.#values)) {
       this.#captureValue(id, body);
     }
+  }
+
+  // A control action's output local: arms store into it, the scope's uses
+  // replay it. A dead output claims nothing.
+  claimActionOutput(output: ValueId): number | undefined {
+    const uses = this.#placement.useCount(output);
+
+    if (uses === 0) {
+      return undefined;
+    }
+
+    return this.#registry.claim(output, uses, this.#typeOf(output));
   }
 
   // Every captured value fully consumed, every scratch local returned.
@@ -289,11 +301,17 @@ export class ValueStack implements OperandUses {
       return;
     }
 
+    // A dead value — a dead control output's result — is never consumed.
+    if (this.#placement.useCount(id) === 0) {
+      return;
+    }
+
     const node = this.#values.node(id);
 
     switch (node.kind) {
       case "const":
       case "external":
+      case "unreachable":
         // Re-emittable anywhere.
         return;
       case "actionOutput": {

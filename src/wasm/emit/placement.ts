@@ -3,8 +3,14 @@ import { effectsOf, mayAlias } from "#ir/aliasing.js";
 import { bodyFinal, type Action, type OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess, type OpAccess, type StorageAccess } from "#ir/ops.js";
-import { actionOutput, finishOperands, nestedBodies } from "#ir/traverse.js";
-import type { ValueId, ValueNode, ValueTable } from "#ir/values.js";
+import {
+  actionOutput,
+  bodyProducedOutputs,
+  finishOperands,
+  nestedBodies,
+  valueDependsOn
+} from "#ir/traverse.js";
+import { valueChildren, type ValueId, type ValueTable } from "#ir/values.js";
 
 // The placement analysis: decides up front, from the action lists and the
 // value graph, where every value materializes — use counts for the tee
@@ -50,9 +56,10 @@ export function analyzePlacement(
 type DemandSite = Readonly<{ body: Body; actionIndex: number }>;
 
 // One consumption of a value. `site` is where the value enters its scope's
-// index space — nested-body uses land at the owning action, as the registry
-// and the walks require; `use` is the action that actually consumes it, in
-// its own body's index space, which is what placement legality needs.
+// index space — nested-body uses land at the owning action unless the value
+// is (or is computed from) a body-produced output; `use` is the action that
+// actually consumes it, in its own body's index space, which is what
+// placement legality needs.
 type DemandEdge = Readonly<{ value: ValueId; site: DemandSite; use: DemandSite }>;
 
 type Producer = Readonly<{
@@ -85,6 +92,8 @@ class PlacementAnalysis implements BlockPlacement {
   readonly #producers = new Map<ValueId, Producer>();
   readonly #outputUses = new Map<ValueId, DemandEdge[]>();
   readonly #outputPlacements = new Map<ValueId, OutputPlacement>();
+  // Control-action outputs -> the result edges their demand charges.
+  readonly #controlOutputs = new Map<ValueId, readonly DemandEdge[]>();
   readonly #bodyOwners = new Map<Body, DemandSite>();
 
   constructor(block: IrBlock, exportedOutputs: Iterable<ValueId>) {
@@ -156,7 +165,12 @@ class PlacementAnalysis implements BlockPlacement {
       const actionSite = { body, actionIndex: localActionIndex };
       const demandEdge = (value: ValueId): DemandEdge => ({
         value,
-        site: produced.has(value) ? actionSite : ownerSite ?? actionSite,
+        site:
+          ownerSite === undefined ||
+          produced.has(value) ||
+          valueDependsOn(this.#values, value, produced)
+            ? actionSite
+            : ownerSite,
         use: actionSite
       });
 
@@ -199,6 +213,52 @@ class PlacementAnalysis implements BlockPlacement {
             this.#recordActionDemandRoots(nested, actionSite);
           }
           return;
+        case "switch": {
+          this.#addDemand(demandEdge(action.selector));
+
+          const resultEdges: DemandEdge[] = [];
+
+          for (const nested of nestedBodies(action)) {
+            this.#recordActionDemandRoots(nested, actionSite);
+
+            if (nested.result === undefined) {
+              continue;
+            }
+
+            assert(
+              nested.result < action.output,
+              `switch result ${nested.result} created after its output ${action.output}`
+            );
+
+            const fallthrough = { body: nested, actionIndex: nested.actions.length };
+
+            resultEdges.push({
+              value: nested.result,
+              // Body-internal results charge at the body's fallthrough;
+              // parent-context ones collapse to the owning switch, like
+              // any nested-body use.
+              site: valueDependsOn(this.#values, nested.result, bodyProducedOutputs(nested))
+                ? fallthrough
+                : actionSite,
+              use: fallthrough
+            });
+          }
+
+          assert(
+            action.selector < action.output,
+            `switch selector ${action.selector} created after its output ${action.output}`
+          );
+          assert(
+            !this.#controlOutputs.has(action.output),
+            `value ${action.output} already has a control producer`
+          );
+          // captureAtProducer: the join's output local is intrinsic to the
+          // multi-arm lowering, so deferral buys nothing.
+          this.#controlOutputs.set(action.output, resultEdges);
+          this.#outputPlacements.set(action.output, captureAtProducerPlacement);
+          produced.add(action.output);
+          return;
+        }
         case "finish":
           for (const operand of finishOperands(action.finish)) {
             this.#addDemand(demandEdge(operand));
@@ -239,6 +299,18 @@ class PlacementAnalysis implements BlockPlacement {
 
       if (producer !== undefined) {
         this.#placeProducer(producer);
+        continue;
+      }
+
+      const resultEdges = this.#controlOutputs.get(id);
+
+      if (resultEdges !== undefined) {
+        // A demanded control output charges each falling-through body's
+        // result at its fallthrough; a dead one leaves pure arms unemitted.
+        for (const edge of resultEdges) {
+          this.#addDemand(edge);
+        }
+
         continue;
       }
 
@@ -448,23 +520,4 @@ function actionMayWriteAny(action: Action, reads: readonly StorageAccess[]): boo
 
 function bodyMayWriteAny(body: Body, reads: readonly StorageAccess[]): boolean {
   return body.actions.some((action) => actionMayWriteAny(action, reads));
-}
-
-function valueChildren(node: ValueNode): readonly ValueId[] {
-  switch (node.kind) {
-    case "const":
-    case "actionOutput":
-    case "external":
-    case "unreachable":
-      return [];
-    case "binary":
-    case "compare":
-      return [node.a, node.b];
-    case "unary":
-    case "extend":
-    case "truncate":
-      return [node.value];
-    case "select":
-      return [node.condition, node.whenTrue, node.whenFalse];
-  }
 }

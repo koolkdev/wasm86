@@ -4,10 +4,12 @@ import {
   actionCompletes,
   bodyFinal,
   type Action,
-  type BranchHint
+  type BranchHint,
+  type SwitchCase
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
+import { nestedBodies } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -108,6 +110,9 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "if":
         emitIf(action);
         return;
+      case "switch":
+        emitSwitch(action);
+        return;
     }
   }
 
@@ -138,6 +143,55 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     }
   }
 
+  // Captures first, then br_table selects among one block per case plus
+  // default plus join; each arm parks its result in the output's local.
+  // Arms emit under the frame with the switch's open label count, so
+  // completions inside them escape correctly.
+  function emitSwitch(action: Extract<Action, { kind: "switch" }>): void {
+    for (const nested of nestedBodies(action)) {
+      valueStack.captureForBody(nested);
+    }
+
+    const outputLocal = valueStack.claimActionOutput(action.output);
+    const caseCount = action.cases.length;
+
+    // Open order join, default, case n-1 .. case 0: case i lands at depth
+    // i in br_table's index space, the default at caseCount. The selector
+    // pushes inside the innermost block, where br_table can see it.
+    for (let index = 0; index <= caseCount + 1; index += 1) {
+      body.block();
+    }
+
+    valueStack.emitUse(action.selector);
+    body.brTable(switchLabelDepths(action.cases), caseCount);
+
+    const emitArm = (armBody: Body): void => {
+      emitBody(armBody);
+
+      const result = armBody.result;
+
+      assert(result !== undefined, "switch arms without results have no producer yet");
+
+      if (outputLocal !== undefined) {
+        valueStack.emitUse(result);
+        body.localSet(outputLocal);
+      } else if (block.values.node(result).kind === "unreachable") {
+        // The path stays impossible even when nothing demands the output.
+        body.unreachable();
+      }
+    };
+
+    action.cases.forEach((switchCase, index) => {
+      body.endBlock();
+      frame.withNestedControl(() => emitArm(switchCase.body), caseCount - index + 1);
+      body.br(caseCount - index);
+    });
+
+    body.endBlock();
+    frame.withNestedControl(() => emitArm(action.defaultBody), 1);
+    body.endBlock();
+  }
+
   // Every store ordered before the terminator has executed by now, and
   // both branch paths see the exports.
   function emitExportedOutputs(): void {
@@ -166,6 +220,20 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   }
 
   valueStack.assertClear();
+}
+
+// The dense br_table label vector: entry m selects the case whose match is
+// m — its body starts after closing the depth-m block — and every hole
+// selects the default at depth cases.length.
+function switchLabelDepths(cases: readonly SwitchCase[]): number[] {
+  const size = cases.reduce((max, entry) => Math.max(max, entry.match + 1), 0);
+  const table = new Array<number>(size).fill(cases.length);
+
+  for (const [depth, entry] of cases.entries()) {
+    table[entry.match] = depth;
+  }
+
+  return table;
 }
 
 function wasmHint(hint: BranchHint | undefined): WasmBranchHint | undefined {

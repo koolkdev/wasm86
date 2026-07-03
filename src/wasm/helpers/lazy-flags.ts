@@ -1,8 +1,8 @@
-import { assert } from "#common/assert.js";
+import { createOpAction, type SwitchCase } from "#ir/actions.js";
 import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { IrBlock } from "#ir/block.js";
 import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
-import { ValueTable, type ValueId } from "#ir/values.js";
+import { fitsUnsigned, ValueTable, type ValueId } from "#ir/values.js";
 import { statusFlagValuesForSource } from "#x86/flag-values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
@@ -12,16 +12,10 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
-import { emitSlotLoad } from "#wasm/emit/state.js";
 import type { HelperRegistry } from "./registry.js";
 
 export type LazyFlagHelper = X86StatusFlag;
 export type HelperCallKey = Readonly<{ kind: "lazyFlag"; flag: X86StatusFlag }>;
-
-type ResolverCase = Readonly<{
-  kindByte: number;
-  emitValue: () => void;
-}>;
 
 export function lazyFlagHelperName(flag: LazyFlagHelper): string {
   return `resolve${flag}`;
@@ -47,168 +41,107 @@ export function defineLazyFlagHelpers(
 function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncoder {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
-  const kindLocal = body.addLocal(wasmValueType.i32);
+  const resolver = lazyFlagResolverBlock(helper);
 
-  emitSlotLoad(body, lazyFlagsKindChannel, false);
-  body.localSet(kindLocal);
-
-  const cases = resolverCases(body, scratch, helper);
-
-  for (let index = 0; index <= cases.length; index += 1) {
-    body.block();
-  }
-
-  body.localGet(kindLocal).brTable(lazyKindDispatchTable(cases), cases.length);
-
-  for (let index = cases.length - 1; index >= 0; index -= 1) {
-    body.endBlock();
-    cases[index]!.emitValue();
-    body.returnFromFunction();
-  }
-
-  body.endBlock();
-  body.unreachable();
+  scratch.withLocals([wasmValueType.i32], ([outputLocal]) => {
+    emitActionFragment(resolver.block, {
+      body,
+      scratch,
+      embedding: {
+        fallthrough: { kind: "fallthrough" },
+        outputs: new Map([[resolver.output, outputLocal]])
+      }
+    });
+    body.localGet(outputLocal);
+  });
   scratch.assertClear();
   return body.end();
 }
 
-function resolverCases(
-  body: WasmFunctionBodyEncoder,
-  scratch: WasmLocalScratchAllocator,
-  helper: LazyFlagHelper
-): readonly ResolverCase[] {
-  return [
-    {
-      kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
-      emitValue: () => {
-        emitSlotLoad(body, flagChannel(helper), false);
-      }
-    },
+// One IrBlock per helper: read the lazy kind channel, switch on it, export
+// the selected arm's flag value. Each arm schedules its own channel reads,
+// so demand stays arm-local — LOGIC arms never touch lazyFlagsB and a
+// formula that ignores a read leaves it unemitted.
+function lazyFlagResolverBlock(flag: LazyFlagHelper): Readonly<{ block: IrBlock; output: ValueId }> {
+  const values = new ValueTable();
+  const kindRead = createOpAction(values, { kind: "state.read", slot: lazyFlagsKindChannel });
+  const cases: SwitchCase[] = [
+    noneArm(values, flag),
     ...([8, 16, 32] as const).flatMap((width) => [
-      {
-        kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, width),
-        emitValue: () => emitBinaryFlag(body, scratch, helper, "add", width)
-      },
-      {
-        kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, width),
-        emitValue: () => emitBinaryFlag(body, scratch, helper, "sub", width)
-      },
-      {
-        kindByte: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, width),
-        emitValue: () => emitLogicFlag(body, scratch, helper, width)
-      }
+      binaryArm(values, flag, "add", width),
+      binaryArm(values, flag, "sub", width),
+      logicArm(values, flag, width)
     ])
   ];
-}
-
-function lazyKindDispatchTable(cases: readonly ResolverCase[]): number[] {
-  const maxKindByte = Math.max(...cases.map((entry) => entry.kindByte));
-  const table = new Array<number>(maxKindByte + 1).fill(cases.length);
-
-  for (const [index, entry] of cases.entries()) {
-    assert(table[entry.kindByte] === cases.length, `duplicate lazy flag kind byte ${entry.kindByte}`);
-    table[entry.kindByte] = cases.length - 1 - index;
-  }
-
-  return table;
-}
-
-function emitBinaryFlag(
-  body: WasmFunctionBodyEncoder,
-  scratch: WasmLocalScratchAllocator,
-  flag: LazyFlagHelper,
-  kind: "add" | "sub",
-  width: OperandWidth
-): void {
-  const fragment = binaryFlagFragment(flag, kind, width);
-
-  scratch.withLocals([wasmValueType.i32], ([outputLocal]) => {
-    emitActionFragment(fragment.block, {
-      body,
-      scratch,
-      embedding: {
-        fallthrough: { kind: "fallthrough" },
-        outputs: new Map([[fragment.value, outputLocal]])
-      }
-    });
-    body.localGet(outputLocal);
-  });
-}
-
-function emitLogicFlag(
-  body: WasmFunctionBodyEncoder,
-  scratch: WasmLocalScratchAllocator,
-  flag: LazyFlagHelper,
-  width: OperandWidth
-): void {
-  const fragment = logicFlagFragment(flag, width);
-
-  scratch.withLocals([wasmValueType.i32], ([outputLocal]) => {
-    emitActionFragment(fragment.block, {
-      body,
-      scratch,
-      embedding: {
-        fallthrough: { kind: "fallthrough" },
-        outputs: new Map([[fragment.value, outputLocal]])
-      }
-    });
-    body.localGet(outputLocal);
-  });
-}
-
-
-function binaryFlagFragment(
-  flag: LazyFlagHelper,
-  kind: "add" | "sub",
-  width: OperandWidth
-): Readonly<{ block: IrBlock; value: ValueId }> {
-  const values = new ValueTable();
-  const left = values.addActionOutput();
-  const right = values.addActionOutput();
-  const result = values.binary(kind, left, right);
-  const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
-    kind,
-    width,
-    left,
-    right,
-    result
-  }, { undefinedAF: values.const(0) })[flag];
+  // Every arm result exists before the output: placement's descending walk
+  // settles the output's demand before charging them.
+  const defaultBody = { actions: [], result: values.unreachable() };
+  const output = values.addActionOutput(fitsUnsigned(1));
 
   return {
-    value: formula,
+    output,
     block: {
+      values,
       body: {
         actions: [
-          { kind: "op", output: left, op: { kind: "state.read", slot: lazyFlagsAChannel } },
-          { kind: "op", output: right, op: { kind: "state.read", slot: lazyFlagsBChannel } }
+          kindRead,
+          {
+            kind: "switch",
+            selector: kindRead.output!,
+            output,
+            cases,
+            defaultBody
+          }
         ]
-      },
-      values
+      }
     }
   };
 }
 
-function logicFlagFragment(
+function noneArm(values: ValueTable, flag: LazyFlagHelper): SwitchCase {
+  const read = createOpAction(values, { kind: "state.read", slot: flagChannel(flag) });
+
+  return {
+    match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
+    body: { actions: [read], result: read.output! }
+  };
+}
+
+function binaryArm(
+  values: ValueTable,
   flag: LazyFlagHelper,
+  kind: "add" | "sub",
   width: OperandWidth
-): Readonly<{ block: IrBlock; value: ValueId }> {
-  const values = new ValueTable();
-  const result = values.addActionOutput();
+): SwitchCase {
+  const left = createOpAction(values, { kind: "state.read", slot: lazyFlagsAChannel });
+  const right = createOpAction(values, { kind: "state.read", slot: lazyFlagsBChannel });
   const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
-    kind: "logic",
+    kind,
     width,
-    result
+    left: left.output!,
+    right: right.output!,
+    result: values.binary(kind, left.output!, right.output!)
   }, { undefinedAF: values.const(0) })[flag];
 
   return {
-    value: formula,
-    block: {
-      body: {
-        actions: [
-          { kind: "op", output: result, op: { kind: "state.read", slot: lazyFlagsAChannel } }
-        ]
-      },
-      values
-    }
+    match: lazyFlagsKindByte(
+      kind === "add" ? WASM_CPU_LAZY_FLAGS_KIND.ADD : WASM_CPU_LAZY_FLAGS_KIND.SUB,
+      width
+    ),
+    body: { actions: [left, right], result: formula }
+  };
+}
+
+function logicArm(values: ValueTable, flag: LazyFlagHelper, width: OperandWidth): SwitchCase {
+  const result = createOpAction(values, { kind: "state.read", slot: lazyFlagsAChannel });
+  const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
+    kind: "logic",
+    width,
+    result: result.output!
+  }, { undefinedAF: values.const(0) })[flag];
+
+  return {
+    match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, width),
+    body: { actions: [result], result: formula }
   };
 }

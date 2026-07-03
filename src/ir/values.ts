@@ -85,6 +85,25 @@ export type ValueNode =
   | TruncateValueNode
   | ExtendValueNode;
 
+export function valueChildren(node: ValueNode): readonly ValueId[] {
+  switch (node.kind) {
+    case "const":
+    case "actionOutput":
+    case "external":
+    case "unreachable":
+      return [];
+    case "binary":
+    case "compare":
+      return [node.a, node.b];
+    case "unary":
+    case "extend":
+    case "truncate":
+      return [node.value];
+    case "select":
+      return [node.condition, node.whenTrue, node.whenFalse];
+  }
+}
+
 // What is provably known about a node's value: the smallest width it fits
 // unsigned (all higher bits zero) and the smallest width it equals its own
 // sign-extension from. 32 in either bound means no information — every i32

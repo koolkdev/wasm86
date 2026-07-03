@@ -30,9 +30,9 @@ export type ControlFrame = Readonly<{
   emitDispatch(dispatch: DispatchFinish): void;
   // Applies the embedding to a natural action-body fallthrough.
   emitFallthrough(): void;
-  // Runs emitBody while completions account for one enclosing Wasm control
-  // construct, so `br` completions can escape inline if bodies.
-  withNestedControl(emitBody: () => void): void;
+  // Runs emitBody while completions account for `labels` enclosing Wasm
+  // control constructs, so `br` completions can escape inline bodies.
+  withNestedControl(emitBody: () => void, labels?: number): void;
 }>;
 
 type LinkedTarget = Readonly<
@@ -159,12 +159,12 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     emitReport,
     emitDispatch,
     emitFallthrough,
-    withNestedControl(emitBody: () => void): void {
-      inlineControlDepth += 1;
+    withNestedControl(emitBody: () => void, labels = 1): void {
+      inlineControlDepth += labels;
       try {
         emitBody();
       } finally {
-        inlineControlDepth -= 1;
+        inlineControlDepth -= labels;
       }
     }
   };

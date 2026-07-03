@@ -20,6 +20,8 @@ export type ActionEffects = Readonly<{
 
 const noEffects: ActionEffects = { reads: [], writes: [] };
 
+// A control action's signature is the union over its bodies — any one may
+// be selected. The union is for legality only; demand stays per-body.
 export function effectsOf(action: Action): ActionEffects {
   switch (action.kind) {
     case "op":
@@ -29,6 +31,8 @@ export function effectsOf(action: Action): ActionEffects {
       };
     case "if":
       return bodyEffects(action.thenBody, action.elseBody);
+    case "switch":
+      return bodyEffects(...action.cases.map((switchCase) => switchCase.body), action.defaultBody);
     case "finish":
       return noEffects;
   }
@@ -92,6 +96,9 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
     case "if":
       return bodyMayWriteStateSlot(action.thenBody, slot) ||
         (action.elseBody !== undefined && bodyMayWriteStateSlot(action.elseBody, slot));
+    case "switch":
+      return action.cases.some((switchCase) => bodyMayWriteStateSlot(switchCase.body, slot)) ||
+        bodyMayWriteStateSlot(action.defaultBody, slot);
     case "finish":
       return false;
   }

@@ -23,6 +23,23 @@ export type IfAction = Readonly<{
   elseBody?: Body;
 }>;
 
+// Selects one body by selector match, the default when none matches; the
+// selected body's fallthrough result becomes `output`. The emitter derives
+// the dense br_table from the match values.
+export type SwitchAction = Readonly<{
+  kind: "switch";
+  selector: ValueId;
+  // Required until a control-only switch has a producer.
+  output: ValueId;
+  cases: readonly SwitchCase[];
+  defaultBody: Body;
+}>;
+
+export type SwitchCase = Readonly<{ match: number; body: Body }>;
+
+// Matches lower to a dense br_table, so they stay byte-sized.
+export const maxSwitchMatch = 255;
+
 export type Finish =
   | Readonly<{
       kind: "dispatch";
@@ -45,6 +62,7 @@ export type DispatchFinish = Extract<Finish, { kind: "dispatch" }>;
 export type Action =
   | OpAction
   | IfAction
+  | SwitchAction
   | FinishAction;
 
 export type StateWriteAction = Readonly<{ kind: "op"; op: StateWriteOp }>;
@@ -65,6 +83,8 @@ export function createOpAction(values: ValueTable, op: IrOp): OpAction {
   };
 }
 
+// A control action completes if every selectable body escapes; a
+// result-bearing body does not complete — it falls through to the join.
 export function actionCompletes(action: Action): boolean {
   switch (action.kind) {
     case "op":
@@ -73,6 +93,9 @@ export function actionCompletes(action: Action): boolean {
       return action.elseBody !== undefined &&
         bodyCompletes(action.thenBody) &&
         bodyCompletes(action.elseBody);
+    case "switch":
+      return action.cases.every((switchCase) => bodyCompletes(switchCase.body)) &&
+        bodyCompletes(action.defaultBody);
     case "finish":
       return true;
   }

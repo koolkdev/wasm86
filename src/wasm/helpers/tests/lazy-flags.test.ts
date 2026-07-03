@@ -58,6 +58,22 @@ test("lazy flag helper dispatches through br_table", () => {
   strictEqual(opcodes.includes(wasmOpcode.i32Eq), false);
 });
 
+test("LOGIC arms read only the lazy A channel", () => {
+  const module = moduleWithCpuMemory();
+  const registry = createWasmHelperRegistry(module);
+
+  defineLazyFlagHelper(registry, "ZF");
+
+  const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(module.encode()));
+  const loads = opcodes.filter(
+    (opcode) => opcode === wasmOpcode.i32Load || opcode === wasmOpcode.i32Load8U
+  );
+
+  // One kind-channel read, one NONE flag byte, two lazy operands per
+  // ADD/SUB arm, and exactly one — lazyFlagsA — per LOGIC arm.
+  strictEqual(loads.length, 1 + 1 + 6 * 2 + 3 * 1);
+});
+
 test("lazy flag helpers resolve explicit NONE flag bytes", async () => {
   const runtime = await instantiateLazyFlagHelpers();
   const explicitFlags = {

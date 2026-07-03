@@ -2,16 +2,18 @@ import { assert } from "#common/assert.js";
 import {
   actionCompletes,
   bodyCompletes,
+  maxSwitchMatch,
   type Action,
   type DispatchFinish,
   type Finish,
   type IrExit,
   type OpAction,
-  type StateWriteAction
+  type StateWriteAction,
+  type SwitchAction
 } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
 import { opAccess, type OpValueOutput } from "./ops.js";
-import { unboundedWidthBounds, type WidthBounds } from "./values.js";
+import { unboundedWidthBounds, type ValueId, type WidthBounds } from "./values.js";
 
 export type ValidateIrBlockOptions = Readonly<{
   allowImplicitEntryFallthrough?: boolean;
@@ -21,7 +23,7 @@ export type ValidateIrBlockOptions = Readonly<{
 // where their owner requires it, and dispatch targets are real values with
 // matching EIP commits on every path that dispatches.
 export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
-  validateBody(block, block.body, [], "body");
+  validateBody(block, block.body, [], "body", undefined);
 
   assert(
     bodyCompletes(block.body) || options.allowImplicitEntryFallthrough === true,
@@ -29,15 +31,36 @@ export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions 
   );
 }
 
+// A body carries a result exactly when its owner declares an output
+// (`ownerOutput`) and the body itself does not complete.
 function validateBody(
   block: IrBlock,
   body: Body,
   ancestorPrefix: readonly Action[],
-  path: string
+  path: string,
+  ownerOutput: ValueId | undefined
 ): void {
+  if (body.result !== undefined) {
+    assert(ownerOutput !== undefined, `${path} carries a result without an owner output`);
+    assert(!bodyCompletes(body), `${path} carries a result but completes`);
+    assert(
+      block.values.valueType(body.result) === block.values.valueType(ownerOutput),
+      `${path} result type does not match its owner output`
+    );
+  } else {
+    // Escaping bodies under an output owner are model-valid but have no
+    // producer yet; the emitter cannot lower them.
+    assert(ownerOutput === undefined, `${path} must carry a result`);
+  }
+
   for (const [index, action] of body.actions.entries()) {
     assertKnownAction(action);
     validateActionValues(block, action);
+
+    // Structural before completion: actionCompletes walks the default body.
+    if (action.kind === "switch") {
+      validateSwitchCases(action, `${path}.switch[${index}]`);
+    }
 
     if (actionCompletes(action)) {
       assert(
@@ -57,13 +80,33 @@ function validateBody(
 
     switch (action.kind) {
       case "if":
-        validateBody(block, action.thenBody, prefixBeforeAction(), `${path}.if[${index}].thenBody`);
+        validateBody(block, action.thenBody, prefixBeforeAction(), `${path}.if[${index}].thenBody`, undefined);
 
         if (action.elseBody !== undefined) {
-          validateBody(block, action.elseBody, prefixBeforeAction(), `${path}.if[${index}].elseBody`);
+          validateBody(block, action.elseBody, prefixBeforeAction(), `${path}.if[${index}].elseBody`, undefined);
         }
 
         break;
+      case "switch": {
+        for (const [caseIndex, switchCase] of action.cases.entries()) {
+          validateBody(
+            block,
+            switchCase.body,
+            prefixBeforeAction(),
+            `${path}.switch[${index}].case[${caseIndex}]`,
+            action.output
+          );
+        }
+
+        validateBody(
+          block,
+          action.defaultBody,
+          prefixBeforeAction(),
+          `${path}.switch[${index}].default`,
+          action.output
+        );
+        break;
+      }
       case "finish":
         if (action.finish.kind === "dispatch") {
           assertDispatchEipFlushed(prefixBeforeAction(), action.finish, path);
@@ -84,9 +127,28 @@ function validateActionValues(block: IrBlock, action: Action): void {
     case "if":
       block.values.node(action.condition);
       return;
+    case "switch":
+      block.values.node(action.selector);
+      block.values.node(action.output);
+      return;
     case "finish":
       validateFinishValues(block, action.finish);
       return;
+  }
+}
+
+function validateSwitchCases(action: SwitchAction, path: string): void {
+  assert(action.defaultBody !== undefined, `${path} is missing its default body`);
+
+  const seen = new Set<number>();
+
+  for (const { match } of action.cases) {
+    assert(
+      Number.isInteger(match) && match >= 0 && match <= maxSwitchMatch,
+      `${path} case match ${match} is not an integer in [0, ${maxSwitchMatch}]`
+    );
+    assert(!seen.has(match), `${path} has a duplicate case match ${match}`);
+    seen.add(match);
   }
 }
 
@@ -184,6 +246,7 @@ function assertKnownAction(action: Action): void {
   assert(
     kind === "op" ||
       kind === "if" ||
+      kind === "switch" ||
       kind === "finish",
     `unknown IR action kind ${String(kind)}`
   );

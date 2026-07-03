@@ -1,9 +1,9 @@
 import { doesNotThrow, throws } from "node:assert";
 import { test } from "node:test";
 
-import type { Action } from "#ir/actions.js";
+import { maxSwitchMatch, type Action, type SwitchAction } from "#ir/actions.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
-import type { IrBlock } from "#ir/block.js";
+import type { Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { fitsUnsigned, ValueTable } from "#ir/values.js";
 import { stateWrite } from "#ir/tests/storage-op-helpers.js";
@@ -204,6 +204,151 @@ test("a nested dispatch must flush EIP state on its path", () => {
         ])
       ),
     /thenBody dispatch path must flush EIP state/
+  );
+});
+
+function switchWith(overrides: Partial<SwitchAction>): Action {
+  return {
+    kind: "switch",
+    selector: 0,
+    output: 1,
+    cases: [
+      { match: 0, body: { actions: [], result: 2 } },
+      { match: 2, body: { actions: [], result: 3 } }
+    ],
+    defaultBody: { actions: [], result: 4 },
+    ...overrides
+  };
+}
+
+test("a switch whose bodies all carry results validates", () => {
+  doesNotThrow(() => validateIrBlock(blockWith([switchWith({}), finishExit()])));
+});
+
+test("an escaping switch body is rejected until a producer arrives", () => {
+  throws(
+    () =>
+      validateIrBlock(
+        blockWith([
+          switchWith({ cases: [{ match: 0, body: { actions: [finishExit()] } }] }),
+          finishExit()
+        ])
+      ),
+    /case\[0\] must carry a result/
+  );
+});
+
+test("a result on the root body is rejected", () => {
+  const values = new ValueTable();
+  const result = values.const(1);
+
+  throws(
+    () => validateIrBlock({ values, body: { actions: [finishExit()], result } }),
+    /body carries a result without an owner output/
+  );
+});
+
+test("a result under an output-less owner is rejected", () => {
+  throws(
+    () =>
+      validateIrBlock(
+        blockWith([
+          {
+            kind: "if",
+            condition: 0,
+            thenBody: { actions: [finishExit()], result: 1 }
+          },
+          finishExit()
+        ])
+      ),
+    /thenBody carries a result without an owner output/
+  );
+});
+
+test("a result on a completing body is rejected", () => {
+  throws(
+    () =>
+      validateIrBlock(
+        blockWith([
+          switchWith({ cases: [{ match: 0, body: { actions: [finishExit()], result: 2 } }] }),
+          finishExit()
+        ])
+      ),
+    /case\[0\] carries a result but completes/
+  );
+});
+
+test("an output-owner body that neither escapes nor carries a result is rejected", () => {
+  throws(
+    () =>
+      validateIrBlock(
+        blockWith([
+          switchWith({ defaultBody: { actions: [] } }),
+          finishExit()
+        ])
+      ),
+    /default must carry a result/
+  );
+});
+
+test("a duplicate switch case match is rejected", () => {
+  throws(
+    () =>
+      validateIrBlock(
+        blockWith([
+          switchWith({
+            cases: [
+              { match: 1, body: { actions: [], result: 2 } },
+              { match: 1, body: { actions: [], result: 3 } }
+            ]
+          }),
+          finishExit()
+        ])
+      ),
+    /has a duplicate case match 1/
+  );
+});
+
+test("a negative switch case match is rejected", () => {
+  throws(
+    () =>
+      validateIrBlock(
+        blockWith([
+          switchWith({ cases: [{ match: -1, body: { actions: [], result: 2 } }] }),
+          finishExit()
+        ])
+      ),
+    /case match -1 is not an integer in \[0, 255\]/
+  );
+});
+
+test("a switch case match beyond the dense-table bound is rejected", () => {
+  doesNotThrow(() =>
+    validateIrBlock(
+      blockWith([
+        switchWith({ cases: [{ match: maxSwitchMatch, body: { actions: [], result: 2 } }] }),
+        finishExit()
+      ])
+    )
+  );
+  throws(
+    () =>
+      validateIrBlock(
+        blockWith([
+          switchWith({ cases: [{ match: maxSwitchMatch + 1, body: { actions: [], result: 2 } }] }),
+          finishExit()
+        ])
+      ),
+    /case match 256 is not an integer in \[0, 255\]/
+  );
+});
+
+test("a switch without a default body is rejected", () => {
+  const missingDefault = switchWith({ defaultBody: undefined as unknown as Body });
+
+  throws(
+    () => validateIrBlock(blockWith([missingDefault, finishExit()])),
+    /is missing its default body/
   );
 });
 
