@@ -14,7 +14,7 @@ import {
 import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { emitActionFragment } from "#wasm/emit/emit.js";
+import { emitActionFragment } from "#wasm/emit/action.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
 // Decode reads as action fragments: a guarded instruction fetch is memory.check +

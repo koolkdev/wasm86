@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import { fitsUnsigned, ValueTable } from "#ir/values.js";
-import { analyzeBlockValues } from "#wasm/emit/values.js";
+import { analyzePlacement } from "#wasm/emit/placement.js";
 import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import { memoryCheck, memoryRead, memoryWrite, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
@@ -13,7 +13,7 @@ function analyze(
   actions: readonly Action[],
   exportedOutputs: readonly number[] = []
 ) {
-  return analyzeBlockValues(
+  return analyzePlacement(
     {
       body: { actions },
       values

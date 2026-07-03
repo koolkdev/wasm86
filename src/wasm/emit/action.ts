@@ -7,16 +7,16 @@ import {
   type BranchHint
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
+import { opAccess } from "#ir/ops.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmBranchHint, type WasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
-import { emitGuestLoad, emitGuestStore, emitMemoryCheckFromStack } from "./memory.js";
-import { emitSlotLoad, emitSlotStore } from "./state.js";
-import { createValueStack } from "./value-stack.js";
-import { analyzeBlockValues, type BlockValueAnalysis } from "./values.js";
+import { emitOp } from "./ops.js";
+import { analyzePlacement, type BlockPlacement } from "./placement.js";
+import { ValueStack } from "./value-stack.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
 // The emitter driver: walks an IrBlock in action order and fills the
@@ -32,14 +32,14 @@ export type ActionFragmentContext = Readonly<{
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
   helpers?: WasmHelperRegistry | undefined;
-  analysis?: BlockValueAnalysis | undefined;
+  placement?: BlockPlacement | undefined;
   embedding: FragmentEmbedding;
 }>;
 
 export type ActionFunctionContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   helpers?: WasmHelperRegistry | undefined;
-  analysis?: BlockValueAnalysis | undefined;
+  placement?: BlockPlacement | undefined;
   embedding: FunctionEmbedding;
 }>;
 
@@ -51,7 +51,7 @@ export function emitActionFunction(block: IrBlock, context: ActionFunctionContex
     body: context.body,
     scratch,
     helpers: context.helpers,
-    analysis: context.analysis,
+    placement: context.placement,
     embedding: context.embedding
   });
   scratch.assertClear();
@@ -63,17 +63,14 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
 
   const { body, embedding } = context;
   const outputs = embedding.outputs ?? new Map<ValueId, number>();
-  const analysis = context.analysis ?? analyzeBlockValues(block, outputs.keys());
-  const valueStack = createValueStack({
+  const placement = context.placement ?? analyzePlacement(block, outputs.keys());
+  const valueStack = new ValueStack({
     body,
     scratch: context.scratch,
     values: block.values,
-    analysis,
+    placement,
     externalLocals: context.externalLocals ?? new Map(),
-    helpers: context.helpers,
-    loadSlot: (slot, signed, operands) => emitSlotLoad(body, slot, signed, operands),
-    loadGuest: (width, signed) => emitGuestLoad(body, width, signed),
-    checkGuest: (byteLength) => emitMemoryCheckFromStack(body, byteLength)
+    emitOp: (op, operands) => emitOp(body, context.helpers, op, operands)
   });
   const terminator = bodyFinal(block.body);
 
@@ -81,14 +78,21 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     body,
     dispatch: embedding.dispatch,
     fallthrough: embedding.fallthrough,
-    emitPayload: valueStack.emitUse,
+    emitPayload: (id) => valueStack.emitUse(id),
     constValue: (id) => block.values.constValue(id)
   });
 
   function emitAction(action: Action): void {
     switch (action.kind) {
       case "op":
-        emitOp(action);
+        // Output-producing ops route through placement; the rest execute
+        // at their action point.
+        if (opAccess(action.op).valueOutput === undefined) {
+          emitOp(body, context.helpers, action.op, valueStack);
+        } else {
+          valueStack.scheduledProducer(action);
+        }
+
         return;
       case "finish":
         switch (action.finish.kind) {
@@ -103,25 +107,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         return;
       case "if":
         emitIf(action);
-        return;
-    }
-  }
-
-  function emitOp(action: Extract<Action, { kind: "op" }>): void {
-    switch (action.op.kind) {
-      case "state.read":
-      case "memory.read":
-      case "memory.check":
-      case "cpu.resolveFlag":
-        valueStack.scheduledProducer(action);
-        return;
-      case "state.write":
-        emitSlotStore(body, action.op.slot, action.op.value, valueStack);
-        return;
-      case "memory.write":
-        valueStack.emitUse(action.op.address);
-        valueStack.emitUse(action.op.value);
-        emitGuestStore(body, action.op.width);
         return;
     }
   }

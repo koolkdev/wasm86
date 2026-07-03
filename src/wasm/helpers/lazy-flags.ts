@@ -11,7 +11,7 @@ import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
-import { emitActionFragment } from "#wasm/emit/emit.js";
+import { emitActionFragment } from "#wasm/emit/action.js";
 import { emitSlotLoad } from "#wasm/emit/state.js";
 import type { HelperRegistry } from "./registry.js";
 

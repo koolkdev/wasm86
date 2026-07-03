@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { GprDynamicSlot, SegmentDynamicSlot, StateChannel, StateSlot } from "#ir/slots.js";
 import type { ValueId } from "#ir/values.js";
-import type { OperandUses } from "./value-stack.js";
+import type { OperandUses } from "./ops.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";

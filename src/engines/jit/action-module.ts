@@ -7,11 +7,11 @@ import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import type { LinkCompletion } from "#wasm/emit/embed.js";
-import { emitActionFunction } from "#wasm/emit/emit.js";
+import { emitActionFunction } from "#wasm/emit/action.js";
 import {
-  analyzeBlockValues,
-  type BlockValueAnalysis
-} from "#wasm/emit/values.js";
+  analyzePlacement,
+  type BlockPlacement
+} from "#wasm/emit/placement.js";
 import { CompletionExit, encodeCompletionExit } from "#wasm/exit.js";
 import {
   createWasmHelperRegistry,
@@ -35,7 +35,7 @@ export type ActionJitBlock = Readonly<{
 type AnalyzedActionJitBlock = Readonly<{
   entryEip: number;
   actions: IrBlock;
-  analysis: BlockValueAnalysis;
+  placement: BlockPlacement;
 }>;
 
 export type EncodeActionJitModuleOptions = Readonly<{
@@ -122,11 +122,11 @@ export function encodeActionJitModule(
 
   const analyzedBlocks = blocks.map((block): AnalyzedActionJitBlock => ({
     ...block,
-    analysis: analyzeBlockValues(block.actions)
+    placement: analyzePlacement(block.actions)
   }));
   const helpers = createWasmHelperRegistry(module);
   const helperCalls = analyzedBlocks.flatMap((block) =>
-    helperCallsForBlock(block.actions, block.analysis)
+    helperCallsForBlock(block.actions, block.placement)
   );
 
   defineRequiredHelpers(helpers, helperCalls);
@@ -150,7 +150,7 @@ export function encodeActionJitModule(
     const body = emitActionFunction(block.actions, {
       body: new WasmFunctionBodyEncoder(),
       helpers,
-      analysis: block.analysis,
+      placement: block.placement,
       embedding: { dispatch: completion }
     });
     const functionIndex = module.addFunction(typeIndex, body);

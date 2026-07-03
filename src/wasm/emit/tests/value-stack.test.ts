@@ -6,8 +6,9 @@ import { gprChannel, lazyFlagsBChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { Body } from "#ir/block.js";
 import { ValueTable, fitsUnsigned } from "#ir/values.js";
-import { createValueStack, type ValueStack } from "#wasm/emit/value-stack.js";
-import { analyzeBlockValues } from "#wasm/emit/values.js";
+import { emitOp } from "#wasm/emit/ops.js";
+import { ValueStack } from "#wasm/emit/value-stack.js";
+import { analyzePlacement } from "#wasm/emit/placement.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
@@ -38,17 +39,15 @@ function createTestEmitter(
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const externalLocals = new Map(externalIds.map((id) => [id, body.addLocal(wasmValueType.i32)]));
-  const valueStack = createValueStack({
+  const valueStack = new ValueStack({
     body,
     scratch,
     values,
-    analysis: analyzeBlockValues({ body: actionBody, values }),
+    placement: analyzePlacement({ body: actionBody, values }),
     externalLocals,
-    helpers,
-    // Stand-ins for the state and guest access layers: plain loads.
-    loadSlot: () => body.i32Const(0).i32Load({ align: 2, offset: 0, memoryIndex: 0 }),
-    loadGuest: () => body.i32Load({ align: 2, offset: 0, memoryIndex: 1 }),
-    checkGuest: () => body.drop().i32Const(0)
+    // The real op lowering: its state and guest accesses emit the same
+    // opcode shapes the assertions pin (const address + load).
+    emitOp: (op, operands) => emitOp(body, helpers, op, operands)
   });
 
   return { body, scratch, valueStack };

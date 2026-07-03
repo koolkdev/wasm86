@@ -5,7 +5,7 @@ import { walkBodyActions } from "#ir/traverse.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#wasm/encoder/types.js";
-import type { BlockValueAnalysis } from "#wasm/emit/values.js";
+import type { BlockPlacement } from "#wasm/emit/placement.js";
 import {
   defineLazyFlagHelpers,
   lazyFlagHelperName,
@@ -33,12 +33,12 @@ export function allHelpers(): readonly HelperCallKey[] {
 
 export function helperCallsForBlock(
   block: IrBlock,
-  analysis: BlockValueAnalysis
+  placement: BlockPlacement
 ): readonly HelperCallKey[] {
   const helperCalls = new Map<string, HelperCallKey>();
 
   walkBodyActions(block.body, (action) => {
-    const helper = liveActionHelper(action, analysis);
+    const helper = liveActionHelper(action, placement);
 
     if (helper !== undefined) {
       helperCalls.set(helperFunctionName(helper), helper);
@@ -50,7 +50,7 @@ export function helperCallsForBlock(
 
 function liveActionHelper(
   action: Action,
-  analysis: BlockValueAnalysis
+  placement: BlockPlacement
 ): HelperCallKey | undefined {
   if (action.kind !== "op") {
     return undefined;
@@ -68,7 +68,7 @@ function liveActionHelper(
 
   const output = action.output;
 
-  return output !== undefined && analysis.useCount(output) > 0
+  return output !== undefined && placement.useCount(output) > 0
     ? helper
     : undefined;
 }

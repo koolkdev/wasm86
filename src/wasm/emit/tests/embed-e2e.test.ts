@@ -8,7 +8,7 @@ import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import { emitActionFragment } from "#wasm/emit/emit.js";
+import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FallthroughTarget } from "#wasm/emit/embed.js";
 import { decodeExit, type DecodedCpuExceptionExit, type DecodedExit } from "#wasm/exit.js";
 import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";

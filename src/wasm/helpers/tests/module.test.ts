@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { gprChannel } from "#ir/slots.js";
 import { ValueTable, fitsUnsigned } from "#ir/values.js";
-import { analyzeBlockValues } from "#wasm/emit/values.js";
+import { analyzePlacement } from "#wasm/emit/placement.js";
 import { helperCallsForBlock } from "#wasm/helpers/module.js";
 import { resolveFlag, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
@@ -20,7 +20,7 @@ test("helperCallsForBlock reports live scheduled flag resolves", () => {
     values
   } as const;
 
-  deepStrictEqual(helperCallsForBlock(block, analyzeBlockValues(block)), [
+  deepStrictEqual(helperCallsForBlock(block, analyzePlacement(block)), [
     { kind: "lazyFlag", flag: "ZF" }
   ]);
 });
@@ -34,7 +34,7 @@ test("helperCallsForBlock omits dead scheduled flag resolves", () => {
     values
   } as const;
 
-  deepStrictEqual(helperCallsForBlock(block, analyzeBlockValues(block)), []);
+  deepStrictEqual(helperCallsForBlock(block, analyzePlacement(block)), []);
 });
 
 test("helperCallsForBlock deduplicates repeated scheduled flag resolves", () => {
@@ -53,7 +53,7 @@ test("helperCallsForBlock deduplicates repeated scheduled flag resolves", () => 
     values
   } as const;
 
-  deepStrictEqual(helperCallsForBlock(block, analyzeBlockValues(block)), [
+  deepStrictEqual(helperCallsForBlock(block, analyzePlacement(block)), [
     { kind: "lazyFlag", flag: "ZF" }
   ]);
 });

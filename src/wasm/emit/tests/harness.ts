@@ -5,8 +5,8 @@ import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import { emitActionFragment } from "#wasm/emit/emit.js";
-import { analyzeBlockValues, type BlockValueAnalysis } from "#wasm/emit/values.js";
+import { emitActionFragment } from "#wasm/emit/action.js";
+import { analyzePlacement, type BlockPlacement } from "#wasm/emit/placement.js";
 import {
   createWasmHelperRegistry,
   defineRequiredHelpers,
@@ -40,7 +40,7 @@ function emitIrBlockBody(
   block: IrBlock,
   externalParamCount: number,
   helpers?: WasmHelperRegistry,
-  analysis?: BlockValueAnalysis
+  placement?: BlockPlacement
 ): WasmFunctionBodyEncoder {
   const body = new WasmFunctionBodyEncoder(externalParamCount);
   const scratch = new WasmLocalScratchAllocator(body);
@@ -51,7 +51,7 @@ function emitIrBlockBody(
     scratch,
     externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
     helpers,
-    analysis,
+    placement,
     embedding: {
       dispatch: { kind: "br", depth: 0 },
       fallthrough: { kind: "fallthrough" }
@@ -127,13 +127,13 @@ function encodeFunctionBodyModule(body: WasmFunctionBodyEncoder, paramCount: num
 function encodeIrBlockModule(block: IrBlock, externalParamCount: number): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
   const typeIndex = initializeTestModule(module, externalParamCount);
-  const analysis = analyzeBlockValues(block);
+  const placement = analyzePlacement(block);
   const helpers = createWasmHelperRegistry(module);
 
-  defineRequiredHelpers(helpers, helperCallsForBlock(block, analysis));
+  defineRequiredHelpers(helpers, helperCallsForBlock(block, placement));
   module.exportFunction(
     wasmBlockExportName,
-    module.addFunction(typeIndex, emitIrBlockBody(block, externalParamCount, helpers, analysis))
+    module.addFunction(typeIndex, emitIrBlockBody(block, externalParamCount, helpers, placement))
   );
   return module.encode();
 }
