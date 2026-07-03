@@ -1,7 +1,6 @@
-import { strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { StopReason } from "#x86/execution/run-result.js";
 import { readWasmCpuState, type WasmCpuStateField } from "#runtime/tests/fixtures/cpu-state.js";
 import { CompiledBlockDecodeError } from "#engines/jit/compiled-blocks/wasm-cache.js";
 import { RuntimeMode } from "#runtime/execution/mode.js";
@@ -53,7 +52,7 @@ test("runtime instance stops at max instructions", () => {
   const runtime = createRuntime(COUNTDOWN_BRANCH_TRAP, { mode: RuntimeMode.INTERPRETER });
   const result = runtime.run({ maxInstructions: 4 });
 
-  strictEqual(result.stopReason, StopReason.INSTRUCTION_LIMIT);
+  strictEqual(result.stop.kind, "instructionLimit");
   strictEqual(runtime.memories.cpuState.instructionCount, 4);
 });
 
@@ -63,7 +62,7 @@ test("runtime instance executes from guest memory even when eip is outside loade
   });
   const result = runtime.run({ maxInstructions: 1 });
 
-  strictEqual(result.stopReason, StopReason.INSTRUCTION_LIMIT);
+  strictEqual(result.stop.kind, "instructionLimit");
   strictEqual(runtime.memories.cpuState.eip, engineFixtureStartAddress + 2);
   strictEqual(runtime.memories.cpuState.instructionCount, 1);
 });
@@ -99,7 +98,7 @@ function assertFixtureResult(
   result: ReturnType<RuntimeInstance["run"]>
 ): void {
   for (const [field, expected] of Object.entries(fixture.expected.result)) {
-    strictEqual(result[field as keyof typeof result], expected, `${fixture.name}: expected result.${field}`);
+    deepStrictEqual(result[field as keyof typeof result], expected, `${fixture.name}: expected result.${field}`);
   }
 
   for (const [field, expected] of Object.entries(fixture.expected.state)) {

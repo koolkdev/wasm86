@@ -4,7 +4,7 @@ import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import { encodeExit, ExitReason } from "#wasm/exit.js";
+import { CompletionExit, encodeCompletionExit } from "#wasm/exit.js";
 import { createWasmHelperRegistry, defineAllHelpers, type WasmHelperRegistry } from "#wasm/helpers/module.js";
 import { RmDecodeHelpers } from "./decode.js";
 import { emitOpcodeDispatch } from "./dispatch.js";
@@ -74,7 +74,7 @@ function encodeRunLoopBody(
 
   body.loop();
   body.localGet(fuelParam).i32Eqz().ifBlock();
-  body.i64Const(encodeExit(ExitReason.INSTRUCTION_LIMIT, 0)).returnFromFunction();
+  body.i64Const(encodeCompletionExit(CompletionExit.INSTRUCTION_LIMIT, 0)).returnFromFunction();
   body.endBlock();
 
   // Completed instructions land on this block's end; faults and unsupported

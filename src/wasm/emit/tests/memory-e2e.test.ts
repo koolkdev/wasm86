@@ -10,7 +10,7 @@ import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags, x86StatusFlags, type X86Flag } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
-import { decodeExit, ExitReason } from "#wasm/exit.js";
+import { HostExit, decodeExit } from "#wasm/exit.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -212,7 +212,7 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength, 4, "read fault");
+  assertFaultExit(run(), HostExit.MEMORY_READ_FAULT, guestByteLength, 4, "read fault");
   assertState(
     stateView,
     {
@@ -236,7 +236,7 @@ test("a direct-offset read fault reports the offset and leaves state unchanged",
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength - 2, 4, "moffs read fault");
+  assertFaultExit(run(), HostExit.MEMORY_READ_FAULT, guestByteLength - 2, 4, "moffs read fault");
   assertState(
     stateView,
     { regs: { eax: 0x1234_5678 }, eip: instruction.address, flags: allFlagsSet },
@@ -257,7 +257,7 @@ test("a write fault leaves guest memory untouched", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "write fault");
+  assertFaultExit(run(), HostExit.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "write fault");
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0);
   assertState(
     stateView,
@@ -277,7 +277,7 @@ test("a direct-offset write fault reports the offset and leaves state unchanged"
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "moffs write fault");
+  assertFaultExit(run(), HostExit.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "moffs write fault");
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0);
   assertState(
     stateView,
@@ -298,7 +298,7 @@ test("a narrow access faults with its byte length", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength, 1, "byte fault");
+  assertFaultExit(run(), HostExit.MEMORY_READ_FAULT, guestByteLength, 1, "byte fault");
   assertState(
     stateView,
     { regs: { ebx: guestByteLength }, eip: instruction.address, flags: allFlagsSet },
@@ -414,7 +414,7 @@ test("a faulting word push reports a word-sized stack write", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, 0xffff_ffff, 2, "word push fault");
+  assertFaultExit(run(), HostExit.MEMORY_WRITE_FAULT, 0xffff_ffff, 2, "word push fault");
   assertState(
     stateView,
     { regs: { eax: 0x1234, esp: 1 }, eip: instruction.address, flags: allFlagsSet },
@@ -613,7 +613,7 @@ test("stack-all range guards report full dword and word ranges", async () => {
       "pushad",
       [0x60],
       { eax: 0x1111_1111, esp: 0x10, eip: startAddress, ...allFlagsSet },
-      ExitReason.MEMORY_WRITE_FAULT,
+      HostExit.MEMORY_WRITE_FAULT,
       0xffff_fff0,
       32
     ],
@@ -621,7 +621,7 @@ test("stack-all range guards report full dword and word ranges", async () => {
       "popad",
       [0x61],
       { eax: 0x1111_1111, esp: guestByteLength - 16, eip: startAddress, ...allFlagsSet },
-      ExitReason.MEMORY_READ_FAULT,
+      HostExit.MEMORY_READ_FAULT,
       guestByteLength - 16,
       32
     ],
@@ -629,7 +629,7 @@ test("stack-all range guards report full dword and word ranges", async () => {
       "pusha",
       [0x66, 0x60],
       { eax: 0x1111_1111, esp: 8, eip: startAddress, ...allFlagsSet },
-      ExitReason.MEMORY_WRITE_FAULT,
+      HostExit.MEMORY_WRITE_FAULT,
       0xffff_fff8,
       16
     ],
@@ -637,7 +637,7 @@ test("stack-all range guards report full dword and word ranges", async () => {
       "popa",
       [0x66, 0x61],
       { eax: 0x1111_1111, esp: guestByteLength - 8, eip: startAddress, ...allFlagsSet },
-      ExitReason.MEMORY_READ_FAULT,
+      HostExit.MEMORY_READ_FAULT,
       guestByteLength - 8,
       16
     ]
@@ -882,7 +882,7 @@ test("a faulting pushfd write reports its eip with prior state flushed", async (
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, 0xffff_fffe, 4, "pushfd fault");
+  assertFaultExit(run(), HostExit.MEMORY_WRITE_FAULT, 0xffff_fffe, 4, "pushfd fault");
   assertState(
     stateView,
     { regs: { eax: reference.result, esp: 2 }, eip: instructions[1]!.address, flags: noFlagsSet },
@@ -907,7 +907,7 @@ test("a faulting popfd read reports its eip with prior state flushed", async () 
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), ExitReason.MEMORY_READ_FAULT, guestByteLength - 2, 4, "popfd fault");
+  assertFaultExit(run(), HostExit.MEMORY_READ_FAULT, guestByteLength - 2, 4, "popfd fault");
   assertState(
     stateView,
     { regs: { eax: reference.result, esp: guestByteLength - 2 }, eip: instructions[1]!.address, flags: noFlagsSet },
@@ -938,7 +938,7 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
   // The add commits esp = 0x20 and its flags before the pop faults.
   const reference = aluReference("add", 32, 0x1c, 4);
 
-  assertFaultExit(run(), ExitReason.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "pop [mem] fault");
+  assertFaultExit(run(), HostExit.MEMORY_WRITE_FAULT, guestByteLength - 2, 4, "pop [mem] fault");
   strictEqual(guestView.getUint32(0x20, true), 0xcafe_1234);
   assertState(
     stateView,
@@ -999,10 +999,15 @@ function effectiveAddressOf(operand: MemOperand): EffectiveAddress {
   };
 }
 
-function assertFaultExit(exit: bigint, reason: ExitReason, address: number, size: number, label: string): void {
+function assertFaultExit(exit: bigint, reason: HostExit, address: number, size: number, label: string): void {
   const decoded = decodeExit(exit);
 
-  strictEqual(decoded.exitReason, reason, `${label} reason`);
+  strictEqual(decoded.family, "host", `${label} family`);
+  if (decoded.family !== "host") {
+    return;
+  }
+
+  strictEqual(decoded.reason, reason, `${label} reason`);
   strictEqual(decoded.payload, address, `${label} payload`);
   strictEqual(decoded.detail, size, `${label} fault size`);
 }

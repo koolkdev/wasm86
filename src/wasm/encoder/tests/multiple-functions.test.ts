@@ -5,7 +5,7 @@ import { wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import { decodeExit, encodeExit, ExitReason } from "#wasm/exit.js";
+import { decodeExit, encodeHostExit, HostExit } from "#wasm/exit.js";
 
 const entryExportName = "entry";
 const cpuStatePtr = 32;
@@ -26,7 +26,8 @@ test("exported_entry_calls_internal_function", async () => {
   }
 
   deepStrictEqual(decodeExit(result), {
-    exitReason: ExitReason.HOST_TRAP,
+    family: "host",
+    reason: HostExit.TRAP,
     payload: 0x2e
   });
 });
@@ -101,7 +102,7 @@ function addBlockFunctionType(module: WasmModuleEncoder): number {
 
 function helperBody(): WasmFunctionBodyEncoder {
   return new WasmFunctionBodyEncoder(1)
-    .i64Const(encodeExit(ExitReason.HOST_TRAP, 0x2e))
+    .i64Const(encodeHostExit(HostExit.TRAP, 0x2e))
     .end();
 }
 

@@ -16,7 +16,7 @@ import type {
 } from "#x86/schema/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { segmentRegisters } from "#x86/types.js";
-import { encodeExit, ExitReason } from "#wasm/exit.js";
+import { encodeHostExit, HostExit } from "#wasm/exit.js";
 import { noBaseRegister, type RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";
 import { emitInstructionHandler, type HandlerEmitContext } from "./handlers.js";
@@ -289,7 +289,7 @@ function regDispatchTable(cases: readonly ModRmRegCase[]): number[] {
 }
 
 function emitReturnUnsupported(body: WasmFunctionBodyEncoder): void {
-  body.i64Const(encodeExit(ExitReason.UNSUPPORTED, 0)).returnFromFunction();
+  body.i64Const(encodeHostExit(HostExit.UNSUPPORTED, 0)).returnFromFunction();
 }
 
 function isRmOperand(operand: OperandSpec): operand is Extract<OperandSpec, { kind: "modrm.rm" }> {

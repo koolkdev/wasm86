@@ -9,7 +9,7 @@ import {
 } from "./interpreter-helpers.js";
 import { assertMemoryImports, startAddress } from "#wasm/tests/helpers.js";
 import { wasmImport } from "#wasm/abi.js";
-import { ExitReason } from "#wasm/exit.js";
+import { CompletionExit, HostExit } from "#wasm/exit.js";
 import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";
 import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
@@ -53,7 +53,7 @@ test("fuel zero returns instruction-limit exit without changing architectural st
 
   const exit = interpreter.run(0);
 
-  deepStrictEqual(exit, { exitReason: ExitReason.INSTRUCTION_LIMIT, payload: 0 });
+  deepStrictEqual(exit, { family: "completion", reason: CompletionExit.INSTRUCTION_LIMIT, payload: 0 });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -70,7 +70,8 @@ test("unsupported byte returns unsupported exit without changing architectural s
 
   const exit = interpreter.run(1);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  strictEqual(exit.family, "host");
+  strictEqual(exit.reason, HostExit.UNSUPPORTED);
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -87,7 +88,7 @@ test("operand-size prefix dispatches to the prefixed opcode form", async () => {
   const exit = interpreter.run(1);
   const state = readInterpreterState(interpreter.stateView);
 
-  deepStrictEqual(exit, { exitReason: ExitReason.INSTRUCTION_LIMIT, payload: 0 });
+  deepStrictEqual(exit, { family: "completion", reason: CompletionExit.INSTRUCTION_LIMIT, payload: 0 });
   strictEqual(state.eax, 0xffff_1234);
   strictEqual(state.eip, startAddress + 4);
   strictEqual(state.instructionCount, 8);
@@ -110,7 +111,8 @@ test("non-canonical prefix encoding reports unsupported instead of misdecoding",
 
     const exit = interpreter.run(1);
 
-    strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+    strictEqual(exit.family, "host");
+    strictEqual(exit.reason, HostExit.UNSUPPORTED);
     assertInterpreterStateEquals(interpreter.stateView, initialState);
   }
 });
@@ -127,7 +129,8 @@ test("truncated two-byte opcode escape returns decode fault", async () => {
 
   const exit = interpreter.run(1);
 
-  strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
+  strictEqual(exit.family, "host");
+  strictEqual(exit.reason, HostExit.DECODE_FAULT);
   strictEqual(exit.payload, interpreter.guestView.byteLength);
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
@@ -143,7 +146,8 @@ test("unsupported two-byte opcode path dispatches before unsupported exit", asyn
 
   const exit = interpreter.run(1);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  strictEqual(exit.family, "host");
+  strictEqual(exit.reason, HostExit.UNSUPPORTED);
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

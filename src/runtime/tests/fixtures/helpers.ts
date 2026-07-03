@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 
 import { decodeIsaBlock } from "#x86/decoder/decode-block.js";
 import type { RunResult } from "#x86/execution/run-result.js";
@@ -148,7 +148,7 @@ export function assertEngineFixtureResult(
 
 function assertResultFields(fixture: EngineFixture, actual: RunResult): void {
   for (const [field, expected] of Object.entries(fixture.expected.result)) {
-    strictEqual(
+    deepStrictEqual(
       actual[field as keyof typeof actual],
       expected,
       `${fixture.name}: expected result.${field}`

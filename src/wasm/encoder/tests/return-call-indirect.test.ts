@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import { decodeExit, encodeExit, ExitReason } from "#wasm/exit.js";
+import { decodeExit, encodeHostExit, HostExit } from "#wasm/exit.js";
 
 const importNamespace = "wasm86";
 const tableImportName = "links";
@@ -25,7 +25,8 @@ test("return_call_indirect_invokes_imported_table_target", async () => {
   }
 
   deepStrictEqual(decodeExit(result), {
-    exitReason: ExitReason.HOST_TRAP,
+    family: "host",
+    reason: HostExit.TRAP,
     payload: 0x2e
   });
 });
@@ -43,7 +44,8 @@ test("call_indirect_invokes_imported_table_target", async () => {
   }
 
   deepStrictEqual(decodeExit(result), {
-    exitReason: ExitReason.HOST_TRAP,
+    family: "host",
+    reason: HostExit.TRAP,
     payload: 0x2e
   });
 });
@@ -91,7 +93,7 @@ function encodeIndirectCallModule(
   const targetIndex = module.addFunction(
     blockType,
     new WasmFunctionBodyEncoder(1)
-      .i64Const(encodeExit(ExitReason.HOST_TRAP, 0x2e))
+      .i64Const(encodeHostExit(HostExit.TRAP, 0x2e))
       .end()
   );
   const entryIndex = module.addFunction(blockType, entryBody(blockType, tableIndex));

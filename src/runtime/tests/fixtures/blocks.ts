@@ -1,4 +1,3 @@
-import { StopReason } from "#x86/execution/run-result.js";
 import type { EngineFixture } from "./types.js";
 import { engineFixtureStartAddress } from "./programs.js";
 
@@ -12,7 +11,7 @@ export const MOV_ADD_JUMP_BLOCK = {
   initialState: { eip: engineFixtureStartAddress },
   expected: {
     result: {
-      stopReason: StopReason.NONE
+      stop: { kind: "none" }
     },
     state: {
       eax: 3,
@@ -34,7 +33,7 @@ export const MEMORY_STORE_JUMP_BLOCK = {
   },
   expected: {
     result: {
-      stopReason: StopReason.NONE
+      stop: { kind: "none" }
     },
     state: {
       eax: 0x1234_5678,
@@ -59,7 +58,7 @@ export const CMP_BRANCH_TAKEN_BLOCK = {
   },
   expected: {
     result: {
-      stopReason: StopReason.NONE
+      stop: { kind: "none" }
     },
     state: {
       eax: 1,

@@ -13,7 +13,7 @@ import {
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
 import { startAddress } from "#wasm/tests/helpers.js";
-import { ExitReason, type DecodedExit } from "#wasm/exit.js";
+import { HostExit, type DecodedExit } from "#wasm/exit.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
@@ -251,7 +251,8 @@ test("MOV EAX from a direct offset read fault leaves architectural state unchang
   const { interpreter, exit } = await executeMemoryInstruction([0xa1, ...disp32(faultAddress)], initialState);
 
   deepStrictEqual(exit, {
-    exitReason: ExitReason.MEMORY_READ_FAULT,
+    family: "host",
+    reason: HostExit.MEMORY_READ_FAULT,
     payload: faultAddress,
     detail: 4
   });
@@ -270,7 +271,8 @@ test("MOV direct offset from EAX write fault leaves architectural state unchange
   const { interpreter, exit } = await executeMemoryInstruction([0xa3, ...disp32(faultAddress)], initialState);
 
   deepStrictEqual(exit, {
-    exitReason: ExitReason.MEMORY_WRITE_FAULT,
+    family: "host",
+    reason: HostExit.MEMORY_WRITE_FAULT,
     payload: faultAddress,
     detail: 4
   });
@@ -293,7 +295,8 @@ test("memory read guards report 1, 2, and 4 byte fault ranges", async () => {
     );
 
     deepStrictEqual(exit, {
-      exitReason: ExitReason.MEMORY_READ_FAULT,
+      family: "host",
+      reason: HostExit.MEMORY_READ_FAULT,
       payload: faultAddress,
       detail: width / 8
     });
@@ -316,7 +319,8 @@ test("memory write guards report 1, 2, and 4 byte fault ranges before stores", a
     );
 
     deepStrictEqual(exit, {
-      exitReason: ExitReason.MEMORY_WRITE_FAULT,
+      family: "host",
+      reason: HostExit.MEMORY_WRITE_FAULT,
       payload: faultAddress,
       detail: width / 8
     });
@@ -351,7 +355,8 @@ test("LEA m32 form rejects register ModRM", async () => {
   });
   const { interpreter, exit } = await executeMemoryInstruction([0x8d, 0xc0], initialState);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  strictEqual(exit.family, "host");
+  strictEqual(exit.reason, HostExit.UNSUPPORTED);
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

@@ -7,7 +7,7 @@ import {
   writeInterpreterState,
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
-import { ExitReason, type DecodedExit } from "#wasm/exit.js";
+import { CompletionExit, type DecodedExit } from "#wasm/exit.js";
 import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 
 export type ExecutedInstruction = Readonly<{
@@ -63,7 +63,7 @@ export function writeGuestBytes(view: DataView, address: number, bytes: readonly
 }
 
 export function assertSingleInstructionExit(exit: DecodedExit): void {
-  deepStrictEqual(exit, { exitReason: ExitReason.INSTRUCTION_LIMIT, payload: 0 });
+  deepStrictEqual(exit, { family: "completion", reason: CompletionExit.INSTRUCTION_LIMIT, payload: 0 });
 }
 
 export function assertCompletedInstruction(

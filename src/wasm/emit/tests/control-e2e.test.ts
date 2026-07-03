@@ -10,7 +10,7 @@ import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
-import { decodeExit, ExitReason } from "#wasm/exit.js";
+import { HostExit, decodeExit } from "#wasm/exit.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -97,7 +97,8 @@ test("int exits host trap with the vector payload and pending state visible", as
 
   const exit = decodeExit(run());
 
-  strictEqual(exit.exitReason, ExitReason.HOST_TRAP);
+  strictEqual(exit.family, "host");
+  strictEqual(exit.reason, HostExit.TRAP);
   strictEqual(exit.payload, 0x21);
   assertState(stateView, { regs: { ecx: 0x77 }, eip: instructions[1]!.nextEip, flags: allFlagsSet }, "int");
 });
@@ -141,7 +142,8 @@ test("a faulting load before a branch exits through its fault edge", async () =>
 
   const exit = decodeExit(run());
 
-  strictEqual(exit.exitReason, ExitReason.MEMORY_READ_FAULT);
+  strictEqual(exit.family, "host");
+  strictEqual(exit.reason, HostExit.MEMORY_READ_FAULT);
   strictEqual(exit.payload, 0x10000);
   strictEqual(exit.detail, 4);
   assertState(

@@ -15,7 +15,7 @@ export type EngineFixture = Readonly<{
 }>;
 
 export type EngineExpectation = Readonly<{
-  result: Partial<RunResult> & Pick<RunResult, "stopReason">;
+  result: Partial<RunResult> & Pick<RunResult, "stop">;
   state: Partial<WasmCpuStateSnapshot>;
   memory?: readonly MemoryPatch[];
 }>;

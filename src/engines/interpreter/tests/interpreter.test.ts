@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { gprChannel } from "#ir/slots.js";
 import type { RegName } from "#x86/types.js";
-import { ExitReason } from "#wasm/exit.js";
+import { CompletionExit, HostExit, type DecodedCompletionExit, type DecodedExit, type DecodedHostExit } from "#wasm/exit.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -47,6 +47,26 @@ function writeProgram(view: DataView, address: number, bytes: readonly number[])
   }
 }
 
+function assertHostExit(exit: DecodedExit, reason: HostExit): asserts exit is DecodedHostExit {
+  strictEqual(exit.family, "host");
+
+  if (exit.family !== "host") {
+    throw new Error("expected host exit");
+  }
+
+  strictEqual(exit.reason, reason);
+}
+
+function assertCompletionExit(exit: DecodedExit, reason: CompletionExit): asserts exit is DecodedCompletionExit {
+  strictEqual(exit.family, "completion");
+
+  if (exit.family !== "completion") {
+    throw new Error("expected completion exit");
+  }
+
+  strictEqual(exit.reason, reason);
+}
+
 function readRegister(view: DataView, name: RegName): number {
   return readWasmCpuStateChannel(view, gprChannel(name));
 }
@@ -66,7 +86,7 @@ test("a program mixing mov, ALU, cmp, and jcc runs to its halt byte", async () =
 
   const exit = interpreter.run(100);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  assertHostExit(exit, HostExit.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 15);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x11);
@@ -88,7 +108,7 @@ test("cmp against an immediate steers a two-byte jcc when taken", async () => {
 
   const exit = interpreter.run(100);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  assertHostExit(exit, HostExit.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 42);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x11);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 3);
@@ -107,7 +127,7 @@ test("a not-taken jcc falls through to the next instruction", async () => {
 
   const exit = interpreter.run(100);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  assertHostExit(exit, HostExit.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 8);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x0b);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 2);
@@ -137,7 +157,7 @@ test("memory operands round-trip through the ModRM addressing forms", async () =
 
   const exit = interpreter.run(100);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  assertHostExit(exit, HostExit.UNSUPPORTED);
   strictEqual(interpreter.guestView.getUint32(0x2004, true), 0x11223344);
   strictEqual(interpreter.guestView.getUint8(0x2000), 0xbe);
   strictEqual(readRegister(interpreter.stateView, "edx"), 0x11224444);
@@ -167,7 +187,7 @@ test("SIB addressing covers scaled-index, base-displacement, and no-index forms"
 
   const exit = interpreter.run(100);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  assertHostExit(exit, HostExit.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "edx"), 0x1111);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0x2222);
   strictEqual(readRegister(interpreter.stateView, "ebx"), 0x3333);
@@ -188,7 +208,7 @@ test("byte-register forms touch only their byte of the register file", async () 
 
   const exit = interpreter.run(100);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  assertHostExit(exit, HostExit.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 0x11220744);
   strictEqual(readRegister(interpreter.stateView, "ebx"), 0x77);
   assertLazyFlagState(interpreter.stateView, { kind: "ADD", width: 8, a: 0x77, b: 0x90 });
@@ -206,7 +226,7 @@ test("test writes flags without touching its operands", async () => {
 
   const exit = interpreter.run(100);
 
-  strictEqual(exit.exitReason, ExitReason.UNSUPPORTED);
+  assertHostExit(exit, HostExit.UNSUPPORTED);
   strictEqual(readRegister(interpreter.stateView, "eax"), 0xf0);
   strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 0);
   assertLazyFlagState(interpreter.stateView, { kind: "LOGIC_RESULT", width: 8, a: 0 });
@@ -223,7 +243,7 @@ test("exhausted fuel exits with the instruction limit and the count preserved", 
 
   const exit = interpreter.run(1);
 
-  strictEqual(exit.exitReason, ExitReason.INSTRUCTION_LIMIT);
+  assertCompletionExit(exit, CompletionExit.INSTRUCTION_LIMIT);
   strictEqual(readRegister(interpreter.stateView, "eax"), 1);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 5);
@@ -238,7 +258,7 @@ test("fetching the opcode past mapped memory is a decode fault at the boundary",
 
   const exit = interpreter.run(10);
 
-  strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
+  assertHostExit(exit, HostExit.DECODE_FAULT);
   strictEqual(exit.payload, eip);
   strictEqual(exit.detail, 1);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
@@ -254,7 +274,7 @@ test("an immediate crossing the end of memory faults with the instruction's eip"
 
   const exit = interpreter.run(10);
 
-  strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
+  assertHostExit(exit, HostExit.DECODE_FAULT);
   strictEqual(exit.payload, eip + 1);
   strictEqual(exit.detail, 4);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
@@ -270,7 +290,7 @@ test("a displacement crossing the end of memory is a decode fault", async () => 
 
   const exit = interpreter.run(10);
 
-  strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
+  assertHostExit(exit, HostExit.DECODE_FAULT);
   strictEqual(exit.payload, eip + 2);
   strictEqual(exit.detail, 4);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
@@ -285,7 +305,7 @@ test("a SIB byte past the end of memory is a decode fault at its address", async
 
   const exit = interpreter.run(10);
 
-  strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
+  assertHostExit(exit, HostExit.DECODE_FAULT);
   strictEqual(exit.payload, eip + 2);
   strictEqual(exit.detail, 1);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
@@ -301,7 +321,7 @@ test("a SIB displacement crossing the end of memory is a decode fault", async ()
 
   const exit = interpreter.run(10);
 
-  strictEqual(exit.exitReason, ExitReason.DECODE_FAULT);
+  assertHostExit(exit, HostExit.DECODE_FAULT);
   strictEqual(exit.payload, eip + 3);
   strictEqual(exit.detail, 4);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
@@ -323,7 +343,7 @@ test("a guest load past the end is a memory fault, not a decode fault", async ()
 
   const exit = interpreter.run(10);
 
-  strictEqual(exit.exitReason, ExitReason.MEMORY_READ_FAULT);
+  assertHostExit(exit, HostExit.MEMORY_READ_FAULT);
   strictEqual(exit.payload, address);
   strictEqual(exit.detail, 4);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress);

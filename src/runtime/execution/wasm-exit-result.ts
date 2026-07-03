@@ -1,55 +1,59 @@
 import {
   runResultFromExecutionState,
-  StopReason,
   type FaultOperation,
-  type RunResult,
-  type RunResultDetails
+  type RunResult
 } from "#x86/execution/run-result.js";
-import { ExitReason, type DecodedExit } from "#wasm/exit.js";
+import { CompletionExit, HostExit, type DecodedExit, type DecodedHostExit } from "#wasm/exit.js";
 import type { WasmCpuState } from "#wasm/host/cpu-state.js";
 
 export function runResultFromWasmExit(state: WasmCpuState, exit: DecodedExit): RunResult {
-  switch (exit.exitReason) {
-    case ExitReason.DYNAMIC_JUMP:
-    case ExitReason.LINK_STUB:
-      return runResultFromExecutionState(state, StopReason.NONE);
-    case ExitReason.HOST_TRAP:
-      return runResultFromExecutionState(state, StopReason.HOST_TRAP, { trapVector: exit.payload });
-    case ExitReason.UNSUPPORTED:
-      return runResultFromExecutionState(state, StopReason.UNSUPPORTED, unsupportedDetails());
-    case ExitReason.DECODE_FAULT:
-      return runResultFromExecutionState(state, StopReason.DECODE_FAULT, {
-        faultAddress: exit.payload,
-        faultOperation: "execute"
-      });
-    case ExitReason.MEMORY_READ_FAULT:
-      return stopWithMemoryFault(state, exit, "read", memoryFaultSize(exit));
-    case ExitReason.MEMORY_WRITE_FAULT:
-      return stopWithMemoryFault(state, exit, "write", memoryFaultSize(exit));
-    case ExitReason.INSTRUCTION_LIMIT:
-      return runResultFromExecutionState(state, StopReason.INSTRUCTION_LIMIT);
+  switch (exit.family) {
+    case "completion":
+      return runResultFromCompletionExit(state, exit.reason);
+    case "host":
+      return runResultFromHostExit(state, exit);
   }
 }
 
-function memoryFaultSize(exit: DecodedExit): number {
-  return exit.detail ?? 4;
+function runResultFromCompletionExit(state: WasmCpuState, reason: CompletionExit): RunResult {
+  switch (reason) {
+    case CompletionExit.DYNAMIC_JUMP:
+    case CompletionExit.LINK_STUB:
+      return runResultFromExecutionState(state, { kind: "none" });
+    case CompletionExit.INSTRUCTION_LIMIT:
+      return runResultFromExecutionState(state, { kind: "instructionLimit" });
+  }
 }
 
-function unsupportedDetails(): RunResultDetails {
-  return {
-    unsupportedReason: "unsupportedOpcode"
-  };
+function runResultFromHostExit(state: WasmCpuState, exit: DecodedHostExit): RunResult {
+  switch (exit.reason) {
+    case HostExit.TRAP:
+      return runResultFromExecutionState(state, { kind: "hostTrap", vector: exit.payload });
+    case HostExit.UNSUPPORTED:
+      return runResultFromExecutionState(state, { kind: "unsupported", reason: "unsupportedOpcode" });
+    case HostExit.DECODE_FAULT:
+      return runResultFromExecutionState(state, { kind: "decodeFault", address: exit.payload });
+    case HostExit.MEMORY_READ_FAULT:
+      return stopWithMemoryFault(state, exit, "read", memoryFaultSize(exit));
+    case HostExit.MEMORY_WRITE_FAULT:
+      return stopWithMemoryFault(state, exit, "write", memoryFaultSize(exit));
+  }
+}
+
+function memoryFaultSize(exit: DecodedHostExit): number {
+  return exit.detail ?? 4;
 }
 
 function stopWithMemoryFault(
   state: WasmCpuState,
-  exit: DecodedExit,
+  exit: DecodedHostExit,
   faultOperation: FaultOperation,
   faultSize: number
 ): RunResult {
-  return runResultFromExecutionState(state, StopReason.MEMORY_FAULT, {
-    faultAddress: exit.payload,
-    faultSize,
-    faultOperation
+  return runResultFromExecutionState(state, {
+    kind: "memoryFault",
+    address: exit.payload,
+    size: faultSize,
+    operation: faultOperation
   });
 }

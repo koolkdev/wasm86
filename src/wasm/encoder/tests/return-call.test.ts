@@ -6,14 +6,14 @@ import { WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
-import { decodeExit, encodeExit, ExitReason } from "#wasm/exit.js";
+import { CompletionExit, decodeExit, encodeCompletionExit, encodeHostExit, HostExit } from "#wasm/exit.js";
 
 const entryExportName = "entry";
 const cpuStatePtr = 32;
 const u32Align = 2;
 
 test("return_call_two_function_smoke_test", async () => {
-  const instance = await instantiateReturnCallModule(constantTargetBody(ExitReason.HOST_TRAP, 0x2e));
+  const instance = await instantiateReturnCallModule(constantHostTargetBody(HostExit.TRAP, 0x2e));
   const entry = exportedFunction(instance, entryExportName);
   const result = entry(cpuStatePtr);
 
@@ -22,13 +22,14 @@ test("return_call_two_function_smoke_test", async () => {
   }
 
   deepStrictEqual(decodeExit(result), {
-    exitReason: ExitReason.HOST_TRAP,
+    family: "host",
+    reason: HostExit.TRAP,
     payload: 0x2e
   });
 });
 
 test("return_call_result_reaches_typescript_once", async () => {
-  const instance = await instantiateReturnCallModule(constantTargetBody(ExitReason.DYNAMIC_JUMP, 0x1234));
+  const instance = await instantiateReturnCallModule(constantCompletionTargetBody(CompletionExit.DYNAMIC_JUMP, 0x1234));
   const entry = exportedFunction(instance, entryExportName);
   const result = entry(cpuStatePtr);
 
@@ -37,7 +38,8 @@ test("return_call_result_reaches_typescript_once", async () => {
   }
 
   deepStrictEqual(decodeExit(result), {
-    exitReason: ExitReason.DYNAMIC_JUMP,
+    family: "completion",
+    reason: CompletionExit.DYNAMIC_JUMP,
     payload: 0x1234
   });
 });
@@ -57,7 +59,8 @@ test("return_call_preserves_cpu_state_memory_abi", async () => {
   }
 
   deepStrictEqual(decodeExit(result), {
-    exitReason: ExitReason.DYNAMIC_JUMP,
+    family: "completion",
+    reason: CompletionExit.DYNAMIC_JUMP,
     payload: 0xfeed_cafe
   });
 });
@@ -133,9 +136,15 @@ function returnCallEntryBody(targetFunctionIndex: number): WasmFunctionBodyEncod
     .end();
 }
 
-function constantTargetBody(exitReason: ExitReason, payload: number): WasmFunctionBodyEncoder {
+function constantHostTargetBody(reason: HostExit, payload: number): WasmFunctionBodyEncoder {
   return new WasmFunctionBodyEncoder(1)
-    .i64Const(encodeExit(exitReason, payload))
+    .i64Const(encodeHostExit(reason, payload))
+    .end();
+}
+
+function constantCompletionTargetBody(reason: CompletionExit, payload: number): WasmFunctionBodyEncoder {
+  return new WasmFunctionBodyEncoder(1)
+    .i64Const(encodeCompletionExit(reason, payload))
     .end();
 }
 
@@ -148,7 +157,7 @@ function statePayloadTargetBody(): WasmFunctionBodyEncoder {
       offset: WASM_CPU_STATE_OFFSETS.eax
     })
     .i64ExtendI32U()
-    .i64Const(encodeExit(ExitReason.DYNAMIC_JUMP, 0))
+    .i64Const(encodeCompletionExit(CompletionExit.DYNAMIC_JUMP, 0))
     .i64Or()
     .end();
 }

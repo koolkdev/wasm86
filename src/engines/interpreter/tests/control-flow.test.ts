@@ -8,7 +8,7 @@ import {
   writeInterpreterState
 } from "./interpreter-helpers.js";
 import { startAddress } from "#wasm/tests/helpers.js";
-import { ExitReason } from "#wasm/exit.js";
+import { HostExit } from "#wasm/exit.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
@@ -151,6 +151,6 @@ test("truncated JMP rel32 returns decode fault without changing architectural st
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { exitReason: ExitReason.DECODE_FAULT, payload: eip + 1, detail: 4 });
+  deepStrictEqual(exit, { family: "host", reason: HostExit.DECODE_FAULT, payload: eip + 1, detail: 4 });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

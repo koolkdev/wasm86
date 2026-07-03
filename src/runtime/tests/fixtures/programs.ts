@@ -1,4 +1,3 @@
-import { StopReason } from "#x86/execution/run-result.js";
 import type { EngineFixture } from "./types.js";
 
 export const engineFixtureStartAddress = 0x1000;
@@ -13,8 +12,7 @@ export const MOV_ADD_TRAP = {
   initialState: { eip: engineFixtureStartAddress },
   expected: {
     result: {
-      stopReason: StopReason.HOST_TRAP,
-      trapVector: 0x2e
+      stop: { kind: "hostTrap", vector: 0x2e }
     },
     state: {
       eax: 3,
@@ -36,8 +34,7 @@ export const MEMORY_STORE_TRAP = {
   },
   expected: {
     result: {
-      stopReason: StopReason.HOST_TRAP,
-      trapVector: 0x2e
+      stop: { kind: "hostTrap", vector: 0x2e }
     },
     state: {
       eax: 0x1234_5678,
@@ -64,8 +61,7 @@ export const COUNTDOWN_BRANCH_TRAP = {
   },
   expected: {
     result: {
-      stopReason: StopReason.HOST_TRAP,
-      trapVector: 0x2e
+      stop: { kind: "hostTrap", vector: 0x2e }
     },
     state: {
       eax: 0,
@@ -81,8 +77,7 @@ export const UNSUPPORTED_OPCODE = {
   initialState: { eip: engineFixtureStartAddress },
   expected: {
     result: {
-      stopReason: StopReason.UNSUPPORTED,
-      unsupportedReason: "unsupportedOpcode"
+      stop: { kind: "unsupported", reason: "unsupportedOpcode" }
     },
     state: {
       eip: engineFixtureStartAddress,

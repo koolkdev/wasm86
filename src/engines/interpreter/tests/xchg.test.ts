@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ExitReason } from "#wasm/exit.js";
+import { HostExit } from "#wasm/exit.js";
 import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf,
@@ -217,7 +217,7 @@ test("XCHG memory read faults before changing register state", async () => {
   });
   const { exit, state } = await executeInstruction([0x87, 0x18], initial);
 
-  deepStrictEqual(exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: 0x1_0000, detail: 4 });
+  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: 0x1_0000, detail: 4 });
   strictEqual(state.eax, initial.eax);
   strictEqual(state.ebx, initial.ebx);
   deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(initial));

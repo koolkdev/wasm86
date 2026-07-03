@@ -10,7 +10,7 @@ import { ValueTable, fitsUnsigned } from "#ir/values.js";
 import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
-import { ExitReason } from "#wasm/exit.js";
+import { CompletionExit, HostExit } from "#wasm/exit.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
@@ -84,7 +84,7 @@ test("a guard fault mid-block reports the faulting eip with earlier state flushe
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.MEMORY_READ_FAULT, payload: faultAddress, detail: 4 });
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: faultAddress, detail: 4 });
   strictEqual(state.eax, 6);
   strictEqual(state.eip, startEip + 1);
   strictEqual(state.instructionCount, 1);
@@ -109,7 +109,7 @@ test("a static jump to a block in the same module tail-calls it directly", () =>
   const run = handle.run(startEip);
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(state.eax, 2);
   strictEqual(state.eip, targetEip + 3);
   strictEqual(state.instructionCount, 4);
@@ -131,7 +131,7 @@ test("a dynamic jump target reports DYNAMIC_JUMP and resumes from flushed state"
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.DYNAMIC_JUMP, payload: 0 });
+  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.DYNAMIC_JUMP, payload: 0 });
   strictEqual(state.eip, 0x4000);
   strictEqual(state.instructionCount, 1);
 });

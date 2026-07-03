@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { ExitReason } from "#wasm/exit.js";
+import { CompletionExit, HostExit } from "#wasm/exit.js";
 import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
 import { assertLazyFlagState, readWasmCpuState, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
 import { jitModuleLinkFallbackExportName } from "#engines/jit/compiled-blocks/module-link-table.js";
@@ -36,7 +36,7 @@ test("unlinked final static jmp uses module-local fallback stub", () => {
   const run = a.run();
   const state = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.LINK_STUB, payload: bEip });
+  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: bEip });
   strictEqual(state.eip, bEip);
   strictEqual(state.eax, 1);
 });
@@ -57,7 +57,7 @@ test("compiled target patches dependent module-local table", () => {
   const run = a.run();
   const state = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(state.eax, 2);
 });
 
@@ -78,7 +78,7 @@ test("compiled target patches static call through dependent module-local table",
   const state = readWasmCpuState(fixture.memories.cpuState);
   const returnAddress = aEip + incEaxCallRel32(aEip, bEip).length;
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(state.eax, 2);
   strictEqual(state.esp, 0x7c);
   strictEqual(new DataView(fixture.memories.guestMemory.buffer).getUint32(0x7c, true), returnAddress);
@@ -105,7 +105,7 @@ test("constant-folded indirect jump target links through the module-local table"
   const run = a.run();
   const state = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(state.eax, bEip + 1);
   strictEqual(state.eip, bEip + 3);
 });
@@ -128,7 +128,7 @@ test("final jmp rel8 can link through the module-local table", () => {
   const run = a.run();
   const state = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(state.eax, 2);
 });
 
@@ -156,7 +156,7 @@ test("compiled conditional targets patch both branch slots", () => {
   const takenRun = branch.run();
   const takenState = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(takenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(takenRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(takenState.eax, 2);
 
   fixture.memories.cpuState.load({ eip: aEip, ZF: 1 });
@@ -164,7 +164,7 @@ test("compiled conditional targets patch both branch slots", () => {
   const notTakenRun = branch.run();
   const notTakenState = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(notTakenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(notTakenRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(notTakenState.eax, 2);
 });
 
@@ -191,7 +191,7 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
   const takenRun = branch.run();
   const takenState = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(takenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(takenRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(takenState.eax, 1);
   deepStrictEqual(wasmCpuStatusFlagsOf(takenState), noFlags);
   assertLazyFlagState(takenState, { kind: "ADD", width: 32, a: 0, b: 1 }, "taken");
@@ -201,7 +201,7 @@ test("linked conditional branch exits preserve exit-store flag values", () => {
   const notTakenRun = branch.run();
   const notTakenState = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(notTakenRun.exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(notTakenRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(notTakenState.eax, 0);
   deepStrictEqual(wasmCpuStatusFlagsOf(notTakenState), noFlags);
   assertLazyFlagState(notTakenState, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 }, "not taken");
@@ -227,7 +227,7 @@ test("invalidating compiled target restores dependent module-local fallback", ()
   const run = a.run();
   const state = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(run.exit, { exitReason: ExitReason.LINK_STUB, payload: bEip });
+  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: bEip });
   strictEqual(state.eip, bEip);
   strictEqual(state.eax, 1);
 });
@@ -248,11 +248,11 @@ test("target compile and invalidation patch multiple dependent module tables", (
   strictEqual(c.moduleLinkTable?.table.get(cSlot), b.exportedBlockFunctionForEip(bEip));
 
   fixture.memories.cpuState.load({ eip: aEip });
-  deepStrictEqual(a.run().exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(a.run().exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(readWasmCpuState(fixture.memories.cpuState).eax, 2);
 
   fixture.memories.cpuState.load({ eip: cEip });
-  deepStrictEqual(c.run().exit, { exitReason: ExitReason.HOST_TRAP, payload: 0x2e });
+  deepStrictEqual(c.run().exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(readWasmCpuState(fixture.memories.cpuState).eax, 2);
 
   fixture.cache.invalidate(bEip);
@@ -261,7 +261,7 @@ test("target compile and invalidation patch multiple dependent module tables", (
   strictEqual(c.moduleLinkTable?.table.get(cSlot), exportedFunction(c, jitModuleLinkFallbackExportName(bEip)));
 
   fixture.memories.cpuState.load({ eip: cEip });
-  deepStrictEqual(c.run().exit, { exitReason: ExitReason.LINK_STUB, payload: bEip });
+  deepStrictEqual(c.run().exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: bEip });
   strictEqual(readWasmCpuState(fixture.memories.cpuState).eax, 1);
 });
 

@@ -12,7 +12,7 @@ import {
   analyzeBlockValues,
   type BlockValueAnalysis
 } from "#wasm/emit/values.js";
-import { encodeExit, ExitReason } from "#wasm/exit.js";
+import { CompletionExit, encodeCompletionExit } from "#wasm/exit.js";
 import {
   createWasmHelperRegistry,
   defineRequiredHelpers,
@@ -114,7 +114,7 @@ export function encodeActionJitModule(
   for (const targetEip of tableTargetEips) {
     const stubIndex = module.addFunction(
       typeIndex,
-      new WasmFunctionBodyEncoder().i64Const(encodeExit(ExitReason.LINK_STUB, targetEip)).end()
+      new WasmFunctionBodyEncoder().i64Const(encodeCompletionExit(CompletionExit.LINK_STUB, targetEip)).end()
     );
 
     module.exportFunction(jitModuleLinkFallbackExportName(targetEip), stubIndex);

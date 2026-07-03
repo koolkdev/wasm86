@@ -1,14 +1,3 @@
-export const StopReason = {
-  NONE: 0,
-  HOST_TRAP: 4,
-  UNSUPPORTED: 5,
-  DECODE_FAULT: 6,
-  MEMORY_FAULT: 7,
-  INSTRUCTION_LIMIT: 8
-} as const;
-
-export type StopReason = (typeof StopReason)[keyof typeof StopReason];
-
 export type FaultOperation = "read" | "write" | "execute";
 
 export type UnsupportedReason =
@@ -17,21 +6,19 @@ export type UnsupportedReason =
   | "unsupportedAddressingMode"
   | "unsupportedInstruction";
 
+export type RunStop =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{ kind: "hostTrap"; vector: number }>
+  | Readonly<{ kind: "unsupported"; reason: UnsupportedReason }>
+  | Readonly<{ kind: "decodeFault"; address: number }>
+  | Readonly<{ kind: "memoryFault"; address: number; size: number; operation: FaultOperation }>
+  | Readonly<{ kind: "instructionLimit" }>;
+
 export type RunResult = Readonly<{
-  stopReason: StopReason;
+  stop: RunStop;
   finalEip: number;
   instructionCount: number;
-  trapVector?: number;
-  faultAddress?: number;
-  faultSize?: number;
-  faultOperation?: FaultOperation;
-  unsupportedByte?: number;
-  unsupportedReason?: UnsupportedReason;
 }>;
-
-export type RunResultDetails = Readonly<
-  Omit<RunResult, "stopReason" | "finalEip" | "instructionCount">
->;
 
 export type RunResultStateView = Readonly<{
   eip: number;
@@ -40,14 +27,12 @@ export type RunResultStateView = Readonly<{
 
 export function runResultFromExecutionState(
   state: RunResultStateView,
-  stopReason: StopReason,
-  details: RunResultDetails = {}
+  stop: RunStop
 ): RunResult {
   return {
-    stopReason,
+    stop,
     finalEip: state.eip,
-    instructionCount: state.instructionCount,
-    ...details
+    instructionCount: state.instructionCount
   };
 }
 

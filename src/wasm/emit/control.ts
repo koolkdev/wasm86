@@ -3,7 +3,7 @@ import type { ActionExitReason, DispatchFinish, ExitFinish } from "#ir/actions.j
 import type { ValueId } from "#ir/values.js";
 import { u32 } from "#x86/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { encodeExit, ExitReason } from "#wasm/exit.js";
+import { CompletionExit, HostExit, encodeCompletionExit, encodeHostExit } from "#wasm/exit.js";
 import type { DispatchTarget, FallthroughTarget, LinkCompletion } from "./embed.js";
 
 // Report and completion lowering for nested bodies emitted inline by emit.ts.
@@ -98,7 +98,7 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
   function emitLinkedCompletion(target: LinkedTarget): void {
     switch (target.kind) {
       case "dynamic":
-        body.i64Const(encodeExit(ExitReason.DYNAMIC_JUMP, 0)).returnFromFunction();
+        body.i64Const(encodeCompletionExit(CompletionExit.DYNAMIC_JUMP, 0)).returnFromFunction();
         return;
       case "function":
         body.returnCallFunction(target.functionIndex);
@@ -114,12 +114,12 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     const detail = exit.detail ?? 0;
 
     if (exit.payload === undefined) {
-      body.i64Const(encodeExit(reason, 0, detail)).returnFromFunction();
+      body.i64Const(encodeHostExit(reason, 0, detail)).returnFromFunction();
       return;
     }
 
     context.emitPayload(exit.payload);
-    body.i64ExtendI32U().i64Const(encodeExit(reason, 0, detail)).i64Or().returnFromFunction();
+    body.i64ExtendI32U().i64Const(encodeHostExit(reason, 0, detail)).i64Or().returnFromFunction();
   }
 
   return {
@@ -138,17 +138,17 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
 }
 
 // ir/action names exit reasons; the emitter owns the numeric encoding.
-function exitReasonCode(reason: ActionExitReason): ExitReason {
+function exitReasonCode(reason: ActionExitReason): HostExit {
   switch (reason) {
     case "hostTrap":
-      return ExitReason.HOST_TRAP;
+      return HostExit.TRAP;
     case "unsupported":
-      return ExitReason.UNSUPPORTED;
+      return HostExit.UNSUPPORTED;
     case "decodeFault":
-      return ExitReason.DECODE_FAULT;
+      return HostExit.DECODE_FAULT;
     case "memoryReadFault":
-      return ExitReason.MEMORY_READ_FAULT;
+      return HostExit.MEMORY_READ_FAULT;
     case "memoryWriteFault":
-      return ExitReason.MEMORY_WRITE_FAULT;
+      return HostExit.MEMORY_WRITE_FAULT;
   }
 }

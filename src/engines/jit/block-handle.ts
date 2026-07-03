@@ -18,8 +18,8 @@ import {
 export const wasmBlockExitEncoding = {
   resultType: "i64",
   payloadBits: "0..31",
-  exitReasonBits: "32..47",
-  reservedBits: "48..63"
+  codeBits: "32..47",
+  detailBits: "48..63"
 } as const;
 
 export type WasmBlockExitEncoding = typeof wasmBlockExitEncoding;
