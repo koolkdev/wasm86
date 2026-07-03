@@ -1,5 +1,4 @@
-import type { MemoryAccessKind } from "#x86/memory-access.js";
-import type { SemanticBuildContext, SemanticsBuilder } from "#x86/semantics/builder.js";
+import type { MemoryAccessKind, SemanticBuildContext, SemanticsBuilder } from "#x86/semantics/builder.js";
 import type { StorageInput, ValueInput } from "#x86/semantics/refs.js";
 import type { OperandWidth } from "#x86/types.js";
 

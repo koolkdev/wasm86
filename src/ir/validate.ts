@@ -5,6 +5,7 @@ import {
   type Action,
   type DispatchFinish,
   type Finish,
+  type IrExit,
   type OpAction,
   type StateWriteAction
 } from "./actions.js";
@@ -95,14 +96,26 @@ function validateFinishValues(block: IrBlock, finish: Finish): void {
       block.values.node(finish.targetEip);
       return;
     case "exit":
-      if (finish.payload !== undefined) {
-        block.values.node(finish.payload);
+      validateExitValues(block, finish.exit);
+      return;
+  }
+}
+
+function validateExitValues(block: IrBlock, exit: IrExit): void {
+  switch (exit.class) {
+    case "cpuException": {
+      const exception = exit.exception;
+
+      switch (exception.kind) {
+        case "PF":
+          block.values.node(exception.linearAddress);
+          return;
       }
-      if (finish.detail !== undefined) {
-        assert(
-          Number.isInteger(finish.detail) && finish.detail >= 0 && finish.detail <= 0xffff,
-          `exit detail out of range: ${finish.detail}`
-        );
+      return;
+    }
+    case "host":
+      if (exit.payload !== undefined) {
+        block.values.node(exit.payload);
       }
       return;
   }

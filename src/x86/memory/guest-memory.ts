@@ -1,9 +1,9 @@
-import type { FaultOperation } from "#x86/execution/run-result.js";
+export type GuestMemoryAccess = "read" | "write";
 
 export type MemoryFault = Readonly<{
   faultAddress: number;
   faultSize: number;
-  faultOperation: FaultOperation;
+  guestAccess: GuestMemoryAccess;
 }>;
 
 export type MemoryReadResult = Readonly<{ ok: true; value: number }> | Readonly<{ ok: false; fault: MemoryFault }>;
@@ -11,7 +11,7 @@ export type MemoryWriteResult = Readonly<{ ok: true }> | Readonly<{ ok: false; f
 
 export type GuestMemory = Readonly<{
   byteLength: number;
-  checkAccess(address: number, byteLength: number, operation: FaultOperation): MemoryFault | undefined;
+  checkAccess(address: number, byteLength: number, operation: GuestMemoryAccess): MemoryFault | undefined;
   readU8(address: number): MemoryReadResult;
   readU16(address: number): MemoryReadResult;
   readU32(address: number): MemoryReadResult;
@@ -35,7 +35,7 @@ export class ArrayBufferGuestMemory implements GuestMemory {
     return this.#view.byteLength;
   }
 
-  checkAccess(address: number, byteLength: number, operation: FaultOperation): MemoryFault | undefined {
+  checkAccess(address: number, byteLength: number, operation: GuestMemoryAccess): MemoryFault | undefined {
     return this.#fault(address, byteLength, operation);
   }
 
@@ -102,10 +102,10 @@ export class ArrayBufferGuestMemory implements GuestMemory {
     return { ok: true };
   }
 
-  #fault(address: number, size: number, operation: FaultOperation): MemoryFault | undefined {
+  #fault(address: number, size: number, operation: GuestMemoryAccess): MemoryFault | undefined {
     return isInBounds(address, size, this.byteLength)
       ? undefined
-      : { faultAddress: address, faultSize: size, faultOperation: operation };
+      : { faultAddress: address, faultSize: size, guestAccess: operation };
   }
 }
 

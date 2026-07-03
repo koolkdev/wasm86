@@ -1,9 +1,16 @@
 import { assert } from "#common/assert.js";
-import type { ActionExitReason, DispatchFinish, ExitFinish } from "#ir/actions.js";
+import type { DispatchFinish, ExitFinish, HostExitReason } from "#ir/actions.js";
 import type { ValueId } from "#ir/values.js";
+import { CpuExceptionVector, type CpuException } from "#x86/exceptions.js";
 import { u32 } from "#x86/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { CompletionExit, HostExit, encodeCompletionExit, encodeHostExit } from "#wasm/exit.js";
+import {
+  CompletionExit,
+  HostExit,
+  encodeCompletionExit,
+  encodeCpuExceptionExitBase,
+  encodeHostExit
+} from "#wasm/exit.js";
 import type { DispatchTarget, FallthroughTarget, LinkCompletion } from "./embed.js";
 
 // Report and completion lowering for nested bodies emitted inline by emit.ts.
@@ -110,16 +117,39 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
   }
 
   function emitReport(exit: ExitFinish): void {
-    const reason = exitReasonCode(exit.reason);
-    const detail = exit.detail ?? 0;
+    switch (exit.exit.class) {
+      case "host":
+        emitHostReport(exit.exit.reason, exit.exit.payload);
+        return;
+      case "cpuException":
+        emitCpuExceptionReport(exit.exit.exception);
+        return;
+    }
+  }
 
-    if (exit.payload === undefined) {
-      body.i64Const(encodeHostExit(reason, 0, detail)).returnFromFunction();
+  function emitHostReport(reason: HostExitReason, payload: ValueId | undefined): void {
+    const code = hostExitReasonCode(reason);
+
+    if (payload === undefined) {
+      body.i64Const(encodeHostExit(code, 0)).returnFromFunction();
       return;
     }
 
-    context.emitPayload(exit.payload);
-    body.i64ExtendI32U().i64Const(encodeHostExit(reason, 0, detail)).i64Or().returnFromFunction();
+    context.emitPayload(payload);
+    body.i64ExtendI32U().i64Const(encodeHostExit(code, 0)).i64Or().returnFromFunction();
+  }
+
+  function emitCpuExceptionReport(exception: CpuException<ValueId>): void {
+    switch (exception.kind) {
+      case "PF":
+        context.emitPayload(exception.linearAddress);
+        body
+          .i64ExtendI32U()
+          .i64Const(encodeCpuExceptionExitBase(CpuExceptionVector.PF, exception.errorCode))
+          .i64Or()
+          .returnFromFunction();
+        return;
+    }
   }
 
   return {
@@ -137,18 +167,12 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
   };
 }
 
-// ir/action names exit reasons; the emitter owns the numeric encoding.
-function exitReasonCode(reason: ActionExitReason): HostExit {
+// ir/action names host exit reasons; the emitter owns the numeric encoding.
+function hostExitReasonCode(reason: HostExitReason): HostExit {
   switch (reason) {
     case "hostTrap":
       return HostExit.TRAP;
     case "unsupported":
       return HostExit.UNSUPPORTED;
-    case "decodeFault":
-      return HostExit.DECODE_FAULT;
-    case "memoryReadFault":
-      return HostExit.MEMORY_READ_FAULT;
-    case "memoryWriteFault":
-      return HostExit.MEMORY_WRITE_FAULT;
   }
 }

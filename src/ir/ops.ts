@@ -1,6 +1,6 @@
 import type { OperandWidth } from "#x86/types.js";
 import type { X86StatusFlag } from "#x86/flags.js";
-import type { MemoryAccessKind } from "#x86/memory-access.js";
+import type { MemoryAccessKind } from "#x86/semantics/builder.js";
 import {
   flagChannel,
   lazyFlagsAChannel,

@@ -1,4 +1,9 @@
 import { u32 } from "#x86/numeric.js";
+import {
+  CpuExceptionVector,
+  pageFault,
+  type CpuException
+} from "#x86/exceptions.js";
 
 export const CompletionExit = {
   INSTRUCTION_LIMIT: 0,
@@ -12,17 +17,15 @@ export type CompletionExit = (typeof CompletionExit)[keyof typeof CompletionExit
 
 export const HostExit = {
   TRAP: 0,
-  UNSUPPORTED: 1,
-  DECODE_FAULT: 2,
-  MEMORY_READ_FAULT: 3,
-  MEMORY_WRITE_FAULT: 4
+  UNSUPPORTED: 1
 } as const;
 
 export type HostExit = (typeof HostExit)[keyof typeof HostExit];
 
 export type DecodedExit =
   | DecodedCompletionExit
-  | DecodedHostExit;
+  | DecodedHostExit
+  | DecodedCpuExceptionExit;
 
 export type DecodedCompletionExit = Readonly<{
   family: "completion";
@@ -34,7 +37,11 @@ export type DecodedHostExit = Readonly<{
   family: "host";
   reason: HostExit;
   payload: number;
-  detail?: number;
+}>;
+
+export type DecodedCpuExceptionExit = Readonly<{
+  family: "cpuException";
+  exception: CpuException<number>;
 }>;
 
 const payloadMask = 0xffff_ffffn;
@@ -46,9 +53,11 @@ const detailMask = 0xffffn;
 const detailShift = 48n;
 const completionFamily = 0x01;
 const hostFamily = 0x02;
+const cpuExceptionFamily = 0x03;
 const families = new Set<number>([
   completionFamily,
-  hostFamily
+  hostFamily,
+  cpuExceptionFamily
 ]);
 const completionExits = new Set<number>(Object.values(CompletionExit));
 const hostExits = new Set<number>(Object.values(HostExit));
@@ -59,10 +68,28 @@ export function encodeCompletionExit(reason: CompletionExit, payload: number): b
   return encodeExitCode(completionFamily, reason, payload);
 }
 
-export function encodeHostExit(reason: HostExit, payload: number, detail = 0): bigint {
+export function encodeHostExit(reason: HostExit, payload: number): bigint {
   assertHostExit(reason);
 
-  return encodeExitCode(hostFamily, reason, payload, detail);
+  return encodeExitCode(hostFamily, reason, payload);
+}
+
+export function encodeCpuExceptionExit(exception: CpuException<number>): bigint {
+  switch (exception.kind) {
+    case "PF":
+      return encodeExitCode(
+        cpuExceptionFamily,
+        CpuExceptionVector.PF,
+        exception.linearAddress,
+        exception.errorCode
+      );
+  }
+}
+
+export function encodeCpuExceptionExitBase(vector: number, detail: number): bigint {
+  assertCpuExceptionVector(vector);
+
+  return encodeExitCode(cpuExceptionFamily, vector, 0, detail);
 }
 
 function encodeExitCode(family: number, subtype: number, payload: number, detail = 0): bigint {
@@ -87,6 +114,8 @@ export function decodeExit(value: bigint): DecodedExit {
       return decodeCompletionExit(subtype, payload, detail);
     case hostFamily:
       return decodeHostExit(subtype, payload, detail);
+    case cpuExceptionFamily:
+      return decodeCpuExceptionExit(subtype, payload, detail);
     default:
       throw new RangeError(`unknown Wasm exit family: ${family}`);
   }
@@ -111,14 +140,31 @@ function assertNoCompletionDetail(value: number): void {
 
 function decodeHostExit(subtype: number, payload: number, detail: number): DecodedHostExit {
   assertHostExit(subtype);
+  assertNoHostDetail(detail);
 
-  const decoded = {
+  return {
     family: "host",
     reason: subtype,
     payload
-  } as const;
+  };
+}
 
-  return detail === 0 ? decoded : { ...decoded, detail };
+function assertNoHostDetail(value: number): void {
+  if (value !== 0) {
+    throw new RangeError(`Wasm host exit detail must be zero: ${value}`);
+  }
+}
+
+function decodeCpuExceptionExit(subtype: number, payload: number, detail: number): DecodedCpuExceptionExit {
+  assertCpuExceptionVector(subtype);
+
+  switch (subtype) {
+    case CpuExceptionVector.PF:
+      return {
+        family: "cpuException",
+        exception: pageFault(payload, detail)
+      };
+  }
 }
 
 function assertFamily(value: number): void {
@@ -142,6 +188,15 @@ function assertCompletionExit(value: number): asserts value is CompletionExit {
 function assertHostExit(value: number): asserts value is HostExit {
   if (!Number.isInteger(value) || !hostExits.has(value)) {
     throw new RangeError(`unknown Wasm host exit: ${value}`);
+  }
+}
+
+function assertCpuExceptionVector(value: number): asserts value is CpuExceptionVector {
+  switch (value) {
+    case CpuExceptionVector.PF:
+      return;
+    default:
+      throw new RangeError(`unknown x86 CPU exception vector: ${value}`);
   }
 }
 

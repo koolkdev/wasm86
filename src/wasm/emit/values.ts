@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { actionMayWriteStateSlot, bodyMayWriteStateSlot } from "#ir/aliasing.js";
-import { bodyFinal, type Action, type Finish } from "#ir/actions.js";
+import { bodyFinal, type Action, type Finish, type IrExit } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
 import type { StateSlot } from "#ir/slots.js";
@@ -248,9 +248,24 @@ function actionOperands(action: Action): readonly ValueId[] {
 function finishOperands(finish: Finish): readonly ValueId[] {
   switch (finish.kind) {
     case "exit":
-      return finish.payload === undefined ? [] : [finish.payload];
+      return exitOperands(finish.exit);
     case "dispatch":
       return [];
+  }
+}
+
+function exitOperands(exit: IrExit): readonly ValueId[] {
+  switch (exit.class) {
+    case "cpuException": {
+      const exception = exit.exception;
+
+      switch (exception.kind) {
+        case "PF":
+          return [exception.linearAddress];
+      }
+    }
+    case "host":
+      return exit.payload === undefined ? [] : [exit.payload];
   }
 }
 

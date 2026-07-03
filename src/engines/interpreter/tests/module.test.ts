@@ -10,6 +10,7 @@ import {
 import { assertMemoryImports, startAddress } from "#wasm/tests/helpers.js";
 import { wasmImport } from "#wasm/abi.js";
 import { CompletionExit, HostExit } from "#wasm/exit.js";
+import { fetchPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";
 import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
@@ -128,10 +129,9 @@ test("truncated two-byte opcode escape returns decode fault", async () => {
   interpreter.guestView.setUint8(lastGuestByte, 0x0f);
 
   const exit = interpreter.run(1);
+  const expected = fetchPageFaultExit(interpreter.guestView.byteLength);
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.DECODE_FAULT);
-  strictEqual(exit.payload, interpreter.guestView.byteLength);
+  deepStrictEqual(exit, expected);
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

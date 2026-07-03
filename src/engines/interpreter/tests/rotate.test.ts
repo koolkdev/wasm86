@@ -5,7 +5,7 @@ import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf
 } from "#runtime/tests/fixtures/cpu-state.js";
-import { HostExit } from "#wasm/exit.js";
+import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
@@ -167,7 +167,7 @@ test("faulting rotate memory destination leaves state and flags unchanged", asyn
 
   const { exit, state } = await executeInstruction([0xd1, 0x03], initialState);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: faultAddress, detail: 4 });
+  deepStrictEqual(exit, readPageFaultExit(faultAddress));
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress, 7);

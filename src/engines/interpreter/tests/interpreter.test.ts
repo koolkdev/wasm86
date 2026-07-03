@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { gprChannel } from "#ir/slots.js";
 import type { RegName } from "#x86/types.js";
 import { CompletionExit, HostExit, type DecodedCompletionExit, type DecodedExit, type DecodedHostExit } from "#wasm/exit.js";
+import { fetchPageFaultExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -258,9 +259,7 @@ test("fetching the opcode past mapped memory is a decode fault at the boundary",
 
   const exit = interpreter.run(10);
 
-  assertHostExit(exit, HostExit.DECODE_FAULT);
-  strictEqual(exit.payload, eip);
-  strictEqual(exit.detail, 1);
+  deepStrictEqual(exit, fetchPageFaultExit(eip));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -274,9 +273,7 @@ test("an immediate crossing the end of memory faults with the instruction's eip"
 
   const exit = interpreter.run(10);
 
-  assertHostExit(exit, HostExit.DECODE_FAULT);
-  strictEqual(exit.payload, eip + 1);
-  strictEqual(exit.detail, 4);
+  deepStrictEqual(exit, fetchPageFaultExit(eip + 1));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -290,9 +287,7 @@ test("a displacement crossing the end of memory is a decode fault", async () => 
 
   const exit = interpreter.run(10);
 
-  assertHostExit(exit, HostExit.DECODE_FAULT);
-  strictEqual(exit.payload, eip + 2);
-  strictEqual(exit.detail, 4);
+  deepStrictEqual(exit, fetchPageFaultExit(eip + 2));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
 });
 
@@ -305,9 +300,7 @@ test("a SIB byte past the end of memory is a decode fault at its address", async
 
   const exit = interpreter.run(10);
 
-  assertHostExit(exit, HostExit.DECODE_FAULT);
-  strictEqual(exit.payload, eip + 2);
-  strictEqual(exit.detail, 1);
+  deepStrictEqual(exit, fetchPageFaultExit(eip + 2));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -321,9 +314,7 @@ test("a SIB displacement crossing the end of memory is a decode fault", async ()
 
   const exit = interpreter.run(10);
 
-  assertHostExit(exit, HostExit.DECODE_FAULT);
-  strictEqual(exit.payload, eip + 3);
-  strictEqual(exit.detail, 4);
+  deepStrictEqual(exit, fetchPageFaultExit(eip + 3));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -343,9 +334,7 @@ test("a guest load past the end is a memory fault, not a decode fault", async ()
 
   const exit = interpreter.run(10);
 
-  assertHostExit(exit, HostExit.MEMORY_READ_FAULT);
-  strictEqual(exit.payload, address);
-  strictEqual(exit.detail, 4);
+  deepStrictEqual(exit, readPageFaultExit(address));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });

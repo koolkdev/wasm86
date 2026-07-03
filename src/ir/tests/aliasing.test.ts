@@ -71,7 +71,7 @@ test("ifs and finishes touch no data directly", () => {
     { reads: [], writes: [] }
   );
   deepStrictEqual(
-    effectsOf({ kind: "finish", finish: { kind: "exit", reason: "unsupported" } }),
+    effectsOf({ kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "unsupported" } } }),
     { reads: [], writes: [] }
   );
   deepStrictEqual(

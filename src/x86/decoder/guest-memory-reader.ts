@@ -1,6 +1,6 @@
 import type { GuestMemory } from "#x86/memory/guest-memory.js";
 import {
-  decodeFault,
+  truncatedInstructionFault,
   IsaDecodeError,
   type IsaDecodeReader
 } from "./reader.js";
@@ -37,13 +37,13 @@ export class GuestMemoryDecodeReader implements RegionedDecodeReader {
 
   readU8(eip: number): number {
     if (this.regionAt(eip) === undefined) {
-      throw new IsaDecodeError(decodeFault(eip));
+      throw new IsaDecodeError(truncatedInstructionFault(eip));
     }
 
     const read = this.memory.readU8(eip);
 
     if (!read.ok) {
-      throw new IsaDecodeError(decodeFault(eip));
+      throw new IsaDecodeError(truncatedInstructionFault(eip));
     }
 
     return read.value;

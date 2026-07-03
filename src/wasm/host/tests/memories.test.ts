@@ -82,7 +82,7 @@ test("runtime Wasm guest memory reads writes and reports faults", () => {
     fault: {
       faultAddress: memories.guest.byteLength - 2,
       faultSize: 4,
-      faultOperation: "write"
+      guestAccess: "write"
     }
   });
 });

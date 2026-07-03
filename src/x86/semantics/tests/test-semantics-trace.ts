@@ -1,10 +1,10 @@
 import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
 import { mem, operand, reg } from "#x86/semantics/refs.js";
 import type { ConditionCode } from "#x86/conditions.js";
-import type { MemoryAccessKind } from "#x86/memory-access.js";
 import type {
   SemanticsBuilder,
   GetOptions,
+  MemoryAccessKind,
   SemanticBuildContext,
   SemanticOperandInfo,
   SemanticOperandInput,

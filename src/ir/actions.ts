@@ -1,14 +1,15 @@
+import { assert } from "#common/assert.js";
+import type { CpuException } from "#x86/exceptions.js";
 import type { Body } from "./block.js";
-import type { IrOp, StateWriteOp } from "./ops.js";
-import type { ValueId } from "./values.js";
+import { opAccess, type IrOp, type StateWriteOp } from "./ops.js";
+import { type ValueId, type ValueTable } from "./values.js";
 
 // Reports to the host; the action emitter owns the numeric encoding.
-export type ActionExitReason =
-  | "hostTrap"
-  | "unsupported"
-  | "decodeFault"
-  | "memoryReadFault"
-  | "memoryWriteFault";
+export type HostExitReason = "hostTrap" | "unsupported";
+
+export type IrExit =
+  | Readonly<{ class: "cpuException"; exception: CpuException<ValueId> }>
+  | Readonly<{ class: "host"; reason: HostExitReason; payload?: ValueId }>;
 
 export type OpAction = Readonly<{ kind: "op"; op: IrOp; output?: ValueId }>;
 
@@ -29,9 +30,7 @@ export type Finish =
     }>
   | Readonly<{
       kind: "exit";
-      reason: ActionExitReason;
-      payload?: ValueId;
-      detail?: number;
+      exit: IrExit;
     }>;
 
 export type FinishAction = Readonly<{
@@ -49,6 +48,22 @@ export type Action =
   | FinishAction;
 
 export type StateWriteAction = Readonly<{ kind: "op"; op: StateWriteOp }>;
+
+export function createOpAction(values: ValueTable, op: IrOp): OpAction {
+  const access = opAccess(op);
+
+  if (access.valueOutput === undefined) {
+    return { kind: "op", op };
+  }
+
+  assert(access.valueOutput.type === "i32", `${op.kind} op action output type is not supported`);
+
+  return {
+    kind: "op",
+    output: values.addActionOutput(access.valueOutput.bounds),
+    op
+  };
+}
 
 export function actionCompletes(action: Action): boolean {
   switch (action.kind) {

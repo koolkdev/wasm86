@@ -29,8 +29,8 @@ function finishDispatch(targetEip: number): Action {
   return { kind: "finish", finish: { kind: "dispatch", targetEip } };
 }
 
-function finishExit(reason: "unsupported" | "memoryReadFault" = "unsupported"): Action {
-  return { kind: "finish", finish: { kind: "exit", reason } };
+function finishExit(reason: "unsupported" = "unsupported"): Action {
+  return { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason } } };
 }
 
 const finishDispatch0 = finishDispatch(0);

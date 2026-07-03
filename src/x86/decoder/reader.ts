@@ -64,7 +64,7 @@ export function readAvailableBytes(reader: IsaDecodeReader, startEip: number, ma
   return raw;
 }
 
-export function decodeFault(address: number, raw: readonly number[] = []): IsaDecodeFault {
+export function truncatedInstructionFault(address: number, raw: readonly number[] = []): IsaDecodeFault {
   return {
     reason: "truncated",
     address,

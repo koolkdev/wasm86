@@ -15,6 +15,7 @@ import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { defineLazyFlagHelper } from "#wasm/helpers/lazy-flags.js";
 import { createWasmHelperRegistry } from "#wasm/helpers/module.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import { memoryRead, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import type { MemoryReadAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
 
@@ -707,7 +708,16 @@ test("captureForBody computes an untouched compound into a local for later uses"
       stateWrite(gprChannel("ebx"), sum),
       stateWrite(gprChannel("ecx"), sum),
       stateWrite(gprChannel("edx"), read),
-      { kind: "finish", finish: { kind: "exit", reason: "memoryWriteFault", payload: five } }
+      {
+        kind: "finish",
+        finish: {
+          kind: "exit",
+          exit: {
+            class: "cpuException",
+            exception: pageFault(five, PageFaultErrorCode.WRITE)
+          }
+        }
+      }
     ]
   };
 

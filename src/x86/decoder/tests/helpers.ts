@@ -12,7 +12,7 @@ import {
 } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import {
-  decodeFault,
+  truncatedInstructionFault,
   IsaDecodeError,
   type IsaDecodeReader
 } from "#x86/decoder/reader.js";
@@ -49,13 +49,13 @@ export class ByteArrayDecodeReader implements IsaDecodeReader {
     const index = eip - this.baseAddress;
 
     if (!Number.isInteger(index) || index < 0 || index >= this.#bytes.length) {
-      throw new IsaDecodeError(decodeFault(eip));
+      throw new IsaDecodeError(truncatedInstructionFault(eip));
     }
 
     const value = this.#bytes[index];
 
     if (value === undefined) {
-      throw new IsaDecodeError(decodeFault(eip));
+      throw new IsaDecodeError(truncatedInstructionFault(eip));
     }
 
     return value;

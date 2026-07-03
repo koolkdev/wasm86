@@ -1,11 +1,11 @@
 import { assert } from "#common/assert.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import { isX86StatusFlag, type X86Flag } from "#x86/flags.js";
-import type { MemoryAccessKind } from "#x86/memory-access.js";
 import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
   SemanticsBuilder,
   GetOptions,
+  MemoryAccessKind,
   SemanticBuildContext,
   SemanticOperandInfo,
   SemanticOperandInput,
@@ -53,6 +53,7 @@ import type {
   Finish
 } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
+import { memoryGuardActions } from "./memory-guard.js";
 import {
   ValueTable,
   fitsUnsigned,
@@ -326,19 +327,15 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     assert(!this.#wroteMemory, "a memory guard cannot follow a memory write in the same instruction");
 
     const addressId = address;
-    const fault = this.#values.addActionOutput(fitsUnsigned(1));
-
-    this.#actions.push({
-      kind: "op",
-      output: fault,
-      op: { kind: "memory.check", address: addressId, byteLength, access }
-    });
-    this.#actions.push({
-      kind: "if",
-      condition: fault,
-      hint: "unlikely",
-      thenBody: this.#faultBody(access === "read" ? "memoryReadFault" : "memoryWriteFault", addressId, byteLength)
-    });
+    this.#actions.push(
+      ...memoryGuardActions(
+        this.#values,
+        addressId,
+        byteLength,
+        { kind: "data", access },
+        this.#pending.flushesForPath("fault")
+      )
+    );
   }
 
   address(operandRef: OperandInput): Value {
@@ -473,19 +470,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#actions.push(...this.#pending.flushesForPath("completed"));
     this.#actions.push({
       kind: "finish",
-      finish: { kind: "exit", reason: "hostTrap", payload: vectorId }
+      finish: { kind: "exit", exit: { class: "host", reason: "hostTrap", payload: vectorId } }
     });
     this.#blockEnd = "terminated";
     this.#terminated = true;
-  }
-
-  // Fault bodies restore the instruction-start state captured by
-  // beginInstruction, including the faulting instruction's eip.
-  #faultBody(reason: "memoryReadFault" | "memoryWriteFault", address: ValueId, byteLength: number): Body {
-    return this.#terminatingBody(
-      { kind: "exit", reason, payload: address, detail: byteLength },
-      this.#pending.flushesForPath("fault")
-    );
   }
 
   // Branch bodies observe the completed instruction.

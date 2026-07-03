@@ -1,4 +1,4 @@
-export type FaultOperation = "read" | "write" | "execute";
+import type { CpuException } from "#x86/exceptions.js";
 
 export type UnsupportedReason =
   | "unsupportedOpcode"
@@ -10,8 +10,7 @@ export type RunStop =
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "hostTrap"; vector: number }>
   | Readonly<{ kind: "unsupported"; reason: UnsupportedReason }>
-  | Readonly<{ kind: "decodeFault"; address: number }>
-  | Readonly<{ kind: "memoryFault"; address: number; size: number; operation: FaultOperation }>
+  | Readonly<{ kind: "cpuException"; exception: CpuException<number> }>
   | Readonly<{ kind: "instructionLimit" }>;
 
 export type RunResult = Readonly<{

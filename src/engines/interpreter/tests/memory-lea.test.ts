@@ -14,6 +14,7 @@ import {
 } from "./interpreter-helpers.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import { HostExit, type DecodedExit } from "#wasm/exit.js";
+import { readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
@@ -250,12 +251,7 @@ test("MOV EAX from a direct offset read fault leaves architectural state unchang
 
   const { interpreter, exit } = await executeMemoryInstruction([0xa1, ...disp32(faultAddress)], initialState);
 
-  deepStrictEqual(exit, {
-    family: "host",
-    reason: HostExit.MEMORY_READ_FAULT,
-    payload: faultAddress,
-    detail: 4
-  });
+  deepStrictEqual(exit, readPageFaultExit(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -270,12 +266,7 @@ test("MOV direct offset from EAX write fault leaves architectural state unchange
 
   const { interpreter, exit } = await executeMemoryInstruction([0xa3, ...disp32(faultAddress)], initialState);
 
-  deepStrictEqual(exit, {
-    family: "host",
-    reason: HostExit.MEMORY_WRITE_FAULT,
-    payload: faultAddress,
-    detail: 4
-  });
+  deepStrictEqual(exit, writePageFaultExit(faultAddress));
   strictEqual(interpreter.guestView.getUint32(0x1_0000 - 4, true), 0);
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
@@ -294,12 +285,7 @@ test("memory read guards report 1, 2, and 4 byte fault ranges", async () => {
       initialState
     );
 
-    deepStrictEqual(exit, {
-      family: "host",
-      reason: HostExit.MEMORY_READ_FAULT,
-      payload: faultAddress,
-      detail: width / 8
-    });
+    deepStrictEqual(exit, readPageFaultExit(faultAddress));
     assertInterpreterStateEquals(interpreter.stateView, initialState);
   }
 });
@@ -318,12 +304,7 @@ test("memory write guards report 1, 2, and 4 byte fault ranges before stores", a
       initialState
     );
 
-    deepStrictEqual(exit, {
-      family: "host",
-      reason: HostExit.MEMORY_WRITE_FAULT,
-      payload: faultAddress,
-      detail: width / 8
-    });
+    deepStrictEqual(exit, writePageFaultExit(faultAddress));
     assertInterpreterStateEquals(interpreter.stateView, initialState);
   }
 });

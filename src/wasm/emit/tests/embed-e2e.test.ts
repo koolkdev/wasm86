@@ -10,14 +10,15 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { emitActionFragment } from "#wasm/emit/emit.js";
 import type { FallthroughTarget } from "#wasm/emit/embed.js";
-import { HostExit, decodeExit, type DecodedExit, type DecodedHostExit } from "#wasm/exit.js";
+import { decodeExit, type DecodedCpuExceptionExit, type DecodedExit } from "#wasm/exit.js";
+import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
 import { memoryCheck, memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 // Fragments emitted inline in hand-written function bodies. The fragments
-// here are decode reads — a guarded one-byte fetch at eip+k with a
-// decode-fault edge — exporting the fetched byte to an embedder local.
+// here are decode reads — a guarded one-byte instruction fetch at eip+k with a
+// page-fault edge — exporting the fetched byte to an embedder local.
 
 type DecodeReadFragment = Readonly<{
   block: IrBlock;
@@ -59,7 +60,16 @@ function decodeReadFragment(k: number): DecodeReadFragment {
           thenBody: {
             actions: [
               stateWrite(eipChannel, eipValue),
-              { kind: "finish", finish: { kind: "exit", reason: "decodeFault", payload: address, detail: 1 } }
+              {
+                kind: "finish",
+                finish: {
+                  kind: "exit",
+                  exit: {
+                    class: "cpuException",
+                    exception: pageFault(address, PageFaultErrorCode.INSTRUCTION_FETCH)
+                  }
+                }
+              }
             ]
           }
         },
@@ -90,14 +100,12 @@ async function instantiateDecodeRead(fallthrough: FallthroughTarget) {
   return instantiateFunctionBody(body);
 }
 
-function assertHostExit(exit: DecodedExit, reason: HostExit): asserts exit is DecodedHostExit {
-  strictEqual(exit.family, "host");
+function assertCpuException(exit: DecodedExit): asserts exit is DecodedCpuExceptionExit {
+  strictEqual(exit.family, "cpuException");
 
-  if (exit.family !== "host") {
-    throw new Error("expected host exit");
+  if (exit.family !== "cpuException") {
+    throw new Error("expected CPU exception exit");
   }
-
-  strictEqual(exit.reason, reason);
 }
 
 test("a decode-read fragment exports the byte and falls through implicitly", async () => {
@@ -148,7 +156,7 @@ test("dispatch br target skips later enclosing harness-style actions", async () 
   strictEqual(run(), 0x42n);
 });
 
-test("the decode-fault edge keeps the encoded return", async () => {
+test("the instruction-fetch fault edge keeps the encoded return", async () => {
   const { stateView, run } = await instantiateDecodeRead({ kind: "fallthrough" });
   const eip = wasmGuestMemoryMinByteLength - 2;
 
@@ -156,9 +164,10 @@ test("the decode-fault edge keeps the encoded return", async () => {
 
   const decoded = decodeExit(run());
 
-  assertHostExit(decoded, HostExit.DECODE_FAULT);
-  strictEqual(decoded.payload, eip + 2);
-  strictEqual(decoded.detail, 1);
+  assertCpuException(decoded);
+  strictEqual(decoded.exception.kind, "PF");
+  strictEqual(decoded.exception.linearAddress, eip + 2);
+  strictEqual(decoded.exception.errorCode, PageFaultErrorCode.INSTRUCTION_FETCH);
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), eip);
 });
 
@@ -189,7 +198,7 @@ test("fallthrough br target lands on the embedder label across the fragment's ne
   strictEqual(run(), 0x90n);
 
   writeWasmCpuStateSnapshot(stateView, { eip: wasmGuestMemoryMinByteLength - 2 });
-  assertHostExit(decodeExit(run()), HostExit.DECODE_FAULT);
+  assertCpuException(decodeExit(run()));
 });
 
 test("consecutive fragments share the embedder's scratch locals", async () => {

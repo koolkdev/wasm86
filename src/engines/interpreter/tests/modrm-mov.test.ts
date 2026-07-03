@@ -8,7 +8,7 @@ import {
   writeInterpreterState
 } from "./interpreter-helpers.js";
 import { startAddress } from "#wasm/tests/helpers.js";
-import { HostExit } from "#wasm/exit.js";
+import { fetchPageFaultExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
@@ -68,7 +68,7 @@ test("memory ModRM with out-of-range address returns read fault without changing
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: initialState.ebx, detail: 4 });
+  deepStrictEqual(exit, readPageFaultExit(initialState.ebx));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -86,6 +86,6 @@ test("truncated ModRM returns decode fault without changing architectural state"
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.DECODE_FAULT, payload: eip + 1, detail: 1 });
+  deepStrictEqual(exit, fetchPageFaultExit(eip + 1));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

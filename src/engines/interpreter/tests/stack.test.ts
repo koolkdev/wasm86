@@ -9,7 +9,7 @@ import {
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
 import { startAddress } from "#wasm/tests/helpers.js";
-import { HostExit } from "#wasm/exit.js";
+import { readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { x86Flags, type X86Flag } from "#x86/flags.js";
 import {
   assertCompletedInstruction,
@@ -399,7 +399,7 @@ test("a faulting PUSHFD write reports its eip with prior state flushed", async (
   const exit = interpreter.run(2);
   const state = readInterpreterState(interpreter.stateView);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_WRITE_FAULT, payload: 0xffff_fffe, detail: 4 });
+  deepStrictEqual(exit, writePageFaultExit(0xffff_fffe));
   strictEqual(state.eax, 0);
   strictEqual(state.esp, 2);
   strictEqual(state.eip, startAddress + 3);
@@ -426,7 +426,7 @@ test("a faulting POPFD read reports its eip with prior state flushed", async () 
   const exit = interpreter.run(2);
   const state = readInterpreterState(interpreter.stateView);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: 0xffff_fffe, detail: 4 });
+  deepStrictEqual(exit, readPageFaultExit(0xffff_fffe));
   strictEqual(state.eax, 0);
   strictEqual(state.esp, 0xffff_fffe);
   strictEqual(state.eip, startAddress + 3);
@@ -710,7 +710,7 @@ test("a faulting POP [mem] write leaves ESP, EIP, and the stack untouched", asyn
 
   // The destination write guard faults after the handler already advanced
   // esp on the main path; the fault edge must restore it.
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_WRITE_FAULT, payload: 0xfffd, detail: 4 });
+  deepStrictEqual(exit, writePageFaultExit(0xfffd));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
   strictEqual(interpreter.guestView.getUint32(0x40, true), 0x5566_7788);
 });
@@ -730,7 +730,7 @@ test("a faulting POP word [mem] write leaves ESP, EIP, and the stack untouched",
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_WRITE_FAULT, payload: 0xffff, detail: 2 });
+  deepStrictEqual(exit, writePageFaultExit(0xffff));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
   strictEqual(interpreter.guestView.getUint16(0x40, true), 0xbeef);
 });
@@ -787,7 +787,7 @@ test("a faulting PUSH r16 write reports a word-sized fault", async () => {
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_WRITE_FAULT, payload: 0xffff_ffff, detail: 2 });
+  deepStrictEqual(exit, writePageFaultExit(0xffff_ffff));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -804,7 +804,7 @@ test("a faulting POP r16 read reports a word-sized fault", async () => {
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: 0xffff, detail: 2 });
+  deepStrictEqual(exit, readPageFaultExit(0xffff));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -814,25 +814,25 @@ test("faulting stack-all range guards leave architectural state unchanged", asyn
       "pushad",
       [0x60],
       createWasmCpuStateSnapshot({ eax: 0x1111_1111, esp: 0x10, eip: startAddress, instructionCount: 7 }),
-      { family: "host", reason: HostExit.MEMORY_WRITE_FAULT, payload: 0xffff_fff0, detail: 32 }
+      writePageFaultExit(0xffff_fff0)
     ],
     [
       "popad",
       [0x61],
       createWasmCpuStateSnapshot({ eax: 0x1111_1111, esp: 0xfff0, eip: startAddress, instructionCount: 7 }),
-      { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: 0xfff0, detail: 32 }
+      readPageFaultExit(0xfff0)
     ],
     [
       "pusha",
       [0x66, 0x60],
       createWasmCpuStateSnapshot({ eax: 0x1111_1111, esp: 8, eip: startAddress, instructionCount: 7 }),
-      { family: "host", reason: HostExit.MEMORY_WRITE_FAULT, payload: 0xffff_fff8, detail: 16 }
+      writePageFaultExit(0xffff_fff8)
     ],
     [
       "popa",
       [0x66, 0x61],
       createWasmCpuStateSnapshot({ eax: 0x1111_1111, esp: 0xfff8, eip: startAddress, instructionCount: 7 }),
-      { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: 0xfff8, detail: 16 }
+      readPageFaultExit(0xfff8)
     ]
   ] as const) {
     const interpreter = await instantiateWasmInterpreter();

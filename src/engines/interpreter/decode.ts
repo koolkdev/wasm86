@@ -51,7 +51,7 @@ export class RmDecodeHelpers {
     };
   }
 
-  // A fault result returns as-is, so payload, detail, and the unadvanced eip
+  // A fault result returns as-is, so exception fields and the unadvanced eip
   // match the inline emission exactly.
   emitMemoryAddressDecode(context: RmDecodeCallContext, opcodeLength: number): void {
     const { body, locals } = context;

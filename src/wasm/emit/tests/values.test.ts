@@ -5,6 +5,7 @@ import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsKindCh
 import type { Action } from "#ir/actions.js";
 import { fitsUnsigned, ValueTable } from "#ir/values.js";
 import { analyzeBlockValues } from "#wasm/emit/values.js";
+import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import { memoryCheck, memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function analyze(
@@ -19,6 +20,33 @@ function analyze(
     },
     exportedOutputs
   );
+}
+
+function hostExit(payload?: number): Action {
+  return {
+    kind: "finish",
+    finish: {
+      kind: "exit",
+      exit: {
+        class: "host",
+        reason: "hostTrap",
+        ...(payload === undefined ? {} : { payload })
+      }
+    }
+  };
+}
+
+function pageFaultExit(address: number, write = false): Action {
+  return {
+    kind: "finish",
+    finish: {
+      kind: "exit",
+      exit: {
+        class: "cpuException",
+        exception: pageFault(address, write ? PageFaultErrorCode.WRITE : 0)
+      }
+    }
+  };
 }
 
 test("action operand edges count at their action index", () => {
@@ -41,15 +69,15 @@ test("action operand edges count at their action index", () => {
       {
         kind: "if",
         condition: fault,
-        thenBody: { actions: [{ kind: "finish", finish: { kind: "exit", reason: "memoryReadFault" } }] }
+        thenBody: { actions: [pageFaultExit(guarded)] }
       },
       {
         kind: "if",
         condition,
-        thenBody: { actions: [{ kind: "finish", finish: { kind: "exit", reason: "hostTrap" } }] },
-        elseBody: { actions: [{ kind: "finish", finish: { kind: "exit", reason: "hostTrap" } }] }
+        thenBody: { actions: [hostExit()] },
+        elseBody: { actions: [hostExit()] }
       },
-      { kind: "finish", finish: { kind: "exit", reason: "hostTrap", payload } }
+      hostExit(payload)
     ]
   );
 
@@ -58,8 +86,8 @@ test("action operand edges count at their action index", () => {
   strictEqual(analysis.lastUse(address), 2);
   strictEqual(analysis.useCount(stored), 1);
   strictEqual(analysis.lastUse(stored), 2);
-  strictEqual(analysis.useCount(guarded), 1);
-  strictEqual(analysis.lastUse(guarded), 3);
+  strictEqual(analysis.useCount(guarded), 2);
+  strictEqual(analysis.lastUse(guarded), 4);
   strictEqual(analysis.useCount(fault), 1);
   strictEqual(analysis.lastUse(fault), 4);
   strictEqual(analysis.useCount(condition), 1);
@@ -117,7 +145,7 @@ test("fault body operands count at their if action index", () => {
         thenBody: {
           actions: [
             stateWrite(gprChannel("eax"), read),
-            { kind: "finish", finish: { kind: "exit", reason: "memoryWriteFault", payload: address } }
+            pageFaultExit(address, true)
           ]
         }
       }
@@ -190,7 +218,7 @@ test("an edge use past an overlapping store pins the read", () => {
         thenBody: {
           actions: [
             stateWrite(gprChannel("ebx"), read),
-            { kind: "finish", finish: { kind: "exit", reason: "memoryWriteFault", payload: address } }
+            pageFaultExit(address, true)
           ]
         }
       }
@@ -238,7 +266,7 @@ test("an edge value reloading a channel the edge flushes pins the read", () => {
           actions: [
             stateWrite(gprChannel("eax"), read),
             stateWrite(gprChannel("ebx"), five),
-            { kind: "finish", finish: { kind: "exit", reason: "memoryWriteFault", payload: address } }
+            pageFaultExit(address, true)
           ]
         }
       }
@@ -470,7 +498,7 @@ test("a nested body producer whose operand follows its output fails loudly", () 
             actions: [
               memoryRead(loaded, address, 32),
               stateWrite(gprChannel("eax"), loaded),
-              { kind: "finish", finish: { kind: "exit", reason: "memoryReadFault" } }
+              pageFaultExit(address)
             ]
           }
         }

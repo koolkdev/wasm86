@@ -1,7 +1,7 @@
 import { u32 } from "#x86/numeric.js";
 import { decodeIsaInstructionFromReader } from "./decode.js";
 import {
-  decodeFault,
+  truncatedInstructionFault,
   IsaDecodeError,
   maxX86InstructionLength,
   readAvailableBytes,
@@ -97,7 +97,7 @@ function decodeInstruction(
     if (error instanceof IsaDecodeError || error instanceof RangeError) {
       return {
         kind: "decode-fault",
-        fault: decodeFault(eip, readAvailableBytes(reader, eip, maxX86InstructionLength))
+        fault: truncatedInstructionFault(eip, readAvailableBytes(reader, eip, maxX86InstructionLength))
       };
     }
 

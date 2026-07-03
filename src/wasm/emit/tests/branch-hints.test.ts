@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { IfAction } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable, fitsUnsigned } from "#ir/values.js";
+import { pageFault } from "#x86/exceptions.js";
 import { wasmBranchHint } from "#wasm/encoder/function-body.js";
 import { irBlockBody } from "./harness.js";
 
@@ -27,11 +28,17 @@ function branchHintsForCheckIf(hint: IfAction["hint"]): readonly number[] {
           ...(hint === undefined ? {} : { hint }),
           thenBody: {
             actions: [
-              { kind: "finish", finish: { kind: "exit", reason: "memoryReadFault", payload: address, detail: 4 } }
+              {
+                kind: "finish",
+                finish: {
+                  kind: "exit",
+                  exit: { class: "cpuException", exception: pageFault(address, 0) }
+                }
+              }
             ]
           }
         },
-        { kind: "finish", finish: { kind: "exit", reason: "unsupported" } }
+        { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "unsupported" } } }
       ]
     }
   };

@@ -8,7 +8,7 @@ import {
   writeInterpreterState
 } from "./interpreter-helpers.js";
 import { startAddress } from "#wasm/tests/helpers.js";
-import { HostExit } from "#wasm/exit.js";
+import { fetchPageFaultExit, readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
   assertCompletedInstruction,
   executeInstruction,
@@ -114,7 +114,7 @@ test("faulting MOV segment selector to memory reports a word write", async () =>
   });
   const { exit, state } = await executeInstruction([0x8c, 0x2b], initial);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_WRITE_FAULT, payload: 0xffff, detail: 2 });
+  deepStrictEqual(exit, writePageFaultExit(0xffff));
   deepStrictEqual(state, initial);
 });
 
@@ -315,7 +315,7 @@ test("CMOVcc r16 memory source faults even when condition is false", async () =>
   });
   const { exit, state } = await executeInstruction([0x66, 0x0f, 0x45, 0x13], initial);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: 0x1_0000, detail: 2 });
+  deepStrictEqual(exit, readPageFaultExit(0x1_0000));
   strictEqual(state.edx, initial.edx);
   deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(initial));
   strictEqual(state.eip, initial.eip);
@@ -408,7 +408,7 @@ test("truncated MOV r32, imm32 returns decode fault without changing architectur
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.DECODE_FAULT, payload: eip + 1, detail: 4 });
+  deepStrictEqual(exit, fetchPageFaultExit(eip + 1));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

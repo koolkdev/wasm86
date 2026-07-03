@@ -1,6 +1,6 @@
-import type { FaultOperation } from "#x86/execution/run-result.js";
 import type {
   GuestMemory,
+  GuestMemoryAccess,
   MemoryFault,
   MemoryReadResult,
   MemoryWriteResult
@@ -15,7 +15,7 @@ export class WasmGuestMemory implements GuestMemory {
     return this.memory.buffer.byteLength;
   }
 
-  checkAccess(address: number, byteLength: number, operation: FaultOperation): MemoryFault | undefined {
+  checkAccess(address: number, byteLength: number, operation: GuestMemoryAccess): MemoryFault | undefined {
     return this.#fault(address, byteLength, operation);
   }
 
@@ -76,10 +76,10 @@ export class WasmGuestMemory implements GuestMemory {
     return { ok: true };
   }
 
-  #fault(address: number, size: number, operation: FaultOperation): MemoryFault | undefined {
+  #fault(address: number, size: number, operation: GuestMemoryAccess): MemoryFault | undefined {
     return isInBounds(address, size, this.byteLength)
       ? undefined
-      : { faultAddress: address, faultSize: size, faultOperation: operation };
+      : { faultAddress: address, faultSize: size, guestAccess: operation };
   }
 
   #view(): DataView<ArrayBuffer> {

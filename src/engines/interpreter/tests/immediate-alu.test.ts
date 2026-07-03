@@ -8,6 +8,7 @@ import {
 } from "./interpreter-helpers.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import { HostExit } from "#wasm/exit.js";
+import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
@@ -534,7 +535,7 @@ test("ADC memory destination fault leaves architectural state unchanged", async 
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: faultAddress, detail: 4 });
+  deepStrictEqual(exit, readPageFaultExit(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -553,7 +554,7 @@ test("SBB memory source fault leaves architectural state unchanged", async () =>
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: faultAddress, detail: 4 });
+  deepStrictEqual(exit, readPageFaultExit(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

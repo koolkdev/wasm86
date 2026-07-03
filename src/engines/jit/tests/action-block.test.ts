@@ -11,6 +11,7 @@ import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
 import { CompletionExit, HostExit } from "#wasm/exit.js";
+import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
@@ -84,7 +85,7 @@ test("a guard fault mid-block reports the faulting eip with earlier state flushe
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "host", reason: HostExit.MEMORY_READ_FAULT, payload: faultAddress, detail: 4 });
+  deepStrictEqual(run.exit, readPageFaultExit(faultAddress));
   strictEqual(state.eax, 6);
   strictEqual(state.eip, startEip + 1);
   strictEqual(state.instructionCount, 1);
@@ -157,7 +158,7 @@ function syntheticBlock(withHelper: boolean): IrBlock {
       actions: [
         ...(withHelper ? [resolveFlag(stored, "ZF")] : []),
         stateWrite(gprChannel("eax"), stored),
-        { kind: "finish", finish: { kind: "exit", reason: "hostTrap" } }
+        { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "hostTrap" } } }
       ]
     },
     values

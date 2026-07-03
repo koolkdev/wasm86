@@ -40,7 +40,7 @@ test("read_oob_reports_fault", () => {
 
   deepStrictEqual(result, {
     ok: false,
-    fault: { faultAddress: 4, faultSize: 1, faultOperation: "read" }
+    fault: { faultAddress: 4, faultSize: 1, guestAccess: "read" }
   });
 });
 
@@ -56,7 +56,7 @@ test("write_oob_does_not_partially_mutate", () => {
 
   deepStrictEqual(result, {
     ok: false,
-    fault: { faultAddress: 2, faultSize: 4, faultOperation: "write" }
+    fault: { faultAddress: 2, faultSize: 4, guestAccess: "write" }
   });
   deepStrictEqual(readGuestBytes(memory, 0, memory.byteLength), before);
 });
@@ -74,7 +74,7 @@ test("u32_crosses_end_faults", () => {
 
   deepStrictEqual(memory.readU32(5), {
     ok: false,
-    fault: { faultAddress: 5, faultSize: 4, faultOperation: "read" }
+    fault: { faultAddress: 5, faultSize: 4, guestAccess: "read" }
   });
 });
 
@@ -83,6 +83,6 @@ test("u32_address_ffffffff_faults", () => {
 
   deepStrictEqual(memory.readU32(0xffff_ffff), {
     ok: false,
-    fault: { faultAddress: 0xffff_ffff, faultSize: 4, faultOperation: "read" }
+    fault: { faultAddress: 0xffff_ffff, faultSize: 4, guestAccess: "read" }
   });
 });

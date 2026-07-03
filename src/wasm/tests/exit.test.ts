@@ -8,10 +8,12 @@ import {
   CompletionExit,
   decodeExit,
   encodeCompletionExit,
+  encodeCpuExceptionExit,
   encodeHostExit,
   HostExit,
   type DecodedExit
 } from "#wasm/exit.js";
+import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 
 const fixtures: readonly ExitFixture[] = [
   {
@@ -33,36 +35,24 @@ const fixtures: readonly ExitFixture[] = [
     payload: 0x1000
   },
   {
-    name: "decode_fault_exit_decodes",
-    family: "host",
-    reason: HostExit.DECODE_FAULT,
-    payload: 0x1000
+    name: "page_fault_zero_error_code_decodes",
+    family: "cpuException",
+    exception: pageFault(0x3e, 0)
   },
   {
-    name: "memory_read_fault_exit_decodes",
-    family: "host",
-    reason: HostExit.MEMORY_READ_FAULT,
-    payload: 0x3e
+    name: "page_fault_write_error_code_decodes",
+    family: "cpuException",
+    exception: pageFault(0x3e, PageFaultErrorCode.WRITE)
   },
   {
-    name: "memory_write_fault_exit_decodes",
-    family: "host",
-    reason: HostExit.MEMORY_WRITE_FAULT,
-    payload: 0x3e
-  },
-  {
-    name: "memory_fault_detail_decodes",
-    family: "host",
-    reason: HostExit.MEMORY_READ_FAULT,
-    payload: 0x3e,
-    detail: 2
+    name: "page_fault_fetch_error_code_decodes",
+    family: "cpuException",
+    exception: pageFault(0x1000, PageFaultErrorCode.INSTRUCTION_FETCH)
   },
   {
     name: "high_detail_bit_decodes_through_i64_const",
-    family: "host",
-    reason: HostExit.MEMORY_READ_FAULT,
-    payload: 0x3e,
-    detail: 0x8000
+    family: "cpuException",
+    exception: pageFault(0x3e, 0x8000)
   },
   {
     name: "roundtrip_high_payload_bit",
@@ -90,6 +80,10 @@ test("decode rejects unknown exit family", () => {
 
 test("decode rejects unknown host subtype", () => {
   assertUnknownExit(0x02ffn << 32n, /unknown Wasm host exit/);
+});
+
+test("decode rejects unknown CPU exception subtype", () => {
+  assertUnknownExit(0x03ffn << 32n, /unknown x86 CPU exception vector/);
 });
 
 test("decode rejects unknown completion subtype", () => {
@@ -148,7 +142,9 @@ function encodeFixture(fixture: ExitFixture): bigint {
     case "completion":
       return encodeCompletionExit(fixture.reason, fixture.payload);
     case "host":
-      return encodeHostExit(fixture.reason, fixture.payload, fixture.detail);
+      return encodeHostExit(fixture.reason, fixture.payload);
+    case "cpuException":
+      return encodeCpuExceptionExit(fixture.exception);
   }
 }
 
@@ -164,8 +160,12 @@ function expectedExit(fixture: ExitFixture): DecodedExit {
       return {
         family: fixture.family,
         reason: fixture.reason,
-        payload: fixture.payload,
-        ...(fixture.detail === undefined ? {} : { detail: fixture.detail })
+        payload: fixture.payload
+      };
+    case "cpuException":
+      return {
+        family: fixture.family,
+        exception: fixture.exception
       };
   }
 }

@@ -11,6 +11,7 @@ import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
 import { HostExit, decodeExit } from "#wasm/exit.js";
+import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -141,11 +142,14 @@ test("a faulting load before a branch exits through its fault edge", async () =>
   writeWasmCpuStateSnapshot(stateView, initial);
 
   const exit = decodeExit(run());
+  const expected = readPageFaultExit(0x10000);
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.MEMORY_READ_FAULT);
-  strictEqual(exit.payload, 0x10000);
-  strictEqual(exit.detail, 4);
+  strictEqual(exit.family, "cpuException");
+  if (exit.family === "cpuException") {
+    strictEqual(exit.exception.kind, expected.exception.kind);
+    strictEqual(exit.exception.linearAddress, expected.exception.linearAddress);
+    strictEqual(exit.exception.errorCode, expected.exception.errorCode);
+  }
   assertState(
     stateView,
     { regs: { ebx: 0x10000 }, eip: instructions[0]!.address, flags: allFlagsSet },
