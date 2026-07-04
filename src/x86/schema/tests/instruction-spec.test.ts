@@ -10,15 +10,14 @@ import {
   mnemonic,
   validateInstructionSet
 } from "#x86/schema/builders.js";
-import { opcodePathMatches, opcodePlusReg, validateOpcodePath } from "#x86/schema/opcodes.js";
+import { expandOpcodePath, opcodePlusReg, validateOpcodePath } from "#x86/schema/opcodes.js";
 import { imm, modrmReg, modrmRm, moffs, opReg } from "#x86/schema/operands.js";
 import type { InstructionSpec } from "#x86/schema/types.js";
 
 const semantics = { test: "semantics-placeholder" } as const;
 
-test("opcode path exact byte matching", () => {
-  strictEqual(opcodePathMatches([0x8b], [0x8b]), true);
-  strictEqual(opcodePathMatches([0x8b], [0x8a]), false);
+test("opcode path exact bytes expand directly", () => {
+  deepStrictEqual(expandOpcodePath([0x8b]), [{ bytes: [0x8b] }]);
 });
 
 test("opcode plus register path matches and exposes low bits through opcode.reg operand", () => {
@@ -32,10 +31,6 @@ test("opcode plus register path matches and exposes low bits through opcode.reg 
     semantics
   });
 
-  strictEqual(opcodePathMatches(spec.opcode, [0xb8]), true);
-  strictEqual(opcodePathMatches(spec.opcode, [0xbf]), true);
-  strictEqual(opcodePathMatches(spec.opcode, [0xc0]), false);
-
   const expanded = expandInstructionSpec(spec);
 
   strictEqual(expanded.length, 8);
@@ -45,17 +40,19 @@ test("opcode plus register path matches and exposes low bits through opcode.reg 
   strictEqual(expanded[7]?.opcodeLowBits, 7);
 });
 
-test("variable opcode path matching supports condition-family shapes", () => {
+test("variable opcode path expansion supports condition-family shapes", () => {
   const shortJcc = [{ byte: 0x70, bits: 4 }] as const;
   const nearJcc = [0x0f, { byte: 0x80, bits: 4 }] as const;
 
-  strictEqual(opcodePathMatches(shortJcc, [0x70]), true);
-  strictEqual(opcodePathMatches(shortJcc, [0x7f]), true);
-  strictEqual(opcodePathMatches(shortJcc, [0x80]), false);
+  deepStrictEqual(
+    expandOpcodePath(shortJcc),
+    Array.from({ length: 16 }, (_, low) => ({ bytes: [0x70 + low], lowBits: low }))
+  );
 
-  strictEqual(opcodePathMatches(nearJcc, [0x0f, 0x80]), true);
-  strictEqual(opcodePathMatches(nearJcc, [0x0f, 0x8f]), true);
-  strictEqual(opcodePathMatches(nearJcc, [0x0f, 0x90]), false);
+  deepStrictEqual(
+    expandOpcodePath(nearJcc),
+    Array.from({ length: 16 }, (_, low) => ({ bytes: [0x0f, 0x80 + low], lowBits: low }))
+  );
 });
 
 test("opcode descriptors reject malformed byte and fixed-bit shapes", () => {

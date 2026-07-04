@@ -1,5 +1,15 @@
 import type { FixedHighBits, OpcodePath, OpcodePathPart } from "./types.js";
 
+export type ExpandedOpcode = Readonly<{
+  bytes: readonly number[];
+  lowBits?: number;
+}>;
+
+type ExpandedOpcodePart = Readonly<{
+  byte: number;
+  lowBits?: number;
+}>;
+
 export function opcodePlusReg(byte: number): Readonly<{ byte: number; bits: 5 }> {
   return { byte, bits: 5 };
 }
@@ -30,72 +40,25 @@ export function validateOpcodePathPart(part: OpcodePathPart): void {
   }
 }
 
-export function opcodePathMatches(path: OpcodePath, bytes: readonly number[]): boolean {
-  validateOpcodePath(path);
-
-  if (bytes.length < path.length) {
-    return false;
-  }
-
-  for (let index = 0; index < path.length; index += 1) {
-    const part = path[index];
-    const byte = bytes[index];
-
-    if (part === undefined || byte === undefined || !opcodePartMatches(part, byte)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-export function opcodePartMatches(part: OpcodePathPart, byteRead: number): boolean {
-  validateByte(byteRead, "opcode byte read");
-
-  if (typeof part === "number") {
-    validateByte(part, "opcode byte");
-    return byteRead === part;
-  }
-
-  validateOpcodePathPart(part);
-
-  const bits = part.bits ?? 8;
-  return byteRead >>> (8 - bits) === part.byte >>> (8 - bits);
-}
-
 export function variableOpcodePartCount(path: OpcodePath): number {
   return path.filter((part) => typeof part !== "number" && (part.bits ?? 8) < 8).length;
 }
 
-export function opcodeLowBits(path: OpcodePath, bytes: readonly number[]): number | undefined {
-  if (!opcodePathMatches(path, bytes)) {
-    return undefined;
-  }
-
-  for (let index = 0; index < path.length; index += 1) {
-    const part = path[index];
-    const byte = bytes[index];
-
-    if (part !== undefined && byte !== undefined && typeof part !== "number" && (part.bits ?? 8) < 8) {
-      return byte & lowMask(part.bits ?? 8);
-    }
-  }
-
-  return undefined;
-}
-
-export function expandOpcodePath(path: OpcodePath): readonly (readonly number[])[] {
+export function expandOpcodePath(path: OpcodePath): readonly ExpandedOpcode[] {
   validateOpcodePath(path);
 
-  const expanded: number[][] = [[]];
+  const expanded: ExpandedOpcode[] = [{ bytes: [] }];
 
   for (const part of path) {
     const values = expandOpcodePart(part);
-    const next: number[][] = [];
+    const next: ExpandedOpcode[] = [];
 
     for (const prefix of expanded) {
       for (const value of values) {
-        next.push([...prefix, value]);
+        const bytes = [...prefix.bytes, value.byte];
+        const lowBits = prefix.lowBits ?? value.lowBits;
+
+        next.push(lowBits === undefined ? { bytes } : { bytes, lowBits });
       }
     }
 
@@ -105,20 +68,21 @@ export function expandOpcodePath(path: OpcodePath): readonly (readonly number[])
   return expanded;
 }
 
-function expandOpcodePart(part: OpcodePathPart): readonly number[] {
+function expandOpcodePart(part: OpcodePathPart): readonly ExpandedOpcodePart[] {
   if (typeof part === "number") {
     validateByte(part, "opcode byte");
-    return [part];
+    return [{ byte: part }];
   }
 
   validateOpcodePathPart(part);
 
   const bits = part.bits ?? 8;
   const count = 1 << (8 - bits);
-  const values: number[] = [];
+  const values: ExpandedOpcodePart[] = [];
 
   for (let low = 0; low < count; low += 1) {
-    values.push(part.byte | low);
+    const byte = part.byte | low;
+    values.push(bits < 8 ? { byte, lowBits: low } : { byte });
   }
 
   return values;

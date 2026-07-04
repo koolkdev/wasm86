@@ -1,6 +1,5 @@
 import {
   expandOpcodePath,
-  opcodeLowBits,
   validateOpcodePath,
   variableOpcodePartCount
 } from "./opcodes.js";
@@ -86,14 +85,12 @@ export function expandInstructionSpec<TSemantics>(
 ): readonly ExpandedInstructionSpec<TSemantics>[] {
   validateInstructionSpec(spec);
 
-  return expandOpcodePath(spec.opcode).map((opcode) => {
-    const lowBits = opcodeLowBits(spec.opcode, opcode);
-
+  return expandOpcodePath(spec.opcode).map(({ bytes, lowBits }) => {
     if (lowBits === undefined) {
-      return { spec, opcode };
+      return { spec, opcode: bytes };
     }
 
-    return { spec, opcode, opcodeLowBits: lowBits };
+    return { spec, opcode: bytes, opcodeLowBits: lowBits };
   });
 }
 
@@ -126,7 +123,11 @@ export function instructionSpecsOverlap(left: InstructionSpec, right: Instructio
 
   for (const leftOpcode of leftOpcodes) {
     for (const rightOpcode of rightOpcodes) {
-      if (opcodeBytesEqual(leftOpcode, rightOpcode) && prefixUseOverlaps(left, right) && modRmUseOverlaps(left, right)) {
+      if (
+        opcodeBytesEqual(leftOpcode.bytes, rightOpcode.bytes) &&
+        prefixUseOverlaps(left, right) &&
+        modRmUseOverlaps(left, right)
+      ) {
         return true;
       }
     }
