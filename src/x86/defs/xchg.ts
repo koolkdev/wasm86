@@ -1,6 +1,4 @@
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { implicitReg, modrmReg, modrmRm, opReg } from "#x86/schema/operands.js";
-import { opcodePlusReg } from "#x86/schema/opcodes.js";
+import { form, implicitReg, mnemonic, modrmReg, modrmRm, opcodePlusReg, opReg } from "./dsl.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 
 export const XCHG = mnemonic("xchg", [

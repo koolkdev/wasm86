@@ -1,12 +1,63 @@
 import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import type {
+  DefinedIsa,
   ImmediateExtension,
+  InstructionForm,
+  InstructionFormSpec,
+  InstructionMnemonic,
+  InstructionSpec,
+  IsaDefinition,
   MemOperandType,
   OperandSpec,
   RegOperandType,
   RmOperandType
-} from "./types.js";
+} from "./spec.js";
+
+export function form(
+  formId: string,
+  spec: InstructionFormSpec
+): InstructionForm {
+  return { formId, spec };
+}
+
+export function mnemonic(
+  mnemonicName: string,
+  forms: readonly InstructionForm[]
+): InstructionMnemonic {
+  if (forms.length === 0) {
+    throw new Error("instruction mnemonic must have at least one form");
+  }
+
+  return { mnemonic: mnemonicName, forms };
+}
+
+export function defineIsa(definition: IsaDefinition): DefinedIsa {
+  return {
+    name: definition.name,
+    instructions: definition.mnemonics.flatMap((entry) => instructionsForMnemonic(entry))
+  };
+}
+
+export function instructionsForMnemonic(
+  entry: InstructionMnemonic
+): readonly InstructionSpec[] {
+  return entry.forms.map((entryForm) =>
+    instruction({
+      id: `${entry.mnemonic}.${entryForm.formId}`,
+      mnemonic: entry.mnemonic,
+      ...entryForm.spec
+    })
+  );
+}
+
+export function opcodePlusReg(byte: number): Readonly<{ byte: number; bits: 5 }> {
+  return { byte, bits: 5 };
+}
+
+function instruction(spec: InstructionSpec): InstructionSpec {
+  return spec;
+}
 
 export function modrmReg(type: RegOperandType): OperandSpec {
   return { kind: "modrm.reg", type };

@@ -1,7 +1,16 @@
 import { CONDITION_CODE_DESCRIPTORS } from "#x86/defs/condition-codes.js";
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm, implicitReg, modrmReg, modrmRm, modrmSreg, moffs, opReg } from "#x86/schema/operands.js";
-import { opcodePlusReg } from "#x86/schema/opcodes.js";
+import {
+  form,
+  imm,
+  implicitReg,
+  mnemonic,
+  modrmReg,
+  modrmRm,
+  modrmSreg,
+  moffs,
+  opcodePlusReg,
+  opReg
+} from "./dsl.js";
 import { cmovSemantic, movSemantic, movSregSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 
 export const MOV = mnemonic("mov", [

@@ -4,8 +4,7 @@ import { test } from "node:test";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import { X86_32_CORE } from "#x86/index.js";
-import { expandInstructionSpec } from "#x86/schema/builders.js";
-import type { InstructionSpec } from "#x86/schema/types.js";
+import { expandInstructionSpec, type InstructionSpec } from "#x86/defs/spec.js";
 import {
   buildSemanticTrace,
   operands,

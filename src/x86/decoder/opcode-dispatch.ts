@@ -1,5 +1,9 @@
-import { instructionReadsModRm } from "#x86/schema/builders.js";
-import type { ExpandedInstructionSpec, OperandSizePrefixMode, Reg3 } from "#x86/schema/types.js";
+import {
+  instructionReadsModRm,
+  type ExpandedInstructionSpec,
+  type OperandSizePrefixMode,
+  type Reg3
+} from "#x86/defs/spec.js";
 import type { IsaDecodeReader } from "./reader.js";
 
 export type OpcodeDispatchCandidateSet = Readonly<{

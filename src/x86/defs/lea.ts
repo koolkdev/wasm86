@@ -1,5 +1,4 @@
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { modrmReg, modrmRm } from "#x86/schema/operands.js";
+import { form, mnemonic, modrmReg, modrmRm } from "./dsl.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 
 export const LEA = mnemonic("lea", [

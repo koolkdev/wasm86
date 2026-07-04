@@ -80,3 +80,72 @@ export type ExpandedInstructionSpec = Readonly<{
   opcode: readonly number[];
   opcodeLowBits?: number;
 }>;
+
+export type ExpandedOpcode = Readonly<{
+  bytes: readonly number[];
+  lowBits?: number;
+}>;
+
+type ExpandedOpcodePart = Readonly<{
+  byte: number;
+  lowBits?: number;
+}>;
+
+export function instructionReadsModRm(spec: InstructionSpec): boolean {
+  return spec.modrm?.match !== undefined || (spec.operands ?? []).some(isModRmOperand);
+}
+
+export function expandInstructionSpec(
+  spec: InstructionSpec
+): readonly ExpandedInstructionSpec[] {
+  return expandOpcodePath(spec.opcode).map(({ bytes, lowBits }) => {
+    if (lowBits === undefined) {
+      return { spec, opcode: bytes };
+    }
+
+    return { spec, opcode: bytes, opcodeLowBits: lowBits };
+  });
+}
+
+export function expandOpcodePath(path: OpcodePath): readonly ExpandedOpcode[] {
+  const expanded: ExpandedOpcode[] = [{ bytes: [] }];
+
+  for (const part of path) {
+    const values = expandOpcodePart(part);
+    const next: ExpandedOpcode[] = [];
+
+    for (const prefix of expanded) {
+      for (const value of values) {
+        const bytes = [...prefix.bytes, value.byte];
+        const lowBits = prefix.lowBits ?? value.lowBits;
+
+        next.push(lowBits === undefined ? { bytes } : { bytes, lowBits });
+      }
+    }
+
+    expanded.splice(0, expanded.length, ...next);
+  }
+
+  return expanded;
+}
+
+function isModRmOperand(operand: OperandSpec): boolean {
+  return operand.kind === "modrm.reg" || operand.kind === "modrm.sreg" || operand.kind === "modrm.rm";
+}
+
+function expandOpcodePart(part: OpcodePathPart): readonly ExpandedOpcodePart[] {
+  if (typeof part === "number") {
+    return [{ byte: part }];
+  }
+
+  const bits = part.bits ?? 8;
+  const count = 1 << (8 - bits);
+  const values: ExpandedOpcodePart[] = [];
+
+  for (let low = 0; low < count; low += 1) {
+    const byte = part.byte | low;
+    values.push(bits < 8 ? { byte, lowBits: low } : { byte });
+  }
+
+  return values;
+}

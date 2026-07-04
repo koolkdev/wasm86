@@ -1,6 +1,4 @@
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { opcodePlusReg } from "#x86/schema/opcodes.js";
-import { imm, implicitReg, modrmReg, modrmRm, opReg } from "#x86/schema/operands.js";
+import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm, opcodePlusReg, opReg } from "./dsl.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 
 export const ADD = mnemonic("add", [

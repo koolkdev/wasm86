@@ -12,7 +12,7 @@ import type {
   OperandSpec,
   Reg3,
   RmOperandType
-} from "#x86/schema/types.js";
+} from "#x86/defs/spec.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { segmentRegisters } from "#x86/types.js";
 import { encodeHostExit, HostExit } from "#wasm/exit.js";

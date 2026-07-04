@@ -2,18 +2,16 @@ import { u32 } from "#x86/numeric.js";
 import { X86_32_CORE } from "#x86/index.js";
 import {
   expandInstructionSpec,
-  instructionReadsModRm
-} from "#x86/schema/builders.js";
-import type {
-  ExpandedInstructionSpec,
-  MemOperandType,
-  ModRmMatch,
-  OperandSizePrefixMode,
-  OperandSpec,
-  Reg3,
-  RegOperandType,
-  RmOperandType
-} from "#x86/schema/types.js";
+  instructionReadsModRm,
+  type ExpandedInstructionSpec,
+  type MemOperandType,
+  type ModRmMatch,
+  type OperandSizePrefixMode,
+  type OperandSpec,
+  type Reg3,
+  type RegOperandType,
+  type RmOperandType
+} from "#x86/defs/spec.js";
 import { registerAlias, registerAliasByIndex } from "#x86/registers.js";
 import { segmentRegisters, type MemOperand, type OperandWidth, type SegmentRegister } from "#x86/types.js";
 import { signedImm8, signedImm32 } from "./immediate.js";

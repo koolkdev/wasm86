@@ -1,6 +1,4 @@
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm, implicitSreg, modrmRm, opReg } from "#x86/schema/operands.js";
-import { opcodePlusReg } from "#x86/schema/opcodes.js";
+import { form, imm, implicitSreg, mnemonic, modrmRm, opcodePlusReg, opReg } from "./dsl.js";
 import {
   leaveSemantic,
   popadSemantic,

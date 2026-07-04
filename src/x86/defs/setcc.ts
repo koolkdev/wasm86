@@ -1,6 +1,5 @@
 import { CONDITION_CODE_DESCRIPTORS } from "#x86/defs/condition-codes.js";
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { modrmRm } from "#x86/schema/operands.js";
+import { form, mnemonic, modrmRm } from "./dsl.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 
 export const SETCC = CONDITION_CODE_DESCRIPTORS.map((descriptor) =>

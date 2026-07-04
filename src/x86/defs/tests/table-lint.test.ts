@@ -3,19 +3,19 @@ import { test } from "node:test";
 
 import { formatPlaceholders } from "#x86/format.js";
 import { X86_32_CORE } from "#x86/index.js";
-import { instructionReadsModRm } from "#x86/schema/builders.js";
-import { expandOpcodePath } from "#x86/schema/opcodes.js";
-import { imm, modrmReg, modrmRm, opReg } from "#x86/schema/operands.js";
+import { imm, modrmReg, modrmRm, opReg } from "#x86/defs/dsl.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import type {
-  FixedHighBits,
-  InstructionSpec,
-  ModRmMatch,
-  OpcodePath,
-  OpcodePathPart,
-  OperandSizePrefixMode,
-  Reg3
-} from "#x86/schema/types.js";
+import {
+  expandOpcodePath,
+  instructionReadsModRm,
+  type FixedHighBits,
+  type InstructionSpec,
+  type ModRmMatch,
+  type OpcodePath,
+  type OpcodePathPart,
+  type OperandSizePrefixMode,
+  type Reg3
+} from "#x86/defs/spec.js";
 
 const semantics: SemanticTemplate = () => {};
 

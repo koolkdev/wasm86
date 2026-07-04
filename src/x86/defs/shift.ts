@@ -1,6 +1,5 @@
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm, implicitReg, modrmReg, modrmRm } from "#x86/schema/operands.js";
-import type { InstructionMnemonic } from "#x86/schema/types.js";
+import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "./dsl.js";
+import type { InstructionMnemonic } from "./spec.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { rotateSemantic, type RotateOp } from "#x86/semantics/rotate.js";
 import {

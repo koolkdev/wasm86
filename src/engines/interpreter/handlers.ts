@@ -11,7 +11,7 @@ import {
   type ExternalValueId,
   type OperandBinding
 } from "#ir/operands.js";
-import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#x86/schema/types.js";
+import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#x86/defs/spec.js";
 import { reg16, reg32, reg8, type RegName } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";

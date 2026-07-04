@@ -1,4 +1,4 @@
-import { defineIsa } from "./schema/builders.js";
+import { defineIsa } from "./defs/dsl.js";
 import { ADC, ADD, AND, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR } from "./defs/alu.js";
 import { AAA, AAD, AAM, AAS, DAA, DAS } from "./defs/bcd-ascii.js";
 import { BSWAP } from "./defs/byte-swap.js";

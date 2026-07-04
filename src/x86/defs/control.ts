@@ -2,8 +2,8 @@ import {
   CONDITION_CODE_DESCRIPTORS,
   type ConditionCodeDescriptor
 } from "#x86/defs/condition-codes.js";
-import { form, mnemonic, type InstructionForm, type InstructionMnemonic } from "#x86/schema/builders.js";
-import { imm, modrmRm, rel } from "#x86/schema/operands.js";
+import { form, imm, mnemonic, modrmRm, rel } from "./dsl.js";
+import type { InstructionForm, InstructionMnemonic } from "./spec.js";
 import { callSemantic, jccSemantic, jmpSemantic, retImmSemantic, retSemantic } from "#x86/semantics/control.js";
 
 export const JMP = mnemonic("jmp", [

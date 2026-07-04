@@ -1,4 +1,4 @@
-import { form, mnemonic } from "#x86/schema/builders.js";
+import { form, mnemonic } from "./dsl.js";
 import {
   accumulatorSignExtendSemantic,
   highAccumulatorSignExtendSemantic

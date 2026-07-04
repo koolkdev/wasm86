@@ -1,5 +1,4 @@
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm, modrmRm } from "#x86/schema/operands.js";
+import { form, imm, mnemonic, modrmRm } from "./dsl.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 
 export const NOP = mnemonic("nop", [

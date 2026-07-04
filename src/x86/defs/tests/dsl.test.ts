@@ -3,14 +3,21 @@ import { test } from "node:test";
 
 import {
   defineIsa,
-  expandInstructionSpec,
   form,
-  instruction,
+  imm,
+  mnemonic,
+  modrmReg,
+  modrmRm,
+  moffs,
+  opcodePlusReg,
+  opReg
+} from "#x86/defs/dsl.js";
+import {
+  expandInstructionSpec,
+  expandOpcodePath,
   instructionReadsModRm,
-  mnemonic
-} from "#x86/schema/builders.js";
-import { expandOpcodePath, opcodePlusReg } from "#x86/schema/opcodes.js";
-import { imm, modrmReg, modrmRm, moffs, opReg } from "#x86/schema/operands.js";
+  type InstructionSpec
+} from "#x86/defs/spec.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 
 const semantics: SemanticTemplate = () => {};
@@ -21,14 +28,14 @@ test("opcode path exact bytes expand directly", () => {
 
 test("opcode plus register path matches and exposes low bits through opcode.reg operand", () => {
   // B8+rd id: MOV r32, imm32
-  const spec = instruction({
+  const spec: InstructionSpec = {
     id: "mov.r32_imm32",
     mnemonic: "mov",
     opcode: [opcodePlusReg(0xb8)],
     operands: [opReg(), imm(32)],
     syntax: "mov {0}, {1}",
     semantics
-  });
+  };
 
   const expanded = expandInstructionSpec(spec);
 
@@ -56,14 +63,14 @@ test("variable opcode path expansion supports condition-family shapes", () => {
 
 test("normal slash-r form reads ModRM through operands without a modrm field", () => {
   // 8B /r: MOV r32, r/m32
-  const spec = instruction({
+  const spec: InstructionSpec = {
     id: "mov.r32_rm32",
     mnemonic: "mov",
     opcode: [0x8b],
     operands: [modrmReg("r32"), modrmRm("rm32")],
     syntax: "mov {0}, {1}",
     semantics
-  });
+  };
 
   strictEqual(spec.modrm, undefined);
   strictEqual(instructionReadsModRm(spec), true);
@@ -71,7 +78,7 @@ test("normal slash-r form reads ModRM through operands without a modrm field", (
 
 test("modrm.match represents Intel slash digit notation", () => {
   // 83 /5 ib: SUB r/m32, sign-extended imm8
-  const spec = instruction({
+  const spec: InstructionSpec = {
     id: "sub.rm32_imm8",
     mnemonic: "sub",
     opcode: [0x83],
@@ -79,13 +86,13 @@ test("modrm.match represents Intel slash digit notation", () => {
     operands: [modrmRm("rm32"), imm(8, "sign")],
     syntax: "sub {0}, {1}",
     semantics
-  });
+  };
 
   deepStrictEqual(spec.modrm?.match, { reg: 5 });
   strictEqual(instructionReadsModRm(spec), true);
 });
 
-test("schema operand helpers support byte and word ModRM forms", () => {
+test("dsl operand helpers support byte and word ModRM forms", () => {
   deepStrictEqual(modrmReg("r8"), { kind: "modrm.reg", type: "r8" });
   deepStrictEqual(modrmRm("rm16"), { kind: "modrm.rm", type: "rm16" });
   deepStrictEqual(modrmRm("r32_m16"), { kind: "modrm.rm", type: "r32_m16" });

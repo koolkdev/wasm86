@@ -1,5 +1,4 @@
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm, implicitReg, modrmReg, modrmRm } from "#x86/schema/operands.js";
+import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "./dsl.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { testSemantic } from "#x86/semantics/test.js";
 

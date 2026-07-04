@@ -1,5 +1,4 @@
-import { form, mnemonic } from "#x86/schema/builders.js";
-import { imm } from "#x86/schema/operands.js";
+import { form, imm, mnemonic } from "./dsl.js";
 import {
   aaaSemantic,
   aadSemantic,
