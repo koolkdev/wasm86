@@ -186,10 +186,14 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
     [8, 16, 32].map((width) => lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, width as 8 | 16 | 32))
   );
 
-  for (const switchCase of switchAction.cases) {
+  const accesses = [{ accessByteLength: 1 }, { accessByteLength: 2 }, {}] as const;
+
+  for (const [index, switchCase] of switchAction.cases.entries()) {
+    const access = accesses[index]!;
+
     deepStrictEqual(switchCase.body.actions.map((action) => action.kind === "op" ? action.op : undefined), [
-      { kind: "state.read", slot: lazyFlagsAChannel },
-      { kind: "state.read", slot: lazyFlagsBChannel }
+      { kind: "state.read", slot: lazyFlagsAChannel, ...access },
+      { kind: "state.read", slot: lazyFlagsBChannel, ...access }
     ]);
 
     const result = values.node(switchCase.body.result!);
@@ -210,6 +214,34 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
 
   ok(fallback.kind === "binary", "expected fallback CF | ZF expression");
   strictEqual(fallback.operator, "or");
+});
+
+test("signed compare-family conditions sign-extend through narrow lazy reads", () => {
+  const { values, actions, flags } = createHarness();
+
+  flags.condition("L");
+
+  const switchAction = switchActions(actions)[0];
+
+  ok(switchAction !== undefined, "expected lazy condition switch");
+
+  const accesses = [{ signed: true, accessByteLength: 1 }, { signed: true, accessByteLength: 2 }, {}] as const;
+
+  for (const [index, switchCase] of switchAction.cases.entries()) {
+    const access = accesses[index]!;
+    const [left, right] = switchCase.body.actions;
+
+    ok(left?.kind === "op" && right?.kind === "op", "expected arm-local reads");
+    deepStrictEqual(left.op, { kind: "state.read", slot: lazyFlagsAChannel, ...access });
+    deepStrictEqual(right.op, { kind: "state.read", slot: lazyFlagsBChannel, ...access });
+
+    const result = values.node(switchCase.body.result!);
+
+    ok(result.kind === "compare", "expected direct arm compare");
+    strictEqual(result.operator, "lt_s");
+    strictEqual(result.a, left.output);
+    strictEqual(result.b, right.output);
+  }
 });
 
 test("input-backed equality condition builds lazy cases from the shared operator table", () => {

@@ -16,7 +16,13 @@ import {
   type WidthBounds
 } from "./values.js";
 
-export type StateReadOp = Readonly<{ kind: "state.read"; slot: StateSlot; signed?: true }>;
+export type StateReadOp = Readonly<{
+  kind: "state.read";
+  slot: StateSlot;
+  signed?: true;
+  // Narrow access to the slot's low bytes.
+  accessByteLength?: 1 | 2;
+}>;
 export type StateWriteOp = Readonly<{ kind: "state.write"; slot: StateSlot; value: ValueId }>;
 export type MemoryReadOp = Readonly<{
   kind: "memory.read";
@@ -68,7 +74,7 @@ export function opAccess(op: IrOp): OpAccess {
     case "state.read":
       return {
         valueInputs: slotValueInputs(op.slot),
-        valueOutput: stateReadOutput(op.slot, op.signed === true),
+        valueOutput: stateReadOutput(op),
         reads: [{ space: "state", slot: op.slot }],
         writes: []
       };
@@ -148,8 +154,14 @@ function slotValueInputs(slot: StateSlot): readonly ValueId[] {
   }
 }
 
-function stateReadOutput(slot: StateSlot, signed: boolean): OpValueOutput {
-  return output(readBounds(slot, signed));
+function stateReadOutput(op: StateReadOp): OpValueOutput {
+  const signed = op.signed === true;
+
+  return output(
+    op.accessByteLength === undefined
+      ? readBounds(op.slot, signed)
+      : byteLengthBounds(op.accessByteLength, signed)
+  );
 }
 
 function memoryReadOutput(width: OperandWidth, signed: boolean): OpValueOutput {
@@ -163,9 +175,9 @@ function memoryReadOutput(width: OperandWidth, signed: boolean): OpValueOutput {
 function readBounds(slot: StateSlot, signed: boolean): WidthBounds | undefined {
   switch (slot.kind) {
     case "gpr":
-      return gprReadBounds(slot.byteLength, signed);
+      return byteLengthBounds(slot.byteLength, signed);
     case "gprDynamic":
-      return gprReadBounds(slot.byteLength, signed);
+      return byteLengthBounds(slot.byteLength, signed);
     case "flag":
       return fitsUnsigned(1);
     case "segment":
@@ -180,7 +192,7 @@ function readBounds(slot: StateSlot, signed: boolean): WidthBounds | undefined {
   }
 }
 
-function gprReadBounds(byteLength: 1 | 2 | 4, signed: boolean): WidthBounds | undefined {
+function byteLengthBounds(byteLength: 1 | 2 | 4, signed: boolean): WidthBounds | undefined {
   switch (byteLength) {
     case 1:
       return signed ? signExtended(8) : fitsUnsigned(8);

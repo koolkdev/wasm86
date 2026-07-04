@@ -25,19 +25,28 @@ export function emitSlotLoad(
   body: WasmFunctionBodyEncoder,
   slot: StateSlot,
   signed: boolean,
-  operands: OperandUses
+  operands: OperandUses,
+  accessByteLength?: 1 | 2
 ): void;
 export function emitSlotLoad(
   body: WasmFunctionBodyEncoder,
   slot: StateSlot,
   signed: boolean,
-  operands?: OperandUses
+  operands?: OperandUses,
+  accessByteLength?: 1 | 2
 ): void {
-  const immediate = slotImmediate(slot);
+  const access = accessByteLength ?? slotAccessByteLength(slot);
+
+  assert(
+    accessByteLength === undefined || accessByteLength < slotAccessByteLength(slot),
+    "a narrowed slot access must be narrower than the slot"
+  );
+
+  const immediate = slotImmediate(slot, access);
 
   emitSlotAddress(body, slot, operands);
 
-  switch (slotAccessByteLength(slot)) {
+  switch (access) {
     case 1:
       signed ? body.i32Load8S(immediate) : body.i32Load8U(immediate);
       return;
@@ -57,7 +66,7 @@ export function emitSlotStore(
   value: ValueId,
   operands: OperandUses
 ): void {
-  const immediate = slotImmediate(slot);
+  const immediate = slotImmediate(slot, slotAccessByteLength(slot));
 
   emitSlotAddress(body, slot, operands);
   operands.emitUse(value);
@@ -140,11 +149,11 @@ function emitDynamicSegmentOffset(
   body.i32Const(slot.field === "selector" ? 1 : 2).i32Shl();
 }
 
-function slotImmediate(slot: StateSlot): WasmMemoryImmediate {
+function slotImmediate(slot: StateSlot, accessByteLength: 1 | 2 | 4): WasmMemoryImmediate {
   const offset = slotBaseOffset(slot);
 
   return {
-    align: accessAlign(offset, slotAccessByteLength(slot)),
+    align: accessAlign(offset, accessByteLength),
     offset,
     memoryIndex: wasmMemoryIndex.cpuState
   };

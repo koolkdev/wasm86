@@ -66,7 +66,10 @@ test("LOGIC arms read only the lazy A channel", () => {
 
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(module.encode()));
   const loads = opcodes.filter(
-    (opcode) => opcode === wasmOpcode.i32Load || opcode === wasmOpcode.i32Load8U
+    (opcode) =>
+      opcode === wasmOpcode.i32Load ||
+      opcode === wasmOpcode.i32Load8U ||
+      opcode === wasmOpcode.i32Load16U
   );
 
   // One kind-channel read, one NONE flag byte, two lazy operands per

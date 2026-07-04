@@ -34,7 +34,7 @@ export function emitOp(
 ): void {
   switch (op.kind) {
     case "state.read":
-      emitSlotLoad(body, op.slot, op.signed === true, operands);
+      emitSlotLoad(body, op.slot, op.signed === true, operands, op.accessByteLength);
       return;
     case "state.write":
       emitSlotStore(body, op.slot, op.value, operands);

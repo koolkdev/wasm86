@@ -124,6 +124,14 @@ test("op output bounds match narrow and signed reads", () => {
     type: "i32",
     bounds: fitsUnsigned(8)
   });
+  deepStrictEqual(opValueOutput({ kind: "state.read", slot: lazyFlagsAChannel, accessByteLength: 1 }), {
+    type: "i32",
+    bounds: fitsUnsigned(8)
+  });
+  deepStrictEqual(opValueOutput({ kind: "state.read", slot: lazyFlagsAChannel, signed: true, accessByteLength: 2 }), {
+    type: "i32",
+    bounds: signExtended(16)
+  });
   deepStrictEqual(opValueOutput({ kind: "state.read", slot: segmentSelectorChannel("fs") }), {
     type: "i32",
     bounds: fitsUnsigned(16)

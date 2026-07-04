@@ -1,7 +1,8 @@
 import { createOpAction, type SwitchCase } from "#ir/actions.js";
 import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { IrBlock } from "#ir/block.js";
-import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
+import type { StateReadOp } from "#ir/ops.js";
 import { fitsUnsigned, ValueTable, type ValueId } from "#ir/values.js";
 import { statusFlagValuesForSource } from "#x86/flag-values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
@@ -113,8 +114,8 @@ function binaryArm(
   kind: "add" | "sub",
   width: OperandWidth
 ): SwitchCase {
-  const left = createOpAction(values, { kind: "state.read", slot: lazyFlagsAChannel });
-  const right = createOpAction(values, { kind: "state.read", slot: lazyFlagsBChannel });
+  const left = createOpAction(values, lazyOperandReadOp(lazyFlagsAChannel, width));
+  const right = createOpAction(values, lazyOperandReadOp(lazyFlagsBChannel, width));
   const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
     kind,
     width,
@@ -133,7 +134,7 @@ function binaryArm(
 }
 
 function logicArm(values: ValueTable, flag: LazyFlagHelper, width: OperandWidth): SwitchCase {
-  const result = createOpAction(values, { kind: "state.read", slot: lazyFlagsAChannel });
+  const result = createOpAction(values, lazyOperandReadOp(lazyFlagsAChannel, width));
   const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
     kind: "logic",
     width,
@@ -144,4 +145,10 @@ function logicArm(values: ValueTable, flag: LazyFlagHelper, width: OperandWidth)
     match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, width),
     body: { actions: [result], result: formula }
   };
+}
+
+function lazyOperandReadOp(slot: StateSlot, width: OperandWidth): StateReadOp {
+  return width === 32
+    ? { kind: "state.read", slot }
+    : { kind: "state.read", slot, accessByteLength: width === 8 ? 1 : 2 };
 }

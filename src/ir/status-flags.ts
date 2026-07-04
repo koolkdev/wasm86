@@ -12,12 +12,14 @@ import {
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
 import { createOpAction, type Action, type SwitchCase } from "./actions.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "./lazy-flags.js";
+import type { StateReadOp } from "./ops.js";
 import { valueTableFlagOps } from "./flag-value-ops.js";
 import {
   flagChannel,
   lazyFlagsAChannel,
   lazyFlagsBChannel,
-  lazyFlagsKindChannel
+  lazyFlagsKindChannel,
+  type StateSlot
 } from "./slots.js";
 import { fitsUnsigned, type ValueId, type ValueTable } from "./values.js";
 import type { PendingState } from "./pending/state.js";
@@ -295,7 +297,7 @@ export class StatusFlags {
   }
 
   #lazyConditionArm(spec: LazyConditionCaseSpec): SwitchCase {
-    const left = createOpAction(this.#values, { kind: "state.read", slot: lazyFlagsAChannel });
+    const left = createOpAction(this.#values, this.#lazyOperandRead(lazyFlagsAChannel, spec));
 
     assert(left.output !== undefined, "lazy condition left read is missing its output");
 
@@ -309,7 +311,7 @@ export class StatusFlags {
       };
     }
 
-    const right = createOpAction(this.#values, { kind: "state.read", slot: lazyFlagsBChannel });
+    const right = createOpAction(this.#values, this.#lazyOperandRead(lazyFlagsBChannel, spec));
 
     assert(right.output !== undefined, "lazy condition right read is missing its output");
 
@@ -320,6 +322,23 @@ export class StatusFlags {
         result: this.#compare(spec.width, spec.operator, left.output, right.output)
       }
     };
+  }
+
+  #lazyOperandRead(slot: StateSlot, spec: LazyConditionCaseSpec): StateReadOp {
+    const signed = signedComparePredicates.has(spec.operator);
+
+    switch (spec.width) {
+      case 8:
+        return signed
+          ? { kind: "state.read", slot, signed: true, accessByteLength: 1 }
+          : { kind: "state.read", slot, accessByteLength: 1 };
+      case 16:
+        return signed
+          ? { kind: "state.read", slot, signed: true, accessByteLength: 2 }
+          : { kind: "state.read", slot, accessByteLength: 2 };
+      case 32:
+        return { kind: "state.read", slot };
+    }
   }
 
   #lazyConditionDefaultBody(expr: FlagBoolExpr): Readonly<{ actions: readonly Action[]; result: ValueId }> {
