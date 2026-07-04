@@ -9,6 +9,7 @@ import { createWasmHelperRegistry, defineAllHelpers, type WasmHelperRegistry } f
 import { RmDecodeHelpers } from "./decode.js";
 import { emitOpcodeDispatch } from "./dispatch.js";
 import { emitOpcodeFetch } from "./fragments.js";
+import { emitPrefixStateReset } from "./prefixes.js";
 import type { InterpreterHandler } from "./handlers.js";
 import { InterpreterLocals } from "./locals.js";
 
@@ -81,7 +82,13 @@ function encodeRunLoopBody(
   // opcodes return from inside.
   body.block();
   emitOpcodeFetch({ body, scratch, helpers }, { eipLocal: locals.eip, byteLocal: locals.byte });
-  emitOpcodeDispatch({ body, scratch, helpers, locals, handlers, continueDepth: 0, rmDecode });
+  // Fault paths commit the start; prefix cases rebase the eip local.
+  body.localGet(locals.eip).localSet(locals.instructionStart);
+  emitPrefixStateReset({ body, scratch, helpers, locals });
+  // Prefix cases branch here to rescan with their prefix folded into locals.
+  body.loop();
+  emitOpcodeDispatch({ body, scratch, helpers, locals, handlers, continueDepth: 1, rmDecode });
+  body.endBlock();
   body.endBlock();
 
   body.localGet(fuelParam).i32Const(1).i32Sub().localSet(fuelParam);

@@ -95,10 +95,30 @@ test("operand-size prefix dispatches to the prefixed opcode form", async () => {
   strictEqual(state.instructionCount, 8);
 });
 
-test("non-canonical prefix encoding reports unsupported instead of misdecoding", async () => {
+test("repeated operand-size prefixes execute with the override operand size", async () => {
+  const interpreter = await instantiateWasmInterpreter();
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0xffff_0000,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  writeInterpreterState(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, startAddress, [0x66, 0x66, 0xb8, 0x34, 0x12]);
+
+  const exit = interpreter.run(1);
+  const state = readInterpreterState(interpreter.stateView);
+
+  deepStrictEqual(exit, { family: "completion", reason: CompletionExit.INSTRUCTION_LIMIT, payload: 0 });
+  strictEqual(state.eax, 0xffff_1234);
+  strictEqual(state.eip, startAddress + 5);
+  strictEqual(state.instructionCount, 8);
+});
+
+test("a prefix byte outside the scan set reports unsupported instead of misdecoding", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const cases = [
-    [0x66, 0x66, 0xb8, 0x34, 0x12] // repeated operand-size prefix
+    [0x67, 0xb8, 0x34, 0x12, 0x00, 0x00], // address-size prefix
+    [0x66, 0xf3, 0xb8, 0x34, 0x12] // rep after a scanned prefix
   ] as const;
 
   for (const bytes of cases) {

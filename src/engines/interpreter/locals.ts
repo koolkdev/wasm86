@@ -16,6 +16,10 @@ export class InterpreterLocals {
   readonly imm: number;
   readonly target: number;
   readonly nextEip: number;
+  // Prefix bits (bit 0: operand size), reset per instruction.
+  readonly prefixFlags: number;
+  // The instruction start; fault paths commit it while eip is rebased.
+  readonly instructionStart: number;
 
   constructor(body: WasmFunctionBodyEncoder) {
     this.eip = body.addLocal(wasmValueType.i32);
@@ -29,5 +33,7 @@ export class InterpreterLocals {
     this.imm = body.addLocal(wasmValueType.i32);
     this.target = body.addLocal(wasmValueType.i32);
     this.nextEip = body.addLocal(wasmValueType.i32);
+    this.prefixFlags = body.addLocal(wasmValueType.i32);
+    this.instructionStart = body.addLocal(wasmValueType.i32);
   }
 }

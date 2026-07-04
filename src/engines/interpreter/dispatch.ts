@@ -8,7 +8,6 @@ import {
 import type {
   ExpandedInstructionSpec,
   MemOperandType,
-  OperandSizePrefixMode,
   OperandSpec,
   Reg3,
   RmOperandType
@@ -20,108 +19,133 @@ import { noBaseRegister, type RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";
 import { emitInstructionHandler, type HandlerEmitContext } from "./handlers.js";
 import { interpreterDispatchRoot } from "./instructions.js";
+import { emitPrefixCase, operandSizeFlagBit, prefixBytes } from "./prefixes.js";
 
 // The hand-written dispatch shape: br_table over the fetched opcode byte,
 // the reg-field group switch, and the mod-form split. Fetches and handlers
 // are action fragments; memory arms call the shared rm-decode helper.
 //
-// The operand-size prefix dispatches positionally, canonical encodings only:
-// 0x66 at the first byte is one more dispatch case that fetches the next
-// byte and re-enters the root with the override candidate sets, the prefix
-// counted in the opcode length. Anything else — repeated prefixes, prefixes
-// on multi-byte positions — falls through dispatch to the honest
-// unsupported exit.
-
-const operandSizeOverridePrefix = 0x66;
+// The tree is emitted once, inside the run loop's redispatch loop. Prefix
+// bytes are first-byte cases that consume their byte and branch back to
+// rescan (prefixes.ts), so dispatch reaches the opcode with the eip local
+// rebased to it — every decode offset stays static — and each leaf picks
+// its arm by the prefix flags.
 
 export type DispatchEmitContext = HandlerEmitContext & Readonly<{ rmDecode: RmDecodeHelpers }>;
 
-type OpcodeDispatchContext = DispatchEmitContext &
-  Readonly<{
-    operandSize: OperandSizePrefixMode;
-    // Prefix bytes before the opcode (0 or 1); leaf byte offsets shift by it.
-    prefixLength: number;
-  }>;
-
 export function emitOpcodeDispatch(context: DispatchEmitContext): void {
-  emitDispatchNode(interpreterDispatchRoot, { ...context, operandSize: "default", prefixLength: 0 }, 1);
+  emitDispatchNode(interpreterDispatchRoot, context, 1);
 }
 
-function emitDispatchNode(node: OpcodeDispatchNode, context: OpcodeDispatchContext, opcodeLength: number): void {
-  const { body } = context;
-  const bytes = dispatchBytesWithPrefix(node, prefixDispatches(context, opcodeLength));
+// One dispatch case: an opcode child of the tree, or a prefix byte that
+// consumes itself and branches back to rescan.
+type DispatchCase =
+  | Readonly<{ byte: number; kind: "opcode"; child: OpcodeDispatchNode }>
+  | Readonly<{ byte: number; kind: "prefix" }>;
 
-  if (bytes.length === 0) {
+function dispatchCases(node: OpcodeDispatchNode, opcodeLength: number): DispatchCase[] {
+  const cases: DispatchCase[] = dispatchBytes(node).map((byte) => {
+    const child = node.next[byte];
+
+    assert(child !== undefined, `opcode dispatch lost byte 0x${byte.toString(16)}`);
+    return { byte, kind: "opcode", child };
+  });
+
+  // Prefix bytes dispatch at the first byte only: deeper bytes are opcode
+  // bytes, and a prefix case has already consumed anything before them.
+  if (opcodeLength > 1) {
+    return cases;
+  }
+
+  for (const byte of prefixBytes) {
+    assert(node.next[byte] === undefined, "a prefix byte collides with an opcode");
+    cases.push({ byte, kind: "prefix" });
+  }
+
+  return cases;
+}
+
+function emitDispatchNode(node: OpcodeDispatchNode, context: DispatchEmitContext, opcodeLength: number): void {
+  const { body } = context;
+  const cases = dispatchCases(node, opcodeLength);
+
+  if (cases.length === 0) {
     emitReturnUnsupported(body);
     return;
   }
 
-  for (let index = 0; index <= bytes.length; index += 1) {
+  for (let index = 0; index <= cases.length; index += 1) {
     body.block();
   }
 
-  body.localGet(context.locals.byte).brTable(byteDispatchTable(bytes), bytes.length);
+  body.localGet(context.locals.byte).brTable(byteDispatchTable(cases), cases.length);
 
-  for (let index = bytes.length - 1; index >= 0; index -= 1) {
+  for (let index = cases.length - 1; index >= 0; index -= 1) {
     body.endBlock();
-
-    const byte = bytes[index]!;
-    const caseContext = { ...context, continueDepth: context.continueDepth + 1 + index };
-
-    if (byte === operandSizeOverridePrefix && prefixDispatches(context, opcodeLength)) {
-      emitOperandSizePrefixCase(caseContext);
-      continue;
-    }
-
-    const child = node.next[byte];
-
-    assert(child !== undefined, `opcode dispatch lost byte 0x${byte.toString(16)}`);
-
-    if (child.leaf !== undefined) {
-      emitLeaf(child.leaf, caseContext);
-    } else {
-      emitOpcodeByteFetch(caseContext, context.locals.eip, opcodeLength, context.locals.byte);
-      emitDispatchNode(child, caseContext, opcodeLength + 1);
-    }
+    emitDispatchCase(cases[index]!, {
+      ...context,
+      continueDepth: context.continueDepth + 1 + index
+    }, opcodeLength);
   }
 
   body.endBlock();
   emitReturnUnsupported(body);
 }
 
-// The prefix is a first-byte dispatch case of the unprefixed root only.
-function prefixDispatches(context: OpcodeDispatchContext, opcodeLength: number): boolean {
-  return context.operandSize === "default" && opcodeLength === 1;
+function emitDispatchCase(
+  dispatchCase: DispatchCase,
+  context: DispatchEmitContext,
+  opcodeLength: number
+): void {
+  switch (dispatchCase.kind) {
+    case "prefix":
+      // The redispatch loop sits one label inside the instruction-complete
+      // target.
+      emitPrefixCase(dispatchCase.byte, context.continueDepth - 1, context);
+      return;
+    case "opcode": {
+      const { child } = dispatchCase;
+
+      if (child.leaf !== undefined) {
+        emitLeaf(child.leaf, context);
+        return;
+      }
+
+      emitOpcodeByteFetch(context, context.locals.eip, opcodeLength, context.locals.byte);
+      emitDispatchNode(child, context, opcodeLength + 1);
+      return;
+    }
+  }
 }
 
-function dispatchBytesWithPrefix(node: OpcodeDispatchNode, withPrefix: boolean): number[] {
-  const bytes = dispatchBytes(node);
+// One arm per operand-size bucket, indexed by the masked prefix flags; an
+// empty bucket's arm is the unsupported exit.
+function emitLeaf(leaf: OpcodeDispatchLeaf, context: DispatchEmitContext): void {
+  const { body, locals } = context;
+  const arms = [leaf.operandSize.default, leaf.operandSize.override];
 
-  if (!withPrefix) {
-    return bytes;
+  for (let index = 0; index < arms.length; index += 1) {
+    body.block();
   }
 
-  assert(
-    !bytes.includes(operandSizeOverridePrefix),
-    "the operand-size prefix byte collides with an opcode"
-  );
-  return [...bytes, operandSizeOverridePrefix];
+  body.localGet(locals.prefixFlags).i32Const(operandSizeFlagBit).i32And();
+  // The mask keeps the value inside the table; the default is unreachable.
+  body.brTable(arms.map((_, value) => arms.length - 1 - value), 0);
+
+  for (let value = arms.length - 1; value >= 0; value -= 1) {
+    body.endBlock();
+    emitLeafCandidates(leaf, arms[value]!, {
+      ...context,
+      continueDepth: context.continueDepth + value
+    });
+  }
 }
 
-// The byte after the prefix is the opcode: fetch it and re-enter the root
-// dispatch over the override candidate sets.
-function emitOperandSizePrefixCase(context: OpcodeDispatchContext): void {
-  emitOpcodeByteFetch(context, context.locals.eip, 1, context.locals.byte);
-  emitDispatchNode(
-    interpreterDispatchRoot,
-    { ...context, operandSize: "override", prefixLength: 1 },
-    2
-  );
-}
-
-function emitLeaf(leaf: OpcodeDispatchLeaf, context: OpcodeDispatchContext): void {
-  const candidates = leaf.operandSize[context.operandSize];
-
+function emitLeafCandidates(
+  leaf: OpcodeDispatchLeaf,
+  candidates: OpcodeDispatchCandidateSet,
+  context: DispatchEmitContext
+): void {
   switch (candidates.kind) {
     case "empty":
       emitReturnUnsupported(context.body);
@@ -136,7 +160,7 @@ function emitLeaf(leaf: OpcodeDispatchLeaf, context: OpcodeDispatchContext): voi
 
       emitInstructionHandler(context, instruction, "plain", {
         kind: "static",
-        offset: context.prefixLength + leaf.opcodeLength
+        offset: leaf.opcodeLength
       });
       return;
     }
@@ -149,10 +173,10 @@ function emitLeaf(leaf: OpcodeDispatchLeaf, context: OpcodeDispatchContext): voi
 function emitModRmLeaf(
   leaf: OpcodeDispatchLeaf,
   candidates: OpcodeDispatchCandidateSet,
-  context: OpcodeDispatchContext
+  context: DispatchEmitContext
 ): void {
   const { body, locals } = context;
-  const opcodeEnd = context.prefixLength + leaf.opcodeLength;
+  const opcodeEnd = leaf.opcodeLength;
 
   emitModRmFetch(context, locals.eip, opcodeEnd, {
     modLocal: locals.mod,
@@ -234,12 +258,18 @@ type ModRmRegCase = Readonly<{
   regs: readonly Reg3[];
 }>;
 
+function resolvedModRmCandidate(
+  candidates: OpcodeDispatchCandidateSet,
+  reg: Reg3
+): ExpandedInstructionSpec | undefined {
+  return (candidates.modRmByReg[reg] ?? []).find((candidate) => modRmRegMatches(candidate.spec, reg));
+}
+
 function modRmRegCases(candidates: OpcodeDispatchCandidateSet): readonly ModRmRegCase[] {
   const casesById = new Map<string, { instruction: ExpandedInstructionSpec; regs: Reg3[] }>();
 
   for (const reg of reg3Values) {
-    const bucket = candidates.modRmByReg[reg] ?? [];
-    const instruction = bucket.find((candidate) => modRmRegMatches(candidate.spec, reg));
+    const instruction = resolvedModRmCandidate(candidates, reg);
 
     if (instruction === undefined) {
       continue;
@@ -265,11 +295,11 @@ function isValidModRmReg(spec: ExpandedInstructionSpec["spec"], reg: Reg3): bool
   return !(spec.operands ?? []).some((operand) => operand.kind === "modrm.sreg") || reg < segmentRegisters.length;
 }
 
-function byteDispatchTable(bytes: readonly number[]): number[] {
-  const table = new Array<number>(256).fill(bytes.length);
+function byteDispatchTable(cases: readonly DispatchCase[]): number[] {
+  const table = new Array<number>(256).fill(cases.length);
 
-  for (const [index, byte] of bytes.entries()) {
-    table[byte] = bytes.length - 1 - index;
+  for (const [index, dispatchCase] of cases.entries()) {
+    table[dispatchCase.byte] = cases.length - 1 - index;
   }
 
   return table;

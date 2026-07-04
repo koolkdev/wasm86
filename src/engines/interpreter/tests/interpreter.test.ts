@@ -381,9 +381,9 @@ test("every ModRM memory arm shares one rm-decode helper per opcode length", () 
   );
 
   ok(memoryHandlers.length > 1, "expected several ModRM memory arms");
-  // One helper per byte count before the ModRM: plain, two-byte or prefixed,
-  // and prefixed two-byte opcodes.
-  deepStrictEqual([...encodedModule().rmDecodeHelpers].sort(), [1, 2, 3]);
+  // One helper per byte count before the ModRM: plain and two-byte opcodes.
+  // Prefixed encodings reuse both through the rebased eip local.
+  deepStrictEqual([...encodedModule().rmDecodeHelpers].sort(), [1, 2]);
 });
 
 test("ModRM handlers never repeat per register", () => {

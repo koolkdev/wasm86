@@ -76,11 +76,13 @@ export function emitInstructionHandler(
 
   const builder = createIrBlockBuilder();
 
+  // The location's eip is what fault paths commit; prefix cases rebase the
+  // eip local, so the location binds the saved instruction start.
   builder.addInstruction(
     instruction.spec.semantics,
     bindings,
     externalInstructionLocation(
-      externals.bind(context.locals.eip),
+      externals.bind(context.locals.instructionStart),
       externals.bind(context.locals.nextEip)
     )
   );
