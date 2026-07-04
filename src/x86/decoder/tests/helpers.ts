@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
+import { defaultSegmentForBase } from "#x86/segments.js";
 import {
-  defaultSegmentForBase,
   type EffectiveAddress,
   type MemOperand,
   type OperandWidth,

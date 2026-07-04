@@ -49,7 +49,8 @@ import { shiftSemantic } from "#x86/semantics/shift.js";
 import { popfdSemantic, popfSemantic, popSemantic, pushfdSemantic, pushfSemantic } from "#x86/semantics/stack.js";
 import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
-import { defaultSegmentForBase, type EffectiveAddress } from "#x86/types.js";
+import { defaultSegmentForBase } from "#x86/segments.js";
+import type { EffectiveAddress } from "#x86/types.js";
 import { assertLazyRecord } from "./lazy-flags.js";
 import { isMemoryCheck, isMemoryRead, isMemoryWrite, isResolveFlag, isStateRead, isStateWrite, memoryCheck, memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import type { MemoryCheckAction, MemoryReadAction, MemoryWriteAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
@@ -2324,6 +2325,35 @@ test("a memStatic operand guards and accesses the external address", () => {
   )!;
 
   deepStrictEqual(entryActions(block), [
+    ...memoryGuard(block, 1, address, 4, "read"),
+    memoryRead(load.output, address, 32),
+    stateWrite(gprChannel("eax"), load.output),
+    stateWrite(eipChannel, v.const(0x1006)),
+    finishDispatch(v.const(0x1006))
+  ]);
+  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultExit("read", address));
+});
+
+test("a segmented memStatic operand adds the selected segment base", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    movSemantic(32),
+    [regBinding("eax"), memStaticBinding(7, dynamicMemSegment(8))],
+    loc(0x1000, 0x1006)
+  );
+
+  const block = builder.finish();
+  const v = block.values;
+  const segmentBase = dynamicSegmentBaseRead(block);
+  const address = v.binary("add", segmentBase.output, v.external(7));
+  const load = entryActions(block).find(
+    (action): action is MemoryReadAction => isMemoryRead(action)
+  )!;
+
+  deepStrictEqual(segmentBase.op.slot, { kind: "segmentDynamic", index: v.external(8), field: "base" });
+  deepStrictEqual(entryActions(block), [
+    stateRead(segmentBase.output, segmentBase.op.slot),
     ...memoryGuard(block, 1, address, 4, "read"),
     memoryRead(load.output, address, 32),
     stateWrite(gprChannel("eax"), load.output),

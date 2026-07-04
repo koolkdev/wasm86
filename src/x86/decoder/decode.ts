@@ -13,6 +13,7 @@ import {
   type RmOperandType
 } from "#x86/defs/spec.js";
 import { registerAlias, registerAliasByIndex } from "#x86/registers.js";
+import { operandSizeOverridePrefixByte, segmentOverridePrefixSegments } from "#x86/prefixes.js";
 import { segmentRegisters, type MemOperand, type OperandWidth, type SegmentRegister } from "#x86/types.js";
 import { signedImm8, signedImm32 } from "./immediate.js";
 import { decodeModRmAddressing, rm32ModRmByteLengthAt, type ModRmRm } from "./modrm.js";
@@ -101,28 +102,17 @@ class InstructionDecoder {
   }
 
   private consumePrefix(value: number): boolean {
-    switch (value) {
-      case 0x66:
-        this.operandSize = "override";
-        return this.consumePrefixByte();
-      case 0x26:
-        return this.consumeSegmentOverride("es");
-      case 0x2e:
-        return this.consumeSegmentOverride("cs");
-      case 0x36:
-        return this.consumeSegmentOverride("ss");
-      case 0x3e:
-        return this.consumeSegmentOverride("ds");
-      case 0x64:
-        return this.consumeSegmentOverride("fs");
-      case 0x65:
-        return this.consumeSegmentOverride("gs");
-      default:
-        return false;
+    if (value === operandSizeOverridePrefixByte) {
+      this.operandSize = "override";
+      return this.consumePrefixByte();
     }
-  }
 
-  private consumeSegmentOverride(segment: SegmentRegister): true {
+    const segment = segmentOverridePrefixSegments.get(value);
+
+    if (segment === undefined) {
+      return false;
+    }
+
     this.segmentOverride = segment;
     return this.consumePrefixByte();
   }

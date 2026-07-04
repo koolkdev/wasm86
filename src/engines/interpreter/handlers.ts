@@ -2,6 +2,7 @@ import { assert } from "#common/assert.js";
 import { createIrBlockBuilder, externalInstructionLocation } from "#ir/builder.js";
 import {
   immExternalBinding,
+  dynamicMemSegment,
   memDynamicBinding,
   memStaticBinding,
   regBinding,
@@ -12,8 +13,14 @@ import {
   type OperandBinding
 } from "#ir/operands.js";
 import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#x86/defs/spec.js";
+import {
+  dsSegmentIndex,
+  noSegmentOverride,
+  ssDefaultSegmentBaseIndexes,
+  ssSegmentIndex
+} from "#x86/segments.js";
 import { reg16, reg32, reg8, type RegName } from "#x86/types.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
@@ -115,6 +122,7 @@ function decodeOperand(
       return { binding: segmentDynamicBinding(externals.bind(locals.reg)), cursor };
     case "modrm.rm":
       assert(form !== "plain", `${instruction.spec.id}: rm operand without a resolved form`);
+      emitRmEffectiveSegment(context, form);
       return { binding: rmBinding(form, locals, externals), cursor };
     case "opcode.reg": {
       assert(
@@ -129,8 +137,12 @@ function decodeOperand(
       return { binding: segmentBinding(operand.reg), cursor };
     case "moffs":
       emitImmediateFetch(context, locals.eip, cursor, 32, false, locals.offset);
+      emitEffectiveSegment(context, dsSegmentIndex);
       return {
-        binding: memStaticBinding(externals.bind(locals.offset)),
+        binding: memStaticBinding(
+          externals.bind(locals.offset),
+          dynamicMemSegment(externals.bind(locals.effectiveSegment))
+        ),
         cursor: advanceCursor(context, cursor, 4)
       };
     case "imm":
@@ -170,9 +182,66 @@ function rmBinding(
     case "regDynamic":
       return regDynamicBinding(externals.bind(locals.rm));
     case "memStatic":
-      return memStaticBinding(externals.bind(locals.offset));
+      return memStaticBinding(
+        externals.bind(locals.offset),
+        dynamicMemSegment(externals.bind(locals.effectiveSegment))
+      );
     case "memDynamic":
-      return memDynamicBinding(externals.bind(locals.base), externals.bind(locals.offset), undefined);
+      return memDynamicBinding(
+        externals.bind(locals.base),
+        externals.bind(locals.offset),
+        dynamicMemSegment(externals.bind(locals.effectiveSegment))
+      );
+  }
+}
+
+function emitRmEffectiveSegment(context: HandlerEmitContext, form: HandlerForm): void {
+  switch (form) {
+    case "plain":
+    case "regDynamic":
+      return;
+    case "memStatic":
+      emitEffectiveSegment(context, dsSegmentIndex);
+      return;
+    case "memDynamic":
+      emitDynamicBaseEffectiveSegment(context);
+      return;
+  }
+}
+
+function emitEffectiveSegment(context: HandlerEmitContext, defaultSegment: number): void {
+  const { body, locals } = context;
+
+  body.localGet(locals.segment).i32Const(noSegmentOverride).i32Eq().ifBlock(wasmBranchHint.likely);
+  body.i32Const(defaultSegment).localSet(locals.effectiveSegment);
+  body.elseBlock();
+  body.localGet(locals.segment).localSet(locals.effectiveSegment);
+  body.endBlock();
+}
+
+function emitDynamicBaseEffectiveSegment(context: HandlerEmitContext): void {
+  const { body, locals } = context;
+
+  body.localGet(locals.segment).i32Const(noSegmentOverride).i32Eq().ifBlock(wasmBranchHint.likely);
+  emitBaseDefaultsToStackSegment(context);
+  body.ifBlock();
+  body.i32Const(ssSegmentIndex).localSet(locals.effectiveSegment);
+  body.elseBlock();
+  body.i32Const(dsSegmentIndex).localSet(locals.effectiveSegment);
+  body.endBlock();
+  body.elseBlock();
+  body.localGet(locals.segment).localSet(locals.effectiveSegment);
+  body.endBlock();
+}
+
+function emitBaseDefaultsToStackSegment(context: HandlerEmitContext): void {
+  const { body, locals } = context;
+  const [firstBaseIndex, ...remainingBaseIndexes] = ssDefaultSegmentBaseIndexes;
+
+  body.localGet(locals.base).i32Const(firstBaseIndex).i32Eq();
+
+  for (const baseIndex of remainingBaseIndexes) {
+    body.localGet(locals.base).i32Const(baseIndex).i32Eq().i32Or();
   }
 }
 

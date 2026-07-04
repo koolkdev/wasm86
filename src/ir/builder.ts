@@ -650,7 +650,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       case "mem":
         return this.#linearAddress(binding.address.segment, this.#operandAddress(index));
       case "memStatic":
-        return this.#operandAddress(index);
+        return this.#memDynamicLinearAddress(binding.segment, this.#operandAddress(index));
       case "memDynamic":
         return this.#memDynamicLinearAddress(binding.segment, this.#operandAddress(index));
     }

@@ -18,6 +18,10 @@ export class InterpreterLocals {
   readonly nextEip: number;
   // Prefix bits (bit 0: operand size), reset per instruction.
   readonly prefixFlags: number;
+  // Segment override local: no override sentinel or a segmentRegisters index.
+  readonly segment: number;
+  // The resolved segmentRegisters index for the current memory operand.
+  readonly effectiveSegment: number;
   // The instruction start; fault paths commit it while eip is rebased.
   readonly instructionStart: number;
 
@@ -34,6 +38,8 @@ export class InterpreterLocals {
     this.target = body.addLocal(wasmValueType.i32);
     this.nextEip = body.addLocal(wasmValueType.i32);
     this.prefixFlags = body.addLocal(wasmValueType.i32);
+    this.segment = body.addLocal(wasmValueType.i32);
+    this.effectiveSegment = body.addLocal(wasmValueType.i32);
     this.instructionStart = body.addLocal(wasmValueType.i32);
   }
 }

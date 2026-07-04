@@ -1,4 +1,7 @@
 import { assert } from "#common/assert.js";
+import { operandSizeOverridePrefixByte, segmentOverridePrefixSegments } from "#x86/prefixes.js";
+import { noSegmentOverride, segmentRegisterIndex } from "#x86/segments.js";
+import type { SegmentRegister } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
@@ -28,9 +31,10 @@ type PrefixHandler = Readonly<{
 }>;
 
 const prefixHandlers: readonly PrefixHandler[] = [
+  ...[...segmentOverridePrefixSegments].map(([byte, reg]) => segmentOverridePrefix(byte, reg)),
   {
     // Operand-size override.
-    byte: 0x66,
+    byte: operandSizeOverridePrefixByte,
     emitEffect: ({ body, locals }) => {
       body.localGet(locals.prefixFlags).i32Const(operandSizeFlagBit).i32Or().localSet(locals.prefixFlags);
     }
@@ -43,6 +47,7 @@ export const prefixBytes: readonly number[] = prefixHandlers.map((handler) => ha
 // Locals persist across run-loop iterations; every instruction starts clean.
 export function emitPrefixStateReset(context: PrefixEmitContext): void {
   context.body.i32Const(0).localSet(context.locals.prefixFlags);
+  context.body.i32Const(noSegmentOverride).localSet(context.locals.segment);
 }
 
 export function emitPrefixCase(byte: number, redispatchDepth: number, context: PrefixEmitContext): void {
@@ -54,4 +59,15 @@ export function emitPrefixCase(byte: number, redispatchDepth: number, context: P
   body.localGet(locals.eip).i32Const(1).i32Add().localSet(locals.eip);
   emitOpcodeByteFetch(context, locals.eip, 0, locals.byte);
   body.br(redispatchDepth);
+}
+
+function segmentOverridePrefix(byte: number, reg: SegmentRegister): PrefixHandler {
+  const index = segmentRegisterIndex(reg);
+
+  return {
+    byte,
+    emitEffect: ({ body, locals }) => {
+      body.i32Const(index).localSet(locals.segment);
+    }
+  };
 }

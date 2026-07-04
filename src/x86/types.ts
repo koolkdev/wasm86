@@ -35,7 +35,3 @@ export type Mem32Operand = MemOperand & Readonly<{ accessWidth: 32 }>;
 export function widthMask(width: OperandWidth): number {
   return width === 32 ? 0xffff_ffff : width === 16 ? 0xffff : 0xff;
 }
-
-export function defaultSegmentForBase(base: Reg32 | undefined): SegmentRegister {
-  return base === "esp" || base === "ebp" ? "ss" : "ds";
-}

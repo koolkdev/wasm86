@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 
 import type { IsaDecodedInstruction, IsaOperandBinding } from "./decoder/types.js";
-import { defaultSegmentForBase } from "./types.js";
+import { defaultSegmentForBase } from "./segments.js";
 
 const formatPlaceholderPattern = /\{([^{}]+)\}/g;
 
