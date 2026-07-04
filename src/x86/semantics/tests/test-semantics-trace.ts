@@ -88,6 +88,7 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
   readonly #pendingStatusFlags = new Map<X86StatusFlag, ValueInput>();
   readonly #operandInfo: readonly SemanticOperandInfo[];
   readonly #constValues = new Map<number, Value>();
+  readonly #const64Values = new Map<bigint, Value>();
   readonly #inlineValues = new Map<Value, string>();
   readonly #displayValues = new Map<Value, number>();
   #nextEipValue: Value | undefined;
@@ -113,6 +114,21 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     const handle = this.#allocateValue();
 
     this.#constValues.set(canonical, handle);
+    this.#inlineValues.set(handle, `${canonical}`);
+    return handle;
+  }
+
+  const64(value: bigint): Value {
+    const canonical = BigInt.asUintN(64, value);
+    const existing = this.#const64Values.get(canonical);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const handle = this.#allocateValue();
+
+    this.#const64Values.set(canonical, handle);
     this.#inlineValues.set(handle, `${canonical}`);
     return handle;
   }

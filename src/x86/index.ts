@@ -4,6 +4,7 @@ import { AAA, AAD, AAM, AAS, DAA, DAS } from "./defs/bcd-ascii.js";
 import { BSWAP } from "./defs/byte-swap.js";
 import { CALL, JCC, JMP, RET } from "./defs/control.js";
 import { CMP, TEST } from "./defs/cmp-test.js";
+import { DIV, IDIV } from "./defs/div.js";
 import { LEA } from "./defs/lea.js";
 import { INT, NOP } from "./defs/misc.js";
 import { CMOVCC, MOV, MOVSX, MOVZX } from "./defs/mov.js";
@@ -42,6 +43,8 @@ export const X86_32_CORE = defineIsa({
     NEG,
     MUL,
     IMUL,
+    DIV,
+    IDIV,
     BSWAP,
     CBW,
     CWDE,

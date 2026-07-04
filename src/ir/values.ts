@@ -35,6 +35,7 @@ export type ValueType = "i32" | "i64";
 // Actions are not expressions: a scheduled op output enters the
 // graph as an actionOutput leaf.
 export type ConstValueNode = Readonly<{ kind: "const"; value: number }>;
+export type Const64ValueNode = Readonly<{ kind: "const64"; value: bigint }>;
 export type UnreachableValueNode = Readonly<{ kind: "unreachable"; type: ValueType }>;
 export type ActionOutputValueNode = Readonly<{ kind: "actionOutput" }>;
 export type ExternalValueNode = Readonly<{ kind: "external"; external: ExternalValueId }>;
@@ -75,6 +76,7 @@ export type ExtendValueNode = Readonly<{
 
 export type ValueNode =
   | ConstValueNode
+  | Const64ValueNode
   | UnreachableValueNode
   | ActionOutputValueNode
   | ExternalValueNode
@@ -88,6 +90,7 @@ export type ValueNode =
 export function valueChildren(node: ValueNode): readonly ValueId[] {
   switch (node.kind) {
     case "const":
+    case "const64":
     case "actionOutput":
     case "external":
     case "unreachable":
@@ -133,6 +136,7 @@ export class ValueTable {
   // Derived on first query, memoized per node.
   readonly #widthBounds: (WidthBounds | undefined)[] = [];
   readonly #constIds = new Map<number, ValueId>();
+  readonly #const64Ids = new Map<bigint, ValueId>();
   readonly #unreachableIds = new Map<ValueType, ValueId>();
   readonly #externalIds = new Map<ExternalValueId, ValueId>();
   readonly #binaryIds: Map4<ValueType, BinaryOperator, ValueId, ValueId, ValueId> = new Map();
@@ -170,6 +174,10 @@ export class ValueTable {
 
   const(value: number): ValueId {
     return this.#internConst(value);
+  }
+
+  const64(value: bigint): ValueId {
+    return this.#internConst64(value);
   }
 
   unreachable(type: ValueType = "i32"): ValueId {
@@ -296,6 +304,20 @@ export class ValueTable {
     const id = this.#add({ kind: "const", value: canonical }, []);
 
     this.#constIds.set(canonical, id);
+    return id;
+  }
+
+  #internConst64(value: bigint): ValueId {
+    const canonical = BigInt.asIntN(64, value);
+    const existing = this.#const64Ids.get(canonical);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const id = this.#add({ kind: "const64", value: canonical }, []);
+
+    this.#const64Ids.set(canonical, id);
     return id;
   }
 
@@ -458,6 +480,8 @@ export class ValueTable {
     switch (node.kind) {
       case "const":
         return ValueTable.#constWidthBounds(node.value);
+      case "const64":
+        assert(false, "width bounds requested for i64 constant value");
       case "unreachable":
         return unboundedWidthBounds;
       case "actionOutput":
@@ -509,6 +533,8 @@ export class ValueTable {
         return fitsUnsigned(b.unsignedBits);
       case "div_u":
         return fitsUnsigned(a.unsignedBits);
+      case "div_s":
+      case "rem_s":
       case "add":
       case "sub":
       case "mul":
@@ -573,6 +599,8 @@ export class ValueTable {
         return node.type;
       case "unreachable":
         return node.type;
+      case "const64":
+        return "i64";
       case "const":
       case "actionOutput":
       case "external":

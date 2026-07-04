@@ -47,6 +47,7 @@ export type SemanticTemplate = (builder: SemanticsBuilder, context: SemanticBuil
 export interface SemanticsBuilder {
   operand(index: number): OperandRef;
   const32(value: number): Value;
+  const64(value: bigint): Value;
   nextEip(): Value;
   reg(reg: RegName): RegRef;
   mem(address: ValueInput): MemRef;

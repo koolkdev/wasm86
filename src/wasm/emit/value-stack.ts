@@ -123,6 +123,9 @@ export class ValueStack implements OperandUses {
       case "const":
         this.#body.i32Const(node.value);
         return;
+      case "const64":
+        this.#body.i64Const(node.value);
+        return;
       case "external": {
         const local = this.#context.externalLocals.get(node.external);
 
@@ -160,7 +163,7 @@ export class ValueStack implements OperandUses {
     const node = this.#values.node(id);
 
     // Consts and externals re-emit freely; the borrow holds nothing.
-    if (node.kind === "const" || node.kind === "external") {
+    if (node.kind === "const" || node.kind === "const64" || node.kind === "external") {
       const reemit = () => this.emitUse(id);
 
       return this.#createBorrow(id, { first: reemit, repeat: reemit });
@@ -310,6 +313,7 @@ export class ValueStack implements OperandUses {
 
     switch (node.kind) {
       case "const":
+      case "const64":
       case "external":
       case "unreachable":
         // Re-emittable anywhere.

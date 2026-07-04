@@ -5,6 +5,7 @@ import { x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { callSemantic, retSemantic } from "#x86/semantics/control.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
+import { divImplicitSemantic, idivImplicitSemantic } from "#x86/semantics/div.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
@@ -362,6 +363,66 @@ test("implicit multiply memory source is guarded before accumulator reads", () =
     "%1 = get op0:16",
     "%2 = get ax:16"
   ]);
+});
+
+test("implicit div guards and reads the source before divide-error checks and writes", () => {
+  const trace = buildSemanticTrace(divImplicitSemantic(16), operands("mem"));
+  const exceptionIndex = trace.events.findIndex((event) => event.startsWith("cpuExceptionIf "));
+  const firstSetIndex = trace.events.findIndex((event) => event.startsWith("set "));
+  const firstFlagIndex = trace.events.findIndex((event) => event.startsWith("flag "));
+
+  deepStrictEqual(trace.events.slice(0, 3), [
+    "%0 = addr op0",
+    "guard read %0:2",
+    "%1 = get op0:16"
+  ]);
+  ok(trace.events[3]?.endsWith(" = get ax:16"));
+  ok(trace.events[4]?.endsWith(" = get dx:16"));
+  ok(exceptionIndex > 4);
+  ok(firstSetIndex > exceptionIndex);
+  strictEqual(firstFlagIndex, -1);
+  strictEqual(trace.flagWrites.length, 0);
+  ok(trace.defs.some((entry) => entry.startsWith("div_u(")));
+  ok(trace.defs.some((entry) => entry.startsWith("rem_u(")));
+});
+
+test("implicit idiv builds signed full-width values and guards before writes", () => {
+  const trace = buildSemanticTrace(idivImplicitSemantic(32), regOperands(1));
+  const exceptionIndexes = trace.events.flatMap((event, index) => (event.startsWith("cpuExceptionIf ") ? [index] : []));
+  const firstSetIndex = trace.events.findIndex((event) => event.startsWith("set "));
+
+  deepStrictEqual(trace.events.slice(0, 3), [
+    "%0 = get op0:32:signed",
+    "%1 = get eax:32",
+    "%2 = get edx:32"
+  ]);
+  strictEqual(exceptionIndexes.length, 2);
+  ok(trace.defs.includes("extend64.s32(%2)"));
+  ok(trace.defs.includes("extend64.u32(%1)"));
+  ok(trace.defs.some((entry) => entry.startsWith("div_s64(")));
+  ok(trace.defs.some((entry) => entry.startsWith("rem_s64(")));
+  ok(trace.defs.some((entry) => entry.endsWith(", 9223372036854775808)") && entry.startsWith("cmp64.eq(")));
+  ok(trace.defs.some((entry) => entry.startsWith("cmp64.ne(")));
+  ok(firstSetIndex > exceptionIndexes[1]!);
+});
+
+test("implicit idiv word form guards undefined divisions before dividing and checks fit after", () => {
+  const trace = buildSemanticTrace(idivImplicitSemantic(16), regOperands(1));
+  const exceptionIndexes = trace.events.flatMap((event, index) => (event.startsWith("cpuExceptionIf ") ? [index] : []));
+  const firstSetIndex = trace.events.findIndex((event) => event.startsWith("set "));
+
+  deepStrictEqual(trace.events.slice(0, 3), [
+    "%0 = get op0:16:signed",
+    "%1 = get ax:16",
+    "%2 = get dx:16:signed"
+  ]);
+  strictEqual(exceptionIndexes.length, 2);
+  ok(trace.defs.includes("cmp32.eq(%4, 2147483648)"));
+  ok(trace.defs.includes("cmp32.eq(%0, 4294967295)"));
+  ok(trace.defs.some((entry) => entry.startsWith("div_s(")));
+  ok(trace.defs.some((entry) => entry.startsWith("rem_s(")));
+  ok(trace.defs.some((entry) => entry.startsWith("cmp32.ge_u(")));
+  ok(firstSetIndex > exceptionIndexes[1]!);
 });
 
 test("accumulator sign-extension forms are flagless", () => {

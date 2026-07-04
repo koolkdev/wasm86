@@ -14,7 +14,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
-  strictEqual(X86_32_CORE.instructions.length, 409);
+  strictEqual(X86_32_CORE.instructions.length, 415);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -95,6 +95,12 @@ test("x86-32 core registers the initial instruction surface", () => {
     "imul.r32_rm32_imm32",
     "imul.r16_rm16_imm8",
     "imul.r32_rm32_imm8",
+    "div.rm8",
+    "div.rm16",
+    "div.rm32",
+    "idiv.rm8",
+    "idiv.rm16",
+    "idiv.rm32",
     "bswap.r32",
     "cbw.word",
     "cwde.dword",
@@ -571,6 +577,43 @@ test("implicit multiply forms use one source operand and grouped opcodes", () =>
   deepStrictEqual(imulDword.opcode, [0xf7]);
   deepStrictEqual(imulDword.modrm, { match: { reg: 5 } });
   deepStrictEqual(imulDword.operands, [{ kind: "modrm.rm", type: "rm32" }]);
+});
+
+test("divide forms use one source operand and grouped opcodes", () => {
+  const divByte = instruction("div.rm8");
+  const divWord = instruction("div.rm16");
+  const divDword = instruction("div.rm32");
+  const idivByte = instruction("idiv.rm8");
+  const idivWord = instruction("idiv.rm16");
+  const idivDword = instruction("idiv.rm32");
+
+  deepStrictEqual(divByte.opcode, [0xf6]);
+  deepStrictEqual(divByte.modrm, { match: { reg: 6 } });
+  deepStrictEqual(divByte.operands, [{ kind: "modrm.rm", type: "rm8" }]);
+  deepStrictEqual(divByte.format, { syntax: "div {0}" });
+
+  deepStrictEqual(divWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(divWord.opcode, [0xf7]);
+  deepStrictEqual(divWord.modrm, { match: { reg: 6 } });
+  deepStrictEqual(divWord.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+
+  deepStrictEqual(divDword.opcode, [0xf7]);
+  deepStrictEqual(divDword.modrm, { match: { reg: 6 } });
+  deepStrictEqual(divDword.operands, [{ kind: "modrm.rm", type: "rm32" }]);
+
+  deepStrictEqual(idivByte.opcode, [0xf6]);
+  deepStrictEqual(idivByte.modrm, { match: { reg: 7 } });
+  deepStrictEqual(idivByte.operands, [{ kind: "modrm.rm", type: "rm8" }]);
+  deepStrictEqual(idivByte.format, { syntax: "idiv {0}" });
+
+  deepStrictEqual(idivWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(idivWord.opcode, [0xf7]);
+  deepStrictEqual(idivWord.modrm, { match: { reg: 7 } });
+  deepStrictEqual(idivWord.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+
+  deepStrictEqual(idivDword.opcode, [0xf7]);
+  deepStrictEqual(idivDword.modrm, { match: { reg: 7 } });
+  deepStrictEqual(idivDword.operands, [{ kind: "modrm.rm", type: "rm32" }]);
 });
 
 test("accumulator sign-extension forms are no-operand instructions", () => {

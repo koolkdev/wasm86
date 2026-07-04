@@ -23,7 +23,7 @@ export function foldBinary(
   const right = context.constValue(b);
 
   if (left !== undefined && right !== undefined) {
-    if ((operator === "div_u" || operator === "rem_u") && (right >>> 0) === 0) {
+    if (constantBinaryTraps(operator, left, right)) {
       return context.unreachable("i32");
     }
 
@@ -65,9 +65,16 @@ export function foldBinary(
       }
 
       return undefined;
+    case "div_s":
     case "div_u":
       if (right === 1) {
         return a;
+      }
+
+      return undefined;
+    case "rem_s":
+      if (right === 1 || right === -1) {
+        return context.const(0);
       }
 
       return undefined;
@@ -242,9 +249,18 @@ function evalBinary(operator: BinaryOperator, a: number, b: number): number {
       return i32(a - b);
     case "mul":
       return Math.imul(a, b);
+    case "div_s": {
+      assert(b !== 0, "div_s divisor must be non-zero");
+      assert(a !== -0x8000_0000 || b !== -1, "div_s quotient must not overflow");
+      return i32(Math.trunc(a / b));
+    }
     case "div_u": {
       assert((b >>> 0) !== 0, "div_u divisor must be non-zero");
       return i32(Math.floor((a >>> 0) / (b >>> 0)));
+    }
+    case "rem_s": {
+      assert(b !== 0, "rem_s divisor must be non-zero");
+      return i32(a % b);
     }
     case "rem_u": {
       assert((b >>> 0) !== 0, "rem_u divisor must be non-zero");
@@ -266,6 +282,29 @@ function evalBinary(operator: BinaryOperator, a: number, b: number): number {
       return a >> (b & 31);
     case "shr_u":
       return i32(a >>> (b & 31));
+  }
+}
+
+function constantBinaryTraps(operator: BinaryOperator, left: number, right: number): boolean {
+  switch (operator) {
+    case "div_s":
+      return right === 0 || (left === -0x8000_0000 && right === -1);
+    case "div_u":
+    case "rem_s":
+    case "rem_u":
+      return right === 0;
+    case "add":
+    case "sub":
+    case "mul":
+    case "xor":
+    case "or":
+    case "and":
+    case "shl":
+    case "rotl":
+    case "rotr":
+    case "shr_s":
+    case "shr_u":
+      return false;
   }
 }
 

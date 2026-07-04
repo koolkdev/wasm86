@@ -228,6 +228,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return valueFromId(this.#values.const(value));
   }
 
+  const64(value: bigint): Value {
+    this.#beforeOp("const64");
+    return valueFromId(this.#values.const64(value));
+  }
+
   nextEip(): Value {
     this.#beforeOp("nextEip");
     return valueFromId(this.#location().nextEip());

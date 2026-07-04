@@ -371,6 +371,9 @@ test("operators map to their wasm opcodes", () => {
   const unsignedShifted = values.binary("shr_u", one, two);
   const mixed = values.binary("xor", shifted, values.binary("xor", signedShifted, unsignedShifted));
   const product = values.binary("mul", one, two);
+  const signedQuotient = values.binary("div_s", one, two);
+  const unsignedQuotient = values.binary("div_u", one, two);
+  const signedRemainder = values.binary("rem_s", one, two);
   const remainder = values.binary("rem_u", one, two);
   const rotatedLeft = values.binary("rotl", one, two);
   const rotatedRight = values.binary("rotr", one, two);
@@ -384,6 +387,9 @@ test("operators map to their wasm opcodes", () => {
     testBody([
       stateWrite(gprChannel("eax"), mixed),
       stateWrite(gprChannel("esi"), product),
+      stateWrite(gprChannel("esi"), signedQuotient),
+      stateWrite(gprChannel("esi"), unsignedQuotient),
+      stateWrite(gprChannel("esi"), signedRemainder),
       stateWrite(gprChannel("esi"), remainder),
       stateWrite(gprChannel("esi"), rotatedLeft),
       stateWrite(gprChannel("esi"), rotatedRight),
@@ -398,6 +404,9 @@ test("operators map to their wasm opcodes", () => {
 
   valueStack.emitUse(mixed);
   valueStack.emitUse(product);
+  valueStack.emitUse(signedQuotient);
+  valueStack.emitUse(unsignedQuotient);
+  valueStack.emitUse(signedRemainder);
   valueStack.emitUse(remainder);
   valueStack.emitUse(rotatedLeft);
   valueStack.emitUse(rotatedRight);
@@ -423,6 +432,15 @@ test("operators map to their wasm opcodes", () => {
     wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.i32Mul,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.i32DivS,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.i32DivU,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.i32RemS,
     wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.i32RemU,
@@ -520,19 +538,34 @@ test("i64 binary operators lower to wasm i64 opcodes", () => {
   const two = values.extend64(32, values.external(1), false);
   const three = values.extend64(32, values.external(2), false);
   const four = values.extend64(32, values.external(3), false);
+  const five = values.extend64(32, values.external(4), false);
+  const six = values.extend64(32, values.external(5), false);
+  const seven = values.extend64(32, values.external(6), true);
+  const eight = values.extend64(32, values.external(7), true);
+  const nine = values.extend64(32, values.external(8), true);
+  const ten = values.extend64(32, values.external(9), true);
   const either = values.binary64("or", one, two);
-  const remainder = values.binary64("rem_u", three, four);
+  const quotient = values.binary64("div_u", three, four);
+  const remainder = values.binary64("rem_u", five, six);
+  const signedQuotient = values.binary64("div_s", seven, eight);
+  const signedRemainder = values.binary64("rem_s", nine, ten);
   const { body, scratch, valueStack } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), either),
-      stateWrite(gprChannel("ebx"), remainder)
+      stateWrite(gprChannel("ebx"), quotient),
+      stateWrite(gprChannel("ecx"), remainder),
+      stateWrite(gprChannel("edx"), signedQuotient),
+      stateWrite(gprChannel("esi"), signedRemainder)
     ]),
-    [0, 1, 2, 3]
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   );
 
   valueStack.emitUse(either);
+  valueStack.emitUse(quotient);
   valueStack.emitUse(remainder);
+  valueStack.emitUse(signedQuotient);
+  valueStack.emitUse(signedRemainder);
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -546,7 +579,47 @@ test("i64 binary operators lower to wasm i64 opcodes", () => {
     wasmOpcode.i64ExtendI32U,
     wasmOpcode.localGet,
     wasmOpcode.i64ExtendI32U,
+    wasmOpcode.i64DivU,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32U,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32U,
     wasmOpcode.i64RemU,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.i64DivS,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.i64RemS,
+    wasmOpcode.end
+  ]);
+});
+
+test("i64 equality against an i64 constant lowers to i64.const and i64.eq", () => {
+  const values = new ValueTable();
+  const value = values.extend64(32, values.external(0), true);
+  const equal = values.compare64("eq", value, values.const64(-0x8000_0000_0000_0000n));
+  const { body, scratch, valueStack } = createTestEmitter(
+    values,
+    testBody([
+      stateWrite(gprChannel("eax"), equal)
+    ]),
+    [0]
+  );
+
+  valueStack.emitUse(equal);
+  valueStack.assertClear();
+  scratch.assertClear();
+
+  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.i64Const,
+    wasmOpcode.i64Eq,
     wasmOpcode.end
   ]);
 });
@@ -556,7 +629,7 @@ test("unsupported i64 operators fail at wasm lowering", () => {
   const one = values.extend64(32, values.external(0), true);
   const two = values.extend64(32, values.external(1), true);
   const sum = values.binary64("add", one, two);
-  const equal = values.compare64("eq", one, two);
+  const less = values.compare64("lt_s", one, two);
   const sumEmitter = createTestEmitter(
     values,
     testBody([
@@ -564,16 +637,16 @@ test("unsupported i64 operators fail at wasm lowering", () => {
     ]),
     [0, 1]
   );
-  const equalEmitter = createTestEmitter(
+  const lessEmitter = createTestEmitter(
     values,
     testBody([
-      stateWrite(gprChannel("eax"), equal)
+      stateWrite(gprChannel("eax"), less)
     ]),
     [0, 1]
   );
 
   throws(() => sumEmitter.valueStack.emitUse(sum), /unsupported i64 binary operator add/);
-  throws(() => equalEmitter.valueStack.emitUse(equal), /unsupported i64 compare operator eq/);
+  throws(() => lessEmitter.valueStack.emitUse(less), /unsupported i64 compare operator lt_s/);
 });
 
 test("truncate masks to the requested width", () => {

@@ -30,6 +30,15 @@ export function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryVa
       case "mul":
         body.i64Mul();
         return;
+      case "div_s":
+        body.i64DivS();
+        return;
+      case "div_u":
+        body.i64DivU();
+        return;
+      case "rem_s":
+        body.i64RemS();
+        return;
       case "rem_u":
         body.i64RemU();
         return;
@@ -60,8 +69,14 @@ export function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryVa
     case "mul":
       body.i32Mul();
       return;
+    case "div_s":
+      body.i32DivS();
+      return;
     case "div_u":
       body.i32DivU();
+      return;
+    case "rem_s":
+      body.i32RemS();
       return;
     case "rem_u":
       body.i32RemU();
@@ -104,6 +119,9 @@ export function emitUnaryOperator(body: WasmFunctionBodyEncoder, node: UnaryValu
 export function emitCompareOperator(body: WasmFunctionBodyEncoder, node: CompareValueNode): void {
   if (node.type === "i64") {
     switch (node.operator) {
+      case "eq":
+        body.i64Eq();
+        return;
       case "ne":
         body.i64Ne();
         return;
