@@ -9,7 +9,7 @@ export const SETCC = CONDITION_CODE_DESCRIPTORS.map((descriptor) =>
     form("rm8", {
       opcode: [0x0f, 0x90 + descriptor.opcodeLow],
       operands: [modrmRm("rm8")],
-      format: { syntax: `set${descriptor.suffix} {0}` },
+      syntax: `set${descriptor.suffix} {0}`,
       semantics: setccSemantic(descriptor.cc)
     })
   ])

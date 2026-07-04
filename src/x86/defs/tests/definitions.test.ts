@@ -189,7 +189,7 @@ test("multi-byte nop forms use slash-zero ModRM operands without side effects", 
   deepStrictEqual(near.opcode, [0x0f, 0x1f]);
   deepStrictEqual(near.modrm, { match: { reg: 0 } });
   deepStrictEqual(near.operands, [{ kind: "modrm.rm", type: "rm32" }]);
-  deepStrictEqual(near.format, { syntax: "nop {0}" });
+  strictEqual(near.syntax, "nop {0}");
 
   deepStrictEqual(buildSemanticTrace(semanticsOf(near)).events, ["next"]);
 
@@ -213,7 +213,7 @@ test("cmovcc forms are concrete specs with select-value semantics", () => {
     { kind: "modrm.reg", type: "r32" },
     { kind: "modrm.rm", type: "rm32" }
   ]);
-  deepStrictEqual(spec.format, { syntax: "cmove {0}, {1}" });
+  strictEqual(spec.syntax, "cmove {0}, {1}");
 
   const trace = buildSemanticTrace(semanticsOf(spec), regOperands(2));
 
@@ -291,7 +291,7 @@ test("setcc forms use select-value semantics for register or memory destinations
   deepStrictEqual(spec.opcode, [0x0f, 0x94]);
   strictEqual(spec.modrm, undefined);
   deepStrictEqual(spec.operands, [{ kind: "modrm.rm", type: "rm8" }]);
-  deepStrictEqual(spec.format, { syntax: "sete {0}" });
+  strictEqual(spec.syntax, "sete {0}");
 
   const trace = buildSemanticTrace(semanticsOf(spec), regOperands(1));
 
@@ -308,7 +308,7 @@ test("leave is a no-operand stack frame instruction", () => {
 
   deepStrictEqual(spec.opcode, [0xc9]);
   strictEqual(spec.operands, undefined);
-  deepStrictEqual(spec.format, { syntax: "leave" });
+  strictEqual(spec.syntax, "leave");
 });
 
 test("pushfd is a no-operand dword flags push", () => {
@@ -316,7 +316,7 @@ test("pushfd is a no-operand dword flags push", () => {
 
   deepStrictEqual(spec.opcode, [0x9c]);
   strictEqual(spec.operands, undefined);
-  deepStrictEqual(spec.format, { syntax: "pushfd" });
+  strictEqual(spec.syntax, "pushfd");
 });
 
 test("pushf is an operand-size word flags push", () => {
@@ -325,7 +325,7 @@ test("pushf is an operand-size word flags push", () => {
   deepStrictEqual(spec.prefixes, { operandSize: "override" });
   deepStrictEqual(spec.opcode, [0x9c]);
   strictEqual(spec.operands, undefined);
-  deepStrictEqual(spec.format, { syntax: "pushf" });
+  strictEqual(spec.syntax, "pushf");
 });
 
 test("popfd is a no-operand dword flags pop", () => {
@@ -333,7 +333,7 @@ test("popfd is a no-operand dword flags pop", () => {
 
   deepStrictEqual(spec.opcode, [0x9d]);
   strictEqual(spec.operands, undefined);
-  deepStrictEqual(spec.format, { syntax: "popfd" });
+  strictEqual(spec.syntax, "popfd");
 });
 
 test("pushad and popad are no-operand dword stack-all forms", () => {
@@ -342,11 +342,11 @@ test("pushad and popad are no-operand dword stack-all forms", () => {
 
   deepStrictEqual(pushad.opcode, [0x60]);
   strictEqual(pushad.operands, undefined);
-  deepStrictEqual(pushad.format, { syntax: "pushad" });
+  strictEqual(pushad.syntax, "pushad");
 
   deepStrictEqual(popad.opcode, [0x61]);
   strictEqual(popad.operands, undefined);
-  deepStrictEqual(popad.format, { syntax: "popad" });
+  strictEqual(popad.syntax, "popad");
 });
 
 test("pusha and popa are operand-size word stack-all forms", () => {
@@ -356,12 +356,12 @@ test("pusha and popa are operand-size word stack-all forms", () => {
   deepStrictEqual(pusha.prefixes, { operandSize: "override" });
   deepStrictEqual(pusha.opcode, [0x60]);
   strictEqual(pusha.operands, undefined);
-  deepStrictEqual(pusha.format, { syntax: "pusha" });
+  strictEqual(pusha.syntax, "pusha");
 
   deepStrictEqual(popa.prefixes, { operandSize: "override" });
   deepStrictEqual(popa.opcode, [0x61]);
   strictEqual(popa.operands, undefined);
-  deepStrictEqual(popa.format, { syntax: "popa" });
+  strictEqual(popa.syntax, "popa");
 });
 
 test("popf is an operand-size word flags pop", () => {
@@ -370,7 +370,7 @@ test("popf is an operand-size word flags pop", () => {
   deepStrictEqual(spec.prefixes, { operandSize: "override" });
   deepStrictEqual(spec.opcode, [0x9d]);
   strictEqual(spec.operands, undefined);
-  deepStrictEqual(spec.format, { syntax: "popf" });
+  strictEqual(spec.syntax, "popf");
 });
 
 test("push segment forms name each fixed segment-register opcode", () => {
@@ -431,7 +431,7 @@ test("slash-r forms use ModRM operands without an explicit ModRM match", () => {
     { kind: "modrm.reg", type: "r32" },
     { kind: "modrm.rm", type: "rm32" }
   ]);
-  deepStrictEqual(spec.format, { syntax: "mov {0}, {1}" });
+  strictEqual(spec.syntax, "mov {0}, {1}");
 });
 
 test("xchg forms cover ModRM and accumulator opcodes", () => {
@@ -447,7 +447,7 @@ test("xchg forms cover ModRM and accumulator opcodes", () => {
     { kind: "modrm.rm", type: "rm8" },
     { kind: "modrm.reg", type: "r8" }
   ]);
-  deepStrictEqual(byte.format, { syntax: "xchg {0}, {1}" });
+  strictEqual(byte.syntax, "xchg {0}, {1}");
 
   deepStrictEqual(word.opcode, [0x87]);
   deepStrictEqual(word.prefixes, { operandSize: "override" });
@@ -470,14 +470,14 @@ test("xchg forms cover ModRM and accumulator opcodes", () => {
     { kind: "implicit.reg", reg: "ax", type: "r16" },
     { kind: "opcode.reg", type: "r16" }
   ]);
-  deepStrictEqual(ax.format, { syntax: "xchg {0}, {1}" });
+  strictEqual(ax.syntax, "xchg {0}, {1}");
 
   deepStrictEqual(eax.opcode, [{ byte: 0x90, bits: 5 }]);
   deepStrictEqual(eax.operands, [
     { kind: "implicit.reg", reg: "eax", type: "r32" },
     { kind: "opcode.reg", type: "r32" }
   ]);
-  deepStrictEqual(eax.format, { syntax: "xchg {0}, {1}" });
+  strictEqual(eax.syntax, "xchg {0}, {1}");
 });
 
 test("xchg semantics read both operands before writing either operand", () => {
@@ -506,7 +506,7 @@ test("explicit imul forms use register destinations and signed immediates", () =
     { kind: "modrm.reg", type: "r32" },
     { kind: "modrm.rm", type: "rm32" }
   ]);
-  deepStrictEqual(regDword.format, { syntax: "imul {0}, {1}" });
+  strictEqual(regDword.syntax, "imul {0}, {1}");
 
   deepStrictEqual(regWord.prefixes, { operandSize: "override" });
   deepStrictEqual(regWord.opcode, [0x0f, 0xaf]);
@@ -521,7 +521,7 @@ test("explicit imul forms use register destinations and signed immediates", () =
     { kind: "modrm.rm", type: "rm32" },
     { kind: "imm", width: 32 }
   ]);
-  deepStrictEqual(immDword.format, { syntax: "imul {0}, {1}, {2}" });
+  strictEqual(immDword.syntax, "imul {0}, {1}, {2}");
 
   deepStrictEqual(immWord.prefixes, { operandSize: "override" });
   deepStrictEqual(immWord.operands, [
@@ -553,7 +553,7 @@ test("implicit multiply forms use one source operand and grouped opcodes", () =>
   deepStrictEqual(mulByte.opcode, [0xf6]);
   deepStrictEqual(mulByte.modrm, { match: { reg: 4 } });
   deepStrictEqual(mulByte.operands, [{ kind: "modrm.rm", type: "rm8" }]);
-  deepStrictEqual(mulByte.format, { syntax: "mul {0}" });
+  strictEqual(mulByte.syntax, "mul {0}");
 
   deepStrictEqual(mulWord.prefixes, { operandSize: "override" });
   deepStrictEqual(mulWord.opcode, [0xf7]);
@@ -567,7 +567,7 @@ test("implicit multiply forms use one source operand and grouped opcodes", () =>
   deepStrictEqual(imulByte.opcode, [0xf6]);
   deepStrictEqual(imulByte.modrm, { match: { reg: 5 } });
   deepStrictEqual(imulByte.operands, [{ kind: "modrm.rm", type: "rm8" }]);
-  deepStrictEqual(imulByte.format, { syntax: "imul {0}" });
+  strictEqual(imulByte.syntax, "imul {0}");
 
   deepStrictEqual(imulWord.prefixes, { operandSize: "override" });
   deepStrictEqual(imulWord.opcode, [0xf7]);
@@ -590,7 +590,7 @@ test("divide forms use one source operand and grouped opcodes", () => {
   deepStrictEqual(divByte.opcode, [0xf6]);
   deepStrictEqual(divByte.modrm, { match: { reg: 6 } });
   deepStrictEqual(divByte.operands, [{ kind: "modrm.rm", type: "rm8" }]);
-  deepStrictEqual(divByte.format, { syntax: "div {0}" });
+  strictEqual(divByte.syntax, "div {0}");
 
   deepStrictEqual(divWord.prefixes, { operandSize: "override" });
   deepStrictEqual(divWord.opcode, [0xf7]);
@@ -604,7 +604,7 @@ test("divide forms use one source operand and grouped opcodes", () => {
   deepStrictEqual(idivByte.opcode, [0xf6]);
   deepStrictEqual(idivByte.modrm, { match: { reg: 7 } });
   deepStrictEqual(idivByte.operands, [{ kind: "modrm.rm", type: "rm8" }]);
-  deepStrictEqual(idivByte.format, { syntax: "idiv {0}" });
+  strictEqual(idivByte.syntax, "idiv {0}");
 
   deepStrictEqual(idivWord.prefixes, { operandSize: "override" });
   deepStrictEqual(idivWord.opcode, [0xf7]);
@@ -625,20 +625,20 @@ test("accumulator sign-extension forms are no-operand instructions", () => {
   deepStrictEqual(cbw.prefixes, { operandSize: "override" });
   deepStrictEqual(cbw.opcode, [0x98]);
   strictEqual(cbw.operands, undefined);
-  deepStrictEqual(cbw.format, { syntax: "cbw" });
+  strictEqual(cbw.syntax, "cbw");
 
   deepStrictEqual(cwde.opcode, [0x98]);
   strictEqual(cwde.operands, undefined);
-  deepStrictEqual(cwde.format, { syntax: "cwde" });
+  strictEqual(cwde.syntax, "cwde");
 
   deepStrictEqual(cwd.prefixes, { operandSize: "override" });
   deepStrictEqual(cwd.opcode, [0x99]);
   strictEqual(cwd.operands, undefined);
-  deepStrictEqual(cwd.format, { syntax: "cwd" });
+  strictEqual(cwd.syntax, "cwd");
 
   deepStrictEqual(cdq.opcode, [0x99]);
   strictEqual(cdq.operands, undefined);
-  deepStrictEqual(cdq.format, { syntax: "cdq" });
+  strictEqual(cdq.syntax, "cdq");
 });
 
 test("rotate forms share group-2 count and width shapes", () => {
@@ -650,7 +650,7 @@ test("rotate forms share group-2 count and width shapes", () => {
   deepStrictEqual(rol.opcode, [0xd1]);
   deepStrictEqual(rol.modrm, { match: { reg: 0 } });
   deepStrictEqual(rol.operands, [{ kind: "modrm.rm", type: "rm32" }]);
-  deepStrictEqual(rol.format, { syntax: "rol {0}, 1" });
+  strictEqual(rol.syntax, "rol {0}, 1");
 
   deepStrictEqual(ror.prefixes, { operandSize: "override" });
   deepStrictEqual(ror.opcode, [0xc1]);
@@ -659,7 +659,7 @@ test("rotate forms share group-2 count and width shapes", () => {
     { kind: "modrm.rm", type: "rm16" },
     { kind: "imm", width: 8 }
   ]);
-  deepStrictEqual(ror.format, { syntax: "ror {0}, {1}" });
+  strictEqual(ror.syntax, "ror {0}, {1}");
 
   deepStrictEqual(rcl.opcode, [0xd2]);
   deepStrictEqual(rcl.modrm, { match: { reg: 2 } });
@@ -667,7 +667,7 @@ test("rotate forms share group-2 count and width shapes", () => {
     { kind: "modrm.rm", type: "rm8" },
     { kind: "implicit.reg", reg: "cl", type: "r8" }
   ]);
-  deepStrictEqual(rcl.format, { syntax: "rcl {0}, {1}" });
+  strictEqual(rcl.syntax, "rcl {0}, {1}");
 
   deepStrictEqual(rcr.opcode, [0xd3]);
   deepStrictEqual(rcr.modrm, { match: { reg: 3 } });
@@ -675,7 +675,7 @@ test("rotate forms share group-2 count and width shapes", () => {
     { kind: "modrm.rm", type: "rm32" },
     { kind: "implicit.reg", reg: "cl", type: "r8" }
   ]);
-  deepStrictEqual(rcr.format, { syntax: "rcr {0}, {1}" });
+  strictEqual(rcr.syntax, "rcr {0}, {1}");
 });
 
 test("double-shift forms use two-byte ModRM source and count operands", () => {
@@ -690,7 +690,7 @@ test("double-shift forms use two-byte ModRM source and count operands", () => {
     { kind: "modrm.reg", type: "r32" },
     { kind: "imm", width: 8 }
   ]);
-  deepStrictEqual(shldImm.format, { syntax: "shld {0}, {1}, {2}" });
+  strictEqual(shldImm.syntax, "shld {0}, {1}, {2}");
 
   deepStrictEqual(shldCl.prefixes, { operandSize: "override" });
   deepStrictEqual(shldCl.opcode, [0x0f, 0xa5]);
@@ -699,7 +699,7 @@ test("double-shift forms use two-byte ModRM source and count operands", () => {
     { kind: "modrm.reg", type: "r16" },
     { kind: "implicit.reg", reg: "cl", type: "r8" }
   ]);
-  deepStrictEqual(shldCl.format, { syntax: "shld {0}, {1}, {2}" });
+  strictEqual(shldCl.syntax, "shld {0}, {1}, {2}");
 
   deepStrictEqual(shrdImm.prefixes, { operandSize: "override" });
   deepStrictEqual(shrdImm.opcode, [0x0f, 0xac]);
@@ -708,7 +708,7 @@ test("double-shift forms use two-byte ModRM source and count operands", () => {
     { kind: "modrm.reg", type: "r16" },
     { kind: "imm", width: 8 }
   ]);
-  deepStrictEqual(shrdImm.format, { syntax: "shrd {0}, {1}, {2}" });
+  strictEqual(shrdImm.syntax, "shrd {0}, {1}, {2}");
 
   deepStrictEqual(shrdCl.opcode, [0x0f, 0xad]);
   deepStrictEqual(shrdCl.operands, [
@@ -716,7 +716,7 @@ test("double-shift forms use two-byte ModRM source and count operands", () => {
     { kind: "modrm.reg", type: "r32" },
     { kind: "implicit.reg", reg: "cl", type: "r8" }
   ]);
-  deepStrictEqual(shrdCl.format, { syntax: "shrd {0}, {1}, {2}" });
+  strictEqual(shrdCl.syntax, "shrd {0}, {1}, {2}");
 });
 
 test("group opcode forms use modrm.match.reg for Intel slash-digit notation", () => {
@@ -932,7 +932,7 @@ test("bswap is a flagless opcode-register dword byte swap", () => {
 
   deepStrictEqual(spec.opcode, [0x0f, { byte: 0xc8, bits: 5 }]);
   deepStrictEqual(spec.operands, [{ kind: "opcode.reg", type: "r32" }]);
-  deepStrictEqual(spec.format, { syntax: "bswap {0}" });
+  strictEqual(spec.syntax, "bswap {0}");
   deepStrictEqual(trace.events, [
     "%0 = get op0:32",
     "set op0:32 <- %5",
@@ -1021,7 +1021,7 @@ test("ret imm16 records unsigned immediate and generic control semantics", () =>
 
   deepStrictEqual(spec.opcode, [0xc2]);
   deepStrictEqual(spec.operands, [{ kind: "imm", width: 16 }]);
-  deepStrictEqual(spec.format, { syntax: "ret {0}" });
+  strictEqual(spec.syntax, "ret {0}");
 
   const trace = buildSemanticTrace(semanticsOf(spec));
 
@@ -1077,16 +1077,16 @@ test("jcc forms are concrete specs with condition-specific semantics", () => {
 
   deepStrictEqual(short.opcode, [0x75]);
   deepStrictEqual(short.operands, [{ kind: "rel", width: 8 }]);
-  deepStrictEqual(short.format, { syntax: "jne {0}" });
+  strictEqual(short.syntax, "jne {0}");
 
   deepStrictEqual(word.opcode, [0x0f, 0x85]);
   deepStrictEqual(word.prefixes, { operandSize: "override" });
   deepStrictEqual(word.operands, [{ kind: "rel", width: 16 }]);
-  deepStrictEqual(word.format, { syntax: "jne {0}" });
+  strictEqual(word.syntax, "jne {0}");
 
   deepStrictEqual(near.opcode, [0x0f, 0x85]);
   deepStrictEqual(near.operands, [{ kind: "rel", width: 32 }]);
-  deepStrictEqual(near.format, { syntax: "jne {0}" });
+  strictEqual(near.syntax, "jne {0}");
 
   const trace = buildSemanticTrace(semanticsOf(short));
 

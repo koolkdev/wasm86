@@ -8,7 +8,7 @@ export const DIV = mnemonic("div", [
     opcode: [0xf6],
     modrm: { match: { reg: 6 } },
     operands: [modrmRm("rm8")],
-    format: { syntax: "div {0}" },
+    syntax: "div {0}",
     semantics: divImplicitSemantic(8)
   }),
   // 66 F7 /6: DIV r/m16
@@ -17,7 +17,7 @@ export const DIV = mnemonic("div", [
     opcode: [0xf7],
     modrm: { match: { reg: 6 } },
     operands: [modrmRm("rm16")],
-    format: { syntax: "div {0}" },
+    syntax: "div {0}",
     semantics: divImplicitSemantic(16)
   }),
   // F7 /6: DIV r/m32
@@ -25,7 +25,7 @@ export const DIV = mnemonic("div", [
     opcode: [0xf7],
     modrm: { match: { reg: 6 } },
     operands: [modrmRm("rm32")],
-    format: { syntax: "div {0}" },
+    syntax: "div {0}",
     semantics: divImplicitSemantic(32)
   })
 ]);
@@ -36,7 +36,7 @@ export const IDIV = mnemonic("idiv", [
     opcode: [0xf6],
     modrm: { match: { reg: 7 } },
     operands: [modrmRm("rm8")],
-    format: { syntax: "idiv {0}" },
+    syntax: "idiv {0}",
     semantics: idivImplicitSemantic(8)
   }),
   // 66 F7 /7: IDIV r/m16
@@ -45,7 +45,7 @@ export const IDIV = mnemonic("idiv", [
     opcode: [0xf7],
     modrm: { match: { reg: 7 } },
     operands: [modrmRm("rm16")],
-    format: { syntax: "idiv {0}" },
+    syntax: "idiv {0}",
     semantics: idivImplicitSemantic(16)
   }),
   // F7 /7: IDIV r/m32
@@ -53,7 +53,7 @@ export const IDIV = mnemonic("idiv", [
     opcode: [0xf7],
     modrm: { match: { reg: 7 } },
     operands: [modrmRm("rm32")],
-    format: { syntax: "idiv {0}" },
+    syntax: "idiv {0}",
     semantics: idivImplicitSemantic(32)
   })
 ]);

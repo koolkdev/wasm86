@@ -1,6 +1,7 @@
 import { deepStrictEqual, match } from "node:assert";
 import { test } from "node:test";
 
+import { formatPlaceholders } from "#x86/format.js";
 import { X86_32_CORE } from "#x86/index.js";
 import { instructionReadsModRm } from "#x86/schema/builders.js";
 import { expandOpcodePath } from "#x86/schema/opcodes.js";
@@ -35,7 +36,7 @@ test("lint rejects duplicate ids and malformed instruction fields", () => {
     fixtureSpec({ id: "dup.id", opcode: [0x91] }),
     fixtureSpec({ id: "", opcode: [0x92] }),
     fixtureSpec({ id: "bad.mnemonic", mnemonic: "", opcode: [0x93] }),
-    fixtureSpec({ id: "bad.syntax", opcode: [0x94], format: { syntax: "" } }),
+    fixtureSpec({ id: "bad.syntax", opcode: [0x94], syntax: "" }),
     fixtureSpec({
       id: "bad.prefix",
       opcode: [0x95],
@@ -51,7 +52,7 @@ test("lint rejects duplicate ids and malformed instruction fields", () => {
   match(message, /duplicate instruction id: dup\.id/);
   match(message, /<instruction 2>: instruction id must not be empty/);
   match(message, /bad\.mnemonic: instruction mnemonic must not be empty/);
-  match(message, /bad\.syntax: instruction format syntax must not be empty/);
+  match(message, /bad\.syntax: instruction syntax must not be empty/);
   match(message, /bad\.prefix: operand-size prefix mode must be default or override/);
   match(message, /bad\.modrm: modrm\.match\.reg must be an integer in 0\.\.7/);
 });
@@ -82,19 +83,19 @@ test("lint rejects invalid opcode register operand use", () => {
       id: "bad.no_variable_opcode",
       opcode: [0xb8],
       operands: [opReg()],
-      format: { syntax: "bad {0}" }
+      syntax: "bad {0}"
     }),
     fixtureSpec({
       id: "bad.two_variable_opcodes",
       opcode: [{ byte: 0xb8, bits: 5 }, { byte: 0x70, bits: 4 }],
       operands: [opReg()],
-      format: { syntax: "bad {0}" }
+      syntax: "bad {0}"
     }),
     fixtureSpec({
       id: "bad.two_opcode_regs",
       opcode: [{ byte: 0xb8, bits: 5 }],
       operands: [opReg(), opReg()],
-      format: { syntax: "bad {0}, {1}" }
+      syntax: "bad {0}, {1}"
     })
   ]);
 
@@ -109,7 +110,7 @@ test("lint rejects invalid format placeholders", () => {
       id: "mov.rm32_r32",
       opcode: [0x89],
       operands: [modrmRm("rm32"), modrmReg("r32")],
-      format: { syntax: "mov {0}, {1}" }
+      syntax: "mov {0}, {1}"
     })
   ]);
 
@@ -118,13 +119,13 @@ test("lint rejects invalid format placeholders", () => {
       id: "mov.bad_format",
       opcode: [0x89],
       operands: [modrmRm("rm32")],
-      format: { syntax: "mov {0}, {1}" }
+      syntax: "mov {0}, {1}"
     }),
     fixtureSpec({
       id: "mov.bad_format_name",
       opcode: [0x8b],
       operands: [modrmRm("rm32")],
-      format: { syntax: "mov {dst}" }
+      syntax: "mov {dst}"
     })
   ]);
 
@@ -145,14 +146,14 @@ test("lint detects instruction overlap while separating operand-size forms", () 
       id: "mov.r32_rm32",
       opcode: [0x8b],
       operands: [modrmReg("r32"), modrmRm("rm32")],
-      format: { syntax: "mov {0}, {1}" }
+      syntax: "mov {0}, {1}"
     }),
     fixtureSpec({
       id: "mov.r16_rm16",
       prefixes: { operandSize: "override" },
       opcode: [0x8b],
       operands: [modrmReg("r16"), modrmRm("rm16")],
-      format: { syntax: "mov {0}, {1}" }
+      syntax: "mov {0}, {1}"
     })
   ]);
 
@@ -160,7 +161,7 @@ test("lint detects instruction overlap while separating operand-size forms", () 
     id: "fixture.slash_r",
     opcode: [0x83],
     operands: [modrmReg("r32"), modrmRm("rm32")],
-    format: { syntax: "fixture {0}, {1}" }
+    syntax: "fixture {0}, {1}"
   });
 
   match(lintMessage([slashR, add]), /instruction specs overlap: fixture\.slash_r and add\.rm32_imm8/);
@@ -216,7 +217,7 @@ function lintInstructionSpec(spec: InstructionSpec, index: number, failures: str
 
   lintRequiredText(spec.id, "instruction id", label, failures);
   lintRequiredText(spec.mnemonic, "instruction mnemonic", label, failures);
-  lintRequiredText(spec.format.syntax, "instruction format syntax", label, failures);
+  lintRequiredText(spec.syntax, "instruction syntax", label, failures);
 
   const opcodePathOk = lintOpcodePath(spec.opcode, label, failures);
   const prefixOk = lintPrefixes(spec, label, failures);
@@ -345,34 +346,20 @@ function variableOpcodePartCount(path: OpcodePath): number {
 
 function lintFormat(spec: InstructionSpec, label: string, failures: string[]): void {
   const operandCount = spec.operands?.length ?? 0;
+  let placeholders: readonly number[];
 
-  for (const placeholder of formatPlaceholders(spec.format.syntax, label, failures)) {
+  try {
+    placeholders = formatPlaceholders(spec.syntax);
+  } catch (error) {
+    failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  for (const placeholder of placeholders) {
     if (placeholder >= operandCount) {
       failures.push(`${label}: format placeholder {${placeholder}} does not match an operand index`);
     }
   }
-}
-
-function formatPlaceholders(format: string, label: string, failures: string[]): readonly number[] {
-  const placeholders: number[] = [];
-
-  for (const placeholderMatch of format.matchAll(/\{([^{}]+)\}/g)) {
-    const placeholder = placeholderMatch[1];
-
-    if (placeholder === undefined) {
-      failures.push(`${label}: format placeholder parser produced an empty capture`);
-      continue;
-    }
-
-    if (!/^(0|[1-9][0-9]*)$/.test(placeholder)) {
-      failures.push(`${label}: format placeholder {${placeholder}} must be an operand index`);
-      continue;
-    }
-
-    placeholders.push(Number(placeholder));
-  }
-
-  return placeholders;
 }
 
 function lintInstructionOverlaps(analyses: readonly LintAnalysis[], failures: string[]): void {
@@ -460,7 +447,7 @@ function fixtureSpec(overrides: Partial<InstructionSpec>): InstructionSpec {
     mnemonic: "fixture",
     opcode: [0x90],
     operands: [],
-    format: { syntax: "fixture" },
+    syntax: "fixture",
     semantics,
     ...overrides
   };
@@ -475,7 +462,7 @@ function group83(id: string, reg: 0 | 5): InstructionSpec {
     opcode: [0x83],
     modrm: { match: { reg } },
     operands: [modrmRm("rm32"), imm(8, "sign")],
-    format: { syntax: `${mnemonicName} {0}, {1}` }
+    syntax: `${mnemonicName} {0}, {1}`
   });
 }
 

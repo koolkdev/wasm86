@@ -8,7 +8,7 @@ export const BSWAP = mnemonic("bswap", [
   form("r32", {
     opcode: [0x0f, opcodePlusReg(0xc8)],
     operands: [opReg()],
-    format: { syntax: "bswap {0}" },
+    syntax: "bswap {0}",
     semantics: bswapSemantic()
   })
 ]);

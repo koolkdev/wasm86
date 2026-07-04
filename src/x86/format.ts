@@ -1,19 +1,39 @@
+import { assert } from "#common/assert.js";
+
 import type { IsaDecodedInstruction, IsaOperandBinding } from "./decoder/types.js";
 import { defaultSegmentForBase } from "./types.js";
 
+const formatPlaceholderPattern = /\{([^{}]+)\}/g;
+
 export function formatIsaInstruction(instruction: IsaDecodedInstruction): string {
-  return instruction.spec.format.syntax.replace(/\{([^{}]+)\}/g, (_match, placeholder: string) => {
-    if (!/^(0|[1-9][0-9]*)$/.test(placeholder)) {
-      throw new Error(`format placeholder {${placeholder}} must be an operand index`);
-    }
+  return instruction.spec.syntax.replace(formatPlaceholderPattern, (match: string) => {
+    const placeholder = formatPlaceholders(match)[0];
 
-    const operand = instruction.operands[Number(placeholder)];
+    assert(placeholder !== undefined, "format placeholder parser produced no placeholder");
 
-    if (operand === undefined) {
-      throw new Error(`format placeholder {${placeholder}} does not match a decoded operand`);
-    }
+    const operand = instruction.operands[placeholder];
+
+    assert(
+      operand !== undefined,
+      `format placeholder {${placeholder}} does not match a decoded operand`
+    );
 
     return formatIsaOperand(operand);
+  });
+}
+
+export function formatPlaceholders(syntax: string): readonly number[] {
+  return [...syntax.matchAll(formatPlaceholderPattern)].map((match) => {
+    const placeholder = match[1];
+
+    assert(placeholder !== undefined, "format placeholder parser produced an empty capture");
+
+    assert(
+      /^(0|[1-9][0-9]*)$/.test(placeholder),
+      `format placeholder {${placeholder}} must be an operand index`
+    );
+
+    return Number(placeholder);
   });
 }
 

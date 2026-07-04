@@ -47,14 +47,14 @@ function doubleShiftMnemonic(
       prefixes: { operandSize: "override" },
       opcode: [0x0f, opcode.imm8],
       operands: [modrmRm("rm16"), modrmReg("r16"), imm(8)],
-      format: { syntax: `${op} {0}, {1}, {2}` },
+      syntax: `${op} {0}, {1}, {2}`,
       semantics: doubleShiftSemantic(op, 16, "imm8")
     }),
     // 0F xx /r ib: double-precision shift r/m32, r32 by imm8
     form("rm32_r32_imm8", {
       opcode: [0x0f, opcode.imm8],
       operands: [modrmRm("rm32"), modrmReg("r32"), imm(8)],
-      format: { syntax: `${op} {0}, {1}, {2}` },
+      syntax: `${op} {0}, {1}, {2}`,
       semantics: doubleShiftSemantic(op, 32, "imm8")
     }),
     // 66 0F xx /r: double-precision shift r/m16, r16 by CL
@@ -62,14 +62,14 @@ function doubleShiftMnemonic(
       prefixes: { operandSize: "override" },
       opcode: [0x0f, opcode.cl],
       operands: [modrmRm("rm16"), modrmReg("r16"), implicitReg("cl")],
-      format: { syntax: `${op} {0}, {1}, {2}` },
+      syntax: `${op} {0}, {1}, {2}`,
       semantics: doubleShiftSemantic(op, 16, "cl")
     }),
     // 0F xx /r: double-precision shift r/m32, r32 by CL
     form("rm32_r32_cl", {
       opcode: [0x0f, opcode.cl],
       operands: [modrmRm("rm32"), modrmReg("r32"), implicitReg("cl")],
-      format: { syntax: `${op} {0}, {1}, {2}` },
+      syntax: `${op} {0}, {1}, {2}`,
       semantics: doubleShiftSemantic(op, 32, "cl")
     })
   ]);
@@ -86,7 +86,7 @@ function group2Mnemonic(
       opcode: [0xd0],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm8")],
-      format: { syntax: `${op} {0}, 1` },
+      syntax: `${op} {0}, 1`,
       semantics: semantic(8, "one")
     }),
     // 66 D1 /n: group-2 r/m16 by 1
@@ -95,7 +95,7 @@ function group2Mnemonic(
       opcode: [0xd1],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm16")],
-      format: { syntax: `${op} {0}, 1` },
+      syntax: `${op} {0}, 1`,
       semantics: semantic(16, "one")
     }),
     // D1 /n: group-2 r/m32 by 1
@@ -103,7 +103,7 @@ function group2Mnemonic(
       opcode: [0xd1],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm32")],
-      format: { syntax: `${op} {0}, 1` },
+      syntax: `${op} {0}, 1`,
       semantics: semantic(32, "one")
     }),
     // D2 /n: group-2 r/m8 by CL
@@ -111,7 +111,7 @@ function group2Mnemonic(
       opcode: [0xd2],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm8"), implicitReg("cl")],
-      format: { syntax: `${op} {0}, {1}` },
+      syntax: `${op} {0}, {1}`,
       semantics: semantic(8, "cl")
     }),
     // 66 D3 /n: group-2 r/m16 by CL
@@ -120,7 +120,7 @@ function group2Mnemonic(
       opcode: [0xd3],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm16"), implicitReg("cl")],
-      format: { syntax: `${op} {0}, {1}` },
+      syntax: `${op} {0}, {1}`,
       semantics: semantic(16, "cl")
     }),
     // D3 /n: group-2 r/m32 by CL
@@ -128,7 +128,7 @@ function group2Mnemonic(
       opcode: [0xd3],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm32"), implicitReg("cl")],
-      format: { syntax: `${op} {0}, {1}` },
+      syntax: `${op} {0}, {1}`,
       semantics: semantic(32, "cl")
     }),
     // C0 /n ib: group-2 r/m8 by imm8
@@ -136,7 +136,7 @@ function group2Mnemonic(
       opcode: [0xc0],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm8"), imm(8)],
-      format: { syntax: `${op} {0}, {1}` },
+      syntax: `${op} {0}, {1}`,
       semantics: semantic(8, "imm8")
     }),
     // 66 C1 /n ib: group-2 r/m16 by imm8
@@ -145,7 +145,7 @@ function group2Mnemonic(
       opcode: [0xc1],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm16"), imm(8)],
-      format: { syntax: `${op} {0}, {1}` },
+      syntax: `${op} {0}, {1}`,
       semantics: semantic(16, "imm8")
     }),
     // C1 /n ib: group-2 r/m32 by imm8
@@ -153,7 +153,7 @@ function group2Mnemonic(
       opcode: [0xc1],
       modrm: { match: { reg: group } },
       operands: [modrmRm("rm32"), imm(8)],
-      format: { syntax: `${op} {0}, {1}` },
+      syntax: `${op} {0}, {1}`,
       semantics: semantic(32, "imm8")
     })
   ]);

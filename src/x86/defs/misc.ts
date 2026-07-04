@@ -6,14 +6,14 @@ export const NOP = mnemonic("nop", [
   // Alias for xchg eax, eax
   // form("near", {
   //   opcode: [0x90],
-  //   format: { syntax: "nop" },
+  //   syntax: "nop",
   //   semantics: nopSemantic()
   // }),
   // Alias for xchg ax, ax
   // form("operand_size_override", {
   //   opcode: [0x90],
   //   prefixes: { operandSize: "override" },
-  //   format: { syntax: "nop" },
+  //   syntax: "nop",
   //   semantics: nopSemantic()
   // }),
   // 66 0F 1F /0: multi-byte NOP r/m16
@@ -22,7 +22,7 @@ export const NOP = mnemonic("nop", [
     prefixes: { operandSize: "override" },
     modrm: { match: { reg: 0 } },
     operands: [modrmRm("rm16")],
-    format: { syntax: "nop {0}" },
+    syntax: "nop {0}",
     semantics: nopSemantic()
   }),
   // 0F 1F /0: multi-byte NOP r/m32
@@ -30,7 +30,7 @@ export const NOP = mnemonic("nop", [
     opcode: [0x0f, 0x1f],
     modrm: { match: { reg: 0 } },
     operands: [modrmRm("rm32")],
-    format: { syntax: "nop {0}" },
+    syntax: "nop {0}",
     semantics: nopSemantic()
   })
 ]);
@@ -40,7 +40,7 @@ export const INT = mnemonic("int", [
   form("imm8", {
     opcode: [0xcd],
     operands: [imm(8)],
-    format: { syntax: "int {0}" },
+    syntax: "int {0}",
     semantics: intSemantic()
   })
 ]);

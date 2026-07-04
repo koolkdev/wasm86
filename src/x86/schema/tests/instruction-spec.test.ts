@@ -26,7 +26,7 @@ test("opcode plus register path matches and exposes low bits through opcode.reg 
     mnemonic: "mov",
     opcode: [opcodePlusReg(0xb8)],
     operands: [opReg(), imm(32)],
-    format: { syntax: "mov {0}, {1}" },
+    syntax: "mov {0}, {1}",
     semantics
   });
 
@@ -61,7 +61,7 @@ test("normal slash-r form reads ModRM through operands without a modrm field", (
     mnemonic: "mov",
     opcode: [0x8b],
     operands: [modrmReg("r32"), modrmRm("rm32")],
-    format: { syntax: "mov {0}, {1}" },
+    syntax: "mov {0}, {1}",
     semantics
   });
 
@@ -77,7 +77,7 @@ test("modrm.match represents Intel slash digit notation", () => {
     opcode: [0x83],
     modrm: { match: { reg: 5 } },
     operands: [modrmRm("rm32"), imm(8, "sign")],
-    format: { syntax: "sub {0}, {1}" },
+    syntax: "sub {0}, {1}",
     semantics
   });
 
@@ -99,14 +99,14 @@ test("mnemonic and ISA builders generate stable full instruction ids", () => {
     form("r32_rm32", {
       opcode: [0x8b],
       operands: [modrmReg("r32"), modrmRm("rm32")],
-      format: { syntax: "mov {0}, {1}" },
+      syntax: "mov {0}, {1}",
       semantics
     }),
     // 89 /r: MOV r/m32, r32
     form("rm32_r32", {
       opcode: [0x89],
       operands: [modrmRm("rm32"), modrmReg("r32")],
-      format: { syntax: "mov {0}, {1}" },
+      syntax: "mov {0}, {1}",
       semantics
     })
   ]);

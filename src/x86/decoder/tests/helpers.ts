@@ -95,7 +95,7 @@ export function testDecodeFixtures(fixtures: readonly DecoderFixture[]): void {
       }
 
       if (fixture.format !== undefined) {
-        strictEqual(decoded.instruction.spec.format.syntax, fixture.format);
+        strictEqual(decoded.instruction.spec.syntax, fixture.format);
       }
     });
   }

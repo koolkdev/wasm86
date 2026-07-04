@@ -10,7 +10,7 @@ test("decodes opcode-encoded register and imm32 operands", () => {
   const decoded = ok(decodeBytes([0xbb, 0x78, 0x56, 0x34, 0x12]));
 
   strictEqual(decoded.spec.id, "mov.r32_imm32");
-  strictEqual(decoded.spec.format.syntax, "mov {0}, {1}");
+  strictEqual(decoded.spec.syntax, "mov {0}, {1}");
   strictEqual(decoded.length, 5);
   strictEqual(decoded.nextEip, startAddress + 5);
   deepStrictEqual(decoded.raw, [0xbb, 0x78, 0x56, 0x34, 0x12]);
@@ -61,11 +61,11 @@ test("decodes slash-r register/register operands positionally", () => {
   const reverse = ok(decodeBytes([0x89, 0xc3]));
 
   strictEqual(mov.spec.id, "mov.r32_rm32");
-  strictEqual(mov.spec.format.syntax, "mov {0}, {1}");
+  strictEqual(mov.spec.syntax, "mov {0}, {1}");
   deepStrictEqual(mov.operands, [reg32("eax"), reg32("ebx")]);
 
   strictEqual(reverse.spec.id, "mov.rm32_r32");
-  strictEqual(reverse.spec.format.syntax, "mov {0}, {1}");
+  strictEqual(reverse.spec.syntax, "mov {0}, {1}");
   deepStrictEqual(reverse.operands, [reg32("ebx"), reg32("eax")]);
 });
 
@@ -82,7 +82,7 @@ test("decodes xchg ModRM and accumulator forms", () => {
   const accumulatorWordSelf = ok(decodeBytes([0x66, 0x90]));
 
   strictEqual(dword.spec.id, "xchg.rm32_r32");
-  strictEqual(dword.spec.format.syntax, "xchg {0}, {1}");
+  strictEqual(dword.spec.syntax, "xchg {0}, {1}");
   deepStrictEqual(dword.operands, [reg32("eax"), reg32("ebx")]);
 
   strictEqual(byte.spec.id, "xchg.rm8_r8");
@@ -128,27 +128,27 @@ test("uses ModRM match fields for slash-digit groups", () => {
   const xor = ok(decodeBytes([0x81, 0xf3, 0x78, 0x56, 0x34, 0x12]));
 
   strictEqual(sub.spec.id, "sub.rm32_imm8");
-  strictEqual(sub.spec.format.syntax, "sub {0}, {1}");
+  strictEqual(sub.spec.syntax, "sub {0}, {1}");
   deepStrictEqual(sub.operands, [reg32("ebx"), signImm8(0xffff_ffff)]);
 
   strictEqual(or.spec.id, "or.rm32_imm8");
-  strictEqual(or.spec.format.syntax, "or {0}, {1}");
+  strictEqual(or.spec.syntax, "or {0}, {1}");
   deepStrictEqual(or.operands, [reg32("ebx"), signImm8(0x7f)]);
 
   strictEqual(adc.spec.id, "adc.rm32_imm8");
-  strictEqual(adc.spec.format.syntax, "adc {0}, {1}");
+  strictEqual(adc.spec.syntax, "adc {0}, {1}");
   deepStrictEqual(adc.operands, [reg32("ebx"), signImm8(0xffff_ffff)]);
 
   strictEqual(sbb.spec.id, "sbb.rm32_imm8");
-  strictEqual(sbb.spec.format.syntax, "sbb {0}, {1}");
+  strictEqual(sbb.spec.syntax, "sbb {0}, {1}");
   deepStrictEqual(sbb.operands, [reg32("ebx"), signImm8(0xffff_ff80)]);
 
   strictEqual(and.spec.id, "and.rm32_imm32");
-  strictEqual(and.spec.format.syntax, "and {0}, {1}");
+  strictEqual(and.spec.syntax, "and {0}, {1}");
   deepStrictEqual(and.operands, [reg32("ebx"), imm32(0x1234_5678)]);
 
   strictEqual(xor.spec.id, "xor.rm32_imm32");
-  strictEqual(xor.spec.format.syntax, "xor {0}, {1}");
+  strictEqual(xor.spec.syntax, "xor {0}, {1}");
   deepStrictEqual(xor.operands, [reg32("ebx"), imm32(0x1234_5678)]);
 });
 
@@ -171,14 +171,14 @@ test("decodes direct relative targets as absolute target operands", () => {
   const jmp32 = ok(decodeBytes([0xe9, 0xfb, 0xff, 0xff, 0xff]));
 
   strictEqual(jmp8.spec.id, "jmp.rel8");
-  strictEqual(jmp8.spec.format.syntax, "jmp {0}");
+  strictEqual(jmp8.spec.syntax, "jmp {0}");
   strictEqual(jmp8.nextEip, startAddress + 2);
   deepStrictEqual(jmp8.operands, [
     { kind: "relTarget", width: 8, displacement: -2, target: startAddress }
   ]);
 
   strictEqual(jmp16.spec.id, "jmp.rel16");
-  strictEqual(jmp16.spec.format.syntax, "jmp {0}");
+  strictEqual(jmp16.spec.syntax, "jmp {0}");
   strictEqual(jmp16.nextEip, startAddress + 4);
   deepStrictEqual(jmp16.operands, [
     { kind: "relTarget", width: 16, displacement: -4, target: startAddress }
@@ -190,7 +190,7 @@ test("decodes direct relative targets as absolute target operands", () => {
   ]);
 
   strictEqual(jmp32.spec.id, "jmp.rel32");
-  strictEqual(jmp32.spec.format.syntax, "jmp {0}");
+  strictEqual(jmp32.spec.syntax, "jmp {0}");
   strictEqual(jmp32.nextEip, startAddress + 5);
   deepStrictEqual(jmp32.operands, [
     { kind: "relTarget", width: 32, displacement: -5, target: startAddress }
@@ -204,13 +204,13 @@ test("decodes concrete jcc rel8, rel16, and rel32 forms", () => {
   const rel32 = ok(decodeBytes([0x0f, 0x85, 0xfa, 0xff, 0xff, 0xff]));
 
   strictEqual(rel8.spec.id, "jne.rel8");
-  strictEqual(rel8.spec.format.syntax, "jne {0}");
+  strictEqual(rel8.spec.syntax, "jne {0}");
   deepStrictEqual(rel8.operands, [
     { kind: "relTarget", width: 8, displacement: 5, target: startAddress + 7 }
   ]);
 
   strictEqual(rel16.spec.id, "jne.rel16");
-  strictEqual(rel16.spec.format.syntax, "jne {0}");
+  strictEqual(rel16.spec.syntax, "jne {0}");
   deepStrictEqual(rel16.operands, [
     { kind: "relTarget", width: 16, displacement: -6, target: startAddress - 1 }
   ]);
@@ -221,7 +221,7 @@ test("decodes concrete jcc rel8, rel16, and rel32 forms", () => {
   ]);
 
   strictEqual(rel32.spec.id, "jne.rel32");
-  strictEqual(rel32.spec.format.syntax, "jne {0}");
+  strictEqual(rel32.spec.syntax, "jne {0}");
   deepStrictEqual(rel32.operands, [
     { kind: "relTarget", width: 32, displacement: -6, target: startAddress }
   ]);
@@ -233,17 +233,17 @@ test("decodes multi-byte nop and int imm8 forms", () => {
   const trap = ok(decodeBytes([0xcd, 0x2e]));
 
   strictEqual(multiByteNop.spec.id, "nop.rm32");
-  strictEqual(multiByteNop.spec.format.syntax, "nop {0}");
+  strictEqual(multiByteNop.spec.syntax, "nop {0}");
   strictEqual(multiByteNop.length, 4);
   deepStrictEqual(multiByteNop.operands, [mem32({ base: "eax", scale: 1, disp: 0 })]);
 
   strictEqual(wordNop.spec.id, "nop.rm16");
-  strictEqual(wordNop.spec.format.syntax, "nop {0}");
+  strictEqual(wordNop.spec.syntax, "nop {0}");
   strictEqual(wordNop.length, 4);
   deepStrictEqual(wordNop.operands, [mem(16, { base: "eax", scale: 1, disp: 0 })]);
 
   strictEqual(trap.spec.id, "int.imm8");
-  strictEqual(trap.spec.format.syntax, "int {0}");
+  strictEqual(trap.spec.syntax, "int {0}");
   strictEqual(trap.length, 2);
   deepStrictEqual(trap.operands, [imm8(0x2e)]);
 });
@@ -253,7 +253,7 @@ test("decodes ModRM memory operands with displacement", () => {
   const decoded = ok(decodeBytes([0x8b, 0x43, 0x04]));
 
   strictEqual(decoded.spec.id, "mov.r32_rm32");
-  strictEqual(decoded.spec.format.syntax, "mov {0}, {1}");
+  strictEqual(decoded.spec.syntax, "mov {0}, {1}");
   deepStrictEqual(decoded.operands, [reg32("eax"), mem32({ base: "ebx", scale: 1, disp: 4 })]);
 });
 

@@ -36,10 +36,6 @@ export type ModRmMatch = Readonly<{
   rm?: Reg3;
 }>;
 
-export type InstructionFormat = Readonly<{
-  syntax: string;
-}>;
-
 export type InstructionPrefixes = Readonly<{
   operandSize?: OperandSizePrefixMode;
 }>;
@@ -53,7 +49,7 @@ export type InstructionSpec = Readonly<{
     match?: ModRmMatch;
   }>;
   operands?: readonly OperandSpec[];
-  format: InstructionFormat;
+  syntax: string;
   semantics: SemanticTemplate;
 }>;
 
