@@ -5,6 +5,7 @@ import { X86_32_CORE } from "#x86/index.js";
 import { instructionReadsModRm } from "#x86/schema/builders.js";
 import { expandOpcodePath } from "#x86/schema/opcodes.js";
 import { imm, modrmReg, modrmRm, opReg } from "#x86/schema/operands.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type {
   FixedHighBits,
   InstructionSpec,
@@ -15,7 +16,7 @@ import type {
   Reg3
 } from "#x86/schema/types.js";
 
-const semantics = { test: "semantics-placeholder" } as const;
+const semantics: SemanticTemplate = () => {};
 
 type LintAnalysis = Readonly<{
   spec: InstructionSpec;
@@ -453,7 +454,7 @@ function lowMask(bits: number): number {
   return (1 << (8 - bits)) - 1;
 }
 
-function fixtureSpec(overrides: Partial<InstructionSpec<typeof semantics>>): InstructionSpec<typeof semantics> {
+function fixtureSpec(overrides: Partial<InstructionSpec>): InstructionSpec {
   return {
     id: "fixture.valid",
     mnemonic: "fixture",
@@ -465,7 +466,7 @@ function fixtureSpec(overrides: Partial<InstructionSpec<typeof semantics>>): Ins
   };
 }
 
-function group83(id: string, reg: 0 | 5): InstructionSpec<typeof semantics> {
+function group83(id: string, reg: 0 | 5): InstructionSpec {
   const mnemonicName = group83Mnemonic(reg);
 
   return fixtureSpec({

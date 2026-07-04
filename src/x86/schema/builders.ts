@@ -12,17 +12,17 @@ import type {
   OpcodePath
 } from "./types.js";
 
-export function form<TSemantics>(
+export function form(
   formId: string,
-  spec: InstructionFormSpec<TSemantics>
-): InstructionForm<TSemantics> {
+  spec: InstructionFormSpec
+): InstructionForm {
   return { formId, spec };
 }
 
-export function mnemonic<TSemantics>(
+export function mnemonic(
   mnemonicName: string,
-  forms: readonly InstructionForm<TSemantics>[]
-): InstructionMnemonic<TSemantics> {
+  forms: readonly InstructionForm[]
+): InstructionMnemonic {
   if (forms.length === 0) {
     throw new Error("instruction mnemonic must have at least one form");
   }
@@ -30,20 +30,20 @@ export function mnemonic<TSemantics>(
   return { mnemonic: mnemonicName, forms };
 }
 
-export function defineIsa<TSemantics>(definition: IsaDefinition<TSemantics>): DefinedIsa<TSemantics> {
+export function defineIsa(definition: IsaDefinition): DefinedIsa {
   return {
     name: definition.name,
     instructions: definition.mnemonics.flatMap((entry) => instructionsForMnemonic(entry))
   };
 }
 
-export function instruction<TSemantics>(spec: InstructionSpec<TSemantics>): InstructionSpec<TSemantics> {
+export function instruction(spec: InstructionSpec): InstructionSpec {
   return spec;
 }
 
-export function instructionsForMnemonic<TSemantics>(
-  entry: InstructionMnemonic<TSemantics>
-): readonly InstructionSpec<TSemantics>[] {
+export function instructionsForMnemonic(
+  entry: InstructionMnemonic
+): readonly InstructionSpec[] {
   return entry.forms.map((entryForm) =>
     instruction({
       id: `${entry.mnemonic}.${entryForm.formId}`,
@@ -57,9 +57,9 @@ export function instructionReadsModRm(spec: InstructionSpec): boolean {
   return spec.modrm?.match !== undefined || (spec.operands ?? []).some(isModRmOperand);
 }
 
-export function expandInstructionSpec<TSemantics>(
-  spec: InstructionSpec<TSemantics>
-): readonly ExpandedInstructionSpec<TSemantics>[] {
+export function expandInstructionSpec(
+  spec: InstructionSpec
+): readonly ExpandedInstructionSpec[] {
   return expandOpcodePath(spec.opcode).map(({ bytes, lowBits }) => {
     if (lowBits === undefined) {
       return { spec, opcode: bytes };

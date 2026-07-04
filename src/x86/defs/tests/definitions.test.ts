@@ -1106,7 +1106,7 @@ function instruction(id: string): InstructionSpec {
 }
 
 function semanticsOf(spec: InstructionSpec): SemanticTemplate {
-  return spec.semantics as SemanticTemplate;
+  return spec.semantics;
 }
 
 function statusFlagKeys(write: Partial<Record<(typeof x86StatusFlags)[number], unknown>>): string[] {

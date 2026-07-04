@@ -1,3 +1,4 @@
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 
 export type Reg3 = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
@@ -43,7 +44,7 @@ export type InstructionPrefixes = Readonly<{
   operandSize?: OperandSizePrefixMode;
 }>;
 
-export type InstructionSpec<TSemantics = unknown> = Readonly<{
+export type InstructionSpec = Readonly<{
   id: string;
   mnemonic: string;
   opcode: OpcodePath;
@@ -53,33 +54,33 @@ export type InstructionSpec<TSemantics = unknown> = Readonly<{
   }>;
   operands?: readonly OperandSpec[];
   format: InstructionFormat;
-  semantics: TSemantics;
+  semantics: SemanticTemplate;
 }>;
 
-export type InstructionFormSpec<TSemantics = unknown> = Omit<InstructionSpec<TSemantics>, "id" | "mnemonic">;
+export type InstructionFormSpec = Omit<InstructionSpec, "id" | "mnemonic">;
 
-export type InstructionForm<TSemantics = unknown> = Readonly<{
+export type InstructionForm = Readonly<{
   formId: string;
-  spec: InstructionFormSpec<TSemantics>;
+  spec: InstructionFormSpec;
 }>;
 
-export type InstructionMnemonic<TSemantics = unknown> = Readonly<{
+export type InstructionMnemonic = Readonly<{
   mnemonic: string;
-  forms: readonly InstructionForm<TSemantics>[];
+  forms: readonly InstructionForm[];
 }>;
 
-export type IsaDefinition<TSemantics = unknown> = Readonly<{
+export type IsaDefinition = Readonly<{
   name: string;
-  mnemonics: readonly InstructionMnemonic<TSemantics>[];
+  mnemonics: readonly InstructionMnemonic[];
 }>;
 
-export type DefinedIsa<TSemantics = unknown> = Readonly<{
+export type DefinedIsa = Readonly<{
   name: string;
-  instructions: readonly InstructionSpec<TSemantics>[];
+  instructions: readonly InstructionSpec[];
 }>;
 
-export type ExpandedInstructionSpec<TSemantics = unknown> = Readonly<{
-  spec: InstructionSpec<TSemantics>;
+export type ExpandedInstructionSpec = Readonly<{
+  spec: InstructionSpec;
   opcode: readonly number[];
   opcodeLowBits?: number;
 }>;

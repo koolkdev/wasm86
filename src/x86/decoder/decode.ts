@@ -1,4 +1,3 @@
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { u32 } from "#x86/numeric.js";
 import { X86_32_CORE } from "#x86/index.js";
 import {
@@ -46,12 +45,12 @@ type CandidateDecode =
   | Readonly<{ kind: "unsupported"; length: number }>;
 
 type DispatchedCandidates = Readonly<{
-  candidates: readonly ExpandedInstructionSpec<SemanticTemplate>[];
+  candidates: readonly ExpandedInstructionSpec[];
   modrm: DecodedModRm | undefined;
   unsupportedLength: number;
 }>;
 
-const EXPANDED_INSTRUCTIONS: readonly ExpandedInstructionSpec<SemanticTemplate>[] =
+const EXPANDED_INSTRUCTIONS: readonly ExpandedInstructionSpec[] =
   X86_32_CORE.instructions.flatMap((spec) => expandInstructionSpec(spec));
 const OPCODE_DISPATCH_ROOT = buildOpcodeDispatch(EXPANDED_INSTRUCTIONS);
 
@@ -137,7 +136,7 @@ class InstructionDecoder {
 
   private decodeCandidate(
     opcodeAddress: number,
-    expanded: ExpandedInstructionSpec<SemanticTemplate>,
+    expanded: ExpandedInstructionSpec,
     dispatchedModRm: DecodedModRm | undefined
   ): CandidateDecode {
     const spec = expanded.spec;
@@ -184,7 +183,7 @@ class InstructionDecoder {
 
   private decodeOperand(
     cursor: number,
-    expanded: ExpandedInstructionSpec<SemanticTemplate>,
+    expanded: ExpandedInstructionSpec,
     modrm: DecodedModRm | undefined,
     operand: OperandSpec
   ):

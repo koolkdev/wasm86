@@ -11,7 +11,6 @@ import {
   type ExternalValueId,
   type OperandBinding
 } from "#ir/operands.js";
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#x86/schema/types.js";
 import { reg16, reg32, reg8, type RegName } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -51,7 +50,7 @@ export type HandlerEmitContext = Readonly<{
 
 export function emitInstructionHandler(
   context: HandlerEmitContext,
-  instruction: ExpandedInstructionSpec<SemanticTemplate>,
+  instruction: ExpandedInstructionSpec,
   form: HandlerForm,
   cursorAfterDispatch: DecodeCursor
 ): void {
@@ -99,7 +98,7 @@ type DecodedOperand = Readonly<{ binding: OperandBinding; cursor: DecodeCursor }
 
 function decodeOperand(
   context: HandlerEmitContext,
-  instruction: ExpandedInstructionSpec<SemanticTemplate>,
+  instruction: ExpandedInstructionSpec,
   operand: OperandSpec,
   form: HandlerForm,
   cursor: DecodeCursor,

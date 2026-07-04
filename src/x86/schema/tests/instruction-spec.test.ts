@@ -11,8 +11,9 @@ import {
 } from "#x86/schema/builders.js";
 import { expandOpcodePath, opcodePlusReg } from "#x86/schema/opcodes.js";
 import { imm, modrmReg, modrmRm, moffs, opReg } from "#x86/schema/operands.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 
-const semantics = { test: "semantics-placeholder" } as const;
+const semantics: SemanticTemplate = () => {};
 
 test("opcode path exact bytes expand directly", () => {
   deepStrictEqual(expandOpcodePath([0x8b]), [{ bytes: [0x8b] }]);

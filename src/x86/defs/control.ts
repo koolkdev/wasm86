@@ -1,4 +1,3 @@
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import {
   CONDITION_CODE_DESCRIPTORS,
   type ConditionCodeDescriptor
@@ -115,13 +114,13 @@ export const RET = mnemonic("ret", [
   })
 ]);
 
-export const JCC: readonly InstructionMnemonic<SemanticTemplate>[] = CONDITION_CODE_DESCRIPTORS.map(jccMnemonic);
+export const JCC: readonly InstructionMnemonic[] = CONDITION_CODE_DESCRIPTORS.map(jccMnemonic);
 
-function jccMnemonic(descriptor: ConditionCodeDescriptor): InstructionMnemonic<SemanticTemplate> {
+function jccMnemonic(descriptor: ConditionCodeDescriptor): InstructionMnemonic {
   return mnemonic(`j${descriptor.suffix}`, [jccRel8(descriptor), jccRel16(descriptor), jccRel32(descriptor)]);
 }
 
-function jccRel8(descriptor: ConditionCodeDescriptor): InstructionForm<SemanticTemplate> {
+function jccRel8(descriptor: ConditionCodeDescriptor): InstructionForm {
   return form("rel8", {
     opcode: [0x70 + descriptor.opcodeLow],
     operands: [rel(8)],
@@ -130,7 +129,7 @@ function jccRel8(descriptor: ConditionCodeDescriptor): InstructionForm<SemanticT
   });
 }
 
-function jccRel32(descriptor: ConditionCodeDescriptor): InstructionForm<SemanticTemplate> {
+function jccRel32(descriptor: ConditionCodeDescriptor): InstructionForm {
   return form("rel32", {
     opcode: [0x0f, 0x80 + descriptor.opcodeLow],
     operands: [rel(32)],
@@ -139,7 +138,7 @@ function jccRel32(descriptor: ConditionCodeDescriptor): InstructionForm<Semantic
   });
 }
 
-function jccRel16(descriptor: ConditionCodeDescriptor): InstructionForm<SemanticTemplate> {
+function jccRel16(descriptor: ConditionCodeDescriptor): InstructionForm {
   return form("rel16", {
     opcode: [0x0f, 0x80 + descriptor.opcodeLow],
     prefixes: { operandSize: "override" },

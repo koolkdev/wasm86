@@ -1,12 +1,11 @@
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { instructionReadsModRm } from "#x86/schema/builders.js";
 import type { ExpandedInstructionSpec, OperandSizePrefixMode, Reg3 } from "#x86/schema/types.js";
 import type { IsaDecodeReader } from "./reader.js";
 
 export type OpcodeDispatchCandidateSet = Readonly<{
   kind: "empty" | "noModRm" | "modRm";
-  noModRmCandidates: readonly ExpandedInstructionSpec<SemanticTemplate>[];
-  modRmByReg: readonly (readonly ExpandedInstructionSpec<SemanticTemplate>[])[];
+  noModRmCandidates: readonly ExpandedInstructionSpec[];
+  modRmByReg: readonly (readonly ExpandedInstructionSpec[])[];
 }>;
 
 export type OpcodeDispatchLeaf = Readonly<{
@@ -25,8 +24,8 @@ export type OpcodeLookup =
 
 type MutableOpcodeDispatchCandidateSet = {
   kind: "empty" | "noModRm" | "modRm";
-  noModRmCandidates: ExpandedInstructionSpec<SemanticTemplate>[];
-  modRmByReg: ExpandedInstructionSpec<SemanticTemplate>[][];
+  noModRmCandidates: ExpandedInstructionSpec[];
+  modRmByReg: ExpandedInstructionSpec[][];
 };
 
 type MutableOpcodeDispatchLeaf = {
@@ -53,7 +52,7 @@ export function dispatchBytes(node: OpcodeDispatchNode): number[] {
 }
 
 export function buildOpcodeDispatch(
-  instructions: readonly ExpandedInstructionSpec<SemanticTemplate>[]
+  instructions: readonly ExpandedInstructionSpec[]
 ): OpcodeDispatchNode {
   const root = opcodeDispatchNode();
 
@@ -121,7 +120,7 @@ function opcodeDispatchCandidateSet(): MutableOpcodeDispatchCandidateSet {
 
 function addOpcodeCandidate(
   leaf: MutableOpcodeDispatchLeaf,
-  instruction: ExpandedInstructionSpec<SemanticTemplate>
+  instruction: ExpandedInstructionSpec
 ): void {
   const candidates = leaf.operandSize[instruction.spec.prefixes?.operandSize ?? "default"];
 
@@ -148,7 +147,7 @@ function addOpcodeCandidate(
 function useCandidateKind(
   candidates: MutableOpcodeDispatchCandidateSet,
   kind: "noModRm" | "modRm",
-  instruction: ExpandedInstructionSpec<SemanticTemplate>
+  instruction: ExpandedInstructionSpec
 ): void {
   if (candidates.kind === "empty") {
     candidates.kind = kind;
@@ -163,7 +162,7 @@ function useCandidateKind(
 function addModRmRegCandidate(
   candidateSet: MutableOpcodeDispatchCandidateSet,
   reg: Reg3,
-  instruction: ExpandedInstructionSpec<SemanticTemplate>
+  instruction: ExpandedInstructionSpec
 ): void {
   const candidates = candidateSet.modRmByReg[reg];
 

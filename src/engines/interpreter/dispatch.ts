@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import {
   dispatchBytes,
   type OpcodeDispatchCandidateSet,
@@ -195,7 +194,7 @@ function emitModRmLeaf(
 // index, the rest decode an effective address and base presence picks the
 // memStatic or memDynamic body.
 function emitModRmForms(
-  instruction: ExpandedInstructionSpec<SemanticTemplate>,
+  instruction: ExpandedInstructionSpec,
   opcodeEnd: number,
   context: DispatchEmitContext
 ): void {
@@ -231,12 +230,12 @@ function emitModRmForms(
 }
 
 type ModRmRegCase = Readonly<{
-  instruction: ExpandedInstructionSpec<SemanticTemplate>;
+  instruction: ExpandedInstructionSpec;
   regs: readonly Reg3[];
 }>;
 
 function modRmRegCases(candidates: OpcodeDispatchCandidateSet): readonly ModRmRegCase[] {
-  const casesById = new Map<string, { instruction: ExpandedInstructionSpec<SemanticTemplate>; regs: Reg3[] }>();
+  const casesById = new Map<string, { instruction: ExpandedInstructionSpec; regs: Reg3[] }>();
 
   for (const reg of reg3Values) {
     const bucket = candidates.modRmByReg[reg] ?? [];
@@ -258,11 +257,11 @@ function modRmRegCases(candidates: OpcodeDispatchCandidateSet): readonly ModRmRe
   return [...casesById.values()];
 }
 
-function modRmRegMatches(spec: ExpandedInstructionSpec<SemanticTemplate>["spec"], reg: Reg3): boolean {
+function modRmRegMatches(spec: ExpandedInstructionSpec["spec"], reg: Reg3): boolean {
   return (spec.modrm?.match?.reg === undefined || spec.modrm.match.reg === reg) && isValidModRmReg(spec, reg);
 }
 
-function isValidModRmReg(spec: ExpandedInstructionSpec<SemanticTemplate>["spec"], reg: Reg3): boolean {
+function isValidModRmReg(spec: ExpandedInstructionSpec["spec"], reg: Reg3): boolean {
   return !(spec.operands ?? []).some((operand) => operand.kind === "modrm.sreg") || reg < segmentRegisters.length;
 }
 

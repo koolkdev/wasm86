@@ -29,18 +29,18 @@ export const SHRD = doubleShiftMnemonic("shrd", { imm8: 0xac, cl: 0xad });
 
 type Group2Semantic = (width: OperandWidth, countSource: ShiftCountSource) => SemanticTemplate;
 
-function shiftMnemonic(op: ShiftOp, group: ShiftGroup): InstructionMnemonic<SemanticTemplate> {
+function shiftMnemonic(op: ShiftOp, group: ShiftGroup): InstructionMnemonic {
   return group2Mnemonic(op, group, (width, countSource) => shiftSemantic(op, width, countSource));
 }
 
-function rotateMnemonic(op: RotateOp, group: RotateGroup): InstructionMnemonic<SemanticTemplate> {
+function rotateMnemonic(op: RotateOp, group: RotateGroup): InstructionMnemonic {
   return group2Mnemonic(op, group, (width, countSource) => rotateSemantic(op, width, countSource));
 }
 
 function doubleShiftMnemonic(
   op: DoubleShiftOp,
   opcode: Readonly<Record<DoubleShiftCountSource, number>>
-): InstructionMnemonic<SemanticTemplate> {
+): InstructionMnemonic {
   return mnemonic(op, [
     // 66 0F xx /r ib: double-precision shift r/m16, r16 by imm8
     form("rm16_r16_imm8", {
@@ -79,7 +79,7 @@ function group2Mnemonic(
   op: ShiftOp | RotateOp,
   group: Group2,
   semantic: Group2Semantic
-): InstructionMnemonic<SemanticTemplate> {
+): InstructionMnemonic {
   return mnemonic(op, [
     // D0 /n: group-2 r/m8 by 1
     form("rm8_1", {

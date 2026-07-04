@@ -1,5 +1,4 @@
 import type { MemOperand, OperandWidth, RegisterAlias, SegmentRegister } from "#x86/types.js";
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { InstructionSpec, ImmediateExtension } from "#x86/schema/types.js";
 
 export type IsaOperandBinding =
@@ -21,7 +20,7 @@ export type IsaOperandBinding =
     }>;
 
 export type IsaDecodedInstruction = Readonly<{
-  spec: InstructionSpec<SemanticTemplate>;
+  spec: InstructionSpec;
   address: number;
   length: number;
   nextEip: number;
