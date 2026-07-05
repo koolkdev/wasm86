@@ -9,6 +9,8 @@ import {
 } from "./interpreter-helpers.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import { fetchPageFaultExit, readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { HostExit } from "#wasm/exit.js";
+import { invalidOpcode } from "#x86/exceptions.js";
 import {
   assertCompletedInstruction,
   executeInstruction,
@@ -103,6 +105,39 @@ test("executes MOV from segment selectors to memory as a word store", async () =
   assertSingleInstructionExit(result.exit);
   strictEqual(result.guestView.getUint32(0x20, true), 0x4433_abcd);
   assertCompletedInstruction(result.state, startAddress + 2, 8);
+});
+
+test("MOV to a segment register exits before committing the instruction", async () => {
+  const initial = createWasmCpuStateSnapshot({
+    eax: 0x1234_5678,
+    esSelector: 0x1111,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const { exit, state } = await executeInstruction([0x8e, 0xc0], initial);
+
+  deepStrictEqual(exit, {
+    family: "host",
+    reason: HostExit.SEGMENT_LOAD,
+    payload: 0x5678
+  });
+  deepStrictEqual(state, initial);
+});
+
+test("MOV to CS raises invalid-opcode before segment-load handling", async () => {
+  const initial = createWasmCpuStateSnapshot({
+    eax: 0x1234_5678,
+    csSelector: 0x1111,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const { exit, state } = await executeInstruction([0x8e, 0xc8], initial);
+
+  deepStrictEqual(exit, {
+    family: "cpuException",
+    exception: invalidOpcode()
+  });
+  deepStrictEqual(state, initial);
 });
 
 test("faulting MOV segment selector to memory reports a word write", async () => {

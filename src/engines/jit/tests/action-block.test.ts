@@ -11,6 +11,7 @@ import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
 import { CompletionExit, HostExit } from "#wasm/exit.js";
+import { invalidOpcode } from "#x86/exceptions.js";
 import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
@@ -89,6 +90,61 @@ test("a guard fault mid-block reports the faulting eip with earlier state flushe
   strictEqual(state.eax, 6);
   strictEqual(state.eip, startEip + 1);
   strictEqual(state.instructionCount, 1);
+});
+
+test("a segment-register load exits from a compiled block before committing the instruction", () => {
+  // mov es, ax; inc eax. The decoder does not know the segment load ends
+  // the flat32 IR block, so action compilation must stop after the first
+  // instruction.
+  const block = decodeBlock([0x8e, 0xc0, 0x40]);
+  strictEqual(block.instructions.length, 2);
+  const memories = createWasmHostMemories();
+  const handle = compileActionWasmBlockHandle([block], {
+    cpuStateMemory: memories.cpuStateMemory,
+    guestMemory: memories.guestMemory
+  });
+
+  memories.cpuState.load({
+    eip: startEip,
+    eax: 0x1234_5678,
+    esSelector: 0x1111,
+    instructionCount: 7
+  });
+
+  const run = handle.run();
+  const state = readWasmCpuState(memories.cpuState);
+
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.SEGMENT_LOAD, payload: 0x5678 });
+  strictEqual(state.eax, 0x1234_5678);
+  strictEqual(state.esSelector, 0x1111);
+  strictEqual(state.eip, startEip);
+  strictEqual(state.instructionCount, 7);
+});
+
+test("a compiled MOV to CS raises invalid-opcode before segment-load handling", () => {
+  // mov cs, ax.
+  const block = decodeBlock([0x8e, 0xc8]);
+  const memories = createWasmHostMemories();
+  const handle = compileActionWasmBlockHandle([block], {
+    cpuStateMemory: memories.cpuStateMemory,
+    guestMemory: memories.guestMemory
+  });
+
+  memories.cpuState.load({
+    eip: startEip,
+    eax: 0x1234_5678,
+    csSelector: 0x1111,
+    instructionCount: 7
+  });
+
+  const run = handle.run();
+  const state = readWasmCpuState(memories.cpuState);
+
+  deepStrictEqual(run.exit, { family: "cpuException", exception: invalidOpcode() });
+  strictEqual(state.eax, 0x1234_5678);
+  strictEqual(state.csSelector, 0x1111);
+  strictEqual(state.eip, startEip);
+  strictEqual(state.instructionCount, 7);
 });
 
 test("a static jump to a block in the same module tail-calls it directly", () => {

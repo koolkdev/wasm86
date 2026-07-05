@@ -144,6 +144,9 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
       case "DE":
         body.i64Const(encodeCpuExceptionExitBase(CpuExceptionVector.DE, 0)).returnFromFunction();
         return;
+      case "UD":
+        body.i64Const(encodeCpuExceptionExitBase(CpuExceptionVector.UD, 0)).returnFromFunction();
+        return;
       case "PF":
         context.emitPayload(exception.linearAddress);
         body
@@ -177,5 +180,7 @@ function hostExitReasonCode(reason: HostExitReason): HostExit {
       return HostExit.TRAP;
     case "unsupported":
       return HostExit.UNSUPPORTED;
+    case "segmentLoad":
+      return HostExit.SEGMENT_LOAD;
   }
 }

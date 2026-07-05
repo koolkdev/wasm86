@@ -204,6 +204,27 @@ const fixtures: readonly DecoderFixture[] = [
     id: "pop.r16"
   },
   {
+    name: "pop ds",
+    bytes: [0x1f],
+    mnemonic: "pop",
+    operands: [sreg("ds")],
+    id: "pop.ds"
+  },
+  {
+    name: "pop fs",
+    bytes: [0x0f, 0xa1],
+    mnemonic: "pop",
+    operands: [sreg("fs")],
+    id: "pop.fs"
+  },
+  {
+    name: "pop gs with operand-size override",
+    bytes: [0x66, 0x0f, 0xa9],
+    mnemonic: "pop",
+    operands: [sreg("gs")],
+    id: "pop.gs_o16"
+  },
+  {
     name: "pop [eax]",
     bytes: [0x8f, 0x00],
     mnemonic: "pop",

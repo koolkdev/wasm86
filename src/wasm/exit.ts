@@ -3,6 +3,7 @@ import { u32 } from "#x86/numeric.js";
 import {
   CpuExceptionVector,
   divideError,
+  invalidOpcode,
   pageFault,
   type CpuException
 } from "#x86/exceptions.js";
@@ -19,7 +20,8 @@ export type CompletionExit = (typeof CompletionExit)[keyof typeof CompletionExit
 
 export const HostExit = {
   TRAP: 0,
-  UNSUPPORTED: 1
+  UNSUPPORTED: 1,
+  SEGMENT_LOAD: 2
 } as const;
 
 export type HostExit = (typeof HostExit)[keyof typeof HostExit];
@@ -80,6 +82,8 @@ export function encodeCpuExceptionExit(exception: CpuException<number>): bigint 
   switch (exception.kind) {
     case "DE":
       return encodeExitCode(cpuExceptionFamily, CpuExceptionVector.DE, 0, 0);
+    case "UD":
+      return encodeExitCode(cpuExceptionFamily, CpuExceptionVector.UD, 0, 0);
     case "PF":
       return encodeExitCode(
         cpuExceptionFamily,
@@ -170,6 +174,11 @@ function decodeCpuExceptionExit(subtype: number, payload: number, detail: number
         family: "cpuException",
         exception: divideError()
       };
+    case CpuExceptionVector.UD:
+      return {
+        family: "cpuException",
+        exception: invalidOpcode()
+      };
     case CpuExceptionVector.PF:
       return {
         family: "cpuException",
@@ -205,6 +214,7 @@ function assertHostExit(value: number): asserts value is HostExit {
 function assertCpuExceptionVector(value: number): asserts value is CpuExceptionVector {
   switch (value) {
     case CpuExceptionVector.DE:
+    case CpuExceptionVector.UD:
     case CpuExceptionVector.PF:
       return;
     default:
@@ -215,6 +225,7 @@ function assertCpuExceptionVector(value: number): asserts value is CpuExceptionV
 function assertCpuExceptionExitFields(vector: CpuExceptionVector, payload: number, detail: number): void {
   switch (vector) {
     case CpuExceptionVector.DE:
+    case CpuExceptionVector.UD:
       assert(payload === 0, `Wasm CPU exception exit payload must be zero: ${payload}`);
       assert(detail === 0, `Wasm CPU exception exit detail must be zero: ${detail}`);
       return;

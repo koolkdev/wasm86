@@ -10,6 +10,7 @@ import {
 } from "./interpreter-helpers.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import { readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { HostExit } from "#wasm/exit.js";
 import { x86Flags, type X86Flag } from "#x86/flags.js";
 import {
   assertCompletedInstruction,
@@ -122,6 +123,31 @@ test("executes PUSH segment selectors", async () => {
   strictEqual(pushGsWord.state.esp, 0x3e);
   strictEqual(pushGsWord.interpreter.guestView.getUint16(0x3e, true), 0xabcd);
   assertCompletedInstruction(pushGsWord.state, startAddress + 3, 8);
+});
+
+test("POP segment exits without committing ESP or the selector", async () => {
+  const initialState = createWasmCpuStateSnapshot({
+    esp: 0x40,
+    dsSelector: 0x2222,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const interpreter = await instantiateWasmInterpreter();
+
+  writeInterpreterState(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, startAddress, [0x1f]);
+  interpreter.guestView.setUint32(0x40, 0xabcd_1234, true);
+
+  const exit = interpreter.run(1);
+  const state = readInterpreterState(interpreter.stateView);
+
+  deepStrictEqual(exit, {
+    family: "host",
+    reason: HostExit.SEGMENT_LOAD,
+    payload: (3 << 16) | 0x1234
+  });
+  deepStrictEqual(state, initialState);
+  strictEqual(interpreter.guestView.getUint32(0x40, true), 0xabcd_1234);
 });
 
 test("executes PUSH sign-extended imm8", async () => {

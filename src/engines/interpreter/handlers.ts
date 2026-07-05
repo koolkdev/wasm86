@@ -81,7 +81,7 @@ export function emitInstructionHandler(
 
   emitNextEip(context, cursor);
 
-  const builder = createIrBlockBuilder();
+  const builder = createIrBlockBuilder({ segmentMode: "flat32" });
 
   // The location's eip is what fault paths commit; prefix cases rebase the
   // eip local, so the location binds the saved instruction start.

@@ -4,7 +4,7 @@ import type { IrBlock } from "#ir/block.js";
 import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/decoder/types.js";
 
 export function buildIrBlock(instructions: readonly IsaDecodedInstruction[]): IrBlock {
-  const builder = createIrBlockBuilder();
+  const builder = createIrBlockBuilder({ segmentMode: "flat32" });
 
   for (const instruction of instructions) {
     builder.addInstruction(
@@ -12,6 +12,10 @@ export function buildIrBlock(instructions: readonly IsaDecodedInstruction[]): Ir
       instruction.operands.map(staticBinding),
       staticInstructionLocation(instruction.address, instruction.nextEip)
     );
+
+    if (builder.isTerminated()) {
+      break;
+    }
   }
 
   return builder.finish();

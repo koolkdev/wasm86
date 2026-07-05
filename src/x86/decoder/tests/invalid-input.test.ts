@@ -39,12 +39,14 @@ test("truncated opcode escape reports decode fault", () => {
 });
 
 test("reports unsupported segment-register ModRM indexes", () => {
-  const decoded = decodeBytes([0x8c, 0xf0]);
+  for (const opcode of [0x8c, 0x8e]) {
+    const decoded = decodeBytes([opcode, 0xf0]);
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.length, 2);
-    strictEqual(decoded.unsupportedByte, 0x8c);
+    strictEqual(decoded.kind, "unsupported");
+    if (decoded.kind === "unsupported") {
+      strictEqual(decoded.length, 2);
+      strictEqual(decoded.unsupportedByte, opcode);
+    }
   }
 });
 

@@ -86,6 +86,41 @@ const fixtures: readonly DecoderFixture[] = [
     id: "mov.rm32_sreg"
   },
   {
+    name: "mov ds, ax",
+    bytes: [0x8e, 0xd8],
+    mnemonic: "mov",
+    operands: [sreg("ds"), reg("ax")],
+    id: "mov.sreg_rm16"
+  },
+  {
+    name: "mov cs, ax decodes through the MOV Sreg form",
+    bytes: [0x8e, 0xc8],
+    mnemonic: "mov",
+    operands: [sreg("cs"), reg("ax")],
+    id: "mov.sreg_rm16"
+  },
+  {
+    name: "mov cs, ax with operand-size override decodes through the MOV Sreg form",
+    bytes: [0x66, 0x8e, 0xc8],
+    mnemonic: "mov",
+    operands: [sreg("cs"), reg("ax")],
+    id: "mov.sreg_rm16_o16"
+  },
+  {
+    name: "mov fs, ax with operand-size override",
+    bytes: [0x66, 0x8e, 0xe0],
+    mnemonic: "mov",
+    operands: [sreg("fs"), reg("ax")],
+    id: "mov.sreg_rm16_o16"
+  },
+  {
+    name: "mov gs, [ebx]",
+    bytes: [0x8e, 0x2b],
+    mnemonic: "mov",
+    operands: [sreg("gs"), mem(16, { base: "ebx", scale: 1, disp: 0 })],
+    id: "mov.sreg_rm16"
+  },
+  {
     name: "mov eax, [ebx]",
     bytes: [0x8b, 0x03],
     mnemonic: "mov",

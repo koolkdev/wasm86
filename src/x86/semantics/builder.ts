@@ -3,7 +3,7 @@ import type { CpuException } from "#x86/exceptions.js";
 import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#x86/flag-sources.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
-import type { OperandWidth, RegName } from "#x86/types.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 import type {
   MemRef,
   OperandInput,
@@ -26,7 +26,12 @@ export type SemanticOperandStorageKind =
 
 export type SemanticOperandInfo = Readonly<{
   storage: SemanticOperandStorageKind;
+  segment?: SemanticSegmentOperandInfo;
 }>;
+
+export type SemanticSegmentOperandInfo =
+  | Readonly<{ kind: "static"; reg: SegmentRegister }>
+  | Readonly<{ kind: "dynamic"; index: ValueInput }>;
 
 export type SimpleFlagSource = ArchitecturalSimpleFlagSource<ValueInput>;
 

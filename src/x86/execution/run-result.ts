@@ -1,4 +1,5 @@
 import type { CpuException } from "#x86/exceptions.js";
+import type { SegmentRegister } from "#x86/types.js";
 
 export type UnsupportedReason =
   | "unsupportedOpcode"
@@ -9,6 +10,7 @@ export type UnsupportedReason =
 export type RunStop =
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "hostTrap"; vector: number }>
+  | Readonly<{ kind: "segmentLoad"; segment: SegmentRegister; selector: number }>
   | Readonly<{ kind: "unsupported"; reason: UnsupportedReason }>
   | Readonly<{ kind: "cpuException"; exception: CpuException<number> }>
   | Readonly<{ kind: "instructionLimit" }>;

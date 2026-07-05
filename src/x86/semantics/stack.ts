@@ -214,6 +214,15 @@ export function popSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   };
 }
 
+export function popSegmentSemantic(width: StackOperandWidth = 32): SemanticTemplate {
+  return (s, context) => {
+    const dst = s.operand(0);
+    const value = popStack(s, context, width);
+
+    s.set(dst, value, 16);
+  };
+}
+
 export function leaveSemantic(): SemanticTemplate {
   return (s, context) => {
     const frame = s.get(s.reg("ebp"));

@@ -13,7 +13,7 @@ import {
   HostExit,
   type DecodedExit
 } from "#wasm/exit.js";
-import { PageFaultErrorCode, divideError, pageFault } from "#x86/exceptions.js";
+import { PageFaultErrorCode, divideError, invalidOpcode, pageFault } from "#x86/exceptions.js";
 
 const fixtures: readonly ExitFixture[] = [
   {
@@ -35,9 +35,20 @@ const fixtures: readonly ExitFixture[] = [
     payload: 0x1000
   },
   {
+    name: "segment_load_exit_decodes",
+    family: "host",
+    reason: HostExit.SEGMENT_LOAD,
+    payload: 0x3_1234
+  },
+  {
     name: "divide_error_decodes",
     family: "cpuException",
     exception: divideError()
+  },
+  {
+    name: "invalid_opcode_decodes",
+    family: "cpuException",
+    exception: invalidOpcode()
   },
   {
     name: "page_fault_zero_error_code_decodes",

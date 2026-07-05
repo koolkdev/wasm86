@@ -77,6 +77,7 @@ function exitOperands(exit: IrExit): readonly ValueId[] {
 
       switch (exception.kind) {
         case "DE":
+        case "UD":
           return [];
         case "PF":
           return [exception.linearAddress];

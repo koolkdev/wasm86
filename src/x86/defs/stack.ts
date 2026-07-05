@@ -4,6 +4,7 @@ import {
   popadSemantic,
   popfdSemantic,
   popfSemantic,
+  popSegmentSemantic,
   popaSemantic,
   popSemantic,
   pushadSemantic,
@@ -183,6 +184,81 @@ export const POP = mnemonic("pop", [
     operands: [opReg()],
     syntax: "pop {0}",
     semantics: popSemantic()
+  }),
+  // 07: POP ES
+  form("es", {
+    opcode: [0x07],
+    operands: [implicitSreg("es")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic()
+  }),
+  // 17: POP SS
+  form("ss", {
+    opcode: [0x17],
+    operands: [implicitSreg("ss")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic()
+  }),
+  // 1F: POP DS
+  form("ds", {
+    opcode: [0x1f],
+    operands: [implicitSreg("ds")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic()
+  }),
+  // 0F A1: POP FS
+  form("fs", {
+    opcode: [0x0f, 0xa1],
+    operands: [implicitSreg("fs")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic()
+  }),
+  // 0F A9: POP GS
+  form("gs", {
+    opcode: [0x0f, 0xa9],
+    operands: [implicitSreg("gs")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic()
+  }),
+  // 66 07: POP ES
+  form("es_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x07],
+    operands: [implicitSreg("es")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic(16)
+  }),
+  // 66 17: POP SS
+  form("ss_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x17],
+    operands: [implicitSreg("ss")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic(16)
+  }),
+  // 66 1F: POP DS
+  form("ds_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x1f],
+    operands: [implicitSreg("ds")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic(16)
+  }),
+  // 66 0F A1: POP FS
+  form("fs_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x0f, 0xa1],
+    operands: [implicitSreg("fs")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic(16)
+  }),
+  // 66 0F A9: POP GS
+  form("gs_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x0f, 0xa9],
+    operands: [implicitSreg("gs")],
+    syntax: "pop {0}",
+    semantics: popSegmentSemantic(16)
   }),
   // 66 8F /0: POP r/m16
   form("rm16", {

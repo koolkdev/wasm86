@@ -5,7 +5,7 @@ import { opAccess, type IrOp, type StateWriteOp } from "./ops.js";
 import { type ValueId, type ValueTable } from "./values.js";
 
 // Reports to the host; the action emitter owns the numeric encoding.
-export type HostExitReason = "hostTrap" | "unsupported";
+export type HostExitReason = "hostTrap" | "unsupported" | "segmentLoad";
 
 export type IrExit =
   | Readonly<{ class: "cpuException"; exception: CpuException<ValueId> }>

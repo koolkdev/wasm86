@@ -24,7 +24,7 @@ import type {
   Value,
   ValueInput
 } from "#x86/semantics/refs.js";
-import type { OperandWidth, RegName } from "#x86/types.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 import type {
   BinaryOperator,
   CompareOperator,
@@ -55,6 +55,10 @@ export function operands(...storage: SemanticOperandStorageKind[]): readonly Sem
 
 export function regOperands(count: number): readonly SemanticOperandInfo[] {
   return Array.from({ length: count }, () => ({ storage: "reg" as const }));
+}
+
+export function segmentOperand(reg: SegmentRegister): SemanticOperandInfo {
+  return { storage: "reg", segment: { kind: "static", reg } };
 }
 
 export function flagCell(

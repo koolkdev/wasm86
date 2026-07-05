@@ -15,6 +15,7 @@ import {
   memStaticBinding,
   regBinding,
   regDynamicBinding,
+  segmentBinding,
   staticMemSegment
 } from "#ir/operands.js";
 import {
@@ -43,7 +44,7 @@ import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { callSemantic, jccSemantic, jmpSemantic } from "#x86/semantics/control.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic } from "#x86/semantics/misc.js";
-import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
+import { movSemantic, movsxSemantic, movToSregSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 import { shiftSemantic } from "#x86/semantics/shift.js";
 import { popfdSemantic, popfSemantic, popSemantic, pushfdSemantic, pushfSemantic } from "#x86/semantics/stack.js";
@@ -189,6 +190,10 @@ function finishDispatch(targetEip: ValueId): Action {
 
 function finishExit(reason: "hostTrap", payload: ValueId): Action {
   return { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason, payload } } };
+}
+
+function finishSegmentLoad(payload: ValueId): Action {
+  return { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "segmentLoad", payload } } };
 }
 
 function pageFaultExit(
@@ -1057,6 +1062,29 @@ test("int flushes pending state with the resume eip before a host trap exit", ()
     stateWrite(eipChannel, v.const(0x1007)),
     finishExit("hostTrap", v.const(0x21))
   ]);
+});
+
+test("flat32 segment set exits through the fault path without segment writes", () => {
+  const builder = createIrBlockBuilder({ segmentMode: "flat32" });
+
+  builder.addInstruction(movSemantic(32), [regBinding("ecx"), immBinding(0x77)], loc(0x1000, 0x1005));
+  builder.addInstruction(movToSregSemantic(), [segmentBinding("ds"), regBinding("ax")], loc(0x1005, 0x1007));
+
+  const block = builder.finish();
+  const v = block.values;
+  const ax = entryActions(block).find(
+    (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("ax")
+  )?.output;
+
+  ok(ax !== undefined, "expected selector source read");
+  strictEqual(nestedActionBodies(block).length, 0);
+  deepStrictEqual(entryActions(block), [
+    stateRead(ax, gprChannel("ax")),
+    stateWrite(gprChannel("ecx"), v.const(0x77)),
+    stateWrite(eipChannel, v.const(0x1005)),
+    finishSegmentLoad(v.binary("or", v.const(3 << 16), v.truncate(16, ax)))
+  ]);
+  strictEqual(stateWrites(block).some((write) => write.op.slot.kind === "segment"), false);
 });
 
 test("a block ended by a host trap rejects further instructions", () => {

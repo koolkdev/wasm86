@@ -1,6 +1,9 @@
 import type { ConditionCode } from "#x86/conditions.js";
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
+import { invalidOpcode } from "#x86/exceptions.js";
+import { segmentRegisterIndex } from "#x86/segments.js";
+import type { SemanticOperandInfo, SemanticTemplate, SemanticsBuilder } from "#x86/semantics/builder.js";
 import type { OperandWidth } from "#x86/types.js";
+import type { Value } from "./refs.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
 export function movSemantic(width: OperandWidth = 32): SemanticTemplate {
@@ -28,6 +31,34 @@ export function movSregSemantic(registerWidth: Extract<OperandWidth, 16 | 32>): 
     guardStorageWrite(s, context, dst, width);
     s.set(dst, value, width);
   };
+}
+
+export function movToSregSemantic(): SemanticTemplate {
+  return (s, context) => {
+    const dst = s.operand(0);
+    const src = s.operand(1);
+    const csLoad = segmentTargetIsCs(s, context.operandInfo(dst));
+
+    if (csLoad !== undefined) {
+      s.cpuExceptionIf(csLoad, invalidOpcode());
+    }
+
+    guardStorageRead(s, context, src, 16);
+    s.set(dst, s.get(src, 16), 16);
+  };
+}
+
+function segmentTargetIsCs(s: SemanticsBuilder, info: SemanticOperandInfo): Value | undefined {
+  if (info.segment === undefined) {
+    return undefined;
+  }
+
+  switch (info.segment.kind) {
+    case "static":
+      return info.segment.reg === "cs" ? s.const32(1) : undefined;
+    case "dynamic":
+      return s.compare(32, "eq", info.segment.index, s.const32(segmentRegisterIndex("cs")));
+  }
 }
 
 export function movzxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {

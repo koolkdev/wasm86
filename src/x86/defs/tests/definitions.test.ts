@@ -14,7 +14,7 @@ import {
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
   strictEqual(X86_32_CORE.instructionLengthLimit, 15);
-  strictEqual(X86_32_CORE.instructions.length, 415);
+  strictEqual(X86_32_CORE.instructions.length, 427);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -32,6 +32,8 @@ test("x86-32 core registers the initial instruction surface", () => {
     "mov.moffs16_ax",
     "mov.rm16_sreg",
     "mov.rm32_sreg",
+    "mov.sreg_rm16",
+    "mov.sreg_rm16_o16",
     "nop.rm16",
     "nop.rm32",
     "mov.rm32_r32",
@@ -133,6 +135,9 @@ test("x86-32 core registers the initial instruction surface", () => {
     "push.imm8_o16",
     "pop.r16",
     "pop.r32",
+    "pop.ds",
+    "pop.fs",
+    "pop.gs_o16",
     "pop.rm16",
     "pop.rm32",
     "pushad.dword",
@@ -164,9 +169,11 @@ test("x86-32 core registers the initial instruction surface", () => {
   }
 });
 
-test("mov segment-register read forms use Sreg ModRM operands", () => {
+test("mov segment-register forms use Sreg ModRM operands", () => {
   const word = instruction("mov.rm16_sreg");
   const dword = instruction("mov.rm32_sreg");
+  const toSegment = instruction("mov.sreg_rm16");
+  const toSegmentOperandSize = instruction("mov.sreg_rm16_o16");
 
   deepStrictEqual(word.prefixes, { operandSize: "override" });
   deepStrictEqual(word.opcode, [0x8c]);
@@ -179,6 +186,21 @@ test("mov segment-register read forms use Sreg ModRM operands", () => {
   deepStrictEqual(dword.operands, [
     { kind: "modrm.rm", type: "r32_m16" },
     { kind: "modrm.sreg" }
+  ]);
+
+  deepStrictEqual(toSegment.opcode, [0x8e]);
+  deepStrictEqual(toSegment.operands, [
+    { kind: "modrm.sreg" },
+    { kind: "modrm.rm", type: "rm16" }
+  ]);
+
+  deepStrictEqual(toSegmentOperandSize.prefixes, { operandSize: "override" });
+  deepStrictEqual(toSegmentOperandSize.opcode, [0x8e]);
+  deepStrictEqual(toSegmentOperandSize.operands, toSegment.operands);
+  deepStrictEqual(buildSemanticTrace(semanticsOf(toSegment), operands("reg", "reg")).events, [
+    "%0 = get op1:16",
+    "set op0:16 <- %0",
+    "next"
   ]);
 });
 
@@ -386,6 +408,30 @@ test("push segment forms name each fixed segment-register opcode", () => {
 
   deepStrictEqual(gsWord.prefixes, { operandSize: "override" });
   deepStrictEqual(gsWord.opcode, [0x0f, 0xa8]);
+  deepStrictEqual(gsWord.operands, [{ kind: "implicit.sreg", reg: "gs" }]);
+});
+
+test("pop segment forms name each writable fixed segment-register opcode", () => {
+  const es = instruction("pop.es");
+  const ss = instruction("pop.ss");
+  const ds = instruction("pop.ds");
+  const fs = instruction("pop.fs");
+  const gsWord = instruction("pop.gs_o16");
+
+  deepStrictEqual(es.opcode, [0x07]);
+  deepStrictEqual(es.operands, [{ kind: "implicit.sreg", reg: "es" }]);
+
+  deepStrictEqual(ss.opcode, [0x17]);
+  deepStrictEqual(ss.operands, [{ kind: "implicit.sreg", reg: "ss" }]);
+
+  deepStrictEqual(ds.opcode, [0x1f]);
+  deepStrictEqual(ds.operands, [{ kind: "implicit.sreg", reg: "ds" }]);
+
+  deepStrictEqual(fs.opcode, [0x0f, 0xa1]);
+  deepStrictEqual(fs.operands, [{ kind: "implicit.sreg", reg: "fs" }]);
+
+  deepStrictEqual(gsWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(gsWord.opcode, [0x0f, 0xa9]);
   deepStrictEqual(gsWord.operands, [{ kind: "implicit.sreg", reg: "gs" }]);
 });
 

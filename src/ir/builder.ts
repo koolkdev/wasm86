@@ -36,16 +36,17 @@ import type {
   MemDynamicOperandBinding,
   OperandBinding,
   RegDynamicOperandBinding,
-  SegmentDynamicOperandBinding
+  SegmentDynamicOperandBinding,
+  SegmentOperandBinding
 } from "./operands.js";
 import { PendingState } from "./pending/state.js";
+import { Segments, type SegmentMode } from "./segments.js";
 import { StatusFlags } from "./status-flags.js";
 import {
   eipChannel,
   flagChannel,
   gprChannel,
   instructionCountChannel,
-  segmentBaseChannel,
   type GprDynamicSlot,
   type GprChannel
 } from "./slots.js";
@@ -83,14 +84,20 @@ export type IrBlockBuilder = Readonly<{
     bindings: readonly OperandBinding[],
     location: InstructionLocation
   ): void;
+  isTerminated(): boolean;
   finish(): IrBlock;
 }>;
 
-export function createIrBlockBuilder(): IrBlockBuilder {
-  const builder = new IrBlockBuilderImpl();
+export type IrBlockBuilderOptions = Readonly<{
+  segmentMode?: SegmentMode;
+}>;
+
+export function createIrBlockBuilder(options: IrBlockBuilderOptions = {}): IrBlockBuilder {
+  const builder = new IrBlockBuilderImpl(options.segmentMode ?? "flat32");
 
   return {
     addInstruction: (template, bindings, location) => builder.addInstruction(template, bindings, location),
+    isTerminated: () => builder.isTerminated(),
     finish: () => builder.finish()
   };
 }
@@ -121,12 +128,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #actions: Action[] = [];
   readonly #pending = new PendingState(this.#values, (action) => this.#actions.push(action));
   readonly #statusFlags = new StatusFlags(this.#values, this.#pending, (action) => this.#actions.push(action));
+  readonly #segments: Segments;
   // An effective/linear address is computed once per operand, at its first
   // use, so later uses see the same address even if the instruction rewrites
   // a base register in between.
   readonly #operandAddresses = new Map<number, ValueId>();
   readonly #operandLinearAddresses = new Map<number, ValueId>();
-  readonly #dynamicSegmentBases = new Map<ExternalValueId, ValueId>();
   #bindings: readonly OperandBinding[] = [];
   #instructionLocation: InstructionLocationValues | undefined;
   #instructionCountBase: ValueId | undefined;
@@ -136,6 +143,15 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #finished = false;
   // "terminated" means the root body already holds its terminator.
   #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
+
+  constructor(segmentMode: SegmentMode) {
+    this.#segments = new Segments(
+      this.#values,
+      this.#pending,
+      segmentMode,
+      (finish, actions) => this.#terminate(finish, actions)
+    );
+  }
 
   addInstruction(
     template: SemanticTemplate,
@@ -149,7 +165,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#bindings = bindings;
     this.#operandAddresses.clear();
     this.#operandLinearAddresses.clear();
-    this.#dynamicSegmentBases.clear();
+    this.#segments.beginInstruction();
     this.#instructionLocation = this.#locationValues(location);
     this.#terminated = false;
     this.#wroteMemory = false;
@@ -166,6 +182,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     // in place with its partial pendings, poisoning further use.
     this.#instructionLocation = undefined;
     this.#bindings = [];
+  }
+
+  isTerminated(): boolean {
+    return this.#blockEnd === "terminated";
   }
 
   finish(): IrBlock {
@@ -198,8 +218,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     switch (binding.kind) {
       case "reg":
-      case "segment":
         return { storage: "reg" };
+      case "segment":
+        return { storage: "reg", segment: { kind: "static", reg: binding.channel.reg } };
       case "imm":
         return { storage: "imm" };
       case "mem":
@@ -211,7 +232,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         return { storage: "reg" };
       case "segmentDynamic":
         // A runtime segment index: register-like storage, selector channel.
-        return { storage: "reg" };
+        return { storage: "reg", segment: { kind: "dynamic", index: valueFromId(this.#values.external(binding.index)) } };
       case "immExternal":
         // A runtime value with no storage cell, e.g. a decoded immediate.
         return { storage: "imm" };
@@ -266,7 +287,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "reg":
             return valueFromId(this.#readChannel(binding.channel, accessWidth, options));
           case "segment":
-            return valueFromId(this.#widthAdjusted(this.#pending.read(binding.channel), accessWidth, options));
+            return valueFromId(this.#segments.readSelector(binding.channel, accessWidth, options));
           case "mem":
           case "memStatic":
           case "memDynamic":
@@ -276,7 +297,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
               this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options)
             );
           case "segmentDynamic":
-            return valueFromId(this.#dynamicSegmentSelector(binding, accessWidth, options));
+            return valueFromId(
+              this.#segments.readDynamicSelector(this.#values.external(binding.index), accessWidth, options)
+            );
         }
       }
     }
@@ -302,7 +325,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
             return;
           case "segment":
           case "segmentDynamic":
-            throw notSupportedError(`set to ${binding.kind} operand binding`);
+            this.#writeSegmentSelector(binding, value, accessWidth);
+            return;
           case "mem":
           case "memStatic":
           case "memDynamic":
@@ -519,6 +543,13 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     };
   }
 
+  #terminate(finish: Finish, actions: readonly Action[]): void {
+    this.#actions.push(...actions);
+    this.#actions.push({ kind: "finish", finish });
+    this.#blockEnd = "terminated";
+    this.#terminated = true;
+  }
+
   // Every terminator advances the count: fault bodies commit instruction-start
   // state, so a faulting instruction never counts. The value
   // is always base + completed off the block's one read, so a flush stores
@@ -544,18 +575,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     };
   }
 
-  #dynamicSegmentSelector(
-    binding: SegmentDynamicOperandBinding,
-    accessWidth: OperandWidth,
-    options: GetOptions
-  ): ValueId {
-    return this.#widthAdjusted(
-      this.#pending.readDynamicSegmentSelector(this.#values.external(binding.index)),
-      accessWidth,
-      options
-    );
-  }
-
   #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: GetOptions): ValueId {
     return options.signed === true
       ? this.#values.extend(accessWidth, value, true)
@@ -576,6 +595,15 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       `${accessWidth}-bit set to a ${channel.byteLength * 8}-bit register channel`
     );
     this.#pending.write(channel, value);
+  }
+
+  #writeSegmentSelector(
+    binding: SegmentOperandBinding | SegmentDynamicOperandBinding,
+    value: ValueInput,
+    accessWidth: OperandWidth
+  ): void {
+    assert(accessWidth === 16, `${accessWidth}-bit set to a segment selector`);
+    this.#segments.writeSelector(binding, value);
   }
 
   #readGuestMemory(address: ValueId, width: OperandWidth, options: GetOptions): ValueId {
@@ -697,7 +725,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       return offset;
     }
 
-    return this.#values.binary("add", this.#pending.read(segmentBaseChannel(segment)), offset);
+    return this.#values.binary("add", this.#segments.readBase(segment), offset);
   }
 
   #memDynamicLinearAddress(segment: MemDynamicSegment | undefined, offset: ValueId): ValueId {
@@ -712,14 +740,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   #dynamicSegmentLinearAddress(segment: ExternalValueId, offset: ValueId): ValueId {
-    let base = this.#dynamicSegmentBases.get(segment);
-
-    if (base === undefined) {
-      base = this.#pending.readDynamicSegmentBase(this.#values.external(segment));
-      this.#dynamicSegmentBases.set(segment, base);
-    }
-
-    return this.#values.binary("add", base, offset);
+    return this.#values.binary("add", this.#segments.readDynamicBase(this.#values.external(segment)), offset);
   }
 
   #binding(index: number): OperandBinding {

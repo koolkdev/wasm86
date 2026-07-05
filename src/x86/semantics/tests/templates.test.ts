@@ -8,7 +8,7 @@ import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { divImplicitSemantic, idivImplicitSemantic } from "#x86/semantics/div.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
-import { cmovSemantic, movSemantic } from "#x86/semantics/mov.js";
+import { cmovSemantic, movSemantic, movToSregSemantic } from "#x86/semantics/mov.js";
 import {
   imulImplicitSemantic,
   imulRegRmImmSemantic,
@@ -39,6 +39,7 @@ import {
   flagCell,
   operands,
   regOperands,
+  segmentOperand,
   type SemanticTrace
 } from "./test-semantics-trace.js";
 
@@ -48,6 +49,17 @@ test("mov semantic gets the source, sets the destination, and falls through", ()
   deepStrictEqual(trace.events, [
     "%0 = get op1:32",
     "set op0:32 <- %0",
+    "next"
+  ]);
+});
+
+test("MOV to CS raises #UD before loading the selector source", () => {
+  const trace = buildSemanticTrace(movToSregSemantic(), [segmentOperand("cs"), { storage: "reg" }]);
+
+  deepStrictEqual(trace.events, [
+    "cpuExceptionIf 1 UD",
+    "%0 = get op1:16",
+    "set op0:16 <- %0",
     "next"
   ]);
 });

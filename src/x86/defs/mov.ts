@@ -11,7 +11,14 @@ import {
   opcodePlusReg,
   opReg
 } from "./dsl.js";
-import { cmovSemantic, movSemantic, movSregSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
+import {
+  cmovSemantic,
+  movSemantic,
+  movSregSemantic,
+  movsxSemantic,
+  movToSregSemantic,
+  movzxSemantic
+} from "#x86/semantics/mov.js";
 
 export const MOV = mnemonic("mov", [
   // 8A /r: MOV r8, r/m8
@@ -72,6 +79,21 @@ export const MOV = mnemonic("mov", [
     operands: [modrmRm("r32_m16"), modrmSreg()],
     syntax: "mov {0}, {1}",
     semantics: movSregSemantic(32)
+  }),
+  // 66 8E /r: MOV Sreg, r/m16
+  form("sreg_rm16_o16", {
+    prefixes: { operandSize: "override" },
+    opcode: [0x8e],
+    operands: [modrmSreg(), modrmRm("rm16")],
+    syntax: "mov {0}, {1}",
+    semantics: movToSregSemantic()
+  }),
+  // 8E /r: MOV Sreg, r/m16
+  form("sreg_rm16", {
+    opcode: [0x8e],
+    operands: [modrmSreg(), modrmRm("rm16")],
+    syntax: "mov {0}, {1}",
+    semantics: movToSregSemantic()
   }),
   // A0: MOV AL, moffs8
   form("al_moffs8", {
