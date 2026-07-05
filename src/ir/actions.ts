@@ -2,6 +2,7 @@ import { assert } from "#common/assert.js";
 import type { CpuException } from "#x86/exceptions.js";
 import type { Body } from "./block.js";
 import { opAccess, type IrOp, type StateWriteOp } from "./ops.js";
+import type { StateChannel } from "./slots.js";
 import { type ValueId, type ValueTable } from "./values.js";
 
 // Reports to the host; the action emitter owns the numeric encoding.
@@ -40,6 +41,31 @@ export type SwitchCase = Readonly<{ match: number; body: Body }>;
 // Matches lower to a dense br_table, so they stay byte-sized.
 export const maxSwitchMatch = 255;
 
+// One loop-carried cell: a local seeded at loop entry, read inside the body
+// as the opaque `loopInput` leaf, rewritten at each back edge. A channel
+// names the state it stands in for while the loop runs; a channel-less cell
+// is a plain loop-carried temporary.
+export type LoopCarriedCell = Readonly<{
+  channel?: StateChannel;
+  seed: ValueId;
+  loopInput: ValueId;
+}>;
+
+// Runs its body until the body falls through; `loopContinue` actions inside the
+// body take the back edge. Loop fallthrough is the body's fallthrough.
+export type LoopAction = Readonly<{
+  kind: "loop";
+  carried: readonly LoopCarriedCell[];
+  body: Body;
+}>;
+
+// The back edge: rewrites the carried cells (updates aligned with the
+// carried list) and re-enters the loop body. Completes a body like finish.
+export type LoopContinueAction = Readonly<{
+  kind: "loopContinue";
+  updates: readonly ValueId[];
+}>;
+
 export type Finish =
   | Readonly<{
       kind: "dispatch";
@@ -63,6 +89,8 @@ export type Action =
   | OpAction
   | IfAction
   | SwitchAction
+  | LoopAction
+  | LoopContinueAction
   | FinishAction;
 
 export type StateWriteAction = Readonly<{ kind: "op"; op: StateWriteOp }>;
@@ -96,6 +124,10 @@ export function actionCompletes(action: Action): boolean {
     case "switch":
       return action.cases.every((switchCase) => bodyCompletes(switchCase.body)) &&
         bodyCompletes(action.defaultBody);
+    case "loop":
+      // A loop exits on body fallthrough, so it never completes its owner.
+      return false;
+    case "loopContinue":
     case "finish":
       return true;
   }

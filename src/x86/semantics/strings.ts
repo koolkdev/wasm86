@@ -1,15 +1,22 @@
 import { subFlagSource } from "#x86/semantics/flag-writes.js";
 import { guardStorageRead, guardStorageWrite } from "#x86/semantics/memory.js";
-import type { SemanticTemplate, SemanticsBuilder } from "#x86/semantics/builder.js";
+import type {
+  LoopOptions,
+  SemanticBuildContext,
+  SemanticOps,
+  SemanticTemplate
+} from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
+
+type StringUnit = (builder: SemanticOps, context: SemanticBuildContext) => void;
 
 export function movsSemantic(width: OperandWidth): SemanticTemplate {
   return movsUnit(width);
 }
 
 export function repMovsSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(movsUnit(width));
+  return repSemantic(movsUnit(width), { stateRegs: ["ecx", "esi", "edi"] });
 }
 
 export function cmpsSemantic(width: OperandWidth): SemanticTemplate {
@@ -17,11 +24,11 @@ export function cmpsSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 export function repeCmpsSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(cmpsUnit(width), "E");
+  return repSemantic(cmpsUnit(width), { stateRegs: ["ecx", "esi", "edi"], statusFlags: true }, "E");
 }
 
 export function repneCmpsSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(cmpsUnit(width), "NE");
+  return repSemantic(cmpsUnit(width), { stateRegs: ["ecx", "esi", "edi"], statusFlags: true }, "NE");
 }
 
 export function stosSemantic(width: OperandWidth): SemanticTemplate {
@@ -29,7 +36,7 @@ export function stosSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 export function repStosSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(stosUnit(width));
+  return repSemantic(stosUnit(width), { stateRegs: ["ecx", "edi"] });
 }
 
 export function lodsSemantic(width: OperandWidth): SemanticTemplate {
@@ -37,7 +44,9 @@ export function lodsSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 export function repLodsSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(lodsUnit(width));
+  return repSemantic(lodsUnit(width), {
+    stateRegs: ["ecx", "esi", accumulator(width)]
+  });
 }
 
 export function scasSemantic(width: OperandWidth): SemanticTemplate {
@@ -45,14 +54,14 @@ export function scasSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 export function repeScasSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(scasUnit(width), "E");
+  return repSemantic(scasUnit(width), { stateRegs: ["ecx", "edi"], statusFlags: true }, "E");
 }
 
 export function repneScasSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(scasUnit(width), "NE");
+  return repSemantic(scasUnit(width), { stateRegs: ["ecx", "edi"], statusFlags: true }, "NE");
 }
 
-function movsUnit(width: OperandWidth): SemanticTemplate {
+function movsUnit(width: OperandWidth): StringUnit {
   return (s, context) => {
     const src = s.operand(0);
     const dst = s.operand(1);
@@ -69,7 +78,7 @@ function movsUnit(width: OperandWidth): SemanticTemplate {
   };
 }
 
-function cmpsUnit(width: OperandWidth): SemanticTemplate {
+function cmpsUnit(width: OperandWidth): StringUnit {
   return (s, context) => {
     const leftOperand = s.operand(0);
     const rightOperand = s.operand(1);
@@ -88,7 +97,7 @@ function cmpsUnit(width: OperandWidth): SemanticTemplate {
   };
 }
 
-function stosUnit(width: OperandWidth): SemanticTemplate {
+function stosUnit(width: OperandWidth): StringUnit {
   return (s, context) => {
     const dst = s.operand(0);
     const value = s.get(s.reg(accumulator(width)), width);
@@ -100,7 +109,7 @@ function stosUnit(width: OperandWidth): SemanticTemplate {
   };
 }
 
-function lodsUnit(width: OperandWidth): SemanticTemplate {
+function lodsUnit(width: OperandWidth): StringUnit {
   return (s, context) => {
     const src = s.operand(0);
     const delta = stringDelta(s, width);
@@ -113,7 +122,7 @@ function lodsUnit(width: OperandWidth): SemanticTemplate {
   };
 }
 
-function scasUnit(width: OperandWidth): SemanticTemplate {
+function scasUnit(width: OperandWidth): StringUnit {
   return (s, context) => {
     const rightOperand = s.operand(0);
     const delta = stringDelta(s, width);
@@ -128,24 +137,39 @@ function scasUnit(width: OperandWidth): SemanticTemplate {
     stepRegister(s, "edi", delta);
   };
 }
-
-function repSemantic(unit: SemanticTemplate, condition?: "E" | "NE"): SemanticTemplate {
+function repSemantic(
+  unit: StringUnit,
+  loop: Omit<LoopOptions, "enter" | "body" | "onContinue">,
+  condition?: "E" | "NE"
+): SemanticTemplate {
   return (s, context) => {
     const ecx = s.get(s.reg("ecx"));
 
-    s.jumpIf(s.compare(32, "eq", ecx, s.const32(0)), s.nextEip());
-    unit(s, context);
+    s.loop({
+      ...loop,
+      enter: s.compare(32, "ne", ecx, s.const32(0)),
+      body: (loopBuilder) => {
+        unit(loopBuilder, context);
 
-    const decremented = s.binary("sub", ecx, s.const32(1));
-    const nonzero = s.compare(32, "ne", decremented, s.const32(0));
+        const decremented = loopBuilder.binary(
+          "sub",
+          loopBuilder.get(loopBuilder.reg("ecx")),
+          loopBuilder.const32(1)
+        );
+        const nonzero = loopBuilder.compare(32, "ne", decremented, loopBuilder.const32(0));
 
-    s.set(s.reg("ecx"), decremented);
-    s.jumpIf(repBranchPredicate(s, condition, nonzero), s.currentEip());
+        loopBuilder.set(loopBuilder.reg("ecx"), decremented);
+        return repBranchPredicate(loopBuilder, condition, nonzero);
+      },
+      onContinue: (loopBuilder) => {
+        loopBuilder.incrementInstructionCount();
+      }
+    });
   };
 }
 
 function repBranchPredicate(
-  s: SemanticsBuilder,
+  s: SemanticOps,
   condition: "E" | "NE" | undefined,
   nonzero: Value
 ): Value {
@@ -154,13 +178,13 @@ function repBranchPredicate(
     : s.binary("and", nonzero, s.condition(condition));
 }
 
-function stringDelta(s: SemanticsBuilder, width: OperandWidth) {
+function stringDelta(s: SemanticOps, width: OperandWidth) {
   const byteLength = width / 8;
 
   return s.select(s.readFlag("DF"), s.const32(-byteLength), s.const32(byteLength));
 }
 
-function stepRegister(s: SemanticsBuilder, reg: "esi" | "edi", delta: ReturnType<typeof stringDelta>): void {
+function stepRegister(s: SemanticOps, reg: "esi" | "edi", delta: ReturnType<typeof stringDelta>): void {
   s.set(s.reg(reg), s.binary("add", s.get(s.reg(reg), 32), delta), 32);
 }
 

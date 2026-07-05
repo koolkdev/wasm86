@@ -251,7 +251,10 @@ test("exhausted fuel exits with the instruction limit and the count preserved", 
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 8);
 });
 
-test("rep movsd preempts between iterations with restart state committed", async () => {
+// A fused rep is one dispatch: the fuel budget no longer preempts it per
+// element, so a run may overshoot its budget mid-rep while the count stays
+// exact per unit.
+test("rep movsd runs every unit in one dispatch past the fuel budget", async () => {
   const interpreter = await instantiate();
 
   writeWasmCpuStateSnapshot(interpreter.stateView, {
@@ -268,26 +271,23 @@ test("rep movsd preempts between iterations with restart state committed", async
   interpreter.guestView.setUint32(0x2004, 0x3333_4444, true);
   interpreter.guestView.setUint32(0x2008, 0x5555_6666, true);
 
-  const preempted = interpreter.run(1);
+  const exhausted = interpreter.run(1);
 
-  assertCompletionExit(preempted, CompletionExit.INSTRUCTION_LIMIT);
-  strictEqual(readRegister(interpreter.stateView, "ecx"), 2);
-  strictEqual(readRegister(interpreter.stateView, "esi"), 0x2004);
-  strictEqual(readRegister(interpreter.stateView, "edi"), 0x3004);
-  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress);
-  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 1);
+  assertCompletionExit(exhausted, CompletionExit.INSTRUCTION_LIMIT);
+  strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
+  strictEqual(readRegister(interpreter.stateView, "esi"), 0x200c);
+  strictEqual(readRegister(interpreter.stateView, "edi"), 0x300c);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 2);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 3);
   strictEqual(interpreter.guestView.getUint32(0x3000, true), 0x1111_2222);
+  strictEqual(interpreter.guestView.getUint32(0x3004, true), 0x3333_4444);
+  strictEqual(interpreter.guestView.getUint32(0x3008, true), 0x5555_6666);
 
   const completed = interpreter.run(10);
 
   assertHostExit(completed, HostExit.TRAP);
-  strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
-  strictEqual(readRegister(interpreter.stateView, "esi"), 0x200c);
-  strictEqual(readRegister(interpreter.stateView, "edi"), 0x300c);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 4);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 4);
-  strictEqual(interpreter.guestView.getUint32(0x3004, true), 0x3333_4444);
-  strictEqual(interpreter.guestView.getUint32(0x3008, true), 0x5555_6666);
 });
 
 test("fetching the opcode past mapped memory is a decode fault at the boundary", async () => {

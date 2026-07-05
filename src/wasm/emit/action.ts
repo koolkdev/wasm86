@@ -5,11 +5,13 @@ import {
   bodyFinal,
   type Action,
   type BranchHint,
+  type LoopContinueAction,
+  type LoopAction,
   type SwitchCase
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
-import { nestedBodies } from "#ir/traverse.js";
+import { loopInputsOf, nestedBodies } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -17,6 +19,7 @@ import { wasmBranchHint, type WasmBranchHint, type WasmFunctionBodyEncoder } fro
 import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { emitOp } from "./ops.js";
+import { wasmTypeForValue } from "./operators.js";
 import { analyzePlacement, type BlockPlacement } from "./placement.js";
 import { ValueStack } from "./value-stack.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
@@ -84,6 +87,9 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     constValue: (id) => block.values.constValue(id)
   });
 
+  // The innermost open loop's carried locals, aligned with its carried list.
+  const loopCellLocals: number[][] = [];
+
   function emitAction(action: Action): void {
     switch (action.kind) {
       case "op":
@@ -113,7 +119,64 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "switch":
         emitSwitch(action);
         return;
+      case "loop":
+        emitLoop(action);
+        return;
+      case "loopContinue":
+        emitLoopContinue(action);
+        return;
     }
+  }
+
+  // Captures first — loop-invariant values and entry-anchored producers
+  // materialize on the enclosing flow — then one local per carried cell,
+  // seeded before the loop opens and bound to the cell's loop input.
+  function emitLoop(action: LoopAction): void {
+    valueStack.captureForBody(action.body, loopInputsOf(action));
+
+    const locals = action.carried.map((cell) => {
+      valueStack.emitUse(cell.seed);
+
+      const local = context.scratch.allocLocal(wasmTypeForValue(block.values.valueType(cell.loopInput)));
+
+      body.localSet(local);
+      valueStack.bindLoopInput(cell.loopInput, local);
+      return local;
+    });
+
+    body.loop();
+    loopCellLocals.push(locals);
+    // The body re-executes per iteration: locals captured before the loop
+    // must not recycle inside it.
+    context.scratch.pushReuseBarrier();
+    frame.withLoopBody(() => emitBody(action.body));
+    context.scratch.popReuseBarrier();
+    loopCellLocals.pop();
+    body.endBlock();
+
+    for (const [index, cell] of action.carried.entries()) {
+      valueStack.unbindLoopInput(cell.loopInput);
+      context.scratch.freeLocal(locals[index]!);
+    }
+  }
+
+  // All updates compute before any local rewrites — an update may read
+  // another cell's loop input — then the sets pop in reverse.
+  function emitLoopContinue(action: LoopContinueAction): void {
+    const locals = loopCellLocals[loopCellLocals.length - 1];
+
+    assert(locals !== undefined, "loopContinue action outside any loop body");
+    assert(action.updates.length === locals.length, "loopContinue updates do not align with the loop's cells");
+
+    for (const update of action.updates) {
+      valueStack.emitUse(update);
+    }
+
+    for (let index = locals.length - 1; index >= 0; index -= 1) {
+      body.localSet(locals[index]!);
+    }
+
+    frame.emitLoopContinue();
   }
 
   // The condition emits first so values it shares with the bodies tee at

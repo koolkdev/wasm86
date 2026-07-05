@@ -33,6 +33,10 @@ export type ControlFrame = Readonly<{
   // Runs emitBody while completions account for `labels` enclosing Wasm
   // control constructs, so `br` completions can escape inline bodies.
   withNestedControl(emitBody: () => void, labels?: number): void;
+  // Runs emitBody as the body of a just-opened Wasm loop block, so
+  // emitLoopContinue can branch back to the innermost loop label.
+  withLoopBody(emitBody: () => void): void;
+  emitLoopContinue(): void;
 }>;
 
 type LinkedTarget = Readonly<
@@ -48,6 +52,8 @@ type LinkedTarget = Readonly<
 export function createControlFrame(context: ControlFrameContext): ControlFrame {
   const { body } = context;
   let inlineControlDepth = 0;
+  // Each mark is the inline depth just inside its loop block.
+  const loopMarks: number[] = [];
 
   function emitFallthrough(): void {
     const target = context.fallthrough;
@@ -169,6 +175,22 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
       } finally {
         inlineControlDepth -= labels;
       }
+    },
+    withLoopBody(emitBody: () => void): void {
+      inlineControlDepth += 1;
+      loopMarks.push(inlineControlDepth);
+      try {
+        emitBody();
+      } finally {
+        loopMarks.pop();
+        inlineControlDepth -= 1;
+      }
+    },
+    emitLoopContinue(): void {
+      const mark = loopMarks[loopMarks.length - 1];
+
+      assert(mark !== undefined, "continue emitted outside a loop body");
+      body.br(inlineControlDepth - mark);
     }
   };
 }

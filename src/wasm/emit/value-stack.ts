@@ -4,16 +4,17 @@ import type { OpAction } from "#ir/actions.js";
 import { opAccess, type IrOp } from "#ir/ops.js";
 import type { Body } from "#ir/block.js";
 import { bodyContains, bodyInputValues } from "#ir/traverse.js";
-import type {
-  BinaryValueNode,
-  CompareValueNode,
-  ExtendValueNode,
-  TruncateValueNode,
-  SelectValueNode,
-  UnreachableValueNode,
-  UnaryValueNode,
-  ValueId,
-  ValueTable
+import {
+  valueChildren,
+  type BinaryValueNode,
+  type CompareValueNode,
+  type ExtendValueNode,
+  type TruncateValueNode,
+  type SelectValueNode,
+  type UnreachableValueNode,
+  type UnaryValueNode,
+  type ValueId,
+  type ValueTable
 } from "#ir/values.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -76,6 +77,8 @@ export class ValueStack implements OperandUses {
   readonly #pending = new Map<ValueId, PendingProducer>();
   // Open borrows per value; assertClear reports leaks.
   readonly #borrows = new Map<ValueId, number>();
+  // Loop input leaf -> its carried cell's local, bound for the loop extent.
+  readonly #loopInputLocals = new Map<ValueId, number>();
 
   constructor(context: ValueStackContext) {
     this.#context = context;
@@ -133,6 +136,13 @@ export class ValueStack implements OperandUses {
         this.#body.localGet(local);
         return;
       }
+      case "loopInput": {
+        const local = this.#loopInputLocals.get(id);
+
+        assert(local !== undefined, `no local bound for loop input value ${id}`);
+        this.#body.localGet(local);
+        return;
+      }
       // A deferred producer executes here, at its scope's first use, and
       // tees for the rest of that scope's uses.
       case "actionOutput": {
@@ -162,8 +172,14 @@ export class ValueStack implements OperandUses {
   borrowUse(id: ValueId): BorrowedUse {
     const node = this.#values.node(id);
 
-    // Consts and externals re-emit freely; the borrow holds nothing.
-    if (node.kind === "const" || node.kind === "const64" || node.kind === "external") {
+    // Consts, externals, and loop inputs re-emit freely; the borrow holds
+    // nothing.
+    if (
+      node.kind === "const" ||
+      node.kind === "const64" ||
+      node.kind === "external" ||
+      node.kind === "loopInput"
+    ) {
       const reemit = () => this.emitUse(id);
 
       return this.#createBorrow(id, { first: reemit, repeat: reemit });
@@ -180,11 +196,25 @@ export class ValueStack implements OperandUses {
 
   // Called before entering a nested body: its actions are emitted later
   // but executes here, so anything it consumes from the parent context must
-  // be replayable from a local.
-  captureForBody(body: Body): void {
-    for (const id of bodyInputValues(body, this.#values)) {
+  // be replayable from a local. A loop body passes its input leaves as
+  // `bodyProduced` — values computed from them materialize inside, per
+  // iteration, never here.
+  captureForBody(body: Body, bodyProduced: readonly ValueId[] = []): void {
+    for (const id of bodyInputValues(body, this.#values, bodyProduced)) {
       this.#captureValue(id, body);
     }
+  }
+
+  // Binds a loop input to its carried cell's local for the loop extent;
+  // every use inside replays the local without counting.
+  bindLoopInput(id: ValueId, local: number): void {
+    assert(this.#values.node(id).kind === "loopInput", `value ${id} is not a loop input`);
+    assert(!this.#loopInputLocals.has(id), `loop input ${id} is already bound`);
+    this.#loopInputLocals.set(id, local);
+  }
+
+  unbindLoopInput(id: ValueId): void {
+    assert(this.#loopInputLocals.delete(id), `loop input ${id} is not bound`);
   }
 
   // A control action's output local: arms store into it, the scope's uses
@@ -208,6 +238,10 @@ export class ValueStack implements OperandUses {
     assert(
       this.#pending.size === 0,
       `deferred producers never emitted: ${[...this.#pending.keys()].join(", ")}`
+    );
+    assert(
+      this.#loopInputLocals.size === 0,
+      `loop inputs never unbound: ${[...this.#loopInputLocals.keys()].join(", ")}`
     );
     this.#registry.assertClear();
   }
@@ -315,6 +349,7 @@ export class ValueStack implements OperandUses {
       case "const":
       case "const64":
       case "external":
+      case "loopInput":
       case "unreachable":
         // Re-emittable anywhere.
         return;
@@ -360,10 +395,37 @@ export class ValueStack implements OperandUses {
         // Not in the registry means nothing consumed it yet (the pending
         // nested-body use keeps a consumed multi-use compound captured, so
         // every counted use is still to come.
+        this.#captureNestedBodyEntryProducers(id, forBody);
         this.#emitCompute(node);
         this.#registry.captureSet(id, this.#placement.useCount(id), this.#typeOf(id));
         return;
       }
+    }
+  }
+
+  // A compound input can wrap a deferred producer whose emission is
+  // anchored at this body's entry — placement refuses to sink pure ops into
+  // loop bodies, but the compound itself stays a body input because it does
+  // not depend on the loop's own leaves. Capture such producers first so
+  // computing the compound replays their locals.
+  #captureNestedBodyEntryProducers(id: ValueId, forBody: Body): void {
+    const node = this.#values.node(id);
+
+    if (node.kind === "actionOutput") {
+      const deferred = this.#pending.get(id);
+
+      if (
+        deferred !== undefined &&
+        deferred.emissions.some((emission) => emission.anchor === "bodyEntry" && emission.body === forBody)
+      ) {
+        this.#captureValue(id, forBody);
+      }
+
+      return;
+    }
+
+    for (const child of valueChildren(node)) {
+      this.#captureNestedBodyEntryProducers(child, forBody);
     }
   }
 

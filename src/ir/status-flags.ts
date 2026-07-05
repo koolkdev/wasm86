@@ -133,6 +133,27 @@ export class StatusFlags {
     return getBacking(this.#current.backings, flag).kind !== "input";
   }
 
+  isInputBacked(flag: X86StatusFlag): boolean {
+    return getBacking(this.#current.backings, flag).kind === "input";
+  }
+
+  conditionReadsInputFlags(cc: ConditionCode): boolean {
+    return CONDITIONS[cc].reads.some((flag) => this.isInputBacked(flag));
+  }
+
+  // Forgets every tracked backing and cached resolve: flag reads go back to
+  // the flag state in memory. Used when that state was rewritten behind the
+  // tracker's back — a loop body's carried lazy cells.
+  resetToInputs(): void {
+    this.#current.directSource = undefined;
+    this.#current.backings.clear();
+    for (const [flag, backing] of initialBackings()) {
+      this.#current.backings.set(flag, backing);
+    }
+
+    this.#inputFlags.clear();
+  }
+
   #setBacking(flag: X86StatusFlag, backing: FlagBacking): void {
     this.#current.backings.set(flag, backing);
   }

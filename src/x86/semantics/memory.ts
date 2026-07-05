@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { MemoryAccessKind, SemanticBuildContext, SemanticsBuilder } from "#x86/semantics/builder.js";
+import type { MemoryAccessKind, SemanticBuildContext, SemanticOps } from "#x86/semantics/builder.js";
 import type { OperandRef, StorageInput, ValueInput } from "#x86/semantics/refs.js";
 import type { OperandWidth } from "#x86/types.js";
 
@@ -25,7 +25,7 @@ export function resolvedOperandStorage(
 }
 
 export function guardStorageRead(
-  s: SemanticsBuilder,
+  s: SemanticOps,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
@@ -34,7 +34,7 @@ export function guardStorageRead(
 }
 
 export function guardStorageWrite(
-  s: SemanticsBuilder,
+  s: SemanticOps,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
@@ -43,7 +43,7 @@ export function guardStorageWrite(
 }
 
 export function guardStorageReadWrite(
-  s: SemanticsBuilder,
+  s: SemanticOps,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
@@ -52,7 +52,7 @@ export function guardStorageReadWrite(
 }
 
 function guardStorageAccesses(
-  s: SemanticsBuilder,
+  s: SemanticOps,
   context: SemanticBuildContext,
   storage: StorageInput,
   byteLength: number,
@@ -70,7 +70,7 @@ function guardStorageAccesses(
 }
 
 function memoryGuardAddress(
-  s: SemanticsBuilder,
+  s: SemanticOps,
   context: SemanticBuildContext,
   storage: StorageInput
 ): ValueInput | undefined {

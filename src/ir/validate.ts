@@ -7,12 +7,14 @@ import {
   type DispatchFinish,
   type Finish,
   type IrExit,
+  type LoopAction,
   type OpAction,
   type StateWriteAction,
   type SwitchAction
 } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
 import { opAccess, type OpValueOutput } from "./ops.js";
+import type { StateChannel } from "./slots.js";
 import { unboundedWidthBounds, type ValueId, type WidthBounds } from "./values.js";
 
 export type ValidateIrBlockOptions = Readonly<{
@@ -23,7 +25,7 @@ export type ValidateIrBlockOptions = Readonly<{
 // where their owner requires it, and dispatch targets are real values with
 // matching EIP commits on every path that dispatches.
 export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
-  validateBody(block, block.body, [], "body", undefined);
+  validateBody(block, block.body, [], "body", undefined, undefined);
 
   assert(
     bodyCompletes(block.body) || options.allowImplicitEntryFallthrough === true,
@@ -32,13 +34,15 @@ export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions 
 }
 
 // A body carries a result exactly when its owner declares an output
-// (`ownerOutput`) and the body itself does not complete.
+// (`ownerOutput`) and the body itself does not complete. `enclosingLoop` is
+// the innermost loop whose back edge a continue in this body would take.
 function validateBody(
   block: IrBlock,
   body: Body,
   ancestorPrefix: readonly Action[],
   path: string,
-  ownerOutput: ValueId | undefined
+  ownerOutput: ValueId | undefined,
+  enclosingLoop: LoopAction | undefined
 ): void {
   if (body.result !== undefined) {
     assert(ownerOutput !== undefined, `${path} carries a result without an owner output`);
@@ -80,10 +84,10 @@ function validateBody(
 
     switch (action.kind) {
       case "if":
-        validateBody(block, action.thenBody, prefixBeforeAction(), `${path}.if[${index}].thenBody`, undefined);
+        validateBody(block, action.thenBody, prefixBeforeAction(), `${path}.if[${index}].thenBody`, undefined, enclosingLoop);
 
         if (action.elseBody !== undefined) {
-          validateBody(block, action.elseBody, prefixBeforeAction(), `${path}.if[${index}].elseBody`, undefined);
+          validateBody(block, action.elseBody, prefixBeforeAction(), `${path}.if[${index}].elseBody`, undefined, enclosingLoop);
         }
 
         break;
@@ -94,7 +98,8 @@ function validateBody(
             switchCase.body,
             prefixBeforeAction(),
             `${path}.switch[${index}].case[${caseIndex}]`,
-            action.output
+            action.output,
+            enclosingLoop
           );
         }
 
@@ -103,10 +108,22 @@ function validateBody(
           action.defaultBody,
           prefixBeforeAction(),
           `${path}.switch[${index}].default`,
-          action.output
+          action.output,
+          enclosingLoop
         );
         break;
       }
+      case "loop":
+        validateLoopCells(block, action, `${path}.loop[${index}]`);
+        validateBody(block, action.body, prefixBeforeAction(), `${path}.loop[${index}].body`, undefined, action);
+        break;
+      case "loopContinue":
+        assert(enclosingLoop !== undefined, `${path} has a loopContinue outside any loop body`);
+        assert(
+          action.updates.length === enclosingLoop.carried.length,
+          `${path} loopContinue updates do not align with the enclosing loop's carried cells`
+        );
+        break;
       case "finish":
         if (action.finish.kind === "dispatch") {
           assertDispatchEipFlushed(prefixBeforeAction(), action.finish, path);
@@ -116,6 +133,43 @@ function validateBody(
       case "op":
         break;
     }
+  }
+}
+
+function validateLoopCells(block: IrBlock, action: LoopAction, path: string): void {
+  assert(action.carried.length > 0, `${path} carries no cells`);
+
+  const seen = new Set<ValueId>();
+
+  for (const cell of action.carried) {
+    block.values.node(cell.seed);
+    assert(
+      block.values.node(cell.loopInput).kind === "loopInput",
+      `${path} carried cell input ${cell.loopInput} is not a loopInput value`
+    );
+    assert(!seen.has(cell.loopInput), `${path} reuses loop input ${cell.loopInput} across carried cells`);
+    seen.add(cell.loopInput);
+
+    if (cell.channel !== undefined) {
+      assertCarriableChannel(cell.channel, path);
+    }
+  }
+}
+
+// The pending layer carries channels it can seed, read, and flush through
+// exact accesses. GPR carries may be narrow, but loop bodies must touch them
+// through the exact same alias.
+function assertCarriableChannel(channel: StateChannel, path: string): void {
+  switch (channel.kind) {
+    case "gpr":
+      return;
+    case "instructionCount":
+    case "lazyFlags":
+      return;
+    case "flag":
+    case "segment":
+    case "eip":
+      assert(false, `${path} carries an unsupported ${channel.kind} channel`);
   }
 }
 
@@ -130,6 +184,13 @@ function validateActionValues(block: IrBlock, action: Action): void {
     case "switch":
       block.values.node(action.selector);
       block.values.node(action.output);
+      return;
+    case "loop":
+      return;
+    case "loopContinue":
+      for (const update of action.updates) {
+        block.values.node(update);
+      }
       return;
     case "finish":
       validateFinishValues(block, action.finish);
@@ -247,6 +308,8 @@ function assertKnownAction(action: Action): void {
     kind === "op" ||
       kind === "if" ||
       kind === "switch" ||
+      kind === "loop" ||
+      kind === "loopContinue" ||
       kind === "finish",
     `unknown IR action kind ${String(kind)}`
   );

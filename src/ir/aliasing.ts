@@ -33,6 +33,9 @@ export function effectsOf(action: Action): ActionEffects {
       return bodyEffects(action.thenBody, action.elseBody);
     case "switch":
       return bodyEffects(...action.cases.map((switchCase) => switchCase.body), action.defaultBody);
+    case "loop":
+      return bodyEffects(action.body);
+    case "loopContinue":
     case "finish":
       return noEffects;
   }
@@ -99,6 +102,9 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
     case "switch":
       return action.cases.some((switchCase) => bodyMayWriteStateSlot(switchCase.body, slot)) ||
         bodyMayWriteStateSlot(action.defaultBody, slot);
+    case "loop":
+      return bodyMayWriteStateSlot(action.body, slot);
+    case "loopContinue":
     case "finish":
       return false;
   }

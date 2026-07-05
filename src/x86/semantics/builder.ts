@@ -43,18 +43,10 @@ export type GetOptions = Readonly<{
 
 export type SemanticOperandInput = OperandRef;
 
-export interface SemanticBuildContext {
-  operandInfo(operand: SemanticOperandInput): SemanticOperandInfo;
-}
-
-export type SemanticTemplate = (builder: SemanticsBuilder, context: SemanticBuildContext) => void;
-
-export interface SemanticsBuilder {
+export interface SemanticOps {
   operand(index: number): OperandRef;
   const32(value: number): Value;
   const64(value: bigint): Value;
-  currentEip(): Value;
-  nextEip(): Value;
   reg(reg: RegName): RegRef;
   mem(address: ValueInput): MemRef;
 
@@ -76,13 +68,45 @@ export interface SemanticsBuilder {
   extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value;
 
   readFlag(flag: X86Flag): Value;
-  writeFlag(flag: X86Flag, value: ValueInput): void;
   writeStatusFlagsSource(source: SimpleFlagSource): void;
   condition(cc: ConditionCode): Value;
+}
+
+export interface LoopSemanticsBuilder extends SemanticOps {
+  incrementInstructionCount(): void;
+}
+
+// A fused semantic loop's state declaration. State registers live in locals
+// for the loop's extent and materialize on fault or loop exit.
+export type LoopOptions = Readonly<{
+  // Gate for entering the first iteration.
+  enter: ValueInput;
+  // Registers whose pending writes are carried locally and committed on exit.
+  stateRegs?: readonly RegName[];
+  // Carry lazy status-flag state through the loop.
+  statusFlags?: boolean;
+  // Emits one iteration and returns the back-edge predicate.
+  body: (builder: LoopSemanticsBuilder) => ValueInput;
+  // Runs only on a taken back edge before carried updates are captured.
+  onContinue?: (builder: LoopSemanticsBuilder) => void;
+}>;
+
+export interface SemanticBuildContext {
+  operandInfo(operand: SemanticOperandInput): SemanticOperandInfo;
+}
+
+export type SemanticTemplate = (builder: SemanticsBuilder, context: SemanticBuildContext) => void;
+
+export interface SemanticsBuilder extends SemanticOps {
+  currentEip(): Value;
+  nextEip(): Value;
+
+  writeFlag(flag: X86Flag, value: ValueInput): void;
 
   next(): void;
   jump(target: TargetInput): void;
   jumpIf(condition: ValueInput, target: TargetInput): void;
+  loop(options: LoopOptions): void;
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void;
   hostTrap(vector: ValueInput): void;
   hostTrapIf(condition: ValueInput, vector: ValueInput): void;

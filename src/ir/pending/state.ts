@@ -22,10 +22,17 @@ import { PendingStateAccess } from "./state-access.js";
 
 export type PendingPathKind = "fault" | "completed";
 
+// Observes every static-channel read and write resolved through pending.
+export type PendingAccessObserver = Readonly<{
+  onRead(channel: StateChannel): void;
+  onWrite(channel: StateChannel): void;
+}>;
+
 export class PendingState {
   readonly #state: PendingStateAccess;
   readonly #cells: PendingCells<FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel>;
   readonly #gprs: PendingGprs;
+  #observer: PendingAccessObserver | undefined;
 
   constructor(values: ValueTable, emit: (action: Action) => void) {
     this.#state = new PendingStateAccess(values, emit);
@@ -34,7 +41,12 @@ export class PendingState {
     this.#gprs = new PendingGprs(values, this.#state);
   }
 
+  observeAccess(observer: PendingAccessObserver | undefined): void {
+    this.#observer = observer;
+  }
+
   read(channel: StateChannel, options?: PendingReadOptions): ValueId {
+    this.#observer?.onRead(channel);
     switch (channel.kind) {
       case "gpr":
         return this.#gprs.read(channel, options);
@@ -48,6 +60,7 @@ export class PendingState {
   }
 
   write(channel: StateChannel, value: ValueId): void {
+    this.#observer?.onWrite(channel);
     switch (channel.kind) {
       case "gpr":
         this.#gprs.write(channel, value);
@@ -64,8 +77,20 @@ export class PendingState {
     }
   }
 
-  invalidate(channel: FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel): void {
+  invalidate(channel: StateChannel): void {
+    if (channel.kind === "gpr") {
+      this.#gprs.invalidate(channel);
+      return;
+    }
+
     this.#cells.invalidate(channel);
+  }
+
+  dirtyChannelsSinceBoundary(skip: (channel: StateChannel) => boolean): readonly StateChannel[] {
+    return [
+      ...this.#gprs.dirtyChannelsSinceBoundary(skip),
+      ...this.#cells.dirtyChannelsSinceBoundary(skip)
+    ];
   }
 
   readDynamicGpr(slot: GprDynamicSlot, options?: PendingReadOptions): ValueId {

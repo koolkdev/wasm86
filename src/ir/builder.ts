@@ -6,6 +6,7 @@ import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
   SemanticsBuilder,
   GetOptions,
+  LoopOptions,
   MemoryAccessKind,
   SemanticBuildContext,
   SemanticOperandInfo,
@@ -41,6 +42,7 @@ import type {
   SegmentOperandBinding
 } from "./operands.js";
 import { PendingState } from "./pending/state.js";
+import { LoopBuilder, LoopSemanticsBuilderImpl } from "./builder/loop.js";
 import { Segments, type SegmentMode } from "./segments.js";
 import { StatusFlags } from "./status-flags.js";
 import {
@@ -49,7 +51,8 @@ import {
   gprChannel,
   instructionCountChannel,
   type GprDynamicSlot,
-  type GprChannel
+  type GprChannel,
+  type StateChannel
 } from "./slots.js";
 import type {
   Action,
@@ -127,9 +130,10 @@ function valueFromId(id: ValueId): Value {
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = new ValueTable();
   readonly #actions: Action[] = [];
-  readonly #pending = new PendingState(this.#values, (action) => this.#actions.push(action));
-  readonly #statusFlags = new StatusFlags(this.#values, this.#pending, (action) => this.#actions.push(action));
+  readonly #pending = new PendingState(this.#values, (action) => this.#emitAction(action));
+  readonly #statusFlags = new StatusFlags(this.#values, this.#pending, (action) => this.#emitAction(action));
   readonly #segments: Segments;
+  #activeLoop: LoopBuilder | undefined;
   // An effective/linear address is computed once per operand, at its first
   // use, so later uses see the same address even if the instruction rewrites
   // a base register in between.
@@ -152,6 +156,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       segmentMode,
       (finish, actions) => this.#terminate(finish, actions)
     );
+    this.#pending.observeAccess({
+      onRead: (channel) => this.#onPendingAccess(channel, "read"),
+      onWrite: (channel) => this.#onPendingAccess(channel, "write")
+    });
   }
 
   addInstruction(
@@ -363,15 +371,16 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     assert(!this.#wroteMemory, "a memory guard cannot follow a memory write in the same instruction");
 
     const addressId = address;
-    this.#actions.push(
-      ...memoryGuardActions(
-        this.#values,
-        addressId,
-        byteLength,
-        { kind: "data", access },
-        this.#pending.flushesForPath("fault")
-      )
-    );
+
+    for (const action of memoryGuardActions(
+      this.#values,
+      addressId,
+      byteLength,
+      { kind: "data", access },
+      this.#pending.flushesForPath("fault")
+    )) {
+      this.#emitAction(action);
+    }
   }
 
   address(operandRef: OperandInput): Value {
@@ -444,11 +453,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   readFlag(flag: X86Flag): Value {
     this.#beforeOp("readFlag");
-    return valueFromId(
-      isX86StatusFlag(flag)
-        ? this.#statusFlags.readFlag(flag)
-        : this.#pending.read(flagChannel(flag))
-    );
+    if (!isX86StatusFlag(flag)) {
+      return valueFromId(this.#pending.read(flagChannel(flag)));
+    }
+
+    return valueFromId(this.#statusFlags.readFlag(flag));
   }
 
   writeFlag(flag: X86Flag, value: ValueInput): void {
@@ -485,18 +494,64 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const conditionId = condition;
     const targetId = target;
 
-    this.#actions.push({
+    this.#emitAction({
       kind: "if",
       condition: conditionId,
       thenBody: this.#earlyDispatchBody(targetId)
     });
   }
 
+  // Opens a loop: the declared channels become loop-carried cells
+  // living in locals while the body runs. The loop itself falls through;
+  // instruction completion remains with the surrounding semantic template.
+  loop(options: LoopOptions): void {
+    this.#beforeOp("loop");
+    assert(this.#activeLoop === undefined, "nested loops are unsupported");
+
+    const loop = LoopBuilder.begin({
+      values: this.#values,
+      pending: this.#pending,
+      statusFlags: this.#statusFlags,
+      emitParentAction: (action) => this.#actions.push(action)
+    }, options);
+
+    this.#activeLoop = loop;
+
+    let exitValues: readonly ValueId[];
+
+    try {
+      const loopBuilder = new LoopSemanticsBuilderImpl({
+        host: this,
+        values: this.#values,
+        pending: this.#pending,
+        statusFlags: this.#statusFlags,
+        binding: (index) => this.#binding(index),
+        resetInstructionCountFold: () => this.#resetInstructionCountFold()
+      });
+      const onContinue = options.onContinue;
+      const continueCondition = options.body(loopBuilder);
+
+      exitValues = loop.emitContinue(
+        continueCondition,
+        onContinue === undefined ? undefined : () => onContinue(loopBuilder)
+      );
+    } finally {
+      this.#activeLoop = undefined;
+    }
+    assert(!this.#terminated, "a loop body must not terminate the instruction");
+
+    loop.close(options.enter, exitValues);
+
+    // Loop-carried state is runtime-dependent past the loop; the count fold
+    // re-bases if later completion needs it.
+    this.#resetInstructionCountFold();
+  }
+
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {
     this.#beforeOp("cpuExceptionIf");
     assert(!this.#wroteMemory, "a CPU exception guard cannot follow a memory write in the same instruction");
 
-    this.#actions.push({
+    this.#emitAction({
       kind: "if",
       condition,
       hint: "unlikely",
@@ -583,6 +638,25 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#terminated = true;
   }
 
+  // The action sink. The active loop builder owns body action routing
+  // and invariant read hoisting while its callback runs.
+  #emitAction(action: Action): void {
+    const loop = this.#activeLoop;
+
+    if (loop === undefined) {
+      this.#actions.push(action);
+      return;
+    }
+
+    loop.emitAction(action);
+  }
+
+  // Loop bodies may only touch a carried channel whole — a partial overlap
+  // would flush the carried cell mid-body.
+  #onPendingAccess(channel: StateChannel, access: "read" | "write"): void {
+    this.#activeLoop?.onPendingAccess(channel, access);
+  }
+
   // Every terminator advances the count: fault bodies commit instruction-start
   // state, so a faulting instruction never counts. The value
   // is always base + completed off the block's one read, so a flush stores
@@ -602,6 +676,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       this.#instructionCountBase,
       this.#values.const(this.#instructionsCompleted + extraCompleted)
     );
+  }
+
+  #resetInstructionCountFold(): void {
+    this.#instructionCountBase = undefined;
+    this.#instructionsCompleted = 0;
   }
 
   #dynamicGprSlot(binding: RegDynamicOperandBinding, accessWidth: OperandWidth): GprDynamicSlot {
@@ -648,7 +727,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const signed = options.signed === true && width !== 32;
     const output = this.#values.addActionOutput(memoryReadBounds(width, signed));
 
-    this.#actions.push(
+    this.#emitAction(
       signed
         ? { kind: "op", output, op: { kind: "memory.read", address, width, signed: true } }
         : { kind: "op", output, op: { kind: "memory.read", address, width } }
@@ -658,7 +737,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   #writeGuestMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
     this.#wroteMemory = true;
-    this.#actions.push({ kind: "op", op: { kind: "memory.write", address, value, width } });
+    this.#emitAction({ kind: "op", op: { kind: "memory.write", address, value, width } });
   }
 
   #operandAddress(index: number): ValueId {

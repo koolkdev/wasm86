@@ -10,6 +10,7 @@ export type WasmBodyInstruction = Readonly<{
   offset: number;
   opcode: number;
   local?: number;
+  memoryIndex?: number;
 }>;
 
 export function extractOnlyWasmFunctionBody(moduleBytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
@@ -228,10 +229,13 @@ export function wasmBodyInstructions(functionBody: Uint8Array<ArrayBuffer>): rea
       case wasmOpcode.i32Load16U:
       case wasmOpcode.i32Store:
       case wasmOpcode.i32Store8:
-      case wasmOpcode.i32Store16:
-        instructions.push({ offset: instructionOffset, opcode });
-        offset = skipMemoryImmediate(functionBody, offset);
+      case wasmOpcode.i32Store16: {
+        const memory = readMemoryImmediate(functionBody, offset);
+
+        instructions.push({ offset: instructionOffset, opcode, memoryIndex: memory.memoryIndex });
+        offset = memory.nextOffset;
         break;
+      }
       default:
         instructions.push({ offset: instructionOffset, opcode });
         break;

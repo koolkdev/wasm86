@@ -12,7 +12,10 @@ export function nestedBodies(action: Action): readonly Body[] {
         : [action.thenBody, action.elseBody];
     case "switch":
       return [...action.cases.map((switchCase) => switchCase.body), action.defaultBody];
+    case "loop":
+      return [action.body];
     case "op":
+    case "loopContinue":
     case "finish":
       return [];
   }
@@ -47,7 +50,8 @@ export function bodyContains(root: Body, target: Body): boolean {
   return false;
 }
 
-// The value ids one action consumes, in operand order.
+// The value ids one action consumes, in operand order. A loop consumes its
+// seeds at entry; a loopContinue consumes its updates at the back edge.
 export function actionOperands(action: Action): readonly ValueId[] {
   switch (action.kind) {
     case "op":
@@ -56,6 +60,10 @@ export function actionOperands(action: Action): readonly ValueId[] {
       return [action.condition];
     case "switch":
       return [action.selector];
+    case "loop":
+      return action.carried.map((cell) => cell.seed);
+    case "loopContinue":
+      return action.updates;
     case "finish":
       return finishOperands(action.finish);
   }
@@ -103,6 +111,8 @@ export function actionOutput(action: Action, access?: OpAccess): ValueId | undef
     case "switch":
       return action.output;
     case "if":
+    case "loop":
+    case "loopContinue":
     case "finish":
       return undefined;
   }
@@ -152,10 +162,16 @@ export function valueDependsOn(
 }
 
 // Everything a nested body consumes from its parent context, its result
-// included. The walk stops at values transitively produced inside the body;
-// a body-internal compound decomposes into its parent-context children.
-export function bodyInputValues(body: Body, values: ValueTable): readonly ValueId[] {
-  const produced = bodyProducedOutputs(body);
+// included. The walk stops at values transitively produced inside the body —
+// a loop body's own input leaves included, so loop-input-dependent values
+// are never treated as parent-context inputs; a body-internal compound
+// decomposes into its parent-context children.
+export function bodyInputValues(
+  body: Body,
+  values: ValueTable,
+  extraProduced: Iterable<ValueId> = []
+): readonly ValueId[] {
+  const produced = new Set([...bodyProducedOutputs(body), ...extraProduced]);
   const inputs: ValueId[] = [];
   const decomposed = new Set<ValueId>();
 
@@ -185,7 +201,7 @@ export function bodyInputValues(body: Body, values: ValueTable): readonly ValueI
     }
 
     for (const nested of nestedBodies(action)) {
-      for (const input of bodyInputValues(nested, values)) {
+      for (const input of bodyInputValues(nested, values, loopInputsOf(action))) {
         collect(input);
       }
     }
@@ -196,4 +212,8 @@ export function bodyInputValues(body: Body, values: ValueTable): readonly ValueI
   }
 
   return inputs;
+}
+
+export function loopInputsOf(action: Action): readonly ValueId[] {
+  return action.kind === "loop" ? action.carried.map((cell) => cell.loopInput) : [];
 }

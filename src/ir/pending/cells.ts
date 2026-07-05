@@ -62,6 +62,15 @@ export class PendingCells<TCell extends PendingCell = PendingCell> {
     return this.#pending.has(channel);
   }
 
+  // Pending entries whose value differs from the boundary snapshot.
+  dirtyChannelsSinceBoundary(skip: (channel: TCell) => boolean): readonly TCell[] {
+    return [...this.#pending].flatMap(([channel, entry]) => (
+      entry.dirty && !skip(channel) && this.#boundary.get(channel) !== entry.value
+        ? [channel]
+        : []
+    ));
+  }
+
   beginInstruction(): void {
     this.#boundary = new Map(
       [...this.#pending].map(([channel, entry]) => [channel, entry.value])
@@ -96,7 +105,7 @@ export class PendingCells<TCell extends PendingCell = PendingCell> {
   }
 }
 
-function channelReadBounds(channel: PendingCell): WidthBounds | undefined {
+export function channelReadBounds(channel: PendingCell): WidthBounds | undefined {
   switch (channel.kind) {
     case "flag":
       return fitsUnsigned(1);

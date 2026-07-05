@@ -5,6 +5,8 @@ import type { ConditionCode } from "#x86/conditions.js";
 import type {
   SemanticsBuilder,
   GetOptions,
+  LoopSemanticsBuilder,
+  LoopOptions,
   MemoryAccessKind,
   SemanticBuildContext,
   SemanticOperandInfo,
@@ -85,7 +87,7 @@ function statusFlagValues(flags: StatusFlagValues): StatusFlagValues {
   };
 }
 
-class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
+class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBuildContext {
   readonly #events: string[] = [];
   readonly #defs: string[] = [];
   readonly #flagWrites: StatusFlagValues[] = [];
@@ -298,6 +300,24 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
 
   jumpIf(condition: ValueInput, target: TargetInput): void {
     this.#emit(`jumpIf ${this.#value(condition)} -> ${this.#value(target)}`);
+  }
+
+  loop(options: LoopOptions): void {
+    const stateRegs = options.stateRegs ?? [];
+
+    this.#emit(
+      `loop enter=${this.#value(options.enter)} stateRegs=[${stateRegs.join(",")}]` +
+        (options.statusFlags === true ? " statusFlags" : "")
+    );
+    const continueCondition = options.body(this);
+
+    options.onContinue?.(this);
+    this.#emit(`loopContinue ${this.#value(continueCondition)}`);
+    this.#emit("loopEnd");
+  }
+
+  incrementInstructionCount(): void {
+    this.#emit("incrementInstructionCount");
   }
 
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {

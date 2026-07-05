@@ -368,3 +368,100 @@ test("a nested dispatch target EIP write mismatch is rejected", () => {
     /thenBody dispatch EIP flush does not match dispatch\.targetEip/
   );
 });
+
+test("a loop with a dword carried cell and an aligned continue validates", () => {
+  const values = new ValueTable();
+  const seed = values.const(3);
+  const loopInput = values.addLoopInput();
+  const update = values.binary("sub", loopInput, values.const(1));
+
+  doesNotThrow(() =>
+    validateIrBlock(
+      entryBlock(values, [
+        {
+          kind: "loop",
+          carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+          body: {
+            actions: [
+              { kind: "if", condition: update, thenBody: { actions: [{ kind: "loopContinue", updates: [update] }] } },
+              stateWrite(gprChannel("ecx"), update)
+            ]
+          }
+        },
+        writeEip0,
+        finishDispatch0
+      ])
+    )
+  );
+});
+
+test("a loopContinue outside any loop body is rejected", () => {
+  throws(
+    () => validateIrBlock(blockWith([{ kind: "loopContinue", updates: [] }])),
+    /loopContinue outside any loop body/
+  );
+});
+
+test("loopContinue updates misaligned with the carried list are rejected", () => {
+  const values = new ValueTable();
+  const seed = values.const(3);
+  const loopInput = values.addLoopInput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          {
+            kind: "loop",
+            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            body: { actions: [{ kind: "loopContinue", updates: [] }] }
+          },
+          writeEip0,
+          finishDispatch0
+        ])
+      ),
+    /updates do not align/
+  );
+});
+
+test("a narrow GPR carried channel validates", () => {
+  const values = new ValueTable();
+  const seed = values.const(3);
+  const loopInput = values.addLoopInput();
+
+  doesNotThrow(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          {
+            kind: "loop",
+            carried: [{ channel: gprChannel("cl"), seed, loopInput }],
+            body: { actions: [{ kind: "loopContinue", updates: [loopInput] }] }
+          },
+          writeEip0,
+          finishDispatch0
+        ])
+      )
+  );
+});
+
+test("a carried cell whose input is not a loopInput value is rejected", () => {
+  const values = new ValueTable();
+  const seed = values.const(3);
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          {
+            kind: "loop",
+            carried: [{ channel: gprChannel("ecx"), seed, loopInput: seed }],
+            body: { actions: [{ kind: "loopContinue", updates: [seed] }] }
+          },
+          writeEip0,
+          finishDispatch0
+        ])
+      ),
+    /is not a loopInput value/
+  );
+});

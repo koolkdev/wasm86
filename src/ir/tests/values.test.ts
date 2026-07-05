@@ -1,7 +1,7 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { ValueTable, fitsUnsigned, signExtended } from "#ir/values.js";
+import { ValueTable, fitsUnsigned, signExtended, valueChildren } from "#ir/values.js";
 
 test("value table deduplicates constants by canonical i32 value", () => {
   const table = new ValueTable();
@@ -423,4 +423,17 @@ test("a select is bounded by the weaker of its arms", () => {
   const wide = table.select(condition, table.const(1), table.const(0x100));
 
   strictEqual(table.node(table.truncate(8, wide)).kind, "truncate");
+});
+
+test("loop inputs are opaque i32 leaves with their creation bounds", () => {
+  const table = new ValueTable();
+  const first = table.addLoopInput();
+  const second = table.addLoopInput(fitsUnsigned(8));
+
+  notStrictEqual(first, second);
+  strictEqual(table.node(first).kind, "loopInput");
+  strictEqual(table.valueType(first), "i32");
+  deepStrictEqual(valueChildren(table.node(first)), []);
+  strictEqual(table.truncate(8, second), second);
+  strictEqual(table.node(table.truncate(8, first)).kind, "truncate");
 });

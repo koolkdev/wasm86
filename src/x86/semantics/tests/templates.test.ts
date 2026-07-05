@@ -47,6 +47,7 @@ import {
   cmpsSemantic,
   lodsSemantic,
   movsSemantic,
+  repLodsSemantic,
   repMovsSemantic,
   repneScasSemantic,
   scasSemantic,
@@ -260,34 +261,46 @@ test("stos, lods, and scas use accumulator widths and one pointer step", () => {
   ok(scas.events.includes("set edi:32 <- %10"));
 });
 
-test("rep movs restarts at the current eip after one counted unit", () => {
+test("rep movs skips a zero count and fuses the unit into a state-reg loop", () => {
   const trace = buildSemanticTrace(repMovsSemantic(32), operands("mem", "mem"));
 
   deepStrictEqual(trace.events.slice(0, 4), [
     "%0 = get ecx:32",
-    "jumpIf %1 -> nextEip",
+    "loop enter=%1 stateRegs=[ecx,esi,edi]",
     "%2 = flag DF",
     "%4 = addr op0"
   ]);
-  ok(trace.events.includes("set ecx:32 <- %11"));
-  deepStrictEqual(trace.events.slice(-2), [
-    "jumpIf %12 -> currentEip",
+  ok(trace.events.includes("set ecx:32 <- %12"));
+  deepStrictEqual(trace.events.slice(-4), [
+    "incrementInstructionCount",
+    "loopContinue %13",
+    "loopEnd",
     "next"
   ]);
-  strictEqual(trace.defs[1], "cmp32.eq(%0, 0)");
-  strictEqual(trace.defs[11], "sub(%0, 1)");
-  strictEqual(trace.defs[12], "cmp32.ne(%11, 0)");
+  strictEqual(trace.defs[1], "cmp32.ne(%0, 0)");
+  // The back-edge count is the body's own ecx read, not the pre-loop one.
+  strictEqual(trace.defs[12], "sub(%11, 1)");
+  strictEqual(trace.defs[13], "cmp32.ne(%12, 0)");
+});
+
+test("rep lods carries its accumulator as loop state", () => {
+  const trace = buildSemanticTrace(repLodsSemantic(8), operands("mem"));
+
+  strictEqual(trace.events[1], "loop enter=%1 stateRegs=[ecx,esi,al]");
 });
 
 test("repne scas combines remaining ECX with ZF after the compare unit", () => {
   const trace = buildSemanticTrace(repneScasSemantic(8), operands("mem"));
 
-  ok(trace.events.includes("%15 = condition NE"));
-  deepStrictEqual(trace.events.slice(-2), [
-    "jumpIf %16 -> currentEip",
+  strictEqual(trace.events[1], "loop enter=%1 stateRegs=[ecx,edi] statusFlags");
+  ok(trace.events.includes("%16 = condition NE"));
+  deepStrictEqual(trace.events.slice(-4), [
+    "incrementInstructionCount",
+    "loopContinue %17",
+    "loopEnd",
     "next"
   ]);
-  strictEqual(trace.defs[16], "and(%14, %15)");
+  strictEqual(trace.defs[17], "and(%15, %16)");
 });
 
 test("lea semantic computes an address without getting the operand value", () => {

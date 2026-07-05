@@ -8,20 +8,23 @@ export type ScratchLocals<Types extends readonly WasmValueType[]> = {
 export class WasmLocalScratchAllocator {
   readonly #scratchLocalTypes = new Map<number, WasmValueType>();
   readonly #freeScratchLocals = new Map<WasmValueType, number[]>();
+  readonly #allocationDepths = new Map<number, number>();
+  // One entry per open barrier: frees of locals allocated outside it wait
+  // here until it lifts.
+  readonly #reuseBarriers: number[][] = [];
 
   constructor(readonly body: WasmFunctionBodyEncoder) {}
 
   allocLocal(type: WasmValueType): number {
     const freeLocals = this.#freeScratchLocals.get(type);
     const reusable = freeLocals?.pop();
+    const index = reusable ?? this.body.addLocal(type);
 
-    if (reusable !== undefined) {
-      return reusable;
+    if (reusable === undefined) {
+      this.#scratchLocalTypes.set(index, type);
     }
 
-    const index = this.body.addLocal(type);
-
-    this.#scratchLocalTypes.set(index, type);
+    this.#allocationDepths.set(index, this.#reuseBarriers.length);
     return index;
   }
 
@@ -32,6 +35,19 @@ export class WasmLocalScratchAllocator {
       throw new Error(`cannot free non-scratch local: ${index}`);
     }
 
+    const depth = this.#allocationDepths.get(index) ?? 0;
+
+    if (depth < this.#reuseBarriers.length) {
+      const deferred = this.#reuseBarriers[depth]!;
+
+      if (deferred.includes(index)) {
+        throw new Error(`scratch local already free: ${index}`);
+      }
+
+      deferred.push(index);
+      return;
+    }
+
     const freeLocals = scratchLocalList(this.#freeScratchLocals, type);
 
     if (freeLocals.includes(index)) {
@@ -39,6 +55,26 @@ export class WasmLocalScratchAllocator {
     }
 
     freeLocals.push(index);
+  }
+
+  // Code emitted under a barrier re-executes (a loop body), so a local
+  // allocated before it must survive every iteration: its free defers until
+  // the barrier holding its allocation scope lifts. Locals allocated inside
+  // re-capture per iteration and recycle freely.
+  pushReuseBarrier(): void {
+    this.#reuseBarriers.push([]);
+  }
+
+  popReuseBarrier(): void {
+    const deferred = this.#reuseBarriers.pop();
+
+    if (deferred === undefined) {
+      throw new Error("no reuse barrier to pop");
+    }
+
+    for (const index of deferred) {
+      this.freeLocal(index);
+    }
   }
 
   assertClear(): void {

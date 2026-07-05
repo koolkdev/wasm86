@@ -7,6 +7,7 @@ import {
   actionOutput,
   bodyProducedOutputs,
   finishOperands,
+  loopInputsOf,
   nestedBodies,
   valueDependsOn
 } from "#ir/traverse.js";
@@ -95,6 +96,7 @@ class PlacementAnalysis implements BlockPlacement {
   // Control-action outputs -> the result edges their demand charges.
   readonly #controlOutputs = new Map<ValueId, readonly DemandEdge[]>();
   readonly #bodyOwners = new Map<Body, DemandSite>();
+  readonly #loopBodies = new Set<Body>();
 
   constructor(block: IrBlock, exportedOutputs: Iterable<ValueId>) {
     this.#values = block.values;
@@ -121,6 +123,10 @@ class PlacementAnalysis implements BlockPlacement {
 
   #recordBodyOwners(body: Body): void {
     body.actions.forEach((action, actionIndex) => {
+      if (action.kind === "loop") {
+        this.#loopBodies.add(action.body);
+      }
+
       for (const nested of nestedBodies(action)) {
         this.#bodyOwners.set(nested, { body, actionIndex });
         this.#recordBodyOwners(nested);
@@ -158,8 +164,14 @@ class PlacementAnalysis implements BlockPlacement {
     );
   }
 
-  #recordActionDemandRoots(body: Body, ownerSite?: DemandSite): void {
-    const produced = new Set<ValueId>();
+  // `bodyProduced` seeds the produced set — a loop body's own input leaves,
+  // so values computed from them keep their demand sites inside the body.
+  #recordActionDemandRoots(
+    body: Body,
+    ownerSite?: DemandSite,
+    bodyProduced: readonly ValueId[] = []
+  ): void {
+    const produced = new Set<ValueId>(bodyProduced);
 
     body.actions.forEach((action, localActionIndex) => {
       const actionSite = { body, actionIndex: localActionIndex };
@@ -259,6 +271,19 @@ class PlacementAnalysis implements BlockPlacement {
           produced.add(action.output);
           return;
         }
+        case "loop":
+          // Seeds are consumed at loop entry, on the owning scope's flow.
+          for (const cell of action.carried) {
+            this.#addDemand(demandEdge(cell.seed));
+          }
+
+          this.#recordActionDemandRoots(action.body, actionSite, loopInputsOf(action));
+          return;
+        case "loopContinue":
+          for (const update of action.updates) {
+            this.#addDemand(demandEdge(update));
+          }
+          return;
         case "finish":
           for (const operand of finishOperands(action.finish)) {
             this.#addDemand(demandEdge(operand));
@@ -417,6 +442,20 @@ class PlacementAnalysis implements BlockPlacement {
 
     if (firstDirect === undefined) {
       for (const [body, subtree] of ordered) {
+        // An op never sinks into a loop body — it would re-execute per
+        // iteration. It anchors at the loop's entry instead, where the
+        // capture walk materializes it once.
+        if (this.#loopBodies.has(body)) {
+          out.push({
+            anchor: "bodyEntry",
+            body,
+            uses: subtree.edges.length,
+            homeEntry: homeEntry ?? subtree.entryIndex,
+            position: { body: scope, actionIndex: subtree.entryIndex }
+          });
+          continue;
+        }
+
         this.#scheduleScope(body, subtree.edges, homeEntry ?? subtree.entryIndex, out);
       }
 

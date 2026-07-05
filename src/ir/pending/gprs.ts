@@ -105,6 +105,26 @@ export class PendingGprs {
     return this.#pending.has(channel);
   }
 
+  // Drops the channel's pending value and cached reads; the next read goes
+  // back to state memory.
+  invalidate(channel: GprChannel): void {
+    for (const other of this.#pending.keys()) {
+      if (channelsOverlap(other, channel)) {
+        this.#pending.delete(other);
+      }
+    }
+
+    this.#invalidateReadsOverlapping(channel);
+  }
+
+  dirtyChannelsSinceBoundary(skip: (channel: GprChannel) => boolean): readonly GprChannel[] {
+    return [...this.#pending].flatMap(([channel, entry]) => (
+      entry.dirty && !skip(channel) && this.#boundary.get(channel) !== entry.value
+        ? [channel]
+        : []
+    ));
+  }
+
   beginInstruction(): void {
     this.#boundary = new Map(
       [...this.#pending].map(([channel, entry]) => [channel, entry.value])

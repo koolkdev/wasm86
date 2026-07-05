@@ -38,6 +38,9 @@ export type ConstValueNode = Readonly<{ kind: "const"; value: number }>;
 export type Const64ValueNode = Readonly<{ kind: "const64"; value: bigint }>;
 export type UnreachableValueNode = Readonly<{ kind: "unreachable"; type: ValueType }>;
 export type ActionOutputValueNode = Readonly<{ kind: "actionOutput" }>;
+// A loop-carried cell's iteration-start value; the emitter binds it to the
+// cell's local. Opaque and never interned, like actionOutput.
+export type LoopInputValueNode = Readonly<{ kind: "loopInput" }>;
 export type ExternalValueNode = Readonly<{ kind: "external"; external: ExternalValueId }>;
 export type BinaryValueNode = Readonly<{
   kind: "binary";
@@ -79,6 +82,7 @@ export type ValueNode =
   | Const64ValueNode
   | UnreachableValueNode
   | ActionOutputValueNode
+  | LoopInputValueNode
   | ExternalValueNode
   | BinaryValueNode
   | UnaryValueNode
@@ -92,6 +96,7 @@ export function valueChildren(node: ValueNode): readonly ValueId[] {
     case "const":
     case "const64":
     case "actionOutput":
+    case "loopInput":
     case "external":
     case "unreachable":
       return [];
@@ -191,6 +196,13 @@ export class ValueTable {
   addActionOutput(bounds?: WidthBounds): ValueId {
     // Each action produces a distinct value; outputs are never deduped.
     const id = this.#add({ kind: "actionOutput" }, []);
+
+    this.#widthBounds[id] = bounds ?? unboundedWidthBounds;
+    return id;
+  }
+
+  addLoopInput(bounds?: WidthBounds): ValueId {
+    const id = this.#add({ kind: "loopInput" }, []);
 
     this.#widthBounds[id] = bounds ?? unboundedWidthBounds;
     return id;
@@ -485,8 +497,10 @@ export class ValueTable {
       case "unreachable":
         return unboundedWidthBounds;
       case "actionOutput":
+      case "loopInput":
       case "external":
-        // Action outputs carry their bounds from creation; externals are opaque.
+        // Action and loop inputs carry their bounds from creation; externals
+        // are opaque.
         return unboundedWidthBounds;
       case "binary":
         assert(node.type === "i32", `width bounds requested for ${node.type} binary value`);
@@ -606,6 +620,7 @@ export class ValueTable {
         return "i64";
       case "const":
       case "actionOutput":
+      case "loopInput":
       case "external":
       case "unary":
       case "compare":

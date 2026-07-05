@@ -176,6 +176,8 @@ function decodeOperand(
   }
 }
 
+// Hidden memory operands use a fixed base register; only the segment may
+// come from runtime prefix state.
 function implicitMemoryBinding(
   context: HandlerEmitContext,
   externals: HandlerExternals,
@@ -190,26 +192,11 @@ function implicitMemoryBinding(
     );
   }
 
-  const baseIndex = reg32Index(base);
-
-  emitImplicitMemoryBinding(context, baseIndex, disp);
-  return memDynamicBinding(
-    externals.bind(context.locals.base),
-    externals.bind(context.locals.offset),
+  emitEffectiveSegment(context, defaultSegmentIndexForBaseIndex(reg32Index(base)));
+  return memBinding(
+    { base, index: undefined, scale: 1, disp },
     dynamicMemSegment(externals.bind(context.locals.effectiveSegment))
   );
-}
-
-function emitImplicitMemoryBinding(
-  context: HandlerEmitContext,
-  baseIndex: number,
-  disp: number
-): void {
-  const { body, locals } = context;
-
-  body.i32Const(baseIndex).localSet(locals.base);
-  body.i32Const(disp).localSet(locals.offset);
-  emitEffectiveSegment(context, defaultSegmentIndexForBaseIndex(baseIndex));
 }
 
 // The base-less EA leaves decode complete in the offset local.

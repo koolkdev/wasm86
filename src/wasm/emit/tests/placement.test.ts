@@ -896,3 +896,56 @@ test("an exported read crossing an overlapping store captures", () => {
   // boundary would observe the new eax: the read captures.
   strictEqual(analysis.outputPlacement(read).kind, "captureAtProducer");
 });
+
+test("a pure read consumed only inside a loop body anchors at the loop entry", () => {
+  const values = new ValueTable();
+  const readOut = values.addActionOutput(fitsUnsigned(1));
+  const loopInput = values.addLoopInput();
+  const update = values.binary("add", loopInput, readOut);
+  const loopBody = {
+    actions: [
+      stateWrite(gprChannel("ebx"), update),
+      { kind: "loopContinue", updates: [update] } as const
+    ]
+  };
+  const analysis = analyze(values, [
+    stateRead(readOut, flagChannel("DF")),
+    {
+      kind: "loop",
+      carried: [{ channel: gprChannel("eax"), seed: values.const(0), loopInput }],
+      body: loopBody
+    },
+    hostExit()
+  ]);
+  const placement = analysis.outputPlacement(readOut);
+
+  // The op never sinks into the body — it would re-execute per iteration.
+  strictEqual(placement.kind, "deferToUse");
+  deepStrictEqual(
+    placement.kind === "deferToUse" ? placement.emissions : [],
+    [{ anchor: "bodyEntry", body: loopBody, uses: 1 }]
+  );
+});
+
+test("a producer whose reads the loop body writes captures at its action point", () => {
+  const values = new ValueTable();
+  const readOut = values.addActionOutput();
+  const loopInput = values.addLoopInput();
+  const update = values.binary("add", loopInput, readOut);
+  const analysis = analyze(values, [
+    stateRead(readOut, gprChannel("ebx")),
+    {
+      kind: "loop",
+      carried: [{ channel: gprChannel("eax"), seed: values.const(0), loopInput }],
+      body: {
+        actions: [
+          stateWrite(gprChannel("ebx"), update),
+          { kind: "loopContinue", updates: [update] } as const
+        ]
+      }
+    },
+    hostExit()
+  ]);
+
+  strictEqual(analysis.outputPlacement(readOut).kind, "captureAtProducer");
+});
