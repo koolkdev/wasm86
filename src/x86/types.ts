@@ -9,6 +9,7 @@ export type Reg8 = (typeof reg8)[number];
 export type RegName = Reg8 | Reg16 | Reg32;
 export type SegmentRegister = (typeof segmentRegisters)[number];
 export type OperandWidth = 8 | 16 | 32;
+export type MemoryOperandWidth = OperandWidth | 64;
 
 export type RegisterAlias = Readonly<{
   name: RegName;
@@ -27,7 +28,7 @@ export type EffectiveAddress = Readonly<{
 
 export type MemOperand = EffectiveAddress & Readonly<{
   kind: "mem";
-  accessWidth: OperandWidth;
+  accessWidth: MemoryOperandWidth;
 }>;
 
 export type Mem32Operand = MemOperand & Readonly<{ accessWidth: 32 }>;

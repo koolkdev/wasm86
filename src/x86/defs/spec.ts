@@ -16,7 +16,7 @@ export type OpcodePath = readonly OpcodePathPart[];
 export type ImmediateExtension = "sign";
 export type RegOperandType = "r8" | "r16" | "r32";
 export type RmOperandType = "rm8" | "rm16" | "rm32" | "r32_m16";
-export type MemOperandType = "m8" | "m16" | "m32";
+export type MemOperandType = "m8" | "m16" | "m32" | "m64";
 export type OperandSizePrefixMode = "default" | "override";
 
 export type OperandSpec =

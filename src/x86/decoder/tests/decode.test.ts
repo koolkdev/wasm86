@@ -164,6 +164,17 @@ test("rejects unregistered grouped opcodes after ModRM.reg dispatch", () => {
   }
 });
 
+test("cmpxchg8b register ModRM form is unsupported", () => {
+  const decoded = decodeBytes([0x0f, 0xc7, 0xc8]);
+
+  strictEqual(decoded.kind, "unsupported");
+  if (decoded.kind === "unsupported") {
+    strictEqual(decoded.length, 3);
+    deepStrictEqual(decoded.raw, [0x0f, 0xc7, 0xc8]);
+    strictEqual(decoded.unsupportedByte, 0x0f);
+  }
+});
+
 test("decodes direct relative targets as absolute target operands", () => {
   const jmp8 = ok(decodeBytes([0xeb, 0xfe]));
   const jmp16 = ok(decodeBytes([0x66, 0xe9, 0xfc, 0xff]));

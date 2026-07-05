@@ -335,6 +335,7 @@ function isMemoryOnlyRmType(type: RmOperandType | MemOperandType): type is MemOp
     case "m8":
     case "m16":
     case "m32":
+    case "m64":
       return true;
     case "rm8":
     case "rm16":

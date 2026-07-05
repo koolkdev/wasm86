@@ -5,6 +5,11 @@ import { x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { bitScanSemantic, bitTestSemantic } from "#x86/semantics/bits.js";
 import { callSemantic, retSemantic } from "#x86/semantics/control.js";
+import {
+  cmpxchg8bSemantic,
+  cmpxchgSemantic,
+  xaddSemantic
+} from "#x86/semantics/compare-exchange.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { divImplicitSemantic, idivImplicitSemantic } from "#x86/semantics/div.js";
 import {
@@ -482,6 +487,76 @@ test("bit-scan semantics preserve destination on zero source and write observed 
 
   ok(bsr.defs.some((def) => def.startsWith("clz(%1)")));
   ok(bsr.defs.some((def) => def.startsWith("sub(31, ")));
+});
+
+test("cmpxchg writes compare flags and commits the accumulator before the destination", () => {
+  const trace = buildSemanticTrace(cmpxchgSemantic(32), regOperands(2));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get op0:32",
+    "%2 = get op1:32",
+    "%4 = get eax:32",
+    "flagSource sub:32 left=%5 right=%1 result=%7",
+    "set eax:32 <- %9",
+    "set op0:32 <- %10",
+    "next"
+  ]);
+  strictEqual(trace.defs[1], "truncate32(%0)");
+  strictEqual(trace.defs[3], "truncate32(%2)");
+  strictEqual(trace.defs[5], "truncate32(%4)");
+  strictEqual(trace.defs[6], "sub(%5, %1)");
+  strictEqual(trace.defs[7], "truncate32(%6)");
+  strictEqual(trace.defs[8], "cmp32.eq(%5, %1)");
+  strictEqual(trace.defs[9], "select(%8, %5, %1)");
+  strictEqual(trace.defs[10], "select(%8, %3, %1)");
+});
+
+test("xadd writes the source before the destination for same-register doubling", () => {
+  const trace = buildSemanticTrace(xaddSemantic(32), regOperands(2));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get op0:32",
+    "%2 = get op1:32",
+    "flagSource add:32 left=%1 right=%3 result=%5",
+    "set op1:32 <- %1",
+    "set op0:32 <- %5",
+    "next"
+  ]);
+  strictEqual(trace.defs[1], "truncate32(%0)");
+  strictEqual(trace.defs[3], "truncate32(%2)");
+  strictEqual(trace.defs[4], "add(%1, %3)");
+  strictEqual(trace.defs[5], "truncate32(%4)");
+});
+
+test("cmpxchg8b guards one qword and writes only ZF", () => {
+  const trace = buildSemanticTrace(cmpxchg8bSemantic(), operands("mem"));
+
+  deepStrictEqual(trace.events, [
+    "%0 = addr op0",
+    "guard read %0:8",
+    "guard write %0:8",
+    "%2 = get mem(%0):32",
+    "%3 = get mem(%1):32",
+    "%4 = get eax:32",
+    "%5 = get edx:32",
+    "flag ZF <- %8",
+    "%9 = get ebx:32",
+    "set mem(%0):32 <- %10",
+    "%11 = get ecx:32",
+    "set mem(%1):32 <- %12",
+    "set eax:32 <- %13",
+    "set edx:32 <- %14",
+    "next"
+  ]);
+  strictEqual(trace.defs[1], "add(%0, 4)");
+  strictEqual(trace.defs[6], "cmp32.eq(%4, %2)");
+  strictEqual(trace.defs[7], "cmp32.eq(%5, %3)");
+  strictEqual(trace.defs[8], "and(%6, %7)");
+  strictEqual(trace.defs[10], "select(%8, %9, %2)");
+  strictEqual(trace.defs[12], "select(%8, %11, %3)");
+  strictEqual(trace.defs[13], "select(%8, %4, %2)");
+  strictEqual(trace.defs[14], "select(%8, %5, %3)");
+  deepStrictEqual(directFlagWrites(trace), ["ZF"]);
 });
 
 test("imul reg-rm semantics use a signed full product and explicit status flags", () => {

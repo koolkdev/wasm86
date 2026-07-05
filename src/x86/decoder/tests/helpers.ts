@@ -4,8 +4,8 @@ import { test } from "node:test";
 import { defaultSegmentForBase } from "#x86/segments.js";
 import {
   type EffectiveAddress,
+  type MemoryOperandWidth,
   type MemOperand,
-  type OperandWidth,
   type Reg32,
   type RegName,
   type SegmentRegister
@@ -114,7 +114,7 @@ export function sreg(regName: SegmentRegister): IsaOperandBinding {
 }
 
 export function mem(
-  width: OperandWidth,
+  width: MemoryOperandWidth,
   operand: Readonly<{
     segment?: EffectiveAddress["segment"];
     base?: EffectiveAddress["base"];

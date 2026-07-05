@@ -15,7 +15,7 @@ import {
 import { registerAlias, registerAliasByIndex } from "#x86/registers.js";
 import { operandSizeOverridePrefixByte, segmentOverridePrefixSegments } from "#x86/prefixes.js";
 import { defaultSegmentForBase } from "#x86/segments.js";
-import { segmentRegisters, type MemOperand, type OperandWidth, type SegmentRegister } from "#x86/types.js";
+import { segmentRegisters, type MemOperand, type MemoryOperandWidth, type OperandWidth, type SegmentRegister } from "#x86/types.js";
 import { signedImm8, signedImm32 } from "./immediate.js";
 import { decodeModRmAddressing, rm32ModRmByteLengthAt, type ModRmRm } from "./modrm.js";
 import { buildOpcodeDispatch, opcodeLeaf, type OpcodeDispatchLeaf } from "./opcode-dispatch.js";
@@ -484,7 +484,7 @@ class InstructionDecoder {
     }
   }
 
-  private static rmMemoryWidth(type: RmOperandType | MemOperandType): OperandWidth {
+  private static rmMemoryWidth(type: RmOperandType | MemOperandType): MemoryOperandWidth {
     switch (type) {
       case "rm8":
       case "m8":
@@ -496,6 +496,8 @@ class InstructionDecoder {
       case "rm32":
       case "m32":
         return 32;
+      case "m64":
+        return 64;
     }
   }
 
@@ -504,6 +506,7 @@ class InstructionDecoder {
       case "m8":
       case "m16":
       case "m32":
+      case "m64":
         return true;
       case "rm8":
       case "rm16":

@@ -14,7 +14,7 @@ import {
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
   strictEqual(X86_32_CORE.instructionLengthLimit, 15);
-  strictEqual(X86_32_CORE.instructions.length, 471);
+  strictEqual(X86_32_CORE.instructions.length, 478);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -150,6 +150,13 @@ test("x86-32 core registers the initial instruction surface", () => {
     "btc.rm32_r32",
     "bsf.r16_rm16",
     "bsr.r32_rm32",
+    "cmpxchg.rm8_r8",
+    "cmpxchg.rm16_r16",
+    "cmpxchg.rm32_r32",
+    "xadd.rm8_r8",
+    "xadd.rm16_r16",
+    "xadd.rm32_r32",
+    "cmpxchg8b.m64",
     "cmp.rm32_imm8",
     "cmp.rm16_imm16",
     "test.al_imm8",
@@ -639,6 +646,63 @@ test("xchg forms cover ModRM and accumulator opcodes", () => {
     { kind: "opcode.reg", type: "r32" }
   ]);
   strictEqual(eax.syntax, "xchg {0}, {1}");
+});
+
+test("compare-exchange forms cover cmpxchg, xadd, and cmpxchg8b", () => {
+  const cmpxchgByte = instruction("cmpxchg.rm8_r8");
+  const cmpxchgWord = instruction("cmpxchg.rm16_r16");
+  const cmpxchgDword = instruction("cmpxchg.rm32_r32");
+  const xaddByte = instruction("xadd.rm8_r8");
+  const xaddWord = instruction("xadd.rm16_r16");
+  const xaddDword = instruction("xadd.rm32_r32");
+  const cmpxchg8b = instruction("cmpxchg8b.m64");
+
+  deepStrictEqual(cmpxchgByte.opcode, [0x0f, 0xb0]);
+  deepStrictEqual(cmpxchgByte.operands, [
+    { kind: "modrm.rm", type: "rm8" },
+    { kind: "modrm.reg", type: "r8" }
+  ]);
+  strictEqual(cmpxchgByte.syntax, "cmpxchg {0}, {1}");
+
+  deepStrictEqual(cmpxchgWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(cmpxchgWord.opcode, [0x0f, 0xb1]);
+  deepStrictEqual(cmpxchgWord.operands, [
+    { kind: "modrm.rm", type: "rm16" },
+    { kind: "modrm.reg", type: "r16" }
+  ]);
+
+  deepStrictEqual(cmpxchgDword.opcode, [0x0f, 0xb1]);
+  deepStrictEqual(cmpxchgDword.operands, [
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "modrm.reg", type: "r32" }
+  ]);
+
+  deepStrictEqual(xaddByte.opcode, [0x0f, 0xc0]);
+  deepStrictEqual(xaddByte.operands, [
+    { kind: "modrm.rm", type: "rm8" },
+    { kind: "modrm.reg", type: "r8" }
+  ]);
+  strictEqual(xaddByte.syntax, "xadd {0}, {1}");
+
+  deepStrictEqual(xaddWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(xaddWord.opcode, [0x0f, 0xc1]);
+  deepStrictEqual(xaddWord.operands, [
+    { kind: "modrm.rm", type: "rm16" },
+    { kind: "modrm.reg", type: "r16" }
+  ]);
+
+  deepStrictEqual(xaddDword.opcode, [0x0f, 0xc1]);
+  deepStrictEqual(xaddDword.operands, [
+    { kind: "modrm.rm", type: "rm32" },
+    { kind: "modrm.reg", type: "r32" }
+  ]);
+
+  deepStrictEqual(cmpxchg8b.opcode, [0x0f, 0xc7]);
+  deepStrictEqual(cmpxchg8b.modrm, { match: { reg: 1 } });
+  deepStrictEqual(cmpxchg8b.operands, [
+    { kind: "modrm.rm", type: "m64" }
+  ]);
+  strictEqual(cmpxchg8b.syntax, "cmpxchg8b {0}");
 });
 
 test("xchg semantics read both operands before writing either operand", () => {

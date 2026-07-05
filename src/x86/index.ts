@@ -3,6 +3,7 @@ import { ADC, ADD, AND, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR } from "./defs/alu
 import { AAA, AAD, AAM, AAS, DAA, DAS } from "./defs/bcd-ascii.js";
 import { BSF, BSR, BT, BTC, BTR, BTS } from "./defs/bits.js";
 import { BSWAP } from "./defs/byte-swap.js";
+import { CMPXCHG, CMPXCHG8B, XADD } from "./defs/compare-exchange.js";
 import { CALL, JCC, JMP, RET } from "./defs/control.js";
 import { CMP, TEST } from "./defs/cmp-test.js";
 import { DIV, IDIV } from "./defs/div.js";
@@ -84,6 +85,9 @@ export const X86_32_CORE = defineIsa({
     BTC,
     BSF,
     BSR,
+    CMPXCHG,
+    XADD,
+    CMPXCHG8B,
     CMP,
     TEST,
     PUSH,
