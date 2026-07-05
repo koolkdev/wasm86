@@ -2,15 +2,21 @@ import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#wasm/encoder/types.js";
-import { emitRmAddressFragment, emitSibFetch, type RmAddressParts } from "./fragments.js";
+import {
+  emitRmAddressFragment,
+  emitSibFetch,
+  type DecodeCursor,
+  type RmAddressParts
+} from "./fragments.js";
 import type { InterpreterLocals } from "./locals.js";
 
 // The memory form of a ModRM rm operand, shared as one module-level helper
 // function per opcode length so every fragment offset stays static. The
 // mod/rm/SIB case split is genuine control structure and stays hand-written;
 // each case's loads are action fragments. The decoded base register field,
-// the summed state-independent address terms, and the bytes consumed so far
-// (opcode + ModRM + SIB + displacement) leave through the module globals.
+// the summed state-independent address terms, and the cursor after the
+// address bytes (opcode + ModRM + SIB + displacement) leave through the
+// module globals.
 
 // Reported in the base global by ModRM's two base-less cases (mod 0 rm 101,
 // SIB mod 0 base 101), which put the whole sum in offset.
@@ -25,7 +31,7 @@ const rmDecodeHelperType = {
   results: [wasmValueType.i64]
 } as const satisfies WasmFunctionType;
 
-type RmDecodeGlobals = Readonly<{ base: number; offset: number; length: number }>;
+type RmDecodeGlobals = Readonly<{ base: number; offset: number; cursor: number }>;
 
 export type RmDecodeCallContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -47,7 +53,7 @@ export class RmDecodeHelpers {
     this.#globals = {
       base: module.addGlobal({ type: wasmValueType.i32, mutable: true, initialValue: 0 }),
       offset: module.addGlobal({ type: wasmValueType.i32, mutable: true, initialValue: 0 }),
-      length: module.addGlobal({ type: wasmValueType.i32, mutable: true, initialValue: 0 })
+      cursor: module.addGlobal({ type: wasmValueType.i32, mutable: true, initialValue: 0 })
     };
   }
 
@@ -62,7 +68,7 @@ export class RmDecodeHelpers {
       body.localTee(status).i64Eqz().ifBlock();
       body.globalGet(this.#globals.base).localSet(locals.base);
       body.globalGet(this.#globals.offset).localSet(locals.offset);
-      body.globalGet(this.#globals.length).localSet(locals.length);
+      body.globalGet(this.#globals.cursor).localSet(locals.addressCursor);
       body.elseBlock();
       body.localGet(status).returnFromFunction();
       body.endBlock();
@@ -125,84 +131,67 @@ function encodeRmDecodeHelperBody(
     },
     globals
   };
-  const modRmEnd = opcodeLength + 1;
+  const cursorAfterModRm: DecodeCursor = { kind: "static", offset: opcodeLength + 1 };
 
   body.localGet(context.locals.rm).i32Const(0b100).i32Eq().ifBlock();
-  emitSibAddressCases(context, modRmEnd);
+  emitSibAddressCases(context, cursorAfterModRm);
   body.elseBlock();
-  emitPlainAddressCases(context, modRmEnd);
+  emitPlainAddressCases(context, cursorAfterModRm);
   body.endBlock();
   scratch.assertClear();
   return body.i64Const(0n).end();
 }
 
-function emitPlainAddressCases(context: HelperContext, modRmEnd: number): void {
+function emitPlainAddressCases(context: HelperContext, cursor: DecodeCursor): void {
   const { body, locals } = context;
 
   emitModCases(context, {
     mod0: () => {
       body.localGet(locals.rm).i32Const(0b101).i32Eq().ifBlock();
-      emitAddressCase(
-        context,
-        undefined,
-        { displacement: { offset: modRmEnd, width: 32 } },
-        modRmEnd + 4
-      );
+      emitAddressCase(context, undefined, { displacement: { width: 32 } }, cursor);
       body.elseBlock();
-      emitAddressCase(context, locals.rm, {}, modRmEnd);
+      emitAddressCase(context, locals.rm, {}, cursor);
       body.endBlock();
     },
-    mod1: () =>
-      emitAddressCase(
-        context,
-        locals.rm,
-        { displacement: { offset: modRmEnd, width: 8 } },
-        modRmEnd + 1
-      ),
-    mod2: () =>
-      emitAddressCase(
-        context,
-        locals.rm,
-        { displacement: { offset: modRmEnd, width: 32 } },
-        modRmEnd + 4
-      )
+    mod1: () => emitAddressCase(context, locals.rm, { displacement: { width: 8 } }, cursor),
+    mod2: () => emitAddressCase(context, locals.rm, { displacement: { width: 32 } }, cursor)
   });
 }
 
-function emitSibAddressCases(context: HelperContext, modRmEnd: number): void {
+function emitSibAddressCases(context: HelperContext, cursor: DecodeCursor): void {
   const { body, locals } = context;
-  const sibEnd = modRmEnd + 1;
 
-  emitSibFetch(context, locals.eip, modRmEnd, {
+  const cursorAfterSib = emitSibFetch(context, locals.eip, cursor, {
     scaledIndexLocal: locals.scaledIndex,
     baseLocal: locals.sibBase
   });
+
   emitModCases(context, {
     mod0: () => {
       body.localGet(locals.sibBase).i32Const(0b101).i32Eq().ifBlock();
       emitAddressCase(
         context,
         undefined,
-        { scaledIndexLocal: locals.scaledIndex, displacement: { offset: sibEnd, width: 32 } },
-        sibEnd + 4
+        { scaledIndexLocal: locals.scaledIndex, displacement: { width: 32 } },
+        cursorAfterSib
       );
       body.elseBlock();
-      emitAddressCase(context, locals.sibBase, { scaledIndexLocal: locals.scaledIndex }, sibEnd);
+      emitAddressCase(context, locals.sibBase, { scaledIndexLocal: locals.scaledIndex }, cursorAfterSib);
       body.endBlock();
     },
     mod1: () =>
       emitAddressCase(
         context,
         locals.sibBase,
-        { scaledIndexLocal: locals.scaledIndex, displacement: { offset: sibEnd, width: 8 } },
-        sibEnd + 1
+        { scaledIndexLocal: locals.scaledIndex, displacement: { width: 8 } },
+        cursorAfterSib
       ),
     mod2: () =>
       emitAddressCase(
         context,
         locals.sibBase,
-        { scaledIndexLocal: locals.scaledIndex, displacement: { offset: sibEnd, width: 32 } },
-        sibEnd + 4
+        { scaledIndexLocal: locals.scaledIndex, displacement: { width: 32 } },
+        cursorAfterSib
       )
   });
 }
@@ -229,7 +218,7 @@ function emitAddressCase(
   context: HelperContext,
   baseLocal: number | undefined,
   parts: RmAddressParts,
-  length: number
+  cursor: DecodeCursor
 ): void {
   const { body, locals, globals } = context;
 
@@ -239,7 +228,18 @@ function emitAddressCase(
     body.localGet(baseLocal).globalSet(globals.base);
   }
 
-  emitRmAddressFragment(context, locals.eip, parts, locals.offset);
+  const cursorAfterAddress = emitRmAddressFragment(context, locals.eip, parts, cursor, locals.offset);
+
   body.localGet(locals.offset).globalSet(globals.offset);
-  body.i32Const(length).globalSet(globals.length);
+
+  switch (cursorAfterAddress.kind) {
+    case "static":
+      body.i32Const(cursorAfterAddress.offset);
+      break;
+    case "local":
+      body.localGet(cursorAfterAddress.local);
+      break;
+  }
+
+  body.globalSet(globals.cursor);
 }

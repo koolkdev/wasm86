@@ -57,7 +57,7 @@ export function emitPrefixCase(byte: number, redispatchDepth: number, context: P
   assert(handler !== undefined, `no prefix handler for byte 0x${byte.toString(16)}`);
   handler.emitEffect(context);
   body.localGet(locals.eip).i32Const(1).i32Add().localSet(locals.eip);
-  emitOpcodeByteFetch(context, locals.eip, 0, locals.byte);
+  emitOpcodeByteFetch(context, locals.eip, { kind: "static", offset: 0 }, locals.byte);
   body.br(redispatchDepth);
 }
 

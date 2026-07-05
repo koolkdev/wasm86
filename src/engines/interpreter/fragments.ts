@@ -40,6 +40,7 @@ class DecodeFragment {
   readonly #externalLocals = new Map<ExternalValueId, number>();
   readonly #externalsByLocal = new Map<number, ValueId>();
   readonly #outputs = new Map<ValueId, number>();
+  readonly #cursorOutputs: [ValueId, number][] = [];
 
   external(local: number): ValueId {
     const existing = this.#externalsByLocal.get(local);
@@ -118,6 +119,34 @@ class DecodeFragment {
     return output;
   }
 
+  readInstructionBytes(
+    eipLocal: number,
+    cursor: DecodeCursor,
+    width: OperandWidth,
+    signed = false
+  ): Readonly<{ value: ValueId; cursor: DecodeCursor; cursorEnd: ValueId }> {
+    const byteLength = width / 8;
+    const value = this.readGuest(cursorAddress(this, eipLocal, cursor), width, signed);
+
+    switch (cursor.kind) {
+      case "static": {
+        const offset = cursor.offset + byteLength;
+
+        return { value, cursor: { kind: "static", offset }, cursorEnd: this.const32(offset) };
+      }
+      case "local": {
+        const cursorEnd = this.add(this.external(cursor.local), this.const32(byteLength));
+
+        assert(
+          !this.#cursorOutputs.some(([, local]) => local === cursor.local),
+          "decode fragment advanced the same cursor local more than once"
+        );
+        this.#cursorOutputs.push([cursorEnd, cursor.local]);
+        return { value, cursor, cursorEnd };
+      }
+    }
+  }
+
   output(value: ValueId, local: number): void {
     assert(!this.#outputs.has(value), "decode fragment already exports this value");
     this.#outputs.set(value, local);
@@ -128,13 +157,19 @@ class DecodeFragment {
       body: { actions: this.#actions },
       values: this.#values
     };
+    const outputs = new Map(this.#outputs);
+
+    for (const [id, local] of this.#cursorOutputs) {
+      assert(!outputs.has(id), "decode fragment already exports this cursor value");
+      outputs.set(id, local);
+    }
 
     emitActionFragment(block, {
       body: context.body,
       scratch: context.scratch,
       externalLocals: this.#externalLocals,
       helpers: context.helpers,
-      embedding: { fallthrough: { kind: "fallthrough" }, outputs: this.#outputs }
+      embedding: { fallthrough: { kind: "fallthrough" }, outputs }
     });
   }
 }
@@ -176,43 +211,45 @@ export function emitOpcodeFetch(
 export function emitOpcodeByteFetch(
   context: FragmentEmitContext,
   eipLocal: number,
-  offset: number,
+  cursor: DecodeCursor,
   byteLocal: number
-): void {
+): DecodeCursor {
   const fragment = new DecodeFragment();
+  const decoded = fragment.readInstructionBytes(eipLocal, cursor, 8);
 
-  fragment.output(
-    fragment.readGuest(cursorAddress(fragment, eipLocal, { kind: "static", offset }), 8),
-    byteLocal
-  );
+  fragment.output(decoded.value, byteLocal);
   fragment.emit(context);
+  return decoded.cursor;
 }
 
 // The ModRM byte, exported as its three fields.
 export function emitModRmFetch(
   context: FragmentEmitContext,
   eipLocal: number,
-  offset: number,
+  cursor: DecodeCursor,
   outputs: Readonly<{ modLocal: number; regLocal: number; rmLocal: number }>
-): void {
+): DecodeCursor {
   const fragment = new DecodeFragment();
-  const byte = fragment.readGuest(cursorAddress(fragment, eipLocal, { kind: "static", offset }), 8);
+  const decoded = fragment.readInstructionBytes(eipLocal, cursor, 8);
+  const byte = decoded.value;
 
   fragment.output(fragment.extract(byte, 6), outputs.modLocal);
   fragment.output(fragment.extract(byte, 3, 0b111), outputs.regLocal);
   fragment.output(fragment.extract(byte, 0, 0b111), outputs.rmLocal);
   fragment.emit(context);
+  return decoded.cursor;
 }
 
 // The SIB byte, exported as the scaled-index term and the base field.
 export function emitSibFetch(
   context: FragmentEmitContext,
   eipLocal: number,
-  offset: number,
+  cursor: DecodeCursor,
   outputs: Readonly<{ scaledIndexLocal: number; baseLocal: number }>
-): void {
+): DecodeCursor {
   const fragment = new DecodeFragment();
-  const byte = fragment.readGuest(cursorAddress(fragment, eipLocal, { kind: "static", offset }), 8);
+  const decoded = fragment.readInstructionBytes(eipLocal, cursor, 8);
+  const byte = decoded.value;
 
   fragment.output(
     fragment.scaledIndex(fragment.extract(byte, 3, 0b111), fragment.extract(byte, 6)),
@@ -220,36 +257,41 @@ export function emitSibFetch(
   );
   fragment.output(fragment.extract(byte, 0, 0b111), outputs.baseLocal);
   fragment.emit(context);
+  return decoded.cursor;
 }
 
 // The state-independent terms of one ModRM address case — scaled index,
 // displacement; the base register is not a term. The empty sum is const 0.
 export type RmAddressParts = Readonly<{
   scaledIndexLocal?: number;
-  displacement?: Readonly<{ offset: number; width: 8 | 32 }>;
+  displacement?: Readonly<{ width: 8 | 32 }>;
 }>;
 
 export function emitRmAddressFragment(
   context: FragmentEmitContext,
   eipLocal: number,
   parts: RmAddressParts,
+  cursor: DecodeCursor,
   offsetLocal: number
-): void {
+): DecodeCursor {
   const fragment = new DecodeFragment();
   const terms: ValueId[] = [];
+  let nextCursor = cursor;
 
   if (parts.scaledIndexLocal !== undefined) {
     terms.push(fragment.external(parts.scaledIndexLocal));
   }
 
   if (parts.displacement !== undefined) {
-    terms.push(
-      fragment.readGuest(
-        cursorAddress(fragment, eipLocal, { kind: "static", offset: parts.displacement.offset }),
-        parts.displacement.width,
-        parts.displacement.width === 8
-      )
+    const decoded = fragment.readInstructionBytes(
+      eipLocal,
+      cursor,
+      parts.displacement.width,
+      parts.displacement.width === 8
     );
+
+    terms.push(decoded.value);
+    nextCursor = decoded.cursor;
   }
 
   fragment.output(
@@ -257,6 +299,7 @@ export function emitRmAddressFragment(
     offsetLocal
   );
   fragment.emit(context);
+  return nextCursor;
 }
 
 // An immediate operand, sign-extended at decode when the spec says so.
@@ -267,35 +310,31 @@ export function emitImmediateFetch(
   width: OperandWidth,
   signExtend: boolean,
   valueLocal: number
-): void {
+): DecodeCursor {
   const fragment = new DecodeFragment();
+  const decoded = fragment.readInstructionBytes(eipLocal, cursor, width, signExtend);
 
-  fragment.output(
-    fragment.readGuest(cursorAddress(fragment, eipLocal, cursor), width, signExtend),
-    valueLocal
-  );
+  fragment.output(decoded.value, valueLocal);
   fragment.emit(context);
+  return decoded.cursor;
 }
 
 // A rel operand resolved to its absolute target: nextEip plus the
-// sign-extended displacement.
+// sign-extended displacement. The read's cursor end is the decoded length,
+// so nextEip needs no separately tracked instruction length.
 export function emitRelTargetFetch(
   context: FragmentEmitContext,
   eipLocal: number,
-  offset: number,
+  cursor: DecodeCursor,
   width: 8 | 16 | 32,
-  instructionLength: number,
   targetLocal: number
-): void {
+): DecodeCursor {
   const fragment = new DecodeFragment();
-  const displacement = fragment.readGuest(
-    cursorAddress(fragment, eipLocal, { kind: "static", offset }),
-    width,
-    true
-  );
-  const nextEip = fragment.add(fragment.external(eipLocal), fragment.const32(instructionLength));
-  const target = fragment.add(nextEip, displacement);
+  const decoded = fragment.readInstructionBytes(eipLocal, cursor, width, true);
+  const nextEip = fragment.add(fragment.external(eipLocal), decoded.cursorEnd);
+  const target = fragment.add(nextEip, decoded.value);
 
   fragment.output(width === 16 ? fragment.and(target, 0xffff) : target, targetLocal);
   fragment.emit(context);
+  return decoded.cursor;
 }

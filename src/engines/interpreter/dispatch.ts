@@ -111,7 +111,12 @@ function emitDispatchCase(
         return;
       }
 
-      emitOpcodeByteFetch(context, context.locals.eip, opcodeLength, context.locals.byte);
+      emitOpcodeByteFetch(
+        context,
+        context.locals.eip,
+        { kind: "static", offset: opcodeLength },
+        context.locals.byte
+      );
       emitDispatchNode(child, context, opcodeLength + 1);
       return;
     }
@@ -178,7 +183,7 @@ function emitModRmLeaf(
   const { body, locals } = context;
   const opcodeEnd = leaf.opcodeLength;
 
-  emitModRmFetch(context, locals.eip, opcodeEnd, {
+  const cursorAfterModRm = emitModRmFetch(context, locals.eip, { kind: "static", offset: opcodeEnd }, {
     modLocal: locals.mod,
     regLocal: locals.reg,
     rmLocal: locals.rm
@@ -192,7 +197,7 @@ function emitModRmLeaf(
   }
 
   if (cases.length === 1 && cases[0]!.regs.length === reg3Values.length) {
-    emitModRmForms(cases[0]!.instruction, opcodeEnd, context);
+    emitModRmForms(cases[0]!.instruction, opcodeEnd, cursorAfterModRm, context);
     return;
   }
 
@@ -204,7 +209,7 @@ function emitModRmLeaf(
 
   for (let index = cases.length - 1; index >= 0; index -= 1) {
     body.endBlock();
-    emitModRmForms(cases[index]!.instruction, opcodeEnd, {
+    emitModRmForms(cases[index]!.instruction, opcodeEnd, cursorAfterModRm, {
       ...context,
       continueDepth: context.continueDepth + 1 + index
     });
@@ -220,10 +225,10 @@ function emitModRmLeaf(
 function emitModRmForms(
   instruction: ExpandedInstructionSpec,
   opcodeEnd: number,
+  cursorAfterModRm: DecodeCursor,
   context: DispatchEmitContext
 ): void {
   const { body } = context;
-  const cursorAfterModRm: DecodeCursor = { kind: "static", offset: opcodeEnd + 1 };
   const rmOperand = (instruction.spec.operands ?? []).find(isRmOperand);
 
   if (rmOperand === undefined) {
@@ -233,7 +238,7 @@ function emitModRmForms(
 
   const armContext = { ...context, continueDepth: context.continueDepth + 1 };
   const memoryContext = { ...context, continueDepth: context.continueDepth + 2 };
-  const cursorAfterAddress: DecodeCursor = { kind: "local", local: context.locals.length };
+  const cursorAfterAddress: DecodeCursor = { kind: "local", local: context.locals.addressCursor };
 
   body.localGet(context.locals.mod).i32Const(3).i32Eq().ifBlock();
 

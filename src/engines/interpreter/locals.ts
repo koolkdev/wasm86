@@ -12,7 +12,8 @@ export class InterpreterLocals {
   readonly rm: number;
   readonly base: number;
   readonly offset: number;
-  readonly length: number;
+  // Cursor after the decoded rm address bytes, from the rebased eip.
+  readonly addressCursor: number;
   readonly imm: number;
   readonly target: number;
   readonly nextEip: number;
@@ -33,7 +34,7 @@ export class InterpreterLocals {
     this.rm = body.addLocal(wasmValueType.i32);
     this.base = body.addLocal(wasmValueType.i32);
     this.offset = body.addLocal(wasmValueType.i32);
-    this.length = body.addLocal(wasmValueType.i32);
+    this.addressCursor = body.addLocal(wasmValueType.i32);
     this.imm = body.addLocal(wasmValueType.i32);
     this.target = body.addLocal(wasmValueType.i32);
     this.nextEip = body.addLocal(wasmValueType.i32);

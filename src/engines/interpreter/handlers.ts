@@ -136,17 +136,17 @@ function decodeOperand(
     case "implicit.sreg":
       return { binding: segmentBinding(operand.reg), cursor };
     case "moffs":
-      emitImmediateFetch(context, locals.eip, cursor, 32, false, locals.offset);
+      cursor = emitImmediateFetch(context, locals.eip, cursor, 32, false, locals.offset);
       emitEffectiveSegment(context, dsSegmentIndex);
       return {
         binding: memStaticBinding(
           externals.bind(locals.offset),
           dynamicMemSegment(externals.bind(locals.effectiveSegment))
         ),
-        cursor: advanceCursor(context, cursor, 4)
+        cursor
       };
     case "imm":
-      emitImmediateFetch(
+      cursor = emitImmediateFetch(
         context,
         locals.eip,
         cursor,
@@ -156,19 +156,14 @@ function decodeOperand(
       );
       return {
         binding: immExternalBinding(externals.bind(locals.imm)),
-        cursor: advanceCursor(context, cursor, operand.width / 8)
+        cursor
       };
-    case "rel": {
-      assert(cursor.kind === "static", `${instruction.spec.id}: rel operand after a runtime-sized operand`);
-
-      const length = cursor.offset + operand.width / 8;
-
-      emitRelTargetFetch(context, locals.eip, cursor.offset, operand.width, length, locals.target);
+    case "rel":
+      cursor = emitRelTargetFetch(context, locals.eip, cursor, operand.width, locals.target);
       return {
         binding: immExternalBinding(externals.bind(locals.target)),
-        cursor: { kind: "static", offset: length }
+        cursor
       };
-    }
   }
 }
 
@@ -242,16 +237,6 @@ function emitBaseDefaultsToStackSegment(context: HandlerEmitContext): void {
 
   for (const baseIndex of remainingBaseIndexes) {
     body.localGet(locals.base).i32Const(baseIndex).i32Eq().i32Or();
-  }
-}
-
-function advanceCursor(context: HandlerEmitContext, cursor: DecodeCursor, byteLength: number): DecodeCursor {
-  switch (cursor.kind) {
-    case "static":
-      return { kind: "static", offset: cursor.offset + byteLength };
-    case "local":
-      context.body.localGet(cursor.local).i32Const(byteLength).i32Add().localSet(cursor.local);
-      return cursor;
   }
 }
 
