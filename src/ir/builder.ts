@@ -255,6 +255,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return valueFromId(this.#values.const64(value));
   }
 
+  currentEip(): Value {
+    this.#beforeOp("currentEip");
+    return valueFromId(this.#location().eip());
+  }
+
   nextEip(): Value {
     this.#beforeOp("nextEip");
     return valueFromId(this.#location().nextEip());
@@ -474,6 +479,19 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#terminated = true;
   }
 
+  jumpIf(condition: ValueInput, target: TargetInput): void {
+    this.#beforeOp("jumpIf");
+
+    const conditionId = condition;
+    const targetId = target;
+
+    this.#actions.push({
+      kind: "if",
+      condition: conditionId,
+      thenBody: this.#earlyDispatchBody(targetId)
+    });
+  }
+
   conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void {
     this.#beforeOp("conditionalJump");
     this.#advanceInstructionCount();
@@ -553,6 +571,25 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     );
   }
 
+  #earlyDispatchBody(target: TargetInput): Body {
+    return this.#terminatingBody(
+      { kind: "dispatch", targetEip: target },
+      this.#completedFlushesTo(target, this.#advancedInstructionCountValue(1))
+    );
+  }
+
+  #completedFlushesTo(target: TargetInput, instructionCount: ValueId): readonly Action[] {
+    return [
+      ...this.#pending.flushesForPath("completed").filter(
+        (action) =>
+          action.op.slot.kind !== "eip" &&
+          action.op.slot.kind !== "instructionCount"
+      ),
+      { kind: "op", op: { kind: "state.write", slot: instructionCountChannel, value: instructionCount } },
+      { kind: "op", op: { kind: "state.write", slot: eipChannel, value: target } }
+    ];
+  }
+
   #terminatingBody(
     terminator: Finish,
     actions: readonly Action[]
@@ -577,15 +614,19 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // is always base + completed off the block's one read, so a flush stores
   // a single folded add.
   #advanceInstructionCount(): void {
-    this.#instructionCountBase ??= this.#pending.read(instructionCountChannel);
     this.#instructionsCompleted += 1;
     this.#pending.write(
       instructionCountChannel,
-      this.#values.binary(
-        "add",
-        this.#instructionCountBase,
-        this.#values.const(this.#instructionsCompleted)
-      )
+      this.#advancedInstructionCountValue(0)
+    );
+  }
+
+  #advancedInstructionCountValue(extraCompleted: number): ValueId {
+    this.#instructionCountBase ??= this.#pending.read(instructionCountChannel);
+    return this.#values.binary(
+      "add",
+      this.#instructionCountBase,
+      this.#values.const(this.#instructionsCompleted + extraCompleted)
     );
   }
 

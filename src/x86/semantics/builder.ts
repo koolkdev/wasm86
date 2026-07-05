@@ -53,6 +53,7 @@ export interface SemanticsBuilder {
   operand(index: number): OperandRef;
   const32(value: number): Value;
   const64(value: bigint): Value;
+  currentEip(): Value;
   nextEip(): Value;
   reg(reg: RegName): RegRef;
   mem(address: ValueInput): MemRef;
@@ -81,6 +82,7 @@ export interface SemanticsBuilder {
 
   next(): void;
   jump(target: TargetInput): void;
+  jumpIf(condition: ValueInput, target: TargetInput): void;
   conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void;
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void;
   hostTrap(vector: ValueInput): void;

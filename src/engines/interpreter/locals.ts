@@ -17,7 +17,7 @@ export class InterpreterLocals {
   readonly imm: number;
   readonly target: number;
   readonly nextEip: number;
-  // Prefix bits (bit 0: operand size), reset per instruction.
+  // Prefix bits (bit 0: operand size, bits 1-2: REP group), reset per instruction.
   readonly prefixFlags: number;
   // Segment override local: no override sentinel or a segmentRegisters index.
   readonly segment: number;

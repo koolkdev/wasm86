@@ -14,7 +14,7 @@ import {
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
   strictEqual(X86_32_CORE.instructionLengthLimit, 15);
-  strictEqual(X86_32_CORE.instructions.length, 484);
+  strictEqual(X86_32_CORE.instructions.length, 505);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -113,20 +113,41 @@ test("x86-32 core registers the initial instruction surface", () => {
     "sahf.ah",
     "xlat.m8_al",
     "movs.m8_m8",
+    "movs.rep_m8_m8",
     "movs.m16_m16",
+    "movs.rep_m16_m16",
     "movs.m32_m32",
+    "movs.rep_m32_m32",
     "cmps.m8_m8",
+    "cmps.repe_m8_m8",
+    "cmps.repne_m8_m8",
     "cmps.m16_m16",
+    "cmps.repe_m16_m16",
+    "cmps.repne_m16_m16",
     "cmps.m32_m32",
+    "cmps.repe_m32_m32",
+    "cmps.repne_m32_m32",
     "stos.m8_al",
+    "stos.rep_m8_al",
     "stos.m16_ax",
+    "stos.rep_m16_ax",
     "stos.m32_eax",
+    "stos.rep_m32_eax",
     "lods.al_m8",
+    "lods.rep_al_m8",
     "lods.ax_m16",
+    "lods.rep_ax_m16",
     "lods.eax_m32",
+    "lods.rep_eax_m32",
     "scas.al_m8",
+    "scas.repe_al_m8",
+    "scas.repne_al_m8",
     "scas.ax_m16",
+    "scas.repe_ax_m16",
+    "scas.repne_ax_m16",
     "scas.eax_m32",
+    "scas.repe_eax_m32",
+    "scas.repne_eax_m32",
     "cbw.word",
     "cwde.dword",
     "cwd.word",

@@ -95,6 +95,7 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
   readonly #const64Values = new Map<bigint, Value>();
   readonly #inlineValues = new Map<Value, string>();
   readonly #displayValues = new Map<Value, number>();
+  #currentEipValue: Value | undefined;
   #nextEipValue: Value | undefined;
   #nextValueId = 0;
   #terminated = false;
@@ -134,6 +135,18 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
 
     this.#const64Values.set(canonical, handle);
     this.#inlineValues.set(handle, `${canonical}`);
+    return handle;
+  }
+
+  currentEip(): Value {
+    if (this.#currentEipValue !== undefined) {
+      return this.#currentEipValue;
+    }
+
+    const handle = this.#allocateValue();
+
+    this.#currentEipValue = handle;
+    this.#inlineValues.set(handle, "currentEip");
     return handle;
   }
 
@@ -281,6 +294,10 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
 
   jump(target: TargetInput): void {
     this.#emitTerminator(`jump ${this.#value(target)}`);
+  }
+
+  jumpIf(condition: ValueInput, target: TargetInput): void {
+    this.#emit(`jumpIf ${this.#value(condition)} -> ${this.#value(target)}`);
   }
 
   conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void {

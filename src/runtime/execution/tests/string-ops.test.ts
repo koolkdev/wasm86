@@ -151,6 +151,131 @@ runFixture({
   }
 });
 
+runFixture(repMovsdFixture(0));
+runFixture(repMovsdFixture(1));
+runFixture(repMovsPrefixSequenceFixture("rep-movsw-f3-66-prefix-order/trap", [0xf3, 0x66, 0xa5], 16));
+runFixture(repMovsPrefixSequenceFixture("rep-movsw-66-f3-prefix-order/trap", [0x66, 0xf3, 0xa5], 16));
+runFixture(repMovsPrefixSequenceFixture("rep-movsd-f2-f3-last-wins/trap", [0xf2, 0xf3, 0xa5], 32));
+
+runFixture({
+  name: "rep-movsd-zero-count-skips-memory-and-preserves-flags/trap",
+  bytes: withTrap(repMovsOpcode(32)),
+  initialState: {
+    ecx: 0,
+    esi: sourceAddress,
+    edi: destOffset,
+    esBase,
+    ...allStatusFlagsSet,
+    eip: engineFixtureStartAddress
+  },
+  initialMemory: [
+    { address: sourceAddress, bytes: dwordBytes(0xfeed_cafe) },
+    { address: esBase + destOffset, bytes: dwordBytes(0x1122_3344) }
+  ],
+  expected: {
+    result: { stop: { kind: "hostTrap", vector: 0x2e } },
+    state: {
+      ecx: 0,
+      esi: sourceAddress,
+      edi: destOffset,
+      esBase,
+      ...allStatusFlagsSet,
+      eip: engineFixtureStartAddress + repMovsOpcode(32).length + trap.length,
+      instructionCount: 2
+    },
+    memory: [{ address: esBase + destOffset, bytes: dwordBytes(0x1122_3344) }]
+  }
+});
+
+runFixture({
+  name: "repe-cmpsb-stops-at-first-mismatch/trap",
+  bytes: withTrap([...repeCmpsOpcode(8), 0x9f, 0x0f, 0x90, 0xc3]),
+  initialState: {
+    eax: 0x1122_3300,
+    ebx: 0x1234_5600,
+    ecx: 4,
+    esi: sourceAddress,
+    edi: destOffset,
+    esBase,
+    eip: engineFixtureStartAddress
+  },
+  initialMemory: [
+    { address: sourceAddress, bytes: [1, 2, 3, 4] },
+    { address: esBase + destOffset, bytes: [1, 2, 9, 4] }
+  ],
+  expected: {
+    result: { stop: { kind: "hostTrap", vector: 0x2e } },
+    state: {
+      eax: ((0x1122_3300 & 0xffff_00ff) | (lahfImage(aluReference("cmp", 8, 3, 9).flags) << 8)) >>> 0,
+      ebx: 0x1234_5600 | aluReference("cmp", 8, 3, 9).flags.OF,
+      ecx: 1,
+      esi: sourceAddress + 3,
+      edi: destOffset + 3,
+      esBase,
+      eip: engineFixtureStartAddress + repeCmpsOpcode(8).length + 1 + 3 + trap.length,
+      instructionCount: 6
+    }
+  }
+});
+
+runFixture({
+  name: "repne-scasb-finds-matching-byte/trap",
+  bytes: withTrap(repneScasOpcode(8)),
+  initialState: {
+    eax: accumulatorInitial(8, 3),
+    ecx: 4,
+    edi: destOffset,
+    esBase,
+    eip: engineFixtureStartAddress
+  },
+  initialMemory: [
+    { address: esBase + destOffset, bytes: [1, 2, 3, 4] }
+  ],
+  expected: {
+    result: { stop: { kind: "hostTrap", vector: 0x2e } },
+    state: {
+      eax: accumulatorInitial(8, 3),
+      ecx: 1,
+      edi: destOffset + 3,
+      esBase,
+      eip: engineFixtureStartAddress + repneScasOpcode(8).length + trap.length,
+      instructionCount: 4
+    }
+  }
+});
+
+runFixture({
+  name: "rep-movsd-write-guard-fault-commits-prior-iteration",
+  bytes: repMovsOpcode(32),
+  initialState: {
+    ecx: 2,
+    esi: sourceAddress,
+    edi: guestByteLength - 4,
+    esBase,
+    eip: engineFixtureStartAddress
+  },
+  initialMemory: [
+    { address: sourceAddress, bytes: [...dwordBytes(0x1111_2222), ...dwordBytes(0x3333_4444)] }
+  ],
+  expected: {
+    result: {
+      stop: {
+        kind: "cpuException",
+        exception: { kind: "PF", linearAddress: guestByteLength, errorCode: 2 }
+      }
+    },
+    state: {
+      ecx: 1,
+      esi: sourceAddress + 4,
+      edi: guestByteLength,
+      esBase,
+      eip: engineFixtureStartAddress,
+      instructionCount: 1
+    },
+    memory: [{ address: guestByteLength - 4, bytes: dwordBytes(0x1111_2222) }]
+  }
+});
+
 function runFixture(fixture: EngineFixture): void {
   for (const runMode of modes) {
     test(`${runMode.name} executes ${fixture.name}`, () => {
@@ -165,6 +290,83 @@ function runFixture(fixture: EngineFixture): void {
       assertEngineFixtureResult(fixture, result, memories);
     });
   }
+}
+
+function repMovsdFixture(df: 0 | 1): EngineFixture {
+  const values = [0x1111_2222, 0x3333_4444, 0x5555_6666];
+  const bytes = values.flatMap((value) => [...dwordBytes(value)]);
+  const startOffset = df === 0 ? 0 : 8;
+  const finalOffset = df === 0 ? 12 : -4;
+
+  return {
+    name: `rep-movsd-df${df}/trap`,
+    bytes: withTrap(repMovsOpcode(32)),
+    initialState: {
+      ecx: 3,
+      esi: sourceAddress + startOffset,
+      edi: destOffset + startOffset,
+      esBase,
+      DF: df,
+      eip: engineFixtureStartAddress
+    },
+    initialMemory: [
+      { address: sourceAddress, bytes }
+    ],
+    expected: {
+      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      state: {
+        ecx: 0,
+        esi: sourceAddress + finalOffset,
+        edi: destOffset + finalOffset,
+        esBase,
+        DF: df,
+        eip: engineFixtureStartAddress + repMovsOpcode(32).length + trap.length,
+        instructionCount: 4
+      },
+      memory: [{ address: esBase + destOffset, bytes }]
+    }
+  };
+}
+
+function repMovsPrefixSequenceFixture(
+  name: string,
+  opcode: readonly number[],
+  width: 16 | 32
+): EngineFixture {
+  const values = width === 16
+    ? [0x1122, 0x3344, 0x5566]
+    : [0x1111_2222, 0x3333_4444];
+  const bytes = values.flatMap((value) => [...bytesForWidth(width, value)]);
+  const byteLength = bytes.length;
+
+  return {
+    name,
+    bytes: withTrap(opcode),
+    initialState: {
+      ecx: values.length,
+      esi: sourceAddress,
+      edi: destOffset,
+      esBase,
+      ...allStatusFlagsSet,
+      eip: engineFixtureStartAddress
+    },
+    initialMemory: [
+      { address: sourceAddress, bytes }
+    ],
+    expected: {
+      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      state: {
+        ecx: 0,
+        esi: sourceAddress + byteLength,
+        edi: destOffset + byteLength,
+        esBase,
+        ...allStatusFlagsSet,
+        eip: engineFixtureStartAddress + opcode.length + trap.length,
+        instructionCount: values.length + 1
+      },
+      memory: [{ address: esBase + destOffset, bytes }]
+    }
+  };
 }
 
 function movsFixture(width: OperandWidth, df: 0 | 1): EngineFixture {
@@ -367,6 +569,10 @@ function movsOpcode(width: OperandWidth): readonly number[] {
   }
 }
 
+function repMovsOpcode(width: OperandWidth): readonly number[] {
+  return [0xf3, ...movsOpcode(width)];
+}
+
 function cmpsOpcode(width: OperandWidth): readonly number[] {
   switch (width) {
     case 8:
@@ -376,6 +582,10 @@ function cmpsOpcode(width: OperandWidth): readonly number[] {
     case 32:
       return [0xa7];
   }
+}
+
+function repeCmpsOpcode(width: OperandWidth): readonly number[] {
+  return [0xf3, ...cmpsOpcode(width)];
 }
 
 function stosOpcode(width: OperandWidth): readonly number[] {
@@ -409,6 +619,10 @@ function scasOpcode(width: OperandWidth): readonly number[] {
     case 32:
       return [0xaf];
   }
+}
+
+function repneScasOpcode(width: OperandWidth): readonly number[] {
+  return [0xf2, ...scasOpcode(width)];
 }
 
 function withTrap(bytes: readonly number[]): readonly number[] {

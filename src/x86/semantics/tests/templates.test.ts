@@ -47,6 +47,8 @@ import {
   cmpsSemantic,
   lodsSemantic,
   movsSemantic,
+  repMovsSemantic,
+  repneScasSemantic,
   scasSemantic,
   stosSemantic
 } from "#x86/semantics/strings.js";
@@ -256,6 +258,30 @@ test("stos, lods, and scas use accumulator widths and one pointer step", () => {
     "flagSource sub:32 left=%4 right=%6 result=%8"
   ]);
   ok(scas.events.includes("set edi:32 <- %10"));
+});
+
+test("rep movs restarts at the current eip after one counted unit", () => {
+  const trace = buildSemanticTrace(repMovsSemantic(32), operands("mem", "mem"));
+
+  deepStrictEqual(trace.events.slice(0, 4), [
+    "%0 = get ecx:32",
+    "jumpIf %1 -> nextEip",
+    "%2 = flag DF",
+    "%4 = addr op0"
+  ]);
+  ok(trace.events.includes("set ecx:32 <- %11"));
+  deepStrictEqual(trace.events.at(-1), "branch %12 ? currentEip : nextEip");
+  strictEqual(trace.defs[1], "cmp32.eq(%0, 0)");
+  strictEqual(trace.defs[11], "sub(%0, 1)");
+  strictEqual(trace.defs[12], "cmp32.ne(%11, 0)");
+});
+
+test("repne scas combines remaining ECX with ZF after the compare unit", () => {
+  const trace = buildSemanticTrace(repneScasSemantic(8), operands("mem"));
+
+  ok(trace.events.includes("%15 = condition NE"));
+  deepStrictEqual(trace.events.at(-1), "branch %16 ? currentEip : nextEip");
+  strictEqual(trace.defs[16], "and(%14, %15)");
 });
 
 test("lea semantic computes an address without getting the operand value", () => {

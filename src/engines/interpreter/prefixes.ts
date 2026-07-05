@@ -1,5 +1,11 @@
 import { assert } from "#common/assert.js";
-import { operandSizeOverridePrefixByte, segmentOverridePrefixSegments } from "#x86/prefixes.js";
+import { prefixFlagBits } from "#x86/decoder/prefix-flags.js";
+import {
+  operandSizeOverridePrefixByte,
+  repnePrefixByte,
+  repPrefixByte,
+  segmentOverridePrefixSegments
+} from "#x86/prefixes.js";
 import { noSegmentOverride, segmentRegisterIndex } from "#x86/segments.js";
 import type { SegmentRegister } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -15,7 +21,9 @@ import type { InterpreterLocals } from "./locals.js";
 // EIP stays untouched, and the saved instruction start serves handler
 // fault paths.
 
-export const operandSizeFlagBit = 1 << 0;
+export const operandSizeFlagBit = prefixFlagBits.operandSizeOverride;
+export const repFlagBit = prefixFlagBits.rep;
+export const repneFlagBit = prefixFlagBits.repne;
 
 export type PrefixEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -37,6 +45,32 @@ const prefixHandlers: readonly PrefixHandler[] = [
     byte: operandSizeOverridePrefixByte,
     emitEffect: ({ body, locals }) => {
       body.localGet(locals.prefixFlags).i32Const(operandSizeFlagBit).i32Or().localSet(locals.prefixFlags);
+    }
+  },
+  {
+    // REP/REPE. Last prefix in the group wins.
+    byte: repPrefixByte,
+    emitEffect: ({ body, locals }) => {
+      body
+        .localGet(locals.prefixFlags)
+        .i32Const(~repneFlagBit)
+        .i32And()
+        .i32Const(repFlagBit)
+        .i32Or()
+        .localSet(locals.prefixFlags);
+    }
+  },
+  {
+    // REPNE. Last prefix in the group wins.
+    byte: repnePrefixByte,
+    emitEffect: ({ body, locals }) => {
+      body
+        .localGet(locals.prefixFlags)
+        .i32Const(~repFlagBit)
+        .i32And()
+        .i32Const(repneFlagBit)
+        .i32Or()
+        .localSet(locals.prefixFlags);
     }
   }
 ];

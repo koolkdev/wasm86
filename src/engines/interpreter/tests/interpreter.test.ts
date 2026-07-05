@@ -251,6 +251,45 @@ test("exhausted fuel exits with the instruction limit and the count preserved", 
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 8);
 });
 
+test("rep movsd preempts between iterations with restart state committed", async () => {
+  const interpreter = await instantiate();
+
+  writeWasmCpuStateSnapshot(interpreter.stateView, {
+    ecx: 3,
+    esi: 0x2000,
+    edi: 0x3000,
+    eip: startAddress
+  });
+  writeProgram(interpreter.guestView, startAddress, [
+    0xf3, 0xa5, // rep movsd
+    0xcd, 0x2e
+  ]);
+  interpreter.guestView.setUint32(0x2000, 0x1111_2222, true);
+  interpreter.guestView.setUint32(0x2004, 0x3333_4444, true);
+  interpreter.guestView.setUint32(0x2008, 0x5555_6666, true);
+
+  const preempted = interpreter.run(1);
+
+  assertCompletionExit(preempted, CompletionExit.INSTRUCTION_LIMIT);
+  strictEqual(readRegister(interpreter.stateView, "ecx"), 2);
+  strictEqual(readRegister(interpreter.stateView, "esi"), 0x2004);
+  strictEqual(readRegister(interpreter.stateView, "edi"), 0x3004);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 1);
+  strictEqual(interpreter.guestView.getUint32(0x3000, true), 0x1111_2222);
+
+  const completed = interpreter.run(10);
+
+  assertHostExit(completed, HostExit.TRAP);
+  strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
+  strictEqual(readRegister(interpreter.stateView, "esi"), 0x200c);
+  strictEqual(readRegister(interpreter.stateView, "edi"), 0x300c);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 4);
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 4);
+  strictEqual(interpreter.guestView.getUint32(0x3004, true), 0x3333_4444);
+  strictEqual(interpreter.guestView.getUint32(0x3008, true), 0x5555_6666);
+});
+
 test("fetching the opcode past mapped memory is a decode fault at the boundary", async () => {
   const interpreter = await instantiate();
   const eip = wasmGuestMemoryMinByteLength;

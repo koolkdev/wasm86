@@ -13,12 +13,19 @@ import {
   type RmOperandType
 } from "#x86/defs/spec.js";
 import { registerAlias, registerAliasByIndex } from "#x86/registers.js";
-import { operandSizeOverridePrefixByte, segmentOverridePrefixSegments } from "#x86/prefixes.js";
+import {
+  operandSizeOverridePrefixByte,
+  repnePrefixByte,
+  repPrefixByte,
+  segmentOverridePrefixSegments,
+  type RepeatPrefix
+} from "#x86/prefixes.js";
 import { defaultSegmentForBase } from "#x86/segments.js";
 import { segmentRegisters, type MemOperand, type MemoryOperandWidth, type OperandWidth, type SegmentRegister } from "#x86/types.js";
 import { signedImm8, signedImm32 } from "./immediate.js";
 import { decodeModRmAddressing, rm32ModRmByteLengthAt, type ModRmRm } from "./modrm.js";
 import { buildOpcodeDispatch, opcodeLeaf, type OpcodeDispatchLeaf } from "./opcode-dispatch.js";
+import { prefixFlagsFor } from "./prefix-flags.js";
 import {
   instructionTooLongFault,
   IsaDecodeError,
@@ -64,6 +71,7 @@ export function decodeIsaInstructionFromReader(
 class InstructionDecoder {
   private readonly reader: IsaDecodeReader;
   private operandSize: OperandSizePrefixMode = "default";
+  private repPrefix: RepeatPrefix | undefined;
   private segmentOverride: SegmentRegister | undefined;
   private prefixByteLength = 0;
 
@@ -112,6 +120,16 @@ class InstructionDecoder {
   private consumePrefix(value: number): boolean {
     if (value === operandSizeOverridePrefixByte) {
       this.operandSize = "override";
+      return this.consumePrefixByte();
+    }
+
+    if (value === repPrefixByte) {
+      this.repPrefix = "rep";
+      return this.consumePrefixByte();
+    }
+
+    if (value === repnePrefixByte) {
+      this.repPrefix = "repne";
       return this.consumePrefixByte();
     }
 
@@ -357,7 +375,18 @@ class InstructionDecoder {
   }
 
   private dispatchCandidates(opcodeAddress: number, leaf: OpcodeDispatchLeaf): DispatchedCandidates {
-    const candidates = leaf.operandSize[this.operandSize];
+    const candidates = leaf.prefixFlags[prefixFlagsFor({
+      operandSize: this.operandSize,
+      ...(this.repPrefix === undefined ? {} : { rep: this.repPrefix })
+    })];
+
+    if (candidates === undefined) {
+      return {
+        candidates: [],
+        modrm: undefined,
+        unsupportedLength: this.prefixByteLength + leaf.opcodeLength
+      };
+    }
 
     switch (candidates.kind) {
       case "empty":

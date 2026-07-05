@@ -12,6 +12,7 @@ import type {
   Reg3,
   RmOperandType
 } from "#x86/defs/spec.js";
+import { prefixFlagMask } from "#x86/decoder/prefix-flags.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { segmentRegisters } from "#x86/types.js";
 import { encodeHostExit, HostExit } from "#wasm/exit.js";
@@ -19,7 +20,7 @@ import { noBaseRegister, type RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";
 import { emitInstructionHandler, type HandlerEmitContext } from "./handlers.js";
 import { interpreterDispatchRoot } from "./instructions.js";
-import { emitPrefixCase, operandSizeFlagBit, prefixBytes } from "./prefixes.js";
+import { emitPrefixCase, prefixBytes } from "./prefixes.js";
 
 // The hand-written dispatch shape: br_table over the fetched opcode byte,
 // the reg-field group switch, and the mod-form split. Fetches and handlers
@@ -123,17 +124,17 @@ function emitDispatchCase(
   }
 }
 
-// One arm per operand-size bucket, indexed by the masked prefix flags; an
+// One arm per prefix bucket, indexed by the masked prefix flags; an
 // empty bucket's arm is the unsupported exit.
 function emitLeaf(leaf: OpcodeDispatchLeaf, context: DispatchEmitContext): void {
   const { body, locals } = context;
-  const arms = [leaf.operandSize.default, leaf.operandSize.override];
+  const arms = leaf.prefixFlags;
 
   for (let index = 0; index < arms.length; index += 1) {
     body.block();
   }
 
-  body.localGet(locals.prefixFlags).i32Const(operandSizeFlagBit).i32And();
+  body.localGet(locals.prefixFlags).i32Const(prefixFlagMask).i32And();
   // The mask keeps the value inside the table; the default is unreachable.
   body.brTable(arms.map((_, value) => arms.length - 1 - value), 0);
 

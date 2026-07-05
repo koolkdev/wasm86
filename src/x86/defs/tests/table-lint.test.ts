@@ -17,6 +17,7 @@ import {
   type OperandSizePrefixMode,
   type Reg3
 } from "#x86/defs/spec.js";
+import type { RepeatPrefix } from "#x86/prefixes.js";
 
 const semantics: SemanticTemplate = () => {};
 
@@ -50,8 +51,13 @@ test("lint rejects duplicate ids and malformed instruction fields", () => {
       prefixes: { operandSize: "invalid" as OperandSizePrefixMode }
     }),
     fixtureSpec({
-      id: "bad.modrm",
+      id: "bad.rep_prefix",
       opcode: [0x96],
+      prefixes: { rep: "invalid" as RepeatPrefix }
+    }),
+    fixtureSpec({
+      id: "bad.modrm",
+      opcode: [0x97],
       modrm: { match: { reg: 8 as Reg3 } }
     })
   ]);
@@ -61,6 +67,7 @@ test("lint rejects duplicate ids and malformed instruction fields", () => {
   match(message, /bad\.mnemonic: instruction mnemonic must not be empty/);
   match(message, /bad\.syntax: instruction syntax must not be empty/);
   match(message, /bad\.prefix: operand-size prefix mode must be default or override/);
+  match(message, /bad\.rep_prefix: repeat prefix mode must be rep or repne/);
   match(message, /bad\.modrm: modrm\.match\.reg must be an integer in 0\.\.7/);
 });
 
@@ -310,13 +317,20 @@ function lintFixedHighBits(bits: number, label: string, failures: string[]): boo
 
 function lintPrefixes(spec: InstructionSpec, label: string, failures: string[]): boolean {
   const operandSize = spec.prefixes?.operandSize;
+  const rep = spec.prefixes?.rep;
+  let ok = true;
 
-  if (operandSize === undefined || operandSize === "default" || operandSize === "override") {
-    return true;
+  if (!(operandSize === undefined || operandSize === "default" || operandSize === "override")) {
+    failures.push(`${label}: operand-size prefix mode must be default or override, got ${operandSize}`);
+    ok = false;
   }
 
-  failures.push(`${label}: operand-size prefix mode must be default or override, got ${operandSize}`);
-  return false;
+  if (!(rep === undefined || rep === "rep" || rep === "repne")) {
+    failures.push(`${label}: repeat prefix mode must be rep or repne, got ${rep}`);
+    ok = false;
+  }
+
+  return ok;
 }
 
 function lintModRmMatch(match: ModRmMatch | undefined, label: string, failures: string[]): boolean {
@@ -476,11 +490,16 @@ function modRmUseOverlaps(left: InstructionSpec, right: InstructionSpec): boolea
 }
 
 function prefixUseOverlaps(left: InstructionSpec, right: InstructionSpec): boolean {
-  return operandSizePrefixMode(left) === operandSizePrefixMode(right);
+  return operandSizePrefixMode(left) === operandSizePrefixMode(right) &&
+    repeatPrefixMode(left) === repeatPrefixMode(right);
 }
 
 function operandSizePrefixMode(spec: InstructionSpec): OperandSizePrefixMode {
   return spec.prefixes?.operandSize ?? "default";
+}
+
+function repeatPrefixMode(spec: InstructionSpec): RepeatPrefix | "none" {
+  return spec.prefixes?.rep ?? "none";
 }
 
 function modRmMatchesOverlap(left: ModRmMatch | undefined, right: ModRmMatch | undefined): boolean {

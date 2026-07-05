@@ -1,9 +1,9 @@
 import {
   instructionReadsModRm,
   type ExpandedInstructionSpec,
-  type OperandSizePrefixMode,
   type Reg3
 } from "#x86/defs/spec.js";
+import { prefixFlagBucketCount, prefixFlagsFor } from "./prefix-flags.js";
 import type { IsaDecodeReader } from "./reader.js";
 
 export type OpcodeDispatchCandidateSet = Readonly<{
@@ -14,7 +14,7 @@ export type OpcodeDispatchCandidateSet = Readonly<{
 
 export type OpcodeDispatchLeaf = Readonly<{
   opcodeLength: number;
-  operandSize: Readonly<Record<OperandSizePrefixMode, OpcodeDispatchCandidateSet>>;
+  prefixFlags: readonly OpcodeDispatchCandidateSet[];
 }>;
 
 export type OpcodeDispatchNode = Readonly<{
@@ -34,7 +34,7 @@ type MutableOpcodeDispatchCandidateSet = {
 
 type MutableOpcodeDispatchLeaf = {
   opcodeLength: number;
-  operandSize: Record<OperandSizePrefixMode, MutableOpcodeDispatchCandidateSet>;
+  prefixFlags: MutableOpcodeDispatchCandidateSet[];
 };
 
 type MutableOpcodeDispatchNode = {
@@ -107,10 +107,7 @@ function opcodeDispatchNode(): MutableOpcodeDispatchNode {
 function opcodeDispatchLeaf(opcodeLength: number): MutableOpcodeDispatchLeaf {
   return {
     opcodeLength,
-    operandSize: {
-      default: opcodeDispatchCandidateSet(),
-      override: opcodeDispatchCandidateSet()
-    }
+    prefixFlags: Array.from({ length: prefixFlagBucketCount }, () => opcodeDispatchCandidateSet())
   };
 }
 
@@ -126,7 +123,11 @@ function addOpcodeCandidate(
   leaf: MutableOpcodeDispatchLeaf,
   instruction: ExpandedInstructionSpec
 ): void {
-  const candidates = leaf.operandSize[instruction.spec.prefixes?.operandSize ?? "default"];
+  const candidates = leaf.prefixFlags[prefixFlagsFor(instruction.spec.prefixes)];
+
+  if (candidates === undefined) {
+    throw new Error(`prefix dispatch bucket out of range for ${instruction.spec.id}`);
+  }
 
   if (!instructionReadsModRm(instruction.spec)) {
     useCandidateKind(candidates, "noModRm", instruction);

@@ -1,4 +1,5 @@
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
+import type { RepeatPrefix } from "#x86/prefixes.js";
 import type { OperandWidth, Reg32, RegName, SegmentRegister } from "#x86/types.js";
 
 export type Reg3 = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
@@ -39,6 +40,7 @@ export type ModRmMatch = Readonly<{
 
 export type InstructionPrefixes = Readonly<{
   operandSize?: OperandSizePrefixMode;
+  rep?: RepeatPrefix;
 }>;
 
 export type InstructionSpec = Readonly<{

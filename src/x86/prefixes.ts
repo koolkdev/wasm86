@@ -1,6 +1,10 @@
 import type { SegmentRegister } from "./types.js";
 
 export const operandSizeOverridePrefixByte = 0x66;
+export const repPrefixByte = 0xf3;
+export const repnePrefixByte = 0xf2;
+
+export type RepeatPrefix = "rep" | "repne";
 
 export const segmentOverridePrefixSegments: ReadonlyMap<number, SegmentRegister> = new Map([
   [0x26, "es"],

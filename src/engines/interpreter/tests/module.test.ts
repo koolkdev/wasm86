@@ -114,11 +114,11 @@ test("repeated operand-size prefixes execute with the override operand size", as
   strictEqual(state.instructionCount, 8);
 });
 
-test("a prefix byte outside the scan set reports unsupported instead of misdecoding", async () => {
+test("unsupported prefix streams report unsupported instead of misdecoding", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const cases = [
     [0x67, 0xb8, 0x34, 0x12, 0x00, 0x00], // address-size prefix
-    [0x66, 0xf3, 0xb8, 0x34, 0x12] // rep after a scanned prefix
+    [0x66, 0xf3, 0xb8, 0x34, 0x12] // REP on a non-REP opcode
   ] as const;
 
   for (const bytes of cases) {
