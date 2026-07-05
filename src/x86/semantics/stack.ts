@@ -2,6 +2,7 @@ import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#
 import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, type X86Flag } from "#x86/flags.js";
 import type { OperandWidth, Reg16, Reg32, RegName } from "#x86/types.js";
+import { buildFlagImage, writeFlagsFromImage } from "./flag-image.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
 export type StackOperandWidth = Extract<OperandWidth, 16 | 32>;
@@ -174,16 +175,7 @@ function pushFlags(
   flags: readonly X86Flag[]
 ): void {
   // Reserved bit 1 and the user-mode IF image bit are set.
-  let image: Value = s.const32(0x202);
-
-  for (const flag of flags) {
-    const bit = s.readFlag(flag);
-    const offset = x86EflagsBitOffset[flag];
-
-    image = s.binary("or", image, offset === 0 ? bit : s.binary("shl", bit, s.const32(offset)));
-  }
-
-  pushStack(s, context, width, image);
+  pushStack(s, context, width, buildFlagImage(s, flags, 0x202));
 }
 
 function popFlags(
@@ -193,14 +185,8 @@ function popFlags(
   flags: readonly X86Flag[]
 ): void {
   const image = popStack(s, context, width);
-  const one = s.const32(1);
 
-  for (const flag of flags) {
-    const offset = x86EflagsBitOffset[flag];
-    const shifted = offset === 0 ? image : s.binary("shr_u", image, s.const32(offset));
-
-    s.writeFlag(flag, s.binary("and", shifted, one));
-  }
+  writeFlagsFromImage(s, flags, image);
 }
 
 export function popSemantic(width: StackOperandWidth = 32): SemanticTemplate {

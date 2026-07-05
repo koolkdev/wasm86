@@ -14,7 +14,7 @@ import {
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
   strictEqual(X86_32_CORE.instructionLengthLimit, 15);
-  strictEqual(X86_32_CORE.instructions.length, 427);
+  strictEqual(X86_32_CORE.instructions.length, 436);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -104,6 +104,14 @@ test("x86-32 core registers the initial instruction surface", () => {
     "idiv.rm16",
     "idiv.rm32",
     "bswap.r32",
+    "clc.near",
+    "stc.near",
+    "cmc.near",
+    "cld.near",
+    "std.near",
+    "lahf.ah",
+    "sahf.ah",
+    "xlat.m8_al",
     "cbw.word",
     "cwde.dword",
     "cwd.word",
@@ -159,6 +167,7 @@ test("x86-32 core registers the initial instruction surface", () => {
     "ret.near",
     "ret.imm16_o16",
     "ret.imm16",
+    "wait.near",
     "int.imm8",
     "cmovne.r32_rm32",
     "jne.rel8",
@@ -217,6 +226,45 @@ test("multi-byte nop forms use slash-zero ModRM operands without side effects", 
 
   deepStrictEqual(operandSize.prefixes, { operandSize: "override" });
   deepStrictEqual(operandSize.operands, [{ kind: "modrm.rm", type: "rm16" }]);
+});
+
+test("flag and misc scalar forms use fixed one-byte opcodes", () => {
+  const cases = [
+    ["clc.near", [0xf8], "clc"],
+    ["stc.near", [0xf9], "stc"],
+    ["cmc.near", [0xf5], "cmc"],
+    ["cld.near", [0xfc], "cld"],
+    ["std.near", [0xfd], "std"],
+    ["lahf.ah", [0x9f], "lahf"],
+    ["sahf.ah", [0x9e], "sahf"],
+    ["wait.near", [0x9b], "wait"]
+  ] as const;
+
+  for (const [id, opcode, syntax] of cases) {
+    const spec = instruction(id);
+
+    deepStrictEqual(spec.opcode, opcode, id);
+    strictEqual(spec.syntax, syntax, id);
+    deepStrictEqual(spec.operands, undefined, id);
+  }
+
+  deepStrictEqual(buildSemanticTrace(semanticsOf(instruction("wait.near"))).events, ["next"]);
+});
+
+test("xlat form is operand-less syntax over a hidden EBX byte memory operand", () => {
+  const spec = instruction("xlat.m8_al");
+
+  deepStrictEqual(spec.opcode, [0xd7]);
+  strictEqual(spec.syntax, "xlat");
+  deepStrictEqual(spec.operands, [{ kind: "implicit.mem", width: 8, base: "ebx", disp: 0 }]);
+
+  const trace = buildSemanticTrace(semanticsOf(spec), operands("mem"));
+
+  deepStrictEqual(trace.events.slice(0, 3), [
+    "%0 = addr op0",
+    "%1 = get al:8",
+    "guard read %2:1"
+  ]);
 });
 
 test("cmovcc forms are concrete specs with select-value semantics", () => {

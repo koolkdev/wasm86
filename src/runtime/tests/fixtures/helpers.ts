@@ -119,6 +119,17 @@ export function createFixtureInterpreterOnlyEngines(memories: WasmHostMemories):
   };
 }
 
+export function createFixtureCompiledOnlyEngines(_memories: WasmHostMemories): RuntimeEngines {
+  return {
+    interpreter: {
+      run() {
+        throw new Error("compiled-blocks fixture unexpectedly fell back to the interpreter");
+      }
+    },
+    compiledBlocks: new WasmBlocksEngine(createFixtureCompiledBlockCache())
+  };
+}
+
 export function createFixtureFallbackEngines(memories: WasmHostMemories): RuntimeEngines {
   return {
     interpreter: new WasmInterpreterEngine(instantiateFixtureWasmInterpreter(memories)),

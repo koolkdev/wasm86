@@ -14,12 +14,14 @@ import {
 } from "#ir/operands.js";
 import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#x86/defs/spec.js";
 import {
+  defaultSegmentIndexForBaseIndex,
   dsSegmentIndex,
   noSegmentOverride,
   ssDefaultSegmentBaseIndexes,
   ssSegmentIndex
 } from "#x86/segments.js";
-import { reg16, reg32, reg8, type RegName } from "#x86/types.js";
+import { reg32Index } from "#x86/registers.js";
+import { reg16, reg32, reg8, type Reg32, type RegName } from "#x86/types.js";
 import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
@@ -135,6 +137,16 @@ function decodeOperand(
       return { binding: regBinding(operand.reg), cursor };
     case "implicit.sreg":
       return { binding: segmentBinding(operand.reg), cursor };
+    case "implicit.mem":
+      emitImplicitMemoryBinding(context, operand.base, operand.disp);
+      return {
+        binding: memDynamicBinding(
+          externals.bind(locals.base),
+          externals.bind(locals.offset),
+          dynamicMemSegment(externals.bind(locals.effectiveSegment))
+        ),
+        cursor
+      };
     case "moffs":
       cursor = emitImmediateFetch(context, locals.eip, cursor, 32, false, locals.offset);
       emitEffectiveSegment(context, dsSegmentIndex);
@@ -165,6 +177,19 @@ function decodeOperand(
         cursor
       };
   }
+}
+
+function emitImplicitMemoryBinding(
+  context: HandlerEmitContext,
+  base: Reg32,
+  disp: number
+): void {
+  const { body, locals } = context;
+  const baseIndex = reg32Index(base);
+
+  body.i32Const(baseIndex).localSet(locals.base);
+  body.i32Const(disp).localSet(locals.offset);
+  emitEffectiveSegment(context, defaultSegmentIndexForBaseIndex(baseIndex));
 }
 
 // The base-less EA leaves decode complete in the offset local.

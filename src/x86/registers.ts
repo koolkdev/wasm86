@@ -1,4 +1,4 @@
-import type { OperandWidth, RegisterAlias, RegName } from "./types.js";
+import { reg32, type OperandWidth, type RegisterAlias, type Reg32, type RegName } from "./types.js";
 
 export const registerAliasesByWidth = {
   8: [
@@ -55,4 +55,14 @@ export function registerAliasByIndex(width: OperandWidth, index: number): Regist
   }
 
   return alias;
+}
+
+export function reg32Index(reg: Reg32): number {
+  const index = reg32.indexOf(reg);
+
+  if (index === -1) {
+    throw new Error(`unknown r32 register: ${reg}`);
+  }
+
+  return index;
 }

@@ -5,8 +5,9 @@ import { BSWAP } from "./defs/byte-swap.js";
 import { CALL, JCC, JMP, RET } from "./defs/control.js";
 import { CMP, TEST } from "./defs/cmp-test.js";
 import { DIV, IDIV } from "./defs/div.js";
+import { CLC, CLD, CMC, LAHF, SAHF, STC, STD, XLAT } from "./defs/flags.js";
 import { LEA } from "./defs/lea.js";
-import { INT, NOP } from "./defs/misc.js";
+import { INT, NOP, WAIT } from "./defs/misc.js";
 import { CMOVCC, MOV, MOVSX, MOVZX } from "./defs/mov.js";
 import { IMUL, MUL } from "./defs/mul.js";
 import { SETCC } from "./defs/setcc.js";
@@ -47,6 +48,14 @@ export const X86_32_CORE = defineIsa({
     DIV,
     IDIV,
     BSWAP,
+    CLC,
+    STC,
+    CMC,
+    CLD,
+    STD,
+    LAHF,
+    SAHF,
+    XLAT,
     CBW,
     CWDE,
     CWD,
@@ -78,6 +87,7 @@ export const X86_32_CORE = defineIsa({
     JMP,
     CALL,
     RET,
+    WAIT,
     INT,
     ...JCC
   ]

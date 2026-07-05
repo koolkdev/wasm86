@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
-import { reg32, segmentRegisters, type Reg32, type SegmentRegister } from "./types.js";
+import { reg32Index } from "./registers.js";
+import { segmentRegisters, type Reg32, type SegmentRegister } from "./types.js";
 
 export const noSegmentOverride = -1;
 
@@ -25,12 +26,5 @@ export function segmentRegisterIndex(reg: SegmentRegister): number {
   const index = segmentRegisters.indexOf(reg);
 
   assert(index !== -1, `unknown segment register: ${reg}`);
-  return index;
-}
-
-function reg32Index(reg: Reg32): number {
-  const index = reg32.indexOf(reg);
-
-  assert(index !== -1, `unknown register: ${reg}`);
   return index;
 }

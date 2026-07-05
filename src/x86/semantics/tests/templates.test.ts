@@ -6,6 +6,13 @@ import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { callSemantic, retSemantic } from "#x86/semantics/control.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { divImplicitSemantic, idivImplicitSemantic } from "#x86/semantics/div.js";
+import {
+  cmcSemantic,
+  lahfSemantic,
+  sahfSemantic,
+  writeFlagSemantic,
+  xlatSemantic
+} from "#x86/semantics/flags.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
 import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic, movToSregSemantic } from "#x86/semantics/mov.js";
@@ -90,6 +97,65 @@ test("int semantic reads the vector and exits to a host trap", () => {
     "%0 = get op0:32",
     "hostTrap %0"
   ]);
+});
+
+test("flag scalar semantics write only their target flag", () => {
+  for (const [name, template, expected] of [
+    ["clc", writeFlagSemantic("CF", 0), "flag CF <- 0"],
+    ["stc", writeFlagSemantic("CF", 1), "flag CF <- 1"],
+    ["cld", writeFlagSemantic("DF", 0), "flag DF <- 0"],
+    ["std", writeFlagSemantic("DF", 1), "flag DF <- 1"]
+  ] as const) {
+    const trace = buildSemanticTrace(template);
+
+    deepStrictEqual(trace.events, [expected, "next"], name);
+  }
+});
+
+test("cmc resolves and complements CF without touching other flags directly", () => {
+  const trace = buildSemanticTrace(cmcSemantic());
+
+  deepStrictEqual(trace.events, [
+    "%0 = flag CF",
+    "flag CF <- %1",
+    "next"
+  ]);
+  strictEqual(trace.defs[1], "xor(%0, 1)");
+});
+
+test("lahf builds AH from the five low status flags and the reserved bit", () => {
+  const trace = buildSemanticTrace(lahfSemantic());
+
+  for (const flag of ["CF", "PF", "AF", "ZF", "SF"] as const) {
+    strictEqual(trace.events.some((event) => event.endsWith(`flag ${flag}`)), true, flag);
+  }
+
+  strictEqual(trace.events.some((event) => event.endsWith("flag OF")), false);
+  strictEqual(trace.events.some((event) => event.startsWith("set ah:8 <- ")), true);
+  deepStrictEqual(trace.events.at(-1), "next");
+});
+
+test("sahf writes the five low status flags from AH and leaves OF untouched", () => {
+  const trace = buildSemanticTrace(sahfSemantic());
+
+  strictEqual(trace.events[0], "%0 = get ah:8");
+  deepStrictEqual(directFlagWrites(trace), ["CF", "PF", "AF", "ZF", "SF"]);
+  strictEqual(directFlagWrites(trace).includes("OF"), false);
+  deepStrictEqual(trace.events.at(-1), "next");
+});
+
+test("xlat guards and reads the byte at implicit EBX plus zero-extended AL", () => {
+  const trace = buildSemanticTrace(xlatSemantic(), operands("mem"));
+
+  deepStrictEqual(trace.events, [
+    "%0 = addr op0",
+    "%1 = get al:8",
+    "guard read %2:1",
+    "%3 = get mem(%2):8",
+    "set al:8 <- %3",
+    "next"
+  ]);
+  strictEqual(trace.defs[2], "add(%0, %1)");
 });
 
 test("lea semantic computes an address without getting the operand value", () => {

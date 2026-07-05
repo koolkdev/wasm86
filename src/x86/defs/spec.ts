@@ -1,5 +1,5 @@
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
+import type { OperandWidth, Reg32, RegName, SegmentRegister } from "#x86/types.js";
 
 export type Reg3 = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export type FixedHighBits = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
@@ -26,6 +26,7 @@ export type OperandSpec =
   | Readonly<{ kind: "opcode.reg"; type: RegOperandType }>
   | Readonly<{ kind: "implicit.reg"; reg: RegName; type: RegOperandType }>
   | Readonly<{ kind: "implicit.sreg"; reg: SegmentRegister }>
+  | Readonly<{ kind: "implicit.mem"; width: OperandWidth; base: Reg32; disp: number }>
   | Readonly<{ kind: "moffs"; width: OperandWidth }>
   | Readonly<{ kind: "imm"; width: OperandWidth; semanticWidth?: OperandWidth; extension?: ImmediateExtension }>
   | Readonly<{ kind: "rel"; width: 8 | 16 | 32 }>;

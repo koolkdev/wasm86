@@ -431,6 +431,7 @@ function encodedOperandByteLength(operand: OperandSpec): number {
     case "rel":
       return operand.width / 8;
     case "implicit.reg":
+    case "implicit.mem":
     case "implicit.sreg":
     case "modrm.reg":
     case "modrm.rm":

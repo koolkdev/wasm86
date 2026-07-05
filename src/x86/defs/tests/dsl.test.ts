@@ -5,6 +5,7 @@ import {
   defineIsa,
   form,
   imm,
+  implicitMem,
   mnemonic,
   modrmReg,
   modrmRm,
@@ -98,6 +99,7 @@ test("dsl operand helpers support byte and word ModRM forms", () => {
   deepStrictEqual(modrmRm("r32_m16"), { kind: "modrm.rm", type: "r32_m16" });
   deepStrictEqual(modrmRm("m8"), { kind: "modrm.rm", type: "m8" });
   deepStrictEqual(moffs(32), { kind: "moffs", width: 32 });
+  deepStrictEqual(implicitMem(8, "ebx"), { kind: "implicit.mem", width: 8, base: "ebx", disp: 0 });
 });
 
 test("mnemonic and ISA builders generate stable full instruction ids", () => {

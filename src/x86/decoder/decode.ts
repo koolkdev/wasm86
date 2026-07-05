@@ -14,6 +14,7 @@ import {
 } from "#x86/defs/spec.js";
 import { registerAlias, registerAliasByIndex } from "#x86/registers.js";
 import { operandSizeOverridePrefixByte, segmentOverridePrefixSegments } from "#x86/prefixes.js";
+import { defaultSegmentForBase } from "#x86/segments.js";
 import { segmentRegisters, type MemOperand, type OperandWidth, type SegmentRegister } from "#x86/types.js";
 import { signedImm8, signedImm32 } from "./immediate.js";
 import { decodeModRmAddressing, rm32ModRmByteLengthAt, type ModRmRm } from "./modrm.js";
@@ -219,6 +220,20 @@ class InstructionDecoder {
         return { kind: "ok", binding: { kind: "reg", alias: registerAlias(operand.reg) }, cursor };
       case "implicit.sreg":
         return { kind: "ok", binding: { kind: "segment", reg: operand.reg }, cursor };
+      case "implicit.mem":
+        return {
+          kind: "ok",
+          binding: {
+            kind: "mem",
+            accessWidth: operand.width,
+            segment: this.segmentOverride ?? defaultSegmentForBase(operand.base),
+            base: operand.base,
+            index: undefined,
+            scale: 1,
+            disp: operand.disp
+          },
+          cursor
+        };
       case "moffs":
         return {
           kind: "ok",

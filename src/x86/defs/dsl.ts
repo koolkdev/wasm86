@@ -1,4 +1,4 @@
-import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
+import type { OperandWidth, Reg32, RegName, SegmentRegister } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import type {
   DefinedIsa,
@@ -82,6 +82,10 @@ export function implicitReg(reg: RegName): OperandSpec {
 
 export function implicitSreg(reg: SegmentRegister): OperandSpec {
   return { kind: "implicit.sreg", reg };
+}
+
+export function implicitMem(width: OperandWidth, base: Reg32, disp = 0): OperandSpec {
+  return { kind: "implicit.mem", width, base, disp };
 }
 
 export function moffs(width: OperandWidth): OperandSpec {
