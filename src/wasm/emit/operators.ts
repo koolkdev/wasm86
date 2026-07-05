@@ -110,6 +110,12 @@ export function emitBinaryOperator(body: WasmFunctionBodyEncoder, node: BinaryVa
 
 export function emitUnaryOperator(body: WasmFunctionBodyEncoder, node: UnaryValueNode): void {
   switch (node.operator) {
+    case "ctz":
+      body.i32Ctz();
+      return;
+    case "clz":
+      body.i32Clz();
+      return;
     case "popcnt":
       body.i32Popcnt();
       return;

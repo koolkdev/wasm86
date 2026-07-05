@@ -370,6 +370,8 @@ test("operators map to their wasm opcodes", () => {
   const signedShifted = values.binary("shr_s", one, two);
   const unsignedShifted = values.binary("shr_u", one, two);
   const mixed = values.binary("xor", shifted, values.binary("xor", signedShifted, unsignedShifted));
+  const trailingZeros = values.unary("ctz", one);
+  const leadingZeros = values.unary("clz", two);
   const product = values.binary("mul", one, two);
   const signedQuotient = values.binary("div_s", one, two);
   const unsignedQuotient = values.binary("div_u", one, two);
@@ -386,6 +388,8 @@ test("operators map to their wasm opcodes", () => {
     values,
     testBody([
       stateWrite(gprChannel("eax"), mixed),
+      stateWrite(gprChannel("esi"), trailingZeros),
+      stateWrite(gprChannel("esi"), leadingZeros),
       stateWrite(gprChannel("esi"), product),
       stateWrite(gprChannel("esi"), signedQuotient),
       stateWrite(gprChannel("esi"), unsignedQuotient),
@@ -403,6 +407,8 @@ test("operators map to their wasm opcodes", () => {
   );
 
   valueStack.emitUse(mixed);
+  valueStack.emitUse(trailingZeros);
+  valueStack.emitUse(leadingZeros);
   valueStack.emitUse(product);
   valueStack.emitUse(signedQuotient);
   valueStack.emitUse(unsignedQuotient);
@@ -429,6 +435,10 @@ test("operators map to their wasm opcodes", () => {
     wasmOpcode.i32ShrU,
     wasmOpcode.i32Xor,
     wasmOpcode.i32Xor,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Ctz,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Clz,
     wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.i32Mul,

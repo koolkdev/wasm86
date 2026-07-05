@@ -324,6 +324,10 @@ function evalUnary(operator: UnaryOperator, value: number): number {
   switch (operator) {
     case "popcnt":
       return popCount32(value);
+    case "ctz":
+      return countTrailingZeros32(value);
+    case "clz":
+      return Math.clz32(value);
   }
 }
 
@@ -384,4 +388,10 @@ function popCount32(value: number): number {
   }
 
   return count;
+}
+
+function countTrailingZeros32(value: number): number {
+  const unsigned = value >>> 0;
+
+  return unsigned === 0 ? 32 : 31 - Math.clz32(unsigned & -unsigned);
 }

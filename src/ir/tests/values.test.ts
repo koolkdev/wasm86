@@ -218,6 +218,10 @@ test("unary operations fold constants", () => {
   const table = new ValueTable();
 
   strictEqual(table.unary("popcnt", table.const(0xf0f0)), table.const(8));
+  strictEqual(table.unary("ctz", table.const(0x0100)), table.const(8));
+  strictEqual(table.unary("ctz", table.const(0)), table.const(32));
+  strictEqual(table.unary("clz", table.const(0x0100)), table.const(23));
+  strictEqual(table.unary("clz", table.const(0)), table.const(32));
 });
 
 test("extend folds constants", () => {

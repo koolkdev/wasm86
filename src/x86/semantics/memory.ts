@@ -1,6 +1,28 @@
+import { assert } from "#common/assert.js";
 import type { MemoryAccessKind, SemanticBuildContext, SemanticsBuilder } from "#x86/semantics/builder.js";
-import type { StorageInput, ValueInput } from "#x86/semantics/refs.js";
+import type { OperandRef, StorageInput, ValueInput } from "#x86/semantics/refs.js";
 import type { OperandWidth } from "#x86/types.js";
+
+export type ResolvedOperandStorage = "reg" | "mem";
+
+export function resolvedOperandStorage(
+  context: SemanticBuildContext,
+  operand: OperandRef
+): ResolvedOperandStorage {
+  const storage = context.operandInfo(operand).storage;
+
+  switch (storage) {
+    case "reg":
+      return "reg";
+    case "mem":
+      return "mem";
+    case "regOrMem":
+      assert(false, "operand storage must be resolved to register or memory");
+    case "imm":
+    case "relTarget":
+      assert(false, `operand storage cannot be ${storage}`);
+  }
+}
 
 export function guardStorageRead(
   s: SemanticsBuilder,

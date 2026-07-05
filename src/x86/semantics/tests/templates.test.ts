@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
+import { bitScanSemantic, bitTestSemantic } from "#x86/semantics/bits.js";
 import { callSemantic, retSemantic } from "#x86/semantics/control.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { divImplicitSemantic, idivImplicitSemantic } from "#x86/semantics/div.js";
@@ -423,6 +424,64 @@ test("runtime shift counts greater than one write OF as zero", () => {
   strictEqual(trace.defs[14], "cmp32.eq(%3, 1)");
   strictEqual(trace.defs[29], "select(%14, %19, 0)");
   strictEqual(trace.def(flagCell(write, "OF")), "select(%20, %29, %13)");
+});
+
+test("bit-test register forms write only CF and mask the bit offset", () => {
+  const trace = buildSemanticTrace(bitTestSemantic("bt", 32, "reg"), regOperands(2));
+
+  deepStrictEqual(trace.events, [
+    "%0 = get op0:32",
+    "%2 = get op1:32",
+    "flag CF <- %5",
+    "next"
+  ]);
+  strictEqual(trace.defs[1], "truncate32(%0)");
+  strictEqual(trace.defs[3], "and(%2, 31)");
+  strictEqual(trace.defs[4], "shr_u(%1, %3)");
+  strictEqual(trace.defs[5], "and(%4, 1)");
+  deepStrictEqual(directFlagWrites(trace), ["CF"]);
+  strictEqual(trace.events.some((event) => event.startsWith("set ")), false);
+});
+
+test("bit-test memory register forms use signed bit-string addressing", () => {
+  const trace = buildSemanticTrace(bitTestSemantic("bts", 32, "reg"), operands("mem", "reg"));
+
+  deepStrictEqual(trace.events.slice(0, 6), [
+    "%0 = get op1:32:signed",
+    "%3 = addr op0",
+    "guard read %4:4",
+    "guard write %4:4",
+    "%5 = get mem(%4):32",
+    "flag CF <- %9"
+  ]);
+  strictEqual(trace.defs[1], "shr_s(%0, 5)");
+  strictEqual(trace.defs[2], "shl(%1, 2)");
+  strictEqual(trace.defs[4], "add(%3, %2)");
+  strictEqual(trace.defs[7], "and(%0, 31)");
+  ok(trace.events.includes("set mem(%4):32 <- %13"));
+});
+
+test("bit-scan semantics preserve destination on zero source and write observed undefined flags", () => {
+  const bsf = buildSemanticTrace(bitScanSemantic("bsf", 32), regOperands(2));
+  const bsr = buildSemanticTrace(bitScanSemantic("bsr", 32), regOperands(2));
+
+  deepStrictEqual(bsf.events.slice(0, 2), [
+    "%0 = get op1:32",
+    "%2 = get op0:32"
+  ]);
+  ok(bsf.defs.includes("ctz(%1)"));
+  ok(bsf.defs.includes("select(%3, 0, %4)"));
+  ok(bsf.defs.includes("select(%3, %2, %4)"));
+  deepStrictEqual(directFlagWrites(bsf), ["CF", "PF", "AF", "ZF", "SF", "OF"]);
+  ok(bsf.events.includes("flag CF <- 0"));
+  ok(bsf.events.includes("flag AF <- 0"));
+  ok(bsf.events.includes("flag SF <- 0"));
+  ok(bsf.events.includes("flag OF <- 0"));
+  ok(bsf.events.includes("flag ZF <- %3"));
+  ok(bsf.events.includes("set op0:32 <- %6"));
+
+  ok(bsr.defs.some((def) => def.startsWith("clz(%1)")));
+  ok(bsr.defs.some((def) => def.startsWith("sub(31, ")));
 });
 
 test("imul reg-rm semantics use a signed full product and explicit status flags", () => {

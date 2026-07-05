@@ -14,7 +14,7 @@ import {
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
   strictEqual(X86_32_CORE.instructionLengthLimit, 15);
-  strictEqual(X86_32_CORE.instructions.length, 451);
+  strictEqual(X86_32_CORE.instructions.length, 471);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -144,6 +144,12 @@ test("x86-32 core registers the initial instruction surface", () => {
     "shr.rm32_cl",
     "shrd.rm16_r16_cl",
     "sar.rm8_imm8",
+    "bt.rm32_r32",
+    "bts.rm16_imm8",
+    "btr.rm32_imm8",
+    "btc.rm32_r32",
+    "bsf.r16_rm16",
+    "bsr.r32_rm32",
     "cmp.rm32_imm8",
     "cmp.rm16_imm16",
     "test.al_imm8",

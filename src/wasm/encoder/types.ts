@@ -58,6 +58,8 @@ export const wasmOpcode = {
   i64Eqz: 0x50,
   i64Eq: 0x51,
   i64Ne: 0x52,
+  i32Clz: 0x67,
+  i32Ctz: 0x68,
   i32Popcnt: 0x69,
   i32Add: 0x6a,
   i32Sub: 0x6b,

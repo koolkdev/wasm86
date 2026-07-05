@@ -252,6 +252,16 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i32Clz(): this {
+    this.#writeInstruction(wasmOpcode.i32Clz);
+    return this;
+  }
+
+  i32Ctz(): this {
+    this.#writeInstruction(wasmOpcode.i32Ctz);
+    return this;
+  }
+
   i32Popcnt(): this {
     this.#writeInstruction(wasmOpcode.i32Popcnt);
     return this;

@@ -566,6 +566,9 @@ export class ValueTable {
     _widthBoundsOf: (id: ValueId) => WidthBounds
   ): WidthBounds {
     switch (node.operator) {
+      case "ctz":
+      case "clz":
+        return fitsUnsigned(6);
       case "popcnt":
         return unboundedWidthBounds;
     }
