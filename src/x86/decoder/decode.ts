@@ -21,7 +21,6 @@ import { buildOpcodeDispatch, opcodeLeaf, type OpcodeDispatchLeaf } from "./opco
 import {
   instructionTooLongFault,
   IsaDecodeError,
-  maxX86InstructionLength,
   readAvailableBytes,
   readRawBytes,
   readU16LE,
@@ -52,6 +51,7 @@ type DispatchedCandidates = Readonly<{
 const EXPANDED_INSTRUCTIONS: readonly ExpandedInstructionSpec[] =
   X86_32_CORE.instructions.flatMap((spec) => expandInstructionSpec(spec));
 const OPCODE_DISPATCH_ROOT = buildOpcodeDispatch(EXPANDED_INSTRUCTIONS);
+const instructionLengthLimit = X86_32_CORE.instructionLengthLimit;
 
 export function decodeIsaInstructionFromReader(
   reader: IsaDecodeReader,
@@ -72,6 +72,10 @@ class InstructionDecoder {
 
   decode(): IsaDecodeResult {
     this.decodePrefixes();
+
+    if (this.prefixByteLength >= instructionLengthLimit) {
+      return this.unsupported(this.prefixByteLength);
+    }
 
     const opcodeAddress = this.address + this.prefixByteLength;
     const lookup = opcodeLeaf(OPCODE_DISPATCH_ROOT, this.reader, opcodeAddress);
@@ -98,7 +102,10 @@ class InstructionDecoder {
   }
 
   private decodePrefixes(): void {
-    while (this.consumePrefix(this.readU8(this.address + this.prefixByteLength))) {}
+    while (
+      this.prefixByteLength < instructionLengthLimit &&
+      this.consumePrefix(this.readU8(this.address + this.prefixByteLength))
+    ) {}
   }
 
   private consumePrefix(value: number): boolean {
@@ -311,7 +318,7 @@ class InstructionDecoder {
   private readU8(eip: number): number {
     const offset = eip - this.address;
 
-    if (offset >= maxX86InstructionLength) {
+    if (offset >= instructionLengthLimit) {
       this.throwInstructionTooLong();
     }
 
@@ -319,14 +326,18 @@ class InstructionDecoder {
   }
 
   private assertInstructionLength(end: number): void {
-    if (end - this.address > maxX86InstructionLength) {
+    if (end - this.address > instructionLengthLimit) {
       this.throwInstructionTooLong();
     }
   }
 
   private throwInstructionTooLong(): never {
     throw new IsaDecodeError(
-      instructionTooLongFault(this.address, readAvailableBytes(this.source, this.address, maxX86InstructionLength))
+      instructionTooLongFault(
+        this.address,
+        instructionLengthLimit,
+        readAvailableBytes(this.source, this.address, instructionLengthLimit)
+      )
     );
   }
 

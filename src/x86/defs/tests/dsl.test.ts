@@ -118,8 +118,9 @@ test("mnemonic and ISA builders generate stable full instruction ids", () => {
     })
   ]);
 
-  const isa = defineIsa({ name: "x86-32-core-test", mnemonics: [mov] });
+  const isa = defineIsa({ name: "x86-32-core-test", instructionLengthLimit: 15, mnemonics: [mov] });
 
+  strictEqual(isa.instructionLengthLimit, 15);
   deepStrictEqual(
     isa.instructions.map((entry) => entry.id),
     ["mov.r32_rm32", "mov.rm32_r32"]

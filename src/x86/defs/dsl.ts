@@ -35,6 +35,7 @@ export function mnemonic(
 export function defineIsa(definition: IsaDefinition): DefinedIsa {
   return {
     name: definition.name,
+    instructionLengthLimit: definition.instructionLengthLimit,
     instructions: definition.mnemonics.flatMap((entry) => instructionsForMnemonic(entry))
   };
 }

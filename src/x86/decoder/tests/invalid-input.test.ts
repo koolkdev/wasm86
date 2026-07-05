@@ -1,8 +1,11 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { IsaDecodeError, maxX86InstructionLength } from "#x86/decoder/reader.js";
+import { IsaDecodeError } from "#x86/decoder/reader.js";
+import { X86_32_CORE } from "#x86/index.js";
 import { decodeBytes, startAddress } from "./helpers.js";
+
+const instructionLengthLimit = X86_32_CORE.instructionLengthLimit;
 
 test("reports unsupported opcode without throwing", () => {
   const decoded = decodeBytes([0x62]);
@@ -51,16 +54,27 @@ test("accepts a maximum length prefixed instruction", () => {
 
   strictEqual(decoded.kind, "ok");
   if (decoded.kind === "ok") {
-    strictEqual(decoded.instruction.length, maxX86InstructionLength);
-    strictEqual(decoded.instruction.nextEip, startAddress + maxX86InstructionLength);
+    strictEqual(decoded.instruction.length, instructionLengthLimit);
+    strictEqual(decoded.instruction.nextEip, startAddress + instructionLengthLimit);
     deepStrictEqual(decoded.instruction.raw, bytes);
+  }
+});
+
+test("reports an all-prefix instruction at the length limit as unsupported", () => {
+  const bytes = new Array<number>(instructionLengthLimit).fill(0x66);
+  const decoded = decodeBytes(bytes);
+
+  strictEqual(decoded.kind, "unsupported");
+  if (decoded.kind === "unsupported") {
+    strictEqual(decoded.length, instructionLengthLimit);
+    strictEqual(decoded.unsupportedByte, 0x66);
+    deepStrictEqual(decoded.raw, bytes);
   }
 });
 
 test("overlong instructions report instruction-too-long decode faults", () => {
   assertInstructionTooLong([...new Array<number>(13).fill(0x66), 0xb8, 0x34, 0x12]);
-  assertInstructionTooLong(new Array<number>(15).fill(0x66));
-  assertInstructionTooLong([...new Array<number>(15).fill(0x64), 0x8b, 0x03]);
+  assertInstructionTooLong([...new Array<number>(14).fill(0x64), 0x8b, 0x03]);
   assertInstructionTooLong([...new Array<number>(14).fill(0x66), 0x0f, 0x90]);
 });
 
@@ -88,8 +102,8 @@ function assertInstructionTooLong(values: readonly number[]): void {
 
       strictEqual(error.fault.reason, "instructionTooLong");
       strictEqual(error.fault.address, startAddress);
-      strictEqual(error.fault.offset, maxX86InstructionLength);
-      deepStrictEqual(error.fault.raw, values.slice(0, maxX86InstructionLength));
+      strictEqual(error.fault.offset, instructionLengthLimit);
+      deepStrictEqual(error.fault.raw, values.slice(0, instructionLengthLimit));
       return true;
     }
   );

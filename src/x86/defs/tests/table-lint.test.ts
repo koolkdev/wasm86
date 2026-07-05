@@ -11,6 +11,7 @@ import {
   type FixedHighBits,
   type InstructionSpec,
   type ModRmMatch,
+  type OperandSpec,
   type OpcodePath,
   type OpcodePathPart,
   type OperandSizePrefixMode,
@@ -25,8 +26,14 @@ type LintAnalysis = Readonly<{
   canCheckOverlap: boolean;
 }>;
 
+type LintOptions = Readonly<{
+  instructionLengthLimit?: number;
+}>;
+
 test("x86-32 core instruction table passes schema lint", () => {
-  deepStrictEqual(instructionTableLintFailures(X86_32_CORE.instructions), []);
+  deepStrictEqual(instructionTableLintFailures(X86_32_CORE.instructions, {
+    instructionLengthLimit: X86_32_CORE.instructionLengthLimit
+  }), []);
   validateInstructionSet(X86_32_CORE.instructions);
 });
 
@@ -75,6 +82,18 @@ test("lint rejects malformed opcode paths", () => {
   match(message, /bad\.opcode_byte: opcode byte must be an integer in 0\.\.255/);
   match(message, /bad\.fixed_bits: opcode fixed high bits must be an integer in 1\.\.8/);
   match(message, /bad\.variable_low_bits: variable opcode low bits must be zero in descriptor byte/);
+});
+
+test("lint rejects prefix-free encodings longer than the ISA instruction limit", () => {
+  const message = lintMessage([
+    fixtureSpec({
+      id: "bad.length",
+      opcode: new Array<number>(12).fill(0x0f),
+      operands: [modrmRm("rm32")]
+    })
+  ], { instructionLengthLimit: 15 });
+
+  match(message, /bad\.length: prefix-free encoding can be 18 bytes, exceeding instruction-length limit 15/);
 });
 
 test("lint rejects invalid opcode register operand use", () => {
@@ -175,8 +194,8 @@ function validateInstructionSet(specs: readonly InstructionSpec[]): void {
   }
 }
 
-function lintMessage(specs: readonly InstructionSpec[]): string {
-  const failures = instructionTableLintFailures(specs);
+function lintMessage(specs: readonly InstructionSpec[], options: LintOptions = {}): string {
+  const failures = instructionTableLintFailures(specs, options);
 
   if (failures.length === 0) {
     return "<no lint failures>";
@@ -185,13 +204,16 @@ function lintMessage(specs: readonly InstructionSpec[]): string {
   return failures.join("\n");
 }
 
-function instructionTableLintFailures(specs: readonly InstructionSpec[]): readonly string[] {
+function instructionTableLintFailures(specs: readonly InstructionSpec[], options: LintOptions = {}): readonly string[] {
   const failures: string[] = [];
 
   lintUniqueInstructionIds(specs, failures);
 
   const analyses = specs.map((spec, index) => lintInstructionSpec(spec, index, failures));
   lintInstructionOverlaps(analyses, failures);
+  if (options.instructionLengthLimit !== undefined) {
+    lintInstructionLengths(specs, options.instructionLengthLimit, failures);
+  }
 
   return failures;
 }
@@ -376,6 +398,45 @@ function lintInstructionOverlaps(analyses: readonly LintAnalysis[], failures: st
         failures.push(`instruction specs overlap: ${left.label} and ${right.label}`);
       }
     }
+  }
+}
+
+function lintInstructionLengths(specs: readonly InstructionSpec[], instructionLengthLimit: number, failures: string[]): void {
+  specs.forEach((spec, index) => {
+    const length = maxPrefixFreeInstructionLength(spec);
+
+    if (length > instructionLengthLimit) {
+      failures.push(
+        `${instructionLabel(spec, index)}: prefix-free encoding can be ${length} bytes, ` +
+          `exceeding instruction-length limit ${instructionLengthLimit}`
+      );
+    }
+  });
+}
+
+function maxPrefixFreeInstructionLength(spec: InstructionSpec): number {
+  const opcodeLength = Math.max(0, ...expandOpcodePath(spec.opcode).map((opcode) => opcode.bytes.length));
+  const modRmLength = instructionReadsModRm(spec) ? 6 : 0;
+  const operandLength = (spec.operands ?? []).reduce((length, operand) => length + encodedOperandByteLength(operand), 0);
+
+  return opcodeLength + modRmLength + operandLength;
+}
+
+function encodedOperandByteLength(operand: OperandSpec): number {
+  switch (operand.kind) {
+    case "imm":
+      return operand.width / 8;
+    case "moffs":
+      return 4;
+    case "rel":
+      return operand.width / 8;
+    case "implicit.reg":
+    case "implicit.sreg":
+    case "modrm.reg":
+    case "modrm.rm":
+    case "modrm.sreg":
+    case "opcode.reg":
+      return 0;
   }
 }
 

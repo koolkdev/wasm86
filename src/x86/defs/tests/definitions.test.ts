@@ -13,6 +13,7 @@ import {
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
+  strictEqual(X86_32_CORE.instructionLengthLimit, 15);
   strictEqual(X86_32_CORE.instructions.length, 415);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);

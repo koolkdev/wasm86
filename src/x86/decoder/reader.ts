@@ -1,5 +1,3 @@
-export const maxX86InstructionLength = 15;
-
 export type IsaDecodeFaultReason = "truncated" | "instructionTooLong";
 
 export type IsaDecodeFault = Readonly<{
@@ -73,11 +71,11 @@ export function truncatedInstructionFault(address: number, raw: readonly number[
   };
 }
 
-export function instructionTooLongFault(address: number, raw: readonly number[] = []): IsaDecodeFault {
+export function instructionTooLongFault(address: number, offset: number, raw: readonly number[] = []): IsaDecodeFault {
   return {
     reason: "instructionTooLong",
     address,
-    offset: maxX86InstructionLength,
+    offset,
     raw
   };
 }

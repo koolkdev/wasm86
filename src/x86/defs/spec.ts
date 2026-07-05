@@ -67,11 +67,13 @@ export type InstructionMnemonic = Readonly<{
 
 export type IsaDefinition = Readonly<{
   name: string;
+  instructionLengthLimit: number;
   mnemonics: readonly InstructionMnemonic[];
 }>;
 
 export type DefinedIsa = Readonly<{
   name: string;
+  instructionLengthLimit: number;
   instructions: readonly InstructionSpec[];
 }>;
 

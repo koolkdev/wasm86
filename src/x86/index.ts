@@ -17,6 +17,7 @@ import { XCHG } from "./defs/xchg.js";
 
 export const X86_32_CORE = defineIsa({
   name: "x86-32-core",
+  instructionLengthLimit: 15,
   mnemonics: [
     NOP,
     MOV,
