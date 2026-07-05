@@ -300,12 +300,6 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     this.#emit(`jumpIf ${this.#value(condition)} -> ${this.#value(target)}`);
   }
 
-  conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void {
-    this.#emitTerminator(
-      `branch ${this.#value(condition)} ? ${this.#value(taken)} : ${this.#value(notTaken)}`
-    );
-  }
-
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {
     this.#emit(`cpuExceptionIf ${this.#value(condition)} ${exception.kind}`);
   }

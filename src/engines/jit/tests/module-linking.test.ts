@@ -132,23 +132,19 @@ test("final jmp rel8 can link through the module-local table", () => {
   strictEqual(state.eax, 2);
 });
 
-test("compiled conditional targets patch both branch slots", () => {
+test("compiled conditional side exits patch only the taken branch slot", () => {
   const takenEip = aEip + 0x20;
   const branchBytes = incEaxJnzRel8(aEip, takenEip);
   const notTakenEip = aEip + branchBytes.length;
   const fixture = createLinkingFixture([
-    block(aEip, branchBytes),
-    block(notTakenEip, incEaxHostTrap()),
+    block(aEip, [...branchBytes, ...incEaxHostTrap()]),
     block(takenEip, incEaxHostTrap())
   ]);
   const branch = compileBlock(fixture, aEip);
-  const notTaken = compileBlock(fixture, notTakenEip);
   const taken = compileBlock(fixture, takenEip);
-  const notTakenSlot = slotForTarget(branch, notTakenEip);
   const takenSlot = slotForTarget(branch, takenEip);
 
-  strictEqual(branch.moduleLinkTable?.table.length, 2);
-  strictEqual(branch.moduleLinkTable?.table.get(notTakenSlot), notTaken.exportedBlockFunctionForEip(notTakenEip));
+  strictEqual(branch.moduleLinkTable?.table.length, 1);
   strictEqual(branch.moduleLinkTable?.table.get(takenSlot), taken.exportedBlockFunctionForEip(takenEip));
 
   fixture.memories.cpuState.load({ eip: aEip });
@@ -159,31 +155,28 @@ test("compiled conditional targets patch both branch slots", () => {
   deepStrictEqual(takenRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
   strictEqual(takenState.eax, 2);
 
-  fixture.memories.cpuState.load({ eip: aEip, ZF: 1 });
+  fixture.memories.cpuState.load({ eip: aEip, eax: 0xffff_ffff });
 
   const notTakenRun = branch.run();
   const notTakenState = readWasmCpuState(fixture.memories.cpuState);
 
   deepStrictEqual(notTakenRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
-  strictEqual(notTakenState.eax, 2);
+  strictEqual(notTakenState.eax, 1);
+  strictEqual(notTakenState.eip, notTakenEip + incEaxHostTrap().length);
 });
 
-test("linked conditional branch exits preserve exit-store flag values", () => {
+test("linked conditional side exits and local fallthrough preserve exit-store flag values", () => {
   const takenEip = aEip + 0x20;
   const branchBytes = addEaxOneJnzRel8(aEip, takenEip);
-  const notTakenEip = aEip + branchBytes.length;
   const fixture = createLinkingFixture([
-    block(aEip, branchBytes),
-    block(notTakenEip, hostTrap()),
+    block(aEip, [...branchBytes, ...hostTrap()]),
     block(takenEip, hostTrap())
   ]);
   const branch = compileBlock(fixture, aEip);
-  const notTaken = compileBlock(fixture, notTakenEip);
   const taken = compileBlock(fixture, takenEip);
-  const notTakenSlot = slotForTarget(branch, notTakenEip);
   const takenSlot = slotForTarget(branch, takenEip);
 
-  strictEqual(branch.moduleLinkTable?.table.get(notTakenSlot), notTaken.exportedBlockFunctionForEip(notTakenEip));
+  strictEqual(branch.moduleLinkTable?.table.length, 1);
   strictEqual(branch.moduleLinkTable?.table.get(takenSlot), taken.exportedBlockFunctionForEip(takenEip));
 
   fixture.memories.cpuState.load({ eip: aEip, eax: 0 });

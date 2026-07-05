@@ -492,22 +492,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     });
   }
 
-  conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void {
-    this.#beforeOp("conditionalJump");
-    this.#advanceInstructionCount();
-
-    const conditionId = condition;
-
-    this.#actions.push({
-      kind: "if",
-      condition: conditionId,
-      thenBody: this.#branchBody(taken),
-      elseBody: this.#branchBody(notTaken)
-    });
-    this.#blockEnd = "terminated";
-    this.#terminated = true;
-  }
-
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {
     this.#beforeOp("cpuExceptionIf");
     assert(!this.#wroteMemory, "a CPU exception guard cannot follow a memory write in the same instruction");
@@ -559,16 +543,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       )
     });
     this.#terminated = true;
-  }
-
-  // Branch bodies observe the completed instruction.
-  #branchBody(target: TargetInput): Body {
-    this.#pending.write(eipChannel, target);
-
-    return this.#terminatingBody(
-      { kind: "dispatch", targetEip: target },
-      this.#pending.flushesForPath("completed")
-    );
   }
 
   #earlyDispatchBody(target: TargetInput): Body {

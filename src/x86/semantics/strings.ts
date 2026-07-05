@@ -140,7 +140,7 @@ function repSemantic(unit: SemanticTemplate, condition?: "E" | "NE"): SemanticTe
     const nonzero = s.compare(32, "ne", decremented, s.const32(0));
 
     s.set(s.reg("ecx"), decremented);
-    s.conditionalJump(repBranchPredicate(s, condition, nonzero), s.currentEip(), s.nextEip());
+    s.jumpIf(repBranchPredicate(s, condition, nonzero), s.currentEip());
   };
 }
 

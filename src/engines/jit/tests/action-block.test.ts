@@ -8,6 +8,7 @@ import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable, fitsUnsigned } from "#ir/values.js";
 import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
+import { wasmOpcode } from "#wasm/encoder/types.js";
 import { ByteArrayDecodeReader } from "#x86/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
 import { CompletionExit, HostExit } from "#wasm/exit.js";
@@ -15,7 +16,11 @@ import { invalidOpcode } from "#x86/exceptions.js";
 import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
-import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
+import {
+  extractOnlyWasmFunctionBody,
+  wasmBodyOpcodes,
+  wasmDefinedFunctionCount
+} from "#wasm/tests/body-opcodes.js";
 import { isStateRead, isStateWrite, resolveFlag, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 const startEip = 0x1000;
@@ -119,6 +124,142 @@ test("a segment-register load exits from a compiled block before committing the 
   strictEqual(state.esSelector, 0x1111);
   strictEqual(state.eip, startEip);
   strictEqual(state.instructionCount, 7);
+});
+
+test("a not-taken forward jcc keeps pre-branch register pendings live inside the block", () => {
+  // mov eax, 7; cmp ecx, 0; je +2; add ebx, eax; int 0x2e.
+  const block = decodeBlock([
+    0xb8, 0x07, 0x00, 0x00, 0x00,
+    0x83, 0xf9, 0x00,
+    0x74, 0x02,
+    0x01, 0xc3,
+    0xcd, 0x2e
+  ]);
+  const ir = buildIrBlock(block.instructions);
+  const actions = entryActions(ir);
+  const branchIndex = actions.findIndex((action) => action.kind === "if");
+  const ebxReadIndex = actions.findIndex(
+    (action): action is Action =>
+      isStateRead(action) && action.op.slot === gprChannel("ebx")
+  );
+  const ebxRead = actions[ebxReadIndex];
+  const memories = createWasmHostMemories();
+  const handle = compileActionWasmBlockHandle([block], {
+    cpuStateMemory: memories.cpuStateMemory,
+    guestMemory: memories.guestMemory
+  });
+
+  strictEqual(block.instructions.map((instruction) => instruction.spec.id).join(","), [
+    "mov.r32_imm32",
+    "cmp.rm32_imm8",
+    "je.rel8",
+    "add.rm32_r32",
+    "int.imm8"
+  ].join(","));
+  strictEqual(handle.moduleLinkTable?.table.length, 1);
+  strictEqual(branchIndex > 0, true);
+  strictEqual(ebxReadIndex > branchIndex, true);
+  strictEqual(
+    actions.slice(branchIndex + 1, ebxReadIndex).some((action) => isStateWrite(action)),
+    false
+  );
+
+  if (ebxRead === undefined || !isStateRead(ebxRead)) {
+    throw new Error("expected ebx read after the branch");
+  }
+
+  const ebxWrite = actions.find((action) => isStateWrite(action) && action.op.slot === gprChannel("ebx"));
+
+  if (ebxWrite === undefined || !isStateWrite(ebxWrite)) {
+    throw new Error("expected ebx write after the branch");
+  }
+
+  strictEqual(
+    actions.filter((action) => isStateWrite(action) && action.op.slot === gprChannel("eax")).length,
+    1
+  );
+  strictEqual(
+    ebxWrite.op.value,
+    ir.values.binary("add", ebxRead.output, ir.values.const(7))
+  );
+
+  memories.cpuState.load({ eip: startEip, ebx: 0x20, ecx: 1 });
+
+  const run = handle.run();
+  const state = readWasmCpuState(memories.cpuState);
+
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  strictEqual(state.eax, 7);
+  strictEqual(state.ebx, 0x27);
+  strictEqual(state.eip, startEip + 14);
+  strictEqual(state.instructionCount, 5);
+});
+
+test("a backward jcc to the block entry self-links as a return_call tail loop", () => {
+  // sub ecx, 1; jnz start; int 0x2e.
+  const block = decodeBlock([
+    0x83, 0xe9, 0x01,
+    0x75, 0xfb,
+    0xcd, 0x2e
+  ]);
+  const ir = buildIrBlock(block.instructions);
+  const bytes = encodeActionJitModule([{ entryEip: startEip, actions: ir }]);
+  const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(bytes));
+  const memories = createWasmHostMemories();
+  const handle = compileActionWasmBlockHandle([block], {
+    cpuStateMemory: memories.cpuStateMemory,
+    guestMemory: memories.guestMemory
+  });
+
+  strictEqual(handle.moduleLinkTable, undefined);
+  strictEqual(opcodes.includes(wasmOpcode.returnCall), true);
+
+  memories.cpuState.load({ eip: startEip, ecx: 3 });
+
+  const run = handle.run();
+  const state = readWasmCpuState(memories.cpuState);
+
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  strictEqual(state.ecx, 0);
+  strictEqual(state.eip, startEip + 7);
+  strictEqual(state.instructionCount, 7);
+});
+
+test("into mid-block traps only on OF and otherwise falls through inside the block", () => {
+  // mov eax, 1; into; mov ebx, 2; int 0x2e.
+  const block = decodeBlock([
+    0xb8, 0x01, 0x00, 0x00, 0x00,
+    0xce,
+    0xbb, 0x02, 0x00, 0x00, 0x00,
+    0xcd, 0x2e
+  ]);
+  const memories = createWasmHostMemories();
+  const handle = compileActionWasmBlockHandle([block], {
+    cpuStateMemory: memories.cpuStateMemory,
+    guestMemory: memories.guestMemory
+  });
+
+  memories.cpuState.load({ eip: startEip, OF: 0 });
+
+  const clearRun = handle.run();
+  const clearState = readWasmCpuState(memories.cpuState);
+
+  deepStrictEqual(clearRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  strictEqual(clearState.eax, 1);
+  strictEqual(clearState.ebx, 2);
+  strictEqual(clearState.eip, startEip + 13);
+  strictEqual(clearState.instructionCount, 4);
+
+  memories.cpuState.load({ eip: startEip, ebx: 0x55, OF: 1 });
+
+  const setRun = handle.run();
+  const setState = readWasmCpuState(memories.cpuState);
+
+  deepStrictEqual(setRun.exit, { family: "host", reason: HostExit.TRAP, payload: 4 });
+  strictEqual(setState.eax, 1);
+  strictEqual(setState.ebx, 0x55);
+  strictEqual(setState.eip, startEip + 6);
+  strictEqual(setState.instructionCount, 2);
 });
 
 test("a compiled MOV to CS raises invalid-opcode before segment-load handling", () => {

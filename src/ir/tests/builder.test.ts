@@ -176,15 +176,6 @@ function memoryGuard(
   ];
 }
 
-function terminalIf(block: IrBlock, condition: ValueId, thenBodyIndex = 1, elseBodyIndex = 2): IfAction {
-  const thenBody = nestedActionBodies(block)[thenBodyIndex - 1];
-  const elseBody = nestedActionBodies(block)[elseBodyIndex - 1];
-
-  ok(thenBody !== undefined, `then body ${thenBodyIndex} exists`);
-  ok(elseBody !== undefined, `else body ${elseBodyIndex} exists`);
-  return { kind: "if", condition, thenBody, elseBody };
-}
-
 function finishDispatch(targetEip: ValueId): Action {
   return { kind: "finish", finish: { kind: "dispatch", targetEip } };
 }
@@ -891,7 +882,7 @@ test("ops after a control terminator in one template fail loudly", () => {
   );
 });
 
-test("jcc after cmp source uses the source-derived condition with per-edge lazy commits", () => {
+test("jcc after cmp source uses the source-derived condition as a side exit", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(cmpSemantic(32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
@@ -903,26 +894,27 @@ test("jcc after cmp source uses the source-derived condition with per-edge lazy 
   const eax = actions.find(
     (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("eax")
   )!.output;
+  const branch = ifAction(block);
 
-  strictEqual(nestedActionBodies(block).length, 2);
-  deepStrictEqual(actions[actions.length - 1], terminalIf(block, v.compare("eq", eax, v.const(5))));
+  strictEqual(nestedActionBodies(block).length, 1);
+  deepStrictEqual(branch, {
+    kind: "if",
+    condition: v.compare("eq", eax, v.const(5)),
+    thenBody: nestedActionBodies(block)[0]
+  });
 
-  // The branch is the entry's terminator: nothing flushes on the main path.
-  strictEqual(stateWrites(block).length, 0);
-
-  // Each edge flushes the cmp's lazy record and dispatches at its own eip.
+  // The taken side exit observes the completed jcc; the root path falls
+  // through and flushes the same lazy record only at block end.
   const taken = nestedBodyFlushes(block, 1);
-  const notTaken = nestedBodyFlushes(block, 2);
 
-  for (const flushes of [taken, notTaken]) {
-    strictEqual(flushes.length, 4);
-    assertLazyRecord(flushes, v, { kind: "SUB", width: 32, left: eax, right: v.const(5) });
-  }
-
+  strictEqual(taken.length, 4);
+  assertLazyRecord(taken, v, { kind: "SUB", width: 32, left: eax, right: v.const(5) });
   strictEqual(nestedBodyWriteFlushes(block, 1).find((write) => write.op.slot === eipChannel)?.op.value, v.const(0x2000));
   deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: v.const(0x2000) });
-  strictEqual(nestedBodyWriteFlushes(block, 2).find((write) => write.op.slot === eipChannel)?.op.value, v.const(0x1005));
-  deepStrictEqual(nestedBodyView(block, 2).terminator, { kind: "dispatch", targetEip: v.const(0x1005) });
+
+  assertLazyRecord(stateWrites(block), v, { kind: "SUB", width: 32, left: eax, right: v.const(5) });
+  strictEqual(stateWrites(block).find((write) => write.op.slot === eipChannel)?.op.value, v.const(0x1005));
+  deepStrictEqual(actions[actions.length - 1], finishDispatch(v.const(0x1005)));
 });
 
 test("jcc after test source uses the source-derived condition with no flag byte reads", () => {
@@ -943,9 +935,8 @@ test("jcc after test source uses the source-derived condition with no flag byte 
     entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
     false
   );
-  strictEqual(stateWrites(block).length, 0);
 
-  for (const flushes of [nestedBodyWriteFlushes(block, 1), nestedBodyWriteFlushes(block, 2)]) {
+  for (const flushes of [nestedBodyWriteFlushes(block, 1), stateWrites(block)]) {
     assertLazyRecord(flushes.filter((flush) => flush.op.slot.kind === "lazyFlags"), v, {
       kind: "LOGIC_RESULT",
       width: 32,
@@ -960,7 +951,7 @@ const subSourceThenJccTemplate: SemanticTemplate = (s) => {
   const result = s.binary("sub", left, right);
 
   s.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
-  s.conditionalJump(s.condition("E"), s.const32(0x2000), s.const32(0x1005));
+  s.jumpIf(s.condition("E"), s.const32(0x2000));
 };
 
 test("jcc after a sub flag source uses the source-derived condition", () => {
@@ -1128,8 +1119,7 @@ test("jecxz and loop branches dispatch through ecx-derived conditions without fl
 
   strictEqual(ifAction(jecxz).condition, jecxz.values.compare("eq", jecxzEcx, jecxz.values.const(0)));
   strictEqual(ifAction(loop).condition, loop.values.compare("ne", decremented, loop.values.const(0)));
-  strictEqual(stateWrites(loop).length, 0);
-  for (const branch of [nestedBodyWriteFlushes(loop, 1), nestedBodyWriteFlushes(loop, 2)]) {
+  for (const branch of [nestedBodyWriteFlushes(loop, 1), stateWrites(loop)]) {
     strictEqual(branch.find((write) => write.op.slot === gprChannel("ecx"))?.op.value, decremented);
   }
   strictEqual(
@@ -1137,9 +1127,9 @@ test("jecxz and loop branches dispatch through ecx-derived conditions without fl
       ...entryActions(jecxz),
       ...entryActions(loop),
       ...nestedBodyWriteFlushes(jecxz, 1),
-      ...nestedBodyWriteFlushes(jecxz, 2),
       ...nestedBodyWriteFlushes(loop, 1),
-      ...nestedBodyWriteFlushes(loop, 2)
+      ...stateWrites(jecxz),
+      ...stateWrites(loop)
     ].some(
       (action) => isStateWrite(action) && action.op.slot.kind === "flag"
     ),
@@ -2743,7 +2733,7 @@ test("every instruction advances the count channel once, flushed once", () => {
   ]);
 });
 
-test("branch edges flush the advanced count", () => {
+test("jumpIf side exit and fallthrough flush the advanced count", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(jccSemantic("E"), [immBinding(0x2000)], loc(0x1000, 0x1002));
@@ -2752,15 +2742,20 @@ test("branch edges flush the advanced count", () => {
   const v = block.values;
   const advanced = v.binary("add", instructionCountRead(block).output, v.const(1));
 
-  for (const index of [1, 2]) {
-    strictEqual(
-      nestedBodyView(block, index).flushes.find(
-        (flush): flush is StateWriteAction =>
-          isStateWrite(flush) && flush.op.slot === instructionCountChannel
-      )?.op.value,
-      advanced
-    );
-  }
+  strictEqual(
+    nestedBodyView(block, 1).flushes.find(
+      (flush): flush is StateWriteAction =>
+        isStateWrite(flush) && flush.op.slot === instructionCountChannel
+    )?.op.value,
+    advanced
+  );
+  strictEqual(
+    rawEntryActions(block).find(
+      (action): action is StateWriteAction =>
+        isStateWrite(action) && action.op.slot === instructionCountChannel
+    )?.op.value,
+    advanced
+  );
 });
 
 test("a fault edge restores the boundary count", () => {

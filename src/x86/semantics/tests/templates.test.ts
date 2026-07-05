@@ -270,7 +270,10 @@ test("rep movs restarts at the current eip after one counted unit", () => {
     "%4 = addr op0"
   ]);
   ok(trace.events.includes("set ecx:32 <- %11"));
-  deepStrictEqual(trace.events.at(-1), "branch %12 ? currentEip : nextEip");
+  deepStrictEqual(trace.events.slice(-2), [
+    "jumpIf %12 -> currentEip",
+    "next"
+  ]);
   strictEqual(trace.defs[1], "cmp32.eq(%0, 0)");
   strictEqual(trace.defs[11], "sub(%0, 1)");
   strictEqual(trace.defs[12], "cmp32.ne(%11, 0)");
@@ -280,7 +283,10 @@ test("repne scas combines remaining ECX with ZF after the compare unit", () => {
   const trace = buildSemanticTrace(repneScasSemantic(8), operands("mem"));
 
   ok(trace.events.includes("%15 = condition NE"));
-  deepStrictEqual(trace.events.at(-1), "branch %16 ? currentEip : nextEip");
+  deepStrictEqual(trace.events.slice(-2), [
+    "jumpIf %16 -> currentEip",
+    "next"
+  ]);
   strictEqual(trace.defs[16], "and(%14, %15)");
 });
 
@@ -1069,7 +1075,8 @@ test("jecxz and loop semantic branch conditions use ecx without writing flags", 
   deepStrictEqual(jecxz.events, [
     "%0 = get ecx:32",
     "%2 = get op0:32",
-    "branch %1 ? %2 : nextEip"
+    "jumpIf %1 -> %2",
+    "next"
   ]);
   strictEqual(jecxz.defs[1], "cmp32.eq(%0, 0)");
 
@@ -1077,7 +1084,8 @@ test("jecxz and loop semantic branch conditions use ecx without writing flags", 
     "%0 = get ecx:32",
     "set ecx:32 <- %1",
     "%3 = get op0:32",
-    "branch %2 ? %3 : nextEip"
+    "jumpIf %2 -> %3",
+    "next"
   ]);
   strictEqual(loop.defs[1], "sub(%0, 1)");
   strictEqual(loop.defs[2], "cmp32.ne(%1, 0)");
@@ -1087,7 +1095,8 @@ test("jecxz and loop semantic branch conditions use ecx without writing flags", 
     "set ecx:32 <- %1",
     "%3 = condition E",
     "%5 = get op0:32",
-    "branch %4 ? %5 : nextEip"
+    "jumpIf %4 -> %5",
+    "next"
   ]);
   strictEqual(loope.defs[4], "and(%2, %3)");
 
@@ -1096,7 +1105,8 @@ test("jecxz and loop semantic branch conditions use ecx without writing flags", 
     "set ecx:32 <- %1",
     "%3 = condition NE",
     "%5 = get op0:32",
-    "branch %4 ? %5 : nextEip"
+    "jumpIf %4 -> %5",
+    "next"
   ]);
   strictEqual(loopne.defs[4], "and(%2, %3)");
 });

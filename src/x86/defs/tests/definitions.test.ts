@@ -1345,7 +1345,8 @@ test("ecx loop control forms use default rel8 targets", () => {
     "%0 = get ecx:32",
     "set ecx:32 <- %1",
     "%3 = get op0:32",
-    "branch %2 ? %3 : nextEip"
+    "jumpIf %2 -> %3",
+    "next"
   ]);
   strictEqual(loopTrace.defs[1], "sub(%0, 1)");
   strictEqual(loopTrace.defs[2], "cmp32.ne(%1, 0)");
@@ -1392,7 +1393,8 @@ test("jcc forms are concrete specs with condition-specific semantics", () => {
   deepStrictEqual(trace.events, [
     "%0 = condition NE",
     "%1 = get op0:32",
-    "branch %0 ? %1 : nextEip"
+    "jumpIf %0 -> %1",
+    "next"
   ]);
 });
 

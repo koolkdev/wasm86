@@ -79,6 +79,78 @@ const fixtures = [
         instructionCount: 2
       }
     }
+  },
+  {
+    name: "forward-jcc-not-taken-falls-through-inside-block/trap",
+    bytes: [
+      0xb8, 0x07, 0x00, 0x00, 0x00,
+      0x83, 0xf9, 0x00,
+      0x74, 0x02,
+      0x01, 0xc3,
+      ...trap
+    ],
+    initialState: {
+      ebx: 0x20,
+      ecx: 1,
+      eip: engineFixtureStartAddress
+    },
+    expected: {
+      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      state: {
+        eax: 7,
+        ebx: 0x27,
+        ecx: 1,
+        eip: engineFixtureStartAddress + 14,
+        instructionCount: 5
+      }
+    }
+  },
+  {
+    name: "into-clear-falls-through-mid-block/trap",
+    bytes: [
+      0xb8, 0x01, 0x00, 0x00, 0x00,
+      0xce,
+      0xbb, 0x02, 0x00, 0x00, 0x00,
+      ...trap
+    ],
+    initialState: {
+      OF: 0,
+      eip: engineFixtureStartAddress
+    },
+    expected: {
+      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      state: {
+        eax: 1,
+        ebx: 2,
+        OF: 0,
+        eip: engineFixtureStartAddress + 13,
+        instructionCount: 4
+      }
+    }
+  },
+  {
+    name: "into-set-traps-mid-block",
+    bytes: [
+      0xb8, 0x01, 0x00, 0x00, 0x00,
+      0xce,
+      0xbb, 0x02, 0x00, 0x00, 0x00,
+      ...trap
+    ],
+    initialState: {
+      ebx: 0x55,
+      OF: 1,
+      eip: engineFixtureStartAddress
+    },
+    expected: {
+      result: { stop: { kind: "hostTrap", vector: 4 } },
+      state: {
+        eax: 1,
+        ebx: 0x55,
+        OF: 1,
+        eip: engineFixtureStartAddress + 6,
+        instructionCount: 2
+      }
+    }
   }
 ] as const satisfies readonly EngineFixture[];
 

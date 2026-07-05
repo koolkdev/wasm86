@@ -110,15 +110,10 @@ function shouldEndDecodedBlock(instruction: IsaDecodedInstruction): boolean {
     case "call":
     case "int":
     case "int3":
-    case "into":
-    case "jecxz":
     case "jmp":
-    case "loop":
-    case "loope":
-    case "loopne":
     case "ret":
       return true;
     default:
-      return instruction.spec.mnemonic.startsWith("j");
+      return false;
   }
 }
