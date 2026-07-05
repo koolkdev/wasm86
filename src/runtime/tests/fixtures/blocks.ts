@@ -68,8 +68,87 @@ export const CMP_BRANCH_TAKEN_BLOCK = {
   }
 } satisfies EngineFixture;
 
+export const LOOP_EXIT_BLOCK = {
+  name: "loop-exit",
+  bytes: [
+    0xe2, 0x00
+  ],
+  initialState: {
+    ecx: 1,
+    eip: engineFixtureStartAddress,
+    CF: 1,
+    PF: 1,
+    AF: 1,
+    ZF: 1,
+    SF: 1,
+    OF: 1
+  },
+  expected: {
+    result: {
+      stop: { kind: "none" }
+    },
+    state: {
+      ecx: 0,
+      eip: engineFixtureStartAddress + 2,
+      instructionCount: 1,
+      CF: 1,
+      PF: 1,
+      AF: 1,
+      ZF: 1,
+      SF: 1,
+      OF: 1
+    }
+  }
+} satisfies EngineFixture;
+
+export const JECXZ_TAKEN_BLOCK = {
+  name: "jecxz-taken",
+  bytes: [
+    0xe3, 0x02
+  ],
+  initialState: {
+    ecx: 0,
+    eip: engineFixtureStartAddress,
+    OF: 1
+  },
+  expected: {
+    result: {
+      stop: { kind: "none" }
+    },
+    state: {
+      ecx: 0,
+      eip: engineFixtureStartAddress + 4,
+      instructionCount: 1,
+      OF: 1
+    }
+  }
+} satisfies EngineFixture;
+
+export const INTO_NOT_TAKEN_BLOCK = {
+  name: "into-not-taken",
+  bytes: [
+    0xce
+  ],
+  initialState: {
+    eip: engineFixtureStartAddress
+  },
+  expected: {
+    result: {
+      stop: { kind: "none" }
+    },
+    state: {
+      eip: engineFixtureStartAddress + 1,
+      instructionCount: 1,
+      OF: 0
+    }
+  }
+} satisfies EngineFixture;
+
 export const COMPILED_BLOCK_FIXTURES = [
   MOV_ADD_JUMP_BLOCK,
   MEMORY_STORE_JUMP_BLOCK,
-  CMP_BRANCH_TAKEN_BLOCK
+  CMP_BRANCH_TAKEN_BLOCK,
+  LOOP_EXIT_BLOCK,
+  JECXZ_TAKEN_BLOCK,
+  INTO_NOT_TAKEN_BLOCK
 ] as const satisfies readonly EngineFixture[];

@@ -112,6 +112,154 @@ test("int exits host trap with the vector payload and pending state visible", as
   assertState(stateView, { regs: { ecx: 0x77 }, eip: instructions[1]!.nextEip, flags: allFlagsSet }, "int");
 });
 
+test("int3 exits host trap vector 3 after the one-byte instruction", async () => {
+  const instruction = decodeOk(decodeBytes([0xcc]));
+  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+  writeWasmCpuStateSnapshot(stateView, { eip: instruction.address, eax: 0x77, ...allFlagsSet });
+
+  const exit = decodeExit(run());
+
+  strictEqual(exit.family, "host");
+  strictEqual(exit.reason, HostExit.TRAP);
+  strictEqual(exit.payload, 3);
+  assertState(stateView, { regs: { eax: 0x77 }, eip: instruction.nextEip, flags: allFlagsSet }, "int3");
+});
+
+test("into traps vector 4 only when OF is set", async () => {
+  const instruction = decodeOk(decodeBytes([0xce]));
+
+  {
+    const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+    writeWasmCpuStateSnapshot(stateView, { eip: instruction.address, eax: 0x77, ...noFlagsSet });
+
+    strictEqual(run(), irBlockCompleted);
+    assertState(stateView, { regs: { eax: 0x77 }, eip: instruction.nextEip, flags: noFlagsSet }, "into not taken");
+  }
+
+  {
+    const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+    writeWasmCpuStateSnapshot(stateView, { eip: instruction.address, eax: 0x77, ...noFlagsSet, OF: 1 });
+
+    const exit = decodeExit(run());
+
+    strictEqual(exit.family, "host");
+    strictEqual(exit.reason, HostExit.TRAP);
+    strictEqual(exit.payload, 4);
+    assertState(
+      stateView,
+      { regs: { eax: 0x77 }, eip: instruction.nextEip, flags: { ...noFlagsSet, OF: 1 } },
+      "into taken"
+    );
+  }
+});
+
+test("into resolves lazy overflow from a prior add before deciding to trap", async () => {
+  // add eax, ebx; into. Explicit OF starts clear, so the trap depends on the
+  // lazy ADD flag source produced by the first instruction.
+  const instructions = decodeSequence([
+    [0x01, 0xd8],
+    [0xce]
+  ]);
+  const { stateView, run } = await instantiateIrBlock(blockOf(instructions));
+
+  writeWasmCpuStateSnapshot(stateView, {
+    eax: 0x7fff_ffff,
+    ebx: 1,
+    eip: instructions[0]!.address,
+    ...noFlagsSet
+  });
+
+  const exit = decodeExit(run());
+
+  strictEqual(exit.family, "host");
+  strictEqual(exit.reason, HostExit.TRAP);
+  strictEqual(exit.payload, 4);
+  assertState(
+    stateView,
+    { regs: { eax: 0x8000_0000, ebx: 1 }, eip: instructions[1]!.nextEip, flags: noFlagsSet },
+    "into lazy add overflow"
+  );
+  assertLazyFlagState(stateView, { kind: "ADD", width: 32, a: 0x7fff_ffff, b: 1 }, "into lazy add overflow");
+});
+
+test("ecx loop controls count down, branch, and leave flags untouched", async () => {
+  const cases = [
+    {
+      name: "loop",
+      bytes: [0xe2, 0x20],
+      initial: { ecx: 1, ...allFlagsSet },
+      expectedEcx: 0,
+      expectedEip: 0x1002,
+      expectedFlags: allFlagsSet
+    },
+    {
+      name: "loope taken",
+      bytes: [0xe1, 0x20],
+      initial: { ecx: 2, ...noFlagsSet, ZF: 1 },
+      expectedEcx: 1,
+      expectedEip: 0x1022,
+      expectedFlags: { ...noFlagsSet, ZF: 1 }
+    },
+    {
+      name: "loope stops on zf clear",
+      bytes: [0xe1, 0x20],
+      initial: { ecx: 2, ...noFlagsSet },
+      expectedEcx: 1,
+      expectedEip: 0x1002,
+      expectedFlags: noFlagsSet
+    },
+    {
+      name: "loopne taken",
+      bytes: [0xe0, 0x20],
+      initial: { ecx: 2, ...noFlagsSet },
+      expectedEcx: 1,
+      expectedEip: 0x1022,
+      expectedFlags: noFlagsSet
+    },
+    {
+      name: "loopne stops on zf set",
+      bytes: [0xe0, 0x20],
+      initial: { ecx: 2, ...noFlagsSet, ZF: 1 },
+      expectedEcx: 1,
+      expectedEip: 0x1002,
+      expectedFlags: { ...noFlagsSet, ZF: 1 }
+    }
+  ] as const;
+
+  for (const entry of cases) {
+    const instruction = decodeOk(decodeBytes(entry.bytes));
+    const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+    writeWasmCpuStateSnapshot(stateView, { eip: instruction.address, ...entry.initial });
+
+    strictEqual(run(), irBlockCompleted, entry.name);
+    assertState(
+      stateView,
+      { regs: { ecx: entry.expectedEcx }, eip: entry.expectedEip, flags: entry.expectedFlags },
+      entry.name
+    );
+  }
+});
+
+test("jecxz branches exactly when ecx is zero without touching flags", async () => {
+  const instruction = decodeOk(decodeBytes([0xe3, 0x20]));
+
+  for (const [name, ecx, expectedEip] of [
+    ["taken", 0, 0x1022],
+    ["not taken", 1, instruction.nextEip]
+  ] as const) {
+    const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+
+    writeWasmCpuStateSnapshot(stateView, { eip: instruction.address, ecx, ...allFlagsSet });
+
+    strictEqual(run(), irBlockCompleted, name);
+    assertState(stateView, { regs: { ecx }, eip: expectedEip, flags: allFlagsSet }, `jecxz ${name}`);
+  }
+});
+
 test("a branch composes with a fault edge in one block", async () => {
   // mov ecx, [ebx]; je +0x20 with ZF preset: the load's inline fault
   // edge coexists with the branch's inline if/else arms.

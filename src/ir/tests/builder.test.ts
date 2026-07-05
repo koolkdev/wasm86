@@ -41,9 +41,9 @@ import type { MemoryAccessKind, SemanticTemplate } from "#x86/semantics/builder.
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
-import { callSemantic, jccSemantic, jmpSemantic } from "#x86/semantics/control.js";
+import { callSemantic, jccSemantic, jecxzSemantic, jmpSemantic, loopSemantic } from "#x86/semantics/control.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
-import { intSemantic } from "#x86/semantics/misc.js";
+import { int3Semantic, intoSemantic, intSemantic } from "#x86/semantics/misc.js";
 import { movSemantic, movsxSemantic, movToSregSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
 import { shiftSemantic } from "#x86/semantics/shift.js";
@@ -1063,6 +1063,88 @@ test("int flushes pending state with the resume eip before a host trap exit", ()
     stateWrite(eipChannel, v.const(0x1007)),
     finishExit("hostTrap", v.const(0x21))
   ]);
+});
+
+test("int3 flushes the constant breakpoint vector as a host trap", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(int3Semantic(), [], loc(0x1000, 0x1001));
+
+  const block = builder.finish();
+  const v = block.values;
+
+  deepStrictEqual(entryActions(block), [
+    stateWrite(eipChannel, v.const(0x1001)),
+    finishExit("hostTrap", v.const(3))
+  ]);
+});
+
+test("into emits a completed-path conditional host trap and fallthrough state", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
+  builder.addInstruction(intoSemantic(), [], loc(0x1005, 0x1006));
+
+  const block = builder.finish();
+  const v = block.values;
+  const ofRead = resolveFlagAction(block, "OF").output;
+
+  deepStrictEqual(ifAction(block), {
+    kind: "if",
+    condition: ofRead,
+    hint: "unlikely",
+    thenBody: nestedActionBodies(block)[0]
+  });
+  deepStrictEqual(nestedBodyWriteFlushes(block, 1).map((write) => write.op), [
+    stateWrite(gprChannel("eax"), v.const(0x77)).op,
+    stateWrite(eipChannel, v.const(0x1006)).op
+  ]);
+  deepStrictEqual(nestedBodyView(block, 1).terminator, {
+    kind: "exit",
+    exit: { class: "host", reason: "hostTrap", payload: v.const(4) }
+  });
+  deepStrictEqual(stateWrites(block).map((write) => write.op), [
+    stateWrite(gprChannel("eax"), v.const(0x77)).op,
+    stateWrite(eipChannel, v.const(0x1006)).op
+  ]);
+});
+
+test("jecxz and loop branches dispatch through ecx-derived conditions without flag writes", () => {
+  const jecxzBuilder = createIrBlockBuilder();
+  const loopBuilder = createIrBlockBuilder();
+
+  jecxzBuilder.addInstruction(jecxzSemantic(), [immBinding(0x2000)], loc(0x1000, 0x1002));
+  loopBuilder.addInstruction(loopSemantic("none"), [immBinding(0x2000)], loc(0x1000, 0x1002));
+
+  const jecxz = jecxzBuilder.finish();
+  const loop = loopBuilder.finish();
+  const jecxzEcx = entryActions(jecxz).find(
+    (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("ecx")
+  )!.output;
+  const loopEcx = entryActions(loop).find(
+    (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("ecx")
+  )!.output;
+  const decremented = loop.values.binary("sub", loopEcx, loop.values.const(1));
+
+  strictEqual(ifAction(jecxz).condition, jecxz.values.compare("eq", jecxzEcx, jecxz.values.const(0)));
+  strictEqual(ifAction(loop).condition, loop.values.compare("ne", decremented, loop.values.const(0)));
+  strictEqual(stateWrites(loop).length, 0);
+  for (const branch of [nestedBodyWriteFlushes(loop, 1), nestedBodyWriteFlushes(loop, 2)]) {
+    strictEqual(branch.find((write) => write.op.slot === gprChannel("ecx"))?.op.value, decremented);
+  }
+  strictEqual(
+    [
+      ...entryActions(jecxz),
+      ...entryActions(loop),
+      ...nestedBodyWriteFlushes(jecxz, 1),
+      ...nestedBodyWriteFlushes(jecxz, 2),
+      ...nestedBodyWriteFlushes(loop, 1),
+      ...nestedBodyWriteFlushes(loop, 2)
+    ].some(
+      (action) => isStateWrite(action) && action.op.slot.kind === "flag"
+    ),
+    false
+  );
 });
 
 test("flat32 segment set exits through the fault path without segment writes", () => {

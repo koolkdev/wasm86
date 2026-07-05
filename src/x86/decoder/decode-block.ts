@@ -109,7 +109,13 @@ function shouldEndDecodedBlock(instruction: IsaDecodedInstruction): boolean {
   switch (instruction.spec.mnemonic) {
     case "call":
     case "int":
+    case "int3":
+    case "into":
+    case "jecxz":
     case "jmp":
+    case "loop":
+    case "loope":
+    case "loopne":
     case "ret":
       return true;
     default:

@@ -4,7 +4,15 @@ import {
 } from "#x86/defs/condition-codes.js";
 import { form, imm, mnemonic, modrmRm, rel } from "./dsl.js";
 import type { InstructionForm, InstructionMnemonic } from "./spec.js";
-import { callSemantic, jccSemantic, jmpSemantic, retImmSemantic, retSemantic } from "#x86/semantics/control.js";
+import {
+  callSemantic,
+  jccSemantic,
+  jecxzSemantic,
+  jmpSemantic,
+  loopSemantic,
+  retImmSemantic,
+  retSemantic
+} from "#x86/semantics/control.js";
 
 export const JMP = mnemonic("jmp", [
   // EB cb: JMP rel8
@@ -111,6 +119,46 @@ export const RET = mnemonic("ret", [
     operands: [imm(16)],
     syntax: "ret {0}",
     semantics: retImmSemantic()
+  })
+]);
+
+export const JECXZ = mnemonic("jecxz", [
+  // E3 cb: JECXZ rel8
+  form("rel8", {
+    opcode: [0xe3],
+    operands: [rel(8)],
+    syntax: "jecxz {0}",
+    semantics: jecxzSemantic()
+  })
+]);
+
+export const LOOP = mnemonic("loop", [
+  // E2 cb: LOOP rel8
+  form("rel8", {
+    opcode: [0xe2],
+    operands: [rel(8)],
+    syntax: "loop {0}",
+    semantics: loopSemantic("none")
+  })
+]);
+
+export const LOOPE = mnemonic("loope", [
+  // E1 cb: LOOPE/LOOPZ rel8
+  form("rel8", {
+    opcode: [0xe1],
+    operands: [rel(8)],
+    syntax: "loope {0}",
+    semantics: loopSemantic("E")
+  })
+]);
+
+export const LOOPNE = mnemonic("loopne", [
+  // E0 cb: LOOPNE/LOOPNZ rel8
+  form("rel8", {
+    opcode: [0xe0],
+    operands: [rel(8)],
+    syntax: "loopne {0}",
+    semantics: loopSemantic("NE")
   })
 ]);
 

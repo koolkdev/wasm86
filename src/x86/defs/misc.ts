@@ -1,5 +1,5 @@
 import { form, imm, mnemonic, modrmRm } from "./dsl.js";
-import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
+import { int3Semantic, intoSemantic, intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 
 export const NOP = mnemonic("nop", [
   // 90 and 66 90 stay xchg (e)ax, (e)ax: architecturally identical
@@ -40,5 +40,23 @@ export const INT = mnemonic("int", [
     operands: [imm(8)],
     syntax: "int {0}",
     semantics: intSemantic()
+  })
+]);
+
+export const INT3 = mnemonic("int3", [
+  // CC: INT3
+  form("near", {
+    opcode: [0xcc],
+    syntax: "int3",
+    semantics: int3Semantic()
+  })
+]);
+
+export const INTO = mnemonic("into", [
+  // CE: INTO
+  form("near", {
+    opcode: [0xce],
+    syntax: "into",
+    semantics: intoSemantic()
   })
 ]);

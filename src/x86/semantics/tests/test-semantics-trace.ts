@@ -297,6 +297,10 @@ class TraceBuilder implements SemanticsBuilder, SemanticBuildContext {
     this.#emitTerminator(`hostTrap ${this.#value(vector)}`);
   }
 
+  hostTrapIf(condition: ValueInput, vector: ValueInput): void {
+    this.#emitTerminator(`hostTrapIf ${this.#value(condition)} ${this.#value(vector)}`);
+  }
+
   finish(): SemanticTrace {
     if (!this.#terminated) {
       this.next();

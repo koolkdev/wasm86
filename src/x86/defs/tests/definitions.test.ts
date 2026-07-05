@@ -14,7 +14,7 @@ import {
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
   strictEqual(X86_32_CORE.instructionLengthLimit, 15);
-  strictEqual(X86_32_CORE.instructions.length, 478);
+  strictEqual(X86_32_CORE.instructions.length, 484);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -195,8 +195,14 @@ test("x86-32 core registers the initial instruction surface", () => {
     "ret.near",
     "ret.imm16_o16",
     "ret.imm16",
+    "jecxz.rel8",
+    "loop.rel8",
+    "loope.rel8",
+    "loopne.rel8",
     "wait.near",
     "int.imm8",
+    "int3.near",
+    "into.near",
     "cmovne.r32_rm32",
     "jne.rel8",
     "jne.rel16",
@@ -1293,6 +1299,53 @@ test("operand-size near control forms use 16-bit targets and stack cells", () =>
     "jump %1"
   ]);
   strictEqual(trace.defs[1], "truncate16(%0)");
+});
+
+test("ecx loop control forms use default rel8 targets", () => {
+  const jecxz = instruction("jecxz.rel8");
+  const loop = instruction("loop.rel8");
+  const loope = instruction("loope.rel8");
+  const loopne = instruction("loopne.rel8");
+
+  deepStrictEqual(jecxz.opcode, [0xe3]);
+  deepStrictEqual(loop.opcode, [0xe2]);
+  deepStrictEqual(loope.opcode, [0xe1]);
+  deepStrictEqual(loopne.opcode, [0xe0]);
+
+  for (const spec of [jecxz, loop, loope, loopne]) {
+    strictEqual(spec.prefixes, undefined);
+    deepStrictEqual(spec.operands, [{ kind: "rel", width: 8 }]);
+    strictEqual(spec.syntax, `${spec.mnemonic} {0}`);
+  }
+
+  const loopTrace = buildSemanticTrace(semanticsOf(loop));
+
+  deepStrictEqual(loopTrace.events, [
+    "%0 = get ecx:32",
+    "set ecx:32 <- %1",
+    "%3 = get op0:32",
+    "branch %2 ? %3 : nextEip"
+  ]);
+  strictEqual(loopTrace.defs[1], "sub(%0, 1)");
+  strictEqual(loopTrace.defs[2], "cmp32.ne(%1, 0)");
+});
+
+test("breakpoint trap forms expose host-trap semantics", () => {
+  const int3 = instruction("int3.near");
+  const into = instruction("into.near");
+
+  deepStrictEqual(int3.opcode, [0xcc]);
+  strictEqual(int3.operands, undefined);
+  strictEqual(int3.syntax, "int3");
+  deepStrictEqual(buildSemanticTrace(semanticsOf(int3)).events, ["hostTrap 3"]);
+
+  deepStrictEqual(into.opcode, [0xce]);
+  strictEqual(into.operands, undefined);
+  strictEqual(into.syntax, "into");
+  deepStrictEqual(buildSemanticTrace(semanticsOf(into)).events, [
+    "%0 = flag OF",
+    "hostTrapIf %0 4"
+  ]);
 });
 
 test("jcc forms are concrete specs with condition-specific semantics", () => {

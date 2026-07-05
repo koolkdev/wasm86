@@ -522,6 +522,27 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#terminated = true;
   }
 
+  // The taken path is a completed trap; the untaken path is the ordinary
+  // fallthrough for this instruction and may continue into the next one.
+  hostTrapIf(condition: ValueInput, vector: ValueInput): void {
+    this.#beforeOp("hostTrapIf");
+    this.#advanceInstructionCount();
+
+    const vectorId = vector;
+
+    this.#pending.write(eipChannel, this.#location().nextEip());
+    this.#actions.push({
+      kind: "if",
+      condition,
+      hint: "unlikely",
+      thenBody: this.#terminatingBody(
+        { kind: "exit", exit: { class: "host", reason: "hostTrap", payload: vectorId } },
+        this.#pending.flushesForPath("completed")
+      )
+    });
+    this.#terminated = true;
+  }
+
   // Branch bodies observe the completed instruction.
   #branchBody(target: TargetInput): Body {
     this.#pending.write(eipChannel, target);

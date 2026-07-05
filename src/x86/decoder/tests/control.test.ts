@@ -10,6 +10,20 @@ const fixtures: readonly DecoderFixture[] = [
     format: "int {0}"
   },
   {
+    name: "int3",
+    bytes: [0xcc],
+    mnemonic: "int3",
+    id: "int3.near",
+    format: "int3"
+  },
+  {
+    name: "into",
+    bytes: [0xce],
+    mnemonic: "into",
+    id: "into.near",
+    format: "into"
+  },
+  {
     name: "jmp rel8 5",
     bytes: [0xeb, 0x05],
     mnemonic: "jmp",
@@ -118,6 +132,34 @@ const fixtures: readonly DecoderFixture[] = [
     mnemonic: "jl",
     operands: [relTarget(8, -128, 0x0f82)],
     id: "jl.rel8"
+  },
+  {
+    name: "jecxz rel8",
+    bytes: [0xe3, 0x05],
+    mnemonic: "jecxz",
+    operands: [relTarget(8, 5, 0x1007)],
+    id: "jecxz.rel8"
+  },
+  {
+    name: "loop rel8",
+    bytes: [0xe2, 0xfb],
+    mnemonic: "loop",
+    operands: [relTarget(8, -5, 0x0ffd)],
+    id: "loop.rel8"
+  },
+  {
+    name: "loope rel8",
+    bytes: [0xe1, 0x05],
+    mnemonic: "loope",
+    operands: [relTarget(8, 5, 0x1007)],
+    id: "loope.rel8"
+  },
+  {
+    name: "loopne rel8",
+    bytes: [0xe0, 0x05],
+    mnemonic: "loopne",
+    operands: [relTarget(8, 5, 0x1007)],
+    id: "loopne.rel8"
   },
   {
     name: "je rel32",

@@ -51,6 +51,26 @@ test("decodeIsaBlock_stops_after_int_control_instruction", () => {
   }
 });
 
+test("decodeIsaBlock_stops_after_ecx_control_and_breakpoint_trap_instructions", () => {
+  for (const [bytes, id] of [
+    [[0xcc], "int3.near"],
+    [[0xce], "into.near"],
+    [[0xe3, 0x00], "jecxz.rel8"],
+    [[0xe2, 0x00], "loop.rel8"],
+    [[0xe1, 0x00], "loope.rel8"],
+    [[0xe0, 0x00], "loopne.rel8"]
+  ] as const) {
+    const block = decodeIsaBlock(byteReader([
+      0x90,
+      ...bytes,
+      0x90
+    ]), startAddress);
+
+    deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32", id]);
+    strictEqual(block.terminator.kind, "control", id);
+  }
+});
+
 test("decodeIsaBlock_returns_fallthrough_when_instruction_limit_ends_block", () => {
   const block = decodeIsaBlock(byteReader([
     0x90,

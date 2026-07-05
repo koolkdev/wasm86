@@ -84,4 +84,5 @@ export interface SemanticsBuilder {
   conditionalJump(condition: ValueInput, taken: TargetInput, notTaken: TargetInput): void;
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void;
   hostTrap(vector: ValueInput): void;
+  hostTrapIf(condition: ValueInput, vector: ValueInput): void;
 }

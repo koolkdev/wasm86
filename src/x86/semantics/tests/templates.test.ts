@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { bitScanSemantic, bitTestSemantic } from "#x86/semantics/bits.js";
-import { callSemantic, retSemantic } from "#x86/semantics/control.js";
+import { callSemantic, jecxzSemantic, loopSemantic, retSemantic } from "#x86/semantics/control.js";
 import {
   cmpxchg8bSemantic,
   cmpxchgSemantic,
@@ -20,7 +20,7 @@ import {
   xlatSemantic
 } from "#x86/semantics/flags.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
-import { intSemantic, nopSemantic } from "#x86/semantics/misc.js";
+import { int3Semantic, intoSemantic, intSemantic, nopSemantic } from "#x86/semantics/misc.js";
 import { cmovSemantic, movSemantic, movToSregSemantic } from "#x86/semantics/mov.js";
 import {
   imulImplicitSemantic,
@@ -109,6 +109,17 @@ test("int semantic reads the vector and exits to a host trap", () => {
   deepStrictEqual(trace.events, [
     "%0 = get op0:32",
     "hostTrap %0"
+  ]);
+});
+
+test("int3 and into semantics expose host trap exits", () => {
+  const int3 = buildSemanticTrace(int3Semantic());
+  const into = buildSemanticTrace(intoSemantic());
+
+  deepStrictEqual(int3.events, ["hostTrap 3"]);
+  deepStrictEqual(into.events, [
+    "%0 = flag OF",
+    "hostTrapIf %0 4"
   ]);
 });
 
@@ -1021,6 +1032,47 @@ test("ret semantic jumps to the popped value after incrementing esp", () => {
     "jump %1"
   ]);
   strictEqual(trace.defs[2], "add(%0, 4)");
+});
+
+test("jecxz and loop semantic branch conditions use ecx without writing flags", () => {
+  const jecxz = buildSemanticTrace(jecxzSemantic());
+  const loop = buildSemanticTrace(loopSemantic("none"));
+  const loope = buildSemanticTrace(loopSemantic("E"));
+  const loopne = buildSemanticTrace(loopSemantic("NE"));
+
+  deepStrictEqual(jecxz.events, [
+    "%0 = get ecx:32",
+    "%2 = get op0:32",
+    "branch %1 ? %2 : nextEip"
+  ]);
+  strictEqual(jecxz.defs[1], "cmp32.eq(%0, 0)");
+
+  deepStrictEqual(loop.events, [
+    "%0 = get ecx:32",
+    "set ecx:32 <- %1",
+    "%3 = get op0:32",
+    "branch %2 ? %3 : nextEip"
+  ]);
+  strictEqual(loop.defs[1], "sub(%0, 1)");
+  strictEqual(loop.defs[2], "cmp32.ne(%1, 0)");
+
+  deepStrictEqual(loope.events, [
+    "%0 = get ecx:32",
+    "set ecx:32 <- %1",
+    "%3 = condition E",
+    "%5 = get op0:32",
+    "branch %4 ? %5 : nextEip"
+  ]);
+  strictEqual(loope.defs[4], "and(%2, %3)");
+
+  deepStrictEqual(loopne.events, [
+    "%0 = get ecx:32",
+    "set ecx:32 <- %1",
+    "%3 = condition NE",
+    "%5 = get op0:32",
+    "branch %4 ? %5 : nextEip"
+  ]);
+  strictEqual(loopne.defs[4], "and(%2, %3)");
 });
 
 test("common flag-producing templates emit flag sources", () => {
