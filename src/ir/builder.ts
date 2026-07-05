@@ -23,7 +23,7 @@ import type {
   Value,
   ValueInput
 } from "#x86/semantics/refs.js";
-import type { EffectiveAddress, OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 import {
   signedComparePredicates,
   type BinaryOperator,
@@ -32,8 +32,9 @@ import {
 } from "#x86/semantics/ops.js";
 import type {
   ExternalValueId,
-  MemDynamicSegment,
+  EffectiveAddressTerms,
   MemDynamicOperandBinding,
+  MemSegmentBinding,
   OperandBinding,
   RegDynamicOperandBinding,
   SegmentDynamicOperandBinding,
@@ -676,11 +677,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     switch (binding.kind) {
       case "mem":
-        return this.#linearAddress(binding.address.segment, this.#operandAddress(index));
+        return this.#memSegmentLinearAddress(binding.segment, this.#operandAddress(index));
       case "memStatic":
-        return this.#memDynamicLinearAddress(binding.segment, this.#operandAddress(index));
+        return this.#memSegmentLinearAddress(binding.segment, this.#operandAddress(index));
       case "memDynamic":
-        return this.#memDynamicLinearAddress(binding.segment, this.#operandAddress(index));
+        return this.#memSegmentLinearAddress(binding.segment, this.#operandAddress(index));
     }
   }
 
@@ -694,7 +695,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return this.#values.binary("add", base, this.#values.external(binding.offset));
   }
 
-  #effectiveAddress(ea: EffectiveAddress): ValueId {
+  #effectiveAddress(ea: EffectiveAddressTerms): ValueId {
     let address: ValueId | undefined;
 
     if (ea.base !== undefined) {
@@ -728,9 +729,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return this.#values.binary("add", this.#segments.readBase(segment), offset);
   }
 
-  #memDynamicLinearAddress(segment: MemDynamicSegment | undefined, offset: ValueId): ValueId {
-    switch (segment?.kind) {
-      case undefined:
+  #memSegmentLinearAddress(segment: MemSegmentBinding, offset: ValueId): ValueId {
+    switch (segment.kind) {
+      case "none":
         return offset;
       case "static":
         return this.#linearAddress(segment.reg, offset);

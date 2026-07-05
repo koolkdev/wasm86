@@ -26,7 +26,7 @@ export type OperandSpec =
   | Readonly<{ kind: "opcode.reg"; type: RegOperandType }>
   | Readonly<{ kind: "implicit.reg"; reg: RegName; type: RegOperandType }>
   | Readonly<{ kind: "implicit.sreg"; reg: SegmentRegister }>
-  | Readonly<{ kind: "implicit.mem"; width: OperandWidth; base: Reg32; disp: number }>
+  | Readonly<{ kind: "implicit.mem"; width: OperandWidth; base: Reg32; disp: number; segment?: SegmentRegister }>
   | Readonly<{ kind: "moffs"; width: OperandWidth }>
   | Readonly<{ kind: "imm"; width: OperandWidth; semanticWidth?: OperandWidth; extension?: ImmediateExtension }>
   | Readonly<{ kind: "rel"; width: 8 | 16 | 32 }>;

@@ -2,14 +2,22 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
+import {
+  immBinding,
+  memBinding,
+  noMemSegment,
+  regBinding,
+  staticMemSegment,
+  type EffectiveAddressTerms,
+  type OperandBinding
+} from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decodeOk } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
-import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
+import { reg32, type MemOperand, type Reg32 } from "#x86/types.js";
 import { HostExit, decodeExit } from "#wasm/exit.js";
 import { assertPageFaultException, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
@@ -200,14 +208,16 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
         // The decoder already resolved the absolute target.
         return immBinding(operand.target);
       case "mem":
-        return memBinding(effectiveAddressOf(operand));
+        return memBinding(
+          effectiveAddressTermsOf(operand),
+          operand.segment === undefined ? noMemSegment() : staticMemSegment(operand.segment)
+        );
     }
   });
 }
 
-function effectiveAddressOf(operand: MemOperand): EffectiveAddress {
+function effectiveAddressTermsOf(operand: MemOperand): EffectiveAddressTerms {
   return {
-    segment: operand.segment,
     base: operand.base,
     index: operand.index,
     scale: operand.scale,

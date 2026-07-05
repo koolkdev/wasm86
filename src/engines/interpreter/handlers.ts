@@ -3,12 +3,14 @@ import { createIrBlockBuilder, externalInstructionLocation } from "#ir/builder.j
 import {
   immExternalBinding,
   dynamicMemSegment,
+  memBinding,
   memDynamicBinding,
   memStaticBinding,
   regBinding,
   regDynamicBinding,
   segmentBinding,
   segmentDynamicBinding,
+  staticMemSegment,
   type ExternalValueId,
   type OperandBinding
 } from "#ir/operands.js";
@@ -21,7 +23,7 @@ import {
   ssSegmentIndex
 } from "#x86/segments.js";
 import { reg32Index } from "#x86/registers.js";
-import { reg16, reg32, reg8, type Reg32, type RegName } from "#x86/types.js";
+import { reg16, reg32, reg8, type Reg32, type RegName, type SegmentRegister } from "#x86/types.js";
 import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
@@ -138,13 +140,8 @@ function decodeOperand(
     case "implicit.sreg":
       return { binding: segmentBinding(operand.reg), cursor };
     case "implicit.mem":
-      emitImplicitMemoryBinding(context, operand.base, operand.disp);
       return {
-        binding: memDynamicBinding(
-          externals.bind(locals.base),
-          externals.bind(locals.offset),
-          dynamicMemSegment(externals.bind(locals.effectiveSegment))
-        ),
+        binding: implicitMemoryBinding(context, externals, operand.base, operand.disp, operand.segment),
         cursor
       };
     case "moffs":
@@ -179,13 +176,36 @@ function decodeOperand(
   }
 }
 
+function implicitMemoryBinding(
+  context: HandlerEmitContext,
+  externals: HandlerExternals,
+  base: Reg32,
+  disp: number,
+  segment: SegmentRegister | undefined
+): OperandBinding {
+  if (segment !== undefined) {
+    return memBinding(
+      { base, index: undefined, scale: 1, disp },
+      staticMemSegment(segment)
+    );
+  }
+
+  const baseIndex = reg32Index(base);
+
+  emitImplicitMemoryBinding(context, baseIndex, disp);
+  return memDynamicBinding(
+    externals.bind(context.locals.base),
+    externals.bind(context.locals.offset),
+    dynamicMemSegment(externals.bind(context.locals.effectiveSegment))
+  );
+}
+
 function emitImplicitMemoryBinding(
   context: HandlerEmitContext,
-  base: Reg32,
+  baseIndex: number,
   disp: number
 ): void {
   const { body, locals } = context;
-  const baseIndex = reg32Index(base);
 
   body.i32Const(baseIndex).localSet(locals.base);
   body.i32Const(disp).localSet(locals.offset);

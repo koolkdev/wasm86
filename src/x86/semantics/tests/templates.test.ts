@@ -37,6 +37,13 @@ import {
   pushaSemantic,
   pushSemantic
 } from "#x86/semantics/stack.js";
+import {
+  cmpsSemantic,
+  lodsSemantic,
+  movsSemantic,
+  scasSemantic,
+  stosSemantic
+} from "#x86/semantics/strings.js";
 import { testSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import type { ValueInput } from "#x86/semantics/refs.js";
@@ -156,6 +163,82 @@ test("xlat guards and reads the byte at implicit EBX plus zero-extended AL", () 
     "next"
   ]);
   strictEqual(trace.defs[2], "add(%0, %1)");
+});
+
+test("movs reads the source, writes the fixed destination, then steps both pointers", () => {
+  const trace = buildSemanticTrace(movsSemantic(32), operands("mem", "mem"));
+
+  deepStrictEqual(trace.events, [
+    "%0 = flag DF",
+    "%2 = addr op0",
+    "guard read %2:4",
+    "%3 = get op0:32",
+    "%4 = addr op1",
+    "guard write %4:4",
+    "set op1:32 <- %3",
+    "%5 = get esi:32",
+    "set esi:32 <- %6",
+    "%7 = get edi:32",
+    "set edi:32 <- %8",
+    "next"
+  ]);
+  strictEqual(trace.defs[1], "select(%0, 4294967292, 4)");
+  strictEqual(trace.defs[6], "add(%5, %1)");
+  strictEqual(trace.defs[8], "add(%7, %1)");
+});
+
+test("cmps compares source minus destination before stepping both pointers", () => {
+  const trace = buildSemanticTrace(cmpsSemantic(16), operands("mem", "mem"));
+
+  deepStrictEqual(trace.events.slice(0, 7), [
+    "%0 = flag DF",
+    "%2 = addr op0",
+    "guard read %2:2",
+    "%3 = addr op1",
+    "guard read %3:2",
+    "%4 = get op0:16",
+    "%6 = get op1:16"
+  ]);
+  ok(trace.events.includes("flagSource sub:16 left=%5 right=%7 result=%9"));
+  ok(trace.events.includes("set esi:32 <- %11"));
+  ok(trace.events.includes("set edi:32 <- %13"));
+});
+
+test("stos, lods, and scas use accumulator widths and one pointer step", () => {
+  const stos = buildSemanticTrace(stosSemantic(8), operands("mem"));
+  const lods = buildSemanticTrace(lodsSemantic(16), operands("mem"));
+  const scas = buildSemanticTrace(scasSemantic(32), operands("mem"));
+
+  deepStrictEqual(stos.events.slice(0, 6), [
+    "%0 = get al:8",
+    "%1 = flag DF",
+    "%3 = addr op0",
+    "guard write %3:1",
+    "set op0:8 <- %0",
+    "%4 = get edi:32"
+  ]);
+  strictEqual(stos.events.some((event) => event.startsWith("set esi:32")), false);
+
+  deepStrictEqual(lods.events.slice(0, 7), [
+    "%0 = flag DF",
+    "%2 = addr op0",
+    "guard read %2:2",
+    "%3 = get op0:16",
+    "set ax:16 <- %3",
+    "%4 = get esi:32",
+    "set esi:32 <- %5"
+  ]);
+  strictEqual(lods.events.some((event) => event.startsWith("set edi:32")), false);
+
+  deepStrictEqual(scas.events.slice(0, 6), [
+    "%0 = flag DF",
+    "%2 = addr op0",
+    "guard read %2:4",
+    "%3 = get eax:32",
+    "%5 = get op0:32",
+    "flagSource sub:32 left=%4 right=%6 result=%8"
+  ]);
+  ok(scas.events.includes("set edi:32 <- %10"));
 });
 
 test("lea semantic computes an address without getting the operand value", () => {

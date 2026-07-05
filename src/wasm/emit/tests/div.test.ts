@@ -2,12 +2,19 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
+import {
+  memBinding,
+  noMemSegment,
+  regBinding,
+  staticMemSegment,
+  type EffectiveAddressTerms,
+  type OperandBinding
+} from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decoded, startAddress } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import type { EffectiveAddress, MemOperand, RegName } from "#x86/types.js";
+import type { MemOperand, RegName } from "#x86/types.js";
 import {
   assertLazyFlagState,
   createWasmCpuStateSnapshot,
@@ -245,7 +252,10 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
       case "reg":
         return regBinding(operand.alias.name);
       case "mem":
-        return memBinding(effectiveAddressOf(operand));
+        return memBinding(
+          effectiveAddressTermsOf(operand),
+          operand.segment === undefined ? noMemSegment() : staticMemSegment(operand.segment)
+        );
       case "imm":
       case "segment":
       case "relTarget":
@@ -254,9 +264,8 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
   });
 }
 
-function effectiveAddressOf(operand: MemOperand): EffectiveAddress {
+function effectiveAddressTermsOf(operand: MemOperand): EffectiveAddressTerms {
   return {
-    segment: operand.segment,
     base: operand.base,
     index: operand.index,
     scale: operand.scale,

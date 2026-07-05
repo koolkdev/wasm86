@@ -223,15 +223,15 @@ class InstructionDecoder {
       case "implicit.mem":
         return {
           kind: "ok",
-          binding: {
+          binding: ({
             kind: "mem",
             accessWidth: operand.width,
-            segment: this.segmentOverride ?? defaultSegmentForBase(operand.base),
+            segment: operand.segment ?? this.segmentOverride ?? defaultSegmentForBase(operand.base),
             base: operand.base,
             index: undefined,
             scale: 1,
             disp: operand.disp
-          },
+          } satisfies MemOperand),
           cursor
         };
       case "moffs":

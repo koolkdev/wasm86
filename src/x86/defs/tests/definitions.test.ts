@@ -14,7 +14,7 @@ import {
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
   strictEqual(X86_32_CORE.instructionLengthLimit, 15);
-  strictEqual(X86_32_CORE.instructions.length, 436);
+  strictEqual(X86_32_CORE.instructions.length, 451);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -112,6 +112,21 @@ test("x86-32 core registers the initial instruction surface", () => {
     "lahf.ah",
     "sahf.ah",
     "xlat.m8_al",
+    "movs.m8_m8",
+    "movs.m16_m16",
+    "movs.m32_m32",
+    "cmps.m8_m8",
+    "cmps.m16_m16",
+    "cmps.m32_m32",
+    "stos.m8_al",
+    "stos.m16_ax",
+    "stos.m32_eax",
+    "lods.al_m8",
+    "lods.ax_m16",
+    "lods.eax_m32",
+    "scas.al_m8",
+    "scas.ax_m16",
+    "scas.eax_m32",
     "cbw.word",
     "cwde.dword",
     "cwd.word",
@@ -353,6 +368,52 @@ test("mov moffs forms use accumulator direct-offset operands", () => {
     { kind: "moffs", width: 16 },
     { kind: "implicit.reg", reg: "ax", type: "r16" }
   ]);
+});
+
+test("string forms use hidden ESI and fixed ES:EDI memory operands", () => {
+  const movsByte = instruction("movs.m8_m8");
+  const movsWord = instruction("movs.m16_m16");
+  const movsDword = instruction("movs.m32_m32");
+  const cmpsDword = instruction("cmps.m32_m32");
+  const stosDword = instruction("stos.m32_eax");
+  const lodsDword = instruction("lods.eax_m32");
+  const scasDword = instruction("scas.eax_m32");
+
+  deepStrictEqual(movsByte.opcode, [0xa4]);
+  deepStrictEqual(movsByte.operands, [
+    { kind: "implicit.mem", width: 8, base: "esi", disp: 0 },
+    { kind: "implicit.mem", width: 8, base: "edi", disp: 0, segment: "es" }
+  ]);
+  strictEqual(movsByte.syntax, "movs");
+
+  deepStrictEqual(movsWord.prefixes, { operandSize: "override" });
+  deepStrictEqual(movsWord.opcode, [0xa5]);
+  deepStrictEqual(movsWord.operands, [
+    { kind: "implicit.mem", width: 16, base: "esi", disp: 0 },
+    { kind: "implicit.mem", width: 16, base: "edi", disp: 0, segment: "es" }
+  ]);
+
+  deepStrictEqual(movsDword.opcode, [0xa5]);
+  deepStrictEqual(movsDword.operands, [
+    { kind: "implicit.mem", width: 32, base: "esi", disp: 0 },
+    { kind: "implicit.mem", width: 32, base: "edi", disp: 0, segment: "es" }
+  ]);
+
+  deepStrictEqual(cmpsDword.opcode, [0xa7]);
+  deepStrictEqual(cmpsDword.operands, movsDword.operands);
+
+  deepStrictEqual(stosDword.opcode, [0xab]);
+  deepStrictEqual(stosDword.operands, [
+    { kind: "implicit.mem", width: 32, base: "edi", disp: 0, segment: "es" }
+  ]);
+
+  deepStrictEqual(lodsDword.opcode, [0xad]);
+  deepStrictEqual(lodsDword.operands, [
+    { kind: "implicit.mem", width: 32, base: "esi", disp: 0 }
+  ]);
+
+  deepStrictEqual(scasDword.opcode, [0xaf]);
+  deepStrictEqual(scasDword.operands, stosDword.operands);
 });
 
 test("setcc forms use select-value semantics for register or memory destinations", () => {

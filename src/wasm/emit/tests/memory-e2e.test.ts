@@ -2,14 +2,22 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
+import {
+  immBinding,
+  memBinding,
+  noMemSegment,
+  regBinding,
+  staticMemSegment,
+  type EffectiveAddressTerms,
+  type OperandBinding
+} from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decodeOk, startAddress } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
 import { x86Flags, x86StatusFlags, type X86Flag } from "#x86/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
-import { reg32, type EffectiveAddress, type MemOperand, type Reg32 } from "#x86/types.js";
+import { reg32, type MemOperand, type Reg32 } from "#x86/types.js";
 import { decodeExit, type DecodedCpuExceptionExit } from "#wasm/exit.js";
 import { assertPageFaultException, readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
@@ -973,7 +981,10 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
       case "imm":
         return immBinding(operand.value);
       case "mem":
-        return memBinding(effectiveAddressOf(operand));
+        return memBinding(
+          effectiveAddressTermsOf(operand),
+          operand.segment === undefined ? noMemSegment() : staticMemSegment(operand.segment)
+        );
       case "segment":
         throw new Error("segment operands not supported in the memory e2e");
       case "relTarget":
@@ -982,9 +993,8 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
   });
 }
 
-function effectiveAddressOf(operand: MemOperand): EffectiveAddress {
+function effectiveAddressTermsOf(operand: MemOperand): EffectiveAddressTerms {
   return {
-    segment: operand.segment,
     base: operand.base,
     index: operand.index,
     scale: operand.scale,

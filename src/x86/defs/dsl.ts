@@ -84,8 +84,15 @@ export function implicitSreg(reg: SegmentRegister): OperandSpec {
   return { kind: "implicit.sreg", reg };
 }
 
-export function implicitMem(width: OperandWidth, base: Reg32, disp = 0): OperandSpec {
-  return { kind: "implicit.mem", width, base, disp };
+export function implicitMem(
+  width: OperandWidth,
+  base: Reg32,
+  disp = 0,
+  options: Readonly<{ segment?: SegmentRegister }> = {}
+): OperandSpec {
+  return options.segment === undefined
+    ? { kind: "implicit.mem", width, base, disp }
+    : { kind: "implicit.mem", width, base, disp, segment: options.segment };
 }
 
 export function moffs(width: OperandWidth): OperandSpec {

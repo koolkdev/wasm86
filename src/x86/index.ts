@@ -14,6 +14,7 @@ import { SETCC } from "./defs/setcc.js";
 import { RCL, RCR, ROL, ROR, SAR, SHL, SHLD, SHR, SHRD } from "./defs/shift.js";
 import { CBW, CDQ, CWD, CWDE } from "./defs/sign-extend.js";
 import { LEAVE, POP, POPA, POPAD, POPF, POPFD, PUSH, PUSHA, PUSHAD, PUSHF, PUSHFD } from "./defs/stack.js";
+import { CMPS, LODS, MOVS, SCAS, STOS } from "./defs/strings.js";
 import { XCHG } from "./defs/xchg.js";
 
 export const X86_32_CORE = defineIsa({
@@ -56,6 +57,11 @@ export const X86_32_CORE = defineIsa({
     LAHF,
     SAHF,
     XLAT,
+    MOVS,
+    CMPS,
+    STOS,
+    LODS,
+    SCAS,
     CBW,
     CWDE,
     CWD,

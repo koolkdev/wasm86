@@ -65,13 +65,14 @@ function mem(
     disp: number;
   }>
 ): ReturnType<typeof memBinding> {
+  const segment = address.segment ?? defaultSegmentForBase(address.base);
+
   return memBinding({
-    segment: address.segment ?? defaultSegmentForBase(address.base),
     base: address.base,
     index: address.index,
     scale: address.scale,
     disp: address.disp
-  });
+  }, staticMemSegment(segment));
 }
 
 // Every instruction advances the count channel; the dedicated tests at the
@@ -2394,7 +2395,7 @@ test("a segmented memStatic operand adds the selected segment base", () => {
 test("a memDynamic operand reads the base register inside the block", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(32), [regBinding("eax"), memDynamicBinding(0, 1, undefined)], loc(0x1000, 0x1006));
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), memDynamicBinding(0, 1)], loc(0x1000, 0x1006));
 
   const block = builder.finish();
   const v = block.values;
@@ -2514,7 +2515,7 @@ test("a read+write memDynamic operand reads the base once and reuses the address
 
   builder.addInstruction(
     aluSemantic("add", 32),
-    [memDynamicBinding(0, 1, undefined), immBinding(5)],
+    [memDynamicBinding(0, 1), immBinding(5)],
     loc(0x1000, 0x1003)
   );
 
@@ -2534,7 +2535,7 @@ test("a read+write memDynamic operand reads the base once and reuses the address
 test("pop [memDynamic] flushes esp before the base read and restores it on the write edge", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(popSemantic(), [memDynamicBinding(0, 1, undefined)], loc(0x1000, 0x1003));
+  builder.addInstruction(popSemantic(), [memDynamicBinding(0, 1)], loc(0x1000, 0x1003));
 
   const block = builder.finish();
   const v = block.values;
@@ -2588,7 +2589,7 @@ test("a guard after a memDynamic flush of a never-read register fails loudly", (
     () =>
       createIrBlockBuilder().addInstruction(
         blindWriteThenDynamicAddress,
-        [memDynamicBinding(0, 1, undefined)],
+        [memDynamicBinding(0, 1)],
         loc(0x1000, 0x1002)
       ),
     /unrestorable/

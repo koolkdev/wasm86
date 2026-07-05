@@ -100,6 +100,13 @@ test("dsl operand helpers support byte and word ModRM forms", () => {
   deepStrictEqual(modrmRm("m8"), { kind: "modrm.rm", type: "m8" });
   deepStrictEqual(moffs(32), { kind: "moffs", width: 32 });
   deepStrictEqual(implicitMem(8, "ebx"), { kind: "implicit.mem", width: 8, base: "ebx", disp: 0 });
+  deepStrictEqual(implicitMem(32, "edi", 0, { segment: "es" }), {
+    kind: "implicit.mem",
+    width: 32,
+    base: "edi",
+    disp: 0,
+    segment: "es"
+  });
 });
 
 test("mnemonic and ISA builders generate stable full instruction ids", () => {

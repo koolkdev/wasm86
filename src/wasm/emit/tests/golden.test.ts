@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { immBinding, memBinding, regBinding, type OperandBinding } from "#ir/operands.js";
+import { immBinding, memBinding, noMemSegment, regBinding, staticMemSegment, type OperandBinding } from "#ir/operands.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
@@ -113,12 +113,11 @@ function bindingsFor(
         return immBinding(operand.target);
       case "mem":
         return memBinding({
-          segment: operand.segment,
           base: operand.base,
           index: operand.index,
           scale: operand.scale,
           disp: operand.disp
-        });
+        }, operand.segment === undefined ? noMemSegment() : staticMemSegment(operand.segment));
     }
   });
 }
