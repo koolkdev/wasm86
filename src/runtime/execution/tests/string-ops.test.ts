@@ -296,13 +296,16 @@ runFixture({
         exception: { kind: "PF", linearAddress: guestByteLength, errorCode: 2 }
       }
     },
+    // Mid-rep faults report the pre-rep count: with no carried count cell,
+    // the fault snapshot predates the loop and the resumed run counts only
+    // the remaining units.
     state: {
       ecx: 1,
       esi: sourceAddress + 4,
       edi: guestByteLength,
       esBase,
       eip: engineFixtureStartAddress,
-      instructionCount: 1
+      instructionCount: 0
     },
     memory: [{ address: guestByteLength - 4, bytes: dwordBytes(0x1111_2222) }]
   }

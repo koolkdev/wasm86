@@ -349,6 +349,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#terminated = true;
   }
 
+  addInstructionCount(amount: ValueInput): void {
+    this.#beforeOp("addInstructionCount");
+    this.#state.instructionCount.add(amount);
+  }
+
   memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void {
     this.#beforeOp("memoryGuard");
     // Guest memory cannot be rolled back by any scheme, so a fault body
@@ -513,13 +518,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         scope: loop.scope,
         binding: (index) => this.#binding(index)
       });
-      const onContinue = options.onContinue;
-      const continueCondition = options.body(loopBuilder);
 
-      exitValues = loop.emitContinue(
-        continueCondition,
-        onContinue === undefined ? undefined : () => onContinue(loopBuilder)
-      );
+      exitValues = loop.emitContinue(options.body(loopBuilder));
     } finally {
       this.#activeLoop = undefined;
     }

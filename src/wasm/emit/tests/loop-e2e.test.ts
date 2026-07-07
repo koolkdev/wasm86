@@ -191,7 +191,8 @@ test("a mid-string fault commits partial progress with eip at the rep", async ()
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esi")), 0x24);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edi")), guestByteLength);
   strictEqual(readWasmCpuStateChannel(stateView, eipChannel), repEip);
-  strictEqual(readWasmCpuStateField(stateView, "instructionCount"), 1);
+  // The count is not carried: a mid-rep fault reports the pre-rep count.
+  strictEqual(readWasmCpuStateField(stateView, "instructionCount"), 0);
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0x1111_2222);
 });
 

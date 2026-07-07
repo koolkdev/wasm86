@@ -365,6 +365,39 @@ test("compounds nothing references contribute no uses", () => {
   strictEqual(analysis.useCount(five), 1);
 });
 
+test("a compound demanded across scopes charges children once, where it computes", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const five = values.const(5);
+  const sum = values.binary("add", read, five);
+  const outer = values.const(0);
+  const inner = values.const(1);
+  const analysis = analyze(values, [
+    stateRead(read, gprChannel("eax")),
+    {
+      kind: "if",
+      condition: outer,
+      thenBody: {
+        actions: [
+          {
+            kind: "if",
+            condition: inner,
+            thenBody: { actions: [stateWrite(gprChannel("ebx"), sum), hostExit()] }
+          }
+        ]
+      }
+    },
+    stateWrite(gprChannel("ecx"), sum)
+  ]);
+
+  // The inner arm's demand sits in the outer arm's scope, the write's at
+  // root: sum computes once on the root flow before the outer if and both
+  // replay it, so its children charge once, there.
+  strictEqual(analysis.useCount(sum), 2);
+  strictEqual(analysis.useCount(read), 1);
+  strictEqual(analysis.useCount(five), 1);
+});
+
 test("charging flows through nested compounds once", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();

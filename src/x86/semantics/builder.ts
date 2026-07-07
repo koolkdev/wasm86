@@ -72,9 +72,7 @@ export interface SemanticOps {
   condition(cc: ConditionCode): Value;
 }
 
-export interface LoopSemanticsBuilder extends SemanticOps {
-  incrementInstructionCount(): void;
-}
+export interface LoopSemanticsBuilder extends SemanticOps {}
 
 // A fused semantic loop's state declaration. State registers live in locals
 // for the loop's extent and materialize on fault or loop exit.
@@ -87,8 +85,6 @@ export type LoopOptions = Readonly<{
   statusFlags?: boolean;
   // Emits one iteration and returns the back-edge predicate.
   body: (builder: LoopSemanticsBuilder) => ValueInput;
-  // Runs only on a taken back edge before carried updates are captured.
-  onContinue?: (builder: LoopSemanticsBuilder) => void;
 }>;
 
 export interface SemanticBuildContext {
@@ -102,6 +98,7 @@ export interface SemanticsBuilder extends SemanticOps {
   nextEip(): Value;
 
   writeFlag(flag: X86Flag, value: ValueInput): void;
+  addInstructionCount(amount: ValueInput): void;
 
   next(): void;
   jump(target: TargetInput): void;

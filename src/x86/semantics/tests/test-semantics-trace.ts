@@ -311,13 +311,12 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     );
     const continueCondition = options.body(this);
 
-    options.onContinue?.(this);
     this.#emit(`loopContinue ${this.#value(continueCondition)}`);
     this.#emit("loopEnd");
   }
 
-  incrementInstructionCount(): void {
-    this.#emit("incrementInstructionCount");
+  addInstructionCount(amount: ValueInput): void {
+    this.#emit(`addInstructionCount ${this.#value(amount)}`);
   }
 
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {

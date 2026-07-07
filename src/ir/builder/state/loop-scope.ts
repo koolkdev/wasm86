@@ -5,7 +5,6 @@ import {
   channelCovers,
   channelsOverlap,
   gprChannel,
-  instructionCountChannel,
   isDynamicSlot,
   lazyFlagsAChannel,
   lazyFlagsBChannel,
@@ -22,7 +21,6 @@ type LoopCell = Required<LoopCarriedCell>;
 export type StateLoopOptions = Readonly<{
   regs?: readonly RegName[];
   statusFlags: boolean;
-  instructionCount: boolean;
 }>;
 
 export class StateLoopScope {
@@ -30,7 +28,6 @@ export class StateLoopScope {
   readonly #state: State;
   readonly #carried: readonly StateChannel[];
   readonly #carriesStatusFlags: boolean;
-  readonly #carriesInstructionCount: boolean;
   #cells: readonly LoopCell[] | undefined;
   #dirtyAtEntry: ReadonlySet<StateChannel> = new Set();
 
@@ -42,10 +39,8 @@ export class StateLoopScope {
     this.#values = values;
     this.#state = state;
     this.#carriesStatusFlags = options.statusFlags;
-    this.#carriesInstructionCount = options.instructionCount;
     this.#carried = [
       ...(options.regs ?? []).map((reg) => gprChannel(reg)),
-      ...(options.instructionCount ? [instructionCountChannel] : []),
       ...(options.statusFlags ? [lazyFlagsKindChannel, lazyFlagsAChannel, lazyFlagsBChannel] : [])
     ];
 
@@ -86,25 +81,6 @@ export class StateLoopScope {
 
   captureExitValues(): readonly ValueId[] {
     return this.#openCells().map((cell) => this.#state.readChannel(cell.channel));
-  }
-
-  captureContinueValues(): readonly ValueId[] {
-    return this.#openCells().map((cell) => this.#state.readChannel(cell.channel));
-  }
-
-  restoreExitValues(exitValues: readonly ValueId[]): void {
-    this.#openCells().forEach((cell, index) => {
-      this.#state.writeChannel(cell.channel, exitValues[index]!);
-    });
-  }
-
-  assertExitValues(exitValues: readonly ValueId[]): void {
-    this.#openCells().forEach((cell, index) => {
-      assert(
-        this.#state.readChannel(cell.channel) === exitValues[index],
-        "carried channels must not change after the back edge"
-      );
-    });
   }
 
   commitExitValues(exitValues: readonly ValueId[]): readonly StateWriteAction[] {
@@ -149,10 +125,6 @@ export class StateLoopScope {
 
   carriesStatusFlags(): boolean {
     return this.#carriesStatusFlags;
-  }
-
-  carriesInstructionCount(): boolean {
-    return this.#carriesInstructionCount;
   }
 
   // A loop body may only write channels it carries; any other write is silently

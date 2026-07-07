@@ -25,13 +25,8 @@ export class InstructionCountState {
     this.#cells.write(instructionCountChannel, this.#advancedValue());
   }
 
-  write(value: ValueId): void {
-    this.#cells.write(instructionCountChannel, value);
-    this.#rebase();
-  }
-
-  invalidate(): void {
-    this.#cells.invalidate(instructionCountChannel);
+  add(value: ValueId): void {
+    this.#cells.write(instructionCountChannel, this.#values.binary("add", this.read(), value));
     this.#rebase();
   }
 

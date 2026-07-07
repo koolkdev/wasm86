@@ -271,16 +271,20 @@ test("rep movs skips a zero count and fuses the unit into a state-reg loop", () 
     "%4 = addr op0"
   ]);
   ok(trace.events.includes("set ecx:32 <- %12"));
-  deepStrictEqual(trace.events.slice(-4), [
-    "incrementInstructionCount",
+  deepStrictEqual(trace.events.slice(-5), [
     "loopContinue %13",
     "loopEnd",
+    "%14 = get ecx:32",
+    "addInstructionCount %16",
     "next"
   ]);
   strictEqual(trace.defs[1], "cmp32.ne(%0, 0)");
   // The back-edge count is the body's own ecx read, not the pre-loop one.
   strictEqual(trace.defs[12], "sub(%11, 1)");
   strictEqual(trace.defs[13], "cmp32.ne(%12, 0)");
+  // The unit count settles as (entryEcx − exitEcx) − enter after the loop.
+  strictEqual(trace.defs[15], "sub(%0, %14)");
+  strictEqual(trace.defs[16], "sub(%15, %1)");
 });
 
 test("rep lods carries its accumulator as loop state", () => {
@@ -294,10 +298,11 @@ test("repne scas combines remaining ECX with ZF after the compare unit", () => {
 
   strictEqual(trace.events[1], "loop enter=%1 stateRegs=[ecx,edi] statusFlags");
   ok(trace.events.includes("%16 = condition NE"));
-  deepStrictEqual(trace.events.slice(-4), [
-    "incrementInstructionCount",
+  deepStrictEqual(trace.events.slice(-5), [
     "loopContinue %17",
     "loopEnd",
+    "%18 = get ecx:32",
+    "addInstructionCount %20",
     "next"
   ]);
   strictEqual(trace.defs[17], "and(%15, %16)");

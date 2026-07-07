@@ -139,15 +139,16 @@ function scasUnit(width: OperandWidth): StringUnit {
 }
 function repSemantic(
   unit: StringUnit,
-  loop: Omit<LoopOptions, "enter" | "body" | "onContinue">,
+  loop: Omit<LoopOptions, "enter" | "body">,
   condition?: "E" | "NE"
 ): SemanticTemplate {
   return (s, context) => {
     const ecx = s.get(s.reg("ecx"));
+    const enter = s.compare(32, "ne", ecx, s.const32(0));
 
     s.loop({
       ...loop,
-      enter: s.compare(32, "ne", ecx, s.const32(0)),
+      enter,
       body: (loopBuilder) => {
         unit(loopBuilder, context);
 
@@ -160,11 +161,14 @@ function repSemantic(
 
         loopBuilder.set(loopBuilder.reg("ecx"), decremented);
         return repBranchPredicate(loopBuilder, condition, nonzero);
-      },
-      onContinue: (loopBuilder) => {
-        loopBuilder.incrementInstructionCount();
       }
     });
+
+    // Each unit decrements ECX once: entry − exit counts completed units.
+    // Minus enter cancels next()'s +1 on the ran path; a zero trip adds 0.
+    const exitEcx = s.get(s.reg("ecx"));
+
+    s.addInstructionCount(s.binary("sub", s.binary("sub", ecx, exitEcx), enter));
   };
 }
 

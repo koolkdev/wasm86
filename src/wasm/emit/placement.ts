@@ -310,10 +310,10 @@ class PlacementAnalysis implements BlockPlacement {
   // settled before recording what it consumes. Placement rides the same
   // walk: an output's demand is complete when the walk reaches it, so its
   // producer's placement — and with it where the producer's operands are
-  // charged — is decided right there. A demanded compound demands its
-  // children at its first use in each body scope; a captured producer
-  // demands its operands at the producing action; a deferred producer
-  // demands them once, at the point it will execute.
+  // charged — is decided right there. A demanded compound charges its
+  // children once, at the site dominating every demanding scope; a captured
+  // producer demands its operands at the producing action; a deferred
+  // producer demands them once, at the point it will execute.
   #propagateDemandAndPlace(): void {
     for (let id = this.#values.size() - 1; id >= 0; id -= 1) {
       if ((this.#demandCounts.get(id) ?? 0) === 0) {
@@ -342,12 +342,15 @@ class PlacementAnalysis implements BlockPlacement {
       const demands = this.#firstDemands.get(id);
 
       assert(demands !== undefined, `demanded value ${id} has no demand sites`);
-      for (const [body, firstActionIndex] of demands) {
-        const computedAt = { body, actionIndex: firstActionIndex };
 
-        for (const child of valueChildren(this.#values.node(id))) {
-          this.#addDemand({ value: child, site: computedAt, use: computedAt });
-        }
+      // A compound computes once and replays from its local across scopes,
+      // so its children charge once — at the point dominating every
+      // demanding scope, where the first capture walk or direct use
+      // actually computes it.
+      const computedAt = this.#dominatingDemandSite(demands);
+
+      for (const child of valueChildren(this.#values.node(id))) {
+        this.#addDemand({ value: child, site: computedAt, use: computedAt });
       }
     }
   }
@@ -486,6 +489,64 @@ class PlacementAnalysis implements BlockPlacement {
       homeEntry: homeEntry ?? earliest[1].entryIndex,
       position: { body: scope, actionIndex: earliest[1].entryIndex }
     });
+  }
+
+  // Demand in one scope keeps its earliest index; demand spanning scopes
+  // projects each site to the shared ancestor's owning action and takes
+  // the earliest.
+  #dominatingDemandSite(demands: ReadonlyMap<Body, number>): DemandSite {
+    let site: DemandSite | undefined;
+
+    for (const [body, actionIndex] of demands) {
+      site =
+        site === undefined
+          ? { body, actionIndex }
+          : this.#commonDominator(site, { body, actionIndex });
+    }
+
+    assert(site !== undefined, "demanded value has no demand sites");
+    return site;
+  }
+
+  #commonDominator(a: DemandSite, b: DemandSite): DemandSite {
+    const scope = this.#commonScope(a.body, b.body);
+
+    return {
+      body: scope,
+      actionIndex: Math.min(this.#projectedIndex(a, scope), this.#projectedIndex(b, scope))
+    };
+  }
+
+  #commonScope(a: Body, b: Body): Body {
+    const ancestors = new Set<Body>();
+
+    for (let body: Body | undefined = a; body !== undefined; body = this.#bodyOwners.get(body)?.body) {
+      ancestors.add(body);
+    }
+
+    for (let body = b; ; ) {
+      if (ancestors.has(body)) {
+        return body;
+      }
+
+      const owner = this.#bodyOwners.get(body);
+
+      assert(owner !== undefined, "demand sites share no ancestor body");
+      body = owner.body;
+    }
+  }
+
+  #projectedIndex(site: DemandSite, scope: Body): number {
+    let current = site;
+
+    while (current.body !== scope) {
+      const owner = this.#bodyOwners.get(current.body);
+
+      assert(owner !== undefined, "demand site is not under its dominating scope");
+      current = owner;
+    }
+
+    return current.actionIndex;
   }
 
   // The nested body directly under `ancestor` on the way to `body`, with

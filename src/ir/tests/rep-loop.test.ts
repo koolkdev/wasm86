@@ -23,11 +23,12 @@ import {
   repLodsSemantic,
   repMovsSemantic
 } from "#x86/semantics/strings.js";
-import { isStateRead, isStateWrite } from "#ir/tests/storage-op-helpers.js";
+import { isStateRead, isStateWrite, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
-// The fused rep shape: one loop action carrying the string registers and the
-// count, a per-iteration path with no state traffic for carried channels,
-// fault arms that restore iteration-start state, and one exit-tail commit.
+// The fused rep shape: one loop action carrying the string registers, a
+// per-iteration path with no state traffic for carried channels, fault arms
+// that restore iteration-start state, one exit-tail commit, and the unit
+// count settled from the ecx delta after the loop.
 
 const repEip = 0x1000;
 const repNextEip = 0x1002;
@@ -115,13 +116,13 @@ function writeFor(writes: readonly StateWriteAction[], channel: StateChannel): S
   return write;
 }
 
-test("rep movs carries ecx, esi, edi, and the count as loop cells", () => {
+test("rep movs carries ecx, esi, and edi as loop cells", () => {
   const block = repMovsBlock();
   const loop = findLoop(block);
 
   deepStrictEqual(
     loop.carried.map((cell) => cell.channel),
-    [gprChannel("ecx"), gprChannel("esi"), gprChannel("edi"), instructionCountChannel]
+    [gprChannel("ecx"), gprChannel("esi"), gprChannel("edi")]
   );
 
   for (const cell of loop.carried) {
@@ -150,9 +151,8 @@ test("the iteration path has no state ops; carried commits sit in the exit tail"
   // or writes state directly (fault arms are nested, not on the path).
   deepStrictEqual(iterationPath.filter((action) => isStateRead(action) || isStateWrite(action)), []);
 
-  // The exit tail commits each carried channel once. Instruction count is
-  // different: onContinue adds one only to the taken back edge, while normal
-  // fallthrough counts the final iteration after the loop.
+  // The exit tail commits each carried channel once, and the back edge
+  // carries exactly the values the exit tail commits.
   const updates = backEdgeUpdates(loop.body);
   const tailWrites = stateWrites(loop.body.actions.slice(backEdge + 1));
 
@@ -160,19 +160,7 @@ test("the iteration path has no state ops; carried commits sit in the exit tail"
     tailWrites.map((action) => action.op.slot),
     loop.carried.map((cell) => cell.channel)
   );
-
-  for (const [index, write] of tailWrites.entries()) {
-    if (write.op.slot.kind === "instructionCount") {
-      const countUpdate = block.values.node(updates[index]!);
-
-      ok(countUpdate.kind === "binary" && countUpdate.operator === "add", "continue count advances by one");
-      strictEqual(countUpdate.a, write.op.value);
-      strictEqual(block.values.constValue(countUpdate.b), 1);
-      continue;
-    }
-
-    strictEqual(write.op.value, updates[index]);
-  }
+  deepStrictEqual(tailWrites.map((action) => action.op.value), updates);
 });
 
 test("a mid-body fault restores iteration-start carried values and the rep eip", () => {
@@ -235,20 +223,35 @@ test("a dirty-at-entry carried channel commits its seed on the zero-trip arm", (
   strictEqual(loopEnterIf(repMovsBlock()).elseBody, undefined);
 });
 
-test("the zero-trip arm counts the rep as one instruction at nextEip", () => {
+// The count is not carried: one fallthrough write settles the rep's units as
+// (entryEcx − exitEcx) − enter, with next() folding the final +1 on top — N
+// units on a full run, 1 on a zero trip, k on a repe/repne early exit.
+test("the fallthrough count write folds the ecx delta over the block's read", () => {
   const block = repMovsBlock();
-  const writes = stateWrites(block.body.actions);
-  const countWrite = writes.find((action) => action.op.slot.kind === "instructionCount");
+  const v = block.values;
+  const loop = findLoop(block);
+  const enterIf = loopEnterIf(block);
+  const postLoop = block.body.actions.slice(block.body.actions.indexOf(enterIf) + 1);
+  const exitEcxRead = postLoop
+    .filter(isStateRead)
+    .find((action) => slotsMayAlias(action.op.slot, gprChannel("ecx")));
+  const countRead = postLoop
+    .filter(isStateRead)
+    .find((action) => action.op.slot.kind === "instructionCount");
   const finish = block.body.actions.at(-1);
 
-  ok(countWrite !== undefined, "fallthrough writes instruction count");
+  ok(exitEcxRead !== undefined, "the count settle re-reads ecx after the loop");
+  ok(countRead !== undefined, "the count folds from a post-loop read");
   ok(finish?.kind === "finish" && finish.finish.kind === "dispatch", "fallthrough dispatches");
+  strictEqual(v.constValue(finish.finish.targetEip), repNextEip);
 
-  const countNode = block.values.node(countWrite.op.value);
+  const ecxSeed = loop.carried[0]!.seed;
+  const delta = v.binary("sub", v.binary("sub", ecxSeed, exitEcxRead.output), enterIf.condition);
 
-  strictEqual(block.values.constValue(finish.finish.targetEip), repNextEip);
-  ok(countNode.kind === "binary" && countNode.operator === "add", "fallthrough advances the count");
-  strictEqual(block.values.constValue(countNode.b), 1);
+  deepStrictEqual(
+    stateWrites(postLoop).filter((action) => action.op.slot.kind === "instructionCount"),
+    [stateWrite(instructionCountChannel, v.binary("add", v.binary("add", countRead.output, delta), v.const(1)))]
+  );
 });
 
 test("instructions after the loop rebase the count from state", () => {
@@ -281,7 +284,7 @@ test("rep lods carries its accumulator instead of writing it through each iterat
 
   deepStrictEqual(
     loop.carried.map((cell) => cell.channel),
-    [gprChannel("ecx"), gprChannel("esi"), gprChannel("al"), instructionCountChannel]
+    [gprChannel("ecx"), gprChannel("esi"), gprChannel("al")]
   );
 
   const backEdge = backEdgeIndex(loop.body);
@@ -305,7 +308,6 @@ test("repe cmps carries the lazy flag cells and updates them per unit", () => {
       gprChannel("ecx"),
       gprChannel("esi"),
       gprChannel("edi"),
-      instructionCountChannel,
       lazyFlagsKindChannel,
       lazyFlagsAChannel,
       lazyFlagsBChannel

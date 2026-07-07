@@ -85,8 +85,7 @@ export class State {
         this.gpr.invalidate(channel);
         return;
       case "instructionCount":
-        this.instructionCount.invalidate();
-        return;
+        assert(false, "the instruction count changes only through InstructionCountState");
       case "flag":
       case "segment":
       case "eip":
@@ -114,8 +113,7 @@ export class State {
         this.gpr.writeChannel(channel, value);
         return;
       case "instructionCount":
-        this.instructionCount.write(value);
-        return;
+        assert(false, "the instruction count changes only through InstructionCountState");
       case "flag":
       case "eip":
       case "lazyFlags":

@@ -73,42 +73,28 @@ export class LoopBuilder {
       context.values,
       context.state,
       options.stateRegs === undefined
-        ? { statusFlags: options.statusFlags === true, instructionCount: true }
-        : { regs: options.stateRegs, statusFlags: options.statusFlags === true, instructionCount: true }
+        ? { statusFlags: options.statusFlags === true }
+        : { regs: options.stateRegs, statusFlags: options.statusFlags === true }
     );
 
     return new LoopBuilder(context, scope.begin(), scope);
   }
 
-  // The conditional back edge, and the only one. onContinue may update
-  // carried values, but those updates apply only to the back edge.
-  emitContinue(condition: ValueInput, onContinue: (() => void) | undefined): readonly ValueId[] {
+  // The conditional back edge, and the only one. The back edge and the exit
+  // tail see the same carried values: one capture serves both.
+  emitContinue(condition: ValueInput): readonly ValueId[] {
     const exitValues = this.#scope.captureExitValues();
-    const bodyActionCount = this.#bodyActions.length;
-
-    onContinue?.();
-
-    assert(
-      this.#bodyActions.length === bodyActionCount,
-      "loop onContinue actions are unsupported; update carried state only"
-    );
-
-    const continueUpdates = this.#scope.captureContinueValues();
-
-    this.#scope.restoreExitValues(exitValues);
 
     this.emitAction({
       kind: "if",
       condition,
-      thenBody: { actions: [{ kind: "loopContinue", updates: continueUpdates }] }
+      thenBody: { actions: [{ kind: "loopContinue", updates: exitValues }] }
     });
 
     return exitValues;
   }
 
   close(enter: ValueInput, exitValues: readonly ValueId[]): void {
-    this.#scope.assertExitValues(exitValues);
-
     // The exit path's one commit per carried channel.
     for (const action of this.#scope.commitExitValues(exitValues)) {
       this.emitAction(action);
@@ -218,14 +204,6 @@ class LoopState {
       "input-backed conditions inside a loop body are unsupported"
     );
     return this.#context.host.condition(cc);
-  }
-
-  incrementInstructionCount(): void {
-    assert(
-      this.#context.scope.carriesInstructionCount(),
-      "loop body increments the instruction count, but the loop does not carry it"
-    );
-    this.#context.state.instructionCount.increment();
   }
 
   #assertStorageSupported(storage: StorageInput): void {
@@ -370,10 +348,6 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
     return this.#state.condition(cc);
   }
 
-  incrementInstructionCount(): void {
-    this.#state.incrementInstructionCount();
-  }
-
   currentEip(): Value {
     return unsupportedLoopOperation("currentEip");
   }
@@ -384,6 +358,10 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
 
   writeFlag(_flag: X86Flag, _value: ValueInput): void {
     unsupportedLoopOperation("writeFlag");
+  }
+
+  addInstructionCount(_amount: ValueInput): void {
+    unsupportedLoopOperation("addInstructionCount");
   }
 
   next(): void {
