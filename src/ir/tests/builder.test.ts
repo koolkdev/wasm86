@@ -658,7 +658,7 @@ test("narrow signed compares sign-extend both operands", () => {
   const reads = entryActions(block).filter(
     (action): action is StateReadAction => isStateRead(action)
   );
-  const compare = v.compare(
+  const compare = v.compare(32,
     "lt_s",
     v.extend(8, reads[0]!.output, true),
     v.extend(8, reads[1]!.output, true)
@@ -686,7 +686,7 @@ test("an 8-bit unsigned compare of covered operands creates no truncations", () 
 
   strictEqual(
     stateWrites(block).find((write) => write.op.slot === gprChannel("al"))?.op.value,
-    v.compare("lt_u", al, v.const(5))
+    v.compare(32, "lt_u", al, v.const(5))
   );
   ok(!nodeKinds(block).includes("truncate"), "no truncations expected");
 });
@@ -710,7 +710,7 @@ test("an 8-bit equality on an unproven value keeps its mask", () => {
 
   strictEqual(
     stateWrites(block).find((write) => write.op.slot === gprChannel("al"))?.op.value,
-    v.compare("eq", v.truncate(8, sum), v.const(0))
+    v.compare(32, "eq", v.truncate(8, sum), v.const(0))
   );
 });
 
@@ -735,7 +735,7 @@ test("a signed byte get feeds a signed compare with no extra extends", () => {
   deepStrictEqual(actions[1], stateRead(reads[1]!.output, gprChannel("bl"), true));
   strictEqual(
     stateWrites(block).find((write) => write.op.slot === gprChannel("al"))?.op.value,
-    block.values.compare("lt_s", reads[0]!.output, reads[1]!.output)
+    block.values.compare(32, "lt_s", reads[0]!.output, reads[1]!.output)
   );
   ok(!nodeKinds(block).includes("unary"), "no extends expected");
 });
@@ -757,7 +757,7 @@ test("value methods build through the builder", () => {
     (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("eax")
   )!;
   const zero = block.values.const(0);
-  const compare = block.values.compare("lt_s", read.output, zero);
+  const compare = block.values.compare(32, "lt_s", read.output, zero);
   const negated = block.values.binary("sub", zero, read.output);
   const selected = block.values.select(compare, negated, read.output);
 
@@ -881,7 +881,7 @@ test("jcc after cmp source uses the source-derived condition as a side exit", ()
   strictEqual(nestedActionBodies(block).length, 1);
   deepStrictEqual(branch, {
     kind: "if",
-    condition: v.compare("eq", eax, v.const(5)),
+    condition: v.compare(32, "eq", eax, v.const(5)),
     thenBody: nestedActionBodies(block)[0]
   });
 
@@ -911,7 +911,7 @@ test("jcc after test source uses the source-derived condition with no flag byte 
   );
   const result = v.binary("and", reads[0]!.output, reads[1]!.output);
 
-  strictEqual(ifAction(block).condition, v.compare("eq", result, v.const(0)));
+  strictEqual(ifAction(block).condition, v.compare(32, "eq", result, v.const(0)));
   strictEqual(
     entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
     false
@@ -945,7 +945,7 @@ test("jcc after a sub flag source uses the source-derived condition", () => {
     (action): action is StateReadAction => isStateRead(action)
   );
 
-  strictEqual(ifAction(block).condition, block.values.compare("eq", reads[0]!.output, reads[1]!.output));
+  strictEqual(ifAction(block).condition, block.values.compare(32, "eq", reads[0]!.output, reads[1]!.output));
 });
 
 test("jcc after 16-bit cmp source sign-extends operands for signed direct conditions", () => {
@@ -959,7 +959,7 @@ test("jcc after 16-bit cmp source sign-extends operands for signed direct condit
   const reads = entryActions(block).filter(
     (action): action is StateReadAction => isStateRead(action)
   );
-  const condition = v.compare(
+  const condition = v.compare(32,
     "lt_s",
     v.extend(16, reads[0]!.output, true),
     v.extend(16, reads[1]!.output, true)
@@ -983,7 +983,7 @@ test("jcc after 8-bit cmp source sign-extends operands for signed direct conditi
   const reads = entryActions(block).filter(
     (action): action is StateReadAction => isStateRead(action)
   );
-  const condition = v.compare(
+  const condition = v.compare(32,
     "ge_s",
     v.extend(8, reads[0]!.output, true),
     v.extend(8, reads[1]!.output, true)
@@ -1007,7 +1007,7 @@ test("jcc after 16-bit cmp immediate source sign-extends immediates for signed d
   const ax = entryActions(block).find(
     (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("ax")
   )!.output;
-  const condition = v.compare(
+  const condition = v.compare(32,
     "le_s",
     v.extend(16, ax, true),
     v.const(-0x8000)
@@ -1097,8 +1097,8 @@ test("jecxz and loop branches dispatch through ecx-derived conditions without fl
   )!.output;
   const decremented = loop.values.binary("sub", loopEcx, loop.values.const(1));
 
-  strictEqual(ifAction(jecxz).condition, jecxz.values.compare("eq", jecxzEcx, jecxz.values.const(0)));
-  strictEqual(ifAction(loop).condition, loop.values.compare("ne", decremented, loop.values.const(0)));
+  strictEqual(ifAction(jecxz).condition, jecxz.values.compare(32, "eq", jecxzEcx, jecxz.values.const(0)));
+  strictEqual(ifAction(loop).condition, loop.values.compare(32, "ne", decremented, loop.values.const(0)));
   for (const branch of [nestedBodyWriteFlushes(loop, 1), stateWrites(loop)]) {
     strictEqual(branch.find((write) => write.op.slot === gprChannel("ecx"))?.op.value, decremented);
   }
@@ -1164,7 +1164,7 @@ test("setcc after cmp source consumes the source-derived condition", () => {
   const ebx = entryActions(block).find(
     (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("ebx")
   )!.output;
-  const condition = v.compare("lt_u", ebx, v.const(5));
+  const condition = v.compare(32, "lt_u", ebx, v.const(5));
 
   strictEqual(
     stateWrites(block).find((write) => write.op.slot === gprChannel("al"))?.op.value,
@@ -1193,7 +1193,7 @@ test("setcc after a logic flag source uses the source-derived condition", () => 
     (action): action is StateReadAction => isStateRead(action)
   );
   const result = v.binary("and", reads[0]!.output, reads[1]!.output);
-  const condition = v.compare("ne", result, v.const(0));
+  const condition = v.compare(32, "ne", result, v.const(0));
 
   strictEqual(
     stateWrites(block).find((write) => write.op.slot === gprChannel("al"))?.op.value,
@@ -1264,7 +1264,7 @@ test("setcc after an intervening add uses the latest source-expanded flag expres
     (action): action is StateReadAction => isStateRead(action)
   )[1]!.output;
   const sum = v.binary("add", ecxRead, v.const(1));
-  const zf = v.compare("eq", sum, v.const(0));
+  const zf = v.compare(32, "eq", sum, v.const(0));
 
   strictEqual(
     stateWrites(block).find((write) => write.op.slot === gprChannel("al"))?.op.value,

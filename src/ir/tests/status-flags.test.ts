@@ -108,7 +108,7 @@ test("a sub source commits a lazy runtime record", () => {
   assertOnlyLazyRecord(completedFlushes, values, { kind: "SUB", width: 32, left, right });
   strictEqual(
     flagValue(flags, "ZF"),
-    values.compare("eq", result, values.const(0))
+    values.compare(32, "eq", result, values.const(0))
   );
 });
 
@@ -135,7 +135,7 @@ test("an add source commits a lazy runtime record", () => {
   assertOnlyLazyRecord(pending.flushesForPath("completed"), values, { kind: "ADD", width: 32, left, right });
   strictEqual(
     flagValue(flags, "CF"),
-    values.compare("lt_u", values.truncate(32, result), values.truncate(32, left))
+    values.compare(32, "lt_u", values.truncate(32, result), values.truncate(32, left))
   );
 });
 
@@ -169,9 +169,9 @@ test("condition uses the current sub source directly", () => {
 
   flags.writeSource({ kind: "sub", width: 32, left, right, result });
 
-  strictEqual(flags.condition("E"), values.compare("eq", left, right));
-  strictEqual(flags.condition("B"), values.compare("lt_u", left, right));
-  strictEqual(flags.condition("L"), values.compare("lt_s", left, right));
+  strictEqual(flags.condition("E"), values.compare(32, "eq", left, right));
+  strictEqual(flags.condition("B"), values.compare(32, "lt_u", left, right));
+  strictEqual(flags.condition("L"), values.compare(32, "lt_s", left, right));
   deepStrictEqual(actions, []);
 });
 
@@ -288,7 +288,7 @@ test("condition falls back to live flag backings after a direct flag write", () 
   strictEqual(flags.condition("E"), zero);
   strictEqual(
     flags.condition("NE"),
-    values.compare("eq", zero, zero)
+    values.compare(32, "eq", zero, zero)
   );
   deepStrictEqual(actions, []);
 });
@@ -351,7 +351,7 @@ test("a logic source commits a lazy result record and resolves current values", 
   strictEqual(flagValue(flags, "CF"), zero);
   strictEqual(flagValue(flags, "AF"), zero);
   strictEqual(flagValue(flags, "OF"), zero);
-  strictEqual(flagValue(flags, "ZF"), values.compare("eq", truncated, zero));
+  strictEqual(flagValue(flags, "ZF"), values.compare(32, "eq", truncated, zero));
   strictEqual(flagValue(flags, "SF"), values.binary("shr_u", truncated, values.const(7)));
 
   const completedFlushes = pending.flushesForPath("completed");
@@ -391,7 +391,7 @@ test("writeFlag updates one status flag while preserving other pending values", 
   flags.writeSource({ kind: "sub", width: 32, left, right, result });
   flags.write("ZF", zf);
 
-  strictEqual(flagValue(flags, "CF"), values.compare("lt_u", left, right));
+  strictEqual(flagValue(flags, "CF"), values.compare(32, "lt_u", left, right));
   strictEqual(flagValue(flags, "ZF"), zf);
 
   const completedFlushes = pending.flushesForPath("completed");

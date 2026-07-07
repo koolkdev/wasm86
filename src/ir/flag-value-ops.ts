@@ -10,9 +10,7 @@ export function valueTableFlagOps(values: ValueTable): FlagValueOps<ValueId> {
     xor: (a, b) => values.binary("xor", a, b),
     shrU: (a, b) => values.binary("shr_u", a, b),
     popcnt: (value) => values.unary("popcnt", value),
-    compare: (width, operator, a, b) => (
-      values.compare(operator, values.truncate(width, a), values.truncate(width, b))
-    ),
+    compare: (width, operator, a, b) => values.compare(width, operator, a, b),
     select: (condition, whenTrue, whenFalse) => (
       values.select(condition, whenTrue, whenFalse)
     )

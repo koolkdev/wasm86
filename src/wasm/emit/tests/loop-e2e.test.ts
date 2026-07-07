@@ -66,7 +66,7 @@ function swapLoopBlock(): IrBlock {
         actions: [
           {
             kind: "if",
-            condition: values.compare("ne", remaining, values.const(0)),
+            condition: values.compare(32, "ne", remaining, values.const(0)),
             thenBody: { actions: [{ kind: "loopContinue", updates: [bInput, aInput, remaining] }] }
           },
           stateWrite(gprChannel("eax"), bInput),
@@ -124,7 +124,7 @@ test("a hoisted loop-invariant value stays live across iterations", async () => 
         actions: [
           {
             kind: "if",
-            condition: values.compare("ne", remaining, values.const(0)),
+            condition: values.compare(32, "ne", remaining, values.const(0)),
             thenBody: { actions: [{ kind: "loopContinue", updates: [total, remaining] }] }
           },
           stateWrite(gprChannel("eax"), total),

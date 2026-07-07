@@ -10,10 +10,11 @@ import {
   type Map3,
   type Map4
 } from "#common/nested-map.js";
-import type {
-  BinaryOperator,
-  CompareOperator,
-  UnaryOperator
+import {
+  signedComparePredicates,
+  type BinaryOperator,
+  type CompareOperator,
+  type UnaryOperator
 } from "#x86/semantics/ops.js";
 import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/types.js";
@@ -232,7 +233,19 @@ export class ValueTable {
     return foldUnary(this.#foldContext(), operator, value) ?? this.#internUnary(operator, value);
   }
 
-  compare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
+  // Compares in the width's domain, lowering by predicate class: signed
+  // predicates sign-extend operands, the rest mask them; 32 adjusts nothing.
+  compare(width: OperandWidth, operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
+    const signed = signedComparePredicates.has(operator);
+
+    return this.#compare(
+      operator,
+      this.widthAdjusted(width, a, signed),
+      this.widthAdjusted(width, b, signed)
+    );
+  }
+
+  #compare(operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
     this.#assertKnownChildren([a, b]);
     this.#assertValueType(a, "i32");
     this.#assertValueType(b, "i32");
@@ -285,6 +298,12 @@ export class ValueTable {
     const fold = signed ? foldExtend : foldTruncate;
 
     return fold(this.#foldContext(), width, value) ?? this.#internExtend("i32", signed, width, value);
+  }
+
+  // The value seen through a width-limited access: sign-extended when
+  // signed, masked otherwise.
+  widthAdjusted(width: OperandWidth, value: ValueId, signed: boolean): ValueId {
+    return signed ? this.extend(width, value, true) : this.truncate(width, value);
   }
 
   extend64(width: OperandWidth, value: ValueId, signed: boolean): ValueId {

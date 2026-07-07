@@ -69,10 +69,10 @@ test("each compound kind deduplicates on its full key", () => {
   notStrictEqual(table.extend(8, a, false), extend);
   deepStrictEqual(table.node(extend), { kind: "extend", type: "i32", signed: true, width: 8, value: a });
 
-  const compare = table.compare("eq", a, b);
+  const compare = table.compare(32, "eq", a, b);
 
-  strictEqual(table.compare("eq", a, b), compare);
-  notStrictEqual(table.compare("ne", a, b), compare);
+  strictEqual(table.compare(32, "eq", a, b), compare);
+  notStrictEqual(table.compare(32, "ne", a, b), compare);
   deepStrictEqual(table.node(compare), { kind: "compare", type: "i32", operator: "eq", a, b });
 
   const select = table.select(compare, a, b);
@@ -240,14 +240,38 @@ test("compares fold constants and same-value predicates", () => {
   const two = table.const(2);
   const minusOne = table.const(-1);
 
-  strictEqual(table.compare("eq", one, one), table.const(1));
-  strictEqual(table.compare("ne", one, one), table.const(0));
-  strictEqual(table.compare("lt_u", minusOne, one), table.const(0));
-  strictEqual(table.compare("gt_u", minusOne, one), table.const(1));
-  strictEqual(table.compare("lt_s", minusOne, one), table.const(1));
-  strictEqual(table.compare("ge_s", one, two), table.const(0));
-  strictEqual(table.compare("le_u", value, value), table.const(1));
-  strictEqual(table.compare("gt_s", value, value), table.const(0));
+  strictEqual(table.compare(32, "eq", one, one), table.const(1));
+  strictEqual(table.compare(32, "ne", one, one), table.const(0));
+  strictEqual(table.compare(32, "lt_u", minusOne, one), table.const(0));
+  strictEqual(table.compare(32, "gt_u", minusOne, one), table.const(1));
+  strictEqual(table.compare(32, "lt_s", minusOne, one), table.const(1));
+  strictEqual(table.compare(32, "ge_s", one, two), table.const(0));
+  strictEqual(table.compare(32, "le_u", value, value), table.const(1));
+  strictEqual(table.compare(32, "gt_s", value, value), table.const(0));
+});
+
+test("compare lowers narrow widths by predicate class", () => {
+  const table = new ValueTable();
+  const a = table.addActionOutput();
+  const b = table.external(0);
+
+  strictEqual(
+    table.compare(16, "lt_s", a, b),
+    table.compare(32, "lt_s", table.extend(16, a, true), table.extend(16, b, true))
+  );
+  strictEqual(
+    table.compare(8, "eq", a, b),
+    table.compare(32, "eq", table.truncate(8, a), table.truncate(8, b))
+  );
+});
+
+test("widthAdjusted extends when signed and truncates otherwise", () => {
+  const table = new ValueTable();
+  const value = table.addActionOutput();
+
+  strictEqual(table.widthAdjusted(8, value, true), table.extend(8, value, true));
+  strictEqual(table.widthAdjusted(8, value, false), table.truncate(8, value));
+  strictEqual(table.widthAdjusted(32, value, false), value);
 });
 
 test("select folds constant conditions and equal arms", () => {
@@ -328,7 +352,7 @@ test("extend folds constants and elides extensions covered by bounds", () => {
 
 test("compare results fit a single bit either way", () => {
   const table = new ValueTable();
-  const compare = table.compare("eq", table.addActionOutput(), table.external(0));
+  const compare = table.compare(32, "eq", table.addActionOutput(), table.external(0));
   const wide = table.extend64(32, table.addActionOutput(), true);
   const product = table.binary64("mul", wide, table.extend64(32, table.external(1), true));
   const i64Compare = table.compare64("ne", wide, product);

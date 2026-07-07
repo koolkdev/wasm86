@@ -1,9 +1,9 @@
-import { createOpAction, type SwitchCase } from "#ir/actions.js";
+import { buildIrBlock, type SwitchArm } from "#ir/body-builder.js";
 import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { IrBlock } from "#ir/block.js";
 import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import type { StateReadOp } from "#ir/ops.js";
-import { fitsUnsigned, ValueTable, type ValueId } from "#ir/values.js";
+import { fitsUnsigned, type ValueId } from "#ir/values.js";
 import { statusFlagValuesForSource } from "#x86/flag-values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
@@ -64,86 +64,66 @@ function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncod
 // so demand stays arm-local — LOGIC arms never touch lazyFlagsB and a
 // formula that ignores a read leaves it unemitted.
 function lazyFlagResolverBlock(flag: LazyFlagHelper): Readonly<{ block: IrBlock; output: ValueId }> {
-  const values = new ValueTable();
-  const kindRead = createOpAction(values, { kind: "state.read", slot: lazyFlagsKindChannel });
-  const cases: SwitchCase[] = [
-    noneArm(values, flag),
-    ...([8, 16, 32] as const).flatMap((width) => [
-      binaryArm(values, flag, "add", width),
-      binaryArm(values, flag, "sub", width),
-      logicArm(values, flag, width)
-    ])
-  ];
-  // Every arm result exists before the output: placement's descending walk
-  // settles the output's demand before charging them.
-  const defaultBody = { actions: [], result: values.unreachable() };
-  const output = values.addActionOutput(fitsUnsigned(1));
+  let output!: ValueId;
+  const block = buildIrBlock((b) => {
+    output = b.switch(
+      b.op({ kind: "state.read", slot: lazyFlagsKindChannel }),
+      [
+        noneArm(flag),
+        ...([8, 16, 32] as const).flatMap((width) => [
+          binaryArm(flag, "add", width),
+          binaryArm(flag, "sub", width),
+          logicArm(flag, width)
+        ])
+      ],
+      (arm) => arm.values.unreachable(),
+      fitsUnsigned(1)
+    );
+  });
 
-  return {
-    output,
-    block: {
-      values,
-      body: {
-        actions: [
-          kindRead,
-          {
-            kind: "switch",
-            selector: kindRead.output!,
-            output,
-            cases,
-            defaultBody
-          }
-        ]
-      }
-    }
-  };
+  return { output, block };
 }
 
-function noneArm(values: ValueTable, flag: LazyFlagHelper): SwitchCase {
-  const read = createOpAction(values, { kind: "state.read", slot: flagChannel(flag) });
-
+function noneArm(flag: LazyFlagHelper): SwitchArm {
   return {
     match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
-    body: { actions: [read], result: read.output! }
+    build: (arm) => arm.op({ kind: "state.read", slot: flagChannel(flag) })
   };
 }
 
-function binaryArm(
-  values: ValueTable,
-  flag: LazyFlagHelper,
-  kind: "add" | "sub",
-  width: OperandWidth
-): SwitchCase {
-  const left = createOpAction(values, lazyOperandReadOp(lazyFlagsAChannel, width));
-  const right = createOpAction(values, lazyOperandReadOp(lazyFlagsBChannel, width));
-  const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
-    kind,
-    width,
-    left: left.output!,
-    right: right.output!,
-    result: values.binary(kind, left.output!, right.output!)
-  }, { undefinedAF: values.const(0) })[flag];
-
+function binaryArm(flag: LazyFlagHelper, kind: "add" | "sub", width: OperandWidth): SwitchArm {
   return {
     match: lazyFlagsKindByte(
       kind === "add" ? WASM_CPU_LAZY_FLAGS_KIND.ADD : WASM_CPU_LAZY_FLAGS_KIND.SUB,
       width
     ),
-    body: { actions: [left, right], result: formula }
+    build: (arm) => {
+      const left = arm.op(lazyOperandReadOp(lazyFlagsAChannel, width));
+      const right = arm.op(lazyOperandReadOp(lazyFlagsBChannel, width));
+
+      return statusFlagValuesForSource(valueTableFlagOps(arm.values), {
+        kind,
+        width,
+        left,
+        right,
+        result: arm.values.binary(kind, left, right)
+      }, { undefinedAF: arm.values.const(0) })[flag];
+    }
   };
 }
 
-function logicArm(values: ValueTable, flag: LazyFlagHelper, width: OperandWidth): SwitchCase {
-  const result = createOpAction(values, lazyOperandReadOp(lazyFlagsAChannel, width));
-  const formula = statusFlagValuesForSource(valueTableFlagOps(values), {
-    kind: "logic",
-    width,
-    result: result.output!
-  }, { undefinedAF: values.const(0) })[flag];
-
+function logicArm(flag: LazyFlagHelper, width: OperandWidth): SwitchArm {
   return {
     match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, width),
-    body: { actions: [result], result: formula }
+    build: (arm) => {
+      const result = arm.op(lazyOperandReadOp(lazyFlagsAChannel, width));
+
+      return statusFlagValuesForSource(valueTableFlagOps(arm.values), {
+        kind: "logic",
+        width,
+        result
+      }, { undefinedAF: arm.values.const(0) })[flag];
+    }
   };
 }
 

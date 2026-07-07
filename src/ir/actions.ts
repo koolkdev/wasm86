@@ -1,9 +1,8 @@
-import { assert } from "#common/assert.js";
 import type { CpuException } from "#x86/exceptions.js";
 import type { Body } from "./block.js";
-import { opAccess, type IrOp, type StateWriteOp } from "./ops.js";
+import type { IrOp, StateWriteOp } from "./ops.js";
 import type { StateChannel } from "./slots.js";
-import { type ValueId, type ValueTable } from "./values.js";
+import type { ValueId } from "./values.js";
 
 // Reports to the host; the action emitter owns the numeric encoding.
 export type HostExitReason = "hostTrap" | "unsupported" | "segmentLoad";
@@ -94,22 +93,6 @@ export type Action =
   | FinishAction;
 
 export type StateWriteAction = Readonly<{ kind: "op"; op: StateWriteOp }>;
-
-export function createOpAction(values: ValueTable, op: IrOp): OpAction {
-  const access = opAccess(op);
-
-  if (access.valueOutput === undefined) {
-    return { kind: "op", op };
-  }
-
-  assert(access.valueOutput.type === "i32", `${op.kind} op action output type is not supported`);
-
-  return {
-    kind: "op",
-    output: values.addActionOutput(access.valueOutput.bounds),
-    op
-  };
-}
 
 // A control action completes if every selectable body escapes; a
 // result-bearing body does not complete — it falls through to the join.

@@ -1,16 +1,10 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import { eipChannel } from "#ir/slots.js";
-import type { Action } from "#ir/actions.js";
+import { BodyBuilder } from "#ir/body-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { memoryGuardActions } from "#ir/memory-guard.js";
-import {
-  ValueTable,
-  fitsUnsigned,
-  signExtended,
-  type ValueId,
-  type WidthBounds
-} from "#ir/values.js";
+import { ValueTable, type ValueId } from "#ir/values.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -35,12 +29,15 @@ export type DecodeCursor =
   | Readonly<{ kind: "local"; local: number }>;
 
 class DecodeFragment {
-  readonly #values = new ValueTable();
-  readonly #actions: Action[] = [];
+  readonly #builder = new BodyBuilder(new ValueTable());
   readonly #externalLocals = new Map<ExternalValueId, number>();
   readonly #externalsByLocal = new Map<number, ValueId>();
   readonly #outputs = new Map<ValueId, number>();
   readonly #cursorOutputs: [ValueId, number][] = [];
+
+  get values(): ValueTable {
+    return this.#builder.values;
+  }
 
   external(local: number): ValueId {
     const existing = this.#externalsByLocal.get(local);
@@ -49,55 +46,30 @@ class DecodeFragment {
       return existing;
     }
 
-    const id = this.#values.external(this.#externalLocals.size);
+    const id = this.values.external(this.#externalLocals.size);
 
     this.#externalLocals.set(this.#externalLocals.size, local);
     this.#externalsByLocal.set(local, id);
     return id;
   }
 
-  const32(value: number): ValueId {
-    return this.#values.const(value);
-  }
-
-  add(a: ValueId, b: ValueId): ValueId {
-    return this.#values.binary("add", a, b);
-  }
-
-  extract(value: ValueId, shift: number, mask?: number): ValueId {
-    const shifted = shift === 0 ? value : this.#values.binary("shr_u", value, this.const32(shift));
-
-    return mask === undefined ? shifted : this.and(shifted, mask);
-  }
-
-  and(value: ValueId, mask: number): ValueId {
-    return this.#values.binary("and", value, this.const32(mask));
-  }
-
   readEip(): ValueId {
-    const output = this.#values.addActionOutput();
-
-    this.#actions.push({ kind: "op", output, op: { kind: "state.read", slot: eipChannel } });
-    return output;
+    return this.#builder.op({ kind: "state.read", slot: eipChannel });
   }
 
   readGprWord(index: ValueId): ValueId {
-    const output = this.#values.addActionOutput();
-
-    this.#actions.push({
-      kind: "op",
-      output,
-      op: { kind: "state.read", slot: { kind: "gprDynamic", index, byteLength: 4 } }
+    return this.#builder.op({
+      kind: "state.read",
+      slot: { kind: "gprDynamic", index, byteLength: 4 }
     });
-    return output;
   }
 
   // The scaled-index term: zero when the index field selects "none" (4).
   scaledIndex(index: ValueId, shift: ValueId): ValueId {
-    return this.#values.select(
-      this.#values.compare("eq", index, this.const32(4)),
-      this.const32(0),
-      this.#values.binary("shl", this.readGprWord(index), shift)
+    return this.values.select(
+      this.values.compare(32, "eq", index, this.values.const(4)),
+      this.values.const(0),
+      this.values.binary("shl", this.readGprWord(index), shift)
     );
   }
 
@@ -105,18 +77,15 @@ class DecodeFragment {
   readGuest(address: ValueId, width: OperandWidth, signed = false): ValueId {
     const byteLength = width / 8;
 
-    this.#actions.push(
-      ...memoryGuardActions(this.#values, address, byteLength, { kind: "instructionFetch" })
-    );
+    for (const action of memoryGuardActions(this.values, address, byteLength, { kind: "instructionFetch" })) {
+      this.#builder.push(action);
+    }
 
-    const output = this.#values.addActionOutput(decodeReadBounds(width, signed));
-
-    this.#actions.push(
+    return this.#builder.op(
       signed && width !== 32
-        ? { kind: "op", output, op: { kind: "memory.read", address, width, signed: true } }
-        : { kind: "op", output, op: { kind: "memory.read", address, width } }
+        ? { kind: "memory.read", address, width, signed: true }
+        : { kind: "memory.read", address, width }
     );
-    return output;
   }
 
   readInstructionBytes(
@@ -132,10 +101,14 @@ class DecodeFragment {
       case "static": {
         const offset = cursor.offset + byteLength;
 
-        return { value, cursor: { kind: "static", offset }, cursorEnd: this.const32(offset) };
+        return { value, cursor: { kind: "static", offset }, cursorEnd: this.values.const(offset) };
       }
       case "local": {
-        const cursorEnd = this.add(this.external(cursor.local), this.const32(byteLength));
+        const cursorEnd = this.values.binary(
+          "add",
+          this.external(cursor.local),
+          this.values.const(byteLength)
+        );
 
         assert(
           !this.#cursorOutputs.some(([, local]) => local === cursor.local),
@@ -154,8 +127,8 @@ class DecodeFragment {
 
   emit(context: FragmentEmitContext): void {
     const block: IrBlock = {
-      body: { actions: this.#actions },
-      values: this.#values
+      body: this.#builder.build(),
+      values: this.values
     };
     const outputs = new Map(this.#outputs);
 
@@ -174,22 +147,16 @@ class DecodeFragment {
   }
 }
 
-function decodeReadBounds(width: OperandWidth, signed: boolean): WidthBounds | undefined {
-  if (width === 32) {
-    return undefined;
-  }
-
-  return signed ? signExtended(width) : fitsUnsigned(width);
-}
-
 function cursorAddress(fragment: DecodeFragment, eipLocal: number, cursor: DecodeCursor): ValueId {
   const eip = fragment.external(eipLocal);
 
   switch (cursor.kind) {
     case "static":
-      return cursor.offset === 0 ? eip : fragment.add(eip, fragment.const32(cursor.offset));
+      return cursor.offset === 0
+        ? eip
+        : fragment.values.binary("add", eip, fragment.values.const(cursor.offset));
     case "local":
-      return fragment.add(eip, fragment.external(cursor.local));
+      return fragment.values.binary("add", eip, fragment.external(cursor.local));
   }
 }
 
@@ -230,12 +197,16 @@ export function emitModRmFetch(
   outputs: Readonly<{ modLocal: number; regLocal: number; rmLocal: number }>
 ): DecodeCursor {
   const fragment = new DecodeFragment();
+  const values = fragment.values;
   const decoded = fragment.readInstructionBytes(eipLocal, cursor, 8);
   const byte = decoded.value;
 
-  fragment.output(fragment.extract(byte, 6), outputs.modLocal);
-  fragment.output(fragment.extract(byte, 3, 0b111), outputs.regLocal);
-  fragment.output(fragment.extract(byte, 0, 0b111), outputs.rmLocal);
+  fragment.output(values.binary("shr_u", byte, values.const(6)), outputs.modLocal);
+  fragment.output(
+    values.binary("and", values.binary("shr_u", byte, values.const(3)), values.const(0b111)),
+    outputs.regLocal
+  );
+  fragment.output(values.binary("and", byte, values.const(0b111)), outputs.rmLocal);
   fragment.emit(context);
   return decoded.cursor;
 }
@@ -248,14 +219,18 @@ export function emitSibFetch(
   outputs: Readonly<{ scaledIndexLocal: number; baseLocal: number }>
 ): DecodeCursor {
   const fragment = new DecodeFragment();
+  const values = fragment.values;
   const decoded = fragment.readInstructionBytes(eipLocal, cursor, 8);
   const byte = decoded.value;
 
   fragment.output(
-    fragment.scaledIndex(fragment.extract(byte, 3, 0b111), fragment.extract(byte, 6)),
+    fragment.scaledIndex(
+      values.binary("and", values.binary("shr_u", byte, values.const(3)), values.const(0b111)),
+      values.binary("shr_u", byte, values.const(6))
+    ),
     outputs.scaledIndexLocal
   );
-  fragment.output(fragment.extract(byte, 0, 0b111), outputs.baseLocal);
+  fragment.output(values.binary("and", byte, values.const(0b111)), outputs.baseLocal);
   fragment.emit(context);
   return decoded.cursor;
 }
@@ -275,6 +250,7 @@ export function emitRmAddressFragment(
   offsetLocal: number
 ): DecodeCursor {
   const fragment = new DecodeFragment();
+  const values = fragment.values;
   const terms: ValueId[] = [];
   let nextCursor = cursor;
 
@@ -295,7 +271,9 @@ export function emitRmAddressFragment(
   }
 
   fragment.output(
-    terms.length === 0 ? fragment.const32(0) : terms.reduce((sum, term) => fragment.add(sum, term)),
+    terms.length === 0
+      ? values.const(0)
+      : terms.reduce((sum, term) => values.binary("add", sum, term)),
     offsetLocal
   );
   fragment.emit(context);
@@ -330,11 +308,15 @@ export function emitRelTargetFetch(
   targetLocal: number
 ): DecodeCursor {
   const fragment = new DecodeFragment();
+  const values = fragment.values;
   const decoded = fragment.readInstructionBytes(eipLocal, cursor, width, true);
-  const nextEip = fragment.add(fragment.external(eipLocal), decoded.cursorEnd);
-  const target = fragment.add(nextEip, decoded.value);
+  const nextEip = values.binary("add", fragment.external(eipLocal), decoded.cursorEnd);
+  const target = values.binary("add", nextEip, decoded.value);
 
-  fragment.output(width === 16 ? fragment.and(target, 0xffff) : target, targetLocal);
+  fragment.output(
+    width === 16 ? values.binary("and", target, values.const(0xffff)) : target,
+    targetLocal
+  );
   fragment.emit(context);
   return decoded.cursor;
 }

@@ -337,7 +337,7 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
   const one = values.external(0);
   const two = values.external(1);
   const whenTrue = values.unary("popcnt", one);
-  const condition = values.compare("lt_u", one, two);
+  const condition = values.compare(32, "lt_u", one, two);
   const select = values.select(condition, whenTrue, two);
   const { body, valueStack } = createTestEmitter(
     values,
@@ -382,8 +382,8 @@ test("operators map to their wasm opcodes", () => {
   const extended8 = values.extend(8, one, true);
   const extended16 = values.extend(16, two, true);
   const masked = values.binary("sub", values.binary("and", one, two), values.binary("or", one, two));
-  const equal = values.compare("eq", one, two);
-  const signed = values.compare("ge_s", one, two);
+  const equal = values.compare(32, "eq", one, two);
+  const signed = values.compare(32, "ge_s", one, two);
   const { body, valueStack } = createTestEmitter(
     values,
     testBody([
@@ -702,8 +702,8 @@ test("equality against constant zero emits eqz from either side", () => {
   const values = new ValueTable();
   const external = values.external(3);
   const zero = values.const(0);
-  const left = values.compare("eq", external, zero);
-  const right = values.compare("eq", zero, external);
+  const left = values.compare(32, "eq", external, zero);
+  const right = values.compare(32, "eq", zero, external);
   const { body, valueStack } = createTestEmitter(
     values,
     testBody([
@@ -729,8 +729,8 @@ test("equality against constant zero emits eqz from either side", () => {
 test("ne and non-zero equality keep the generic compare", () => {
   const values = new ValueTable();
   const external = values.external(3);
-  const notZero = values.compare("ne", external, values.const(0));
-  const one = values.compare("eq", external, values.const(1));
+  const notZero = values.compare(32, "ne", external, values.const(0));
+  const one = values.compare(32, "eq", external, values.const(1));
   const { body, valueStack } = createTestEmitter(
     values,
     testBody([

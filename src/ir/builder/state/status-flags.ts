@@ -10,7 +10,8 @@ import {
   type StatusFlagValues
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
-import { createOpAction, type Action, type SwitchCase } from "../../actions.js";
+import type { Action } from "../../actions.js";
+import { BodyBuilder, type SwitchArm } from "../../body-builder.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "../../lazy-flags.js";
 import type { StateReadOp } from "../../ops.js";
 import { valueTableFlagOps } from "../../flag-value-ops.js";
@@ -288,9 +289,9 @@ export class StatusFlagState {
     switch (source.kind) {
       case "add":
       case "sub":
-        return this.#compare(source.width, operator, source.left, source.right);
+        return this.#values.compare(source.width, operator, source.left, source.right);
       case "logic":
-        return this.#compare(source.width, operator, source.result, this.#values.const(0));
+        return this.#values.compare(source.width, operator, source.result, this.#values.const(0));
     }
   }
 
@@ -302,17 +303,18 @@ export class StatusFlagState {
     }
 
     const selector = this.#cells.read(lazyFlagsKindChannel);
-    const cases = caseSpecs.map((spec) => this.#lazyConditionArm(spec));
-    const defaultBody = this.#lazyConditionDefaultBody(CONDITIONS[cc].expr);
-    const output = this.#values.addActionOutput(fitsUnsigned(1));
-
-    this.#emit({
-      kind: "switch",
+    const builder = new BodyBuilder(this.#values);
+    const output = builder.switch(
       selector,
-      output,
-      cases,
-      defaultBody
-    });
+      caseSpecs.map((spec) => this.#lazyConditionArm(spec)),
+      (arm) => this.#lazyConditionDefault(arm, CONDITIONS[cc].expr),
+      fitsUnsigned(1)
+    );
+
+    for (const action of builder.build().actions) {
+      this.#emit(action);
+    }
+
     return output;
   }
 
@@ -320,30 +322,19 @@ export class StatusFlagState {
     return CONDITIONS[cc].reads.every((flag) => getBacking(this.#current.backings, flag).kind === "input");
   }
 
-  #lazyConditionArm(spec: LazyConditionCaseSpec): SwitchCase {
-    const left = createOpAction(this.#values, this.#lazyOperandRead(lazyFlagsAChannel, spec));
-
-    assert(left.output !== undefined, "lazy condition left read is missing its output");
-
-    if (spec.kind === LAZY_FLAGS_KIND.LOGIC_RESULT) {
-      return {
-        match: lazyFlagsKindByte(spec.kind, spec.width),
-        body: {
-          actions: [left],
-          result: this.#compare(spec.width, spec.operator, left.output, this.#values.const(0))
-        }
-      };
-    }
-
-    const right = createOpAction(this.#values, this.#lazyOperandRead(lazyFlagsBChannel, spec));
-
-    assert(right.output !== undefined, "lazy condition right read is missing its output");
-
+  #lazyConditionArm(spec: LazyConditionCaseSpec): SwitchArm {
     return {
       match: lazyFlagsKindByte(spec.kind, spec.width),
-      body: {
-        actions: [left, right],
-        result: this.#compare(spec.width, spec.operator, left.output, right.output)
+      build: (arm) => {
+        const left = arm.op(this.#lazyOperandRead(lazyFlagsAChannel, spec));
+
+        if (spec.kind === LAZY_FLAGS_KIND.LOGIC_RESULT) {
+          return this.#values.compare(spec.width, spec.operator, left, this.#values.const(0));
+        }
+
+        const right = arm.op(this.#lazyOperandRead(lazyFlagsBChannel, spec));
+
+        return this.#values.compare(spec.width, spec.operator, left, right);
       }
     };
   }
@@ -365,26 +356,21 @@ export class StatusFlagState {
     }
   }
 
-  #lazyConditionDefaultBody(expr: FlagBoolExpr): Readonly<{ actions: readonly Action[]; result: ValueId }> {
-    const actions: Action[] = [];
+  #lazyConditionDefault(body: BodyBuilder, expr: FlagBoolExpr): ValueId {
     const flags = new Map<X86StatusFlag, ValueId>();
-    const result = this.#flagBoolExpr(expr, (flag) => {
+
+    return this.#flagBoolExpr(expr, (flag) => {
       const cached = flags.get(flag);
 
       if (cached !== undefined) {
         return cached;
       }
 
-      const action = createOpAction(this.#values, { kind: "cpu.resolveFlag", flag });
+      const resolved = body.op({ kind: "cpu.resolveFlag", flag });
 
-      assert(action.output !== undefined, `${flag} resolver is missing its output`);
-
-      actions.push(action);
-      flags.set(flag, action.output);
-      return action.output;
+      flags.set(flag, resolved);
+      return resolved;
     });
-
-    return { actions, result };
   }
 
   #flagBoolExpr(expr: FlagBoolExpr, resolveFlag: FlagBoolExprFlagResolver): ValueId {
@@ -393,6 +379,7 @@ export class StatusFlagState {
         return resolveFlag(expr.flag);
       case "not":
         return this.#values.compare(
+          32,
           "eq",
           this.#flagBoolExpr(expr.value, resolveFlag),
           this.#values.const(0)
@@ -463,14 +450,6 @@ export class StatusFlagState {
     return statusFlagValuesForSource(this.#valueOps, source, {
       undefinedAF: this.#materializeUndef(logicUndefFlagPolicy)
     });
-  }
-
-  #compare(width: SimpleFlagSource<ValueId>["width"], operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
-    const lower = signedComparePredicates.has(operator)
-      ? (id: ValueId) => this.#values.extend(width, id, true)
-      : (id: ValueId) => this.#values.truncate(width, id);
-
-    return this.#values.compare(operator, lower(a), lower(b));
   }
 }
 

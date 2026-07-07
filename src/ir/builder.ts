@@ -25,11 +25,10 @@ import type {
   ValueInput
 } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
-import {
-  signedComparePredicates,
-  type BinaryOperator,
-  type CompareOperator,
-  type UnaryOperator
+import type {
+  BinaryOperator,
+  CompareOperator,
+  UnaryOperator
 } from "#x86/semantics/ops.js";
 import type {
   ExternalValueId,
@@ -280,9 +279,13 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
         switch (binding.kind) {
           case "imm":
-            return valueFromId(this.#widthAdjusted(this.#values.const(binding.value), accessWidth, options));
+            return valueFromId(
+              this.#values.widthAdjusted(accessWidth, this.#values.const(binding.value), options.signed === true)
+            );
           case "immExternal":
-            return valueFromId(this.#widthAdjusted(this.#values.external(binding.value), accessWidth, options));
+            return valueFromId(
+              this.#values.widthAdjusted(accessWidth, this.#values.external(binding.value), options.signed === true)
+            );
           case "reg":
             return valueFromId(this.#state.gpr.read(binding.channel, accessWidth, options));
           case "segment":
@@ -430,15 +433,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
     this.#beforeOp("compare");
-    // Narrow compares lower by predicate class: signed predicates need
-    // sign-extended operands, the rest masked ones.
-    const lower = signedComparePredicates.has(operator)
-      ? (id: ValueId) => this.#values.extend(width, id, true)
-      : (id: ValueId) => this.#values.truncate(width, id);
-
-    return valueFromId(
-      this.#values.compare(operator, lower(a), lower(b))
-    );
+    return valueFromId(this.#values.compare(width, operator, a, b));
   }
 
   readFlag(flag: X86Flag): Value {
@@ -626,12 +621,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       index: this.#values.external(binding.index),
       byteLength: dynamicGprByteLength[accessWidth]
     };
-  }
-
-  #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: GetOptions): ValueId {
-    return options.signed === true
-      ? this.#values.extend(accessWidth, value, true)
-      : this.#values.truncate(accessWidth, value);
   }
 
   #writeSegmentSelector(
