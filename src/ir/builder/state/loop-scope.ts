@@ -32,6 +32,7 @@ export class StateLoopScope {
   readonly #carriesStatusFlags: boolean;
   readonly #carriesInstructionCount: boolean;
   #cells: readonly LoopCell[] | undefined;
+  #dirtyAtEntry: ReadonlySet<StateChannel> = new Set();
 
   constructor(
     values: ValueTable,
@@ -66,6 +67,10 @@ export class StateLoopScope {
       seed: this.#state.readChannel(channel),
       loopInput: this.#values.addLoopInput(loopInputBounds(channel))
     }));
+
+    // What stays dirty after the seed reads is exactly what memory lacks on
+    // the zero-trip path: an exact pending entry is read without a flush.
+    this.#dirtyAtEntry = new Set(this.#carried.filter((channel) => this.#state.isChannelDirty(channel)));
 
     for (const cell of cells) {
       this.#state.writeChannel(cell.channel, cell.loopInput);
@@ -107,6 +112,17 @@ export class StateLoopScope {
       kind: "op",
       op: { kind: "state.write", slot: cell.channel, value: exitValues[index]! }
     }));
+  }
+
+  // The zero-trip arm's commits: only dirty-at-entry channels, whose pre-loop
+  // value survives nowhere but the seed once the ran arm consumes it.
+  commitSeedValues(): readonly StateWriteAction[] {
+    return this.#openCells()
+      .filter((cell) => this.#dirtyAtEntry.has(cell.channel))
+      .map((cell) => ({
+        kind: "op",
+        op: { kind: "state.write", slot: cell.channel, value: cell.seed }
+      }));
   }
 
   close(): void {

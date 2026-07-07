@@ -62,6 +62,11 @@ export class StateCells {
     return this.#buffer.has(channel);
   }
 
+  // Whether memory does not hold the cell's current value.
+  isDirty(channel: StateCell): boolean {
+    return this.#buffer.get(channel)?.dirty === true;
+  }
+
   beginInstruction(): void {
     this.#buffer.snapshotBoundary();
   }

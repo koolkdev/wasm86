@@ -190,6 +190,51 @@ test("a mid-body fault restores iteration-start carried values and the rep eip",
   strictEqual(block.values.constValue(eipWrite.op.value), repEip);
 });
 
+// The if whose then-body holds the loop: the loop's enter join.
+function loopEnterIf(block: IrBlock): IfAction {
+  const entry = block.body.actions.find(
+    (action): action is IfAction =>
+      action.kind === "if" && action.thenBody.actions.some((nested) => nested.kind === "loop")
+  );
+
+  ok(entry !== undefined, "loop entry if exists");
+  return entry;
+}
+
+// A channel dirtied before the loop survives only as the cell seed, which the
+// ran arm consumes; the zero-trip arm must commit it or memory keeps the
+// stale pre-loop value.
+test("a dirty-at-entry carried channel commits its seed on the zero-trip arm", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], loc(repEip - 2, repEip));
+  builder.addInstruction(repMovsSemantic(32), [siOperand(), diOperand()], loc(repEip, repNextEip));
+
+  const block = builder.finish();
+  const loop = findLoop(block);
+  const enterIf = loopEnterIf(block);
+
+  ok(enterIf.elseBody !== undefined, "the loop entry if has a zero-trip arm");
+
+  const elseWrites = stateWrites(enterIf.elseBody.actions);
+  const ecxCell = loop.carried.find((cell) => cell.channel === gprChannel("ecx"));
+
+  ok(ecxCell !== undefined, "loop carries ecx");
+  strictEqual(writeFor(elseWrites, gprChannel("ecx")).op.value, ecxCell.seed);
+
+  // Memory-backed carried channels already read back correctly when the loop
+  // never runs; only dirty-at-entry channels commit here.
+  for (const reg of ["esi", "edi"] as const) {
+    ok(
+      elseWrites.every((write) => !slotsMayAlias(write.op.slot, gprChannel(reg))),
+      `${reg} gets no zero-trip commit`
+    );
+  }
+
+  // A lone rep dirties nothing before the loop: no else arm at all.
+  strictEqual(loopEnterIf(repMovsBlock()).elseBody, undefined);
+});
+
 test("the zero-trip arm counts the rep as one instruction at nextEip", () => {
   const block = repMovsBlock();
   const writes = stateWrites(block.body.actions);

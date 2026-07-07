@@ -102,6 +102,12 @@ export class State {
       : this.#cells.read(channel);
   }
 
+  isChannelDirty(channel: StateChannel): boolean {
+    return channel.kind === "gpr"
+      ? this.gpr.isChannelDirty(channel)
+      : this.#cells.isDirty(channel);
+  }
+
   writeChannel(channel: StateChannel, value: ValueId): void {
     switch (channel.kind) {
       case "gpr":

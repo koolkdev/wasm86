@@ -132,6 +132,18 @@ export class GprState {
     return this.#buffer.has(channel);
   }
 
+  // Whether memory does not hold the channel's current bytes: any
+  // overlapping dirty entry counts.
+  isChannelDirty(channel: GprChannel): boolean {
+    for (const [other, entry] of this.#buffer.entries()) {
+      if (entry.dirty && channelsOverlap(other, channel)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   // Drops the channel's tracked value and cached reads; the next read goes
   // back to state memory.
   invalidate(channel: GprChannel): void {

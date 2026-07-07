@@ -120,10 +120,15 @@ export class LoopBuilder {
       body: { actions: this.#bodyActions }
     };
 
+    // The enter-if is a join: the ran arm commits through the exit tail, the
+    // zero-trip arm commits the dirty-at-entry seeds.
+    const seedCommits = this.#scope.commitSeedValues();
+
     this.#context.emitParentAction({
       kind: "if",
       condition: enter,
-      thenBody: { actions: [...this.#entryActions, loopAction] }
+      thenBody: { actions: [...this.#entryActions, loopAction] },
+      ...(seedCommits.length > 0 ? { elseBody: { actions: seedCommits } } : {})
     });
 
     this.#scope.close();

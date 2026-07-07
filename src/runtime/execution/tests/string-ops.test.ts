@@ -22,6 +22,7 @@ const guestByteLength = 0x10000;
 const allStatusFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 const sourceAddress = 0x20;
 const destOffset = 0x30;
+const countAddress = 0x50;
 const esBase = 0;
 
 const modes = [
@@ -182,6 +183,37 @@ runFixture({
       ...allStatusFlagsSet,
       eip: engineFixtureStartAddress + repMovsOpcode(32).length + trap.length,
       instructionCount: 2
+    },
+    memory: [{ address: esBase + destOffset, bytes: dwordBytes(0x1122_3344) }]
+  }
+});
+
+// A preceding load leaves ecx dirty when the loop opens; the zero-trip arm
+// must commit the loaded 0, not keep the stale pre-load ecx.
+runFixture({
+  name: "rep-movsd-zero-count-commits-dirty-ecx/trap",
+  bytes: withTrap([0x8b, 0x0d, ...dwordBytes(countAddress), ...repMovsOpcode(32)]),
+  initialState: {
+    ecx: 5,
+    esi: sourceAddress,
+    edi: destOffset,
+    esBase,
+    eip: engineFixtureStartAddress
+  },
+  initialMemory: [
+    { address: countAddress, bytes: dwordBytes(0) },
+    { address: sourceAddress, bytes: dwordBytes(0xfeed_cafe) },
+    { address: esBase + destOffset, bytes: dwordBytes(0x1122_3344) }
+  ],
+  expected: {
+    result: { stop: { kind: "hostTrap", vector: 0x2e } },
+    state: {
+      ecx: 0,
+      esi: sourceAddress,
+      edi: destOffset,
+      esBase,
+      eip: engineFixtureStartAddress + 6 + repMovsOpcode(32).length + trap.length,
+      instructionCount: 3
     },
     memory: [{ address: esBase + destOffset, bytes: dwordBytes(0x1122_3344) }]
   }
