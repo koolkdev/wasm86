@@ -55,7 +55,7 @@ test("a repeated add compiles to one eax read and one eax write", () => {
   strictEqual(actions.filter((action) => isStateWrite(action) && isEaxWordSlot(action.op.slot)).length, 1);
 });
 
-test("cross-instruction dead flag writes are absent and EIP dispatch state is explicit", () => {
+test("cross-instruction dead flag writes are absent and dispatch owns EIP state", () => {
   // add eax, 1; add eax, 1.
   const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
   const actions = entryActions(block);
@@ -69,7 +69,7 @@ test("cross-instruction dead flag writes are absent and EIP dispatch state is ex
   strictEqual(flagWrites.length, 0);
   strictEqual(new Set(flagWrites).size, flagWrites.length);
   strictEqual(lazyKindWrites.length, 1);
-  strictEqual(actions.filter((action) => isStateWrite(action) && action.op.slot.kind === "eip").length, 1);
+  strictEqual(actions.filter((action) => isStateWrite(action) && action.op.slot.kind === "eip").length, 0);
   strictEqual(
     actions.filter((action) => action.kind === "finish" && action.finish.kind === "dispatch").length,
     1

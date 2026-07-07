@@ -33,7 +33,6 @@ function loopBlock(values: ValueTable, actions: readonly Action[]): IrBlock {
     body: {
       actions: [
         ...actions,
-        stateWrite(eipChannel, eip),
         { kind: "finish", finish: { kind: "dispatch", targetEip: eip } }
       ]
     }

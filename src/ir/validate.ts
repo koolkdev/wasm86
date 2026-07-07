@@ -4,7 +4,6 @@ import {
   bodyCompletes,
   maxSwitchMatch,
   type Action,
-  type DispatchFinish,
   type Finish,
   type IrExit,
   type LoopAction,
@@ -14,7 +13,13 @@ import {
 } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
 import { opAccess, type OpValueOutput } from "./ops.js";
-import type { StateChannel } from "./slots.js";
+import {
+  channelCovers,
+  channelsOverlap,
+  isDynamicSlot,
+  type StateChannel,
+  type StateSlot
+} from "./slots.js";
 import { unboundedWidthBounds, type ValueId, type WidthBounds } from "./values.js";
 
 export type ValidateIrBlockOptions = Readonly<{
@@ -22,8 +27,9 @@ export type ValidateIrBlockOptions = Readonly<{
 }>;
 
 // Structural checks: bodies terminate consistently, nested bodies are closed
-// where their owner requires it, and dispatch targets are real values with
-// matching EIP commits on every path that dispatches.
+// where their owner requires it, and dispatch targets are real values. A
+// dispatch completion owns the architectural EIP commit, so state writes on
+// the same path must not also flush EIP.
 export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
   validateBody(block, block.body, [], "body", undefined, undefined);
 
@@ -60,6 +66,9 @@ function validateBody(
   for (const [index, action] of body.actions.entries()) {
     assertKnownAction(action);
     validateActionValues(block, action);
+    if (action.kind === "op" && enclosingLoop !== undefined) {
+      validateLoopStateAccess(action, enclosingLoop, `${path}.op[${index}]`);
+    }
 
     // Structural before completion: actionCompletes walks the default body.
     if (action.kind === "switch") {
@@ -126,7 +135,7 @@ function validateBody(
         break;
       case "finish":
         if (action.finish.kind === "dispatch") {
-          assertDispatchEipFlushed(prefixBeforeAction(), action.finish, path);
+          assertDispatchDoesNotFlushEip(prefixBeforeAction(), path);
         }
 
         break;
@@ -156,7 +165,7 @@ function validateLoopCells(block: IrBlock, action: LoopAction, path: string): vo
   }
 }
 
-// The pending layer carries channels it can seed, read, and flush through
+// The state layer carries channels it can seed, read, and flush through
 // exact accesses. GPR carries may be narrow, but loop bodies must touch them
 // through the exact same alias.
 function assertCarriableChannel(channel: StateChannel, path: string): void {
@@ -170,6 +179,47 @@ function assertCarriableChannel(channel: StateChannel, path: string): void {
     case "segment":
     case "eip":
       assert(false, `${path} carries an unsupported ${channel.kind} channel`);
+  }
+}
+
+function validateLoopStateAccess(action: OpAction, loop: LoopAction, path: string): void {
+  const access = opAccess(action.op);
+
+  for (const read of access.reads) {
+    if (read.space === "state") {
+      validateLoopStateSlotAccess(read.slot, "read", loop, path);
+    }
+  }
+
+  for (const write of access.writes) {
+    if (write.space === "state") {
+      validateLoopStateSlotAccess(write.slot, "write", loop, path);
+    }
+  }
+}
+
+function validateLoopStateSlotAccess(
+  slot: StateSlot,
+  access: "read" | "write",
+  loop: LoopAction,
+  path: string
+): void {
+  const carriedChannels = loop.carried.flatMap((cell) => cell.channel === undefined ? [] : [cell.channel]);
+
+  if (isDynamicSlot(slot)) {
+    assert(
+      slot.kind !== "gprDynamic" || carriedChannels.every((channel) => channel.kind !== "gpr"),
+      `${path} loop body ${access} uses a dynamic GPR slot with carried GPR state`
+    );
+    return;
+  }
+
+  for (const carried of carriedChannels) {
+    assert(
+      !channelsOverlap(carried, slot) ||
+        (channelCovers(carried, slot) && channelCovers(slot, carried)),
+      `${path} loop body ${access} partially overlaps a carried channel`
+    );
   }
 }
 
@@ -290,15 +340,10 @@ function formatBounds(bounds: WidthBounds): string {
   return `{ unsignedBits: ${bounds.unsignedBits}, signedBits: ${bounds.signedBits} }`;
 }
 
-function assertDispatchEipFlushed(
-  prefix: readonly Action[],
-  dispatch: DispatchFinish,
-  path: string
-): void {
+function assertDispatchDoesNotFlushEip(prefix: readonly Action[], path: string): void {
   const eipWrite = lastEipWrite(prefix);
 
-  assert(eipWrite !== undefined, `${path} dispatch path must flush EIP state`);
-  assert(eipWrite.op.value === dispatch.targetEip, `${path} dispatch EIP flush does not match dispatch.targetEip`);
+  assert(eipWrite === undefined, `${path} dispatch path must not flush EIP state`);
 }
 
 function assertKnownAction(action: Action): void {

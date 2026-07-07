@@ -231,7 +231,6 @@ test("a dispatch inside an arm escapes through the switch's labels", async () =>
                     condition,
                     thenBody: {
                       actions: [
-                        stateWrite(eipChannel, target),
                         { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
                       ]
                     }

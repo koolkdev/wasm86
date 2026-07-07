@@ -1,11 +1,12 @@
 import { assert } from "#common/assert.js";
 import { segmentRegisterIndex } from "#x86/segments.js";
 import type { OperandWidth, SegmentRegister } from "#x86/types.js";
-import type { SegmentDynamicOperandBinding, SegmentOperandBinding } from "./operands.js";
-import type { Action, Finish } from "./actions.js";
-import type { PendingState } from "./pending/state.js";
-import { segmentBaseChannel, type SegmentChannel } from "./slots.js";
-import { type ValueId, type ValueTable } from "./values.js";
+import type { SegmentDynamicOperandBinding, SegmentOperandBinding } from "../../operands.js";
+import type { Action, Finish } from "../../actions.js";
+import { segmentBaseChannel, type SegmentChannel } from "../../slots.js";
+import { fitsUnsigned, type ValueId, type ValueTable } from "../../values.js";
+import type { StateCells } from "./cells.js";
+import type { StateAccess } from "./access.js";
 
 export type SegmentMode = "flat32";
 
@@ -15,23 +16,29 @@ export type SegmentReadOptions = Readonly<{
 
 export type SegmentTerminator = (finish: Finish, actions: readonly Action[]) => void;
 
-export class Segments {
+export class SegmentState {
   readonly #values: ValueTable;
-  readonly #pending: PendingState;
+  readonly #cells: StateCells;
+  readonly #state: StateAccess;
   readonly #mode: SegmentMode;
   readonly #terminate: SegmentTerminator;
+  readonly #faultFlushes: () => readonly Action[];
   readonly #dynamicBases = new Map<number, ValueId>();
 
   constructor(
     values: ValueTable,
-    pending: PendingState,
+    cells: StateCells,
+    state: StateAccess,
     mode: SegmentMode,
-    terminate: SegmentTerminator
+    terminate: SegmentTerminator,
+    faultFlushes: () => readonly Action[]
   ) {
     this.#values = values;
-    this.#pending = pending;
+    this.#cells = cells;
+    this.#state = state;
     this.#mode = mode;
     this.#terminate = terminate;
+    this.#faultFlushes = faultFlushes;
   }
 
   beginInstruction(): void {
@@ -43,22 +50,26 @@ export class Segments {
     accessWidth: OperandWidth,
     options: SegmentReadOptions
   ): ValueId {
-    return this.#widthAdjusted(this.#pending.read(channel), accessWidth, options);
+    return this.#widthAdjusted(this.#cells.read(channel), accessWidth, options);
   }
 
   readDynamicSelector(index: ValueId, accessWidth: OperandWidth, options: SegmentReadOptions): ValueId {
-    return this.#widthAdjusted(this.#pending.readDynamicSegmentSelector(index), accessWidth, options);
+    return this.#widthAdjusted(
+      this.#state.read({ kind: "segmentDynamic", index, field: "selector" }, fitsUnsigned(16)),
+      accessWidth,
+      options
+    );
   }
 
   readBase(reg: SegmentRegister): ValueId {
-    return this.#pending.read(segmentBaseChannel(reg));
+    return this.#cells.read(segmentBaseChannel(reg));
   }
 
   readDynamicBase(index: ValueId): ValueId {
     let base = this.#dynamicBases.get(index);
 
     if (base === undefined) {
-      base = this.#pending.readDynamicSegmentBase(index);
+      base = this.#state.read({ kind: "segmentDynamic", index, field: "base" });
       this.#dynamicBases.set(index, base);
     }
 
@@ -77,7 +88,7 @@ export class Segments {
               payload: this.#loadPayload(binding, selector)
             }
           },
-          this.#pending.flushesForPath("fault")
+          this.#faultFlushes()
         );
         return;
     }

@@ -1,5 +1,5 @@
-import type { Action } from "../actions.js";
 import type { X86StatusFlag } from "#x86/flags.js";
+import type { Action } from "../../actions.js";
 import {
   type EipChannel,
   type FlagChannel,
@@ -7,12 +7,12 @@ import {
   type LazyFlagsChannel,
   type SegmentChannel,
   type StateSlot
-} from "../slots.js";
-import { fitsUnsigned, type ValueId, type ValueTable, type WidthBounds } from "../values.js";
+} from "../../slots.js";
+import { fitsUnsigned, type ValueId, type ValueTable, type WidthBounds } from "../../values.js";
 
 export type CachedStateInput = FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
 
-export class PendingStateAccess {
+export class StateAccess {
   readonly #values: ValueTable;
   readonly #emit: (action: Action) => void;
   readonly #inputReads = new Map<CachedStateInput, ValueId>();

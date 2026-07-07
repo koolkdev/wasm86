@@ -1,7 +1,8 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
+import { subFlagSource } from "#x86/semantics/flag-writes.js";
 import { immBinding, memBinding, regBinding, staticMemSegment } from "#ir/operands.js";
 import {
   gprChannel,
@@ -192,15 +193,15 @@ test("a mid-body fault restores iteration-start carried values and the rep eip",
 test("the zero-trip arm counts the rep as one instruction at nextEip", () => {
   const block = repMovsBlock();
   const writes = stateWrites(block.body.actions);
-  const eipWrite = writes.find((action) => action.op.slot.kind === "eip");
   const countWrite = writes.find((action) => action.op.slot.kind === "instructionCount");
+  const finish = block.body.actions.at(-1);
 
-  ok(eipWrite !== undefined, "fallthrough writes next eip");
   ok(countWrite !== undefined, "fallthrough writes instruction count");
+  ok(finish?.kind === "finish" && finish.finish.kind === "dispatch", "fallthrough dispatches");
 
   const countNode = block.values.node(countWrite.op.value);
 
-  strictEqual(block.values.constValue(eipWrite.op.value), repNextEip);
+  strictEqual(block.values.constValue(finish.finish.targetEip), repNextEip);
   ok(countNode.kind === "binary" && countNode.operator === "add", "fallthrough advances the count");
   strictEqual(block.values.constValue(countNode.b), 1);
 });
@@ -278,4 +279,54 @@ test("repe cmps carries the lazy flag cells and updates them per unit", () => {
   const kindUpdate = updates[loop.carried.findIndex((cell) => cell.channel === lazyFlagsKindChannel)]!;
 
   strictEqual(block.values.constValue(kindUpdate), lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 8));
+});
+
+// A loop body may only write channels the loop carries; the write sites assert
+// at the point of the write, not by scanning pending state afterward.
+test("a loop body writing an uncarried register asserts at the write", () => {
+  const builder = createIrBlockBuilder();
+
+  throws(
+    () =>
+      builder.addInstruction(
+        (s) => {
+          s.loop({
+            stateRegs: ["ecx"],
+            enter: s.const32(1),
+            body: (b) => {
+              b.set(b.reg("eax"), b.const32(0));
+              return b.const32(0);
+            }
+          });
+        },
+        [],
+        loc(repEip, repNextEip)
+      ),
+    /uncarried state channel/
+  );
+});
+
+test("a loop body writing status flags it does not carry asserts", () => {
+  const builder = createIrBlockBuilder();
+
+  throws(
+    () =>
+      builder.addInstruction(
+        (s) => {
+          s.loop({
+            stateRegs: ["ecx"],
+            enter: s.const32(1),
+            body: (b) => {
+              b.writeStatusFlagsSource(
+                subFlagSource({ width: 32, left: b.const32(0), right: b.const32(0), result: b.const32(0) })
+              );
+              return b.const32(0);
+            }
+          });
+        },
+        [],
+        loc(repEip, repNextEip)
+      ),
+    /does not carry them/
+  );
 });

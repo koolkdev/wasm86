@@ -1,7 +1,10 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { PendingState } from "#ir/pending/state.js";
+import { StateAccess } from "#ir/builder/state/access.js";
+import { StateCells, type StatePathKind } from "#ir/builder/state/cells.js";
+import { GprState, type GprReadOptions } from "#ir/builder/state/gpr.js";
+import { SegmentState } from "#ir/builder/state/segments.js";
 import {
   eipChannel,
   flagChannel,
@@ -11,6 +14,7 @@ import {
   segmentBaseChannel,
   segmentSelectorChannel,
   type GprDynamicSlot,
+  type StateChannel,
   type StateSlot
 } from "#ir/slots.js";
 import type { Action, StateWriteAction } from "#ir/actions.js";
@@ -20,25 +24,84 @@ import { isStateRead, isStateWrite, stateRead, stateWrite } from "#ir/tests/stor
 type Harness = Readonly<{
   values: ValueTable;
   actions: Action[];
-  pending: PendingState;
+  pending: StateAccessHarness;
+}>;
+
+type StateAccessHarness = Readonly<{
+  read(channel: StateChannel, options?: GprReadOptions): ValueId;
+  write(channel: StateChannel, value: ValueId): void;
+  has(channel: StateChannel): boolean;
+  beginInstruction(): void;
+  flushesForPath(path: StatePathKind): readonly StateWriteAction[];
+  readDynamicGpr(slot: GprDynamicSlot, options?: GprReadOptions): ValueId;
+  writeDynamicGpr(slot: GprDynamicSlot, value: ValueId): void;
+  readDynamicSegmentBase(index: ValueId): ValueId;
+  readDynamicSegmentSelector(index: ValueId): ValueId;
 }>;
 
 function createHarness(): Harness {
   const values = new ValueTable();
   const actions: Action[] = [];
+  const access = new StateAccess(values, (action) => actions.push(action));
+  const cells = new StateCells(access);
+  const gpr = new GprState(values, access);
+  const flushesForPath = (path: StatePathKind): readonly StateWriteAction[] => [
+    ...gpr.flushesForPath(path),
+    ...cells.flushesForPath(path)
+  ];
+  const segments = new SegmentState(
+    values,
+    cells,
+    access,
+    "flat32",
+    (finish, finishActions) => {
+      actions.push(...finishActions, { kind: "finish", finish });
+    },
+    () => flushesForPath("fault")
+  );
 
-  return { values, actions, pending: new PendingState(values, (action) => actions.push(action)) };
+  return {
+    values,
+    actions,
+    pending: {
+      read: (channel, options) => channel.kind === "gpr"
+        ? gpr.readChannel(channel, options)
+        : cells.read(channel),
+      write: (channel, value) => {
+        if (channel.kind === "gpr") {
+          gpr.writeChannel(channel, value);
+          return;
+        }
+
+        if (channel.kind === "segment") {
+          throw new Error("segment writes must use a segment-load host exit");
+        }
+
+        cells.write(channel, value);
+      },
+      has: (channel) => channel.kind === "gpr" ? gpr.has(channel) : cells.has(channel),
+      beginInstruction: () => {
+        gpr.beginInstruction();
+        cells.beginInstruction();
+      },
+      flushesForPath,
+      readDynamicGpr: (slot, options) => gpr.readDynamic(slot, options),
+      writeDynamicGpr: (slot, value) => gpr.writeDynamic(slot, value),
+      readDynamicSegmentBase: (index) => segments.readDynamicBase(index),
+      readDynamicSegmentSelector: (index) => segments.readDynamicSelector(index, 16, {})
+    }
+  };
 }
 
 function dynamicGpr(index: ValueId, byteLength: 1 | 2 | 4 = 4): GprDynamicSlot {
   return { kind: "gprDynamic", index, byteLength };
 }
 
-function faultFlushEntries(pending: PendingState): ReadonlyArray<readonly [StateSlot, ValueId]> {
+function faultFlushEntries(pending: StateAccessHarness): ReadonlyArray<readonly [StateSlot, ValueId]> {
   return edgeEntries(pending.flushesForPath("fault"));
 }
 
-function completedEdgeEntries(pending: PendingState): ReadonlyArray<readonly [StateSlot, ValueId]> {
+function completedEdgeEntries(pending: StateAccessHarness): ReadonlyArray<readonly [StateSlot, ValueId]> {
   return edgeEntries(pending.flushesForPath("completed"));
 }
 

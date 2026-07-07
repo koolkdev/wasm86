@@ -74,7 +74,7 @@ export function finishOperands(finish: Finish): readonly ValueId[] {
     case "exit":
       return exitOperands(finish.exit);
     case "dispatch":
-      return [];
+      return [finish.targetEip];
   }
 }
 

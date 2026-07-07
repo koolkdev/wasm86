@@ -41,18 +41,11 @@ import type {
   SegmentDynamicOperandBinding,
   SegmentOperandBinding
 } from "./operands.js";
-import { PendingState } from "./pending/state.js";
 import { LoopBuilder, LoopSemanticsBuilderImpl } from "./builder/loop.js";
-import { Segments, type SegmentMode } from "./segments.js";
-import { StatusFlags } from "./status-flags.js";
+import { State } from "./builder/state/index.js";
+import type { SegmentMode } from "./builder/state/segments.js";
 import {
-  eipChannel,
-  flagChannel,
-  gprChannel,
-  instructionCountChannel,
-  type GprDynamicSlot,
-  type GprChannel,
-  type StateChannel
+  type GprDynamicSlot
 } from "./slots.js";
 import type {
   Action,
@@ -130,9 +123,7 @@ function valueFromId(id: ValueId): Value {
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = new ValueTable();
   readonly #actions: Action[] = [];
-  readonly #pending = new PendingState(this.#values, (action) => this.#emitAction(action));
-  readonly #statusFlags = new StatusFlags(this.#values, this.#pending, (action) => this.#emitAction(action));
-  readonly #segments: Segments;
+  readonly #state: State;
   #activeLoop: LoopBuilder | undefined;
   // An effective/linear address is computed once per operand, at its first
   // use, so later uses see the same address even if the instruction rewrites
@@ -141,8 +132,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #operandLinearAddresses = new Map<number, ValueId>();
   #bindings: readonly OperandBinding[] = [];
   #instructionLocation: InstructionLocationValues | undefined;
-  #instructionCountBase: ValueId | undefined;
-  #instructionsCompleted = 0;
   #terminated = false;
   #wroteMemory = false;
   #finished = false;
@@ -150,16 +139,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
 
   constructor(segmentMode: SegmentMode) {
-    this.#segments = new Segments(
+    this.#state = new State(
       this.#values,
-      this.#pending,
+      (action) => this.#emitAction(action),
       segmentMode,
       (finish, actions) => this.#terminate(finish, actions)
     );
-    this.#pending.observeAccess({
-      onRead: (channel) => this.#onPendingAccess(channel, "read"),
-      onWrite: (channel) => this.#onPendingAccess(channel, "write")
-    });
   }
 
   addInstruction(
@@ -174,12 +159,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#bindings = bindings;
     this.#operandAddresses.clear();
     this.#operandLinearAddresses.clear();
-    this.#segments.beginInstruction();
     this.#instructionLocation = this.#locationValues(location);
     this.#terminated = false;
     this.#wroteMemory = false;
-    this.#pending.write(eipChannel, this.#location().eip());
-    this.#pending.beginInstruction();
+    this.#state.beginInstruction(this.#location().eip());
 
     template(this, this);
 
@@ -205,11 +188,13 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     switch (this.#blockEnd) {
       case "fallthrough":
       case "jump":
-        assert(this.#pending.has(eipChannel), "IR block did not advance eip; no instructions were added");
-        this.#actions.push(...this.#pending.flushesForPath("completed"));
+        assert(this.#state.eip.has(), "IR block did not advance eip; no instructions were added");
+        const targetEip = this.#state.takeEipForDispatch();
+
+        this.#actions.push(...this.#state.flushesForCompletedDispatch());
         this.#actions.push({
           kind: "finish",
-          finish: { kind: "dispatch", targetEip: this.#pending.read(eipChannel) }
+          finish: { kind: "dispatch", targetEip }
         });
         break;
       case "terminated":
@@ -287,7 +272,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     switch (storage.kind) {
       case "reg":
-        return valueFromId(this.#readChannel(gprChannel(storage.reg), accessWidth, options));
+        return valueFromId(this.#state.gpr.read(storage.reg, accessWidth, options));
       case "mem":
         return valueFromId(this.#readGuestMemory(storage.address, accessWidth, options));
       case "operand": {
@@ -299,20 +284,20 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "immExternal":
             return valueFromId(this.#widthAdjusted(this.#values.external(binding.value), accessWidth, options));
           case "reg":
-            return valueFromId(this.#readChannel(binding.channel, accessWidth, options));
+            return valueFromId(this.#state.gpr.read(binding.channel, accessWidth, options));
           case "segment":
-            return valueFromId(this.#segments.readSelector(binding.channel, accessWidth, options));
+            return valueFromId(this.#state.segments.readSelector(binding.channel, accessWidth, options));
           case "mem":
           case "memStatic":
           case "memDynamic":
             return valueFromId(this.#readGuestMemory(this.#operandLinearAddress(storage.index), accessWidth, options));
           case "regDynamic":
             return valueFromId(
-              this.#pending.readDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), options)
+              this.#state.gpr.readDynamic(this.#dynamicGprSlot(binding, accessWidth), options)
             );
           case "segmentDynamic":
             return valueFromId(
-              this.#segments.readDynamicSelector(this.#values.external(binding.index), accessWidth, options)
+              this.#state.segments.readDynamicSelector(this.#values.external(binding.index), accessWidth, options)
             );
         }
       }
@@ -325,7 +310,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     switch (storage.kind) {
       case "reg":
-        this.#writeChannel(gprChannel(storage.reg), value, accessWidth);
+        this.#state.gpr.write(storage.reg, value, accessWidth);
         return;
       case "mem":
         this.#writeGuestMemory(storage.address, value, accessWidth);
@@ -335,7 +320,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
         switch (binding.kind) {
           case "reg":
-            this.#writeChannel(binding.channel, value, accessWidth);
+            this.#state.gpr.write(binding.channel, value, accessWidth);
             return;
           case "segment":
           case "segmentDynamic":
@@ -347,7 +332,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
             this.#writeGuestMemory(this.#operandLinearAddress(storage.index), value, accessWidth);
             return;
           case "regDynamic":
-            this.#pending.writeDynamicGpr(this.#dynamicGprSlot(binding, accessWidth), value);
+            this.#state.gpr.writeDynamic(this.#dynamicGprSlot(binding, accessWidth), value);
             return;
           case "imm":
           case "immExternal":
@@ -359,8 +344,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   next(): void {
     this.#beforeOp("next");
-    this.#advanceInstructionCount();
-    this.#pending.write(eipChannel, this.#location().nextEip());
+    this.#state.instructionCount.increment();
+    this.#state.eip.write(this.#location().nextEip());
     this.#terminated = true;
   }
 
@@ -377,7 +362,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       addressId,
       byteLength,
       { kind: "data", access },
-      this.#pending.flushesForPath("fault")
+      this.#state.flushesForPath("fault")
     )) {
       this.#emitAction(action);
     }
@@ -454,42 +439,44 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readFlag(flag: X86Flag): Value {
     this.#beforeOp("readFlag");
     if (!isX86StatusFlag(flag)) {
-      return valueFromId(this.#pending.read(flagChannel(flag)));
+      return valueFromId(this.#state.flags.read(flag));
     }
 
-    return valueFromId(this.#statusFlags.readFlag(flag));
+    return valueFromId(this.#state.statusFlags.read(flag));
   }
 
   writeFlag(flag: X86Flag, value: ValueInput): void {
     this.#beforeOp("writeFlag");
     if (isX86StatusFlag(flag)) {
-      this.#statusFlags.writeFlag(flag, value);
+      this.#state.statusFlags.write(flag, value);
       return;
     }
 
-    this.#pending.write(flagChannel(flag), value);
+    this.#state.flags.write(flag, value);
   }
 
   writeStatusFlagsSource(source: SimpleFlagSource): void {
     this.#beforeOp("writeStatusFlagsSource");
-    this.#statusFlags.writeStatusFlagsSource(source);
+    this.#state.statusFlags.writeSource(source);
   }
 
   condition(cc: ConditionCode): Value {
     this.#beforeOp("condition");
-    return valueFromId(this.#statusFlags.condition(cc));
+    return valueFromId(this.#state.statusFlags.condition(cc));
   }
 
   jump(target: TargetInput): void {
     this.#beforeOp("jump");
-    this.#advanceInstructionCount();
-    this.#pending.write(eipChannel, target);
+    this.#state.instructionCount.increment();
+    this.#state.eip.write(target);
     this.#blockEnd = "jump";
     this.#terminated = true;
   }
 
   jumpIf(condition: ValueInput, target: TargetInput): void {
     this.#beforeOp("jumpIf");
+    this.#state.instructionCount.increment();
+    this.#state.eip.write(this.#location().nextEip());
 
     const conditionId = condition;
     const targetId = target;
@@ -499,6 +486,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       condition: conditionId,
       thenBody: this.#earlyDispatchBody(targetId)
     });
+    this.#terminated = true;
   }
 
   // Opens a loop: the declared channels become loop-carried cells
@@ -510,8 +498,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     const loop = LoopBuilder.begin({
       values: this.#values,
-      pending: this.#pending,
-      statusFlags: this.#statusFlags,
+      state: this.#state,
       emitParentAction: (action) => this.#actions.push(action)
     }, options);
 
@@ -522,11 +509,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     try {
       const loopBuilder = new LoopSemanticsBuilderImpl({
         host: this,
-        values: this.#values,
-        pending: this.#pending,
-        statusFlags: this.#statusFlags,
-        binding: (index) => this.#binding(index),
-        resetInstructionCountFold: () => this.#resetInstructionCountFold()
+        state: this.#state,
+        scope: loop.scope,
+        binding: (index) => this.#binding(index)
       });
       const onContinue = options.onContinue;
       const continueCondition = options.body(loopBuilder);
@@ -541,10 +526,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     assert(!this.#terminated, "a loop body must not terminate the instruction");
 
     loop.close(options.enter, exitValues);
-
-    // Loop-carried state is runtime-dependent past the loop; the count fold
-    // re-bases if later completion needs it.
-    this.#resetInstructionCountFold();
   }
 
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {
@@ -557,7 +538,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       hint: "unlikely",
       thenBody: this.#terminatingBody(
         { kind: "exit", exit: { class: "cpuException", exception } },
-        this.#pending.flushesForPath("fault")
+        this.#state.flushesForPath("fault")
       )
     });
   }
@@ -565,12 +546,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // A trap resumes at the next instruction with all state observable.
   hostTrap(vector: ValueInput): void {
     this.#beforeOp("hostTrap");
-    this.#advanceInstructionCount();
+    this.#state.instructionCount.increment();
 
     const vectorId = vector;
 
-    this.#pending.write(eipChannel, this.#location().nextEip());
-    this.#actions.push(...this.#pending.flushesForPath("completed"));
+    this.#state.eip.write(this.#location().nextEip());
+    this.#actions.push(...this.#state.flushesForPath("completed"));
     this.#actions.push({
       kind: "finish",
       finish: { kind: "exit", exit: { class: "host", reason: "hostTrap", payload: vectorId } }
@@ -583,18 +564,18 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // fallthrough for this instruction and may continue into the next one.
   hostTrapIf(condition: ValueInput, vector: ValueInput): void {
     this.#beforeOp("hostTrapIf");
-    this.#advanceInstructionCount();
+    this.#state.instructionCount.increment();
 
     const vectorId = vector;
 
-    this.#pending.write(eipChannel, this.#location().nextEip());
+    this.#state.eip.write(this.#location().nextEip());
     this.#actions.push({
       kind: "if",
       condition,
       hint: "unlikely",
       thenBody: this.#terminatingBody(
         { kind: "exit", exit: { class: "host", reason: "hostTrap", payload: vectorId } },
-        this.#pending.flushesForPath("completed")
+        this.#state.flushesForPath("completed")
       )
     });
     this.#terminated = true;
@@ -603,20 +584,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #earlyDispatchBody(target: TargetInput): Body {
     return this.#terminatingBody(
       { kind: "dispatch", targetEip: target },
-      this.#completedFlushesTo(target, this.#advancedInstructionCountValue(1))
+      this.#state.flushesForCompletedDispatch()
     );
-  }
-
-  #completedFlushesTo(target: TargetInput, instructionCount: ValueId): readonly Action[] {
-    return [
-      ...this.#pending.flushesForPath("completed").filter(
-        (action) =>
-          action.op.slot.kind !== "eip" &&
-          action.op.slot.kind !== "instructionCount"
-      ),
-      { kind: "op", op: { kind: "state.write", slot: instructionCountChannel, value: instructionCount } },
-      { kind: "op", op: { kind: "state.write", slot: eipChannel, value: target } }
-    ];
   }
 
   #terminatingBody(
@@ -651,38 +620,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     loop.emitAction(action);
   }
 
-  // Loop bodies may only touch a carried channel whole — a partial overlap
-  // would flush the carried cell mid-body.
-  #onPendingAccess(channel: StateChannel, access: "read" | "write"): void {
-    this.#activeLoop?.onPendingAccess(channel, access);
-  }
-
-  // Every terminator advances the count: fault bodies commit instruction-start
-  // state, so a faulting instruction never counts. The value
-  // is always base + completed off the block's one read, so a flush stores
-  // a single folded add.
-  #advanceInstructionCount(): void {
-    this.#instructionsCompleted += 1;
-    this.#pending.write(
-      instructionCountChannel,
-      this.#advancedInstructionCountValue(0)
-    );
-  }
-
-  #advancedInstructionCountValue(extraCompleted: number): ValueId {
-    this.#instructionCountBase ??= this.#pending.read(instructionCountChannel);
-    return this.#values.binary(
-      "add",
-      this.#instructionCountBase,
-      this.#values.const(this.#instructionsCompleted + extraCompleted)
-    );
-  }
-
-  #resetInstructionCountFold(): void {
-    this.#instructionCountBase = undefined;
-    this.#instructionsCompleted = 0;
-  }
-
   #dynamicGprSlot(binding: RegDynamicOperandBinding, accessWidth: OperandWidth): GprDynamicSlot {
     return {
       kind: "gprDynamic",
@@ -697,29 +634,13 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       : this.#values.truncate(accessWidth, value);
   }
 
-  #readChannel(channel: GprChannel, accessWidth: OperandWidth, options: GetOptions): ValueId {
-    assert(
-      channel.byteLength * 8 === accessWidth,
-      `${accessWidth}-bit get from a ${channel.byteLength * 8}-bit register channel`
-    );
-    return this.#pending.read(channel, options);
-  }
-
-  #writeChannel(channel: GprChannel, value: ValueInput, accessWidth: OperandWidth): void {
-    assert(
-      channel.byteLength * 8 === accessWidth,
-      `${accessWidth}-bit set to a ${channel.byteLength * 8}-bit register channel`
-    );
-    this.#pending.write(channel, value);
-  }
-
   #writeSegmentSelector(
     binding: SegmentOperandBinding | SegmentDynamicOperandBinding,
     value: ValueInput,
     accessWidth: OperandWidth
   ): void {
     assert(accessWidth === 16, `${accessWidth}-bit set to a segment selector`);
-    this.#segments.writeSelector(binding, value);
+    this.#state.segments.writeSelector(binding, value);
   }
 
   #readGuestMemory(address: ValueId, width: OperandWidth, options: GetOptions): ValueId {
@@ -801,7 +722,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   #dynamicAddress(binding: MemDynamicOperandBinding): ValueId {
-    const base = this.#pending.readDynamicGpr({
+    const base = this.#state.gpr.readDynamic({
       kind: "gprDynamic",
       index: this.#values.external(binding.base),
       byteLength: 4
@@ -814,11 +735,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     let address: ValueId | undefined;
 
     if (ea.base !== undefined) {
-      address = this.#pending.read(gprChannel(ea.base));
+      address = this.#state.gpr.read(ea.base);
     }
 
     if (ea.index !== undefined) {
-      const index = this.#pending.read(gprChannel(ea.index));
+      const index = this.#state.gpr.read(ea.index);
       const scaled = ea.scale === 1
         ? index
         : this.#values.binary("shl", index, this.#values.const(scaleShift[ea.scale]));
@@ -841,7 +762,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       return offset;
     }
 
-    return this.#values.binary("add", this.#segments.readBase(segment), offset);
+    return this.#values.binary("add", this.#state.segments.readBase(segment), offset);
   }
 
   #memSegmentLinearAddress(segment: MemSegmentBinding, offset: ValueId): ValueId {
@@ -856,7 +777,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   #dynamicSegmentLinearAddress(segment: ExternalValueId, offset: ValueId): ValueId {
-    return this.#values.binary("add", this.#segments.readDynamicBase(this.#values.external(segment)), offset);
+    return this.#values.binary("add", this.#state.segments.readDynamicBase(this.#values.external(segment)), offset);
   }
 
   #binding(index: number): OperandBinding {

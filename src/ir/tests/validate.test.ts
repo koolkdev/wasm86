@@ -6,7 +6,7 @@ import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { fitsUnsigned, ValueTable } from "#ir/values.js";
-import { stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function blockWith(actions: readonly Action[]): IrBlock {
   const values = new ValueTable();
@@ -42,7 +42,7 @@ test("a body ending with a finish exit validates", () => {
 });
 
 test("a body ending with a finish dispatch validates", () => {
-  doesNotThrow(() => validateIrBlock(blockWith([writeEip0, finishDispatch0])));
+  doesNotThrow(() => validateIrBlock(blockWith([finishDispatch0])));
 });
 
 test("an implicit fragment body end validates only when allowed", () => {
@@ -59,8 +59,8 @@ test("a terminal if with both bodies complete validates", () => {
         {
           kind: "if",
           condition: 0,
-          thenBody: { actions: [writeEip0, finishDispatch0] },
-          elseBody: { actions: [writeEip1, finishDispatch(1)] }
+          thenBody: { actions: [finishDispatch0] },
+          elseBody: { actions: [finishDispatch(1)] }
         }
       ])
     )
@@ -83,7 +83,7 @@ test("an action after the finish exit terminator is rejected", () => {
 test("an action after a finish dispatch terminator is rejected", () => {
   throws(
     () =>
-      validateIrBlock(blockWith([writeEip0, finishDispatch0, stateWrite(eipChannel, 0)])),
+      validateIrBlock(blockWith([finishDispatch0, stateWrite(eipChannel, 0)])),
     /has actions after its terminal finish action/
   );
 });
@@ -93,12 +93,12 @@ test("an action after a terminal if is rejected", () => {
     () =>
       validateIrBlock(
         blockWith([
-          {
-            kind: "if",
-            condition: 0,
-            thenBody: { actions: [writeEip0, finishDispatch0] },
-            elseBody: { actions: [finishExit()] }
-          },
+        {
+          kind: "if",
+          condition: 0,
+          thenBody: { actions: [finishDispatch0] },
+          elseBody: { actions: [finishExit()] }
+        },
           stateWrite(eipChannel, 0)
         ])
       ),
@@ -160,7 +160,7 @@ test("op action output bounds must match the op signature", () => {
   );
 });
 
-test("a root dispatch target write mismatch is rejected", () => {
+test("a root dispatch EIP write is rejected", () => {
   throws(
     () =>
       validateIrBlock(
@@ -170,15 +170,14 @@ test("a root dispatch target write mismatch is rejected", () => {
           finishDispatch0
         ])
       ),
-    /body dispatch EIP flush does not match dispatch\.targetEip/
+    /body dispatch path must not flush EIP state/
   );
 });
 
-test("a nested dispatch can use an ancestor EIP write", () => {
+test("a nested dispatch validates without an EIP flush", () => {
   doesNotThrow(() =>
     validateIrBlock(
       blockWith([
-        writeEip0,
         {
           kind: "if",
           condition: 1,
@@ -190,11 +189,12 @@ test("a nested dispatch can use an ancestor EIP write", () => {
   );
 });
 
-test("a nested dispatch must flush EIP state on its path", () => {
+test("a nested dispatch rejects an ancestor EIP write", () => {
   throws(
     () =>
       validateIrBlock(
         blockWith([
+          writeEip0,
           {
             kind: "if",
             condition: 0,
@@ -203,7 +203,7 @@ test("a nested dispatch must flush EIP state on its path", () => {
           }
         ])
       ),
-    /thenBody dispatch path must flush EIP state/
+    /thenBody dispatch path must not flush EIP state/
   );
 });
 
@@ -352,7 +352,7 @@ test("a switch without a default body is rejected", () => {
   );
 });
 
-test("a nested dispatch target EIP write mismatch is rejected", () => {
+test("a nested dispatch EIP write is rejected", () => {
   throws(
     () =>
       validateIrBlock(
@@ -365,7 +365,7 @@ test("a nested dispatch target EIP write mismatch is rejected", () => {
           }
         ])
       ),
-    /thenBody dispatch EIP flush does not match dispatch\.targetEip/
+    /thenBody dispatch path must not flush EIP state/
   );
 });
 
@@ -388,7 +388,6 @@ test("a loop with a dword carried cell and an aligned continue validates", () =>
             ]
           }
         },
-        writeEip0,
         finishDispatch0
       ])
     )
@@ -416,7 +415,6 @@ test("loopContinue updates misaligned with the carried list are rejected", () =>
             carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
             body: { actions: [{ kind: "loopContinue", updates: [] }] }
           },
-          writeEip0,
           finishDispatch0
         ])
       ),
@@ -438,10 +436,36 @@ test("a narrow GPR carried channel validates", () => {
             carried: [{ channel: gprChannel("cl"), seed, loopInput }],
             body: { actions: [{ kind: "loopContinue", updates: [loopInput] }] }
           },
-          writeEip0,
           finishDispatch0
         ])
       )
+  );
+});
+
+test("a loop body state access partially overlapping a carried channel is rejected", () => {
+  const values = new ValueTable();
+  const seed = values.const(3);
+  const loopInput = values.addLoopInput();
+  const partialRead = values.addActionOutput(fitsUnsigned(8));
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          {
+            kind: "loop",
+            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            body: {
+              actions: [
+                stateRead(partialRead, gprChannel("cl")),
+                { kind: "loopContinue", updates: [loopInput] }
+              ]
+            }
+          },
+          finishDispatch0
+        ])
+      ),
+    /loop body read partially overlaps a carried channel/
   );
 });
 
@@ -458,7 +482,6 @@ test("a carried cell whose input is not a loopInput value is rejected", () => {
             carried: [{ channel: gprChannel("ecx"), seed, loopInput: seed }],
             body: { actions: [{ kind: "loopContinue", updates: [seed] }] }
           },
-          writeEip0,
           finishDispatch0
         ])
       ),

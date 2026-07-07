@@ -10,19 +10,20 @@ import {
   type StatusFlagValues
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
-import { createOpAction, type Action, type SwitchCase } from "./actions.js";
-import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "./lazy-flags.js";
-import type { StateReadOp } from "./ops.js";
-import { valueTableFlagOps } from "./flag-value-ops.js";
+import { createOpAction, type Action, type SwitchCase } from "../../actions.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "../../lazy-flags.js";
+import type { StateReadOp } from "../../ops.js";
+import { valueTableFlagOps } from "../../flag-value-ops.js";
 import {
   flagChannel,
   lazyFlagsAChannel,
   lazyFlagsBChannel,
   lazyFlagsKindChannel,
   type StateSlot
-} from "./slots.js";
-import { fitsUnsigned, type ValueId, type ValueTable } from "./values.js";
-import type { PendingState } from "./pending/state.js";
+} from "../../slots.js";
+import { fitsUnsigned, type ValueId, type ValueTable } from "../../values.js";
+import type { StateAccess } from "./access.js";
+import type { StateCells } from "./cells.js";
 
 export type FlagSourceId = number;
 
@@ -37,7 +38,7 @@ type FlagBacking =
 type StatusFlagValueIds = StatusFlagValues<ValueId>;
 type SourceExpansionCache = Map<FlagSourceId, StatusFlagValueIds>;
 type FlagBoolExprFlagResolver = (flag: X86StatusFlag) => ValueId;
-type StatusFlagState = {
+type StatusFlagTrackerState = {
   backings: Map<X86StatusFlag, FlagBacking>;
   directSource: FlagSourceId | undefined;
 };
@@ -50,23 +51,25 @@ type LazyConditionCaseSpec = Readonly<{
   operator: CompareOperator;
 }>;
 
-export class StatusFlags {
+export class StatusFlagState {
   readonly #values: ValueTable;
-  readonly #pending: PendingState;
+  readonly #cells: StateCells;
+  readonly #state: StateAccess;
   readonly #emit: (action: Action) => void;
   readonly #sources: SimpleFlagSource<ValueId>[] = [];
   readonly #current = initialStatusFlagState();
   readonly #inputFlags = new Map<X86StatusFlag, ValueId>();
   readonly #valueOps: ReturnType<typeof valueTableFlagOps>;
 
-  constructor(values: ValueTable, pending: PendingState, emit: (action: Action) => void) {
+  constructor(values: ValueTable, cells: StateCells, state: StateAccess, emit: (action: Action) => void) {
     this.#values = values;
-    this.#pending = pending;
+    this.#cells = cells;
+    this.#state = state;
     this.#emit = emit;
     this.#valueOps = valueTableFlagOps(values);
   }
 
-  readFlag(flag: X86StatusFlag): ValueId {
+  read(flag: X86StatusFlag): ValueId {
     return this.#resolveFlagFrom(this.#current, flag, new Map());
   }
 
@@ -91,7 +94,7 @@ export class StatusFlags {
     );
   }
 
-  writeStatusFlagsSource(source: SimpleFlagSource<ValueId>): void {
+  writeSource(source: SimpleFlagSource<ValueId>): void {
     const sourceId = this.#sources.length;
 
     this.#sources.push(source);
@@ -120,7 +123,7 @@ export class StatusFlags {
     }
   }
 
-  writeFlag(targetFlag: X86StatusFlag, value: ValueId): void {
+  write(targetFlag: X86StatusFlag, value: ValueId): void {
     if (this.#isCurrentFlagValue(targetFlag, value)) {
       return;
     }
@@ -182,12 +185,12 @@ export class StatusFlags {
     for (const flag of x86StatusFlags) {
       this.#writeExplicitFlag(flag, values[flag]);
     }
-    this.#pending.write(lazyFlagsKindChannel, this.#values.const(0));
+    this.#cells.write(lazyFlagsKindChannel, this.#values.const(0));
   }
 
   #writeExplicitFlag(flag: X86StatusFlag, value: ValueId): void {
     this.#setBacking(flag, { kind: "value", value });
-    this.#pending.write(flagChannel(flag), value);
+    this.#cells.write(flagChannel(flag), value);
   }
 
   #isCurrentFlagValue(flag: X86StatusFlag, value: ValueId): boolean {
@@ -213,10 +216,10 @@ export class StatusFlags {
     const kind = source.kind === "add" ? LAZY_FLAGS_KIND.ADD : LAZY_FLAGS_KIND.SUB;
 
     this.#invalidateExplicitFlagChannels();
-    this.#pending.invalidate(lazyFlagsKindChannel);
-    this.#pending.write(lazyFlagsAChannel, this.#values.truncate(source.width, source.left));
-    this.#pending.write(lazyFlagsBChannel, this.#values.truncate(source.width, source.right));
-    this.#pending.write(
+    this.#cells.invalidate(lazyFlagsKindChannel);
+    this.#cells.write(lazyFlagsAChannel, this.#values.truncate(source.width, source.left));
+    this.#cells.write(lazyFlagsBChannel, this.#values.truncate(source.width, source.right));
+    this.#cells.write(
       lazyFlagsKindChannel,
       this.#values.const(lazyFlagsKindByte(kind, source.width))
     );
@@ -224,10 +227,10 @@ export class StatusFlags {
 
   #writeLazyLogicSource(source: SimpleFlagSource<ValueId> & Readonly<{ kind: "logic" }>): void {
     this.#invalidateExplicitFlagChannels();
-    this.#pending.invalidate(lazyFlagsKindChannel);
-    this.#pending.write(lazyFlagsAChannel, this.#values.truncate(source.width, source.result));
-    this.#pending.invalidate(lazyFlagsBChannel);
-    this.#pending.write(
+    this.#cells.invalidate(lazyFlagsKindChannel);
+    this.#cells.write(lazyFlagsAChannel, this.#values.truncate(source.width, source.result));
+    this.#cells.invalidate(lazyFlagsBChannel);
+    this.#cells.write(
       lazyFlagsKindChannel,
       this.#values.const(lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, source.width))
     );
@@ -235,18 +238,18 @@ export class StatusFlags {
 
   #invalidateExplicitFlagChannels(): void {
     for (const flag of x86StatusFlags) {
-      this.#pending.invalidate(flagChannel(flag));
+      this.#cells.invalidate(flagChannel(flag));
     }
   }
 
   #invalidateLazyChannels(): void {
-    this.#pending.invalidate(lazyFlagsAChannel);
-    this.#pending.invalidate(lazyFlagsBChannel);
-    this.#pending.invalidate(lazyFlagsKindChannel);
+    this.#cells.invalidate(lazyFlagsAChannel);
+    this.#cells.invalidate(lazyFlagsBChannel);
+    this.#cells.invalidate(lazyFlagsKindChannel);
   }
 
   #resolveFlagFrom(
-    state: StatusFlagState,
+    state: StatusFlagTrackerState,
     flag: X86StatusFlag,
     cache: SourceExpansionCache
   ): ValueId {
@@ -298,7 +301,7 @@ export class StatusFlags {
       return undefined;
     }
 
-    const selector = this.#pending.read(lazyFlagsKindChannel);
+    const selector = this.#cells.read(lazyFlagsKindChannel);
     const cases = caseSpecs.map((spec) => this.#lazyConditionArm(spec));
     const defaultBody = this.#lazyConditionDefaultBody(CONDITIONS[cc].expr);
     const output = this.#values.addActionOutput(fitsUnsigned(1));
@@ -422,7 +425,7 @@ export class StatusFlags {
       return cached;
     }
 
-    const resolved = this.#pending.resolveFlag(flag);
+    const resolved = this.#state.resolveFlag(flag);
 
     this.#inputFlags.set(flag, resolved);
     return resolved;
@@ -495,7 +498,7 @@ function lazyRuntimeConditionCase(
   return operator === undefined ? [] : [{ kind, width, operator }];
 }
 
-function initialStatusFlagState(): StatusFlagState {
+function initialStatusFlagState(): StatusFlagTrackerState {
   return {
     backings: initialBackings(),
     directSource: undefined
@@ -508,7 +511,7 @@ function getBacking(
 ): FlagBacking {
   const backing = backings.get(flag);
 
-  assert(backing !== undefined, `missing pending backing for ${flag}`);
+  assert(backing !== undefined, `missing status flag backing for ${flag}`);
 
   return backing;
 }

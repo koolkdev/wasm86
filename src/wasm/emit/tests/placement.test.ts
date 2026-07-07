@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import { flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import { fitsUnsigned, ValueTable } from "#ir/values.js";
 import { analyzePlacement } from "#wasm/emit/placement.js";
@@ -209,14 +209,12 @@ test("branch edge values count once per edge", () => {
         thenBody: {
           actions: [
             stateWrite(gprChannel("eax"), read),
-            stateWrite(eipChannel, target),
             { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
           ]
         },
         elseBody: {
           actions: [
             stateWrite(gprChannel("eax"), read),
-            stateWrite(eipChannel, fallthrough),
             { kind: "finish", finish: { kind: "dispatch", targetEip: fallthrough } }
           ]
         }
@@ -230,14 +228,14 @@ test("branch edge values count once per edge", () => {
   strictEqual(analysis.useCount(fallthrough), 1);
 });
 
-test("dispatch target references are not demand roots", () => {
+test("dispatch target references are demand roots", () => {
   const values = new ValueTable();
   const target = values.const(0x2000);
   const analysis = analyze(values, [
     { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
   ]);
 
-  strictEqual(analysis.useCount(target), 0);
+  strictEqual(analysis.useCount(target), 1);
 });
 
 test("an edge use past an overlapping store captures the read at its producer", () => {
