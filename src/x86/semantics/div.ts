@@ -43,7 +43,11 @@ function unsignedDivide(
 
   // The quotient fits if the dividend's high half is below the divisor; a
   // zero divisor fails that too, so one check covers both #DE causes.
-  s.cpuExceptionIf(v.compare(width, "ge_u", dividend.high, divisor), divideError());
+  s.if(
+    v.compare(width, "ge_u", dividend.high, divisor),
+    (then) => then.cpuException(divideError()),
+    "unlikely"
+  );
 
   switch (width) {
     case 8:
@@ -74,18 +78,30 @@ function signedDivide(
     case 16: {
       const dividend = signedNarrowDividend(s, v, width);
 
-      s.cpuExceptionIf(undefinedSignedDivision(v, width, dividend, divisor), divideError());
+      s.if(
+        undefinedSignedDivision(v, width, dividend, divisor),
+        (then) => then.cpuException(divideError()),
+        "unlikely"
+      );
 
       const quotient = v.binary("div_s", dividend, divisor);
 
-      s.cpuExceptionIf(narrowQuotientOverflows(v, width, quotient), divideError());
+      s.if(
+        narrowQuotientOverflows(v, width, quotient),
+        (then) => then.cpuException(divideError()),
+        "unlikely"
+      );
 
       return { quotient, remainder: v.binary("rem_s", dividend, divisor) };
     }
     case 32: {
       const dividend = signedDwordDividend(s, v);
 
-      s.cpuExceptionIf(undefinedSignedDivision(v, width, dividend, divisor), divideError());
+      s.if(
+        undefinedSignedDivision(v, width, dividend, divisor),
+        (then) => then.cpuException(divideError()),
+        "unlikely"
+      );
 
       const divisor64 = v.extend64(32, divisor, true);
       const quotient64 = v.binary64("div_s", dividend, divisor64);
@@ -93,7 +109,11 @@ function signedDivide(
 
       // The quotient fits if it round-trips through its low 32 bits; the
       // truncation is shared with the register write.
-      s.cpuExceptionIf(v.compare64("ne", v.extend64(32, quotient, true), quotient64), divideError());
+      s.if(
+        v.compare64("ne", v.extend64(32, quotient, true), quotient64),
+        (then) => then.cpuException(divideError()),
+        "unlikely"
+      );
 
       return { quotient, remainder: v.truncate64(32, v.binary64("rem_s", dividend, divisor64)) };
     }

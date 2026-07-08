@@ -331,8 +331,8 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     this.#emit(`addInstructionCount ${this.#value(amount)}`);
   }
 
-  cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {
-    this.#emit(`cpuExceptionIf ${this.#value(condition)} ${exception.kind}`);
+  cpuException(exception: CpuException<ValueInput>): void {
+    this.#emitTerminator(`cpuException ${exception.kind}`);
   }
 
   hostTrap(vector: ValueInput): void {

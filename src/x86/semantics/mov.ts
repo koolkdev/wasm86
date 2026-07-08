@@ -40,7 +40,7 @@ export function movToSregSemantic(): SemanticTemplate {
     const csLoad = segmentTargetIsCs(v, context.operandInfo(dst));
 
     if (csLoad !== undefined) {
-      s.cpuExceptionIf(csLoad, invalidOpcode());
+      s.if(csLoad, (then) => then.cpuException(invalidOpcode()), "unlikely");
     }
 
     guardStorageRead(s, context, src, 16);

@@ -101,6 +101,6 @@ export interface SemanticsBuilder extends SemanticOps {
   jump(target: TargetInput): void;
   if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void;
   loop(body: LoopBody): void;
-  cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void;
+  cpuException(exception: CpuException<ValueInput>): void;
   hostTrap(vector: ValueInput): void;
 }

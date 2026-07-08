@@ -56,6 +56,10 @@ export class FinishEmitter {
     );
   }
 
+  cpuException(exception: CpuException<ValueId>): void {
+    this.finishCurrentBody({ kind: "exit", exit: { class: "cpuException", exception } }, "fault");
+  }
+
   dispatch(body: BodyBuilder, targetEip: ValueId): void {
     assert(!this.#state.eip.has(), "dispatch requires the pending eip to be consumed");
     this.#finishBodyWith(

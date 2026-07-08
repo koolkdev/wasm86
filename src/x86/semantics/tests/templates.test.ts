@@ -80,7 +80,9 @@ test("MOV to CS raises #UD before loading the selector source", () => {
   const trace = buildSemanticTrace(movToSregSemantic(), [segmentOperand("cs"), { storage: "reg" }]);
 
   deepStrictEqual(trace.events, [
-    "cpuExceptionIf 1 UD",
+    "if 1",
+    "cpuException UD",
+    "ifEnd",
     "%0 = get op1:16",
     "set op0:16 <- %0",
     "next"
@@ -730,7 +732,7 @@ test("implicit multiply memory source is guarded before accumulator reads", () =
 
 test("implicit div guards and reads the source before divide-error checks and writes", () => {
   const trace = buildSemanticTrace(divImplicitSemantic(16), operands("mem"));
-  const exceptionIndex = trace.events.findIndex((event) => event.startsWith("cpuExceptionIf "));
+  const exceptionIndex = trace.events.findIndex((event) => event.startsWith("cpuException "));
   const firstSetIndex = trace.events.findIndex((event) => event.startsWith("set "));
   const firstFlagIndex = trace.events.findIndex((event) => event.startsWith("flag "));
 
@@ -751,7 +753,7 @@ test("implicit div guards and reads the source before divide-error checks and wr
 
 test("implicit idiv builds signed full-width values and guards before writes", () => {
   const trace = buildSemanticTrace(idivImplicitSemantic(32), regOperands(1));
-  const exceptionIndexes = trace.events.flatMap((event, index) => (event.startsWith("cpuExceptionIf ") ? [index] : []));
+  const exceptionIndexes = trace.events.flatMap((event, index) => (event.startsWith("cpuException ") ? [index] : []));
   const firstSetIndex = trace.events.findIndex((event) => event.startsWith("set "));
 
   deepStrictEqual(trace.events.slice(0, 3), [
@@ -771,7 +773,7 @@ test("implicit idiv builds signed full-width values and guards before writes", (
 
 test("implicit idiv word form guards undefined divisions before dividing and checks fit after", () => {
   const trace = buildSemanticTrace(idivImplicitSemantic(16), regOperands(1));
-  const exceptionIndexes = trace.events.flatMap((event, index) => (event.startsWith("cpuExceptionIf ") ? [index] : []));
+  const exceptionIndexes = trace.events.flatMap((event, index) => (event.startsWith("cpuException ") ? [index] : []));
   const firstSetIndex = trace.events.findIndex((event) => event.startsWith("set "));
 
   deepStrictEqual(trace.events.slice(0, 3), [

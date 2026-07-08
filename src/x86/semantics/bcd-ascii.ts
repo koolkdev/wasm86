@@ -50,7 +50,11 @@ export function aamSemantic(): SemanticTemplate {
     const base = s.get(s.operand(0), 8);
     const oldAl = s.get(s.reg("al"), 8);
 
-    s.cpuExceptionIf(v.compare(8, "eq", base, v.const(0)), divideError());
+    s.if(
+      v.compare(8, "eq", base, v.const(0)),
+      (then) => then.cpuException(divideError()),
+      "unlikely"
+    );
 
     const quotient = v.binary("div_u", oldAl, base);
     const remainder = v.binary("rem_u", oldAl, base);

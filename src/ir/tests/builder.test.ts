@@ -36,7 +36,7 @@ import type {
 import type { Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { valueId, type ValueId, type ValueNode } from "#ir/values.js";
-import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
+import { invalidOpcode, PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { MemoryAccessKind, SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
@@ -848,6 +848,27 @@ test("a block ended by a jump rejects further instructions", () => {
       builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(1)], loc(0x1005, 0x100a)),
     /after a block terminator/
   );
+});
+
+test("a root CPU exception exits at the faulting instruction", () => {
+  const exception = invalidOpcode();
+  const fault: SemanticTemplate = (s) => {
+    s.cpuException(exception);
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
+  builder.addInstruction(fault, [], loc(0x1005, 0x1006));
+
+  const block = builder.finish();
+  const v = block.values;
+
+  deepStrictEqual(entryActions(block), [
+    stateWrite(gprChannel("eax"), v.const(0x77)),
+    stateWrite(eipChannel, v.const(0x1005)),
+    { kind: "finish", finish: { kind: "exit", exit: { class: "cpuException", exception } } }
+  ]);
+  strictEqual(stateWrites(block).some((write) => write.op.slot === instructionCountChannel), false);
 });
 
 test("actions after a terminal finish in one template are rejected by validation", () => {
