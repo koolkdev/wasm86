@@ -160,7 +160,8 @@ function repSemantic(
     });
 
     // Each unit decrements ECX once: entry - exit counts completed units.
-    // next() accounts for one instruction, so subtract the enter bit here.
+    // Instruction completion already charges the REP instruction once; add
+    // only the extra completed units beyond the first entered unit.
     const exitEcx = s.get(s.reg("ecx"));
     const completedUnits = v.binary("sub", ecx, exitEcx);
 

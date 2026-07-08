@@ -1,9 +1,7 @@
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 
 export function nopSemantic(): SemanticTemplate {
-  return (s) => {
-    s.next();
-  };
+  return () => {};
 }
 
 export function intSemantic(): SemanticTemplate {

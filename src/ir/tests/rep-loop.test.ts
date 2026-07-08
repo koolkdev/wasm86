@@ -239,7 +239,7 @@ test("a dirty-at-entry carried channel commits its seed on the zero-trip arm", (
 });
 
 // The count is not carried: the root settles extra completed units as
-// (entryEcx - exitEcx) - enter, then next() folds in the instruction itself.
+// (entryEcx - exitEcx) - enter, then implicit fallthrough folds in the instruction itself.
 test("the root count write folds the ecx delta over the block's read", () => {
   const block = repMovsBlock();
   const v = block.values;

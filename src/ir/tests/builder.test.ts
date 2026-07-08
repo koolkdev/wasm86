@@ -884,31 +884,31 @@ test("actions after a terminal finish in one template are rejected by validation
 });
 
 test("a template cannot terminate the instruction twice", () => {
-  const jumpThenNext: SemanticTemplate = (s, v) => {
+  const jumpThenTrap: SemanticTemplate = (s, v) => {
     s.jump(v.const(0x2000));
-    s.next();
+    s.hostTrap(v.const(3));
   };
 
   throws(
-    () => createIrBlockBuilder().addInstruction(jumpThenNext, [], loc(0x1000, 0x1005)),
+    () => createIrBlockBuilder().addInstruction(jumpThenTrap, [], loc(0x1000, 0x1005)),
     /instruction is already terminated/
   );
 });
 
 test("a semantic if body terminates only its taken arm", () => {
-  const nextInIf: SemanticTemplate = (s, v) => {
+  const jumpInIf: SemanticTemplate = (s, v) => {
     s.if(v.const(1), (then) => {
-      then.next();
+      then.jump(v.const(0x2000));
     });
   };
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(nextInIf, [], loc(0x1000, 0x1005));
+  builder.addInstruction(jumpInIf, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
 
   strictEqual(nestedActionBodies(block).length, 1);
-  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: block.values.const(0x1005) });
+  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: block.values.const(0x2000) });
   deepStrictEqual(rawEntryActions(block)[rawEntryActions(block).length - 1], finishDispatch(block.values.const(0x1005)));
 });
 

@@ -7,28 +7,24 @@ const lahfFlags = ["CF", "PF", "AF", "ZF", "SF"] as const satisfies readonly X86
 export function writeFlagSemantic(flag: X86Flag, value: 0 | 1): SemanticTemplate {
   return (s, v) => {
     s.writeFlag(flag, v.const(value));
-    s.next();
   };
 }
 
 export function cmcSemantic(): SemanticTemplate {
   return (s, v) => {
     s.writeFlag("CF", v.binary("xor", s.readFlag("CF"), v.const(1)));
-    s.next();
   };
 }
 
 export function lahfSemantic(): SemanticTemplate {
   return (s, v) => {
     s.set(s.reg("ah"), buildFlagImage(s, v, lahfFlags, 0x02), 8);
-    s.next();
   };
 }
 
 export function sahfSemantic(): SemanticTemplate {
   return (s, v) => {
     writeFlagsFromImage(s, v, lahfFlags, s.get(s.reg("ah"), 8));
-    s.next();
   };
 }
 
@@ -39,6 +35,5 @@ export function xlatSemantic(): SemanticTemplate {
 
     s.memoryGuard(address, 1, "read");
     s.set(s.reg("al"), s.get(s.mem(address), 8), 8);
-    s.next();
   };
 }

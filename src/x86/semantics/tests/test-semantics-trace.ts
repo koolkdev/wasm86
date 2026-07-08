@@ -298,10 +298,6 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     return out;
   }
 
-  next(): void {
-    this.#emitTerminator("next");
-  }
-
   jump(target: TargetInput): void {
     this.#emitTerminator(`jump ${this.#value(target)}`);
   }
@@ -341,7 +337,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
 
   finish(): SemanticTrace {
     if (!this.#terminated) {
-      this.next();
+      this.#emitTerminator("next");
     }
 
     return {

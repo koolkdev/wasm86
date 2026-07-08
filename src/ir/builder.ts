@@ -158,7 +158,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     template(this, this.#values, this);
 
     if (!this.#terminated) {
-      this.next();
+      this.#completeFallthrough();
     }
 
     // Cleared only on success: a template that throws leaves the instruction
@@ -293,7 +293,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     }
   }
 
-  next(): void {
+  #completeFallthrough(): void {
     this.#completeInstruction(this.#location().nextEip());
     this.#dispatch("fallthrough");
   }

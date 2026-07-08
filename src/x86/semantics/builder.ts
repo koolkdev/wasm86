@@ -97,7 +97,6 @@ export interface SemanticsBuilder extends SemanticOps {
   writeFlag(flag: X86Flag, value: ValueInput): void;
   addInstructionCount(amount: ValueInput): void;
 
-  next(): void;
   jump(target: TargetInput): void;
   if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void;
   loop(body: LoopBody): void;
