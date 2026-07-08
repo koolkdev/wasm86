@@ -20,6 +20,6 @@ export function int3Semantic(): SemanticTemplate {
 
 export function intoSemantic(): SemanticTemplate {
   return (s, v) => {
-    s.hostTrapIf(s.readFlag("OF"), v.const(4));
+    s.if(s.readFlag("OF"), (then) => then.hostTrap(v.const(4)), "unlikely");
   };
 }

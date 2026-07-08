@@ -1345,7 +1345,9 @@ test("ecx loop control forms use default rel8 targets", () => {
     "%0 = get ecx:32",
     "set ecx:32 <- %1",
     "%3 = get op0:32",
-    "jumpIf %2 -> %3",
+    "if %2",
+    "jump %3",
+    "ifEnd",
     "next"
   ]);
   strictEqual(loopTrace.defs[1], "sub(%0, 1)");
@@ -1366,7 +1368,10 @@ test("breakpoint trap forms expose host-trap semantics", () => {
   strictEqual(into.syntax, "into");
   deepStrictEqual(buildSemanticTrace(semanticsOf(into)).events, [
     "%0 = flag OF",
-    "hostTrapIf %0 4"
+    "if %0",
+    "hostTrap 4",
+    "ifEnd",
+    "next"
   ]);
 });
 
@@ -1393,7 +1398,9 @@ test("jcc forms are concrete specs with condition-specific semantics", () => {
   deepStrictEqual(trace.events, [
     "%0 = condition NE",
     "%1 = get op0:32",
-    "jumpIf %0 -> %1",
+    "if %0",
+    "jump %1",
+    "ifEnd",
     "next"
   ]);
 });

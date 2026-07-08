@@ -49,15 +49,20 @@ export function retImmSemantic(width: StackOperandWidth = 32): SemanticTemplate 
 
 export function jccSemantic(cc: ConditionCode): SemanticTemplate {
   return (s) => {
-    s.jumpIf(s.condition(cc), s.get(s.operand(0)));
+    const branch = s.condition(cc);
+    const target = s.get(s.operand(0));
+
+    s.if(branch, (then) => then.jump(target));
   };
 }
 
 export function jecxzSemantic(): SemanticTemplate {
   return (s, v) => {
     const ecx = s.get(s.reg("ecx"));
+    const branch = v.compare(32, "eq", ecx, v.const(0));
+    const target = s.get(s.operand(0));
 
-    s.jumpIf(v.compare(32, "eq", ecx, v.const(0)), s.get(s.operand(0)));
+    s.if(branch, (then) => then.jump(target));
   };
 }
 
@@ -69,7 +74,10 @@ export function loopSemantic(condition: LoopCondition): SemanticTemplate {
     const nonzero = v.compare(32, "ne", decremented, v.const(0));
 
     s.set(s.reg("ecx"), decremented);
-    s.jumpIf(loopBranchPredicate(s, v, condition, nonzero), s.get(s.operand(0)));
+    const branch = loopBranchPredicate(s, v, condition, nonzero);
+    const target = s.get(s.operand(0));
+
+    s.if(branch, (then) => then.jump(target));
   };
 }
 

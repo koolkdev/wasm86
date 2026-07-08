@@ -874,17 +874,42 @@ test("a template cannot terminate the instruction twice", () => {
   );
 });
 
-test("a semantic if body must not terminate the instruction", () => {
+test("a semantic if body terminates only its taken arm", () => {
   const nextInIf: SemanticTemplate = (s, v) => {
     s.if(v.const(1), (then) => {
       then.next();
     });
   };
+  const builder = createIrBlockBuilder();
 
-  throws(
-    () => createIrBlockBuilder().addInstruction(nextInIf, [], loc(0x1000, 0x1005)),
-    /if body must not terminate the instruction/
-  );
+  builder.addInstruction(nextInIf, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  strictEqual(nestedActionBodies(block).length, 1);
+  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: block.values.const(0x1005) });
+  deepStrictEqual(rawEntryActions(block)[rawEntryActions(block).length - 1], finishDispatch(block.values.const(0x1005)));
+});
+
+test("a nested semantic if terminator does not terminate the containing arm", () => {
+  const nestedJump: SemanticTemplate = (s, v) => {
+    s.if(v.const(1), (then) => {
+      then.if(v.const(1), (inner) => {
+        inner.jump(v.const(0x2000));
+      });
+      then.jump(v.const(0x3000));
+    });
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(nestedJump, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  strictEqual(nestedActionBodies(block).length, 2);
+  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: block.values.const(0x3000) });
+  deepStrictEqual(nestedBodyView(block, 2).terminator, { kind: "dispatch", targetEip: block.values.const(0x2000) });
+  deepStrictEqual(rawEntryActions(block)[rawEntryActions(block).length - 1], finishDispatch(block.values.const(0x1005)));
 });
 
 test("a segment load inside a loop body fails loudly", () => {
@@ -996,7 +1021,7 @@ const subSourceThenJccTemplate: SemanticTemplate = (s, v) => {
   const result = v.binary("sub", left, right);
 
   s.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
-  s.jumpIf(s.condition("E"), v.const(0x2000));
+  s.if(s.condition("E"), (then) => then.jump(v.const(0x2000)));
 };
 
 test("jcc after a sub flag source uses the source-derived condition", () => {
@@ -2755,28 +2780,34 @@ test("every instruction advances the count channel once, flushed once", () => {
   ]);
 });
 
-test("jumpIf side exit and fallthrough flush the advanced count", () => {
+test("conditional jump side exit and fallthrough flush the advanced count", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(jccSemantic("E"), [immBinding(0x2000)], loc(0x1000, 0x1002));
 
   const block = builder.finish();
   const v = block.values;
-  const advanced = v.binary("add", instructionCountRead(block).output, v.const(1));
+  const taken = nestedBodyView(block, 1);
+  const takenRead = taken.actions.find(
+    (action): action is StateReadAction =>
+      isStateRead(action) && action.op.slot === instructionCountChannel
+  );
+  const fallthroughRead = instructionCountRead(block);
 
+  ok(takenRead !== undefined, "expected taken count read");
   strictEqual(
-    nestedBodyView(block, 1).flushes.find(
+    taken.flushes.find(
       (flush): flush is StateWriteAction =>
         isStateWrite(flush) && flush.op.slot === instructionCountChannel
     )?.op.value,
-    advanced
+    v.binary("add", takenRead.output, v.const(1))
   );
   strictEqual(
     rawEntryActions(block).find(
       (action): action is StateWriteAction =>
         isStateWrite(action) && action.op.slot === instructionCountChannel
     )?.op.value,
-    advanced
+    v.binary("add", fallthroughRead.output, v.const(1))
   );
 });
 

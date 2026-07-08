@@ -306,13 +306,16 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     this.#emitTerminator(`jump ${this.#value(target)}`);
   }
 
-  jumpIf(condition: ValueInput, target: TargetInput): void {
-    this.#emit(`jumpIf ${this.#value(condition)} -> ${this.#value(target)}`);
-  }
-
   if(condition: ValueInput, thenBuild: IfBody): void {
     this.#emit(`if ${this.#value(condition)}`);
-    thenBuild(this, this.values);
+    const parentTerminated = this.#terminated;
+
+    this.#terminated = false;
+    try {
+      thenBuild(this, this.values);
+    } finally {
+      this.#terminated = parentTerminated;
+    }
     this.#emit("ifEnd");
   }
 
@@ -334,10 +337,6 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
 
   hostTrap(vector: ValueInput): void {
     this.#emitTerminator(`hostTrap ${this.#value(vector)}`);
-  }
-
-  hostTrapIf(condition: ValueInput, vector: ValueInput): void {
-    this.#emitTerminator(`hostTrapIf ${this.#value(condition)} ${this.#value(vector)}`);
   }
 
   finish(): SemanticTrace {

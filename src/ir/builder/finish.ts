@@ -69,14 +69,6 @@ export class FinishEmitter {
     this.finishCurrentBody(hostTrapFinish(vector), "completed");
   }
 
-  hostTrapIf(condition: ValueId, vector: ValueId): void {
-    this.#control.if(
-      condition,
-      (trapBody) => this.finishBody(trapBody, hostTrapFinish(vector), "completed"),
-      "unlikely"
-    );
-  }
-
   #finishBodyWith(body: BodyBuilder, finish: Finish, flushes: readonly StateWriteAction[]): void {
     for (const action of flushes) {
       body.push(action);

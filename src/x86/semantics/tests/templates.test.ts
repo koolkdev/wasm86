@@ -122,7 +122,10 @@ test("int3 and into semantics expose host trap exits", () => {
   deepStrictEqual(int3.events, ["hostTrap 3"]);
   deepStrictEqual(into.events, [
     "%0 = flag OF",
-    "hostTrapIf %0 4"
+    "if %0",
+    "hostTrap 4",
+    "ifEnd",
+    "next"
   ]);
 });
 
@@ -1097,7 +1100,9 @@ test("jecxz and loop semantic branch conditions use ecx without writing flags", 
   deepStrictEqual(jecxz.events, [
     "%0 = get ecx:32",
     "%2 = get op0:32",
-    "jumpIf %1 -> %2",
+    "if %1",
+    "jump %2",
+    "ifEnd",
     "next"
   ]);
   strictEqual(jecxz.defs[1], "cmp32.eq(%0, 0)");
@@ -1106,7 +1111,9 @@ test("jecxz and loop semantic branch conditions use ecx without writing flags", 
     "%0 = get ecx:32",
     "set ecx:32 <- %1",
     "%3 = get op0:32",
-    "jumpIf %2 -> %3",
+    "if %2",
+    "jump %3",
+    "ifEnd",
     "next"
   ]);
   strictEqual(loop.defs[1], "sub(%0, 1)");
@@ -1117,7 +1124,9 @@ test("jecxz and loop semantic branch conditions use ecx without writing flags", 
     "set ecx:32 <- %1",
     "%3 = condition E",
     "%5 = get op0:32",
-    "jumpIf %4 -> %5",
+    "if %4",
+    "jump %5",
+    "ifEnd",
     "next"
   ]);
   strictEqual(loope.defs[4], "and(%2, %3)");
@@ -1127,7 +1136,9 @@ test("jecxz and loop semantic branch conditions use ecx without writing flags", 
     "set ecx:32 <- %1",
     "%3 = condition NE",
     "%5 = get op0:32",
-    "jumpIf %4 -> %5",
+    "if %4",
+    "jump %5",
+    "ifEnd",
     "next"
   ]);
   strictEqual(loopne.defs[4], "and(%2, %3)");

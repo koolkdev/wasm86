@@ -16,6 +16,7 @@ import type {
 } from "./refs.js";
 
 export type MemoryAccessKind = "read" | "write";
+export type SemanticBranchHint = "unlikely" | "likely";
 
 export type SemanticOperandStorageKind =
   | "reg"
@@ -98,10 +99,8 @@ export interface SemanticsBuilder extends SemanticOps {
 
   next(): void;
   jump(target: TargetInput): void;
-  jumpIf(condition: ValueInput, target: TargetInput): void;
-  if(condition: ValueInput, thenBuild: IfBody): void;
+  if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void;
   loop(body: LoopBody): void;
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void;
   hostTrap(vector: ValueInput): void;
-  hostTrapIf(condition: ValueInput, vector: ValueInput): void;
 }

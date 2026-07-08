@@ -9,6 +9,7 @@ import type {
   IfBody,
   LoopBody,
   MemoryAccessKind,
+  SemanticBranchHint,
   SemanticBuildContext,
   SemanticOperandInfo,
   SemanticOperandInput,
@@ -115,6 +116,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #finish: FinishEmitter;
   readonly #segmentMode: SegmentMode;
   #instructionLocation: InstructionLocationValues | undefined;
+  // Which flow a terminator ends: the instruction's main flow ("root",
+  // dispatch deferred to finish) or an if arm ("arm", dispatched in place).
+  #terminatorScope: "root" | "arm" = "root";
   #terminated = false;
   #finished = false;
   #wroteMemory = false;
@@ -291,6 +295,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   next(): void {
     this.#completeInstruction(this.#location().nextEip());
+    if (this.#terminatorScope === "arm") {
+      this.#dispatchArm();
+    }
   }
 
   addInstructionCount(amount: ValueInput): void {
@@ -339,23 +346,18 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   jump(target: TargetInput): void {
     this.#completeInstruction(target);
+    if (this.#terminatorScope === "arm") {
+      this.#dispatchArm();
+      return;
+    }
+
     this.#blockEnd = "jump";
   }
 
-  jumpIf(condition: ValueInput, target: TargetInput): void {
-    this.#completeInstruction(this.#location().nextEip());
-    this.#control.if(condition, (taken) => {
-      // The dispatch target is the jump target, not the pending fallthrough eip.
-      this.#state.takeEipForDispatch();
-      this.#finish.dispatch(taken, target);
-    });
-  }
-
-  if(condition: ValueInput, thenBuild: IfBody): void {
+  if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void {
     this.#control.if(condition, () => {
-      thenBuild(this, this.#values);
-      assert(!this.#terminated, "an if body must not terminate the instruction");
-    });
+      this.#withArmScope(() => thenBuild(this, this.#values));
+    }, hint);
   }
 
   // Opens a loop: body-written channels become loop-carried cells living in
@@ -417,14 +419,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   hostTrap(vector: ValueInput): void {
     this.#completeInstruction(this.#location().nextEip());
     this.#finish.hostTrap(vector);
-    this.#blockEnd = "terminated";
-  }
-
-  // The taken path is a completed trap; the untaken path is the ordinary
-  // fallthrough for this instruction and may continue into the next one.
-  hostTrapIf(condition: ValueInput, vector: ValueInput): void {
-    this.#completeInstruction(this.#location().nextEip());
-    this.#finish.hostTrapIf(condition, vector);
+    if (this.#terminatorScope === "root") {
+      this.#blockEnd = "terminated";
+    }
   }
 
   #completeInstruction(target: ValueInput): void {
@@ -432,6 +429,27 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#state.instructionCount.increment();
     this.#state.eip.write(target);
     this.#terminated = true;
+  }
+
+  // An arm owns its termination: the body it dispatches is the arm's, and the
+  // surrounding flow stays open to terminate separately.
+  #withArmScope(build: () => void): void {
+    const scope = this.#terminatorScope;
+    const terminated = this.#terminated;
+
+    this.#terminatorScope = "arm";
+    this.#terminated = false;
+    try {
+      build();
+    } finally {
+      this.#terminatorScope = scope;
+      this.#terminated = terminated;
+    }
+  }
+
+  #dispatchArm(): void {
+    // The dispatch target is this arm's completed EIP; the outer fallthrough advances separately.
+    this.#finish.dispatch(this.#current, this.#state.takeEipForDispatch());
   }
 
   #readMemory(address: ValueId, width: OperandWidth, options: GetOptions): Value {
