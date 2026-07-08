@@ -4,6 +4,7 @@ import {
   type EipChannel,
   type InstructionCountChannel,
   type LazyFlagsChannel,
+  type StateSlot,
   type SegmentChannel,
   channelsOverlap
 } from "../../slots.js";
@@ -13,7 +14,7 @@ import {
   type WidthBounds
 } from "../../values.js";
 import type { StateWriteAction } from "../../actions.js";
-import { StateAccess } from "./access.js";
+import type { BodyBuilder } from "../../body-builder.js";
 import { PendingBuffer, type StatePathKind } from "./pending-buffer.js";
 
 export type { StatePathKind };
@@ -21,13 +22,15 @@ export type { StatePathKind };
 export type StateCell = FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
 
 // Exact state cells are independent state slots tracked by exact key: the
-// pending buffer holds the transactional writes, StateAccess the clean reads.
+// pending buffer holds the transactional writes, and this store owns clean
+// reads for exact-keyed cells.
 export class StateCells {
-  readonly #state: StateAccess;
+  readonly #currentBody: () => BodyBuilder;
   readonly #buffer = new PendingBuffer<StateCell>();
+  readonly #inputReads = new Map<StateCell, ValueId>();
 
-  constructor(state: StateAccess) {
-    this.#state = state;
+  constructor(currentBody: () => BodyBuilder) {
+    this.#currentBody = currentBody;
   }
 
   read(channel: StateCell): ValueId {
@@ -39,13 +42,22 @@ export class StateCells {
 
     this.#assertNoOverlappingEntries(channel);
 
-    return this.#state.readInput(channel, channelReadBounds(channel));
+    const cached = this.#inputReads.get(channel);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const output = this.#readState(channel);
+
+    this.#inputReads.set(channel, output);
+    return output;
   }
 
   write(channel: StateCell, value: ValueId): void {
     this.#assertNoOverlappingEntries(channel);
 
-    if (this.#state.cachedInput(channel) === value) {
+    if (this.#inputReads.get(channel) === value) {
       this.#buffer.delete(channel);
       return;
     }
@@ -55,7 +67,7 @@ export class StateCells {
 
   invalidate(channel: StateCell): void {
     this.#buffer.delete(channel);
-    this.#state.invalidateInput(channel);
+    this.#inputReads.delete(channel);
   }
 
   has(channel: StateCell): boolean {
@@ -73,6 +85,10 @@ export class StateCells {
 
   flushesForPath(path: StatePathKind): readonly StateWriteAction[] {
     return this.#buffer.flushes(path);
+  }
+
+  #readState(slot: StateSlot): ValueId {
+    return this.#currentBody().opValue({ kind: "state.read", slot });
   }
 
   #assertNoOverlappingEntries(channel: StateCell): void {

@@ -10,8 +10,7 @@ import {
   type StatusFlagValues
 } from "#x86/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
-import type { Action } from "../../actions.js";
-import { BodyBuilder, type SwitchArm } from "../../body-builder.js";
+import type { BodyBuilder, SwitchArm } from "../../body-builder.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "../../lazy-flags.js";
 import type { StateReadOp } from "../../ops.js";
 import { valueTableFlagOps } from "../../flag-value-ops.js";
@@ -23,7 +22,6 @@ import {
   type StateSlot
 } from "../../slots.js";
 import { fitsUnsigned, type ValueId, type ValueTable } from "../../values.js";
-import type { StateAccess } from "./access.js";
 import type { StateCells } from "./cells.js";
 
 export type FlagSourceId = number;
@@ -55,18 +53,16 @@ type LazyConditionCaseSpec = Readonly<{
 export class StatusFlagState {
   readonly #values: ValueTable;
   readonly #cells: StateCells;
-  readonly #state: StateAccess;
-  readonly #emit: (action: Action) => void;
+  readonly #currentBody: () => BodyBuilder;
   readonly #sources: SimpleFlagSource<ValueId>[] = [];
   readonly #current = initialStatusFlagState();
   readonly #inputFlags = new Map<X86StatusFlag, ValueId>();
   readonly #valueOps: ReturnType<typeof valueTableFlagOps>;
 
-  constructor(values: ValueTable, cells: StateCells, state: StateAccess, emit: (action: Action) => void) {
+  constructor(values: ValueTable, cells: StateCells, currentBody: () => BodyBuilder) {
     this.#values = values;
     this.#cells = cells;
-    this.#state = state;
-    this.#emit = emit;
+    this.#currentBody = currentBody;
     this.#valueOps = valueTableFlagOps(values);
   }
 
@@ -303,19 +299,13 @@ export class StatusFlagState {
     }
 
     const selector = this.#cells.read(lazyFlagsKindChannel);
-    const builder = new BodyBuilder(this.#values);
-    const output = builder.switch(
+
+    return this.#currentBody().switch(
       selector,
       caseSpecs.map((spec) => this.#lazyConditionArm(spec)),
       (arm) => this.#lazyConditionDefault(arm, CONDITIONS[cc].expr),
       fitsUnsigned(1)
     );
-
-    for (const action of builder.build().actions) {
-      this.#emit(action);
-    }
-
-    return output;
   }
 
   #conditionReadsOnlyInputFlags(cc: ConditionCode): boolean {
@@ -326,13 +316,13 @@ export class StatusFlagState {
     return {
       match: lazyFlagsKindByte(spec.kind, spec.width),
       build: (arm) => {
-        const left = arm.op(this.#lazyOperandRead(lazyFlagsAChannel, spec));
+        const left = arm.opValue(this.#lazyOperandRead(lazyFlagsAChannel, spec));
 
         if (spec.kind === LAZY_FLAGS_KIND.LOGIC_RESULT) {
           return this.#values.compare(spec.width, spec.operator, left, this.#values.const(0));
         }
 
-        const right = arm.op(this.#lazyOperandRead(lazyFlagsBChannel, spec));
+        const right = arm.opValue(this.#lazyOperandRead(lazyFlagsBChannel, spec));
 
         return this.#values.compare(spec.width, spec.operator, left, right);
       }
@@ -366,7 +356,7 @@ export class StatusFlagState {
         return cached;
       }
 
-      const resolved = body.op({ kind: "cpu.resolveFlag", flag });
+      const resolved = body.opValue({ kind: "cpu.resolveFlag", flag });
 
       flags.set(flag, resolved);
       return resolved;
@@ -412,7 +402,7 @@ export class StatusFlagState {
       return cached;
     }
 
-    const resolved = this.#state.resolveFlag(flag);
+    const resolved = this.#currentBody().opValue({ kind: "cpu.resolveFlag", flag });
 
     this.#inputFlags.set(flag, resolved);
     return resolved;

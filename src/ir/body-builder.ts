@@ -6,6 +6,10 @@ import { ValueTable, type ValueId, type WidthBounds } from "./values.js";
 
 export type BuildBody = (b: BodyBuilder) => void;
 export type BuildResult = (b: BodyBuilder) => ValueId;
+export type BodyActionSink = Readonly<{
+  push(action: Action): void;
+  actions(): readonly Action[];
+}>;
 
 export type SwitchArm = Readonly<{ match: number; build: BuildResult }>;
 
@@ -15,39 +19,47 @@ export type IfOptions = Readonly<{
 }>;
 
 export class BodyBuilder {
-  readonly #actions: Action[] = [];
+  readonly #sink: BodyActionSink;
 
-  constructor(readonly values: ValueTable) {}
+  constructor(readonly values: ValueTable, sink: BodyActionSink = new BufferedBodyActionSink()) {
+    this.#sink = sink;
+  }
+
+  // Schedules an op with no value output (memory.write, state.write, ...).
+  op(op: IrOp): void {
+    assert(opAccess(op).valueOutput === undefined, `${op.kind} op has an output; emit it with opValue`);
+    this.#emit({ kind: "op", op });
+  }
 
   // Schedules an op that produces a value; returns that value.
-  op(op: IrOp): ValueId {
+  opValue(op: IrOp): ValueId {
     const valueOutput = opAccess(op).valueOutput;
 
-    assert(valueOutput !== undefined, `${op.kind} op has no output; emit it with effect`);
+    assert(valueOutput !== undefined, `${op.kind} op has no output; emit it with op`);
     assert(valueOutput.type === "i32", `${op.kind} op action output type is not supported`);
 
     const output = this.values.addActionOutput(valueOutput.bounds);
 
-    this.#actions.push({ kind: "op", op, output });
+    this.#emit({ kind: "op", op, output });
     return output;
-  }
-
-  // Schedules an op that only affects state (memory.write, state.write, ...).
-  effect(op: IrOp): void {
-    assert(opAccess(op).valueOutput === undefined, `${op.kind} op has an output; emit it with op`);
-    this.#actions.push({ kind: "op", op });
   }
 
   // Escape hatch for an already-built action.
   push(action: Action): void {
-    this.#actions.push(action);
+    this.#emit(action);
+  }
+
+  extend(actions: readonly Action[]): void {
+    for (const action of actions) {
+      this.push(action);
+    }
   }
 
   if(condition: ValueId, thenBuild: BuildBody, options: IfOptions = {}): void {
     const thenBody = this.#childBody(thenBuild);
     const elseBody = options.elseBuild === undefined ? undefined : this.#childBody(options.elseBuild);
 
-    this.#actions.push({
+    this.#emit({
       kind: "if",
       condition,
       ...(options.hint !== undefined ? { hint: options.hint } : {}),
@@ -66,26 +78,28 @@ export class BodyBuilder {
     const defaultBody = this.#childResultBody(defaultBuild);
     const output = this.values.addActionOutput(outputBounds);
 
-    this.#actions.push({ kind: "switch", selector, output, cases, defaultBody });
+    this.#emit({ kind: "switch", selector, output, cases, defaultBody });
     return output;
   }
 
   // Terminates this body: fault arms, trap arms, the root.
   finish(finish: Finish): void {
-    this.#actions.push({ kind: "finish", finish });
+    this.#emit({ kind: "finish", finish });
   }
 
   loop(carried: readonly LoopCarriedCell[], bodyBuild: BuildBody): void {
-    this.#actions.push({ kind: "loop", carried, body: this.#childBody(bodyBuild) });
+    this.#emit({ kind: "loop", carried, body: this.#childBody(bodyBuild) });
   }
 
   // The back edge of the enclosing loop; usually sits under an if arm.
   loopContinue(updates: readonly ValueId[]): void {
-    this.#actions.push({ kind: "loopContinue", updates });
+    this.#emit({ kind: "loopContinue", updates });
   }
 
   build(result?: ValueId): Body {
-    return result === undefined ? { actions: this.#actions } : { actions: this.#actions, result };
+    const actions = this.#sink.actions();
+
+    return result === undefined ? { actions } : { actions, result };
   }
 
   #childBody(build: BuildBody): Body {
@@ -100,6 +114,22 @@ export class BodyBuilder {
     const result = build(child);
 
     return child.build(result);
+  }
+
+  #emit(action: Action): void {
+    this.#sink.push(action);
+  }
+}
+
+class BufferedBodyActionSink implements BodyActionSink {
+  readonly #actions: Action[] = [];
+
+  push(action: Action): void {
+    this.#actions.push(action);
+  }
+
+  actions(): readonly Action[] {
+    return this.#actions;
   }
 }
 

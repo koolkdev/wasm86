@@ -67,7 +67,7 @@ function lazyFlagResolverBlock(flag: LazyFlagHelper): Readonly<{ block: IrBlock;
   let output!: ValueId;
   const block = buildIrBlock((b) => {
     output = b.switch(
-      b.op({ kind: "state.read", slot: lazyFlagsKindChannel }),
+      b.opValue({ kind: "state.read", slot: lazyFlagsKindChannel }),
       [
         noneArm(flag),
         ...([8, 16, 32] as const).flatMap((width) => [
@@ -87,7 +87,7 @@ function lazyFlagResolverBlock(flag: LazyFlagHelper): Readonly<{ block: IrBlock;
 function noneArm(flag: LazyFlagHelper): SwitchArm {
   return {
     match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
-    build: (arm) => arm.op({ kind: "state.read", slot: flagChannel(flag) })
+    build: (arm) => arm.opValue({ kind: "state.read", slot: flagChannel(flag) })
   };
 }
 
@@ -98,8 +98,8 @@ function binaryArm(flag: LazyFlagHelper, kind: "add" | "sub", width: OperandWidt
       width
     ),
     build: (arm) => {
-      const left = arm.op(lazyOperandReadOp(lazyFlagsAChannel, width));
-      const right = arm.op(lazyOperandReadOp(lazyFlagsBChannel, width));
+      const left = arm.opValue(lazyOperandReadOp(lazyFlagsAChannel, width));
+      const right = arm.opValue(lazyOperandReadOp(lazyFlagsBChannel, width));
 
       return statusFlagValuesForSource(valueTableFlagOps(arm.values), {
         kind,
@@ -116,7 +116,7 @@ function logicArm(flag: LazyFlagHelper, width: OperandWidth): SwitchArm {
   return {
     match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, width),
     build: (arm) => {
-      const result = arm.op(lazyOperandReadOp(lazyFlagsAChannel, width));
+      const result = arm.opValue(lazyOperandReadOp(lazyFlagsAChannel, width));
 
       return statusFlagValuesForSource(valueTableFlagOps(arm.values), {
         kind: "logic",

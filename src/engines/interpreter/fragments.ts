@@ -54,11 +54,11 @@ class DecodeFragment {
   }
 
   readEip(): ValueId {
-    return this.#builder.op({ kind: "state.read", slot: eipChannel });
+    return this.#builder.opValue({ kind: "state.read", slot: eipChannel });
   }
 
   readGprWord(index: ValueId): ValueId {
-    return this.#builder.op({
+    return this.#builder.opValue({
       kind: "state.read",
       slot: { kind: "gprDynamic", index, byteLength: 4 }
     });
@@ -81,7 +81,7 @@ class DecodeFragment {
       this.#builder.push(action);
     }
 
-    return this.#builder.op(
+    return this.#builder.opValue(
       signed && width !== 32
         ? { kind: "memory.read", address, width, signed: true }
         : { kind: "memory.read", address, width }

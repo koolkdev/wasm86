@@ -24,35 +24,23 @@ import type {
   Value,
   ValueInput
 } from "#x86/semantics/refs.js";
-import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
+import type { OperandWidth, RegName } from "#x86/types.js";
 import type {
   ExternalValueId,
-  EffectiveAddressTerms,
-  MemDynamicOperandBinding,
-  MemSegmentBinding,
   OperandBinding,
-  RegDynamicOperandBinding,
   SegmentDynamicOperandBinding,
   SegmentOperandBinding
 } from "./operands.js";
 import { LoopBuilder, LoopSemanticsBuilderImpl } from "./builder/loop.js";
+import { FinishEmitter } from "./builder/finish.js";
+import { OperandResolver } from "./builder/operands.js";
+import { emitSegmentLoad, type SegmentMode } from "./builder/segments.js";
 import { State } from "./builder/state/index.js";
-import type { SegmentMode } from "./builder/state/segments.js";
-import {
-  type GprDynamicSlot
-} from "./slots.js";
-import type {
-  Action,
-  Finish
-} from "./actions.js";
-import type { Body, IrBlock } from "./block.js";
-import { memoryGuardActions } from "./memory-guard.js";
+import { BodyBuilder } from "./body-builder.js";
+import type { IrBlock } from "./block.js";
 import {
   ValueTable,
-  fitsUnsigned,
-  signExtended,
-  type ValueId,
-  type WidthBounds
+  type ValueId
 } from "./values.js";
 
 // Instruction addresses are known at block-compile time for JIT blocks, but
@@ -112,29 +100,26 @@ export function externalInstructionLocation(
 
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = new ValueTable();
-  readonly #actions: Action[] = [];
+  readonly #body: BodyBuilder;
+  #current: BodyBuilder;
   readonly #state: State;
-  #activeLoop: LoopBuilder | undefined;
-  // An effective/linear address is computed once per operand, at its first
-  // use, so later uses see the same address even if the instruction rewrites
-  // a base register in between.
-  readonly #operandAddresses = new Map<number, ValueId>();
-  readonly #operandLinearAddresses = new Map<number, ValueId>();
-  #bindings: readonly OperandBinding[] = [];
+  readonly #operands: OperandResolver;
+  readonly #finish: FinishEmitter;
+  readonly #segmentMode: SegmentMode;
   #instructionLocation: InstructionLocationValues | undefined;
   #terminated = false;
-  #wroteMemory = false;
   #finished = false;
+  #wroteMemory = false;
   // "terminated" means the root body already holds its terminator.
   #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
 
   constructor(segmentMode: SegmentMode) {
-    this.#state = new State(
-      this.#values,
-      (action) => this.#emitAction(action),
-      segmentMode,
-      (finish, actions) => this.#terminate(finish, actions)
-    );
+    this.#body = new BodyBuilder(this.#values);
+    this.#current = this.#body;
+    this.#state = new State(this.#values, () => this.#current);
+    this.#operands = new OperandResolver(this.#values, this.#state);
+    this.#finish = new FinishEmitter(this.#state, () => this.#current);
+    this.#segmentMode = segmentMode;
   }
 
   addInstruction(
@@ -146,9 +131,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     assert(this.#blockEnd === "fallthrough", "cannot add instructions after a block terminator");
     assert(this.#instructionLocation === undefined, "IR block builder has an incomplete instruction");
 
-    this.#bindings = bindings;
-    this.#operandAddresses.clear();
-    this.#operandLinearAddresses.clear();
+    this.#operands.beginInstruction(bindings);
     this.#instructionLocation = this.#locationValues(location);
     this.#terminated = false;
     this.#wroteMemory = false;
@@ -163,7 +146,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     // Cleared only on success: a template that throws leaves the instruction
     // in place with its partial pendings, poisoning further use.
     this.#instructionLocation = undefined;
-    this.#bindings = [];
+    this.#operands.endInstruction();
   }
 
   isTerminated(): boolean {
@@ -181,60 +164,32 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         assert(this.#state.eip.has(), "IR block did not advance eip; no instructions were added");
         const targetEip = this.#state.takeEipForDispatch();
 
-        this.#actions.push(...this.#state.flushesForCompletedDispatch());
-        this.#actions.push({
-          kind: "finish",
-          finish: { kind: "dispatch", targetEip }
-        });
+        this.#finish.dispatch(this.#body, targetEip);
         break;
       case "terminated":
         break;
     }
 
     return {
-      body: { actions: this.#actions },
+      body: this.#body.build(),
       values: this.#values
     };
   }
 
   operandInfo(operandInput: SemanticOperandInput): SemanticOperandInfo {
-    const binding = this.#binding(operandInput.index);
-
-    switch (binding.kind) {
-      case "reg":
-        return { storage: "reg" };
-      case "segment":
-        return { storage: "reg", segment: { kind: "static", reg: binding.channel.reg } };
-      case "imm":
-        return { storage: "imm" };
-      case "mem":
-      case "memStatic":
-      case "memDynamic":
-        return { storage: "mem" };
-      case "regDynamic":
-        // A runtime register index: register storage, dynamic channel.
-        return { storage: "reg" };
-      case "segmentDynamic":
-        // A runtime segment index: register-like storage, selector channel.
-        return { storage: "reg", segment: { kind: "dynamic", index: this.#values.external(binding.index) } };
-      case "immExternal":
-        // A runtime value with no storage cell, e.g. a decoded immediate.
-        return { storage: "imm" };
-    }
+    return this.#operands.operandInfo(operandInput);
   }
 
   operand(index: number): OperandRef {
-    this.#binding(index);
+    this.#operands.binding(index);
     return operand(index);
   }
 
   currentEip(): Value {
-    this.#beforeOp("currentEip");
     return this.#location().eip();
   }
 
   nextEip(): Value {
-    this.#beforeOp("nextEip");
     return this.#location().nextEip();
   }
 
@@ -247,16 +202,15 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): Value {
-    this.#beforeOp("get");
     const storage = toStorageRef(source);
 
     switch (storage.kind) {
       case "reg":
         return this.#state.gpr.read(storage.reg, accessWidth, options);
       case "mem":
-        return this.#readGuestMemory(storage.address, accessWidth, options);
+        return this.#readMemory(storage.address, accessWidth, options);
       case "operand": {
-        const binding = this.#binding(storage.index);
+        const binding = this.#operands.binding(storage.index);
 
         switch (binding.kind) {
           case "imm":
@@ -274,9 +228,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "mem":
           case "memStatic":
           case "memDynamic":
-            return this.#readGuestMemory(this.#operandLinearAddress(storage.index), accessWidth, options);
+            return this.#readMemory(this.#operands.linearAddress(storage.index), accessWidth, options);
           case "regDynamic":
-            return this.#state.gpr.readDynamic(this.#dynamicGprSlot(binding, accessWidth), options);
+            return this.#state.gpr.readDynamic(this.#operands.dynamicGprSlot(binding, accessWidth), options);
           case "segmentDynamic":
             return this.#state.segments.readDynamicSelector(this.#values.external(binding.index), accessWidth, options);
         }
@@ -285,7 +239,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   set(target: StorageInput, value: ValueInput, accessWidth: OperandWidth = 32): void {
-    this.#beforeOp("set");
     const storage = toStorageRef(target);
 
     switch (storage.kind) {
@@ -293,10 +246,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         this.#state.gpr.write(storage.reg, value, accessWidth);
         return;
       case "mem":
-        this.#writeGuestMemory(storage.address, value, accessWidth);
+        this.#writeMemory(storage.address, value, accessWidth);
         return;
       case "operand": {
-        const binding = this.#binding(storage.index);
+        const binding = this.#operands.binding(storage.index);
 
         switch (binding.kind) {
           case "reg":
@@ -309,10 +262,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "mem":
           case "memStatic":
           case "memDynamic":
-            this.#writeGuestMemory(this.#operandLinearAddress(storage.index), value, accessWidth);
+            this.#writeMemory(this.#operands.linearAddress(storage.index), value, accessWidth);
             return;
           case "regDynamic":
-            this.#state.gpr.writeDynamic(this.#dynamicGprSlot(binding, accessWidth), value);
+            this.#state.gpr.writeDynamic(this.#operands.dynamicGprSlot(binding, accessWidth), value);
             return;
           case "imm":
           case "immExternal":
@@ -323,48 +276,29 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   next(): void {
-    this.#beforeOp("next");
-    this.#state.instructionCount.increment();
-    this.#state.eip.write(this.#location().nextEip());
-    this.#terminated = true;
+    this.#completeInstruction(this.#location().nextEip());
   }
 
   addInstructionCount(amount: ValueInput): void {
-    this.#beforeOp("addInstructionCount");
     this.#state.instructionCount.add(amount);
   }
 
   memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void {
-    this.#beforeOp("memoryGuard");
     // Guest memory cannot be rolled back by any scheme, so a fault body
     // cannot restore the pre-instruction state once the instruction stored.
     assert(!this.#wroteMemory, "a memory guard cannot follow a memory write in the same instruction");
-
-    const addressId = address;
-
-    for (const action of memoryGuardActions(
-      this.#values,
-      addressId,
-      byteLength,
-      { kind: "data", access },
-      this.#state.flushesForPath("fault")
-    )) {
-      this.#emitAction(action);
-    }
+    this.#finish.guardIf(address, byteLength, access);
   }
 
   address(operandRef: OperandInput): Value {
-    this.#beforeOp("address");
-    return this.#operandAddress(operandRef.index);
+    return this.#operands.address(operandRef.index);
   }
 
   linearAddress(operandRef: OperandInput): Value {
-    this.#beforeOp("linearAddress");
-    return this.#operandLinearAddress(operandRef.index);
+    return this.#operands.linearAddress(operandRef.index);
   }
 
   readFlag(flag: X86Flag): Value {
-    this.#beforeOp("readFlag");
     if (!isX86StatusFlag(flag)) {
       return this.#state.flags.read(flag);
     }
@@ -373,7 +307,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   writeFlag(flag: X86Flag, value: ValueInput): void {
-    this.#beforeOp("writeFlag");
     if (isX86StatusFlag(flag)) {
       this.#state.statusFlags.write(flag, value);
       return;
@@ -383,171 +316,94 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   writeStatusFlagsSource(source: SimpleFlagSource): void {
-    this.#beforeOp("writeStatusFlagsSource");
     this.#state.statusFlags.writeSource(source);
   }
 
   condition(cc: ConditionCode): Value {
-    this.#beforeOp("condition");
     return this.#state.statusFlags.condition(cc);
   }
 
   jump(target: TargetInput): void {
-    this.#beforeOp("jump");
-    this.#state.instructionCount.increment();
-    this.#state.eip.write(target);
+    this.#completeInstruction(target);
     this.#blockEnd = "jump";
-    this.#terminated = true;
   }
 
   jumpIf(condition: ValueInput, target: TargetInput): void {
-    this.#beforeOp("jumpIf");
-    this.#state.instructionCount.increment();
-    this.#state.eip.write(this.#location().nextEip());
-
-    const conditionId = condition;
-    const targetId = target;
-
-    this.#emitAction({
-      kind: "if",
-      condition: conditionId,
-      thenBody: this.#earlyDispatchBody(targetId)
-    });
-    this.#terminated = true;
+    this.#completeInstruction(this.#location().nextEip());
+    this.#current.if(condition, (taken) => this.#finish.dispatch(taken, target));
   }
 
   // Opens a loop: the declared channels become loop-carried cells
   // living in locals while the body runs. The loop itself falls through;
   // instruction completion remains with the surrounding semantic template.
   loop(options: LoopOptions): void {
-    this.#beforeOp("loop");
-    assert(this.#activeLoop === undefined, "nested loops are unsupported");
+    assert(this.#current === this.#body, "nested loops are unsupported");
 
     const loop = LoopBuilder.begin({
       values: this.#values,
       state: this.#state,
-      emitParentAction: (action) => this.#actions.push(action)
+      parent: this.#current
     }, options);
 
-    this.#activeLoop = loop;
-
-    let exitValues: readonly ValueId[];
+    const parent = this.#current;
+    this.#current = loop.body;
 
     try {
       const loopBuilder = new LoopSemanticsBuilderImpl({
         host: this,
         state: this.#state,
         scope: loop.scope,
-        binding: (index) => this.#binding(index)
+        operands: this.#operands
       });
 
-      exitValues = loop.emitContinue(options.body(loopBuilder, this.#values));
+      loop.emitContinue(options.body(loopBuilder, this.#values));
     } finally {
-      this.#activeLoop = undefined;
+      this.#current = parent;
     }
     assert(!this.#terminated, "a loop body must not terminate the instruction");
 
-    loop.close(options.enter, exitValues);
+    loop.close(options.enter);
   }
 
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {
-    this.#beforeOp("cpuExceptionIf");
     assert(!this.#wroteMemory, "a CPU exception guard cannot follow a memory write in the same instruction");
-
-    this.#emitAction({
-      kind: "if",
-      condition,
-      hint: "unlikely",
-      thenBody: this.#terminatingBody(
-        { kind: "exit", exit: { class: "cpuException", exception } },
-        this.#state.flushesForPath("fault")
-      )
-    });
+    this.#finish.faultIf(condition, exception);
   }
 
   // A trap resumes at the next instruction with all state observable.
   hostTrap(vector: ValueInput): void {
-    this.#beforeOp("hostTrap");
-    this.#state.instructionCount.increment();
-
-    const vectorId = vector;
-
-    this.#state.eip.write(this.#location().nextEip());
-    this.#actions.push(...this.#state.flushesForPath("completed"));
-    this.#actions.push({
-      kind: "finish",
-      finish: { kind: "exit", exit: { class: "host", reason: "hostTrap", payload: vectorId } }
-    });
+    this.#completeInstruction(this.#location().nextEip());
+    this.#finish.hostTrap(vector);
     this.#blockEnd = "terminated";
-    this.#terminated = true;
   }
 
   // The taken path is a completed trap; the untaken path is the ordinary
   // fallthrough for this instruction and may continue into the next one.
   hostTrapIf(condition: ValueInput, vector: ValueInput): void {
-    this.#beforeOp("hostTrapIf");
+    this.#completeInstruction(this.#location().nextEip());
+    this.#finish.hostTrapIf(condition, vector);
+  }
+
+  #completeInstruction(target: ValueInput): void {
+    assert(!this.#terminated, "the instruction is already terminated");
     this.#state.instructionCount.increment();
-
-    const vectorId = vector;
-
-    this.#state.eip.write(this.#location().nextEip());
-    this.#actions.push({
-      kind: "if",
-      condition,
-      hint: "unlikely",
-      thenBody: this.#terminatingBody(
-        { kind: "exit", exit: { class: "host", reason: "hostTrap", payload: vectorId } },
-        this.#state.flushesForPath("completed")
-      )
-    });
+    this.#state.eip.write(target);
     this.#terminated = true;
   }
 
-  #earlyDispatchBody(target: TargetInput): Body {
-    return this.#terminatingBody(
-      { kind: "dispatch", targetEip: target },
-      this.#state.flushesForCompletedDispatch()
+  #readMemory(address: ValueId, width: OperandWidth, options: GetOptions): Value {
+    const signed = options.signed === true && width !== 32;
+
+    return this.#current.opValue(
+      signed
+        ? { kind: "memory.read", address, width, signed: true }
+        : { kind: "memory.read", address, width }
     );
   }
 
-  #terminatingBody(
-    terminator: Finish,
-    actions: readonly Action[]
-  ): Body {
-    return {
-      actions: [
-        ...actions,
-        { kind: "finish", finish: terminator }
-      ]
-    };
-  }
-
-  #terminate(finish: Finish, actions: readonly Action[]): void {
-    this.#actions.push(...actions);
-    this.#actions.push({ kind: "finish", finish });
-    this.#blockEnd = "terminated";
-    this.#terminated = true;
-  }
-
-  // The action sink. The active loop builder owns body action routing
-  // and invariant read hoisting while its callback runs.
-  #emitAction(action: Action): void {
-    const loop = this.#activeLoop;
-
-    if (loop === undefined) {
-      this.#actions.push(action);
-      return;
-    }
-
-    loop.emitAction(action);
-  }
-
-  #dynamicGprSlot(binding: RegDynamicOperandBinding, accessWidth: OperandWidth): GprDynamicSlot {
-    return {
-      kind: "gprDynamic",
-      index: this.#values.external(binding.index),
-      byteLength: dynamicGprByteLength[accessWidth]
-    };
+  #writeMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
+    this.#wroteMemory = true;
+    this.#current.op({ kind: "memory.write", address, value, width });
   }
 
   #writeSegmentSelector(
@@ -556,151 +412,16 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     accessWidth: OperandWidth
   ): void {
     assert(accessWidth === 16, `${accessWidth}-bit set to a segment selector`);
-    this.#state.segments.writeSelector(binding, value);
-  }
+    assert(!this.#terminated, "the instruction is already terminated");
+    // Also what keeps segment reads hoistable out of loop bodies.
+    assert(this.#current === this.#body, "a segment load inside a loop body is unsupported");
 
-  #readGuestMemory(address: ValueId, width: OperandWidth, options: GetOptions): ValueId {
-    // Sign-extension is meaningful only below the word, as in pending reads.
-    const signed = options.signed === true && width !== 32;
-    const output = this.#values.addActionOutput(memoryReadBounds(width, signed));
+    const outcome = emitSegmentLoad(this.#segmentMode, this.#values, this.#finish, binding, value);
 
-    this.#emitAction(
-      signed
-        ? { kind: "op", output, op: { kind: "memory.read", address, width, signed: true } }
-        : { kind: "op", output, op: { kind: "memory.read", address, width } }
-    );
-    return output;
-  }
-
-  #writeGuestMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
-    this.#wroteMemory = true;
-    this.#emitAction({ kind: "op", op: { kind: "memory.write", address, value, width } });
-  }
-
-  #operandAddress(index: number): ValueId {
-    const cached = this.#operandAddresses.get(index);
-
-    if (cached !== undefined) {
-      return cached;
+    if (outcome === "terminated") {
+      this.#blockEnd = "terminated";
+      this.#terminated = true;
     }
-
-    const binding = this.#binding(index);
-    const address = this.#bindingAddress(binding);
-
-    this.#operandAddresses.set(index, address);
-    return address;
-  }
-
-  #operandLinearAddress(index: number): ValueId {
-    const cached = this.#operandLinearAddresses.get(index);
-
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const binding = this.#binding(index);
-    const address = this.#bindingLinearAddress(index, binding);
-
-    this.#operandLinearAddresses.set(index, address);
-    return address;
-  }
-
-  #bindingAddress(binding: OperandBinding): ValueId {
-    assert(
-      binding.kind === "mem" || binding.kind === "memStatic" || binding.kind === "memDynamic",
-      `address of a ${binding.kind} operand binding`
-    );
-
-    switch (binding.kind) {
-      case "mem":
-        return this.#effectiveAddress(binding.address);
-      case "memStatic":
-        return this.#values.external(binding.address);
-      case "memDynamic":
-        return this.#dynamicAddress(binding);
-    }
-  }
-
-  #bindingLinearAddress(index: number, binding: OperandBinding): ValueId {
-    assert(
-      binding.kind === "mem" || binding.kind === "memStatic" || binding.kind === "memDynamic",
-      `linear address of a ${binding.kind} operand binding`
-    );
-
-    switch (binding.kind) {
-      case "mem":
-        return this.#memSegmentLinearAddress(binding.segment, this.#operandAddress(index));
-      case "memStatic":
-        return this.#memSegmentLinearAddress(binding.segment, this.#operandAddress(index));
-      case "memDynamic":
-        return this.#memSegmentLinearAddress(binding.segment, this.#operandAddress(index));
-    }
-  }
-
-  #dynamicAddress(binding: MemDynamicOperandBinding): ValueId {
-    const base = this.#state.gpr.readDynamic({
-      kind: "gprDynamic",
-      index: this.#values.external(binding.base),
-      byteLength: 4
-    });
-
-    return this.#values.binary("add", base, this.#values.external(binding.offset));
-  }
-
-  #effectiveAddress(ea: EffectiveAddressTerms): ValueId {
-    let address: ValueId | undefined;
-
-    if (ea.base !== undefined) {
-      address = this.#state.gpr.read(ea.base);
-    }
-
-    if (ea.index !== undefined) {
-      const index = this.#state.gpr.read(ea.index);
-      const scaled = ea.scale === 1
-        ? index
-        : this.#values.binary("shl", index, this.#values.const(scaleShift[ea.scale]));
-
-      address = address === undefined ? scaled : this.#values.binary("add", address, scaled);
-    }
-
-    if (address === undefined) {
-      return this.#values.const(ea.disp);
-    }
-
-    return ea.disp === 0
-      ? address
-      : this.#values.binary("add", address, this.#values.const(ea.disp));
-  }
-
-  #linearAddress(segment: SegmentRegister | undefined, offset: ValueId): ValueId {
-    // Flat-memory assumption: CS/DS/ES/SS bases are zero; FS/GS may be non-zero.
-    if (segment !== "fs" && segment !== "gs") {
-      return offset;
-    }
-
-    return this.#values.binary("add", this.#state.segments.readBase(segment), offset);
-  }
-
-  #memSegmentLinearAddress(segment: MemSegmentBinding, offset: ValueId): ValueId {
-    switch (segment.kind) {
-      case "none":
-        return offset;
-      case "static":
-        return this.#linearAddress(segment.reg, offset);
-      case "dynamic":
-        return this.#dynamicSegmentLinearAddress(segment.value, offset);
-    }
-  }
-
-  #dynamicSegmentLinearAddress(segment: ExternalValueId, offset: ValueId): ValueId {
-    return this.#values.binary("add", this.#state.segments.readDynamicBase(this.#values.external(segment)), offset);
-  }
-
-  #binding(index: number): OperandBinding {
-    const binding = this.#bindings[index];
-
-    assert(binding !== undefined, `missing operand binding for operand ${index}`);
-    return binding;
   }
 
   #locationValues(location: InstructionLocation): InstructionLocationValues {
@@ -724,22 +445,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return this.#instructionLocation;
   }
 
-  #beforeOp(op: string): void {
-    this.#location();
-    assert(!this.#terminated, `cannot emit ${op} after instruction terminator`);
-  }
-}
-
-const scaleShift = { 1: 0, 2: 1, 4: 2, 8: 3 } as const;
-
-const dynamicGprByteLength = { 8: 1, 16: 2, 32: 4 } as const;
-
-function memoryReadBounds(width: OperandWidth, signed: boolean): WidthBounds | undefined {
-  if (width === 32) {
-    return undefined;
-  }
-
-  return signed ? signExtended(width) : fitsUnsigned(width);
 }
 
 function notSupportedError(what: string): Error {

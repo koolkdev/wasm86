@@ -1,7 +1,7 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { StateAccess } from "#ir/builder/state/access.js";
+import { BodyBuilder } from "#ir/body-builder.js";
 import { StateCells, type StatePathKind } from "#ir/builder/state/cells.js";
 import { GprState, type GprReadOptions } from "#ir/builder/state/gpr.js";
 import { SegmentState } from "#ir/builder/state/segments.js";
@@ -24,10 +24,10 @@ import { isStateRead, isStateWrite, stateRead, stateWrite } from "#ir/tests/stor
 type Harness = Readonly<{
   values: ValueTable;
   actions: Action[];
-  pending: StateAccessHarness;
+  pending: PendingHarness;
 }>;
 
-type StateAccessHarness = Readonly<{
+type PendingHarness = Readonly<{
   read(channel: StateChannel, options?: GprReadOptions): ValueId;
   write(channel: StateChannel, value: ValueId): void;
   has(channel: StateChannel): boolean;
@@ -41,24 +41,16 @@ type StateAccessHarness = Readonly<{
 
 function createHarness(): Harness {
   const values = new ValueTable();
-  const actions: Action[] = [];
-  const access = new StateAccess(values, (action) => actions.push(action));
-  const cells = new StateCells(access);
-  const gpr = new GprState(values, access);
+  const body = new BodyBuilder(values);
+  const actions = body.build().actions as Action[];
+  const currentBody = () => body;
+  const cells = new StateCells(currentBody);
+  const gpr = new GprState(values, currentBody);
   const flushesForPath = (path: StatePathKind): readonly StateWriteAction[] => [
     ...gpr.flushesForPath(path),
     ...cells.flushesForPath(path)
   ];
-  const segments = new SegmentState(
-    values,
-    cells,
-    access,
-    "flat32",
-    (finish, finishActions) => {
-      actions.push(...finishActions, { kind: "finish", finish });
-    },
-    () => flushesForPath("fault")
-  );
+  const segments = new SegmentState(values, cells, currentBody);
 
   return {
     values,
@@ -97,11 +89,11 @@ function dynamicGpr(index: ValueId, byteLength: 1 | 2 | 4 = 4): GprDynamicSlot {
   return { kind: "gprDynamic", index, byteLength };
 }
 
-function faultFlushEntries(pending: StateAccessHarness): ReadonlyArray<readonly [StateSlot, ValueId]> {
+function faultFlushEntries(pending: PendingHarness): ReadonlyArray<readonly [StateSlot, ValueId]> {
   return edgeEntries(pending.flushesForPath("fault"));
 }
 
-function completedEdgeEntries(pending: StateAccessHarness): ReadonlyArray<readonly [StateSlot, ValueId]> {
+function completedEdgeEntries(pending: PendingHarness): ReadonlyArray<readonly [StateSlot, ValueId]> {
   return edgeEntries(pending.flushesForPath("completed"));
 }
 

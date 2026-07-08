@@ -8,6 +8,7 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noUnusedLocals": true,
+    "noImplicitReturns": true,
     "noUnusedParameters": true,
     "useUnknownInCatchVariables": true,
     "forceConsistentCasingInFileNames": true,

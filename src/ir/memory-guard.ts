@@ -21,7 +21,7 @@ export function memoryGuardActions(
   faultBodyPrefix: readonly Action[] = []
 ): readonly Action[] {
   const builder = new BodyBuilder(values);
-  const fault = builder.op({
+  const fault = builder.opValue({
     kind: "memory.check",
     address,
     byteLength,

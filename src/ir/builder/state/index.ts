@@ -1,10 +1,10 @@
 import { assert } from "#common/assert.js";
-import type { Action, StateWriteAction } from "../../actions.js";
+import type { StateWriteAction } from "../../actions.js";
+import type { BodyBuilder } from "../../body-builder.js";
 import {
   type StateChannel
 } from "../../slots.js";
 import type { ValueId, ValueTable } from "../../values.js";
-import { StateAccess } from "./access.js";
 import { StateCells } from "./cells.js";
 import type { StatePathKind } from "./pending-buffer.js";
 import { EipState } from "./eip.js";
@@ -12,11 +12,10 @@ import { FlagState } from "./flags.js";
 import { GprState } from "./gpr.js";
 import { InstructionCountState } from "./instruction-count.js";
 import type { StateLoopOptions } from "./loop-scope.js";
-import { SegmentState, type SegmentMode, type SegmentTerminator } from "./segments.js";
+import { SegmentState } from "./segments.js";
 import { StatusFlagState } from "./status-flags.js";
 
 export class State {
-  readonly #access: StateAccess;
   readonly #cells: StateCells;
 
   readonly gpr: GprState;
@@ -26,26 +25,13 @@ export class State {
   readonly eip: EipState;
   readonly instructionCount: InstructionCountState;
 
-  constructor(
-    values: ValueTable,
-    emit: (action: Action) => void,
-    segmentMode: SegmentMode,
-    terminate: SegmentTerminator
-  ) {
-    this.#access = new StateAccess(values, emit);
-    this.#cells = new StateCells(this.#access);
+  constructor(values: ValueTable, currentBody: () => BodyBuilder) {
+    this.#cells = new StateCells(currentBody);
 
-    this.gpr = new GprState(values, this.#access);
+    this.gpr = new GprState(values, currentBody);
     this.flags = new FlagState(this.#cells);
-    this.statusFlags = new StatusFlagState(values, this.#cells, this.#access, emit);
-    this.segments = new SegmentState(
-      values,
-      this.#cells,
-      this.#access,
-      segmentMode,
-      terminate,
-      () => this.flushesForPath("fault")
-    );
+    this.statusFlags = new StatusFlagState(values, this.#cells, currentBody);
+    this.segments = new SegmentState(values, this.#cells, currentBody);
     this.eip = new EipState(this.#cells);
     this.instructionCount = new InstructionCountState(values, this.#cells);
   }

@@ -22,8 +22,9 @@ import {
 import type { OperandWidth, RegName } from "#x86/types.js";
 import { gprChannel, type GprChannel } from "../slots.js";
 import type { Action, LoopCarriedCell } from "../actions.js";
-import type { OperandBinding } from "../operands.js";
+import { BodyBuilder, type BodyActionSink, type IfOptions } from "../body-builder.js";
 import type { ValueId, ValueTable } from "../values.js";
+import type { OperandResolver } from "./operands.js";
 import type { State } from "./state/index.js";
 import { StateLoopScope } from "./state/loop-scope.js";
 
@@ -33,36 +34,43 @@ export type LoopSemanticsBuilderContext = Readonly<{
   host: SemanticOps;
   state: State;
   scope: StateLoopScope;
-  binding(index: number): OperandBinding;
+  operands: OperandResolver;
 }>;
 
 export type LoopBuilderContext = Readonly<{
   values: ValueTable;
   state: State;
-  emitParentAction(action: Action): void;
+  parent: BodyBuilder;
 }>;
 
 // One loop under construction: the carried cells, entry-hoisted actions, the
 // body's action sink, and the accesses the scope polices.
 export class LoopBuilder {
-  readonly #context: LoopBuilderContext;
+  readonly #parent: BodyBuilder;
   readonly #cells: readonly LoopCell[];
   readonly #scope: StateLoopScope;
-  readonly #entryActions: Action[] = [];
-  readonly #bodyActions: Action[] = [];
+  readonly #bodySink: LoopBodySink;
+  readonly #body: BodyBuilder;
+  #exitValues: readonly ValueId[] | undefined;
 
   private constructor(
     context: LoopBuilderContext,
     cells: readonly LoopCell[],
     scope: StateLoopScope
   ) {
-    this.#context = context;
+    this.#parent = context.parent;
     this.#cells = cells;
     this.#scope = scope;
+    this.#bodySink = new LoopBodySink(scope);
+    this.#body = new BodyBuilder(context.values, this.#bodySink);
   }
 
   get scope(): StateLoopScope {
     return this.#scope;
+  }
+
+  get body(): BodyBuilder {
+    return this.#body;
   }
 
   static begin(context: LoopBuilderContext, options: LoopOptions): LoopBuilder {
@@ -79,54 +87,66 @@ export class LoopBuilder {
 
   // The conditional back edge, and the only one. The back edge and the exit
   // tail see the same carried values: one capture serves both.
-  emitContinue(condition: ValueInput): readonly ValueId[] {
+  emitContinue(condition: ValueInput): void {
+    assert(this.#exitValues === undefined, "the loop back edge is already emitted");
+
     const exitValues = this.#scope.captureExitValues();
 
-    this.emitAction({
-      kind: "if",
-      condition,
-      thenBody: { actions: [{ kind: "loopContinue", updates: exitValues }] }
-    });
-
-    return exitValues;
+    this.#body.if(condition, (taken) => taken.loopContinue(exitValues));
+    this.#exitValues = exitValues;
   }
 
-  close(enter: ValueInput, exitValues: readonly ValueId[]): void {
-    // The exit path's one commit per carried channel.
-    for (const action of this.#scope.commitExitValues(exitValues)) {
-      this.emitAction(action);
-    }
+  close(enter: ValueInput): void {
+    assert(this.#exitValues !== undefined, "cannot close a loop without its back edge");
 
-    const loopAction: Action = {
-      kind: "loop",
-      carried: this.#cells,
-      body: { actions: this.#bodyActions }
-    };
+    // The exit path's one commit per carried channel.
+    for (const action of this.#scope.commitExitValues(this.#exitValues)) {
+      this.#body.push(action);
+    }
 
     // The enter-if is a join: the ran arm commits through the exit tail, the
     // zero-trip arm commits the dirty-at-entry seeds.
     const seedCommits = this.#scope.commitSeedValues();
 
-    this.#context.emitParentAction({
-      kind: "if",
-      condition: enter,
-      thenBody: { actions: [...this.#entryActions, loopAction] },
-      ...(seedCommits.length > 0 ? { elseBody: { actions: seedCommits } } : {})
-    });
+    this.#parent.if(
+      enter,
+      (thenBody) => this.#buildEnteredBody(thenBody),
+      this.#zeroTripOptions(seedCommits)
+    );
 
     this.#scope.close();
   }
 
-  // Inside a loop body, reads of channels the loop does not carry are
-  // loop-invariant: their ops hoist before the loop and the body consumes
-  // the values from locals.
-  emitAction(action: Action): void {
+  #buildEnteredBody(body: BodyBuilder): void {
+    body.extend(this.#bodySink.entryActions());
+    body.loop(this.#cells, (loopBody) => loopBody.extend(this.#body.build().actions));
+  }
+
+  #zeroTripOptions(seedCommits: readonly Action[]): IfOptions {
+    return seedCommits.length === 0
+      ? {}
+      : { elseBuild: (elseBody) => elseBody.extend(seedCommits) };
+  }
+
+}
+
+class LoopBodySink implements BodyActionSink {
+  readonly #scope: StateLoopScope;
+  readonly #entryActions: Action[] = [];
+  readonly #bodyActions: Action[] = [];
+
+  constructor(scope: StateLoopScope) {
+    this.#scope = scope;
+  }
+
+  push(action: Action): void {
     if (action.kind === "op" && action.op.kind === "state.read") {
       const slot = action.op.slot;
 
-      // Dynamic GPR reads flush tracked GPR state - asserted away at their call
-      // sites; a dynamic segment base is loop-invariant like any static
-      // non-carried channel, since segment writes terminate the block.
+      // Dynamic GPR reads flush tracked GPR state - asserted away at their
+      // call sites; a dynamic segment base is loop-invariant like any static
+      // non-carried channel, since segment loads are rejected inside loop
+      // bodies and end the block outside them.
       this.#scope.assertHoistableRead(slot);
       this.#entryActions.push(action);
       return;
@@ -139,13 +159,34 @@ export class LoopBuilder {
     this.#bodyActions.push(action);
   }
 
+  actions(): readonly Action[] {
+    return this.#bodyActions;
+  }
+
+  entryActions(): readonly Action[] {
+    return this.#entryActions;
+  }
 }
 
-class LoopState {
+// The loop body's semantic surface: the host's operations behind the scope's
+// carried-channel policing and the dynamic-operand guard.
+export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
   readonly #context: LoopSemanticsBuilderContext;
 
   constructor(context: LoopSemanticsBuilderContext) {
     this.#context = context;
+  }
+
+  operand(index: number): OperandRef {
+    return this.#context.host.operand(index);
+  }
+
+  reg(regInput: RegName): RegRef {
+    return this.#context.host.reg(regInput);
+  }
+
+  mem(address: ValueInput): MemRef {
+    return this.#context.host.mem(address);
   }
 
   get(source: StorageInput, accessWidth?: OperandWidth, options?: GetOptions): Value {
@@ -221,9 +262,7 @@ class LoopState {
   }
 
   #operandUsesDynamicRegister(index: number): boolean {
-    const binding = this.#context.binding(index);
-
-    return binding.kind === "regDynamic" || binding.kind === "memDynamic";
+    return this.#context.operands.operandUsesDynamicGpr(index);
   }
 
   // The GPR channel a set writes, if any; memory and segment targets have none.
@@ -234,66 +273,10 @@ class LoopState {
       case "reg":
         return gprChannel(ref.reg);
       case "operand": {
-        const binding = this.#context.binding(ref.index);
-
-        return binding.kind === "reg" ? binding.channel : undefined;
+        return this.#context.operands.operandGprChannel(ref.index);
       }
       case "mem":
         return undefined;
     }
-  }
-}
-
-export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
-  readonly #context: LoopSemanticsBuilderContext;
-  readonly #state: LoopState;
-
-  constructor(context: LoopSemanticsBuilderContext) {
-    this.#context = context;
-    this.#state = new LoopState(context);
-  }
-
-  operand(index: number): OperandRef {
-    return this.#context.host.operand(index);
-  }
-
-  reg(regInput: RegName): RegRef {
-    return this.#context.host.reg(regInput);
-  }
-
-  mem(address: ValueInput): MemRef {
-    return this.#context.host.mem(address);
-  }
-
-  get(source: StorageInput, accessWidth?: OperandWidth, options?: GetOptions): Value {
-    return this.#state.get(source, accessWidth, options);
-  }
-
-  set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void {
-    this.#state.set(target, value, accessWidth);
-  }
-
-  memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void {
-    this.#state.memoryGuard(address, byteLength, access);
-  }
-
-  address(operandRef: OperandInput): Value {
-    return this.#state.address(operandRef);
-  }
-
-  linearAddress(operandRef: OperandInput): Value {
-    return this.#state.linearAddress(operandRef);
-  }
-
-  readFlag(flag: X86Flag): Value {
-    return this.#state.readFlag(flag);
-  }
-
-  writeStatusFlagsSource(source: SimpleFlagSource): void {
-    this.#state.writeStatusFlagsSource(source);
-  }
-
-  condition(cc: ConditionCode): Value {
-    return this.#state.condition(cc);
   }
 }

@@ -34,6 +34,7 @@ import type {
   SwitchAction
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
+import { validateIrBlock } from "#ir/validate.js";
 import { valueId, type ValueId, type ValueNode } from "#ir/values.js";
 import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
@@ -849,18 +850,44 @@ test("a block ended by a jump rejects further instructions", () => {
   );
 });
 
-test("ops after a control terminator in one template fail loudly", () => {
-  const jumpThenSet: SemanticTemplate = (s, v) => {
-    const target = v.const(0x2000);
-    const value = v.const(1);
+test("actions after a terminal finish in one template are rejected by validation", () => {
+  const trapThenSet: SemanticTemplate = (s, v) => {
+    s.hostTrap(v.const(3));
+    s.set(s.mem(v.const(0x2000)), v.const(1), 32);
+  };
+  const builder = createIrBlockBuilder();
 
-    s.jump(target);
-    s.set(s.reg("eax"), value, 32);
+  builder.addInstruction(trapThenSet, [], loc(0x1000, 0x1005));
+
+  throws(() => validateIrBlock(builder.finish()), /actions after its terminal finish action/);
+});
+
+test("a template cannot terminate the instruction twice", () => {
+  const jumpThenNext: SemanticTemplate = (s, v) => {
+    s.jump(v.const(0x2000));
+    s.next();
   };
 
   throws(
-    () => createIrBlockBuilder().addInstruction(jumpThenSet, [], loc(0x1000, 0x1005)),
-    /cannot emit set after instruction terminator/
+    () => createIrBlockBuilder().addInstruction(jumpThenNext, [], loc(0x1000, 0x1005)),
+    /instruction is already terminated/
+  );
+});
+
+test("a segment load inside a loop body fails loudly", () => {
+  const segmentLoadInLoop: SemanticTemplate = (s, v) => {
+    s.loop({
+      enter: v.const(1),
+      body: (loop, lv) => {
+        loop.set(loop.operand(0), lv.const(1), 16);
+        return lv.const(0);
+      }
+    });
+  };
+
+  throws(
+    () => createIrBlockBuilder().addInstruction(segmentLoadInLoop, [segmentBinding("ds")], loc(0x1000, 0x1005)),
+    /segment load inside a loop body/
   );
 });
 

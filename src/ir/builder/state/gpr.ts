@@ -9,13 +9,10 @@ import {
   type GprChannel
 } from "../../slots.js";
 import {
-  fitsUnsigned,
-  signExtended,
   type ValueId,
-  type ValueTable,
-  type WidthBounds
+  type ValueTable
 } from "../../values.js";
-import { StateAccess } from "./access.js";
+import type { BodyBuilder } from "../../body-builder.js";
 import { PendingBuffer, type StatePathKind } from "./pending-buffer.js";
 
 export type GprReadOptions = Readonly<{ signed?: boolean }>;
@@ -26,15 +23,15 @@ export type GprReadOptions = Readonly<{ signed?: boolean }>;
 // unrestorable-store tracking are GPR-specific and live here.
 export class GprState {
   readonly #values: ValueTable;
-  readonly #state: StateAccess;
+  readonly #currentBody: () => BodyBuilder;
   readonly #buffer = new PendingBuffer<GprChannel>();
   readonly #reads = new Map<GprChannel, ValueId>();
   readonly #signedReads = new Map<GprChannel, ValueId>();
   #unrestorableStore = false;
 
-  constructor(values: ValueTable, state: StateAccess) {
+  constructor(values: ValueTable, currentBody: () => BodyBuilder) {
     this.#values = values;
-    this.#state = state;
+    this.#currentBody = currentBody;
   }
 
   read(reg: RegName | GprChannel, accessWidthOrOptions?: OperandWidth | GprReadOptions, options: GprReadOptions = {}): ValueId {
@@ -60,12 +57,12 @@ export class GprState {
 
     this.#flushDirty();
 
-    return this.#state.read(slot, gprReadBounds(slot.byteLength, signed), signed);
+    return this.#readState(slot, signed);
   }
 
   writeDynamic(slot: GprDynamicSlot, value: ValueId): void {
     this.#flushDirty();
-    this.#state.write(slot, value);
+    this.#writeState(slot, value);
     this.#unrestorableStore = true;
     this.#buffer.clear();
     this.#reads.clear();
@@ -101,7 +98,7 @@ export class GprState {
       return cached;
     }
 
-    const output = this.#state.read(channel, gprReadBounds(channel.byteLength, signed), signed);
+    const output = this.#readState(channel, signed);
 
     cache.set(channel, output);
     return output;
@@ -192,9 +189,21 @@ export class GprState {
       }
     }
 
-    this.#state.write(channel, entry.value);
+    this.#writeState(channel, entry.value);
     this.#buffer.markClean(channel);
     this.#invalidateReadsOverlapping(channel);
+  }
+
+  #readState(slot: GprChannel | GprDynamicSlot, signed: boolean): ValueId {
+    return this.#currentBody().opValue(
+      signed
+        ? { kind: "state.read", slot, signed: true }
+        : { kind: "state.read", slot }
+    );
+  }
+
+  #writeState(slot: GprChannel | GprDynamicSlot, value: ValueId): void {
+    this.#currentBody().op({ kind: "state.write", slot, value });
   }
 
   #flushDirty(): void {
@@ -253,15 +262,4 @@ function narrowBits(channel: GprChannel): 8 | 16 | undefined {
   }
 
   return channel.byteLength === 1 ? 8 : 16;
-}
-
-function gprReadBounds(byteLength: 1 | 2 | 4, signed: boolean): WidthBounds | undefined {
-  switch (byteLength) {
-    case 1:
-      return signed ? signExtended(8) : fitsUnsigned(8);
-    case 2:
-      return signed ? signExtended(16) : fitsUnsigned(16);
-    case 4:
-      return undefined;
-  }
 }
