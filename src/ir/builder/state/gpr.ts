@@ -13,9 +13,16 @@ import {
   type ValueTable
 } from "../../values.js";
 import type { BodyBuilder } from "../../body-builder.js";
-import { PendingBuffer, type StatePathKind } from "./pending-buffer.js";
+import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
 
 export type GprReadOptions = Readonly<{ signed?: boolean }>;
+
+type GprStateSnapshot = Readonly<{
+  buffer: PendingBufferSnapshot<GprChannel>;
+  reads: ReadonlyMap<GprChannel, ValueId>;
+  signedReads: ReadonlyMap<GprChannel, ValueId>;
+  unrestorableStore: boolean;
+}>;
 
 // GPRs have byte aliases and dynamic register slots, so they need overlap
 // rules the exact state cells do not. The pending buffer holds the
@@ -156,6 +163,31 @@ export class GprState {
   beginInstruction(): void {
     this.#buffer.snapshotBoundary();
     this.#unrestorableStore = false;
+  }
+
+  snapshot(): GprStateSnapshot {
+    return {
+      buffer: this.#buffer.snapshot(),
+      reads: new Map(this.#reads),
+      signedReads: new Map(this.#signedReads),
+      unrestorableStore: this.#unrestorableStore
+    };
+  }
+
+  restore(snapshot: GprStateSnapshot): void {
+    this.#buffer.restore(snapshot.buffer);
+    this.#reads.clear();
+    this.#signedReads.clear();
+
+    for (const [channel, value] of snapshot.reads) {
+      this.#reads.set(channel, value);
+    }
+
+    for (const [channel, value] of snapshot.signedReads) {
+      this.#signedReads.set(channel, value);
+    }
+
+    this.#unrestorableStore = snapshot.unrestorableStore;
   }
 
   flushesForPath(path: StatePathKind): readonly StateWriteAction[] {

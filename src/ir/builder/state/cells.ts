@@ -15,11 +15,16 @@ import {
 } from "../../values.js";
 import type { StateWriteAction } from "../../actions.js";
 import type { BodyBuilder } from "../../body-builder.js";
-import { PendingBuffer, type StatePathKind } from "./pending-buffer.js";
+import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
 
 export type { StatePathKind };
 
 export type StateCell = FlagChannel | SegmentChannel | EipChannel | InstructionCountChannel | LazyFlagsChannel;
+
+type StateCellsSnapshot = Readonly<{
+  buffer: PendingBufferSnapshot<StateCell>;
+  inputReads: ReadonlyMap<StateCell, ValueId>;
+}>;
 
 // Exact state cells are independent state slots tracked by exact key: the
 // pending buffer holds the transactional writes, and this store owns clean
@@ -81,6 +86,22 @@ export class StateCells {
 
   beginInstruction(): void {
     this.#buffer.snapshotBoundary();
+  }
+
+  snapshot(): StateCellsSnapshot {
+    return {
+      buffer: this.#buffer.snapshot(),
+      inputReads: new Map(this.#inputReads)
+    };
+  }
+
+  restore(snapshot: StateCellsSnapshot): void {
+    this.#buffer.restore(snapshot.buffer);
+    this.#inputReads.clear();
+
+    for (const [channel, value] of snapshot.inputReads) {
+      this.#inputReads.set(channel, value);
+    }
   }
 
   flushesForPath(path: StatePathKind): readonly StateWriteAction[] {

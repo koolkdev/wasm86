@@ -6,6 +6,11 @@ export type StatePathKind = "fault" | "completed";
 
 type PendingEntry = { value: ValueId; dirty: boolean };
 
+export type PendingBufferSnapshot<C extends StateSlot> = Readonly<{
+  entries: ReadonlyMap<C, Readonly<PendingEntry>>;
+  boundary: ReadonlyMap<C, ValueId>;
+}>;
+
 // A pending-write buffer with an instruction-boundary snapshot: the
 // transactional core shared by the exact-keyed cell store and the alias-keyed
 // GPR store. It owns entry tracking, the boundary snapshot, the dirty-since
@@ -43,6 +48,23 @@ export class PendingBuffer<C extends StateSlot> {
 
   clear(): void {
     this.#entries.clear();
+  }
+
+  snapshot(): PendingBufferSnapshot<C> {
+    return {
+      entries: new Map([...this.#entries].map(([channel, entry]) => [channel, { ...entry }])),
+      boundary: new Map(this.#boundary)
+    };
+  }
+
+  restore(snapshot: PendingBufferSnapshot<C>): void {
+    this.#entries.clear();
+
+    for (const [channel, entry] of snapshot.entries) {
+      this.#entries.set(channel, { ...entry });
+    }
+
+    this.#boundary = new Map(snapshot.boundary);
   }
 
   has(channel: C): boolean {

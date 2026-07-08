@@ -15,6 +15,14 @@ import type { StateLoopOptions } from "./loop-scope.js";
 import { SegmentState } from "./segments.js";
 import { StatusFlagState } from "./status-flags.js";
 
+type StateSnapshot = Readonly<{
+  gpr: ReturnType<GprState["snapshot"]>;
+  cells: ReturnType<StateCells["snapshot"]>;
+  statusFlags: ReturnType<StatusFlagState["snapshot"]>;
+  segments: ReturnType<SegmentState["snapshot"]>;
+  instructionCount: ReturnType<InstructionCountState["snapshot"]>;
+}>;
+
 export class State {
   readonly #cells: StateCells;
 
@@ -24,6 +32,7 @@ export class State {
   readonly segments: SegmentState;
   readonly eip: EipState;
   readonly instructionCount: InstructionCountState;
+  #scopeOpen = false;
 
   constructor(values: ValueTable, currentBody: () => BodyBuilder) {
     this.#cells = new StateCells(currentBody);
@@ -54,15 +63,27 @@ export class State {
     ];
   }
 
-  flushesForCompletedDispatch(): readonly StateWriteAction[] {
-    return this.flushesForPath("completed").filter((action) => action.op.slot.kind !== "eip");
-  }
-
   takeEipForDispatch(): ValueId {
     const targetEip = this.eip.read();
 
     this.eip.invalidate();
     return targetEip;
+  }
+
+  enterScope(build: () => boolean): void {
+    assert(!this.#scopeOpen, "nested state scopes are unsupported");
+
+    const snapshot = this.#snapshot();
+
+    this.#scopeOpen = true;
+    try {
+      const terminating = build();
+
+      assert(terminating, "joining state scope exits are unsupported");
+    } finally {
+      this.#restore(snapshot);
+      this.#scopeOpen = false;
+    }
   }
 
   invalidate(channel: StateChannel): void {
@@ -108,6 +129,24 @@ export class State {
       case "segment":
         assert(false, "segment writes must use a segment-load host exit");
     }
+  }
+
+  #snapshot(): StateSnapshot {
+    return {
+      gpr: this.gpr.snapshot(),
+      cells: this.#cells.snapshot(),
+      statusFlags: this.statusFlags.snapshot(),
+      segments: this.segments.snapshot(),
+      instructionCount: this.instructionCount.snapshot()
+    };
+  }
+
+  #restore(snapshot: StateSnapshot): void {
+    this.gpr.restore(snapshot.gpr);
+    this.#cells.restore(snapshot.cells);
+    this.statusFlags.restore(snapshot.statusFlags);
+    this.segments.restore(snapshot.segments);
+    this.instructionCount.restore(snapshot.instructionCount);
   }
 }
 

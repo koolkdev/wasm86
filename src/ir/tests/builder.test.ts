@@ -925,6 +925,33 @@ test("jcc after cmp source uses the source-derived condition as a side exit", ()
   deepStrictEqual(actions[actions.length - 1], finishDispatch(v.const(0x1005)));
 });
 
+test("jcc side exit consumes eip in a terminating state scope and preserves fallthrough state", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
+  builder.addInstruction(jccSemantic("E"), [immBinding(0x2000)], loc(0x1005, 0x1007));
+
+  const block = builder.finish();
+  const v = block.values;
+  const takenFlushes = nestedBodyView(block, 1).flushes;
+  const advancedCount = v.binary("add", instructionCountRead(block).output, v.const(2));
+
+  strictEqual(takenFlushes.find((write) => write.op.slot === eipChannel), undefined);
+  strictEqual(
+    takenFlushes.find((write) => write.op.slot === gprChannel("eax"))?.op.value,
+    v.const(0x77)
+  );
+  strictEqual(
+    takenFlushes.find((write) => write.op.slot === instructionCountChannel)?.op.value,
+    advancedCount
+  );
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("eax"))?.op.value,
+    v.const(0x77)
+  );
+  deepStrictEqual(rawEntryActions(block)[rawEntryActions(block).length - 1], finishDispatch(v.const(0x1007)));
+});
+
 test("jcc after test source uses the source-derived condition with no flag byte reads", () => {
   const builder = createIrBlockBuilder();
 

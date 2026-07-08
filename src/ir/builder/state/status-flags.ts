@@ -41,6 +41,11 @@ type StatusFlagTrackerState = {
   backings: Map<X86StatusFlag, FlagBacking>;
   directSource: FlagSourceId | undefined;
 };
+type StatusFlagStateSnapshot = Readonly<{
+  sourcesLength: number;
+  current: StatusFlagTrackerState;
+  inputFlags: ReadonlyMap<X86StatusFlag, ValueId>;
+}>;
 
 const logicUndefFlagPolicy: UndefFlagPolicy = "zero";
 const lazyConditionWidths = [8, 16, 32] as const;
@@ -152,6 +157,32 @@ export class StatusFlagState {
     }
 
     this.#inputFlags.clear();
+  }
+
+  snapshot(): StatusFlagStateSnapshot {
+    return {
+      sourcesLength: this.#sources.length,
+      current: {
+        backings: new Map(this.#current.backings),
+        directSource: this.#current.directSource
+      },
+      inputFlags: new Map(this.#inputFlags)
+    };
+  }
+
+  restore(snapshot: StatusFlagStateSnapshot): void {
+    this.#sources.length = snapshot.sourcesLength;
+    this.#current.directSource = snapshot.current.directSource;
+    this.#current.backings.clear();
+
+    for (const [flag, backing] of snapshot.current.backings) {
+      this.#current.backings.set(flag, backing);
+    }
+
+    this.#inputFlags.clear();
+    for (const [flag, value] of snapshot.inputFlags) {
+      this.#inputFlags.set(flag, value);
+    }
   }
 
   #setBacking(flag: X86StatusFlag, backing: FlagBacking): void {

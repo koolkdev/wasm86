@@ -9,6 +9,10 @@ export type SegmentReadOptions = Readonly<{
   signed?: boolean;
 }>;
 
+type SegmentStateSnapshot = Readonly<{
+  dynamicBases: ReadonlyMap<number, ValueId>;
+}>;
+
 // Selector and base cells only; what a selector *write* means is mode policy
 // and lives with the finish emitter.
 export class SegmentState {
@@ -29,6 +33,18 @@ export class SegmentState {
 
   beginInstruction(): void {
     this.#dynamicBases.clear();
+  }
+
+  snapshot(): SegmentStateSnapshot {
+    return { dynamicBases: new Map(this.#dynamicBases) };
+  }
+
+  restore(snapshot: SegmentStateSnapshot): void {
+    this.#dynamicBases.clear();
+
+    for (const [index, value] of snapshot.dynamicBases) {
+      this.#dynamicBases.set(index, value);
+    }
   }
 
   readSelector(

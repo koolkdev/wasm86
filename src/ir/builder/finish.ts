@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import {
   pageFault,
   pageFaultErrorCode,
@@ -9,16 +10,19 @@ import type { Finish, StateWriteAction } from "../actions.js";
 import type { StatePathKind } from "./state/pending-buffer.js";
 import type { State } from "./state/index.js";
 import type { ValueId } from "../values.js";
+import type { ControlEmitter } from "./control.js";
 
 // The one place a body ends: the exit path's state flushes, then the Finish.
 // x86 exit policy (exceptions, traps, dispatch) lives here.
 export class FinishEmitter {
   readonly #state: State;
   readonly #currentBody: () => BodyBuilder;
+  readonly #control: ControlEmitter;
 
-  constructor(state: State, currentBody: () => BodyBuilder) {
+  constructor(state: State, currentBody: () => BodyBuilder, control: ControlEmitter) {
     this.#state = state;
     this.#currentBody = currentBody;
+    this.#control = control;
   }
 
   finishBody(body: BodyBuilder, finish: Finish, path: StatePathKind): void {
@@ -41,22 +45,23 @@ export class FinishEmitter {
   }
 
   faultIf(condition: ValueId, exception: CpuException<ValueId>): void {
-    this.#currentBody().if(
+    this.#control.if(
       condition,
       (faultBody) => this.finishBody(
         faultBody,
         { kind: "exit", exit: { class: "cpuException", exception } },
         "fault"
       ),
-      { hint: "unlikely" }
+      "unlikely"
     );
   }
 
   dispatch(body: BodyBuilder, targetEip: ValueId): void {
+    assert(!this.#state.eip.has(), "dispatch requires the pending eip to be consumed");
     this.#finishBodyWith(
       body,
       { kind: "dispatch", targetEip },
-      this.#state.flushesForCompletedDispatch()
+      this.#state.flushesForPath("completed")
     );
   }
 
@@ -65,10 +70,10 @@ export class FinishEmitter {
   }
 
   hostTrapIf(condition: ValueId, vector: ValueId): void {
-    this.#currentBody().if(
+    this.#control.if(
       condition,
       (trapBody) => this.finishBody(trapBody, hostTrapFinish(vector), "completed"),
-      { hint: "unlikely" }
+      "unlikely"
     );
   }
 

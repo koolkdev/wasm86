@@ -31,6 +31,7 @@ import type {
   SegmentDynamicOperandBinding,
   SegmentOperandBinding
 } from "./operands.js";
+import { ControlEmitter } from "./builder/control.js";
 import { LoopBuilder, LoopSemanticsBuilderImpl } from "./builder/loop.js";
 import { FinishEmitter } from "./builder/finish.js";
 import { OperandResolver } from "./builder/operands.js";
@@ -104,6 +105,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #current: BodyBuilder;
   readonly #state: State;
   readonly #operands: OperandResolver;
+  readonly #control: ControlEmitter;
   readonly #finish: FinishEmitter;
   readonly #segmentMode: SegmentMode;
   #instructionLocation: InstructionLocationValues | undefined;
@@ -118,7 +120,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#current = this.#body;
     this.#state = new State(this.#values, () => this.#current);
     this.#operands = new OperandResolver(this.#values, this.#state);
-    this.#finish = new FinishEmitter(this.#state, () => this.#current);
+    this.#control = new ControlEmitter(
+      this.#state,
+      () => this.#current,
+      (body, build) => this.#withCurrentBody(body, build)
+    );
+    this.#finish = new FinishEmitter(this.#state, () => this.#current, this.#control);
     this.#segmentMode = segmentMode;
   }
 
@@ -330,7 +337,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   jumpIf(condition: ValueInput, target: TargetInput): void {
     this.#completeInstruction(this.#location().nextEip());
-    this.#current.if(condition, (taken) => this.#finish.dispatch(taken, target));
+    this.#control.if(condition, (taken) => {
+      // The dispatch target is the jump target, not the pending fallthrough eip.
+      this.#state.takeEipForDispatch();
+      this.#finish.dispatch(taken, target);
+    });
   }
 
   // Opens a loop: the declared channels become loop-carried cells
@@ -345,10 +356,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       parent: this.#current
     }, options);
 
-    const parent = this.#current;
-    this.#current = loop.body;
-
-    try {
+    this.#withCurrentBody(loop.body, () => {
       const loopBuilder = new LoopSemanticsBuilderImpl({
         host: this,
         state: this.#state,
@@ -357,9 +365,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       });
 
       loop.emitContinue(options.body(loopBuilder, this.#values));
-    } finally {
-      this.#current = parent;
-    }
+    });
     assert(!this.#terminated, "a loop body must not terminate the instruction");
 
     loop.close(options.enter);
@@ -404,6 +410,17 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   #writeMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
     this.#wroteMemory = true;
     this.#current.op({ kind: "memory.write", address, value, width });
+  }
+
+  #withCurrentBody(body: BodyBuilder, build: (body: BodyBuilder) => void): void {
+    const parent = this.#current;
+
+    this.#current = body;
+    try {
+      build(body);
+    } finally {
+      this.#current = parent;
+    }
   }
 
   #writeSegmentSelector(
