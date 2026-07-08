@@ -120,6 +120,17 @@ function writeFor(writes: readonly StateWriteAction[], channel: StateChannel): S
   return write;
 }
 
+function preLoopActions(block: IrBlock): readonly Action[] {
+  const enterIf = loopEnterIf(block);
+  const loopIndex = enterIf.thenBody.actions.findIndex((action) => action.kind === "loop");
+
+  ok(loopIndex >= 0, "loop entry arm holds a loop");
+  return [
+    ...block.body.actions.slice(0, block.body.actions.indexOf(enterIf)),
+    ...enterIf.thenBody.actions.slice(0, loopIndex)
+  ];
+}
+
 test("rep movs carries esi, edi, and ecx as loop cells in body write order", () => {
   const block = repMovsBlock();
   const loop = findLoop(block);
@@ -134,10 +145,10 @@ test("rep movs carries esi, edi, and ecx as loop cells in body write order", () 
   }
 
   // Seeds are the pre-loop reads of the carried channels.
-  const rootReads = block.body.actions.filter(isStateRead);
+  const seedReads = preLoopActions(block).filter(isStateRead);
 
   for (const cell of loop.carried) {
-    const read = rootReads.find(
+    const read = seedReads.find(
       (action) => action.output === cell.seed && slotsMayAlias(action.op.slot, cell.channel!)
     );
 
@@ -227,25 +238,30 @@ test("a dirty-at-entry carried channel commits its seed on the zero-trip arm", (
   strictEqual(loopEnterIf(repMovsBlock()).elseBody, undefined);
 });
 
-// The count is not carried: one fallthrough write settles the rep's units as
-// (entryEcx − exitEcx) − enter, with next() folding the final +1 on top — N
-// units on a full run, 1 on a zero trip, k on a repe/repne early exit.
-test("the fallthrough count write folds the ecx delta over the block's read", () => {
+// The count is not carried: the root settles extra completed units as
+// (entryEcx - exitEcx) - enter, then next() folds in the instruction itself.
+test("the root count write folds the ecx delta over the block's read", () => {
   const block = repMovsBlock();
   const v = block.values;
   const loop = findLoop(block);
   const enterIf = loopEnterIf(block);
-  const postLoop = block.body.actions.slice(block.body.actions.indexOf(enterIf) + 1);
-  const exitEcxRead = postLoop
+  const loopIndex = enterIf.thenBody.actions.findIndex((action) => action.kind === "loop");
+
+  ok(loopIndex >= 0, "loop entry arm holds a loop");
+
+  const enteredAfterLoop = enterIf.thenBody.actions.slice(loopIndex + 1);
+  const rootAfterEntry = block.body.actions.slice(block.body.actions.indexOf(enterIf) + 1);
+  const exitEcxRead = rootAfterEntry
     .filter(isStateRead)
     .find((action) => slotsMayAlias(action.op.slot, gprChannel("ecx")));
-  const countRead = postLoop
+  const countRead = rootAfterEntry
     .filter(isStateRead)
     .find((action) => action.op.slot.kind === "instructionCount");
   const finish = block.body.actions.at(-1);
 
+  deepStrictEqual(enteredAfterLoop.filter((action) => isStateRead(action) || isStateWrite(action)), []);
   ok(exitEcxRead !== undefined, "the count settle re-reads ecx after the loop");
-  ok(countRead !== undefined, "the count folds from a post-loop read");
+  ok(countRead !== undefined, "the count folds from a post-entry read");
   ok(finish?.kind === "finish" && finish.finish.kind === "dispatch", "fallthrough dispatches");
   strictEqual(v.constValue(finish.finish.targetEip), repNextEip);
 
@@ -253,7 +269,7 @@ test("the fallthrough count write folds the ecx delta over the block's read", ()
   const delta = v.binary("sub", v.binary("sub", ecxSeed, exitEcxRead.output), enterIf.condition);
 
   deepStrictEqual(
-    stateWrites(postLoop).filter((action) => action.op.slot.kind === "instructionCount"),
+    stateWrites(rootAfterEntry).filter((action) => action.op.slot.kind === "instructionCount"),
     [stateWrite(instructionCountChannel, v.binary("add", v.binary("add", countRead.output, delta), v.const(1)))]
   );
 });
@@ -392,12 +408,9 @@ test("loop bodies derive carries in a scratch value view before real emission", 
   builder.addInstruction(
     (s, v) => {
       outerValueView = v;
-      s.loop({
-        enter: v.const(1),
-        body: (_b, loopV) => {
-          loopValueViews.push(loopV);
-          return loopV.const(0);
-        }
+      s.loop((_b, loopV) => {
+        loopValueViews.push(loopV);
+        return loopV.const(0);
       });
     },
     [],
@@ -414,13 +427,10 @@ test("a loop body register write is derived as a carried channel", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(
-    (s, v) => {
-      s.loop({
-        enter: v.const(1),
-        body: (b, loopV) => {
-          b.set(b.reg("eax"), loopV.const(0));
-          return loopV.const(0);
-        }
+    (s, _v) => {
+      s.loop((b, loopV) => {
+        b.set(b.reg("eax"), loopV.const(0));
+        return loopV.const(0);
       });
     },
     [],
@@ -434,20 +444,17 @@ test("a loop body status-flag source write derives the lazy flag carries", () =>
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(
-    (s, v) => {
-      s.loop({
-        enter: v.const(1),
-        body: (b, loopV) => {
-          b.writeStatusFlagsSource(
-            subFlagSource({
-              width: 32,
-              left: loopV.const(0),
-              right: loopV.const(0),
-              result: loopV.const(0)
-            })
-          );
-          return loopV.const(0);
-        }
+    (s, _v) => {
+      s.loop((b, loopV) => {
+        b.writeStatusFlagsSource(
+          subFlagSource({
+            width: 32,
+            left: loopV.const(0),
+            right: loopV.const(0),
+            result: loopV.const(0)
+          })
+        );
+        return loopV.const(0);
       });
     },
     [],
@@ -466,19 +473,16 @@ test("overlapping loop body register writes assert during carry derivation", () 
   throws(
     () =>
       builder.addInstruction(
-        (s, v) => {
-          s.loop({
-            enter: v.const(1),
-            body: (b, loopV) => {
-              b.set(b.reg("al"), loopV.const(1), 8);
-              b.set(b.reg("ax"), loopV.const(2), 16);
-              return loopV.const(0);
-            }
+        (s, _v) => {
+          s.loop((b, loopV) => {
+            b.set(b.reg("al"), loopV.const(1), 8);
+            b.set(b.reg("ax"), loopV.const(2), 16);
+            return loopV.const(0);
           });
         },
         [],
         loc(repEip, repNextEip)
       ),
-    /overlapping loop-carried state writes/
+    /overlapping state channels/
   );
 });

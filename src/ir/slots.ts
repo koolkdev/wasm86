@@ -167,6 +167,24 @@ export function channelCovers(outer: StateChannel, inner: StateChannel): boolean
   return sameChannel(outer, inner);
 }
 
+export function dedupeDisjointChannels(input: readonly StateChannel[]): readonly StateChannel[] {
+  const channels: StateChannel[] = [];
+
+  for (const channel of input) {
+    if (channels.some((existing) => channelCovers(existing, channel) && channelCovers(channel, existing))) {
+      continue;
+    }
+
+    assert(
+      channels.every((existing) => !channelsOverlap(existing, channel)),
+      "overlapping state channels are unsupported"
+    );
+    channels.push(channel);
+  }
+
+  return channels;
+}
+
 function sameChannel(a: StateChannel, b: StateChannel): boolean {
   switch (a.kind) {
     case "gpr":

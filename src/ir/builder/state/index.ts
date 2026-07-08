@@ -34,7 +34,6 @@ export class State {
   readonly segments: SegmentState;
   readonly eip: EipState;
   readonly instructionCount: InstructionCountState;
-  #scopeOpen = false;
 
   constructor(values: ValueTable, currentBody: () => BodyBuilder, writeObserver?: StateWriteObserver) {
     this.#writeObserver = writeObserver;
@@ -73,19 +72,13 @@ export class State {
     return targetEip;
   }
 
-  enterScope(build: () => boolean): void {
-    assert(!this.#scopeOpen, "nested state scopes are unsupported");
-
+  enterScope<T>(build: () => T): T {
     const snapshot = this.#snapshot();
 
-    this.#scopeOpen = true;
     try {
-      const terminating = build();
-
-      assert(terminating, "joining state scope exits are unsupported");
+      return build();
     } finally {
       this.#restore(snapshot);
-      this.#scopeOpen = false;
     }
   }
 
@@ -95,7 +88,8 @@ export class State {
         this.gpr.invalidate(channel);
         return;
       case "instructionCount":
-        assert(false, "the instruction count changes only through InstructionCountState");
+        this.instructionCount.invalidate();
+        return;
       case "flag":
       case "segment":
       case "eip":

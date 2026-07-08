@@ -21,7 +21,7 @@ import {
 import type { OperandWidth, RegName } from "#x86/types.js";
 import { type StateChannel } from "../slots.js";
 import type { Action, LoopCarriedCell } from "../actions.js";
-import { BodyBuilder, type BodyActionSink, type IfOptions } from "../body-builder.js";
+import { BodyBuilder, type BodyActionSink } from "../body-builder.js";
 import type { ValueId, ValueTable } from "../values.js";
 import type { OperandResolver } from "./operands.js";
 import type { State } from "./state/index.js";
@@ -88,7 +88,7 @@ export class LoopBuilder {
     this.#exitValues = exitValues;
   }
 
-  close(enter: ValueInput): void {
+  close(): void {
     assert(this.#exitValues !== undefined, "cannot close a loop without its back edge");
 
     // The exit path's one commit per carried channel.
@@ -96,28 +96,13 @@ export class LoopBuilder {
       this.#body.push(action);
     }
 
-    // The enter-if is a join: the ran arm commits through the exit tail, the
-    // zero-trip arm commits the dirty-at-entry seeds.
-    const seedCommits = this.#scope.commitSeedValues();
-
-    this.#parent.if(
-      enter,
-      (thenBody) => this.#buildEnteredBody(thenBody),
-      this.#zeroTripOptions(seedCommits)
-    );
-
+    this.#buildBody(this.#parent);
     this.#scope.close();
   }
 
-  #buildEnteredBody(body: BodyBuilder): void {
+  #buildBody(body: BodyBuilder): void {
     body.extend(this.#bodySink.entryActions());
     body.loop(this.#cells, (loopBody) => loopBody.extend(this.#body.build().actions));
-  }
-
-  #zeroTripOptions(seedCommits: readonly Action[]): IfOptions {
-    return seedCommits.length === 0
-      ? {}
-      : { elseBuild: (elseBody) => elseBody.extend(seedCommits) };
   }
 
 }

@@ -76,12 +76,8 @@ export interface SemanticOps {
 
 export interface LoopSemanticsBuilder extends SemanticOps {}
 
-export type LoopOptions = Readonly<{
-  // Gate for entering the first iteration.
-  enter: ValueInput;
-  // Emits one iteration and returns the back-edge predicate.
-  body: (builder: LoopSemanticsBuilder, values: Values) => ValueInput;
-}>;
+export type LoopBody = (builder: LoopSemanticsBuilder, values: Values) => ValueInput;
+export type IfBody = (builder: SemanticsBuilder, values: Values) => void;
 
 export interface SemanticBuildContext {
   operandInfo(operand: SemanticOperandInput): SemanticOperandInfo;
@@ -103,7 +99,8 @@ export interface SemanticsBuilder extends SemanticOps {
   next(): void;
   jump(target: TargetInput): void;
   jumpIf(condition: ValueInput, target: TargetInput): void;
-  loop(options: LoopOptions): void;
+  if(condition: ValueInput, thenBuild: IfBody): void;
+  loop(body: LoopBody): void;
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void;
   hostTrap(vector: ValueInput): void;
   hostTrapIf(condition: ValueInput, vector: ValueInput): void;

@@ -874,14 +874,24 @@ test("a template cannot terminate the instruction twice", () => {
   );
 });
 
+test("a semantic if body must not terminate the instruction", () => {
+  const nextInIf: SemanticTemplate = (s, v) => {
+    s.if(v.const(1), (then) => {
+      then.next();
+    });
+  };
+
+  throws(
+    () => createIrBlockBuilder().addInstruction(nextInIf, [], loc(0x1000, 0x1005)),
+    /if body must not terminate the instruction/
+  );
+});
+
 test("a segment load inside a loop body fails loudly", () => {
-  const segmentLoadInLoop: SemanticTemplate = (s, v) => {
-    s.loop({
-      enter: v.const(1),
-      body: (loop, lv) => {
-        loop.set(loop.operand(0), lv.const(1), 16);
-        return lv.const(0);
-      }
+  const segmentLoadInLoop: SemanticTemplate = (s, _v) => {
+    s.loop((loop, lv) => {
+      loop.set(loop.operand(0), lv.const(1), 16);
+      return lv.const(0);
     });
   };
 

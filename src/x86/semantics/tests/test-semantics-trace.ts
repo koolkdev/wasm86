@@ -5,8 +5,9 @@ import type { ConditionCode } from "#x86/conditions.js";
 import type {
   SemanticsBuilder,
   GetOptions,
+  IfBody,
+  LoopBody,
   LoopSemanticsBuilder,
-  LoopOptions,
   MemoryAccessKind,
   SemanticBuildContext,
   SemanticOperandInfo,
@@ -309,9 +310,15 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     this.#emit(`jumpIf ${this.#value(condition)} -> ${this.#value(target)}`);
   }
 
-  loop(options: LoopOptions): void {
-    this.#emit(`loop enter=${this.#value(options.enter)}`);
-    const continueCondition = options.body(this, this.values);
+  if(condition: ValueInput, thenBuild: IfBody): void {
+    this.#emit(`if ${this.#value(condition)}`);
+    thenBuild(this, this.values);
+    this.#emit("ifEnd");
+  }
+
+  loop(body: LoopBody): void {
+    this.#emit("loop");
+    const continueCondition = body(this, this.values);
 
     this.#emit(`loopContinue ${this.#value(continueCondition)}`);
     this.#emit("loopEnd");

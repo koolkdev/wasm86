@@ -266,14 +266,15 @@ test("rep movs skips a zero count and fuses the unit into a state-reg loop", () 
 
   deepStrictEqual(trace.events.slice(0, 4), [
     "%0 = get ecx:32",
-    "loop enter=%1",
-    "%2 = flag DF",
-    "%4 = addr op0"
+    "if %1",
+    "loop",
+    "%2 = flag DF"
   ]);
   ok(trace.events.includes("set ecx:32 <- %12"));
-  deepStrictEqual(trace.events.slice(-5), [
+  deepStrictEqual(trace.events.slice(-6), [
     "loopContinue %13",
     "loopEnd",
+    "ifEnd",
     "%14 = get ecx:32",
     "addInstructionCount %16",
     "next"
@@ -282,7 +283,7 @@ test("rep movs skips a zero count and fuses the unit into a state-reg loop", () 
   // The back-edge count is the body's own ecx read, not the pre-loop one.
   strictEqual(trace.defs[12], "sub(%11, 1)");
   strictEqual(trace.defs[13], "cmp32.ne(%12, 0)");
-  // The unit count settles as (entryEcx − exitEcx) − enter after the loop.
+  // The root settles extra units as (entryEcx - exitEcx) - enter.
   strictEqual(trace.defs[15], "sub(%0, %14)");
   strictEqual(trace.defs[16], "sub(%15, %1)");
 });
@@ -290,17 +291,20 @@ test("rep movs skips a zero count and fuses the unit into a state-reg loop", () 
 test("rep lods carries its accumulator as loop state", () => {
   const trace = buildSemanticTrace(repLodsSemantic(8), operands("mem"));
 
-  strictEqual(trace.events[1], "loop enter=%1");
+  strictEqual(trace.events[1], "if %1");
+  strictEqual(trace.events[2], "loop");
 });
 
 test("repne scas combines remaining ECX with ZF after the compare unit", () => {
   const trace = buildSemanticTrace(repneScasSemantic(8), operands("mem"));
 
-  strictEqual(trace.events[1], "loop enter=%1");
+  strictEqual(trace.events[1], "if %1");
+  strictEqual(trace.events[2], "loop");
   ok(trace.events.includes("%16 = condition NE"));
-  deepStrictEqual(trace.events.slice(-5), [
+  deepStrictEqual(trace.events.slice(-6), [
     "loopContinue %17",
     "loopEnd",
+    "ifEnd",
     "%18 = get ecx:32",
     "addInstructionCount %20",
     "next"

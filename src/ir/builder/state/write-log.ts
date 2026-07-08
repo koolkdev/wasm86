@@ -56,6 +56,10 @@ export class StateWriteLog implements StateWriteObserver {
 
     build();
 
+    return this.writtenChannelsSince(checkpoint);
+  }
+
+  writtenChannelsSince(checkpoint: StateWriteObserverCheckpoint): readonly StateChannel[] {
     return [
       ...this.#gprWrites.slice(checkpoint.gprWrites),
       ...this.#statusFlagWritesSince(checkpoint),

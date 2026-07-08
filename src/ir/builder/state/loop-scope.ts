@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { LoopCarriedCell, StateWriteAction } from "../../actions.js";
 import {
+  dedupeDisjointChannels,
   channelsOverlap,
   isDynamicSlot,
   type StateChannel,
@@ -17,7 +18,6 @@ export class StateLoopScope {
   readonly #state: State;
   readonly #bodyWrites: readonly StateChannel[];
   #cells: readonly LoopCell[] | undefined;
-  #dirtyAtEntry: ReadonlySet<StateChannel> = new Set();
   #closed = false;
 
   constructor(
@@ -33,18 +33,12 @@ export class StateLoopScope {
   begin(): readonly LoopCell[] {
     assert(this.#cells === undefined, "loop state scope is already open");
 
-    // The carried set is the body's write set, deduped in first-write order;
-    // the exact-access rule rejects overlapping narrow writes (al then ax).
-    const carried = [...new Set(this.#bodyWrites)];
+    const carried = dedupeDisjointChannels(this.#bodyWrites);
 
-    for (const [index, channel] of carried.entries()) {
+    for (const channel of carried) {
       assert(
         channel.kind === "gpr" || channel.kind === "lazyFlags",
         `loop body writes unsupported state channel: ${JSON.stringify(channel)}`
-      );
-      assert(
-        carried.slice(0, index).every((existing) => !channelsOverlap(existing, channel)),
-        "overlapping loop-carried state writes are unsupported"
       );
     }
 
@@ -55,11 +49,6 @@ export class StateLoopScope {
       seed: this.#state.readChannel(channel),
       loopInput: this.#values.addLoopInput(loopInputBounds(channel))
     }));
-
-    // The skipped arm only needs generated commits for values that existed
-    // solely in pending state at entry. Clean memory-backed channels already
-    // read back as the entry contribution.
-    this.#dirtyAtEntry = new Set(carried.filter((channel) => this.#state.isChannelDirty(channel)));
 
     for (const cell of cells) {
       this.#state.writeChannel(cell.channel, cell.loopInput);
@@ -82,17 +71,6 @@ export class StateLoopScope {
       kind: "op",
       op: { kind: "state.write", slot: cell.channel, value: exitValues[index]! }
     }));
-  }
-
-  // The zero-trip arm's commits: only dirty-at-entry channels, whose pre-loop
-  // value survives nowhere but the seed once the ran arm consumes it.
-  commitSeedValues(): readonly StateWriteAction[] {
-    return this.#openCells()
-      .filter((cell) => this.#dirtyAtEntry.has(cell.channel))
-      .map((cell) => ({
-        kind: "op",
-        op: { kind: "state.write", slot: cell.channel, value: cell.seed }
-      }));
   }
 
   close(): void {

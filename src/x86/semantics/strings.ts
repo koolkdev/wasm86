@@ -143,9 +143,8 @@ function repSemantic(
     const ecx = s.get(s.reg("ecx"));
     const enter = v.compare(32, "ne", ecx, v.const(0));
 
-    s.loop({
-      enter,
-      body: (loopBuilder, loopValues) => {
+    s.if(enter, (thenBuilder) => {
+      thenBuilder.loop((loopBuilder, loopValues) => {
         unit(loopBuilder, loopValues, context);
 
         const decremented = loopValues.binary(
@@ -157,14 +156,15 @@ function repSemantic(
 
         loopBuilder.set(loopBuilder.reg("ecx"), decremented);
         return repBranchPredicate(loopBuilder, loopValues, condition, nonzero);
-      }
+      });
     });
 
-    // Each unit decrements ECX once: entry − exit counts completed units.
-    // Minus enter cancels next()'s +1 on the ran path; a zero trip adds 0.
+    // Each unit decrements ECX once: entry - exit counts completed units.
+    // next() accounts for one instruction, so subtract the enter bit here.
     const exitEcx = s.get(s.reg("ecx"));
+    const completedUnits = v.binary("sub", ecx, exitEcx);
 
-    s.addInstructionCount(v.binary("sub", v.binary("sub", ecx, exitEcx), enter));
+    s.addInstructionCount(v.binary("sub", completedUnits, enter));
   };
 }
 

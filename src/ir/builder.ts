@@ -6,7 +6,8 @@ import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
   SemanticsBuilder,
   GetOptions,
-  LoopOptions,
+  IfBody,
+  LoopBody,
   MemoryAccessKind,
   SemanticBuildContext,
   SemanticOperandInfo,
@@ -40,7 +41,7 @@ import { FinishEmitter } from "./builder/finish.js";
 import { OperandResolver } from "./builder/operands.js";
 import { emitSegmentLoad, type SegmentMode } from "./builder/segments.js";
 import { State } from "./builder/state/index.js";
-import { StateWriteLog, type StateWriteObserver } from "./builder/state/write-log.js";
+import { StateWriteLog } from "./builder/state/write-log.js";
 import { BodyBuilder } from "./body-builder.js";
 import type { IrBlock } from "./block.js";
 import { type StateChannel } from "./slots.js";
@@ -120,13 +121,14 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // "terminated" means the root body already holds its terminator.
   #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
 
-  constructor(segmentMode: SegmentMode, stateWriteObserver?: StateWriteObserver) {
+  constructor(segmentMode: SegmentMode, stateWriteLog = new StateWriteLog()) {
     this.#body = new BodyBuilder(this.#values);
     this.#current = this.#body;
-    this.#state = new State(this.#values, () => this.#current, stateWriteObserver);
+    this.#state = new State(this.#values, () => this.#current, stateWriteLog);
     this.#operands = new OperandResolver(this.#values, this.#state);
     this.#control = new ControlEmitter(
       this.#state,
+      stateWriteLog,
       () => this.#current,
       (body, build) => this.#withCurrentBody(body, build)
     );
@@ -349,17 +351,22 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     });
   }
 
+  if(condition: ValueInput, thenBuild: IfBody): void {
+    this.#control.if(condition, () => {
+      thenBuild(this, this.#values);
+      assert(!this.#terminated, "an if body must not terminate the instruction");
+    });
+  }
+
   // Opens a loop: body-written channels become loop-carried cells living in
   // locals while the body runs. The loop itself falls through; instruction
   // completion remains with the surrounding semantic template.
-  loop(options: LoopOptions): void {
-    assert(this.#current === this.#body, "nested loops are unsupported");
-
+  loop(body: LoopBody): void {
     const loop = LoopBuilder.begin({
       values: this.#values,
       state: this.#state,
       parent: this.#current
-    }, this.#deriveLoopWrites(options));
+    }, this.#deriveLoopWrites(body));
 
     this.#withCurrentBody(loop.body, () => {
       const loopBuilder = new LoopSemanticsBuilderImpl({
@@ -368,30 +375,30 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         operands: this.#operands
       });
 
-      loop.emitContinue(options.body(loopBuilder, this.#values));
+      loop.emitContinue(body(loopBuilder, this.#values));
     });
     assert(!this.#terminated, "a loop body must not terminate the instruction");
 
-    loop.close(options.enter);
+    loop.close();
   }
 
-  #deriveLoopWrites(options: LoopOptions): readonly StateChannel[] {
+  #deriveLoopWrites(body: LoopBody): readonly StateChannel[] {
     const writeLog = new StateWriteLog();
     const scratch = new IrBlockBuilderImpl(this.#segmentMode, writeLog);
-    const body = new BodyBuilder(scratch.#values);
+    const scratchBody = new BodyBuilder(scratch.#values);
 
     scratch.#operands.beginInstruction(this.#operands.currentBindings());
     scratch.#state.beginInstruction(scratch.#values.const(0));
 
     try {
       return writeLog.captureWrittenChannels(() => {
-        scratch.#withCurrentBody(body, () => {
+        scratch.#withCurrentBody(scratchBody, () => {
           const loopBuilder = new LoopSemanticsBuilderImpl({
             host: scratch,
             state: scratch.#state,
             operands: scratch.#operands
           });
-          const condition = options.body(loopBuilder, scratch.#values);
+          const condition = body(loopBuilder, scratch.#values);
 
           scratch.#values.node(condition);
         });

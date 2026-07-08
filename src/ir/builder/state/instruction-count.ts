@@ -35,6 +35,11 @@ export class InstructionCountState {
     this.#rebase();
   }
 
+  invalidate(): void {
+    this.#cells.invalidate(instructionCountChannel);
+    this.#rebase();
+  }
+
   snapshot(): InstructionCountStateSnapshot {
     return {
       base: this.#base,
