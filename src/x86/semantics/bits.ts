@@ -1,8 +1,8 @@
+import type { Values } from "#ir/values.js";
 import type {
   SemanticBuildContext,
   SemanticsBuilder,
-  SemanticTemplate,
-  Values
+  SemanticTemplate
 } from "#x86/semantics/builder.js";
 import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";

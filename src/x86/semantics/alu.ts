@@ -1,4 +1,5 @@
-import type { SemanticTemplate, Values } from "#x86/semantics/builder.js";
+import type { Values } from "#ir/values.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import {

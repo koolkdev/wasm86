@@ -4,7 +4,8 @@ import type { BodyBuilder } from "../../body-builder.js";
 import {
   type StateChannel
 } from "../../slots.js";
-import type { ValueId, ValueTable } from "../../values.js";
+import type { ValueId } from "../../values.js";
+import { ValueTable } from "../../value-table.js";
 import { StateCells } from "./cells.js";
 import type { StatePathKind } from "./pending-buffer.js";
 import { EipState } from "./eip.js";

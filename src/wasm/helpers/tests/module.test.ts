@@ -2,7 +2,8 @@ import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { gprChannel } from "#ir/slots.js";
-import { ValueTable, fitsUnsigned } from "#ir/values.js";
+import { ValueTable } from "#ir/value-table.js";
+import { fitsUnsigned } from "#ir/values.js";
 import { analyzePlacement } from "#wasm/emit/placement.js";
 import { helperCallsForBlock } from "#wasm/helpers/module.js";
 import { resolveFlag, stateWrite } from "#ir/tests/storage-op-helpers.js";

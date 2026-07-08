@@ -2,6 +2,7 @@ import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } fro
 import type { CpuException } from "#x86/exceptions.js";
 import { mem, operand, reg } from "#x86/semantics/refs.js";
 import type { ConditionCode } from "#x86/conditions.js";
+import type { Values } from "#ir/values.js";
 import type {
   SemanticsBuilder,
   GetOptions,
@@ -15,8 +16,7 @@ import type {
   SemanticOperandStorageKind,
   SemanticTemplate,
   SimpleFlagSource,
-  StatusFlagValues,
-  Values
+  StatusFlagValues
 } from "#x86/semantics/builder.js";
 import type {
   MemRef,
@@ -33,7 +33,7 @@ import type {
   BinaryOperator,
   CompareOperator,
   UnaryOperator
-} from "#x86/semantics/ops.js";
+} from "#ir/operators.js";
 
 export type SemanticTrace = Readonly<{
   events: readonly string[];

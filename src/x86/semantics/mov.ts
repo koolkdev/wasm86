@@ -1,7 +1,8 @@
 import type { ConditionCode } from "#x86/conditions.js";
 import { invalidOpcode } from "#x86/exceptions.js";
+import type { Values } from "#ir/values.js";
 import { segmentRegisterIndex } from "#x86/segments.js";
-import type { SemanticOperandInfo, SemanticTemplate, Values } from "#x86/semantics/builder.js";
+import type { SemanticOperandInfo, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { Value } from "./refs.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";

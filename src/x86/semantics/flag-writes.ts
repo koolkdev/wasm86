@@ -12,9 +12,9 @@ import {
 } from "#x86/flag-values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import type { OperandWidth } from "#x86/types.js";
+import type { Values } from "#ir/values.js";
 import type {
   SemanticsBuilder,
-  Values,
   SimpleFlagSource
 } from "#x86/semantics/builder.js";
 import type { Value, ValueInput } from "#x86/semantics/refs.js";

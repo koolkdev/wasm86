@@ -1,7 +1,7 @@
+import type { Values } from "#ir/values.js";
 import type {
   SemanticsBuilder,
-  SemanticTemplate,
-  Values
+  SemanticTemplate
 } from "#x86/semantics/builder.js";
 import { bitAt, lowBit, signBit } from "#x86/flag-values.js";
 import type { StorageInput, Value } from "#x86/semantics/refs.js";

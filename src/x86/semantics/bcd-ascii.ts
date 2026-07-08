@@ -1,6 +1,7 @@
 import { zspValues } from "#x86/flag-values.js";
 import { divideError } from "#x86/exceptions.js";
-import type { SemanticTemplate, SemanticsBuilder, Values } from "#x86/semantics/builder.js";
+import type { Values } from "#ir/values.js";
+import type { SemanticTemplate, SemanticsBuilder } from "#x86/semantics/builder.js";
 import type { Value, ValueInput } from "#x86/semantics/refs.js";
 import { writeAddFlags, writeStatusFlagValues } from "./flag-writes.js";
 import { semanticFlagOps } from "./flag-value-ops.js";

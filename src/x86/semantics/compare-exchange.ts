@@ -1,4 +1,5 @@
-import type { SemanticTemplate, Values } from "#x86/semantics/builder.js";
+import type { Values } from "#ir/values.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { Value, ValueInput } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
 import { addFlagSource, subFlagSource } from "./flag-writes.js";

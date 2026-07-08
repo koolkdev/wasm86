@@ -2,6 +2,7 @@ import type { Action, OpAction } from "#ir/actions.js";
 import type {
   CpuResolveFlagOp,
   MemoryCheckOp,
+  MemoryAccessKind,
   MemoryReadOp,
   MemoryWriteOp,
   StateReadOp,
@@ -9,7 +10,6 @@ import type {
 } from "#ir/ops.js";
 import type { StateSlot } from "#ir/slots.js";
 import { valueId, type ValueId } from "#ir/values.js";
-import type { MemoryAccessKind } from "#x86/semantics/builder.js";
 import type { X86StatusFlag } from "#x86/flags.js";
 import type { OperandWidth } from "#x86/types.js";
 

@@ -9,13 +9,13 @@ import {
   type BinaryValueNode,
   type CompareValueNode,
   type ExtendValueNode,
-  type TruncateValueNode,
   type SelectValueNode,
-  type UnreachableValueNode,
+  type TruncateValueNode,
   type UnaryValueNode,
-  type ValueId,
-  type ValueTable
+  type UnreachableValueNode,
+  type ValueId
 } from "#ir/values.js";
+import type { ValueTable } from "#ir/value-table.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { LocalRegistry } from "./local-registry.js";

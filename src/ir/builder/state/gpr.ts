@@ -2,16 +2,11 @@ import { assert } from "#common/assert.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
 import type { StateWriteAction } from "../../actions.js";
 import {
-  channelCovers,
-  channelsOverlap,
-  gprChannel,
-  type GprDynamicSlot,
-  type GprChannel
+  channelCovers, channelsOverlap, gprChannel, type GprDynamicSlot, type GprChannel
 } from "../../slots.js";
 import {
-  type ValueId,
-  type ValueTable
-} from "../../values.js";
+  type ValueId } from "../../values.js";
+import type { ValueTable } from "../../value-table.js";
 import type { BodyBuilder } from "../../body-builder.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
 import type { StateWriteObserver } from "./write-log.js";

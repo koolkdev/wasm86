@@ -4,16 +4,13 @@ import { test } from "node:test";
 import { createIrBlockBuilder, staticInstructionLocation as loc, type IrBlockBuilder } from "#ir/builder.js";
 import { immBinding, regBinding } from "#ir/operands.js";
 import {
-  eipChannel,
-  gprChannel,
-  lazyFlagsBChannel,
-  lazyFlagsKindChannel,
-  type StateSlot
+  eipChannel, gprChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot
 } from "#ir/slots.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
-import { fitsUnsigned, ValueTable } from "#ir/values.js";
+import { fitsUnsigned } from "#ir/values.js";
+import { ValueTable } from "#ir/value-table.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";

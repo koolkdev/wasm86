@@ -2,7 +2,8 @@ import { assert } from "#common/assert.js";
 import type { Action, BranchHint, Finish, LoopCarriedCell } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
 import { opAccess, type IrOp } from "./ops.js";
-import { ValueTable, type ValueId, type WidthBounds } from "./values.js";
+import { ValueTable } from "./value-table.js";
+import type { ValueId, WidthBounds } from "./values.js";
 
 export type BuildBody = (b: BodyBuilder) => void;
 export type BuildResult = (b: BodyBuilder) => ValueId;

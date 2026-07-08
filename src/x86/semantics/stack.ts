@@ -1,4 +1,5 @@
-import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate, Values } from "#x86/semantics/builder.js";
+import type { Values } from "#ir/values.js";
+import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, type X86Flag } from "#x86/flags.js";
 import type { OperandWidth, Reg16, Reg32, RegName } from "#x86/types.js";

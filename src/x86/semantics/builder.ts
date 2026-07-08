@@ -2,7 +2,7 @@ import type { ConditionCode } from "#x86/conditions.js";
 import type { CpuException } from "#x86/exceptions.js";
 import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#x86/flag-sources.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
-import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
+import type { Values } from "#ir/values.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 import type {
   MemRef,
@@ -43,21 +43,6 @@ export type GetOptions = Readonly<{
 }>;
 
 export type SemanticOperandInput = OperandRef;
-
-export interface Values {
-  const(value: number): Value;
-  const64(value: bigint): Value;
-  binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value;
-  unary(operator: UnaryOperator, value: ValueInput): Value;
-  select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value;
-  truncate(width: OperandWidth, value: ValueInput): Value;
-  extend(width: OperandWidth, value: ValueInput, signed: boolean): Value;
-  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value;
-  binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value;
-  compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value;
-  truncate64(width: OperandWidth, value: ValueInput): Value;
-  extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value;
-}
 
 export interface SemanticOps {
   operand(index: number): OperandRef;

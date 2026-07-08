@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import type { IrBlock } from "#ir/block.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
-import { ValueTable } from "#ir/values.js";
+import { ValueTable } from "#ir/value-table.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
 import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";

@@ -1,13 +1,10 @@
 import { assert } from "#common/assert.js";
 import type { LoopCarriedCell, StateWriteAction } from "../../actions.js";
 import {
-  dedupeDisjointChannels,
-  channelsOverlap,
-  isDynamicSlot,
-  type StateChannel,
-  type StateSlot
+  dedupeDisjointChannels, channelsOverlap, isDynamicSlot, type StateChannel, type StateSlot
 } from "../../slots.js";
-import type { ValueId, ValueTable, WidthBounds } from "../../values.js";
+import type { ValueId, WidthBounds } from "../../values.js";
+import { ValueTable } from "../../value-table.js";
 import { channelReadBounds } from "./cells.js";
 import type { State } from "./index.js";
 

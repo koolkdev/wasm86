@@ -5,7 +5,8 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { regDynamicBinding, immBinding, regBinding } from "#ir/operands.js";
 import { gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { fitsUnsigned, ValueTable, type ValueId } from "#ir/values.js";
+import { fitsUnsigned, type ValueId } from "#ir/values.js";
+import { ValueTable } from "#ir/value-table.js";
 import type { RegName } from "#x86/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic } from "#x86/semantics/mov.js";

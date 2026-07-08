@@ -34,11 +34,12 @@ import type {
   SwitchAction
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
+import type { MemoryAccessKind } from "#ir/ops.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { valueId, type ValueId, type ValueNode } from "#ir/values.js";
 import { invalidOpcode, PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
-import type { MemoryAccessKind, SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";

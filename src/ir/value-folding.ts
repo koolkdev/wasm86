@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { i32 } from "#x86/numeric.js";
-import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
+import type { BinaryOperator, CompareOperator, UnaryOperator } from "#ir/operators.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { ValueId, ValueType } from "./values.js";
 

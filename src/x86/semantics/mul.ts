@@ -1,4 +1,5 @@
-import type { SemanticTemplate, SemanticsBuilder, Values } from "#x86/semantics/builder.js";
+import type { Values } from "#ir/values.js";
+import type { SemanticTemplate, SemanticsBuilder } from "#x86/semantics/builder.js";
 import type { StorageInput, Value } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
 import { guardStorageRead } from "./memory.js";

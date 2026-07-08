@@ -2,7 +2,8 @@ import { assert } from "#common/assert.js";
 import type { Action, Finish, IrExit } from "./actions.js";
 import type { Body } from "./block.js";
 import { opAccess, type OpAccess } from "./ops.js";
-import { valueChildren, type ValueId, type ValueTable } from "./values.js";
+import { valueChildren, type ValueId } from "./values.js";
+import type { ValueTable } from "./value-table.js";
 
 export function nestedBodies(action: Action): readonly Body[] {
   switch (action.kind) {

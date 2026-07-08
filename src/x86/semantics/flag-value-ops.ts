@@ -1,5 +1,5 @@
 import type { FlagValueOps } from "#x86/flag-values.js";
-import type { Values } from "#x86/semantics/builder.js";
+import type { Values } from "#ir/values.js";
 import type { Value } from "#x86/semantics/refs.js";
 
 export function semanticFlagOps(v: Values): FlagValueOps<Value> {

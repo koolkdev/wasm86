@@ -1,19 +1,14 @@
 import { assert } from "#common/assert.js";
 import type {
-  SemanticOperandInfo,
-  SemanticOperandInput
+  SemanticOperandInfo, SemanticOperandInput
 } from "#x86/semantics/builder.js";
 import type { OperandWidth, SegmentRegister } from "#x86/types.js";
 import type {
-  EffectiveAddressTerms,
-  ExternalValueId,
-  MemDynamicOperandBinding,
-  MemSegmentBinding,
-  OperandBinding,
-  RegDynamicOperandBinding
+  EffectiveAddressTerms, ExternalValueId, MemDynamicOperandBinding, MemSegmentBinding, OperandBinding, RegDynamicOperandBinding
 } from "../operands.js";
 import type { GprDynamicSlot, GprChannel } from "../slots.js";
-import type { ValueId, ValueTable } from "../values.js";
+import type { ValueId } from "../values.js";
+import { ValueTable } from "../value-table.js";
 import type { State } from "./state/index.js";
 
 export class OperandResolver {

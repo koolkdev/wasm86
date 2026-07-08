@@ -4,14 +4,10 @@ import { bodyFinal, type Action, type OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess, type OpAccess, type StorageAccess } from "#ir/ops.js";
 import {
-  actionOutput,
-  bodyProducedOutputs,
-  finishOperands,
-  loopInputsOf,
-  nestedBodies,
-  valueDependsOn
+  actionOutput, bodyProducedOutputs, finishOperands, loopInputsOf, nestedBodies, valueDependsOn
 } from "#ir/traverse.js";
-import { valueChildren, valueId, type ValueId, type ValueTable } from "#ir/values.js";
+import { valueChildren, valueId, type ValueId } from "#ir/values.js";
+import type { ValueTable } from "#ir/value-table.js";
 
 // The placement analysis: decides up front, from the action lists and the
 // value graph, where every value materializes — use counts for the tee

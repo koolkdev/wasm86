@@ -4,9 +4,9 @@ import {
   pageFaultErrorCode,
   type CpuException
 } from "#x86/exceptions.js";
-import type { MemoryAccessKind } from "#x86/semantics/builder.js";
 import type { BodyBuilder } from "../body-builder.js";
 import type { Finish, StateWriteAction } from "../actions.js";
+import type { MemoryAccessKind } from "../ops.js";
 import type { StatePathKind } from "./state/pending-buffer.js";
 import type { State } from "./state/index.js";
 import type { ValueId } from "../values.js";

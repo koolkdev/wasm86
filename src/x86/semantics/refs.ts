@@ -1,9 +1,8 @@
 import { assert } from "#common/assert.js";
+import type { Value } from "#ir/values.js";
 import type { RegName } from "#x86/types.js";
 
-declare const valueBrand: unique symbol;
-
-export type Value = number & { readonly [valueBrand]: "x86-semantic-value" };
+export type { Value } from "#ir/values.js";
 
 export type OperandRef = Readonly<{ kind: "operand"; index: number }>;
 export type RegRef = Readonly<{ kind: "reg"; reg: RegName }>;

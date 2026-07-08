@@ -1,5 +1,6 @@
 import type { ConditionCode } from "#x86/conditions.js";
-import type { SemanticsBuilder, SemanticTemplate, Values } from "#x86/semantics/builder.js";
+import type { Values } from "#ir/values.js";
+import type { SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
 import { popStack, pushStack, type StackOperandWidth } from "./stack.js";
 import { guardStorageRead } from "./memory.js";

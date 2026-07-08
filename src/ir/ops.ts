@@ -1,6 +1,5 @@
 import type { OperandWidth } from "#x86/types.js";
 import type { X86StatusFlag } from "#x86/flags.js";
-import type { MemoryAccessKind } from "#x86/semantics/builder.js";
 import {
   flagChannel,
   lazyFlagsAChannel,
@@ -15,6 +14,8 @@ import {
   type ValueType,
   type WidthBounds
 } from "./values.js";
+
+export type MemoryAccessKind = "read" | "write";
 
 export type StateReadOp = Readonly<{
   kind: "state.read";

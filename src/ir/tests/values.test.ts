@@ -1,7 +1,8 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { ValueTable, fitsUnsigned, signExtended, valueChildren, valueId } from "#ir/values.js";
+import { ValueTable } from "#ir/value-table.js";
+import { fitsUnsigned, signExtended, valueChildren, valueId } from "#ir/values.js";
 
 test("value table deduplicates constants by canonical i32 value", () => {
   const table = new ValueTable();

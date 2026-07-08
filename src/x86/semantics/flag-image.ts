@@ -1,5 +1,6 @@
 import { x86EflagsBitOffset, type X86Flag } from "#x86/flags.js";
-import type { SemanticsBuilder, Values } from "#x86/semantics/builder.js";
+import type { Values } from "#ir/values.js";
+import type { SemanticsBuilder } from "#x86/semantics/builder.js";
 import type { Value, ValueInput } from "#x86/semantics/refs.js";
 
 export function buildFlagImage(

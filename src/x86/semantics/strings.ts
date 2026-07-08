@@ -1,10 +1,10 @@
 import { subFlagSource } from "#x86/semantics/flag-writes.js";
 import { guardStorageRead, guardStorageWrite } from "#x86/semantics/memory.js";
+import type { Values } from "#ir/values.js";
 import type {
   SemanticBuildContext,
   SemanticOps,
-  SemanticTemplate,
-  Values
+  SemanticTemplate
 } from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName } from "#x86/types.js";

@@ -2,11 +2,10 @@ import { strictEqual } from "node:assert";
 
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import {
-  lazyFlagsAChannel,
-  lazyFlagsBChannel,
-  lazyFlagsKindChannel
+  lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel
 } from "#ir/slots.js";
-import type { ValueId, ValueTable } from "#ir/values.js";
+import type { ValueId } from "#ir/values.js";
+import { ValueTable } from "#ir/value-table.js";
 import type { StateWriteAction } from "#ir/tests/storage-op-helpers.js";
 
 export type LazyRecordExpectation = Readonly<

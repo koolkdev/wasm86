@@ -1,7 +1,8 @@
 import type { Action } from "./actions.js";
 import { BodyBuilder } from "./body-builder.js";
-import type { ValueId, ValueTable } from "./values.js";
-import type { MemoryAccessKind } from "#x86/semantics/builder.js";
+import type { MemoryAccessKind } from "./ops.js";
+import type { ValueId } from "./values.js";
+import type { ValueTable } from "./value-table.js";
 import {
   pageFault,
   pageFaultErrorCode,

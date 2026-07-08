@@ -9,19 +9,16 @@ import {
   statusFlagValuesForSource,
   type StatusFlagValues
 } from "#x86/flag-values.js";
-import { signedComparePredicates, type CompareOperator } from "#x86/semantics/ops.js";
+import { signedComparePredicates, type CompareOperator } from "#ir/operators.js";
 import type { BodyBuilder, SwitchArm } from "../../body-builder.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "../../lazy-flags.js";
 import type { StateReadOp } from "../../ops.js";
 import { valueTableFlagOps } from "../../flag-value-ops.js";
 import {
-  flagChannel,
-  lazyFlagsAChannel,
-  lazyFlagsBChannel,
-  lazyFlagsKindChannel,
-  type StateSlot
+  flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot
 } from "../../slots.js";
-import { fitsUnsigned, type ValueId, type ValueTable } from "../../values.js";
+import { fitsUnsigned, type ValueId } from "../../values.js";
+import type { ValueTable } from "../../value-table.js";
 import type { StateCells } from "./cells.js";
 import type { StateWriteObserver } from "./write-log.js";
 
