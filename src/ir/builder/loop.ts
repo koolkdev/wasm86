@@ -3,7 +3,6 @@ import type { ConditionCode } from "#x86/conditions.js";
 import { isX86StatusFlag, type X86Flag } from "#x86/flags.js";
 import type {
   GetOptions,
-  LoopOptions,
   LoopSemanticsBuilder,
   MemoryAccessKind,
   SemanticOps,
@@ -20,7 +19,7 @@ import {
   type ValueInput
 } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
-import { gprChannel, type GprChannel } from "../slots.js";
+import { type StateChannel } from "../slots.js";
 import type { Action, LoopCarriedCell } from "../actions.js";
 import { BodyBuilder, type BodyActionSink, type IfOptions } from "../body-builder.js";
 import type { ValueId, ValueTable } from "../values.js";
@@ -33,7 +32,6 @@ type LoopCell = Required<LoopCarriedCell>;
 export type LoopSemanticsBuilderContext = Readonly<{
   host: SemanticOps;
   state: State;
-  scope: StateLoopScope;
   operands: OperandResolver;
 }>;
 
@@ -73,14 +71,8 @@ export class LoopBuilder {
     return this.#body;
   }
 
-  static begin(context: LoopBuilderContext, options: LoopOptions): LoopBuilder {
-    const scope = new StateLoopScope(
-      context.values,
-      context.state,
-      options.stateRegs === undefined
-        ? { statusFlags: options.statusFlags === true }
-        : { regs: options.stateRegs, statusFlags: options.statusFlags === true }
-    );
+  static begin(context: LoopBuilderContext, bodyWrites: readonly StateChannel[]): LoopBuilder {
+    const scope = new StateLoopScope(context.values, context.state, bodyWrites);
 
     return new LoopBuilder(context, scope.begin(), scope);
   }
@@ -196,13 +188,6 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
 
   set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void {
     this.#assertStorageSupported(target);
-
-    const channel = this.#writtenGprChannel(target);
-
-    if (channel !== undefined) {
-      this.#context.scope.assertWritableChannel(channel);
-    }
-
     this.#context.host.set(target, value, accessWidth);
   }
 
@@ -229,10 +214,6 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
   }
 
   writeStatusFlagsSource(source: SimpleFlagSource): void {
-    assert(
-      this.#context.scope.carriesStatusFlags(),
-      "loop body writes status flags, but the loop does not carry them"
-    );
     this.#context.host.writeStatusFlagsSource(source);
   }
 
@@ -263,20 +244,5 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
 
   #operandUsesDynamicRegister(index: number): boolean {
     return this.#context.operands.operandUsesDynamicGpr(index);
-  }
-
-  // The GPR channel a set writes, if any; memory and segment targets have none.
-  #writtenGprChannel(storage: StorageInput): GprChannel | undefined {
-    const ref = toStorageRef(storage);
-
-    switch (ref.kind) {
-      case "reg":
-        return gprChannel(ref.reg);
-      case "operand": {
-        return this.#context.operands.operandGprChannel(ref.index);
-      }
-      case "mem":
-        return undefined;
-    }
   }
 }

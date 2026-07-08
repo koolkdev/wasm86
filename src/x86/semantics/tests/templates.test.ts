@@ -266,7 +266,7 @@ test("rep movs skips a zero count and fuses the unit into a state-reg loop", () 
 
   deepStrictEqual(trace.events.slice(0, 4), [
     "%0 = get ecx:32",
-    "loop enter=%1 stateRegs=[ecx,esi,edi]",
+    "loop enter=%1",
     "%2 = flag DF",
     "%4 = addr op0"
   ]);
@@ -290,13 +290,13 @@ test("rep movs skips a zero count and fuses the unit into a state-reg loop", () 
 test("rep lods carries its accumulator as loop state", () => {
   const trace = buildSemanticTrace(repLodsSemantic(8), operands("mem"));
 
-  strictEqual(trace.events[1], "loop enter=%1 stateRegs=[ecx,esi,al]");
+  strictEqual(trace.events[1], "loop enter=%1");
 });
 
 test("repne scas combines remaining ECX with ZF after the compare unit", () => {
   const trace = buildSemanticTrace(repneScasSemantic(8), operands("mem"));
 
-  strictEqual(trace.events[1], "loop enter=%1 stateRegs=[ecx,edi] statusFlags");
+  strictEqual(trace.events[1], "loop enter=%1");
   ok(trace.events.includes("%16 = condition NE"));
   deepStrictEqual(trace.events.slice(-5), [
     "loopContinue %17",

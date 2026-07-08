@@ -76,15 +76,9 @@ export interface SemanticOps {
 
 export interface LoopSemanticsBuilder extends SemanticOps {}
 
-// A fused semantic loop's state declaration. State registers live in locals
-// for the loop's extent and materialize on fault or loop exit.
 export type LoopOptions = Readonly<{
   // Gate for entering the first iteration.
   enter: ValueInput;
-  // Registers whose pending writes are carried locally and committed on exit.
-  stateRegs?: readonly RegName[];
-  // Carry lazy status-flag state through the loop.
-  statusFlags?: boolean;
   // Emits one iteration and returns the back-edge predicate.
   body: (builder: LoopSemanticsBuilder, values: Values) => ValueInput;
 }>;

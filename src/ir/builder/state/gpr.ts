@@ -14,6 +14,7 @@ import {
 } from "../../values.js";
 import type { BodyBuilder } from "../../body-builder.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
+import type { StateWriteObserver } from "./write-log.js";
 
 export type GprReadOptions = Readonly<{ signed?: boolean }>;
 
@@ -34,11 +35,13 @@ export class GprState {
   readonly #buffer = new PendingBuffer<GprChannel>();
   readonly #reads = new Map<GprChannel, ValueId>();
   readonly #signedReads = new Map<GprChannel, ValueId>();
+  readonly #writeObserver: StateWriteObserver | undefined;
   #unrestorableStore = false;
 
-  constructor(values: ValueTable, currentBody: () => BodyBuilder) {
+  constructor(values: ValueTable, currentBody: () => BodyBuilder, writeObserver?: StateWriteObserver) {
     this.#values = values;
     this.#currentBody = currentBody;
+    this.#writeObserver = writeObserver;
   }
 
   read(reg: RegName | GprChannel, accessWidthOrOptions?: OperandWidth | GprReadOptions, options: GprReadOptions = {}): ValueId {
@@ -112,6 +115,8 @@ export class GprState {
   }
 
   #writeChannel(channel: GprChannel, value: ValueId): void {
+    this.#writeObserver?.recordStateWrite(channel);
+
     for (const [other] of this.#buffer.entries()) {
       if (other === channel || !channelsOverlap(other, channel)) {
         continue;

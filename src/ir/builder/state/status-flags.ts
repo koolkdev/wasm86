@@ -23,6 +23,7 @@ import {
 } from "../../slots.js";
 import { fitsUnsigned, type ValueId, type ValueTable } from "../../values.js";
 import type { StateCells } from "./cells.js";
+import type { StateWriteObserver } from "./write-log.js";
 
 export type FlagSourceId = number;
 
@@ -59,15 +60,22 @@ export class StatusFlagState {
   readonly #values: ValueTable;
   readonly #cells: StateCells;
   readonly #currentBody: () => BodyBuilder;
+  readonly #writeObserver: StateWriteObserver | undefined;
   readonly #sources: SimpleFlagSource<ValueId>[] = [];
   readonly #current = initialStatusFlagState();
   readonly #inputFlags = new Map<X86StatusFlag, ValueId>();
   readonly #valueOps: ReturnType<typeof valueTableFlagOps>;
 
-  constructor(values: ValueTable, cells: StateCells, currentBody: () => BodyBuilder) {
+  constructor(
+    values: ValueTable,
+    cells: StateCells,
+    currentBody: () => BodyBuilder,
+    writeObserver?: StateWriteObserver
+  ) {
     this.#values = values;
     this.#cells = cells;
     this.#currentBody = currentBody;
+    this.#writeObserver = writeObserver;
     this.#valueOps = valueTableFlagOps(values);
   }
 
@@ -101,6 +109,7 @@ export class StatusFlagState {
 
     this.#sources.push(source);
     this.#current.directSource = sourceId;
+    this.#writeObserver?.recordStatusFlagSourceWrite();
 
     switch (source.kind) {
       case "add":

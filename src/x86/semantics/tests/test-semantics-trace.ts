@@ -310,12 +310,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   }
 
   loop(options: LoopOptions): void {
-    const stateRegs = options.stateRegs ?? [];
-
-    this.#emit(
-      `loop enter=${this.#value(options.enter)} stateRegs=[${stateRegs.join(",")}]` +
-        (options.statusFlags === true ? " statusFlags" : "")
-    );
+    this.#emit(`loop enter=${this.#value(options.enter)}`);
     const continueCondition = options.body(this, this.values);
 
     this.#emit(`loopContinue ${this.#value(continueCondition)}`);

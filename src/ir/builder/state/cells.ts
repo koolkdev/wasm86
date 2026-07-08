@@ -16,6 +16,7 @@ import {
 import type { StateWriteAction } from "../../actions.js";
 import type { BodyBuilder } from "../../body-builder.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
+import type { StateWriteObserver } from "./write-log.js";
 
 export type { StatePathKind };
 
@@ -33,9 +34,11 @@ export class StateCells {
   readonly #currentBody: () => BodyBuilder;
   readonly #buffer = new PendingBuffer<StateCell>();
   readonly #inputReads = new Map<StateCell, ValueId>();
+  readonly #writeObserver: StateWriteObserver | undefined;
 
-  constructor(currentBody: () => BodyBuilder) {
+  constructor(currentBody: () => BodyBuilder, writeObserver?: StateWriteObserver) {
     this.#currentBody = currentBody;
+    this.#writeObserver = writeObserver;
   }
 
   read(channel: StateCell): ValueId {
@@ -61,6 +64,7 @@ export class StateCells {
 
   write(channel: StateCell, value: ValueId): void {
     this.#assertNoOverlappingEntries(channel);
+    this.#writeObserver?.recordStateWrite(channel);
 
     if (this.#inputReads.get(channel) === value) {
       this.#buffer.delete(channel);

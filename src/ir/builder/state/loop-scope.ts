@@ -1,14 +1,8 @@
 import { assert } from "#common/assert.js";
-import type { RegName } from "#x86/types.js";
 import type { LoopCarriedCell, StateWriteAction } from "../../actions.js";
 import {
-  channelCovers,
   channelsOverlap,
-  gprChannel,
   isDynamicSlot,
-  lazyFlagsAChannel,
-  lazyFlagsBChannel,
-  lazyFlagsKindChannel,
   type StateChannel,
   type StateSlot
 } from "../../slots.js";
@@ -18,61 +12,61 @@ import type { State } from "./index.js";
 
 type LoopCell = Required<LoopCarriedCell>;
 
-export type StateLoopOptions = Readonly<{
-  regs?: readonly RegName[];
-  statusFlags: boolean;
-}>;
-
 export class StateLoopScope {
   readonly #values: ValueTable;
   readonly #state: State;
-  readonly #carried: readonly StateChannel[];
-  readonly #carriesStatusFlags: boolean;
+  readonly #bodyWrites: readonly StateChannel[];
   #cells: readonly LoopCell[] | undefined;
   #dirtyAtEntry: ReadonlySet<StateChannel> = new Set();
+  #closed = false;
 
   constructor(
     values: ValueTable,
     state: State,
-    options: StateLoopOptions
+    bodyWrites: readonly StateChannel[]
   ) {
     this.#values = values;
     this.#state = state;
-    this.#carriesStatusFlags = options.statusFlags;
-    this.#carried = [
-      ...(options.regs ?? []).map((reg) => gprChannel(reg)),
-      ...(options.statusFlags ? [lazyFlagsKindChannel, lazyFlagsAChannel, lazyFlagsBChannel] : [])
-    ];
-
-    for (const [index, channel] of this.#carried.entries()) {
-      assert(
-        this.#carried.slice(0, index).every((existing) => !channelsOverlap(existing, channel)),
-        "loop state registers must not overlap"
-      );
-    }
+    this.#bodyWrites = bodyWrites;
   }
 
   begin(): readonly LoopCell[] {
     assert(this.#cells === undefined, "loop state scope is already open");
 
-    // Seeds come first: the reads flush and fold pre-loop tracked state before
-    // the carried cells take over their channels.
-    const cells = this.#carried.map((channel) => ({
+    // The carried set is the body's write set, deduped in first-write order;
+    // the exact-access rule rejects overlapping narrow writes (al then ax).
+    const carried = [...new Set(this.#bodyWrites)];
+
+    for (const [index, channel] of carried.entries()) {
+      assert(
+        channel.kind === "gpr" || channel.kind === "lazyFlags",
+        `loop body writes unsupported state channel: ${JSON.stringify(channel)}`
+      );
+      assert(
+        carried.slice(0, index).every((existing) => !channelsOverlap(existing, channel)),
+        "overlapping loop-carried state writes are unsupported"
+      );
+    }
+
+    // Entry values are the skipped-path contribution to the join. Reading
+    // them first also flushes/folds tracked state before loop inputs take over.
+    const cells = carried.map((channel) => ({
       channel,
       seed: this.#state.readChannel(channel),
       loopInput: this.#values.addLoopInput(loopInputBounds(channel))
     }));
 
-    // What stays dirty after the seed reads is exactly what memory lacks on
-    // the zero-trip path: an exact pending entry is read without a flush.
-    this.#dirtyAtEntry = new Set(this.#carried.filter((channel) => this.#state.isChannelDirty(channel)));
+    // The skipped arm only needs generated commits for values that existed
+    // solely in pending state at entry. Clean memory-backed channels already
+    // read back as the entry contribution.
+    this.#dirtyAtEntry = new Set(carried.filter((channel) => this.#state.isChannelDirty(channel)));
 
     for (const cell of cells) {
       this.#state.writeChannel(cell.channel, cell.loopInput);
     }
 
     // The iteration top is the fault boundary: carried cells snapshot as
-    // their loop inputs, so mid-body faults report iteration-start state.
+    // loop inputs, so mid-body faults report iteration-start state.
     this.#state.beginInstructionBoundary();
 
     this.#cells = cells;
@@ -102,13 +96,17 @@ export class StateLoopScope {
   }
 
   close(): void {
-    for (const cell of this.#openCells()) {
+    const cells = this.#openCells();
+
+    for (const cell of cells) {
       this.#state.invalidate(cell.channel);
     }
 
-    if (this.#carriesStatusFlags) {
+    if (cells.some((cell) => cell.channel.kind === "lazyFlags")) {
       this.#state.statusFlags.resetToInputs();
     }
+
+    this.#closed = true;
   }
 
   assertHoistableRead(slot: StateSlot): void {
@@ -123,31 +121,16 @@ export class StateLoopScope {
     assert(!isDynamicSlot(slot), "dynamic state writes inside a loop body are unsupported");
   }
 
-  carriesStatusFlags(): boolean {
-    return this.#carriesStatusFlags;
-  }
-
-  // A loop body may only write channels it carries; any other write is silently
-  // dropped, since only carried cells commit. Narrow carries are exact: carrying
-  // al lets the body write al, but an ax/eax write asserts.
-  assertWritableChannel(channel: StateChannel): void {
-    assert(
-      this.#carried.some((carried) => channelCovers(carried, channel) && channelCovers(channel, carried)),
-      `loop body writes an uncarried state channel: ${JSON.stringify(channel)}`
-    );
-  }
-
   isCarried(channel: StateChannel): boolean {
-    return this.#carried.some((carried) => channelsOverlap(carried, channel));
+    return this.#openCells().some((cell) => channelsOverlap(cell.channel, channel));
   }
 
   #openCells(): readonly LoopCell[] {
-    assert(this.#cells !== undefined, "loop state scope is not open");
+    assert(this.#cells !== undefined && !this.#closed, "loop state scope is not open");
     return this.#cells;
   }
 }
 
-// A loop input is exactly as wide as a read of its channel.
 function loopInputBounds(channel: StateChannel): WidthBounds | undefined {
   return channel.kind === "gpr" ? undefined : channelReadBounds(channel);
 }

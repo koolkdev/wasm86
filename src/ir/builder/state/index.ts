@@ -11,9 +11,9 @@ import { EipState } from "./eip.js";
 import { FlagState } from "./flags.js";
 import { GprState } from "./gpr.js";
 import { InstructionCountState } from "./instruction-count.js";
-import type { StateLoopOptions } from "./loop-scope.js";
 import { SegmentState } from "./segments.js";
 import { StatusFlagState } from "./status-flags.js";
+import type { StateWriteObserver, StateWriteObserverCheckpoint } from "./write-log.js";
 
 type StateSnapshot = Readonly<{
   gpr: ReturnType<GprState["snapshot"]>;
@@ -21,10 +21,12 @@ type StateSnapshot = Readonly<{
   statusFlags: ReturnType<StatusFlagState["snapshot"]>;
   segments: ReturnType<SegmentState["snapshot"]>;
   instructionCount: ReturnType<InstructionCountState["snapshot"]>;
+  writeObserver: StateWriteObserverCheckpoint | undefined;
 }>;
 
 export class State {
   readonly #cells: StateCells;
+  readonly #writeObserver: StateWriteObserver | undefined;
 
   readonly gpr: GprState;
   readonly flags: FlagState;
@@ -34,12 +36,13 @@ export class State {
   readonly instructionCount: InstructionCountState;
   #scopeOpen = false;
 
-  constructor(values: ValueTable, currentBody: () => BodyBuilder) {
-    this.#cells = new StateCells(currentBody);
+  constructor(values: ValueTable, currentBody: () => BodyBuilder, writeObserver?: StateWriteObserver) {
+    this.#writeObserver = writeObserver;
+    this.#cells = new StateCells(currentBody, writeObserver);
 
-    this.gpr = new GprState(values, currentBody);
+    this.gpr = new GprState(values, currentBody, writeObserver);
     this.flags = new FlagState(this.#cells);
-    this.statusFlags = new StatusFlagState(values, this.#cells, currentBody);
+    this.statusFlags = new StatusFlagState(values, this.#cells, currentBody, writeObserver);
     this.segments = new SegmentState(values, this.#cells, currentBody);
     this.eip = new EipState(this.#cells);
     this.instructionCount = new InstructionCountState(values, this.#cells);
@@ -137,7 +140,8 @@ export class State {
       cells: this.#cells.snapshot(),
       statusFlags: this.statusFlags.snapshot(),
       segments: this.segments.snapshot(),
-      instructionCount: this.instructionCount.snapshot()
+      instructionCount: this.instructionCount.snapshot(),
+      writeObserver: this.#writeObserver?.checkpoint()
     };
   }
 
@@ -147,7 +151,9 @@ export class State {
     this.statusFlags.restore(snapshot.statusFlags);
     this.segments.restore(snapshot.segments);
     this.instructionCount.restore(snapshot.instructionCount);
+
+    if (snapshot.writeObserver !== undefined) {
+      this.#writeObserver?.restore(snapshot.writeObserver);
+    }
   }
 }
-
-export type { StateLoopOptions };

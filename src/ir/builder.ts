@@ -32,13 +32,18 @@ import type {
   SegmentOperandBinding
 } from "./operands.js";
 import { ControlEmitter } from "./builder/control.js";
-import { LoopBuilder, LoopSemanticsBuilderImpl } from "./builder/loop.js";
+import {
+  LoopBuilder,
+  LoopSemanticsBuilderImpl
+} from "./builder/loop.js";
 import { FinishEmitter } from "./builder/finish.js";
 import { OperandResolver } from "./builder/operands.js";
 import { emitSegmentLoad, type SegmentMode } from "./builder/segments.js";
 import { State } from "./builder/state/index.js";
+import { StateWriteLog, type StateWriteObserver } from "./builder/state/write-log.js";
 import { BodyBuilder } from "./body-builder.js";
 import type { IrBlock } from "./block.js";
+import { type StateChannel } from "./slots.js";
 import {
   ValueTable,
   type ValueId
@@ -115,10 +120,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // "terminated" means the root body already holds its terminator.
   #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
 
-  constructor(segmentMode: SegmentMode) {
+  constructor(segmentMode: SegmentMode, stateWriteObserver?: StateWriteObserver) {
     this.#body = new BodyBuilder(this.#values);
     this.#current = this.#body;
-    this.#state = new State(this.#values, () => this.#current);
+    this.#state = new State(this.#values, () => this.#current, stateWriteObserver);
     this.#operands = new OperandResolver(this.#values, this.#state);
     this.#control = new ControlEmitter(
       this.#state,
@@ -344,9 +349,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     });
   }
 
-  // Opens a loop: the declared channels become loop-carried cells
-  // living in locals while the body runs. The loop itself falls through;
-  // instruction completion remains with the surrounding semantic template.
+  // Opens a loop: body-written channels become loop-carried cells living in
+  // locals while the body runs. The loop itself falls through; instruction
+  // completion remains with the surrounding semantic template.
   loop(options: LoopOptions): void {
     assert(this.#current === this.#body, "nested loops are unsupported");
 
@@ -354,13 +359,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       values: this.#values,
       state: this.#state,
       parent: this.#current
-    }, options);
+    }, this.#deriveLoopWrites(options));
 
     this.#withCurrentBody(loop.body, () => {
       const loopBuilder = new LoopSemanticsBuilderImpl({
         host: this,
         state: this.#state,
-        scope: loop.scope,
         operands: this.#operands
       });
 
@@ -369,6 +373,32 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     assert(!this.#terminated, "a loop body must not terminate the instruction");
 
     loop.close(options.enter);
+  }
+
+  #deriveLoopWrites(options: LoopOptions): readonly StateChannel[] {
+    const writeLog = new StateWriteLog();
+    const scratch = new IrBlockBuilderImpl(this.#segmentMode, writeLog);
+    const body = new BodyBuilder(scratch.#values);
+
+    scratch.#operands.beginInstruction(this.#operands.currentBindings());
+    scratch.#state.beginInstruction(scratch.#values.const(0));
+
+    try {
+      return writeLog.captureWrittenChannels(() => {
+        scratch.#withCurrentBody(body, () => {
+          const loopBuilder = new LoopSemanticsBuilderImpl({
+            host: scratch,
+            state: scratch.#state,
+            operands: scratch.#operands
+          });
+          const condition = options.body(loopBuilder, scratch.#values);
+
+          scratch.#values.node(condition);
+        });
+      });
+    } finally {
+      scratch.#operands.endInstruction();
+    }
   }
 
   cpuExceptionIf(condition: ValueInput, exception: CpuException<ValueInput>): void {

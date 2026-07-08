@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
@@ -20,8 +20,12 @@ import type { ValueId } from "#ir/values.js";
 import { movSemantic } from "#x86/semantics/mov.js";
 import {
   repeCmpsSemantic,
+  repeScasSemantic,
+  repneCmpsSemantic,
+  repneScasSemantic,
   repLodsSemantic,
-  repMovsSemantic
+  repMovsSemantic,
+  repStosSemantic
 } from "#x86/semantics/strings.js";
 import { isStateRead, isStateWrite, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
@@ -116,13 +120,13 @@ function writeFor(writes: readonly StateWriteAction[], channel: StateChannel): S
   return write;
 }
 
-test("rep movs carries ecx, esi, and edi as loop cells", () => {
+test("rep movs carries esi, edi, and ecx as loop cells in body write order", () => {
   const block = repMovsBlock();
   const loop = findLoop(block);
 
   deepStrictEqual(
     loop.carried.map((cell) => cell.channel),
-    [gprChannel("ecx"), gprChannel("esi"), gprChannel("edi")]
+    [gprChannel("esi"), gprChannel("edi"), gprChannel("ecx")]
   );
 
   for (const cell of loop.carried) {
@@ -245,7 +249,7 @@ test("the fallthrough count write folds the ecx delta over the block's read", ()
   ok(finish?.kind === "finish" && finish.finish.kind === "dispatch", "fallthrough dispatches");
   strictEqual(v.constValue(finish.finish.targetEip), repNextEip);
 
-  const ecxSeed = loop.carried[0]!.seed;
+  const ecxSeed = loop.carried.find((cell) => cell.channel === gprChannel("ecx"))!.seed;
   const delta = v.binary("sub", v.binary("sub", ecxSeed, exitEcxRead.output), enterIf.condition);
 
   deepStrictEqual(
@@ -284,14 +288,14 @@ test("rep lods carries its accumulator instead of writing it through each iterat
 
   deepStrictEqual(
     loop.carried.map((cell) => cell.channel),
-    [gprChannel("ecx"), gprChannel("esi"), gprChannel("al")]
+    [gprChannel("al"), gprChannel("esi"), gprChannel("ecx")]
   );
 
   const backEdge = backEdgeIndex(loop.body);
   const iterationWrites = stateWrites(loop.body.actions.slice(0, backEdge + 1));
 
   deepStrictEqual(iterationWrites, []);
-  strictEqual(writeFor(faultArmWrites(loop.body), gprChannel("al")).op.value, loop.carried[2]!.loopInput);
+  strictEqual(writeFor(faultArmWrites(loop.body), gprChannel("al")).op.value, loop.carried[0]!.loopInput);
 });
 
 test("repe cmps carries the lazy flag cells and updates them per unit", () => {
@@ -305,9 +309,9 @@ test("repe cmps carries the lazy flag cells and updates them per unit", () => {
   deepStrictEqual(
     loop.carried.map((cell) => cell.channel),
     [
-      gprChannel("ecx"),
       gprChannel("esi"),
       gprChannel("edi"),
+      gprChannel("ecx"),
       lazyFlagsKindChannel,
       lazyFlagsAChannel,
       lazyFlagsBChannel
@@ -328,15 +332,70 @@ test("repe cmps carries the lazy flag cells and updates them per unit", () => {
   strictEqual(block.values.constValue(kindUpdate), lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 8));
 });
 
-test("loop bodies share the outer builder value view", () => {
+// GPRs land in body write order (the wrapper decrements ecx after the unit),
+// then the lazy trio as one facet-ordered unit.
+test("derived carried channels follow body write order across rep forms", () => {
+  const cases = [
+    {
+      name: "rep stos",
+      template: repStosSemantic(32),
+      bindings: [diOperand()],
+      channels: [gprChannel("edi"), gprChannel("ecx")]
+    },
+    {
+      name: "rep lods",
+      template: repLodsSemantic(16),
+      bindings: [siOperand()],
+      channels: [gprChannel("ax"), gprChannel("esi"), gprChannel("ecx")]
+    },
+    {
+      name: "repne cmps",
+      template: repneCmpsSemantic(32),
+      bindings: [siOperand(), diOperand()],
+      channels: [
+        gprChannel("esi"),
+        gprChannel("edi"),
+        gprChannel("ecx"),
+        lazyFlagsKindChannel,
+        lazyFlagsAChannel,
+        lazyFlagsBChannel
+      ]
+    },
+    {
+      name: "repe scas",
+      template: repeScasSemantic(8),
+      bindings: [diOperand()],
+      channels: [gprChannel("edi"), gprChannel("ecx"), lazyFlagsKindChannel, lazyFlagsAChannel, lazyFlagsBChannel]
+    },
+    {
+      name: "repne scas",
+      template: repneScasSemantic(8),
+      bindings: [diOperand()],
+      channels: [gprChannel("edi"), gprChannel("ecx"), lazyFlagsKindChannel, lazyFlagsAChannel, lazyFlagsBChannel]
+    }
+  ];
+
+  for (const entry of cases) {
+    const builder = createIrBlockBuilder();
+
+    builder.addInstruction(entry.template, entry.bindings, loc(repEip, repNextEip));
+
+    deepStrictEqual(findLoop(builder.finish()).carried.map((cell) => cell.channel), entry.channels, entry.name);
+  }
+});
+
+test("loop bodies derive carries in a scratch value view before real emission", () => {
   const builder = createIrBlockBuilder();
+  const loopValueViews: unknown[] = [];
+  let outerValueView: unknown;
 
   builder.addInstruction(
     (s, v) => {
+      outerValueView = v;
       s.loop({
         enter: v.const(1),
         body: (_b, loopV) => {
-          strictEqual(loopV, v);
+          loopValueViews.push(loopV);
           return loopV.const(0);
         }
       });
@@ -346,34 +405,62 @@ test("loop bodies share the outer builder value view", () => {
   );
 
   builder.finish();
+  strictEqual(loopValueViews.length, 2);
+  notStrictEqual(loopValueViews[0], loopValueViews[1]);
+  strictEqual(loopValueViews[1], outerValueView);
 });
 
-// A loop body may only write channels the loop carries; the write sites assert
-// at the point of the write, not by scanning pending state afterward.
-test("a loop body writing an uncarried register asserts at the write", () => {
+test("a loop body register write is derived as a carried channel", () => {
   const builder = createIrBlockBuilder();
 
-  throws(
-    () =>
-      builder.addInstruction(
-        (s, v) => {
-          s.loop({
-            stateRegs: ["ecx"],
-            enter: v.const(1),
-            body: (b, loopV) => {
-              b.set(b.reg("eax"), loopV.const(0));
-              return loopV.const(0);
-            }
-          });
-        },
-        [],
-        loc(repEip, repNextEip)
-      ),
-    /uncarried state channel/
+  builder.addInstruction(
+    (s, v) => {
+      s.loop({
+        enter: v.const(1),
+        body: (b, loopV) => {
+          b.set(b.reg("eax"), loopV.const(0));
+          return loopV.const(0);
+        }
+      });
+    },
+    [],
+    loc(repEip, repNextEip)
+  );
+
+  deepStrictEqual(findLoop(builder.finish()).carried.map((cell) => cell.channel), [gprChannel("eax")]);
+});
+
+test("a loop body status-flag source write derives the lazy flag carries", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    (s, v) => {
+      s.loop({
+        enter: v.const(1),
+        body: (b, loopV) => {
+          b.writeStatusFlagsSource(
+            subFlagSource({
+              width: 32,
+              left: loopV.const(0),
+              right: loopV.const(0),
+              result: loopV.const(0)
+            })
+          );
+          return loopV.const(0);
+        }
+      });
+    },
+    [],
+    loc(repEip, repNextEip)
+  );
+
+  deepStrictEqual(
+    findLoop(builder.finish()).carried.map((cell) => cell.channel),
+    [lazyFlagsKindChannel, lazyFlagsAChannel, lazyFlagsBChannel]
   );
 });
 
-test("a loop body writing status flags it does not carry asserts", () => {
+test("overlapping loop body register writes assert during carry derivation", () => {
   const builder = createIrBlockBuilder();
 
   throws(
@@ -381,17 +468,10 @@ test("a loop body writing status flags it does not carry asserts", () => {
       builder.addInstruction(
         (s, v) => {
           s.loop({
-            stateRegs: ["ecx"],
             enter: v.const(1),
             body: (b, loopV) => {
-              b.writeStatusFlagsSource(
-                subFlagSource({
-                  width: 32,
-                  left: loopV.const(0),
-                  right: loopV.const(0),
-                  result: loopV.const(0)
-                })
-              );
+              b.set(b.reg("al"), loopV.const(1), 8);
+              b.set(b.reg("ax"), loopV.const(2), 16);
               return loopV.const(0);
             }
           });
@@ -399,6 +479,6 @@ test("a loop body writing status flags it does not carry asserts", () => {
         [],
         loc(repEip, repNextEip)
       ),
-    /does not carry them/
+    /overlapping loop-carried state writes/
   );
 });

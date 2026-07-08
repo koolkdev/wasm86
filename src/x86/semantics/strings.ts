@@ -1,7 +1,6 @@
 import { subFlagSource } from "#x86/semantics/flag-writes.js";
 import { guardStorageRead, guardStorageWrite } from "#x86/semantics/memory.js";
 import type {
-  LoopOptions,
   SemanticBuildContext,
   SemanticOps,
   SemanticTemplate,
@@ -17,7 +16,7 @@ export function movsSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 export function repMovsSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(movsUnit(width), { stateRegs: ["ecx", "esi", "edi"] });
+  return repSemantic(movsUnit(width));
 }
 
 export function cmpsSemantic(width: OperandWidth): SemanticTemplate {
@@ -25,11 +24,11 @@ export function cmpsSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 export function repeCmpsSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(cmpsUnit(width), { stateRegs: ["ecx", "esi", "edi"], statusFlags: true }, "E");
+  return repSemantic(cmpsUnit(width), "E");
 }
 
 export function repneCmpsSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(cmpsUnit(width), { stateRegs: ["ecx", "esi", "edi"], statusFlags: true }, "NE");
+  return repSemantic(cmpsUnit(width), "NE");
 }
 
 export function stosSemantic(width: OperandWidth): SemanticTemplate {
@@ -37,7 +36,7 @@ export function stosSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 export function repStosSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(stosUnit(width), { stateRegs: ["ecx", "edi"] });
+  return repSemantic(stosUnit(width));
 }
 
 export function lodsSemantic(width: OperandWidth): SemanticTemplate {
@@ -45,9 +44,7 @@ export function lodsSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 export function repLodsSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(lodsUnit(width), {
-    stateRegs: ["ecx", "esi", accumulator(width)]
-  });
+  return repSemantic(lodsUnit(width));
 }
 
 export function scasSemantic(width: OperandWidth): SemanticTemplate {
@@ -55,11 +52,11 @@ export function scasSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 export function repeScasSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(scasUnit(width), { stateRegs: ["ecx", "edi"], statusFlags: true }, "E");
+  return repSemantic(scasUnit(width), "E");
 }
 
 export function repneScasSemantic(width: OperandWidth): SemanticTemplate {
-  return repSemantic(scasUnit(width), { stateRegs: ["ecx", "edi"], statusFlags: true }, "NE");
+  return repSemantic(scasUnit(width), "NE");
 }
 
 function movsUnit(width: OperandWidth): StringUnit {
@@ -140,7 +137,6 @@ function scasUnit(width: OperandWidth): StringUnit {
 }
 function repSemantic(
   unit: StringUnit,
-  loop: Omit<LoopOptions, "enter" | "body">,
   condition?: "E" | "NE"
 ): SemanticTemplate {
   return (s, v, context) => {
@@ -148,7 +144,6 @@ function repSemantic(
     const enter = v.compare(32, "ne", ecx, v.const(0));
 
     s.loop({
-      ...loop,
       enter,
       body: (loopBuilder, loopValues) => {
         unit(loopBuilder, loopValues, context);

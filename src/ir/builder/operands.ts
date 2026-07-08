@@ -40,6 +40,10 @@ export class OperandResolver {
     this.#operandLinearAddresses.clear();
   }
 
+  currentBindings(): readonly OperandBinding[] {
+    return this.#bindings;
+  }
+
   operandInfo(operandInput: SemanticOperandInput): SemanticOperandInfo {
     const binding = this.binding(operandInput.index);
 
