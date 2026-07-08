@@ -13,13 +13,13 @@ export function intSemantic(): SemanticTemplate {
 }
 
 export function int3Semantic(): SemanticTemplate {
-  return (s) => {
-    s.hostTrap(s.const32(3));
+  return (s, v) => {
+    s.hostTrap(v.const(3));
   };
 }
 
 export function intoSemantic(): SemanticTemplate {
-  return (s) => {
-    s.hostTrapIf(s.readFlag("OF"), s.const32(4));
+  return (s, v) => {
+    s.hostTrapIf(s.readFlag("OF"), v.const(4));
   };
 }

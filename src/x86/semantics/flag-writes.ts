@@ -14,6 +14,7 @@ import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import type { OperandWidth } from "#x86/types.js";
 import type {
   SemanticsBuilder,
+  Values,
   SimpleFlagSource
 } from "#x86/semantics/builder.js";
 import type { Value, ValueInput } from "#x86/semantics/refs.js";
@@ -39,6 +40,7 @@ export function logicFlagSource(
 
 export function writeAddFlags(
   s: SemanticsBuilder,
+  v: Values,
   input: Readonly<{
     width: OperandWidth;
     left: ValueInput;
@@ -47,11 +49,12 @@ export function writeAddFlags(
     carryIn?: ValueInput;
   }>
 ): void {
-  writeStatusFlagValues(s, addStatusFlagValues<Value>(semanticFlagOps(s), input));
+  writeStatusFlagValues(s, addStatusFlagValues<Value>(semanticFlagOps(v), input));
 }
 
 export function writeSubFlags(
   s: SemanticsBuilder,
+  v: Values,
   input: Readonly<{
     width: OperandWidth;
     left: ValueInput;
@@ -60,11 +63,12 @@ export function writeSubFlags(
     borrowIn?: ValueInput;
   }>
 ): void {
-  writeStatusFlagValues(s, subStatusFlagValues<Value>(semanticFlagOps(s), input));
+  writeStatusFlagValues(s, subStatusFlagValues<Value>(semanticFlagOps(v), input));
 }
 
 export function writeShiftFlags(
   s: SemanticsBuilder,
+  v: Values,
   input: Readonly<{
     op: ShiftFlagOp;
     width: OperandWidth;
@@ -73,7 +77,7 @@ export function writeShiftFlags(
     result: ValueInput;
   }>
 ): void {
-  writeStatusFlagValues(s, shiftStatusFlagValues(semanticFlagOps(s), {
+  writeStatusFlagValues(s, shiftStatusFlagValues(semanticFlagOps(v), {
     ...input,
     oldFlags: readStatusFlags(s)
   }));
@@ -81,6 +85,7 @@ export function writeShiftFlags(
 
 export function writeRotateFlags(
   s: SemanticsBuilder,
+  v: Values,
   input: Readonly<{
     op: RotateFlagOp;
     width: OperandWidth;
@@ -91,7 +96,7 @@ export function writeRotateFlags(
     oldCf?: ValueInput;
   }>
 ): void {
-  writeStatusFlagValues(s, rotateStatusFlagValues(semanticFlagOps(s), {
+  writeStatusFlagValues(s, rotateStatusFlagValues(semanticFlagOps(v), {
     ...input,
     oldFlags: {
       CF: input.oldCf ?? s.readFlag("CF"),
@@ -102,23 +107,26 @@ export function writeRotateFlags(
 
 export function writeIncFlags(
   s: SemanticsBuilder,
+  v: Values,
   input: Readonly<{ width: OperandWidth; input: ValueInput; result: ValueInput }>
 ): void {
-  writeStatusFlagValues(s, incStatusFlagValues(semanticFlagOps(s), input));
+  writeStatusFlagValues(s, incStatusFlagValues(semanticFlagOps(v), input));
 }
 
 export function writeDecFlags(
   s: SemanticsBuilder,
+  v: Values,
   input: Readonly<{ width: OperandWidth; input: ValueInput; result: ValueInput }>
 ): void {
-  writeStatusFlagValues(s, decStatusFlagValues(semanticFlagOps(s), input));
+  writeStatusFlagValues(s, decStatusFlagValues(semanticFlagOps(v), input));
 }
 
 export function writeNegFlags(
   s: SemanticsBuilder,
+  v: Values,
   input: Readonly<{ width: OperandWidth; input: ValueInput; result: ValueInput }>
 ): void {
-  writeStatusFlagValues(s, negStatusFlagValues(semanticFlagOps(s), input));
+  writeStatusFlagValues(s, negStatusFlagValues(semanticFlagOps(v), input));
 }
 
 function readStatusFlags(s: SemanticsBuilder): StatusFlagValues<Value> {

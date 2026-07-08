@@ -363,7 +363,7 @@ test("direct status flag writes set explicit pending values", () => {
   const { values, pending, flags } = createHarness();
   const explicit = Object.fromEntries(
     x86StatusFlags.map((flag, index) => [flag, values.const(index & 1)])
-  ) as Record<(typeof x86StatusFlags)[number], number>;
+  ) as Record<(typeof x86StatusFlags)[number], ValueId>;
 
   for (const flag of x86StatusFlags) {
     flags.write(flag, explicit[flag]);

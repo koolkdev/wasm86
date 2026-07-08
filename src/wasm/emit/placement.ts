@@ -11,7 +11,7 @@ import {
   nestedBodies,
   valueDependsOn
 } from "#ir/traverse.js";
-import { valueChildren, type ValueId, type ValueTable } from "#ir/values.js";
+import { valueChildren, valueId, type ValueId, type ValueTable } from "#ir/values.js";
 
 // The placement analysis: decides up front, from the action lists and the
 // value graph, where every value materializes — use counts for the tee
@@ -315,7 +315,9 @@ class PlacementAnalysis implements BlockPlacement {
   // producer demands its operands at the producing action; a deferred
   // producer demands them once, at the point it will execute.
   #propagateDemandAndPlace(): void {
-    for (let id = this.#values.size() - 1; id >= 0; id -= 1) {
+    for (let rawId = this.#values.size() - 1; rawId >= 0; rawId -= 1) {
+      const id = valueId(rawId);
+
       if ((this.#demandCounts.get(id) ?? 0) === 0) {
         continue;
       }

@@ -8,10 +8,12 @@ import type {
   StateWriteOp
 } from "#ir/ops.js";
 import type { StateSlot } from "#ir/slots.js";
-import type { ValueId } from "#ir/values.js";
+import { valueId, type ValueId } from "#ir/values.js";
 import type { MemoryAccessKind } from "#x86/semantics/builder.js";
 import type { X86StatusFlag } from "#x86/flags.js";
 import type { OperandWidth } from "#x86/types.js";
+
+type TestValueId = ValueId | number;
 
 export type StateReadFact = Readonly<{
   output: ValueId;
@@ -51,46 +53,51 @@ export type MemoryWriteAction = OpAction & Readonly<{ op: MemoryWriteOp }>;
 export type MemoryCheckAction = OpAction & Readonly<{ op: MemoryCheckOp; output: ValueId }>;
 export type ResolveFlagAction = OpAction & Readonly<{ op: CpuResolveFlagOp; output: ValueId }>;
 
-export function stateRead(output: ValueId, slot: StateSlot): StateReadAction;
-export function stateRead(output: ValueId, slot: StateSlot, signed: true): StateReadAction;
-export function stateRead(output: ValueId, slot: StateSlot, signed?: true): StateReadAction {
+export function stateRead(output: TestValueId, slot: StateSlot): StateReadAction;
+export function stateRead(output: TestValueId, slot: StateSlot, signed: true): StateReadAction;
+export function stateRead(output: TestValueId, slot: StateSlot, signed?: true): StateReadAction {
+  const outputId = valueId(output);
+
   return signed === true
-    ? { kind: "op", output, op: { kind: "state.read", slot, signed: true } }
-    : { kind: "op", output, op: { kind: "state.read", slot } };
+    ? { kind: "op", output: outputId, op: { kind: "state.read", slot, signed: true } }
+    : { kind: "op", output: outputId, op: { kind: "state.read", slot } };
 }
 
-export function stateWrite(slot: StateSlot, value: ValueId): StateWriteAction {
-  return { kind: "op", op: { kind: "state.write", slot, value } };
+export function stateWrite(slot: StateSlot, value: TestValueId): StateWriteAction {
+  return { kind: "op", op: { kind: "state.write", slot, value: valueId(value) } };
 }
 
-export function memoryRead(output: ValueId, address: ValueId, width: OperandWidth): MemoryReadAction;
-export function memoryRead(output: ValueId, address: ValueId, width: OperandWidth, signed: true): MemoryReadAction;
+export function memoryRead(output: TestValueId, address: TestValueId, width: OperandWidth): MemoryReadAction;
+export function memoryRead(output: TestValueId, address: TestValueId, width: OperandWidth, signed: true): MemoryReadAction;
 export function memoryRead(
-  output: ValueId,
-  address: ValueId,
+  output: TestValueId,
+  address: TestValueId,
   width: OperandWidth,
   signed?: true
 ): MemoryReadAction {
+  const outputId = valueId(output);
+  const addressId = valueId(address);
+
   return signed === true
-    ? { kind: "op", output, op: { kind: "memory.read", address, width, signed: true } }
-    : { kind: "op", output, op: { kind: "memory.read", address, width } };
+    ? { kind: "op", output: outputId, op: { kind: "memory.read", address: addressId, width, signed: true } }
+    : { kind: "op", output: outputId, op: { kind: "memory.read", address: addressId, width } };
 }
 
-export function memoryWrite(address: ValueId, value: ValueId, width: OperandWidth): MemoryWriteAction {
-  return { kind: "op", op: { kind: "memory.write", address, value, width } };
+export function memoryWrite(address: TestValueId, value: TestValueId, width: OperandWidth): MemoryWriteAction {
+  return { kind: "op", op: { kind: "memory.write", address: valueId(address), value: valueId(value), width } };
 }
 
 export function memoryCheck(
-  output: ValueId,
-  address: ValueId,
+  output: TestValueId,
+  address: TestValueId,
   byteLength: number,
   access: MemoryAccessKind
 ): MemoryCheckAction {
-  return { kind: "op", output, op: { kind: "memory.check", address, byteLength, access } };
+  return { kind: "op", output: valueId(output), op: { kind: "memory.check", address: valueId(address), byteLength, access } };
 }
 
-export function resolveFlag(output: ValueId, flag: X86StatusFlag): ResolveFlagAction {
-  return { kind: "op", output, op: { kind: "cpu.resolveFlag", flag } };
+export function resolveFlag(output: TestValueId, flag: X86StatusFlag): ResolveFlagAction {
+  return { kind: "op", output: valueId(output), op: { kind: "cpu.resolveFlag", flag } };
 }
 
 export function isStateRead(action: Action): action is StateReadAction {

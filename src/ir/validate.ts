@@ -320,7 +320,7 @@ function validateOpActionValues(block: IrBlock, action: OpAction): void {
 function assertOutputBounds(
   block: IrBlock,
   action: OpAction,
-  output: number,
+  output: ValueId,
   expected: OpValueOutput
 ): void {
   const actualBounds = block.values.widthBounds(output);

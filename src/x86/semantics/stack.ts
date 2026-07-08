@@ -1,4 +1,4 @@
-import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate, Values } from "#x86/semantics/builder.js";
 import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, type X86Flag } from "#x86/flags.js";
 import type { OperandWidth, Reg16, Reg32, RegName } from "#x86/types.js";
@@ -31,12 +31,13 @@ const popaCells = [
 
 export function pushStack(
   s: SemanticsBuilder,
+  v: Values,
   context: SemanticBuildContext,
   width: StackOperandWidth,
   value: ValueInput
 ): void {
   const esp = s.get(s.reg("esp"));
-  const nextEsp = s.binary("sub", esp, s.const32(stackByteLength(width)));
+  const nextEsp = v.binary("sub", esp, v.const(stackByteLength(width)));
   const stack = s.mem(nextEsp);
 
   guardStorageWrite(s, context, stack, width);
@@ -46,6 +47,7 @@ export function pushStack(
 
 export function popStack(
   s: SemanticsBuilder,
+  v: Values,
   context: SemanticBuildContext,
   width: StackOperandWidth
 ): Value {
@@ -54,90 +56,90 @@ export function popStack(
 
   guardStorageRead(s, context, stack, width);
   const value = s.get(stack, width);
-  const nextEsp = s.binary("add", esp, s.const32(stackByteLength(width)));
+  const nextEsp = v.binary("add", esp, v.const(stackByteLength(width)));
 
   s.set(s.reg("esp"), nextEsp);
   return value;
 }
 
 export function pushSemantic(width: StackOperandWidth = 32): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const src = s.operand(0);
 
     guardStorageRead(s, context, src, width);
-    pushStack(s, context, width, s.get(src, width));
+    pushStack(s, v, context, width, s.get(src, width));
   };
 }
 
 export function pushfdSemantic(): SemanticTemplate {
-  return (s, context) => {
-    pushFlags(s, context, 32, x86Flags);
+  return (s, v, context) => {
+    pushFlags(s, v, context, 32, x86Flags);
   };
 }
 
 export function pushfSemantic(): SemanticTemplate {
-  return (s, context) => {
-    pushFlags(s, context, 16, x86Low16Flags);
+  return (s, v, context) => {
+    pushFlags(s, v, context, 16, x86Low16Flags);
   };
 }
 
 export function popfdSemantic(): SemanticTemplate {
-  return (s, context) => {
-    popFlags(s, context, 32, x86Flags);
+  return (s, v, context) => {
+    popFlags(s, v, context, 32, x86Flags);
   };
 }
 
 export function popfSemantic(): SemanticTemplate {
-  return (s, context) => {
-    popFlags(s, context, 16, x86Low16Flags);
+  return (s, v, context) => {
+    popFlags(s, v, context, 16, x86Low16Flags);
   };
 }
 
 export function pushadSemantic(): SemanticTemplate {
-  return (s) => {
-    pushAll(s, 32);
+  return (s, v) => {
+    pushAll(s, v, 32);
   };
 }
 
 export function pushaSemantic(): SemanticTemplate {
-  return (s) => {
-    pushAll(s, 16);
+  return (s, v) => {
+    pushAll(s, v, 16);
   };
 }
 
 export function popadSemantic(): SemanticTemplate {
-  return (s) => {
-    popAll(s, 32);
+  return (s, v) => {
+    popAll(s, v, 32);
   };
 }
 
 export function popaSemantic(): SemanticTemplate {
-  return (s) => {
-    popAll(s, 16);
+  return (s, v) => {
+    popAll(s, v, 16);
   };
 }
 
-function pushAll(s: SemanticsBuilder, width: StackOperandWidth): void {
+function pushAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void {
   const esp = s.get(s.reg("esp"));
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
-  const nextEsp = s.binary("sub", esp, s.const32(totalBytes));
+  const nextEsp = v.binary("sub", esp, v.const(totalBytes));
 
   s.memoryGuard(nextEsp, totalBytes, "write");
 
   const values = width === 32
     ? pushadRegisters.map((reg) => reg === "esp" ? esp : s.get(s.reg(reg)))
-    : pushaRegisters.map((reg) => reg === "sp" ? s.truncate(16, esp) : s.get(s.reg(reg), 16));
+    : pushaRegisters.map((reg) => reg === "sp" ? v.truncate(16, esp) : s.get(s.reg(reg), 16));
 
   values.forEach((value, index) => {
-    const address = s.binary("sub", esp, s.const32(cellBytes * (index + 1)));
+    const address = v.binary("sub", esp, v.const(cellBytes * (index + 1)));
 
     s.set(s.mem(address), value, width);
   });
   s.set(s.reg("esp"), nextEsp);
 }
 
-function popAll(s: SemanticsBuilder, width: StackOperandWidth): void {
+function popAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void {
   const esp = s.get(s.reg("esp"));
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
@@ -145,9 +147,9 @@ function popAll(s: SemanticsBuilder, width: StackOperandWidth): void {
   s.memoryGuard(esp, totalBytes, "read");
 
   const loaded = width === 32
-    ? popCells(s, esp, 32, popadCells)
-    : popCells(s, esp, 16, popaCells);
-  const nextEsp = s.binary("add", esp, s.const32(totalBytes));
+    ? popCells(s, v, esp, 32, popadCells)
+    : popCells(s, v, esp, 16, popaCells);
+  const nextEsp = v.binary("add", esp, v.const(totalBytes));
 
   for (const { reg, value } of loaded) {
     s.set(s.reg(reg), value, width);
@@ -158,65 +160,68 @@ function popAll(s: SemanticsBuilder, width: StackOperandWidth): void {
 
 function popCells<TReg extends RegName>(
   s: SemanticsBuilder,
+  v: Values,
   esp: ValueInput,
   width: StackOperandWidth,
   cells: readonly (readonly [TReg, number])[]
 ): ReadonlyArray<Readonly<{ reg: TReg; value: Value }>> {
   return cells.map(([reg, offset]) => ({
     reg,
-    value: s.get(s.mem(offset === 0 ? esp : s.binary("add", esp, s.const32(offset))), width)
+    value: s.get(s.mem(offset === 0 ? esp : v.binary("add", esp, v.const(offset))), width)
   }));
 }
 
 function pushFlags(
   s: SemanticsBuilder,
+  v: Values,
   context: SemanticBuildContext,
   width: StackOperandWidth,
   flags: readonly X86Flag[]
 ): void {
   // Reserved bit 1 and the user-mode IF image bit are set.
-  pushStack(s, context, width, buildFlagImage(s, flags, 0x202));
+  pushStack(s, v, context, width, buildFlagImage(s, v, flags, 0x202));
 }
 
 function popFlags(
   s: SemanticsBuilder,
+  v: Values,
   context: SemanticBuildContext,
   width: StackOperandWidth,
   flags: readonly X86Flag[]
 ): void {
-  const image = popStack(s, context, width);
+  const image = popStack(s, v, context, width);
 
-  writeFlagsFromImage(s, flags, image);
+  writeFlagsFromImage(s, v, flags, image);
 }
 
 export function popSemantic(width: StackOperandWidth = 32): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
     // SDM order: esp is incremented before the destination EA is computed,
     // so an esp-based destination sees the new esp.
-    const value = popStack(s, context, width);
+    const value = popStack(s, v, context, width);
 
     s.set(popTargetStorage(s, context, width, dst), value, width);
   };
 }
 
 export function popSegmentSemantic(width: StackOperandWidth = 32): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
-    const value = popStack(s, context, width);
+    const value = popStack(s, v, context, width);
 
     s.set(dst, value, 16);
   };
 }
 
 export function leaveSemantic(): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const frame = s.get(s.reg("ebp"));
     const savedFrameStorage = s.mem(frame);
 
     guardStorageRead(s, context, savedFrameStorage, 32);
     const savedFrame = s.get(savedFrameStorage);
-    const nextEsp = s.binary("add", frame, s.const32(4));
+    const nextEsp = v.binary("add", frame, v.const(4));
 
     s.set(s.reg("esp"), nextEsp);
     s.set(s.reg("ebp"), savedFrame);

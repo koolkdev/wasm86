@@ -14,7 +14,8 @@ import type {
   SemanticOperandStorageKind,
   SemanticTemplate,
   SimpleFlagSource,
-  StatusFlagValues
+  StatusFlagValues,
+  Values
 } from "#x86/semantics/builder.js";
 import type {
   MemRef,
@@ -47,7 +48,7 @@ export function buildSemanticTrace(
 ): SemanticTrace {
   const builder = new TraceBuilder(operandInfo);
 
-  template(builder, builder);
+  template(builder, builder.values, builder);
   return builder.finish();
 }
 
@@ -101,6 +102,20 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   #nextEipValue: Value | undefined;
   #nextValueId = 0;
   #terminated = false;
+  readonly values: Values = {
+    const: (value) => this.#const(value),
+    const64: (value) => this.#const64(value),
+    binary: (operator, a, b) => this.#binary(operator, a, b),
+    unary: (operator, value) => this.#unary(operator, value),
+    select: (condition, whenTrue, whenFalse) => this.#select(condition, whenTrue, whenFalse),
+    truncate: (width, value) => this.#truncate(width, value),
+    extend: (width, value, signed) => this.#extend(width, value, signed),
+    compare: (width, operator, a, b) => this.#compare(width, operator, a, b),
+    binary64: (operator, a, b) => this.#binary64(operator, a, b),
+    compare64: (operator, a, b) => this.#compare64(operator, a, b),
+    truncate64: (width, value) => this.#truncate64(width, value),
+    extend64: (width, value, signed) => this.#extend64(width, value, signed)
+  };
 
   constructor(operandInfo: readonly SemanticOperandInfo[]) {
     this.#operandInfo = operandInfo;
@@ -110,7 +125,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     return operand(index);
   }
 
-  const32(value: number): Value {
+  #const(value: number): Value {
     const canonical = value >>> 0;
     const existing = this.#constValues.get(canonical);
 
@@ -125,7 +140,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     return handle;
   }
 
-  const64(value: bigint): Value {
+  #const64(value: bigint): Value {
     const canonical = BigInt.asUintN(64, value);
     const existing = this.#const64Values.get(canonical);
 
@@ -211,45 +226,37 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     return this.address(operandRef);
   }
 
-  binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
-    return this.#binary(operator, a, b);
-  }
-
-  unary(operator: UnaryOperator, value: ValueInput): Value {
-    return this.#unary(operator, value);
-  }
-
-  binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
+  #binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
     return this.#alloc(`${operator}64(${this.#value(a)}, ${this.#value(b)})`);
   }
 
-  compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
+  #compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
     return this.#alloc(`cmp64.${operator}(${this.#value(a)}, ${this.#value(b)})`);
   }
 
-  truncate64(width: OperandWidth, value: ValueInput): Value {
+  #truncate64(width: OperandWidth, value: ValueInput): Value {
     return this.#alloc(`truncate64.${width}(${this.#value(value)})`);
   }
 
-  extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value {
+  #extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value {
     return this.#alloc(`extend64.${signed ? "s" : "u"}${width}(${this.#value(value)})`);
   }
 
-  select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
+  #select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
     return this.#alloc(
       `select(${this.#value(condition)}, ${this.#value(whenTrue)}, ${this.#value(whenFalse)})`
     );
   }
 
-  truncate(width: OperandWidth, value: ValueInput): Value {
+  #truncate(width: OperandWidth, value: ValueInput): Value {
     return this.#alloc(`truncate${width}(${this.#value(value)})`);
   }
 
-  extend(width: OperandWidth, value: ValueInput, signed: boolean): Value {
+  #extend(width: OperandWidth, value: ValueInput, signed: boolean): Value {
     return this.#alloc(`extend.${signed ? "s" : "u"}${width}(${this.#value(value)})`);
   }
 
-  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
+  #compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
     return this.#alloc(`cmp${width}.${operator}(${this.#value(a)}, ${this.#value(b)})`);
   }
 
@@ -309,7 +316,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
       `loop enter=${this.#value(options.enter)} stateRegs=[${stateRegs.join(",")}]` +
         (options.statusFlags === true ? " statusFlags" : "")
     );
-    const continueCondition = options.body(this);
+    const continueCondition = options.body(this, this.values);
 
     this.#emit(`loopContinue ${this.#value(continueCondition)}`);
     this.#emit("loopEnd");

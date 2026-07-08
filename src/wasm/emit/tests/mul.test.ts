@@ -47,12 +47,12 @@ for (const entry of [
 ] as const satisfies readonly SignedProductTruncationCase[]) {
   test(`signed product truncation lowering: ${entry.name}`, async () => {
     const builder = createIrBlockBuilder();
-    const template: SemanticTemplate = (s) => {
-      const left = s.extend64(entry.width, s.get(s.reg("eax"), 32), true);
-      const right = s.extend64(entry.width, s.get(s.reg("ebx"), 32), true);
-      const fullProduct = s.binary64("mul", left, right);
-      const truncatedProduct = s.extend64(entry.width, s.truncate64(entry.width, fullProduct), true);
-      const truncatedDiffers = s.compare64("ne", fullProduct, truncatedProduct);
+    const template: SemanticTemplate = (s, v) => {
+      const left = v.extend64(entry.width, s.get(s.reg("eax"), 32), true);
+      const right = v.extend64(entry.width, s.get(s.reg("ebx"), 32), true);
+      const fullProduct = v.binary64("mul", left, right);
+      const truncatedProduct = v.extend64(entry.width, v.truncate64(entry.width, fullProduct), true);
+      const truncatedDiffers = v.compare64("ne", fullProduct, truncatedProduct);
 
       s.set(s.reg("edx"), truncatedDiffers, 32);
     };
@@ -69,10 +69,10 @@ for (const entry of [
 
 test("i32 multiply lowers to wasm i32.mul", async () => {
   const builder = createIrBlockBuilder();
-  const template: SemanticTemplate = (s) => {
+  const template: SemanticTemplate = (s, v) => {
     s.set(
       s.reg("edx"),
-      s.binary("mul", s.get(s.reg("eax"), 32), s.get(s.reg("ebx"), 32)),
+      v.binary("mul", s.get(s.reg("eax"), 32), s.get(s.reg("ebx"), 32)),
       32
     );
   };
@@ -93,11 +93,11 @@ test("i32 multiply lowers to wasm i32.mul", async () => {
 
 test("unsigned dword product high-half lowering uses i64 shift", async () => {
   const builder = createIrBlockBuilder();
-  const template: SemanticTemplate = (s) => {
-    const left = s.extend64(32, s.get(s.reg("eax"), 32), false);
-    const right = s.extend64(32, s.get(s.reg("ebx"), 32), false);
-    const fullProduct = s.binary64("mul", left, right);
-    const high = s.truncate64(32, s.binary64("shr_u", fullProduct, s.extend64(32, s.const32(32), false)));
+  const template: SemanticTemplate = (s, v) => {
+    const left = v.extend64(32, s.get(s.reg("eax"), 32), false);
+    const right = v.extend64(32, s.get(s.reg("ebx"), 32), false);
+    const fullProduct = v.binary64("mul", left, right);
+    const high = v.truncate64(32, v.binary64("shr_u", fullProduct, v.extend64(32, v.const(32), false)));
 
     s.set(s.reg("edx"), high, 32);
   };

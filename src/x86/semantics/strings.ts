@@ -4,12 +4,13 @@ import type {
   LoopOptions,
   SemanticBuildContext,
   SemanticOps,
-  SemanticTemplate
+  SemanticTemplate,
+  Values
 } from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
 
-type StringUnit = (builder: SemanticOps, context: SemanticBuildContext) => void;
+type StringUnit = (builder: SemanticOps, values: Values, context: SemanticBuildContext) => void;
 
 export function movsSemantic(width: OperandWidth): SemanticTemplate {
   return movsUnit(width);
@@ -62,10 +63,10 @@ export function repneScasSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 function movsUnit(width: OperandWidth): StringUnit {
-  return (s, context) => {
+  return (s, v, context) => {
     const src = s.operand(0);
     const dst = s.operand(1);
-    const delta = stringDelta(s, width);
+    const delta = stringDelta(s, v, width);
 
     guardStorageRead(s, context, src, width);
     const value = s.get(src, width);
@@ -73,68 +74,68 @@ function movsUnit(width: OperandWidth): StringUnit {
     guardStorageWrite(s, context, dst, width);
     s.set(dst, value, width);
 
-    stepRegister(s, "esi", delta);
-    stepRegister(s, "edi", delta);
+    stepRegister(s, v, "esi", delta);
+    stepRegister(s, v, "edi", delta);
   };
 }
 
 function cmpsUnit(width: OperandWidth): StringUnit {
-  return (s, context) => {
+  return (s, v, context) => {
     const leftOperand = s.operand(0);
     const rightOperand = s.operand(1);
-    const delta = stringDelta(s, width);
+    const delta = stringDelta(s, v, width);
 
     guardStorageRead(s, context, leftOperand, width);
     guardStorageRead(s, context, rightOperand, width);
 
-    const left = s.truncate(width, s.get(leftOperand, width));
-    const right = s.truncate(width, s.get(rightOperand, width));
-    const result = s.truncate(width, s.binary("sub", left, right));
+    const left = v.truncate(width, s.get(leftOperand, width));
+    const right = v.truncate(width, s.get(rightOperand, width));
+    const result = v.truncate(width, v.binary("sub", left, right));
 
     s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
-    stepRegister(s, "esi", delta);
-    stepRegister(s, "edi", delta);
+    stepRegister(s, v, "esi", delta);
+    stepRegister(s, v, "edi", delta);
   };
 }
 
 function stosUnit(width: OperandWidth): StringUnit {
-  return (s, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
     const value = s.get(s.reg(accumulator(width)), width);
-    const delta = stringDelta(s, width);
+    const delta = stringDelta(s, v, width);
 
     guardStorageWrite(s, context, dst, width);
     s.set(dst, value, width);
-    stepRegister(s, "edi", delta);
+    stepRegister(s, v, "edi", delta);
   };
 }
 
 function lodsUnit(width: OperandWidth): StringUnit {
-  return (s, context) => {
+  return (s, v, context) => {
     const src = s.operand(0);
-    const delta = stringDelta(s, width);
+    const delta = stringDelta(s, v, width);
 
     guardStorageRead(s, context, src, width);
     const value = s.get(src, width);
 
     s.set(s.reg(accumulator(width)), value, width);
-    stepRegister(s, "esi", delta);
+    stepRegister(s, v, "esi", delta);
   };
 }
 
 function scasUnit(width: OperandWidth): StringUnit {
-  return (s, context) => {
+  return (s, v, context) => {
     const rightOperand = s.operand(0);
-    const delta = stringDelta(s, width);
+    const delta = stringDelta(s, v, width);
 
     guardStorageRead(s, context, rightOperand, width);
 
-    const left = s.truncate(width, s.get(s.reg(accumulator(width)), width));
-    const right = s.truncate(width, s.get(rightOperand, width));
-    const result = s.truncate(width, s.binary("sub", left, right));
+    const left = v.truncate(width, s.get(s.reg(accumulator(width)), width));
+    const right = v.truncate(width, s.get(rightOperand, width));
+    const result = v.truncate(width, v.binary("sub", left, right));
 
     s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
-    stepRegister(s, "edi", delta);
+    stepRegister(s, v, "edi", delta);
   };
 }
 function repSemantic(
@@ -142,25 +143,25 @@ function repSemantic(
   loop: Omit<LoopOptions, "enter" | "body">,
   condition?: "E" | "NE"
 ): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const ecx = s.get(s.reg("ecx"));
-    const enter = s.compare(32, "ne", ecx, s.const32(0));
+    const enter = v.compare(32, "ne", ecx, v.const(0));
 
     s.loop({
       ...loop,
       enter,
-      body: (loopBuilder) => {
-        unit(loopBuilder, context);
+      body: (loopBuilder, loopValues) => {
+        unit(loopBuilder, loopValues, context);
 
-        const decremented = loopBuilder.binary(
+        const decremented = loopValues.binary(
           "sub",
           loopBuilder.get(loopBuilder.reg("ecx")),
-          loopBuilder.const32(1)
+          loopValues.const(1)
         );
-        const nonzero = loopBuilder.compare(32, "ne", decremented, loopBuilder.const32(0));
+        const nonzero = loopValues.compare(32, "ne", decremented, loopValues.const(0));
 
         loopBuilder.set(loopBuilder.reg("ecx"), decremented);
-        return repBranchPredicate(loopBuilder, condition, nonzero);
+        return repBranchPredicate(loopBuilder, loopValues, condition, nonzero);
       }
     });
 
@@ -168,28 +169,29 @@ function repSemantic(
     // Minus enter cancels next()'s +1 on the ran path; a zero trip adds 0.
     const exitEcx = s.get(s.reg("ecx"));
 
-    s.addInstructionCount(s.binary("sub", s.binary("sub", ecx, exitEcx), enter));
+    s.addInstructionCount(v.binary("sub", v.binary("sub", ecx, exitEcx), enter));
   };
 }
 
 function repBranchPredicate(
   s: SemanticOps,
+  v: Values,
   condition: "E" | "NE" | undefined,
   nonzero: Value
 ): Value {
   return condition === undefined
     ? nonzero
-    : s.binary("and", nonzero, s.condition(condition));
+    : v.binary("and", nonzero, s.condition(condition));
 }
 
-function stringDelta(s: SemanticOps, width: OperandWidth) {
+function stringDelta(s: SemanticOps, v: Values, width: OperandWidth) {
   const byteLength = width / 8;
 
-  return s.select(s.readFlag("DF"), s.const32(-byteLength), s.const32(byteLength));
+  return v.select(s.readFlag("DF"), v.const(-byteLength), v.const(byteLength));
 }
 
-function stepRegister(s: SemanticOps, reg: "esi" | "edi", delta: ReturnType<typeof stringDelta>): void {
-  s.set(s.reg(reg), s.binary("add", s.get(s.reg(reg), 32), delta), 32);
+function stepRegister(s: SemanticOps, v: Values, reg: "esi" | "edi", delta: ReturnType<typeof stringDelta>): void {
+  s.set(s.reg(reg), v.binary("add", s.get(s.reg(reg), 32), delta), 32);
 }
 
 function accumulator(width: OperandWidth): RegName {

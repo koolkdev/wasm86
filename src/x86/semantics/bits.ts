@@ -1,7 +1,8 @@
 import type {
   SemanticBuildContext,
   SemanticsBuilder,
-  SemanticTemplate
+  SemanticTemplate,
+  Values
 } from "#x86/semantics/builder.js";
 import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
@@ -18,12 +19,12 @@ export function bitTestSemantic(
   width: BitFieldWidth,
   offsetSource: BitOffsetSource
 ): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
     const dstStorage = resolvedOperandStorage(context, dst);
 
     if (dstStorage === "mem" && offsetSource === "reg") {
-      bitStringMemorySemantic(s, op, width, dst);
+      bitStringMemorySemantic(s, v, op, width, dst);
       return;
     }
 
@@ -31,61 +32,63 @@ export function bitTestSemantic(
       guardBitTestAccess(s, context, op, dst, width);
     }
 
-    const value = s.truncate(width, s.get(dst, width));
-    const bitIndex = simpleBitIndex(s, width, offsetSource);
+    const value = v.truncate(width, s.get(dst, width));
+    const bitIndex = simpleBitIndex(s, v, width, offsetSource);
 
-    writeBitTestResult(s, op, width, dst, value, bitIndex);
+    writeBitTestResult(s, v, op, width, dst, value, bitIndex);
   };
 }
 
 export function bitScanSemantic(op: BitScanOp, width: BitFieldWidth): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
     const src = s.operand(1);
 
     guardStorageRead(s, context, src, width);
 
-    const source = s.truncate(width, s.get(src, width));
+    const source = v.truncate(width, s.get(src, width));
     const oldDestination = s.get(dst, width);
-    const sourceIsZero = s.compare(width, "eq", source, s.const32(0));
-    const scan = bitScanIndex(s, op, source);
-    const scanOrZero = s.select(sourceIsZero, s.const32(0), scan);
-    const result = s.select(sourceIsZero, oldDestination, scan);
+    const sourceIsZero = v.compare(width, "eq", source, v.const(0));
+    const scan = bitScanIndex(v, op, source);
+    const scanOrZero = v.select(sourceIsZero, v.const(0), scan);
+    const result = v.select(sourceIsZero, oldDestination, scan);
 
-    writeBitScanFlags(s, sourceIsZero, scanOrZero);
+    writeBitScanFlags(s, v, sourceIsZero, scanOrZero);
     s.set(dst, result, width);
   };
 }
 
 function bitStringMemorySemantic(
   s: SemanticsBuilder,
+  v: Values,
   op: BitTestOp,
   width: BitFieldWidth,
   dst: OperandRef
 ): void {
   const offset = s.get(s.operand(1), width, { signed: true });
-  const element = s.binary("shr_s", offset, s.const32(elementShift(width)));
-  const byteOffset = s.binary("shl", element, s.const32(byteShift(width)));
-  const address = s.binary("add", s.linearAddress(dst), byteOffset);
+  const element = v.binary("shr_s", offset, v.const(elementShift(width)));
+  const byteOffset = v.binary("shl", element, v.const(byteShift(width)));
+  const address = v.binary("add", s.linearAddress(dst), byteOffset);
 
   guardAddressBitTestAccess(s, op, address, width);
 
   const storage = s.mem(address);
-  const value = s.truncate(width, s.get(storage, width));
-  const bitIndex = s.binary("and", offset, s.const32(width - 1));
+  const value = v.truncate(width, s.get(storage, width));
+  const bitIndex = v.binary("and", offset, v.const(width - 1));
 
-  writeBitTestResult(s, op, width, storage, value, bitIndex);
+  writeBitTestResult(s, v, op, width, storage, value, bitIndex);
 }
 
 function writeBitTestResult(
   s: SemanticsBuilder,
+  v: Values,
   op: BitTestOp,
   width: BitFieldWidth,
   target: StorageInput,
   value: Value,
   bitIndex: Value
 ): void {
-  const bit = lowBit(s, s.binary("shr_u", value, bitIndex));
+  const bit = lowBit(v, v.binary("shr_u", value, bitIndex));
 
   // BT/BTS/BTR/BTC define CF only. PF/AF/ZF/SF/OF are architecturally
   // undefined; the local hardware probe preserves them, so leave them
@@ -96,30 +99,31 @@ function writeBitTestResult(
     return;
   }
 
-  s.set(target, bitTestWriteResult(s, op, width, value, bitIndex), width);
+  s.set(target, bitTestWriteResult(v, op, width, value, bitIndex), width);
 }
 
 function bitTestWriteResult(
-  s: SemanticsBuilder,
+  v: Values,
   op: Exclude<BitTestOp, "bt">,
   width: BitFieldWidth,
   value: Value,
   bitIndex: Value
 ): Value {
-  const mask = s.truncate(width, s.binary("shl", s.const32(1), bitIndex));
+  const mask = v.truncate(width, v.binary("shl", v.const(1), bitIndex));
 
   switch (op) {
     case "bts":
-      return s.truncate(width, s.binary("or", value, mask));
+      return v.truncate(width, v.binary("or", value, mask));
     case "btr":
-      return s.truncate(width, s.binary("and", value, s.binary("xor", mask, s.const32(widthMask(width)))));
+      return v.truncate(width, v.binary("and", value, v.binary("xor", mask, v.const(widthMask(width)))));
     case "btc":
-      return s.truncate(width, s.binary("xor", value, mask));
+      return v.truncate(width, v.binary("xor", value, mask));
   }
 }
 
 function simpleBitIndex(
   s: SemanticsBuilder,
+  v: Values,
   width: BitFieldWidth,
   offsetSource: BitOffsetSource
 ): Value {
@@ -127,25 +131,26 @@ function simpleBitIndex(
     ? s.get(s.operand(1), width)
     : s.get(s.operand(1), 8);
 
-  return s.binary("and", raw, s.const32(width - 1));
+  return v.binary("and", raw, v.const(width - 1));
 }
 
-function bitScanIndex(s: SemanticsBuilder, op: BitScanOp, source: Value): Value {
+function bitScanIndex(v: Values, op: BitScanOp, source: Value): Value {
   switch (op) {
     case "bsf":
-      return s.unary("ctz", source);
+      return v.unary("ctz", source);
     case "bsr":
-      return s.binary("sub", s.const32(31), s.unary("clz", source));
+      return v.binary("sub", v.const(31), v.unary("clz", source));
   }
 }
 
 function writeBitScanFlags(
   s: SemanticsBuilder,
+  v: Values,
   sourceIsZero: Value,
   scanOrZero: Value
 ): void {
-  const zero = s.const32(0);
-  const parity = parityFlag(s, scanOrZero);
+  const zero = v.const(0);
+  const parity = parityFlag(v, scanOrZero);
 
   // BSF/BSR define ZF only. CF/PF/AF/SF/OF are architecturally undefined;
   // these writes mirror the local hardware probe: CF/AF/SF/OF clear, and PF
@@ -160,15 +165,15 @@ function writeBitScanFlags(
   });
 }
 
-function parityFlag(s: SemanticsBuilder, value: ValueInput): Value {
-  const lowByte = s.binary("and", value, s.const32(0xff));
-  const odd = lowBit(s, s.unary("popcnt", lowByte));
+function parityFlag(v: Values, value: ValueInput): Value {
+  const lowByte = v.binary("and", value, v.const(0xff));
+  const odd = lowBit(v, v.unary("popcnt", lowByte));
 
-  return s.compare(32, "eq", odd, s.const32(0));
+  return v.compare(32, "eq", odd, v.const(0));
 }
 
-function lowBit(s: SemanticsBuilder, value: ValueInput): Value {
-  return s.binary("and", value, s.const32(1));
+function lowBit(v: Values, value: ValueInput): Value {
+  return v.binary("and", value, v.const(1));
 }
 
 function guardBitTestAccess(

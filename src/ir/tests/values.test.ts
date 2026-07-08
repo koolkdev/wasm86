@@ -1,7 +1,7 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { ValueTable, fitsUnsigned, signExtended, valueChildren } from "#ir/values.js";
+import { ValueTable, fitsUnsigned, signExtended, valueChildren, valueId } from "#ir/values.js";
 
 test("value table deduplicates constants by canonical i32 value", () => {
   const table = new ValueTable();
@@ -17,7 +17,7 @@ test("value table exposes nodes by id", () => {
 
   deepStrictEqual(table.node(table.const(7)), { kind: "const", value: 7 });
   deepStrictEqual(table.node(table.const(0xdeadbeef)), { kind: "const", value: 0xdeadbeef | 0 });
-  throws(() => table.node(99), /unknown value id 99/);
+  throws(() => table.node(valueId(99)), /unknown value id 99/);
 });
 
 test("building the same expression twice yields the same node id", () => {
@@ -308,16 +308,17 @@ test("compound nodes reject unknown children", () => {
   const table = new ValueTable();
   const a = table.const(1);
   const wide = table.extend64(32, a, true);
+  const unknown = valueId(99);
 
-  throws(() => table.binary("add", a, 99), /unknown value id 99/);
-  throws(() => table.unary("popcnt", 99), /unknown value id 99/);
-  throws(() => table.select(99, a, a), /unknown value id 99/);
-  throws(() => table.truncate(8, 99), /unknown value id 99/);
-  throws(() => table.extend(8, 99, true), /unknown value id 99/);
-  throws(() => table.extend64(32, 99, true), /unknown value id 99/);
-  throws(() => table.extend64(32, 99, false), /unknown value id 99/);
-  throws(() => table.binary64("mul", wide, 99), /unknown value id 99/);
-  throws(() => table.truncate64(32, 99), /unknown value id 99/);
+  throws(() => table.binary("add", a, unknown), /unknown value id 99/);
+  throws(() => table.unary("popcnt", unknown), /unknown value id 99/);
+  throws(() => table.select(unknown, a, a), /unknown value id 99/);
+  throws(() => table.truncate(8, unknown), /unknown value id 99/);
+  throws(() => table.extend(8, unknown, true), /unknown value id 99/);
+  throws(() => table.extend64(32, unknown, true), /unknown value id 99/);
+  throws(() => table.extend64(32, unknown, false), /unknown value id 99/);
+  throws(() => table.binary64("mul", wide, unknown), /unknown value id 99/);
+  throws(() => table.truncate64(32, unknown), /unknown value id 99/);
   throws(() => table.binary("add", wide, a), /value \d+ must be i32, got i64/);
   throws(() => table.truncate(8, wide), /value \d+ must be i32, got i64/);
   throws(() => table.binary64("mul", wide, a), /value \d+ must be i64, got i32/);

@@ -328,6 +328,26 @@ test("repe cmps carries the lazy flag cells and updates them per unit", () => {
   strictEqual(block.values.constValue(kindUpdate), lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 8));
 });
 
+test("loop bodies share the outer builder value view", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    (s, v) => {
+      s.loop({
+        enter: v.const(1),
+        body: (_b, loopV) => {
+          strictEqual(loopV, v);
+          return loopV.const(0);
+        }
+      });
+    },
+    [],
+    loc(repEip, repNextEip)
+  );
+
+  builder.finish();
+});
+
 // A loop body may only write channels the loop carries; the write sites assert
 // at the point of the write, not by scanning pending state afterward.
 test("a loop body writing an uncarried register asserts at the write", () => {
@@ -336,13 +356,13 @@ test("a loop body writing an uncarried register asserts at the write", () => {
   throws(
     () =>
       builder.addInstruction(
-        (s) => {
+        (s, v) => {
           s.loop({
             stateRegs: ["ecx"],
-            enter: s.const32(1),
-            body: (b) => {
-              b.set(b.reg("eax"), b.const32(0));
-              return b.const32(0);
+            enter: v.const(1),
+            body: (b, loopV) => {
+              b.set(b.reg("eax"), loopV.const(0));
+              return loopV.const(0);
             }
           });
         },
@@ -359,15 +379,20 @@ test("a loop body writing status flags it does not carry asserts", () => {
   throws(
     () =>
       builder.addInstruction(
-        (s) => {
+        (s, v) => {
           s.loop({
             stateRegs: ["ecx"],
-            enter: s.const32(1),
-            body: (b) => {
+            enter: v.const(1),
+            body: (b, loopV) => {
               b.writeStatusFlagsSource(
-                subFlagSource({ width: 32, left: b.const32(0), right: b.const32(0), result: b.const32(0) })
+                subFlagSource({
+                  width: 32,
+                  left: loopV.const(0),
+                  right: loopV.const(0),
+                  result: loopV.const(0)
+                })
               );
-              return b.const32(0);
+              return loopV.const(0);
             }
           });
         },

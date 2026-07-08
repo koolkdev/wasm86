@@ -3,11 +3,11 @@ import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { guardStorageWrite } from "./memory.js";
 
 export function setccSemantic(cc: ConditionCode): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
     const condition = s.condition(cc);
 
     guardStorageWrite(s, context, dst, 8);
-    s.set(dst, s.select(condition, s.const32(1), s.const32(0)), 8);
+    s.set(dst, v.select(condition, v.const(1), v.const(0)), 8);
   };
 }

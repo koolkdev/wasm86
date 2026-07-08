@@ -1,6 +1,5 @@
 import { assert } from "#common/assert.js";
 import type { ConditionCode } from "#x86/conditions.js";
-import type { CpuException } from "#x86/exceptions.js";
 import { isX86StatusFlag, type X86Flag } from "#x86/flags.js";
 import type {
   GetOptions,
@@ -10,7 +9,6 @@ import type {
   SemanticOps,
   SimpleFlagSource
 } from "#x86/semantics/builder.js";
-import type { BinaryOperator, CompareOperator, UnaryOperator } from "#x86/semantics/ops.js";
 import {
   toStorageRef,
   type MemRef,
@@ -18,7 +16,6 @@ import {
   type OperandRef,
   type RegRef,
   type StorageInput,
-  type TargetInput,
   type Value,
   type ValueInput
 } from "#x86/semantics/refs.js";
@@ -260,14 +257,6 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
     return this.#context.host.operand(index);
   }
 
-  const32(value: number): Value {
-    return this.#context.host.const32(value);
-  }
-
-  const64(value: bigint): Value {
-    return this.#context.host.const64(value);
-  }
-
   reg(regInput: RegName): RegRef {
     return this.#context.host.reg(regInput);
   }
@@ -296,46 +285,6 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
     return this.#state.linearAddress(operandRef);
   }
 
-  binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
-    return this.#context.host.binary(operator, a, b);
-  }
-
-  unary(operator: UnaryOperator, value: ValueInput): Value {
-    return this.#context.host.unary(operator, value);
-  }
-
-  select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
-    return this.#context.host.select(condition, whenTrue, whenFalse);
-  }
-
-  truncate(width: OperandWidth, value: ValueInput): Value {
-    return this.#context.host.truncate(width, value);
-  }
-
-  extend(width: OperandWidth, value: ValueInput, signed: boolean): Value {
-    return this.#context.host.extend(width, value, signed);
-  }
-
-  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
-    return this.#context.host.compare(width, operator, a, b);
-  }
-
-  binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
-    return this.#context.host.binary64(operator, a, b);
-  }
-
-  compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
-    return this.#context.host.compare64(operator, a, b);
-  }
-
-  truncate64(width: OperandWidth, value: ValueInput): Value {
-    return this.#context.host.truncate64(width, value);
-  }
-
-  extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value {
-    return this.#context.host.extend64(width, value, signed);
-  }
-
   readFlag(flag: X86Flag): Value {
     return this.#state.readFlag(flag);
   }
@@ -347,52 +296,4 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
   condition(cc: ConditionCode): Value {
     return this.#state.condition(cc);
   }
-
-  currentEip(): Value {
-    return unsupportedLoopOperation("currentEip");
-  }
-
-  nextEip(): Value {
-    return unsupportedLoopOperation("nextEip");
-  }
-
-  writeFlag(_flag: X86Flag, _value: ValueInput): void {
-    unsupportedLoopOperation("writeFlag");
-  }
-
-  addInstructionCount(_amount: ValueInput): void {
-    unsupportedLoopOperation("addInstructionCount");
-  }
-
-  next(): void {
-    unsupportedLoopOperation("next");
-  }
-
-  jump(_target: TargetInput): void {
-    unsupportedLoopOperation("jump");
-  }
-
-  jumpIf(_condition: ValueInput, _target: TargetInput): void {
-    unsupportedLoopOperation("jumpIf");
-  }
-
-  loop(_options: LoopOptions): void {
-    unsupportedLoopOperation("loop");
-  }
-
-  cpuExceptionIf(_condition: ValueInput, _exception: CpuException<ValueInput>): void {
-    unsupportedLoopOperation("cpuExceptionIf");
-  }
-
-  hostTrap(_vector: ValueInput): void {
-    unsupportedLoopOperation("hostTrap");
-  }
-
-  hostTrapIf(_condition: ValueInput, _vector: ValueInput): void {
-    unsupportedLoopOperation("hostTrapIf");
-  }
-}
-
-function unsupportedLoopOperation(op: string): never {
-  assert(false, `${op} inside a loop body is unsupported`);
 }

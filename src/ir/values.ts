@@ -16,6 +16,8 @@ import {
   type CompareOperator,
   type UnaryOperator
 } from "#x86/semantics/ops.js";
+import type { Values } from "#x86/semantics/builder.js";
+import type { Value } from "#x86/semantics/refs.js";
 import { i32 } from "#x86/numeric.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { ExternalValueId } from "./operands.js";
@@ -29,7 +31,11 @@ import {
   type ValueFoldContext
 } from "./value-folding.js";
 
-export type ValueId = number;
+export type ValueId = Value;
+
+export function valueId(id: number): ValueId {
+  return id as ValueId;
+}
 export type ValueType = "i32" | "i64";
 
 // Nodes reference children by ValueId only; there is no nested-tree form.
@@ -137,7 +143,7 @@ function clampedBounds(unsignedBits: number, signedBits: number): WidthBounds {
   };
 }
 
-export class ValueTable {
+export class ValueTable implements Values {
   readonly #nodes: ValueNode[] = [];
   // Derived on first query, memoized per node.
   readonly #widthBounds: (WidthBounds | undefined)[] = [];
@@ -321,7 +327,7 @@ export class ValueTable {
     this.#nodes.push(Object.freeze(node));
     this.#widthBounds.push(undefined);
 
-    return id;
+    return valueId(id);
   }
 
   #internConst(value: number): ValueId {

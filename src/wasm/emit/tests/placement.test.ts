@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
-import { fitsUnsigned, ValueTable } from "#ir/values.js";
+import { fitsUnsigned, ValueTable, valueId, type ValueId } from "#ir/values.js";
 import { analyzePlacement } from "#wasm/emit/placement.js";
 import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import { memoryCheck, memoryRead, memoryWrite, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
@@ -11,14 +11,14 @@ import { memoryCheck, memoryRead, memoryWrite, resolveFlag, stateRead, stateWrit
 function analyze(
   values: ValueTable,
   actions: readonly Action[],
-  exportedOutputs: readonly number[] = []
+  exportedOutputs: readonly (ValueId | number)[] = []
 ) {
   return analyzePlacement(
     {
       body: { actions },
       values
     },
-    exportedOutputs
+    exportedOutputs.map(valueId)
   );
 }
 
@@ -30,7 +30,7 @@ function hostExit(payload?: number): Action {
       exit: {
         class: "host",
         reason: "hostTrap",
-        ...(payload === undefined ? {} : { payload })
+        ...(payload === undefined ? {} : { payload: valueId(payload) })
       }
     }
   };
@@ -43,7 +43,7 @@ function pageFaultExit(address: number, write = false): Action {
       kind: "exit",
       exit: {
         class: "cpuException",
-        exception: pageFault(address, write ? PageFaultErrorCode.WRITE : 0)
+        exception: pageFault(valueId(address), write ? PageFaultErrorCode.WRITE : 0)
       }
     }
   };
@@ -729,8 +729,8 @@ test("analysis rejects unknown value ids", () => {
   const values = new ValueTable();
   const analysis = analyze(values, []);
 
-  throws(() => analysis.useCount(0), /unknown value id 0/);
-  throws(() => analysis.outputPlacement(0), /unknown value id 0/);
+  throws(() => analysis.useCount(valueId(0)), /unknown value id 0/);
+  throws(() => analysis.outputPlacement(valueId(0)), /unknown value id 0/);
 });
 
 test("a producer whose operand follows its output fails loudly", () => {

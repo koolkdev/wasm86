@@ -34,7 +34,7 @@ import type {
   SwitchAction
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import type { ValueId, ValueNode } from "#ir/values.js";
+import { valueId, type ValueId, type ValueNode } from "#ir/values.js";
 import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
 import type { MemoryAccessKind, SemanticTemplate } from "#x86/semantics/builder.js";
@@ -226,8 +226,8 @@ function switchAction(block: IrBlock): SwitchAction {
 function nodeKinds(block: IrBlock): ValueNode["kind"][] {
   const kinds: ValueNode["kind"][] = [];
 
-  for (let id = 0; id < block.values.size(); id += 1) {
-    kinds.push(block.values.node(id).kind);
+  for (let rawId = 0; rawId < block.values.size(); rawId += 1) {
+    kinds.push(block.values.node(valueId(rawId)).kind);
   }
 
   return kinds;
@@ -317,7 +317,7 @@ test("mov r32, r32 records one state.read op and forwards its leaf", () => {
     stateWrite(gprChannel("ebx"), 1),
     finishDispatch(v.const(0x1002))
   ]);
-  deepStrictEqual(v.node(1), { kind: "actionOutput" });
+  deepStrictEqual(v.node(valueId(1)), { kind: "actionOutput" });
   // The instruction-start eip, read leaf, next eip, and count advance.
   strictEqual(v.size(), 6);
 });
@@ -431,8 +431,8 @@ test("zero-count shift writes neither the destination nor flags", () => {
 
 // A template writing only ZF; omitted status flags are preserved by resolving
 // their live input backing into the full explicit image.
-const directZfTemplate: SemanticTemplate = (s) => {
-  s.writeFlag("ZF", s.const32(1));
+const directZfTemplate: SemanticTemplate = (s, v) => {
+  s.writeFlag("ZF", v.const(1));
 };
 
 test("writeFlag flushes a full explicit image with omitted flags preserved through resolve ops", () => {
@@ -646,8 +646,8 @@ test("movsx r32, r8 marks the read for a sign-extending load", () => {
 });
 
 test("narrow signed compares sign-extend both operands", () => {
-  const cmp8: SemanticTemplate = (s) => {
-    s.set(s.operand(0), s.compare(8, "lt_s", s.get(s.operand(0), 32), s.get(s.operand(1), 32)), 32);
+  const cmp8: SemanticTemplate = (s, v) => {
+    s.set(s.operand(0), v.compare(8, "lt_s", s.get(s.operand(0), 32), s.get(s.operand(1), 32)), 32);
   };
   const builder = createIrBlockBuilder();
 
@@ -668,8 +668,8 @@ test("narrow signed compares sign-extend both operands", () => {
 });
 
 test("an 8-bit unsigned compare of covered operands creates no truncations", () => {
-  const cmpAl: SemanticTemplate = (s) => {
-    s.set(s.operand(0), s.compare(8, "lt_u", s.get(s.operand(0), 8), s.get(s.operand(1), 8)), 8);
+  const cmpAl: SemanticTemplate = (s, v) => {
+    s.set(s.operand(0), v.compare(8, "lt_u", s.get(s.operand(0), 8), s.get(s.operand(1), 8)), 8);
   };
   const builder = createIrBlockBuilder();
 
@@ -692,10 +692,10 @@ test("an 8-bit unsigned compare of covered operands creates no truncations", () 
 });
 
 test("an 8-bit equality on an unproven value keeps its mask", () => {
-  const cmpSum: SemanticTemplate = (s) => {
-    const sum = s.binary("add", s.get(s.operand(0), 8), s.get(s.operand(1), 8));
+  const cmpSum: SemanticTemplate = (s, v) => {
+    const sum = v.binary("add", s.get(s.operand(0), 8), s.get(s.operand(1), 8));
 
-    s.set(s.operand(0), s.compare(8, "eq", sum, s.const32(0)), 8);
+    s.set(s.operand(0), v.compare(8, "eq", sum, v.const(0)), 8);
   };
   const builder = createIrBlockBuilder();
 
@@ -715,11 +715,11 @@ test("an 8-bit equality on an unproven value keeps its mask", () => {
 });
 
 test("a signed byte get feeds a signed compare with no extra extends", () => {
-  const cmpSigned: SemanticTemplate = (s) => {
+  const cmpSigned: SemanticTemplate = (s, v) => {
     const a = s.get(s.operand(0), 8, { signed: true });
     const b = s.get(s.operand(1), 8, { signed: true });
 
-    s.set(s.operand(0), s.compare(8, "lt_s", a, b), 8);
+    s.set(s.operand(0), v.compare(8, "lt_s", a, b), 8);
   };
   const builder = createIrBlockBuilder();
 
@@ -741,12 +741,12 @@ test("a signed byte get feeds a signed compare with no extra extends", () => {
 });
 
 test("value methods build through the builder", () => {
-  const abs: SemanticTemplate = (s) => {
+  const abs: SemanticTemplate = (s, v) => {
     const value = s.get(s.operand(0), 32);
-    const zero = s.const32(0);
-    const negative = s.compare(32, "lt_s", value, zero);
+    const zero = v.const(0);
+    const negative = v.compare(32, "lt_s", value, zero);
 
-    s.set(s.operand(0), s.select(negative, s.binary("sub", zero, value), value), 32);
+    s.set(s.operand(0), v.select(negative, v.binary("sub", zero, value), value), 32);
   };
   const builder = createIrBlockBuilder();
 
@@ -850,9 +850,9 @@ test("a block ended by a jump rejects further instructions", () => {
 });
 
 test("ops after a control terminator in one template fail loudly", () => {
-  const jumpThenSet: SemanticTemplate = (s) => {
-    const target = s.const32(0x2000);
-    const value = s.const32(1);
+  const jumpThenSet: SemanticTemplate = (s, v) => {
+    const target = v.const(0x2000);
+    const value = v.const(1);
 
     s.jump(target);
     s.set(s.reg("eax"), value, 32);
@@ -926,13 +926,13 @@ test("jcc after test source uses the source-derived condition with no flag byte 
   }
 });
 
-const subSourceThenJccTemplate: SemanticTemplate = (s) => {
+const subSourceThenJccTemplate: SemanticTemplate = (s, v) => {
   const left = s.get(s.reg("eax"), 32);
   const right = s.get(s.reg("ebx"), 32);
-  const result = s.binary("sub", left, right);
+  const result = v.binary("sub", left, right);
 
   s.writeStatusFlagsSource({ kind: "sub", width: 32, left, right, result });
-  s.jumpIf(s.condition("E"), s.const32(0x2000));
+  s.jumpIf(s.condition("E"), v.const(0x2000));
 };
 
 test("jcc after a sub flag source uses the source-derived condition", () => {
@@ -1173,13 +1173,13 @@ test("setcc after cmp source consumes the source-derived condition", () => {
   strictEqual(entryActions(block).filter((action) => isStateRead(action)).length, 1);
 });
 
-const logicSourceThenSetccTemplate: SemanticTemplate = (s) => {
+const logicSourceThenSetccTemplate: SemanticTemplate = (s, v) => {
   const left = s.get(s.reg("eax"), 32);
   const right = s.get(s.reg("ebx"), 32);
-  const result = s.binary("and", left, right);
+  const result = v.binary("and", left, right);
 
   s.writeStatusFlagsSource({ kind: "logic", width: 32, result });
-  s.set(s.reg("al"), s.select(s.condition("NE"), s.const32(1), s.const32(0)), 8);
+  s.set(s.reg("al"), v.select(s.condition("NE"), v.const(1), v.const(0)), 8);
 };
 
 test("setcc after a logic flag source uses the source-derived condition", () => {
@@ -1404,8 +1404,8 @@ test("popf writes only stored low-16 modeled flags", () => {
 });
 
 test("set to an imm operand binding fails loudly", () => {
-  const setImm: SemanticTemplate = (s) => {
-    s.set(s.operand(0), s.const32(1), 32);
+  const setImm: SemanticTemplate = (s, v) => {
+    s.set(s.operand(0), v.const(1), 32);
   };
 
   throws(
@@ -1429,9 +1429,9 @@ test("a template width that disagrees with its register binding fails loudly", (
 
 test("a failed instruction poisons the builder, discarding its partial pendings", () => {
   const builder = createIrBlockBuilder();
-  const setThenFail: Parameters<typeof builder.addInstruction>[0] = (s) => {
-    s.set(s.operand(0), s.const32(1), 32);
-    s.set(s.operand(1), s.const32(2), 32);
+  const setThenFail: Parameters<typeof builder.addInstruction>[0] = (s, v) => {
+    s.set(s.operand(0), v.const(1), 32);
+    s.set(s.operand(1), v.const(2), 32);
   };
 
   throws(
@@ -1823,13 +1823,13 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
 });
 
 test("get and set through s.mem lower to memory actions at the given address", () => {
-  const incMem: SemanticTemplate = (s) => {
-    const address = s.const32(0x2000);
+  const incMem: SemanticTemplate = (s, v) => {
+    const address = v.const(0x2000);
     const target = s.mem(address);
 
     s.memoryGuard(address, 4, "read");
     s.memoryGuard(address, 4, "write");
-    s.set(target, s.binary("add", s.get(target, 32), s.const32(1)), 32);
+    s.set(target, v.binary("add", s.get(target, 32), v.const(1)), 32);
   };
   const builder = createIrBlockBuilder();
 
@@ -1865,10 +1865,10 @@ test("address of a non-mem operand binding fails loudly", () => {
 
 // Writes a register, then guards — the pop r/m32 shape, where the
 // destination EA depends on the already-updated register.
-const setRegThenStore: SemanticTemplate = (s) => {
-  const address = s.const32(0x2000);
+const setRegThenStore: SemanticTemplate = (s, v) => {
+  const address = v.const(0x2000);
 
-  s.set(s.operand(0), s.const32(0x222), 32);
+  s.set(s.operand(0), v.const(0x222), 32);
   s.memoryGuard(address, 4, "write");
   s.set(s.mem(address), s.get(s.operand(0), 32), 32);
 };
@@ -2066,12 +2066,12 @@ test("pop [esp+k] adds the displacement to the incremented esp", () => {
 });
 
 test("a guard after a memory write in the same instruction fails loudly", () => {
-  const storeThenGuard: SemanticTemplate = (s) => {
-    const firstAddress = s.const32(0x2000);
+  const storeThenGuard: SemanticTemplate = (s, v) => {
+    const firstAddress = v.const(0x2000);
 
     s.memoryGuard(firstAddress, 4, "write");
-    s.set(s.mem(firstAddress), s.const32(1), 32);
-    s.memoryGuard(s.const32(0x3000), 4, "write");
+    s.set(s.mem(firstAddress), v.const(1), 32);
+    s.memoryGuard(v.const(0x3000), 4, "write");
   };
 
   throws(
@@ -2082,10 +2082,10 @@ test("a guard after a memory write in the same instruction fails loudly", () => 
 });
 
 test("a guard after flushing a channel first written this instruction fails loudly", () => {
-  const flushThenGuard: SemanticTemplate = (s) => {
-    s.set(s.operand(0), s.const32(1), 8);
+  const flushThenGuard: SemanticTemplate = (s, v) => {
+    s.set(s.operand(0), v.const(1), 8);
     s.get(s.operand(1), 16);
-    s.memoryGuard(s.const32(0x2000), 4, "read");
+    s.memoryGuard(v.const(0x2000), 4, "read");
   };
 
   throws(
@@ -2285,10 +2285,10 @@ test("movsx r32, r8 from a dynamic register marks the read signed with no extra 
 });
 
 test("a guard after a dynamic flush of an instruction-written register fails loudly", () => {
-  const setThenDynamicRead: SemanticTemplate = (s) => {
-    s.set(s.reg("ebx"), s.const32(0x111), 32);
+  const setThenDynamicRead: SemanticTemplate = (s, v) => {
+    s.set(s.reg("ebx"), v.const(0x111), 32);
     s.get(s.operand(0), 32);
-    s.memoryGuard(s.const32(0x2000), 4, "read");
+    s.memoryGuard(v.const(0x2000), 4, "read");
   };
 
   throws(
@@ -2299,9 +2299,9 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
 });
 
 test("a guard after a dynamic write fails loudly", () => {
-  const dynamicWriteThenGuard: SemanticTemplate = (s) => {
-    s.set(s.operand(0), s.const32(0x222), 32);
-    s.memoryGuard(s.const32(0x2000), 4, "write");
+  const dynamicWriteThenGuard: SemanticTemplate = (s, v) => {
+    s.set(s.operand(0), v.const(0x222), 32);
+    s.memoryGuard(v.const(0x2000), 4, "write");
   };
 
   throws(
@@ -2610,8 +2610,8 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
 });
 
 test("a guard after a memDynamic flush of a never-read register fails loudly", () => {
-  const blindWriteThenDynamicAddress: SemanticTemplate = (s) => {
-    s.set(s.reg("ebx"), s.const32(0x111), 32);
+  const blindWriteThenDynamicAddress: SemanticTemplate = (s, v) => {
+    s.set(s.reg("ebx"), v.const(0x111), 32);
     s.memoryGuard(s.address(s.operand(0)), 4, "write");
   };
 

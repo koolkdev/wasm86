@@ -43,19 +43,9 @@ export type GetOptions = Readonly<{
 
 export type SemanticOperandInput = OperandRef;
 
-export interface SemanticOps {
-  operand(index: number): OperandRef;
-  const32(value: number): Value;
+export interface Values {
+  const(value: number): Value;
   const64(value: bigint): Value;
-  reg(reg: RegName): RegRef;
-  mem(address: ValueInput): MemRef;
-
-  get(source: StorageInput, accessWidth?: OperandWidth, options?: GetOptions): Value;
-  set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
-  memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void;
-  address(operand: OperandInput): Value;
-  linearAddress(operand: OperandInput): Value;
-
   binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value;
   unary(operator: UnaryOperator, value: ValueInput): Value;
   select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value;
@@ -66,6 +56,18 @@ export interface SemanticOps {
   compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value;
   truncate64(width: OperandWidth, value: ValueInput): Value;
   extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value;
+}
+
+export interface SemanticOps {
+  operand(index: number): OperandRef;
+  reg(reg: RegName): RegRef;
+  mem(address: ValueInput): MemRef;
+
+  get(source: StorageInput, accessWidth?: OperandWidth, options?: GetOptions): Value;
+  set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
+  memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void;
+  address(operand: OperandInput): Value;
+  linearAddress(operand: OperandInput): Value;
 
   readFlag(flag: X86Flag): Value;
   writeStatusFlagsSource(source: SimpleFlagSource): void;
@@ -84,14 +86,18 @@ export type LoopOptions = Readonly<{
   // Carry lazy status-flag state through the loop.
   statusFlags?: boolean;
   // Emits one iteration and returns the back-edge predicate.
-  body: (builder: LoopSemanticsBuilder) => ValueInput;
+  body: (builder: LoopSemanticsBuilder, values: Values) => ValueInput;
 }>;
 
 export interface SemanticBuildContext {
   operandInfo(operand: SemanticOperandInput): SemanticOperandInfo;
 }
 
-export type SemanticTemplate = (builder: SemanticsBuilder, context: SemanticBuildContext) => void;
+export type SemanticTemplate = (
+  builder: SemanticsBuilder,
+  values: Values,
+  context: SemanticBuildContext
+) => void;
 
 export interface SemanticsBuilder extends SemanticOps {
   currentEip(): Value;

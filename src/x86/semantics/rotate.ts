@@ -1,6 +1,7 @@
 import type {
   SemanticsBuilder,
-  SemanticTemplate
+  SemanticTemplate,
+  Values
 } from "#x86/semantics/builder.js";
 import { bitAt, lowBit, signBit } from "#x86/flag-values.js";
 import type { StorageInput, Value } from "#x86/semantics/refs.js";
@@ -21,39 +22,40 @@ export function rotateSemantic(
   width: OperandWidth,
   countSource: ShiftCountSource
 ): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
 
     guardStorageReadWrite(s, context, dst, width);
 
-    const value = s.truncate(width, s.get(dst, width));
-    const rawCount = readShiftCount(s, countSource);
-    const count = s.binary("and", rawCount, s.const32(0x1f));
+    const value = v.truncate(width, s.get(dst, width));
+    const rawCount = readShiftCount(s, v, countSource);
+    const count = v.binary("and", rawCount, v.const(0x1f));
 
     if (op === "rol" || op === "ror") {
-      writePlainRotate(s, op, width, value, count, dst);
+      writePlainRotate(s, v, op, width, value, count, dst);
       return;
     }
 
-    writeCarryRotate(s, op, width, value, count, dst);
+    writeCarryRotate(s, v, op, width, value, count, dst);
   };
 }
 
 function writePlainRotate(
   s: SemanticsBuilder,
+  v: Values,
   op: Extract<RotateOp, "rol" | "ror">,
   width: OperandWidth,
   value: Value,
   count: Value,
   dst: StorageInput
 ): void {
-  const effective = rotateCount(s, width, count);
-  const result = s.truncate(width, rotateI32(s, rotateDirection(op), width, value, effective));
-  const ops = semanticFlagOps(s);
+  const effective = rotateCount(v, width, count);
+  const result = v.truncate(width, rotateI32(v, rotateDirection(op), width, value, effective));
+  const ops = semanticFlagOps(v);
   const carry = op === "rol" ? lowBit(ops, result) : signBit(ops, width, result);
-  const countIsNonZero = countNonZero(s, count);
+  const countIsNonZero = countNonZero(v, count);
 
-  writeRotateFlags(s, {
+  writeRotateFlags(s, v, {
     op,
     width,
     count,
@@ -66,6 +68,7 @@ function writePlainRotate(
 
 function writeCarryRotate(
   s: SemanticsBuilder,
+  v: Values,
   op: Extract<RotateOp, "rcl" | "rcr">,
   width: OperandWidth,
   value: Value,
@@ -73,13 +76,13 @@ function writeCarryRotate(
   dst: StorageInput
 ): void {
   const oldCf = s.readFlag("CF");
-  const effective = throughCarryCount(s, width, count);
-  const effectiveNonZero = countNonZero(s, effective);
-  const rotated = rotateThroughCarry(s, op, width, value, oldCf, effective);
-  const result = s.select(effectiveNonZero, rotated.result, value);
-  const carry = s.select(effectiveNonZero, rotated.carry, oldCf);
+  const effective = throughCarryCount(v, width, count);
+  const effectiveNonZero = countNonZero(v, effective);
+  const rotated = rotateThroughCarry(v, op, width, value, oldCf, effective);
+  const result = v.select(effectiveNonZero, rotated.result, value);
+  const carry = v.select(effectiveNonZero, rotated.carry, oldCf);
 
-  writeRotateFlags(s, {
+  writeRotateFlags(s, v, {
     op,
     width,
     count,
@@ -92,36 +95,36 @@ function writeCarryRotate(
 }
 
 function rotateI32(
-  s: SemanticsBuilder,
+  v: Values,
   direction: RotateDirection,
   bits: number,
   value: Value,
   count: Value
 ): Value {
   if (bits === 32) {
-    return s.binary(direction === "left" ? "rotl" : "rotr", value, count);
+    return v.binary(direction === "left" ? "rotl" : "rotr", value, count);
   }
 
-  const backCount = s.binary("sub", s.const32(bits), count);
+  const backCount = v.binary("sub", v.const(bits), count);
 
   return direction === "left"
-    ? s.binary("or", s.binary("shl", value, count), s.binary("shr_u", value, backCount))
-    : s.binary("or", s.binary("shr_u", value, count), s.binary("shl", value, backCount));
+    ? v.binary("or", v.binary("shl", value, count), v.binary("shr_u", value, backCount))
+    : v.binary("or", v.binary("shr_u", value, count), v.binary("shl", value, backCount));
 }
 
 function rotateI64(
-  s: SemanticsBuilder,
+  v: Values,
   direction: RotateDirection,
   bits: number,
   value: Value,
   count: Value
 ): Value {
-  const count64 = extendU64(s, count);
-  const backCount64 = extendU64(s, s.binary("sub", s.const32(bits), count));
+  const count64 = extendU64(v, count);
+  const backCount64 = extendU64(v, v.binary("sub", v.const(bits), count));
 
   return direction === "left"
-    ? s.binary64("or", s.binary64("shl", value, count64), s.binary64("shr_u", value, backCount64))
-    : s.binary64("or", s.binary64("shr_u", value, count64), s.binary64("shl", value, backCount64));
+    ? v.binary64("or", v.binary64("shl", value, count64), v.binary64("shr_u", value, backCount64))
+    : v.binary64("or", v.binary64("shr_u", value, count64), v.binary64("shl", value, backCount64));
 }
 
 function rotateDirection(op: RotateOp): RotateDirection {
@@ -136,7 +139,7 @@ function rotateDirection(op: RotateOp): RotateDirection {
 }
 
 function rotateThroughCarry(
-  s: SemanticsBuilder,
+  v: Values,
   op: Extract<RotateOp, "rcl" | "rcr">,
   width: OperandWidth,
   value: Value,
@@ -146,116 +149,116 @@ function rotateThroughCarry(
   switch (width) {
     case 8:
     case 16:
-      return rotateThroughCarry32(s, op, width, value, carry, count);
+      return rotateThroughCarry32(v, op, width, value, carry, count);
     case 32:
-      return rotateThroughCarry64(s, op, value, carry, count);
+      return rotateThroughCarry64(v, op, value, carry, count);
   }
 }
 
 function rotateThroughCarry32(
-  s: SemanticsBuilder,
+  v: Values,
   op: Extract<RotateOp, "rcl" | "rcr">,
   width: Extract<OperandWidth, 8 | 16>,
   value: Value,
   carry: Value,
   count: Value
 ): RotateResult {
-  const ring = buildThroughCarryRing32(s, width, value, carry);
-  const rotated = rotateRing32(s, op, ring, count);
+  const ring = buildThroughCarryRing32(v, width, value, carry);
+  const rotated = rotateRing32(v, op, ring, count);
 
   return {
-    result: s.truncate(width, rotated),
-    carry: bitAt(semanticFlagOps(s), rotated, width)
+    result: v.truncate(width, rotated),
+    carry: bitAt(semanticFlagOps(v), rotated, width)
   };
 }
 
 function buildThroughCarryRing32(
-  s: SemanticsBuilder,
+  v: Values,
   width: Extract<OperandWidth, 8 | 16>,
   value: Value,
   carry: Value
 ): RotateRing32 {
   return {
     bits: width + 1,
-    value: s.binary("or", value, s.binary("shl", carry, s.const32(width)))
+    value: v.binary("or", value, v.binary("shl", carry, v.const(width)))
   };
 }
 
 function rotateRing32(
-  s: SemanticsBuilder,
+  v: Values,
   op: Extract<RotateOp, "rcl" | "rcr">,
   ring: RotateRing32,
   count: Value
 ): Value {
-  return rotateI32(s, rotateDirection(op), ring.bits, ring.value, count);
+  return rotateI32(v, rotateDirection(op), ring.bits, ring.value, count);
 }
 
 function rotateThroughCarry64(
-  s: SemanticsBuilder,
+  v: Values,
   op: Extract<RotateOp, "rcl" | "rcr">,
   value: Value,
   carry: Value,
   count: Value
 ): RotateResult {
-  const ring = buildThroughCarryRing64(s, value, carry);
-  const rotated = rotateRing64(s, op, ring, count);
+  const ring = buildThroughCarryRing64(v, value, carry);
+  const rotated = rotateRing64(v, op, ring, count);
 
   return {
-    result: s.truncate64(32, rotated),
+    result: v.truncate64(32, rotated),
     carry: lowBit(
-      semanticFlagOps(s),
-      s.truncate64(32, s.binary64("shr_u", rotated, extendU64(s, s.const32(32))))
+      semanticFlagOps(v),
+      v.truncate64(32, v.binary64("shr_u", rotated, extendU64(v, v.const(32))))
     )
   };
 }
 
 function buildThroughCarryRing64(
-  s: SemanticsBuilder,
+  v: Values,
   value: Value,
   carry: Value
 ): Value {
-  return s.binary64(
+  return v.binary64(
     "or",
-    extendU64(s, value),
-    s.binary64("shl", extendU64(s, carry), extendU64(s, s.const32(32)))
+    extendU64(v, value),
+    v.binary64("shl", extendU64(v, carry), extendU64(v, v.const(32)))
   );
 }
 
 function rotateRing64(
-  s: SemanticsBuilder,
+  v: Values,
   op: Extract<RotateOp, "rcl" | "rcr">,
   ring: Value,
   count: Value
 ): Value {
-  return rotateI64(s, rotateDirection(op), 33, ring, count);
+  return rotateI64(v, rotateDirection(op), 33, ring, count);
 }
 
-function extendU64(s: SemanticsBuilder, value: Value): Value {
-  return s.extend64(32, value, false);
+function extendU64(v: Values, value: Value): Value {
+  return v.extend64(32, value, false);
 }
 
-function rotateCount(s: SemanticsBuilder, width: OperandWidth, count: Value): Value {
+function rotateCount(v: Values, width: OperandWidth, count: Value): Value {
   switch (width) {
     case 8:
-      return s.binary("and", count, s.const32(7));
+      return v.binary("and", count, v.const(7));
     case 16:
-      return s.binary("and", count, s.const32(15));
+      return v.binary("and", count, v.const(15));
     case 32:
       return count;
   }
 }
 
-function throughCarryCount(s: SemanticsBuilder, width: OperandWidth, count: Value): Value {
+function throughCarryCount(v: Values, width: OperandWidth, count: Value): Value {
   switch (width) {
     case 8:
-      return s.binary("rem_u", count, s.const32(9));
+      return v.binary("rem_u", count, v.const(9));
     case 16:
-      return s.binary("rem_u", count, s.const32(17));
+      return v.binary("rem_u", count, v.const(17));
     case 32:
       return count;
   }
 }
 
-function countNonZero(s: SemanticsBuilder, count: Value): Value {
-  return s.compare(32, "ne", count, s.const32(0));
+function countNonZero(v: Values, count: Value): Value {
+  return v.compare(32, "ne", count, v.const(0));
 }

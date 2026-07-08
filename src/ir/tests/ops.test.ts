@@ -20,7 +20,7 @@ import {
   segmentSelectorChannel,
   type StateSlot
 } from "#ir/slots.js";
-import { fitsUnsigned, signExtended } from "#ir/values.js";
+import { fitsUnsigned, signExtended, valueId } from "#ir/values.js";
 
 const memory: StorageAccess = { space: "memory" };
 const memoryBounds: StorageAccess = { space: "memoryBounds" };
@@ -30,7 +30,7 @@ function state(slot: StateSlot): StorageAccess {
 }
 
 test("state reads expose semantic slot inputs and storage reads", () => {
-  const index = 7;
+  const index = valueId(7);
   const dynamicByte: StateSlot = { kind: "gprDynamic", index, byteLength: 1 };
   const dynamicSegment: StateSlot = { kind: "segmentDynamic", index, field: "selector" };
 
@@ -43,8 +43,8 @@ test("state reads expose semantic slot inputs and storage reads", () => {
 });
 
 test("byte dynamic GPR access lists its index once", () => {
-  const index = 3;
-  const value = 9;
+  const index = valueId(3);
+  const value = valueId(9);
   const slot: StateSlot = { kind: "gprDynamic", index, byteLength: 1 };
 
   deepStrictEqual(opValueInputs({ kind: "state.read", slot }), [index]);
@@ -52,8 +52,8 @@ test("byte dynamic GPR access lists its index once", () => {
 });
 
 test("state writes order slot operands before the written value", () => {
-  const index = 4;
-  const value = 12;
+  const index = valueId(4);
+  const value = valueId(12);
   const dynamicSegment: StateSlot = { kind: "segmentDynamic", index, field: "base" };
 
   deepStrictEqual(opValueInputs({ kind: "state.write", slot: gprChannel("ecx"), value }), [value]);
@@ -63,8 +63,8 @@ test("state writes order slot operands before the written value", () => {
 });
 
 test("memory ops expose address/value inputs and memory storage access", () => {
-  const address = 5;
-  const value = 6;
+  const address = valueId(5);
+  const value = valueId(6);
 
   deepStrictEqual(opAccess({ kind: "memory.read", address, width: 32 }), {
     valueInputs: [address],
@@ -82,7 +82,7 @@ test("memory ops expose address/value inputs and memory storage access", () => {
 });
 
 test("memory.check observes memory bounds and produces a boolean predicate", () => {
-  const address = 5;
+  const address = valueId(5);
 
   deepStrictEqual(opAccess({ kind: "memory.check", address, byteLength: 4, access: "read" }), {
     valueInputs: [address],
@@ -111,8 +111,8 @@ test("cpu.resolveFlag exposes lazy flag channel reads and a boolean output", () 
 test("op output bounds match narrow and signed reads", () => {
   const unsignedByteRead: IrOp = { kind: "state.read", slot: gprChannel("al") };
   const signedByteRead: IrOp = { kind: "state.read", slot: gprChannel("al"), signed: true };
-  const unsignedMemoryRead: IrOp = { kind: "memory.read", address: 1, width: 16 };
-  const signedMemoryRead: IrOp = { kind: "memory.read", address: 1, width: 16, signed: true };
+  const unsignedMemoryRead: IrOp = { kind: "memory.read", address: valueId(1), width: 16 };
+  const signedMemoryRead: IrOp = { kind: "memory.read", address: valueId(1), width: 16, signed: true };
 
   deepStrictEqual(opValueOutput(unsignedByteRead), { type: "i32", bounds: fitsUnsigned(8) });
   deepStrictEqual(opValueOutput(signedByteRead), { type: "i32", bounds: signExtended(8) });
@@ -138,6 +138,6 @@ test("op output bounds match narrow and signed reads", () => {
   });
   deepStrictEqual(opValueOutput(unsignedMemoryRead), { type: "i32", bounds: fitsUnsigned(16) });
   deepStrictEqual(opValueOutput(signedMemoryRead), { type: "i32", bounds: signExtended(16) });
-  deepStrictEqual(opValueOutput({ kind: "memory.read", address: 1, width: 32, signed: true }), { type: "i32" });
-  strictEqual(opValueOutput({ kind: "state.write", slot: gprChannel("eax"), value: 1 }), undefined);
+  deepStrictEqual(opValueOutput({ kind: "memory.read", address: valueId(1), width: 32, signed: true }), { type: "i32" });
+  strictEqual(opValueOutput({ kind: "state.write", slot: gprChannel("eax"), value: valueId(1) }), undefined);
 });

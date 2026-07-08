@@ -1,17 +1,17 @@
 import type { FlagValueOps } from "#x86/flag-values.js";
-import type { SemanticsBuilder } from "#x86/semantics/builder.js";
+import type { Values } from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
 
-export function semanticFlagOps(s: SemanticsBuilder): FlagValueOps<Value> {
+export function semanticFlagOps(v: Values): FlagValueOps<Value> {
   return {
-    const32: (value) => s.const32(value),
-    truncate: (width, value) => s.truncate(width, value),
-    and: (a, b) => s.binary("and", a, b),
-    sub: (a, b) => s.binary("sub", a, b),
-    xor: (a, b) => s.binary("xor", a, b),
-    shrU: (a, b) => s.binary("shr_u", a, b),
-    popcnt: (value) => s.unary("popcnt", value),
-    compare: (width, operator, a, b) => s.compare(width, operator, a, b),
-    select: (condition, whenTrue, whenFalse) => s.select(condition, whenTrue, whenFalse)
+    const32: (value) => v.const(value),
+    truncate: (width, value) => v.truncate(width, value),
+    and: (a, b) => v.binary("and", a, b),
+    sub: (a, b) => v.binary("sub", a, b),
+    xor: (a, b) => v.binary("xor", a, b),
+    shrU: (a, b) => v.binary("shr_u", a, b),
+    popcnt: (value) => v.unary("popcnt", value),
+    compare: (width, operator, a, b) => v.compare(width, operator, a, b),
+    select: (condition, whenTrue, whenFalse) => v.select(condition, whenTrue, whenFalse)
   };
 }

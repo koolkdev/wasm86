@@ -5,7 +5,7 @@ import { maxSwitchMatch, type Action, type SwitchAction } from "#ir/actions.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { fitsUnsigned, ValueTable } from "#ir/values.js";
+import { fitsUnsigned, ValueTable, valueId } from "#ir/values.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function blockWith(actions: readonly Action[]): IrBlock {
@@ -26,7 +26,7 @@ function entryBlock(values: ValueTable, actions: readonly Action[]): IrBlock {
 }
 
 function finishDispatch(targetEip: number): Action {
-  return { kind: "finish", finish: { kind: "dispatch", targetEip } };
+  return { kind: "finish", finish: { kind: "dispatch", targetEip: valueId(targetEip) } };
 }
 
 function finishExit(reason: "unsupported" = "unsupported"): Action {
@@ -58,7 +58,7 @@ test("a terminal if with both bodies complete validates", () => {
       blockWith([
         {
           kind: "if",
-          condition: 0,
+          condition: valueId(0),
           thenBody: { actions: [finishDispatch0] },
           elseBody: { actions: [finishDispatch(1)] }
         }
@@ -95,7 +95,7 @@ test("an action after a terminal if is rejected", () => {
         blockWith([
         {
           kind: "if",
-          condition: 0,
+          condition: valueId(0),
           thenBody: { actions: [finishDispatch0] },
           elseBody: { actions: [finishExit()] }
         },
@@ -180,7 +180,7 @@ test("a nested dispatch validates without an EIP flush", () => {
       blockWith([
         {
           kind: "if",
-          condition: 1,
+          condition: valueId(1),
           thenBody: { actions: [finishDispatch0] },
           elseBody: { actions: [finishExit()] }
         }
@@ -197,7 +197,7 @@ test("a nested dispatch rejects an ancestor EIP write", () => {
           writeEip0,
           {
             kind: "if",
-            condition: 0,
+            condition: valueId(0),
             thenBody: { actions: [finishDispatch0] },
             elseBody: { actions: [finishExit()] }
           }
@@ -210,13 +210,13 @@ test("a nested dispatch rejects an ancestor EIP write", () => {
 function switchWith(overrides: Partial<SwitchAction>): Action {
   return {
     kind: "switch",
-    selector: 0,
-    output: 1,
+    selector: valueId(0),
+    output: valueId(1),
     cases: [
-      { match: 0, body: { actions: [], result: 2 } },
-      { match: 2, body: { actions: [], result: 3 } }
+      { match: 0, body: { actions: [], result: valueId(2) } },
+      { match: 2, body: { actions: [], result: valueId(3) } }
     ],
-    defaultBody: { actions: [], result: 4 },
+    defaultBody: { actions: [], result: valueId(4) },
     ...overrides
   };
 }
@@ -255,8 +255,8 @@ test("a result under an output-less owner is rejected", () => {
         blockWith([
           {
             kind: "if",
-            condition: 0,
-            thenBody: { actions: [finishExit()], result: 1 }
+            condition: valueId(0),
+            thenBody: { actions: [finishExit()], result: valueId(1) }
           },
           finishExit()
         ])
@@ -270,7 +270,7 @@ test("a result on a completing body is rejected", () => {
     () =>
       validateIrBlock(
         blockWith([
-          switchWith({ cases: [{ match: 0, body: { actions: [finishExit()], result: 2 } }] }),
+          switchWith({ cases: [{ match: 0, body: { actions: [finishExit()], result: valueId(2) } }] }),
           finishExit()
         ])
       ),
@@ -298,8 +298,8 @@ test("a duplicate switch case match is rejected", () => {
         blockWith([
           switchWith({
             cases: [
-              { match: 1, body: { actions: [], result: 2 } },
-              { match: 1, body: { actions: [], result: 3 } }
+              { match: 1, body: { actions: [], result: valueId(2) } },
+              { match: 1, body: { actions: [], result: valueId(3) } }
             ]
           }),
           finishExit()
@@ -314,7 +314,7 @@ test("a negative switch case match is rejected", () => {
     () =>
       validateIrBlock(
         blockWith([
-          switchWith({ cases: [{ match: -1, body: { actions: [], result: 2 } }] }),
+          switchWith({ cases: [{ match: -1, body: { actions: [], result: valueId(2) } }] }),
           finishExit()
         ])
       ),
@@ -326,7 +326,7 @@ test("a switch case match beyond the dense-table bound is rejected", () => {
   doesNotThrow(() =>
     validateIrBlock(
       blockWith([
-        switchWith({ cases: [{ match: maxSwitchMatch, body: { actions: [], result: 2 } }] }),
+        switchWith({ cases: [{ match: maxSwitchMatch, body: { actions: [], result: valueId(2) } }] }),
         finishExit()
       ])
     )
@@ -335,7 +335,7 @@ test("a switch case match beyond the dense-table bound is rejected", () => {
     () =>
       validateIrBlock(
         blockWith([
-          switchWith({ cases: [{ match: maxSwitchMatch + 1, body: { actions: [], result: 2 } }] }),
+          switchWith({ cases: [{ match: maxSwitchMatch + 1, body: { actions: [], result: valueId(2) } }] }),
           finishExit()
         ])
       ),
@@ -359,7 +359,7 @@ test("a nested dispatch EIP write is rejected", () => {
         blockWith([
           {
             kind: "if",
-            condition: 0,
+            condition: valueId(0),
             thenBody: { actions: [writeEip1, finishDispatch0] },
             elseBody: { actions: [finishExit()] }
           }

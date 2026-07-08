@@ -26,11 +26,6 @@ import type {
 } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 import type {
-  BinaryOperator,
-  CompareOperator,
-  UnaryOperator
-} from "#x86/semantics/ops.js";
-import type {
   ExternalValueId,
   EffectiveAddressTerms,
   MemDynamicOperandBinding,
@@ -115,10 +110,6 @@ export function externalInstructionLocation(
   };
 }
 
-function valueFromId(id: ValueId): Value {
-  return id as Value;
-}
-
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = new ValueTable();
   readonly #actions: Action[] = [];
@@ -163,7 +154,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#wroteMemory = false;
     this.#state.beginInstruction(this.#location().eip());
 
-    template(this, this);
+    template(this, this.#values, this);
 
     if (!this.#terminated) {
       this.next();
@@ -225,7 +216,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         return { storage: "reg" };
       case "segmentDynamic":
         // A runtime segment index: register-like storage, selector channel.
-        return { storage: "reg", segment: { kind: "dynamic", index: valueFromId(this.#values.external(binding.index)) } };
+        return { storage: "reg", segment: { kind: "dynamic", index: this.#values.external(binding.index) } };
       case "immExternal":
         // A runtime value with no storage cell, e.g. a decoded immediate.
         return { storage: "imm" };
@@ -237,24 +228,14 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return operand(index);
   }
 
-  const32(value: number): Value {
-    this.#beforeOp("const32");
-    return valueFromId(this.#values.const(value));
-  }
-
-  const64(value: bigint): Value {
-    this.#beforeOp("const64");
-    return valueFromId(this.#values.const64(value));
-  }
-
   currentEip(): Value {
     this.#beforeOp("currentEip");
-    return valueFromId(this.#location().eip());
+    return this.#location().eip();
   }
 
   nextEip(): Value {
     this.#beforeOp("nextEip");
-    return valueFromId(this.#location().nextEip());
+    return this.#location().nextEip();
   }
 
   reg(regInput: RegName): RegRef {
@@ -271,37 +252,33 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     switch (storage.kind) {
       case "reg":
-        return valueFromId(this.#state.gpr.read(storage.reg, accessWidth, options));
+        return this.#state.gpr.read(storage.reg, accessWidth, options);
       case "mem":
-        return valueFromId(this.#readGuestMemory(storage.address, accessWidth, options));
+        return this.#readGuestMemory(storage.address, accessWidth, options);
       case "operand": {
         const binding = this.#binding(storage.index);
 
         switch (binding.kind) {
           case "imm":
-            return valueFromId(
-              this.#values.widthAdjusted(accessWidth, this.#values.const(binding.value), options.signed === true)
-            );
+            return this.#values.widthAdjusted(accessWidth, this.#values.const(binding.value), options.signed === true);
           case "immExternal":
-            return valueFromId(
-              this.#values.widthAdjusted(accessWidth, this.#values.external(binding.value), options.signed === true)
+            return this.#values.widthAdjusted(
+              accessWidth,
+              this.#values.external(binding.value),
+              options.signed === true
             );
           case "reg":
-            return valueFromId(this.#state.gpr.read(binding.channel, accessWidth, options));
+            return this.#state.gpr.read(binding.channel, accessWidth, options);
           case "segment":
-            return valueFromId(this.#state.segments.readSelector(binding.channel, accessWidth, options));
+            return this.#state.segments.readSelector(binding.channel, accessWidth, options);
           case "mem":
           case "memStatic":
           case "memDynamic":
-            return valueFromId(this.#readGuestMemory(this.#operandLinearAddress(storage.index), accessWidth, options));
+            return this.#readGuestMemory(this.#operandLinearAddress(storage.index), accessWidth, options);
           case "regDynamic":
-            return valueFromId(
-              this.#state.gpr.readDynamic(this.#dynamicGprSlot(binding, accessWidth), options)
-            );
+            return this.#state.gpr.readDynamic(this.#dynamicGprSlot(binding, accessWidth), options);
           case "segmentDynamic":
-            return valueFromId(
-              this.#state.segments.readDynamicSelector(this.#values.external(binding.index), accessWidth, options)
-            );
+            return this.#state.segments.readDynamicSelector(this.#values.external(binding.index), accessWidth, options);
         }
       }
     }
@@ -378,71 +355,21 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   address(operandRef: OperandInput): Value {
     this.#beforeOp("address");
-    return valueFromId(this.#operandAddress(operandRef.index));
+    return this.#operandAddress(operandRef.index);
   }
 
   linearAddress(operandRef: OperandInput): Value {
     this.#beforeOp("linearAddress");
-    return valueFromId(this.#operandLinearAddress(operandRef.index));
-  }
-
-  binary(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
-    this.#beforeOp("binary");
-    return valueFromId(this.#values.binary(operator, a, b));
-  }
-
-  unary(operator: UnaryOperator, value: ValueInput): Value {
-    this.#beforeOp("unary");
-    return valueFromId(this.#values.unary(operator, value));
-  }
-
-  binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
-    this.#beforeOp("binary64");
-    return valueFromId(this.#values.binary64(operator, a, b));
-  }
-
-  compare64(operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
-    this.#beforeOp("compare64");
-    return valueFromId(this.#values.compare64(operator, a, b));
-  }
-
-  truncate64(width: OperandWidth, value: ValueInput): Value {
-    this.#beforeOp("truncate64");
-    return valueFromId(this.#values.truncate64(width, value));
-  }
-
-  extend64(width: OperandWidth, value: ValueInput, signed: boolean): Value {
-    this.#beforeOp("extend64");
-    return valueFromId(this.#values.extend64(width, value, signed));
-  }
-
-  select(condition: ValueInput, whenTrue: ValueInput, whenFalse: ValueInput): Value {
-    this.#beforeOp("select");
-    return valueFromId(this.#values.select(condition, whenTrue, whenFalse));
-  }
-
-  truncate(width: OperandWidth, value: ValueInput): Value {
-    this.#beforeOp("truncate");
-    return valueFromId(this.#values.truncate(width, value));
-  }
-
-  extend(width: OperandWidth, value: ValueInput, signed: boolean): Value {
-    this.#beforeOp("extend");
-    return valueFromId(this.#values.extend(width, value, signed));
-  }
-
-  compare(width: OperandWidth, operator: CompareOperator, a: ValueInput, b: ValueInput): Value {
-    this.#beforeOp("compare");
-    return valueFromId(this.#values.compare(width, operator, a, b));
+    return this.#operandLinearAddress(operandRef.index);
   }
 
   readFlag(flag: X86Flag): Value {
     this.#beforeOp("readFlag");
     if (!isX86StatusFlag(flag)) {
-      return valueFromId(this.#state.flags.read(flag));
+      return this.#state.flags.read(flag);
     }
 
-    return valueFromId(this.#state.statusFlags.read(flag));
+    return this.#state.statusFlags.read(flag);
   }
 
   writeFlag(flag: X86Flag, value: ValueInput): void {
@@ -462,7 +389,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
   condition(cc: ConditionCode): Value {
     this.#beforeOp("condition");
-    return valueFromId(this.#state.statusFlags.condition(cc));
+    return this.#state.statusFlags.condition(cc);
   }
 
   jump(target: TargetInput): void {
@@ -514,7 +441,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         binding: (index) => this.#binding(index)
       });
 
-      exitValues = loop.emitContinue(options.body(loopBuilder));
+      exitValues = loop.emitContinue(options.body(loopBuilder, this.#values));
     } finally {
       this.#activeLoop = undefined;
     }

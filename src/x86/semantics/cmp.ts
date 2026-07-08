@@ -4,16 +4,16 @@ import { subFlagSource } from "./flag-writes.js";
 import { guardStorageRead } from "./memory.js";
 
 export function cmpSemantic(width: OperandWidth = 32): SemanticTemplate {
-  return (s, context) => {
+  return (s, v, context) => {
     const leftOperand = s.operand(0);
     const rightOperand = s.operand(1);
 
     guardStorageRead(s, context, leftOperand, width);
     guardStorageRead(s, context, rightOperand, width);
 
-    const left = s.truncate(width, s.get(leftOperand, width));
-    const right = s.truncate(width, s.get(rightOperand, width));
-    const result = s.truncate(width, s.binary("sub", left, right));
+    const left = v.truncate(width, s.get(leftOperand, width));
+    const right = v.truncate(width, s.get(rightOperand, width));
+    const result = v.truncate(width, v.binary("sub", left, right));
 
     s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
   };

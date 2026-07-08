@@ -14,6 +14,7 @@ import {
 } from "#ir/slots.js";
 import type { StateSlot } from "#ir/slots.js";
 import { memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { valueId } from "#ir/values.js";
 
 const memory: StorageEffect = { space: "memory" };
 
@@ -22,15 +23,15 @@ function state(slot: StateSlot): StorageEffect {
 }
 
 function dynamicGpr(index: number, byteLength: 1 | 2 | 4 = 4): StateSlot {
-  return { kind: "gprDynamic", index, byteLength };
+  return { kind: "gprDynamic", index: valueId(index), byteLength };
 }
 
 function dynamicSegmentBase(index: number): StateSlot {
-  return { kind: "segmentDynamic", index, field: "base" };
+  return { kind: "segmentDynamic", index: valueId(index), field: "base" };
 }
 
 function dynamicSegmentSelector(index: number): StateSlot {
-  return { kind: "segmentDynamic", index, field: "selector" };
+  return { kind: "segmentDynamic", index: valueId(index), field: "selector" };
 }
 
 test("effects derive from action kind and slot", () => {
@@ -54,7 +55,7 @@ test("effects derive from action kind and slot", () => {
     reads: [],
     writes: [memory]
   });
-  deepStrictEqual(effectsOf({ kind: "op", output: 0, op: { kind: "cpu.resolveFlag", flag: "ZF" } }), {
+  deepStrictEqual(effectsOf({ kind: "op", output: valueId(0), op: { kind: "cpu.resolveFlag", flag: "ZF" } }), {
     reads: [
       state(flagChannel("ZF")),
       state(lazyFlagsKindChannel),
@@ -67,7 +68,7 @@ test("effects derive from action kind and slot", () => {
 
 test("ifs and finishes touch no data directly", () => {
   deepStrictEqual(
-    effectsOf({ kind: "if", condition: 0, thenBody: { actions: [] }, elseBody: { actions: [] } }),
+    effectsOf({ kind: "if", condition: valueId(0), thenBody: { actions: [] }, elseBody: { actions: [] } }),
     { reads: [], writes: [] }
   );
   deepStrictEqual(
@@ -75,7 +76,7 @@ test("ifs and finishes touch no data directly", () => {
     { reads: [], writes: [] }
   );
   deepStrictEqual(
-    effectsOf({ kind: "finish", finish: { kind: "dispatch", targetEip: 0 } }),
+    effectsOf({ kind: "finish", finish: { kind: "dispatch", targetEip: valueId(0) } }),
     { reads: [], writes: [] }
   );
 });
@@ -83,7 +84,7 @@ test("ifs and finishes touch no data directly", () => {
 test("if effects aggregate nested body effects", () => {
   const action = {
     kind: "if",
-    condition: 0,
+    condition: valueId(0),
     thenBody: { actions: [stateRead(1, gprChannel("eax")), stateWrite(gprChannel("ebx"), 1)] },
     elseBody: { actions: [memoryWrite(2, 3, 32)] }
   } as const;
