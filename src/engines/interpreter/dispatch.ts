@@ -20,6 +20,11 @@ import { noBaseRegister, type RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";
 import { emitInstructionHandler, type HandlerEmitContext } from "./handlers.js";
 import { interpreterDispatchRoot } from "./instructions.js";
+import {
+  withModRmScratch,
+  withRmAddressScratch,
+  type ModRmScratch
+} from "./locals.js";
 import { emitPrefixCase, prefixBytes } from "./prefixes.js";
 
 // The hand-written dispatch shape: br_table over the fetched opcode byte,
@@ -164,7 +169,7 @@ function emitLeafCandidates(
         return;
       }
 
-      emitInstructionHandler(context, instruction, "plain", {
+      emitInstructionHandler(context, instruction, { form: "plain" }, {
         kind: "static",
         offset: leaf.opcodeLength
       });
@@ -184,40 +189,42 @@ function emitModRmLeaf(
   const { body, locals } = context;
   const opcodeEnd = leaf.opcodeLength;
 
-  const cursorAfterModRm = emitModRmFetch(context, locals.eip, { kind: "static", offset: opcodeEnd }, {
-    modLocal: locals.mod,
-    regLocal: locals.reg,
-    rmLocal: locals.rm
-  });
-
-  const cases = modRmRegCases(candidates);
-
-  if (cases.length === 0) {
-    emitReturnUnsupported(body);
-    return;
-  }
-
-  if (cases.length === 1 && cases[0]!.regs.length === reg3Values.length) {
-    emitModRmForms(cases[0]!.instruction, opcodeEnd, cursorAfterModRm, context);
-    return;
-  }
-
-  for (let index = 0; index <= cases.length; index += 1) {
-    body.block();
-  }
-
-  body.localGet(locals.reg).brTable(regDispatchTable(cases), cases.length);
-
-  for (let index = cases.length - 1; index >= 0; index -= 1) {
-    body.endBlock();
-    emitModRmForms(cases[index]!.instruction, opcodeEnd, cursorAfterModRm, {
-      ...context,
-      continueDepth: context.continueDepth + 1 + index
+  withModRmScratch(context.scratch, (modRm) => {
+    const cursorAfterModRm = emitModRmFetch(context, locals.eip, { kind: "static", offset: opcodeEnd }, {
+      modLocal: modRm.mod,
+      regLocal: modRm.reg,
+      rmLocal: modRm.rm
     });
-  }
 
-  body.endBlock();
-  emitReturnUnsupported(body);
+    const cases = modRmRegCases(candidates);
+
+    if (cases.length === 0) {
+      emitReturnUnsupported(body);
+      return;
+    }
+
+    if (cases.length === 1 && cases[0]!.regs.length === reg3Values.length) {
+      emitModRmForms(cases[0]!.instruction, opcodeEnd, cursorAfterModRm, context, modRm);
+      return;
+    }
+
+    for (let index = 0; index <= cases.length; index += 1) {
+      body.block();
+    }
+
+    body.localGet(modRm.reg).brTable(regDispatchTable(cases), cases.length);
+
+    for (let index = cases.length - 1; index >= 0; index -= 1) {
+      body.endBlock();
+      emitModRmForms(cases[index]!.instruction, opcodeEnd, cursorAfterModRm, {
+        ...context,
+        continueDepth: context.continueDepth + 1 + index
+      }, modRm);
+    }
+
+    body.endBlock();
+    emitReturnUnsupported(body);
+  });
 }
 
 // The addressing forms of one instruction: mod 3 binds the rm register
@@ -227,35 +234,40 @@ function emitModRmForms(
   instruction: ExpandedInstructionSpec,
   opcodeEnd: number,
   cursorAfterModRm: DecodeCursor,
-  context: DispatchEmitContext
+  context: DispatchEmitContext,
+  modRm: ModRmScratch
 ): void {
   const { body } = context;
   const rmOperand = (instruction.spec.operands ?? []).find(isRmOperand);
 
   if (rmOperand === undefined) {
-    emitInstructionHandler(context, instruction, "plain", cursorAfterModRm);
+    emitInstructionHandler(context, instruction, { form: "plain", modRm }, cursorAfterModRm);
     return;
   }
 
   const armContext = { ...context, continueDepth: context.continueDepth + 1 };
   const memoryContext = { ...context, continueDepth: context.continueDepth + 2 };
-  const cursorAfterAddress: DecodeCursor = { kind: "local", local: context.locals.addressCursor };
 
-  body.localGet(context.locals.mod).i32Const(3).i32Eq().ifBlock();
+  body.localGet(modRm.mod).i32Const(3).i32Eq().ifBlock();
 
   if (isMemoryOnlyRmType(rmOperand.type)) {
     emitReturnUnsupported(body);
   } else {
-    emitInstructionHandler(armContext, instruction, "regDynamic", cursorAfterModRm);
+    emitInstructionHandler(armContext, instruction, { form: "regDynamic", modRm }, cursorAfterModRm);
   }
 
   body.elseBlock();
-  armContext.rmDecode.emitMemoryAddressDecode(armContext, opcodeEnd);
-  body.localGet(context.locals.base).i32Const(noBaseRegister).i32Eq().ifBlock();
-  emitInstructionHandler(memoryContext, instruction, "memStatic", cursorAfterAddress);
-  body.elseBlock();
-  emitInstructionHandler(memoryContext, instruction, "memDynamic", cursorAfterAddress);
-  body.endBlock();
+  withRmAddressScratch(context.scratch, (rmAddress) => {
+    const cursorAfterAddress: DecodeCursor = { kind: "local", local: rmAddress.addressCursor };
+
+    armContext.rmDecode.emitMemoryAddressDecode({ ...armContext, modRm, rmAddress }, opcodeEnd);
+    body.localGet(rmAddress.base).i32Const(noBaseRegister).i32Eq().ifBlock();
+    emitInstructionHandler(memoryContext, instruction, { form: "memStatic", modRm, address: rmAddress }, cursorAfterAddress);
+    body.elseBlock();
+    emitInstructionHandler(memoryContext, instruction, { form: "memDynamic", modRm, address: rmAddress }, cursorAfterAddress);
+    body.endBlock();
+  });
+
   body.endBlock();
 }
 

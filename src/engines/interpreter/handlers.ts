@@ -33,7 +33,14 @@ import {
   emitRelTargetFetch,
   type DecodeCursor
 } from "./fragments.js";
-import type { InterpreterLocals } from "./locals.js";
+import {
+  withHandlerScratch,
+  withValueOperandScratch,
+  type HandlerScratch,
+  type InterpreterLocals,
+  type ModRmScratch,
+  type RmAddressScratch
+} from "./locals.js";
 
 // Instruction handlers are single-instruction IrBlocks over the existing
 // semantics templates. Decoded operands arrive as externals — dynamic
@@ -59,221 +66,295 @@ export type HandlerEmitContext = Readonly<{
   handlers: InterpreterHandler[];
 }>;
 
+export type HandlerCase =
+  | Readonly<{ form: "plain"; modRm?: ModRmScratch }>
+  | Readonly<{ form: "regDynamic"; modRm: ModRmScratch }>
+  | Readonly<{ form: "memStatic"; modRm: ModRmScratch; address: RmAddressScratch }>
+  | Readonly<{ form: "memDynamic"; modRm: ModRmScratch; address: RmAddressScratch }>;
+
 export function emitInstructionHandler(
   context: HandlerEmitContext,
   instruction: ExpandedInstructionSpec,
-  form: HandlerForm,
+  handlerCase: HandlerCase,
   cursorAfterDispatch: DecodeCursor
 ): void {
   const operands = instruction.spec.operands ?? [];
 
-  assert(
-    operands.filter((operand) => operand.kind === "imm" || operand.kind === "rel").length <= 1,
-    `${instruction.spec.id}: only one trailing value operand is supported`
-  );
-
-  const externals = new HandlerExternals();
-  const bindings: OperandBinding[] = [];
-  let cursor = cursorAfterDispatch;
-
-  for (const operand of operands) {
-    const decoded = decodeOperand(context, instruction, operand, form, cursor, externals);
-
-    bindings.push(decoded.binding);
-    cursor = decoded.cursor;
-  }
-
-  emitNextEip(context, cursor);
-
-  const builder = createIrBlockBuilder({ segmentMode: "flat32" });
-
-  // The location's eip is what fault paths commit; prefix cases rebase the
-  // eip local, so the location binds the saved instruction start.
-  builder.addInstruction(
-    instruction.spec.semantics,
-    bindings,
-    externalInstructionLocation(
-      externals.bind(context.locals.instructionStart),
-      externals.bind(context.locals.nextEip)
-    )
-  );
-  emitActionFragment(builder.finish(), {
-    body: context.body,
-    scratch: context.scratch,
-    externalLocals: externals.locals,
-    helpers: context.helpers,
-    embedding: { dispatch: { kind: "br", depth: context.continueDepth } }
-  });
-  context.handlers.push({ instructionId: instruction.spec.id, opcode: instruction.opcode, form });
-}
-
-type DecodedOperand = Readonly<{ binding: OperandBinding; cursor: DecodeCursor }>;
-
-function decodeOperand(
-  context: HandlerEmitContext,
-  instruction: ExpandedInstructionSpec,
-  operand: OperandSpec,
-  form: HandlerForm,
-  cursor: DecodeCursor,
-  externals: HandlerExternals
-): DecodedOperand {
-  const { locals } = context;
-
-  switch (operand.kind) {
-    case "modrm.reg":
-      return { binding: regDynamicBinding(externals.bind(locals.reg)), cursor };
-    case "modrm.sreg":
-      return { binding: segmentDynamicBinding(externals.bind(locals.reg)), cursor };
-    case "modrm.rm":
-      assert(form !== "plain", `${instruction.spec.id}: rm operand without a resolved form`);
-      emitRmEffectiveSegment(context, form);
-      return { binding: rmBinding(form, locals, externals), cursor };
-    case "opcode.reg": {
-      assert(
-        instruction.opcodeLowBits !== undefined,
-        `${instruction.spec.id}: opcode.reg operand without opcode low bits`
-      );
-      return { binding: regBinding(opcodeRegName(operand.type, instruction.opcodeLowBits)), cursor };
-    }
-    case "implicit.reg":
-      return { binding: regBinding(operand.reg), cursor };
-    case "implicit.sreg":
-      return { binding: segmentBinding(operand.reg), cursor };
-    case "implicit.mem":
-      return {
-        binding: implicitMemoryBinding(context, externals, operand.base, operand.disp, operand.segment),
-        cursor
-      };
-    case "moffs":
-      cursor = emitImmediateFetch(context, locals.eip, cursor, 32, false, locals.offset);
-      emitEffectiveSegment(context, dsSegmentIndex);
-      return {
-        binding: memStaticBinding(
-          externals.bind(locals.offset),
-          dynamicMemSegment(externals.bind(locals.effectiveSegment))
-        ),
-        cursor
-      };
-    case "imm":
-      cursor = emitImmediateFetch(
+  withHandlerScratch(context.scratch, (handlerScratch) => {
+    withValueOperandScratch(context.scratch, valueOperandCount(operands), (valueScratch) => {
+      const externals = new HandlerExternals();
+      const emittedOperands = new HandlerOperandEmitter(
         context,
-        locals.eip,
-        cursor,
-        operand.width,
-        operand.extension === "sign",
-        locals.imm
+        instruction,
+        handlerCase,
+        cursorAfterDispatch,
+        handlerScratch,
+        valueScratch,
+        externals
+      ).emitAll();
+
+      emitNextEip(context, emittedOperands.cursor, handlerScratch.nextEip);
+
+      const builder = createIrBlockBuilder({ segmentMode: "flat32" });
+
+      // The location's eip is what fault paths commit; prefix cases rebase the
+      // eip local, so the location binds the saved instruction start.
+      builder.addInstruction(
+        instruction.spec.semantics,
+        emittedOperands.bindings,
+        externalInstructionLocation(
+          externals.bind(context.locals.instructionStart),
+          externals.bind(handlerScratch.nextEip)
+        )
       );
-      return {
-        binding: immExternalBinding(externals.bind(locals.imm)),
-        cursor
-      };
-    case "rel":
-      cursor = emitRelTargetFetch(context, locals.eip, cursor, operand.width, locals.target);
-      return {
-        binding: immExternalBinding(externals.bind(locals.target)),
-        cursor
-      };
-  }
+      emitActionFragment(builder.finish(), {
+        body: context.body,
+        scratch: context.scratch,
+        externalLocals: externals.locals,
+        helpers: context.helpers,
+        embedding: { dispatch: { kind: "br", depth: context.continueDepth } }
+      });
+      context.handlers.push({
+        instructionId: instruction.spec.id,
+        opcode: instruction.opcode,
+        form: handlerCase.form
+      });
+    });
+  });
 }
 
-// Hidden memory operands use a fixed base register; only the segment may
-// come from runtime prefix state.
-function implicitMemoryBinding(
-  context: HandlerEmitContext,
-  externals: HandlerExternals,
-  base: Reg32,
-  disp: number,
-  segment: SegmentRegister | undefined
-): OperandBinding {
-  if (segment !== undefined) {
+type EmittedHandlerOperands = Readonly<{
+  bindings: readonly OperandBinding[];
+  cursor: DecodeCursor;
+}>;
+
+class HandlerOperandEmitter {
+  readonly #context: HandlerEmitContext;
+  readonly #instruction: ExpandedInstructionSpec;
+  readonly #operands: readonly OperandSpec[];
+  readonly #handlerCase: HandlerCase;
+  readonly #handlerScratch: HandlerScratch;
+  readonly #valueScratch: readonly number[];
+  readonly #externals: HandlerExternals;
+  readonly #bindings: OperandBinding[] = [];
+  #cursor: DecodeCursor;
+  #valueIndex = 0;
+
+  constructor(
+    context: HandlerEmitContext,
+    instruction: ExpandedInstructionSpec,
+    handlerCase: HandlerCase,
+    cursor: DecodeCursor,
+    handlerScratch: HandlerScratch,
+    valueScratch: readonly number[],
+    externals: HandlerExternals
+  ) {
+    this.#context = context;
+    this.#instruction = instruction;
+    this.#operands = instruction.spec.operands ?? [];
+    this.#handlerCase = handlerCase;
+    this.#cursor = cursor;
+    this.#handlerScratch = handlerScratch;
+    this.#valueScratch = valueScratch;
+    this.#externals = externals;
+  }
+
+  emitAll(): EmittedHandlerOperands {
+    for (const operand of this.#operands) {
+      this.#bindings.push(this.#emitOperand(operand));
+    }
+
+    assert(
+      this.#valueIndex === this.#valueScratch.length,
+      `${this.#instruction.spec.id}: not all value scratch locals were consumed`
+    );
+
+    return { bindings: this.#bindings, cursor: this.#cursor };
+  }
+
+  #emitOperand(operand: OperandSpec): OperandBinding {
+    const { locals } = this.#context;
+
+    switch (operand.kind) {
+      case "modrm.reg":
+        return regDynamicBinding(this.#external(this.#modRmScratch().reg));
+      case "modrm.sreg":
+        return segmentDynamicBinding(this.#external(this.#modRmScratch().reg));
+      case "modrm.rm":
+        this.#emitRmEffectiveSegment();
+        return this.#rmBinding();
+      case "opcode.reg": {
+        assert(
+          this.#instruction.opcodeLowBits !== undefined,
+          `${this.#instruction.spec.id}: opcode.reg operand without opcode low bits`
+        );
+        return regBinding(opcodeRegName(operand.type, this.#instruction.opcodeLowBits));
+      }
+      case "implicit.reg":
+        return regBinding(operand.reg);
+      case "implicit.sreg":
+        return segmentBinding(operand.reg);
+      case "implicit.mem":
+        return this.#implicitMemoryBinding(operand.base, operand.disp, operand.segment);
+      case "moffs":
+        this.#cursor = emitImmediateFetch(
+          this.#context,
+          locals.eip,
+          this.#cursor,
+          32,
+          false,
+          this.#handlerScratch.offset
+        );
+        emitEffectiveSegment(this.#context, dsSegmentIndex, this.#handlerScratch.effectiveSegment);
+        return memStaticBinding(
+          this.#external(this.#handlerScratch.offset),
+          dynamicMemSegment(this.#external(this.#handlerScratch.effectiveSegment))
+        );
+      case "imm": {
+        const valueLocal = this.#nextValueLocal();
+
+        this.#cursor = emitImmediateFetch(
+          this.#context,
+          locals.eip,
+          this.#cursor,
+          operand.width,
+          operand.extension === "sign",
+          valueLocal
+        );
+        return immExternalBinding(this.#external(valueLocal));
+      }
+      case "rel": {
+        const valueLocal = this.#nextValueLocal();
+
+        this.#cursor = emitRelTargetFetch(this.#context, locals.eip, this.#cursor, operand.width, valueLocal);
+        return immExternalBinding(this.#external(valueLocal));
+      }
+    }
+  }
+
+  #implicitMemoryBinding(
+    base: Reg32,
+    disp: number,
+    segment: SegmentRegister | undefined
+  ): OperandBinding {
+    if (segment !== undefined) {
+      return memBinding(
+        { base, index: undefined, scale: 1, disp },
+        staticMemSegment(segment)
+      );
+    }
+
+    emitEffectiveSegment(
+      this.#context,
+      defaultSegmentIndexForBaseIndex(reg32Index(base)),
+      this.#handlerScratch.effectiveSegment
+    );
     return memBinding(
       { base, index: undefined, scale: 1, disp },
-      staticMemSegment(segment)
+      dynamicMemSegment(this.#external(this.#handlerScratch.effectiveSegment))
     );
   }
 
-  emitEffectiveSegment(context, defaultSegmentIndexForBaseIndex(reg32Index(base)));
-  return memBinding(
-    { base, index: undefined, scale: 1, disp },
-    dynamicMemSegment(externals.bind(context.locals.effectiveSegment))
-  );
-}
+  #rmBinding(): OperandBinding {
+    switch (this.#handlerCase.form) {
+      case "regDynamic":
+        return regDynamicBinding(this.#external(this.#handlerCase.modRm.rm));
+      case "memStatic":
+        return memStaticBinding(
+          this.#external(this.#handlerCase.address.offset),
+          dynamicMemSegment(this.#external(this.#handlerScratch.effectiveSegment))
+        );
+      case "memDynamic":
+        return memDynamicBinding(
+          this.#external(this.#handlerCase.address.base),
+          this.#external(this.#handlerCase.address.offset),
+          dynamicMemSegment(this.#external(this.#handlerScratch.effectiveSegment))
+        );
+      case "plain":
+        assert(false, `${this.#instruction.spec.id}: rm operand without a resolved form`);
+    }
+  }
 
-// The base-less EA leaves decode complete in the offset local.
-function rmBinding(
-  form: Exclude<HandlerForm, "plain">,
-  locals: InterpreterLocals,
-  externals: HandlerExternals
-): OperandBinding {
-  switch (form) {
-    case "regDynamic":
-      return regDynamicBinding(externals.bind(locals.rm));
-    case "memStatic":
-      return memStaticBinding(
-        externals.bind(locals.offset),
-        dynamicMemSegment(externals.bind(locals.effectiveSegment))
-      );
-    case "memDynamic":
-      return memDynamicBinding(
-        externals.bind(locals.base),
-        externals.bind(locals.offset),
-        dynamicMemSegment(externals.bind(locals.effectiveSegment))
-      );
+  #emitRmEffectiveSegment(): void {
+    switch (this.#handlerCase.form) {
+      case "plain":
+      case "regDynamic":
+        return;
+      case "memStatic":
+        emitEffectiveSegment(this.#context, dsSegmentIndex, this.#handlerScratch.effectiveSegment);
+        return;
+      case "memDynamic":
+        emitDynamicBaseEffectiveSegment(
+          this.#context,
+          this.#handlerCase.address.base,
+          this.#handlerScratch.effectiveSegment
+        );
+        return;
+    }
+  }
+
+  #modRmScratch(): ModRmScratch {
+    const { modRm } = this.#handlerCase;
+
+    assert(modRm !== undefined, `${this.#instruction.spec.id}: ModRM operand without ModRM scratch`);
+    return modRm;
+  }
+
+  #nextValueLocal(): number {
+    const local = this.#valueScratch[this.#valueIndex];
+
+    assert(local !== undefined, `${this.#instruction.spec.id}: value scratch ${this.#valueIndex} was not allocated`);
+    this.#valueIndex += 1;
+    return local;
+  }
+
+  #external(local: number): ExternalValueId {
+    return this.#externals.bind(local);
   }
 }
 
-function emitRmEffectiveSegment(context: HandlerEmitContext, form: HandlerForm): void {
-  switch (form) {
-    case "plain":
-    case "regDynamic":
-      return;
-    case "memStatic":
-      emitEffectiveSegment(context, dsSegmentIndex);
-      return;
-    case "memDynamic":
-      emitDynamicBaseEffectiveSegment(context);
-      return;
-  }
-}
-
-function emitEffectiveSegment(context: HandlerEmitContext, defaultSegment: number): void {
+function emitEffectiveSegment(context: HandlerEmitContext, defaultSegment: number, effectiveSegmentLocal: number): void {
   const { body, locals } = context;
 
   body.localGet(locals.segment).i32Const(noSegmentOverride).i32Eq().ifBlock(wasmBranchHint.likely);
-  body.i32Const(defaultSegment).localSet(locals.effectiveSegment);
+  body.i32Const(defaultSegment).localSet(effectiveSegmentLocal);
   body.elseBlock();
-  body.localGet(locals.segment).localSet(locals.effectiveSegment);
+  body.localGet(locals.segment).localSet(effectiveSegmentLocal);
   body.endBlock();
 }
 
-function emitDynamicBaseEffectiveSegment(context: HandlerEmitContext): void {
+function emitDynamicBaseEffectiveSegment(
+  context: HandlerEmitContext,
+  baseLocal: number,
+  effectiveSegmentLocal: number
+): void {
   const { body, locals } = context;
 
   body.localGet(locals.segment).i32Const(noSegmentOverride).i32Eq().ifBlock(wasmBranchHint.likely);
-  emitBaseDefaultsToStackSegment(context);
+  emitBaseDefaultsToStackSegment(context, baseLocal);
   body.ifBlock();
-  body.i32Const(ssSegmentIndex).localSet(locals.effectiveSegment);
+  body.i32Const(ssSegmentIndex).localSet(effectiveSegmentLocal);
   body.elseBlock();
-  body.i32Const(dsSegmentIndex).localSet(locals.effectiveSegment);
+  body.i32Const(dsSegmentIndex).localSet(effectiveSegmentLocal);
   body.endBlock();
   body.elseBlock();
-  body.localGet(locals.segment).localSet(locals.effectiveSegment);
+  body.localGet(locals.segment).localSet(effectiveSegmentLocal);
   body.endBlock();
 }
 
-function emitBaseDefaultsToStackSegment(context: HandlerEmitContext): void {
-  const { body, locals } = context;
+function emitBaseDefaultsToStackSegment(context: HandlerEmitContext, baseLocal: number): void {
+  const { body } = context;
   const [firstBaseIndex, ...remainingBaseIndexes] = ssDefaultSegmentBaseIndexes;
 
-  body.localGet(locals.base).i32Const(firstBaseIndex).i32Eq();
+  body.localGet(baseLocal).i32Const(firstBaseIndex).i32Eq();
 
   for (const baseIndex of remainingBaseIndexes) {
-    body.localGet(locals.base).i32Const(baseIndex).i32Eq().i32Or();
+    body.localGet(baseLocal).i32Const(baseIndex).i32Eq().i32Or();
   }
 }
 
 // nextEip is an external: eip plus the decoded length.
-function emitNextEip(context: HandlerEmitContext, cursor: DecodeCursor): void {
+function emitNextEip(context: HandlerEmitContext, cursor: DecodeCursor, nextEipLocal: number): void {
   const { body, locals } = context;
 
   body.localGet(locals.eip);
@@ -287,7 +368,7 @@ function emitNextEip(context: HandlerEmitContext, cursor: DecodeCursor): void {
       break;
   }
 
-  body.i32Add().localSet(locals.nextEip);
+  body.i32Add().localSet(nextEipLocal);
 }
 
 function opcodeRegName(type: RegOperandType, lowBits: number): RegName {
@@ -307,6 +388,14 @@ function opcodeRegNames(type: RegOperandType): readonly RegName[] {
     case "r32":
       return reg32;
   }
+}
+
+function valueOperandCount(operands: readonly OperandSpec[]): number {
+  return operands.filter(isValueOperand).length;
+}
+
+function isValueOperand(operand: OperandSpec): boolean {
+  return operand.kind === "imm" || operand.kind === "rel";
 }
 
 // External ids per handler block, deduplicated per dispatch local.

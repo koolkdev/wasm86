@@ -8,7 +8,11 @@ import {
   type DecodeCursor,
   type RmAddressParts
 } from "./fragments.js";
-import type { InterpreterLocals } from "./locals.js";
+import type {
+  InterpreterLocals,
+  ModRmScratch,
+  RmAddressScratch
+} from "./locals.js";
 
 // The memory form of a ModRM rm operand, shared as one module-level helper
 // function per opcode length so every fragment offset stays static. The
@@ -37,6 +41,8 @@ export type RmDecodeCallContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   locals: InterpreterLocals;
+  modRm: ModRmScratch;
+  rmAddress: RmAddressScratch;
 }>;
 
 // One module's shared rm-decode helpers: the result globals plus one helper
@@ -60,15 +66,15 @@ export class RmDecodeHelpers {
   // A fault result returns as-is, so exception fields and the unadvanced eip
   // match the inline emission exactly.
   emitMemoryAddressDecode(context: RmDecodeCallContext, opcodeLength: number): void {
-    const { body, locals } = context;
+    const { body, locals, modRm, rmAddress } = context;
     const helperIndex = this.#functionIndex(opcodeLength);
 
-    body.localGet(locals.eip).localGet(locals.mod).localGet(locals.rm).callFunction(helperIndex);
+    body.localGet(locals.eip).localGet(modRm.mod).localGet(modRm.rm).callFunction(helperIndex);
     context.scratch.withLocals([wasmValueType.i64], ([status]) => {
       body.localTee(status).i64Eqz().ifBlock();
-      body.globalGet(this.#globals.base).localSet(locals.base);
-      body.globalGet(this.#globals.offset).localSet(locals.offset);
-      body.globalGet(this.#globals.cursor).localSet(locals.addressCursor);
+      body.globalGet(this.#globals.base).localSet(rmAddress.base);
+      body.globalGet(this.#globals.offset).localSet(rmAddress.offset);
+      body.globalGet(this.#globals.cursor).localSet(rmAddress.addressCursor);
       body.elseBlock();
       body.localGet(status).returnFromFunction();
       body.endBlock();
