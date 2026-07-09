@@ -4,11 +4,8 @@ import {
   bodyCompletes,
   maxSwitchMatch,
   type Action,
-  type Finish,
-  type IrExit,
   type LoopAction,
   type OpAction,
-  type StateWriteAction,
   type SwitchAction
 } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
@@ -20,10 +17,38 @@ import {
   type StateChannel,
   type StateSlot
 } from "./slots.js";
-import { unboundedWidthBounds, type ValueId, type WidthBounds } from "./values.js";
+import { actionOperands } from "./traverse.js";
+import {
+  unboundedWidthBounds,
+  valueChildren,
+  valueId,
+  type ValueId,
+  type WidthBounds
+} from "./values.js";
 
 export type ValidateIrBlockOptions = Readonly<{
   allowImplicitEntryFallthrough?: boolean;
+  // Values the embedder consumes at the root body's dispatch/fallthrough
+  // boundary. They are not represented by actions inside IrBlock.
+  exportedOutputs?: Iterable<ValueId>;
+}>;
+
+type ActionSite = Readonly<{
+  body: Body;
+  actionIndex: number;
+  path: string;
+}>;
+
+type BodyOwner = Readonly<{
+  body: Body;
+  actionIndex: number;
+}>;
+
+type BodyValidationContext = Readonly<{
+  path: string;
+  ownerOutput: ValueId | undefined;
+  enclosingLoop: LoopAction | undefined;
+  hasPriorEipWrite: boolean;
 }>;
 
 // Structural checks: bodies terminate consistently, nested bodies are closed
@@ -31,134 +56,433 @@ export type ValidateIrBlockOptions = Readonly<{
 // dispatch completion owns the architectural EIP commit, so state writes on
 // the same path must not also flush EIP.
 export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
-  validateBody(block, block.body, [], "body", undefined, undefined);
-
-  assert(
-    bodyCompletes(block.body) || options.allowImplicitEntryFallthrough === true,
-    "root body does not complete"
-  );
+  new IrValidator(block).validate(options);
 }
 
-// A body carries a result exactly when its owner declares an output
-// (`ownerOutput`) and the body itself does not complete. `enclosingLoop` is
-// the innermost loop whose back edge a continue in this body would take.
-function validateBody(
-  block: IrBlock,
-  body: Body,
-  ancestorPrefix: readonly Action[],
-  path: string,
-  ownerOutput: ValueId | undefined,
-  enclosingLoop: LoopAction | undefined
-): void {
-  if (body.result !== undefined) {
-    assert(ownerOutput !== undefined, `${path} carries a result without an owner output`);
-    assert(!bodyCompletes(body), `${path} carries a result but completes`);
-    assert(
-      block.values.valueType(body.result) === block.values.valueType(ownerOutput),
-      `${path} result type does not match its owner output`
-    );
-  } else {
-    // Escaping bodies under an output owner are model-valid but have no
-    // producer yet; the emitter cannot lower them.
-    assert(ownerOutput === undefined, `${path} must carry a result`);
+// Validation has two phases. Indexing establishes the unique body tree and all
+// scoped definitions; the semantic walk can then reject forward and escaping
+// uses without depending on traversal order.
+class IrValidator {
+  readonly #block: IrBlock;
+  readonly #bodyOwners = new Map<Body, BodyOwner | null>();
+  readonly #producers = new Map<ValueId, ActionSite>();
+  readonly #loopInputs = new Map<ValueId, Body>();
+
+  constructor(block: IrBlock) {
+    this.#block = block;
+    this.#bodyOwners.set(block.body, null);
   }
 
-  for (const [index, action] of body.actions.entries()) {
-    assertKnownAction(action);
-    validateActionValues(block, action);
-    if (action.kind === "op" && enclosingLoop !== undefined) {
-      validateLoopStateAccess(action, enclosingLoop, `${path}.op[${index}]`);
+  validate(options: ValidateIrBlockOptions): void {
+    this.#indexBody(this.#block.body, "body");
+    this.#assertEveryActionOutputHasProducer();
+    this.#validateBody(this.#block.body, {
+      path: "body",
+      ownerOutput: undefined,
+      enclosingLoop: undefined,
+      hasPriorEipWrite: false
+    });
+    this.#validateBoundaryOutputs(options.exportedOutputs ?? []);
+
+    assert(
+      bodyCompletes(this.#block.body) || options.allowImplicitEntryFallthrough === true,
+      "root body does not complete"
+    );
+  }
+
+  // Phase 1: claim every nested body and record all scoped definitions.
+  #indexBody(body: Body, path: string): void {
+    for (const [actionIndex, action] of body.actions.entries()) {
+      assertKnownAction(action);
+
+      const site = {
+        body,
+        actionIndex,
+        path: `${path}.${action.kind}[${actionIndex}]`
+      };
+
+      this.#indexActionDefinitions(action, site);
+    }
+  }
+
+  #indexActionDefinitions(action: Action, site: ActionSite): void {
+    switch (action.kind) {
+      case "op":
+        this.#indexOpProducer(action, site);
+        return;
+      case "if":
+        this.#indexNestedBody(action.thenBody, site, `${site.path}.thenBody`);
+        if (action.elseBody !== undefined) {
+          this.#indexNestedBody(action.elseBody, site, `${site.path}.elseBody`);
+        }
+        return;
+      case "switch":
+        assert(action.defaultBody !== undefined, `${site.path} is missing its default body`);
+        this.#indexSwitchProducer(action, site);
+        for (const [caseIndex, switchCase] of action.cases.entries()) {
+          this.#indexNestedBody(switchCase.body, site, `${site.path}.case[${caseIndex}]`);
+        }
+        this.#indexNestedBody(action.defaultBody, site, `${site.path}.default`);
+        return;
+      case "loop":
+        this.#recordBodyOwner(action.body, site, `${site.path}.body`);
+        this.#indexLoopInputs(action, site);
+        this.#indexBody(action.body, `${site.path}.body`);
+        return;
+      case "loopContinue":
+      case "finish":
+        return;
+    }
+  }
+
+  #indexNestedBody(body: Body, owner: ActionSite, path: string): void {
+    this.#recordBodyOwner(body, owner, path);
+    this.#indexBody(body, path);
+  }
+
+  #recordBodyOwner(body: Body, owner: ActionSite, path: string): void {
+    assert(!this.#bodyOwners.has(body), `${path} reuses a Body object that already has an owner`);
+    this.#bodyOwners.set(body, {
+      body: owner.body,
+      actionIndex: owner.actionIndex
+    });
+  }
+
+  #indexOpProducer(action: OpAction, site: ActionSite): void {
+    const access = opAccess(action.op);
+
+    if (access.valueOutput === undefined) {
+      assert(action.output === undefined, `${action.op.kind} op action must not declare an output`);
+      return;
     }
 
-    // Structural before completion: actionCompletes walks the default body.
-    if (action.kind === "switch") {
-      validateSwitchCases(action, `${path}.switch[${index}]`);
+    assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
+    assert(
+      access.writes.length === 0,
+      `${site.path} output-producing op has writes whose execute-when-dead semantics are not modeled`
+    );
+    for (const input of access.valueInputs) {
+      assert(input < action.output, `producer operand ${input} created after its output ${action.output}`);
     }
+    this.#recordProducer(action.output, site);
+  }
 
-    if (actionCompletes(action)) {
+  #indexSwitchProducer(action: SwitchAction, site: ActionSite): void {
+    this.#recordProducer(action.output, site);
+    assert(
+      action.selector < action.output,
+      `switch selector ${action.selector} created after its output ${action.output}`
+    );
+
+    for (const body of [...action.cases.map((switchCase) => switchCase.body), action.defaultBody]) {
+      if (body.result !== undefined) {
+        assert(
+          body.result < action.output,
+          `switch result ${body.result} created after its output ${action.output}`
+        );
+      }
+    }
+  }
+
+  #recordProducer(output: ValueId, site: ActionSite): void {
+    assert(
+      this.#block.values.node(output).kind === "actionOutput",
+      `${site.path} producer output ${output} is not an actionOutput value`
+    );
+    assert(!this.#producers.has(output), `action output ${output} has more than one producer`);
+    this.#producers.set(output, site);
+  }
+
+  #indexLoopInputs(action: LoopAction, site: ActionSite): void {
+    for (const cell of action.carried) {
       assert(
-        index === body.actions.length - 1,
-        `${path} has actions after its terminal ${action.kind} action`
+        this.#block.values.node(cell.loopInput).kind === "loopInput",
+        `${site.path} carried cell input ${cell.loopInput} is not a loopInput value`
+      );
+
+      assert(
+        !this.#loopInputs.has(cell.loopInput),
+        `${site.path} reuses loop input ${cell.loopInput} across carried cells or loops`
+      );
+      this.#loopInputs.set(cell.loopInput, action.body);
+    }
+  }
+
+  #assertEveryActionOutputHasProducer(): void {
+    for (let rawId = 0; rawId < this.#block.values.size(); rawId += 1) {
+      const id = valueId(rawId);
+
+      if (this.#block.values.node(id).kind === "actionOutput") {
+        assert(this.#producers.has(id), `action output ${id} has no producer`);
+      }
+    }
+  }
+
+  // A body carries a result exactly when its owner declares an output and the
+  // body itself does not complete. `enclosingLoop` is the innermost loop whose
+  // back edge a continue in this body would take.
+  //
+  // Phase 2: validate action semantics and every value use against phase 1.
+  #validateBody(body: Body, context: BodyValidationContext): void {
+    this.#validateBodyResult(body, context);
+
+    let hasPriorEipWrite = context.hasPriorEipWrite;
+
+    for (const [actionIndex, action] of body.actions.entries()) {
+      const site = {
+        body,
+        actionIndex,
+        path: `${context.path}.${action.kind}[${actionIndex}]`
+      };
+
+      this.#validateAction(action, site, context, hasPriorEipWrite);
+
+      if (actionCompletes(action)) {
+        assert(
+          actionIndex === body.actions.length - 1,
+          `${context.path} has actions after its terminal ${action.kind} action`
+        );
+      }
+
+      this.#validateNestedBodies(action, site, context, hasPriorEipWrite);
+      hasPriorEipWrite ||= actionWritesEip(action);
+    }
+
+    if (body.result !== undefined) {
+      this.#validateValueUse(
+        body.result,
+        { body, actionIndex: body.actions.length, path: `${context.path} fallthrough` },
+        `${context.path} result`
       );
     }
+  }
 
-    let prefix: readonly Action[] | undefined;
-    const prefixBeforeAction = () => {
-      prefix ??= [
-        ...ancestorPrefix,
-        ...body.actions.slice(0, index)
-      ];
-      return prefix;
-    };
+  #validateBodyResult(body: Body, context: BodyValidationContext): void {
+    if (body.result !== undefined) {
+      assert(
+        context.ownerOutput !== undefined,
+        `${context.path} carries a result without an owner output`
+      );
+      assert(!bodyCompletes(body), `${context.path} carries a result but completes`);
+      assert(
+        this.#block.values.valueType(body.result) ===
+          this.#block.values.valueType(context.ownerOutput),
+        `${context.path} result type does not match its owner output`
+      );
+      return;
+    }
+
+    // Escaping bodies under an output owner are model-valid but have no
+    // producer yet; the emitter cannot lower them.
+    assert(context.ownerOutput === undefined, `${context.path} must carry a result`);
+  }
+
+  #validateAction(
+    action: Action,
+    site: ActionSite,
+    context: BodyValidationContext,
+    hasPriorEipWrite: boolean
+  ): void {
+    if (action.kind === "op") {
+      validateOpAction(this.#block, action);
+      if (context.enclosingLoop !== undefined) {
+        validateLoopStateAccess(action, context.enclosingLoop, site.path);
+      }
+    }
+
+    for (const operand of actionOperands(action)) {
+      this.#validateValueUse(operand, site, `${site.path} operand ${operand}`);
+    }
 
     switch (action.kind) {
-      case "if":
-        validateBody(block, action.thenBody, prefixBeforeAction(), `${path}.if[${index}].thenBody`, undefined, enclosingLoop);
-
-        if (action.elseBody !== undefined) {
-          validateBody(block, action.elseBody, prefixBeforeAction(), `${path}.if[${index}].elseBody`, undefined, enclosingLoop);
-        }
-
-        break;
-      case "switch": {
-        for (const [caseIndex, switchCase] of action.cases.entries()) {
-          validateBody(
-            block,
-            switchCase.body,
-            prefixBeforeAction(),
-            `${path}.switch[${index}].case[${caseIndex}]`,
-            action.output,
-            enclosingLoop
-          );
-        }
-
-        validateBody(
-          block,
-          action.defaultBody,
-          prefixBeforeAction(),
-          `${path}.switch[${index}].default`,
-          action.output,
-          enclosingLoop
-        );
-        break;
-      }
+      case "switch":
+        validateSwitchCases(action, site.path);
+        return;
       case "loop":
-        validateLoopCells(block, action, `${path}.loop[${index}]`);
-        validateBody(block, action.body, prefixBeforeAction(), `${path}.loop[${index}].body`, undefined, action);
-        break;
+        validateLoopChannels(action, site.path);
+        return;
       case "loopContinue":
-        assert(enclosingLoop !== undefined, `${path} has a loopContinue outside any loop body`);
         assert(
-          action.updates.length === enclosingLoop.carried.length,
-          `${path} loopContinue updates do not align with the enclosing loop's carried cells`
+          context.enclosingLoop !== undefined,
+          `${site.path} has a loopContinue outside any loop body`
         );
-        break;
+        assert(
+          action.updates.length === context.enclosingLoop.carried.length,
+          `${site.path} loopContinue updates do not align with the enclosing loop's carried cells`
+        );
+        return;
       case "finish":
         if (action.finish.kind === "dispatch") {
-          assertDispatchDoesNotFlushEip(prefixBeforeAction(), path);
+          assert(!hasPriorEipWrite, `${context.path} dispatch path must not flush EIP state`);
         }
-
-        break;
+        return;
+      case "if":
       case "op":
-        break;
+        return;
+    }
+  }
+
+  #validateNestedBodies(
+    action: Action,
+    site: ActionSite,
+    context: BodyValidationContext,
+    hasPriorEipWrite: boolean
+  ): void {
+    switch (action.kind) {
+      case "if":
+        this.#validateBody(action.thenBody, {
+          path: `${site.path}.thenBody`,
+          ownerOutput: undefined,
+          enclosingLoop: context.enclosingLoop,
+          hasPriorEipWrite
+        });
+        if (action.elseBody !== undefined) {
+          this.#validateBody(action.elseBody, {
+            path: `${site.path}.elseBody`,
+            ownerOutput: undefined,
+            enclosingLoop: context.enclosingLoop,
+            hasPriorEipWrite
+          });
+        }
+        return;
+      case "switch":
+        for (const [caseIndex, switchCase] of action.cases.entries()) {
+          this.#validateBody(switchCase.body, {
+            path: `${site.path}.case[${caseIndex}]`,
+            ownerOutput: action.output,
+            enclosingLoop: context.enclosingLoop,
+            hasPriorEipWrite
+          });
+        }
+        this.#validateBody(action.defaultBody, {
+          path: `${site.path}.default`,
+          ownerOutput: action.output,
+          enclosingLoop: context.enclosingLoop,
+          hasPriorEipWrite
+        });
+        return;
+      case "loop":
+        this.#validateBody(action.body, {
+          path: `${site.path}.body`,
+          ownerOutput: undefined,
+          enclosingLoop: action,
+          hasPriorEipWrite
+        });
+        return;
+      case "op":
+      case "loopContinue":
+      case "finish":
+        return;
+    }
+  }
+
+  #validateValueUse(value: ValueId, site: ActionSite, path: string): void {
+    const visited = new Set<ValueId>();
+
+    const visit = (id: ValueId): void => {
+      if (visited.has(id)) {
+        return;
+      }
+      visited.add(id);
+
+      const node = this.#block.values.node(id);
+
+      switch (node.kind) {
+        case "actionOutput": {
+          const producer = this.#producers.get(id);
+
+          assert(producer !== undefined, `action output ${id} used at ${path} has no producer`);
+          this.#assertProducerDominatesUse(id, producer, site, path);
+          return;
+        }
+        case "loopInput": {
+          const definition = this.#loopInputs.get(id);
+
+          assert(definition !== undefined, `loop input ${id} used at ${path} has no owning loop`);
+          assert(
+            this.#bodyIsWithin(site.body, definition),
+            `loop input ${id} is used outside its owning loop body at ${path}`
+          );
+          return;
+        }
+        default:
+          for (const child of valueChildren(node)) {
+            visit(child);
+          }
+      }
+    };
+
+    visit(value);
+  }
+
+  #assertProducerDominatesUse(
+    output: ValueId,
+    producer: ActionSite,
+    use: ActionSite,
+    path: string
+  ): void {
+    if (producer.body === use.body) {
+      assert(
+        producer.actionIndex < use.actionIndex,
+        `action output ${output} produced at ${producer.path} does not dominate ${path}`
+      );
+      return;
+    }
+
+    for (let body = use.body; body !== producer.body; ) {
+      const owner = this.#bodyOwners.get(body);
+
+      assert(
+        owner !== undefined && owner !== null,
+        `action output ${output} produced at ${producer.path} does not dominate ${path}`
+      );
+
+      if (owner.body === producer.body) {
+        assert(
+          producer.actionIndex < owner.actionIndex,
+          `action output ${output} produced at ${producer.path} does not dominate ${path}`
+        );
+        return;
+      }
+
+      body = owner.body;
+    }
+  }
+
+  #bodyIsWithin(body: Body, scope: Body): boolean {
+    for (let current = body; ; ) {
+      if (current === scope) {
+        return true;
+      }
+
+      const owner = this.#bodyOwners.get(current);
+
+      if (owner === undefined || owner === null) {
+        return false;
+      }
+      current = owner.body;
+    }
+  }
+
+  #validateBoundaryOutputs(outputs: Iterable<ValueId>): void {
+    const actionIndex = bodyCompletes(this.#block.body)
+      ? this.#block.body.actions.length - 1
+      : this.#block.body.actions.length;
+
+    for (const output of outputs) {
+      this.#validateValueUse(
+        output,
+        { body: this.#block.body, actionIndex, path: "body boundary" },
+        `exported output ${output}`
+      );
     }
   }
 }
 
-// A loop may carry nothing: a body advancing only semantic vars keeps all
-// its cross-iteration state in var locals.
-function validateLoopCells(block: IrBlock, action: LoopAction, path: string): void {
-  const seen = new Set<ValueId>();
-
+// A loop may carry nothing: a body advancing only semantic vars keeps all its
+// cross-iteration state in var locals.
+function validateLoopChannels(action: LoopAction, path: string): void {
   for (const cell of action.carried) {
-    block.values.node(cell.seed);
-    assert(
-      block.values.node(cell.loopInput).kind === "loopInput",
-      `${path} carried cell input ${cell.loopInput} is not a loopInput value`
-    );
-    assert(!seen.has(cell.loopInput), `${path} reuses loop input ${cell.loopInput} across carried cells`);
-    seen.add(cell.loopInput);
-
     assertCarriableChannel(cell.channel, path);
   }
 }
@@ -221,34 +545,7 @@ function validateLoopStateSlotAccess(
   }
 }
 
-function validateActionValues(block: IrBlock, action: Action): void {
-  switch (action.kind) {
-    case "op":
-      validateOpActionValues(block, action);
-      return;
-    case "if":
-      block.values.node(action.condition);
-      return;
-    case "switch":
-      block.values.node(action.selector);
-      block.values.node(action.output);
-      return;
-    case "loop":
-      return;
-    case "loopContinue":
-      for (const update of action.updates) {
-        block.values.node(update);
-      }
-      return;
-    case "finish":
-      validateFinishValues(block, action.finish);
-      return;
-  }
-}
-
 function validateSwitchCases(action: SwitchAction, path: string): void {
-  assert(action.defaultBody !== undefined, `${path} is missing its default body`);
-
   const seen = new Set<number>();
 
   for (const { match } of action.cases) {
@@ -261,40 +558,7 @@ function validateSwitchCases(action: SwitchAction, path: string): void {
   }
 }
 
-function validateFinishValues(block: IrBlock, finish: Finish): void {
-  switch (finish.kind) {
-    case "dispatch":
-      block.values.node(finish.targetEip);
-      return;
-    case "exit":
-      validateExitValues(block, finish.exit);
-      return;
-  }
-}
-
-function validateExitValues(block: IrBlock, exit: IrExit): void {
-  switch (exit.class) {
-    case "cpuException": {
-      const exception = exit.exception;
-
-      switch (exception.kind) {
-        case "DE":
-          return;
-        case "PF":
-          block.values.node(exception.linearAddress);
-          return;
-      }
-      return;
-    }
-    case "host":
-      if (exit.payload !== undefined) {
-        block.values.node(exit.payload);
-      }
-      return;
-  }
-}
-
-function validateOpActionValues(block: IrBlock, action: OpAction): void {
+function validateOpAction(block: IrBlock, action: OpAction): void {
   const access = opAccess(action.op);
 
   if (action.op.kind === "var.read" || action.op.kind === "var.write") {
@@ -304,17 +568,11 @@ function validateOpActionValues(block: IrBlock, action: OpAction): void {
     );
   }
 
-  for (const input of access.valueInputs) {
-    block.values.node(input);
-  }
-
   if (access.valueOutput === undefined) {
-    assert(action.output === undefined, `${action.op.kind} op action must not declare an output`);
     return;
   }
 
   assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
-  block.values.node(action.output);
   assert(
     block.values.valueType(action.output) === access.valueOutput.type,
     `${action.op.kind} op action output ${action.output} has the wrong value type`
@@ -345,12 +603,6 @@ function formatBounds(bounds: WidthBounds): string {
   return `{ unsignedBits: ${bounds.unsignedBits}, signedBits: ${bounds.signedBits} }`;
 }
 
-function assertDispatchDoesNotFlushEip(prefix: readonly Action[], path: string): void {
-  const eipWrite = lastEipWrite(prefix);
-
-  assert(eipWrite === undefined, `${path} dispatch path must not flush EIP state`);
-}
-
 function assertKnownAction(action: Action): void {
   const kind = (action as { kind?: unknown }).kind;
 
@@ -365,18 +617,8 @@ function assertKnownAction(action: Action): void {
   );
 }
 
-function lastEipWrite(actions: readonly Action[]): StateWriteAction | undefined {
-  for (let index = actions.length - 1; index >= 0; index -= 1) {
-    const action = actions[index]!;
-
-    if (isStateWriteAction(action) && action.op.slot.kind === "eip") {
-      return action;
-    }
-  }
-
-  return undefined;
-}
-
-function isStateWriteAction(action: Action): action is StateWriteAction {
-  return action.kind === "op" && action.op.kind === "state.write";
+function actionWritesEip(action: Action): boolean {
+  return action.kind === "op" &&
+    action.op.kind === "state.write" &&
+    action.op.slot.kind === "eip";
 }

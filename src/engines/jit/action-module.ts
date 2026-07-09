@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";
+import { validateIrBlock } from "#ir/validate.js";
 import { u32 } from "#x86/numeric.js";
 import { wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -120,10 +121,14 @@ export function encodeActionJitModule(
     module.exportFunction(jitModuleLinkFallbackExportName(targetEip), stubIndex);
   }
 
-  const analyzedBlocks = blocks.map((block): AnalyzedActionJitBlock => ({
-    ...block,
-    placement: analyzePlacement(block.actions)
-  }));
+  const analyzedBlocks = blocks.map((block): AnalyzedActionJitBlock => {
+    validateIrBlock(block.actions);
+
+    return {
+      ...block,
+      placement: analyzePlacement(block.actions)
+    };
+  });
   const helpers = createWasmHelperRegistry(module);
   const helperCalls = analyzedBlocks.flatMap((block) =>
     helperCallsForBlock(block.actions, block.placement)

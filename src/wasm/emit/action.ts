@@ -37,6 +37,8 @@ export type ActionFragmentContext = Readonly<{
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
   helpers?: WasmHelperRegistry | undefined;
+  // A supplied placement was computed from this validated block with the
+  // embedding's output roots. Without one, the fragment owns both steps.
   placement?: BlockPlacement | undefined;
   embedding: FragmentEmbedding;
 }>;
@@ -44,6 +46,7 @@ export type ActionFragmentContext = Readonly<{
 export type ActionFunctionContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   helpers?: WasmHelperRegistry | undefined;
+  // See ActionFragmentContext.placement.
   placement?: BlockPlacement | undefined;
   embedding: FunctionEmbedding;
 }>;
@@ -64,11 +67,18 @@ export function emitActionFunction(block: IrBlock, context: ActionFunctionContex
 }
 
 export function emitActionFragment(block: IrBlock, context: ActionFragmentContext): void {
-  validateIrBlock(block, { allowImplicitEntryFallthrough: context.embedding.fallthrough !== undefined });
-
   const { body, embedding } = context;
   const outputs = embedding.outputs ?? new Map<ValueId, number>();
-  const placement = context.placement ?? analyzePlacement(block, outputs.keys());
+  let placement = context.placement;
+
+  if (placement === undefined) {
+    validateIrBlock(block, {
+      allowImplicitEntryFallthrough: context.embedding.fallthrough !== undefined,
+      exportedOutputs: outputs.keys()
+    });
+
+    placement = analyzePlacement(block, outputs.keys());
+  }
   const valueStack = new ValueStack({
     body,
     scratch: context.scratch,

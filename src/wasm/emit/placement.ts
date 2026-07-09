@@ -206,7 +206,9 @@ class PlacementAnalysis implements BlockPlacement {
             produced.add(output);
           }
 
-          if (access.writes.length > 0) {
+          // Output-less mutating actions execute lexically, so their operands
+          // are unconditional roots. Validated output producers have no writes.
+          if (output === undefined && access.writes.length > 0) {
             for (const operand of operandDemands) {
               this.#addDemand(operand);
             }
@@ -358,13 +360,6 @@ class PlacementAnalysis implements BlockPlacement {
   // of its scheduled emissions defers; everything else captures at its
   // producer.
   #placeProducer(producer: Producer): void {
-    if (producer.access.writes.length > 0) {
-      // Mutating ops execute at their action point; their operands were
-      // already charged as demand roots when the action was recorded.
-      this.#outputPlacements.set(producer.output, captureAtProducerPlacement);
-      return;
-    }
-
     const edges = this.#outputUses.get(producer.output);
 
     assert(edges !== undefined, `demanded output ${producer.output} has no recorded uses`);

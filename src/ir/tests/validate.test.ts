@@ -208,11 +208,17 @@ test("a nested dispatch rejects an ancestor EIP write", () => {
   );
 });
 
-function switchWith(overrides: Partial<SwitchAction>): Action {
-  return {
+function switchBlock(overrides: Partial<SwitchAction>): IrBlock {
+  const values = new ValueTable();
+
+  for (let value = 0; value < 5; value += 1) {
+    values.const(value);
+  }
+
+  const action: SwitchAction = {
     kind: "switch",
     selector: valueId(0),
-    output: valueId(1),
+    output: values.addActionOutput(),
     cases: [
       { match: 0, body: { actions: [], result: valueId(2) } },
       { match: 2, body: { actions: [], result: valueId(3) } }
@@ -220,21 +226,18 @@ function switchWith(overrides: Partial<SwitchAction>): Action {
     defaultBody: { actions: [], result: valueId(4) },
     ...overrides
   };
+
+  return entryBlock(values, [action, finishExit()]);
 }
 
 test("a switch whose bodies all carry results validates", () => {
-  doesNotThrow(() => validateIrBlock(blockWith([switchWith({}), finishExit()])));
+  doesNotThrow(() => validateIrBlock(switchBlock({})));
 });
 
 test("an escaping switch body is rejected until a producer arrives", () => {
   throws(
     () =>
-      validateIrBlock(
-        blockWith([
-          switchWith({ cases: [{ match: 0, body: { actions: [finishExit()] } }] }),
-          finishExit()
-        ])
-      ),
+      validateIrBlock(switchBlock({ cases: [{ match: 0, body: { actions: [finishExit()] } }] })),
     /case\[0\] must carry a result/
   );
 });
@@ -269,12 +272,7 @@ test("a result under an output-less owner is rejected", () => {
 test("a result on a completing body is rejected", () => {
   throws(
     () =>
-      validateIrBlock(
-        blockWith([
-          switchWith({ cases: [{ match: 0, body: { actions: [finishExit()], result: valueId(2) } }] }),
-          finishExit()
-        ])
-      ),
+      validateIrBlock(switchBlock({ cases: [{ match: 0, body: { actions: [finishExit()], result: valueId(2) } }] })),
     /case\[0\] carries a result but completes/
   );
 });
@@ -282,12 +280,7 @@ test("a result on a completing body is rejected", () => {
 test("an output-owner body that neither escapes nor carries a result is rejected", () => {
   throws(
     () =>
-      validateIrBlock(
-        blockWith([
-          switchWith({ defaultBody: { actions: [] } }),
-          finishExit()
-        ])
-      ),
+      validateIrBlock(switchBlock({ defaultBody: { actions: [] } })),
     /default must carry a result/
   );
 });
@@ -296,15 +289,12 @@ test("a duplicate switch case match is rejected", () => {
   throws(
     () =>
       validateIrBlock(
-        blockWith([
-          switchWith({
-            cases: [
-              { match: 1, body: { actions: [], result: valueId(2) } },
-              { match: 1, body: { actions: [], result: valueId(3) } }
-            ]
-          }),
-          finishExit()
-        ])
+        switchBlock({
+          cases: [
+            { match: 1, body: { actions: [], result: valueId(2) } },
+            { match: 1, body: { actions: [], result: valueId(3) } }
+          ]
+        })
       ),
     /has a duplicate case match 1/
   );
@@ -313,42 +303,27 @@ test("a duplicate switch case match is rejected", () => {
 test("a negative switch case match is rejected", () => {
   throws(
     () =>
-      validateIrBlock(
-        blockWith([
-          switchWith({ cases: [{ match: -1, body: { actions: [], result: valueId(2) } }] }),
-          finishExit()
-        ])
-      ),
+      validateIrBlock(switchBlock({ cases: [{ match: -1, body: { actions: [], result: valueId(2) } }] })),
     /case match -1 is not an integer in \[0, 255\]/
   );
 });
 
 test("a switch case match beyond the dense-table bound is rejected", () => {
   doesNotThrow(() =>
-    validateIrBlock(
-      blockWith([
-        switchWith({ cases: [{ match: maxSwitchMatch, body: { actions: [], result: valueId(2) } }] }),
-        finishExit()
-      ])
-    )
+    validateIrBlock(switchBlock({ cases: [{ match: maxSwitchMatch, body: { actions: [], result: valueId(2) } }] }))
   );
   throws(
     () =>
-      validateIrBlock(
-        blockWith([
-          switchWith({ cases: [{ match: maxSwitchMatch + 1, body: { actions: [], result: valueId(2) } }] }),
-          finishExit()
-        ])
-      ),
+      validateIrBlock(switchBlock({ cases: [{ match: maxSwitchMatch + 1, body: { actions: [], result: valueId(2) } }] })),
     /case match 256 is not an integer in \[0, 255\]/
   );
 });
 
 test("a switch without a default body is rejected", () => {
-  const missingDefault = switchWith({ defaultBody: undefined as unknown as Body });
+  const missingDefault = switchBlock({ defaultBody: undefined as unknown as Body });
 
   throws(
-    () => validateIrBlock(blockWith([missingDefault, finishExit()])),
+    () => validateIrBlock(missingDefault),
     /is missing its default body/
   );
 });
@@ -497,5 +472,438 @@ test("a carried cell whose input is not a loopInput value is rejected", () => {
         ])
       ),
     /is not a loopInput value/
+  );
+});
+
+test("used and unused action outputs without producers are rejected", () => {
+  const unusedValues = new ValueTable();
+
+  unusedValues.addActionOutput();
+  throws(
+    () => validateIrBlock(entryBlock(unusedValues, [finishExit()])),
+    /action output \d+ has no producer/
+  );
+
+  const usedValues = new ValueTable();
+  const used = usedValues.addActionOutput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(usedValues, [stateWrite(gprChannel("eax"), used), finishExit()])
+      ),
+    /action output \d+ has no producer/
+  );
+});
+
+test("producer outputs must name actionOutput values", () => {
+  const constValues = new ValueTable();
+  const constant = constValues.const(0);
+
+  throws(
+    () => validateIrBlock(entryBlock(constValues, [stateRead(constant, gprChannel("eax")), finishExit()])),
+    /producer output \d+ is not an actionOutput value/
+  );
+
+  const compoundValues = new ValueTable();
+  const compound = compoundValues.binary("add", compoundValues.external(0), compoundValues.const(1));
+
+  throws(
+    () => validateIrBlock(entryBlock(compoundValues, [stateRead(compound, gprChannel("eax")), finishExit()])),
+    /producer output \d+ is not an actionOutput value/
+  );
+
+  const loopValues = new ValueTable();
+  const loopInput = loopValues.addLoopInput();
+
+  throws(
+    () => validateIrBlock(entryBlock(loopValues, [stateRead(loopInput, gprChannel("eax")), finishExit()])),
+    /producer output \d+ is not an actionOutput value/
+  );
+});
+
+test("duplicate op producers and op-vs-switch producers are rejected", () => {
+  const opValues = new ValueTable();
+  const opOutput = opValues.addActionOutput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(opValues, [
+          stateRead(opOutput, gprChannel("eax")),
+          stateRead(opOutput, gprChannel("ebx")),
+          finishExit()
+        ])
+      ),
+    /action output \d+ has more than one producer/
+  );
+
+  const mixedValues = new ValueTable();
+  const selector = mixedValues.const(0);
+  const result = mixedValues.const(1);
+  const mixedOutput = mixedValues.addActionOutput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(mixedValues, [
+          stateRead(mixedOutput, gprChannel("eax")),
+          {
+            kind: "switch",
+            selector,
+            output: mixedOutput,
+            cases: [{ match: 0, body: { actions: [], result } }],
+            defaultBody: { actions: [], result }
+          },
+          finishExit()
+        ])
+      ),
+    /action output \d+ has more than one producer/
+  );
+});
+
+test("a same-body compound use before its producer is rejected", () => {
+  const directValues = new ValueTable();
+  const directOutput = directValues.addActionOutput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(directValues, [
+          stateWrite(gprChannel("eax"), directOutput),
+          stateRead(directOutput, gprChannel("ebx")),
+          finishExit()
+        ])
+      ),
+    /action output \d+.*does not dominate/
+  );
+
+  const values = new ValueTable();
+  const output = values.addActionOutput();
+  const compound = values.binary("add", output, values.external(0));
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          stateWrite(gprChannel("eax"), compound),
+          stateRead(output, gprChannel("ebx")),
+          finishExit()
+        ])
+      ),
+    /action output \d+.*does not dominate/
+  );
+});
+
+test("an action output cannot be used from a sibling body", () => {
+  const values = new ValueTable();
+  const condition = values.const(1);
+  const output = values.addActionOutput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          {
+            kind: "if",
+            condition,
+            thenBody: { actions: [stateRead(output, gprChannel("eax"))] },
+            elseBody: { actions: [stateWrite(gprChannel("ebx"), output)] }
+          },
+          finishExit()
+        ])
+      ),
+    /action output \d+.*does not dominate/
+  );
+});
+
+test("one Body object cannot be reused under multiple control actions", () => {
+  const values = new ValueTable();
+  const condition = values.const(1);
+  const shared: Body = { actions: [] };
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          { kind: "if", condition, thenBody: shared },
+          { kind: "if", condition, thenBody: shared },
+          finishExit()
+        ])
+      ),
+    /reuses a Body object that already has an owner/
+  );
+});
+
+test("a loop input is scoped to its owning loop body", () => {
+  const values = new ValueTable();
+  const seed = values.const(0);
+  const loopInput = values.addLoopInput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          {
+            kind: "loop",
+            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            body: { actions: [] }
+          },
+          stateWrite(gprChannel("eax"), loopInput),
+          finishExit()
+        ])
+      ),
+    /loop input \d+ is used outside its owning loop body/
+  );
+});
+
+test("a loop input cannot be reused by a sibling loop", () => {
+  const values = new ValueTable();
+  const seed = values.const(0);
+  const loopInput = values.addLoopInput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          {
+            kind: "loop",
+            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            body: { actions: [] }
+          },
+          {
+            kind: "loop",
+            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            body: { actions: [] }
+          },
+          finishExit()
+        ])
+      ),
+    /reuses loop input \d+ across carried cells or loops/
+  );
+});
+
+test("a loop input cannot be consumed inside a sibling loop body", () => {
+  const values = new ValueTable();
+  const seed = values.const(0);
+  const loopInput = values.addLoopInput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          {
+            kind: "loop",
+            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            body: { actions: [] }
+          },
+          {
+            kind: "loop",
+            carried: [],
+            body: { actions: [stateWrite(gprChannel("eax"), loopInput)] }
+          },
+          finishExit()
+        ])
+      ),
+    /loop input \d+ is used outside its owning loop body/
+  );
+});
+
+test("a loop-body action output cannot escape directly after the loop", () => {
+  const values = new ValueTable();
+  const output = values.addActionOutput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          {
+            kind: "loop",
+            carried: [],
+            body: { actions: [stateRead(output, gprChannel("eax"))] }
+          },
+          stateWrite(gprChannel("ebx"), output),
+          finishExit()
+        ])
+      ),
+    /action output \d+.*does not dominate/
+  );
+});
+
+test("a switch output cannot be its own selector or arm result", () => {
+  const selectorValues = new ValueTable();
+  const selectorResult = selectorValues.const(1);
+  const selectorOutput = selectorValues.addActionOutput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(selectorValues, [
+          {
+            kind: "switch",
+            selector: selectorOutput,
+            output: selectorOutput,
+            cases: [{ match: 0, body: { actions: [], result: selectorResult } }],
+            defaultBody: { actions: [], result: selectorResult }
+          },
+          finishExit()
+        ])
+      ),
+    /switch selector \d+ created after its output/
+  );
+
+  const resultValues = new ValueTable();
+  const resultSelector = resultValues.const(0);
+  const resultOutput = resultValues.addActionOutput();
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(resultValues, [
+          {
+            kind: "switch",
+            selector: resultSelector,
+            output: resultOutput,
+            cases: [{ match: 0, body: { actions: [], result: resultOutput } }],
+            defaultBody: { actions: [], result: resultSelector }
+          },
+          finishExit()
+        ])
+      ),
+    /switch result \d+ created after its output/
+  );
+});
+
+test("a valid switch output can be used after the switch", () => {
+  const values = new ValueTable();
+  const selector = values.const(0);
+  const result = values.const(1);
+  const output = values.addActionOutput();
+
+  doesNotThrow(() =>
+    validateIrBlock(
+      entryBlock(values, [
+        {
+          kind: "switch",
+          selector,
+          output,
+          cases: [{ match: 0, body: { actions: [], result } }],
+          defaultBody: { actions: [], result }
+        },
+        stateWrite(gprChannel("eax"), output),
+        finishExit()
+      ])
+    )
+  );
+});
+
+test("an ancestor producer can feed nested if, switch-result, and loop-body uses", () => {
+  const values = new ValueTable();
+  const condition = values.const(1);
+  const output = values.addActionOutput();
+  const fallback = values.const(0);
+  const switchOutput = values.addActionOutput();
+
+  doesNotThrow(() =>
+    validateIrBlock(
+      entryBlock(values, [
+        stateRead(output, gprChannel("eax")),
+        {
+          kind: "if",
+          condition,
+          thenBody: { actions: [stateWrite(gprChannel("ebx"), output)] }
+        },
+        {
+          kind: "switch",
+          selector: condition,
+          output: switchOutput,
+          cases: [{ match: 0, body: { actions: [], result: output } }],
+          defaultBody: { actions: [], result: fallback }
+        },
+        {
+          kind: "loop",
+          carried: [],
+          body: { actions: [stateWrite(gprChannel("ecx"), output)] }
+        },
+        finishExit()
+      ])
+    )
+  );
+});
+
+test("a body-local producer can feed its body result", () => {
+  const values = new ValueTable();
+  const selector = values.const(0);
+  const armOutput = values.addActionOutput();
+  const formula = values.binary("add", armOutput, values.const(1));
+  const fallback = values.const(7);
+  const switchOutput = values.addActionOutput();
+
+  doesNotThrow(() =>
+    validateIrBlock(
+      entryBlock(values, [
+        {
+          kind: "switch",
+          selector,
+          output: switchOutput,
+          cases: [
+            {
+              match: 0,
+              body: {
+                actions: [stateRead(armOutput, gprChannel("eax"))],
+                result: formula
+              }
+            }
+          ],
+          defaultBody: { actions: [], result: fallback }
+        },
+        finishExit()
+      ])
+    )
+  );
+});
+
+test("producer operands must have lower value ids than their output", () => {
+  const values = new ValueTable();
+  const output = values.addActionOutput();
+  const address = values.const(0x2000);
+
+  throws(
+    () =>
+      validateIrBlock(
+        entryBlock(values, [
+          { kind: "op", output, op: { kind: "memory.read", address, width: 32 } },
+          finishExit()
+        ])
+      ),
+    /producer operand \d+ created after its output/
+  );
+});
+
+test("exported outputs are validated at the root body boundary", () => {
+  const validValues = new ValueTable();
+  const validOutput = validValues.addActionOutput();
+  const validBlock = entryBlock(validValues, [
+    stateRead(validOutput, gprChannel("eax")),
+    finishExit()
+  ]);
+
+  doesNotThrow(() => validateIrBlock(validBlock, { exportedOutputs: [validOutput] }));
+
+  const escapingValues = new ValueTable();
+  const condition = escapingValues.const(1);
+  const escapingOutput = escapingValues.addActionOutput();
+  const escapingBlock = entryBlock(escapingValues, [
+    {
+      kind: "if",
+      condition,
+      thenBody: { actions: [stateRead(escapingOutput, gprChannel("eax"))] }
+    },
+    finishExit()
+  ]);
+
+  throws(
+    () => validateIrBlock(escapingBlock, { exportedOutputs: [escapingOutput] }),
+    /action output \d+.*does not dominate exported output/
   );
 });

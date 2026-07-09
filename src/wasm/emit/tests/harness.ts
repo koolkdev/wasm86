@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { IrBlock } from "#ir/block.js";
+import { validateIrBlock } from "#ir/validate.js";
 import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -38,6 +39,9 @@ export function irBlockBody(block: IrBlock, externalParamCount = 0): WasmFunctio
 
 export function irBlockBodyWithHelpers(block: IrBlock, externalParamCount = 0): WasmFunctionBodyEncoder {
   const module = new WasmModuleEncoder();
+
+  validateIrBlock(block, { allowImplicitEntryFallthrough: true });
+
   const placement = analyzePlacement(block);
   const helpers = createWasmHelperRegistry(module);
 
@@ -136,6 +140,9 @@ function encodeFunctionBodyModule(body: WasmFunctionBodyEncoder, paramCount: num
 function encodeIrBlockModule(block: IrBlock, externalParamCount: number): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
   const typeIndex = initializeTestModule(module, externalParamCount);
+
+  validateIrBlock(block, { allowImplicitEntryFallthrough: true });
+
   const placement = analyzePlacement(block);
   const helpers = createWasmHelperRegistry(module);
 
