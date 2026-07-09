@@ -41,7 +41,7 @@ test("dead producer chains remain non-live", () => {
   strictEqual(liveness.isLive(checked), false);
 });
 
-test("an unused memory read leaves its address chain non-live", () => {
+test("an unused memory read leaves its entire input chain dead", () => {
   const values = new ValueTable();
   const base = values.addActionOutput();
   const offset = values.const(8);

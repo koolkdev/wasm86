@@ -10,7 +10,7 @@ import { fitsUnsigned } from "#ir/values.js";
 import { emitOp } from "#wasm/emit/ops.js";
 import { ValueStack } from "#wasm/emit/value-stack.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
-import { analyzePlacement } from "#wasm/emit/placement.js";
+import { analyzeValueUses } from "#wasm/emit/value-uses.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
@@ -46,7 +46,7 @@ function createTestEmitter(
     body,
     scratch,
     values,
-    placement: analyzePlacement(block, analyzeLiveness(block)),
+    uses: analyzeValueUses(block, analyzeLiveness(block)),
     externalLocals,
     // The real op lowering: its state and guest accesses emit the same
     // opcode shapes the assertions pin (const address + load).
@@ -56,7 +56,7 @@ function createTestEmitter(
   return { body, scratch, valueStack };
 }
 
-test("a deferred flag resolve emits its Wasm call at first use", () => {
+test("a live flag resolve materializes at its action and reads its output local", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
@@ -73,16 +73,21 @@ test("a deferred flag resolve emits its Wasm call at first use", () => {
   );
 
   strictEqual(helperIndex, 0);
-  valueStack.scheduledProducer(resolveAction);
+  valueStack.materializeActionOutput(resolveAction);
   valueStack.emitUse(resolved);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
-  // Nothing at the action point; the call sinks into the consumer.
   const encoded = body.end().encode();
 
-  deepStrictEqual(wasmBodyOpcodes(encoded), [wasmOpcode.call, wasmOpcode.end]);
-  strictEqual(wasmBodyLocalCount(encoded), 0);
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.call,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
 test("a captured flag resolve calls at its action point and replays", () => {
@@ -105,8 +110,9 @@ test("a captured flag resolve calls at its action point and replays", () => {
     helpers
   );
 
-  valueStack.scheduledProducer(resolveAction);
+  valueStack.materializeActionOutput(resolveAction);
   valueStack.emitUse(resolved);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -119,7 +125,7 @@ test("a captured flag resolve calls at its action point and replays", () => {
   ]);
 });
 
-test("scheduled flag resolves fail clearly when the helper is missing", () => {
+test("a live flag resolve fails at its action when the helper is missing", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
@@ -133,12 +139,13 @@ test("scheduled flag resolves fail clearly when the helper is missing", () => {
     createWasmHelperRegistry(new WasmModuleEncoder())
   );
 
-  valueStack.scheduledProducer(resolveAction);
-
-  throws(() => valueStack.emitUse(resolved), /missing Wasm helper resolveZF/);
+  throws(
+    () => valueStack.materializeActionOutput(resolveAction),
+    /missing Wasm helper resolveZF/
+  );
 });
 
-test("dead scheduled flag resolves emit nothing and require no helper", () => {
+test("a dead discardable flag resolve is not materialized", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
@@ -149,7 +156,7 @@ test("dead scheduled flag resolves emit nothing and require no helper", () => {
     createWasmHelperRegistry(new WasmModuleEncoder())
   );
 
-  valueStack.scheduledProducer(resolveAction);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -159,7 +166,7 @@ test("dead scheduled flag resolves emit nothing and require no helper", () => {
   strictEqual(wasmBodyLocalCount(encoded), 0);
 });
 
-test("single-use values emit inline with no locals", () => {
+test("a single-use action output still round-trips through its output local", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.const(5);
@@ -173,8 +180,9 @@ test("single-use values emit inline with no locals", () => {
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.emitUse(sum);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -183,11 +191,13 @@ test("single-use values emit inline with no locals", () => {
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.i32Const,
     wasmOpcode.i32Add,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 0);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
 test("a multi-use value tees once and replays from one freed local", () => {
@@ -205,9 +215,10 @@ test("a multi-use value tees once and replays from one freed local", () => {
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.emitUse(sum);
   valueStack.emitUse(sum);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -216,13 +227,15 @@ test("a multi-use value tees once and replays from one freed local", () => {
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.i32Const,
     wasmOpcode.i32Add,
     wasmOpcode.localTee,
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 1);
+  strictEqual(wasmBodyLocalCount(encoded), 2);
 });
 
 test("a pinned read loads once at its action point and replays past the store", () => {
@@ -241,27 +254,30 @@ test("a pinned read loads once at its action point and replays past the store", 
     ])
   );
 
-  valueStack.scheduledProducer(readEax);
-  valueStack.scheduledProducer(readEbx);
+  valueStack.materializeActionOutput(readEax);
+  valueStack.materializeActionOutput(readEbx);
   valueStack.emitUse(eax);
   valueStack.emitUse(ebx);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
 
-  // The ebx read is captured at its action point; the eax read loads at its
-  // use. Exactly two state loads either way.
+  // Both snapshots materialize in lexical order before either write consumes
+  // them.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
     wasmOpcode.localSet,
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 1);
+  strictEqual(wasmBodyLocalCount(encoded), 2);
 });
 
 test("a dead read emits nothing", () => {
@@ -277,7 +293,7 @@ test("a dead read emits nothing", () => {
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -306,6 +322,7 @@ test("constant and external leaves re-emit per use without scratch locals", () =
   valueStack.emitUse(seven);
   valueStack.emitUse(external);
   valueStack.emitUse(external);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -351,6 +368,7 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
   );
 
   valueStack.emitUse(select);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
@@ -424,6 +442,7 @@ test("operators map to their wasm opcodes", () => {
   valueStack.emitUse(masked);
   valueStack.emitUse(equal);
   valueStack.emitUse(signed);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
@@ -509,6 +528,7 @@ test("signed multiply overflow expressions lower through typed i64 products", ()
 
   valueStack.emitUse(overflow16);
   valueStack.emitUse(overflow32);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -579,6 +599,7 @@ test("i64 binary operators lower to wasm i64 opcodes", () => {
   valueStack.emitUse(remainder);
   valueStack.emitUse(signedQuotient);
   valueStack.emitUse(signedRemainder);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -625,6 +646,7 @@ test("i64 equality against an i64 constant lowers to i64.const and i64.eq", () =
   );
 
   valueStack.emitUse(equal);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -679,18 +701,20 @@ test("truncate masks to the requested width", () => {
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.emitUse(low8);
   valueStack.emitUse(low16);
   valueStack.emitUse(full);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
 
-  // The deferred read materializes once, inside the first truncation, and
-  // the later ones replay its tee.
+  // The read materializes at its action and each truncation replays the same
+  // stable output local.
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
-    wasmOpcode.localTee,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.i32Const,
     wasmOpcode.i32And,
     wasmOpcode.localGet,
@@ -718,6 +742,7 @@ test("equality against constant zero emits eqz from either side", () => {
 
   valueStack.emitUse(left);
   valueStack.emitUse(right);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
@@ -745,6 +770,7 @@ test("ne and non-zero equality keep the generic compare", () => {
 
   valueStack.emitUse(notZero);
   valueStack.emitUse(one);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
@@ -758,7 +784,7 @@ test("ne and non-zero equality keep the generic compare", () => {
   ]);
 });
 
-test("a multi-use deferred load emits at its first use and tees", () => {
+test("a multi-use load materializes once and reads its stable output local", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
@@ -772,27 +798,27 @@ test("a multi-use deferred load emits at its first use and tees", () => {
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.emitUse(loaded);
   valueStack.emitUse(loaded);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
 
-  // Nothing at the action point: the load executes once at its first use
-  // and the remaining use replays the tee.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
-    wasmOpcode.localTee,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
   strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
-test("a multi-use deferred static read emits one slot load and tees", () => {
+test("a multi-use state read emits one lexical load and reads its output local", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
@@ -805,43 +831,27 @@ test("a multi-use deferred static read emits one slot load and tees", () => {
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.emitUse(read);
   valueStack.emitUse(read);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
 
-  // One tee'd slot load instead of a reload per use.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
-    wasmOpcode.localTee,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
   strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
-test("a dead load emits nothing", () => {
-  const values = new ValueTable();
-  const address = values.const(0x2000);
-  const loaded = values.addActionOutput();
-  const readAction: MemoryReadAction = memoryRead(loaded, address, 32);
-  const { body, scratch, valueStack } = createTestEmitter(
-    values,
-    testBody([readAction])
-  );
-
-  valueStack.scheduledProducer(readAction);
-  valueStack.assertClear();
-  scratch.assertClear();
-
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [wasmOpcode.end]);
-});
-
-test("a deferred producer consumed only inside a nested body emits there", () => {
+test("a producer used only by a nested body still materializes before control", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
@@ -871,34 +881,37 @@ test("a deferred producer consumed only inside a nested body emits there", () =>
     [0]
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.captureForBody(faultBody);
   valueStack.emitUse(condition);
   body.ifBlock();
   valueStack.emitUse(loaded);
   body.drop();
   body.endBlock();
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
 
-  // Nothing materializes on the non-fault path: the load executes inside
-  // the body, at its use, without a scratch local.
+  // The producer executes before the condition even though only the selected
+  // body consumes its output local.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
-    wasmOpcode.localGet,
-    wasmOpcode.if,
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.if,
+    wasmOpcode.localGet,
     wasmOpcode.drop,
     wasmOpcode.end,
     wasmOpcode.end
   ]);
-  // Only the external's binding local.
-  strictEqual(wasmBodyLocalCount(encoded), 1);
+  // The external binding plus the action-output local.
+  strictEqual(wasmBodyLocalCount(encoded), 2);
 });
 
-test("captureForBody captures a deferred output's input closure, not the output", () => {
+test("a lexical producer computes its input closure before nested-body capture", () => {
   const values = new ValueTable();
   const base = values.external(0);
   const four = values.const(4);
@@ -930,38 +943,37 @@ test("captureForBody captures a deferred output's input closure, not the output"
     [0, 1]
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.captureForBody(faultBody);
   valueStack.emitUse(condition);
   body.ifBlock();
   valueStack.emitUse(loaded);
   body.drop();
   body.endBlock();
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
 
-  // The address computes into a local before the branch — re-emitting the
-  // load inside the body needs it — while the load itself stays inside.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.localGet,
     wasmOpcode.i32Const,
     wasmOpcode.i32Add,
+    wasmOpcode.i32Load,
     wasmOpcode.localSet,
     wasmOpcode.localGet,
     wasmOpcode.if,
     wasmOpcode.localGet,
-    wasmOpcode.i32Load,
     wasmOpcode.drop,
     wasmOpcode.end,
     wasmOpcode.end
   ]);
-  // The two external binding locals plus the captured address.
+  // The two external binding locals plus the output local.
   strictEqual(wasmBodyLocalCount(encoded), 3);
 });
 
-test("sibling fault bodies each emit a deferred producer, keeping the main path clean", () => {
+test("sibling bodies read one producer local initialized before both", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
@@ -984,7 +996,7 @@ test("sibling fault bodies each emit a deferred producer, keeping the main path 
     [0, 1]
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.captureForBody(firstBody);
   valueStack.emitUse(firstCondition);
   body.ifBlock();
@@ -997,30 +1009,30 @@ test("sibling fault bodies each emit a deferred producer, keeping the main path 
   valueStack.emitUse(loaded);
   body.drop();
   body.endBlock();
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
 
-  // Neither body's emission dominates the other's use, so each re-emits
-  // the load; no set, no tee, nothing outside the bodies.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
-    wasmOpcode.localGet,
-    wasmOpcode.if,
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.if,
+    wasmOpcode.localGet,
     wasmOpcode.drop,
     wasmOpcode.end,
     wasmOpcode.localGet,
     wasmOpcode.if,
-    wasmOpcode.i32Const,
-    wasmOpcode.i32Load,
+    wasmOpcode.localGet,
     wasmOpcode.drop,
     wasmOpcode.end,
     wasmOpcode.end
   ]);
-  // Only the externals' binding locals.
-  strictEqual(wasmBodyLocalCount(encoded), 2);
+  // The external bindings plus the shared output local.
+  strictEqual(wasmBodyLocalCount(encoded), 3);
 });
 
 test("a direct use behind a fault body emits once at the body's entry and replays", () => {
@@ -1044,7 +1056,7 @@ test("a direct use behind a fault body emits once at the body's entry and replay
     [0]
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.captureForBody(faultBody);
   valueStack.emitUse(condition);
   body.ifBlock();
@@ -1053,6 +1065,7 @@ test("a direct use behind a fault body emits once at the body's entry and replay
   body.endBlock();
   valueStack.emitUse(read);
   body.drop();
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -1111,10 +1124,11 @@ test("captureForBody computes an untouched compound into a local for later uses"
     ]
   };
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.captureForBody(nestedBody);
   valueStack.emitUse(sum);
   valueStack.emitUse(sum);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -1124,6 +1138,8 @@ test("captureForBody computes an untouched compound into a local for later uses"
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.i32Const,
     wasmOpcode.i32Add,
     wasmOpcode.localSet,
@@ -1131,7 +1147,7 @@ test("captureForBody computes an untouched compound into a local for later uses"
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 1);
+  strictEqual(wasmBodyLocalCount(encoded), 2);
 });
 
 test("unconsumed captures fail assertClear and hold their scratch local", () => {
@@ -1149,7 +1165,7 @@ test("unconsumed captures fail assertClear and hold their scratch local", () => 
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
   valueStack.emitUse(sum);
 
   throws(() => valueStack.assertClear(), /captured values with unconsumed uses/);
@@ -1170,13 +1186,14 @@ test("a borrowed compound computes once and replays from a pinned local", () => 
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
 
   const borrow = valueStack.borrowUse(sum);
 
   borrow.push();
   borrow.push();
   borrow.release();
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -1187,13 +1204,15 @@ test("a borrowed compound computes once and replays from a pinned local", () => 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.i32Const,
     wasmOpcode.i32Add,
     wasmOpcode.localTee,
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 1);
+  strictEqual(wasmBodyLocalCount(encoded), 2);
 });
 
 test("a borrowed leaf re-emits per push without scratch locals", () => {
@@ -1212,6 +1231,7 @@ test("a borrowed leaf re-emits per push without scratch locals", () => {
   borrow.push();
   borrow.push();
   borrow.release();
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -1241,7 +1261,7 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
 
   const borrow = valueStack.borrowUse(sum);
 
@@ -1249,6 +1269,7 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
   borrow.push();
   borrow.release();
   valueStack.emitUse(sum);
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
@@ -1260,6 +1281,8 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.i32Const,
     wasmOpcode.i32Add,
     wasmOpcode.localTee,
@@ -1267,10 +1290,10 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 1);
+  strictEqual(wasmBodyLocalCount(encoded), 2);
 });
 
-test("a borrow holds a spent registry local until release", () => {
+test("a borrow peeks a stable action-output local", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
@@ -1283,25 +1306,24 @@ test("a borrow holds a spent registry local until release", () => {
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
 
   const borrow = valueStack.borrowUse(loaded);
 
   borrow.push();
   borrow.push();
   borrow.release();
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
 
-  // The first push emits the deferred load and consumes its only counted
-  // use; the pin tees it into a local for the second push and frees it at
-  // release.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
-    wasmOpcode.localTee,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
@@ -1322,7 +1344,7 @@ test("a leaked borrow fails assertClear and holds its scratch local", () => {
     ])
   );
 
-  valueStack.scheduledProducer(readAction);
+  valueStack.materializeActionOutput(readAction);
 
   const borrow = valueStack.borrowUse(sum);
 

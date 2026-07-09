@@ -13,7 +13,7 @@ import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 
 // Leaf opcode mappers: each emits the operator of a compound value node
 // whose operands are already on the stack. Stateless encoder switches —
-// operand pushes and use accounting live in the value stack.
+// operand pushes and use counts live in the value stack.
 
 export function wasmTypeForValue(type: ValueType): WasmValueType {
   switch (type) {

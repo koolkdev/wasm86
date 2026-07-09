@@ -4,12 +4,16 @@ import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmValueType } from "#wasm/encoder/types.js";
 
-// All scratch-local bookkeeping in one place: which local replays a value,
-// how many uses remain, freeing at the last one — deferred while pins hold
-// the local for a borrow. Captures take the value on top of the stack, so
-// the value stack never sees a local index and stays policy-only.
+// All scratch-local bookkeeping in one place. Counted compound captures free
+// at their last use (deferred while pins hold them); action and switch output
+// locals remain bound until the fragment releases them.
 
-type RegistryEntry = { local: number; remainingUses: number; pins: number };
+type RegistryEntry = {
+  local: number;
+  // Undefined marks a fragment-owned output binding.
+  remainingUses: number | undefined;
+  pins: number;
+};
 
 export class LocalRegistry {
   readonly #body: WasmFunctionBodyEncoder;
@@ -36,10 +40,20 @@ export class LocalRegistry {
     this.#body.localTee(this.#capture(id, 0, 1, type));
   }
 
-  // Claims a fresh local the caller stores into itself — a control join's
-  // output; replays consume it like any capture.
-  claim(id: ValueId, remainingUses: number, type: WasmValueType): number {
-    return this.#capture(id, remainingUses, 0, type);
+  // Pops the stack top into a fragment-owned output local.
+  captureOutputSet(id: ValueId, type: WasmValueType): void {
+    this.#body.localSet(this.claimOutputLocal(id, type));
+  }
+
+  // Claims an output local the caller stores into itself. Each selected arm
+  // writes a control join's output local.
+  claimOutputLocal(id: ValueId, type: WasmValueType): number {
+    assert(!this.#entries.has(id), `value ${id} is already captured`);
+
+    const local = this.#scratch.allocLocal(type);
+
+    this.#entries.set(id, { local, remainingUses: undefined, pins: 0 });
+    return local;
   }
 
   replay(id: ValueId): boolean {
@@ -49,10 +63,13 @@ export class LocalRegistry {
       return false;
     }
 
-    assert(entry.remainingUses > 0, `no counted uses of value ${id} remain`);
     this.#body.localGet(entry.local);
-    entry.remainingUses -= 1;
-    this.#maybeFree(id, entry);
+
+    if (entry.remainingUses !== undefined) {
+      assert(entry.remainingUses > 0, `no counted uses of value ${id} remain`);
+      entry.remainingUses -= 1;
+      this.#maybeFree(id, entry);
+    }
     return true;
   }
 
@@ -76,6 +93,18 @@ export class LocalRegistry {
 
   has(id: ValueId): boolean {
     return this.#entries.has(id);
+  }
+
+  releaseOutputLocals(): void {
+    for (const [id, entry] of this.#entries) {
+      if (entry.remainingUses !== undefined) {
+        continue;
+      }
+
+      assert(entry.pins === 0, `output local ${id} is still pinned`);
+      this.#entries.delete(id);
+      this.#scratch.freeLocal(entry.local);
+    }
   }
 
   assertClear(): void {

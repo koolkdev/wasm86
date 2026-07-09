@@ -1,52 +1,51 @@
 import { assert } from "#common/assert.js";
-import type { OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
 import { actionOutput, finishOperands, nestedBodies } from "#ir/traverse.js";
 import { valueChildren, valueId, type ValueId } from "#ir/values.js";
+import type { BlockLiveness } from "./liveness.js";
 
-// The semantic value reachability needed outside emission. It deliberately
-// says nothing about how many times the emitter pushes a value or where an op
-// is scheduled.
-export type BlockLiveness = Readonly<{
-  isLive(id: ValueId): boolean;
+// Temporary use counts for compound-value captures. Action and switch outputs
+// have fragment-owned local bindings and therefore need no lifetime forecast;
+// compounds still use counted captures until their path-local rewrite.
+export type ValueUses = Readonly<{
+  useCount(id: ValueId): number;
 }>;
 
-export function analyzeLiveness(
+export function analyzeValueUses(
   block: IrBlock,
+  liveness: BlockLiveness,
   exportedOutputs: Iterable<ValueId> = []
-): BlockLiveness {
-  return new LivenessAnalysis(block, exportedOutputs);
+): ValueUses {
+  return new ValueUseAnalysis(block, liveness, exportedOutputs);
 }
 
-export function opActionMustExecute(action: OpAction, liveness: BlockLiveness): boolean {
-  const access = opAccess(action.op);
-  const output = actionOutput(action, access);
-
-  return output === undefined || liveness.isLive(output);
-}
-
-class LivenessAnalysis implements BlockLiveness {
+class ValueUseAnalysis implements ValueUses {
   readonly #block: IrBlock;
-  readonly #live = new Set<ValueId>();
-  // Action/control output leaves have dependencies outside the value node
-  // itself: op operands or the results of each switch arm.
+  readonly #liveness: BlockLiveness;
+  readonly #useCounts = new Map<ValueId, number>();
+  // Action/control output leaves carry dependencies outside their value node.
   readonly #outputDependencies = new Map<ValueId, readonly ValueId[]>();
 
-  constructor(block: IrBlock, exportedOutputs: Iterable<ValueId>) {
+  constructor(
+    block: IrBlock,
+    liveness: BlockLiveness,
+    exportedOutputs: Iterable<ValueId>
+  ) {
     this.#block = block;
+    this.#liveness = liveness;
     this.#recordBody(block.body);
 
     for (const output of exportedOutputs) {
-      this.#markLive(output);
+      this.#addUse(output);
     }
 
     this.#propagate();
   }
 
-  isLive(id: ValueId): boolean {
+  useCount(id: ValueId): number {
     this.#block.values.node(id);
-    return this.#live.has(id);
+    return this.#useCounts.get(id) ?? 0;
   }
 
   #recordBody(body: Body): void {
@@ -58,7 +57,7 @@ class LivenessAnalysis implements BlockLiveness {
 
           if (output === undefined) {
             for (const input of access.valueInputs) {
-              this.#markLive(input);
+              this.#addUse(input);
             }
             break;
           }
@@ -68,10 +67,10 @@ class LivenessAnalysis implements BlockLiveness {
           break;
         }
         case "if":
-          this.#markLive(action.condition);
+          this.#addUse(action.condition);
           break;
         case "switch": {
-          this.#markLive(action.selector);
+          this.#addUse(action.selector);
 
           const results = nestedBodies(action).map((nested) => {
             const result = nested.result;
@@ -89,17 +88,17 @@ class LivenessAnalysis implements BlockLiveness {
         }
         case "loop":
           for (const cell of action.carried) {
-            this.#markLive(cell.seed);
+            this.#addUse(cell.seed);
           }
           break;
         case "loopContinue":
           for (const update of action.updates) {
-            this.#markLive(update);
+            this.#addUse(update);
           }
           break;
         case "finish":
           for (const operand of finishOperands(action.finish)) {
-            this.#markLive(operand);
+            this.#addUse(operand);
           }
           break;
       }
@@ -110,28 +109,32 @@ class LivenessAnalysis implements BlockLiveness {
     }
   }
 
-  // ValueTable construction and producer validation establish a topological
-  // id order. Walking it backwards therefore settles every live parent's
-  // dependencies before their ids are reached.
+  // A compound or producer computes once for however many counted replays it
+  // has, so its dependencies are charged once per child edge, not once per
+  // replay. Topological value ids make one descending pass sufficient.
   #propagate(): void {
     for (let rawId = this.#block.values.size() - 1; rawId >= 0; rawId -= 1) {
       const id = valueId(rawId);
+      const uses = this.#useCounts.get(id) ?? 0;
 
-      if (!this.#live.has(id)) {
+      if (!this.#liveness.isLive(id)) {
+        assert(uses === 0, `dead value ${id} has emitter uses`);
         continue;
       }
+
+      assert(uses > 0, `live value ${id} has no emitter uses`);
 
       const dependencies = this.#outputDependencies.get(id) ??
         valueChildren(this.#block.values.node(id));
 
       for (const dependency of dependencies) {
-        this.#markLive(dependency);
+        this.#addUse(dependency);
       }
     }
   }
 
-  #markLive(id: ValueId): void {
+  #addUse(id: ValueId): void {
     this.#block.values.node(id);
-    this.#live.add(id);
+    this.#useCounts.set(id, (this.#useCounts.get(id) ?? 0) + 1);
   }
 }

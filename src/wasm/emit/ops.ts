@@ -7,8 +7,8 @@ import { emitGuestLoad, emitGuestStore, emitMemoryCheck } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";
 
 // How one IR op lowers to wasm, for every op kind: a pure op leaves its
-// output on the stack, a mutating op performs its write. Placement decides
-// when an op executes — this module only knows how. #ir/ops.js defines
+// output on the stack, a mutating op performs its write. The action emitter
+// decides when an op executes — this module only knows how. #ir/ops.js defines
 // what an op is; the state and guest access layers own layout and
 // addressing.
 

@@ -1,11 +1,13 @@
-import { assert } from "#common/assert.js";
 import type { Action, OpAction } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#wasm/encoder/types.js";
-import type { BlockLiveness } from "#wasm/emit/liveness.js";
+import {
+  opActionMustExecute,
+  type BlockLiveness
+} from "#wasm/emit/liveness.js";
 import {
   defineLazyFlagHelpers,
   lazyFlagHelperName,
@@ -62,10 +64,7 @@ function requiredActionHelper(
     return undefined;
   }
 
-  const output = action.output;
-
-  assert(output !== undefined, `${action.op.kind} helper op is missing its output`);
-  return liveness.isLive(output) ? helper : undefined;
+  return opActionMustExecute(action, liveness) ? helper : undefined;
 }
 
 function actionHelper(action: OpAction): HelperCallKey | undefined {

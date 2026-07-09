@@ -1,11 +1,10 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import type { OpAction } from "#ir/actions.js";
-import { opAccess, type IrOp } from "#ir/ops.js";
+import type { IrOp } from "#ir/ops.js";
 import type { Body } from "#ir/block.js";
-import { bodyContains, bodyInputValues } from "#ir/traverse.js";
+import { bodyInputValues } from "#ir/traverse.js";
 import {
-  valueChildren,
   type BinaryValueNode,
   type CompareValueNode,
   type ExtendValueNode,
@@ -28,20 +27,19 @@ import {
   emitUnaryOperator,
   wasmTypeForValue
 } from "./operators.js";
-import type { BlockPlacement, ScheduledEmission } from "./placement.js";
+import type { ValueUses } from "./value-uses.js";
 
-// Turns placement + the value graph into stack code. emitUse pushes exactly
-// one use of a value; anything needed more than once is captured into a
-// refcounted scratch local and replayed until its last counted use. An
+// Turns stable output locals plus the value graph into stack code. emitUse
+// pushes exactly one use of a value; compounds needed more than once are
+// temporarily captured and replayed until their last counted use. An
 // emission that observes one operand several times borrows it instead of
-// consuming extra uses. The local registry is the only scratch-local
-// mechanism in the emitter; borrows pin its locals rather than copy them.
+// consuming extra uses.
 
 export type ValueStackContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   values: ValueTable;
-  placement: BlockPlacement;
+  uses: ValueUses;
   // External id -> the wasm local the embedding bound it to.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
   // Emits one op, consuming its value inputs through the given uses; the
@@ -59,22 +57,14 @@ type CompoundValueNode =
   | TruncateValueNode
   | ExtendValueNode;
 
-// A deferred producer op awaiting its scheduled emissions, consumed in
-// emission order.
-type PendingProducer = { action: OpAction; emissions: ScheduledEmission[] };
-
 type BorrowPolicy = Readonly<{ first(): void; repeat(): void; close?(): void }>;
 
 export class ValueStack implements OperandUses {
   readonly #context: ValueStackContext;
   readonly #body: WasmFunctionBodyEncoder;
   readonly #values: ValueTable;
-  readonly #placement: BlockPlacement;
+  readonly #uses: ValueUses;
   readonly #registry: LocalRegistry;
-  // Deferred producer ops, recorded at their action point: each scope
-  // that itself demands the value emits the op once — at its first use
-  // there or at a subtree's entry — and every use replays that local.
-  readonly #pending = new Map<ValueId, PendingProducer>();
   // Open borrows per value; assertClear reports leaks.
   readonly #borrows = new Map<ValueId, number>();
   // Loop input leaf -> its carried cell's local, bound for the loop extent.
@@ -86,34 +76,18 @@ export class ValueStack implements OperandUses {
     this.#context = context;
     this.#body = context.body;
     this.#values = context.values;
-    this.#placement = context.placement;
+    this.#uses = context.uses;
     this.#registry = new LocalRegistry(context.body, context.scratch);
   }
 
-  // The driver calls this at each output-producing op action point, in
-  // action order.
-  scheduledProducer(action: OpAction): void {
+  // A live output-producing op executes at its action point and stores into
+  // one fragment-owned output local. Every later use reads that local.
+  materializeActionOutput(action: OpAction): void {
     const output = action.output;
 
     assert(output !== undefined, `${action.op.kind} op action is missing its output`);
-
-    const uses = this.#placement.useCount(output);
-    const placement = this.#placement.outputPlacement(output);
-
-    switch (placement.kind) {
-      case "deferToUse":
-        // Each demanding scope emits the op once; a dead pure op never
-        // executes.
-        if (uses > 0) {
-          this.#pending.set(output, { action, emissions: [...placement.emissions] });
-        }
-
-        return;
-      case "captureAtProducer":
-        this.#context.emitOp(action.op, this);
-        this.#registry.captureSet(output, uses, this.#typeOf(output));
-        return;
-    }
+    this.#context.emitOp(action.op, this);
+    this.#registry.captureOutputSet(output, this.#typeOf(output));
   }
 
   // Pushes one use of the value onto the stack.
@@ -145,21 +119,14 @@ export class ValueStack implements OperandUses {
         this.#body.localGet(local);
         return;
       }
-      // A deferred producer executes here, at its scope's first use, and
-      // tees for the rest of that scope's uses.
       case "actionOutput": {
-        const uses = this.#emitPendingProducer(id);
-
-        if (uses > 1) {
-          this.#registry.captureTee(id, uses - 1, this.#typeOf(id));
-        }
-
+        assert(false, `action output ${id} has no local binding`);
         return;
       }
       default: {
         this.#emitCompute(node);
 
-        const uses = this.#placement.useCount(id);
+        const uses = this.#uses.useCount(id);
 
         if (uses > 1) {
           this.#registry.captureTee(id, uses - 1, this.#typeOf(id));
@@ -207,7 +174,7 @@ export class ValueStack implements OperandUses {
   // iteration, never here.
   captureForBody(body: Body, bodyProduced: readonly ValueId[] = []): void {
     for (const id of bodyInputValues(body, this.#values, bodyProduced)) {
-      this.#captureValue(id, body);
+      this.#captureValue(id);
     }
   }
 
@@ -247,16 +214,15 @@ export class ValueStack implements OperandUses {
     this.#varLocals.clear();
   }
 
-  // A control action's output local: arms store into it, the scope's uses
-  // replay it. A dead output claims nothing.
-  claimActionOutput(output: ValueId): number | undefined {
-    const uses = this.#placement.useCount(output);
+  // A live control action's output local: arms store into it and later uses
+  // replay it for the rest of the fragment.
+  claimActionOutput(output: ValueId): number {
+    return this.#registry.claimOutputLocal(output, this.#typeOf(output));
+  }
 
-    if (uses === 0) {
-      return undefined;
-    }
-
-    return this.#registry.claim(output, uses, this.#typeOf(output));
+  releaseFragmentLocals(): void {
+    this.releaseVarLocals();
+    this.#registry.releaseOutputLocals();
   }
 
   // Every captured value fully consumed, every scratch local returned.
@@ -266,36 +232,10 @@ export class ValueStack implements OperandUses {
       `borrowed values never released: ${[...this.#borrows.keys()].join(", ")}`
     );
     assert(
-      this.#pending.size === 0,
-      `deferred producers never emitted: ${[...this.#pending.keys()].join(", ")}`
-    );
-    assert(
       this.#loopInputLocals.size === 0,
       `loop inputs never unbound: ${[...this.#loopInputLocals.keys()].join(", ")}`
     );
     this.#registry.assertClear();
-  }
-
-  // Executes one use-anchored emission of a deferred producer and returns
-  // the counted uses it covers.
-  #emitPendingProducer(id: ValueId): number {
-    const deferred = this.#pending.get(id);
-
-    assert(deferred !== undefined, `action output ${id} has no deferred producer to emit`);
-
-    const emission = deferred.emissions.shift();
-
-    assert(emission !== undefined, `deferred producer ${id} has no scheduled emissions left`);
-    assert(
-      emission.anchor === "use",
-      `deferred producer ${id} reached a use before its scheduled body entry`
-    );
-    if (deferred.emissions.length === 0) {
-      this.#pending.delete(id);
-    }
-
-    this.#context.emitOp(deferred.action.op, this);
-    return emission.uses;
   }
 
   #emitCompute(node: CompoundValueNode): void {
@@ -363,13 +303,13 @@ export class ValueStack implements OperandUses {
     return node.kind === "const" && node.value === 0;
   }
 
-  #captureValue(id: ValueId, forBody: Body): void {
+  #captureValue(id: ValueId): void {
     if (this.#registry.has(id)) {
       return;
     }
 
     // A dead value — a dead control output's result — is never consumed.
-    if (this.#placement.useCount(id) === 0) {
+    if (this.#uses.useCount(id) === 0) {
       return;
     }
 
@@ -384,78 +324,16 @@ export class ValueStack implements OperandUses {
         // Re-emittable anywhere.
         return;
       case "actionOutput": {
-        const deferred = this.#pending.get(id);
-
-        assert(deferred !== undefined, `action output ${id} has no replay source`);
-
-        const index = deferred.emissions.findIndex((entry) => bodyContains(forBody, entry.body));
-
-        // No emission under this body: an earlier one on the enclosing
-        // flow serves its uses before the body runs.
-        if (index === -1) {
-          return;
-        }
-
-        const emission = deferred.emissions[index]!;
-
-        if (emission.anchor === "bodyEntry" && emission.body === forBody) {
-          // The scope's emission is anchored here: execute the op on the
-          // enclosing flow, before the owning control action, and let
-          // every use replay the local.
-          deferred.emissions.splice(index, 1);
-          if (deferred.emissions.length === 0) {
-            this.#pending.delete(id);
-          }
-
-          this.#context.emitOp(deferred.action.op, this);
-          this.#registry.captureSet(id, emission.uses, this.#typeOf(id));
-          return;
-        }
-
-        // The emission lands inside the body: capture what re-emitting
-        // the op there needs — its transitive input closure — never the
-        // output itself.
-        for (const input of opAccess(deferred.action.op).valueInputs) {
-          this.#captureValue(input, forBody);
-        }
-
+        assert(false, `action output ${id} has no replay source`);
         return;
       }
       default: {
-        // Not in the registry means nothing consumed it yet (the pending
-        // nested-body use keeps a consumed multi-use compound captured, so
-        // every counted use is still to come.
-        this.#captureNestedBodyEntryProducers(id, forBody);
+        // Not in the registry means nothing consumed it yet, so every
+        // counted use is still to come.
         this.#emitCompute(node);
-        this.#registry.captureSet(id, this.#placement.useCount(id), this.#typeOf(id));
+        this.#registry.captureSet(id, this.#uses.useCount(id), this.#typeOf(id));
         return;
       }
-    }
-  }
-
-  // A compound input can wrap a deferred producer whose emission is
-  // anchored at this body's entry — placement refuses to sink pure ops into
-  // loop bodies, but the compound itself stays a body input because it does
-  // not depend on the loop's own leaves. Capture such producers first so
-  // computing the compound replays their locals.
-  #captureNestedBodyEntryProducers(id: ValueId, forBody: Body): void {
-    const node = this.#values.node(id);
-
-    if (node.kind === "actionOutput") {
-      const deferred = this.#pending.get(id);
-
-      if (
-        deferred !== undefined &&
-        deferred.emissions.some((emission) => emission.anchor === "bodyEntry" && emission.body === forBody)
-      ) {
-        this.#captureValue(id, forBody);
-      }
-
-      return;
-    }
-
-    for (const child of valueChildren(node)) {
-      this.#captureNestedBodyEntryProducers(child, forBody);
     }
   }
 

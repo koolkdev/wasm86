@@ -21,7 +21,7 @@ import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { analyzeLiveness, type BlockLiveness } from "./liveness.js";
 import { emitOp } from "./ops.js";
 import { wasmTypeForValue } from "./operators.js";
-import { analyzePlacement } from "./placement.js";
+import { analyzeValueUses } from "./value-uses.js";
 import { ValueStack } from "./value-stack.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
@@ -80,12 +80,13 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
 
     liveness = analyzeLiveness(block, outputs.keys());
   }
-  const placement = analyzePlacement(block, liveness, outputs.keys());
+  const fragmentLiveness = liveness;
+  const uses = analyzeValueUses(block, fragmentLiveness, outputs.keys());
   const valueStack = new ValueStack({
     body,
     scratch: context.scratch,
     values: block.values,
-    placement,
+    uses,
     externalLocals: context.externalLocals ?? new Map(),
     emitOp: (op, operands) => emitOp(body, context.helpers, op, operands)
   });
@@ -105,14 +106,16 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   function emitAction(action: Action): void {
     switch (action.kind) {
       case "op":
-        // Output-producing ops route through placement; the rest execute
-        // at their action point.
         if (opAccess(action.op).valueOutput === undefined) {
           emitOp(body, context.helpers, action.op, valueStack);
-        } else {
-          valueStack.scheduledProducer(action);
+          return;
         }
 
+        assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
+
+        if (fragmentLiveness.isLive(action.output)) {
+          valueStack.materializeActionOutput(action);
+        }
         return;
       case "finish":
         switch (action.finish.kind) {
@@ -227,7 +230,9 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       valueStack.captureForBody(nested);
     }
 
-    const outputLocal = valueStack.claimActionOutput(action.output);
+    const outputLocal = fragmentLiveness.isLive(action.output)
+      ? valueStack.claimActionOutput(action.output)
+      : undefined;
     const caseCount = action.cases.length;
 
     // Open order join, default, case n-1 .. case 0: case i lands at depth
@@ -294,7 +299,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     frame.emitFallthrough();
   }
 
-  valueStack.releaseVarLocals();
+  valueStack.releaseFragmentLocals();
   valueStack.assertClear();
 }
 
