@@ -10,9 +10,9 @@ import { wasmValueType } from "#wasm/encoder/types.js";
 import type { LinkCompletion } from "#wasm/emit/embed.js";
 import { emitActionFunction } from "#wasm/emit/action.js";
 import {
-  analyzePlacement,
-  type BlockPlacement
-} from "#wasm/emit/placement.js";
+  analyzeLiveness,
+  type BlockLiveness
+} from "#wasm/emit/liveness.js";
 import { CompletionExit, encodeCompletionExit } from "#wasm/exit.js";
 import {
   createWasmHelperRegistry,
@@ -36,7 +36,7 @@ export type ActionJitBlock = Readonly<{
 type AnalyzedActionJitBlock = Readonly<{
   entryEip: number;
   actions: IrBlock;
-  placement: BlockPlacement;
+  liveness: BlockLiveness;
 }>;
 
 export type EncodeActionJitModuleOptions = Readonly<{
@@ -126,12 +126,12 @@ export function encodeActionJitModule(
 
     return {
       ...block,
-      placement: analyzePlacement(block.actions)
+      liveness: analyzeLiveness(block.actions)
     };
   });
   const helpers = createWasmHelperRegistry(module);
   const helperCalls = analyzedBlocks.flatMap((block) =>
-    helperCallsForBlock(block.actions, block.placement)
+    helperCallsForBlock(block.actions, block.liveness)
   );
 
   defineRequiredHelpers(helpers, helperCalls);
@@ -155,7 +155,7 @@ export function encodeActionJitModule(
     const body = emitActionFunction(block.actions, {
       body: new WasmFunctionBodyEncoder(),
       helpers,
-      placement: block.placement,
+      liveness: block.liveness,
       embedding: { dispatch: completion }
     });
     const functionIndex = module.addFunction(typeIndex, body);

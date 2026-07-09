@@ -5,6 +5,7 @@ import { flagChannel, gprChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlag
 import type { Action } from "#ir/actions.js";
 import { fitsUnsigned, valueId, type ValueId } from "#ir/values.js";
 import { ValueTable } from "#ir/value-table.js";
+import { analyzeLiveness } from "#wasm/emit/liveness.js";
 import { analyzePlacement } from "#wasm/emit/placement.js";
 import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import { memoryCheck, memoryRead, memoryWrite, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
@@ -14,13 +15,13 @@ function analyze(
   actions: readonly Action[],
   exportedOutputs: readonly (ValueId | number)[] = []
 ) {
-  return analyzePlacement(
-    {
-      body: { actions },
-      values
-    },
-    exportedOutputs.map(valueId)
-  );
+  const block = {
+    body: { actions },
+    values
+  };
+  const outputs = exportedOutputs.map(valueId);
+
+  return analyzePlacement(block, analyzeLiveness(block, outputs), outputs);
 }
 
 function hostExit(payload?: number): Action {

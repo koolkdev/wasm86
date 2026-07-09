@@ -9,6 +9,7 @@ import { ValueTable } from "#ir/value-table.js";
 import { fitsUnsigned } from "#ir/values.js";
 import { emitOp } from "#wasm/emit/ops.js";
 import { ValueStack } from "#wasm/emit/value-stack.js";
+import { analyzeLiveness } from "#wasm/emit/liveness.js";
 import { analyzePlacement } from "#wasm/emit/placement.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -40,11 +41,12 @@ function createTestEmitter(
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const externalLocals = new Map(externalIds.map((id) => [id, body.addLocal(wasmValueType.i32)]));
+  const block = { body: actionBody, values };
   const valueStack = new ValueStack({
     body,
     scratch,
     values,
-    placement: analyzePlacement({ body: actionBody, values }),
+    placement: analyzePlacement(block, analyzeLiveness(block)),
     externalLocals,
     // The real op lowering: its state and guest accesses emit the same
     // opcode shapes the assertions pin (const address + load).

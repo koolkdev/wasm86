@@ -8,6 +8,7 @@ import {
 } from "#ir/traverse.js";
 import { valueChildren, valueId, type ValueId } from "#ir/values.js";
 import type { ValueTable } from "#ir/value-table.js";
+import type { BlockLiveness } from "./liveness.js";
 
 // The placement analysis: decides up front, from the action lists and the
 // value graph, where every value materializes — use counts for the tee
@@ -45,9 +46,10 @@ export type BlockPlacement = Readonly<{
 
 export function analyzePlacement(
   block: IrBlock,
+  liveness: BlockLiveness,
   exportedOutputs: Iterable<ValueId> = []
 ): BlockPlacement {
-  return new PlacementAnalysis(block, exportedOutputs);
+  return new PlacementAnalysis(block, liveness, exportedOutputs);
 }
 
 type DemandSite = Readonly<{ body: Body; actionIndex: number }>;
@@ -82,6 +84,7 @@ type PlannedEmission = Readonly<{
 
 class PlacementAnalysis implements BlockPlacement {
   readonly #values: ValueTable;
+  readonly #liveness: BlockLiveness;
   readonly #demandCounts = new Map<ValueId, number>();
   // First demand index per body scope, in that scope's index space:
   // compound children charge there.
@@ -94,8 +97,13 @@ class PlacementAnalysis implements BlockPlacement {
   readonly #bodyOwners = new Map<Body, DemandSite>();
   readonly #loopBodies = new Set<Body>();
 
-  constructor(block: IrBlock, exportedOutputs: Iterable<ValueId>) {
+  constructor(
+    block: IrBlock,
+    liveness: BlockLiveness,
+    exportedOutputs: Iterable<ValueId>
+  ) {
     this.#values = block.values;
+    this.#liveness = liveness;
 
     this.#recordBodyOwners(block.body);
     this.#recordActionDemandRoots(block.body);
@@ -315,10 +323,14 @@ class PlacementAnalysis implements BlockPlacement {
   #propagateDemandAndPlace(): void {
     for (let rawId = this.#values.size() - 1; rawId >= 0; rawId -= 1) {
       const id = valueId(rawId);
+      const demandCount = this.#demandCounts.get(id) ?? 0;
 
-      if ((this.#demandCounts.get(id) ?? 0) === 0) {
+      if (!this.#liveness.isLive(id)) {
+        assert(demandCount === 0, `dead value ${id} has emitter demand`);
         continue;
       }
+
+      assert(demandCount > 0, `live value ${id} has no emitter demand`);
 
       const producer = this.#producers.get(id);
 

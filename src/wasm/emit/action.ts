@@ -18,9 +18,10 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { wasmBranchHint, type WasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
+import { analyzeLiveness, type BlockLiveness } from "./liveness.js";
 import { emitOp } from "./ops.js";
 import { wasmTypeForValue } from "./operators.js";
-import { analyzePlacement, type BlockPlacement } from "./placement.js";
+import { analyzePlacement } from "./placement.js";
 import { ValueStack } from "./value-stack.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
@@ -37,17 +38,17 @@ export type ActionFragmentContext = Readonly<{
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
   helpers?: WasmHelperRegistry | undefined;
-  // A supplied placement was computed from this validated block with the
-  // embedding's output roots. Without one, the fragment owns both steps.
-  placement?: BlockPlacement | undefined;
+  // A supplied liveness result was computed from this validated block with
+  // the embedding's output roots. Without one, the fragment owns both steps.
+  liveness?: BlockLiveness | undefined;
   embedding: FragmentEmbedding;
 }>;
 
 export type ActionFunctionContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   helpers?: WasmHelperRegistry | undefined;
-  // See ActionFragmentContext.placement.
-  placement?: BlockPlacement | undefined;
+  // See ActionFragmentContext.liveness.
+  liveness?: BlockLiveness | undefined;
   embedding: FunctionEmbedding;
 }>;
 
@@ -59,7 +60,7 @@ export function emitActionFunction(block: IrBlock, context: ActionFunctionContex
     body: context.body,
     scratch,
     helpers: context.helpers,
-    placement: context.placement,
+    liveness: context.liveness,
     embedding: context.embedding
   });
   scratch.assertClear();
@@ -69,16 +70,17 @@ export function emitActionFunction(block: IrBlock, context: ActionFunctionContex
 export function emitActionFragment(block: IrBlock, context: ActionFragmentContext): void {
   const { body, embedding } = context;
   const outputs = embedding.outputs ?? new Map<ValueId, number>();
-  let placement = context.placement;
+  let liveness = context.liveness;
 
-  if (placement === undefined) {
+  if (liveness === undefined) {
     validateIrBlock(block, {
       allowImplicitEntryFallthrough: context.embedding.fallthrough !== undefined,
       exportedOutputs: outputs.keys()
     });
 
-    placement = analyzePlacement(block, outputs.keys());
+    liveness = analyzeLiveness(block, outputs.keys());
   }
+  const placement = analyzePlacement(block, liveness, outputs.keys());
   const valueStack = new ValueStack({
     body,
     scratch: context.scratch,

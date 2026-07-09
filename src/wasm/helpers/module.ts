@@ -1,11 +1,11 @@
+import { assert } from "#common/assert.js";
 import type { Action, OpAction } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
-import { opMutates } from "#ir/ops.js";
 import { walkBodyActions } from "#ir/traverse.js";
 import { x86StatusFlags } from "#x86/flags.js";
 import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#wasm/encoder/types.js";
-import type { BlockPlacement } from "#wasm/emit/placement.js";
+import type { BlockLiveness } from "#wasm/emit/liveness.js";
 import {
   defineLazyFlagHelpers,
   lazyFlagHelperName,
@@ -33,12 +33,12 @@ export function allHelpers(): readonly HelperCallKey[] {
 
 export function helperCallsForBlock(
   block: IrBlock,
-  placement: BlockPlacement
+  liveness: BlockLiveness
 ): readonly HelperCallKey[] {
   const helperCalls = new Map<string, HelperCallKey>();
 
   walkBodyActions(block.body, (action) => {
-    const helper = liveActionHelper(action, placement);
+    const helper = requiredActionHelper(action, liveness);
 
     if (helper !== undefined) {
       helperCalls.set(helperFunctionName(helper), helper);
@@ -48,9 +48,9 @@ export function helperCallsForBlock(
   return [...helperCalls.values()];
 }
 
-function liveActionHelper(
+function requiredActionHelper(
   action: Action,
-  placement: BlockPlacement
+  liveness: BlockLiveness
 ): HelperCallKey | undefined {
   if (action.kind !== "op") {
     return undefined;
@@ -62,15 +62,10 @@ function liveActionHelper(
     return undefined;
   }
 
-  if (opMutates(action.op)) {
-    return helper;
-  }
-
   const output = action.output;
 
-  return output !== undefined && placement.useCount(output) > 0
-    ? helper
-    : undefined;
+  assert(output !== undefined, `${action.op.kind} helper op is missing its output`);
+  return liveness.isLive(output) ? helper : undefined;
 }
 
 function actionHelper(action: OpAction): HelperCallKey | undefined {

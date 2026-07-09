@@ -7,7 +7,7 @@ import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { wasmValueType } from "#wasm/encoder/types.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
-import { analyzePlacement, type BlockPlacement } from "#wasm/emit/placement.js";
+import { analyzeLiveness, type BlockLiveness } from "#wasm/emit/liveness.js";
 import {
   createWasmHelperRegistry,
   defineRequiredHelpers,
@@ -42,18 +42,18 @@ export function irBlockBodyWithHelpers(block: IrBlock, externalParamCount = 0): 
 
   validateIrBlock(block, { allowImplicitEntryFallthrough: true });
 
-  const placement = analyzePlacement(block);
+  const liveness = analyzeLiveness(block);
   const helpers = createWasmHelperRegistry(module);
 
-  defineRequiredHelpers(helpers, helperCallsForBlock(block, placement));
-  return emitIrBlockBody(block, externalParamCount, helpers, placement);
+  defineRequiredHelpers(helpers, helperCallsForBlock(block, liveness));
+  return emitIrBlockBody(block, externalParamCount, helpers, liveness);
 }
 
 function emitIrBlockBody(
   block: IrBlock,
   externalParamCount: number,
   helpers?: WasmHelperRegistry,
-  placement?: BlockPlacement
+  liveness?: BlockLiveness
 ): WasmFunctionBodyEncoder {
   const body = new WasmFunctionBodyEncoder(externalParamCount);
   const scratch = new WasmLocalScratchAllocator(body);
@@ -64,7 +64,7 @@ function emitIrBlockBody(
     scratch,
     externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
     helpers,
-    placement,
+    liveness,
     embedding: {
       dispatch: { kind: "br", depth: 0 },
       fallthrough: { kind: "fallthrough" }
@@ -143,13 +143,13 @@ function encodeIrBlockModule(block: IrBlock, externalParamCount: number): Uint8A
 
   validateIrBlock(block, { allowImplicitEntryFallthrough: true });
 
-  const placement = analyzePlacement(block);
+  const liveness = analyzeLiveness(block);
   const helpers = createWasmHelperRegistry(module);
 
-  defineRequiredHelpers(helpers, helperCallsForBlock(block, placement));
+  defineRequiredHelpers(helpers, helperCallsForBlock(block, liveness));
   module.exportFunction(
     wasmBlockExportName,
-    module.addFunction(typeIndex, emitIrBlockBody(block, externalParamCount, helpers, placement))
+    module.addFunction(typeIndex, emitIrBlockBody(block, externalParamCount, helpers, liveness))
   );
   return module.encode();
 }
