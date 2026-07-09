@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import type { Action } from "#ir/actions.js";
 import { BodyBuilder, buildIrBlock, type BodyActionSink } from "#ir/body-builder.js";
-import { eipChannel } from "#ir/slots.js";
+import { eipChannel, gprChannel } from "#ir/slots.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { fitsUnsigned, unboundedWidthBounds, type ValueId } from "#ir/values.js";
 import { ValueTable } from "#ir/value-table.js";
@@ -13,9 +13,10 @@ test("op derives the output and its bounds from the op access", () => {
   const values = new ValueTable();
   const builder = new BodyBuilder(values);
   const address = values.const(0x1000);
-  const fault = builder.opValue({ kind: "memory.check", address, byteLength: 4, access: "read" });
+  const byteLength = values.const(4);
+  const fault = builder.opValue({ kind: "memory.check", address, byteLength, access: "read" });
 
-  deepStrictEqual(builder.build(), { actions: [memoryCheck(fault, address, 4, "read")] });
+  deepStrictEqual(builder.build(), { actions: [memoryCheck(fault, address, byteLength, "read")] });
   deepStrictEqual(values.widthBounds(fault), fitsUnsigned(1));
 });
 
@@ -143,7 +144,7 @@ test("loop bodies take the back edge through loopContinue and validate", () => {
   const block = buildIrBlock((b) => {
     const input = b.values.addLoopInput();
 
-    b.loop([{ seed: b.values.const(3), loopInput: input }], (body) => {
+    b.loop([{ channel: gprChannel("ecx"), seed: b.values.const(3), loopInput: input }], (body) => {
       const next = body.values.binary("sub", input, body.values.const(1));
 
       body.if(body.values.compare(32, "ne", next, body.values.const(0)), (taken) => taken.loopContinue([next]));

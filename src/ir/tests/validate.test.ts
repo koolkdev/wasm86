@@ -395,6 +395,16 @@ test("a loop with a dword carried cell and an aligned continue validates", () =>
   );
 });
 
+test("a var op with an invalid index is rejected", () => {
+  throws(
+    () =>
+      validateIrBlock(
+        blockWith([{ kind: "op", op: { kind: "var.write", variable: -1, value: valueId(0) } }])
+      ),
+    /invalid semantic var index/
+  );
+});
+
 test("a loopContinue outside any loop body is rejected", () => {
   throws(
     () => validateIrBlock(blockWith([{ kind: "loopContinue", updates: [] }])),

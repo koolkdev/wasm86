@@ -486,3 +486,38 @@ test("overlapping loop body register writes assert during carry derivation", () 
     /overlapping state channels/
   );
 });
+
+test("a loop body advancing only semantic vars carries nothing", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    (s, v) => {
+      const counter = s.var(v.const(3));
+
+      s.loop((b, loopV) => {
+        const next = loopV.binary("sub", b.get(counter), loopV.const(1));
+
+        b.set(counter, next);
+        return loopV.compare(32, "ne", next, loopV.const(0));
+      });
+      s.set(s.reg("eax"), s.get(counter));
+    },
+    [],
+    loc(repEip, repNextEip)
+  );
+
+  const block = builder.finish();
+  const loop = findLoop(block);
+
+  deepStrictEqual(loop.carried, []);
+
+  // The post-loop read is its own var.read op, ordered after the loop.
+  const actions = block.body.actions;
+  const loopIndex = actions.findIndex((action) => action === loop);
+  const readIndex = actions.findIndex(
+    (action) => action.kind === "op" && action.op.kind === "var.read"
+  );
+
+  ok(loopIndex >= 0, "the block holds the var-driven loop");
+  ok(readIndex > loopIndex, "the post-loop var read sits after the loop");
+});

@@ -8,8 +8,8 @@ export function testSemantic(width: OperandWidth = 32): SemanticTemplate {
     const leftOperand = s.operand(0);
     const rightOperand = s.operand(1);
 
-    guardStorageRead(s, context, leftOperand, width);
-    guardStorageRead(s, context, rightOperand, width);
+    guardStorageRead(s, v, context, leftOperand, width);
+    guardStorageRead(s, v, context, rightOperand, width);
 
     const left = v.truncate(width, s.get(leftOperand, width));
     const right = v.truncate(width, s.get(rightOperand, width));

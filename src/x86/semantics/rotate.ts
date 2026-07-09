@@ -25,7 +25,7 @@ export function rotateSemantic(
   return (s, v, context) => {
     const dst = s.operand(0);
 
-    guardStorageReadWrite(s, context, dst, width);
+    guardStorageReadWrite(s, v, context, dst, width);
 
     const value = v.truncate(width, s.get(dst, width));
     const rawCount = readShiftCount(s, v, countSource);

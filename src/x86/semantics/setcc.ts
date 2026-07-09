@@ -7,7 +7,7 @@ export function setccSemantic(cc: ConditionCode): SemanticTemplate {
     const dst = s.operand(0);
     const condition = s.condition(cc);
 
-    guardStorageWrite(s, context, dst, 8);
+    guardStorageWrite(s, v, context, dst, 8);
     s.set(dst, v.select(condition, v.const(1), v.const(0)), 8);
   };
 }

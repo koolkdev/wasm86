@@ -25,7 +25,7 @@ export function memoryGuardActions(
   const fault = builder.opValue({
     kind: "memory.check",
     address,
-    byteLength,
+    byteLength: values.const(byteLength),
     access: memoryCheckAccess(access)
   });
 

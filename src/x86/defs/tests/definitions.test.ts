@@ -14,7 +14,7 @@ import {
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");
   strictEqual(X86_32_CORE.instructionLengthLimit, 15);
-  strictEqual(X86_32_CORE.instructions.length, 505);
+  strictEqual(X86_32_CORE.instructions.length, 506);
 
   const ids = X86_32_CORE.instructions.map((spec) => spec.id);
 
@@ -216,6 +216,7 @@ test("x86-32 core registers the initial instruction surface", () => {
     "ret.near",
     "ret.imm16_o16",
     "ret.imm16",
+    "enter.imm16_imm8",
     "jecxz.rel8",
     "loop.rel8",
     "loope.rel8",
@@ -1279,6 +1280,23 @@ test("ret imm16 records unsigned immediate and generic control semantics", () =>
 
   strictEqual(trace.events.at(-1), "jump %1");
   ok(trace.events.includes("%3 = get op0:32"));
+});
+
+test("enter records alloc-size and nesting immediates with semantic var loop semantics", () => {
+  const spec = instruction("enter.imm16_imm8");
+
+  deepStrictEqual(spec.opcode, [0xc8]);
+  deepStrictEqual(spec.operands, [{ kind: "imm", width: 16 }, { kind: "imm", width: 8 }]);
+  strictEqual(spec.syntax, "enter {0}, {1}");
+
+  const trace = buildSemanticTrace(semanticsOf(spec));
+
+  ok(trace.events.some((event) => event.startsWith("guard write ") && !event.endsWith(":4")));
+  ok(trace.events.some((event) => event.startsWith("guard read ") && !event.endsWith(":4")));
+  ok(trace.events.includes("loop"));
+  ok(trace.events.some((event) => event.startsWith("set mem(")));
+  ok(trace.events.some((event) => event.startsWith("set ebp:32 <-")));
+  ok(trace.events.some((event) => event.startsWith("set esp:32 <-")));
 });
 
 test("operand-size near control forms use 16-bit targets and stack cells", () => {

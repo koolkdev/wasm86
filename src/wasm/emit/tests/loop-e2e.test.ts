@@ -141,6 +141,46 @@ test("a hoisted loop-invariant value stays live across iterations", async () => 
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 0);
 });
 
+// Semantic vars back onto plain wasm locals: the loop carries no cells, the
+// var advances per iteration, and a read after the loop sees the final
+// value. The in-body read's value feeds uses past the var.write, pinning
+// the capture-before-overwrite ordering.
+test("var locals carry loop state and survive to post-loop reads", async () => {
+  const values = new ValueTable();
+  const nSeed = values.addActionOutput();
+  const readOut = values.addActionOutput();
+  const postOut = values.addActionOutput();
+  const next = values.binary("sub", readOut, values.const(1));
+  const block = loopBlock(values, [
+    stateRead(nSeed, gprChannel("ecx")),
+    { kind: "op", op: { kind: "var.write", variable: 0, value: nSeed } },
+    {
+      kind: "loop",
+      carried: [],
+      body: {
+        actions: [
+          { kind: "op", output: readOut, op: { kind: "var.read", variable: 0 } },
+          { kind: "op", op: { kind: "var.write", variable: 0, value: next } },
+          {
+            kind: "if",
+            condition: values.compare(32, "ne", next, values.const(0)),
+            thenBody: { actions: [{ kind: "loopContinue", updates: [] }] }
+          }
+        ]
+      }
+    },
+    { kind: "op", output: postOut, op: { kind: "var.read", variable: 0 } },
+    stateWrite(gprChannel("eax"), values.binary("add", postOut, values.const(100)))
+  ]);
+  const { stateView, run } = await instantiateIrBlock(block);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 0xdead, ecx: 5 });
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 100);
+  // Nothing was carried: the loop leaves ecx untouched.
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 5);
+});
+
 const repEip = 0x1000;
 const repNextEip = 0x1002;
 

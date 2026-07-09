@@ -42,7 +42,7 @@ export type MemoryWriteFact = Readonly<{
 export type MemoryCheckFact = Readonly<{
   output: ValueId;
   address: ValueId;
-  byteLength: number;
+  byteLength: ValueId;
   access: MemoryAccessKind;
 }>;
 
@@ -90,10 +90,14 @@ export function memoryWrite(address: TestValueId, value: TestValueId, width: Ope
 export function memoryCheck(
   output: TestValueId,
   address: TestValueId,
-  byteLength: number,
+  byteLength: TestValueId,
   access: MemoryAccessKind
 ): MemoryCheckAction {
-  return { kind: "op", output: valueId(output), op: { kind: "memory.check", address: valueId(address), byteLength, access } };
+  return {
+    kind: "op",
+    output: valueId(output),
+    op: { kind: "memory.check", address: valueId(address), byteLength: valueId(byteLength), access }
+  };
 }
 
 export function resolveFlag(output: TestValueId, flag: X86StatusFlag): ResolveFlagAction {

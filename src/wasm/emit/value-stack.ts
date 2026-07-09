@@ -79,6 +79,8 @@ export class ValueStack implements OperandUses {
   readonly #borrows = new Map<ValueId, number>();
   // Loop input leaf -> its carried cell's local, bound for the loop extent.
   readonly #loopInputLocals = new Map<ValueId, number>();
+  // Semantic var index -> its backing local, held for the fragment.
+  readonly #varLocals = new Map<number, number>();
 
   constructor(context: ValueStackContext) {
     this.#context = context;
@@ -194,6 +196,10 @@ export class ValueStack implements OperandUses {
     });
   }
 
+  constValue(id: ValueId): number | undefined {
+    return this.#values.constValue(id);
+  }
+
   // Called before entering a nested body: its actions are emitted later
   // but executes here, so anything it consumes from the parent context must
   // be replayable from a local. A loop body passes its input leaves as
@@ -215,6 +221,30 @@ export class ValueStack implements OperandUses {
 
   unbindLoopInput(id: ValueId): void {
     assert(this.#loopInputLocals.delete(id), `loop input ${id} is not bound`);
+  }
+
+  // A semantic var's backing local: allocated on first touch, stable until
+  // releaseVarLocals at fragment end. Instruction-scoped var indices reuse
+  // the same local across instructions; each seed write re-initializes it.
+  varLocal(variable: number): number {
+    const existing = this.#varLocals.get(variable);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const local = this.#context.scratch.allocLocal(wasmTypeForValue("i32"));
+
+    this.#varLocals.set(variable, local);
+    return local;
+  }
+
+  releaseVarLocals(): void {
+    for (const local of this.#varLocals.values()) {
+      this.#context.scratch.freeLocal(local);
+    }
+
+    this.#varLocals.clear();
   }
 
   // A control action's output local: arms store into it, the scope's uses

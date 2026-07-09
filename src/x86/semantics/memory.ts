@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import type { Values } from "#ir/values.js";
 import type { MemoryAccessKind, SemanticBuildContext, SemanticOps } from "#x86/semantics/builder.js";
 import type { OperandRef, StorageInput, ValueInput } from "#x86/semantics/refs.js";
 import type { OperandWidth } from "#x86/types.js";
@@ -26,33 +27,37 @@ export function resolvedOperandStorage(
 
 export function guardStorageRead(
   s: SemanticOps,
+  v: Values,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
 ): void {
-  guardStorageAccesses(s, context, storage, byteLengthForWidth(width), ["read"]);
+  guardStorageAccesses(s, v, context, storage, byteLengthForWidth(width), ["read"]);
 }
 
 export function guardStorageWrite(
   s: SemanticOps,
+  v: Values,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
 ): void {
-  guardStorageAccesses(s, context, storage, byteLengthForWidth(width), ["write"]);
+  guardStorageAccesses(s, v, context, storage, byteLengthForWidth(width), ["write"]);
 }
 
 export function guardStorageReadWrite(
   s: SemanticOps,
+  v: Values,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
 ): void {
-  guardStorageAccesses(s, context, storage, byteLengthForWidth(width), ["read", "write"]);
+  guardStorageAccesses(s, v, context, storage, byteLengthForWidth(width), ["read", "write"]);
 }
 
 function guardStorageAccesses(
   s: SemanticOps,
+  v: Values,
   context: SemanticBuildContext,
   storage: StorageInput,
   byteLength: number,
@@ -65,7 +70,7 @@ function guardStorageAccesses(
   }
 
   for (const access of accesses) {
-    s.memoryGuard(address, byteLength, access);
+    s.memoryGuard(address, v.const(byteLength), access);
   }
 }
 
@@ -89,6 +94,7 @@ function memoryGuardAddress(
       }
       return undefined;
     case "reg":
+    case "var":
       return undefined;
   }
 }

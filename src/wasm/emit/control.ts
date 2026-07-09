@@ -91,8 +91,12 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
   function emitDispatchEipWrite(targetEip: ValueId): void {
     emitSlotStore(body, eipChannel, targetEip, {
       emitUse: context.emitPayload,
+      constValue: context.constValue,
       borrowUse: () => {
         throw new Error("dispatch target EIP store does not borrow operands");
+      },
+      varLocal: () => {
+        throw new Error("dispatch target EIP store does not touch semantic vars");
       }
     });
   }

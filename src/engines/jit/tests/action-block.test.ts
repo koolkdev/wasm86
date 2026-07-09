@@ -127,6 +127,36 @@ test("a segment-register load exits from a compiled block before committing the 
   strictEqual(state.instructionCount, 7);
 });
 
+test("a compiled ENTER level 2 copies the display through semantic var loop cells", () => {
+  const block = decodeBlock([0xc8, 0x04, 0x00, 0x02, 0xcd, 0x2e]);
+  const memories = createWasmHostMemories();
+  const guest = new DataView(memories.guestMemory.buffer);
+  const handle = compileActionWasmBlockHandle([block], {
+    cpuStateMemory: memories.cpuStateMemory,
+    guestMemory: memories.guestMemory
+  });
+
+  guest.setUint32(0x17c, 0xaaaa_0001, true);
+  memories.cpuState.load({
+    eip: startEip,
+    esp: 0x120,
+    ebp: 0x180,
+    instructionCount: 7
+  });
+
+  const run = handle.run();
+  const state = readWasmCpuState(memories.cpuState);
+
+  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  strictEqual(state.ebp, 0x11c);
+  strictEqual(state.esp, 0x110);
+  strictEqual(guest.getUint32(0x11c, true), 0x180);
+  strictEqual(guest.getUint32(0x118, true), 0xaaaa_0001);
+  strictEqual(guest.getUint32(0x114, true), 0x11c);
+  strictEqual(state.eip, startEip + 6);
+  strictEqual(state.instructionCount, 9);
+});
+
 test("a not-taken forward jcc keeps pre-branch register pendings live inside the block", () => {
   // mov eax, 7; cmp ecx, 0; je +2; add ebx, eax; int 0x2e.
   const block = decodeBlock([

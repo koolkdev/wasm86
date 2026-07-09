@@ -65,10 +65,10 @@ function movsUnit(width: OperandWidth): StringUnit {
     const dst = s.operand(1);
     const delta = stringDelta(s, v, width);
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
     const value = s.get(src, width);
 
-    guardStorageWrite(s, context, dst, width);
+    guardStorageWrite(s, v, context, dst, width);
     s.set(dst, value, width);
 
     stepRegister(s, v, "esi", delta);
@@ -82,8 +82,8 @@ function cmpsUnit(width: OperandWidth): StringUnit {
     const rightOperand = s.operand(1);
     const delta = stringDelta(s, v, width);
 
-    guardStorageRead(s, context, leftOperand, width);
-    guardStorageRead(s, context, rightOperand, width);
+    guardStorageRead(s, v, context, leftOperand, width);
+    guardStorageRead(s, v, context, rightOperand, width);
 
     const left = v.truncate(width, s.get(leftOperand, width));
     const right = v.truncate(width, s.get(rightOperand, width));
@@ -101,7 +101,7 @@ function stosUnit(width: OperandWidth): StringUnit {
     const value = s.get(s.reg(accumulator(width)), width);
     const delta = stringDelta(s, v, width);
 
-    guardStorageWrite(s, context, dst, width);
+    guardStorageWrite(s, v, context, dst, width);
     s.set(dst, value, width);
     stepRegister(s, v, "edi", delta);
   };
@@ -112,7 +112,7 @@ function lodsUnit(width: OperandWidth): StringUnit {
     const src = s.operand(0);
     const delta = stringDelta(s, v, width);
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
     const value = s.get(src, width);
 
     s.set(s.reg(accumulator(width)), value, width);
@@ -125,7 +125,7 @@ function scasUnit(width: OperandWidth): StringUnit {
     const rightOperand = s.operand(0);
     const delta = stringDelta(s, v, width);
 
-    guardStorageRead(s, context, rightOperand, width);
+    guardStorageRead(s, v, context, rightOperand, width);
 
     const left = v.truncate(width, s.get(s.reg(accumulator(width)), width));
     const right = v.truncate(width, s.get(rightOperand, width));

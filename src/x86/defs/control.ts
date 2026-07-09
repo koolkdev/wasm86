@@ -6,6 +6,7 @@ import { form, imm, mnemonic, modrmRm, rel } from "./dsl.js";
 import type { InstructionForm, InstructionMnemonic } from "./spec.js";
 import {
   callSemantic,
+  enterSemantic,
   jccSemantic,
   jecxzSemantic,
   jmpSemantic,
@@ -119,6 +120,16 @@ export const RET = mnemonic("ret", [
     operands: [imm(16)],
     syntax: "ret {0}",
     semantics: retImmSemantic()
+  })
+]);
+
+export const ENTER = mnemonic("enter", [
+  // C8 iw ib: ENTER imm16, imm8
+  form("imm16_imm8", {
+    opcode: [0xc8],
+    operands: [imm(16), imm(8)],
+    syntax: "enter {0}, {1}",
+    semantics: enterSemantic()
   })
 ]);
 

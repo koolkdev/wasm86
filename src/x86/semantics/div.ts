@@ -21,7 +21,7 @@ function implicitDivideSemantic(kind: DivideKind, width: OperandWidth): Semantic
   return (s, v, context) => {
     const src = s.operand(0);
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
 
     const divisor = s.get(src, width, { signed: kind === "signed" });
     const result = kind === "signed"

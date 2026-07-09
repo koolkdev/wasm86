@@ -29,7 +29,7 @@ export function bitTestSemantic(
     }
 
     if (dstStorage === "mem") {
-      guardBitTestAccess(s, context, op, dst, width);
+      guardBitTestAccess(s, v, context, op, dst, width);
     }
 
     const value = v.truncate(width, s.get(dst, width));
@@ -44,7 +44,7 @@ export function bitScanSemantic(op: BitScanOp, width: BitFieldWidth): SemanticTe
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
 
     const source = v.truncate(width, s.get(src, width));
     const oldDestination = s.get(dst, width);
@@ -70,7 +70,7 @@ function bitStringMemorySemantic(
   const byteOffset = v.binary("shl", element, v.const(byteShift(width)));
   const address = v.binary("add", s.linearAddress(dst), byteOffset);
 
-  guardAddressBitTestAccess(s, op, address, width);
+  guardAddressBitTestAccess(s, v, op, address, width);
 
   const storage = s.mem(address);
   const value = v.truncate(width, s.get(storage, width));
@@ -178,26 +178,28 @@ function lowBit(v: Values, value: ValueInput): Value {
 
 function guardBitTestAccess(
   s: SemanticsBuilder,
+  v: Values,
   context: SemanticBuildContext,
   op: BitTestOp,
   storage: StorageInput,
   width: BitFieldWidth
 ): void {
   if (op === "bt") {
-    guardStorageRead(s, context, storage, width);
+    guardStorageRead(s, v, context, storage, width);
     return;
   }
 
-  guardStorageReadWrite(s, context, storage, width);
+  guardStorageReadWrite(s, v, context, storage, width);
 }
 
 function guardAddressBitTestAccess(
   s: SemanticsBuilder,
+  v: Values,
   op: BitTestOp,
   address: Value,
   width: BitFieldWidth
 ): void {
-  const byteLength = width / 8;
+  const byteLength = v.const(width / 8);
 
   s.memoryGuard(address, byteLength, "read");
 

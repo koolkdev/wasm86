@@ -41,7 +41,7 @@ export function pushStack(
   const nextEsp = v.binary("sub", esp, v.const(stackByteLength(width)));
   const stack = s.mem(nextEsp);
 
-  guardStorageWrite(s, context, stack, width);
+  guardStorageWrite(s, v, context, stack, width);
   s.set(stack, value, width);
   s.set(s.reg("esp"), nextEsp);
 }
@@ -55,7 +55,7 @@ export function popStack(
   const esp = s.get(s.reg("esp"));
   const stack = s.mem(esp);
 
-  guardStorageRead(s, context, stack, width);
+  guardStorageRead(s, v, context, stack, width);
   const value = s.get(stack, width);
   const nextEsp = v.binary("add", esp, v.const(stackByteLength(width)));
 
@@ -67,7 +67,7 @@ export function pushSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, v, context) => {
     const src = s.operand(0);
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
     pushStack(s, v, context, width, s.get(src, width));
   };
 }
@@ -126,7 +126,7 @@ function pushAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void
   const totalBytes = cellBytes * 8;
   const nextEsp = v.binary("sub", esp, v.const(totalBytes));
 
-  s.memoryGuard(nextEsp, totalBytes, "write");
+  s.memoryGuard(nextEsp, v.const(totalBytes), "write");
 
   const values = width === 32
     ? pushadRegisters.map((reg) => reg === "esp" ? esp : s.get(s.reg(reg)))
@@ -145,7 +145,7 @@ function popAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void 
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
 
-  s.memoryGuard(esp, totalBytes, "read");
+  s.memoryGuard(esp, v.const(totalBytes), "read");
 
   const loaded = width === 32
     ? popCells(s, v, esp, 32, popadCells)
@@ -202,7 +202,7 @@ export function popSemantic(width: StackOperandWidth = 32): SemanticTemplate {
     // so an esp-based destination sees the new esp.
     const value = popStack(s, v, context, width);
 
-    s.set(popTargetStorage(s, context, width, dst), value, width);
+    s.set(popTargetStorage(s, v, context, width, dst), value, width);
   };
 }
 
@@ -220,7 +220,7 @@ export function leaveSemantic(): SemanticTemplate {
     const frame = s.get(s.reg("ebp"));
     const savedFrameStorage = s.mem(frame);
 
-    guardStorageRead(s, context, savedFrameStorage, 32);
+    guardStorageRead(s, v, context, savedFrameStorage, 32);
     const savedFrame = s.get(savedFrameStorage);
     const nextEsp = v.binary("add", frame, v.const(4));
 
@@ -231,6 +231,7 @@ export function leaveSemantic(): SemanticTemplate {
 
 function popTargetStorage(
   s: SemanticsBuilder,
+  v: Values,
   context: SemanticBuildContext,
   width: StackOperandWidth,
   dst: OperandRef
@@ -238,11 +239,11 @@ function popTargetStorage(
   if (context.operandInfo(dst).storage === "mem") {
     const target = s.mem(s.linearAddress(dst));
 
-    guardStorageWrite(s, context, target, width);
+    guardStorageWrite(s, v, context, target, width);
     return target;
   }
 
-  guardStorageWrite(s, context, dst, width);
+  guardStorageWrite(s, v, context, dst, width);
   return dst;
 }
 

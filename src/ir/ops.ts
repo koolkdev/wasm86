@@ -40,10 +40,14 @@ export type MemoryWriteOp = Readonly<{
 export type MemoryCheckOp = Readonly<{
   kind: "memory.check";
   address: ValueId;
-  byteLength: number;
+  byteLength: ValueId;
   access: MemoryAccessKind;
 }>;
 export type CpuResolveFlagOp = Readonly<{ kind: "cpu.resolveFlag"; flag: X86StatusFlag }>;
+// A semantic var: a block-local mutable slot the emitter backs with a wasm
+// local. Not architectural state — faults and exits never restore it.
+export type VarReadOp = Readonly<{ kind: "var.read"; variable: number }>;
+export type VarWriteOp = Readonly<{ kind: "var.write"; variable: number; value: ValueId }>;
 
 export type IrOp =
   | StateReadOp
@@ -51,12 +55,15 @@ export type IrOp =
   | MemoryReadOp
   | MemoryWriteOp
   | MemoryCheckOp
-  | CpuResolveFlagOp;
+  | CpuResolveFlagOp
+  | VarReadOp
+  | VarWriteOp;
 
 export type StorageAccess =
   | Readonly<{ space: "state"; slot: StateSlot }>
   | Readonly<{ space: "memory" }>
-  | Readonly<{ space: "memoryBounds" }>;
+  | Readonly<{ space: "memoryBounds" }>
+  | Readonly<{ space: "var"; variable: number }>;
 
 export type OpValueOutput = Readonly<{ type: ValueType; bounds?: WidthBounds }>;
 
@@ -100,7 +107,7 @@ export function opAccess(op: IrOp): OpAccess {
       };
     case "memory.check":
       return {
-        valueInputs: [op.address],
+        valueInputs: [op.address, op.byteLength],
         valueOutput: output(fitsUnsigned(1)),
         reads: [memoryBoundsAccess],
         writes: []
@@ -116,6 +123,19 @@ export function opAccess(op: IrOp): OpAccess {
           { space: "state", slot: lazyFlagsBChannel }
         ],
         writes: []
+      };
+    case "var.read":
+      return {
+        valueInputs: [],
+        valueOutput: output(),
+        reads: [{ space: "var", variable: op.variable }],
+        writes: []
+      };
+    case "var.write":
+      return {
+        valueInputs: [op.value],
+        reads: [],
+        writes: [{ space: "var", variable: op.variable }]
       };
   }
 }

@@ -41,11 +41,10 @@ export type SwitchCase = Readonly<{ match: number; body: Body }>;
 export const maxSwitchMatch = 255;
 
 // One loop-carried cell: a local seeded at loop entry, read inside the body
-// as the opaque `loopInput` leaf, rewritten at each back edge. A channel
-// names the state it stands in for while the loop runs; a channel-less cell
-// is a plain loop-carried temporary.
+// as the opaque `loopInput` leaf, rewritten at each back edge. The channel
+// names the state it stands in for while the loop runs.
 export type LoopCarriedCell = Readonly<{
-  channel?: StateChannel;
+  channel: StateChannel;
   seed: ValueId;
   loopInput: ValueId;
 }>;

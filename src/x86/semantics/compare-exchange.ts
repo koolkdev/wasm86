@@ -11,8 +11,8 @@ export function cmpxchgSemantic(width: OperandWidth): SemanticTemplate {
     const src = s.operand(1);
     const acc = s.reg(accumulator(width));
 
-    guardStorageReadWrite(s, context, dst, width);
-    guardStorageRead(s, context, src, width);
+    guardStorageReadWrite(s, v, context, dst, width);
+    guardStorageRead(s, v, context, src, width);
 
     const oldDst = v.truncate(width, s.get(dst, width));
     const oldSrc = v.truncate(width, s.get(src, width));
@@ -31,8 +31,8 @@ export function xaddSemantic(width: OperandWidth): SemanticTemplate {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageReadWrite(s, context, dst, width);
-    guardStorageReadWrite(s, context, src, width);
+    guardStorageReadWrite(s, v, context, dst, width);
+    guardStorageReadWrite(s, v, context, src, width);
 
     const oldDst = v.truncate(width, s.get(dst, width));
     const oldSrc = v.truncate(width, s.get(src, width));
@@ -49,8 +49,8 @@ export function cmpxchg8bSemantic(): SemanticTemplate {
     const address = s.linearAddress(s.operand(0));
     const highAddress = v.binary("add", address, v.const(4));
 
-    s.memoryGuard(address, 8, "read");
-    s.memoryGuard(address, 8, "write");
+    s.memoryGuard(address, v.const(8), "read");
+    s.memoryGuard(address, v.const(8), "write");
 
     const oldLo = s.get(s.mem(address), 32);
     const oldHi = s.get(s.mem(highAddress), 32);

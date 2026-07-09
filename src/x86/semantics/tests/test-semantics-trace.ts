@@ -1,6 +1,6 @@
 import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
 import type { CpuException } from "#x86/exceptions.js";
-import { mem, operand, reg } from "#x86/semantics/refs.js";
+import { mem, operand, reg, semanticVar } from "#x86/semantics/refs.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import type { Values } from "#ir/values.js";
 import type {
@@ -14,6 +14,7 @@ import type {
   SemanticOperandInfo,
   SemanticOperandInput,
   SemanticOperandStorageKind,
+  SemanticVar,
   SemanticTemplate,
   SimpleFlagSource,
   StatusFlagValues
@@ -99,6 +100,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   readonly #const64Values = new Map<bigint, Value>();
   readonly #inlineValues = new Map<Value, string>();
   readonly #displayValues = new Map<Value, number>();
+  #nextVarIndex = 0;
   #currentEipValue: Value | undefined;
   #nextEipValue: Value | undefined;
   #nextValueId = 0;
@@ -188,6 +190,13 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     return mem(address);
   }
 
+  var(seed: ValueInput): SemanticVar {
+    const variable = semanticVar(this.#nextVarIndex++);
+
+    this.#emit(`var ${this.#storage(variable)} <- ${this.#value(seed)}`);
+    return variable;
+  }
+
   operandInfo(operandInput: SemanticOperandInput): SemanticOperandInfo {
     const index = operandInput.index;
     const info = this.#operandInfo[index];
@@ -212,8 +221,8 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     this.#emit(`set ${this.#storage(target)}:${accessWidth} <- ${this.#value(value)}`);
   }
 
-  memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void {
-    this.#emit(`guard ${access} ${this.#value(address)}:${byteLength}`);
+  memoryGuard(address: ValueInput, byteLength: ValueInput, access: MemoryAccessKind): void {
+    this.#emit(`guard ${access} ${this.#value(address)}:${this.#value(byteLength)}`);
   }
 
   address(operandRef: OperandInput): Value {
@@ -386,6 +395,8 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
         return input.reg;
       case "mem":
         return `mem(${this.#value(input.address)})`;
+      case "var":
+        return `var${input.index}`;
     }
   }
 

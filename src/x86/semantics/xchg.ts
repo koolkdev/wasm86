@@ -3,12 +3,12 @@ import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { guardStorageReadWrite } from "./memory.js";
 
 export function xchgSemantic(width: OperandWidth = 32): SemanticTemplate {
-  return (s, _v, context) => {
+  return (s, v, context) => {
     const leftOperand = s.operand(0);
     const rightOperand = s.operand(1);
 
-    guardStorageReadWrite(s, context, leftOperand, width);
-    guardStorageReadWrite(s, context, rightOperand, width);
+    guardStorageReadWrite(s, v, context, leftOperand, width);
+    guardStorageReadWrite(s, v, context, rightOperand, width);
 
     const left = s.get(leftOperand, width);
     const right = s.get(rightOperand, width);

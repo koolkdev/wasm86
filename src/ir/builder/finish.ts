@@ -33,7 +33,7 @@ export class FinishEmitter {
     this.finishBody(this.#currentBody(), finish, path);
   }
 
-  guardIf(address: ValueId, byteLength: number, access: MemoryAccessKind): void {
+  guardIf(address: ValueId, byteLength: ValueId, access: MemoryAccessKind): void {
     const fault = this.#currentBody().opValue({
       kind: "memory.check",
       address,

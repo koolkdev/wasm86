@@ -282,6 +282,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     frame.emitFallthrough();
   }
 
+  valueStack.releaseVarLocals();
   valueStack.assertClear();
 }
 

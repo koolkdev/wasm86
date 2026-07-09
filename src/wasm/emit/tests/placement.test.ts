@@ -57,6 +57,7 @@ test("action operands count one use per consuming action", () => {
   const memoryOutput = values.addActionOutput();
   const stored = values.const(1);
   const guarded = values.const(0x2000);
+  const byteLength = values.const(4);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const condition = values.const(0);
   const payload = values.const(7);
@@ -66,7 +67,7 @@ test("action operands count one use per consuming action", () => {
       stateRead(readOutput, gprChannel("eax")),
       memoryRead(memoryOutput, address, 32),
       memoryWrite(address, stored, 32),
-      memoryCheck(fault, guarded, 4, "read"),
+      memoryCheck(fault, guarded, byteLength, "read"),
       {
         kind: "if",
         condition: fault,
@@ -131,9 +132,10 @@ test("a check defers across a memory.write", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const stored = values.const(1);
+  const byteLength = values.const(4);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const analysis = analyze(values, [
-    memoryCheck(fault, address, 4, "write"),
+    memoryCheck(fault, address, byteLength, "write"),
     memoryWrite(address, stored, 32),
     {
       kind: "if",
@@ -168,12 +170,13 @@ test("fault body operands count once per edge use", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const address = values.const(0x2000);
+  const byteLength = values.const(4);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const analysis = analyze(
     values,
     [
       stateRead(read, gprChannel("ebx")),
-      memoryCheck(fault, address, 4, "write"),
+      memoryCheck(fault, address, byteLength, "write"),
       {
         kind: "if",
         condition: fault,
@@ -244,13 +247,14 @@ test("an edge use past an overlapping store captures the read at its producer", 
   const read = values.addActionOutput();
   const five = values.const(5);
   const address = values.const(0x2000);
+  const byteLength = values.const(4);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const analysis = analyze(
     values,
     [
       stateRead(read, gprChannel("eax")),
       stateWrite(gprChannel("eax"), five),
-      memoryCheck(fault, address, 4, "write"),
+      memoryCheck(fault, address, byteLength, "write"),
       {
         kind: "if",
         condition: fault,
@@ -292,12 +296,13 @@ test("an edge value reloading a channel the edge flushes captures the read", () 
   const read = values.addActionOutput();
   const five = values.const(5);
   const address = values.const(0x2000);
+  const byteLength = values.const(4);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const analysis = analyze(
     values,
     [
       stateRead(read, gprChannel("ebx")),
-      memoryCheck(fault, address, 4, "write"),
+      memoryCheck(fault, address, byteLength, "write"),
       {
         kind: "if",
         condition: fault,
@@ -563,10 +568,11 @@ test("a deferred output consumed only inside a fault body charges inputs there",
   const address = values.const(0x2000);
   const guarded = values.const(0x3000);
   const loaded = values.addActionOutput();
+  const byteLength = values.const(4);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const analysis = analyze(values, [
     memoryRead(loaded, address, 32),
-    memoryCheck(fault, guarded, 4, "write"),
+    memoryCheck(fault, guarded, byteLength, "write"),
     {
       kind: "if",
       condition: fault,
@@ -592,6 +598,7 @@ test("fault-only demand across sibling fault bodies sinks into each body", () =>
   const first = values.const(0x3000);
   const second = values.const(0x4000);
   const loaded = values.addActionOutput();
+  const byteLength = values.const(4);
   const faultA = values.addActionOutput(fitsUnsigned(1));
   const faultB = values.addActionOutput(fitsUnsigned(1));
   const firstBody = {
@@ -608,9 +615,9 @@ test("fault-only demand across sibling fault bodies sinks into each body", () =>
   };
   const analysis = analyze(values, [
     memoryRead(loaded, address, 32),
-    memoryCheck(faultA, first, 4, "write"),
+    memoryCheck(faultA, first, byteLength, "write"),
     { kind: "if", condition: faultA, thenBody: firstBody },
-    memoryCheck(faultB, second, 4, "write"),
+    memoryCheck(faultB, second, byteLength, "write"),
     { kind: "if", condition: faultB, thenBody: secondBody }
   ]);
 
@@ -632,6 +639,7 @@ test("a direct use behind a demanding fault body emits once at the body's entry"
   const values = new ValueTable();
   const read = values.addActionOutput();
   const address = values.const(0x2000);
+  const byteLength = values.const(4);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const faultBody = {
     actions: [
@@ -641,7 +649,7 @@ test("a direct use behind a demanding fault body emits once at the body's entry"
   };
   const analysis = analyze(values, [
     stateRead(read, gprChannel("ebx")),
-    memoryCheck(fault, address, 4, "write"),
+    memoryCheck(fault, address, byteLength, "write"),
     { kind: "if", condition: fault, thenBody: faultBody },
     stateWrite(lazyFlagsAChannel, read)
   ]);
@@ -661,11 +669,12 @@ test("a body restoring a channel captures the read feeding its deferred load", (
   const guarded = values.const(0x3000);
   const five = values.const(5);
   const loaded = values.addActionOutput();
+  const byteLength = values.const(4);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const analysis = analyze(values, [
     stateRead(base, gprChannel("ebx")),
     memoryRead(loaded, base, 32),
-    memoryCheck(fault, guarded, 4, "write"),
+    memoryCheck(fault, guarded, byteLength, "write"),
     {
       kind: "if",
       condition: fault,

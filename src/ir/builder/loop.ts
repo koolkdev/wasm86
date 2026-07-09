@@ -177,7 +177,7 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
     this.#context.host.set(target, value, accessWidth);
   }
 
-  memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void {
+  memoryGuard(address: ValueInput, byteLength: ValueInput, access: MemoryAccessKind): void {
     this.#context.host.memoryGuard(address, byteLength, access);
   }
 

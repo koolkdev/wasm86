@@ -18,6 +18,10 @@ import { valueId } from "#ir/values.js";
 
 const memory: StorageEffect = { space: "memory" };
 
+function varSlot(variable: number): StorageEffect {
+  return { space: "var", variable };
+}
+
 function state(slot: StateSlot): StorageEffect {
   return { space: "state", slot };
 }
@@ -106,6 +110,10 @@ test("guest memory may-aliases guest memory and never state", () => {
 
 test("static channels alias iff their byte ranges intersect", () => {
   strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ax"))), true);
+  strictEqual(mayAlias(varSlot(0), varSlot(0)), true);
+  strictEqual(mayAlias(varSlot(0), varSlot(1)), false);
+  strictEqual(mayAlias(varSlot(0), memory), false);
+  strictEqual(mayAlias(state(gprChannel("eax")), varSlot(0)), false);
   strictEqual(mayAlias(state(gprChannel("al")), state(gprChannel("ah"))), false);
   strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ebx"))), false);
   strictEqual(mayAlias(state(flagChannel("ZF")), state(flagChannel("ZF"))), true);

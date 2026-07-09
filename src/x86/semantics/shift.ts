@@ -21,7 +21,7 @@ export function shiftSemantic(
   return (s, v, context) => {
     const dst = s.operand(0);
 
-    guardStorageReadWrite(s, context, dst, width);
+    guardStorageReadWrite(s, v, context, dst, width);
 
     const value = v.truncate(width, s.get(dst, width));
     const rawCount = readShiftCount(s, v, countSource);
@@ -43,7 +43,7 @@ export function doubleShiftSemantic(
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageReadWrite(s, context, dst, width);
+    guardStorageReadWrite(s, v, context, dst, width);
 
     const value = v.truncate(width, s.get(dst, width));
     const source = v.truncate(width, s.get(src, width));

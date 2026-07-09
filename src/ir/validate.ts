@@ -145,9 +145,9 @@ function validateBody(
   }
 }
 
+// A loop may carry nothing: a body advancing only semantic vars keeps all
+// its cross-iteration state in var locals.
 function validateLoopCells(block: IrBlock, action: LoopAction, path: string): void {
-  assert(action.carried.length > 0, `${path} carries no cells`);
-
   const seen = new Set<ValueId>();
 
   for (const cell of action.carried) {
@@ -159,9 +159,7 @@ function validateLoopCells(block: IrBlock, action: LoopAction, path: string): vo
     assert(!seen.has(cell.loopInput), `${path} reuses loop input ${cell.loopInput} across carried cells`);
     seen.add(cell.loopInput);
 
-    if (cell.channel !== undefined) {
-      assertCarriableChannel(cell.channel, path);
-    }
+    assertCarriableChannel(cell.channel, path);
   }
 }
 
@@ -204,7 +202,7 @@ function validateLoopStateSlotAccess(
   loop: LoopAction,
   path: string
 ): void {
-  const carriedChannels = loop.carried.flatMap((cell) => cell.channel === undefined ? [] : [cell.channel]);
+  const carriedChannels = loop.carried.map((cell) => cell.channel);
 
   if (isDynamicSlot(slot)) {
     assert(
@@ -298,6 +296,13 @@ function validateExitValues(block: IrBlock, exit: IrExit): void {
 
 function validateOpActionValues(block: IrBlock, action: OpAction): void {
   const access = opAccess(action.op);
+
+  if (action.op.kind === "var.read" || action.op.kind === "var.write") {
+    assert(
+      Number.isInteger(action.op.variable) && action.op.variable >= 0,
+      `${action.op.kind} op has an invalid semantic var index`
+    );
+  }
 
   for (const input of access.valueInputs) {
     block.values.node(input);

@@ -22,8 +22,8 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageReadWrite(s, context, dst, width);
-    guardStorageRead(s, context, src, width);
+    guardStorageReadWrite(s, v, context, dst, width);
+    guardStorageRead(s, v, context, src, width);
 
     const left = v.truncate(width, s.get(dst, width));
     const right = v.truncate(width, s.get(src, width));
@@ -76,7 +76,7 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
   return (s, v, context) => {
     const dst = s.operand(0);
 
-    guardStorageReadWrite(s, context, dst, width);
+    guardStorageReadWrite(s, v, context, dst, width);
 
     const value = s.get(dst, width);
     let result;

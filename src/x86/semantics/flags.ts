@@ -33,7 +33,7 @@ export function xlatSemantic(): SemanticTemplate {
     const tableBase = s.linearAddress(s.operand(0));
     const address = v.binary("add", tableBase, s.get(s.reg("al"), 8));
 
-    s.memoryGuard(address, 1, "read");
+    s.memoryGuard(address, v.const(1), "read");
     s.set(s.reg("al"), s.get(s.mem(address), 8), 8);
   };
 }

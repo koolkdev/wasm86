@@ -19,7 +19,7 @@ function implicitMultiplySemantic(kind: MultiplyKind, width: OperandWidth): Sema
   return (s, v, context) => {
     const src = s.operand(0);
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
 
     const right = s.get(src, width);
     const left = s.get(s.reg(accumulatorForWidth(width)), width);
@@ -35,7 +35,7 @@ export function imulRegRmSemantic(width: OperandWidth): SemanticTemplate {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
 
     const srcValue = s.get(src, width);
     const dstValue = s.get(dst, width);
@@ -49,7 +49,7 @@ export function imulRegRmImmSemantic(width: OperandWidth): SemanticTemplate {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
 
     const srcValue = s.get(src, width);
     const immValue = s.get(s.operand(2), width);

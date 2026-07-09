@@ -69,6 +69,8 @@ export function mayAlias(a: StorageEffect, b: StorageEffect): boolean {
       return b.space === "memoryBounds";
     case "state":
       return b.space === "state" && slotsMayAlias(a.slot, b.slot);
+    case "var":
+      return b.space === "var" && a.variable === b.variable;
   }
 }
 

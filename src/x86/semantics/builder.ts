@@ -11,6 +11,7 @@ import type {
   RegRef,
   StorageInput,
   TargetInput,
+  VarRef,
   Value,
   ValueInput
 } from "./refs.js";
@@ -51,7 +52,7 @@ export interface SemanticOps {
 
   get(source: StorageInput, accessWidth?: OperandWidth, options?: GetOptions): Value;
   set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
-  memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void;
+  memoryGuard(address: ValueInput, byteLength: ValueInput, access: MemoryAccessKind): void;
   address(operand: OperandInput): Value;
   linearAddress(operand: OperandInput): Value;
 
@@ -62,6 +63,7 @@ export interface SemanticOps {
 
 export interface LoopSemanticsBuilder extends SemanticOps {}
 
+export type SemanticVar = VarRef;
 export type LoopBody = (builder: LoopSemanticsBuilder, values: Values) => ValueInput;
 export type IfBody = (builder: SemanticsBuilder, values: Values) => void;
 
@@ -79,6 +81,7 @@ export interface SemanticsBuilder extends SemanticOps {
   currentEip(): Value;
   nextEip(): Value;
 
+  var(seed: ValueInput): SemanticVar;
   writeFlag(flag: X86Flag, value: ValueInput): void;
   addInstructionCount(amount: ValueInput): void;
 

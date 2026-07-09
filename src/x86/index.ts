@@ -4,7 +4,7 @@ import { AAA, AAD, AAM, AAS, DAA, DAS } from "./defs/bcd-ascii.js";
 import { BSF, BSR, BT, BTC, BTR, BTS } from "./defs/bits.js";
 import { BSWAP } from "./defs/byte-swap.js";
 import { CMPXCHG, CMPXCHG8B, XADD } from "./defs/compare-exchange.js";
-import { CALL, JCC, JECXZ, JMP, LOOP, LOOPE, LOOPNE, RET } from "./defs/control.js";
+import { CALL, ENTER, JCC, JECXZ, JMP, LOOP, LOOPE, LOOPNE, RET } from "./defs/control.js";
 import { CMP, TEST } from "./defs/cmp-test.js";
 import { DIV, IDIV } from "./defs/div.js";
 import { CLC, CLD, CMC, LAHF, SAHF, STC, STD, XLAT } from "./defs/flags.js";
@@ -104,6 +104,7 @@ export const X86_32_CORE = defineIsa({
     JMP,
     CALL,
     RET,
+    ENTER,
     JECXZ,
     LOOP,
     LOOPE,

@@ -13,6 +13,7 @@ import type {
   SemanticBuildContext,
   SemanticOperandInfo,
   SemanticOperandInput,
+  SemanticVar,
   SemanticTemplate,
   SimpleFlagSource
 } from "#x86/semantics/builder.js";
@@ -217,10 +218,20 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return mem(address);
   }
 
+  var(seed: ValueInput): SemanticVar {
+    const variable = this.#state.vars.create();
+
+    this.#current.op({ kind: "var.write", variable: variable.index, value: seed });
+    return variable;
+  }
+
   get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): Value {
     const storage = toStorageRef(source);
 
     switch (storage.kind) {
+      case "var":
+        this.#state.vars.assertKnown(storage);
+        return this.#current.opValue({ kind: "var.read", variable: storage.index });
       case "reg":
         return this.#state.gpr.read(storage.reg, accessWidth, options);
       case "mem":
@@ -258,6 +269,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const storage = toStorageRef(target);
 
     switch (storage.kind) {
+      case "var":
+        this.#state.vars.assertKnown(storage);
+        this.#current.op({ kind: "var.write", variable: storage.index, value });
+        return;
       case "reg":
         this.#state.gpr.write(storage.reg, value, accessWidth);
         return;
@@ -300,7 +315,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#state.instructionCount.add(amount);
   }
 
-  memoryGuard(address: ValueInput, byteLength: number, access: MemoryAccessKind): void {
+  memoryGuard(address: ValueInput, byteLength: ValueInput, access: MemoryAccessKind): void {
     // Guest memory cannot be rolled back by any scheme, so a fault body
     // cannot restore the pre-instruction state once the instruction stored.
     assert(!this.#wroteMemory, "a memory guard cannot follow a memory write in the same instruction");
@@ -382,6 +397,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     scratch.#operands.beginInstruction(this.#operands.currentBindings());
     scratch.#state.beginInstruction(scratch.#values.const(0));
+    // The replayed body holds var refs created on this builder.
+    scratch.#state.vars.adopt(this.#state.vars.count);
 
     try {
       return writeLog.captureWrittenChannels(() => {

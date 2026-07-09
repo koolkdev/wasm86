@@ -8,28 +8,28 @@ import type { Value } from "./refs.js";
 import { guardStorageRead, guardStorageWrite } from "./memory.js";
 
 export function movSemantic(width: OperandWidth = 32): SemanticTemplate {
-  return (s, _v, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
     const value = s.get(src, width);
 
-    guardStorageWrite(s, context, dst, width);
+    guardStorageWrite(s, v, context, dst, width);
     s.set(dst, value, width);
   };
 }
 
 export function movSregSemantic(registerWidth: Extract<OperandWidth, 16 | 32>): SemanticTemplate {
-  return (s, _v, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
     const src = s.operand(1);
     const width = context.operandInfo(dst).storage === "mem" ? 16 : registerWidth;
 
-    guardStorageRead(s, context, src, width);
+    guardStorageRead(s, v, context, src, width);
     const value = s.get(src, width);
 
-    guardStorageWrite(s, context, dst, width);
+    guardStorageWrite(s, v, context, dst, width);
     s.set(dst, value, width);
   };
 }
@@ -44,7 +44,7 @@ export function movToSregSemantic(): SemanticTemplate {
       s.if(csLoad, (then) => then.cpuException(invalidOpcode()), "unlikely");
     }
 
-    guardStorageRead(s, context, src, 16);
+    guardStorageRead(s, v, context, src, 16);
     s.set(dst, s.get(src, 16), 16);
   };
 }
@@ -63,27 +63,27 @@ function segmentTargetIsCs(v: Values, info: SemanticOperandInfo): Value | undefi
 }
 
 export function movzxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
-  return (s, _v, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, context, src, sourceWidth);
+    guardStorageRead(s, v, context, src, sourceWidth);
     const value = s.get(src, sourceWidth);
 
-    guardStorageWrite(s, context, dst, destinationWidth);
+    guardStorageWrite(s, v, context, dst, destinationWidth);
     s.set(dst, value, destinationWidth);
   };
 }
 
 export function movsxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
-  return (s, _v, context) => {
+  return (s, v, context) => {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, context, src, sourceWidth);
+    guardStorageRead(s, v, context, src, sourceWidth);
     const value = s.get(src, sourceWidth, { signed: true });
 
-    guardStorageWrite(s, context, dst, destinationWidth);
+    guardStorageWrite(s, v, context, dst, destinationWidth);
     s.set(dst, value, destinationWidth);
   };
 }
@@ -93,15 +93,15 @@ export function cmovSemantic(cc: ConditionCode, width: OperandWidth = 32): Seman
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, context, src, width);
-    guardStorageRead(s, context, dst, width);
+    guardStorageRead(s, v, context, src, width);
+    guardStorageRead(s, v, context, dst, width);
 
     const value = s.get(src, width);
     const condition = s.condition(cc);
     const fallback = s.get(dst, width);
     const selected = v.select(condition, value, fallback);
 
-    guardStorageWrite(s, context, dst, width);
+    guardStorageWrite(s, v, context, dst, width);
     s.set(dst, selected, width);
   };
 }

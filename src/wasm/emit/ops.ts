@@ -3,7 +3,7 @@ import type { IrOp } from "#ir/ops.js";
 import type { ValueId } from "#ir/values.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { helperFunctionName, type WasmHelperRegistry } from "#wasm/helpers/module.js";
-import { emitGuestLoad, emitGuestStore, emitMemoryCheckFromStack } from "./memory.js";
+import { emitGuestLoad, emitGuestStore, emitMemoryCheck } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";
 
 // How one IR op lowers to wasm, for every op kind: a pure op leaves its
@@ -24,6 +24,9 @@ export type BorrowedUse = Readonly<{
 export type OperandUses = Readonly<{
   emitUse(id: ValueId): void;
   borrowUse(id: ValueId): BorrowedUse;
+  constValue(id: ValueId): number | undefined;
+  // The wasm local backing a semantic var, stable for the fragment.
+  varLocal(variable: number): number;
 }>;
 
 export function emitOp(
@@ -49,8 +52,14 @@ export function emitOp(
       emitGuestStore(body, op.width);
       return;
     case "memory.check":
-      operands.emitUse(op.address);
-      emitMemoryCheckFromStack(body, op.byteLength);
+      emitMemoryCheck(body, operands, op.address, op.byteLength);
+      return;
+    case "var.read":
+      body.localGet(operands.varLocal(op.variable));
+      return;
+    case "var.write":
+      operands.emitUse(op.value);
+      body.localSet(operands.varLocal(op.variable));
       return;
     case "cpu.resolveFlag": {
       const helper = { kind: "lazyFlag", flag: op.flag } as const;

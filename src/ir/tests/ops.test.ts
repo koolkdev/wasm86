@@ -81,16 +81,34 @@ test("memory ops expose address/value inputs and memory storage access", () => {
   strictEqual(opMutates({ kind: "memory.write", address, value, width: 32 }), true);
 });
 
+test("var ops expose the var slot and a plain i32 output", () => {
+  const value = valueId(4);
+
+  deepStrictEqual(opAccess({ kind: "var.read", variable: 2 }), {
+    valueInputs: [],
+    valueOutput: { type: "i32" },
+    reads: [{ space: "var", variable: 2 }],
+    writes: []
+  });
+  deepStrictEqual(opAccess({ kind: "var.write", variable: 2, value }), {
+    valueInputs: [value],
+    reads: [],
+    writes: [{ space: "var", variable: 2 }]
+  });
+  strictEqual(opMutates({ kind: "var.write", variable: 2, value }), true);
+});
+
 test("memory.check observes memory bounds and produces a boolean predicate", () => {
   const address = valueId(5);
+  const byteLength = valueId(6);
 
-  deepStrictEqual(opAccess({ kind: "memory.check", address, byteLength: 4, access: "read" }), {
-    valueInputs: [address],
+  deepStrictEqual(opAccess({ kind: "memory.check", address, byteLength, access: "read" }), {
+    valueInputs: [address, byteLength],
     valueOutput: { type: "i32", bounds: fitsUnsigned(1) },
     reads: [memoryBounds],
     writes: []
   });
-  strictEqual(opMutates({ kind: "memory.check", address, byteLength: 4, access: "write" }), false);
+  strictEqual(opMutates({ kind: "memory.check", address, byteLength, access: "write" }), false);
 });
 
 test("cpu.resolveFlag exposes lazy flag channel reads and a boolean output", () => {

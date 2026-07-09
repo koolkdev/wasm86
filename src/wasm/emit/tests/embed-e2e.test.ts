@@ -47,13 +47,14 @@ function decodeReadFragment(k: number): DecodeReadFragment {
   const values = new ValueTable();
   const eipValue = values.addActionOutput();
   const address = values.binary("add", eipValue, values.const(k));
+  const byteLength = values.const(1);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const fetched = values.addActionOutput(fitsUnsigned(8));
   const block: IrBlock = {
     body: {
       actions: [
         stateRead(eipValue, eipChannel),
-        memoryCheck(fault, address, 1, "read"),
+        memoryCheck(fault, address, byteLength, "read"),
         {
           kind: "if",
           condition: fault,

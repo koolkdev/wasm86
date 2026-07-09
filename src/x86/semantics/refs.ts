@@ -7,7 +7,8 @@ export type { Value } from "#ir/values.js";
 export type OperandRef = Readonly<{ kind: "operand"; index: number }>;
 export type RegRef = Readonly<{ kind: "reg"; reg: RegName }>;
 export type MemRef = Readonly<{ kind: "mem"; address: Value }>;
-export type StorageRef = OperandRef | RegRef | MemRef;
+export type VarRef = Readonly<{ kind: "var"; index: number }>;
+export type StorageRef = OperandRef | RegRef | MemRef | VarRef;
 
 export type OperandInput = OperandRef;
 export type StorageInput = StorageRef;
@@ -28,6 +29,14 @@ export function reg(reg: RegName): RegRef {
 
 export function mem(address: ValueInput): MemRef {
   return { kind: "mem", address };
+}
+
+export function semanticVar(index: number): VarRef {
+  assert(
+    Number.isInteger(index) && index >= 0,
+    `semantic var index must be a non-negative integer, got ${index}`
+  );
+  return { kind: "var", index };
 }
 
 export function toStorageRef(value: StorageInput): StorageRef {

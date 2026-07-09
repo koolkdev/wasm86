@@ -173,7 +173,7 @@ function memoryGuard(
 
   ok(check !== undefined, `fault check ${faultBodyIndex} exists`);
   return [
-    memoryCheck(check.output, address, byteLength, access),
+    memoryCheck(check.output, address, block.values.const(byteLength), access),
     { kind: "if", condition: check.output, hint: "unlikely", thenBody }
   ];
 }
@@ -913,6 +913,27 @@ test("a semantic if body terminates only its taken arm", () => {
   deepStrictEqual(rawEntryActions(block)[rawEntryActions(block).length - 1], finishDispatch(block.values.const(0x1005)));
 });
 
+test("a constant-false semantic if is not emitted or built", () => {
+  const skippedIf: SemanticTemplate = (s, v) => {
+    s.if(v.const(0), () => {
+      throw new Error("constant-false if body should not be built");
+    });
+    s.set(s.reg("eax"), v.const(7));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(skippedIf, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  strictEqual(entryActions(block).some((action) => action.kind === "if"), false);
+  strictEqual(nestedActionBodies(block).length, 0);
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("eax"))?.op.value,
+    block.values.const(7)
+  );
+});
+
 test("a nested semantic if terminator does not terminate the containing arm", () => {
   const nestedJump: SemanticTemplate = (s, v) => {
     s.if(v.const(1), (then) => {
@@ -1640,8 +1661,8 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
     (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("ebx")
   )!.output;
   deepStrictEqual(checks, [
-    memoryCheck(checks[0]!.output, address, 4, "read"),
-    memoryCheck(checks[1]!.output, address, 4, "write")
+    memoryCheck(checks[0]!.output, address, v.const(4), "read"),
+    memoryCheck(checks[1]!.output, address, v.const(4), "write")
   ]);
 
   const readIndex = actions.findIndex((action) => isMemoryRead(action));
@@ -1938,8 +1959,8 @@ test("get and set through s.mem lower to memory actions at the given address", (
     const address = v.const(0x2000);
     const target = s.mem(address);
 
-    s.memoryGuard(address, 4, "read");
-    s.memoryGuard(address, 4, "write");
+    s.memoryGuard(address, v.const(4), "read");
+    s.memoryGuard(address, v.const(4), "write");
     s.set(target, v.binary("add", s.get(target, 32), v.const(1)), 32);
   };
   const builder = createIrBlockBuilder();
@@ -1962,6 +1983,26 @@ test("get and set through s.mem lower to memory actions at the given address", (
   ]);
 });
 
+test("a memory guard byte length is a value operand even when it folds to a constant", () => {
+  const foldedGuard: SemanticTemplate = (s, v) => {
+    const address = v.const(0x2000);
+    const byteLength = v.binary("shl", v.const(1), v.const(2));
+
+    s.memoryGuard(address, byteLength, "read");
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(foldedGuard, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+  const check = entryActions(block).find(
+    (action): action is MemoryCheckAction => isMemoryCheck(action)
+  );
+
+  ok(check !== undefined, "expected memory check action");
+  strictEqual(block.values.constValue(check.op.byteLength), 4);
+});
+
 test("address of a non-mem operand binding fails loudly", () => {
   throws(
     () =>
@@ -1980,7 +2021,7 @@ const setRegThenStore: SemanticTemplate = (s, v) => {
   const address = v.const(0x2000);
 
   s.set(s.operand(0), v.const(0x222), 32);
-  s.memoryGuard(address, 4, "write");
+  s.memoryGuard(address, v.const(4), "write");
   s.set(s.mem(address), s.get(s.operand(0), 32), 32);
 };
 
@@ -2180,9 +2221,9 @@ test("a guard after a memory write in the same instruction fails loudly", () => 
   const storeThenGuard: SemanticTemplate = (s, v) => {
     const firstAddress = v.const(0x2000);
 
-    s.memoryGuard(firstAddress, 4, "write");
+    s.memoryGuard(firstAddress, v.const(4), "write");
     s.set(s.mem(firstAddress), v.const(1), 32);
-    s.memoryGuard(v.const(0x3000), 4, "write");
+    s.memoryGuard(v.const(0x3000), v.const(4), "write");
   };
 
   throws(
@@ -2196,7 +2237,7 @@ test("a guard after flushing a channel first written this instruction fails loud
   const flushThenGuard: SemanticTemplate = (s, v) => {
     s.set(s.operand(0), v.const(1), 8);
     s.get(s.operand(1), 16);
-    s.memoryGuard(v.const(0x2000), 4, "read");
+    s.memoryGuard(v.const(0x2000), v.const(4), "read");
   };
 
   throws(
@@ -2399,7 +2440,7 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
   const setThenDynamicRead: SemanticTemplate = (s, v) => {
     s.set(s.reg("ebx"), v.const(0x111), 32);
     s.get(s.operand(0), 32);
-    s.memoryGuard(v.const(0x2000), 4, "read");
+    s.memoryGuard(v.const(0x2000), v.const(4), "read");
   };
 
   throws(
@@ -2412,7 +2453,7 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
 test("a guard after a dynamic write fails loudly", () => {
   const dynamicWriteThenGuard: SemanticTemplate = (s, v) => {
     s.set(s.operand(0), v.const(0x222), 32);
-    s.memoryGuard(v.const(0x2000), 4, "write");
+    s.memoryGuard(v.const(0x2000), v.const(4), "write");
   };
 
   throws(
@@ -2723,7 +2764,7 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
 test("a guard after a memDynamic flush of a never-read register fails loudly", () => {
   const blindWriteThenDynamicAddress: SemanticTemplate = (s, v) => {
     s.set(s.reg("ebx"), v.const(0x111), 32);
-    s.memoryGuard(s.address(s.operand(0)), 4, "write");
+    s.memoryGuard(s.address(s.operand(0)), v.const(4), "write");
   };
 
   throws(

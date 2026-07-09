@@ -41,6 +41,12 @@ export class ControlEmitter {
 
   if(condition: ValueId, emitThenBody: BuildBody, hint?: BranchHint): void {
     const parent = this.#currentBody();
+
+    // If the condition is a constant false, the then body is unreachable and can be skipped.
+    if (parent.values.constValue(condition) === 0) {
+      return;
+    }
+
     const scoped = this.#scopedBody(emitThenBody);
     const elseBody = scoped.terminating ? undefined : this.#skippedBody(scoped.joinedChannels);
 
