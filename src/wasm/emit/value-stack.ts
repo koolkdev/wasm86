@@ -28,6 +28,7 @@ import {
   wasmTypeForValue
 } from "./operators.js";
 import type { ValueUses } from "./value-uses.js";
+import { ValueTraits } from "./value-traits.js";
 
 // Turns stable output locals plus the value graph into stack code. emitUse
 // pushes exactly one use of a value; compounds needed more than once are
@@ -64,6 +65,7 @@ export class ValueStack implements OperandUses {
   readonly #body: WasmFunctionBodyEncoder;
   readonly #values: ValueTable;
   readonly #uses: ValueUses;
+  readonly #traits: ValueTraits;
   readonly #registry: LocalRegistry;
   // Open borrows per value; assertClear reports leaks.
   readonly #borrows = new Map<ValueId, number>();
@@ -77,6 +79,7 @@ export class ValueStack implements OperandUses {
     this.#body = context.body;
     this.#values = context.values;
     this.#uses = context.uses;
+    this.#traits = new ValueTraits(context.values);
     this.#registry = new LocalRegistry(context.body, context.scratch);
   }
 
@@ -328,6 +331,10 @@ export class ValueStack implements OperandUses {
         return;
       }
       default: {
+        assert(
+          this.#traits.canEvaluateWithoutTrap(id, (value) => this.#registry.has(value)),
+          `value ${id} may trap and cannot be captured before a nested body is selected`
+        );
         // Not in the registry means nothing consumed it yet, so every
         // counted use is still to come.
         this.#emitCompute(node);
