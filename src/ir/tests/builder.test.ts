@@ -872,7 +872,7 @@ test("a root CPU exception exits at the faulting instruction", () => {
   strictEqual(stateWrites(block).some((write) => write.op.slot === instructionCountChannel), false);
 });
 
-test("actions after a terminal finish in one template are rejected by validation", () => {
+test("a terminal finish stops the remaining semantic body", () => {
   const trapThenSet: SemanticTemplate = (s, v) => {
     s.hostTrap(v.const(3));
     s.set(s.mem(v.const(0x2000)), v.const(1), 32);
@@ -881,24 +881,31 @@ test("actions after a terminal finish in one template are rejected by validation
 
   builder.addInstruction(trapThenSet, [], loc(0x1000, 0x1005));
 
-  throws(() => validateIrBlock(builder.finish()), /actions after its terminal finish action/);
+  const block = builder.finish();
+
+  validateIrBlock(block);
+  strictEqual(entryActions(block).some((action) => isMemoryWrite(action)), false);
+  deepStrictEqual(entryActions(block).at(-1), finishExit("hostTrap", block.values.const(3)));
 });
 
-test("a template cannot terminate the instruction twice", () => {
+test("a dispatch stops a later terminator in the same semantic body", () => {
   const jumpThenTrap: SemanticTemplate = (s, v) => {
     s.jump(v.const(0x2000));
     s.hostTrap(v.const(3));
   };
+  const builder = createIrBlockBuilder();
 
-  throws(
-    () => createIrBlockBuilder().addInstruction(jumpThenTrap, [], loc(0x1000, 0x1005)),
-    /instruction is already terminated/
-  );
+  builder.addInstruction(jumpThenTrap, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  validateIrBlock(block);
+  deepStrictEqual(entryActions(block), [finishDispatch(block.values.const(0x2000))]);
 });
 
 test("a semantic if body terminates only its taken arm", () => {
   const jumpInIf: SemanticTemplate = (s, v) => {
-    s.if(v.const(1), (then) => {
+    s.if(s.get(s.reg("eax")), (then) => {
       then.jump(v.const(0x2000));
     });
   };
@@ -934,10 +941,119 @@ test("a constant-false semantic if is not emitted or built", () => {
   );
 });
 
+test("a constant-true semantic if builds its arm in the containing scope", () => {
+  const inlinedIf: SemanticTemplate = (s, v) => {
+    const sourceAddress = v.const(0x2000);
+    const armAddress = v.const(0x3000);
+    const parentAddress = v.const(0x4000);
+
+    s.if(v.const(1), (then) => {
+      then.set(then.reg("eax"), then.get(then.mem(sourceAddress), 32));
+      then.set(then.mem(armAddress), v.const(1), 32);
+    });
+    s.set(s.mem(parentAddress), s.get(s.reg("eax")), 32);
+    s.set(s.reg("ebx"), s.get(s.reg("eax")));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(inlinedIf, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+  const load = entryActions(block).find(
+    (action): action is MemoryReadAction => isMemoryRead(action)
+  );
+
+  validateIrBlock(block);
+  ok(load !== undefined, "constant arm memory read exists");
+  strictEqual(entryActions(block).some((action) => action.kind === "if"), false);
+  strictEqual(nestedActionBodies(block).length, 0);
+  deepStrictEqual(entryActions(block).slice(0, 3), [
+    memoryRead(load.output, block.values.const(0x2000), 32),
+    memoryWrite(block.values.const(0x3000), block.values.const(1), 32),
+    memoryWrite(block.values.const(0x4000), load.output, 32)
+  ]);
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("eax"))?.op.value,
+    load.output
+  );
+  // The arm's write stays a parent pending: the read after the if sees it
+  // without a join commit and re-read.
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("ebx"))?.op.value,
+    load.output
+  );
+});
+
+test("a constant-true semantic if with a completing arm stops its containing flow", () => {
+  const jumpThenStore: SemanticTemplate = (s, v) => {
+    s.if(v.const(1), (then) => then.jump(v.const(0x2000)));
+    s.set(s.mem(v.const(0x3000)), v.const(7), 32);
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(jumpThenStore, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  validateIrBlock(block);
+  strictEqual(builder.isTerminated(), true);
+  strictEqual(nestedActionBodies(block).length, 0);
+  deepStrictEqual(entryActions(block), [finishDispatch(block.values.const(0x2000))]);
+});
+
+test("a constant-true invalid-CS arm stops before building the segment-load tail", () => {
+  const builder = createIrBlockBuilder({ segmentMode: "flat32" });
+
+  builder.addInstruction(
+    movToSregSemantic(),
+    [segmentBinding("cs"), regBinding("ax")],
+    loc(0x1000, 0x1002)
+  );
+
+  const block = builder.finish();
+
+  validateIrBlock(block);
+  strictEqual(
+    entryActions(block).some(
+      (action) => isStateRead(action) && action.op.slot === gprChannel("ax")
+    ),
+    false
+  );
+  deepStrictEqual(entryActions(block).at(-1), {
+    kind: "finish",
+    finish: { kind: "exit", exit: { class: "cpuException", exception: invalidOpcode() } }
+  });
+});
+
+test("a constant-true completing if stops only its containing dynamic arm", () => {
+  const nestedJump: SemanticTemplate = (s, v) => {
+    s.if(s.get(s.reg("eax")), (then) => {
+      then.if(v.const(1), (inner) => inner.jump(v.const(0x2000)));
+      then.set(then.mem(v.const(0x3000)), v.const(7), 32);
+    });
+    s.set(s.reg("ebx"), v.const(9));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(nestedJump, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  validateIrBlock(block);
+  strictEqual(nestedActionBodies(block).length, 1);
+  deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: block.values.const(0x2000) });
+  strictEqual(entryActions(block).some((action) => isMemoryWrite(action)), false);
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("ebx"))?.op.value,
+    block.values.const(9)
+  );
+  deepStrictEqual(rawEntryActions(block)[rawEntryActions(block).length - 1], finishDispatch(block.values.const(0x1005)));
+});
+
 test("a nested semantic if terminator does not terminate the containing arm", () => {
   const nestedJump: SemanticTemplate = (s, v) => {
-    s.if(v.const(1), (then) => {
-      then.if(v.const(1), (inner) => {
+    s.if(s.get(s.reg("eax")), (then) => {
+      then.if(then.get(then.reg("ebx")), (inner) => {
         inner.jump(v.const(0x2000));
       });
       then.jump(v.const(0x3000));
@@ -949,10 +1065,78 @@ test("a nested semantic if terminator does not terminate the containing arm", ()
 
   const block = builder.finish();
 
+  validateIrBlock(block);
   strictEqual(nestedActionBodies(block).length, 2);
   deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: block.values.const(0x3000) });
   deepStrictEqual(nestedBodyView(block, 2).terminator, { kind: "dispatch", targetEip: block.values.const(0x2000) });
   deepStrictEqual(rawEntryActions(block)[rawEntryActions(block).length - 1], finishDispatch(block.values.const(0x1005)));
+});
+
+test("a dynamic if arm cannot leak an operand address into its parent scope", () => {
+  const resolveAddressInArm: SemanticTemplate = (s) => {
+    const operand = s.operand(0);
+
+    s.if(s.get(s.reg("ecx")), (then) => {
+      then.address(operand);
+    });
+    s.set(s.reg("ebx"), s.address(operand));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    resolveAddressInArm,
+    [mem({ base: "eax", scale: 1, disp: 0 })],
+    loc(0x1000, 0x1005)
+  );
+
+  const block = builder.finish();
+  const parentRead = entryActions(block).find(
+    (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("eax")
+  );
+  const armRead = nestedActionBodies(block)[0]?.actions.find(
+    (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("eax")
+  );
+
+  validateIrBlock(block);
+  ok(parentRead !== undefined, "parent address read exists");
+  ok(armRead !== undefined, "arm address read exists");
+  ok(parentRead.output !== armRead.output, "parent recomputes the arm-local address");
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("ebx"))?.op.value,
+    parentRead.output
+  );
+});
+
+test("a loop-local operand address cannot escape into the parent scope", () => {
+  const resolveAddressInLoop: SemanticTemplate = (s) => {
+    const operand = s.operand(0);
+
+    s.loop((loop, loopValues) => {
+      loop.address(operand);
+      loop.set(loop.reg("eax"), loopValues.binary("add", loop.get(loop.reg("eax")), loopValues.const(1)));
+      return loopValues.const(0);
+    });
+    s.set(s.reg("ebx"), s.address(operand));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    resolveAddressInLoop,
+    [mem({ base: "eax", scale: 1, disp: 0 })],
+    loc(0x1000, 0x1005)
+  );
+
+  const block = builder.finish();
+  const eaxReads = entryActions(block).filter(
+    (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("eax")
+  );
+
+  validateIrBlock(block);
+  strictEqual(eaxReads.length, 2);
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("ebx"))?.op.value,
+    eaxReads[1]?.output
+  );
 });
 
 test("a segment load inside a loop body fails loudly", () => {
@@ -2231,6 +2415,61 @@ test("a guard after a memory write in the same instruction fails loudly", () => 
       createIrBlockBuilder().addInstruction(storeThenGuard, [], loc(0x1000, 0x1006)),
     /cannot follow a memory write/
   );
+});
+
+test("a continuing dynamic arm carries its memory write into the parent scope", () => {
+  const armStoreThenException: SemanticTemplate = (s, v) => {
+    s.if(s.get(s.reg("eax")), (then) => {
+      then.set(then.mem(v.const(0x2000)), v.const(1), 32);
+    });
+    s.cpuException(invalidOpcode());
+  };
+
+  throws(
+    () => createIrBlockBuilder().addInstruction(armStoreThenException, [], loc(0x1000, 0x1005)),
+    /CPU exception cannot follow a memory write/
+  );
+});
+
+test("a loop carries its memory write into the parent scope", () => {
+  const loopStoreThenException: SemanticTemplate = (s) => {
+    s.loop((loop, loopValues) => {
+      loop.set(loop.mem(loopValues.const(0x2000)), loopValues.const(1), 32);
+      return loopValues.const(0);
+    });
+    s.cpuException(invalidOpcode());
+  };
+
+  throws(
+    () => createIrBlockBuilder().addInstruction(loopStoreThenException, [], loc(0x1000, 0x1005)),
+    /CPU exception cannot follow a memory write/
+  );
+});
+
+test("a terminating dynamic arm does not carry its memory write into the skipped path", () => {
+  const armStoreThenJump: SemanticTemplate = (s, v) => {
+    s.if(s.get(s.reg("eax")), (then) => {
+      then.set(then.mem(v.const(0x2000)), v.const(1), 32);
+      then.jump(v.const(0x3000));
+    });
+    s.cpuException(invalidOpcode());
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(armStoreThenJump, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  validateIrBlock(block);
+  strictEqual(
+    nestedActionBodies(block)[0]?.actions.some((action) => isMemoryWrite(action)),
+    true
+  );
+  strictEqual(entryActions(block).some((action) => isMemoryWrite(action)), false);
+  deepStrictEqual(entryActions(block).at(-1), {
+    kind: "finish",
+    finish: { kind: "exit", exit: { class: "cpuException", exception: invalidOpcode() } }
+  });
 });
 
 test("a guard after flushing a channel first written this instruction fails loudly", () => {

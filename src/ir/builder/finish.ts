@@ -11,17 +11,18 @@ import type { StatePathKind } from "./state/pending-buffer.js";
 import type { State } from "./state/index.js";
 import type { ValueId } from "../values.js";
 import type { ControlEmitter } from "./control.js";
+import type { SemanticScopeStack } from "./scope.js";
 
 // The one place a body ends: the exit path's state flushes, then the Finish.
 // x86 exit policy (exceptions, traps, dispatch) lives here.
 export class FinishEmitter {
   readonly #state: State;
-  readonly #currentBody: () => BodyBuilder;
+  readonly #scopes: SemanticScopeStack;
   readonly #control: ControlEmitter;
 
-  constructor(state: State, currentBody: () => BodyBuilder, control: ControlEmitter) {
+  constructor(state: State, scopes: SemanticScopeStack, control: ControlEmitter) {
     this.#state = state;
-    this.#currentBody = currentBody;
+    this.#scopes = scopes;
     this.#control = control;
   }
 
@@ -30,11 +31,11 @@ export class FinishEmitter {
   }
 
   finishCurrentBody(finish: Finish, path: StatePathKind): void {
-    this.finishBody(this.#currentBody(), finish, path);
+    this.finishBody(this.#scopes.current.body, finish, path);
   }
 
   guardIf(address: ValueId, byteLength: ValueId, access: MemoryAccessKind): void {
-    const fault = this.#currentBody().opValue({
+    const fault = this.#scopes.current.body.opValue({
       kind: "memory.check",
       address,
       byteLength,
@@ -45,6 +46,10 @@ export class FinishEmitter {
   }
 
   faultIf(condition: ValueId, exception: CpuException<ValueId>): void {
+    assert(
+      this.#scopes.current.body.values.constValue(condition) === undefined,
+      "constant fault conditions are unsupported"
+    );
     this.#control.if(
       condition,
       (faultBody) => this.finishBody(

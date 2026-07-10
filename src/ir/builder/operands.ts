@@ -11,28 +11,57 @@ import type { ValueId } from "../values.js";
 import { ValueTable } from "../value-table.js";
 import type { State } from "./state/index.js";
 
+export class OperandScope {
+  readonly #parent: OperandScope | undefined;
+  readonly #addresses = new Map<number, ValueId>();
+  readonly #linearAddresses = new Map<number, ValueId>();
+
+  constructor(parent?: OperandScope) {
+    this.#parent = parent;
+  }
+
+  address(index: number): ValueId | undefined {
+    return this.#addresses.get(index) ?? this.#parent?.address(index);
+  }
+
+  setAddress(index: number, address: ValueId): void {
+    this.#addresses.set(index, address);
+  }
+
+  linearAddress(index: number): ValueId | undefined {
+    return this.#linearAddresses.get(index) ?? this.#parent?.linearAddress(index);
+  }
+
+  setLinearAddress(index: number, address: ValueId): void {
+    this.#linearAddresses.set(index, address);
+  }
+
+  clear(): void {
+    this.#addresses.clear();
+    this.#linearAddresses.clear();
+  }
+}
+
 export class OperandResolver {
   readonly #values: ValueTable;
   readonly #state: State;
-  readonly #operandAddresses = new Map<number, ValueId>();
-  readonly #operandLinearAddresses = new Map<number, ValueId>();
+  readonly #currentScope: () => OperandScope;
   #bindings: readonly OperandBinding[] = [];
 
-  constructor(values: ValueTable, state: State) {
+  constructor(values: ValueTable, state: State, currentScope: () => OperandScope) {
     this.#values = values;
     this.#state = state;
+    this.#currentScope = currentScope;
   }
 
   beginInstruction(bindings: readonly OperandBinding[]): void {
     this.#bindings = bindings;
-    this.#operandAddresses.clear();
-    this.#operandLinearAddresses.clear();
+    this.#currentScope().clear();
   }
 
   endInstruction(): void {
     this.#bindings = [];
-    this.#operandAddresses.clear();
-    this.#operandLinearAddresses.clear();
+    this.#currentScope().clear();
   }
 
   currentBindings(): readonly OperandBinding[] {
@@ -70,7 +99,8 @@ export class OperandResolver {
   }
 
   address(index: number): ValueId {
-    const cached = this.#operandAddresses.get(index);
+    const scope = this.#currentScope();
+    const cached = scope.address(index);
 
     if (cached !== undefined) {
       return cached;
@@ -79,12 +109,13 @@ export class OperandResolver {
     const binding = this.binding(index);
     const address = this.#bindingAddress(binding);
 
-    this.#operandAddresses.set(index, address);
+    scope.setAddress(index, address);
     return address;
   }
 
   linearAddress(index: number): ValueId {
-    const cached = this.#operandLinearAddresses.get(index);
+    const scope = this.#currentScope();
+    const cached = scope.linearAddress(index);
 
     if (cached !== undefined) {
       return cached;
@@ -93,7 +124,7 @@ export class OperandResolver {
     const binding = this.binding(index);
     const address = this.#bindingLinearAddress(index, binding);
 
-    this.#operandLinearAddresses.set(index, address);
+    scope.setLinearAddress(index, address);
     return address;
   }
 

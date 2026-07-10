@@ -226,6 +226,43 @@ test("a not-taken forward jcc keeps pre-branch register pendings live inside the
   strictEqual(state.instructionCount, 5);
 });
 
+test("a folded taken jecxz truncates the block and dispatches to its target", () => {
+  // mov ecx, 0; jecxz +2; mov ebx, 7; int 0x2e — the pending ecx constant
+  // folds the branch taken, so the block ends there and the tail never runs.
+  const block = decodeBlock([
+    0xb9, 0x00, 0x00, 0x00, 0x00,
+    0xe3, 0x02,
+    0xbb, 0x07, 0x00, 0x00, 0x00,
+    0xcd, 0x2e
+  ]);
+  const targetEip = startEip + 9;
+
+  strictEqual(block.instructions.length, 4);
+
+  const ir = buildIrBlock(block.instructions);
+  const actions = entryActions(ir);
+
+  strictEqual(actions.some((action) => action.kind === "if"), false);
+  strictEqual(actions.at(-1)?.kind, "finish");
+
+  const memories = createWasmHostMemories();
+  const handle = compileActionWasmBlockHandle([block], {
+    cpuStateMemory: memories.cpuStateMemory,
+    guestMemory: memories.guestMemory
+  });
+
+  memories.cpuState.load({ eip: startEip, ebx: 0x20, ecx: 5 });
+
+  const run = handle.run();
+  const state = readWasmCpuState(memories.cpuState);
+
+  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: targetEip });
+  strictEqual(state.ebx, 0x20);
+  strictEqual(state.ecx, 0);
+  strictEqual(state.eip, targetEip);
+  strictEqual(state.instructionCount, 2);
+});
+
 test("a backward jcc to the block entry self-links as a return_call tail loop", () => {
   // sub ecx, 1; jnz start; int 0x2e.
   const block = decodeBlock([

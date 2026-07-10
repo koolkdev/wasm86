@@ -35,12 +35,10 @@ import type {
   SegmentOperandBinding
 } from "./operands.js";
 import { ControlEmitter } from "./builder/control.js";
-import {
-  LoopBuilder,
-  LoopSemanticsBuilderImpl
-} from "./builder/loop.js";
+import { LoopBuilder } from "./builder/loop.js";
 import { FinishEmitter } from "./builder/finish.js";
 import { OperandResolver } from "./builder/operands.js";
+import { SemanticScopeStack } from "./builder/scope.js";
 import { emitSegmentLoad, type SegmentMode } from "./builder/segments.js";
 import { State } from "./builder/state/index.js";
 import { StateWriteLog } from "./builder/state/write-log.js";
@@ -108,34 +106,24 @@ export function externalInstructionLocation(
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values = new ValueTable();
   readonly #body: BodyBuilder;
-  #current: BodyBuilder;
+  readonly #scopes: SemanticScopeStack;
   readonly #state: State;
   readonly #operands: OperandResolver;
   readonly #control: ControlEmitter;
   readonly #finish: FinishEmitter;
   readonly #segmentMode: SegmentMode;
   #instructionLocation: InstructionLocationValues | undefined;
-  // Which flow a terminator ends: the instruction's main flow ("root",
-  // dispatch deferred to finish) or an if arm ("arm", dispatched in place).
-  #terminatorScope: "root" | "arm" = "root";
-  #terminated = false;
   #finished = false;
-  #wroteMemory = false;
   // "terminated" means the root body already holds its terminator.
   #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
 
   constructor(segmentMode: SegmentMode, stateWriteLog = new StateWriteLog()) {
     this.#body = new BodyBuilder(this.#values);
-    this.#current = this.#body;
-    this.#state = new State(this.#values, () => this.#current, stateWriteLog);
-    this.#operands = new OperandResolver(this.#values, this.#state);
-    this.#control = new ControlEmitter(
-      this.#state,
-      stateWriteLog,
-      () => this.#current,
-      (body, build) => this.#withCurrentBody(body, build)
-    );
-    this.#finish = new FinishEmitter(this.#state, () => this.#current, this.#control);
+    this.#scopes = new SemanticScopeStack(this.#body);
+    this.#state = new State(this.#values, () => this.#scopes.current.body, stateWriteLog);
+    this.#operands = new OperandResolver(this.#values, this.#state, () => this.#scopes.current.operands);
+    this.#control = new ControlEmitter(this.#state, stateWriteLog, this.#scopes, this, this.#operands);
+    this.#finish = new FinishEmitter(this.#state, this.#scopes, this.#control);
     this.#segmentMode = segmentMode;
   }
 
@@ -148,15 +136,14 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     assert(this.#blockEnd === "fallthrough", "cannot add instructions after a block terminator");
     assert(this.#instructionLocation === undefined, "IR block builder has an incomplete instruction");
 
+    this.#scopes.root.reset();
     this.#operands.beginInstruction(bindings);
     this.#instructionLocation = this.#locationValues(location);
-    this.#terminated = false;
-    this.#wroteMemory = false;
     this.#state.beginInstruction(this.#location().eip());
 
-    template(this, this.#values, this);
+    this.#scopes.root.run(() => template(this, this.#values, this));
 
-    if (!this.#terminated) {
+    if (!this.#scopes.root.isTerminated()) {
       this.#completeFallthrough();
     }
 
@@ -167,7 +154,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   isTerminated(): boolean {
-    return this.#blockEnd === "terminated";
+    return this.#blockEnd !== "fallthrough";
   }
 
   finish(): IrBlock {
@@ -221,7 +208,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   var(seed: ValueInput): SemanticVar {
     const variable = this.#state.vars.create();
 
-    this.#current.op({ kind: "var.write", variable: variable.index, value: seed });
+    this.#scopes.current.body.op({ kind: "var.write", variable: variable.index, value: seed });
     return variable;
   }
 
@@ -231,7 +218,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     switch (storage.kind) {
       case "var":
         this.#state.vars.assertKnown(storage);
-        return this.#current.opValue({ kind: "var.read", variable: storage.index });
+        return this.#scopes.current.body.opValue({ kind: "var.read", variable: storage.index });
       case "reg":
         return this.#state.gpr.read(storage.reg, accessWidth, options);
       case "mem":
@@ -271,7 +258,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     switch (storage.kind) {
       case "var":
         this.#state.vars.assertKnown(storage);
-        this.#current.op({ kind: "var.write", variable: storage.index, value });
+        this.#scopes.current.body.op({ kind: "var.write", variable: storage.index, value });
         return;
       case "reg":
         this.#state.gpr.write(storage.reg, value, accessWidth);
@@ -318,7 +305,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   memoryGuard(address: ValueInput, byteLength: ValueInput, access: MemoryAccessKind): void {
     // Guest memory cannot be rolled back by any scheme, so a fault body
     // cannot restore the pre-instruction state once the instruction stored.
-    assert(!this.#wroteMemory, "a memory guard cannot follow a memory write in the same instruction");
+    assert(!this.#scopes.current.wroteMemory(), "a memory guard cannot follow a memory write in the same instruction");
     this.#finish.guardIf(address, byteLength, access);
   }
 
@@ -358,12 +345,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   jump(target: TargetInput): void {
     this.#completeInstruction(target);
     this.#dispatch("jump");
+    this.#scopes.current.complete();
   }
 
   if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void {
-    this.#control.if(condition, () => {
-      this.#withArmScope(() => thenBuild(this, this.#values));
-    }, hint);
+    this.#control.if(condition, () => thenBuild(this, this.#values), hint);
   }
 
   // Opens a loop: body-written channels become loop-carried cells living in
@@ -373,19 +359,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const loop = LoopBuilder.begin({
       values: this.#values,
       state: this.#state,
-      parent: this.#current
+      parent: this.#scopes.current.body
     }, this.#deriveLoopWrites(body));
 
-    this.#withCurrentBody(loop.body, () => {
-      const loopBuilder = new LoopSemanticsBuilderImpl({
-        host: this,
-        state: this.#state,
-        operands: this.#operands
-      });
-
-      loop.emitContinue(body(loopBuilder, this.#values));
-    });
-    assert(!this.#terminated, "a loop body must not terminate the instruction");
+    this.#control.runLoopBody(loop.body, body, (condition) => loop.emitContinue(condition));
 
     loop.close();
   }
@@ -402,14 +379,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     try {
       return writeLog.captureWrittenChannels(() => {
-        scratch.#withCurrentBody(scratchBody, () => {
-          const loopBuilder = new LoopSemanticsBuilderImpl({
-            host: scratch,
-            state: scratch.#state,
-            operands: scratch.#operands
-          });
-          const condition = body(loopBuilder, scratch.#values);
-
+        scratch.#control.runLoopBody(scratchBody, body, (condition) => {
           scratch.#values.node(condition);
         });
       });
@@ -419,10 +389,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   cpuException(exception: CpuException<ValueInput>): void {
-    assert(!this.#wroteMemory, "a CPU exception cannot follow a memory write in the same instruction");
+    assert(!this.#scopes.current.wroteMemory(), "a CPU exception cannot follow a memory write in the same instruction");
     this.#markTerminated();
     this.#finish.cpuException(exception);
     this.#endBlock("terminated");
+    this.#scopes.current.complete();
   }
 
   // A trap resumes at the next instruction with all state observable.
@@ -430,11 +401,11 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#completeInstruction(this.#location().nextEip());
     this.#finish.hostTrap(vector);
     this.#endBlock("terminated");
+    this.#scopes.current.complete();
   }
 
   #markTerminated(): void {
-    assert(!this.#terminated, "the instruction is already terminated");
-    this.#terminated = true;
+    this.#scopes.current.markTerminated();
   }
 
   #completeInstruction(target: ValueInput): void {
@@ -446,42 +417,30 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // A completed flow ends in a dispatch: an arm's body finishes in place,
   // while the root body defers to finish() so the block can keep extending.
   #dispatch(rootEnd: "fallthrough" | "jump"): void {
-    if (this.#terminatorScope === "arm") {
-      this.#finish.dispatch(this.#current, this.#state.takeEipForDispatch());
-      return;
+    switch (this.#scopes.current.kind) {
+      case "root":
+        this.#endBlock(rootEnd);
+        return;
+      case "arm":
+        this.#finish.dispatch(this.#scopes.current.body, this.#state.takeEipForDispatch());
+        return;
+      case "loop":
+        assert(false, "a loop body must not dispatch");
     }
-
-    this.#endBlock(rootEnd);
   }
 
   // Only the root flow's terminator ends the block; an arm's terminator is
   // local to its own body.
   #endBlock(end: "fallthrough" | "jump" | "terminated"): void {
-    if (this.#terminatorScope === "root") {
+    if (this.#scopes.current.kind === "root") {
       this.#blockEnd = end;
-    }
-  }
-
-  // An arm owns its termination: the body it dispatches is the arm's, and the
-  // surrounding flow stays open to terminate separately.
-  #withArmScope(build: () => void): void {
-    const scope = this.#terminatorScope;
-    const terminated = this.#terminated;
-
-    this.#terminatorScope = "arm";
-    this.#terminated = false;
-    try {
-      build();
-    } finally {
-      this.#terminatorScope = scope;
-      this.#terminated = terminated;
     }
   }
 
   #readMemory(address: ValueId, width: OperandWidth, options: GetOptions): Value {
     const signed = options.signed === true && width !== 32;
 
-    return this.#current.opValue(
+    return this.#scopes.current.body.opValue(
       signed
         ? { kind: "memory.read", address, width, signed: true }
         : { kind: "memory.read", address, width }
@@ -489,19 +448,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   #writeMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
-    this.#wroteMemory = true;
-    this.#current.op({ kind: "memory.write", address, value, width });
-  }
-
-  #withCurrentBody(body: BodyBuilder, build: (body: BodyBuilder) => void): void {
-    const parent = this.#current;
-
-    this.#current = body;
-    try {
-      build(body);
-    } finally {
-      this.#current = parent;
-    }
+    this.#scopes.current.recordMemoryWrite();
+    this.#scopes.current.body.op({ kind: "memory.write", address, value, width });
   }
 
   #writeSegmentSelector(
@@ -510,15 +458,17 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     accessWidth: OperandWidth
   ): void {
     assert(accessWidth === 16, `${accessWidth}-bit set to a segment selector`);
-    assert(!this.#terminated, "the instruction is already terminated");
+    assert(!this.#scopes.current.isTerminated(), "the semantic scope is already terminated");
     // Also what keeps segment reads hoistable out of loop bodies.
-    assert(this.#current === this.#body, "a segment load inside a loop body is unsupported");
+    assert(this.#scopes.current.kind !== "loop", "a segment load inside a loop body is unsupported");
+    assert(this.#scopes.current.kind === "root", "a segment load inside a semantic if arm is unsupported");
 
     const outcome = emitSegmentLoad(this.#segmentMode, this.#values, this.#finish, binding, value);
 
     if (outcome === "terminated") {
-      this.#blockEnd = "terminated";
-      this.#terminated = true;
+      this.#markTerminated();
+      this.#endBlock("terminated");
+      this.#scopes.current.complete();
     }
   }
 

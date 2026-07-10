@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import type { LoopBody, SemanticOps } from "#x86/semantics/builder.js";
 import {
   type BranchHint,
   bodyCompletes
@@ -10,10 +11,11 @@ import {
   type StateChannel
 } from "../slots.js";
 import type { ValueId } from "../values.js";
+import { LoopSemanticsBuilderImpl } from "./loop.js";
+import type { OperandResolver } from "./operands.js";
+import type { SemanticScopeStack } from "./scope.js";
 import type { State } from "./state/index.js";
 import type { StateWriteLog } from "./state/write-log.js";
-
-export type RunInBody = (body: BodyBuilder, build: BuildBody) => void;
 
 type ScopedBody = Readonly<{
   body: Body;
@@ -24,26 +26,34 @@ type ScopedBody = Readonly<{
 export class ControlEmitter {
   readonly #state: State;
   readonly #writeLog: StateWriteLog;
-  readonly #currentBody: () => BodyBuilder;
-  readonly #runInBody: RunInBody;
+  readonly #scopes: SemanticScopeStack;
+  readonly #host: SemanticOps;
+  readonly #operands: OperandResolver;
 
   constructor(
     state: State,
     writeLog: StateWriteLog,
-    currentBody: () => BodyBuilder,
-    runInBody: RunInBody
+    scopes: SemanticScopeStack,
+    host: SemanticOps,
+    operands: OperandResolver
   ) {
     this.#state = state;
     this.#writeLog = writeLog;
-    this.#currentBody = currentBody;
-    this.#runInBody = runInBody;
+    this.#scopes = scopes;
+    this.#host = host;
+    this.#operands = operands;
   }
 
   if(condition: ValueId, emitThenBody: BuildBody, hint?: BranchHint): void {
-    const parent = this.#currentBody();
+    const parent = this.#scopes.current.body;
+    const conditionValue = parent.values.constValue(condition);
 
-    // If the condition is a constant false, the then body is unreachable and can be skipped.
-    if (parent.values.constValue(condition) === 0) {
+    if (conditionValue !== undefined) {
+      // Fold when the condition is a constant.
+      if (conditionValue !== 0) {
+        emitThenBody(parent);
+      }
+
       return;
     }
 
@@ -63,29 +73,44 @@ export class ControlEmitter {
     }
   }
 
+  runLoopBody<T>(
+    bodyBuilder: BodyBuilder,
+    body: LoopBody,
+    finish: (condition: ValueId) => T
+  ): T {
+    return this.#scopes.enter("loop", bodyBuilder, (scope) => {
+      const loopBuilder = new LoopSemanticsBuilderImpl({
+        host: this.#host,
+        state: this.#state,
+        operands: this.#operands
+      });
+      const outcome = scope.run(() => body(loopBuilder, bodyBuilder.values));
+
+      assert(outcome.kind === "fallthrough", "a loop body must not terminate the instruction");
+      scope.commitMemoryWrites();
+      return finish(outcome.result);
+    });
+  }
+
   #scopedBody(emitBody: BuildBody): ScopedBody {
     const writeCheckpoint = this.#writeLog.checkpoint();
 
     return this.#state.enterScope(() => {
-      const child = new BodyBuilder(this.#currentBody().values);
-      let body: Body | undefined;
-      let terminating = false;
-      let joinedChannels: readonly StateChannel[] = [];
+      const child = new BodyBuilder(this.#scopes.current.body.values);
 
-      this.#runInBody(child, (bodyBuilder) => {
-        emitBody(bodyBuilder);
-        terminating = bodyCompletes(child.build());
+      return this.#scopes.enter("arm", child, (scope) => {
+        scope.run(() => emitBody(child));
+        const terminating = bodyCompletes(child.build());
+        let joinedChannels: readonly StateChannel[] = [];
 
         if (!terminating) {
           joinedChannels = dedupeDisjointChannels(this.#writeLog.writtenChannelsSince(writeCheckpoint));
           this.#commitJoinedChannels(child, joinedChannels);
+          scope.commitMemoryWrites();
         }
 
-        body = child.build();
+        return { body: child.build(), terminating, joinedChannels };
       });
-
-      assert(body !== undefined, "state-scoped control body was not built");
-      return { body, terminating, joinedChannels };
     });
   }
 
@@ -94,7 +119,7 @@ export class ControlEmitter {
   }
 
   #skippedBody(channels: readonly StateChannel[]): Body | undefined {
-    const body = new BodyBuilder(this.#currentBody().values);
+    const body = new BodyBuilder(this.#scopes.current.body.values);
 
     if (!this.#emitDirtyChannelCommits(body, channels)) {
       return undefined;
