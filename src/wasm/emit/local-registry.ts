@@ -49,11 +49,6 @@ export class LocalRegistry {
     this.#body.localTee(this.#captureTemporary(id, 0, 1, type));
   }
 
-  // Pops the stack top into a stable output local.
-  captureOutputSet(id: ValueId, remainingUses: number, type: WasmValueType): void {
-    this.#body.localSet(this.claimOutputLocal(id, remainingUses, type));
-  }
-
   // Claims an output local the caller stores into itself. Each selected arm
   // writes a control join's output local.
   claimOutputLocal(id: ValueId, remainingUses: number, type: WasmValueType): number {

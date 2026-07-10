@@ -59,13 +59,16 @@ function createTestEmitter(
     externalLocals,
     // The real op lowering: its state and guest accesses emit the same
     // opcode shapes the assertions pin (const address + load).
-    emitOp: (op, operands) => emitOp(body, helpers, op, operands)
+    emitOp: (op, operands) => emitOp(body, helpers, op, operands),
+    claimProducerAtUse: (output) => {
+      throw new Error(`action output ${output} has no test schedule`);
+    }
   });
 
   return { body, scratch, valueEmitter };
 }
 
-test("a live flag resolve materializes at its action and reads its output local", () => {
+test("captureProducer emits a flag resolve and binds its result", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
@@ -82,7 +85,7 @@ test("a live flag resolve materializes at its action and reads its output local"
   );
 
   strictEqual(helperIndex, 0);
-  valueEmitter.materializeActionOutput(resolveAction);
+  valueEmitter.captureProducer(resolveAction);
   valueEmitter.emitUse(resolved);
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
@@ -99,7 +102,7 @@ test("a live flag resolve materializes at its action and reads its output local"
   strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
-test("a captured flag resolve calls at its action point and replays", () => {
+test("captureProducer observes lazy flags before later mutation", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const record = values.const(0);
@@ -119,7 +122,7 @@ test("a captured flag resolve calls at its action point and replays", () => {
     helpers
   );
 
-  valueEmitter.materializeActionOutput(resolveAction);
+  valueEmitter.captureProducer(resolveAction);
   valueEmitter.emitUse(resolved);
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
@@ -134,7 +137,7 @@ test("a captured flag resolve calls at its action point and replays", () => {
   ]);
 });
 
-test("a live flag resolve fails at its action when the helper is missing", () => {
+test("captureProducer reports a missing flag helper", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
@@ -149,12 +152,12 @@ test("a live flag resolve fails at its action when the helper is missing", () =>
   );
 
   throws(
-    () => valueEmitter.materializeActionOutput(resolveAction),
+    () => valueEmitter.captureProducer(resolveAction),
     /missing Wasm helper resolveZF/
   );
 });
 
-test("a dead discardable flag resolve is not materialized", () => {
+test("a flag resolve with no event emits nothing", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
@@ -175,7 +178,7 @@ test("a dead discardable flag resolve is not materialized", () => {
   strictEqual(wasmBodyLocalCount(encoded), 0);
 });
 
-test("a single-use action output still round-trips through its output local", () => {
+test("a capture event stores even a single-use result for replay", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.const(5);
@@ -189,7 +192,7 @@ test("a single-use action output still round-trips through its output local", ()
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.emitUse(sum);
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
@@ -224,7 +227,7 @@ test("a multi-use value tees once and replays from one freed local", () => {
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.emitUse(sum);
   valueEmitter.emitUse(sum);
   valueEmitter.releaseFragmentLocals();
@@ -253,7 +256,7 @@ test("a multi-use value tees once and replays from one freed local", () => {
   );
 });
 
-test("a pinned read loads once at its action point and replays past the store", () => {
+test("captured reads preserve both snapshots across swapped writes", () => {
   const values = new ValueTable();
   const eax = values.addActionOutput();
   const ebx = values.addActionOutput();
@@ -269,8 +272,8 @@ test("a pinned read loads once at its action point and replays past the store", 
     ])
   );
 
-  valueEmitter.materializeActionOutput(readEax);
-  valueEmitter.materializeActionOutput(readEbx);
+  valueEmitter.captureProducer(readEax);
+  valueEmitter.captureProducer(readEbx);
   valueEmitter.emitUse(eax);
   valueEmitter.emitUse(ebx);
   valueEmitter.releaseFragmentLocals();
@@ -279,8 +282,7 @@ test("a pinned read loads once at its action point and replays past the store", 
 
   const encoded = body.end().encode();
 
-  // Both snapshots materialize in lexical order before either write consumes
-  // them.
+  // Both capture events execute before either write consumes a snapshot.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
@@ -716,15 +718,14 @@ test("truncate masks to the requested width", () => {
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.emitUse(low8);
   valueEmitter.emitUse(low16);
   valueEmitter.emitUse(full);
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
 
-  // The read materializes at its action and each truncation replays the same
-  // stable output local.
+  // One capture supplies both truncations.
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
@@ -799,7 +800,7 @@ test("ne and non-zero equality keep the generic compare", () => {
   ]);
 });
 
-test("a multi-use load materializes once and reads its stable output local", () => {
+test("a captured memory read loads once and replays twice", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
@@ -813,7 +814,7 @@ test("a multi-use load materializes once and reads its stable output local", () 
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.emitUse(loaded);
   valueEmitter.emitUse(loaded);
   valueEmitter.releaseFragmentLocals();
@@ -833,7 +834,7 @@ test("a multi-use load materializes once and reads its stable output local", () 
   strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
-test("a multi-use state read emits one lexical load and reads its output local", () => {
+test("a captured state read loads once and replays twice", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
@@ -846,7 +847,7 @@ test("a multi-use state read emits one lexical load and reads its output local",
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.emitUse(read);
   valueEmitter.emitUse(read);
   valueEmitter.releaseFragmentLocals();
@@ -866,7 +867,7 @@ test("a multi-use state read emits one lexical load and reads its output local",
   strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
-test("a producer used only by a nested body still materializes before control", () => {
+test("a captured producer remains available to a nested body", () => {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
@@ -896,7 +897,7 @@ test("a producer used only by a nested body still materializes before control", 
     [0]
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   captureBodyValues(valueEmitter, values, faultBody);
   valueEmitter.emitUse(condition);
   body.ifBlock();
@@ -909,8 +910,7 @@ test("a producer used only by a nested body still materializes before control", 
 
   const encoded = body.end().encode();
 
-  // The producer executes before the condition even though only the selected
-  // body consumes its output local.
+  // This unit invokes the capture primitive explicitly before control.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
@@ -926,7 +926,7 @@ test("a producer used only by a nested body still materializes before control", 
   strictEqual(wasmBodyLocalCount(encoded), 2);
 });
 
-test("a lexical producer computes its input closure before nested-body capture", () => {
+test("captureProducer evaluates its input closure before storing the result", () => {
   const values = new ValueTable();
   const base = values.external(0);
   const four = values.const(4);
@@ -958,7 +958,7 @@ test("a lexical producer computes its input closure before nested-body capture",
     [0, 1]
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   captureBodyValues(valueEmitter, values, faultBody);
   valueEmitter.emitUse(condition);
   body.ifBlock();
@@ -1011,7 +1011,7 @@ test("sibling bodies read one producer local initialized before both", () => {
     [0, 1]
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   captureBodyValues(valueEmitter, values, firstBody);
   valueEmitter.emitUse(firstCondition);
   body.ifBlock();
@@ -1071,7 +1071,7 @@ test("a direct use behind a fault body emits once at the body's entry and replay
     [0]
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   captureBodyValues(valueEmitter, values, faultBody);
   valueEmitter.emitUse(condition);
   body.ifBlock();
@@ -1139,7 +1139,7 @@ test("captureForBody computes an untouched compound into a local for later uses"
     ]
   };
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   captureBodyValues(valueEmitter, values, nestedBody);
   valueEmitter.emitUse(sum);
   valueEmitter.emitUse(sum);
@@ -1180,61 +1180,11 @@ test("unconsumed captures fail assertClear and hold their scratch local", () => 
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.emitUse(sum);
 
   throws(() => valueEmitter.assertClear(), /value bindings never released/);
   throws(() => scratch.assertClear(), /scratch locals still in use/);
-});
-
-test("an output binding outlives its reclaimed physical local", () => {
-  const values = new ValueTable();
-  const read = values.addActionOutput();
-  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { scratch, valueEmitter } = createTestEmitter(
-    values,
-    testBody([
-      readAction,
-      stateWrite(gprChannel("ebx"), read)
-    ])
-  );
-
-  valueEmitter.materializeActionOutput(readAction);
-  valueEmitter.emitUse(read);
-
-  // The final get returned the physical local, but the logical binding stays
-  // until the fragment releases its binding scope.
-  scratch.assertClear();
-  throws(() => valueEmitter.assertClear(), /value bindings never released/);
-  throws(() => valueEmitter.emitUse(read), /no emitted uses remaining/);
-
-  valueEmitter.releaseFragmentLocals();
-  valueEmitter.assertClear();
-  scratch.assertClear();
-});
-
-test("an unconsumed output binding fails fragment release", () => {
-  const values = new ValueTable();
-  const read = values.addActionOutput();
-  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { scratch, valueEmitter } = createTestEmitter(
-    values,
-    testBody([
-      readAction,
-      stateWrite(gprChannel("ebx"), read)
-    ])
-  );
-
-  valueEmitter.materializeActionOutput(readAction);
-
-  throws(() => valueEmitter.releaseFragmentLocals(), /output binding .* unconsumed emitted uses/);
-  throws(() => valueEmitter.assertClear(), /value bindings never released/);
-  throws(() => scratch.assertClear(), /scratch locals still in use/);
-
-  valueEmitter.emitUse(read);
-  valueEmitter.releaseFragmentLocals();
-  valueEmitter.assertClear();
-  scratch.assertClear();
 });
 
 test("assertClear detects semantic var and loop-input binding leaks", () => {
@@ -1276,7 +1226,7 @@ test("a borrowed compound computes once and replays from a pinned local", () => 
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.withBorrowedUse(sum, (borrow) => {
     borrow.push();
     borrow.push();
@@ -1348,7 +1298,7 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.withBorrowedUse(sum, (borrow) => {
     borrow.push();
     borrow.push();
@@ -1391,7 +1341,7 @@ test("a borrow peeks a stable action-output local", () => {
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.withBorrowedUse(loaded, (borrow) => {
     borrow.push();
     borrow.push();
@@ -1427,7 +1377,7 @@ test("a borrowed local is unpinned when its callback throws", () => {
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
 
   throws(
     () => valueEmitter.withBorrowedUse(sum, (borrow) => {
@@ -1488,7 +1438,7 @@ test("nested borrows keep the same local pinned until the outer callback ends", 
     ])
   );
 
-  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.captureProducer(readAction);
   valueEmitter.withBorrowedUse(sum, (outer) => {
     outer.push();
     valueEmitter.withBorrowedUse(sum, (inner) => {

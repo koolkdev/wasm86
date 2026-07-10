@@ -11,7 +11,7 @@ import {
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
-import { bodyInputValues, loopInputsOf, nestedBodies } from "#ir/traverse.js";
+import { nestedBodies } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -21,6 +21,8 @@ import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { analyzeLiveness, type BlockLiveness } from "./liveness.js";
 import { emitOp } from "./ops.js";
 import { wasmTypeForValue } from "./operators.js";
+import { planProducerSchedule } from "./schedule/build.js";
+import { ProducerScheduleExecutor } from "./schedule/executor.js";
 import { analyzeValueUses } from "./value-uses.js";
 import { ValueEmitter } from "./value-emitter.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
@@ -82,15 +84,19 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   }
   const fragmentLiveness = liveness;
   const uses = analyzeValueUses(block, fragmentLiveness, outputs.keys());
+  const producerSchedule = planProducerSchedule(block, fragmentLiveness, uses, outputs.keys());
+  const scheduledProducers = new ProducerScheduleExecutor(producerSchedule);
   const valueEmitter = new ValueEmitter({
     body,
     scratch: context.scratch,
     values: block.values,
     uses,
     externalLocals: context.externalLocals ?? new Map(),
-    emitOp: (op, operands) => emitOp(body, context.helpers, op, operands)
+    emitOp: (op, operands) => emitOp(body, context.helpers, op, operands),
+    claimProducerAtUse: (output) =>
+      scheduledProducers.executeUse(output).producer.action
   });
-  const terminator = bodyFinal(block.body);
+  const completingAction = bodyFinal(block.body);
 
   const frame = createControlFrame({
     body,
@@ -108,13 +114,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       case "op":
         if (opAccess(action.op).valueOutput === undefined) {
           emitOp(body, context.helpers, action.op, valueEmitter);
-          return;
-        }
-
-        assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
-
-        if (fragmentLiveness.isLive(action.output)) {
-          valueEmitter.materializeActionOutput(action);
         }
         return;
       case "finish":
@@ -143,11 +142,11 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     }
   }
 
-  // Captures first — loop-invariant values and entry-anchored producers
+  // Captures first — loop-invariant values and preheader producers
   // materialize on the enclosing flow — then one local per carried cell,
   // seeded before the loop opens and bound to the cell's loop input.
   function emitLoop(action: LoopAction): void {
-    captureForBody(action.body, loopInputsOf(action));
+    captureForBody(action.body);
 
     const locals = action.carried.map((cell) => {
       valueEmitter.emitUse(cell.seed);
@@ -229,7 +228,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     }
 
     const outputLocal = fragmentLiveness.isLive(action.output)
-      ? valueEmitter.claimActionOutput(action.output)
+      ? valueEmitter.claimControlOutput(action.output)
       : undefined;
     const caseCount = action.cases.length;
 
@@ -250,13 +249,15 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
 
       assert(result !== undefined, "switch arms without results have no producer yet");
 
-      if (outputLocal !== undefined) {
-        valueEmitter.emitUse(result);
-        body.localSet(outputLocal);
-      } else if (block.values.node(result).kind === "unreachable") {
-        // The path stays impossible even when nothing demands the output.
-        body.unreachable();
-      }
+      emitAtSite(armBody, armBody.actions.length, () => {
+        if (outputLocal !== undefined) {
+          valueEmitter.emitUse(result);
+          body.localSet(outputLocal);
+        } else if (block.values.node(result).kind === "unreachable") {
+          // The path stays impossible even when nothing demands the output.
+          body.unreachable();
+        }
+      });
     };
 
     action.cases.forEach((switchCase, index) => {
@@ -270,8 +271,8 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     body.endBlock();
   }
 
-  // Every store ordered before the terminator has executed by now, and
-  // both branch paths see the exports.
+  // Copy boundary outputs after ordinary actions and before control leaves
+  // the fragment.
   function emitExportedOutputs(): void {
     for (const [id, local] of outputs) {
       valueEmitter.emitUse(id);
@@ -280,27 +281,47 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   }
 
   function emitBody(actionBody: Body): void {
-    for (const action of actionBody.actions) {
-      emitAction(action);
+    actionBody.actions.forEach((action, actionIndex) => {
+      emitAtSite(actionBody, actionIndex, () => emitAction(action));
+    });
+  }
+
+  function emitAtSite(actionBody: Body, actionIndex: number, emit: () => void): void {
+    scheduledProducers.withSite(
+      actionBody,
+      actionIndex,
+      (event) => valueEmitter.captureProducer(event.producer.action),
+      emit
+    );
+  }
+
+  function captureForBody(actionBody: Body): void {
+    const inputs = producerSchedule.inputsForBody(actionBody);
+
+    valueEmitter.captureValues(inputs);
+  }
+
+  const completionSiteIndex = completingAction === undefined
+    ? block.body.actions.length
+    : block.body.actions.length - 1;
+
+  for (let actionIndex = 0; actionIndex < completionSiteIndex; actionIndex += 1) {
+    const action = block.body.actions[actionIndex]!;
+
+    emitAtSite(block.body, actionIndex, () => emitAction(action));
+  }
+
+  emitAtSite(block.body, completionSiteIndex, () => {
+    emitExportedOutputs();
+
+    if (completingAction === undefined) {
+      frame.emitFallthrough();
+    } else {
+      emitAction(completingAction);
     }
-  }
+  });
 
-  function captureForBody(actionBody: Body, bodyProduced: readonly ValueId[] = []): void {
-    valueEmitter.captureValues(bodyInputValues(actionBody, block.values, bodyProduced));
-  }
-
-  for (const action of terminator === undefined ? block.body.actions : block.body.actions.slice(0, -1)) {
-    emitAction(action);
-  }
-
-  emitExportedOutputs();
-
-  if (terminator !== undefined) {
-    emitAction(terminator);
-  } else {
-    frame.emitFallthrough();
-  }
-
+  scheduledProducers.assertComplete();
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
 }

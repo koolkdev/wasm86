@@ -28,11 +28,10 @@ import {
 import type { ValueUses } from "./value-uses.js";
 import { ValueTraits } from "./value-traits.js";
 
-// Turns stable output locals plus the value graph into stack code. emitUse
-// pushes exactly one use of a value; compounds needed more than once are
-// temporarily captured and replayed until their last counted use. An
-// emission that observes one operand several times borrows it instead of
-// consuming extra uses.
+// Turns captured values plus the value graph into stack code. emitUse pushes
+// one use; repeated values replay a temporary local until their final use.
+// An op that observes one operand several times borrows it without consuming
+// extra uses.
 
 export type ValueEmitterContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -45,6 +44,9 @@ export type ValueEmitterContext = Readonly<{
   // driver wires this to the op lowering layer, so the emitter never sees
   // slot offsets or the helper registry.
   emitOp(op: IrOp, operands: OperandUses): void;
+  // Claims the verified use event for an uncaptured action output.
+  // Scheduling remains outside this emitter.
+  claimProducerAtUse(output: ValueId): OpAction;
 }>;
 
 type CompoundValueNode =
@@ -79,18 +81,32 @@ export class ValueEmitter implements OperandUses {
     this.#registry = new LocalRegistry(context.body, context.scratch);
   }
 
-  // A live output-producing op executes at its action point and stores into
-  // one stable output local. Every later emitted use reads that local; its
-  // physical storage can recycle after the final get.
-  materializeActionOutput(action: OpAction): void {
+  // Executes a capture event. Every counted use later replays its temporary
+  // local, which recycles after the final reference.
+  captureProducer(action: OpAction): void {
     const output = action.output;
 
     assert(output !== undefined, `${action.op.kind} op action is missing its output`);
     const uses = this.#uses.useCount(output);
 
-    assert(uses > 0, `live action output ${output} has no emitted uses`);
+    assert(uses > 0, `scheduled action output ${output} has no emitted uses`);
     this.#context.emitOp(action.op, this);
-    this.#registry.captureOutputSet(output, uses, this.#typeOf(output));
+    this.#registry.captureSet(output, uses, this.#typeOf(output));
+  }
+
+  // Executes a use event. The first use stays on the stack; a tee captures
+  // only when later counted uses remain.
+  #emitProducerAtUse(action: OpAction): void {
+    const output = action.output;
+
+    assert(output !== undefined, `${action.op.kind} op action is missing its output`);
+    const uses = this.#uses.useCount(output);
+
+    assert(uses > 0, `scheduled action output ${output} has no emitted uses`);
+    this.#context.emitOp(action.op, this);
+    if (uses > 1) {
+      this.#registry.captureTee(output, uses - 1, this.#typeOf(output));
+    }
   }
 
   // Pushes one use of the value onto the stack.
@@ -123,7 +139,7 @@ export class ValueEmitter implements OperandUses {
         return;
       }
       case "actionOutput": {
-        assert(false, `action output ${id} has no local binding`);
+        this.#emitProducerAtUse(this.#context.claimProducerAtUse(id));
         return;
       }
       default: {
@@ -259,7 +275,7 @@ export class ValueEmitter implements OperandUses {
 
   // A live control action's output local: arms store into it and later uses
   // replay it until the final emitted reference.
-  claimActionOutput(output: ValueId): number {
+  claimControlOutput(output: ValueId): number {
     const uses = this.#uses.useCount(output);
 
     assert(uses > 0, `live control output ${output} has no emitted uses`);

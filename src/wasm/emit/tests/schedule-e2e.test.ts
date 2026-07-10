@@ -18,10 +18,10 @@ import {
 } from "#runtime/tests/fixtures/cpu-state.js";
 import { instantiateIrBlock, irBlockBody, irBlockCompleted } from "./harness.js";
 
-test("a live producer before control executes even when its use is unselected", async () => {
+test("a single nested-body demand executes inside the selected body", async () => {
   const values = new ValueTable();
   const condition = values.external(0);
-  const address = values.const(0xffff_ffff);
+  const address = values.external(1);
   const loaded = values.addActionOutput();
   const block: IrBlock = {
     values,
@@ -36,15 +36,53 @@ test("a live producer before control executes even when its use is unselected", 
       ]
     }
   };
-  const { run } = await instantiateIrBlock(block, 1);
+  const encoded = irBlockBody(block, 2).encode();
+  const opcodes = wasmBodyOpcodes(encoded);
+  const loadIndex = opcodes.indexOf(wasmOpcode.i32Load);
+  const ifIndex = opcodes.indexOf(wasmOpcode.if);
 
-  throws(() => run(0), WebAssembly.RuntimeError);
+  strictEqual(loadIndex > ifIndex, true);
+  const { guestView, run } = await instantiateIrBlock(block, 2);
+
+  guestView.setUint32(0x100, 0x1234_5678, true);
+  strictEqual(run(0, 0x100), irBlockCompleted);
+  strictEqual(run(1, 0x100), irBlockCompleted);
+});
+
+test("a selected-body producer keeps its compound input in the body", () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const base = values.external(1);
+  const address = values.binary("add", base, values.const(4));
+  const loaded = values.addActionOutput();
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        memoryRead(loaded, address, 32),
+        {
+          kind: "if",
+          condition,
+          thenBody: { actions: [stateWrite(gprChannel("eax"), loaded)] }
+        }
+      ]
+    }
+  };
+  const encoded = irBlockBody(block, 2).encode();
+  const opcodes = wasmBodyOpcodes(encoded);
+  const ifIndex = opcodes.indexOf(wasmOpcode.if);
+
+  strictEqual(opcodes.indexOf(wasmOpcode.i32Add) > ifIndex, true);
+  strictEqual(opcodes.indexOf(wasmOpcode.i32Load) > ifIndex, true);
+  strictEqual(opcodes.includes(wasmOpcode.localSet), false);
+  strictEqual(opcodes.includes(wasmOpcode.localTee), false);
+  strictEqual(wasmBodyLocalCount(encoded), 0);
 });
 
 test("a producer declared inside a body executes only on that selected body", async () => {
   const values = new ValueTable();
   const condition = values.external(0);
-  const address = values.const(0xffff_ffff);
+  const address = values.const(0x100);
   const loaded = values.addActionOutput();
   const block: IrBlock = {
     values,
@@ -61,15 +99,17 @@ test("a producer declared inside a body executes only on that selected body", as
       }]
     }
   };
-  const { run } = await instantiateIrBlock(block, 1);
+  const { guestView, stateView, run } = await instantiateIrBlock(block, 1);
 
+  guestView.setUint32(0x100, 0x1234_5678, true);
   strictEqual(run(0), irBlockCompleted);
-  throws(() => run(1), WebAssembly.RuntimeError);
+  strictEqual(run(1), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 0x1234_5678);
 });
 
-test("an unused memory read is omitted even when its address would trap", async () => {
+test("an unused memory read is omitted without a materialization event", async () => {
   const values = new ValueTable();
-  const address = values.const(0xffff_ffff);
+  const address = values.const(0x100);
   const loaded = values.addActionOutput();
   const block: IrBlock = {
     values,
@@ -104,7 +144,7 @@ test("an unused state read emits neither its opcode nor an output local", () => 
   strictEqual(wasmBodyLocalCount(encoded), 0);
 });
 
-test("a live single-use output sets one local at its action and reads it", () => {
+test("a live single-use output materializes directly at its use", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const block: IrBlock = {
@@ -119,9 +159,73 @@ test("a live single-use output sets one local at its action and reads it", () =>
   const encoded = irBlockBody(block).encode();
   const opcodes = wasmBodyOpcodes(encoded);
 
-  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localSet).length, 1);
-  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localGet).length, 1);
-  strictEqual(wasmBodyLocalCount(encoded), 1);
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localSet).length, 0);
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localGet).length, 0);
+  strictEqual(wasmBodyLocalCount(encoded), 0);
+});
+
+test("a condition use tees once for a later selected-body use", async () => {
+  const values = new ValueTable();
+  const condition = values.addActionOutput();
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        stateRead(condition, gprChannel("eax")),
+        {
+          kind: "if",
+          condition,
+          thenBody: { actions: [stateWrite(gprChannel("ebx"), condition)] }
+        }
+      ]
+    }
+  };
+  const encoded = irBlockBody(block).encode();
+  const opcodes = wasmBodyOpcodes(encoded);
+
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localTee).length, 1);
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localSet).length, 0);
+
+  const { stateView, run } = await instantiateIrBlock(block);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 1, ebx: 0 });
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 1);
+});
+
+test("a trapping producer input still evaluates before a selected early exit", async () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const index = values.binary("div_u", values.const(1), values.external(1));
+  const output = values.addActionOutput();
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        stateRead(output, { kind: "gprDynamic", index, byteLength: 4 }),
+        {
+          kind: "if",
+          condition,
+          thenBody: {
+            actions: [{
+              kind: "finish",
+              finish: { kind: "exit", exit: { class: "host", reason: "hostTrap" } }
+            }]
+          }
+        },
+        stateWrite(gprChannel("eax"), output)
+      ]
+    }
+  };
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).encode());
+  const divideIndex = opcodes.indexOf(wasmOpcode.i32DivU);
+  const ifIndex = opcodes.indexOf(wasmOpcode.if);
+
+  strictEqual(divideIndex >= 0 && divideIndex < ifIndex, true);
+
+  const { run } = await instantiateIrBlock(block, 2);
+
+  throws(() => run(1, 0), WebAssembly.RuntimeError);
 });
 
 test("an output local preserves a read snapshot across an overlapping write", async () => {
@@ -146,7 +250,7 @@ test("an output local preserves a read snapshot across an overlapping write", as
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 41);
 });
 
-test("a long straight-line sequence reuses one physical output local", () => {
+test("a long straight-line sequence materializes each output directly", () => {
   const values = new ValueTable();
   const actions: Action[] = [];
   const outputCount = 64;
@@ -166,14 +270,14 @@ test("a long straight-line sequence reuses one physical output local", () => {
 
   strictEqual(
     localInstructions.filter((instruction) => instruction.opcode === wasmOpcode.localSet).length,
-    outputCount
+    0
   );
   strictEqual(
     localInstructions.filter((instruction) => instruction.opcode === wasmOpcode.localGet).length,
-    outputCount
+    0
   );
-  strictEqual(wasmBodyLocalCount(encoded), 1);
-  deepStrictEqual(new Set(localInstructions.map((instruction) => instruction.local)), new Set([0]));
+  strictEqual(wasmBodyLocalCount(encoded), 0);
+  deepStrictEqual(localInstructions, []);
 });
 
 test("sibling bodies reuse a local after the earlier binding's final reference", async () => {
@@ -214,8 +318,8 @@ test("sibling bodies reuse a local after the earlier binding's final reference",
     .filter((instruction) => instruction.opcode === wasmOpcode.localSet)
     .map((instruction) => instruction.local);
 
-  strictEqual(wasmBodyLocalCount(encoded), 1);
-  deepStrictEqual(outputSets, [2, 2]);
+  strictEqual(wasmBodyLocalCount(encoded), 0);
+  deepStrictEqual(outputSets, []);
 
   const { stateView, run } = await instantiateIrBlock(block, 2);
 
@@ -256,13 +360,11 @@ test("an output used by both siblings cannot recycle between them", async () => 
     .filter((instruction) => instruction.local !== undefined)
     .map((instruction) => [instruction.opcode, instruction.local] as const);
 
-  strictEqual(wasmBodyLocalCount(encoded), 2);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
   deepStrictEqual(localInstructions, [
     [wasmOpcode.localSet, 2],
     [wasmOpcode.localGet, 0],
     [wasmOpcode.localGet, 2],
-    [wasmOpcode.localSet, 3],
-    [wasmOpcode.localGet, 3],
     [wasmOpcode.localGet, 1],
     [wasmOpcode.localGet, 2]
   ]);
@@ -275,7 +377,7 @@ test("an output used by both siblings cannot recycle between them", async () => 
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esi")), 0x41);
 });
 
-test("a reclaimed output tombstone covers dead nested producer inputs", () => {
+test("dead nested producers do not recapture an already consumed output", () => {
   const values = new ValueTable();
   const condition = values.external(0);
   const base = values.addActionOutput();
@@ -298,5 +400,5 @@ test("a reclaimed output tombstone covers dead nested producer inputs", () => {
   const opcodes = wasmBodyOpcodes(encoded);
 
   strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Load).length, 1);
-  strictEqual(wasmBodyLocalCount(encoded), 1);
+  strictEqual(wasmBodyLocalCount(encoded), 0);
 });
