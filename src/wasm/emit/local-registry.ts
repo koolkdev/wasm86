@@ -4,16 +4,25 @@ import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmValueType } from "#wasm/encoder/types.js";
 
-// All scratch-local bookkeeping in one place. Counted compound captures free
-// at their last use (deferred while pins hold them); action and switch output
-// locals remain bound until the fragment releases them.
+// All scratch-local bookkeeping in one place. Counted compound captures and
+// stable output bindings free their physical local after their final emitted
+// use, deferred while pins hold them.
 
-type RegistryEntry = {
+type TemporaryEntry = {
+  kind: "temporary";
   local: number;
-  // Undefined marks a fragment-owned output binding.
-  remainingUses: number | undefined;
+  remainingUses: number;
   pins: number;
 };
+
+type OutputEntry = {
+  kind: "output";
+  local: number | undefined;
+  remainingUses: number;
+  pins: number;
+};
+
+type RegistryEntry = TemporaryEntry | OutputEntry;
 
 export class LocalRegistry {
   readonly #body: WasmFunctionBodyEncoder;
@@ -27,32 +36,30 @@ export class LocalRegistry {
 
   // Pops the stack top into a fresh local.
   captureSet(id: ValueId, remainingUses: number, type: WasmValueType): void {
-    this.#body.localSet(this.#capture(id, remainingUses, 0, type));
+    this.#body.localSet(this.#captureTemporary(id, remainingUses, 0, type));
   }
 
   // Copies the stack top into a fresh local, leaving it pushed as one use.
   captureTee(id: ValueId, remainingUses: number, type: WasmValueType): void {
-    this.#body.localTee(this.#capture(id, remainingUses, 0, type));
+    this.#body.localTee(this.#captureTemporary(id, remainingUses, 0, type));
   }
 
   // Copies the stack top into a fresh local held only by a pin.
   capturePinned(id: ValueId, type: WasmValueType): void {
-    this.#body.localTee(this.#capture(id, 0, 1, type));
+    this.#body.localTee(this.#captureTemporary(id, 0, 1, type));
   }
 
-  // Pops the stack top into a fragment-owned output local.
-  captureOutputSet(id: ValueId, type: WasmValueType): void {
-    this.#body.localSet(this.claimOutputLocal(id, type));
+  // Pops the stack top into a stable output local.
+  captureOutputSet(id: ValueId, remainingUses: number, type: WasmValueType): void {
+    this.#body.localSet(this.claimOutputLocal(id, remainingUses, type));
   }
 
   // Claims an output local the caller stores into itself. Each selected arm
   // writes a control join's output local.
-  claimOutputLocal(id: ValueId, type: WasmValueType): number {
-    assert(!this.#entries.has(id), `value ${id} is already captured`);
+  claimOutputLocal(id: ValueId, remainingUses: number, type: WasmValueType): number {
+    const local = this.#allocLocal(id, remainingUses, 0, type);
 
-    const local = this.#scratch.allocLocal(type);
-
-    this.#entries.set(id, { local, remainingUses: undefined, pins: 0 });
+    this.#entries.set(id, { kind: "output", local, remainingUses, pins: 0 });
     return local;
   }
 
@@ -63,29 +70,41 @@ export class LocalRegistry {
       return false;
     }
 
-    this.#body.localGet(entry.local);
+    const local = entry.local;
 
-    if (entry.remainingUses !== undefined) {
-      assert(entry.remainingUses > 0, `no counted uses of value ${id} remain`);
-      entry.remainingUses -= 1;
-      this.#maybeFree(id, entry);
-    }
+    assert(local !== undefined, `value ${id} has no emitted uses remaining`);
+    assert(entry.remainingUses > 0, `value ${id} has no emitted uses remaining`);
+    this.#body.localGet(local);
+    entry.remainingUses -= 1;
+    this.#maybeFree(id, entry);
     return true;
   }
 
   // Replays without consuming a counted use; only sound under a pin.
   peek(id: ValueId): void {
-    this.#body.localGet(this.#entry(id).local);
+    const entry = this.#entries.get(id);
+
+    assert(entry !== undefined, `value ${id} is not captured`);
+    const local = entry.local;
+
+    assert(local !== undefined, `value ${id} has no physical local`);
+    assert(entry.pins > 0, `value ${id} is not pinned`);
+    this.#body.localGet(local);
   }
 
   // Pins keep an entry alive past its last counted use until unpinned.
   pin(id: ValueId): void {
-    this.#entry(id).pins += 1;
+    const entry = this.#entries.get(id);
+
+    assert(entry !== undefined, `value ${id} is not captured`);
+    assert(entry.local !== undefined, `value ${id} has no physical local`);
+    entry.pins += 1;
   }
 
   unpin(id: ValueId): void {
-    const entry = this.#entry(id);
+    const entry = this.#entries.get(id);
 
+    assert(entry !== undefined, `value ${id} is not captured`);
     assert(entry.pins > 0, `value ${id} is not pinned`);
     entry.pins -= 1;
     this.#maybeFree(id, entry);
@@ -95,46 +114,61 @@ export class LocalRegistry {
     return this.#entries.has(id);
   }
 
-  releaseOutputLocals(): void {
+  releaseOutputBindings(): void {
     for (const [id, entry] of this.#entries) {
-      if (entry.remainingUses !== undefined) {
+      if (entry.kind !== "output") {
         continue;
       }
 
-      assert(entry.pins === 0, `output local ${id} is still pinned`);
+      assert(entry.remainingUses === 0, `output binding ${id} has unconsumed emitted uses`);
+      assert(entry.pins === 0, `output binding ${id} is still pinned`);
+      assert(entry.local === undefined, `output binding ${id} still owns a physical local`);
       this.#entries.delete(id);
-      this.#scratch.freeLocal(entry.local);
     }
   }
 
   assertClear(): void {
     assert(
       this.#entries.size === 0,
-      `captured values with unconsumed uses: ${[...this.#entries.keys()].join(", ")}`
+      `value bindings never released: ${[...this.#entries.keys()].join(", ")}`
     );
   }
 
-  #capture(id: ValueId, remainingUses: number, pins: number, type: WasmValueType): number {
-    assert(remainingUses > 0 || pins > 0, `cannot capture value ${id} without uses or pins`);
-    assert(!this.#entries.has(id), `value ${id} is already captured`);
+  #captureTemporary(
+    id: ValueId,
+    remainingUses: number,
+    pins: number,
+    type: WasmValueType
+  ): number {
+    const local = this.#allocLocal(id, remainingUses, pins, type);
 
-    const local = this.#scratch.allocLocal(type);
-
-    this.#entries.set(id, { local, remainingUses, pins });
+    this.#entries.set(id, { kind: "temporary", local, remainingUses, pins });
     return local;
   }
 
-  #entry(id: ValueId): RegistryEntry {
-    const entry = this.#entries.get(id);
-
-    assert(entry !== undefined, `value ${id} is not captured`);
-    return entry;
+  #allocLocal(
+    id: ValueId,
+    remainingUses: number,
+    pins: number,
+    type: WasmValueType
+  ): number {
+    assert(remainingUses > 0 || pins > 0, `cannot capture value ${id} without uses or pins`);
+    assert(!this.#entries.has(id), `value ${id} is already captured`);
+    return this.#scratch.allocLocal(type);
   }
 
   #maybeFree(id: ValueId, entry: RegistryEntry): void {
     if (entry.remainingUses === 0 && entry.pins === 0) {
-      this.#entries.delete(id);
-      this.#scratch.freeLocal(entry.local);
+      const local = entry.local;
+
+      assert(local !== undefined, `value ${id} has no physical local to release`);
+      this.#scratch.freeLocal(local);
+
+      if (entry.kind === "output") {
+        entry.local = undefined;
+      } else {
+        this.#entries.delete(id);
+      }
     }
   }
 }

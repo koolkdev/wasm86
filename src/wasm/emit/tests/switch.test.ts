@@ -6,7 +6,7 @@ import { eipChannel, gprChannel } from "#ir/slots.js";
 import { ValueTable } from "#ir/value-table.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
-import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { wasmBodyLocalCount, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
@@ -59,6 +59,53 @@ test("a switch selects arms by match and falls back to the default", async () =>
       `selector ${selectorValue}`
     );
   }
+});
+
+test("sequential switch joins reuse one physical local", async () => {
+  const values = new ValueTable();
+  const selector = values.external(0);
+  const firstCase = values.const(11);
+  const firstFallback = values.const(12);
+  const secondCase = values.const(21);
+  const secondFallback = values.const(22);
+  const firstOutput = values.addActionOutput();
+  const secondOutput = values.addActionOutput();
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        {
+          kind: "switch",
+          selector,
+          output: firstOutput,
+          cases: [{ match: 0, body: { actions: [], result: firstCase } }],
+          defaultBody: { actions: [], result: firstFallback }
+        },
+        stateWrite(gprChannel("eax"), firstOutput),
+        {
+          kind: "switch",
+          selector,
+          output: secondOutput,
+          cases: [{ match: 0, body: { actions: [], result: secondCase } }],
+          defaultBody: { actions: [], result: secondFallback }
+        },
+        stateWrite(gprChannel("ebx"), secondOutput)
+      ]
+    }
+  };
+  const encoded = irBlockBody(block, 1).encode();
+
+  strictEqual(wasmBodyLocalCount(encoded), 1);
+
+  const { stateView, run } = await instantiateIrBlock(block, 1);
+
+  strictEqual(run(0), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 11);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 21);
+
+  strictEqual(run(7), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 12);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 22);
 });
 
 test("an impossible default lowers to unreachable and traps", async () => {

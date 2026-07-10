@@ -61,19 +61,21 @@ export class WasmLocalScratchAllocator {
   // allocated before it must survive every iteration: its free defers until
   // the barrier holding its allocation scope lifts. Locals allocated inside
   // re-capture per iteration and recycle freely.
-  pushReuseBarrier(): void {
+  withReuseBarrier<Result>(callback: () => Result): Result {
     this.#reuseBarriers.push([]);
-  }
 
-  popReuseBarrier(): void {
-    const deferred = this.#reuseBarriers.pop();
+    try {
+      return callback();
+    } finally {
+      const deferred = this.#reuseBarriers.pop();
 
-    if (deferred === undefined) {
-      throw new Error("no reuse barrier to pop");
-    }
+      if (deferred === undefined) {
+        throw new Error("reuse barrier scope is not active");
+      }
 
-    for (const index of deferred) {
-      this.freeLocal(index);
+      for (const index of deferred) {
+        this.freeLocal(index);
+      }
     }
   }
 

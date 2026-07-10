@@ -13,17 +13,16 @@ import { emitSlotLoad, emitSlotStore } from "./state.js";
 // addressing.
 
 // A borrowed operand: the first push() takes its one counted use; later
-// pushes replay it for free until release().
+// pushes replay it for free within the callback scope.
 export type BorrowedUse = Readonly<{
   push(): void;
-  release(): void;
 }>;
 
 // How op emissions consume operands: push each one exactly once (emitUse)
-// or borrow it for repeated observation (borrowUse).
+// or borrow it for repeated observation within a synchronous scope.
 export type OperandUses = Readonly<{
   emitUse(id: ValueId): void;
-  borrowUse(id: ValueId): BorrowedUse;
+  withBorrowedUse(id: ValueId, callback: (borrowed: BorrowedUse) => void): void;
   constValue(id: ValueId): number | undefined;
   // The wasm local backing a semantic var, stable for the fragment.
   varLocal(variable: number): number;

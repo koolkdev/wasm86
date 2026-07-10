@@ -126,17 +126,15 @@ function emitDynamicGprOffset(
       operands.emitUse(slot.index);
       body.i32Const(7).i32And().i32Const(2).i32Shl();
       return;
-    case 1: {
-      const index = operands.borrowUse(slot.index);
-
-      index.push();
-      body.i32Const(3).i32And().i32Const(2).i32Shl();
-      index.push();
-      body.i32Const(2).i32ShrU().i32Const(1).i32And();
-      body.i32Add();
-      index.release();
+    case 1:
+      operands.withBorrowedUse(slot.index, (index) => {
+        index.push();
+        body.i32Const(3).i32And().i32Const(2).i32Shl();
+        index.push();
+        body.i32Const(2).i32ShrU().i32Const(1).i32And();
+        body.i32Add();
+      });
       return;
-    }
   }
 }
 

@@ -87,24 +87,23 @@ function emitDynamicMemoryCheck(
   addressId: ValueId,
   byteLengthId: ValueId
 ): void {
-  const address = operands.borrowUse(addressId);
-  const byteLength = operands.borrowUse(byteLengthId);
+  operands.withBorrowedUse(addressId, (address) => {
+    operands.withBorrowedUse(byteLengthId, (byteLength) => {
+      byteLength.push();
+      body.i32Const(0).i32Ne();
 
-  byteLength.push();
-  body.i32Const(0).i32Ne();
+      byteLength.push();
+      emitGuestByteLength(body);
+      body.i32GtU();
 
-  byteLength.push();
-  emitGuestByteLength(body);
-  body.i32GtU();
+      address.push();
+      emitGuestByteLength(body);
+      byteLength.push();
+      body.i32Sub().i32GtU();
 
-  address.push();
-  emitGuestByteLength(body);
-  byteLength.push();
-  body.i32Sub().i32GtU();
-
-  body.i32Or().i32And();
-  address.release();
-  byteLength.release();
+      body.i32Or().i32And();
+    });
+  });
 }
 
 function guestImmediate(width: OperandWidth): WasmMemoryImmediate {

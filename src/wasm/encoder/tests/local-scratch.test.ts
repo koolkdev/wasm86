@@ -1,4 +1,4 @@
-import { strictEqual, throws } from "node:assert";
+import { notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -54,5 +54,51 @@ test("wasm_local_scratch_asserts_clear_state", () => {
   throws(() => scratch.assertClear(), /still in use/);
 
   scratch.freeLocal(temporary);
+  scratch.assertClear();
+});
+
+test("wasm_local_scratch_barrier_defers_outer_reuse_but_reuses_inner_locals", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const scratch = new WasmLocalScratchAllocator(body);
+  const outer = scratch.allocLocal(wasmValueType.i32);
+
+  scratch.withReuseBarrier(() => {
+    scratch.freeLocal(outer);
+
+    const inner = scratch.allocLocal(wasmValueType.i32);
+
+    notStrictEqual(inner, outer);
+    scratch.freeLocal(inner);
+
+    const reusedInner = scratch.allocLocal(wasmValueType.i32);
+
+    strictEqual(reusedInner, inner);
+    scratch.freeLocal(reusedInner);
+  });
+
+  const reusedOuter = scratch.allocLocal(wasmValueType.i32);
+
+  strictEqual(reusedOuter, outer);
+  scratch.freeLocal(reusedOuter);
+  scratch.assertClear();
+});
+
+test("wasm_local_scratch_barrier_lifts when its callback throws", () => {
+  const body = new WasmFunctionBodyEncoder();
+  const scratch = new WasmLocalScratchAllocator(body);
+  const outer = scratch.allocLocal(wasmValueType.i32);
+
+  throws(
+    () => scratch.withReuseBarrier(() => {
+      scratch.freeLocal(outer);
+      throw new Error("barrier callback failed");
+    }),
+    /barrier callback failed/
+  );
+
+  const reused = scratch.allocLocal(wasmValueType.i32);
+
+  strictEqual(reused, outer);
+  scratch.freeLocal(reused);
   scratch.assertClear();
 });

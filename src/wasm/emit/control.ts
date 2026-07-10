@@ -92,7 +92,7 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     emitSlotStore(body, eipChannel, targetEip, {
       emitUse: context.emitPayload,
       constValue: context.constValue,
-      borrowUse: () => {
+      withBorrowedUse: () => {
         throw new Error("dispatch target EIP store does not borrow operands");
       },
       varLocal: () => {

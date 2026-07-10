@@ -142,6 +142,50 @@ test("a compound shared by selected bodies charges its children once", () => {
   strictEqual(analysis.useCount(one), 1);
 });
 
+test("an output used by sibling bodies counts both emitted references", () => {
+  const values = new ValueTable();
+  const output = values.addActionOutput();
+  const firstCondition = values.external(0);
+  const secondCondition = values.external(1);
+  const analysis = analyze(values, [
+    stateRead(output, gprChannel("eax")),
+    {
+      kind: "if",
+      condition: firstCondition,
+      thenBody: { actions: [stateWrite(gprChannel("ebx"), output)] }
+    },
+    {
+      kind: "if",
+      condition: secondCondition,
+      thenBody: { actions: [stateWrite(gprChannel("ecx"), output)] }
+    }
+  ]);
+
+  strictEqual(analysis.useCount(output), 2);
+  strictEqual(analysis.useCount(firstCondition), 1);
+  strictEqual(analysis.useCount(secondCondition), 1);
+});
+
+test("an output in a loop body counts one emitted reference, not iterations", () => {
+  const values = new ValueTable();
+  const output = values.addActionOutput();
+  const analysis = analyze(values, [
+    stateRead(output, gprChannel("eax")),
+    {
+      kind: "loop",
+      carried: [],
+      body: {
+        actions: [
+          stateWrite(gprChannel("ebx"), output),
+          { kind: "loopContinue", updates: [] }
+        ]
+      }
+    }
+  ]);
+
+  strictEqual(analysis.useCount(output), 1);
+});
+
 test("a live switch output charges each arm result", () => {
   const values = new ValueTable();
   const selector = values.external(0);

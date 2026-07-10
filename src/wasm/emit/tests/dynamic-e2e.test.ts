@@ -12,8 +12,9 @@ import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic } from "#x86/semantics/mov.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import { assertLazyFlagState, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
-import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { memoryCheck, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 // One emitted handler body per op+width, with the register indices arriving
 // as wasm params at run time.
@@ -211,4 +212,33 @@ test("a 16-bit dynamic access touches two bytes of the indexed word", async () =
   strictEqual(readRegister(stateView, "esi"), 0xaaaa0003);
   strictEqual(readRegister(stateView, "edx"), 0xbbbb8002);
   assertLazyFlagState(stateView, { kind: "ADD", width: 16, a: 0x8001, b: 0x8002 });
+});
+
+test("a dynamic memory check preserves repeated borrowed operands", async () => {
+  const values = new ValueTable();
+  const address = values.external(0);
+  const byteLength = values.external(1);
+  const fault = values.addActionOutput(fitsUnsigned(1));
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        memoryCheck(fault, address, byteLength, "read"),
+        stateWrite(gprChannel("eax"), fault)
+      ]
+    }
+  };
+  const { stateView, run } = await instantiateIrBlock(block, 2);
+  const cases = [
+    [0, 1, 0],
+    [wasmGuestMemoryMinByteLength - 4, 4, 0],
+    [wasmGuestMemoryMinByteLength - 3, 4, 1],
+    [0xffff_ffff, 0, 0],
+    [0, wasmGuestMemoryMinByteLength + 1, 1]
+  ] as const;
+
+  for (const [start, length, expectedFault] of cases) {
+    strictEqual(run(start, length), irBlockCompleted);
+    strictEqual(readRegister(stateView, "eax"), expectedFault);
+  }
 });

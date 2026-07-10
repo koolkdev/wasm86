@@ -11,7 +11,7 @@ import {
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
-import { loopInputsOf, nestedBodies } from "#ir/traverse.js";
+import { bodyInputValues, loopInputsOf, nestedBodies } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
@@ -22,7 +22,7 @@ import { analyzeLiveness, type BlockLiveness } from "./liveness.js";
 import { emitOp } from "./ops.js";
 import { wasmTypeForValue } from "./operators.js";
 import { analyzeValueUses } from "./value-uses.js";
-import { ValueStack } from "./value-stack.js";
+import { ValueEmitter } from "./value-emitter.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
 // The emitter driver: walks an IrBlock in action order and fills the
@@ -82,7 +82,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   }
   const fragmentLiveness = liveness;
   const uses = analyzeValueUses(block, fragmentLiveness, outputs.keys());
-  const valueStack = new ValueStack({
+  const valueEmitter = new ValueEmitter({
     body,
     scratch: context.scratch,
     values: block.values,
@@ -96,7 +96,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     body,
     dispatch: embedding.dispatch,
     fallthrough: embedding.fallthrough,
-    emitPayload: (id) => valueStack.emitUse(id),
+    emitPayload: (id) => valueEmitter.emitUse(id),
     constValue: (id) => block.values.constValue(id)
   });
 
@@ -107,14 +107,14 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     switch (action.kind) {
       case "op":
         if (opAccess(action.op).valueOutput === undefined) {
-          emitOp(body, context.helpers, action.op, valueStack);
+          emitOp(body, context.helpers, action.op, valueEmitter);
           return;
         }
 
         assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
 
         if (fragmentLiveness.isLive(action.output)) {
-          valueStack.materializeActionOutput(action);
+          valueEmitter.materializeActionOutput(action);
         }
         return;
       case "finish":
@@ -147,15 +147,15 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   // materialize on the enclosing flow — then one local per carried cell,
   // seeded before the loop opens and bound to the cell's loop input.
   function emitLoop(action: LoopAction): void {
-    valueStack.captureForBody(action.body, loopInputsOf(action));
+    captureForBody(action.body, loopInputsOf(action));
 
     const locals = action.carried.map((cell) => {
-      valueStack.emitUse(cell.seed);
+      valueEmitter.emitUse(cell.seed);
 
       const local = context.scratch.allocLocal(wasmTypeForValue(block.values.valueType(cell.loopInput)));
 
       body.localSet(local);
-      valueStack.bindLoopInput(cell.loopInput, local);
+      valueEmitter.bindLoopInput(cell.loopInput, local);
       return local;
     });
 
@@ -163,14 +163,12 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     loopCellLocals.push(locals);
     // The body re-executes per iteration: locals captured before the loop
     // must not recycle inside it.
-    context.scratch.pushReuseBarrier();
-    frame.withLoopBody(() => emitBody(action.body));
-    context.scratch.popReuseBarrier();
+    context.scratch.withReuseBarrier(() => frame.withLoopBody(() => emitBody(action.body)));
     loopCellLocals.pop();
     body.endBlock();
 
     for (const [index, cell] of action.carried.entries()) {
-      valueStack.unbindLoopInput(cell.loopInput);
+      valueEmitter.unbindLoopInput(cell.loopInput);
       context.scratch.freeLocal(locals[index]!);
     }
   }
@@ -184,7 +182,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     assert(action.updates.length === locals.length, "loopContinue updates do not align with the loop's cells");
 
     for (const update of action.updates) {
-      valueStack.emitUse(update);
+      valueEmitter.emitUse(update);
     }
 
     for (let index = locals.length - 1; index >= 0; index -= 1) {
@@ -198,11 +196,11 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   // their first use; both bodies' values are then captured — stack-neutral
   // sets under the pushed condition — before any path leaves the parent.
   function emitIf(action: Extract<Action, { kind: "if" }>): void {
-    valueStack.emitUse(action.condition);
-    valueStack.captureForBody(action.thenBody);
+    valueEmitter.emitUse(action.condition);
+    captureForBody(action.thenBody);
 
     if (action.elseBody !== undefined) {
-      valueStack.captureForBody(action.elseBody);
+      captureForBody(action.elseBody);
     }
 
     body.ifBlock(wasmHint(action.hint));
@@ -227,11 +225,11 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   // completions inside them escape correctly.
   function emitSwitch(action: Extract<Action, { kind: "switch" }>): void {
     for (const nested of nestedBodies(action)) {
-      valueStack.captureForBody(nested);
+      captureForBody(nested);
     }
 
     const outputLocal = fragmentLiveness.isLive(action.output)
-      ? valueStack.claimActionOutput(action.output)
+      ? valueEmitter.claimActionOutput(action.output)
       : undefined;
     const caseCount = action.cases.length;
 
@@ -242,7 +240,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       body.block();
     }
 
-    valueStack.emitUse(action.selector);
+    valueEmitter.emitUse(action.selector);
     body.brTable(switchLabelDepths(action.cases), caseCount);
 
     const emitArm = (armBody: Body): void => {
@@ -253,7 +251,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       assert(result !== undefined, "switch arms without results have no producer yet");
 
       if (outputLocal !== undefined) {
-        valueStack.emitUse(result);
+        valueEmitter.emitUse(result);
         body.localSet(outputLocal);
       } else if (block.values.node(result).kind === "unreachable") {
         // The path stays impossible even when nothing demands the output.
@@ -276,7 +274,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   // both branch paths see the exports.
   function emitExportedOutputs(): void {
     for (const [id, local] of outputs) {
-      valueStack.emitUse(id);
+      valueEmitter.emitUse(id);
       body.localSet(local);
     }
   }
@@ -285,6 +283,10 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     for (const action of actionBody.actions) {
       emitAction(action);
     }
+  }
+
+  function captureForBody(actionBody: Body, bodyProduced: readonly ValueId[] = []): void {
+    valueEmitter.captureValues(bodyInputValues(actionBody, block.values, bodyProduced));
   }
 
   for (const action of terminator === undefined ? block.body.actions : block.body.actions.slice(0, -1)) {
@@ -299,8 +301,8 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     frame.emitFallthrough();
   }
 
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
 }
 
 // The dense br_table label vector: entry m selects the case whose match is

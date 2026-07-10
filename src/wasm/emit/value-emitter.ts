@@ -2,8 +2,6 @@ import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import type { OpAction } from "#ir/actions.js";
 import type { IrOp } from "#ir/ops.js";
-import type { Body } from "#ir/block.js";
-import { bodyInputValues } from "#ir/traverse.js";
 import {
   type BinaryValueNode,
   type CompareValueNode,
@@ -36,7 +34,7 @@ import { ValueTraits } from "./value-traits.js";
 // emission that observes one operand several times borrows it instead of
 // consuming extra uses.
 
-export type ValueStackContext = Readonly<{
+export type ValueEmitterContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   values: ValueTable;
@@ -44,7 +42,7 @@ export type ValueStackContext = Readonly<{
   // External id -> the wasm local the embedding bound it to.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
   // Emits one op, consuming its value inputs through the given uses; the
-  // driver wires this to the op lowering layer, so the stack never sees
+  // driver wires this to the op lowering layer, so the emitter never sees
   // slot offsets or the helper registry.
   emitOp(op: IrOp, operands: OperandUses): void;
 }>;
@@ -58,10 +56,8 @@ type CompoundValueNode =
   | TruncateValueNode
   | ExtendValueNode;
 
-type BorrowPolicy = Readonly<{ first(): void; repeat(): void; close?(): void }>;
-
-export class ValueStack implements OperandUses {
-  readonly #context: ValueStackContext;
+export class ValueEmitter implements OperandUses {
+  readonly #context: ValueEmitterContext;
   readonly #body: WasmFunctionBodyEncoder;
   readonly #values: ValueTable;
   readonly #uses: ValueUses;
@@ -74,7 +70,7 @@ export class ValueStack implements OperandUses {
   // Semantic var index -> its backing local, held for the fragment.
   readonly #varLocals = new Map<number, number>();
 
-  constructor(context: ValueStackContext) {
+  constructor(context: ValueEmitterContext) {
     this.#context = context;
     this.#body = context.body;
     this.#values = context.values;
@@ -84,13 +80,17 @@ export class ValueStack implements OperandUses {
   }
 
   // A live output-producing op executes at its action point and stores into
-  // one fragment-owned output local. Every later use reads that local.
+  // one stable output local. Every later emitted use reads that local; its
+  // physical storage can recycle after the final get.
   materializeActionOutput(action: OpAction): void {
     const output = action.output;
 
     assert(output !== undefined, `${action.op.kind} op action is missing its output`);
+    const uses = this.#uses.useCount(output);
+
+    assert(uses > 0, `live action output ${output} has no emitted uses`);
     this.#context.emitOp(action.op, this);
-    this.#registry.captureOutputSet(output, this.#typeOf(output));
+    this.#registry.captureOutputSet(output, uses, this.#typeOf(output));
   }
 
   // Pushes one use of the value onto the stack.
@@ -140,43 +140,83 @@ export class ValueStack implements OperandUses {
     }
   }
 
-  // Borrows one counted use of the value for repeated observation.
-  borrowUse(id: ValueId): BorrowedUse {
+  // Borrows one counted use of the value for repeated observation. The local
+  // is unpinned in finally, and an escaped borrowed handle cannot be pushed.
+  withBorrowedUse(id: ValueId, callback: (borrowed: BorrowedUse) => void): void {
     const node = this.#values.node(id);
-
-    // Consts, externals, and loop inputs re-emit freely; the borrow holds
-    // nothing.
-    if (
+    const reemittable =
       node.kind === "const" ||
       node.kind === "const64" ||
       node.kind === "external" ||
-      node.kind === "loopInput"
-    ) {
-      const reemit = () => this.emitUse(id);
+      node.kind === "loopInput";
+    let active = true;
+    let pushed = false;
+    let pinned = false;
+    const borrowed: BorrowedUse = {
+      push: (): void => {
+        assert(active, `borrowed value ${id} pushed outside its scope`);
 
-      return this.#createBorrow(id, { first: reemit, repeat: reemit });
+        if (!pushed) {
+          if (reemittable) {
+            this.emitUse(id);
+          } else {
+            // Record ownership before replay: if replay fails, the callback
+            // scope's finally still unpins while the fragment aborts.
+            if (this.#registry.has(id)) {
+              this.#registry.pin(id);
+              pinned = true;
+              this.emitUse(id);
+            } else {
+              this.emitUse(id);
+
+              if (this.#registry.has(id)) {
+                this.#registry.pin(id);
+              } else {
+                this.#registry.capturePinned(id, this.#typeOf(id));
+              }
+              pinned = true;
+            }
+          }
+          pushed = true;
+          return;
+        }
+
+        if (reemittable) {
+          this.emitUse(id);
+        } else {
+          this.#registry.peek(id);
+        }
+      }
+    };
+
+    this.#borrows.set(id, (this.#borrows.get(id) ?? 0) + 1);
+    try {
+      callback(borrowed);
+      assert(pushed, `borrowed value ${id} was never pushed`);
+    } finally {
+      active = false;
+
+      try {
+        if (pinned) {
+          this.#registry.unpin(id);
+        }
+      } finally {
+        const remaining = this.#borrows.get(id);
+
+        assert(remaining !== undefined && remaining > 0, `borrowed value ${id} is not active`);
+        remaining === 1 ? this.#borrows.delete(id) : this.#borrows.set(id, remaining - 1);
+      }
     }
-
-    // Everything else consumes its counted use at the first push and pins
-    // the registry local it lands in until release.
-    return this.#createBorrow(id, {
-      first: () => this.#emitPinnedUse(id),
-      repeat: () => this.#registry.peek(id),
-      close: () => this.#registry.unpin(id)
-    });
   }
 
   constValue(id: ValueId): number | undefined {
     return this.#values.constValue(id);
   }
 
-  // Called before entering a nested body: its actions are emitted later
-  // but executes here, so anything it consumes from the parent context must
-  // be replayable from a local. A loop body passes its input leaves as
-  // `bodyProduced` — values computed from them materialize inside, per
-  // iteration, never here.
-  captureForBody(body: Body, bodyProduced: readonly ValueId[] = []): void {
-    for (const id of bodyInputValues(body, this.#values, bodyProduced)) {
+  // Captures parent-context values that later-emitted code needs to replay.
+  // The action driver owns body traversal and supplies only those inputs.
+  captureValues(ids: Iterable<ValueId>): void {
+    for (const id of ids) {
       this.#captureValue(id);
     }
   }
@@ -218,14 +258,17 @@ export class ValueStack implements OperandUses {
   }
 
   // A live control action's output local: arms store into it and later uses
-  // replay it for the rest of the fragment.
+  // replay it until the final emitted reference.
   claimActionOutput(output: ValueId): number {
-    return this.#registry.claimOutputLocal(output, this.#typeOf(output));
+    const uses = this.#uses.useCount(output);
+
+    assert(uses > 0, `live control output ${output} has no emitted uses`);
+    return this.#registry.claimOutputLocal(output, uses, this.#typeOf(output));
   }
 
   releaseFragmentLocals(): void {
     this.releaseVarLocals();
-    this.#registry.releaseOutputLocals();
+    this.#registry.releaseOutputBindings();
   }
 
   // Every captured value fully consumed, every scratch local returned.
@@ -237,6 +280,10 @@ export class ValueStack implements OperandUses {
     assert(
       this.#loopInputLocals.size === 0,
       `loop inputs never unbound: ${[...this.#loopInputLocals.keys()].join(", ")}`
+    );
+    assert(
+      this.#varLocals.size === 0,
+      `semantic var locals never released: ${[...this.#varLocals.keys()].join(", ")}`
     );
     this.#registry.assertClear();
   }
@@ -341,53 +388,6 @@ export class ValueStack implements OperandUses {
         this.#registry.captureSet(id, this.#uses.useCount(id), this.#typeOf(id));
         return;
       }
-    }
-  }
-
-  // Tracks the borrow and enforces the push/release order; the policy says
-  // what to emit.
-  #createBorrow(id: ValueId, policy: BorrowPolicy): BorrowedUse {
-    let pushed = false;
-    let released = false;
-
-    this.#borrows.set(id, (this.#borrows.get(id) ?? 0) + 1);
-
-    return {
-      push: (): void => {
-        assert(!released, `borrowed value ${id} pushed after release`);
-        pushed ? policy.repeat() : policy.first();
-        pushed = true;
-      },
-      release: (): void => {
-        assert(!released, `borrowed value ${id} released twice`);
-        assert(pushed, `borrowed value ${id} released without a push`);
-        released = true;
-
-        const remaining = this.#borrows.get(id)! - 1;
-
-        remaining === 0 ? this.#borrows.delete(id) : this.#borrows.set(id, remaining);
-        policy.close?.();
-      }
-    };
-  }
-
-  // Emits one counted use of the value and pins its registry local.
-  #emitPinnedUse(id: ValueId): void {
-    // Pin first: the replay below may consume the last counted use.
-    if (this.#registry.has(id)) {
-      this.#registry.pin(id);
-      this.emitUse(id);
-      return;
-    }
-
-    // A multi-use value tees itself into the registry when computed; a
-    // single-use one is captured under the pin alone.
-    this.emitUse(id);
-
-    if (this.#registry.has(id)) {
-      this.#registry.pin(id);
-    } else {
-      this.#registry.capturePinned(id, this.#typeOf(id));
     }
   }
 

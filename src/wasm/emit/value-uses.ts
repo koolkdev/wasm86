@@ -5,9 +5,9 @@ import { actionOutput, finishOperands, nestedBodies } from "#ir/traverse.js";
 import { valueChildren, valueId, type ValueId } from "#ir/values.js";
 import type { BlockLiveness } from "./liveness.js";
 
-// Temporary use counts for compound-value captures. Action and switch outputs
-// have fragment-owned local bindings and therefore need no lifetime forecast;
-// compounds still use counted captures until their path-local rewrite.
+// Counts concrete consuming sites emitted for each value. Compound captures
+// and stable action/switch output bindings use them to release physical locals
+// after their final emitted get; repeated borrowed gets are covered by a pin.
 export type ValueUses = Readonly<{
   useCount(id: ValueId): number;
 }>;

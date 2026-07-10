@@ -5,10 +5,11 @@ import type { ExternalValueId } from "#ir/operands.js";
 import { gprChannel, lazyFlagsBChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { Body } from "#ir/block.js";
+import { bodyInputValues } from "#ir/traverse.js";
 import { ValueTable } from "#ir/value-table.js";
 import { fitsUnsigned } from "#ir/values.js";
-import { emitOp } from "#wasm/emit/ops.js";
-import { ValueStack } from "#wasm/emit/value-stack.js";
+import { emitOp, type BorrowedUse } from "#wasm/emit/ops.js";
+import { ValueEmitter } from "#wasm/emit/value-emitter.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
 import { analyzeValueUses } from "#wasm/emit/value-uses.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
@@ -17,7 +18,11 @@ import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";
 import { defineLazyFlagHelper } from "#wasm/helpers/lazy-flags.js";
 import { createWasmHelperRegistry } from "#wasm/helpers/module.js";
-import { wasmBodyLocalCount, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import {
+  wasmBodyInstructions,
+  wasmBodyLocalCount,
+  wasmBodyOpcodes
+} from "#wasm/tests/body-opcodes.js";
 import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import { memoryRead, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import type { MemoryReadAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
@@ -26,10 +31,14 @@ function testBody(actions: readonly Action[]): Body {
   return { actions };
 }
 
+function captureBodyValues(valueEmitter: ValueEmitter, values: ValueTable, body: Body): void {
+  valueEmitter.captureValues(bodyInputValues(body, values));
+}
+
 type TestEmitter = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  valueStack: ValueStack;
+  valueEmitter: ValueEmitter;
 }>;
 
 function createTestEmitter(
@@ -42,7 +51,7 @@ function createTestEmitter(
   const scratch = new WasmLocalScratchAllocator(body);
   const externalLocals = new Map(externalIds.map((id) => [id, body.addLocal(wasmValueType.i32)]));
   const block = { body: actionBody, values };
-  const valueStack = new ValueStack({
+  const valueEmitter = new ValueEmitter({
     body,
     scratch,
     values,
@@ -53,7 +62,7 @@ function createTestEmitter(
     emitOp: (op, operands) => emitOp(body, helpers, op, operands)
   });
 
-  return { body, scratch, valueStack };
+  return { body, scratch, valueEmitter };
 }
 
 test("a live flag resolve materializes at its action and reads its output local", () => {
@@ -62,7 +71,7 @@ test("a live flag resolve materializes at its action and reads its output local"
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
   const helpers = createWasmHelperRegistry(new WasmModuleEncoder());
   const helperIndex = defineLazyFlagHelper(helpers, "ZF");
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       resolveAction,
@@ -73,10 +82,10 @@ test("a live flag resolve materializes at its action and reads its output local"
   );
 
   strictEqual(helperIndex, 0);
-  valueStack.materializeActionOutput(resolveAction);
-  valueStack.emitUse(resolved);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(resolveAction);
+  valueEmitter.emitUse(resolved);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -99,7 +108,7 @@ test("a captured flag resolve calls at its action point and replays", () => {
 
   defineLazyFlagHelper(helpers, "ZF");
 
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       resolveAction,
@@ -110,10 +119,10 @@ test("a captured flag resolve calls at its action point and replays", () => {
     helpers
   );
 
-  valueStack.materializeActionOutput(resolveAction);
-  valueStack.emitUse(resolved);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(resolveAction);
+  valueEmitter.emitUse(resolved);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   // The lazy record between resolve and use pins the observation point.
@@ -129,7 +138,7 @@ test("a live flag resolve fails at its action when the helper is missing", () =>
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
-  const { valueStack } = createTestEmitter(
+  const { valueEmitter } = createTestEmitter(
     values,
     testBody([
       resolveAction,
@@ -140,7 +149,7 @@ test("a live flag resolve fails at its action when the helper is missing", () =>
   );
 
   throws(
-    () => valueStack.materializeActionOutput(resolveAction),
+    () => valueEmitter.materializeActionOutput(resolveAction),
     /missing Wasm helper resolveZF/
   );
 });
@@ -149,15 +158,15 @@ test("a dead discardable flag resolve is not materialized", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([resolveAction]),
     [],
     createWasmHelperRegistry(new WasmModuleEncoder())
   );
 
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -172,7 +181,7 @@ test("a single-use action output still round-trips through its output local", ()
   const five = values.const(5);
   const sum = values.binary("add", read, five);
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -180,10 +189,10 @@ test("a single-use action output still round-trips through its output local", ()
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.emitUse(sum);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.emitUse(sum);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -206,7 +215,7 @@ test("a multi-use value tees once and replays from one freed local", () => {
   const five = values.const(5);
   const sum = values.binary("add", read, five);
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -215,11 +224,11 @@ test("a multi-use value tees once and replays from one freed local", () => {
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.emitUse(sum);
-  valueStack.emitUse(sum);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.emitUse(sum);
+  valueEmitter.emitUse(sum);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -235,7 +244,13 @@ test("a multi-use value tees once and replays from one freed local", () => {
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 2);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
+  deepStrictEqual(
+    wasmBodyInstructions(encoded)
+      .filter((instruction) => instruction.local !== undefined)
+      .map((instruction) => instruction.local),
+    [0, 0, 0, 0]
+  );
 });
 
 test("a pinned read loads once at its action point and replays past the store", () => {
@@ -244,7 +259,7 @@ test("a pinned read loads once at its action point and replays past the store", 
   const ebx = values.addActionOutput();
   const readEax: StateReadAction = stateRead(eax, gprChannel("eax"));
   const readEbx: StateReadAction = stateRead(ebx, gprChannel("ebx"));
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readEax,
@@ -254,12 +269,12 @@ test("a pinned read loads once at its action point and replays past the store", 
     ])
   );
 
-  valueStack.materializeActionOutput(readEax);
-  valueStack.materializeActionOutput(readEbx);
-  valueStack.emitUse(eax);
-  valueStack.emitUse(ebx);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readEax);
+  valueEmitter.materializeActionOutput(readEbx);
+  valueEmitter.emitUse(eax);
+  valueEmitter.emitUse(ebx);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -285,7 +300,7 @@ test("a dead read emits nothing", () => {
   const read = values.addActionOutput();
   const seven = values.const(7);
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -293,8 +308,8 @@ test("a dead read emits nothing", () => {
     ])
   );
 
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -307,7 +322,7 @@ test("constant and external leaves re-emit per use without scratch locals", () =
   const values = new ValueTable();
   const seven = values.const(7);
   const external = values.external(3);
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), seven),
@@ -318,12 +333,12 @@ test("constant and external leaves re-emit per use without scratch locals", () =
     [3]
   );
 
-  valueStack.emitUse(seven);
-  valueStack.emitUse(seven);
-  valueStack.emitUse(external);
-  valueStack.emitUse(external);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.emitUse(seven);
+  valueEmitter.emitUse(seven);
+  valueEmitter.emitUse(external);
+  valueEmitter.emitUse(external);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -342,14 +357,14 @@ test("constant and external leaves re-emit per use without scratch locals", () =
 test("an external without a bound local fails loudly", () => {
   const values = new ValueTable();
   const external = values.external(3);
-  const { valueStack } = createTestEmitter(
+  const { valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), external)
     ])
   );
 
-  throws(() => valueStack.emitUse(external), /no local bound for external value 3/);
+  throws(() => valueEmitter.emitUse(external), /no local bound for external value 3/);
 });
 
 test("select pushes whenTrue, whenFalse, then condition", () => {
@@ -359,7 +374,7 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
   const whenTrue = values.unary("popcnt", one);
   const condition = values.compare(32, "lt_u", one, two);
   const select = values.select(condition, whenTrue, two);
-  const { body, valueStack } = createTestEmitter(
+  const { body, valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), select)
@@ -367,9 +382,9 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
     [0, 1]
   );
 
-  valueStack.emitUse(select);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.emitUse(select);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.localGet,
@@ -405,7 +420,7 @@ test("operators map to their wasm opcodes", () => {
   const masked = values.binary("sub", values.binary("and", one, two), values.binary("or", one, two));
   const equal = values.compare(32, "eq", one, two);
   const signed = values.compare(32, "ge_s", one, two);
-  const { body, valueStack } = createTestEmitter(
+  const { body, valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), mixed),
@@ -427,23 +442,23 @@ test("operators map to their wasm opcodes", () => {
     [0, 1]
   );
 
-  valueStack.emitUse(mixed);
-  valueStack.emitUse(trailingZeros);
-  valueStack.emitUse(leadingZeros);
-  valueStack.emitUse(product);
-  valueStack.emitUse(signedQuotient);
-  valueStack.emitUse(unsignedQuotient);
-  valueStack.emitUse(signedRemainder);
-  valueStack.emitUse(remainder);
-  valueStack.emitUse(rotatedLeft);
-  valueStack.emitUse(rotatedRight);
-  valueStack.emitUse(extended8);
-  valueStack.emitUse(extended16);
-  valueStack.emitUse(masked);
-  valueStack.emitUse(equal);
-  valueStack.emitUse(signed);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.emitUse(mixed);
+  valueEmitter.emitUse(trailingZeros);
+  valueEmitter.emitUse(leadingZeros);
+  valueEmitter.emitUse(product);
+  valueEmitter.emitUse(signedQuotient);
+  valueEmitter.emitUse(unsignedQuotient);
+  valueEmitter.emitUse(signedRemainder);
+  valueEmitter.emitUse(remainder);
+  valueEmitter.emitUse(rotatedLeft);
+  valueEmitter.emitUse(rotatedRight);
+  valueEmitter.emitUse(extended8);
+  valueEmitter.emitUse(extended16);
+  valueEmitter.emitUse(masked);
+  valueEmitter.emitUse(equal);
+  valueEmitter.emitUse(signed);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.localGet,
@@ -517,7 +532,7 @@ test("signed multiply overflow expressions lower through typed i64 products", ()
   const product32 = values.binary64("mul", left32, right32);
   const truncated32 = values.extend64(32, values.truncate64(32, product32), true);
   const overflow32 = values.compare64("ne", product32, truncated32);
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), overflow16),
@@ -526,10 +541,10 @@ test("signed multiply overflow expressions lower through typed i64 products", ()
     [0, 1]
   );
 
-  valueStack.emitUse(overflow16);
-  valueStack.emitUse(overflow32);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.emitUse(overflow16);
+  valueEmitter.emitUse(overflow32);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -582,7 +597,7 @@ test("i64 binary operators lower to wasm i64 opcodes", () => {
   const remainder = values.binary64("rem_u", five, six);
   const signedQuotient = values.binary64("div_s", seven, eight);
   const signedRemainder = values.binary64("rem_s", nine, ten);
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), either),
@@ -594,13 +609,13 @@ test("i64 binary operators lower to wasm i64 opcodes", () => {
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   );
 
-  valueStack.emitUse(either);
-  valueStack.emitUse(quotient);
-  valueStack.emitUse(remainder);
-  valueStack.emitUse(signedQuotient);
-  valueStack.emitUse(signedRemainder);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.emitUse(either);
+  valueEmitter.emitUse(quotient);
+  valueEmitter.emitUse(remainder);
+  valueEmitter.emitUse(signedQuotient);
+  valueEmitter.emitUse(signedRemainder);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
@@ -637,7 +652,7 @@ test("i64 equality against an i64 constant lowers to i64.const and i64.eq", () =
   const values = new ValueTable();
   const value = values.extend64(32, values.external(0), true);
   const equal = values.compare64("eq", value, values.const64(-0x8000_0000_0000_0000n));
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), equal)
@@ -645,9 +660,9 @@ test("i64 equality against an i64 constant lowers to i64.const and i64.eq", () =
     [0]
   );
 
-  valueStack.emitUse(equal);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.emitUse(equal);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
@@ -680,8 +695,8 @@ test("unsupported i64 operators fail at wasm lowering", () => {
     [0, 1]
   );
 
-  throws(() => sumEmitter.valueStack.emitUse(sum), /unsupported i64 binary operator add/);
-  throws(() => lessEmitter.valueStack.emitUse(less), /unsupported i64 compare operator lt_s/);
+  throws(() => sumEmitter.valueEmitter.emitUse(sum), /unsupported i64 binary operator add/);
+  throws(() => lessEmitter.valueEmitter.emitUse(less), /unsupported i64 compare operator lt_s/);
 });
 
 test("truncate masks to the requested width", () => {
@@ -691,7 +706,7 @@ test("truncate masks to the requested width", () => {
   const low16 = values.truncate(16, read);
   const full = values.truncate(32, read);
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { body, valueStack } = createTestEmitter(
+  const { body, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -701,12 +716,12 @@ test("truncate masks to the requested width", () => {
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.emitUse(low8);
-  valueStack.emitUse(low16);
-  valueStack.emitUse(full);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.emitUse(low8);
+  valueEmitter.emitUse(low16);
+  valueEmitter.emitUse(full);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
 
   // The read materializes at its action and each truncation replays the same
   // stable output local.
@@ -731,7 +746,7 @@ test("equality against constant zero emits eqz from either side", () => {
   const zero = values.const(0);
   const left = values.compare(32, "eq", external, zero);
   const right = values.compare(32, "eq", zero, external);
-  const { body, valueStack } = createTestEmitter(
+  const { body, valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), left),
@@ -740,10 +755,10 @@ test("equality against constant zero emits eqz from either side", () => {
     [3]
   );
 
-  valueStack.emitUse(left);
-  valueStack.emitUse(right);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.emitUse(left);
+  valueEmitter.emitUse(right);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.localGet,
@@ -759,7 +774,7 @@ test("ne and non-zero equality keep the generic compare", () => {
   const external = values.external(3);
   const notZero = values.compare(32, "ne", external, values.const(0));
   const one = values.compare(32, "eq", external, values.const(1));
-  const { body, valueStack } = createTestEmitter(
+  const { body, valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), notZero),
@@ -768,10 +783,10 @@ test("ne and non-zero equality keep the generic compare", () => {
     [3]
   );
 
-  valueStack.emitUse(notZero);
-  valueStack.emitUse(one);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.emitUse(notZero);
+  valueEmitter.emitUse(one);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
 
   deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
     wasmOpcode.localGet,
@@ -789,7 +804,7 @@ test("a multi-use load materializes once and reads its stable output local", () 
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
   const readAction: MemoryReadAction = memoryRead(loaded, address, 32);
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -798,11 +813,11 @@ test("a multi-use load materializes once and reads its stable output local", () 
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.emitUse(loaded);
-  valueStack.emitUse(loaded);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.emitUse(loaded);
+  valueEmitter.emitUse(loaded);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -822,7 +837,7 @@ test("a multi-use state read emits one lexical load and reads its output local",
   const values = new ValueTable();
   const read = values.addActionOutput();
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -831,11 +846,11 @@ test("a multi-use state read emits one lexical load and reads its output local",
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.emitUse(read);
-  valueStack.emitUse(read);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.emitUse(read);
+  valueEmitter.emitUse(read);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -872,7 +887,7 @@ test("a producer used only by a nested body still materializes before control", 
       }
     ]
   };
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -881,15 +896,15 @@ test("a producer used only by a nested body still materializes before control", 
     [0]
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.captureForBody(faultBody);
-  valueStack.emitUse(condition);
+  valueEmitter.materializeActionOutput(readAction);
+  captureBodyValues(valueEmitter, values, faultBody);
+  valueEmitter.emitUse(condition);
   body.ifBlock();
-  valueStack.emitUse(loaded);
+  valueEmitter.emitUse(loaded);
   body.drop();
   body.endBlock();
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -934,7 +949,7 @@ test("a lexical producer computes its input closure before nested-body capture",
       }
     ]
   };
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -943,15 +958,15 @@ test("a lexical producer computes its input closure before nested-body capture",
     [0, 1]
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.captureForBody(faultBody);
-  valueStack.emitUse(condition);
+  valueEmitter.materializeActionOutput(readAction);
+  captureBodyValues(valueEmitter, values, faultBody);
+  valueEmitter.emitUse(condition);
   body.ifBlock();
-  valueStack.emitUse(loaded);
+  valueEmitter.emitUse(loaded);
   body.drop();
   body.endBlock();
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -986,7 +1001,7 @@ test("sibling bodies read one producer local initialized before both", () => {
   };
   const firstBody: Body = { actions: [stateWrite(gprChannel("eax"), loaded), hostTrap] };
   const secondBody: Body = { actions: [stateWrite(gprChannel("ebx"), loaded), hostTrap] };
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -996,21 +1011,21 @@ test("sibling bodies read one producer local initialized before both", () => {
     [0, 1]
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.captureForBody(firstBody);
-  valueStack.emitUse(firstCondition);
+  valueEmitter.materializeActionOutput(readAction);
+  captureBodyValues(valueEmitter, values, firstBody);
+  valueEmitter.emitUse(firstCondition);
   body.ifBlock();
-  valueStack.emitUse(loaded);
+  valueEmitter.emitUse(loaded);
   body.drop();
   body.endBlock();
-  valueStack.captureForBody(secondBody);
-  valueStack.emitUse(secondCondition);
+  captureBodyValues(valueEmitter, values, secondBody);
+  valueEmitter.emitUse(secondCondition);
   body.ifBlock();
-  valueStack.emitUse(loaded);
+  valueEmitter.emitUse(loaded);
   body.drop();
   body.endBlock();
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -1046,7 +1061,7 @@ test("a direct use behind a fault body emits once at the body's entry and replay
       { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "hostTrap" } } }
     ]
   };
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -1056,17 +1071,17 @@ test("a direct use behind a fault body emits once at the body's entry and replay
     [0]
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.captureForBody(faultBody);
-  valueStack.emitUse(condition);
+  valueEmitter.materializeActionOutput(readAction);
+  captureBodyValues(valueEmitter, values, faultBody);
+  valueEmitter.emitUse(condition);
   body.ifBlock();
-  valueStack.emitUse(read);
+  valueEmitter.emitUse(read);
   body.drop();
   body.endBlock();
-  valueStack.emitUse(read);
+  valueEmitter.emitUse(read);
   body.drop();
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -1097,7 +1112,7 @@ test("captureForBody computes an untouched compound into a local for later uses"
   const five = values.const(5);
   const sum = values.binary("add", read, five);
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -1124,12 +1139,12 @@ test("captureForBody computes an untouched compound into a local for later uses"
     ]
   };
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.captureForBody(nestedBody);
-  valueStack.emitUse(sum);
-  valueStack.emitUse(sum);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readAction);
+  captureBodyValues(valueEmitter, values, nestedBody);
+  valueEmitter.emitUse(sum);
+  valueEmitter.emitUse(sum);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -1147,7 +1162,7 @@ test("captureForBody computes an untouched compound into a local for later uses"
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 2);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
 test("unconsumed captures fail assertClear and hold their scratch local", () => {
@@ -1156,7 +1171,7 @@ test("unconsumed captures fail assertClear and hold their scratch local", () => 
   const five = values.const(5);
   const sum = values.binary("add", read, five);
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { scratch, valueStack } = createTestEmitter(
+  const { scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -1165,11 +1180,86 @@ test("unconsumed captures fail assertClear and hold their scratch local", () => 
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
-  valueStack.emitUse(sum);
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.emitUse(sum);
 
-  throws(() => valueStack.assertClear(), /captured values with unconsumed uses/);
+  throws(() => valueEmitter.assertClear(), /value bindings never released/);
   throws(() => scratch.assertClear(), /scratch locals still in use/);
+});
+
+test("an output binding outlives its reclaimed physical local", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
+  const { scratch, valueEmitter } = createTestEmitter(
+    values,
+    testBody([
+      readAction,
+      stateWrite(gprChannel("ebx"), read)
+    ])
+  );
+
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.emitUse(read);
+
+  // The final get returned the physical local, but the logical binding stays
+  // until the fragment releases its binding scope.
+  scratch.assertClear();
+  throws(() => valueEmitter.assertClear(), /value bindings never released/);
+  throws(() => valueEmitter.emitUse(read), /no emitted uses remaining/);
+
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
+  scratch.assertClear();
+});
+
+test("an unconsumed output binding fails fragment release", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
+  const { scratch, valueEmitter } = createTestEmitter(
+    values,
+    testBody([
+      readAction,
+      stateWrite(gprChannel("ebx"), read)
+    ])
+  );
+
+  valueEmitter.materializeActionOutput(readAction);
+
+  throws(() => valueEmitter.releaseFragmentLocals(), /output binding .* unconsumed emitted uses/);
+  throws(() => valueEmitter.assertClear(), /value bindings never released/);
+  throws(() => scratch.assertClear(), /scratch locals still in use/);
+
+  valueEmitter.emitUse(read);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
+  scratch.assertClear();
+});
+
+test("assertClear detects semantic var and loop-input binding leaks", () => {
+  const values = new ValueTable();
+  const loopInput = values.addLoopInput();
+  const { scratch, valueEmitter } = createTestEmitter(
+    values,
+    testBody([
+      stateWrite(gprChannel("eax"), loopInput)
+    ])
+  );
+  const loopLocal = scratch.allocLocal(wasmValueType.i32);
+
+  valueEmitter.varLocal(7);
+  valueEmitter.bindLoopInput(loopInput, loopLocal);
+
+  throws(() => valueEmitter.assertClear(), /loop inputs never unbound/);
+
+  valueEmitter.unbindLoopInput(loopInput);
+  throws(() => valueEmitter.assertClear(), /semantic var locals never released/);
+
+  scratch.freeLocal(loopLocal);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
+  scratch.assertClear();
 });
 
 test("a borrowed compound computes once and replays from a pinned local", () => {
@@ -1178,7 +1268,7 @@ test("a borrowed compound computes once and replays from a pinned local", () => 
   const five = values.const(5);
   const sum = values.binary("add", read, five);
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -1186,15 +1276,13 @@ test("a borrowed compound computes once and replays from a pinned local", () => 
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
-
-  const borrow = valueStack.borrowUse(sum);
-
-  borrow.push();
-  borrow.push();
-  borrow.release();
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.withBorrowedUse(sum, (borrow) => {
+    borrow.push();
+    borrow.push();
+  });
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -1212,13 +1300,13 @@ test("a borrowed compound computes once and replays from a pinned local", () => 
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 2);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
 test("a borrowed leaf re-emits per push without scratch locals", () => {
   const values = new ValueTable();
   const external = values.external(3);
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), external)
@@ -1226,13 +1314,12 @@ test("a borrowed leaf re-emits per push without scratch locals", () => {
     [3]
   );
 
-  const borrow = valueStack.borrowUse(external);
-
-  borrow.push();
-  borrow.push();
-  borrow.release();
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.withBorrowedUse(external, (borrow) => {
+    borrow.push();
+    borrow.push();
+  });
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -1252,7 +1339,7 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
   const five = values.const(5);
   const sum = values.binary("add", read, five);
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -1261,16 +1348,14 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
-
-  const borrow = valueStack.borrowUse(sum);
-
-  borrow.push();
-  borrow.push();
-  borrow.release();
-  valueStack.emitUse(sum);
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.withBorrowedUse(sum, (borrow) => {
+    borrow.push();
+    borrow.push();
+  });
+  valueEmitter.emitUse(sum);
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -1290,7 +1375,7 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
     wasmOpcode.localGet,
     wasmOpcode.end
   ]);
-  strictEqual(wasmBodyLocalCount(encoded), 2);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
 test("a borrow peeks a stable action-output local", () => {
@@ -1298,7 +1383,7 @@ test("a borrow peeks a stable action-output local", () => {
   const address = values.const(0x2000);
   const loaded = values.addActionOutput();
   const readAction: MemoryReadAction = memoryRead(loaded, address, 32);
-  const { body, scratch, valueStack } = createTestEmitter(
+  const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -1306,15 +1391,13 @@ test("a borrow peeks a stable action-output local", () => {
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
-
-  const borrow = valueStack.borrowUse(loaded);
-
-  borrow.push();
-  borrow.push();
-  borrow.release();
-  valueStack.releaseFragmentLocals();
-  valueStack.assertClear();
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.withBorrowedUse(loaded, (borrow) => {
+    borrow.push();
+    borrow.push();
+  });
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
   scratch.assertClear();
 
   const encoded = body.end().encode();
@@ -1330,13 +1413,13 @@ test("a borrow peeks a stable action-output local", () => {
   strictEqual(wasmBodyLocalCount(encoded), 1);
 });
 
-test("a leaked borrow fails assertClear and holds its scratch local", () => {
+test("a borrowed local is unpinned when its callback throws", () => {
   const values = new ValueTable();
   const read = values.addActionOutput();
   const five = values.const(5);
   const sum = values.binary("add", read, five);
   const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
-  const { scratch, valueStack } = createTestEmitter(
+  const { scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
       readAction,
@@ -1344,46 +1427,94 @@ test("a leaked borrow fails assertClear and holds its scratch local", () => {
     ])
   );
 
-  valueStack.materializeActionOutput(readAction);
+  valueEmitter.materializeActionOutput(readAction);
 
-  const borrow = valueStack.borrowUse(sum);
-
-  borrow.push();
-
-  throws(() => valueStack.assertClear(), /borrowed values never released/);
-  throws(() => scratch.assertClear(), /scratch locals still in use/);
+  throws(
+    () => valueEmitter.withBorrowedUse(sum, (borrow) => {
+      borrow.push();
+      throw new Error("borrow callback failed");
+    }),
+    /borrow callback failed/
+  );
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
+  scratch.assertClear();
 });
 
-test("a released borrow refuses further pushes and releases", () => {
+test("a borrowed handle cannot push outside its callback scope", () => {
   const values = new ValueTable();
   const external = values.external(0);
-  const { valueStack } = createTestEmitter(
+  const { valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), external)
     ]),
     [0]
   );
-  const borrow = valueStack.borrowUse(external);
+  let escaped: BorrowedUse | undefined;
 
-  borrow.push();
-  borrow.release();
+  valueEmitter.withBorrowedUse(external, (borrow) => {
+    escaped = borrow;
+    borrow.push();
+  });
 
-  throws(() => borrow.push(), /pushed after release/);
-  throws(() => borrow.release(), /released twice/);
+  throws(() => escaped!.push(), /pushed outside its scope/);
 });
 
-test("a borrow must observe its value before release", () => {
+test("a borrow callback must observe its value", () => {
   const values = new ValueTable();
   const external = values.external(0);
-  const { valueStack } = createTestEmitter(
+  const { valueEmitter } = createTestEmitter(
     values,
     testBody([
       stateWrite(gprChannel("eax"), external)
     ]),
     [0]
   );
-  const borrow = valueStack.borrowUse(external);
+  throws(() => valueEmitter.withBorrowedUse(external, () => {}), /was never pushed/);
+});
 
-  throws(() => borrow.release(), /released without a push/);
+test("nested borrows keep the same local pinned until the outer callback ends", () => {
+  const values = new ValueTable();
+  const read = values.addActionOutput();
+  const sum = values.binary("add", read, values.const(5));
+  const readAction: StateReadAction = stateRead(read, gprChannel("eax"));
+  const { body, scratch, valueEmitter } = createTestEmitter(
+    values,
+    testBody([
+      readAction,
+      stateWrite(gprChannel("ebx"), sum),
+      stateWrite(gprChannel("ecx"), sum)
+    ])
+  );
+
+  valueEmitter.materializeActionOutput(readAction);
+  valueEmitter.withBorrowedUse(sum, (outer) => {
+    outer.push();
+    valueEmitter.withBorrowedUse(sum, (inner) => {
+      inner.push();
+      inner.push();
+    });
+    outer.push();
+  });
+  valueEmitter.releaseFragmentLocals();
+  valueEmitter.assertClear();
+  scratch.assertClear();
+
+  const encoded = body.end().encode();
+
+  deepStrictEqual(wasmBodyOpcodes(encoded), [
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Load,
+    wasmOpcode.localSet,
+    wasmOpcode.localGet,
+    wasmOpcode.i32Const,
+    wasmOpcode.i32Add,
+    wasmOpcode.localTee,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.localGet,
+    wasmOpcode.end
+  ]);
+  strictEqual(wasmBodyLocalCount(encoded), 1);
 });
