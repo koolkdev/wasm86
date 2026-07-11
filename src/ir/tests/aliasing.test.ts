@@ -9,7 +9,9 @@ import {
   lazyFlagsAChannel,
   lazyFlagsBChannel,
   lazyFlagsKindChannel,
+  segmentAccessChannel,
   segmentBaseChannel,
+  segmentLimitChannel,
   segmentSelectorChannel
 } from "#ir/slots.js";
 import type { StateSlot } from "#ir/slots.js";
@@ -36,6 +38,14 @@ function dynamicSegmentBase(index: number): StateSlot {
 
 function dynamicSegmentSelector(index: number): StateSlot {
   return { kind: "segmentDynamic", index: valueId(index), field: "selector" };
+}
+
+function dynamicSegmentLimit(index: number): StateSlot {
+  return { kind: "segmentDynamic", index: valueId(index), field: "limit" };
+}
+
+function dynamicSegmentAccess(index: number): StateSlot {
+  return { kind: "segmentDynamic", index: valueId(index), field: "access" };
 }
 
 test("effects derive from action kind and slot", () => {
@@ -124,6 +134,9 @@ test("static channels alias iff their byte ranges intersect", () => {
   strictEqual(mayAlias(state(segmentSelectorChannel("fs")), state(segmentSelectorChannel("fs"))), true);
   strictEqual(mayAlias(state(segmentSelectorChannel("fs")), state(segmentBaseChannel("fs"))), false);
   strictEqual(mayAlias(state(segmentBaseChannel("fs")), state(segmentBaseChannel("gs"))), false);
+  strictEqual(mayAlias(state(segmentLimitChannel("fs")), state(segmentLimitChannel("fs"))), true);
+  strictEqual(mayAlias(state(segmentLimitChannel("fs")), state(segmentLimitChannel("gs"))), false);
+  strictEqual(mayAlias(state(segmentLimitChannel("fs")), state(segmentAccessChannel("fs"))), false);
 });
 
 test("a dynamic GPR slot may-aliases every GPR word and never exact cells", () => {
@@ -153,6 +166,16 @@ test("a dynamic segment slot may-aliases segment channels for the same field", (
   strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(segmentBaseChannel("fs"))), false);
   strictEqual(mayAlias(state(segmentBaseChannel("fs")), state(dynamicSegmentSelector(0))), false);
   strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(dynamicSegmentBase(0))), false);
+  strictEqual(mayAlias(state(dynamicSegmentLimit(0)), state(segmentLimitChannel("fs"))), true);
+  strictEqual(mayAlias(state(segmentLimitChannel("gs")), state(dynamicSegmentLimit(0))), true);
+  strictEqual(mayAlias(state(dynamicSegmentLimit(0)), state(dynamicSegmentLimit(1))), true);
+  strictEqual(mayAlias(state(dynamicSegmentAccess(0)), state(segmentAccessChannel("fs"))), true);
+  strictEqual(mayAlias(state(segmentAccessChannel("gs")), state(dynamicSegmentAccess(0))), true);
+  strictEqual(mayAlias(state(dynamicSegmentAccess(0)), state(dynamicSegmentAccess(1))), true);
+  strictEqual(mayAlias(state(dynamicSegmentLimit(0)), state(segmentAccessChannel("fs"))), false);
+  strictEqual(mayAlias(state(segmentAccessChannel("fs")), state(dynamicSegmentLimit(0))), false);
+  strictEqual(mayAlias(state(dynamicSegmentAccess(0)), state(segmentLimitChannel("fs"))), false);
+  strictEqual(mayAlias(state(segmentLimitChannel("fs")), state(dynamicSegmentAccess(0))), false);
   strictEqual(mayAlias(state(dynamicSegmentBase(0)), state(gprChannel("eax"))), false);
   strictEqual(mayAlias(state(gprChannel("eax")), state(dynamicSegmentBase(0))), false);
 });

@@ -45,19 +45,31 @@ export const WASM_CPU_STATE_LAYOUT = {
   ssBase: { offset: 84, byteLength: 4 },
   dsBase: { offset: 88, byteLength: 4 },
   fsBase: { offset: 92, byteLength: 4 },
-  gsBase: { offset: 96, byteLength: 4 }
+  gsBase: { offset: 96, byteLength: 4 },
+  esLimit: { offset: 100, byteLength: 4 },
+  csLimit: { offset: 104, byteLength: 4 },
+  ssLimit: { offset: 108, byteLength: 4 },
+  dsLimit: { offset: 112, byteLength: 4 },
+  fsLimit: { offset: 116, byteLength: 4 },
+  gsLimit: { offset: 120, byteLength: 4 },
+  esAccess: { offset: 124, byteLength: 4 },
+  csAccess: { offset: 128, byteLength: 4 },
+  ssAccess: { offset: 132, byteLength: 4 },
+  dsAccess: { offset: 136, byteLength: 4 },
+  fsAccess: { offset: 140, byteLength: 4 },
+  gsAccess: { offset: 144, byteLength: 4 }
 } as const satisfies Readonly<Record<string, WasmCpuStateLayoutEntry>>;
 
 export type WasmCpuStateField = keyof typeof WASM_CPU_STATE_LAYOUT;
 
 export const WASM_CPU_LAZY_FLAGS_KIND = LAZY_FLAGS_KIND;
 export const WASM_CPU_SEGMENT_FIELDS = {
-  es: { selector: "esSelector", base: "esBase" },
-  cs: { selector: "csSelector", base: "csBase" },
-  ss: { selector: "ssSelector", base: "ssBase" },
-  ds: { selector: "dsSelector", base: "dsBase" },
-  fs: { selector: "fsSelector", base: "fsBase" },
-  gs: { selector: "gsSelector", base: "gsBase" }
+  es: { selector: "esSelector", base: "esBase", limit: "esLimit", access: "esAccess" },
+  cs: { selector: "csSelector", base: "csBase", limit: "csLimit", access: "csAccess" },
+  ss: { selector: "ssSelector", base: "ssBase", limit: "ssLimit", access: "ssAccess" },
+  ds: { selector: "dsSelector", base: "dsBase", limit: "dsLimit", access: "dsAccess" },
+  fs: { selector: "fsSelector", base: "fsBase", limit: "fsLimit", access: "fsAccess" },
+  gs: { selector: "gsSelector", base: "gsBase", limit: "gsLimit", access: "gsAccess" }
 } as const satisfies Readonly<Record<SegmentRegister, Readonly<Record<SegmentChannelField, WasmCpuStateField>>>>;
 
 export const WASM_CPU_STATE_FIELDS = Object.keys(WASM_CPU_STATE_LAYOUT) as readonly WasmCpuStateField[];
@@ -80,6 +92,8 @@ export const WASM_CPU_STATE_BYTE_LENGTH = Math.max(
 export const WASM_CPU_GPR_BASE_OFFSET = WASM_CPU_STATE_OFFSETS.eax;
 export const WASM_CPU_SEGMENT_SELECTOR_OFFSET = WASM_CPU_STATE_OFFSETS.esSelector;
 export const WASM_CPU_SEGMENT_BASE_OFFSET = WASM_CPU_STATE_OFFSETS.esBase;
+export const WASM_CPU_SEGMENT_LIMIT_OFFSET = WASM_CPU_STATE_OFFSETS.esLimit;
+export const WASM_CPU_SEGMENT_ACCESS_OFFSET = WASM_CPU_STATE_OFFSETS.esAccess;
 
 for (const [index, reg] of reg32.entries()) {
   assert(
@@ -96,6 +110,14 @@ for (const [index, reg] of segmentRegisters.entries()) {
   assert(
     WASM_CPU_STATE_OFFSETS[WASM_CPU_SEGMENT_FIELDS[reg].base] === WASM_CPU_SEGMENT_BASE_OFFSET + index * 4,
     "cpu state layout segment bases must be contiguous in segment register order"
+  );
+  assert(
+    WASM_CPU_STATE_OFFSETS[WASM_CPU_SEGMENT_FIELDS[reg].limit] === WASM_CPU_SEGMENT_LIMIT_OFFSET + index * 4,
+    "cpu state layout segment limits must be contiguous in segment register order"
+  );
+  assert(
+    WASM_CPU_STATE_OFFSETS[WASM_CPU_SEGMENT_FIELDS[reg].access] === WASM_CPU_SEGMENT_ACCESS_OFFSET + index * 4,
+    "cpu state layout segment access words must be contiguous in segment register order"
   );
 }
 

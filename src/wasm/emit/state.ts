@@ -9,7 +9,9 @@ import {
   wasmCpuStateChannelAccessByteLength,
   wasmCpuStateChannelOffset,
   WASM_CPU_GPR_BASE_OFFSET,
+  WASM_CPU_SEGMENT_ACCESS_OFFSET,
   WASM_CPU_SEGMENT_BASE_OFFSET,
+  WASM_CPU_SEGMENT_LIMIT_OFFSET,
   WASM_CPU_SEGMENT_SELECTOR_OFFSET
 } from "#wasm/cpu-state-layout.js";
 
@@ -162,7 +164,16 @@ function slotBaseOffset(slot: StateSlot): number {
     case "gprDynamic":
       return WASM_CPU_GPR_BASE_OFFSET;
     case "segmentDynamic":
-      return slot.field === "selector" ? WASM_CPU_SEGMENT_SELECTOR_OFFSET : WASM_CPU_SEGMENT_BASE_OFFSET;
+      switch (slot.field) {
+        case "selector":
+          return WASM_CPU_SEGMENT_SELECTOR_OFFSET;
+        case "base":
+          return WASM_CPU_SEGMENT_BASE_OFFSET;
+        case "limit":
+          return WASM_CPU_SEGMENT_LIMIT_OFFSET;
+        case "access":
+          return WASM_CPU_SEGMENT_ACCESS_OFFSET;
+      }
     case "gpr":
     case "flag":
     case "segment":
@@ -189,7 +200,7 @@ function slotAccessByteLength(slot: StateSlot): 1 | 2 | 4 {
   }
 }
 
-// Dynamic state addresses add an aligned selector/base array offset, so the
+// Dynamic state addresses add an aligned segment-field array offset, so the
 // selected field's alignment carries to every indexed address.
 function accessAlign(offset: number, byteLength: 1 | 2 | 4): 0 | 1 | 2 {
   switch (byteLength) {

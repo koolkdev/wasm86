@@ -8,7 +8,9 @@ import {
   lazyFlagsAChannel,
   lazyFlagsBChannel,
   lazyFlagsKindChannel,
+  segmentAccessChannel,
   segmentBaseChannel,
+  segmentLimitChannel,
   segmentSelectorChannel
 } from "#ir/slots.js";
 import { x86Flags } from "#x86/flags.js";
@@ -16,7 +18,9 @@ import { reg16, reg32, reg8, segmentRegisters } from "#x86/types.js";
 import { registerAlias } from "#x86/registers.js";
 import {
   WASM_CPU_FLAG_BYTE_OFFSETS,
+  WASM_CPU_SEGMENT_ACCESS_OFFSET,
   WASM_CPU_SEGMENT_BASE_OFFSET,
+  WASM_CPU_SEGMENT_LIMIT_OFFSET,
   WASM_CPU_SEGMENT_SELECTOR_OFFSET,
   WASM_CPU_STATE_BYTE_LENGTH,
   WASM_CPU_STATE_FIELDS,
@@ -44,7 +48,7 @@ test("cpu state layout fields and flag offsets are stable", () => {
   strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsKind, 40);
   strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsA, 44);
   strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsB, 48);
-  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 100);
+  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 148);
 
   for (const field of WASM_CPU_STATE_FIELDS) {
     strictEqual(WASM_CPU_STATE_OFFSETS[field], WASM_CPU_STATE_LAYOUT[field].offset);
@@ -84,7 +88,13 @@ test("channel offsets derive from the register word offset plus the byte offset"
     strictEqual(wasmCpuStateChannelOffset(segmentBaseChannel(reg)), WASM_CPU_STATE_OFFSETS[`${reg}Base`]);
     strictEqual(wasmCpuStateChannelOffset(segmentSelectorChannel(reg)), WASM_CPU_SEGMENT_SELECTOR_OFFSET + index * 2);
     strictEqual(wasmCpuStateChannelOffset(segmentBaseChannel(reg)), WASM_CPU_SEGMENT_BASE_OFFSET + index * 4);
+    strictEqual(wasmCpuStateChannelOffset(segmentLimitChannel(reg)), WASM_CPU_STATE_OFFSETS[`${reg}Limit`]);
+    strictEqual(wasmCpuStateChannelOffset(segmentAccessChannel(reg)), WASM_CPU_STATE_OFFSETS[`${reg}Access`]);
+    strictEqual(wasmCpuStateChannelOffset(segmentLimitChannel(reg)), WASM_CPU_SEGMENT_LIMIT_OFFSET + index * 4);
+    strictEqual(wasmCpuStateChannelOffset(segmentAccessChannel(reg)), WASM_CPU_SEGMENT_ACCESS_OFFSET + index * 4);
     strictEqual(wasmCpuStateChannelAccessByteLength(segmentSelectorChannel(reg)), 2);
     strictEqual(wasmCpuStateChannelAccessByteLength(segmentBaseChannel(reg)), 4);
+    strictEqual(wasmCpuStateChannelAccessByteLength(segmentLimitChannel(reg)), 4);
+    strictEqual(wasmCpuStateChannelAccessByteLength(segmentAccessChannel(reg)), 4);
   }
 });

@@ -12,7 +12,7 @@ export type GprChannel = Readonly<{
 }>;
 
 export type FlagChannel<TFlag extends X86Flag = X86Flag> = Readonly<{ kind: "flag"; flag: TFlag }>;
-export type SegmentChannelField = "selector" | "base";
+export type SegmentChannelField = "selector" | "base" | "limit" | "access";
 export type SegmentChannel<
   TSegment extends SegmentRegister = SegmentRegister,
   TField extends SegmentChannelField = SegmentChannelField
@@ -92,6 +92,12 @@ const segmentSelectorChannels = new Map<SegmentRegister, SegmentChannel<SegmentR
 const segmentBaseChannels = new Map<SegmentRegister, SegmentChannel<SegmentRegister, "base">>(
   segmentRegisters.map((reg) => [reg, { kind: "segment", reg, field: "base" }])
 );
+const segmentLimitChannels = new Map<SegmentRegister, SegmentChannel<SegmentRegister, "limit">>(
+  segmentRegisters.map((reg) => [reg, { kind: "segment", reg, field: "limit" }])
+);
+const segmentAccessChannels = new Map<SegmentRegister, SegmentChannel<SegmentRegister, "access">>(
+  segmentRegisters.map((reg) => [reg, { kind: "segment", reg, field: "access" }])
+);
 
 export const eipChannel: EipChannel = { kind: "eip" };
 export const instructionCountChannel: InstructionCountChannel = { kind: "instructionCount" };
@@ -144,6 +150,26 @@ export function segmentBaseChannel<TSegment extends SegmentRegister>(reg: TSegme
   assert(channel !== undefined, `unknown segment base channel: ${reg}`);
 
   return channel as SegmentChannel<TSegment, "base">;
+}
+
+export function segmentLimitChannel<TSegment extends SegmentRegister>(
+  reg: TSegment
+): SegmentChannel<TSegment, "limit"> {
+  const channel = segmentLimitChannels.get(reg);
+
+  assert(channel !== undefined, `unknown segment limit channel: ${reg}`);
+
+  return channel as SegmentChannel<TSegment, "limit">;
+}
+
+export function segmentAccessChannel<TSegment extends SegmentRegister>(
+  reg: TSegment
+): SegmentChannel<TSegment, "access"> {
+  const channel = segmentAccessChannels.get(reg);
+
+  assert(channel !== undefined, `unknown segment access channel: ${reg}`);
+
+  return channel as SegmentChannel<TSegment, "access">;
 }
 
 export function channelsOverlap(a: StateChannel, b: StateChannel): boolean {

@@ -149,19 +149,35 @@ test("narrow register alias writes truncate the value and leave neighbor bytes u
   strictEqual(state.readReg32("eax"), 0xdead_4321);
 });
 
-test("host view stores segment selectors separately from segment bases", () => {
+test("host view stores all loaded segment fields independently", () => {
   const { cpuState: state } = createWasmHostMemories();
 
-  state.load({ fsSelector: 0x12345, fsBase: 0xaabb_ccdd, gsSelector: 0x33 });
+  state.load({
+    fsSelector: 0x12345,
+    fsBase: 0xaabb_ccdd,
+    fsLimit: 0xffff_ffff,
+    fsAccess: 0x0000_00e0,
+    gsSelector: 0x3
+  });
 
   strictEqual(state.readSegmentSelector("fs"), 0x2345);
   strictEqual(state.readSegmentBase("fs"), 0xaabb_ccdd);
-  strictEqual(state.readSegmentSelector("gs"), 0x33);
+  strictEqual(state.readSegmentLimit("fs"), 0xffff_ffff);
+  strictEqual(state.readSegmentAccess("fs"), 0x0000_00e0);
+  strictEqual(state.readSegmentSelector("gs"), 0x3);
   strictEqual(state.readSegmentBase("gs"), 0);
+  strictEqual(state.readSegmentLimit("gs"), 0);
+  strictEqual(state.readSegmentAccess("gs"), 0);
+  strictEqual(readWasmCpuState(state).fsLimit, 0xffff_ffff);
+  strictEqual(readWasmCpuState(state).fsAccess, 0x0000_00e0);
 
   state.writeSegmentSelector("fs", 0x1_0044);
   state.writeSegmentBase("fs", 0xffff_0000);
+  state.writeSegmentLimit("fs", 0);
+  state.writeSegmentAccess("fs", 0x1_0000_00a0);
 
   strictEqual(state.readSegmentSelector("fs"), 0x44);
   strictEqual(state.readSegmentBase("fs"), 0xffff_0000);
+  strictEqual(state.readSegmentLimit("fs"), 0);
+  strictEqual(state.readSegmentAccess("fs"), 0x0000_00a0);
 });

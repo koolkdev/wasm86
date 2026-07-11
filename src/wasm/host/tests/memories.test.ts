@@ -1,9 +1,10 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { createWasmCpuStateSnapshot, readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
 import { WASM_CPU_STATE_BYTE_LENGTH, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { createWasmHostMemories, wasmPagesForByteLength } from "#wasm/host/memories.js";
+import { MACHINE_FIXED_END, MACHINE_FIXED_PAGE_COUNT } from "#wasm/machine-state-layout.js";
 
 test("wasmPagesForByteLength rounds up to WebAssembly pages", () => {
   strictEqual(wasmPagesForByteLength(0), 1);
@@ -67,9 +68,21 @@ test("runtime Wasm memories expose raw cpu state field offsets", () => {
     ssBase: 84,
     dsBase: 88,
     fsBase: 92,
-    gsBase: 96
+    gsBase: 96,
+    esLimit: 100,
+    csLimit: 104,
+    ssLimit: 108,
+    dsLimit: 112,
+    fsLimit: 116,
+    gsLimit: 120,
+    esAccess: 124,
+    csAccess: 128,
+    ssAccess: 132,
+    dsAccess: 136,
+    fsAccess: 140,
+    gsAccess: 144
   });
-  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 100);
+  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 148);
 });
 
 test("runtime Wasm guest memory reads writes and reports faults", () => {
@@ -85,4 +98,37 @@ test("runtime Wasm guest memory reads writes and reports faults", () => {
       guestAccess: "write"
     }
   });
+});
+
+test("runtime Wasm memories expose a fixed-prefix machine memory and typed accessor", () => {
+  const memories = createWasmHostMemories();
+
+  strictEqual(memories.machineMemory.buffer.byteLength, MACHINE_FIXED_END);
+  strictEqual(memories.machine.memory, memories.machineMemory);
+});
+
+test("runtime Wasm memories accept larger supplied machine memory without changing its bytes", () => {
+  const machineMemory = new WebAssembly.Memory({ initial: MACHINE_FIXED_PAGE_COUNT + 1 });
+  const bytes = new Uint8Array(machineMemory.buffer);
+
+  bytes[0x1000] = 0x11;
+  bytes[MACHINE_FIXED_END - 1] = 0x22;
+  bytes[MACHINE_FIXED_END] = 0x33;
+
+  const memories = createWasmHostMemories({ machineMemory });
+
+  strictEqual(memories.machineMemory, machineMemory);
+  strictEqual(memories.machine.memory, machineMemory);
+  strictEqual(bytes[0x1000], 0x11);
+  strictEqual(bytes[MACHINE_FIXED_END - 1], 0x22);
+  strictEqual(bytes[MACHINE_FIXED_END], 0x33);
+});
+
+test("runtime Wasm memories reject supplied machine memory shorter than the fixed prefix", () => {
+  const machineMemory = new WebAssembly.Memory({ initial: MACHINE_FIXED_PAGE_COUNT - 1 });
+
+  throws(
+    () => createWasmHostMemories({ machineMemory }),
+    new RegExp(`machine memory is too small: .* < ${MACHINE_FIXED_END}`)
+  );
 });

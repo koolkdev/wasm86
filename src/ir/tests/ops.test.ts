@@ -17,6 +17,8 @@ import {
   lazyFlagsAChannel,
   lazyFlagsBChannel,
   lazyFlagsKindChannel,
+  segmentAccessChannel,
+  segmentLimitChannel,
   segmentSelectorChannel,
   type StateSlot
 } from "#ir/slots.js";
@@ -60,6 +62,18 @@ test("state writes order slot operands before the written value", () => {
   deepStrictEqual(opValueInputs({ kind: "state.write", slot: dynamicSegment, value }), [index, value]);
   deepStrictEqual(opWrites({ kind: "state.write", slot: dynamicSegment, value }), [state(dynamicSegment)]);
   strictEqual(opMutates({ kind: "state.write", slot: dynamicSegment, value }), true);
+});
+
+test("every dynamic segment field lists its index exactly once", () => {
+  const index = valueId(4);
+  const value = valueId(12);
+
+  for (const field of ["selector", "base", "limit", "access"] as const) {
+    const slot: StateSlot = { kind: "segmentDynamic", index, field };
+
+    deepStrictEqual(opValueInputs({ kind: "state.read", slot }), [index]);
+    deepStrictEqual(opValueInputs({ kind: "state.write", slot, value }), [index, value]);
+  }
 });
 
 test("memory ops expose address/value inputs and memory storage access", () => {
@@ -173,6 +187,12 @@ test("op output bounds match narrow and signed reads", () => {
     type: "i32",
     bounds: fitsUnsigned(16)
   });
+  deepStrictEqual(opValueOutput({ kind: "state.read", slot: segmentLimitChannel("fs") }), { type: "i32" });
+  deepStrictEqual(opValueOutput({ kind: "state.read", slot: segmentAccessChannel("fs") }), { type: "i32" });
+  deepStrictEqual(opValueOutput({
+    kind: "state.read",
+    slot: { kind: "segmentDynamic", index: valueId(2), field: "limit" }
+  }), { type: "i32" });
   deepStrictEqual(opValueOutput(unsignedMemoryRead), { type: "i32", bounds: fitsUnsigned(16) });
   deepStrictEqual(opValueOutput(signedMemoryRead), { type: "i32", bounds: signExtended(16) });
   deepStrictEqual(

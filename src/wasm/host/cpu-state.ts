@@ -46,6 +46,22 @@ export class WasmCpuState implements MutableCpuStateView {
     this.#writeField(this.#view(), wasmCpuSegmentField(reg, "base"), value);
   }
 
+  readSegmentLimit(reg: SegmentRegister): number {
+    return this.#readField(this.#view(), wasmCpuSegmentField(reg, "limit"));
+  }
+
+  writeSegmentLimit(reg: SegmentRegister, value: number): void {
+    this.#writeField(this.#view(), wasmCpuSegmentField(reg, "limit"), value);
+  }
+
+  readSegmentAccess(reg: SegmentRegister): number {
+    return this.#readField(this.#view(), wasmCpuSegmentField(reg, "access"));
+  }
+
+  writeSegmentAccess(reg: SegmentRegister, value: number): void {
+    this.#writeField(this.#view(), wasmCpuSegmentField(reg, "access"), value);
+  }
+
   readFlag(flag: X86Flag): boolean {
     return this.#readFlagByte(this.#view(), flag) !== 0;
   }

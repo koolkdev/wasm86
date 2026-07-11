@@ -11,7 +11,9 @@ import {
   lazyFlagsAChannel,
   lazyFlagsBChannel,
   lazyFlagsKindChannel,
+  segmentAccessChannel,
   segmentBaseChannel,
+  segmentLimitChannel,
   segmentSelectorChannel,
   type StateChannel
 } from "#ir/slots.js";
@@ -49,12 +51,16 @@ test("lazy flag metadata channels are raw state fields", () => {
   deepStrictEqual(lazyFlagsBChannel, { kind: "lazyFlags", field: "lazyFlagsB" });
 });
 
-test("segment channels split visible selectors from hidden bases", () => {
+test("segment channels split selectors from loaded hidden state", () => {
   for (const reg of segmentRegisters) {
     deepStrictEqual(segmentSelectorChannel(reg), { kind: "segment", reg, field: "selector" });
     deepStrictEqual(segmentBaseChannel(reg), { kind: "segment", reg, field: "base" });
+    deepStrictEqual(segmentLimitChannel(reg), { kind: "segment", reg, field: "limit" });
+    deepStrictEqual(segmentAccessChannel(reg), { kind: "segment", reg, field: "access" });
     strictEqual(segmentSelectorChannel(reg), segmentSelectorChannel(reg));
     strictEqual(segmentBaseChannel(reg), segmentBaseChannel(reg));
+    strictEqual(segmentLimitChannel(reg), segmentLimitChannel(reg));
+    strictEqual(segmentAccessChannel(reg), segmentAccessChannel(reg));
   }
 });
 
@@ -111,6 +117,8 @@ test("channelCovers requires full byte-range containment", () => {
   strictEqual(channelCovers(segmentBaseChannel("fs"), segmentBaseChannel("fs")), true);
   strictEqual(channelCovers(segmentSelectorChannel("fs"), segmentBaseChannel("fs")), false);
   strictEqual(channelCovers(segmentBaseChannel("fs"), segmentSelectorChannel("fs")), false);
+  strictEqual(channelCovers(segmentLimitChannel("fs"), segmentLimitChannel("fs")), true);
+  strictEqual(channelCovers(segmentLimitChannel("fs"), segmentAccessChannel("fs")), false);
 });
 
 test("channelsOverlap keeps exact cells disjoint from everything else", () => {
@@ -123,6 +131,9 @@ test("channelsOverlap keeps exact cells disjoint from everything else", () => {
   strictEqual(channelsOverlap(segmentSelectorChannel("fs"), segmentSelectorChannel("fs")), true);
   strictEqual(channelsOverlap(segmentSelectorChannel("fs"), segmentBaseChannel("fs")), false);
   strictEqual(channelsOverlap(segmentBaseChannel("fs"), segmentBaseChannel("gs")), false);
+  strictEqual(channelsOverlap(segmentLimitChannel("fs"), segmentLimitChannel("fs")), true);
+  strictEqual(channelsOverlap(segmentLimitChannel("fs"), segmentLimitChannel("gs")), false);
+  strictEqual(channelsOverlap(segmentLimitChannel("fs"), segmentAccessChannel("fs")), false);
 
   for (const other of [gprChannel("eax"), gprChannel("ah"), flagChannel("OF"), lazyFlagsKindChannel, segmentBaseChannel("fs")]) {
     strictEqual(channelsOverlap(eipChannel, other), false);

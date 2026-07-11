@@ -3,7 +3,15 @@ import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { regDynamicBinding, immBinding, regBinding } from "#ir/operands.js";
-import { gprChannel } from "#ir/slots.js";
+import {
+  gprChannel,
+  segmentAccessChannel,
+  segmentBaseChannel,
+  segmentLimitChannel,
+  segmentSelectorChannel,
+  type SegmentChannelField,
+  type StateChannel
+} from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { fitsUnsigned, type ValueId } from "#ir/values.js";
 import { ValueTable } from "#ir/value-table.js";
@@ -25,6 +33,19 @@ function readRegister(view: DataView, name: RegName): number {
 
 function assertCompleted(exit: bigint): void {
   strictEqual(exit, irBlockCompleted);
+}
+
+function segmentChannel(reg: "es" | "fs" | "gs", field: SegmentChannelField): StateChannel {
+  switch (field) {
+    case "selector":
+      return segmentSelectorChannel(reg);
+    case "base":
+      return segmentBaseChannel(reg);
+    case "limit":
+      return segmentLimitChannel(reg);
+    case "access":
+      return segmentAccessChannel(reg);
+  }
 }
 
 test("one add r/m32, r32 body serves several runtime register pairs", async () => {
@@ -212,6 +233,67 @@ test("a 16-bit dynamic access touches two bytes of the indexed word", async () =
   strictEqual(readRegister(stateView, "esi"), 0xaaaa0003);
   strictEqual(readRegister(stateView, "edx"), 0xbbbb8002);
   assertLazyFlagState(stateView, { kind: "ADD", width: 16, a: 0x8001, b: 0x8002 });
+});
+
+test("static segment slots round-trip selectors and loaded hidden state", async () => {
+  const values = new ValueTable();
+  const fields = ["selector", "base", "limit", "access"] as const;
+  const inputs = fields.map((_, index) => values.external(index));
+  const loaded = fields.map((field) => values.addActionOutput(field === "selector" ? fitsUnsigned(16) : undefined));
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        ...fields.map((field, index) => stateWrite(segmentChannel("es", field), inputs[index]!)),
+        ...fields.map((field, index) => stateRead(loaded[index]!, segmentChannel("es", field))),
+        ...fields.map((field, index) => stateWrite(segmentChannel("gs", field), loaded[index]!))
+      ]
+    }
+  };
+  const { stateView, run } = await instantiateIrBlock(block, inputs.length);
+  const expected = [0x2345, 0x89ab_cdef, 0xffff_ffff, 0x0000_00e0] as const;
+
+  assertCompleted(run(...expected));
+
+  for (const [index, field] of fields.entries()) {
+    strictEqual(readWasmCpuStateChannel(stateView, segmentChannel("es", field)), expected[index]);
+    strictEqual(readWasmCpuStateChannel(stateView, segmentChannel("gs", field)), expected[index]);
+  }
+});
+
+test("dynamic segment slots use separate contiguous arrays for every loaded field", async () => {
+  const values = new ValueTable();
+  const fields = ["selector", "base", "limit", "access"] as const;
+  const targetIndex = values.external(0);
+  const inputs = fields.map((_, index) => values.external(index + 1));
+  const loaded = fields.map((field) => values.addActionOutput(field === "selector" ? fitsUnsigned(16) : undefined));
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        ...fields.map((field, index) => stateWrite(
+          { kind: "segmentDynamic", index: targetIndex, field },
+          inputs[index]!
+        )),
+        ...fields.map((field, index) => stateRead(
+          loaded[index]!,
+          { kind: "segmentDynamic", index: targetIndex, field }
+        )),
+        ...fields.map((field, index) => stateWrite(segmentChannel("fs", field), loaded[index]!))
+      ]
+    }
+  };
+  const { stateView, run } = await instantiateIrBlock(block, inputs.length + 1);
+  const expected = [0x4567, 0x1020_3040, 0xa0b0_c0d0, 0x0000_00a0] as const;
+
+  // gs is the last segment-register record and catches an incorrect array
+  // stride or a field base that spills into the following array.
+  assertCompleted(run(5, ...expected));
+
+  for (const [index, field] of fields.entries()) {
+    strictEqual(readWasmCpuStateChannel(stateView, segmentChannel("gs", field)), expected[index]);
+    strictEqual(readWasmCpuStateChannel(stateView, segmentChannel("fs", field)), expected[index]);
+  }
 });
 
 test("a dynamic memory check preserves repeated borrowed operands", async () => {
