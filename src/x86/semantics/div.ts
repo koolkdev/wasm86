@@ -3,7 +3,7 @@ import type { Values } from "#ir/values.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
 import type { OperandWidth } from "#x86/types.js";
-import { guardStorageRead } from "./memory.js";
+import { readStorage, resolveStorageRead } from "./memory.js";
 
 type DivideKind = "signed" | "unsigned";
 type DivideResult = Readonly<{ quotient: Value; remainder: Value }>;
@@ -21,9 +21,9 @@ function implicitDivideSemantic(kind: DivideKind, width: OperandWidth): Semantic
   return (s, v, context) => {
     const src = s.operand(0);
 
-    guardStorageRead(s, v, context, src, width);
+    const srcStorage = resolveStorageRead(s, v, context, src, width);
 
-    const divisor = s.get(src, width, { signed: kind === "signed" });
+    const divisor = readStorage(s, v, srcStorage, width, { signed: kind === "signed" });
     const result = kind === "signed"
       ? signedDivide(s, v, width, divisor)
       : unsignedDivide(s, v, width, divisor);

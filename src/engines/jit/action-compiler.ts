@@ -2,12 +2,12 @@ import { createIrBlockBuilder, staticInstructionLocation } from "#ir/builder.js"
 import {
   immBinding,
   memBinding,
-  noMemSegment,
   regBinding,
   segmentBinding,
   staticMemSegment,
   type OperandBinding
 } from "#ir/operands.js";
+import { defaultSegmentForBase } from "#x86/segments.js";
 import type { IrBlock } from "#ir/block.js";
 import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/decoder/types.js";
 
@@ -47,6 +47,6 @@ function staticBinding(operand: IsaOperandBinding): OperandBinding {
         index: operand.index,
         scale: operand.scale,
         disp: operand.disp
-      }, operand.segment === undefined ? noMemSegment() : staticMemSegment(operand.segment));
+      }, staticMemSegment(operand.segment ?? defaultSegmentForBase(operand.base)));
   }
 }

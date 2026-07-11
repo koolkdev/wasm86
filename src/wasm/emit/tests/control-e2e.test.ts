@@ -5,12 +5,12 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import {
   immBinding,
   memBinding,
-  noMemSegment,
   regBinding,
   staticMemSegment,
   type EffectiveAddressTerms,
   type OperandBinding
 } from "#ir/operands.js";
+import { defaultSegmentForBase } from "#x86/segments.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decodeOk } from "#x86/decoder/tests/helpers.js";
@@ -358,7 +358,7 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
       case "mem":
         return memBinding(
           effectiveAddressTermsOf(operand),
-          operand.segment === undefined ? noMemSegment() : staticMemSegment(operand.segment)
+          staticMemSegment(operand.segment ?? defaultSegmentForBase(operand.base))
         );
     }
   });

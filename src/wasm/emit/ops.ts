@@ -43,14 +43,15 @@ export function emitOp(
       return;
     case "memory.read":
       operands.emitUse(op.address);
-      emitGuestLoad(body, op.width, op.signed === true);
+      emitGuestLoad(body, op.width, op.signed === true, op.byteOffset);
       return;
     case "memory.write":
       operands.emitUse(op.address);
       operands.emitUse(op.value);
-      emitGuestStore(body, op.width);
+      emitGuestStore(body, op.width, op.byteOffset);
       return;
     case "memory.check":
+    case "memory.resolve":
       emitMemoryCheck(body, operands, op.address, op.byteLength);
       return;
     case "var.read":

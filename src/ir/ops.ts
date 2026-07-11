@@ -28,12 +28,14 @@ export type StateWriteOp = Readonly<{ kind: "state.write"; slot: StateSlot; valu
 export type MemoryReadOp = Readonly<{
   kind: "memory.read";
   address: ValueId;
+  byteOffset: number;
   width: OperandWidth;
   signed?: true;
 }>;
 export type MemoryWriteOp = Readonly<{
   kind: "memory.write";
   address: ValueId;
+  byteOffset: number;
   value: ValueId;
   width: OperandWidth;
 }>;
@@ -42,6 +44,11 @@ export type MemoryCheckOp = Readonly<{
   address: ValueId;
   byteLength: ValueId;
   access: MemoryAccessKind;
+}>;
+export type MemoryResolveOp = Readonly<{
+  kind: "memory.resolve";
+  address: ValueId;
+  byteLength: ValueId;
 }>;
 export type CpuResolveFlagOp = Readonly<{ kind: "cpu.resolveFlag"; flag: X86StatusFlag }>;
 // A semantic var: a block-local mutable slot the emitter backs with a wasm
@@ -55,6 +62,7 @@ export type IrOp =
   | MemoryReadOp
   | MemoryWriteOp
   | MemoryCheckOp
+  | MemoryResolveOp
   | CpuResolveFlagOp
   | VarReadOp
   | VarWriteOp;
@@ -106,6 +114,7 @@ export function opAccess(op: IrOp): OpAccess {
         writes: [memoryAccess]
       };
     case "memory.check":
+    case "memory.resolve":
       return {
         valueInputs: [op.address, op.byteLength],
         valueOutput: output(fitsUnsigned(1)),

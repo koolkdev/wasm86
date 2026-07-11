@@ -6,9 +6,9 @@ import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { OperandUses } from "./ops.js";
 
-// Bounds checks and guest memory access. Guest addresses are arbitrary x86
-// pointers, so accesses carry no static offset and only natural alignment
-// hints.
+// Bounds checks and guest memory access. A resolved range supplies the guest
+// base; constant subaccess offsets fold into Wasm immediates, while dynamic
+// offsets have already been added to the base by the IR builder.
 
 const wasmPageShift = 16;
 
@@ -48,8 +48,13 @@ export function emitGuestByteLength(body: WasmFunctionBodyEncoder): void {
     .i32Shl();
 }
 
-export function emitGuestLoad(body: WasmFunctionBodyEncoder, width: OperandWidth, signed: boolean): void {
-  const immediate = guestImmediate(width);
+export function emitGuestLoad(
+  body: WasmFunctionBodyEncoder,
+  width: OperandWidth,
+  signed: boolean,
+  byteOffset: number
+): void {
+  const immediate = guestImmediate(width, byteOffset);
 
   switch (width) {
     case 8:
@@ -65,8 +70,12 @@ export function emitGuestLoad(body: WasmFunctionBodyEncoder, width: OperandWidth
   }
 }
 
-export function emitGuestStore(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
-  const immediate = guestImmediate(width);
+export function emitGuestStore(
+  body: WasmFunctionBodyEncoder,
+  width: OperandWidth,
+  byteOffset: number
+): void {
+  const immediate = guestImmediate(width, byteOffset);
 
   switch (width) {
     case 8:
@@ -106,10 +115,10 @@ function emitDynamicMemoryCheck(
   });
 }
 
-function guestImmediate(width: OperandWidth): WasmMemoryImmediate {
+function guestImmediate(width: OperandWidth, byteOffset: number): WasmMemoryImmediate {
   return {
     align: guestAlign[width],
-    offset: 0,
+    offset: byteOffset,
     memoryIndex: wasmMemoryIndex.guest
   };
 }

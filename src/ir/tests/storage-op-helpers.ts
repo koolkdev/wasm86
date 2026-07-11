@@ -4,6 +4,7 @@ import type {
   MemoryCheckOp,
   MemoryAccessKind,
   MemoryReadOp,
+  MemoryResolveOp,
   MemoryWriteOp,
   StateReadOp,
   StateWriteOp
@@ -29,12 +30,14 @@ export type StateWriteFact = Readonly<{
 export type MemoryReadFact = Readonly<{
   output: ValueId;
   address: ValueId;
+  byteOffset: number;
   width: OperandWidth;
   signed?: true;
 }>;
 
 export type MemoryWriteFact = Readonly<{
   address: ValueId;
+  byteOffset: number;
   value: ValueId;
   width: OperandWidth;
 }>;
@@ -46,11 +49,18 @@ export type MemoryCheckFact = Readonly<{
   access: MemoryAccessKind;
 }>;
 
+export type MemoryResolveFact = Readonly<{
+  output: ValueId;
+  address: ValueId;
+  byteLength: ValueId;
+}>;
+
 export type StateReadAction = OpAction & Readonly<{ op: StateReadOp; output: ValueId }>;
 export type StateWriteAction = OpAction & Readonly<{ op: StateWriteOp }>;
 export type MemoryReadAction = OpAction & Readonly<{ op: MemoryReadOp; output: ValueId }>;
 export type MemoryWriteAction = OpAction & Readonly<{ op: MemoryWriteOp }>;
 export type MemoryCheckAction = OpAction & Readonly<{ op: MemoryCheckOp; output: ValueId }>;
+export type MemoryResolveAction = OpAction & Readonly<{ op: MemoryResolveOp; output: ValueId }>;
 export type ResolveFlagAction = OpAction & Readonly<{ op: CpuResolveFlagOp; output: ValueId }>;
 
 export function stateRead(output: TestValueId, slot: StateSlot): StateReadAction;
@@ -79,12 +89,19 @@ export function memoryRead(
   const addressId = valueId(address);
 
   return signed === true
-    ? { kind: "op", output: outputId, op: { kind: "memory.read", address: addressId, width, signed: true } }
-    : { kind: "op", output: outputId, op: { kind: "memory.read", address: addressId, width } };
+    ? {
+        kind: "op",
+        output: outputId,
+        op: { kind: "memory.read", address: addressId, byteOffset: 0, width, signed: true }
+      }
+    : { kind: "op", output: outputId, op: { kind: "memory.read", address: addressId, byteOffset: 0, width } };
 }
 
 export function memoryWrite(address: TestValueId, value: TestValueId, width: OperandWidth): MemoryWriteAction {
-  return { kind: "op", op: { kind: "memory.write", address: valueId(address), value: valueId(value), width } };
+  return {
+    kind: "op",
+    op: { kind: "memory.write", address: valueId(address), byteOffset: 0, value: valueId(value), width }
+  };
 }
 
 export function memoryCheck(
@@ -97,6 +114,18 @@ export function memoryCheck(
     kind: "op",
     output: valueId(output),
     op: { kind: "memory.check", address: valueId(address), byteLength: valueId(byteLength), access }
+  };
+}
+
+export function memoryResolve(
+  output: TestValueId,
+  address: TestValueId,
+  byteLength: TestValueId
+): MemoryResolveAction {
+  return {
+    kind: "op",
+    output: valueId(output),
+    op: { kind: "memory.resolve", address: valueId(address), byteLength: valueId(byteLength) }
   };
 }
 
@@ -122,6 +151,10 @@ export function isMemoryWrite(action: Action): action is MemoryWriteAction {
 
 export function isMemoryCheck(action: Action): action is MemoryCheckAction {
   return action.kind === "op" && action.op.kind === "memory.check" && "output" in action && action.output !== undefined;
+}
+
+export function isMemoryResolve(action: Action): action is MemoryResolveAction {
+  return action.kind === "op" && action.op.kind === "memory.resolve" && "output" in action && action.output !== undefined;
 }
 
 export function isResolveFlag(action: Action): action is ResolveFlagAction {
@@ -152,8 +185,19 @@ export function memoryReadFact(action: OpAction): MemoryReadFact | undefined {
   }
 
   return action.op.signed === true
-    ? { output: action.output!, address: action.op.address, width: action.op.width, signed: true }
-    : { output: action.output!, address: action.op.address, width: action.op.width };
+    ? {
+        output: action.output!,
+        address: action.op.address,
+        byteOffset: action.op.byteOffset,
+        width: action.op.width,
+        signed: true
+      }
+    : {
+        output: action.output!,
+        address: action.op.address,
+        byteOffset: action.op.byteOffset,
+        width: action.op.width
+      };
 }
 
 export function memoryWriteFact(action: OpAction): MemoryWriteFact | undefined {
@@ -161,7 +205,12 @@ export function memoryWriteFact(action: OpAction): MemoryWriteFact | undefined {
     return undefined;
   }
 
-  return { address: action.op.address, value: action.op.value, width: action.op.width };
+  return {
+    address: action.op.address,
+    byteOffset: action.op.byteOffset,
+    value: action.op.value,
+    width: action.op.width
+  };
 }
 
 export function memoryCheckFact(action: OpAction): MemoryCheckFact | undefined {
@@ -174,5 +223,17 @@ export function memoryCheckFact(action: OpAction): MemoryCheckFact | undefined {
     address: action.op.address,
     byteLength: action.op.byteLength,
     access: action.op.access
+  };
+}
+
+export function memoryResolveFact(action: OpAction): MemoryResolveFact | undefined {
+  if (action.op.kind !== "memory.resolve") {
+    return undefined;
+  }
+
+  return {
+    output: action.output!,
+    address: action.op.address,
+    byteLength: action.op.byteLength
   };
 }

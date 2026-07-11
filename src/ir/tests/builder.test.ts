@@ -39,12 +39,19 @@ import { validateIrBlock } from "#ir/validate.js";
 import { valueId, type ValueId, type ValueNode } from "#ir/values.js";
 import { invalidOpcode, PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticOps, SemanticTemplate } from "#x86/semantics/builder.js";
+import type { Values } from "#ir/values.js";
+import type {
+  MemoryAccess,
+  MemoryAccessKind as SemanticAccessKind,
+  ValueInput
+} from "#x86/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { callSemantic, jccSemantic, jecxzSemantic, jmpSemantic, loopSemantic } from "#x86/semantics/control.js";
 import { leaSemantic } from "#x86/semantics/lea.js";
+import { memoryAccessException } from "#x86/semantics/memory.js";
 import { int3Semantic, intoSemantic, intSemantic } from "#x86/semantics/misc.js";
 import { movSemantic, movsxSemantic, movToSregSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";
@@ -53,10 +60,10 @@ import { popfdSemantic, popfSemantic, popSemantic, pushfdSemantic, pushfSemantic
 import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
 import { defaultSegmentForBase } from "#x86/segments.js";
-import type { EffectiveAddress } from "#x86/types.js";
+import type { EffectiveAddress, OperandWidth } from "#x86/types.js";
 import { assertLazyRecord } from "./lazy-flags.js";
-import { isMemoryCheck, isMemoryRead, isMemoryWrite, isResolveFlag, isStateRead, isStateWrite, memoryCheck, memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import type { MemoryCheckAction, MemoryReadAction, MemoryWriteAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
+import { isMemoryRead, isMemoryResolve, isMemoryWrite, isResolveFlag, isStateRead, isStateWrite, memoryRead, memoryResolve, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import type { MemoryReadAction, MemoryResolveAction, MemoryWriteAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
 
 function mem(
   address: Readonly<{
@@ -75,6 +82,34 @@ function mem(
     scale: address.scale,
     disp: address.disp
   }, staticMemSegment(segment));
+}
+
+function resolveDsMemory<TIntent extends SemanticAccessKind>(
+  s: SemanticOps,
+  address: ValueInput,
+  byteLength: ValueInput,
+  intent: TIntent
+): MemoryAccess<TIntent> {
+  const access = s.memoryResolve(s.mem("ds", address), byteLength, intent);
+
+  s.if(
+    access.invalid,
+    (failure) => failure.cpuException(memoryAccessException(access)),
+    "unlikely"
+  );
+  return access;
+}
+
+function writeDsMemory(
+  s: SemanticOps,
+  v: Values,
+  address: ValueInput,
+  value: ValueInput,
+  width: OperandWidth
+): void {
+  const access = resolveDsMemory(s, address, v.const(width / 8), "write");
+
+  s.memoryWrite(access, v.const(0), value, width);
 }
 
 // Every instruction advances the count channel; the dedicated tests at the
@@ -155,8 +190,8 @@ function memoryGuard(
   faultBodyIndex: number,
   address: ValueId,
   byteLength: number,
-  access: MemoryAccessKind
-): readonly [MemoryCheckAction, IfAction] {
+  _access: MemoryAccessKind
+): readonly [MemoryResolveAction, IfAction] {
   const thenBody = nestedActionBodies(block)[faultBodyIndex - 1];
 
   ok(thenBody !== undefined, `fault body ${faultBodyIndex} exists`);
@@ -168,12 +203,12 @@ function memoryGuard(
   ok(faultIf !== undefined, `fault if ${faultBodyIndex} exists`);
 
   const check = entryActions(block).find(
-    (action): action is MemoryCheckAction => isMemoryCheck(action) && action.output === faultIf.condition
+    (action): action is MemoryResolveAction => isMemoryResolve(action) && action.output === faultIf.condition
   );
 
   ok(check !== undefined, `fault check ${faultBodyIndex} exists`);
   return [
-    memoryCheck(check.output, address, block.values.const(byteLength), access),
+    memoryResolve(check.output, address, block.values.const(byteLength)),
     { kind: "if", condition: check.output, hint: "unlikely", thenBody }
   ];
 }
@@ -875,7 +910,7 @@ test("a root CPU exception exits at the faulting instruction", () => {
 test("a terminal finish stops the remaining semantic body", () => {
   const trapThenSet: SemanticTemplate = (s, v) => {
     s.hostTrap(v.const(3));
-    s.set(s.mem(v.const(0x2000)), v.const(1), 32);
+    writeDsMemory(s, v, v.const(0x2000), v.const(1), 32);
   };
   const builder = createIrBlockBuilder();
 
@@ -941,17 +976,184 @@ test("a constant-false semantic if is not emitted or built", () => {
   );
 });
 
+test("a constant-false semantic if builds only its else arm in the containing scope", () => {
+  const selectElse: SemanticTemplate = (s, v) => {
+    s.ifElse(v.const(0), () => {
+      throw new Error("constant-false then body should not be built");
+    }, (otherwise) => otherwise.set(otherwise.reg("eax"), v.const(7)));
+    s.set(s.reg("ebx"), s.get(s.reg("eax")));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(selectElse, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  validateIrBlock(block);
+  strictEqual(entryActions(block).some((action) => action.kind === "if"), false);
+  strictEqual(nestedActionBodies(block).length, 0);
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("eax"))?.op.value,
+    block.values.const(7)
+  );
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("ebx"))?.op.value,
+    block.values.const(7)
+  );
+});
+
+test("a dynamic semantic ifElse emits both arms", () => {
+  const selectRegister: SemanticTemplate = (s, v) => {
+    s.ifElse(s.get(s.reg("eax")), (then) => {
+      then.set(then.reg("ebx"), v.const(1));
+    }, (otherwise) => otherwise.set(otherwise.reg("ebx"), v.const(2)), "likely");
+    s.set(s.reg("ecx"), s.get(s.reg("ebx")));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(selectRegister, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+  const branch = ifAction(block);
+  const ebxAfterJoin = entryActions(block).find(
+    (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("ebx")
+  );
+
+  validateIrBlock(block);
+  ok(branch.elseBody !== undefined, "dynamic branch has an explicit else body");
+  strictEqual(branch.hint, "likely");
+  deepStrictEqual(branch.thenBody.actions, [stateWrite(gprChannel("ebx"), block.values.const(1))]);
+  deepStrictEqual(branch.elseBody.actions, [stateWrite(gprChannel("ebx"), block.values.const(2))]);
+  ok(ebxAfterJoin !== undefined, "joined ebx is read after the branch");
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("ecx"))?.op.value,
+    ebxAfterJoin.output
+  );
+});
+
+test("ifElse arms reconcile sibling writes with dirty parent state", () => {
+  const reconcileParent: SemanticTemplate = (s, v) => {
+    s.set(s.reg("eax"), v.const(10));
+    s.set(s.reg("ebx"), v.const(20));
+    s.ifElse(s.get(s.reg("ecx")), (then) => {
+      then.set(then.reg("eax"), v.const(1));
+    }, (otherwise) => otherwise.set(otherwise.reg("ebx"), v.const(2)));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(reconcileParent, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+  const branch = ifAction(block);
+
+  validateIrBlock(block);
+  ok(branch.elseBody !== undefined, "dynamic branch has an explicit else body");
+  deepStrictEqual(branch.thenBody.actions, [
+    stateWrite(gprChannel("eax"), block.values.const(1)),
+    stateWrite(gprChannel("ebx"), block.values.const(20))
+  ]);
+  deepStrictEqual(branch.elseBody.actions, [
+    stateWrite(gprChannel("ebx"), block.values.const(2)),
+    stateWrite(gprChannel("eax"), block.values.const(10))
+  ]);
+});
+
+test("a sibling exception is isolated from a continuing memory-write arm", () => {
+  const storeOrFault: SemanticTemplate = (s, v) => {
+    const access = s.memoryResolve(s.mem("ds", v.const(0x2000)), v.const(4), "write");
+
+    s.ifElse(s.get(s.reg("eax")), (then) => {
+      then.memoryWrite(access, v.const(0), v.const(1), 32);
+    }, (otherwise) => otherwise.cpuException(invalidOpcode()));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(storeOrFault, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+  const branch = ifAction(block);
+
+  validateIrBlock(block);
+  ok(branch.elseBody !== undefined, "dynamic branch has an explicit else body");
+  strictEqual(branch.thenBody.actions.some((action) => isMemoryWrite(action)), true);
+  strictEqual(branch.elseBody.actions.some((action) => isMemoryWrite(action)), false);
+  deepStrictEqual(nestedBodyView(block, 2).terminator, {
+    kind: "exit",
+    exit: { class: "cpuException", exception: invalidOpcode() }
+  });
+  strictEqual(entryActions(block).some((action) => isMemoryWrite(action)), false);
+  deepStrictEqual(entryActions(block).at(-1), finishDispatch(block.values.const(0x1005)));
+});
+
+test("an ifElse with two completing arms completes the root semantic path", () => {
+  const trapEitherWay: SemanticTemplate = (s, v) => {
+    s.ifElse(
+      s.get(s.reg("eax")),
+      (then) => then.hostTrap(v.const(1)),
+      (otherwise) => otherwise.hostTrap(v.const(2))
+    );
+    s.set(s.reg("ebx"), v.const(7));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(trapEitherWay, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+  const branch = ifAction(block);
+
+  validateIrBlock(block);
+  strictEqual(builder.isTerminated(), true);
+  ok(branch.elseBody !== undefined, "completing branch has an else body");
+  deepStrictEqual(branch.thenBody.actions.at(-1), finishExit("hostTrap", block.values.const(1)));
+  deepStrictEqual(branch.elseBody.actions.at(-1), finishExit("hostTrap", block.values.const(2)));
+  strictEqual(
+    stateWrites(block).some((write) => write.op.slot === gprChannel("ebx")),
+    false
+  );
+  strictEqual(rawEntryActions(block).at(-1), branch);
+});
+
+test("a completing nested ifElse stops only its containing arm", () => {
+  const nestedDispatch: SemanticTemplate = (s, v) => {
+    s.if(s.get(s.reg("eax")), (outer) => {
+      outer.ifElse(
+        outer.get(outer.reg("ebx")),
+        (then) => then.jump(v.const(0x2000)),
+        (otherwise) => otherwise.jump(v.const(0x3000))
+      );
+      writeDsMemory(outer, v, v.const(0x4000), v.const(1), 32);
+    });
+    s.set(s.reg("ecx"), v.const(9));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(nestedDispatch, [], loc(0x1000, 0x1005));
+
+  const block = builder.finish();
+
+  validateIrBlock(block);
+  strictEqual(entryActions(block).some((action) => isMemoryWrite(action)), false);
+  strictEqual(
+    stateWrites(block).find((write) => write.op.slot === gprChannel("ecx"))?.op.value,
+    block.values.const(9)
+  );
+  deepStrictEqual(rawEntryActions(block).at(-1), finishDispatch(block.values.const(0x1005)));
+});
+
 test("a constant-true semantic if builds its arm in the containing scope", () => {
   const inlinedIf: SemanticTemplate = (s, v) => {
     const sourceAddress = v.const(0x2000);
     const armAddress = v.const(0x3000);
     const parentAddress = v.const(0x4000);
+    const source = resolveDsMemory(s, sourceAddress, v.const(4), "read");
+    const arm = resolveDsMemory(s, armAddress, v.const(4), "write");
+    const parent = resolveDsMemory(s, parentAddress, v.const(4), "write");
 
     s.if(v.const(1), (then) => {
-      then.set(then.reg("eax"), then.get(then.mem(sourceAddress), 32));
-      then.set(then.mem(armAddress), v.const(1), 32);
+      then.set(then.reg("eax"), then.memoryRead(source, v.const(0), 32));
+      then.memoryWrite(arm, v.const(0), v.const(1), 32);
     });
-    s.set(s.mem(parentAddress), s.get(s.reg("eax")), 32);
+    s.memoryWrite(parent, v.const(0), s.get(s.reg("eax")), 32);
     s.set(s.reg("ebx"), s.get(s.reg("eax")));
   };
   const builder = createIrBlockBuilder();
@@ -965,9 +1167,8 @@ test("a constant-true semantic if builds its arm in the containing scope", () =>
 
   validateIrBlock(block);
   ok(load !== undefined, "constant arm memory read exists");
-  strictEqual(entryActions(block).some((action) => action.kind === "if"), false);
-  strictEqual(nestedActionBodies(block).length, 0);
-  deepStrictEqual(entryActions(block).slice(0, 3), [
+  strictEqual(nestedActionBodies(block).length, 3);
+  deepStrictEqual(entryActions(block).filter((action) => isMemoryRead(action) || isMemoryWrite(action)), [
     memoryRead(load.output, block.values.const(0x2000), 32),
     memoryWrite(block.values.const(0x3000), block.values.const(1), 32),
     memoryWrite(block.values.const(0x4000), load.output, 32)
@@ -987,7 +1188,7 @@ test("a constant-true semantic if builds its arm in the containing scope", () =>
 test("a constant-true semantic if with a completing arm stops its containing flow", () => {
   const jumpThenStore: SemanticTemplate = (s, v) => {
     s.if(v.const(1), (then) => then.jump(v.const(0x2000)));
-    s.set(s.mem(v.const(0x3000)), v.const(7), 32);
+    writeDsMemory(s, v, v.const(0x3000), v.const(7), 32);
   };
   const builder = createIrBlockBuilder();
 
@@ -1029,7 +1230,7 @@ test("a constant-true completing if stops only its containing dynamic arm", () =
   const nestedJump: SemanticTemplate = (s, v) => {
     s.if(s.get(s.reg("eax")), (then) => {
       then.if(v.const(1), (inner) => inner.jump(v.const(0x2000)));
-      then.set(then.mem(v.const(0x3000)), v.const(7), 32);
+      writeDsMemory(then, v, v.const(0x3000), v.const(7), 32);
     });
     s.set(s.reg("ebx"), v.const(9));
   };
@@ -1825,7 +2026,7 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
   deepStrictEqual(edge.terminator, pageFaultExit("write", address));
 });
 
-test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", () => {
+test("add [ebx], r32 resolves once with a WRITE fault before its read and write", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(
@@ -1837,21 +2038,22 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
   const block = builder.finish();
   const v = block.values;
   const actions = entryActions(block);
-  const checks = actions.filter((action): action is MemoryCheckAction => isMemoryCheck(action));
+  const resolutions = actions.filter(
+    (action): action is MemoryResolveAction => isMemoryResolve(action)
+  );
 
-  // guardStorageReadWrite emits a read guard then a write guard, both on the
-  // base-register read (scale 1 and disp 0 add no terms).
+  // One WRITE resolution supplies the access used by both RMW phases (scale 1
+  // and disp 0 add no terms).
   const address = actions.find(
     (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("ebx")
   )!.output;
-  deepStrictEqual(checks, [
-    memoryCheck(checks[0]!.output, address, v.const(4), "read"),
-    memoryCheck(checks[1]!.output, address, v.const(4), "write")
+  deepStrictEqual(resolutions, [
+    memoryResolve(resolutions[0]!.output, address, v.const(4))
   ]);
 
   const readIndex = actions.findIndex((action) => isMemoryRead(action));
   const writeIndex = actions.findIndex((action) => isMemoryWrite(action));
-  const lastGuardIndex = actions.lastIndexOf(checks[1]!);
+  const lastGuardIndex = actions.lastIndexOf(resolutions[0]!);
 
   ok(lastGuardIndex < readIndex && readIndex < writeIndex, "guards, then the load, then the store");
 
@@ -1863,14 +2065,11 @@ test("add [ebx], r32 lowers paired guards exactly as the semantics emit them", (
 
   deepStrictEqual(actions[writeIndex], memoryWrite(address, v.binary("add", loaded, ecx), 32));
 
-  // Each guard owns an edge with its own fault reason; nothing was pending
-  // at guard time, so both flush only the instruction's eip.
+  // The WRITE validity branch owns the only edge and reports a write PF.
   const eipFlushes = [stateWrite(eipChannel, v.const(0x1000))];
 
   deepStrictEqual(nestedBodyView(block, 1).flushes, eipFlushes);
-  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultExit("read", address));
-  deepStrictEqual(nestedBodyView(block, 2).flushes, eipFlushes);
-  deepStrictEqual(nestedBodyView(block, 2).terminator, pageFaultExit("write", address));
+  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultExit("write", address));
 });
 
 test("a later guard's edge flushes earlier pendings with the faulting eip", () => {
@@ -2129,8 +2328,7 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
   // register flush carries the loaded value.
   deepStrictEqual(entryActions(block), [
     stateRead(ebx, gprChannel("ebx")),
-    ...memoryGuard(block, 1, ebx, 4, "read"),
-    ...memoryGuard(block, 2, ebx, 4, "write"),
+    ...memoryGuard(block, 1, ebx, 4, "write"),
     memoryRead(load, ebx, 32),
     memoryWrite(ebx, ebx, 32),
     stateWrite(gprChannel("ebx"), load),
@@ -2138,14 +2336,17 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
   ]);
 });
 
-test("get and set through s.mem lower to memory actions at the given address", () => {
+test("a validated DS WRITE access lowers read and write actions at its address", () => {
   const incMem: SemanticTemplate = (s, v) => {
     const address = v.const(0x2000);
-    const target = s.mem(address);
+    const target = resolveDsMemory(s, address, v.const(4), "write");
 
-    s.memoryGuard(address, v.const(4), "read");
-    s.memoryGuard(address, v.const(4), "write");
-    s.set(target, v.binary("add", s.get(target, 32), v.const(1)), 32);
+    s.memoryWrite(
+      target,
+      v.const(0),
+      v.binary("add", s.memoryRead(target, v.const(0), 32), v.const(1)),
+      32
+    );
   };
   const builder = createIrBlockBuilder();
 
@@ -2159,8 +2360,7 @@ test("get and set through s.mem lower to memory actions at the given address", (
   )!;
 
   deepStrictEqual(entryActions(block), [
-    ...memoryGuard(block, 1, address, 4, "read"),
-    ...memoryGuard(block, 2, address, 4, "write"),
+    ...memoryGuard(block, 1, address, 4, "write"),
     memoryRead(read.output, address, 32),
     memoryWrite(address, v.binary("add", read.output, v.const(1)), 32),
     finishDispatch(v.const(0x1006))
@@ -2172,7 +2372,7 @@ test("a memory guard byte length is a value operand even when it folds to a cons
     const address = v.const(0x2000);
     const byteLength = v.binary("shl", v.const(1), v.const(2));
 
-    s.memoryGuard(address, byteLength, "read");
+    resolveDsMemory(s, address, byteLength, "read");
   };
   const builder = createIrBlockBuilder();
 
@@ -2180,11 +2380,106 @@ test("a memory guard byte length is a value operand even when it folds to a cons
 
   const block = builder.finish();
   const check = entryActions(block).find(
-    (action): action is MemoryCheckAction => isMemoryCheck(action)
+    (action): action is MemoryResolveAction => isMemoryResolve(action)
   );
 
-  ok(check !== undefined, "expected memory check action");
+  ok(check !== undefined, "expected memory resolve action");
   strictEqual(block.values.constValue(check.op.byteLength), 4);
+});
+
+test("memory resolution is nonterminal and access metadata adds no IR actions", () => {
+  const template: SemanticTemplate = (s, v) => {
+    const access = s.memoryResolve(s.mem("ds", v.const(0x2000)), v.const(4), "read");
+
+    access.invalid;
+    s.set(s.reg("eax"), v.const(7));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(template, [], loc(0x1000, 0x1001));
+  const block = builder.finish();
+  const actions = entryActions(block);
+
+  strictEqual(actions.filter((action) => isMemoryResolve(action)).length, 1);
+  strictEqual(actions.some((action) => action.kind === "if"), false);
+  strictEqual(stateWrites(block).find((write) => write.op.slot === gprChannel("eax"))?.op.value, block.values.const(7));
+});
+
+test("the IR builder does not impose semantic memory-validation policy", () => {
+  const uncheckedRead: SemanticTemplate = (s, v) => {
+    const access = s.memoryResolve(s.mem("ds", v.const(0x2000)), v.const(4), "read");
+
+    s.memoryRead(access, v.const(0), 32);
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(uncheckedRead, [], loc(0x1000, 0x1001));
+
+  const actions = entryActions(builder.finish());
+
+  strictEqual(actions.filter((action) => isMemoryResolve(action)).length, 1);
+  strictEqual(actions.filter((action) => isMemoryRead(action)).length, 1);
+  strictEqual(actions.some((action) => action.kind === "if"), false);
+});
+
+test("constant memory access offsets must fit their resolved range", () => {
+  const outOfRange: SemanticTemplate = (s, v) => {
+    const access = resolveDsMemory(s, v.const(0x2000), v.const(4), "read");
+
+    s.memoryRead(access, v.const(1), 32);
+  };
+
+  throws(
+    () => createIrBlockBuilder().addInstruction(outOfRange, [], loc(0x1000, 0x1001)),
+    /exceeds 4-byte resolution/
+  );
+});
+
+test("constant relative offsets become memory immediates at the upper boundary", () => {
+  const boundaryAccess: SemanticTemplate = (s, v) => {
+    const access = resolveDsMemory(s, v.const(0x2000), v.const(8), "write");
+    const value = s.memoryRead(access, v.const(4), 32);
+
+    s.memoryWrite(access, v.const(4), value, 32);
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(boundaryAccess, [], loc(0x1000, 0x1001));
+  const actions = entryActions(builder.finish());
+  const read = actions.find((action): action is MemoryReadAction => isMemoryRead(action));
+  const write = actions.find((action): action is MemoryWriteAction => isMemoryWrite(action));
+
+  ok(read !== undefined);
+  ok(write !== undefined);
+  strictEqual(read.op.byteOffset, 4);
+  strictEqual(write.op.byteOffset, 4);
+  strictEqual(read.op.address, write.op.address);
+});
+
+test("READ and WRITE resolutions retain their exact fault metadata", () => {
+  const bothIntents: SemanticTemplate = (s, v) => {
+    const memory = s.mem("ds", v.const(0x2000));
+    const read = s.memoryResolve(memory, v.const(4), "read");
+    const write = s.memoryResolve(memory, v.const(4), "write");
+
+    s.if(read.invalid, (failure) => {
+      failure.cpuException(memoryAccessException(read));
+    }, "unlikely");
+    s.if(write.invalid, (failure) => {
+      failure.cpuException(memoryAccessException(write));
+    }, "unlikely");
+    const value = s.memoryRead(read, v.const(0), 32);
+
+    s.memoryWrite(write, v.const(0), value, 32);
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(bothIntents, [], loc(0x1000, 0x1001));
+  const block = builder.finish();
+
+  strictEqual(entryActions(block).filter((action) => isMemoryResolve(action)).length, 2);
+  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultExit("read", block.values.const(0x2000)));
+  deepStrictEqual(nestedBodyView(block, 2).terminator, pageFaultExit("write", block.values.const(0x2000)));
 });
 
 test("address of a non-mem operand binding fails loudly", () => {
@@ -2205,8 +2500,7 @@ const setRegThenStore: SemanticTemplate = (s, v) => {
   const address = v.const(0x2000);
 
   s.set(s.operand(0), v.const(0x222), 32);
-  s.memoryGuard(address, v.const(4), "write");
-  s.set(s.mem(address), s.get(s.operand(0), 32), 32);
+  writeDsMemory(s, v, address, s.get(s.operand(0), 32), 32);
 };
 
 test("a guard after a register write restores the pre-instruction value in its edge", () => {
@@ -2390,9 +2684,9 @@ test("pop [esp+k] adds the displacement to the incremented esp", () => {
     (action): action is StateReadAction => isStateRead(action) && action.op.slot === gprChannel("esp")
   )!.output;
   const address = v.binary("add", v.binary("add", esp, v.const(4)), v.const(8));
-  const writeGuard = entryActions(block).find(
-    (action): action is MemoryCheckAction => isMemoryCheck(action) && action.op.access === "write"
-  )!;
+  const writeGuard = entryActions(block).filter(
+    (action): action is MemoryResolveAction => isMemoryResolve(action)
+  )[1]!;
   const store = entryActions(block).find(
     (action): action is MemoryWriteAction => isMemoryWrite(action)
   )!;
@@ -2401,26 +2695,40 @@ test("pop [esp+k] adds the displacement to the incremented esp", () => {
   strictEqual(store.op.address, address);
 });
 
-test("a guard after a memory write in the same instruction fails loudly", () => {
-  const storeThenGuard: SemanticTemplate = (s, v) => {
+test("a fault branch after a memory write in the same instruction fails loudly", () => {
+  const storeThenFault: SemanticTemplate = (s, v) => {
     const firstAddress = v.const(0x2000);
+    const access = resolveDsMemory(s, firstAddress, v.const(4), "write");
 
-    s.memoryGuard(firstAddress, v.const(4), "write");
-    s.set(s.mem(firstAddress), v.const(1), 32);
-    s.memoryGuard(v.const(0x3000), v.const(4), "write");
+    s.memoryWrite(access, v.const(0), v.const(1), 32);
+    resolveDsMemory(s, v.const(0x3000), v.const(4), "write");
   };
 
   throws(
     () =>
-      createIrBlockBuilder().addInstruction(storeThenGuard, [], loc(0x1000, 0x1006)),
-    /cannot follow a memory write/
+      createIrBlockBuilder().addInstruction(storeThenFault, [], loc(0x1000, 0x1006)),
+    /CPU exception cannot follow a memory write/
   );
+});
+
+test("memory resolution itself may follow a memory write", () => {
+  const storeThenResolve: SemanticTemplate = (s, v) => {
+    const access = resolveDsMemory(s, v.const(0x2000), v.const(4), "write");
+
+    s.memoryWrite(access, v.const(0), v.const(1), 32);
+    s.memoryResolve(s.mem("ds", v.const(0x3000)), v.const(4), "read");
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(storeThenResolve, [], loc(0x1000, 0x1006));
+
+  strictEqual(entryActions(builder.finish()).filter(isMemoryResolve).length, 2);
 });
 
 test("a continuing dynamic arm carries its memory write into the parent scope", () => {
   const armStoreThenException: SemanticTemplate = (s, v) => {
     s.if(s.get(s.reg("eax")), (then) => {
-      then.set(then.mem(v.const(0x2000)), v.const(1), 32);
+      writeDsMemory(then, v, v.const(0x2000), v.const(1), 32);
     });
     s.cpuException(invalidOpcode());
   };
@@ -2434,7 +2742,7 @@ test("a continuing dynamic arm carries its memory write into the parent scope", 
 test("a loop carries its memory write into the parent scope", () => {
   const loopStoreThenException: SemanticTemplate = (s) => {
     s.loop((loop, loopValues) => {
-      loop.set(loop.mem(loopValues.const(0x2000)), loopValues.const(1), 32);
+      writeDsMemory(loop, loopValues, loopValues.const(0x2000), loopValues.const(1), 32);
       return loopValues.const(0);
     });
     s.cpuException(invalidOpcode());
@@ -2449,7 +2757,7 @@ test("a loop carries its memory write into the parent scope", () => {
 test("a terminating dynamic arm does not carry its memory write into the skipped path", () => {
   const armStoreThenJump: SemanticTemplate = (s, v) => {
     s.if(s.get(s.reg("eax")), (then) => {
-      then.set(then.mem(v.const(0x2000)), v.const(1), 32);
+      writeDsMemory(then, v, v.const(0x2000), v.const(1), 32);
       then.jump(v.const(0x3000));
     });
     s.cpuException(invalidOpcode());
@@ -2476,7 +2784,7 @@ test("a guard after flushing a channel first written this instruction fails loud
   const flushThenGuard: SemanticTemplate = (s, v) => {
     s.set(s.operand(0), v.const(1), 8);
     s.get(s.operand(1), 16);
-    s.memoryGuard(v.const(0x2000), v.const(4), "read");
+    resolveDsMemory(s, v.const(0x2000), v.const(4), "read");
   };
 
   throws(
@@ -2679,7 +2987,7 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
   const setThenDynamicRead: SemanticTemplate = (s, v) => {
     s.set(s.reg("ebx"), v.const(0x111), 32);
     s.get(s.operand(0), 32);
-    s.memoryGuard(v.const(0x2000), v.const(4), "read");
+    resolveDsMemory(s, v.const(0x2000), v.const(4), "read");
   };
 
   throws(
@@ -2692,7 +3000,7 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
 test("a guard after a dynamic write fails loudly", () => {
   const dynamicWriteThenGuard: SemanticTemplate = (s, v) => {
     s.set(s.operand(0), v.const(0x222), 32);
-    s.memoryGuard(v.const(0x2000), v.const(4), "write");
+    resolveDsMemory(s, v.const(0x2000), v.const(4), "write");
   };
 
   throws(
@@ -2770,7 +3078,11 @@ function dynamicSegmentBaseRead(block: IrBlock): StateReadAction & { slot: Segme
 test("a memStatic operand guards and accesses the external address", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(32), [regBinding("eax"), memStaticBinding(7)], loc(0x1000, 0x1006));
+  builder.addInstruction(
+    movSemantic(32),
+    [regBinding("eax"), memStaticBinding(7, staticMemSegment("ds"))],
+    loc(0x1000, 0x1006)
+  );
 
   const block = builder.finish();
   const v = block.values;
@@ -2819,7 +3131,11 @@ test("a segmented memStatic operand adds the selected segment base", () => {
 test("a memDynamic operand reads the base register inside the block", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(movSemantic(32), [regBinding("eax"), memDynamicBinding(0, 1)], loc(0x1000, 0x1006));
+  builder.addInstruction(
+    movSemantic(32),
+    [regBinding("eax"), memDynamicBinding(0, 1, staticMemSegment("ds"))],
+    loc(0x1000, 0x1006)
+  );
 
   const block = builder.finish();
   const v = block.values;
@@ -2856,8 +3172,8 @@ test("fs memDynamic operands add the segment base to the dynamic effective addre
   )!;
   const offset = dynamicAddress(block, baseRead);
   const address = block.values.binary("add", fsBase.output, offset);
-  const checks = actions.filter(
-    (action): action is MemoryCheckAction => isMemoryCheck(action)
+  const resolutions = actions.filter(
+    (action): action is MemoryResolveAction => isMemoryResolve(action)
   );
   const load = actions.find((action): action is MemoryReadAction => isMemoryRead(action))!;
   const store = actions.find((action): action is MemoryWriteAction => isMemoryWrite(action))!;
@@ -2867,10 +3183,7 @@ test("fs memDynamic operands add the segment base to the dynamic effective addre
     actions.filter((action) => isStateRead(action) && action.op.slot === segmentBaseChannel("fs")).length,
     1
   );
-  deepStrictEqual(checks.map((check) => [check.op.access, check.op.address]), [
-    ["read", address],
-    ["write", address]
-  ]);
+  deepStrictEqual(resolutions.map((resolution) => resolution.op.address), [address]);
   strictEqual(load.op.address, address);
   strictEqual(store.op.address, address);
 });
@@ -2891,8 +3204,8 @@ test("dynamic memDynamic segments read the selected segment base", () => {
   const segmentBase = dynamicSegmentBaseRead(block);
   const offset = dynamicAddress(block, baseRead);
   const address = v.binary("add", segmentBase.output, offset);
-  const checks = actions.filter(
-    (action): action is MemoryCheckAction => isMemoryCheck(action)
+  const resolutions = actions.filter(
+    (action): action is MemoryResolveAction => isMemoryResolve(action)
   );
   const load = actions.find((action): action is MemoryReadAction => isMemoryRead(action))!;
   const store = actions.find((action): action is MemoryWriteAction => isMemoryWrite(action))!;
@@ -2903,10 +3216,7 @@ test("dynamic memDynamic segments read the selected segment base", () => {
     1
   );
   strictEqual(actions.filter((action) => isStateRead(action) && action.op.slot.kind === "segment").length, 0);
-  deepStrictEqual(checks.map((check) => [check.op.access, check.op.address]), [
-    ["read", address],
-    ["write", address]
-  ]);
+  deepStrictEqual(resolutions.map((resolution) => resolution.op.address), [address]);
   strictEqual(load.op.address, address);
   strictEqual(store.op.address, address);
 });
@@ -2937,7 +3247,7 @@ test("a read+write memDynamic operand reads the base once and reuses the address
 
   builder.addInstruction(
     aluSemantic("add", 32),
-    [memDynamicBinding(0, 1), immBinding(5)],
+    [memDynamicBinding(0, 1, staticMemSegment("ds")), immBinding(5)],
     loc(0x1000, 0x1003)
   );
 
@@ -2957,7 +3267,11 @@ test("a read+write memDynamic operand reads the base once and reuses the address
 test("pop [memDynamic] flushes esp before the base read and restores it on the write edge", () => {
   const builder = createIrBlockBuilder();
 
-  builder.addInstruction(popSemantic(), [memDynamicBinding(0, 1)], loc(0x1000, 0x1003));
+  builder.addInstruction(
+    popSemantic(),
+    [memDynamicBinding(0, 1, staticMemSegment("ds"))],
+    loc(0x1000, 0x1003)
+  );
 
   const block = builder.finish();
   const v = block.values;
@@ -3003,14 +3317,14 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
 test("a guard after a memDynamic flush of a never-read register fails loudly", () => {
   const blindWriteThenDynamicAddress: SemanticTemplate = (s, v) => {
     s.set(s.reg("ebx"), v.const(0x111), 32);
-    s.memoryGuard(s.address(s.operand(0)), v.const(4), "write");
+    resolveDsMemory(s, s.address(s.operand(0)), v.const(4), "write");
   };
 
   throws(
     () =>
       createIrBlockBuilder().addInstruction(
         blindWriteThenDynamicAddress,
-        [memDynamicBinding(0, 1)],
+        [memDynamicBinding(0, 1, staticMemSegment("ds"))],
         loc(0x1000, 0x1002)
       ),
     /unrestorable/

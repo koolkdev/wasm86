@@ -5,18 +5,25 @@ import { segmentRegisterIndex } from "#x86/segments.js";
 import type { SemanticOperandInfo, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandWidth } from "#x86/types.js";
 import type { Value } from "./refs.js";
-import { guardStorageRead, guardStorageWrite } from "./memory.js";
+import {
+  readStorage,
+  resolveStorageRead,
+  resolveStorageReadWrite,
+  resolveStorageWrite,
+  writeStorage
+} from "./memory.js";
 
 export function movSemantic(width: OperandWidth = 32): SemanticTemplate {
   return (s, v, context) => {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, v, context, src, width);
-    const value = s.get(src, width);
+    const srcStorage = resolveStorageRead(s, v, context, src, width);
+    const value = readStorage(s, v, srcStorage, width);
 
-    guardStorageWrite(s, v, context, dst, width);
-    s.set(dst, value, width);
+    const dstStorage = resolveStorageWrite(s, v, context, dst, width);
+
+    writeStorage(s, v, dstStorage, value, width);
   };
 }
 
@@ -26,11 +33,12 @@ export function movSregSemantic(registerWidth: Extract<OperandWidth, 16 | 32>): 
     const src = s.operand(1);
     const width = context.operandInfo(dst).storage === "mem" ? 16 : registerWidth;
 
-    guardStorageRead(s, v, context, src, width);
-    const value = s.get(src, width);
+    const srcStorage = resolveStorageRead(s, v, context, src, width);
+    const value = readStorage(s, v, srcStorage, width);
 
-    guardStorageWrite(s, v, context, dst, width);
-    s.set(dst, value, width);
+    const dstStorage = resolveStorageWrite(s, v, context, dst, width);
+
+    writeStorage(s, v, dstStorage, value, width);
   };
 }
 
@@ -44,8 +52,9 @@ export function movToSregSemantic(): SemanticTemplate {
       s.if(csLoad, (then) => then.cpuException(invalidOpcode()), "unlikely");
     }
 
-    guardStorageRead(s, v, context, src, 16);
-    s.set(dst, s.get(src, 16), 16);
+    const srcStorage = resolveStorageRead(s, v, context, src, 16);
+
+    s.set(dst, readStorage(s, v, srcStorage, 16), 16);
   };
 }
 
@@ -67,11 +76,12 @@ export function movzxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): S
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, v, context, src, sourceWidth);
-    const value = s.get(src, sourceWidth);
+    const srcStorage = resolveStorageRead(s, v, context, src, sourceWidth);
+    const value = readStorage(s, v, srcStorage, sourceWidth);
 
-    guardStorageWrite(s, v, context, dst, destinationWidth);
-    s.set(dst, value, destinationWidth);
+    const dstStorage = resolveStorageWrite(s, v, context, dst, destinationWidth);
+
+    writeStorage(s, v, dstStorage, value, destinationWidth);
   };
 }
 
@@ -80,11 +90,12 @@ export function movsxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): S
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, v, context, src, sourceWidth);
-    const value = s.get(src, sourceWidth, { signed: true });
+    const srcStorage = resolveStorageRead(s, v, context, src, sourceWidth);
+    const value = readStorage(s, v, srcStorage, sourceWidth, { signed: true });
 
-    guardStorageWrite(s, v, context, dst, destinationWidth);
-    s.set(dst, value, destinationWidth);
+    const dstStorage = resolveStorageWrite(s, v, context, dst, destinationWidth);
+
+    writeStorage(s, v, dstStorage, value, destinationWidth);
   };
 }
 
@@ -93,15 +104,14 @@ export function cmovSemantic(cc: ConditionCode, width: OperandWidth = 32): Seman
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, v, context, src, width);
-    guardStorageRead(s, v, context, dst, width);
+    const srcStorage = resolveStorageRead(s, v, context, src, width);
+    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
 
-    const value = s.get(src, width);
+    const value = readStorage(s, v, srcStorage, width);
     const condition = s.condition(cc);
-    const fallback = s.get(dst, width);
+    const fallback = readStorage(s, v, dstStorage, width);
     const selected = v.select(condition, value, fallback);
 
-    guardStorageWrite(s, v, context, dst, width);
-    s.set(dst, selected, width);
+    writeStorage(s, v, dstStorage, selected, width);
   };
 }

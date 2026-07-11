@@ -4,7 +4,13 @@ import { test } from "node:test";
 import { x86StatusFlags } from "#x86/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { bitScanSemantic, bitTestSemantic } from "#x86/semantics/bits.js";
-import { callSemantic, jecxzSemantic, loopSemantic, retSemantic } from "#x86/semantics/control.js";
+import {
+  callSemantic,
+  enterSemantic,
+  jecxzSemantic,
+  loopSemantic,
+  retSemantic
+} from "#x86/semantics/control.js";
 import {
   cmpxchg8bSemantic,
   cmpxchgSemantic,
@@ -176,18 +182,21 @@ test("sahf writes the five low status flags from AH and leaves OF untouched", ()
   deepStrictEqual(trace.events.at(-1), "next");
 });
 
-test("xlat guards and reads the byte at implicit EBX plus zero-extended AL", () => {
+test("xlat derives an operand-relative READ ref from AL", () => {
   const trace = buildSemanticTrace(xlatSemantic(), operands("mem"));
 
   deepStrictEqual(trace.events, [
-    "%0 = addr op0",
-    "%1 = get al:8",
-    "guard read %2:1",
-    "%3 = get mem(%2):8",
+    "%0 = get al:8",
+    "resolve r0 = offset(operand(op0), %0):1",
+    "if %2",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%3 = read r0.read+0:8",
     "set al:8 <- %3",
     "next"
   ]);
-  strictEqual(trace.defs[2], "add(%0, %1)");
+  strictEqual(trace.defs[1], "valid(r0.read)");
+  strictEqual(trace.defs[2], "not(%1)");
 });
 
 test("movs reads the source, writes the fixed destination, then steps both pointers", () => {
@@ -195,38 +204,46 @@ test("movs reads the source, writes the fixed destination, then steps both point
 
   deepStrictEqual(trace.events, [
     "%0 = flag DF",
-    "%2 = addr op0",
-    "guard read %2:4",
-    "%3 = get op0:32",
-    "%4 = addr op1",
-    "guard write %4:4",
-    "set op1:32 <- %3",
-    "%5 = get esi:32",
-    "set esi:32 <- %6",
-    "%7 = get edi:32",
-    "set edi:32 <- %8",
+    "resolve r0 = operand(op0):4",
+    "if %3",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%4 = read r0.read+0:32",
+    "resolve r1 = operand(op1):4",
+    "if %6",
+    "cpuException PF r1.write",
+    "ifEnd",
+    "write r1.write+0:32 <- %4",
+    "%7 = get esi:32",
+    "set esi:32 <- %8",
+    "%9 = get edi:32",
+    "set edi:32 <- %10",
     "next"
   ]);
   strictEqual(trace.defs[1], "select(%0, 4294967292, 4)");
-  strictEqual(trace.defs[6], "add(%5, %1)");
   strictEqual(trace.defs[8], "add(%7, %1)");
+  strictEqual(trace.defs[10], "add(%9, %1)");
 });
 
 test("cmps compares source minus destination before stepping both pointers", () => {
   const trace = buildSemanticTrace(cmpsSemantic(16), operands("mem", "mem"));
 
-  deepStrictEqual(trace.events.slice(0, 7), [
+  deepStrictEqual(trace.events.slice(0, 11), [
     "%0 = flag DF",
-    "%2 = addr op0",
-    "guard read %2:2",
-    "%3 = addr op1",
-    "guard read %3:2",
-    "%4 = get op0:16",
-    "%6 = get op1:16"
+    "resolve r0 = operand(op0):2",
+    "if %3",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "resolve r1 = operand(op1):2",
+    "if %5",
+    "cpuException PF r1.read",
+    "ifEnd",
+    "%6 = read r0.read+0:16",
+    "%8 = read r1.read+0:16"
   ]);
-  ok(trace.events.includes("flagSource sub:16 left=%5 right=%7 result=%9"));
-  ok(trace.events.includes("set esi:32 <- %11"));
-  ok(trace.events.includes("set edi:32 <- %13"));
+  ok(trace.events.includes("flagSource sub:16 left=%7 right=%9 result=%11"));
+  ok(trace.events.includes("set esi:32 <- %13"));
+  ok(trace.events.includes("set edi:32 <- %15"));
 });
 
 test("stos, lods, and scas use accumulator widths and one pointer step", () => {
@@ -237,33 +254,39 @@ test("stos, lods, and scas use accumulator widths and one pointer step", () => {
   deepStrictEqual(stos.events.slice(0, 6), [
     "%0 = get al:8",
     "%1 = flag DF",
-    "%3 = addr op0",
-    "guard write %3:1",
-    "set op0:8 <- %0",
-    "%4 = get edi:32"
+    "resolve r0 = operand(op0):1",
+    "if %4",
+    "cpuException PF r0.write",
+    "ifEnd"
   ]);
+  strictEqual(stos.events[6], "write r0.write+0:8 <- %0");
+  strictEqual(stos.events[7], "%5 = get edi:32");
   strictEqual(stos.events.some((event) => event.startsWith("set esi:32")), false);
 
-  deepStrictEqual(lods.events.slice(0, 7), [
+  deepStrictEqual(lods.events.slice(0, 8), [
     "%0 = flag DF",
-    "%2 = addr op0",
-    "guard read %2:2",
-    "%3 = get op0:16",
-    "set ax:16 <- %3",
-    "%4 = get esi:32",
-    "set esi:32 <- %5"
+    "resolve r0 = operand(op0):2",
+    "if %3",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%4 = read r0.read+0:16",
+    "set ax:16 <- %4",
+    "%5 = get esi:32"
   ]);
+  strictEqual(lods.events[8], "set esi:32 <- %6");
   strictEqual(lods.events.some((event) => event.startsWith("set edi:32")), false);
 
-  deepStrictEqual(scas.events.slice(0, 6), [
+  deepStrictEqual(scas.events.slice(0, 8), [
     "%0 = flag DF",
-    "%2 = addr op0",
-    "guard read %2:4",
-    "%3 = get eax:32",
-    "%5 = get op0:32",
-    "flagSource sub:32 left=%4 right=%6 result=%8"
+    "resolve r0 = operand(op0):4",
+    "if %3",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%4 = get eax:32",
+    "%6 = read r0.read+0:32",
+    "flagSource sub:32 left=%5 right=%7 result=%9"
   ]);
-  ok(scas.events.includes("set edi:32 <- %10"));
+  ok(scas.events.includes("set edi:32 <- %11"));
 });
 
 test("rep movs skips a zero count and fuses the unit into a state-reg loop", () => {
@@ -275,22 +298,22 @@ test("rep movs skips a zero count and fuses the unit into a state-reg loop", () 
     "loop",
     "%2 = flag DF"
   ]);
-  ok(trace.events.includes("set ecx:32 <- %12"));
+  ok(trace.events.includes("set ecx:32 <- %14"));
   deepStrictEqual(trace.events.slice(-6), [
-    "loopContinue %13",
+    "loopContinue %15",
     "loopEnd",
     "ifEnd",
-    "%14 = get ecx:32",
-    "addInstructionCount %16",
+    "%16 = get ecx:32",
+    "addInstructionCount %18",
     "next"
   ]);
   strictEqual(trace.defs[1], "cmp32.ne(%0, 0)");
   // The back-edge count is the body's own ecx read, not the pre-loop one.
-  strictEqual(trace.defs[12], "sub(%11, 1)");
-  strictEqual(trace.defs[13], "cmp32.ne(%12, 0)");
+  strictEqual(trace.defs[14], "sub(%13, 1)");
+  strictEqual(trace.defs[15], "cmp32.ne(%14, 0)");
   // The root settles extra units as (entryEcx - exitEcx) - enter.
-  strictEqual(trace.defs[15], "sub(%0, %14)");
-  strictEqual(trace.defs[16], "sub(%15, %1)");
+  strictEqual(trace.defs[17], "sub(%0, %16)");
+  strictEqual(trace.defs[18], "sub(%17, %1)");
 });
 
 test("rep lods carries its accumulator as loop state", () => {
@@ -305,16 +328,16 @@ test("repne scas combines remaining ECX with ZF after the compare unit", () => {
 
   strictEqual(trace.events[1], "if %1");
   strictEqual(trace.events[2], "loop");
-  ok(trace.events.includes("%16 = condition NE"));
+  ok(trace.events.includes("%17 = condition NE"));
   deepStrictEqual(trace.events.slice(-6), [
-    "loopContinue %17",
+    "loopContinue %18",
     "loopEnd",
     "ifEnd",
-    "%18 = get ecx:32",
-    "addInstructionCount %20",
+    "%19 = get ecx:32",
+    "addInstructionCount %21",
     "next"
   ]);
-  strictEqual(trace.defs[17], "and(%15, %16)");
+  strictEqual(trace.defs[18], "and(%16, %17)");
 });
 
 test("lea semantic computes an address without getting the operand value", () => {
@@ -328,32 +351,39 @@ test("lea semantic computes an address without getting the operand value", () =>
   strictEqual(trace.events.some((event) => event.includes("get op1")), false);
 });
 
-test("mov semantic guards memory source and destination operands explicitly", () => {
+test("mov semantic validates READ and WRITE refs before their accesses", () => {
   const trace = buildSemanticTrace(movSemantic(), operands("mem", "mem"));
 
   deepStrictEqual(trace.events, [
-    "%0 = addr op1",
-    "guard read %0:4",
-    "%1 = get op1:32",
-    "%2 = addr op0",
-    "guard write %2:4",
-    "set op0:32 <- %1",
+    "resolve r0 = operand(op1):4",
+    "if %1",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%2 = read r0.read+0:32",
+    "resolve r1 = operand(op0):4",
+    "if %4",
+    "cpuException PF r1.write",
+    "ifEnd",
+    "write r1.write+0:32 <- %2",
     "next"
   ]);
 });
 
-test("binary ALU semantics guard memory read-modify-write before operand reads", () => {
+test("binary ALU memory RMWs validate one WRITE view and reuse it for read and write", () => {
   for (const op of ["add", "adc", "sbb"] as const) {
     const trace = buildSemanticTrace(aluSemantic(op, 32), operands("mem", "reg"));
 
-    deepStrictEqual(trace.events.slice(0, 3), [
-      "%0 = addr op0",
-      "guard read %0:4",
-      "guard write %0:4"
+    deepStrictEqual(trace.events.slice(0, 6), [
+      "resolve r0 = operand(op0):4",
+      "if %1",
+      "cpuException PF r0.write",
+      "ifEnd",
+      "%2 = read r0.write+0:32",
+      "%4 = get op1:32"
     ], op);
-    ok(trace.events[3]?.endsWith(" = get op0:32"), op);
-    ok(trace.events[4]?.endsWith(" = get op1:32"), op);
-    strictEqual(trace.events.some((event) => event.startsWith("set op0:32 <- %")), true, op);
+    strictEqual(memoryResolveEvents(trace).length, 1, op);
+    strictEqual(trace.events.some((event) => event.includes("r0.read")), false, op);
+    strictEqual(trace.events.some((event) => event.startsWith("write r0.write+0:32 <- ")), true, op);
   }
 });
 
@@ -402,26 +432,32 @@ test("shift semantics cover operations, widths, and count sources", () => {
   }
 });
 
-test("shift semantics guard and read operands in ALU order", () => {
+test("shift memory RMWs validate one WRITE view and read operands in ALU order", () => {
   const immTrace = buildSemanticTrace(shiftSemantic("shl", 32, "imm8"), operands("mem", "imm"));
 
-  deepStrictEqual(immTrace.events.slice(0, 3), [
-    "%0 = addr op0",
-    "guard read %0:4",
-    "guard write %0:4"
+  deepStrictEqual(immTrace.events.slice(0, 6), [
+    "resolve r0 = operand(op0):4",
+    "if %1",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "%2 = read r0.write+0:32",
+    "%4 = get op1:8"
   ]);
-  ok(immTrace.events[3]?.endsWith(" = get op0:32"));
-  ok(immTrace.events[4]?.endsWith(" = get op1:8"));
+  strictEqual(memoryResolveEvents(immTrace).length, 1);
+  ok(immTrace.events.includes("write r0.write+0:32 <- %9"));
 
   const clTrace = buildSemanticTrace(shiftSemantic("shr", 16, "cl"), operands("mem"));
 
-  deepStrictEqual(clTrace.events.slice(0, 3), [
-    "%0 = addr op0",
-    "guard read %0:2",
-    "guard write %0:2"
+  deepStrictEqual(clTrace.events.slice(0, 6), [
+    "resolve r0 = operand(op0):2",
+    "if %1",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "%2 = read r0.write+0:16",
+    "%4 = get cl:8"
   ]);
-  ok(clTrace.events[3]?.endsWith(" = get op0:16"));
-  ok(clTrace.events[4]?.endsWith(" = get cl:8"));
+  strictEqual(memoryResolveEvents(clTrace).length, 1);
+  ok(clTrace.events.includes("write r0.write+0:16 <- %9"));
 });
 
 test("double-shift semantics read destination, source, and count in operand order", () => {
@@ -430,15 +466,17 @@ test("double-shift semantics read destination, source, and count in operand orde
     operands("mem", "reg", "imm")
   );
 
-  deepStrictEqual(immTrace.events.slice(0, 6), [
-    "%0 = addr op0",
-    "guard read %0:4",
-    "guard write %0:4",
-    "%1 = get op0:32",
-    "%3 = get op1:32",
-    "%5 = get op2:8"
+  deepStrictEqual(immTrace.events.slice(0, 7), [
+    "resolve r0 = operand(op0):4",
+    "if %1",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "%2 = read r0.write+0:32",
+    "%4 = get op1:32",
+    "%6 = get op2:8"
   ]);
-  ok(immTrace.events.some((event) => event.startsWith("set op0:32 <- ")));
+  strictEqual(memoryResolveEvents(immTrace).length, 1);
+  ok(immTrace.events.some((event) => event.startsWith("write r0.write+0:32 <- ")));
   deepStrictEqual(statusFlagKeys(immTrace.flagWrites[0]!).sort(), [...x86StatusFlags].sort());
 
   const clTrace = buildSemanticTrace(doubleShiftSemantic("shrd", 16, "cl"), regOperands(2));
@@ -505,35 +543,44 @@ test("bit-test register forms write only CF and mask the bit offset", () => {
   const trace = buildSemanticTrace(bitTestSemantic("bt", 32, "reg"), regOperands(2));
 
   deepStrictEqual(trace.events, [
-    "%0 = get op0:32",
-    "%2 = get op1:32",
+    "%0 = get op1:32",
+    "%2 = get op0:32",
     "flag CF <- %5",
     "next"
   ]);
-  strictEqual(trace.defs[1], "truncate32(%0)");
-  strictEqual(trace.defs[3], "and(%2, 31)");
-  strictEqual(trace.defs[4], "shr_u(%1, %3)");
+  strictEqual(trace.defs[1], "and(%0, 31)");
+  strictEqual(trace.defs[3], "truncate32(%2)");
+  strictEqual(trace.defs[4], "shr_u(%3, %1)");
   strictEqual(trace.defs[5], "and(%4, 1)");
   deepStrictEqual(directFlagWrites(trace), ["CF"]);
   strictEqual(trace.events.some((event) => event.startsWith("set ")), false);
 });
 
-test("bit-test memory register forms use signed bit-string addressing", () => {
+test("bit-string memory forms offset the logical ref and select access intent", () => {
   const trace = buildSemanticTrace(bitTestSemantic("bts", 32, "reg"), operands("mem", "reg"));
 
-  deepStrictEqual(trace.events.slice(0, 6), [
+  deepStrictEqual(trace.events, [
     "%0 = get op1:32:signed",
-    "%3 = addr op0",
-    "guard read %4:4",
-    "guard write %4:4",
-    "%5 = get mem(%4):32",
-    "flag CF <- %9"
+    "resolve r0 = offset(operand(op0), %2):4",
+    "if %5",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "%6 = read r0.write+0:32",
+    "flag CF <- %9",
+    "write r0.write+0:32 <- %13",
+    "next"
   ]);
   strictEqual(trace.defs[1], "shr_s(%0, 5)");
   strictEqual(trace.defs[2], "shl(%1, 2)");
-  strictEqual(trace.defs[4], "add(%3, %2)");
-  strictEqual(trace.defs[7], "and(%0, 31)");
-  ok(trace.events.includes("set mem(%4):32 <- %13"));
+  strictEqual(trace.defs[3], "and(%0, 31)");
+  strictEqual(memoryResolveEvents(trace).length, 1);
+
+  const readOnly = buildSemanticTrace(bitTestSemantic("bt", 32, "reg"), operands("mem", "reg"));
+
+  strictEqual(readOnly.events[1], "resolve r0 = offset(operand(op0), %2):4");
+  ok(readOnly.events.includes("cpuException PF r0.read"));
+  ok(readOnly.events.includes("%6 = read r0.read+0:32"));
+  strictEqual(readOnly.events.some((event) => event.startsWith("write ")), false);
 });
 
 test("bit-scan semantics preserve destination on zero source and write observed undefined flags", () => {
@@ -559,7 +606,7 @@ test("bit-scan semantics preserve destination on zero source and write observed 
   ok(bsr.defs.some((def) => def.startsWith("sub(31, ")));
 });
 
-test("cmpxchg writes compare flags and commits the accumulator before the destination", () => {
+test("cmpxchg writes the destination only on equality", () => {
   const trace = buildSemanticTrace(cmpxchgSemantic(32), regOperands(2));
 
   deepStrictEqual(trace.events, [
@@ -567,8 +614,11 @@ test("cmpxchg writes compare flags and commits the accumulator before the destin
     "%2 = get op1:32",
     "%4 = get eax:32",
     "flagSource sub:32 left=%5 right=%1 result=%7",
-    "set eax:32 <- %9",
-    "set op0:32 <- %10",
+    "if %8",
+    "set op0:32 <- %3",
+    "else",
+    "set eax:32 <- %1",
+    "ifEnd",
     "next"
   ]);
   strictEqual(trace.defs[1], "truncate32(%0)");
@@ -577,8 +627,30 @@ test("cmpxchg writes compare flags and commits the accumulator before the destin
   strictEqual(trace.defs[6], "sub(%5, %1)");
   strictEqual(trace.defs[7], "truncate32(%6)");
   strictEqual(trace.defs[8], "cmp32.eq(%5, %1)");
-  strictEqual(trace.defs[9], "select(%8, %5, %1)");
-  strictEqual(trace.defs[10], "select(%8, %3, %1)");
+});
+
+test("cmpxchg memory validates one WRITE view and stores only on equality", () => {
+  const trace = buildSemanticTrace(cmpxchgSemantic(32), operands("mem", "reg"));
+
+  deepStrictEqual(trace.events, [
+    "resolve r0 = operand(op0):4",
+    "if %1",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "%2 = read r0.write+0:32",
+    "%4 = get op1:32",
+    "%6 = get eax:32",
+    "flagSource sub:32 left=%7 right=%3 result=%9",
+    "if %10",
+    "write r0.write+0:32 <- %5",
+    "else",
+    "set eax:32 <- %3",
+    "ifEnd",
+    "next"
+  ]);
+  strictEqual(memoryResolveEvents(trace).length, 1);
+  strictEqual(trace.defs[10], "cmp32.eq(%7, %3)");
+  strictEqual(trace.events.filter((event) => event.startsWith("write ")).length, 1);
 });
 
 test("xadd writes the source before the destination for same-register doubling", () => {
@@ -598,34 +670,56 @@ test("xadd writes the source before the destination for same-register doubling",
   strictEqual(trace.defs[5], "truncate32(%4)");
 });
 
-test("cmpxchg8b guards one qword and writes only ZF", () => {
+test("xadd memory reuses one WRITE view for its read and unconditional store", () => {
+  const trace = buildSemanticTrace(xaddSemantic(32), operands("mem", "reg"));
+
+  deepStrictEqual(trace.events.slice(0, 7), [
+    "resolve r0 = operand(op0):4",
+    "if %1",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "%2 = read r0.write+0:32",
+    "%4 = get op1:32",
+    "flagSource add:32 left=%3 right=%5 result=%7"
+  ]);
+  strictEqual(memoryResolveEvents(trace).length, 1);
+  deepStrictEqual(trace.events.slice(7), [
+    "set op1:32 <- %3",
+    "write r0.write+0:32 <- %7",
+    "next"
+  ]);
+});
+
+test("cmpxchg8b reuses one qword WRITE view and conditionally stores both halves", () => {
   const trace = buildSemanticTrace(cmpxchg8bSemantic(), operands("mem"));
 
   deepStrictEqual(trace.events, [
-    "%0 = addr op0",
-    "guard read %0:8",
-    "guard write %0:8",
-    "%2 = get mem(%0):32",
-    "%3 = get mem(%1):32",
+    "resolve r0 = operand(op0):8",
+    "if %1",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "%2 = read r0.write+0:32",
+    "%3 = read r0.write+4:32",
     "%4 = get eax:32",
     "%5 = get edx:32",
     "flag ZF <- %8",
+    "if %8",
     "%9 = get ebx:32",
-    "set mem(%0):32 <- %10",
-    "%11 = get ecx:32",
-    "set mem(%1):32 <- %12",
-    "set eax:32 <- %13",
-    "set edx:32 <- %14",
+    "write r0.write+0:32 <- %9",
+    "%10 = get ecx:32",
+    "write r0.write+4:32 <- %10",
+    "ifEnd",
+    "set eax:32 <- %11",
+    "set edx:32 <- %12",
     "next"
   ]);
-  strictEqual(trace.defs[1], "add(%0, 4)");
   strictEqual(trace.defs[6], "cmp32.eq(%4, %2)");
   strictEqual(trace.defs[7], "cmp32.eq(%5, %3)");
   strictEqual(trace.defs[8], "and(%6, %7)");
-  strictEqual(trace.defs[10], "select(%8, %9, %2)");
-  strictEqual(trace.defs[12], "select(%8, %11, %3)");
-  strictEqual(trace.defs[13], "select(%8, %4, %2)");
-  strictEqual(trace.defs[14], "select(%8, %5, %3)");
+  strictEqual(trace.defs[11], "select(%8, %4, %2)");
+  strictEqual(trace.defs[12], "select(%8, %5, %3)");
+  strictEqual(memoryResolveEvents(trace).length, 1);
+  strictEqual(trace.events.filter((event) => event.startsWith("write ")).length, 2);
   deepStrictEqual(directFlagWrites(trace), ["ZF"]);
 });
 
@@ -668,14 +762,16 @@ test("imul reg-rm-imm semantics read the r/m source and immediate before writing
   strictEqual(trace.defs[9], "cmp32.ne(%4, %8)");
 });
 
-test("imul memory source is guarded and read before destination state", () => {
+test("imul memory source validates a READ view before destination state", () => {
   const trace = buildSemanticTrace(imulRegRmSemantic(32), operands("reg", "mem"));
 
-  deepStrictEqual(trace.events.slice(0, 4), [
-    "%0 = addr op1",
-    "guard read %0:4",
-    "%1 = get op1:32",
-    "%2 = get op0:32"
+  deepStrictEqual(trace.events.slice(0, 6), [
+    "resolve r0 = operand(op1):4",
+    "if %1",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%2 = read r0.read+0:32",
+    "%3 = get op0:32"
   ]);
 });
 
@@ -719,32 +815,36 @@ test("implicit imul dword writes EDX:EAX from a signed full product", () => {
   strictEqual(trace.value(write.PF), "1");
 });
 
-test("implicit multiply memory source is guarded before accumulator reads", () => {
+test("implicit multiply memory source validates READ before accumulator reads", () => {
   const trace = buildSemanticTrace(mulImplicitSemantic(16), operands("mem"));
 
-  deepStrictEqual(trace.events.slice(0, 4), [
-    "%0 = addr op0",
-    "guard read %0:2",
-    "%1 = get op0:16",
-    "%2 = get ax:16"
+  deepStrictEqual(trace.events.slice(0, 6), [
+    "resolve r0 = operand(op0):2",
+    "if %1",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%2 = read r0.read+0:16",
+    "%3 = get ax:16"
   ]);
 });
 
-test("implicit div guards and reads the source before divide-error checks and writes", () => {
+test("implicit div validates and reads its source before divide-error checks and writes", () => {
   const trace = buildSemanticTrace(divImplicitSemantic(16), operands("mem"));
-  const exceptionIndex = trace.events.findIndex((event) => event.startsWith("cpuException "));
+  const divideErrorIndex = trace.events.findIndex((event) => event === "cpuException DE");
   const firstSetIndex = trace.events.findIndex((event) => event.startsWith("set "));
   const firstFlagIndex = trace.events.findIndex((event) => event.startsWith("flag "));
 
-  deepStrictEqual(trace.events.slice(0, 3), [
-    "%0 = addr op0",
-    "guard read %0:2",
-    "%1 = get op0:16"
+  deepStrictEqual(trace.events.slice(0, 5), [
+    "resolve r0 = operand(op0):2",
+    "if %1",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%2 = read r0.read+0:16"
   ]);
-  ok(trace.events[3]?.endsWith(" = get ax:16"));
-  ok(trace.events[4]?.endsWith(" = get dx:16"));
-  ok(exceptionIndex > 4);
-  ok(firstSetIndex > exceptionIndex);
+  ok(trace.events[5]?.endsWith(" = get ax:16"));
+  ok(trace.events[6]?.endsWith(" = get dx:16"));
+  ok(divideErrorIndex > 6);
+  ok(firstSetIndex > divideErrorIndex);
   strictEqual(firstFlagIndex, -1);
   strictEqual(trace.flagWrites.length, 0);
   ok(trace.defs.some((entry) => entry.startsWith("div_u(")));
@@ -933,13 +1033,16 @@ test("pop semantic loads from old esp, increments esp, then writes the destinati
 
   deepStrictEqual(trace.events, [
     "%0 = get esp:32",
-    "guard read %0:4",
-    "%1 = get mem(%0):32",
-    "set esp:32 <- %2",
-    "set op0:32 <- %1",
+    "resolve r0 = segment(ss, %0):4",
+    "if %2",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%3 = read r0.read+0:32",
+    "set esp:32 <- %4",
+    "set op0:32 <- %3",
     "next"
   ]);
-  strictEqual(trace.defs[2], "add(%0, 4)");
+  strictEqual(trace.defs[4], "add(%0, 4)");
 });
 
 test("push semantic accepts 16-bit stack cells with 32-bit esp", () => {
@@ -948,8 +1051,11 @@ test("push semantic accepts 16-bit stack cells with 32-bit esp", () => {
   deepStrictEqual(trace.events, [
     "%0 = get op0:16",
     "%1 = get esp:32",
-    "guard write %2:2",
-    "set mem(%2):16 <- %0",
+    "resolve r0 = segment(ss, %2):2",
+    "if %4",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "write r0.write+0:16 <- %0",
     "set esp:32 <- %2",
     "next"
   ]);
@@ -961,13 +1067,16 @@ test("pop semantic accepts 16-bit stack cells with 32-bit esp", () => {
 
   deepStrictEqual(trace.events, [
     "%0 = get esp:32",
-    "guard read %0:2",
-    "%1 = get mem(%0):16",
-    "set esp:32 <- %2",
-    "set op0:16 <- %1",
+    "resolve r0 = segment(ss, %0):2",
+    "if %2",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%3 = read r0.read+0:16",
+    "set esp:32 <- %4",
+    "set op0:16 <- %3",
     "next"
   ]);
-  strictEqual(trace.defs[2], "add(%0, 2)");
+  strictEqual(trace.defs[4], "add(%0, 2)");
 });
 
 test("pop memory destination computes the destination address after esp update", () => {
@@ -975,80 +1084,111 @@ test("pop memory destination computes the destination address after esp update",
 
   deepStrictEqual(trace.events, [
     "%0 = get esp:32",
-    "guard read %0:4",
-    "%1 = get mem(%0):32",
-    "set esp:32 <- %2",
-    "%3 = addr op0",
-    "guard write %3:4",
-    "set mem(%3):32 <- %1",
+    "resolve r0 = segment(ss, %0):4",
+    "if %2",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%3 = read r0.read+0:32",
+    "set esp:32 <- %4",
+    "resolve r1 = operand(op0):4",
+    "if %6",
+    "cpuException PF r1.write",
+    "ifEnd",
+    "write r1.write+0:32 <- %3",
     "next"
   ]);
 });
 
-test("pushad and pusha preflight one range and save the original stack pointer", () => {
+test("pushad and pusha resolve one SS range and save original SP", () => {
   const pushad = buildSemanticTrace(pushadSemantic());
   const pusha = buildSemanticTrace(pushaSemantic());
 
-  deepStrictEqual(pushad.events.slice(0, 2), [
-    "%0 = get esp:32",
-    "guard write %1:32"
+  deepStrictEqual(memoryResolveEvents(pushad), [
+    "resolve r0 = segment(ss, %1):32"
   ]);
+  deepStrictEqual(memoryFaultEvents(pushad), ["cpuException PF r0.write"]);
   strictEqual(pushad.defs[1], "sub(%0, 32)");
-  strictEqual(pushad.events.filter((event) => event.startsWith("guard ")).length, 1);
-  strictEqual(pushad.events.some((event, index) => index > firstMemoryWrite(pushad) && event.startsWith("guard ")), false);
-  ok(pushad.events.includes("set mem(%13):32 <- %0"));
-  strictEqual(pushad.defs[13], "sub(%0, 20)");
-
-  deepStrictEqual(pusha.events.slice(0, 2), [
-    "%0 = get esp:32",
-    "guard write %1:16"
+  strictEqual(memoryResolveEvents(pushad).every((event) => pushad.events.indexOf(event) < firstMemoryWrite(pushad)), true);
+  deepStrictEqual(memoryWriteEvents(pushad), [
+    "write r0.write+28:32 <- %4",
+    "write r0.write+24:32 <- %5",
+    "write r0.write+20:32 <- %6",
+    "write r0.write+16:32 <- %7",
+    "write r0.write+12:32 <- %0",
+    "write r0.write+8:32 <- %8",
+    "write r0.write+4:32 <- %9",
+    "write r0.write+0:32 <- %10"
   ]);
+
+  deepStrictEqual(memoryResolveEvents(pusha), [
+    "resolve r0 = segment(ss, %1):16"
+  ]);
+  deepStrictEqual(memoryFaultEvents(pusha), ["cpuException PF r0.write"]);
   strictEqual(pusha.defs[1], "sub(%0, 16)");
-  strictEqual(pusha.events.filter((event) => event.startsWith("guard ")).length, 1);
-  strictEqual(pusha.events.some((event, index) => index > firstMemoryWrite(pusha) && event.startsWith("guard ")), false);
-  ok(pusha.events.includes("set mem(%14):16 <- %6"));
-  strictEqual(pusha.defs[6], "truncate16(%0)");
-  strictEqual(pusha.defs[14], "sub(%0, 10)");
+  strictEqual(memoryResolveEvents(pusha).every((event) => pusha.events.indexOf(event) < firstMemoryWrite(pusha)), true);
+  strictEqual(pusha.defs[8], "truncate16(%0)");
+  deepStrictEqual(memoryWriteEvents(pusha), [
+    "write r0.write+14:16 <- %4",
+    "write r0.write+12:16 <- %5",
+    "write r0.write+10:16 <- %6",
+    "write r0.write+8:16 <- %7",
+    "write r0.write+6:16 <- %8",
+    "write r0.write+4:16 <- %9",
+    "write r0.write+2:16 <- %10",
+    "write r0.write+0:16 <- %11"
+  ]);
 });
 
-test("popad and popa preflight one range and skip the saved stack pointer slot", () => {
+test("popad and popa resolve one full SS range without loading saved SP", () => {
   const popad = buildSemanticTrace(popadSemantic());
   const popa = buildSemanticTrace(popaSemantic());
 
-  deepStrictEqual(popad.events.slice(0, 2), [
-    "%0 = get esp:32",
-    "guard read %0:32"
+  deepStrictEqual(memoryResolveEvents(popad), [
+    "resolve r0 = segment(ss, %0):32"
   ]);
-  strictEqual(popad.events.filter((event) => event.startsWith("guard ")).length, 1);
-  strictEqual(popad.events.some((event, index) => index > firstMemoryWrite(popad) && event.startsWith("guard ")), false);
-  strictEqual(popad.defs.includes("add(%0, 12)"), false);
+  deepStrictEqual(memoryFaultEvents(popad), ["cpuException PF r0.read"]);
+  deepStrictEqual(memoryReadEvents(popad), [
+    "%3 = read r0.read+0:32",
+    "%4 = read r0.read+4:32",
+    "%5 = read r0.read+8:32",
+    "%6 = read r0.read+16:32",
+    "%7 = read r0.read+20:32",
+    "%8 = read r0.read+24:32",
+    "%9 = read r0.read+28:32"
+  ]);
   deepStrictEqual(popad.events.filter((event) => event.startsWith("set ")), [
-    "set edi:32 <- %1",
-    "set esi:32 <- %3",
+    "set edi:32 <- %3",
+    "set esi:32 <- %4",
     "set ebp:32 <- %5",
-    "set ebx:32 <- %7",
-    "set edx:32 <- %9",
-    "set ecx:32 <- %11",
-    "set eax:32 <- %13",
-    "set esp:32 <- %14"
+    "set ebx:32 <- %6",
+    "set edx:32 <- %7",
+    "set ecx:32 <- %8",
+    "set eax:32 <- %9",
+    "set esp:32 <- %10"
   ]);
 
-  deepStrictEqual(popa.events.slice(0, 2), [
-    "%0 = get esp:32",
-    "guard read %0:16"
+  deepStrictEqual(memoryResolveEvents(popa), [
+    "resolve r0 = segment(ss, %0):16"
   ]);
-  strictEqual(popa.events.filter((event) => event.startsWith("guard ")).length, 1);
-  strictEqual(popa.events.some((event, index) => index > firstMemoryWrite(popa) && event.startsWith("guard ")), false);
-  strictEqual(popa.defs.includes("add(%0, 6)"), false);
+  deepStrictEqual(memoryFaultEvents(popa), ["cpuException PF r0.read"]);
+  deepStrictEqual(memoryReadEvents(popa), [
+    "%3 = read r0.read+0:16",
+    "%4 = read r0.read+2:16",
+    "%5 = read r0.read+4:16",
+    "%6 = read r0.read+8:16",
+    "%7 = read r0.read+10:16",
+    "%8 = read r0.read+12:16",
+    "%9 = read r0.read+14:16"
+  ]);
   deepStrictEqual(popa.events.filter((event) => event.startsWith("set ")), [
-    "set di:16 <- %1",
-    "set si:16 <- %3",
+    "set di:16 <- %3",
+    "set si:16 <- %4",
     "set bp:16 <- %5",
-    "set bx:16 <- %7",
-    "set dx:16 <- %9",
-    "set cx:16 <- %11",
-    "set ax:16 <- %13",
-    "set esp:32 <- %14"
+    "set bx:16 <- %6",
+    "set dx:16 <- %7",
+    "set cx:16 <- %8",
+    "set ax:16 <- %9",
+    "set esp:32 <- %10"
   ]);
 });
 
@@ -1057,13 +1197,16 @@ test("leave semantic reads saved frame before updating esp and ebp", () => {
 
   deepStrictEqual(trace.events, [
     "%0 = get ebp:32",
-    "guard read %0:4",
-    "%1 = get mem(%0):32",
-    "set esp:32 <- %2",
-    "set ebp:32 <- %1",
+    "resolve r0 = segment(ss, %0):4",
+    "if %2",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%3 = read r0.read+0:32",
+    "set esp:32 <- %4",
+    "set ebp:32 <- %3",
     "next"
   ]);
-  strictEqual(trace.defs[2], "add(%0, 4)");
+  strictEqual(trace.defs[4], "add(%0, 4)");
 });
 
 test("call semantic resolves the target before pushing the return address", () => {
@@ -1072,8 +1215,11 @@ test("call semantic resolves the target before pushing the return address", () =
   deepStrictEqual(trace.events, [
     "%0 = get op0:32",
     "%1 = get esp:32",
-    "guard write %2:4",
-    "set mem(%2):32 <- nextEip",
+    "resolve r0 = segment(ss, %2):4",
+    "if %4",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "write r0.write+0:32 <- nextEip",
     "set esp:32 <- %2",
     "jump %0"
   ]);
@@ -1085,12 +1231,56 @@ test("ret semantic jumps to the popped value after incrementing esp", () => {
 
   deepStrictEqual(trace.events, [
     "%0 = get esp:32",
-    "guard read %0:4",
-    "%1 = get mem(%0):32",
-    "set esp:32 <- %2",
-    "jump %1"
+    "resolve r0 = segment(ss, %0):4",
+    "if %2",
+    "cpuException PF r0.read",
+    "ifEnd",
+    "%3 = read r0.read+0:32",
+    "set esp:32 <- %4",
+    "jump %3"
   ]);
-  strictEqual(trace.defs[2], "add(%0, 4)");
+  strictEqual(trace.defs[4], "add(%0, 4)");
+});
+
+test("enter uses one nonwrapping destination and display range", () => {
+  const trace = buildSemanticTrace(enterSemantic(), operands("imm", "imm"));
+  const destination = "resolve r0 = segment(ss, %12):%11";
+  const source = "resolve r1 = segment(ss, %18):%17";
+  const destinationIndex = trace.events.indexOf(destination);
+  const levelBranchIndex = trace.events.indexOf("if %7", destinationIndex);
+  const sourceIndex = trace.events.indexOf(source);
+  const firstWriteIndex = trace.events.findIndex(
+    (event, index) => index > sourceIndex && event.startsWith("write ")
+  );
+  const loopIndex = trace.events.indexOf("loop", sourceIndex);
+  const loopEndIndex = trace.events.indexOf("loopEnd", loopIndex);
+
+  strictEqual(destinationIndex > -1, true);
+  deepStrictEqual(memoryResolveEvents(trace), [destination, source]);
+  ok(trace.events.includes("cpuException PF r0.write"));
+  strictEqual(levelBranchIndex > destinationIndex, true);
+  strictEqual(
+    trace.events.slice(destinationIndex + 1, levelBranchIndex).some(
+      (event) => event.startsWith("resolve ")
+    ),
+    false
+  );
+  strictEqual(sourceIndex > levelBranchIndex, true);
+  ok(trace.events.includes("cpuException PF r1.read"));
+  strictEqual(firstWriteIndex > sourceIndex, true);
+  strictEqual(
+    trace.events.slice(sourceIndex + 1, firstWriteIndex).some(
+      (event) => event.startsWith("resolve ")
+    ),
+    false
+  );
+
+  const loopEvents = trace.events.slice(loopIndex, loopEndIndex + 1);
+
+  strictEqual(loopEvents.some((event) => event.startsWith("resolve ")), false);
+  strictEqual(loopEvents.some((event) => /^%\d+ = read r1\.read\+%\d+:32$/.test(event)), true);
+  strictEqual(loopEvents.some((event) => /^write r0\.write\+%\d+:32 <- %\d+$/.test(event)), true);
+  strictEqual(trace.events.includes("else"), true);
 });
 
 test("jecxz and loop semantic branch conditions use ecx without writing flags", () => {
@@ -1232,8 +1422,24 @@ function directFlagWrites(trace: SemanticTrace): string[] {
   });
 }
 
+function memoryResolveEvents(trace: SemanticTrace): string[] {
+  return trace.events.filter((event) => event.startsWith("resolve "));
+}
+
+function memoryReadEvents(trace: SemanticTrace): string[] {
+  return trace.events.filter((event) => /^%\d+ = read /.test(event));
+}
+
+function memoryFaultEvents(trace: SemanticTrace): string[] {
+  return trace.events.filter((event) => /^cpuException PF r\d+\.(?:read|write)$/.test(event));
+}
+
+function memoryWriteEvents(trace: SemanticTrace): string[] {
+  return trace.events.filter((event) => event.startsWith("write "));
+}
+
 function firstMemoryWrite(trace: SemanticTrace): number {
-  const index = trace.events.findIndex((event) => event.startsWith("set mem("));
+  const index = trace.events.findIndex((event) => event.startsWith("write "));
 
   return index === -1 ? trace.events.length : index;
 }

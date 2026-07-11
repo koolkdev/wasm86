@@ -1,16 +1,23 @@
 import type { ConditionCode } from "#x86/conditions.js";
 import type { Values } from "#ir/values.js";
-import type { SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
+import type {
+  SemanticsBuilder,
+  SemanticTemplate
+} from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
 import { popStack, pushStack, type StackOperandWidth } from "./stack.js";
-import { guardStorageRead } from "./memory.js";
+import {
+  readStorage,
+  resolveMemoryAccess,
+  resolveStorageRead
+} from "./memory.js";
 
 export function jmpSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, v, context) => {
     const target = s.operand(0);
 
-    guardStorageRead(s, v, context, target, width);
-    const value = s.get(target, width);
+    const access = resolveStorageRead(s, v, context, target, width);
+    const value = readStorage(s, v, access, width);
 
     s.jump(width === 16 ? v.truncate(16, value) : value);
   };
@@ -20,25 +27,25 @@ export function callSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, v, context) => {
     const targetOperand = s.operand(0);
 
-    guardStorageRead(s, v, context, targetOperand, width);
-    const target = s.get(targetOperand, width);
+    const access = resolveStorageRead(s, v, context, targetOperand, width);
+    const target = readStorage(s, v, access, width);
 
-    pushStack(s, v, context, width, s.nextEip());
+    pushStack(s, v, width, s.nextEip());
     s.jump(width === 16 ? v.truncate(16, target) : target);
   };
 }
 
 export function retSemantic(width: StackOperandWidth = 32): SemanticTemplate {
-  return (s, v, context) => {
-    const target = popStack(s, v, context, width);
+  return (s, v) => {
+    const target = popStack(s, v, width);
 
     s.jump(width === 16 ? v.truncate(16, target) : target);
   };
 }
 
 export function retImmSemantic(width: StackOperandWidth = 32): SemanticTemplate {
-  return (s, v, context) => {
-    const target = popStack(s, v, context, width);
+  return (s, v) => {
+    const target = popStack(s, v, width);
     const bytes = s.get(s.operand(0));
     const esp = s.get(s.reg("esp"));
     const adjustedEsp = v.binary("add", esp, bytes);
@@ -61,38 +68,57 @@ export function enterSemantic(): SemanticTemplate {
     const writeSlots = v.select(levelIsZero, v.const(1), v.binary("add", level, v.const(1)));
     const writeBytes = v.binary("shl", writeSlots, v.const(2));
     const writeStart = v.binary("sub", esp, writeBytes);
+    const oldFrameOffset = v.binary("sub", frameTemp, writeStart);
+    const writeAccess = resolveMemoryAccess(
+      s,
+      s.mem("ss", writeStart),
+      writeBytes,
+      "write"
+    );
 
-    s.memoryGuard(writeStart, writeBytes, "write");
-    s.if(levelGtOne, (then, thenValues) => {
-      const readBytes = thenValues.binary("shl", thenValues.binary("sub", level, thenValues.const(1)), thenValues.const(2));
-      const readStart = thenValues.binary("sub", ebp, readBytes);
+    s.ifElse(
+      levelGtOne,
+      (then, thenValues) => {
+        const readBytes = thenValues.binary(
+          "shl",
+          thenValues.binary("sub", level, thenValues.const(1)),
+          thenValues.const(2)
+        );
+        const readStart = thenValues.binary("sub", ebp, readBytes);
+        const readAccess = resolveMemoryAccess(
+          then,
+          then.mem("ss", readStart),
+          readBytes,
+          "read"
+        );
 
-      then.memoryGuard(readStart, readBytes, "read");
-    });
+        then.memoryWrite(writeAccess, oldFrameOffset, ebp, 32);
+        const remaining = then.var(thenValues.binary("sub", level, thenValues.const(1)));
+        const srcOffset = then.var(thenValues.binary("sub", readBytes, thenValues.const(4)));
+        const dstOffset = then.var(thenValues.binary("sub", oldFrameOffset, thenValues.const(4)));
 
-    s.set(s.mem(frameTemp), ebp);
-    s.if(levelGtOne, (then, thenValues) => {
-      const remaining = then.var(thenValues.binary("sub", level, thenValues.const(1)));
-      const src = then.var(thenValues.binary("sub", ebp, thenValues.const(4)));
-      const dst = then.var(thenValues.binary("sub", frameTemp, thenValues.const(4)));
+        then.loop((loop, loopValues) => {
+          const currentRemaining = loop.get(remaining);
+          const currentSrcOffset = loop.get(srcOffset);
+          const currentDstOffset = loop.get(dstOffset);
+          const copied = loop.memoryRead(readAccess, currentSrcOffset, 32);
+          const nextRemaining = loopValues.binary("sub", currentRemaining, loopValues.const(1));
 
-      then.loop((loop, loopValues) => {
-        const currentRemaining = loop.get(remaining);
-        const currentSrc = loop.get(src);
-        const currentDst = loop.get(dst);
-        const copied = loop.get(loop.mem(currentSrc));
-        const nextRemaining = loopValues.binary("sub", currentRemaining, loopValues.const(1));
-
-        loop.set(loop.mem(currentDst), copied);
-        loop.set(remaining, nextRemaining);
-        loop.set(src, loopValues.binary("sub", currentSrc, loopValues.const(4)));
-        loop.set(dst, loopValues.binary("sub", currentDst, loopValues.const(4)));
-        return loopValues.compare(32, "ne", nextRemaining, loopValues.const(0));
-      });
-    });
-    s.if(levelGtZero, (then) => {
-      then.set(then.mem(writeStart), frameTemp);
-    });
+          loop.memoryWrite(writeAccess, currentDstOffset, copied, 32);
+          loop.set(remaining, nextRemaining);
+          loop.set(srcOffset, loopValues.binary("sub", currentSrcOffset, loopValues.const(4)));
+          loop.set(dstOffset, loopValues.binary("sub", currentDstOffset, loopValues.const(4)));
+          return loopValues.compare(32, "ne", nextRemaining, loopValues.const(0));
+        });
+        then.memoryWrite(writeAccess, thenValues.const(0), frameTemp, 32);
+      },
+      (otherwise, otherwiseValues) => {
+        otherwise.memoryWrite(writeAccess, oldFrameOffset, ebp, 32);
+        otherwise.if(levelGtZero, (nonzero) => {
+          nonzero.memoryWrite(writeAccess, otherwiseValues.const(0), frameTemp, 32);
+        });
+      }
+    );
     s.set(s.reg("ebp"), frameTemp);
     s.set(s.reg("esp"), v.binary("sub", writeStart, size));
   };

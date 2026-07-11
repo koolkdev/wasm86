@@ -2,9 +2,10 @@ import { assert } from "#common/assert.js";
 import type {
   SemanticOperandInfo, SemanticOperandInput
 } from "#x86/semantics/builder.js";
+import type { MemRef, SegmentRef } from "#x86/semantics/refs.js";
 import type { OperandWidth, SegmentRegister } from "#x86/types.js";
 import type {
-  EffectiveAddressTerms, ExternalValueId, MemDynamicOperandBinding, MemSegmentBinding, OperandBinding, RegDynamicOperandBinding
+  EffectiveAddressTerms, MemDynamicOperandBinding, MemSegmentBinding, OperandBinding, RegDynamicOperandBinding
 } from "../operands.js";
 import type { GprDynamicSlot, GprChannel } from "../slots.js";
 import type { ValueId } from "../values.js";
@@ -14,7 +15,6 @@ import type { State } from "./state/index.js";
 export class OperandScope {
   readonly #parent: OperandScope | undefined;
   readonly #addresses = new Map<number, ValueId>();
-  readonly #linearAddresses = new Map<number, ValueId>();
 
   constructor(parent?: OperandScope) {
     this.#parent = parent;
@@ -28,17 +28,8 @@ export class OperandScope {
     this.#addresses.set(index, address);
   }
 
-  linearAddress(index: number): ValueId | undefined {
-    return this.#linearAddresses.get(index) ?? this.#parent?.linearAddress(index);
-  }
-
-  setLinearAddress(index: number, address: ValueId): void {
-    this.#linearAddresses.set(index, address);
-  }
-
   clear(): void {
     this.#addresses.clear();
-    this.#linearAddresses.clear();
   }
 }
 
@@ -113,19 +104,13 @@ export class OperandResolver {
     return address;
   }
 
-  linearAddress(index: number): ValueId {
-    const scope = this.#currentScope();
-    const cached = scope.linearAddress(index);
-
-    if (cached !== undefined) {
-      return cached;
-    }
-
+  memoryReference(index: number): MemRef {
     const binding = this.binding(index);
-    const address = this.#bindingLinearAddress(index, binding);
+    return this.#bindingMemoryReference(index, binding);
+  }
 
-    scope.setLinearAddress(index, address);
-    return address;
+  resolveAddress(memory: MemRef): ValueId {
+    return this.#segmentLinearAddress(memory.segment, memory.offset);
   }
 
   dynamicGprSlot(binding: RegDynamicOperandBinding, accessWidth: OperandWidth): GprDynamicSlot {
@@ -164,17 +149,17 @@ export class OperandResolver {
     }
   }
 
-  #bindingLinearAddress(index: number, binding: OperandBinding): ValueId {
+  #bindingMemoryReference(index: number, binding: OperandBinding): MemRef {
     assert(
       binding.kind === "mem" || binding.kind === "memStatic" || binding.kind === "memDynamic",
-      `linear address of a ${binding.kind} operand binding`
+      `memory reference of a ${binding.kind} operand binding`
     );
 
     switch (binding.kind) {
       case "mem":
       case "memStatic":
       case "memDynamic":
-        return this.#memSegmentLinearAddress(binding.segment, this.address(index));
+        return this.#memReference(binding.segment, this.address(index));
     }
   }
 
@@ -213,7 +198,7 @@ export class OperandResolver {
       : this.#values.binary("add", address, this.#values.const(ea.disp));
   }
 
-  #linearAddress(segment: SegmentRegister | undefined, offset: ValueId): ValueId {
+  #linearAddress(segment: SegmentRegister, offset: ValueId): ValueId {
     // Flat-memory assumption: CS/DS/ES/SS bases are zero; FS/GS may be non-zero.
     if (segment !== "fs" && segment !== "gs") {
       return offset;
@@ -222,19 +207,28 @@ export class OperandResolver {
     return this.#values.binary("add", this.#state.segments.readBase(segment), offset);
   }
 
-  #memSegmentLinearAddress(segment: MemSegmentBinding, offset: ValueId): ValueId {
+  #memReference(segment: MemSegmentBinding, offset: ValueId): MemRef {
     switch (segment.kind) {
-      case "none":
-        return offset;
       case "static":
-        return this.#linearAddress(segment.reg, offset);
+        return {
+          segment: { kind: "static", reg: segment.reg },
+          offset
+        };
       case "dynamic":
-        return this.#dynamicSegmentLinearAddress(segment.value, offset);
+        return {
+          segment: { kind: "dynamic", index: this.#values.external(segment.value) },
+          offset
+        };
     }
   }
 
-  #dynamicSegmentLinearAddress(segment: ExternalValueId, offset: ValueId): ValueId {
-    return this.#values.binary("add", this.#state.segments.readDynamicBase(this.#values.external(segment)), offset);
+  #segmentLinearAddress(segment: SegmentRef, offset: ValueId): ValueId {
+    switch (segment.kind) {
+      case "static":
+        return this.#linearAddress(segment.reg, offset);
+      case "dynamic":
+        return this.#values.binary("add", this.#state.segments.readDynamicBase(segment.index), offset);
+    }
   }
 }
 

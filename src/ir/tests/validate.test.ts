@@ -133,7 +133,7 @@ test("op action output bounds must match the op signature", () => {
           {
             kind: "op",
             output: missingBoundsOutput,
-            op: { kind: "memory.read", address: missingBoundsAddress, width: 8 }
+            op: { kind: "memory.read", address: missingBoundsAddress, byteOffset: 0, width: 8 }
           },
           finishExit()
         ])
@@ -152,7 +152,7 @@ test("op action output bounds must match the op signature", () => {
           {
             kind: "op",
             output: overlyNarrowOutput,
-            op: { kind: "memory.read", address: overlyNarrowAddress, width: 32 }
+            op: { kind: "memory.read", address: overlyNarrowAddress, byteOffset: 0, width: 32 }
           },
           finishExit()
         ])
@@ -872,7 +872,7 @@ test("producer operands must have lower value ids than their output", () => {
     () =>
       validateIrBlock(
         entryBlock(values, [
-          { kind: "op", output, op: { kind: "memory.read", address, width: 32 } },
+          { kind: "op", output, op: { kind: "memory.read", address, byteOffset: 0, width: 32 } },
           finishExit()
         ])
       ),

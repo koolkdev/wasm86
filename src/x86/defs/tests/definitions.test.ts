@@ -317,9 +317,9 @@ test("xlat form is operand-less syntax over a hidden EBX byte memory operand", (
   const trace = buildSemanticTrace(semanticsOf(spec), operands("mem"));
 
   deepStrictEqual(trace.events.slice(0, 3), [
-    "%0 = addr op0",
-    "%1 = get al:8",
-    "guard read %2:1"
+    "%0 = get al:8",
+    "resolve r0 = offset(operand(op0), %0):1",
+    "if %2"
   ]);
 });
 
@@ -1278,8 +1278,8 @@ test("ret imm16 records unsigned immediate and generic control semantics", () =>
 
   const trace = buildSemanticTrace(semanticsOf(spec));
 
-  strictEqual(trace.events.at(-1), "jump %1");
-  ok(trace.events.includes("%3 = get op0:32"));
+  strictEqual(trace.events.at(-1), "jump %3");
+  ok(trace.events.some((event) => /^%\d+ = get op0:32$/.test(event)));
 });
 
 test("enter records alloc-size and nesting immediates with semantic var loop semantics", () => {
@@ -1291,10 +1291,11 @@ test("enter records alloc-size and nesting immediates with semantic var loop sem
 
   const trace = buildSemanticTrace(semanticsOf(spec));
 
-  ok(trace.events.some((event) => event.startsWith("guard write ") && !event.endsWith(":4")));
-  ok(trace.events.some((event) => event.startsWith("guard read ") && !event.endsWith(":4")));
+  ok(trace.events.some((event) => /^resolve r\d+ = segment\(ss, .+\):%\d+$/.test(event)));
+  ok(trace.events.some((event) => /^cpuException PF r\d+\.write$/.test(event)));
+  ok(trace.events.some((event) => /^cpuException PF r\d+\.read$/.test(event)));
   ok(trace.events.includes("loop"));
-  ok(trace.events.some((event) => event.startsWith("set mem(")));
+  ok(trace.events.some((event) => /^write r\d+\.write\+/.test(event)));
   ok(trace.events.some((event) => event.startsWith("set ebp:32 <-")));
   ok(trace.events.some((event) => event.startsWith("set esp:32 <-")));
 });

@@ -1,14 +1,28 @@
 import { assert } from "#common/assert.js";
 import type { Value } from "#ir/values.js";
-import type { RegName } from "#x86/types.js";
+import type { RegName, SegmentRegister } from "#x86/types.js";
 
 export type { Value } from "#ir/values.js";
 
 export type OperandRef = Readonly<{ kind: "operand"; index: number }>;
 export type RegRef = Readonly<{ kind: "reg"; reg: RegName }>;
-export type MemRef = Readonly<{ kind: "mem"; address: Value }>;
+export type SegmentRef =
+  | Readonly<{ kind: "static"; reg: SegmentRegister }>
+  | Readonly<{ kind: "dynamic"; index: Value }>;
+export type MemRef = Readonly<{
+  segment: SegmentRef;
+  offset: Value;
+}>;
+export type MemoryAccessKind = "read" | "write";
+export type MemoryAccess<TIntent extends MemoryAccessKind = MemoryAccessKind> = Readonly<{
+  kind: "memoryAccess";
+  linearAddress: Value;
+  byteLength: Value;
+  invalid: Value;
+  intent: TIntent;
+}>;
 export type VarRef = Readonly<{ kind: "var"; index: number }>;
-export type StorageRef = OperandRef | RegRef | MemRef | VarRef;
+export type StorageRef = OperandRef | RegRef | VarRef;
 
 export type OperandInput = OperandRef;
 export type StorageInput = StorageRef;
@@ -25,10 +39,6 @@ export function operand(index: number): OperandRef {
 
 export function reg(reg: RegName): RegRef {
   return { kind: "reg", reg };
-}
-
-export function mem(address: ValueInput): MemRef {
-  return { kind: "mem", address };
 }
 
 export function semanticVar(index: number): VarRef {

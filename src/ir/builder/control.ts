@@ -7,21 +7,35 @@ import {
 import type { Body } from "../block.js";
 import { BodyBuilder, type BuildBody } from "../body-builder.js";
 import {
+  channelCovers,
   dedupeDisjointChannels,
   type StateChannel
 } from "../slots.js";
 import type { ValueId } from "../values.js";
-import { LoopSemanticsBuilderImpl } from "./loop.js";
+import {
+  LoopSemanticsBuilderImpl,
+  type LoopMemoryOps
+} from "./loop.js";
 import type { OperandResolver } from "./operands.js";
 import type { SemanticScopeStack } from "./scope.js";
 import type { State } from "./state/index.js";
 import type { StateWriteLog } from "./state/write-log.js";
 
-type ScopedBody = Readonly<{
-  body: Body;
-  terminating: boolean;
-  joinedChannels: readonly StateChannel[];
+export type IfOutcome = "continues" | "completes";
+
+type CompletingArm = Readonly<{
+  body: BodyBuilder;
+  outcome: "completes";
 }>;
+
+type ContinuingArm = Readonly<{
+  body: BodyBuilder;
+  outcome: "continues";
+  writtenChannels: readonly StateChannel[];
+  memoryMayBeWritten: boolean;
+}>;
+
+type BuiltArm = CompletingArm | ContinuingArm;
 
 export class ControlEmitter {
   readonly #state: State;
@@ -44,43 +58,53 @@ export class ControlEmitter {
     this.#operands = operands;
   }
 
-  if(condition: ValueId, emitThenBody: BuildBody, hint?: BranchHint): void {
+  if(condition: ValueId, emitThen: BuildBody, hint?: BranchHint): IfOutcome {
     const parent = this.#scopes.current.body;
     const conditionValue = parent.values.constValue(condition);
 
     if (conditionValue !== undefined) {
-      // Fold when the condition is a constant.
       if (conditionValue !== 0) {
-        emitThenBody(parent);
+        emitThen(parent);
       }
-
-      return;
+      return "continues";
     }
 
-    const scoped = this.#scopedBody(emitThenBody);
-    const elseBody = scoped.terminating ? undefined : this.#skippedBody(scoped.joinedChannels);
+    const thenArm = this.#buildArm(emitThen);
 
-    parent.push({
-      kind: "if",
-      condition,
-      ...(hint !== undefined ? { hint } : {}),
-      thenBody: scoped.body,
-      ...(elseBody !== undefined ? { elseBody } : {})
-    });
+    this.#emitOneArmedIf(parent, condition, thenArm, hint);
+    return "continues";
+  }
 
-    if (!scoped.terminating) {
-      this.#closeJoinedChannels(scoped.joinedChannels);
+  ifElse(
+    condition: ValueId,
+    emitThen: BuildBody,
+    emitElse: BuildBody,
+    hint?: BranchHint
+  ): IfOutcome {
+    const parent = this.#scopes.current.body;
+    const conditionValue = parent.values.constValue(condition);
+
+    if (conditionValue !== undefined) {
+      (conditionValue !== 0 ? emitThen : emitElse)(parent);
+      return "continues";
     }
+
+    const thenArm = this.#buildArm(emitThen);
+    const elseArm = this.#buildArm(emitElse);
+
+    return this.#emitTwoArmedIf(parent, condition, thenArm, elseArm, hint);
   }
 
   runLoopBody<T>(
     bodyBuilder: BodyBuilder,
     body: LoopBody,
-    finish: (condition: ValueId) => T
+    finish: (condition: ValueId) => T,
+    memory: LoopMemoryOps = this.#host
   ): T {
     return this.#scopes.enter("loop", bodyBuilder, (scope) => {
       const loopBuilder = new LoopSemanticsBuilderImpl({
         host: this.#host,
+        memory,
         state: this.#state,
         operands: this.#operands
       });
@@ -92,7 +116,62 @@ export class ControlEmitter {
     });
   }
 
-  #scopedBody(emitBody: BuildBody): ScopedBody {
+  #emitOneArmedIf(
+    parent: BodyBuilder,
+    condition: ValueId,
+    thenArm: BuiltArm,
+    hint?: BranchHint
+  ): void {
+    const implicitElse = thenArm.outcome === "completes"
+      ? undefined
+      : this.#buildImplicitElse(thenArm.writtenChannels);
+
+    parent.push({
+      kind: "if",
+      condition,
+      ...(hint !== undefined ? { hint } : {}),
+      thenBody: thenArm.body.build(),
+      ...(implicitElse !== undefined ? { elseBody: implicitElse } : {})
+    });
+
+    if (thenArm.outcome === "continues") {
+      this.#applyJoinEffects([thenArm], thenArm.writtenChannels);
+    }
+  }
+
+  #emitTwoArmedIf(
+    parent: BodyBuilder,
+    condition: ValueId,
+    thenArm: BuiltArm,
+    elseArm: BuiltArm,
+    hint?: BranchHint
+  ): IfOutcome {
+    const continuingArms = [thenArm, elseArm].filter(armContinues);
+    const joinedChannels = dedupeDisjointChannels(
+      continuingArms.flatMap((arm) => arm.writtenChannels)
+    );
+
+    for (const arm of continuingArms) {
+      this.#commitMissingJoinChannels(arm, joinedChannels);
+    }
+
+    parent.push({
+      kind: "if",
+      condition,
+      ...(hint !== undefined ? { hint } : {}),
+      thenBody: thenArm.body.build(),
+      elseBody: elseArm.body.build()
+    });
+
+    if (continuingArms.length === 0) {
+      return "completes";
+    }
+
+    this.#applyJoinEffects(continuingArms, joinedChannels);
+    return "continues";
+  }
+
+  #buildArm(emitBody: BuildBody): BuiltArm {
     const writeCheckpoint = this.#writeLog.checkpoint();
 
     return this.#state.enterScope(() => {
@@ -100,35 +179,46 @@ export class ControlEmitter {
 
       return this.#scopes.enter("arm", child, (scope) => {
         scope.run(() => emitBody(child));
-        const terminating = bodyCompletes(child.build());
-        let joinedChannels: readonly StateChannel[] = [];
+        const completes = bodyCompletes(child.build());
 
-        if (!terminating) {
-          joinedChannels = dedupeDisjointChannels(this.#writeLog.writtenChannelsSince(writeCheckpoint));
-          this.#commitJoinedChannels(child, joinedChannels);
-          scope.commitMemoryWrites();
+        if (completes) {
+          return { body: child, outcome: "completes" };
         }
 
-        return { body: child.build(), terminating, joinedChannels };
+        const writtenChannels = dedupeDisjointChannels(
+          this.#writeLog.writtenChannelsSince(writeCheckpoint)
+        );
+
+        this.#flushDirtyChannelsInto(child, writtenChannels);
+        return {
+          body: child,
+          outcome: "continues",
+          writtenChannels,
+          memoryMayBeWritten: scope.wroteMemory()
+        };
       });
     });
   }
 
-  #commitJoinedChannels(body: BodyBuilder, channels: readonly StateChannel[]): void {
-    this.#emitDirtyChannelCommits(body, channels);
+  #commitMissingJoinChannels(arm: ContinuingArm, joinedChannels: readonly StateChannel[]): void {
+    const missing = joinedChannels.filter((channel) => (
+      arm.writtenChannels.every((written) => !sameStateChannel(written, channel))
+    ));
+
+    this.#flushDirtyChannelsInto(arm.body, missing);
   }
 
-  #skippedBody(channels: readonly StateChannel[]): Body | undefined {
+  #buildImplicitElse(channels: readonly StateChannel[]): Body | undefined {
     const body = new BodyBuilder(this.#scopes.current.body.values);
 
-    if (!this.#emitDirtyChannelCommits(body, channels)) {
+    if (!this.#flushDirtyChannelsInto(body, channels)) {
       return undefined;
     }
 
     return body.build();
   }
 
-  #emitDirtyChannelCommits(body: BodyBuilder, channels: readonly StateChannel[]): boolean {
+  #flushDirtyChannelsInto(body: BodyBuilder, channels: readonly StateChannel[]): boolean {
     let emitted = false;
 
     for (const channel of channels) {
@@ -141,7 +231,18 @@ export class ControlEmitter {
     return emitted;
   }
 
-  #closeJoinedChannels(channels: readonly StateChannel[]): void {
+  #applyJoinEffects(
+    arms: readonly ContinuingArm[],
+    joinedChannels: readonly StateChannel[]
+  ): void {
+    if (arms.some((arm) => arm.memoryMayBeWritten)) {
+      this.#scopes.current.recordMemoryWrite();
+    }
+
+    this.#invalidateJoinChannels(joinedChannels);
+  }
+
+  #invalidateJoinChannels(channels: readonly StateChannel[]): void {
     for (const channel of channels) {
       this.#state.invalidate(channel);
       this.#writeLog.recordStateWrite(channel);
@@ -151,4 +252,12 @@ export class ControlEmitter {
       this.#state.statusFlags.resetToInputs();
     }
   }
+}
+
+function armContinues(arm: BuiltArm): arm is ContinuingArm {
+  return arm.outcome === "continues";
+}
+
+function sameStateChannel(a: StateChannel, b: StateChannel): boolean {
+  return channelCovers(a, b) && channelCovers(b, a);
 }

@@ -33,7 +33,7 @@ test("action operands count one use per consuming action", () => {
   const analysis = analyze(values, [
     stateRead(deadStateRead, gprChannel("eax")),
     memoryRead(deadMemoryRead, address, 32),
-    { kind: "op", op: { kind: "memory.write", address, value: stored, width: 32 } },
+    { kind: "op", op: { kind: "memory.write", address, byteOffset: 0, value: stored, width: 32 } },
     memoryCheck(fault, guarded, byteLength, "read"),
     {
       kind: "if",

@@ -15,7 +15,6 @@ export type ImmOperandBinding = Readonly<{ kind: "imm"; value: number }>;
 export type ImmExternalOperandBinding = Readonly<{ kind: "immExternal"; value: ExternalValueId }>;
 // Memory bindings keep offset calculation separate from segment selection.
 export type MemSegmentBinding =
-  | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "static"; reg: SegmentRegister }>
   | Readonly<{ kind: "dynamic"; value: ExternalValueId }>;
 export type MemOperandBinding = Readonly<{
@@ -83,13 +82,9 @@ export function memBinding(
 
 export function memStaticBinding(
   address: ExternalValueId,
-  segment: MemSegmentBinding = noMemSegment()
+  segment: MemSegmentBinding
 ): MemStaticOperandBinding {
   return { kind: "memStatic", address, segment };
-}
-
-export function noMemSegment(): MemSegmentBinding {
-  return { kind: "none" };
 }
 
 export function staticMemSegment(reg: SegmentRegister): MemSegmentBinding {
@@ -103,7 +98,7 @@ export function dynamicMemSegment(value: ExternalValueId): MemSegmentBinding {
 export function memDynamicBinding(
   base: ExternalValueId,
   offset: ExternalValueId,
-  segment: MemSegmentBinding = noMemSegment()
+  segment: MemSegmentBinding
 ): MemDynamicOperandBinding {
   return { kind: "memDynamic", base, offset, segment };
 }

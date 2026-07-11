@@ -1,5 +1,10 @@
 import { subFlagSource } from "#x86/semantics/flag-writes.js";
-import { guardStorageRead, guardStorageWrite } from "#x86/semantics/memory.js";
+import {
+  readStorage,
+  resolveStorageRead,
+  resolveStorageWrite,
+  writeStorage
+} from "#x86/semantics/memory.js";
 import type { Values } from "#ir/values.js";
 import type {
   SemanticBuildContext,
@@ -65,11 +70,12 @@ function movsUnit(width: OperandWidth): StringUnit {
     const dst = s.operand(1);
     const delta = stringDelta(s, v, width);
 
-    guardStorageRead(s, v, context, src, width);
-    const value = s.get(src, width);
+    const source = resolveStorageRead(s, v, context, src, width);
+    const value = readStorage(s, v, source, width);
 
-    guardStorageWrite(s, v, context, dst, width);
-    s.set(dst, value, width);
+    const destination = resolveStorageWrite(s, v, context, dst, width);
+
+    writeStorage(s, v, destination, value, width);
 
     stepRegister(s, v, "esi", delta);
     stepRegister(s, v, "edi", delta);
@@ -82,11 +88,11 @@ function cmpsUnit(width: OperandWidth): StringUnit {
     const rightOperand = s.operand(1);
     const delta = stringDelta(s, v, width);
 
-    guardStorageRead(s, v, context, leftOperand, width);
-    guardStorageRead(s, v, context, rightOperand, width);
+    const leftAccess = resolveStorageRead(s, v, context, leftOperand, width);
+    const rightAccess = resolveStorageRead(s, v, context, rightOperand, width);
 
-    const left = v.truncate(width, s.get(leftOperand, width));
-    const right = v.truncate(width, s.get(rightOperand, width));
+    const left = v.truncate(width, readStorage(s, v, leftAccess, width));
+    const right = v.truncate(width, readStorage(s, v, rightAccess, width));
     const result = v.truncate(width, v.binary("sub", left, right));
 
     s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
@@ -101,8 +107,9 @@ function stosUnit(width: OperandWidth): StringUnit {
     const value = s.get(s.reg(accumulator(width)), width);
     const delta = stringDelta(s, v, width);
 
-    guardStorageWrite(s, v, context, dst, width);
-    s.set(dst, value, width);
+    const destination = resolveStorageWrite(s, v, context, dst, width);
+
+    writeStorage(s, v, destination, value, width);
     stepRegister(s, v, "edi", delta);
   };
 }
@@ -112,8 +119,8 @@ function lodsUnit(width: OperandWidth): StringUnit {
     const src = s.operand(0);
     const delta = stringDelta(s, v, width);
 
-    guardStorageRead(s, v, context, src, width);
-    const value = s.get(src, width);
+    const source = resolveStorageRead(s, v, context, src, width);
+    const value = readStorage(s, v, source, width);
 
     s.set(s.reg(accumulator(width)), value, width);
     stepRegister(s, v, "esi", delta);
@@ -125,10 +132,10 @@ function scasUnit(width: OperandWidth): StringUnit {
     const rightOperand = s.operand(0);
     const delta = stringDelta(s, v, width);
 
-    guardStorageRead(s, v, context, rightOperand, width);
+    const rightAccess = resolveStorageRead(s, v, context, rightOperand, width);
 
     const left = v.truncate(width, s.get(s.reg(accumulator(width)), width));
-    const right = v.truncate(width, s.get(rightOperand, width));
+    const right = v.truncate(width, readStorage(s, v, rightAccess, width));
     const result = v.truncate(width, v.binary("sub", left, right));
 
     s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));

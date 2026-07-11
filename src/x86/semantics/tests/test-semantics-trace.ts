@@ -1,6 +1,6 @@
 import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
-import type { CpuException } from "#x86/exceptions.js";
-import { mem, operand, reg, semanticVar } from "#x86/semantics/refs.js";
+import { pageFaultErrorCode, type CpuException } from "#x86/exceptions.js";
+import { operand, reg, semanticVar } from "#x86/semantics/refs.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import type { Values } from "#ir/values.js";
 import type {
@@ -10,6 +10,7 @@ import type {
   LoopBody,
   LoopSemanticsBuilder,
   MemoryAccessKind,
+  SemanticBranchHint,
   SemanticBuildContext,
   SemanticOperandInfo,
   SemanticOperandInput,
@@ -21,6 +22,7 @@ import type {
 } from "#x86/semantics/builder.js";
 import type {
   MemRef,
+  MemoryAccess,
   OperandInput,
   OperandRef,
   RegRef,
@@ -100,7 +102,9 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   readonly #const64Values = new Map<bigint, Value>();
   readonly #inlineValues = new Map<Value, string>();
   readonly #displayValues = new Map<Value, number>();
+  readonly #memoryDescriptions = new WeakMap<MemRef, string>();
   #nextVarIndex = 0;
+  #nextMemoryAccessId = 0;
   #currentEipValue: Value | undefined;
   #nextEipValue: Value | undefined;
   #nextValueId = 0;
@@ -186,8 +190,22 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     return reg(regInput);
   }
 
-  mem(address: ValueInput): MemRef {
-    return mem(address);
+  mem(segment: SegmentRegister, offset: ValueInput): MemRef {
+    const memory: MemRef = {
+      segment: { kind: "static", reg: segment },
+      offset
+    };
+
+    this.#memoryDescriptions.set(memory, `segment(${segment}, ${this.#value(offset)})`);
+    return memory;
+  }
+
+  operandMem(operandRef: OperandInput, displacement?: ValueInput): MemRef {
+    const memory = this.#describedMemory(`operand(${this.#storage(operandRef)})`);
+
+    return displacement === undefined
+      ? memory
+      : this.#describedMemory(`offset(${this.#memory(memory)}, ${this.#value(displacement)})`);
   }
 
   var(seed: ValueInput): SemanticVar {
@@ -221,8 +239,54 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     this.#emit(`set ${this.#storage(target)}:${accessWidth} <- ${this.#value(value)}`);
   }
 
-  memoryGuard(address: ValueInput, byteLength: ValueInput, access: MemoryAccessKind): void {
-    this.#emit(`guard ${access} ${this.#value(address)}:${this.#value(byteLength)}`);
+  memoryResolve<TIntent extends MemoryAccessKind>(
+    memory: MemRef,
+    byteLength: ValueInput,
+    intent: TIntent
+  ): MemoryAccess<TIntent> {
+    const id = this.#nextMemoryAccessId++;
+    const linearAddress = (-id - 1) as Value;
+
+    this.#inlineValues.set(linearAddress, `r${id}`);
+    const valid = this.#alloc(`valid(${this.#value(linearAddress)}.${intent})`);
+    const invalid = this.#alloc(`not(${this.#value(valid)})`);
+    const access: MemoryAccess<TIntent> = {
+      kind: "memoryAccess",
+      linearAddress,
+      byteLength,
+      invalid,
+      intent
+    };
+
+    this.#emit(
+      `resolve ${this.#value(linearAddress)} = ${this.#memory(memory)}:${this.#value(byteLength)}`
+    );
+    return access;
+  }
+
+  memoryRead(
+    access: MemoryAccess,
+    byteOffset: ValueInput,
+    width: OperandWidth,
+    options: GetOptions = {}
+  ): Value {
+    const out = this.#alloc(
+      `read ${this.#access(access)}+${this.#value(byteOffset)}:${width}${options.signed === true ? ":signed" : ""}`
+    );
+
+    this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
+    return out;
+  }
+
+  memoryWrite(
+    access: MemoryAccess<"write">,
+    byteOffset: ValueInput,
+    value: ValueInput,
+    width: OperandWidth
+  ): void {
+    this.#emit(
+      `write ${this.#access(access)}+${this.#value(byteOffset)}:${width} <- ${this.#value(value)}`
+    );
   }
 
   address(operandRef: OperandInput): Value {
@@ -230,10 +294,6 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
 
     this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
     return out;
-  }
-
-  linearAddress(operandRef: OperandInput): Value {
-    return this.address(operandRef);
   }
 
   #binary64(operator: BinaryOperator, a: ValueInput, b: ValueInput): Value {
@@ -311,17 +371,38 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     this.#emitTerminator(`jump ${this.#value(target)}`);
   }
 
-  if(condition: ValueInput, thenBuild: IfBody): void {
+  if(condition: ValueInput, thenBuild: IfBody, _hint?: SemanticBranchHint): void {
     this.#emit(`if ${this.#value(condition)}`);
+    this.#traceIfArm(thenBuild);
+    this.#emit("ifEnd");
+  }
+
+  ifElse(
+    condition: ValueInput,
+    thenBuild: IfBody,
+    elseBuild: IfBody,
+    _hint?: SemanticBranchHint
+  ): void {
+    this.#emit(`if ${this.#value(condition)}`);
+    const thenCompletes = this.#traceIfArm(thenBuild);
+
+    this.#emit("else");
+    const elseCompletes = this.#traceIfArm(elseBuild);
+
+    this.#emit("ifEnd");
+    this.#terminated = thenCompletes && elseCompletes;
+  }
+
+  #traceIfArm(build: IfBody): boolean {
     const parentTerminated = this.#terminated;
 
     this.#terminated = false;
     try {
-      thenBuild(this, this.values);
+      build(this, this.values);
+      return this.#terminated;
     } finally {
       this.#terminated = parentTerminated;
     }
-    this.#emit("ifEnd");
   }
 
   loop(body: LoopBody): void {
@@ -337,6 +418,19 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   }
 
   cpuException(exception: CpuException<ValueInput>): void {
+    if (exception.kind === "PF") {
+      const resolvedAddress = this.#inlineValues.get(exception.linearAddress);
+
+      if (resolvedAddress !== undefined) {
+        this.#emitTerminator(
+          `cpuException ${exception.kind} ${resolvedAddress}.${
+            exception.errorCode === pageFaultErrorCode("dataWrite") ? "write" : "read"
+          }`
+        );
+        return;
+      }
+    }
+
     this.#emitTerminator(`cpuException ${exception.kind}`);
   }
 
@@ -393,11 +487,39 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
         return `op${input.index}`;
       case "reg":
         return input.reg;
-      case "mem":
-        return `mem(${this.#value(input.address)})`;
       case "var":
         return `var${input.index}`;
     }
+  }
+
+  #describedMemory(description: string): MemRef {
+    // Keep the trace description in the side table so operand-derived refs do
+    // not manufacture value nodes.
+    const memory: MemRef = {
+      segment: { kind: "static", reg: "ds" },
+      offset: 0 as Value
+    };
+
+    this.#memoryDescriptions.set(memory, description);
+    return memory;
+  }
+
+  #memory(memory: MemRef): string {
+    const described = this.#memoryDescriptions.get(memory);
+
+    if (described !== undefined) {
+      return described;
+    }
+
+    const segment = memory.segment.kind === "static"
+      ? memory.segment.reg
+      : `dynamic(${this.#value(memory.segment.index)})`;
+
+    return `segment(${segment}, ${this.#value(memory.offset)})`;
+  }
+
+  #access(access: MemoryAccess): string {
+    return `${this.#value(access.linearAddress)}.${access.intent}`;
   }
 
   #value(input: ValueInput): string {

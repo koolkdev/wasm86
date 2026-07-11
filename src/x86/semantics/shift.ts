@@ -6,7 +6,7 @@ import type {
 import type { Value } from "#x86/semantics/refs.js";
 import type { OperandWidth } from "#x86/types.js";
 import { writeShiftFlags } from "./flag-writes.js";
-import { guardStorageReadWrite } from "./memory.js";
+import { readStorage, resolveStorageReadWrite, writeStorage } from "./memory.js";
 
 export type ShiftOp = "shl" | "shr" | "sar";
 export type DoubleShiftOp = "shld" | "shrd";
@@ -21,16 +21,16 @@ export function shiftSemantic(
   return (s, v, context) => {
     const dst = s.operand(0);
 
-    guardStorageReadWrite(s, v, context, dst, width);
+    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
 
-    const value = v.truncate(width, s.get(dst, width));
+    const value = v.truncate(width, readStorage(s, v, dstStorage, width));
     const rawCount = readShiftCount(s, v, countSource);
     const count = v.binary("and", rawCount, v.const(0x1f));
     const shiftedResult = v.truncate(width, shiftResult(v, op, width, value, count));
     const result = v.select(v.compare(32, "ne", count, v.const(0)), shiftedResult, value);
 
     writeShiftFlags(s, v, { op, width, value, count, result });
-    s.set(dst, result, width);
+    writeStorage(s, v, dstStorage, result, width);
   };
 }
 
@@ -43,9 +43,9 @@ export function doubleShiftSemantic(
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageReadWrite(s, v, context, dst, width);
+    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
 
-    const value = v.truncate(width, s.get(dst, width));
+    const value = v.truncate(width, readStorage(s, v, dstStorage, width));
     const source = v.truncate(width, s.get(src, width));
     const rawCount = readDoubleShiftCount(s, countSource);
     const count = v.binary("and", rawCount, v.const(0x1f));
@@ -53,7 +53,7 @@ export function doubleShiftSemantic(
     const result = v.select(v.compare(32, "ne", count, v.const(0)), shiftedResult, value);
 
     writeShiftFlags(s, v, { op, width, value, count, result });
-    s.set(dst, result, width);
+    writeStorage(s, v, dstStorage, result, width);
   };
 }
 

@@ -7,7 +7,7 @@ import {
   wasmCpuStatusFlagsOf
 } from "#runtime/tests/fixtures/cpu-state.js";
 import { HostExit } from "#wasm/exit.js";
-import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { startAddress } from "#wasm/tests/helpers.js";
 import {
   assertInterpreterStateEquals,
@@ -229,7 +229,7 @@ test("CMPXCHG memory destination fault leaves architectural state unchanged", as
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, readPageFaultExit(faultAddress));
+  deepStrictEqual(exit, writePageFaultExit(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

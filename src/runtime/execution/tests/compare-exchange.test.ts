@@ -11,7 +11,7 @@ import {
 } from "#runtime/tests/fixtures/helpers.js";
 import { engineFixtureStartAddress } from "#runtime/tests/fixtures/programs.js";
 import type { EngineFixture } from "#runtime/tests/fixtures/types.js";
-import { pageFault } from "#x86/exceptions.js";
+import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
 
 const trap = [0xcd, 0x2e] as const;
@@ -199,7 +199,7 @@ const fixtures = [
     },
     expected: {
       result: {
-        stop: { kind: "cpuException", exception: pageFault(0xfffe, 0) }
+        stop: { kind: "cpuException", exception: pageFault(0xfffe, PageFaultErrorCode.WRITE) }
       },
       state: {
         eax: 5,
@@ -223,7 +223,7 @@ const fixtures = [
     },
     expected: {
       result: {
-        stop: { kind: "cpuException", exception: pageFault(0xfffc, 0) }
+        stop: { kind: "cpuException", exception: pageFault(0xfffc, PageFaultErrorCode.WRITE) }
       },
       state: {
         eax: 0x1111_1111,

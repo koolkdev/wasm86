@@ -1,19 +1,19 @@
 import type { OperandWidth } from "#x86/types.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import { guardStorageReadWrite } from "./memory.js";
+import { readStorage, resolveStorageReadWrite, writeStorage } from "./memory.js";
 
 export function xchgSemantic(width: OperandWidth = 32): SemanticTemplate {
   return (s, v, context) => {
     const leftOperand = s.operand(0);
     const rightOperand = s.operand(1);
 
-    guardStorageReadWrite(s, v, context, leftOperand, width);
-    guardStorageReadWrite(s, v, context, rightOperand, width);
+    const leftStorage = resolveStorageReadWrite(s, v, context, leftOperand, width);
+    const rightStorage = resolveStorageReadWrite(s, v, context, rightOperand, width);
 
-    const left = s.get(leftOperand, width);
-    const right = s.get(rightOperand, width);
+    const left = readStorage(s, v, leftStorage, width);
+    const right = readStorage(s, v, rightStorage, width);
 
-    s.set(rightOperand, left, width);
-    s.set(leftOperand, right, width);
+    writeStorage(s, v, rightStorage, left, width);
+    writeStorage(s, v, leftStorage, right, width);
   };
 }

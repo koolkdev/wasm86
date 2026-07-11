@@ -1,10 +1,17 @@
 import type { Values } from "#ir/values.js";
 import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
-import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
+import type { OperandRef, Value, ValueInput } from "#x86/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, type X86Flag } from "#x86/flags.js";
-import type { OperandWidth, Reg16, Reg32, RegName } from "#x86/types.js";
+import type { OperandWidth, Reg16, Reg32 } from "#x86/types.js";
 import { buildFlagImage, writeFlagsFromImage } from "./flag-image.js";
-import { guardStorageRead, guardStorageWrite } from "./memory.js";
+import {
+  readStorage,
+  resolveMemoryAccess,
+  resolveStorageRead,
+  resolveStorageWrite,
+  writeStorage,
+  type ResolvedStorageAccess
+} from "./memory.js";
 
 export type StackOperandWidth = Extract<OperandWidth, 16 | 32>;
 
@@ -33,30 +40,36 @@ const popaCells = [
 export function pushStack(
   s: SemanticsBuilder,
   v: Values,
-  context: SemanticBuildContext,
   width: StackOperandWidth,
   value: ValueInput
 ): void {
   const esp = s.get(s.reg("esp"));
   const nextEsp = v.binary("sub", esp, v.const(stackByteLength(width)));
-  const stack = s.mem(nextEsp);
+  const stack = resolveMemoryAccess(
+    s,
+    s.mem("ss", nextEsp),
+    v.const(stackByteLength(width)),
+    "write"
+  );
 
-  guardStorageWrite(s, v, context, stack, width);
-  s.set(stack, value, width);
+  s.memoryWrite(stack, v.const(0), value, width);
   s.set(s.reg("esp"), nextEsp);
 }
 
 export function popStack(
   s: SemanticsBuilder,
   v: Values,
-  context: SemanticBuildContext,
   width: StackOperandWidth
 ): Value {
   const esp = s.get(s.reg("esp"));
-  const stack = s.mem(esp);
+  const stack = resolveMemoryAccess(
+    s,
+    s.mem("ss", esp),
+    v.const(stackByteLength(width)),
+    "read"
+  );
 
-  guardStorageRead(s, v, context, stack, width);
-  const value = s.get(stack, width);
+  const value = s.memoryRead(stack, v.const(0), width);
   const nextEsp = v.binary("add", esp, v.const(stackByteLength(width)));
 
   s.set(s.reg("esp"), nextEsp);
@@ -67,32 +80,33 @@ export function pushSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   return (s, v, context) => {
     const src = s.operand(0);
 
-    guardStorageRead(s, v, context, src, width);
-    pushStack(s, v, context, width, s.get(src, width));
+    const source = resolveStorageRead(s, v, context, src, width);
+
+    pushStack(s, v, width, readStorage(s, v, source, width));
   };
 }
 
 export function pushfdSemantic(): SemanticTemplate {
-  return (s, v, context) => {
-    pushFlags(s, v, context, 32, x86Flags);
+  return (s, v) => {
+    pushFlags(s, v, 32, x86Flags);
   };
 }
 
 export function pushfSemantic(): SemanticTemplate {
-  return (s, v, context) => {
-    pushFlags(s, v, context, 16, x86Low16Flags);
+  return (s, v) => {
+    pushFlags(s, v, 16, x86Low16Flags);
   };
 }
 
 export function popfdSemantic(): SemanticTemplate {
-  return (s, v, context) => {
-    popFlags(s, v, context, 32, x86Flags);
+  return (s, v) => {
+    popFlags(s, v, 32, x86Flags);
   };
 }
 
 export function popfSemantic(): SemanticTemplate {
-  return (s, v, context) => {
-    popFlags(s, v, context, 16, x86Low16Flags);
+  return (s, v) => {
+    popFlags(s, v, 16, x86Low16Flags);
   };
 }
 
@@ -125,17 +139,21 @@ function pushAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
   const nextEsp = v.binary("sub", esp, v.const(totalBytes));
-
-  s.memoryGuard(nextEsp, v.const(totalBytes), "write");
+  const access = resolveMemoryAccess(
+    s,
+    s.mem("ss", nextEsp),
+    v.const(totalBytes),
+    "write"
+  );
 
   const values = width === 32
     ? pushadRegisters.map((reg) => reg === "esp" ? esp : s.get(s.reg(reg)))
     : pushaRegisters.map((reg) => reg === "sp" ? v.truncate(16, esp) : s.get(s.reg(reg), 16));
 
   values.forEach((value, index) => {
-    const address = v.binary("sub", esp, v.const(cellBytes * (index + 1)));
+    const byteOffset = totalBytes - cellBytes * (index + 1);
 
-    s.set(s.mem(address), value, width);
+    s.memoryWrite(access, v.const(byteOffset), value, width);
   });
   s.set(s.reg("esp"), nextEsp);
 }
@@ -144,12 +162,17 @@ function popAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void 
   const esp = s.get(s.reg("esp"));
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
-
-  s.memoryGuard(esp, v.const(totalBytes), "read");
-
-  const loaded = width === 32
-    ? popCells(s, v, esp, 32, popadCells)
-    : popCells(s, v, esp, 16, popaCells);
+  const cells = width === 32 ? popadCells : popaCells;
+  const access = resolveMemoryAccess(
+    s,
+    s.mem("ss", esp),
+    v.const(totalBytes),
+    "read"
+  );
+  const loaded = cells.map(([reg, offset]) => ({
+    reg,
+    value: s.memoryRead(access, v.const(offset), width)
+  }));
   const nextEsp = v.binary("add", esp, v.const(totalBytes));
 
   for (const { reg, value } of loaded) {
@@ -159,38 +182,23 @@ function popAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void 
   s.set(s.reg("esp"), nextEsp);
 }
 
-function popCells<TReg extends RegName>(
-  s: SemanticsBuilder,
-  v: Values,
-  esp: ValueInput,
-  width: StackOperandWidth,
-  cells: readonly (readonly [TReg, number])[]
-): ReadonlyArray<Readonly<{ reg: TReg; value: Value }>> {
-  return cells.map(([reg, offset]) => ({
-    reg,
-    value: s.get(s.mem(offset === 0 ? esp : v.binary("add", esp, v.const(offset))), width)
-  }));
-}
-
 function pushFlags(
   s: SemanticsBuilder,
   v: Values,
-  context: SemanticBuildContext,
   width: StackOperandWidth,
   flags: readonly X86Flag[]
 ): void {
   // Reserved bit 1 and the user-mode IF image bit are set.
-  pushStack(s, v, context, width, buildFlagImage(s, v, flags, 0x202));
+  pushStack(s, v, width, buildFlagImage(s, v, flags, 0x202));
 }
 
 function popFlags(
   s: SemanticsBuilder,
   v: Values,
-  context: SemanticBuildContext,
   width: StackOperandWidth,
   flags: readonly X86Flag[]
 ): void {
-  const image = popStack(s, v, context, width);
+  const image = popStack(s, v, width);
 
   writeFlagsFromImage(s, v, flags, image);
 }
@@ -200,28 +208,26 @@ export function popSemantic(width: StackOperandWidth = 32): SemanticTemplate {
     const dst = s.operand(0);
     // SDM order: esp is incremented before the destination EA is computed,
     // so an esp-based destination sees the new esp.
-    const value = popStack(s, v, context, width);
+    const value = popStack(s, v, width);
 
-    s.set(popTargetStorage(s, v, context, width, dst), value, width);
+    writeStorage(s, v, popTargetStorage(s, v, context, width, dst), value, width);
   };
 }
 
 export function popSegmentSemantic(width: StackOperandWidth = 32): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
-    const value = popStack(s, v, context, width);
+    const value = popStack(s, v, width);
 
     s.set(dst, value, 16);
   };
 }
 
 export function leaveSemantic(): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const frame = s.get(s.reg("ebp"));
-    const savedFrameStorage = s.mem(frame);
-
-    guardStorageRead(s, v, context, savedFrameStorage, 32);
-    const savedFrame = s.get(savedFrameStorage);
+    const access = resolveMemoryAccess(s, s.mem("ss", frame), v.const(4), "read");
+    const savedFrame = s.memoryRead(access, v.const(0), 32);
     const nextEsp = v.binary("add", frame, v.const(4));
 
     s.set(s.reg("esp"), nextEsp);
@@ -235,16 +241,15 @@ function popTargetStorage(
   context: SemanticBuildContext,
   width: StackOperandWidth,
   dst: OperandRef
-): StorageInput {
+): ResolvedStorageAccess<"write"> {
   if (context.operandInfo(dst).storage === "mem") {
-    const target = s.mem(s.linearAddress(dst));
-
-    guardStorageWrite(s, v, context, target, width);
-    return target;
+    return {
+      kind: "memory",
+      access: resolveMemoryAccess(s, s.operandMem(dst), v.const(stackByteLength(width)), "write")
+    };
   }
 
-  guardStorageWrite(s, v, context, dst, width);
-  return dst;
+  return resolveStorageWrite(s, v, context, dst, width);
 }
 
 function stackByteLength(width: StackOperandWidth): 2 | 4 {

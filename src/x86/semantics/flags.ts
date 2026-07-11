@@ -1,6 +1,7 @@
 import { type X86Flag } from "#x86/flags.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { buildFlagImage, writeFlagsFromImage } from "./flag-image.js";
+import { resolveMemoryAccess } from "./memory.js";
 
 const lahfFlags = ["CF", "PF", "AF", "ZF", "SF"] as const satisfies readonly X86Flag[];
 
@@ -30,10 +31,9 @@ export function sahfSemantic(): SemanticTemplate {
 
 export function xlatSemantic(): SemanticTemplate {
   return (s, v) => {
-    const tableBase = s.linearAddress(s.operand(0));
-    const address = v.binary("add", tableBase, s.get(s.reg("al"), 8));
+    const memory = s.operandMem(s.operand(0), s.get(s.reg("al"), 8));
+    const access = resolveMemoryAccess(s, memory, v.const(1), "read");
 
-    s.memoryGuard(address, v.const(1), "read");
-    s.set(s.reg("al"), s.get(s.mem(address), 8), 8);
+    s.set(s.reg("al"), s.memoryRead(access, v.const(0), 8), 8);
   };
 }

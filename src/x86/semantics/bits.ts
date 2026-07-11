@@ -1,13 +1,20 @@
 import type { Values } from "#ir/values.js";
 import type {
-  SemanticBuildContext,
   SemanticsBuilder,
   SemanticTemplate
 } from "#x86/semantics/builder.js";
-import type { OperandRef, StorageInput, Value, ValueInput } from "#x86/semantics/refs.js";
+import type { OperandRef, Value, ValueInput } from "#x86/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#x86/types.js";
 import { writeStatusFlagValues } from "./flag-writes.js";
-import { guardStorageRead, guardStorageReadWrite, resolvedOperandStorage } from "./memory.js";
+import {
+  readStorage,
+  resolveMemoryAccess,
+  resolveStorageRead,
+  resolveStorageReadWrite,
+  resolvedOperandStorage,
+  writeStorage,
+  type ResolvedStorageAccess
+} from "./memory.js";
 
 export type BitTestOp = "bt" | "bts" | "btr" | "btc";
 export type BitOffsetSource = "reg" | "imm8";
@@ -28,14 +35,20 @@ export function bitTestSemantic(
       return;
     }
 
-    if (dstStorage === "mem") {
-      guardBitTestAccess(s, v, context, op, dst, width);
-    }
-
-    const value = v.truncate(width, s.get(dst, width));
     const bitIndex = simpleBitIndex(s, v, width, offsetSource);
 
-    writeBitTestResult(s, v, op, width, dst, value, bitIndex);
+    if (op === "bt") {
+      const target = resolveStorageRead(s, v, context, dst, width);
+      const value = v.truncate(width, readStorage(s, v, target, width));
+
+      writeBitTestFlag(s, v, value, bitIndex);
+      return;
+    }
+
+    const target = resolveStorageReadWrite(s, v, context, dst, width);
+    const value = v.truncate(width, readStorage(s, v, target, width));
+
+    writeBitTestResult(s, v, op, width, target, value, bitIndex);
   };
 }
 
@@ -44,9 +57,9 @@ export function bitScanSemantic(op: BitScanOp, width: BitFieldWidth): SemanticTe
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, v, context, src, width);
+    const sourceAccess = resolveStorageRead(s, v, context, src, width);
 
-    const source = v.truncate(width, s.get(src, width));
+    const source = v.truncate(width, readStorage(s, v, sourceAccess, width));
     const oldDestination = s.get(dst, width);
     const sourceIsZero = v.compare(width, "eq", source, v.const(0));
     const scan = bitScanIndex(v, op, source);
@@ -68,23 +81,48 @@ function bitStringMemorySemantic(
   const offset = s.get(s.operand(1), width, { signed: true });
   const element = v.binary("shr_s", offset, v.const(elementShift(width)));
   const byteOffset = v.binary("shl", element, v.const(byteShift(width)));
-  const address = v.binary("add", s.linearAddress(dst), byteOffset);
-
-  guardAddressBitTestAccess(s, v, op, address, width);
-
-  const storage = s.mem(address);
-  const value = v.truncate(width, s.get(storage, width));
+  const memory = s.operandMem(dst, byteOffset);
   const bitIndex = v.binary("and", offset, v.const(width - 1));
 
-  writeBitTestResult(s, v, op, width, storage, value, bitIndex);
+  if (op === "bt") {
+    const access = resolveMemoryAccess(s, memory, v.const(width / 8), "read");
+    const value = v.truncate(width, s.memoryRead(access, v.const(0), width));
+
+    writeBitTestFlag(s, v, value, bitIndex);
+    return;
+  }
+
+  const access = resolveMemoryAccess(s, memory, v.const(width / 8), "write");
+  const value = v.truncate(width, s.memoryRead(access, v.const(0), width));
+
+  writeBitTestResult(
+    s,
+    v,
+    op,
+    width,
+    { kind: "memory", access },
+    value,
+    bitIndex
+  );
 }
 
 function writeBitTestResult(
   s: SemanticsBuilder,
   v: Values,
-  op: BitTestOp,
+  op: Exclude<BitTestOp, "bt">,
   width: BitFieldWidth,
-  target: StorageInput,
+  target: ResolvedStorageAccess<"write">,
+  value: Value,
+  bitIndex: Value
+): void {
+  writeBitTestFlag(s, v, value, bitIndex);
+
+  writeStorage(s, v, target, bitTestWriteResult(v, op, width, value, bitIndex), width);
+}
+
+function writeBitTestFlag(
+  s: SemanticsBuilder,
+  v: Values,
   value: Value,
   bitIndex: Value
 ): void {
@@ -94,12 +132,6 @@ function writeBitTestResult(
   // undefined; the local hardware probe preserves them, so leave them
   // untouched by writing only CF.
   s.writeFlag("CF", bit);
-
-  if (op === "bt") {
-    return;
-  }
-
-  s.set(target, bitTestWriteResult(v, op, width, value, bitIndex), width);
 }
 
 function bitTestWriteResult(
@@ -174,38 +206,6 @@ function parityFlag(v: Values, value: ValueInput): Value {
 
 function lowBit(v: Values, value: ValueInput): Value {
   return v.binary("and", value, v.const(1));
-}
-
-function guardBitTestAccess(
-  s: SemanticsBuilder,
-  v: Values,
-  context: SemanticBuildContext,
-  op: BitTestOp,
-  storage: StorageInput,
-  width: BitFieldWidth
-): void {
-  if (op === "bt") {
-    guardStorageRead(s, v, context, storage, width);
-    return;
-  }
-
-  guardStorageReadWrite(s, v, context, storage, width);
-}
-
-function guardAddressBitTestAccess(
-  s: SemanticsBuilder,
-  v: Values,
-  op: BitTestOp,
-  address: Value,
-  width: BitFieldWidth
-): void {
-  const byteLength = v.const(width / 8);
-
-  s.memoryGuard(address, byteLength, "read");
-
-  if (op !== "bt") {
-    s.memoryGuard(address, byteLength, "write");
-  }
 }
 
 function elementShift(width: BitFieldWidth): 4 | 5 {

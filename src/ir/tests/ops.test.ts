@@ -66,19 +66,19 @@ test("memory ops expose address/value inputs and memory storage access", () => {
   const address = valueId(5);
   const value = valueId(6);
 
-  deepStrictEqual(opAccess({ kind: "memory.read", address, width: 32 }), {
+  deepStrictEqual(opAccess({ kind: "memory.read", address, byteOffset: 0, width: 32 }), {
     valueInputs: [address],
     valueOutput: { type: "i32" },
     reads: [memory],
     writes: []
   });
-  deepStrictEqual(opAccess({ kind: "memory.write", address, value, width: 32 }), {
+  deepStrictEqual(opAccess({ kind: "memory.write", address, byteOffset: 0, value, width: 32 }), {
     valueInputs: [address, value],
     reads: [],
     writes: [memory]
   });
-  strictEqual(opMutates({ kind: "memory.read", address, width: 32 }), false);
-  strictEqual(opMutates({ kind: "memory.write", address, value, width: 32 }), true);
+  strictEqual(opMutates({ kind: "memory.read", address, byteOffset: 0, width: 32 }), false);
+  strictEqual(opMutates({ kind: "memory.write", address, byteOffset: 0, value, width: 32 }), true);
 });
 
 test("var ops expose the var slot and a plain i32 output", () => {
@@ -111,6 +111,19 @@ test("memory.check observes memory bounds and produces a boolean predicate", () 
   strictEqual(opMutates({ kind: "memory.check", address, byteLength, access: "write" }), false);
 });
 
+test("memory.resolve is access-neutral and produces a boolean legacy resolution result", () => {
+  const address = valueId(5);
+  const byteLength = valueId(6);
+
+  deepStrictEqual(opAccess({ kind: "memory.resolve", address, byteLength }), {
+    valueInputs: [address, byteLength],
+    valueOutput: { type: "i32", bounds: fitsUnsigned(1) },
+    reads: [memoryBounds],
+    writes: []
+  });
+  strictEqual(opMutates({ kind: "memory.resolve", address, byteLength }), false);
+});
+
 test("cpu.resolveFlag exposes lazy flag channel reads and a boolean output", () => {
   deepStrictEqual(opAccess({ kind: "cpu.resolveFlag", flag: "ZF" }), {
     valueInputs: [],
@@ -129,8 +142,14 @@ test("cpu.resolveFlag exposes lazy flag channel reads and a boolean output", () 
 test("op output bounds match narrow and signed reads", () => {
   const unsignedByteRead: IrOp = { kind: "state.read", slot: gprChannel("al") };
   const signedByteRead: IrOp = { kind: "state.read", slot: gprChannel("al"), signed: true };
-  const unsignedMemoryRead: IrOp = { kind: "memory.read", address: valueId(1), width: 16 };
-  const signedMemoryRead: IrOp = { kind: "memory.read", address: valueId(1), width: 16, signed: true };
+  const unsignedMemoryRead: IrOp = { kind: "memory.read", address: valueId(1), byteOffset: 0, width: 16 };
+  const signedMemoryRead: IrOp = {
+    kind: "memory.read",
+    address: valueId(1),
+    byteOffset: 0,
+    width: 16,
+    signed: true
+  };
 
   deepStrictEqual(opValueOutput(unsignedByteRead), { type: "i32", bounds: fitsUnsigned(8) });
   deepStrictEqual(opValueOutput(signedByteRead), { type: "i32", bounds: signExtended(8) });
@@ -156,6 +175,9 @@ test("op output bounds match narrow and signed reads", () => {
   });
   deepStrictEqual(opValueOutput(unsignedMemoryRead), { type: "i32", bounds: fitsUnsigned(16) });
   deepStrictEqual(opValueOutput(signedMemoryRead), { type: "i32", bounds: signExtended(16) });
-  deepStrictEqual(opValueOutput({ kind: "memory.read", address: valueId(1), width: 32, signed: true }), { type: "i32" });
+  deepStrictEqual(
+    opValueOutput({ kind: "memory.read", address: valueId(1), byteOffset: 0, width: 32, signed: true }),
+    { type: "i32" }
+  );
   strictEqual(opValueOutput({ kind: "state.write", slot: gprChannel("eax"), value: valueId(1) }), undefined);
 });

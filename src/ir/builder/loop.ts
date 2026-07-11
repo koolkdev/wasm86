@@ -4,13 +4,14 @@ import { isX86StatusFlag, type X86Flag } from "#x86/flags.js";
 import type {
   GetOptions,
   LoopSemanticsBuilder,
-  MemoryAccessKind,
   SemanticOps,
   SimpleFlagSource
 } from "#x86/semantics/builder.js";
 import {
   toStorageRef,
   type MemRef,
+  type MemoryAccess,
+  type MemoryAccessKind,
   type OperandInput,
   type OperandRef,
   type RegRef,
@@ -18,7 +19,9 @@ import {
   type Value,
   type ValueInput
 } from "#x86/semantics/refs.js";
-import type { OperandWidth, RegName } from "#x86/types.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
+import type { CpuException } from "#x86/exceptions.js";
+import type { IfBody, SemanticBranchHint } from "#x86/semantics/builder.js";
 import { type StateChannel } from "../slots.js";
 import type { Action, LoopCarriedCell } from "../actions.js";
 import { BodyBuilder, type BodyActionSink } from "../body-builder.js";
@@ -32,9 +35,12 @@ type LoopCell = Required<LoopCarriedCell>;
 
 export type LoopSemanticsBuilderContext = Readonly<{
   host: SemanticOps;
+  memory: LoopMemoryOps;
   state: State;
   operands: OperandResolver;
 }>;
+
+export type LoopMemoryOps = Pick<SemanticOps, "memoryRead" | "memoryWrite">;
 
 export type LoopBuilderContext = Readonly<{
   values: ValueTable;
@@ -163,8 +169,13 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
     return this.#context.host.reg(regInput);
   }
 
-  mem(address: ValueInput): MemRef {
-    return this.#context.host.mem(address);
+  mem(segment: SegmentRegister, offset: ValueInput): MemRef {
+    return this.#context.host.mem(segment, offset);
+  }
+
+  operandMem(operandRef: OperandInput, displacement?: ValueInput): MemRef {
+    this.#assertOperandSupported(operandRef);
+    return this.#context.host.operandMem(operandRef, displacement);
   }
 
   get(source: StorageInput, accessWidth?: OperandWidth, options?: GetOptions): Value {
@@ -177,18 +188,35 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
     this.#context.host.set(target, value, accessWidth);
   }
 
-  memoryGuard(address: ValueInput, byteLength: ValueInput, access: MemoryAccessKind): void {
-    this.#context.host.memoryGuard(address, byteLength, access);
+  memoryResolve<TIntent extends MemoryAccessKind>(
+    memory: MemRef,
+    byteLength: ValueInput,
+    intent: TIntent
+  ): MemoryAccess<TIntent> {
+    return this.#context.host.memoryResolve(memory, byteLength, intent);
+  }
+
+  memoryRead(
+    access: MemoryAccess,
+    byteOffset: ValueInput,
+    width: OperandWidth,
+    options?: GetOptions
+  ): Value {
+    return this.#context.memory.memoryRead(access, byteOffset, width, options);
+  }
+
+  memoryWrite(
+    access: MemoryAccess<"write">,
+    byteOffset: ValueInput,
+    value: ValueInput,
+    width: OperandWidth
+  ): void {
+    this.#context.memory.memoryWrite(access, byteOffset, value, width);
   }
 
   address(operandRef: OperandInput): Value {
     this.#assertOperandSupported(operandRef);
     return this.#context.host.address(operandRef);
-  }
-
-  linearAddress(operandRef: OperandInput): Value {
-    this.#assertOperandSupported(operandRef);
-    return this.#context.host.linearAddress(operandRef);
   }
 
   readFlag(flag: X86Flag): Value {
@@ -209,6 +237,38 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
       "input-backed conditions inside a loop body are unsupported"
     );
     return this.#context.host.condition(cc);
+  }
+
+  if(
+    condition: ValueInput,
+    thenBuild: IfBody,
+    hint?: SemanticBranchHint
+  ): void {
+    this.#context.host.if(condition, this.#loopIfBody(thenBuild), hint);
+  }
+
+  ifElse(
+    condition: ValueInput,
+    thenBuild: IfBody,
+    elseBuild: IfBody,
+    hint?: SemanticBranchHint
+  ): void {
+    this.#context.host.ifElse(
+      condition,
+      this.#loopIfBody(thenBuild),
+      this.#loopIfBody(elseBuild),
+      hint
+    );
+  }
+
+  cpuException(exception: CpuException<ValueInput>): void {
+    this.#context.host.cpuException(exception);
+  }
+
+  #loopIfBody(build: IfBody): IfBody {
+    return (_host, values) => (
+      build as IfBody<LoopSemanticsBuilder>
+    )(this, values);
   }
 
   #assertStorageSupported(storage: StorageInput): void {

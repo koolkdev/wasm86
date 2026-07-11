@@ -4,11 +4,16 @@ import type {
   SemanticTemplate
 } from "#x86/semantics/builder.js";
 import { bitAt, lowBit, signBit } from "#x86/flag-values.js";
-import type { StorageInput, Value } from "#x86/semantics/refs.js";
+import type { Value } from "#x86/semantics/refs.js";
 import type { OperandWidth } from "#x86/types.js";
 import { semanticFlagOps } from "./flag-value-ops.js";
 import { writeRotateFlags } from "./flag-writes.js";
-import { guardStorageReadWrite } from "./memory.js";
+import {
+  readStorage,
+  resolveStorageReadWrite,
+  type ResolvedStorageAccess,
+  writeStorage
+} from "./memory.js";
 import { readShiftCount, type ShiftCountSource } from "./shift.js";
 
 export type RotateOp = "rol" | "ror" | "rcl" | "rcr";
@@ -25,18 +30,18 @@ export function rotateSemantic(
   return (s, v, context) => {
     const dst = s.operand(0);
 
-    guardStorageReadWrite(s, v, context, dst, width);
+    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
 
-    const value = v.truncate(width, s.get(dst, width));
+    const value = v.truncate(width, readStorage(s, v, dstStorage, width));
     const rawCount = readShiftCount(s, v, countSource);
     const count = v.binary("and", rawCount, v.const(0x1f));
 
     if (op === "rol" || op === "ror") {
-      writePlainRotate(s, v, op, width, value, count, dst);
+      writePlainRotate(s, v, op, width, value, count, dstStorage);
       return;
     }
 
-    writeCarryRotate(s, v, op, width, value, count, dst);
+    writeCarryRotate(s, v, op, width, value, count, dstStorage);
   };
 }
 
@@ -47,7 +52,7 @@ function writePlainRotate(
   width: OperandWidth,
   value: Value,
   count: Value,
-  dst: StorageInput
+  dst: ResolvedStorageAccess<"write">
 ): void {
   const effective = rotateCount(v, width, count);
   const result = v.truncate(width, rotateI32(v, rotateDirection(op), width, value, effective));
@@ -63,7 +68,7 @@ function writePlainRotate(
     carry,
     carryDefined: countIsNonZero
   });
-  s.set(dst, result, width);
+  writeStorage(s, v, dst, result, width);
 }
 
 function writeCarryRotate(
@@ -73,7 +78,7 @@ function writeCarryRotate(
   width: OperandWidth,
   value: Value,
   count: Value,
-  dst: StorageInput
+  dst: ResolvedStorageAccess<"write">
 ): void {
   const oldCf = s.readFlag("CF");
   const effective = throughCarryCount(v, width, count);
@@ -91,7 +96,7 @@ function writeCarryRotate(
     carryDefined: effectiveNonZero,
     oldCf
   });
-  s.set(dst, result, width);
+  writeStorage(s, v, dst, result, width);
 }
 
 function rotateI32(

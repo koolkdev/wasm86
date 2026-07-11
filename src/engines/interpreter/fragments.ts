@@ -84,8 +84,8 @@ class DecodeFragment {
 
     return this.#builder.opValue(
       signed && width !== 32
-        ? { kind: "memory.read", address, width, signed: true }
-        : { kind: "memory.read", address, width }
+        ? { kind: "memory.read", address, byteOffset: 0, width, signed: true }
+        : { kind: "memory.read", address, byteOffset: 0, width }
     );
   }
 

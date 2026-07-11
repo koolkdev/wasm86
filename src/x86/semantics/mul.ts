@@ -2,7 +2,7 @@ import type { Values } from "#ir/values.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#x86/semantics/builder.js";
 import type { StorageInput, Value } from "#x86/semantics/refs.js";
 import type { OperandWidth, RegName } from "#x86/types.js";
-import { guardStorageRead } from "./memory.js";
+import { readStorage, resolveStorageRead } from "./memory.js";
 
 type MultiplyKind = "signed" | "unsigned";
 type MultiplyProduct = Readonly<{ full: Value; low: Value; high: Value; overflow: Value }>;
@@ -19,9 +19,9 @@ function implicitMultiplySemantic(kind: MultiplyKind, width: OperandWidth): Sema
   return (s, v, context) => {
     const src = s.operand(0);
 
-    guardStorageRead(s, v, context, src, width);
+    const srcStorage = resolveStorageRead(s, v, context, src, width);
 
-    const right = s.get(src, width);
+    const right = readStorage(s, v, srcStorage, width);
     const left = s.get(s.reg(accumulatorForWidth(width)), width);
     const product = multiplyProduct(v, kind, width, left, right);
 
@@ -35,9 +35,9 @@ export function imulRegRmSemantic(width: OperandWidth): SemanticTemplate {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, v, context, src, width);
+    const srcStorage = resolveStorageRead(s, v, context, src, width);
 
-    const srcValue = s.get(src, width);
+    const srcValue = readStorage(s, v, srcStorage, width);
     const dstValue = s.get(dst, width);
 
     writeImulResult(s, v, width, dst, dstValue, srcValue);
@@ -49,9 +49,9 @@ export function imulRegRmImmSemantic(width: OperandWidth): SemanticTemplate {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    guardStorageRead(s, v, context, src, width);
+    const srcStorage = resolveStorageRead(s, v, context, src, width);
 
-    const srcValue = s.get(src, width);
+    const srcValue = readStorage(s, v, srcStorage, width);
     const immValue = s.get(s.operand(2), width);
 
     writeImulResult(s, v, width, dst, srcValue, immValue);

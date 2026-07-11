@@ -2,13 +2,12 @@ import { assert } from "#common/assert.js";
 import type { ConditionCode } from "#x86/conditions.js";
 import type { CpuException } from "#x86/exceptions.js";
 import { isX86StatusFlag, type X86Flag } from "#x86/flags.js";
-import { mem, operand, reg, toStorageRef } from "#x86/semantics/refs.js";
+import { operand, reg, toStorageRef } from "#x86/semantics/refs.js";
 import type {
   SemanticsBuilder,
   GetOptions,
   IfBody,
   LoopBody,
-  MemoryAccessKind,
   SemanticBranchHint,
   SemanticBuildContext,
   SemanticOperandInfo,
@@ -19,6 +18,8 @@ import type {
 } from "#x86/semantics/builder.js";
 import type {
   MemRef,
+  MemoryAccess,
+  MemoryAccessKind,
   OperandInput,
   OperandRef,
   RegRef,
@@ -27,16 +28,17 @@ import type {
   Value,
   ValueInput
 } from "#x86/semantics/refs.js";
-import type { OperandWidth, RegName } from "#x86/types.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
 import type {
   ExternalValueId,
   OperandBinding,
   SegmentDynamicOperandBinding,
   SegmentOperandBinding
 } from "./operands.js";
-import { ControlEmitter } from "./builder/control.js";
-import { LoopBuilder } from "./builder/loop.js";
+import { ControlEmitter, type IfOutcome } from "./builder/control.js";
+import { LoopBuilder, type LoopMemoryOps } from "./builder/loop.js";
 import { FinishEmitter } from "./builder/finish.js";
+import { MemoryManager } from "./builder/memory.js";
 import { OperandResolver } from "./builder/operands.js";
 import { SemanticScopeStack } from "./builder/scope.js";
 import { emitSegmentLoad, type SegmentMode } from "./builder/segments.js";
@@ -112,6 +114,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #control: ControlEmitter;
   readonly #finish: FinishEmitter;
   readonly #segmentMode: SegmentMode;
+  readonly #memory: MemoryManager;
   #instructionLocation: InstructionLocationValues | undefined;
   #finished = false;
   // "terminated" means the root body already holds its terminator.
@@ -122,8 +125,13 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#scopes = new SemanticScopeStack(this.#body);
     this.#state = new State(this.#values, () => this.#scopes.current.body, stateWriteLog);
     this.#operands = new OperandResolver(this.#values, this.#state, () => this.#scopes.current.operands);
+    this.#memory = new MemoryManager({
+      values: this.#values,
+      scopes: this.#scopes,
+      operands: this.#operands
+    });
     this.#control = new ControlEmitter(this.#state, stateWriteLog, this.#scopes, this, this.#operands);
-    this.#finish = new FinishEmitter(this.#state, this.#scopes, this.#control);
+    this.#finish = new FinishEmitter(this.#state, this.#scopes);
     this.#segmentMode = segmentMode;
   }
 
@@ -201,8 +209,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     return reg(regInput);
   }
 
-  mem(address: ValueInput): MemRef {
-    return mem(address);
+  mem(segment: SegmentRegister, offset: ValueInput): MemRef {
+    return this.#memory.mem(segment, offset);
+  }
+
+  operandMem(operandRef: OperandInput, displacement?: ValueInput): MemRef {
+    return this.#memory.operandMem(operandRef, displacement);
   }
 
   var(seed: ValueInput): SemanticVar {
@@ -221,8 +233,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
         return this.#scopes.current.body.opValue({ kind: "var.read", variable: storage.index });
       case "reg":
         return this.#state.gpr.read(storage.reg, accessWidth, options);
-      case "mem":
-        return this.#readMemory(storage.address, accessWidth, options);
       case "operand": {
         const binding = this.#operands.binding(storage.index);
 
@@ -242,7 +252,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "mem":
           case "memStatic":
           case "memDynamic":
-            return this.#readMemory(this.#operands.linearAddress(storage.index), accessWidth, options);
+            assert(false, "memory operands must be resolved before reading");
           case "regDynamic":
             return this.#state.gpr.readDynamic(this.#operands.dynamicGprSlot(binding, accessWidth), options);
           case "segmentDynamic":
@@ -263,9 +273,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       case "reg":
         this.#state.gpr.write(storage.reg, value, accessWidth);
         return;
-      case "mem":
-        this.#writeMemory(storage.address, value, accessWidth);
-        return;
       case "operand": {
         const binding = this.#operands.binding(storage.index);
 
@@ -280,8 +287,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
           case "mem":
           case "memStatic":
           case "memDynamic":
-            this.#writeMemory(this.#operands.linearAddress(storage.index), value, accessWidth);
-            return;
+            assert(false, "memory operands must be resolved before writing");
           case "regDynamic":
             this.#state.gpr.writeDynamic(this.#operands.dynamicGprSlot(binding, accessWidth), value);
             return;
@@ -302,19 +308,34 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#state.instructionCount.add(amount);
   }
 
-  memoryGuard(address: ValueInput, byteLength: ValueInput, access: MemoryAccessKind): void {
-    // Guest memory cannot be rolled back by any scheme, so a fault body
-    // cannot restore the pre-instruction state once the instruction stored.
-    assert(!this.#scopes.current.wroteMemory(), "a memory guard cannot follow a memory write in the same instruction");
-    this.#finish.guardIf(address, byteLength, access);
+  memoryResolve<TIntent extends MemoryAccessKind>(
+    memory: MemRef,
+    byteLength: ValueInput,
+    intent: TIntent
+  ): MemoryAccess<TIntent> {
+    return this.#memory.memoryResolve(memory, byteLength, intent);
+  }
+
+  memoryRead(
+    access: MemoryAccess,
+    byteOffset: ValueInput,
+    width: OperandWidth,
+    options: GetOptions = {}
+  ): Value {
+    return this.#memory.memoryRead(access, byteOffset, width, options);
+  }
+
+  memoryWrite(
+    access: MemoryAccess<"write">,
+    byteOffset: ValueInput,
+    value: ValueInput,
+    width: OperandWidth
+  ): void {
+    this.#memory.memoryWrite(access, byteOffset, value, width);
   }
 
   address(operandRef: OperandInput): Value {
     return this.#operands.address(operandRef.index);
-  }
-
-  linearAddress(operandRef: OperandInput): Value {
-    return this.#operands.linearAddress(operandRef.index);
   }
 
   readFlag(flag: X86Flag): Value {
@@ -349,7 +370,37 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void {
-    this.#control.if(condition, () => thenBuild(this, this.#values), hint);
+    const outcome = this.#control.if(
+      condition,
+      () => thenBuild(this, this.#values),
+      hint
+    );
+
+    this.#completeIf(outcome);
+  }
+
+  ifElse(
+    condition: ValueInput,
+    thenBuild: IfBody,
+    elseBuild: IfBody,
+    hint?: SemanticBranchHint
+  ): void {
+    const outcome = this.#control.ifElse(
+      condition,
+      () => thenBuild(this, this.#values),
+      () => elseBuild(this, this.#values),
+      hint
+    );
+
+    this.#completeIf(outcome);
+  }
+
+  #completeIf(outcome: IfOutcome): void {
+    if (outcome === "completes") {
+      this.#markTerminated();
+      this.#endBlock("terminated");
+      this.#scopes.current.complete();
+    }
   }
 
   // Opens a loop: body-written channels become loop-carried cells living in
@@ -371,6 +422,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const writeLog = new StateWriteLog();
     const scratch = new IrBlockBuilderImpl(this.#segmentMode, writeLog);
     const scratchBody = new BodyBuilder(scratch.#values);
+    const analysisMemory: LoopMemoryOps = {
+      memoryRead: () => scratch.#values.addActionOutput(),
+      memoryWrite: () => {}
+    };
 
     scratch.#operands.beginInstruction(this.#operands.currentBindings());
     scratch.#state.beginInstruction(scratch.#values.const(0));
@@ -381,7 +436,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       return writeLog.captureWrittenChannels(() => {
         scratch.#control.runLoopBody(scratchBody, body, (condition) => {
           scratch.#values.node(condition);
-        });
+        }, analysisMemory);
       });
     } finally {
       scratch.#operands.endInstruction();
@@ -435,21 +490,6 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     if (this.#scopes.current.kind === "root") {
       this.#blockEnd = end;
     }
-  }
-
-  #readMemory(address: ValueId, width: OperandWidth, options: GetOptions): Value {
-    const signed = options.signed === true && width !== 32;
-
-    return this.#scopes.current.body.opValue(
-      signed
-        ? { kind: "memory.read", address, width, signed: true }
-        : { kind: "memory.read", address, width }
-    );
-  }
-
-  #writeMemory(address: ValueId, value: ValueInput, width: OperandWidth): void {
-    this.#scopes.current.recordMemoryWrite();
-    this.#scopes.current.body.op({ kind: "memory.write", address, value, width });
   }
 
   #writeSegmentSelector(
