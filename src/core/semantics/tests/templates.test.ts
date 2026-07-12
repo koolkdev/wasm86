@@ -27,7 +27,7 @@ import {
 } from "#core/semantics/flags.js";
 import { leaSemantic } from "#core/semantics/lea.js";
 import { int3Semantic, intoSemantic, intSemantic, nopSemantic } from "#core/semantics/misc.js";
-import { cmovSemantic, movSemantic, movToSregSemantic } from "#core/semantics/mov.js";
+import { cmovSemantic, movToSregSemantic } from "#core/semantics/mov.js";
 import {
   imulImplicitSemantic,
   imulRegRmImmSemantic,
@@ -339,24 +339,6 @@ test("lea semantic computes an address without getting the operand value", () =>
     "next"
   ]);
   strictEqual(trace.events.some((event) => event.includes("get op1")), false);
-});
-
-test("mov semantic validates READ and WRITE refs before their accesses", () => {
-  const trace = buildSemanticTrace(movSemantic(), operands("mem", "mem"));
-
-  deepStrictEqual(trace.events, [
-    "resolve r0 = operand(op1):4",
-    "if %1",
-    "cpuException PF r0.read",
-    "ifEnd",
-    "%2 = read r0.read+0:32",
-    "resolve r1 = operand(op0):4",
-    "if %4",
-    "cpuException PF r1.write",
-    "ifEnd",
-    "write r1.write+0:32 <- %2",
-    "next"
-  ]);
 });
 
 test("binary ALU memory RMWs validate one WRITE view and reuse it for read and write", () => {

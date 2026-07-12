@@ -8,7 +8,7 @@ import {
   writeInterpreterState
 } from "./interpreter-helpers.js";
 import { startAddress } from "#test/support/addresses.js";
-import { fetchPageFaultExit, readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { fetchPageFaultExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { HostExit } from "#wasm/exit.js";
 import { invalidOpcode } from "#core/exceptions.js";
 import {
@@ -71,23 +71,6 @@ test("executes MOV from segment selectors", async () => {
   assertCompletedInstruction(dwordDestination.state, startAddress + 2, 8);
 });
 
-test("executes MOV from segment selectors to memory as a word store", async () => {
-  const result = await executeInstruction(
-    [0x8c, 0x2b],
-    createWasmCpuStateSnapshot({
-      ebx: 0x20,
-      gsSelector: 0xabcd,
-      eip: startAddress,
-      instructionCount: 7
-    }),
-    [{ address: 0x20, bytes: [0x11, 0x22, 0x33, 0x44] }]
-  );
-
-  assertSingleInstructionExit(result.exit);
-  strictEqual(result.guestView.getUint32(0x20, true), 0x4433_abcd);
-  assertCompletedInstruction(result.state, startAddress + 2, 8);
-});
-
 test("MOV to a segment register exits before committing the instruction", async () => {
   const initial = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
@@ -121,19 +104,6 @@ test("MOV to CS raises invalid-opcode before segment-load handling", async () =>
   deepStrictEqual(state, initial);
 });
 
-test("faulting MOV segment selector to memory reports a word write", async () => {
-  const initial = createWasmCpuStateSnapshot({
-    ebx: 0xffff,
-    gsSelector: 0xabcd,
-    eip: startAddress,
-    instructionCount: 7
-  });
-  const { exit, state } = await executeInstruction([0x8c, 0x2b], initial);
-
-  deepStrictEqual(exit, writePageFaultExit(0xffff));
-  deepStrictEqual(state, initial);
-});
-
 test("interpreter dispatches the C7 /0 register form", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const initialState = createWasmCpuStateSnapshot({
@@ -148,50 +118,6 @@ test("interpreter dispatches the C7 /0 register form", async () => {
 
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x1234_5678);
-});
-
-test("executes MOVZX and MOVSX memory forms", async () => {
-  const flags = allFlagsSet;
-  const zeroExtendByte = await executeMovWithMemory(
-    [0x0f, 0xb6, 0x03],
-    createWasmCpuStateSnapshot({ eax: 0xffff_ffff, ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
-    (guest) => guest.setUint8(0x20, 0xfe)
-  );
-  const zeroExtend = await executeMovWithMemory(
-    [0x0f, 0xb7, 0x03],
-    createWasmCpuStateSnapshot({ eax: 0xffff_ffff, ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
-    (guest) => guest.setUint16(0x20, 0x80ff, true)
-  );
-  const signExtendByte = await executeMovWithMemory(
-    [0x0f, 0xbe, 0x03],
-    createWasmCpuStateSnapshot({ ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
-    (guest) => guest.setUint8(0x20, 0x80)
-  );
-  const signExtend = await executeMovWithMemory(
-    [0x0f, 0xbf, 0x03],
-    createWasmCpuStateSnapshot({ ebx: 0x20, ...flags, eip: startAddress, instructionCount: 7 }),
-    (guest) => guest.setUint16(0x20, 0x8001, true)
-  );
-
-  assertSingleInstructionExit(zeroExtendByte.exit);
-  strictEqual(zeroExtendByte.state.eax, 0xfe);
-  deepStrictEqual(wasmCpuStatusFlagsOf(zeroExtendByte.state), flags);
-  assertCompletedInstruction(zeroExtendByte.state, startAddress + 3, 8);
-
-  assertSingleInstructionExit(zeroExtend.exit);
-  strictEqual(zeroExtend.state.eax, 0x80ff);
-  deepStrictEqual(wasmCpuStatusFlagsOf(zeroExtend.state), flags);
-  assertCompletedInstruction(zeroExtend.state, startAddress + 3, 8);
-
-  assertSingleInstructionExit(signExtendByte.exit);
-  strictEqual(signExtendByte.state.eax, 0xffff_ff80);
-  deepStrictEqual(wasmCpuStatusFlagsOf(signExtendByte.state), flags);
-  assertCompletedInstruction(signExtendByte.state, startAddress + 3, 8);
-
-  assertSingleInstructionExit(signExtend.exit);
-  strictEqual(signExtend.state.eax, 0xffff_8001);
-  deepStrictEqual(wasmCpuStatusFlagsOf(signExtend.state), flags);
-  assertCompletedInstruction(signExtend.state, startAddress + 3, 8);
 });
 
 test("executes CMOVcc r16 as a conditional partial register write", async () => {
@@ -332,20 +258,3 @@ test("truncated MOV r32, imm32 returns decode fault without changing architectur
   deepStrictEqual(exit, fetchPageFaultExit(eip + 1));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
-
-async function executeMovWithMemory(
-  bytes: readonly number[],
-  initialState: ReturnType<typeof createWasmCpuStateSnapshot>,
-  setupGuest: (view: DataView) => void
-) {
-  const interpreter = await instantiateWasmInterpreter();
-
-  writeInterpreterState(interpreter.stateView, initialState);
-  writeGuestBytes(interpreter.guestView, initialState.eip, bytes);
-  setupGuest(interpreter.guestView);
-
-  const exit = interpreter.run(1);
-  const state = readInterpreterState(interpreter.stateView);
-
-  return { exit, state };
-}

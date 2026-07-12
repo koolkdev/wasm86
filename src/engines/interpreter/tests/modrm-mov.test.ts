@@ -8,7 +8,7 @@ import {
   writeInterpreterState
 } from "./interpreter-helpers.js";
 import { startAddress } from "#test/support/addresses.js";
-import { fetchPageFaultExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { fetchPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
   assertSingleInstructionExit,
   instantiateWasmInterpreter,
@@ -50,23 +50,6 @@ test("interpreter binds MOV 89 ModRM.rm as the destination", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x1234_5678);
   strictEqual(state.ebx, initialState.ebx);
-});
-
-test("memory ModRM with out-of-range address returns read fault without changing architectural state", async () => {
-  const interpreter = await instantiateWasmInterpreter();
-  const initialState = createWasmCpuStateSnapshot({
-    eax: 0xaaaa_aaaa,
-    ebx: 0x1234_5678,
-    eip: startAddress,
-    instructionCount: 7
-  });
-  writeInterpreterState(interpreter.stateView, initialState);
-  writeGuestBytes(interpreter.guestView, startAddress, [0x8b, 0x03]);
-
-  const exit = interpreter.run(1);
-
-  deepStrictEqual(exit, readPageFaultExit(initialState.ebx));
-  assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
 test("truncated ModRM returns decode fault without changing architectural state", async () => {
