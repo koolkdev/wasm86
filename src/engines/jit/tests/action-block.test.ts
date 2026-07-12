@@ -9,7 +9,7 @@ import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#ir/value-table.js";
 import { fitsUnsigned } from "#ir/values.js";
 import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
+import { wasmOpcode } from "#compiler/encoder/types.js";
 import { ByteArrayDecodeReader } from "#core/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#core/decoder/decode-block.js";
 import { CompletionExit, HostExit } from "#wasm/exit.js";
@@ -21,7 +21,7 @@ import {
   extractOnlyWasmFunctionBody,
   wasmBodyOpcodes,
   wasmDefinedFunctionCount
-} from "#wasm/tests/body-opcodes.js";
+} from "#compiler/encoder/tests/body-opcodes.js";
 import { isStateRead, isStateWrite, resolveFlag, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 const startEip = 0x1000;

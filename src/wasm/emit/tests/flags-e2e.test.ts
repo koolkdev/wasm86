@@ -12,14 +12,14 @@ import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js"
 import { reg32, type Reg32 } from "#core/types.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
+import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
 } from "#runtime/tests/fixtures/cpu-state.js";
-import { wasmBodyMemoryAccesses } from "#wasm/tests/body-opcodes.js";
+import { wasmBodyMemoryAccesses } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";
 import { isStateWrite } from "#ir/tests/storage-op-helpers.js";

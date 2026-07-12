@@ -5,7 +5,7 @@ import { BodyBuilder } from "#ir/body-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { ValueTable } from "#ir/value-table.js";
-import { wasmBranchHint } from "#wasm/encoder/function-body.js";
+import { wasmBranchHint } from "#compiler/encoder/function-body.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot

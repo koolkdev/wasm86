@@ -1,9 +1,9 @@
 import { notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
 
 test("wasm_local_scratch_reuses_released_i32_local", () => {
   const body = new WasmFunctionBodyEncoder(1);

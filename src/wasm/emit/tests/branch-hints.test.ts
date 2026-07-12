@@ -6,7 +6,7 @@ import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#ir/value-table.js";
 import { fitsUnsigned } from "#ir/values.js";
 import { pageFault } from "#core/exceptions.js";
-import { wasmBranchHint } from "#wasm/encoder/function-body.js";
+import { wasmBranchHint } from "#compiler/encoder/function-body.js";
 import { irBlockBody } from "./harness.js";
 
 test("if branch hints come only from the explicit action hint", () => {

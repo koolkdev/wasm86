@@ -24,8 +24,8 @@ import {
 } from "#core/segments.js";
 import { reg32Index } from "#core/registers.js";
 import { reg16, reg32, reg8, type Reg32, type RegName, type SegmentRegister } from "#core/types.js";
-import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 import {

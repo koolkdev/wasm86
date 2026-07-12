@@ -13,7 +13,7 @@ import { CompletionExit, HostExit } from "#wasm/exit.js";
 import { fetchPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";
-import { wasmDefinedFunctionCount } from "#wasm/tests/body-opcodes.js";
+import { wasmDefinedFunctionCount } from "#compiler/encoder/tests/body-opcodes.js";
 import { allHelpers } from "#wasm/helpers/module.js";
 
 test("imports cpu state and guest memories in ABI order", () => {

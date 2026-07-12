@@ -8,8 +8,8 @@ import {
 } from "#core/prefixes.js";
 import { noSegmentOverride, segmentRegisterIndex } from "#core/segments.js";
 import type { SegmentRegister } from "#core/types.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 import { emitOpcodeByteFetch } from "./fragments.js";
 import type { InterpreterLocals } from "./locals.js";

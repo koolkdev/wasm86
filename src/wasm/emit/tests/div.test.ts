@@ -23,10 +23,10 @@ import {
   wasmCpuStatusFlagsOf,
   writeWasmCpuStateSnapshot
 } from "#runtime/tests/fixtures/cpu-state.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
+import { wasmOpcode } from "#compiler/encoder/types.js";
 import { decodeExit } from "#wasm/exit.js";
 import { divideErrorExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
-import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockCompleted, irBlockBody, instantiateIrBlock } from "./harness.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;

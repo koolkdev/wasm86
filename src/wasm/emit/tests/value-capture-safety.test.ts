@@ -5,11 +5,11 @@ import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { stateWrite } from "#ir/tests/storage-op-helpers.js";
 import { ValueTable } from "#ir/value-table.js";
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
+import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
-import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot

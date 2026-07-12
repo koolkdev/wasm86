@@ -4,7 +4,7 @@ import { eipChannel } from "#ir/slots.js";
 import type { ValueId } from "#ir/values.js";
 import { CpuExceptionVector, type CpuException } from "#core/exceptions.js";
 import { u32 } from "#core/numeric.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import {
   CompletionExit,
   HostExit,

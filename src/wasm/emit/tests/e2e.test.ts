@@ -18,14 +18,14 @@ import { movSemantic, movsxSemantic, movzxSemantic } from "#core/semantics/mov.j
 import { xchgSemantic } from "#core/semantics/xchg.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
+import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   assertLazyFlagState,
   readWasmCpuStateChannel,
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot
 } from "#runtime/tests/fixtures/cpu-state.js";
-import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { isStateRead, isStateWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 

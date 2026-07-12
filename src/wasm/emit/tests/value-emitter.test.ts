@@ -12,17 +12,17 @@ import { emitOp, type BorrowedUse } from "#wasm/emit/ops.js";
 import { ValueEmitter } from "#wasm/emit/value-emitter.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
 import { analyzeValueUses } from "#wasm/emit/value-uses.js";
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
+import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { defineLazyFlagHelper } from "#wasm/helpers/lazy-flags.js";
 import { createWasmHelperRegistry } from "#wasm/helpers/module.js";
 import {
   wasmBodyInstructions,
   wasmBodyLocalCount,
   wasmBodyOpcodes
-} from "#wasm/tests/body-opcodes.js";
+} from "#compiler/encoder/tests/body-opcodes.js";
 import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { memoryRead, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import type { MemoryReadAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";

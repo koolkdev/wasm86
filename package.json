@@ -17,6 +17,10 @@
       "types": "./src/common/*",
       "default": "./dist/src/common/*"
     },
+    "#compiler/*": {
+      "types": "./src/compiler/*",
+      "default": "./dist/src/compiler/*"
+    },
     "#core/*": {
       "types": "./src/core/*",
       "default": "./dist/src/core/*"

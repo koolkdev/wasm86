@@ -1,9 +1,9 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
 
 test("a mutable i32 global initializes and round-trips through set/get", async () => {
   const module = new WasmModuleEncoder();

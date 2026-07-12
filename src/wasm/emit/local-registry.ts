@@ -1,8 +1,8 @@
 import { assert } from "#common/assert.js";
 import type { ValueId } from "#ir/values.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import type { WasmValueType } from "#wasm/encoder/types.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
+import type { WasmValueType } from "#compiler/encoder/types.js";
 
 // All scratch-local bookkeeping in one place. Counted compound captures and
 // stable output bindings free their physical local after their final emitted

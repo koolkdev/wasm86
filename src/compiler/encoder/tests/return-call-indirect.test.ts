@@ -1,9 +1,9 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
 import { decodeExit, encodeHostExit, HostExit } from "#wasm/exit.js";
 
 const importNamespace = "wasm86";

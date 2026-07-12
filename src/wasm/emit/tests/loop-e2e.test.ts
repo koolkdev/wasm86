@@ -9,13 +9,13 @@ import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#ir/value-table.js";
 import { repMovsSemantic } from "#core/semantics/strings.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
+import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   readWasmCpuStateChannel,
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot
 } from "#runtime/tests/fixtures/cpu-state.js";
-import { wasmBodyInstructions } from "#wasm/tests/body-opcodes.js";
+import { wasmBodyInstructions } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 

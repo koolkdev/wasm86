@@ -4,9 +4,9 @@ import { walkBodyActions } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { u32 } from "#core/numeric.js";
 import { wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
 import type { LinkCompletion } from "#wasm/emit/embed.js";
 import { emitActionFunction } from "#wasm/emit/action.js";
 import {

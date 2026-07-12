@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
 
 // Cross-iteration interpreter locals: architectural decode state that survives
 // prefix rescans, plus the opcode fetch byte. Operand and dispatch scratch

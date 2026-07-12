@@ -5,8 +5,8 @@ import type { IrBlock } from "#ir/block.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import { ValueTable } from "#ir/value-table.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
-import { wasmBodyLocalCount, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { wasmOpcode } from "#compiler/encoder/types.js";
+import { wasmBodyLocalCount, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot

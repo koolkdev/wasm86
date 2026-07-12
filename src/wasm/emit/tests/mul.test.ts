@@ -15,8 +15,8 @@ import {
   wasmCpuStatusFlagsOf,
   writeWasmCpuStateSnapshot
 } from "#runtime/tests/fixtures/cpu-state.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
-import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { wasmOpcode } from "#compiler/encoder/types.js";
+import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 function readRegister(view: DataView, name: RegName): number {

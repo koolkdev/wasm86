@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import type { WasmFunctionType } from "#wasm/encoder/types.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import type { WasmFunctionType } from "#compiler/encoder/types.js";
 
 export class HelperRegistry<TKey> {
   readonly #module: WasmModuleEncoder;

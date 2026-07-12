@@ -2,10 +2,10 @@ import { assert } from "#common/assert.js";
 import type { IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import { analyzeLiveness, type BlockLiveness } from "#wasm/emit/liveness.js";
 import {

@@ -1,10 +1,10 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { encodeMemoryImmediate } from "#wasm/encoder/memory.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { encodeMemoryImmediate } from "#compiler/encoder/memory.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
 
 const importNamespace = "wasm86";
 const cpuStateImportName = "cpuState";

@@ -1,4 +1,4 @@
-import { wasmOpcode, wasmSectionId } from "#wasm/encoder/types.js";
+import { wasmOpcode, wasmSectionId } from "#compiler/encoder/types.js";
 
 export type WasmBodyMemoryAccess = Readonly<{
   opcode: number;

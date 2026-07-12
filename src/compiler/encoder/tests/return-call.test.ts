@@ -3,9 +3,9 @@ import { test } from "node:test";
 
 import { wasmImport } from "#wasm/abi.js";
 import { WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
 import { CompletionExit, decodeExit, encodeCompletionExit, encodeHostExit, HostExit } from "#wasm/exit.js";
 
 const entryExportName = "entry";

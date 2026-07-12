@@ -1,7 +1,7 @@
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmValueType, type WasmFunctionType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
+import type { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmValueType, type WasmFunctionType } from "#compiler/encoder/types.js";
 import {
   emitRmAddressFragment,
   emitSibFetch,

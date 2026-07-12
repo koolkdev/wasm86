@@ -1,10 +1,10 @@
 import { match, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { wasmBranchHint, WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmOpcode, wasmValueType } from "#wasm/encoder/types.js";
-import { wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { wasmBranchHint, WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
+import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 
 test("constant i64 function compiles", async () => {
   const bytes = encodeConstantI64TestModule("constant", 0x0006_0000_1234_5678n);

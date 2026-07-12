@@ -3,8 +3,8 @@ import type { GprDynamicSlot, SegmentDynamicSlot, StateChannel, StateSlot } from
 import type { ValueId } from "#ir/values.js";
 import type { OperandUses } from "./ops.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmMemoryImmediate } from "#compiler/encoder/memory.js";
 import {
   wasmCpuStateChannelAccessByteLength,
   wasmCpuStateChannelOffset,

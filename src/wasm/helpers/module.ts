@@ -2,8 +2,8 @@ import type { Action, OpAction } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";
 import { x86StatusFlags } from "#core/flags.js";
-import type { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmValueType, type WasmFunctionType } from "#wasm/encoder/types.js";
+import type { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmValueType, type WasmFunctionType } from "#compiler/encoder/types.js";
 import {
   opActionMustExecute,
   type BlockLiveness

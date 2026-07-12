@@ -8,8 +8,8 @@ import type {
   ValueType
 } from "#ir/values.js";
 import type { OperandWidth } from "#core/types.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
 
 // Leaf opcode mappers: each emits the operator of a compound value node
 // whose operands are already on the stack. Stateless encoder switches —

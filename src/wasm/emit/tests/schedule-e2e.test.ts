@@ -6,12 +6,12 @@ import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import { ValueTable } from "#ir/value-table.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
+import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   wasmBodyInstructions,
   wasmBodyLocalCount,
   wasmBodyOpcodes
-} from "#wasm/tests/body-opcodes.js";
+} from "#compiler/encoder/tests/body-opcodes.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot

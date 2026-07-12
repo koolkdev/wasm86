@@ -4,8 +4,8 @@ import { test } from "node:test";
 import { wasmImport } from "#wasm/abi.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
-import { wasmOpcode } from "#wasm/encoder/types.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
+import { wasmOpcode } from "#compiler/encoder/types.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import {
   defineLazyFlagHelper,
   defineLazyFlagHelpers,
@@ -16,7 +16,7 @@ import { writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js"
 import { x86StatusFlags, type X86StatusFlag } from "#core/flags.js";
 import type { OperandWidth } from "#core/types.js";
 import { aluReference } from "#wasm/emit/tests/reference.js";
-import { extractOnlyWasmFunctionBody, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
+import { extractOnlyWasmFunctionBody, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 
 test("lazy flag helper names are stable", () => {
   strictEqual(lazyFlagHelperName("CF"), "resolveCF");

@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { IrOp } from "#ir/ops.js";
 import type { ValueId } from "#ir/values.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { helperFunctionName, type WasmHelperRegistry } from "#wasm/helpers/module.js";
 import { emitGuestLoad, emitGuestStore, emitMemoryCheck } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";

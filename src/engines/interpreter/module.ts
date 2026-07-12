@@ -1,9 +1,9 @@
 import { assert } from "#common/assert.js";
 import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
-import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
-import { WasmModuleEncoder } from "#wasm/encoder/module.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
+import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
 import { CompletionExit, encodeCompletionExit } from "#wasm/exit.js";
 import { createWasmHelperRegistry, defineAllHelpers, type WasmHelperRegistry } from "#wasm/helpers/module.js";
 import { RmDecodeHelpers } from "./decode.js";

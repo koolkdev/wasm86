@@ -13,7 +13,7 @@ import type {
   RmOperandType
 } from "#core/instructions/spec.js";
 import { prefixFlagMask } from "#core/decoder/prefix-flags.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { segmentRegisters } from "#core/types.js";
 import { encodeHostExit, HostExit } from "#wasm/exit.js";
 import { noBaseRegister, type RmDecodeHelpers } from "./decode.js";

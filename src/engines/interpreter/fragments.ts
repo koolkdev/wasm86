@@ -7,8 +7,8 @@ import { memoryGuardActions } from "#ir/memory-guard.js";
 import { ValueTable } from "#ir/value-table.js";
 import type { ValueId } from "#ir/values.js";
 import type { OperandWidth } from "#core/types.js";
-import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 
