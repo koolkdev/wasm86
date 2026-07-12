@@ -1,7 +1,13 @@
 import { assert } from "#common/assert.js";
-import type { BinaryOperator, CompareOperator, UnaryOperator } from "#ir/operators.js";
+import type { CompareOperator, UnaryOperator } from "#ir/operators.js";
 import type { ValueTable } from "#ir/value-table.js";
-import { valueChildren, valueId, type ValueId, type ValueNode } from "#ir/values.js";
+import {
+  valueChildren,
+  valueId,
+  type BinaryValueNode,
+  type ValueId,
+  type ValueNode
+} from "#ir/values.js";
 
 // Whether evaluating a value and its complete dependency closure can execute
 // without a Wasm trap. Value ids are topological, so one ascending pass is
@@ -17,7 +23,7 @@ export class ValueTraits {
 
     for (let rawId = 0; rawId < values.size(); rawId += 1) {
       const node = values.node(valueId(rawId));
-      const intrinsic = ValueTraits.#isIntrinsicallyNonTrapping(node);
+      const intrinsic = ValueTraits.#isIntrinsicallyNonTrapping(values, node);
 
       intrinsicallyNonTrapping.push(intrinsic);
       nonTrapping.push(intrinsic && valueChildren(node).every((child) => (
@@ -66,7 +72,7 @@ export class ValueTraits {
     return visit(id);
   }
 
-  static #isIntrinsicallyNonTrapping(node: ValueNode): boolean {
+  static #isIntrinsicallyNonTrapping(values: ValueTable, node: ValueNode): boolean {
     switch (node.kind) {
       case "const":
       case "const64":
@@ -80,7 +86,7 @@ export class ValueTraits {
       case "unreachable":
         return false;
       case "binary":
-        return ValueTraits.#binaryOperatorIsNonTrapping(node.operator);
+        return ValueTraits.#binaryIsIntrinsicallyNonTrapping(values, node);
       case "unary":
         return ValueTraits.#unaryOperatorIsNonTrapping(node.operator);
       case "compare":
@@ -88,13 +94,34 @@ export class ValueTraits {
     }
   }
 
-  static #binaryOperatorIsNonTrapping(operator: BinaryOperator): boolean {
-    switch (operator) {
-      case "div_s":
+  static #binaryIsIntrinsicallyNonTrapping(
+    values: ValueTable,
+    node: BinaryValueNode
+  ): boolean {
+    switch (node.operator) {
       case "div_u":
       case "rem_s":
-      case "rem_u":
-        return false;
+      case "rem_u": {
+        const divisor = ValueTraits.#constantValue(values, node.b);
+
+        return divisor !== undefined && divisor !== 0n;
+      }
+      case "div_s": {
+        const divisor = ValueTraits.#constantValue(values, node.b);
+
+        if (divisor === undefined || divisor === 0n) {
+          return false;
+        }
+
+        if (divisor !== -1n) {
+          return true;
+        }
+
+        const dividend = ValueTraits.#constantValue(values, node.a);
+        const minimum = node.type === "i32" ? -0x8000_0000n : -0x8000_0000_0000_0000n;
+
+        return dividend !== undefined && dividend !== minimum;
+      }
       case "add":
       case "sub":
       case "mul":
@@ -107,6 +134,19 @@ export class ValueTraits {
       case "shr_s":
       case "shr_u":
         return true;
+    }
+  }
+
+  static #constantValue(values: ValueTable, id: ValueId): bigint | undefined {
+    const node = values.node(id);
+
+    switch (node.kind) {
+      case "const":
+        return BigInt(node.value);
+      case "const64":
+        return node.value;
+      default:
+        return undefined;
     }
   }
 

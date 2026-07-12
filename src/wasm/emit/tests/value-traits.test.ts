@@ -63,6 +63,50 @@ test("classifies every i32 and i64 binary operator", () => {
   }
 });
 
+test("recognizes division and remainder by nonzero constants as nontrapping", () => {
+  for (const operator of ["div_u", "rem_s", "rem_u"] as const) {
+    const values = new ValueTable();
+    const binary32 = values.binary(operator, values.external(0), values.const(17));
+    const binary64 = values.binary64(operator, values.const64(23n), values.const64(17n));
+    const traits = new ValueTraits(values);
+
+    strictEqual(traits.isNonTrapping(binary32), true, `${operator} i32`);
+    strictEqual(traits.isNonTrapping(binary64), true, `${operator} i64`);
+  }
+});
+
+test("recognizes signed division by a safe constant divisor", () => {
+  const values = new ValueTable();
+  const bySeventeen = values.binary("div_s", values.external(0), values.const(17));
+  const byNegativeOne = values.binary("div_s", values.external(0), values.const(-1));
+  const traits = new ValueTraits(values);
+
+  strictEqual(traits.isNonTrapping(bySeventeen), true);
+  strictEqual(traits.isNonTrapping(byNegativeOne), false);
+});
+
+test("keeps zero divisors and signed-overflow cases trapping", () => {
+  const values = new ValueTable();
+  const dividend = values.external(0);
+  const byZero = [
+    values.binary("div_s", dividend, values.const(0)),
+    values.binary("div_u", dividend, values.const(0)),
+    values.binary("rem_s", dividend, values.const(0)),
+    values.binary("rem_u", dividend, values.const(0))
+  ];
+  const signedOverflow = values.binary64(
+    "div_s",
+    values.const64(-0x8000_0000_0000_0000n),
+    values.const64(-1n)
+  );
+  const traits = new ValueTraits(values);
+
+  for (const value of byZero) {
+    strictEqual(traits.isNonTrapping(value), false);
+  }
+  strictEqual(traits.isNonTrapping(signedOverflow), false);
+});
+
 test("classifies constants and runtime-bound values as nontrapping leaves", () => {
   const values = new ValueTable();
   const leaves = [
