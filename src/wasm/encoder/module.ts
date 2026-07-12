@@ -23,6 +23,12 @@ export class WasmModuleEncoder {
   readonly #bodies: EncodedWasmFunctionBody[] = [];
 
   addFunctionType(type: WasmFunctionType): number {
+    const existing = this.#types.findIndex((candidate) => functionTypesEqual(candidate, type));
+
+    if (existing !== -1) {
+      return existing;
+    }
+
     const index = this.#types.length;
     this.#types.push(type);
     return index;
@@ -181,6 +187,14 @@ export class WasmModuleEncoder {
       writeBranchHints(section, body.branchHints);
     }
   }
+}
+
+function functionTypesEqual(a: WasmFunctionType, b: WasmFunctionType): boolean {
+  return valueTypesEqual(a.params, b.params) && valueTypesEqual(a.results, b.results);
+}
+
+function valueTypesEqual(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 type MemoryImport = Readonly<{

@@ -42,6 +42,14 @@ test("function_indexes_are_stable", () => {
   strictEqual(entryIndex, 1);
 });
 
+test("structurally equal function types share an index", () => {
+  const module = new WasmModuleEncoder();
+  const first = addBlockFunctionType(module);
+  const second = addBlockFunctionType(module);
+
+  strictEqual(second, first);
+});
+
 test("cpu_state_memory_import_still_memory_0", () => {
   const imports = WebAssembly.Module.imports(new WebAssembly.Module(encodeTwoFunctionModule()));
 
