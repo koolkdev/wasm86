@@ -52,7 +52,8 @@ export function verifyProducerEvents(
     liveness,
     uses,
     demands,
-    schedule
+    schedule,
+    traits
   );
 
   for (const event of schedule.events()) {
@@ -68,7 +69,8 @@ function reconstructProducerDemands(
   liveness: BlockLiveness,
   uses: ValueUses,
   demands: DemandAnalysis,
-  schedule: ProducerEventIndex
+  schedule: ProducerEventIndex,
+  traits: ValueTraits
 ): ReadonlyMap<ValueId, readonly ValueDemand[]> {
   const byValue = new Map<ValueId, ValueDemand[]>();
   const byProducer = new Map<ValueId, readonly ValueDemand[]>();
@@ -125,7 +127,11 @@ function reconstructProducerDemands(
     }
 
     const computedAt = demands.dominatingSite(
-      valueDemands.map((demand) => demand.requiredAt)
+      valueDemands.map((demand) =>
+        traits.isNonTrapping(id)
+          ? demand.requiredAt
+          : demand.consumedAt
+      )
     );
 
     for (const child of valueChildren(block.values.node(id))) {

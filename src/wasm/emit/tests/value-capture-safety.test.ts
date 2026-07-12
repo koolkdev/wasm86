@@ -21,9 +21,7 @@ import {
   irBlockCompleted
 } from "./harness.js";
 
-const unsupportedCapture = /value \d+ may trap and cannot be captured before a nested body is selected/;
-
-test("a trapping value used only by a future then body is rejected", () => {
+test("a trapping value used only by a future then body stays in that body", async () => {
   const values = new ValueTable();
   const condition = values.external(0);
   const quotient = values.binary("div_u", values.external(1), values.external(2));
@@ -38,10 +36,17 @@ test("a trapping value used only by a future then body is rejected", () => {
     }
   };
 
-  throws(() => irBlockBody(block, 3), unsupportedCapture);
+  const { stateView, run } = await instantiateIrBlock(block, 3);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 9 });
+  strictEqual(run(0, 1, 0), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 9);
+  strictEqual(run(1, 84, 2), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 42);
+  throws(() => run(1, 1, 0), WebAssembly.RuntimeError);
 });
 
-test("a transitively trapping wrapper used only by a future body is rejected", () => {
+test("a transitively trapping wrapper used only by a future body stays in that body", async () => {
   const values = new ValueTable();
   const condition = values.external(0);
   const quotient = values.binary("div_u", values.external(1), values.external(2));
@@ -57,10 +62,17 @@ test("a transitively trapping wrapper used only by a future body is rejected", (
     }
   };
 
-  throws(() => irBlockBody(block, 3), unsupportedCapture);
+  const { stateView, run } = await instantiateIrBlock(block, 3);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 9 });
+  strictEqual(run(0, 1, 0), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 9);
+  strictEqual(run(1, 84, 2), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 43);
+  throws(() => run(1, 1, 0), WebAssembly.RuntimeError);
 });
 
-test("trapping switch arm results are rejected before emission", () => {
+test("trapping switch arm results evaluate only when selected", async () => {
   for (const trappingArm of ["case", "default"] as const) {
     const values = new ValueTable();
     const selector = values.external(0);
@@ -89,7 +101,15 @@ test("trapping switch arm results are rejected before emission", () => {
       }
     };
 
-    throws(() => irBlockBody(block, 3), unsupportedCapture, trappingArm);
+    const { stateView, run } = await instantiateIrBlock(block, 3);
+    const safeSelector = trappingArm === "case" ? 1 : 0;
+    const trappingSelector = trappingArm === "case" ? 0 : 1;
+
+    strictEqual(run(safeSelector, 1, 0), irBlockCompleted, trappingArm);
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 7, trappingArm);
+    strictEqual(run(trappingSelector, 84, 2), irBlockCompleted, trappingArm);
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 42, trappingArm);
+    throws(() => run(trappingSelector, 1, 0), WebAssembly.RuntimeError, trappingArm);
   }
 });
 

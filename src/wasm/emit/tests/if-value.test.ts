@@ -61,3 +61,24 @@ test("a dead ifValue output preserves an impossible selected arm", async () => {
   strictEqual(run(1), irBlockCompleted);
   throws(() => run(0), WebAssembly.RuntimeError);
 });
+
+test("an unselected ifValue arm does not evaluate a trapping result", async () => {
+  const values = new ValueTable();
+  const body = new BodyBuilder(values);
+  const output = body.ifValue(
+    values.external(0),
+    (then) => then.values.binary("div_u", then.values.external(1), then.values.external(2)),
+    (otherwise) => otherwise.values.const(7)
+  );
+
+  body.op({ kind: "state.write", slot: gprChannel("eax"), value: output });
+
+  const block: IrBlock = { values, body: body.build() };
+  const { stateView, run } = await instantiateIrBlock(block, 3);
+
+  strictEqual(run(0, 1, 0), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 7);
+  strictEqual(run(1, 84, 2), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 42);
+  throws(() => run(1, 1, 0), WebAssembly.RuntimeError);
+});

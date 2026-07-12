@@ -106,7 +106,11 @@ class ScheduleBuilder {
       }
 
       const computedAt = this.#demands.dominatingSite(
-        valueDemands.map((demand) => demand.requiredAt)
+        valueDemands.map((demand) =>
+          this.#traits.isNonTrapping(id)
+            ? demand.requiredAt
+            : demand.consumedAt
+        )
       );
 
       this.#sites.set(id, computedAt);
