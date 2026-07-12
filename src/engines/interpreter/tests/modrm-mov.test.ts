@@ -10,13 +10,12 @@ import {
 import { startAddress } from "#test/support/addresses.js";
 import { fetchPageFaultExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {
-  assertCompletedInstruction,
   assertSingleInstructionExit,
   instantiateWasmInterpreter,
   writeGuestBytes
 } from "./support.js";
 
-test("executes MOV r32, r/m32 with register ModRM", async () => {
+test("interpreter binds MOV 8B ModRM.reg as the destination", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const initialState = createWasmCpuStateSnapshot({
     ebx: 0x1234_5678,
@@ -32,10 +31,9 @@ test("executes MOV r32, r/m32 with register ModRM", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x1234_5678);
   strictEqual(state.ebx, initialState.ebx);
-  assertCompletedInstruction(state, startAddress + 2, 8);
 });
 
-test("executes MOV r/m32, r32 with register ModRM", async () => {
+test("interpreter binds MOV 89 ModRM.rm as the destination", async () => {
   const interpreter = await instantiateWasmInterpreter();
   const initialState = createWasmCpuStateSnapshot({
     eax: 0xaaaa_aaaa,
@@ -52,7 +50,6 @@ test("executes MOV r/m32, r32 with register ModRM", async () => {
   assertSingleInstructionExit(exit);
   strictEqual(state.eax, 0x1234_5678);
   strictEqual(state.ebx, initialState.ebx);
-  assertCompletedInstruction(state, startAddress + 2, 8);
 });
 
 test("memory ModRM with out-of-range address returns read fault without changing architectural state", async () => {

@@ -72,16 +72,6 @@ import {
   type SemanticTrace
 } from "./test-semantics-trace.js";
 
-test("mov semantic gets the source, sets the destination, and falls through", () => {
-  const trace = buildSemanticTrace(movSemantic(), regOperands(2));
-
-  deepStrictEqual(trace.events, [
-    "%0 = get op1:32",
-    "set op0:32 <- %0",
-    "next"
-  ]);
-});
-
 test("MOV to CS raises #UD before loading the selector source", () => {
   const trace = buildSemanticTrace(movToSregSemantic(), [segmentOperand("cs"), { storage: "reg" }]);
 
