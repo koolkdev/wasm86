@@ -114,12 +114,8 @@ for (const runMode of modes) {
     );
 
     assertEngineFixtureResult(fixture, result, memories);
-    const gsByte = memories.guest.readU8(0x3000 + destOffset);
-
-    strictEqual(gsByte.ok, true);
-    if (gsByte.ok) {
-      strictEqual(gsByte.value, 0);
-    }
+    const gsByte = new Uint8Array(memories.guestMemory.buffer)[0x3000 + destOffset];
+    strictEqual(gsByte, 0);
   });
 }
 

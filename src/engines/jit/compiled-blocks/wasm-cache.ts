@@ -37,7 +37,7 @@ export class WasmCompiledBlockCache implements WasmCompiledBlockCacheLike {
     }
 
     try {
-      const block = decodeIsaBlock(codeMap.createReader(memories.guest), blockKey, { maxInstructions: 1024 });
+      const block = decodeIsaBlock(codeMap.createReader(memories.guestMemory), blockKey, { maxInstructions: 1024 });
 
       assertCompiledBlockDecodable(block);
 

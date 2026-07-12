@@ -1,9 +1,5 @@
-import type { GuestMemory } from "#x86/memory/guest-memory.js";
-import {
-  GuestMemoryDecodeReader,
-  type GuestMemoryDecodeRegion,
-  type RegionedDecodeReader
-} from "#x86/decoder/guest-memory-reader.js";
+import { readBackingByte } from "#memory/bytes.js";
+import { truncatedInstructionFault, IsaDecodeError, type IsaDecodeReader } from "#x86/decoder/reader.js";
 import { regionContains, type RuntimeCodeRegion } from "./regions.js";
 
 export class RuntimeCodeMap {
@@ -21,16 +17,26 @@ export class RuntimeCodeMap {
     return this.#regions.some((region) => regionContains(region, eip));
   }
 
-  createReader(memory: GuestMemory): RegionedDecodeReader {
-    return new GuestMemoryDecodeReader(memory, this.#regions.map(decodeRegion));
+  createReader(memory: WebAssembly.Memory): IsaDecodeReader {
+    return new RuntimeCodeMapReader(memory, this.#regions);
   }
 }
 
-function decodeRegion(region: RuntimeCodeRegion): GuestMemoryDecodeRegion {
-  return {
-    kind: "guest-memory",
-    baseAddress: region.baseAddress,
-    byteLength: region.byteLength,
-    ...(region.generation === undefined ? {} : { generation: region.generation })
-  };
+export class RuntimeCodeMapReader implements IsaDecodeReader {
+  constructor(
+    readonly memory: WebAssembly.Memory,
+    readonly regions: readonly RuntimeCodeRegion[]
+  ) {}
+
+  readU8(eip: number): number {
+    if (!this.regions.some((region) => regionContains(region, eip))) {
+      throw new IsaDecodeError(truncatedInstructionFault(eip));
+    }
+
+    const value = readBackingByte(this.memory, eip);
+    if (value === undefined) {
+      throw new IsaDecodeError(truncatedInstructionFault(eip));
+    }
+    return value;
+  }
 }

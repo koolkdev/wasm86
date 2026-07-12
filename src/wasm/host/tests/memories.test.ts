@@ -85,19 +85,12 @@ test("runtime Wasm memories expose raw cpu state field offsets", () => {
   strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 148);
 });
 
-test("runtime Wasm guest memory reads writes and reports faults", () => {
-  const memories = createWasmHostMemories({ guestMemoryByteLength: 0x20 });
-
-  strictEqual(memories.guest.writeU32(0x10, 0x1234_5678).ok, true);
-  deepStrictEqual(memories.guest.readU32(0x10), { ok: true, value: 0x1234_5678 });
-  deepStrictEqual(memories.guest.writeU32(memories.guest.byteLength - 2, 0), {
-    ok: false,
-    fault: {
-      faultAddress: memories.guest.byteLength - 2,
-      faultSize: 4,
-      guestAccess: "write"
-    }
-  });
+test("runtime Wasm memories expose the three live memory identities", () => {
+  const memories = createWasmHostMemories();
+  strictEqual(memories.cpuState.memory, memories.cpuStateMemory);
+  strictEqual(memories.machine.memory, memories.machineMemory);
+  strictEqual(memories.guestMemory instanceof WebAssembly.Memory, true);
+  strictEqual("guest" in memories, false);
 });
 
 test("runtime Wasm memories expose a fixed-prefix machine memory and typed accessor", () => {

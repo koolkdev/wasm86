@@ -1,10 +1,9 @@
 import type { DecodedExit } from "#wasm/exit.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
-import type { RegionedDecodeReader } from "#x86/decoder/guest-memory-reader.js";
-import type { GuestMemory } from "#x86/memory/guest-memory.js";
+import type { IsaDecodeReader } from "#x86/decoder/reader.js";
 
 export type WasmCompiledBlockCodeMap = Readonly<{
-  createReader(memory: GuestMemory): RegionedDecodeReader;
+  createReader(memory: WebAssembly.Memory): IsaDecodeReader;
 }>;
 
 export type CompiledBlockRun = Readonly<{

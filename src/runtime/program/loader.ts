@@ -1,27 +1,15 @@
-import type { GuestMemory, MemoryFault } from "#x86/memory/guest-memory.js";
+import { writeBackingBytes } from "#memory/bytes.js";
 import type { RuntimeProgramRegion } from "./regions.js";
 
 export function loadProgramRegions(
-  memory: GuestMemory,
+  memory: WebAssembly.Memory,
   regions: readonly RuntimeProgramRegion[]
-): MemoryFault | undefined {
+): number | undefined {
   for (const region of regions) {
-    const fault = loadProgramRegion(memory, region);
+    const fault = writeBackingBytes(memory, region.baseAddress, region.bytes);
 
     if (fault !== undefined) {
       return fault;
-    }
-  }
-
-  return undefined;
-}
-
-function loadProgramRegion(memory: GuestMemory, region: RuntimeProgramRegion): MemoryFault | undefined {
-  for (let index = 0; index < region.bytes.length; index += 1) {
-    const write = memory.writeU8(region.baseAddress + index, region.bytes[index] ?? 0);
-
-    if (!write.ok) {
-      return write.fault;
     }
   }
 

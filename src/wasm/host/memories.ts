@@ -1,7 +1,6 @@
 import { wasmGuestMemoryMinByteLength, wasmGuestMemoryMinPages, wasmPageByteLength } from "#wasm/abi.js";
 import { MACHINE_FIXED_END } from "#wasm/machine-state-layout.js";
 import { WasmCpuState } from "./cpu-state.js";
-import { WasmGuestMemory } from "./guest-memory.js";
 import { MachineState } from "./machine-state.js";
 
 export type WasmHostMemories = Readonly<{
@@ -9,7 +8,6 @@ export type WasmHostMemories = Readonly<{
   guestMemory: WebAssembly.Memory;
   machineMemory: WebAssembly.Memory;
   cpuState: WasmCpuState;
-  guest: WasmGuestMemory;
   machine: MachineState;
 }>;
 
@@ -34,7 +32,6 @@ export function createWasmHostMemories(options: WasmHostMemoryOptions = {}): Was
     guestMemory,
     machineMemory,
     cpuState: new WasmCpuState(cpuStateMemory),
-    guest: new WasmGuestMemory(guestMemory),
     machine: new MachineState(machineMemory)
   };
 }

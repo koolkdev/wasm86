@@ -5,6 +5,10 @@
   "license": "MIT",
   "type": "module",
   "imports": {
+    "#memory/*": {
+      "types": "./src/memory/*",
+      "default": "./dist/src/memory/*"
+    },
     "#engines/*": {
       "types": "./src/engines/*",
       "default": "./dist/src/engines/*"

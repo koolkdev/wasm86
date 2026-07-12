@@ -116,13 +116,8 @@ function assertMemoryPatches(runtime: RuntimeInstance, patches: readonly MemoryP
   for (const patch of patches) {
     for (let index = 0; index < patch.bytes.length; index += 1) {
       const address = patch.address + index;
-      const read = runtime.memories.guest.readU8(address);
-
-      strictEqual(read.ok, true, `expected memory read at 0x${address.toString(16)} to succeed`);
-
-      if (read.ok) {
-        strictEqual(read.value, patch.bytes[index] ?? 0, `expected memory byte at 0x${address.toString(16)}`);
-      }
+      const read = new Uint8Array(runtime.memories.guestMemory.buffer)[address];
+      strictEqual(read, patch.bytes[index] ?? 0, `expected memory byte at 0x${address.toString(16)}`);
     }
   }
 }

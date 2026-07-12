@@ -1,10 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
-import { GuestMemoryDecodeReader } from "#x86/decoder/guest-memory-reader.js";
 import { decodeIsaInstructionFromReader } from "#x86/decoder/decode.js";
-import { decodeBytes, imm8, imm32, mem, mem32, ok, reg, reg32, signImm8, startAddress } from "./helpers.js";
+import { ByteArrayDecodeReader, decodeBytes, imm8, imm32, mem, mem32, ok, reg, reg32, signImm8, startAddress } from "./helpers.js";
 
 test("decodes opcode-encoded register and imm32 operands", () => {
   const decoded = ok(decodeBytes([0xbb, 0x78, 0x56, 0x34, 0x12]));
@@ -18,11 +16,7 @@ test("decodes opcode-encoded register and imm32 operands", () => {
 });
 
 test("decodes directly from guest memory without requiring a full instruction slice", () => {
-  const memory = new ArrayBufferGuestMemory(startAddress + 1);
-  memory.writeU8(startAddress, 0x90);
-  const reader = new GuestMemoryDecodeReader(memory, [
-    { kind: "guest-memory", baseAddress: startAddress, byteLength: 1 }
-  ]);
+  const reader = new ByteArrayDecodeReader([0x90], startAddress);
 
   const decoded = ok(decodeIsaInstructionFromReader(reader, startAddress));
 
@@ -33,16 +27,8 @@ test("decodes directly from guest memory without requiring a full instruction sl
 });
 
 test("decodes multibyte ModRM/SIB instruction directly from guest memory", () => {
-  const memory = new ArrayBufferGuestMemory(startAddress + 7);
   const values = [0x8b, 0x84, 0x88, 0x10, 0x00, 0x00, 0x00];
-
-  for (let index = 0; index < values.length; index += 1) {
-    memory.writeU8(startAddress + index, values[index] ?? 0);
-  }
-
-  const reader = new GuestMemoryDecodeReader(memory, [
-    { kind: "guest-memory", baseAddress: startAddress, byteLength: values.length }
-  ]);
+  const reader = new ByteArrayDecodeReader(values, startAddress);
   const decoded = ok(decodeIsaInstructionFromReader(reader, startAddress));
 
   strictEqual(decoded.spec.id, "mov.r32_rm32");

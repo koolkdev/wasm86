@@ -1,8 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ArrayBufferGuestMemory } from "#x86/memory/guest-memory.js";
-import { GuestMemoryDecodeReader } from "#x86/decoder/guest-memory-reader.js";
 import { decodeIsaBlock } from "#x86/decoder/decode-block.js";
 import { X86_32_CORE } from "#x86/index.js";
 import { ByteArrayDecodeReader, imm8 } from "./helpers.js";
@@ -130,20 +128,9 @@ function byteReader(values: readonly number[]): ByteArrayDecodeReader {
   return new ByteArrayDecodeReader(values, startAddress);
 }
 
-test("decodeIsaBlock_reports_guest_memory_decode_fault_without_byte_slice", () => {
-  const memory = new ArrayBufferGuestMemory(startAddress + 3);
+test("decodeIsaBlock_reports_decode_fault_without_byte_slice", () => {
   const values = [0x90, 0xb8, 0x01];
-
-  for (let index = 0; index < values.length; index += 1) {
-    memory.writeU8(startAddress + index, values[index] ?? 0);
-  }
-
-  const block = decodeIsaBlock(
-    new GuestMemoryDecodeReader(memory, [
-      { kind: "guest-memory", baseAddress: startAddress, byteLength: values.length }
-    ]),
-    startAddress
-  );
+  const block = decodeIsaBlock(new ByteArrayDecodeReader(values, startAddress), startAddress);
 
   deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32"]);
   strictEqual(block.terminator.kind, "decode-fault");

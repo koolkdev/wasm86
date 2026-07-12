@@ -30,11 +30,11 @@ test("code map creates guest-memory decode readers for executable regions", () =
   const codeMap = new RuntimeCodeMap(codeRegionsFromProgram(program));
   const memories = createWasmHostMemories({ guestMemoryByteLength: startAddress + 5 });
 
-  strictEqual(loadProgramRegions(memories.guest, program), undefined);
+  strictEqual(loadProgramRegions(memories.guestMemory, program), undefined);
   strictEqual(codeMap.contains(startAddress), true);
   strictEqual(codeMap.contains(startAddress + 5), false);
 
-  const decoded = decodeIsaInstructionFromReader(codeMap.createReader(memories.guest), startAddress);
+  const decoded = decodeIsaInstructionFromReader(codeMap.createReader(memories.guestMemory), startAddress);
 
   strictEqual(decoded.kind, "ok");
   if (decoded.kind === "ok") {

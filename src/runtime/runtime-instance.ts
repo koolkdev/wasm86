@@ -118,9 +118,9 @@ function loadProgramBytes(
   program: readonly RuntimeProgramRegion[],
   memories: WasmHostMemories
 ): void {
-  const fault = loadProgramRegions(memories.guest, program);
+  const fault = loadProgramRegions(memories.guestMemory, program);
 
   if (fault !== undefined) {
-    throw new RangeError(`program byte load fault at 0x${fault.faultAddress.toString(16)}`);
+    throw new RangeError(`program byte load fault at 0x${fault.toString(16)}`);
   }
 }

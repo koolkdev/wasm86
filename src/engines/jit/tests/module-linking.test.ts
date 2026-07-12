@@ -8,10 +8,9 @@ import { jitModuleLinkFallbackExportName } from "#engines/jit/compiled-blocks/mo
 import type { WasmCompiledBlockCodeMap } from "#engines/jit/compiled-blocks/block-cache.js";
 import { WasmCompiledBlockCache } from "#engines/jit/compiled-blocks/wasm-cache.js";
 import type { WasmBlockHandle } from "#engines/jit/block-handle.js";
-import {
-  GuestMemoryDecodeReader,
-  type GuestMemoryDecodeRegion
-} from "#x86/decoder/guest-memory-reader.js";
+import { RuntimeCodeMapReader } from "#runtime/program/code-map.js";
+import type { RuntimeCodeRegion } from "#runtime/program/regions.js";
+import { writeBackingBytes } from "#memory/bytes.js";
 
 const aEip = 0x1000;
 const bEip = 0x2000;
@@ -264,11 +263,10 @@ function createLinkingFixture(blocks: readonly TestBlock[]): Readonly<{
   memories: WasmHostMemories;
 }> {
   const memories = createWasmHostMemories();
-  const regions: GuestMemoryDecodeRegion[] = [];
+  const regions: RuntimeCodeRegion[] = [];
 
   for (const testBlock of blocks) {
     regions.push({
-      kind: "guest-memory",
       baseAddress: testBlock.eip,
       byteLength: testBlock.bytes.length
     });
@@ -278,7 +276,7 @@ function createLinkingFixture(blocks: readonly TestBlock[]): Readonly<{
   return {
     cache: new WasmCompiledBlockCache(),
     codeMap: {
-      createReader: (memory) => new GuestMemoryDecodeReader(memory, regions)
+      createReader: (memory) => new RuntimeCodeMapReader(memory, regions)
     },
     memories
   };
@@ -310,12 +308,9 @@ function exportedFunction(handle: WasmBlockHandle, name: string): () => unknown 
 }
 
 function writeGuestBytes(memories: WasmHostMemories, eip: number, bytes: readonly number[]): void {
-  for (let index = 0; index < bytes.length; index += 1) {
-    const write = memories.guest.writeU8(eip + index, bytes[index] ?? 0);
-
-    if (!write.ok) {
-      throw new Error(`failed to write guest byte at 0x${(eip + index).toString(16)}`);
-    }
+  const fault = writeBackingBytes(memories.guestMemory, eip, bytes);
+  if (fault !== undefined) {
+    throw new Error(`failed to write guest byte at 0x${fault.toString(16)}`);
   }
 }
 

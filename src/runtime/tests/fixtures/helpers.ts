@@ -18,6 +18,7 @@ import { codeRegionsFromProgram, type RuntimeProgramRegion } from "#runtime/prog
 import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
+import { readBackingByte, writeBackingBytes } from "#memory/bytes.js";
 import { engineFixtureStartAddress } from "./programs.js";
 import type { EngineFixture, MemoryPatch } from "./types.js";
 
@@ -37,10 +38,10 @@ export function prepareEngineFixture(fixture: EngineFixture): PreparedEngineFixt
 
   writeMemoryPatches(memories, fixture.initialMemory ?? []);
 
-  const fault = loadProgramRegions(memories.guest, [programRegion]);
+  const fault = loadProgramRegions(memories.guestMemory, [programRegion]);
 
   if (fault !== undefined) {
-    throw new Error(`failed to load fixture code at 0x${fault.faultAddress.toString(16)}`);
+    throw new Error(`failed to load fixture code at 0x${fault.toString(16)}`);
   }
 
   memories.cpuState.load(fixture.initialState);
@@ -76,7 +77,7 @@ export function instantiateFixtureWasmInterpreter(memories: WasmHostMemories): W
 export function createFixtureCompiledBlockCache(): CompiledBlockCache {
   return {
     getOrCompile(startEip, codeMap, memories) {
-      const block = decodeIsaBlock(codeMap.createReader(memories.guest), startEip, {
+      const block = decodeIsaBlock(codeMap.createReader(memories.guestMemory), startEip, {
         maxInstructions: 1024
       });
 
@@ -183,26 +184,17 @@ function assertMemoryPatches(memories: WasmHostMemories, patches: readonly Memor
   for (const patch of patches) {
     for (let index = 0; index < patch.bytes.length; index += 1) {
       const address = patch.address + index;
-      const read = memories.guest.readU8(address);
-
-      strictEqual(read.ok, true, `expected memory read at 0x${address.toString(16)} to succeed`);
-
-      if (read.ok) {
-        strictEqual(read.value, patch.bytes[index] ?? 0, `expected memory byte at 0x${address.toString(16)}`);
-      }
+      const read = readBackingByte(memories.guestMemory, address);
+      strictEqual(read, patch.bytes[index] ?? 0, `expected memory byte at 0x${address.toString(16)}`);
     }
   }
 }
 
 function writeMemoryPatches(memories: WasmHostMemories, patches: readonly MemoryPatch[]): void {
   for (const patch of patches) {
-    for (let index = 0; index < patch.bytes.length; index += 1) {
-      const address = patch.address + index;
-      const write = memories.guest.writeU8(address, patch.bytes[index] ?? 0);
-
-      if (!write.ok) {
-        throw new Error(`failed to write fixture memory at 0x${address.toString(16)}`);
-      }
+    const fault = writeBackingBytes(memories.guestMemory, patch.address, patch.bytes);
+    if (fault !== undefined) {
+      throw new Error(`failed to write fixture memory at 0x${fault.toString(16)}`);
     }
   }
 }
