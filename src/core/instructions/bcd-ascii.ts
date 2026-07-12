@@ -6,7 +6,7 @@ import {
   aasSemantic,
   daaSemantic,
   dasSemantic
-} from "#x86/semantics/bcd-ascii.js";
+} from "#core/semantics/bcd-ascii.js";
 
 export const DAA = mnemonic("daa", [
   // 27: DAA

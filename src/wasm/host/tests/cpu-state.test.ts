@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { readRegisterAlias, writeRegisterAlias } from "#x86/cpu-state.js";
+import { readRegisterAlias, writeRegisterAlias } from "#core/state/cpu-state.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { x86Flags } from "#core/flags.js";
 import { registerAlias } from "#core/registers.js";

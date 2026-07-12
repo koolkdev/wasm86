@@ -13,7 +13,7 @@ import {
   loopSemantic,
   retImmSemantic,
   retSemantic
-} from "#x86/semantics/control.js";
+} from "#core/semantics/control.js";
 
 export const JMP = mnemonic("jmp", [
   // EB cb: JMP rel8

@@ -2,7 +2,7 @@ import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:a
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { subFlagSource } from "#x86/semantics/flag-writes.js";
+import { subFlagSource } from "#core/semantics/flag-writes.js";
 import { immBinding, memBinding, regBinding, staticMemSegment } from "#ir/operands.js";
 import {
   gprChannel,
@@ -17,7 +17,7 @@ import type { Body, IrBlock } from "#ir/block.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { slotsMayAlias } from "#ir/aliasing.js";
 import type { ValueId } from "#ir/values.js";
-import { movSemantic } from "#x86/semantics/mov.js";
+import { movSemantic } from "#core/semantics/mov.js";
 import {
   repeCmpsSemantic,
   repeScasSemantic,
@@ -26,7 +26,7 @@ import {
   repLodsSemantic,
   repMovsSemantic,
   repStosSemantic
-} from "#x86/semantics/strings.js";
+} from "#core/semantics/strings.js";
 import { isStateRead, isStateWrite, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 // The fused rep shape: one loop action carrying the string registers, a

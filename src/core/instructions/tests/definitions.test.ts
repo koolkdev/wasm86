@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticTemplate } from "#core/semantics/builder.js";
 import { x86StatusFlags } from "#core/flags.js";
 import { X86_32_CORE } from "#core/index.js";
 import { expandInstructionSpec, type InstructionSpec } from "#core/instructions/spec.js";
@@ -9,7 +9,7 @@ import {
   buildSemanticTrace,
   operands,
   regOperands
-} from "#x86/semantics/tests/test-semantics-trace.js";
+} from "#core/semantics/tests/test-semantics-trace.js";
 
 test("x86-32 core registers the initial instruction surface", () => {
   strictEqual(X86_32_CORE.name, "x86-32-core");

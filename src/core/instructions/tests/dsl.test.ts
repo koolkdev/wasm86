@@ -19,7 +19,7 @@ import {
   instructionReadsModRm,
   type InstructionSpec
 } from "#core/instructions/spec.js";
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticTemplate } from "#core/semantics/builder.js";
 
 const semantics: SemanticTemplate = () => {};
 

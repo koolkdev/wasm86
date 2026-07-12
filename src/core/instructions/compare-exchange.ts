@@ -3,7 +3,7 @@ import {
   cmpxchg8bSemantic,
   cmpxchgSemantic,
   xaddSemantic
-} from "#x86/semantics/compare-exchange.js";
+} from "#core/semantics/compare-exchange.js";
 
 export const CMPXCHG = mnemonic("cmpxchg", [
   // 0F B0 /r: CMPXCHG r/m8, r8.

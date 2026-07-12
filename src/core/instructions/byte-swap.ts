@@ -1,5 +1,5 @@
 import { form, mnemonic, opcodePlusReg, opReg } from "./dsl.js";
-import { bswapSemantic } from "#x86/semantics/byte-swap.js";
+import { bswapSemantic } from "#core/semantics/byte-swap.js";
 
 export const BSWAP = mnemonic("bswap", [
   // 0F C8+rd: BSWAP r32

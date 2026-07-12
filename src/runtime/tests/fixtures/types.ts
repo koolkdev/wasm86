@@ -1,4 +1,4 @@
-import type { RunResult } from "#x86/execution/run-result.js";
+import type { RunResult } from "#driver/results.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 
 export type MemoryPatch = Readonly<{

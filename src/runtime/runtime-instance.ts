@@ -1,4 +1,4 @@
-import type { RunResult } from "#x86/execution/run-result.js";
+import type { RunResult } from "#driver/results.js";
 import { u32 } from "#core/numeric.js";
 import { WasmInterpreterRuntime } from "#engines/interpreter/runtime.js";
 import {

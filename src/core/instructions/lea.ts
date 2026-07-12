@@ -1,5 +1,5 @@
 import { form, mnemonic, modrmReg, modrmRm } from "./dsl.js";
-import { leaSemantic } from "#x86/semantics/lea.js";
+import { leaSemantic } from "#core/semantics/lea.js";
 
 export const LEA = mnemonic("lea", [
   // 66 8D /r: LEA r16, m16

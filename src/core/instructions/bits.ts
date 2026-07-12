@@ -1,5 +1,5 @@
 import { form, imm, mnemonic, modrmReg, modrmRm } from "./dsl.js";
-import { bitScanSemantic, bitTestSemantic } from "#x86/semantics/bits.js";
+import { bitScanSemantic, bitTestSemantic } from "#core/semantics/bits.js";
 
 export const BT = mnemonic("bt", [
   form("rm16_r16", {

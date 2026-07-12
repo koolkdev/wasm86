@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { runResultFromExecutionState } from "#x86/execution/run-result.js";
+import { runResultFromExecutionState } from "#driver/results.js";
 import { createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import {

@@ -1,5 +1,5 @@
 import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm, opcodePlusReg, opReg } from "./dsl.js";
-import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
+import { aluSemantic, unaryAluSemantic } from "#core/semantics/alu.js";
 
 export const ADD = mnemonic("add", [
   // 00 /r: ADD r/m8, r8

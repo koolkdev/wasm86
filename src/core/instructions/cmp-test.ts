@@ -1,6 +1,6 @@
 import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "./dsl.js";
-import { cmpSemantic } from "#x86/semantics/cmp.js";
-import { testSemantic } from "#x86/semantics/test.js";
+import { cmpSemantic } from "#core/semantics/cmp.js";
+import { testSemantic } from "#core/semantics/test.js";
 
 export const CMP = mnemonic("cmp", [
   // 38 /r: CMP r/m8, r8

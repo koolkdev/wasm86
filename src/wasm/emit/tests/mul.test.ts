@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { immBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticTemplate } from "#core/semantics/builder.js";
 import { decodeBytes, ok as decoded } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import type { OperandWidth, RegName } from "#core/types.js";

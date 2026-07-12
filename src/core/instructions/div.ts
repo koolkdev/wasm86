@@ -1,5 +1,5 @@
 import { form, mnemonic, modrmRm } from "./dsl.js";
-import { divImplicitSemantic, idivImplicitSemantic } from "#x86/semantics/div.js";
+import { divImplicitSemantic, idivImplicitSemantic } from "#core/semantics/div.js";
 
 export const DIV = mnemonic("div", [
   // F6 /6: DIV r/m8

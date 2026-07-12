@@ -6,7 +6,7 @@ import type {
   LoopSemanticsBuilder,
   SemanticOps,
   SimpleFlagSource
-} from "#x86/semantics/builder.js";
+} from "#core/semantics/builder.js";
 import {
   toStorageRef,
   type MemRef,
@@ -18,10 +18,10 @@ import {
   type StorageInput,
   type Value,
   type ValueInput
-} from "#x86/semantics/refs.js";
+} from "#core/semantics/refs.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type { CpuException } from "#core/exceptions.js";
-import type { IfBody, SemanticBranchHint } from "#x86/semantics/builder.js";
+import type { IfBody, SemanticBranchHint } from "#core/semantics/builder.js";
 import { type StateChannel } from "../slots.js";
 import type { Action, LoopCarriedCell } from "../actions.js";
 import { BodyBuilder, type BodyActionSink } from "../body-builder.js";

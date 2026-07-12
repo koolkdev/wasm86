@@ -7,7 +7,7 @@ import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#ir/value-table.js";
-import { repMovsSemantic } from "#x86/semantics/strings.js";
+import { repMovsSemantic } from "#core/semantics/strings.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";
 import {

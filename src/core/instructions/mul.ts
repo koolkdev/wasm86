@@ -4,7 +4,7 @@ import {
   imulRegRmImmSemantic,
   imulRegRmSemantic,
   mulImplicitSemantic
-} from "#x86/semantics/mul.js";
+} from "#core/semantics/mul.js";
 
 export const MUL = mnemonic("mul", [
   // F6 /4: MUL r/m8

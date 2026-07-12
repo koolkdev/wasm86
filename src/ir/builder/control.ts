@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { LoopBody, SemanticOps } from "#x86/semantics/builder.js";
+import type { LoopBody, SemanticOps } from "#core/semantics/builder.js";
 import {
   type BranchHint,
   bodyCompletes

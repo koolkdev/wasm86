@@ -1,4 +1,4 @@
-import type { MutableCpuStateView } from "#x86/cpu-state.js";
+import type { MutableCpuStateView } from "#core/state/cpu-state.js";
 import type { X86Flag } from "#core/flags.js";
 import type { Reg32, SegmentRegister } from "#core/types.js";
 import { u32 } from "#core/numeric.js";

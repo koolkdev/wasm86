@@ -2,7 +2,7 @@ import { form, mnemonic } from "./dsl.js";
 import {
   accumulatorSignExtendSemantic,
   highAccumulatorSignExtendSemantic
-} from "#x86/semantics/sign-extend.js";
+} from "#core/semantics/sign-extend.js";
 
 export const CBW = mnemonic("cbw", [
   // 66 98: CBW

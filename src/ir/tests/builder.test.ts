@@ -39,26 +39,26 @@ import { validateIrBlock } from "#ir/validate.js";
 import { valueId, type ValueId, type ValueNode } from "#ir/values.js";
 import { invalidOpcode, PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import type { X86Flag, X86StatusFlag } from "#core/flags.js";
-import type { SemanticOps, SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticOps, SemanticTemplate } from "#core/semantics/builder.js";
 import type { Values } from "#ir/values.js";
 import type {
   MemoryAccess,
   MemoryAccessKind as SemanticAccessKind,
   ValueInput
-} from "#x86/semantics/refs.js";
+} from "#core/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#core/flags.js";
-import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
-import { cmpSemantic } from "#x86/semantics/cmp.js";
-import { callSemantic, jccSemantic, jecxzSemantic, jmpSemantic, loopSemantic } from "#x86/semantics/control.js";
-import { leaSemantic } from "#x86/semantics/lea.js";
-import { memoryAccessException } from "#x86/semantics/memory.js";
-import { int3Semantic, intoSemantic, intSemantic } from "#x86/semantics/misc.js";
-import { movSemantic, movsxSemantic, movToSregSemantic, movzxSemantic } from "#x86/semantics/mov.js";
-import { setccSemantic } from "#x86/semantics/setcc.js";
-import { shiftSemantic } from "#x86/semantics/shift.js";
-import { popfdSemantic, popfSemantic, popSemantic, pushfdSemantic, pushfSemantic } from "#x86/semantics/stack.js";
-import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js";
-import { xchgSemantic } from "#x86/semantics/xchg.js";
+import { aluSemantic, unaryAluSemantic } from "#core/semantics/alu.js";
+import { cmpSemantic } from "#core/semantics/cmp.js";
+import { callSemantic, jccSemantic, jecxzSemantic, jmpSemantic, loopSemantic } from "#core/semantics/control.js";
+import { leaSemantic } from "#core/semantics/lea.js";
+import { memoryAccessException } from "#core/semantics/memory.js";
+import { int3Semantic, intoSemantic, intSemantic } from "#core/semantics/misc.js";
+import { movSemantic, movsxSemantic, movToSregSemantic, movzxSemantic } from "#core/semantics/mov.js";
+import { setccSemantic } from "#core/semantics/setcc.js";
+import { shiftSemantic } from "#core/semantics/shift.js";
+import { popfdSemantic, popfSemantic, popSemantic, pushfdSemantic, pushfSemantic } from "#core/semantics/stack.js";
+import { testSemantic as testInstructionSemantic } from "#core/semantics/test.js";
+import { xchgSemantic } from "#core/semantics/xchg.js";
 import { defaultSegmentForBase } from "#core/segments.js";
 import type { EffectiveAddress, OperandWidth } from "#core/types.js";
 import { assertLazyRecord } from "./lazy-flags.js";

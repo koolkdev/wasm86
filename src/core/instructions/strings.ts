@@ -12,7 +12,7 @@ import {
   repStosSemantic,
   scasSemantic,
   stosSemantic
-} from "#x86/semantics/strings.js";
+} from "#core/semantics/strings.js";
 import type { OperandWidth } from "#core/types.js";
 
 export const MOVS = mnemonic("movs", [

@@ -1,5 +1,5 @@
 import { form, implicitReg, mnemonic, modrmReg, modrmRm, opcodePlusReg, opReg } from "./dsl.js";
-import { xchgSemantic } from "#x86/semantics/xchg.js";
+import { xchgSemantic } from "#core/semantics/xchg.js";
 
 export const XCHG = mnemonic("xchg", [
   // 66 90+rw: XCHG AX, r16.

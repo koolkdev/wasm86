@@ -5,7 +5,7 @@ import {
   sahfSemantic,
   writeFlagSemantic,
   xlatSemantic
-} from "#x86/semantics/flags.js";
+} from "#core/semantics/flags.js";
 
 export const CLC = mnemonic("clc", [
   // F8: CLC

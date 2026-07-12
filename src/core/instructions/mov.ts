@@ -18,7 +18,7 @@ import {
   movsxSemantic,
   movToSregSemantic,
   movzxSemantic
-} from "#x86/semantics/mov.js";
+} from "#core/semantics/mov.js";
 
 export const MOV = mnemonic("mov", [
   // 8A /r: MOV r8, r/m8

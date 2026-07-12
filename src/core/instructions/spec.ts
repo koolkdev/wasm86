@@ -1,4 +1,4 @@
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticTemplate } from "#core/semantics/builder.js";
 import type { RepeatPrefix } from "#core/prefixes.js";
 import type { OperandWidth, Reg32, RegName, SegmentRegister } from "#core/types.js";
 

@@ -1,8 +1,8 @@
 import { assert } from "#common/assert.js";
 import type {
   SemanticOperandInfo, SemanticOperandInput
-} from "#x86/semantics/builder.js";
-import type { MemRef, SegmentRef } from "#x86/semantics/refs.js";
+} from "#core/semantics/builder.js";
+import type { MemRef, SegmentRef } from "#core/semantics/refs.js";
 import type { OperandWidth, SegmentRegister } from "#core/types.js";
 import type {
   EffectiveAddressTerms, MemDynamicOperandBinding, MemSegmentBinding, OperandBinding, RegDynamicOperandBinding

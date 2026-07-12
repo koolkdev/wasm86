@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { formatPlaceholders } from "#core/format.js";
 import { X86_32_CORE } from "#core/index.js";
 import { imm, modrmReg, modrmRm, opReg } from "#core/instructions/dsl.js";
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
+import type { SemanticTemplate } from "#core/semantics/builder.js";
 import {
   expandOpcodePath,
   instructionReadsModRm,

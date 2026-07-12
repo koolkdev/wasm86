@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
-import { semanticVar } from "#x86/semantics/refs.js";
-import type { SemanticVar } from "#x86/semantics/builder.js";
+import { semanticVar } from "#core/semantics/refs.js";
+import type { SemanticVar } from "#core/semantics/builder.js";
 
 // Semantic vars are block-local mutable slots: the builder only numbers
 // them, var.read/var.write ops carry the index, and the emitter backs each

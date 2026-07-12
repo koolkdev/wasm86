@@ -1,7 +1,7 @@
 import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "./dsl.js";
 import type { InstructionMnemonic } from "./spec.js";
-import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import { rotateSemantic, type RotateOp } from "#x86/semantics/rotate.js";
+import type { SemanticTemplate } from "#core/semantics/builder.js";
+import { rotateSemantic, type RotateOp } from "#core/semantics/rotate.js";
 import {
   doubleShiftSemantic,
   shiftSemantic,
@@ -9,7 +9,7 @@ import {
   type DoubleShiftOp,
   type ShiftCountSource,
   type ShiftOp
-} from "#x86/semantics/shift.js";
+} from "#core/semantics/shift.js";
 import type { OperandWidth } from "#core/types.js";
 
 type Group2 = 0 | 1 | 2 | 3 | 4 | 5 | 7;

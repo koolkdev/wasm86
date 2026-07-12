@@ -21,6 +21,10 @@
       "types": "./src/core/*",
       "default": "./dist/src/core/*"
     },
+    "#driver/*": {
+      "types": "./src/driver/*",
+      "default": "./dist/src/driver/*"
+    },
     "#runtime/*": {
       "types": "./src/runtime/*",
       "default": "./dist/src/runtime/*"
@@ -32,10 +36,6 @@
     "#wasm/*": {
       "types": "./src/wasm/*",
       "default": "./dist/src/wasm/*"
-    },
-    "#x86/*": {
-      "types": "./src/x86/*",
-      "default": "./dist/src/x86/*"
     }
   },
   "scripts": {

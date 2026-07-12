@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { GetOptions } from "#x86/semantics/builder.js";
+import type { GetOptions } from "#core/semantics/builder.js";
 import type {
   MemRef,
   MemoryAccess,
@@ -7,7 +7,7 @@ import type {
   OperandInput,
   Value,
   ValueInput
-} from "#x86/semantics/refs.js";
+} from "#core/semantics/refs.js";
 import type { OperandWidth, SegmentRegister } from "#core/types.js";
 import type { ValueTable } from "../value-table.js";
 import type { ValueId } from "../values.js";

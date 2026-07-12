@@ -12,7 +12,7 @@ import {
   pushfSemantic,
   pushaSemantic,
   pushSemantic
-} from "#x86/semantics/stack.js";
+} from "#core/semantics/stack.js";
 
 export const PUSH = mnemonic("push", [
   // 66 50+rw: PUSH r16
