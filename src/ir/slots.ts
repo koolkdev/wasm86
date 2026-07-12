@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
-import { x86Flags, type X86Flag } from "#x86/flags.js";
-import { registerAlias } from "#x86/registers.js";
-import { reg16, reg32, reg8, segmentRegisters, type Reg32, type RegName, type SegmentRegister } from "#x86/types.js";
+import { x86Flags, type X86Flag } from "#core/flags.js";
+import { registerAlias } from "#core/registers.js";
+import { reg16, reg32, reg8, segmentRegisters, type Reg32, type RegName, type SegmentRegister } from "#core/types.js";
 import type { ValueId } from "./values.js";
 
 export type GprChannel = Readonly<{

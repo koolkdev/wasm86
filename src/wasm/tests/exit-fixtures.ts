@@ -1,7 +1,7 @@
 import { ok } from "node:assert";
 
-import { PageFaultErrorCode, divideError, pageFault } from "#x86/exceptions.js";
-import type { CpuException } from "#x86/exceptions.js";
+import { PageFaultErrorCode, divideError, pageFault } from "#core/exceptions.js";
+import type { CpuException } from "#core/exceptions.js";
 import type { DecodedCpuExceptionExit } from "#wasm/exit.js";
 
 export type PageFaultException = Extract<CpuException<number>, { kind: "PF" }>;

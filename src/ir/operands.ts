@@ -1,4 +1,4 @@
-import type { EffectiveAddress, RegName, SegmentRegister } from "#x86/types.js";
+import type { EffectiveAddress, RegName, SegmentRegister } from "#core/types.js";
 import { gprChannel, segmentSelectorChannel, type GprChannel, type SegmentChannel } from "./slots.js";
 
 export type ExternalValueId = number;

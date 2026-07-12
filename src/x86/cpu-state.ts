@@ -1,6 +1,6 @@
-import type { X86Flag } from "./flags.js";
-import { u32 } from "./numeric.js";
-import { widthMask, type RegisterAlias, type Reg32, type SegmentRegister } from "./types.js";
+import type { X86Flag } from "#core/flags.js";
+import { u32 } from "#core/numeric.js";
+import { widthMask, type RegisterAlias, type Reg32, type SegmentRegister } from "#core/types.js";
 
 export interface CpuStateView {
   readonly eip: number;

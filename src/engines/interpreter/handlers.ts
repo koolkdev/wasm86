@@ -14,16 +14,16 @@ import {
   type ExternalValueId,
   type OperandBinding
 } from "#ir/operands.js";
-import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#x86/defs/spec.js";
+import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#core/instructions/spec.js";
 import {
   defaultSegmentIndexForBaseIndex,
   dsSegmentIndex,
   noSegmentOverride,
   ssDefaultSegmentBaseIndexes,
   ssSegmentIndex
-} from "#x86/segments.js";
-import { reg32Index } from "#x86/registers.js";
-import { reg16, reg32, reg8, type Reg32, type RegName, type SegmentRegister } from "#x86/types.js";
+} from "#core/segments.js";
+import { reg32Index } from "#core/registers.js";
+import { reg16, reg32, reg8, type Reg32, type RegName, type SegmentRegister } from "#core/types.js";
 import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";

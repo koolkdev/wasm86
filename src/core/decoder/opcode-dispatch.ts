@@ -2,7 +2,7 @@ import {
   instructionReadsModRm,
   type ExpandedInstructionSpec,
   type Reg3
-} from "#x86/defs/spec.js";
+} from "#core/instructions/spec.js";
 import { prefixFlagBucketCount, prefixFlagsFor } from "./prefix-flags.js";
 import type { IsaDecodeReader } from "./reader.js";
 

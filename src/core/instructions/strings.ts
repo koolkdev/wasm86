@@ -13,7 +13,7 @@ import {
   scasSemantic,
   stosSemantic
 } from "#x86/semantics/strings.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 
 export const MOVS = mnemonic("movs", [
   // A4: MOVS m8, m8

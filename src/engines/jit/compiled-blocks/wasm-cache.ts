@@ -1,6 +1,6 @@
-import { decodeIsaBlock, type IsaDecodedBlock } from "#x86/decoder/decode-block.js";
-import type { IsaDecodeFault } from "#x86/decoder/reader.js";
-import { u32 } from "#x86/numeric.js";
+import { decodeIsaBlock, type IsaDecodedBlock } from "#core/decoder/decode-block.js";
+import type { IsaDecodeFault } from "#core/decoder/reader.js";
+import { u32 } from "#core/numeric.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import { compileActionWasmBlockHandle, type WasmBlockHandle } from "#engines/jit/block-handle.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";

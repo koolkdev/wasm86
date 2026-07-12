@@ -1,5 +1,5 @@
 import type { RunResult } from "#x86/execution/run-result.js";
-import { u32 } from "#x86/numeric.js";
+import { u32 } from "#core/numeric.js";
 import { WasmInterpreterRuntime } from "#engines/interpreter/runtime.js";
 import {
   WasmCompiledBlockCache,

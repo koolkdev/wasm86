@@ -1,6 +1,6 @@
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import type { RepeatPrefix } from "#x86/prefixes.js";
-import type { OperandWidth, Reg32, RegName, SegmentRegister } from "#x86/types.js";
+import type { RepeatPrefix } from "#core/prefixes.js";
+import type { OperandWidth, Reg32, RegName, SegmentRegister } from "#core/types.js";
 
 export type Reg3 = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export type FixedHighBits = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;

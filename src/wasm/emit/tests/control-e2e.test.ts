@@ -10,14 +10,14 @@ import {
   type EffectiveAddressTerms,
   type OperandBinding
 } from "#ir/operands.js";
-import { defaultSegmentForBase } from "#x86/segments.js";
+import { defaultSegmentForBase } from "#core/segments.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { decodeBytes, ok as decodeOk } from "#x86/decoder/tests/helpers.js";
-import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { x86StatusFlags } from "#x86/flags.js";
+import { decodeBytes, ok as decodeOk } from "#core/decoder/tests/helpers.js";
+import type { IsaDecodedInstruction } from "#core/decoder/types.js";
+import { x86StatusFlags } from "#core/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
-import { reg32, type MemOperand, type Reg32 } from "#x86/types.js";
+import { reg32, type MemOperand, type Reg32 } from "#core/types.js";
 import { HostExit, decodeExit } from "#wasm/exit.js";
 import { assertPageFaultException, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {

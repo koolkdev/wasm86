@@ -1,7 +1,7 @@
 import type { MutableCpuStateView } from "#x86/cpu-state.js";
-import type { X86Flag } from "#x86/flags.js";
-import type { Reg32, SegmentRegister } from "#x86/types.js";
-import { u32 } from "#x86/numeric.js";
+import type { X86Flag } from "#core/flags.js";
+import type { Reg32, SegmentRegister } from "#core/types.js";
+import { u32 } from "#core/numeric.js";
 import {
   WASM_CPU_STATE_BYTE_LENGTH,
   WASM_CPU_STATE_FIELDS,

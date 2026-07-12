@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { x86StatusFlags } from "#x86/flags.js";
+import { x86StatusFlags } from "#core/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { bitScanSemantic, bitTestSemantic } from "#x86/semantics/bits.js";
 import {

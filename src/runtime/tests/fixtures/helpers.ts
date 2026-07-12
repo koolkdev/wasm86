@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 
-import { decodeIsaBlock } from "#x86/decoder/decode-block.js";
+import { decodeIsaBlock } from "#core/decoder/decode-block.js";
 import type { RunResult } from "#x86/execution/run-result.js";
 import { readWasmCpuState, type WasmCpuStateField } from "#runtime/tests/fixtures/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";

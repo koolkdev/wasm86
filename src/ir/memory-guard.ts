@@ -7,7 +7,7 @@ import {
   pageFault,
   pageFaultErrorCode,
   type PageFaultAccess
-} from "#x86/exceptions.js";
+} from "#core/exceptions.js";
 
 export type MemoryGuardAccess =
   | Readonly<{ kind: "data"; access: MemoryAccessKind }>

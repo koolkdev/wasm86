@@ -37,8 +37,8 @@ import type { Body, IrBlock } from "#ir/block.js";
 import type { MemoryAccessKind } from "#ir/ops.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { valueId, type ValueId, type ValueNode } from "#ir/values.js";
-import { invalidOpcode, PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
-import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
+import { invalidOpcode, PageFaultErrorCode, pageFault } from "#core/exceptions.js";
+import type { X86Flag, X86StatusFlag } from "#core/flags.js";
 import type { SemanticOps, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { Values } from "#ir/values.js";
 import type {
@@ -46,7 +46,7 @@ import type {
   MemoryAccessKind as SemanticAccessKind,
   ValueInput
 } from "#x86/semantics/refs.js";
-import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#x86/flags.js";
+import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#core/flags.js";
 import { aluSemantic, unaryAluSemantic } from "#x86/semantics/alu.js";
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { callSemantic, jccSemantic, jecxzSemantic, jmpSemantic, loopSemantic } from "#x86/semantics/control.js";
@@ -59,8 +59,8 @@ import { shiftSemantic } from "#x86/semantics/shift.js";
 import { popfdSemantic, popfSemantic, popSemantic, pushfdSemantic, pushfSemantic } from "#x86/semantics/stack.js";
 import { testSemantic as testInstructionSemantic } from "#x86/semantics/test.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";
-import { defaultSegmentForBase } from "#x86/segments.js";
-import type { EffectiveAddress, OperandWidth } from "#x86/types.js";
+import { defaultSegmentForBase } from "#core/segments.js";
+import type { EffectiveAddress, OperandWidth } from "#core/types.js";
 import { assertLazyRecord } from "./lazy-flags.js";
 import { isMemoryRead, isMemoryResolve, isMemoryWrite, isResolveFlag, isStateRead, isStateWrite, memoryRead, memoryResolve, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import type { MemoryReadAction, MemoryResolveAction, MemoryWriteAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";

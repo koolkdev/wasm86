@@ -9,12 +9,12 @@ import {
   type EffectiveAddressTerms,
   type OperandBinding
 } from "#ir/operands.js";
-import { defaultSegmentForBase } from "#x86/segments.js";
+import { defaultSegmentForBase } from "#core/segments.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { decodeBytes, ok as decoded, startAddress } from "#x86/decoder/tests/helpers.js";
-import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import type { MemOperand, RegName } from "#x86/types.js";
+import { decodeBytes, ok as decoded, startAddress } from "#core/decoder/tests/helpers.js";
+import type { IsaDecodedInstruction } from "#core/decoder/types.js";
+import type { MemOperand, RegName } from "#core/types.js";
 import {
   assertLazyFlagState,
   createWasmCpuStateSnapshot,

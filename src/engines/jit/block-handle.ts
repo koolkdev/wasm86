@@ -1,5 +1,5 @@
-import type { IsaDecodedBlock } from "#x86/decoder/decode-block.js";
-import { u32 } from "#x86/numeric.js";
+import type { IsaDecodedBlock } from "#core/decoder/decode-block.js";
+import { u32 } from "#core/numeric.js";
 import { wasmImport } from "#wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";

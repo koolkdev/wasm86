@@ -1,7 +1,7 @@
-import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
-import { pageFaultErrorCode, type CpuException } from "#x86/exceptions.js";
+import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags.js";
+import { pageFaultErrorCode, type CpuException } from "#core/exceptions.js";
 import { operand, reg, semanticVar } from "#x86/semantics/refs.js";
-import type { ConditionCode } from "#x86/conditions.js";
+import type { ConditionCode } from "#core/conditions.js";
 import type { Values } from "#ir/values.js";
 import type {
   SemanticsBuilder,
@@ -31,7 +31,7 @@ import type {
   Value,
   ValueInput
 } from "#x86/semantics/refs.js";
-import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {
   BinaryOperator,
   CompareOperator,

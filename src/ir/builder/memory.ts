@@ -8,7 +8,7 @@ import type {
   Value,
   ValueInput
 } from "#x86/semantics/refs.js";
-import type { OperandWidth, SegmentRegister } from "#x86/types.js";
+import type { OperandWidth, SegmentRegister } from "#core/types.js";
 import type { ValueTable } from "../value-table.js";
 import type { ValueId } from "../values.js";
 import type { OperandResolver } from "./operands.js";

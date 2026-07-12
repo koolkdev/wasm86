@@ -1,6 +1,6 @@
 import type { DecodedExit } from "#wasm/exit.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
-import type { IsaDecodeReader } from "#x86/decoder/reader.js";
+import type { IsaDecodeReader } from "#core/decoder/reader.js";
 
 export type WasmCompiledBlockCodeMap = Readonly<{
   createReader(memory: WebAssembly.Memory): IsaDecodeReader;

@@ -13,7 +13,7 @@ import {
   HostExit,
   type DecodedExit
 } from "#wasm/exit.js";
-import { PageFaultErrorCode, divideError, invalidOpcode, pageFault } from "#x86/exceptions.js";
+import { PageFaultErrorCode, divideError, invalidOpcode, pageFault } from "#core/exceptions.js";
 
 const fixtures: readonly ExitFixture[] = [
   {

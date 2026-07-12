@@ -12,7 +12,7 @@ import type { IrBlock } from "#ir/block.js";
 import { fitsUnsigned } from "#ir/values.js";
 import { ValueTable } from "#ir/value-table.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import type { RegName } from "#x86/types.js";
+import type { RegName } from "#core/types.js";
 import { aluSemantic } from "#x86/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#x86/semantics/mov.js";
 import { xchgSemantic } from "#x86/semantics/xchg.js";

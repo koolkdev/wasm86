@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
-import { i32 } from "#x86/numeric.js";
+import { i32 } from "#core/numeric.js";
 import type { BinaryOperator, CompareOperator, UnaryOperator } from "#ir/operators.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 import type { ValueId, ValueType } from "./values.js";
 
 export type ValueFoldBounds = Readonly<{ unsignedBits: number; signedBits: number }>;

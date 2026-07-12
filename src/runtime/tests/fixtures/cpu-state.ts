@@ -2,8 +2,8 @@ import { strictEqual } from "node:assert";
 
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { StateChannel } from "#ir/slots.js";
-import { x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
-import { u32 } from "#x86/numeric.js";
+import { x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags.js";
+import { u32 } from "#core/numeric.js";
 import type { WasmCpuState, WasmCpuStateInit, WasmCpuStateSnapshot } from "#wasm/host/cpu-state.js";
 import {
   wasmCpuStateChannelAccessByteLength,

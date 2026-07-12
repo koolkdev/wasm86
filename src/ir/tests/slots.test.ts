@@ -17,8 +17,8 @@ import {
   segmentSelectorChannel,
   type StateChannel
 } from "#ir/slots.js";
-import { x86Flags } from "#x86/flags.js";
-import { reg16, reg32, reg8, segmentRegisters } from "#x86/types.js";
+import { x86Flags } from "#core/flags.js";
+import { reg16, reg32, reg8, segmentRegisters } from "#core/types.js";
 
 test("gpr channels describe byte ranges within their register", () => {
   deepStrictEqual(gprChannel("eax"), { kind: "gpr", reg: "eax", byteOffsetInReg: 0, byteLength: 4 });

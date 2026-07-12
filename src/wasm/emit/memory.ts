@@ -3,7 +3,7 @@ import type { ValueId } from "#ir/values.js";
 import { wasmGuestMemoryMinByteLength, wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 import type { OperandUses } from "./ops.js";
 
 // Bounds checks and guest memory access. A resolved range supplies the guest

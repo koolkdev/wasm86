@@ -1,13 +1,13 @@
 import { assert } from "#common/assert.js";
-import { prefixFlagBits } from "#x86/decoder/prefix-flags.js";
+import { prefixFlagBits } from "#core/decoder/prefix-flags.js";
 import {
   operandSizeOverridePrefixByte,
   repnePrefixByte,
   repPrefixByte,
   segmentOverridePrefixSegments
-} from "#x86/prefixes.js";
-import { noSegmentOverride, segmentRegisterIndex } from "#x86/segments.js";
-import type { SegmentRegister } from "#x86/types.js";
+} from "#core/prefixes.js";
+import { noSegmentOverride, segmentRegisterIndex } from "#core/segments.js";
+import type { SegmentRegister } from "#core/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#wasm/encoder/local-scratch.js";
 import type { WasmHelperRegistry } from "#wasm/helpers/module.js";

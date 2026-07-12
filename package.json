@@ -17,6 +17,10 @@
       "types": "./src/common/*",
       "default": "./dist/src/common/*"
     },
+    "#core/*": {
+      "types": "./src/core/*",
+      "default": "./dist/src/core/*"
+    },
     "#runtime/*": {
       "types": "./src/runtime/*",
       "default": "./dist/src/runtime/*"

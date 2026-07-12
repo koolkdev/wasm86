@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { decodeBytes, ok } from "./helpers.js";
-import type { IsaOperandBinding } from "#x86/decoder/types.js";
+import type { IsaOperandBinding } from "#core/decoder/types.js";
 
 test("decodes default segments for memory operands symbolically", () => {
   strictEqual(memoryOperand([0x8b, 0x03]).segment, "ds", "base ebx defaults to ds");

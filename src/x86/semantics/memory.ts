@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { Values } from "#ir/values.js";
-import { pageFault, pageFaultErrorCode, type CpuException } from "#x86/exceptions.js";
+import { pageFault, pageFaultErrorCode, type CpuException } from "#core/exceptions.js";
 import type {
   GetOptions,
   SemanticBuildContext,
@@ -15,7 +15,7 @@ import type {
   Value,
   ValueInput
 } from "#x86/semantics/refs.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 
 export type ResolvedOperandStorage = "reg" | "mem";
 

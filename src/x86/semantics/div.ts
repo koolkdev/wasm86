@@ -1,8 +1,8 @@
-import { divideError } from "#x86/exceptions.js";
+import { divideError } from "#core/exceptions.js";
 import type { Values } from "#ir/values.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 import { readStorage, resolveStorageRead } from "./memory.js";
 
 type DivideKind = "signed" | "unsigned";

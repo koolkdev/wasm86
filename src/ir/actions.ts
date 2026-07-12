@@ -1,4 +1,4 @@
-import type { CpuException } from "#x86/exceptions.js";
+import type { CpuException } from "#core/exceptions.js";
 import type { Body } from "./block.js";
 import type { IrOp, StateWriteOp } from "./ops.js";
 import type { StateChannel } from "./slots.js";

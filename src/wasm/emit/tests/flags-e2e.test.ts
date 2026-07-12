@@ -5,11 +5,11 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel, lazyFlagsKindChannel } from "#ir/slots.js";
-import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
-import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { x86StatusFlags } from "#x86/flags.js";
+import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
+import type { IsaDecodedInstruction } from "#core/decoder/types.js";
+import { x86StatusFlags } from "#core/flags.js";
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
-import { reg32, type Reg32 } from "#x86/types.js";
+import { reg32, type Reg32 } from "#core/types.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { wasmOpcode } from "#wasm/encoder/types.js";

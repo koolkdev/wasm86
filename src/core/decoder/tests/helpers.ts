@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { defaultSegmentForBase } from "#x86/segments.js";
+import { defaultSegmentForBase } from "#core/segments.js";
 import {
   type EffectiveAddress,
   type MemoryOperandWidth,
@@ -9,16 +9,16 @@ import {
   type Reg32,
   type RegName,
   type SegmentRegister
-} from "#x86/types.js";
-import { registerAlias } from "#x86/registers.js";
+} from "#core/types.js";
+import { registerAlias } from "#core/registers.js";
 import {
   truncatedInstructionFault,
   IsaDecodeError,
   type IsaDecodeReader
-} from "#x86/decoder/reader.js";
-import type { IsaDecodedInstruction, IsaDecodeResult } from "#x86/decoder/types.js";
-import type { IsaOperandBinding } from "#x86/decoder/types.js";
-import { decodeIsaInstructionFromReader } from "#x86/decoder/decode.js";
+} from "#core/decoder/reader.js";
+import type { IsaDecodedInstruction, IsaDecodeResult } from "#core/decoder/types.js";
+import type { IsaOperandBinding } from "#core/decoder/types.js";
+import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
 
 export const startAddress = 0x1000;
 

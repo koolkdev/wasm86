@@ -13,9 +13,9 @@ import {
   segmentLimitChannel,
   segmentSelectorChannel
 } from "#ir/slots.js";
-import { x86Flags } from "#x86/flags.js";
-import { reg16, reg32, reg8, segmentRegisters } from "#x86/types.js";
-import { registerAlias } from "#x86/registers.js";
+import { x86Flags } from "#core/flags.js";
+import { reg16, reg32, reg8, segmentRegisters } from "#core/types.js";
+import { registerAlias } from "#core/registers.js";
 import {
   WASM_CPU_FLAG_BYTE_OFFSETS,
   WASM_CPU_SEGMENT_ACCESS_OFFSET,

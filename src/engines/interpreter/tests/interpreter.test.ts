@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { gprChannel } from "#ir/slots.js";
-import type { RegName } from "#x86/types.js";
+import type { RegName } from "#core/types.js";
 import { CompletionExit, HostExit, type DecodedCompletionExit, type DecodedExit, type DecodedHostExit } from "#wasm/exit.js";
 import { fetchPageFaultExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import {

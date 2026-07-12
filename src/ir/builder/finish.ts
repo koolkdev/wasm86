@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { CpuException } from "#x86/exceptions.js";
+import type { CpuException } from "#core/exceptions.js";
 import type { BodyBuilder } from "../body-builder.js";
 import type { Finish, StateWriteAction } from "../actions.js";
 import type { StatePathKind } from "./state/pending-buffer.js";

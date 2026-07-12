@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { u32 } from "#x86/numeric.js";
+import { u32 } from "#core/numeric.js";
 import { wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { WasmModuleEncoder } from "#wasm/encoder/module.js";

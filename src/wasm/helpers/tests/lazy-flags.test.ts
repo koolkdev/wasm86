@@ -13,8 +13,8 @@ import {
 } from "#wasm/helpers/lazy-flags.js";
 import { createWasmHelperRegistry } from "#wasm/helpers/module.js";
 import { writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
-import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
-import type { OperandWidth } from "#x86/types.js";
+import { x86StatusFlags, type X86StatusFlag } from "#core/flags.js";
+import type { OperandWidth } from "#core/types.js";
 import { aluReference } from "#wasm/emit/tests/reference.js";
 import { extractOnlyWasmFunctionBody, wasmBodyOpcodes } from "#wasm/tests/body-opcodes.js";
 

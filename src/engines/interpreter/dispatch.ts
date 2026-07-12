@@ -4,17 +4,17 @@ import {
   type OpcodeDispatchCandidateSet,
   type OpcodeDispatchLeaf,
   type OpcodeDispatchNode
-} from "#x86/decoder/opcode-dispatch.js";
+} from "#core/decoder/opcode-dispatch.js";
 import type {
   ExpandedInstructionSpec,
   MemOperandType,
   OperandSpec,
   Reg3,
   RmOperandType
-} from "#x86/defs/spec.js";
-import { prefixFlagMask } from "#x86/decoder/prefix-flags.js";
+} from "#core/instructions/spec.js";
+import { prefixFlagMask } from "#core/decoder/prefix-flags.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
-import { segmentRegisters } from "#x86/types.js";
+import { segmentRegisters } from "#core/types.js";
 import { encodeHostExit, HostExit } from "#wasm/exit.js";
 import { noBaseRegister, type RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";

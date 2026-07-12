@@ -1,4 +1,4 @@
-import type { ConditionCode } from "#x86/conditions.js";
+import type { ConditionCode } from "#core/conditions.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { resolveStorageWrite, writeStorage } from "./memory.js";
 

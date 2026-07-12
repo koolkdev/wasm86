@@ -3,9 +3,9 @@ import type {
   SemanticsBuilder,
   SemanticTemplate
 } from "#x86/semantics/builder.js";
-import { bitAt, lowBit, signBit } from "#x86/flag-values.js";
+import { bitAt, lowBit, signBit } from "#core/flag-values.js";
 import type { Value } from "#x86/semantics/refs.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 import { semanticFlagOps } from "./flag-value-ops.js";
 import { writeRotateFlags } from "./flag-writes.js";
 import {

@@ -15,7 +15,7 @@ import type { EngineFixture, MemoryPatch } from "#runtime/tests/fixtures/types.j
 import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
 import { aluReference } from "#wasm/emit/tests/reference.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 
 const trap = [0xcd, 0x2e] as const;
 const guestByteLength = 0x10000;

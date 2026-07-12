@@ -1,5 +1,5 @@
-import type { OperandWidth, Reg32, RegName, SegmentRegister } from "#x86/types.js";
-import { registerAlias } from "#x86/registers.js";
+import type { OperandWidth, Reg32, RegName, SegmentRegister } from "#core/types.js";
+import { registerAlias } from "#core/registers.js";
 import type {
   DefinedIsa,
   ImmediateExtension,

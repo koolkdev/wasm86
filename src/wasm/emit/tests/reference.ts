@@ -1,5 +1,5 @@
-import type { X86StatusFlag } from "#x86/flags.js";
-import { widthMask, type OperandWidth } from "#x86/types.js";
+import type { X86StatusFlag } from "#core/flags.js";
+import { widthMask, type OperandWidth } from "#core/types.js";
 
 // Test-local arithmetic-flag reference for action e2e ALU cases. It avoids
 // production flag-value formulas and records AF = 0 for logic ops.

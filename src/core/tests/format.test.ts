@@ -1,9 +1,9 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
-import { formatIsaInstruction, formatIsaOperand } from "#x86/format.js";
-import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
+import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
+import { formatIsaInstruction, formatIsaOperand } from "#core/format.js";
+import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 
 test("formats register and immediate operands through instruction format metadata", () => {
   const decoded = decode([0xbb, 0x78, 0x56, 0x34, 0x12]);

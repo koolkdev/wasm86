@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { OperandWidth, RegName } from "#x86/types.js";
+import type { OperandWidth, RegName } from "#core/types.js";
 import type { StateWriteAction } from "../../actions.js";
 import {
   channelCovers, channelsOverlap, gprChannel, type GprDynamicSlot, type GprChannel

@@ -1,5 +1,5 @@
-import { u32 } from "#x86/numeric.js";
-import { X86_32_CORE } from "#x86/index.js";
+import { u32 } from "#core/numeric.js";
+import { X86_32_CORE } from "#core/index.js";
 import {
   expandInstructionSpec,
   instructionReadsModRm,
@@ -11,17 +11,17 @@ import {
   type Reg3,
   type RegOperandType,
   type RmOperandType
-} from "#x86/defs/spec.js";
-import { registerAlias, registerAliasByIndex } from "#x86/registers.js";
+} from "#core/instructions/spec.js";
+import { registerAlias, registerAliasByIndex } from "#core/registers.js";
 import {
   operandSizeOverridePrefixByte,
   repnePrefixByte,
   repPrefixByte,
   segmentOverridePrefixSegments,
   type RepeatPrefix
-} from "#x86/prefixes.js";
-import { defaultSegmentForBase } from "#x86/segments.js";
-import { segmentRegisters, type MemOperand, type MemoryOperandWidth, type OperandWidth, type SegmentRegister } from "#x86/types.js";
+} from "#core/prefixes.js";
+import { defaultSegmentForBase } from "#core/segments.js";
+import { segmentRegisters, type MemOperand, type MemoryOperandWidth, type OperandWidth, type SegmentRegister } from "#core/types.js";
 import { signedImm8, signedImm32 } from "./immediate.js";
 import { decodeModRmAddressing, rm32ModRmByteLengthAt, type ModRmRm } from "./modrm.js";
 import { buildOpcodeDispatch, opcodeLeaf, type OpcodeDispatchLeaf } from "./opcode-dispatch.js";

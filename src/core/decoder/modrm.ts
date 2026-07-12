@@ -1,12 +1,12 @@
 import type { IsaDecodeReader } from "./reader.js";
 import { readU32LE } from "./reader.js";
 import { signedImm8, signedImm32 } from "./immediate.js";
-import { defaultSegmentForBase } from "#x86/segments.js";
+import { defaultSegmentForBase } from "#core/segments.js";
 import {
   reg32,
   type EffectiveAddress,
   type Reg32
-} from "#x86/types.js";
+} from "#core/types.js";
 
 type Scale = EffectiveAddress["scale"];
 type Sib = Readonly<{

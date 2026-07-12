@@ -1,8 +1,8 @@
 import { assert } from "#common/assert.js";
 import type { SegmentChannelField, StateChannel } from "#ir/slots.js";
-import { x86Flags, type X86Flag } from "#x86/flags.js";
+import { x86Flags, type X86Flag } from "#core/flags.js";
 import { LAZY_FLAGS_KIND } from "#ir/lazy-flags.js";
-import { reg32, segmentRegisters, type SegmentRegister } from "#x86/types.js";
+import { reg32, segmentRegisters, type SegmentRegister } from "#core/types.js";
 
 type WasmCpuStateLayoutEntry = Readonly<{
   offset: number;

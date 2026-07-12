@@ -1,8 +1,8 @@
 import type { Values } from "#ir/values.js";
 import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#x86/semantics/builder.js";
 import type { OperandRef, Value, ValueInput } from "#x86/semantics/refs.js";
-import { x86EflagsBitOffset, x86Flags, type X86Flag } from "#x86/flags.js";
-import type { OperandWidth, Reg16, Reg32 } from "#x86/types.js";
+import { x86EflagsBitOffset, x86Flags, type X86Flag } from "#core/flags.js";
+import type { OperandWidth, Reg16, Reg32 } from "#core/types.js";
 import { buildFlagImage, writeFlagsFromImage } from "./flag-image.js";
 import {
   readStorage,

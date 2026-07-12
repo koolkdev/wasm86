@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import type { SemanticTemplate, StatusFlagValues } from "#x86/semantics/builder.js";
 import type { ValueInput } from "#x86/semantics/refs.js";
-import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
+import { x86StatusFlags, type X86StatusFlag } from "#core/flags.js";
 import {
   addFlagSource,
   logicFlagSource,

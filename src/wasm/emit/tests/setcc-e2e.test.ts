@@ -4,9 +4,9 @@ import { test } from "node:test";
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { immBinding, regBinding } from "#ir/operands.js";
 import { gprChannel } from "#ir/slots.js";
-import { CONDITIONS, type FlagBoolExpr } from "#x86/conditions.js";
-import type { X86StatusFlag } from "#x86/flags.js";
-import type { ConditionCode } from "#x86/conditions.js";
+import { CONDITIONS, type FlagBoolExpr } from "#core/conditions.js";
+import type { X86StatusFlag } from "#core/flags.js";
+import type { ConditionCode } from "#core/conditions.js";
 
 import { cmpSemantic } from "#x86/semantics/cmp.js";
 import { setccSemantic } from "#x86/semantics/setcc.js";

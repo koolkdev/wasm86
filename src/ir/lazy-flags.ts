@@ -1,4 +1,4 @@
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 
 export const LAZY_FLAGS_KIND = {
   NONE: 0,

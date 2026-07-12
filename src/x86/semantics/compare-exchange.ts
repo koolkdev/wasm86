@@ -1,7 +1,7 @@
 import type { Values } from "#ir/values.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import type { Value, ValueInput } from "#x86/semantics/refs.js";
-import type { OperandWidth, RegName } from "#x86/types.js";
+import type { OperandWidth, RegName } from "#core/types.js";
 import { addFlagSource, subFlagSource } from "./flag-writes.js";
 import {
   readStorage,

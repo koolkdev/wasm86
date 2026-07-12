@@ -11,7 +11,7 @@ import {
 } from "#runtime/tests/fixtures/helpers.js";
 import { engineFixtureStartAddress } from "#runtime/tests/fixtures/programs.js";
 import type { EngineFixture } from "#runtime/tests/fixtures/types.js";
-import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
+import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
 
 const trap = [0xcd, 0x2e] as const;

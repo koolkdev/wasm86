@@ -1,7 +1,7 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { pageFault } from "#x86/exceptions.js";
+import { pageFault } from "#core/exceptions.js";
 import { HostExit } from "#wasm/exit.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { runResultFromWasmExit } from "#runtime/execution/wasm-exit-result.js";

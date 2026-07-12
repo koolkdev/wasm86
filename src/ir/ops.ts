@@ -1,5 +1,5 @@
-import type { OperandWidth } from "#x86/types.js";
-import type { X86StatusFlag } from "#x86/flags.js";
+import type { OperandWidth } from "#core/types.js";
+import type { X86StatusFlag } from "#core/flags.js";
 import {
   flagChannel,
   lazyFlagsAChannel,

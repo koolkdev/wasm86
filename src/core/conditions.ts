@@ -1,4 +1,4 @@
-import type { X86StatusFlag } from "#x86/flags.js";
+import type { X86StatusFlag } from "#core/flags.js";
 
 export type ConditionCode =
   | "O"

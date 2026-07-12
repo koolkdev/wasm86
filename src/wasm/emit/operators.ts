@@ -7,7 +7,7 @@ import type {
   UnaryValueNode,
   ValueType
 } from "#ir/values.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 

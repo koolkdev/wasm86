@@ -1,9 +1,9 @@
-import type { ConditionCode } from "#x86/conditions.js";
-import { invalidOpcode } from "#x86/exceptions.js";
+import type { ConditionCode } from "#core/conditions.js";
+import { invalidOpcode } from "#core/exceptions.js";
 import type { Values } from "#ir/values.js";
-import { segmentRegisterIndex } from "#x86/segments.js";
+import { segmentRegisterIndex } from "#core/segments.js";
 import type { SemanticOperandInfo, SemanticTemplate } from "#x86/semantics/builder.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 import type { Value } from "./refs.js";
 import {
   readStorage,

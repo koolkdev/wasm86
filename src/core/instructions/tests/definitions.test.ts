@@ -2,9 +2,9 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import { x86StatusFlags } from "#x86/flags.js";
-import { X86_32_CORE } from "#x86/index.js";
-import { expandInstructionSpec, type InstructionSpec } from "#x86/defs/spec.js";
+import { x86StatusFlags } from "#core/flags.js";
+import { X86_32_CORE } from "#core/index.js";
+import { expandInstructionSpec, type InstructionSpec } from "#core/instructions/spec.js";
 import {
   buildSemanticTrace,
   operands,

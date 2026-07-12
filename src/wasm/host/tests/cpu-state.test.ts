@@ -3,8 +3,8 @@ import { test } from "node:test";
 
 import { readRegisterAlias, writeRegisterAlias } from "#x86/cpu-state.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
-import { x86Flags } from "#x86/flags.js";
-import { registerAlias } from "#x86/registers.js";
+import { x86Flags } from "#core/flags.js";
+import { registerAlias } from "#core/registers.js";
 import { readWasmCpuState, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";

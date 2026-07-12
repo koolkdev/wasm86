@@ -1,5 +1,5 @@
 import { readBackingByte } from "#memory/bytes.js";
-import { truncatedInstructionFault, IsaDecodeError, type IsaDecodeReader } from "#x86/decoder/reader.js";
+import { truncatedInstructionFault, IsaDecodeError, type IsaDecodeReader } from "#core/decoder/reader.js";
 import { regionContains, type RuntimeCodeRegion } from "./regions.js";
 
 export class RuntimeCodeMap {

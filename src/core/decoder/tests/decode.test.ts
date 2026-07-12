@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { decodeIsaInstructionFromReader } from "#x86/decoder/decode.js";
+import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
 import { ByteArrayDecodeReader, decodeBytes, imm8, imm32, mem, mem32, ok, reg, reg32, signImm8, startAddress } from "./helpers.js";
 
 test("decodes opcode-encoded register and imm32 operands", () => {

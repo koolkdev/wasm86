@@ -1,5 +1,5 @@
-import { segmentRegisterIndex } from "#x86/segments.js";
-import type { SegmentRegister } from "#x86/types.js";
+import { segmentRegisterIndex } from "#core/segments.js";
+import type { SegmentRegister } from "#core/types.js";
 import type { SegmentDynamicOperandBinding, SegmentOperandBinding } from "../operands.js";
 import type { ValueId } from "../values.js";
 import { ValueTable } from "../value-table.js";

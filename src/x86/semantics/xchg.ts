@@ -1,4 +1,4 @@
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { readStorage, resolveStorageReadWrite, writeStorage } from "./memory.js";
 

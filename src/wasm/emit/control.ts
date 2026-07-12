@@ -2,8 +2,8 @@ import { assert } from "#common/assert.js";
 import type { DispatchFinish, ExitFinish, HostExitReason } from "#ir/actions.js";
 import { eipChannel } from "#ir/slots.js";
 import type { ValueId } from "#ir/values.js";
-import { CpuExceptionVector, type CpuException } from "#x86/exceptions.js";
-import { u32 } from "#x86/numeric.js";
+import { CpuExceptionVector, type CpuException } from "#core/exceptions.js";
+import { u32 } from "#core/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#wasm/encoder/function-body.js";
 import {
   CompletionExit,

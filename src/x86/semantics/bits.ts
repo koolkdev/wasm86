@@ -4,7 +4,7 @@ import type {
   SemanticTemplate
 } from "#x86/semantics/builder.js";
 import type { OperandRef, Value, ValueInput } from "#x86/semantics/refs.js";
-import { widthMask, type OperandWidth } from "#x86/types.js";
+import { widthMask, type OperandWidth } from "#core/types.js";
 import { writeStatusFlagValues } from "./flag-writes.js";
 import {
   readStorage,

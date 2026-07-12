@@ -12,7 +12,7 @@ import { wasmValueType } from "#wasm/encoder/types.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FallthroughTarget } from "#wasm/emit/embed.js";
 import { decodeExit, type DecodedCpuExceptionExit, type DecodedExit } from "#wasm/exit.js";
-import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
+import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { assertPageFaultException } from "#wasm/tests/exit-fixtures.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";

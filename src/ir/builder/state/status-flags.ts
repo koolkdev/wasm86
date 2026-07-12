@@ -1,14 +1,14 @@
 import { assert } from "#common/assert.js";
-import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
-import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
+import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#core/conditions.js";
+import { x86StatusFlags, type X86StatusFlag } from "#core/flags.js";
 import {
   simpleFlagSourceConditionOperators,
   type SimpleFlagSource
-} from "#x86/flag-sources.js";
+} from "#core/flag-sources.js";
 import {
   statusFlagValuesForSource,
   type StatusFlagValues
-} from "#x86/flag-values.js";
+} from "#core/flag-values.js";
 import { signedComparePredicates, type CompareOperator } from "#ir/operators.js";
 import type { BodyBuilder, SwitchArm } from "../../body-builder.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "../../lazy-flags.js";

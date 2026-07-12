@@ -4,9 +4,9 @@ import { test } from "node:test";
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import { immBinding, memBinding, regBinding, staticMemSegment, type OperandBinding } from "#ir/operands.js";
 import type { IrBlock } from "#ir/block.js";
-import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
-import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { defaultSegmentForBase } from "#x86/segments.js";
+import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
+import type { IsaDecodedInstruction } from "#core/decoder/types.js";
+import { defaultSegmentForBase } from "#core/segments.js";
 import { irBlockBody, irBlockBodyWithHelpers } from "./harness.js";
 
 // Pinned harness-embedded bodies (dispatch escape block + sentinel tail):

@@ -3,7 +3,7 @@ import type {
   SemanticOperandInfo, SemanticOperandInput
 } from "#x86/semantics/builder.js";
 import type { MemRef, SegmentRef } from "#x86/semantics/refs.js";
-import type { OperandWidth, SegmentRegister } from "#x86/types.js";
+import type { OperandWidth, SegmentRegister } from "#core/types.js";
 import type {
   EffectiveAddressTerms, MemDynamicOperandBinding, MemSegmentBinding, OperandBinding, RegDynamicOperandBinding
 } from "../operands.js";

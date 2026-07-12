@@ -12,7 +12,7 @@ import type {
   SemanticTemplate
 } from "#x86/semantics/builder.js";
 import type { Value } from "#x86/semantics/refs.js";
-import type { OperandWidth, RegName } from "#x86/types.js";
+import type { OperandWidth, RegName } from "#core/types.js";
 
 type StringUnit = (builder: SemanticOps, values: Values, context: SemanticBuildContext) => void;
 

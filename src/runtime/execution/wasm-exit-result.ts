@@ -4,7 +4,7 @@ import {
   type RunStop,
   type RunResult
 } from "#x86/execution/run-result.js";
-import { segmentRegisters } from "#x86/types.js";
+import { segmentRegisters } from "#core/types.js";
 import { CompletionExit, HostExit, type DecodedExit, type DecodedHostExit } from "#wasm/exit.js";
 import type { WasmCpuState } from "#wasm/host/cpu-state.js";
 

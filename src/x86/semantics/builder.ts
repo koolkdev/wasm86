@@ -1,9 +1,9 @@
-import type { ConditionCode } from "#x86/conditions.js";
-import type { CpuException } from "#x86/exceptions.js";
-import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#x86/flag-sources.js";
-import type { X86Flag, X86StatusFlag } from "#x86/flags.js";
+import type { ConditionCode } from "#core/conditions.js";
+import type { CpuException } from "#core/exceptions.js";
+import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#core/flag-sources.js";
+import type { X86Flag, X86StatusFlag } from "#core/flags.js";
 import type { Values } from "#ir/values.js";
-import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {
   MemRef,
   MemoryAccess,

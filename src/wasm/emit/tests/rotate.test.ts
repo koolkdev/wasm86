@@ -10,9 +10,9 @@ import {
   wasmCpuStatusFlagsOf,
   writeWasmCpuStateSnapshot
 } from "#runtime/tests/fixtures/cpu-state.js";
-import { decodeBytes, ok as decoded } from "#x86/decoder/tests/helpers.js";
-import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import type { RegName } from "#x86/types.js";
+import { decodeBytes, ok as decoded } from "#core/decoder/tests/helpers.js";
+import type { IsaDecodedInstruction } from "#core/decoder/types.js";
+import type { RegName } from "#core/types.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 const preservedFlags = { PF: 1, AF: 1, ZF: 1, SF: 1 } as const;

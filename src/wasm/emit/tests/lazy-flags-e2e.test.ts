@@ -6,12 +6,12 @@ import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { IrBlock } from "#ir/block.js";
 import { immBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
-import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#x86/conditions.js";
-import { decodeBytes, ok } from "#x86/decoder/tests/helpers.js";
-import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import { CONDITION_CODE_DESCRIPTORS } from "#x86/defs/condition-codes.js";
-import { x86EflagsBitOffset, x86Flags, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#x86/flags.js";
-import { widthMask, type OperandWidth } from "#x86/types.js";
+import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#core/conditions.js";
+import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
+import type { IsaDecodedInstruction } from "#core/decoder/types.js";
+import { CONDITION_CODE_DESCRIPTORS } from "#core/instructions/condition-codes.js";
+import { x86EflagsBitOffset, x86Flags, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags.js";
+import { widthMask, type OperandWidth } from "#core/types.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import {
   assertLazyFlagState,

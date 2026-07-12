@@ -1,6 +1,6 @@
 import type { ExternalValueId } from "./operands.js";
 import type { BinaryOperator, CompareOperator, UnaryOperator } from "./operators.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 
 declare const valueBrand: unique symbol;
 

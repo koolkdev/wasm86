@@ -1,4 +1,4 @@
-import { CONDITION_CODE_DESCRIPTORS } from "#x86/defs/condition-codes.js";
+import { CONDITION_CODE_DESCRIPTORS } from "#core/instructions/condition-codes.js";
 import {
   form,
   imm,

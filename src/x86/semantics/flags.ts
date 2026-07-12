@@ -1,4 +1,4 @@
-import { type X86Flag } from "#x86/flags.js";
+import { type X86Flag } from "#core/flags.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import { buildFlagImage, writeFlagsFromImage } from "./flag-image.js";
 import { resolveMemoryAccess } from "./memory.js";

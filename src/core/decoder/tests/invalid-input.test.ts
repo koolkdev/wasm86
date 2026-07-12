@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { IsaDecodeError } from "#x86/decoder/reader.js";
-import { X86_32_CORE } from "#x86/index.js";
+import { IsaDecodeError } from "#core/decoder/reader.js";
+import { X86_32_CORE } from "#core/index.js";
 import { decodeBytes, startAddress } from "./helpers.js";
 
 const instructionLengthLimit = X86_32_CORE.instructionLengthLimit;

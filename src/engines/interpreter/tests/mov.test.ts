@@ -10,7 +10,7 @@ import {
 import { startAddress } from "#wasm/tests/helpers.js";
 import { fetchPageFaultExit, readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { HostExit } from "#wasm/exit.js";
-import { invalidOpcode } from "#x86/exceptions.js";
+import { invalidOpcode } from "#core/exceptions.js";
 import {
   assertCompletedInstruction,
   executeInstruction,

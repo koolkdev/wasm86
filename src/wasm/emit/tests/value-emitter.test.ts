@@ -23,7 +23,7 @@ import {
   wasmBodyLocalCount,
   wasmBodyOpcodes
 } from "#wasm/tests/body-opcodes.js";
-import { PageFaultErrorCode, pageFault } from "#x86/exceptions.js";
+import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { memoryRead, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import type { MemoryReadAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
 

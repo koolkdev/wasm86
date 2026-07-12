@@ -1,5 +1,5 @@
-import type { CpuException } from "#x86/exceptions.js";
-import type { SegmentRegister } from "#x86/types.js";
+import type { CpuException } from "#core/exceptions.js";
+import type { SegmentRegister } from "#core/types.js";
 
 export type UnsupportedReason =
   | "unsupportedOpcode"

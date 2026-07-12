@@ -9,9 +9,9 @@ import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { ValueTable } from "#ir/value-table.js";
 import type { ValueId } from "#ir/values.js";
-import type { ConditionCode } from "#x86/conditions.js";
-import { simpleFlagSourceConditionOperators } from "#x86/flag-sources.js";
-import { isX86StatusFlag, x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
+import type { ConditionCode } from "#core/conditions.js";
+import { simpleFlagSourceConditionOperators } from "#core/flag-sources.js";
+import { isX86StatusFlag, x86StatusFlags, type X86StatusFlag } from "#core/flags.js";
 import { assertOnlyLazyRecord } from "./lazy-flags.js";
 import { resolveFlag } from "./storage-op-helpers.js";
 

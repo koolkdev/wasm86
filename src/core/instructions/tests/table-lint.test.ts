@@ -1,9 +1,9 @@
 import { deepStrictEqual, match } from "node:assert";
 import { test } from "node:test";
 
-import { formatPlaceholders } from "#x86/format.js";
-import { X86_32_CORE } from "#x86/index.js";
-import { imm, modrmReg, modrmRm, opReg } from "#x86/defs/dsl.js";
+import { formatPlaceholders } from "#core/format.js";
+import { X86_32_CORE } from "#core/index.js";
+import { imm, modrmReg, modrmRm, opReg } from "#core/instructions/dsl.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
 import {
   expandOpcodePath,
@@ -16,8 +16,8 @@ import {
   type OpcodePathPart,
   type OperandSizePrefixMode,
   type Reg3
-} from "#x86/defs/spec.js";
-import type { RepeatPrefix } from "#x86/prefixes.js";
+} from "#core/instructions/spec.js";
+import type { RepeatPrefix } from "#core/prefixes.js";
 
 const semantics: SemanticTemplate = () => {};
 

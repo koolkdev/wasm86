@@ -7,9 +7,9 @@ import {
   staticMemSegment,
   type OperandBinding
 } from "#ir/operands.js";
-import { defaultSegmentForBase } from "#x86/segments.js";
+import { defaultSegmentForBase } from "#core/segments.js";
 import type { IrBlock } from "#ir/block.js";
-import type { IsaDecodedInstruction, IsaOperandBinding } from "#x86/decoder/types.js";
+import type { IsaDecodedInstruction, IsaOperandBinding } from "#core/decoder/types.js";
 
 export function buildIrBlock(instructions: readonly IsaDecodedInstruction[]): IrBlock {
   const builder = createIrBlockBuilder({ segmentMode: "flat32" });

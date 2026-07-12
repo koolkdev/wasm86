@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { Value } from "#ir/values.js";
-import type { RegName, SegmentRegister } from "#x86/types.js";
+import type { RegName, SegmentRegister } from "#core/types.js";
 
 export type { Value } from "#ir/values.js";
 

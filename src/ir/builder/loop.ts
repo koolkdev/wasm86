@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
-import type { ConditionCode } from "#x86/conditions.js";
-import { isX86StatusFlag, type X86Flag } from "#x86/flags.js";
+import type { ConditionCode } from "#core/conditions.js";
+import { isX86StatusFlag, type X86Flag } from "#core/flags.js";
 import type {
   GetOptions,
   LoopSemanticsBuilder,
@@ -19,8 +19,8 @@ import {
   type Value,
   type ValueInput
 } from "#x86/semantics/refs.js";
-import type { OperandWidth, RegName, SegmentRegister } from "#x86/types.js";
-import type { CpuException } from "#x86/exceptions.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
+import type { CpuException } from "#core/exceptions.js";
 import type { IfBody, SemanticBranchHint } from "#x86/semantics/builder.js";
 import { type StateChannel } from "../slots.js";
 import type { Action, LoopCarriedCell } from "../actions.js";

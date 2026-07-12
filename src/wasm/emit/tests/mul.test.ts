@@ -5,9 +5,9 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { immBinding, regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import { decodeBytes, ok as decoded } from "#x86/decoder/tests/helpers.js";
-import type { IsaDecodedInstruction } from "#x86/decoder/types.js";
-import type { OperandWidth, RegName } from "#x86/types.js";
+import { decodeBytes, ok as decoded } from "#core/decoder/tests/helpers.js";
+import type { IsaDecodedInstruction } from "#core/decoder/types.js";
+import type { OperandWidth, RegName } from "#core/types.js";
 import {
   assertLazyFlagState,
   readWasmCpuStateChannel,

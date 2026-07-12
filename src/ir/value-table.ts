@@ -16,8 +16,8 @@ import {
   type CompareOperator,
   type UnaryOperator
 } from "./operators.js";
-import { i32 } from "#x86/numeric.js";
-import type { OperandWidth } from "#x86/types.js";
+import { i32 } from "#core/numeric.js";
+import type { OperandWidth } from "#core/types.js";
 import type { ExternalValueId } from "./operands.js";
 import {
   foldBinary,

@@ -10,7 +10,7 @@ import {
   type ShiftCountSource,
   type ShiftOp
 } from "#x86/semantics/shift.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 
 type Group2 = 0 | 1 | 2 | 3 | 4 | 5 | 7;
 type ShiftGroup = 4 | 5 | 7;

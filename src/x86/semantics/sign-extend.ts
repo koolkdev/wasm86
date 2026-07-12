@@ -1,5 +1,5 @@
 import type { SemanticTemplate } from "#x86/semantics/builder.js";
-import type { OperandWidth } from "#x86/types.js";
+import type { OperandWidth } from "#core/types.js";
 
 export function accumulatorSignExtendSemantic(width: Extract<OperandWidth, 8 | 16>): SemanticTemplate {
   return (s) => {

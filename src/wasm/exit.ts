@@ -1,12 +1,12 @@
 import { assert } from "#common/assert.js";
-import { u32 } from "#x86/numeric.js";
+import { u32 } from "#core/numeric.js";
 import {
   CpuExceptionVector,
   divideError,
   invalidOpcode,
   pageFault,
   type CpuException
-} from "#x86/exceptions.js";
+} from "#core/exceptions.js";
 
 export const CompletionExit = {
   INSTRUCTION_LIMIT: 0,

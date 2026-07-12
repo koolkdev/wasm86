@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { decodeIsaBlock } from "#x86/decoder/decode-block.js";
-import { X86_32_CORE } from "#x86/index.js";
+import { decodeIsaBlock } from "#core/decoder/decode-block.js";
+import { X86_32_CORE } from "#core/index.js";
 import { ByteArrayDecodeReader, imm8 } from "./helpers.js";
 
 const startAddress = 0x1000;

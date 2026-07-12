@@ -1,7 +1,7 @@
 import {
   CONDITION_CODE_DESCRIPTORS,
   type ConditionCodeDescriptor
-} from "#x86/defs/condition-codes.js";
+} from "#core/instructions/condition-codes.js";
 import { form, imm, mnemonic, modrmRm, rel } from "./dsl.js";
 import type { InstructionForm, InstructionMnemonic } from "./spec.js";
 import {
