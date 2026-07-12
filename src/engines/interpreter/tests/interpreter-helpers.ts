@@ -5,7 +5,7 @@ import {
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot,
   type WasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
 import { WASM_CPU_STATE_FIELDS } from "#wasm/cpu-state-layout.js";

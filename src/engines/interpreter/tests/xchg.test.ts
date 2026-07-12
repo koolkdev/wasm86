@@ -7,7 +7,7 @@ import {
   wasmCpuStatusFlagsOf,
   type WasmCpuStateSnapshot,
   type WasmCpuStatusFlag
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,

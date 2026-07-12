@@ -16,7 +16,7 @@ import { CompletionExit, HostExit } from "#wasm/exit.js";
 import { invalidOpcode } from "#core/exceptions.js";
 import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
-import { readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
+import { readWasmCpuState } from "#test/support/cpu-state.js";
 import {
   extractOnlyWasmFunctionBody,
   wasmBodyOpcodes,

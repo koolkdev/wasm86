@@ -9,7 +9,7 @@ import {
   type WasmCpuStateInit,
   wasmCpuStatusFlagsOf,
   writeWasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { decodeBytes, ok as decoded } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import type { RegName } from "#core/types.js";

@@ -5,7 +5,7 @@ import { readRegisterAlias, writeRegisterAlias } from "#core/state/cpu-state.js"
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { x86Flags } from "#core/flags.js";
 import { registerAlias } from "#core/registers.js";
-import { readWasmCpuState, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
+import { readWasmCpuState, wasmCpuStatusFlagsOf } from "#test/support/cpu-state.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 

@@ -8,7 +8,7 @@ import { eipChannel, gprChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { x86StatusFlags } from "#core/flags.js";
-import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type Reg32 } from "#core/types.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
@@ -18,7 +18,7 @@ import {
   readWasmCpuFlagByte,
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { wasmBodyMemoryAccesses } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";

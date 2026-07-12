@@ -11,7 +11,7 @@ import {
   readWasmCpuStateChannel,
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import {
   instantiateInterpreterCompiledModule,

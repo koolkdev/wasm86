@@ -14,7 +14,7 @@ import type { FallthroughTarget } from "#wasm/emit/embed.js";
 import { decodeExit, type DecodedCpuExceptionExit, type DecodedExit } from "#wasm/exit.js";
 import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { assertPageFaultException } from "#wasm/tests/exit-fixtures.js";
-import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
 import { memoryCheck, memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 

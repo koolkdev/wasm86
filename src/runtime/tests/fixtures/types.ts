@@ -1,5 +1,5 @@
 import type { RunResult } from "#driver/results.js";
-import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 
 export type MemoryPatch = Readonly<{
   address: number;

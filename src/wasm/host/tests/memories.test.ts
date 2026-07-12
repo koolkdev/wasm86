@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { createWasmCpuStateSnapshot, readWasmCpuState } from "#runtime/tests/fixtures/cpu-state.js";
+import { createWasmCpuStateSnapshot, readWasmCpuState } from "#test/support/cpu-state.js";
 import { WASM_CPU_STATE_BYTE_LENGTH, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import { createWasmHostMemories, wasmPagesForByteLength } from "#wasm/host/memories.js";
 import { MACHINE_FIXED_END, MACHINE_FIXED_PAGE_COUNT } from "#wasm/machine-state-layout.js";

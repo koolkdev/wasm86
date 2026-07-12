@@ -40,6 +40,10 @@
     "#wasm/*": {
       "types": "./src/wasm/*",
       "default": "./dist/src/wasm/*"
+    },
+    "#test/*": {
+      "types": "./test/*",
+      "default": "./dist/test/*"
     }
   },
   "scripts": {

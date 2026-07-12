@@ -14,7 +14,7 @@ import {
   readWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf,
   writeWasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";

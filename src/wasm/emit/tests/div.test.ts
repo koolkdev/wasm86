@@ -22,7 +22,7 @@ import {
   readWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf,
   writeWasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { decodeExit } from "#wasm/exit.js";
 import { divideErrorExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";

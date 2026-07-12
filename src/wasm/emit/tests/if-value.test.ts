@@ -9,7 +9,7 @@ import { wasmBranchHint } from "#compiler/encoder/function-body.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import {
   instantiateIrBlock,
   irBlockBody,

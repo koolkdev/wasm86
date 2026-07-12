@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 
-import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
   instantiateInterpreterCompiledModule,
   readInterpreterState,

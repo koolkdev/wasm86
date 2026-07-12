@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 
 import { decodeIsaBlock } from "#core/decoder/decode-block.js";
 import type { RunResult } from "#driver/results.js";
-import { readWasmCpuState, type WasmCpuStateField } from "#runtime/tests/fixtures/cpu-state.js";
+import { readWasmCpuState, type WasmCpuStateField } from "#test/support/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import { decodeExit } from "#wasm/exit.js";

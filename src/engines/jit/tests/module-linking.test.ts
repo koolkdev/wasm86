@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { CompletionExit, HostExit } from "#wasm/exit.js";
 import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
-import { assertLazyFlagState, readWasmCpuState, wasmCpuStatusFlagsOf } from "#runtime/tests/fixtures/cpu-state.js";
+import { assertLazyFlagState, readWasmCpuState, wasmCpuStatusFlagsOf } from "#test/support/cpu-state.js";
 import { jitModuleLinkFallbackExportName } from "#engines/jit/compiled-blocks/module-link-table.js";
 import type { WasmCompiledBlockCodeMap } from "#engines/jit/compiled-blocks/block-cache.js";
 import { WasmCompiledBlockCache } from "#engines/jit/compiled-blocks/wasm-cache.js";

@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { readWasmCpuState, type WasmCpuStateField } from "#runtime/tests/fixtures/cpu-state.js";
+import { readWasmCpuState, type WasmCpuStateField } from "#test/support/cpu-state.js";
 import { CompiledBlockDecodeError } from "#engines/jit/compiled-blocks/wasm-cache.js";
 import { RuntimeMode } from "#runtime/execution/mode.js";
 import { RuntimeInstance } from "#runtime/runtime-instance.js";

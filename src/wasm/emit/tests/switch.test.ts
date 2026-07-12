@@ -10,7 +10,7 @@ import { wasmBodyLocalCount, wasmBodyOpcodes } from "#compiler/encoder/tests/bod
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { instantiateIrBlock, irBlockBody, irBlockCompleted } from "./harness.js";
 
 // The value switch: br_table dispatch over one block per case plus default

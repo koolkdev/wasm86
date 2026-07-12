@@ -19,7 +19,7 @@ import type { RegName } from "#core/types.js";
 import { aluSemantic } from "#core/semantics/alu.js";
 import { movSemantic } from "#core/semantics/mov.js";
 import { xchgSemantic } from "#core/semantics/xchg.js";
-import { assertLazyFlagState, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { assertLazyFlagState, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { memoryCheck, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";

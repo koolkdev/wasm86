@@ -2,8 +2,6 @@ import { deepStrictEqual } from "node:assert";
 
 import { wasmImport } from "#wasm/abi.js";
 
-export const startAddress = 0x1000;
-
 export function createGuestMemory(): WebAssembly.Memory {
   return new WebAssembly.Memory({ initial: 1 });
 }

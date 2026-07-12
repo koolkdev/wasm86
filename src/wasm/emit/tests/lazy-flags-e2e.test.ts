@@ -19,7 +19,7 @@ import {
   readWasmCpuStateChannel,
   readWasmCpuStateSnapshot,
   writeWasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { aluReference, type AluFlags } from "./reference.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 

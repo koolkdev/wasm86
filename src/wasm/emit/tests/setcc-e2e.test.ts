@@ -10,7 +10,7 @@ import type { ConditionCode } from "#core/conditions.js";
 
 import { cmpSemantic } from "#core/semantics/cmp.js";
 import { setccSemantic } from "#core/semantics/setcc.js";
-import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { isStateRead } from "#ir/tests/storage-op-helpers.js";
 

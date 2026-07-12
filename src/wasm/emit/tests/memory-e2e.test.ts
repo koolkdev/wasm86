@@ -16,7 +16,7 @@ import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decodeOk, startAddress } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { x86Flags, x86StatusFlags, type X86Flag } from "#core/flags.js";
-import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type MemOperand, type Reg32 } from "#core/types.js";
 import { decodeExit, type DecodedCpuExceptionExit } from "#wasm/exit.js";
 import { assertPageFaultException, readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
@@ -25,7 +25,7 @@ import {
   readWasmCpuFlagByte,
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags } from "./reference.js";
 

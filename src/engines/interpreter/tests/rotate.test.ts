@@ -4,9 +4,9 @@ import { test } from "node:test";
 import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf
-} from "#runtime/tests/fixtures/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
-import { startAddress } from "#wasm/tests/helpers.js";
+import { startAddress } from "#test/support/addresses.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
 const preservedFlags = { PF: 1, AF: 1, ZF: 1, SF: 1 } as const;

@@ -4,8 +4,8 @@ import { test } from "node:test";
 import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf
-} from "#runtime/tests/fixtures/cpu-state.js";
-import { startAddress } from "#wasm/tests/helpers.js";
+} from "#test/support/cpu-state.js";
+import { startAddress } from "#test/support/addresses.js";
 import { divideErrorExit } from "#wasm/tests/exit-fixtures.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 

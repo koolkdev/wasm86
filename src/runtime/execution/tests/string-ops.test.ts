@@ -12,7 +12,7 @@ import {
 } from "#runtime/tests/fixtures/helpers.js";
 import { engineFixtureStartAddress } from "#runtime/tests/fixtures/programs.js";
 import type { EngineFixture, MemoryPatch } from "#runtime/tests/fixtures/types.js";
-import type { WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
 import { aluReference } from "#wasm/emit/tests/reference.js";
 import type { OperandWidth } from "#core/types.js";

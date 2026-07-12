@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { runResultFromExecutionState } from "#driver/results.js";
-import { createWasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { createWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import {
   assertEngineFixtureResult,

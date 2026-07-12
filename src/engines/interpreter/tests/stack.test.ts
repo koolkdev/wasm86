@@ -1,14 +1,14 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { assertLazyFlagState, createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#runtime/tests/fixtures/cpu-state.js";
+import { assertLazyFlagState, createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
   writeInterpreterState,
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
-import { startAddress } from "#wasm/tests/helpers.js";
+import { startAddress } from "#test/support/addresses.js";
 import { readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { HostExit } from "#wasm/exit.js";
 import { x86Flags, type X86Flag } from "#core/flags.js";
