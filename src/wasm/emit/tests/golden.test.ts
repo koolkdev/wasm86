@@ -69,11 +69,11 @@ test("a live-in setcc condition emits its lazy switch golden body", () => {
 });
 
 function emitGolden(byteLists: readonly (readonly number[])[]): string {
-  return Buffer.from(irBlockBody(blockOf(byteLists)).encode()).toString("hex");
+  return Buffer.from(irBlockBody(blockOf(byteLists)).bytes).toString("hex");
 }
 
 function emitGoldenWithHelpers(byteLists: readonly (readonly number[])[]): string {
-  return Buffer.from(irBlockBodyWithHelpers(blockOf(byteLists, "name")).encode()).toString("hex");
+  return Buffer.from(irBlockBodyWithHelpers(blockOf(byteLists, "name")).bytes).toString("hex");
 }
 
 function blockOf(

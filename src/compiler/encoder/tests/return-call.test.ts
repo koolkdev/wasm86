@@ -3,7 +3,10 @@ import { test } from "node:test";
 
 import { wasmImport } from "#wasm/abi.js";
 import { WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody
+} from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { CompletionExit, decodeExit, encodeCompletionExit, encodeHostExit, HostExit } from "#wasm/exit.js";
@@ -73,7 +76,7 @@ test("return_call_same_signature_required", async () => {
 });
 
 async function instantiateReturnCallModule(
-  targetBody: WasmFunctionBodyEncoder,
+  targetBody: EncodedWasmFunctionBody,
   cpuStateMemory = new WebAssembly.Memory({ initial: 1 })
 ): Promise<WebAssembly.Instance> {
   const module = await WebAssembly.compile(encodeReturnCallModule(targetBody));
@@ -87,7 +90,7 @@ async function instantiateReturnCallModule(
   });
 }
 
-function encodeReturnCallModule(targetBody: WasmFunctionBodyEncoder): Uint8Array<ArrayBuffer> {
+function encodeReturnCallModule(targetBody: EncodedWasmFunctionBody): Uint8Array<ArrayBuffer> {
   const module = moduleWithMemories();
   const blockType = addBlockFunctionType(module);
   const targetIndex = module.addFunction(blockType, targetBody);
@@ -105,7 +108,7 @@ function encodeMismatchedReturnCallModule(): Uint8Array<ArrayBuffer> {
     params: [wasmValueType.i32],
     results: [wasmValueType.i32]
   });
-  const targetIndex = module.addFunction(targetType, new WasmFunctionBodyEncoder(1).i32Const(1).end());
+  const targetIndex = module.addFunction(targetType, new WasmFunctionBodyEncoder(1).i32Const(1).finish());
   const entryIndex = module.addFunction(entryType, returnCallEntryBody(targetIndex));
 
   module.exportFunction(entryExportName, entryIndex);
@@ -129,26 +132,26 @@ function addBlockFunctionType(module: WasmModuleEncoder): number {
   });
 }
 
-function returnCallEntryBody(targetFunctionIndex: number): WasmFunctionBodyEncoder {
+function returnCallEntryBody(targetFunctionIndex: number): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
     .localGet(0)
     .returnCallFunction(targetFunctionIndex)
-    .end();
+    .finish();
 }
 
-function constantHostTargetBody(reason: HostExit, payload: number): WasmFunctionBodyEncoder {
+function constantHostTargetBody(reason: HostExit, payload: number): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
     .i64Const(encodeHostExit(reason, payload))
-    .end();
+    .finish();
 }
 
-function constantCompletionTargetBody(reason: CompletionExit, payload: number): WasmFunctionBodyEncoder {
+function constantCompletionTargetBody(reason: CompletionExit, payload: number): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
     .i64Const(encodeCompletionExit(reason, payload))
-    .end();
+    .finish();
 }
 
-function statePayloadTargetBody(): WasmFunctionBodyEncoder {
+function statePayloadTargetBody(): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
     .localGet(0)
     .i32Load({
@@ -159,7 +162,7 @@ function statePayloadTargetBody(): WasmFunctionBodyEncoder {
     .i64ExtendI32U()
     .i64Const(encodeCompletionExit(CompletionExit.DYNAMIC_JUMP, 0))
     .i64Or()
-    .end();
+    .finish();
 }
 
 type CompileResult =

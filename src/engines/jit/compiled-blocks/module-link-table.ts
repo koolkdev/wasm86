@@ -7,6 +7,8 @@ export type JitModuleLinkTableOptions = Readonly<{
   targetEips: readonly number[];
 }>;
 
+export type JitLinkLayout = ReadonlyMap<number, number>;
+
 type SlotEntry = {
   slot: number;
   fallback: JitModuleLocalFallbackFunction | undefined;
@@ -80,6 +82,12 @@ export class JitModuleLinkTable {
 
   targetEips(): readonly number[] {
     return [...this.#slotsByTargetEip.keys()];
+  }
+
+  linkLayout(): JitLinkLayout {
+    return new Map(
+      [...this.#slotsByTargetEip].map(([targetEip, entry]) => [targetEip, entry.slot])
+    );
   }
 
   #entryForTarget(eip: number): SlotEntry {

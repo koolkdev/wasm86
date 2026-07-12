@@ -96,10 +96,10 @@ async function instantiateDecodeRead(fallthrough: FallthroughTarget) {
     scratch,
     embedding: { fallthrough, outputs: new Map([[fragment.fetched, fetchedLocal]]) }
   });
-  body.localGet(fetchedLocal).i64ExtendI32U().end();
+  body.localGet(fetchedLocal).i64ExtendI32U();
   scratch.freeLocal(fetchedLocal);
   scratch.assertClear();
-  return instantiateFunctionBody(body);
+  return instantiateFunctionBody(body.finish());
 }
 
 function assertCpuException(exit: DecodedExit): asserts exit is DecodedCpuExceptionExit {
@@ -150,10 +150,10 @@ test("dispatch br target skips later enclosing harness-style actions", async () 
   });
   body.i64Const(0x41n).returnFromFunction();
   body.endBlock();
-  body.i64Const(0x42n).end();
+  body.i64Const(0x42n);
   scratch.assertClear();
 
-  const { run } = await instantiateFunctionBody(body);
+  const { run } = await instantiateFunctionBody(body.finish());
 
   strictEqual(run(), 0x42n);
 });
@@ -189,11 +189,11 @@ test("fallthrough br target lands on the embedder label across the fragment's ne
     }
   });
   body.endBlock();
-  body.localGet(fetchedLocal).i64ExtendI32U().end();
+  body.localGet(fetchedLocal).i64ExtendI32U();
   scratch.freeLocal(fetchedLocal);
   scratch.assertClear();
 
-  const { stateView, guestView, run } = await instantiateFunctionBody(body);
+  const { stateView, guestView, run } = await instantiateFunctionBody(body.finish());
 
   writeWasmCpuStateSnapshot(stateView, { eip: 0x10 });
   guestView.setUint8(0x12, 0x90);
@@ -229,13 +229,12 @@ test("consecutive fragments share the embedder's scratch locals", async () => {
     .i32Shl()
     .localGet(firstLocal)
     .i32Or()
-    .i64ExtendI32U()
-    .end();
+    .i64ExtendI32U();
   scratch.freeLocal(secondLocal);
   scratch.freeLocal(firstLocal);
   scratch.assertClear();
 
-  const { stateView, guestView, run } = await instantiateFunctionBody(body);
+  const { stateView, guestView, run } = await instantiateFunctionBody(body.finish());
 
   writeWasmCpuStateSnapshot(stateView, { eip: 0x10 });
   guestView.setUint8(0x12, 0x34);
@@ -269,11 +268,11 @@ test("an exported register read pins across a later overlapping store", async ()
       outputs: new Map([[readValue, readLocal]])
     }
   });
-  body.localGet(readLocal).i64ExtendI32U().end();
+  body.localGet(readLocal).i64ExtendI32U();
   scratch.freeLocal(readLocal);
   scratch.assertClear();
 
-  const { stateView, run } = await instantiateFunctionBody(body);
+  const { stateView, run } = await instantiateFunctionBody(body.finish());
 
   writeWasmCpuStateSnapshot(stateView, { eax: 5 });
 

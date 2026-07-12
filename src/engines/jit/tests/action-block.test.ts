@@ -1,8 +1,8 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { buildIrBlock } from "#engines/jit/action-compiler.js";
-import { encodeActionJitModule } from "#engines/jit/action-module.js";
+import { encodeJitModule } from "#engines/jit/module.js";
 import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
 import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
@@ -27,13 +27,13 @@ import { isStateRead, isStateWrite, resolveFlag, stateWrite } from "#ir/tests/st
 const startEip = 0x1000;
 
 test("JIT module emits no helper functions for ordinary blocks", () => {
-  const bytes = encodeActionJitModule([{ entryEip: startEip, actions: syntheticBlock(false) }]);
+  const bytes = encodeJitModule([{ entryEip: startEip, ir: syntheticBlock(false) }]);
 
   strictEqual(wasmDefinedFunctionCount(bytes), 1);
 });
 
-test("JIT module emits a referenced lazy flag helper before block functions", () => {
-  const bytes = encodeActionJitModule([{ entryEip: startEip, actions: syntheticBlock(true) }]);
+test("JIT module emits a referenced lazy flag helper", () => {
+  const bytes = encodeJitModule([{ entryEip: startEip, ir: syntheticBlock(true) }]);
 
   strictEqual(wasmDefinedFunctionCount(bytes), 2);
 });
@@ -42,9 +42,51 @@ test("JIT module includes helpers introduced by input flag reads", () => {
   // seta al reads CF and ZF when there is no same-block flag source; int
   // terminates the block so the test does not need a fallthrough link target.
   const block = buildIrBlock(decodeBlock([0x0f, 0x97, 0xc0, 0xcd, 0x2e]).instructions);
-  const bytes = encodeActionJitModule([{ entryEip: startEip, actions: block }]);
+  const bytes = encodeJitModule([{ entryEip: startEip, ir: block }]);
 
   strictEqual(wasmDefinedFunctionCount(bytes), 3);
+});
+
+test("JIT program closure rejects duplicate normalized block identities", () => {
+  const actions = syntheticBlock(false);
+
+  throws(
+    () => encodeJitModule([
+      { entryEip: startEip, ir: actions },
+      { entryEip: startEip + 0x1_0000_0000, ir: actions }
+    ]),
+    /duplicate JIT block module entry EIP/
+  );
+});
+
+test("JIT program closure rejects an undeclared external link", () => {
+  throws(
+    () => encodeJitModule([{
+      entryEip: startEip,
+      ir: syntheticDispatchBlock(startEip + 0x100)
+    }]),
+    /unknown JIT link target/
+  );
+});
+
+test("JIT program validates external link layouts before declaration", () => {
+  const targetEip = startEip + 0x100;
+  const blocks = [{ entryEip: startEip, ir: syntheticDispatchBlock(targetEip) }];
+
+  throws(
+    () => encodeJitModule(blocks, { linkLayout: new Map([[targetEip, -1]]) }),
+    /invalid JIT link slot/
+  );
+  throws(
+    () => encodeJitModule(blocks, { linkLayout: new Map([[targetEip, 1]]) }),
+    /JIT link slot out of range/
+  );
+  throws(
+    () => encodeJitModule(blocks, {
+      linkLayout: new Map([[targetEip, 0], [targetEip + 1, 0]])
+    }),
+    /duplicate JIT link slot/
+  );
 });
 
 test("a repeated add compiles to one eax read and one eax write", () => {
@@ -271,7 +313,7 @@ test("a backward jcc to the block entry self-links as a return_call tail loop", 
     0xcd, 0x2e
   ]);
   const ir = buildIrBlock(block.instructions);
-  const bytes = encodeActionJitModule([{ entryEip: startEip, actions: ir }]);
+  const bytes = encodeJitModule([{ entryEip: startEip, ir }]);
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(bytes));
   const memories = createWasmHostMemories();
   const handle = compileActionWasmBlockHandle([block], {
@@ -425,6 +467,20 @@ function syntheticBlock(withHelper: boolean): IrBlock {
         stateWrite(gprChannel("eax"), stored),
         { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "hostTrap" } } }
       ]
+    },
+    values
+  };
+}
+
+function syntheticDispatchBlock(targetEip: number): IrBlock {
+  const values = new ValueTable();
+
+  return {
+    body: {
+      actions: [{
+        kind: "finish",
+        finish: { kind: "dispatch", targetEip: values.const(targetEip) }
+      }]
     },
     values
   };

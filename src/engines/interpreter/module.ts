@@ -1,11 +1,15 @@
 import { assert } from "#common/assert.js";
 import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody
+} from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { CompletionExit, encodeCompletionExit } from "#wasm/exit.js";
-import { createWasmHelperRegistry, defineAllHelpers, type WasmHelperRegistry } from "#wasm/helpers/module.js";
+import { allHelpers, installHelpers } from "#wasm/helpers/module.js";
+import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 import { RmDecodeHelpers } from "./decode.js";
 import { emitOpcodeDispatch } from "./dispatch.js";
 import { emitOpcodeFetch } from "./fragments.js";
@@ -38,9 +42,7 @@ export function encodeInterpreterModule(): InterpreterModule {
     results: [wasmValueType.i64]
   });
   const rmDecode = new RmDecodeHelpers(module);
-  const helpers = createWasmHelperRegistry(module);
-
-  defineAllHelpers(helpers);
+  const helpers = installHelpers(module, allHelpers());
 
   // Emitting the run loop adds the rm-decode helpers it uses to the module.
   const { body, handlers } = encodeRunLoopBody(rmDecode, helpers);
@@ -66,8 +68,8 @@ function importInterpreterMemories(module: WasmModuleEncoder): void {
 
 function encodeRunLoopBody(
   rmDecode: RmDecodeHelpers,
-  helpers: WasmHelperRegistry
-): Readonly<{ body: WasmFunctionBodyEncoder; handlers: InterpreterHandler[] }> {
+  helpers: LegacyHelperIndexRegistryAdapter
+): Readonly<{ body: EncodedWasmFunctionBody; handlers: InterpreterHandler[] }> {
   const body = new WasmFunctionBodyEncoder(1);
   const locals = new InterpreterLocals(body);
   const scratch = new WasmLocalScratchAllocator(body);
@@ -96,5 +98,5 @@ function encodeRunLoopBody(
   body.endBlock();
   body.unreachable();
   scratch.assertClear();
-  return { body: body.end(), handlers };
+  return { body: body.finish(), handlers };
 }

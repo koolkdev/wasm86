@@ -1,5 +1,8 @@
 import { ByteSink } from "./byte-sink.js";
-import { WasmFunctionBodyEncoder, type EncodedBranchHint, type EncodedWasmFunctionBody } from "./function-body.js";
+import {
+  type EncodedBranchHint,
+  type EncodedWasmFunctionBody
+} from "./function-body.js";
 import { encodeI32Leb128, encodeI64Leb128 } from "./leb128.js";
 import { validateMemoryLimits, type WasmMemoryLimits } from "./memory.js";
 import {
@@ -20,7 +23,7 @@ export class WasmModuleEncoder {
   readonly #functions: number[] = [];
   readonly #globals: WasmGlobalDefinition[] = [];
   readonly #exports: FunctionExport[] = [];
-  readonly #bodies: EncodedWasmFunctionBody[] = [];
+  readonly #bodies: ModuleFunctionBody[] = [];
 
   addFunctionType(type: WasmFunctionType): number {
     const existing = this.#types.findIndex((candidate) => functionTypesEqual(candidate, type));
@@ -50,14 +53,14 @@ export class WasmModuleEncoder {
     return tableIndex;
   }
 
-  addFunction(typeIndex: number, body: WasmFunctionBodyEncoder): number {
+  addFunction(typeIndex: number, body: EncodedWasmFunctionBody): number {
     if (!Number.isInteger(typeIndex) || typeIndex < 0 || typeIndex >= this.#types.length) {
       throw new RangeError(`unknown Wasm function type index: ${typeIndex}`);
     }
 
     const functionIndex = this.#functions.length;
     this.#functions.push(typeIndex);
-    this.#bodies.push(body.encodeWithMetadata());
+    this.#bodies.push({ bytes: body.bytes, branchHints: body.branchHints });
     return functionIndex;
   }
 
@@ -221,6 +224,11 @@ type TableImport = Readonly<{
 type FunctionExport = Readonly<{
   name: string;
   functionIndex: number;
+}>;
+
+type ModuleFunctionBody = Readonly<{
+  bytes: Uint8Array<ArrayBuffer>;
+  branchHints: readonly EncodedBranchHint[];
 }>;
 
 function writeMemoryType(section: ByteSink, limits: WasmMemoryLimits): void {

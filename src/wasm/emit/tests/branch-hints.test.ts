@@ -78,5 +78,5 @@ function branchHintsForCheckIf(hint: IfAction["hint"]): readonly number[] {
     }
   };
 
-  return irBlockBody(block).encodeWithMetadata().branchHints.map((entry) => entry.value);
+  return irBlockBody(block).branchHints.map((entry) => entry.value);
 }

@@ -2,7 +2,10 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody
+} from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { decodeExit, encodeHostExit, HostExit } from "#wasm/exit.js";
@@ -108,17 +111,17 @@ function addBlockFunctionType(module: WasmModuleEncoder): number {
   });
 }
 
-function helperBody(): WasmFunctionBodyEncoder {
+function helperBody(): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
     .i64Const(encodeHostExit(HostExit.TRAP, 0x2e))
-    .end();
+    .finish();
 }
 
-function entryBody(targetFunctionIndex: number): WasmFunctionBodyEncoder {
+function entryBody(targetFunctionIndex: number): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
     .localGet(0)
     .callFunction(targetFunctionIndex)
-    .end();
+    .finish();
 }
 
 function exportedFunction(instance: WebAssembly.Instance, name: string): (cpuStatePtr: number) => unknown {

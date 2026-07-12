@@ -10,7 +10,7 @@ import type { OperandWidth } from "#core/types.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
-import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
+import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 
 // Decode reads as action fragments: a guarded instruction fetch is memory.check +
 // if + memory.read with a decode-fault body, and the decoded values leave
@@ -20,7 +20,7 @@ import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
 export type FragmentEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  helpers?: WasmHelperRegistry | undefined;
+  helpers?: LegacyHelperIndexRegistryAdapter | undefined;
 }>;
 
 // Byte offset of the next undecoded byte from the instruction start: a

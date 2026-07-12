@@ -102,7 +102,7 @@ function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
         memoryIndex: cpuStateMemoryIndex,
         offset: 0
       })
-      .end()
+      .finish()
   );
   const storeGuest = module.addFunction(
     storeGuestType,
@@ -114,7 +114,7 @@ function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
         memoryIndex: guestMemoryIndex,
         offset: 0
       })
-      .end()
+      .finish()
   );
   const loadGuest = module.addFunction(
     loadGuestType,
@@ -125,7 +125,7 @@ function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
         memoryIndex: guestMemoryIndex,
         offset: 0
       })
-      .end()
+      .finish()
   );
 
   module.exportFunction("storeCpuState", storeCpuState);

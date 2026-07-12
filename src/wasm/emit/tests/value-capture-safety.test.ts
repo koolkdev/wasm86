@@ -120,7 +120,7 @@ test("a trapping value demanded directly by the current body still evaluates", a
     values,
     body: { actions: [stateWrite(gprChannel("eax"), quotient)] }
   };
-  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).encode());
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
   const { stateView, run } = await instantiateIrBlock(block, 2);
 
   strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32DivU).length, 1);
@@ -143,7 +143,7 @@ test("a trapping condition makes its selected wrapper safe to capture", async ()
       }]
     }
   };
-  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).encode());
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
   const { stateView, run } = await instantiateIrBlock(block, 2);
 
   strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32DivU).length, 1);
@@ -176,11 +176,12 @@ test("an exported trapping value evaluates at the fragment boundary", async () =
       outputs: new Map([[quotient, resultLocal]])
     }
   });
-  body.localGet(resultLocal).i64ExtendI32U().end();
+  body.localGet(resultLocal).i64ExtendI32U();
   scratch.freeLocal(resultLocal);
   scratch.assertClear();
+  const encoded = body.finish();
 
-  const { stateView, run } = await instantiateFunctionBody(body, 2);
+  const { stateView, run } = await instantiateFunctionBody(encoded, 2);
 
   strictEqual(run(84, 2), 42n);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 5);

@@ -29,7 +29,7 @@ test("ifValue selects one arm result and preserves its hint", async () => {
   body.op({ kind: "state.write", slot: gprChannel("eax"), value: output });
 
   const block: IrBlock = { values, body: body.build() };
-  const encoded = irBlockBody(block, 1).encodeWithMetadata();
+  const encoded = irBlockBody(block, 1);
 
   deepStrictEqual(
     encoded.branchHints.map((hint) => hint.value),

@@ -80,7 +80,7 @@ test("i32 multiply lowers to wasm i32.mul", async () => {
   builder.addInstruction(template, [], loc(0x1000, 0x1001));
 
   const block = builder.finish();
-  const body = irBlockBody(block).encode();
+  const body = irBlockBody(block).bytes;
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i32Mul), true);
 
@@ -105,7 +105,7 @@ test("unsigned dword product high-half lowering uses i64 shift", async () => {
   builder.addInstruction(template, [], loc(0x1000, 0x1001));
 
   const block = builder.finish();
-  const body = irBlockBody(block).encode();
+  const body = irBlockBody(block).bytes;
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ExtendI32U), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ShrU), true);
@@ -120,7 +120,7 @@ test("unsigned dword product high-half lowering uses i64 shift", async () => {
 test("decoded imul lowers through i64 product and writes explicit flags", async () => {
   const instruction = decoded(decodeBytes([0x0f, 0xaf, 0xcb]));
   const block = blockOf([instruction]);
-  const body = irBlockBody(block).encode();
+  const body = irBlockBody(block).bytes;
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64Mul), true);
 
@@ -149,7 +149,7 @@ test("decoded imul lowers through i64 product and writes explicit flags", async 
 test("decoded implicit mul lowers through unsigned i64 product and writes EDX:EAX", async () => {
   const instruction = decoded(decodeBytes([0xf7, 0xe3]));
   const block = blockOf([instruction]);
-  const body = irBlockBody(block).encode();
+  const body = irBlockBody(block).bytes;
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ExtendI32U), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ShrU), true);

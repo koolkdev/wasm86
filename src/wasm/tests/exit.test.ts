@@ -140,7 +140,7 @@ async function runExitResult(encoded: bigint): Promise<bigint> {
   });
   const body = new WasmFunctionBodyEncoder()
     .i64Const(encoded)
-    .end();
+    .finish();
   const functionIndex = module.addFunction(typeIndex, body);
 
   module.exportFunction("exitResult", functionIndex);

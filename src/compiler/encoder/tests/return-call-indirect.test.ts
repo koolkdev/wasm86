@@ -1,7 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody
+} from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { decodeExit, encodeHostExit, HostExit } from "#wasm/exit.js";
@@ -68,7 +71,7 @@ test("table_import_uses_funcref", () => {
 });
 
 async function instantiateIndirectCallModule(
-  entryBody: (blockType: number, tableIndex: number) => WasmFunctionBodyEncoder
+  entryBody: (blockType: number, tableIndex: number) => EncodedWasmFunctionBody
 ): Promise<Readonly<{ instance: WebAssembly.Instance; table: WebAssembly.Table }>> {
   const module = await WebAssembly.compile(encodeIndirectCallModule(entryBody));
   const table = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
@@ -82,7 +85,7 @@ async function instantiateIndirectCallModule(
 }
 
 function encodeIndirectCallModule(
-  entryBody: (blockType: number, tableIndex: number) => WasmFunctionBodyEncoder
+  entryBody: (blockType: number, tableIndex: number) => EncodedWasmFunctionBody
 ): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
   const tableIndex = module.importTable(importNamespace, tableImportName, { minElements: 1 });
@@ -94,7 +97,7 @@ function encodeIndirectCallModule(
     blockType,
     new WasmFunctionBodyEncoder(1)
       .i64Const(encodeHostExit(HostExit.TRAP, 0x2e))
-      .end()
+      .finish()
   );
   const entryIndex = module.addFunction(blockType, entryBody(blockType, tableIndex));
 
@@ -104,20 +107,20 @@ function encodeIndirectCallModule(
   return module.encode();
 }
 
-function returnCallIndirectEntryBody(blockType: number, tableIndex: number): WasmFunctionBodyEncoder {
+function returnCallIndirectEntryBody(blockType: number, tableIndex: number): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
     .localGet(0)
     .i32Const(0)
     .returnCallIndirect(blockType, tableIndex)
-    .end();
+    .finish();
 }
 
-function callIndirectEntryBody(blockType: number, tableIndex: number): WasmFunctionBodyEncoder {
+function callIndirectEntryBody(blockType: number, tableIndex: number): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
     .localGet(0)
     .i32Const(0)
     .callIndirect(blockType, tableIndex)
-    .end();
+    .finish();
 }
 
 function exportedFunction(instance: WebAssembly.Instance, name: string): (...args: number[]) => unknown {

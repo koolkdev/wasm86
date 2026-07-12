@@ -36,7 +36,7 @@ test("a single nested-body demand executes inside the selected body", async () =
       ]
     }
   };
-  const encoded = irBlockBody(block, 2).encode();
+  const encoded = irBlockBody(block, 2).bytes;
   const opcodes = wasmBodyOpcodes(encoded);
   const loadIndex = opcodes.indexOf(wasmOpcode.i32Load);
   const ifIndex = opcodes.indexOf(wasmOpcode.if);
@@ -68,7 +68,7 @@ test("a selected-body producer keeps its compound input in the body", () => {
       ]
     }
   };
-  const encoded = irBlockBody(block, 2).encode();
+  const encoded = irBlockBody(block, 2).bytes;
   const opcodes = wasmBodyOpcodes(encoded);
   const ifIndex = opcodes.indexOf(wasmOpcode.if);
 
@@ -115,7 +115,7 @@ test("an unused memory read is omitted without a materialization event", async (
     values,
     body: { actions: [memoryRead(loaded, address, 32)] }
   };
-  const encoded = irBlockBody(block).encode();
+  const encoded = irBlockBody(block).bytes;
   const opcodes = wasmBodyOpcodes(encoded);
 
   strictEqual(opcodes.includes(wasmOpcode.i32Load), false);
@@ -135,7 +135,7 @@ test("an unused state read emits neither its opcode nor an output local", () => 
     values,
     body: { actions: [stateRead(read, gprChannel("eax"))] }
   };
-  const encoded = irBlockBody(block).encode();
+  const encoded = irBlockBody(block).bytes;
   const opcodes = wasmBodyOpcodes(encoded);
 
   strictEqual(opcodes.includes(wasmOpcode.i32Load), false);
@@ -156,7 +156,7 @@ test("a live single-use output materializes directly at its use", () => {
       ]
     }
   };
-  const encoded = irBlockBody(block).encode();
+  const encoded = irBlockBody(block).bytes;
   const opcodes = wasmBodyOpcodes(encoded);
 
   strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localSet).length, 0);
@@ -180,7 +180,7 @@ test("a condition use tees once for a later selected-body use", async () => {
       ]
     }
   };
-  const encoded = irBlockBody(block).encode();
+  const encoded = irBlockBody(block).bytes;
   const opcodes = wasmBodyOpcodes(encoded);
 
   strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localTee).length, 1);
@@ -217,7 +217,7 @@ test("a trapping producer input still evaluates before a selected early exit", a
       ]
     }
   };
-  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).encode());
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
   const divideIndex = opcodes.indexOf(wasmOpcode.i32DivU);
   const ifIndex = opcodes.indexOf(wasmOpcode.if);
 
@@ -264,7 +264,7 @@ test("a long straight-line sequence materializes each output directly", () => {
     );
   }
 
-  const encoded = irBlockBody({ values, body: { actions } }).encode();
+  const encoded = irBlockBody({ values, body: { actions } }).bytes;
   const localInstructions = wasmBodyInstructions(encoded)
     .filter((instruction) => instruction.local !== undefined);
 
@@ -313,7 +313,7 @@ test("sibling bodies reuse a local after the earlier binding's final reference",
       ]
     }
   };
-  const encoded = irBlockBody(block, 2).encode();
+  const encoded = irBlockBody(block, 2).bytes;
   const outputSets = wasmBodyInstructions(encoded)
     .filter((instruction) => instruction.opcode === wasmOpcode.localSet)
     .map((instruction) => instruction.local);
@@ -355,7 +355,7 @@ test("an output used by both siblings cannot recycle between them", async () => 
       ]
     }
   };
-  const encoded = irBlockBody(block, 2).encode();
+  const encoded = irBlockBody(block, 2).bytes;
   const localInstructions = wasmBodyInstructions(encoded)
     .filter((instruction) => instruction.local !== undefined)
     .map((instruction) => [instruction.opcode, instruction.local] as const);
@@ -396,7 +396,7 @@ test("dead nested producers do not recapture an already consumed output", () => 
       ]
     }
   };
-  const encoded = irBlockBody(block, 1).encode();
+  const encoded = irBlockBody(block, 1).bytes;
   const opcodes = wasmBodyOpcodes(encoded);
 
   strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Load).length, 1);

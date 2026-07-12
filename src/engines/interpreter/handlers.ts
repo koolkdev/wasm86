@@ -27,7 +27,7 @@ import { reg16, reg32, reg8, type Reg32, type RegName, type SegmentRegister } fr
 import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
-import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
+import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 import {
   emitImmediateFetch,
   emitRelTargetFetch,
@@ -60,7 +60,7 @@ export type HandlerEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   locals: InterpreterLocals;
-  helpers: WasmHelperRegistry;
+  helpers: LegacyHelperIndexRegistryAdapter;
   // Label depth from the emission point to the instruction-complete target.
   continueDepth: number;
   handlers: InterpreterHandler[];
@@ -316,7 +316,7 @@ class HandlerOperandEmitter {
 function emitEffectiveSegment(context: HandlerEmitContext, defaultSegment: number, effectiveSegmentLocal: number): void {
   const { body, locals } = context;
 
-  body.localGet(locals.segment).i32Const(noSegmentOverride).i32Eq().ifBlock(wasmBranchHint.likely);
+  body.localGet(locals.segment).i32Const(noSegmentOverride).i32Eq().ifBlock({ hint: wasmBranchHint.likely });
   body.i32Const(defaultSegment).localSet(effectiveSegmentLocal);
   body.elseBlock();
   body.localGet(locals.segment).localSet(effectiveSegmentLocal);
@@ -330,7 +330,7 @@ function emitDynamicBaseEffectiveSegment(
 ): void {
   const { body, locals } = context;
 
-  body.localGet(locals.segment).i32Const(noSegmentOverride).i32Eq().ifBlock(wasmBranchHint.likely);
+  body.localGet(locals.segment).i32Const(noSegmentOverride).i32Eq().ifBlock({ hint: wasmBranchHint.likely });
   emitBaseDefaultsToStackSegment(context, baseLocal);
   body.ifBlock();
   body.i32Const(ssSegmentIndex).localSet(effectiveSegmentLocal);

@@ -2,7 +2,8 @@ import { assert } from "#common/assert.js";
 import type { IrOp } from "#ir/ops.js";
 import type { ValueId } from "#ir/values.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { helperFunctionName, type WasmHelperRegistry } from "#wasm/helpers/module.js";
+import { helperFunctionName } from "#wasm/helpers/key.js";
+import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 import { emitGuestLoad, emitGuestStore, emitMemoryCheck } from "./memory.js";
 import { emitSlotLoad, emitSlotStore } from "./state.js";
 
@@ -30,7 +31,7 @@ export type OperandUses = Readonly<{
 
 export function emitOp(
   body: WasmFunctionBodyEncoder,
-  helpers: WasmHelperRegistry | undefined,
+  helpers: LegacyHelperIndexRegistryAdapter | undefined,
   op: IrOp,
   operands: OperandUses
 ): void {
@@ -66,7 +67,10 @@ export function emitOp(
       const displayName = helperFunctionName(helper);
 
       assert(helpers !== undefined, `missing Wasm helper ${displayName} in module registry`);
-      body.callFunction(helpers.requireFunctionIndex(helper, displayName));
+      const functionIndex = helpers.functionIndex(helper);
+
+      assert(functionIndex !== undefined, `missing Wasm helper ${displayName} in resolved index registry`);
+      body.callFunction(functionIndex);
       return;
     }
   }

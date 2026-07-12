@@ -5,41 +5,21 @@ import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel
 import type { StateReadOp } from "#ir/ops.js";
 import type { ValueId } from "#ir/values.js";
 import { statusFlagValuesForSource } from "#core/flag-values.js";
-import { x86StatusFlags, type X86StatusFlag } from "#core/flags.js";
+import type { X86StatusFlag } from "#core/flags.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import type { OperandWidth } from "#core/types.js";
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody
+} from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
-import type { HelperRegistry } from "./registry.js";
 
-export type LazyFlagHelper = X86StatusFlag;
-export type HelperCallKey = Readonly<{ kind: "lazyFlag"; flag: X86StatusFlag }>;
-
-export function lazyFlagHelperName(flag: LazyFlagHelper): string {
-  return `resolve${flag}`;
-}
-
-export function defineLazyFlagHelper(registry: HelperRegistry<HelperCallKey>, flag: LazyFlagHelper): number {
-  return registry.define({ kind: "lazyFlag", flag }, () => encodeLazyFlagHelperBody(flag));
-}
-
-export function defineLazyFlagHelpers(
-  registry: HelperRegistry<HelperCallKey>,
-  flags: Iterable<LazyFlagHelper>
-): void {
-  const required = new Set(flags);
-
-  for (const flag of x86StatusFlags) {
-    if (required.has(flag)) {
-      defineLazyFlagHelper(registry, flag);
-    }
-  }
-}
-
-function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncoder {
+// A raw encoded body factory for the temporary declared-helper compatibility
+// path. It owns no module insertion or numeric function binding.
+export function encodeLazyFlagHelperBody(helper: X86StatusFlag): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
   const resolver = lazyFlagResolverBlock(helper);
@@ -56,14 +36,14 @@ function encodeLazyFlagHelperBody(helper: LazyFlagHelper): WasmFunctionBodyEncod
     body.localGet(outputLocal);
   });
   scratch.assertClear();
-  return body.end();
+  return body.finish();
 }
 
 // One IrBlock per helper: read the lazy kind channel, switch on it, export
 // the selected arm's flag value. Each arm schedules its own channel reads,
 // so demand stays arm-local — LOGIC arms never touch lazyFlagsB and a
 // formula that ignores a read leaves it unemitted.
-function lazyFlagResolverBlock(flag: LazyFlagHelper): Readonly<{ block: IrBlock; output: ValueId }> {
+function lazyFlagResolverBlock(flag: X86StatusFlag): Readonly<{ block: IrBlock; output: ValueId }> {
   let output!: ValueId;
   const block = buildIrBlock((b) => {
     output = b.switch(
@@ -83,14 +63,14 @@ function lazyFlagResolverBlock(flag: LazyFlagHelper): Readonly<{ block: IrBlock;
   return { output, block };
 }
 
-function noneArm(flag: LazyFlagHelper): SwitchArm {
+function noneArm(flag: X86StatusFlag): SwitchArm {
   return {
     match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
     build: (arm) => arm.opValue({ kind: "state.read", slot: flagChannel(flag) })
   };
 }
 
-function binaryArm(flag: LazyFlagHelper, kind: "add" | "sub", width: OperandWidth): SwitchArm {
+function binaryArm(flag: X86StatusFlag, kind: "add" | "sub", width: OperandWidth): SwitchArm {
   return {
     match: lazyFlagsKindByte(
       kind === "add" ? WASM_CPU_LAZY_FLAGS_KIND.ADD : WASM_CPU_LAZY_FLAGS_KIND.SUB,
@@ -111,7 +91,7 @@ function binaryArm(flag: LazyFlagHelper, kind: "add" | "sub", width: OperandWidt
   };
 }
 
-function logicArm(flag: LazyFlagHelper, width: OperandWidth): SwitchArm {
+function logicArm(flag: X86StatusFlag, width: OperandWidth): SwitchArm {
   return {
     match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, width),
     build: (arm) => {

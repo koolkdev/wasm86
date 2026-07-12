@@ -172,7 +172,7 @@ test("xchg eax, eax emits no register-state Wasm access", async () => {
   builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("eax")], loc(0x1000, 0x1001));
 
   const block = builder.finish();
-  const body = irBlockBody(block).encode();
+  const body = irBlockBody(block).bytes;
 
   deepStrictEqual(
     wasmBodyMemoryAccesses(body).filter(
@@ -334,7 +334,7 @@ test("zero compares encode as eqz", () => {
 
   builder.addInstruction(logicConditionTemplate, [], loc(0x1000, 0x1003));
 
-  const body = irBlockBody(builder.finish()).encode();
+  const body = irBlockBody(builder.finish()).bytes;
   const opcodes = wasmBodyOpcodes(body);
 
   strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Eqz).length, 1);
@@ -354,7 +354,7 @@ test("a value used twice computes once and both uses observe it", async () => {
   builder.addInstruction(sumIntoBoth, [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1003));
 
   const block = builder.finish();
-  const body = irBlockBody(block).encode();
+  const body = irBlockBody(block).bytes;
 
   // One add for the shared sum, one for the count advance.
   strictEqual(wasmBodyOpcodes(body).filter((opcode) => opcode === wasmOpcode.i32Add).length, 2);

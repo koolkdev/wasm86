@@ -140,7 +140,7 @@ test("two adds in one block store one lazy add record, with the second add's sou
   );
 
   // ...and in the encoding: one lazy kind byte byte store.
-  const body = irBlockBody(block).encode();
+  const body = irBlockBody(block).bytes;
 
   strictEqual(
     wasmBodyMemoryAccesses(body).filter(

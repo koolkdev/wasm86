@@ -1,50 +1,31 @@
 import { assert } from "#common/assert.js";
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import type { WasmModuleEncoder } from "#compiler/encoder/module.js";
-import type { WasmFunctionType } from "#compiler/encoder/types.js";
+import { helperFunctionName, type HelperCallKey } from "./key.js";
 
-export class HelperRegistry<TKey> {
-  readonly #module: WasmModuleEncoder;
-  readonly #typeIndex: number;
-  readonly #keyId: (key: TKey) => string;
-  readonly #entries = new Map<string, Readonly<{ key: TKey; functionIndex: number }>>();
+export type LegacyHelperIndexBinding = Readonly<{
+  key: HelperCallKey;
+  functionIndex: number;
+}>;
 
-  constructor(module: WasmModuleEncoder, type: WasmFunctionType, keyId: (key: TKey) => string) {
-    this.#module = module;
-    this.#typeIndex = module.addFunctionType(type);
-    this.#keyId = keyId;
-  }
+// Numeric compatibility for emitters that still lower helper calls directly
+// to Wasm indexes. Helper definitions, body factories, and reachability are
+// deliberately owned by the caller that constructs these resolved bindings.
+export class LegacyHelperIndexRegistryAdapter {
+  readonly #functionIndices = new Map<string, number>();
 
-  define(key: TKey, body: () => WasmFunctionBodyEncoder): number {
-    const id = this.#keyId(key);
-    const existing = this.#entries.get(id);
+  constructor(bindings: Iterable<LegacyHelperIndexBinding>) {
+    for (const binding of bindings) {
+      const id = helperFunctionName(binding.key);
 
-    if (existing !== undefined) {
-      return existing.functionIndex;
+      assert(!this.#functionIndices.has(id), `duplicate Wasm helper index binding: ${id}`);
+      assert(
+        Number.isInteger(binding.functionIndex) && binding.functionIndex >= 0,
+        `invalid Wasm helper function index for ${id}: ${binding.functionIndex}`
+      );
+      this.#functionIndices.set(id, binding.functionIndex);
     }
-
-    const functionIndex = this.#module.addFunction(this.#typeIndex, body());
-
-    this.#entries.set(id, { key, functionIndex });
-    return functionIndex;
   }
 
-  functionIndex(key: TKey): number | undefined {
-    return this.#entries.get(this.#keyId(key))?.functionIndex;
-  }
-
-  requireFunctionIndex(key: TKey, displayName: string): number {
-    const functionIndex = this.functionIndex(key);
-
-    assert(functionIndex !== undefined, `missing Wasm helper ${displayName} in module registry`);
-    return functionIndex;
-  }
-
-  has(key: TKey): boolean {
-    return this.#entries.has(this.#keyId(key));
-  }
-
-  helpers(): readonly TKey[] {
-    return [...this.#entries.values()].map((entry) => entry.key);
+  functionIndex(key: HelperCallKey): number | undefined {
+    return this.#functionIndices.get(helperFunctionName(key));
   }
 }

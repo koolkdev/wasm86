@@ -1,4 +1,7 @@
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody
+} from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import type { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#compiler/encoder/types.js";
@@ -121,7 +124,7 @@ type HelperContext = Readonly<{
 function encodeRmDecodeHelperBody(
   opcodeLength: number,
   globals: RmDecodeGlobals
-): WasmFunctionBodyEncoder {
+): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder(rmDecodeHelperType.params.length);
   const scratch = new WasmLocalScratchAllocator(body);
   const context: HelperContext = {
@@ -145,7 +148,7 @@ function encodeRmDecodeHelperBody(
   emitPlainAddressCases(context, cursorAfterModRm);
   body.endBlock();
   scratch.assertClear();
-  return body.i64Const(0n).end();
+  return body.i64Const(0n).finish();
 }
 
 function emitPlainAddressCases(context: HelperContext, cursor: DecodeCursor): void {

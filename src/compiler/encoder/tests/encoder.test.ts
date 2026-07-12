@@ -1,7 +1,11 @@
-import { match, ok, strictEqual } from "node:assert";
+import { match, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { wasmBranchHint, WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  wasmBranchHint,
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody
+} from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
@@ -46,6 +50,47 @@ test("branch hint metadata section compiles", async () => {
   strictEqual(sections.length, 1);
 });
 
+test("module preserves encoded function branch hints", async () => {
+  const module = new WasmModuleEncoder();
+  const typeIndex = module.addFunctionType({ params: [], results: [wasmValueType.i32] });
+  const body = new WasmFunctionBodyEncoder()
+    .i32Const(0)
+    .ifBlock({ hint: wasmBranchHint.unlikely })
+    .endBlock()
+    .i32Const(42)
+    .finish();
+  const functionIndex = module.addFunction(typeIndex, body);
+
+  module.exportFunction("entry", functionIndex);
+
+  const compiled = await WebAssembly.compile(module.encode());
+  const sections = WebAssembly.Module.customSections(compiled, "metadata.code.branch_hint");
+  const instance = await WebAssembly.instantiate(compiled);
+  const entry = instance.exports.entry;
+
+  if (typeof entry !== "function") {
+    throw new Error("expected exported function 'entry'");
+  }
+
+  strictEqual(entry(), 42);
+  strictEqual(sections.length, 1);
+});
+
+test("unknown function types do not reserve a function index", () => {
+  const module = new WasmModuleEncoder();
+  const typeIndex = module.addFunctionType({ params: [], results: [] });
+  const body = new WasmFunctionBodyEncoder().finish();
+
+  throws(
+    () => module.addFunction(typeIndex + 1, body),
+    /unknown Wasm function type index/
+  );
+
+  const functionIndex = module.addFunction(typeIndex, body);
+
+  strictEqual(functionIndex, 0);
+});
+
 test("br_table dispatch compiles and branches by i32 selector", async () => {
   const module = await WebAssembly.compile(encodeBrTableTestModule());
   const instance = await WebAssembly.instantiate(module);
@@ -79,7 +124,7 @@ test("i32 signed and unsigned narrow memory and sign-extension opcodes compile",
 
   await WebAssembly.compile(bytes);
 
-  const opcodes = wasmBodyOpcodes(body.encode());
+  const opcodes = wasmBodyOpcodes(body.bytes);
 
   strictEqual(opcodes.includes(wasmOpcode.i32Load8S), true);
   strictEqual(opcodes.includes(wasmOpcode.i32Load16U), true);
@@ -114,7 +159,7 @@ function encodeConstantI64TestModule(exportName: string, value: bigint): Uint8Ar
     params: [],
     results: [wasmValueType.i64]
   });
-  const body = new WasmFunctionBodyEncoder().i64Const(value).end();
+  const body = new WasmFunctionBodyEncoder().i64Const(value).finish();
   const functionIndex = module.addFunction(typeIndex, body);
 
   module.exportFunction(exportName, functionIndex);
@@ -130,10 +175,10 @@ function encodeHintedIfTestModule(): Uint8Array<ArrayBuffer> {
   });
   const body = new WasmFunctionBodyEncoder()
     .i32Const(0)
-    .ifBlock(wasmBranchHint.unlikely)
+    .ifBlock({ hint: wasmBranchHint.unlikely })
     .endBlock()
     .i32Const(1)
-    .end();
+    .finish();
   const functionIndex = module.addFunction(typeIndex, body);
 
   module.exportFunction("hintedIf", functionIndex);
@@ -161,7 +206,7 @@ function encodeBrTableTestModule(): Uint8Array<ArrayBuffer> {
     .returnFromFunction()
     .endBlock()
     .i32Const(30)
-    .end();
+    .finish();
   const functionIndex = module.addFunction(typeIndex, body);
 
   module.exportFunction("select", functionIndex);
@@ -177,12 +222,12 @@ function encodeTypedIfTestModule(): Uint8Array<ArrayBuffer> {
   });
   const body = new WasmFunctionBodyEncoder(1)
     .localGet(0)
-    .ifBlock(undefined, wasmValueType.i32)
+    .ifBlock({ result: wasmValueType.i32 })
     .i32Const(10)
     .elseBlock()
     .i32Const(20)
     .endBlock()
-    .end();
+    .finish();
   const functionIndex = module.addFunction(typeIndex, body);
 
   module.exportFunction("select", functionIndex);
@@ -190,7 +235,7 @@ function encodeTypedIfTestModule(): Uint8Array<ArrayBuffer> {
   return module.encode();
 }
 
-function encodeWidthMemoryOpcodeModule(body: WasmFunctionBodyEncoder): Uint8Array<ArrayBuffer> {
+function encodeWidthMemoryOpcodeModule(body: EncodedWasmFunctionBody): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
 
   module.importMemory("env", "memory", { minPages: 1 });
@@ -206,7 +251,7 @@ function encodeWidthMemoryOpcodeModule(body: WasmFunctionBodyEncoder): Uint8Arra
   return module.encode();
 }
 
-function encodeWidthMemoryOpcodeBody(): WasmFunctionBodyEncoder {
+function encodeWidthMemoryOpcodeBody(): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder(2);
   const valueLocal = body.addLocal(wasmValueType.i32);
 
@@ -228,8 +273,7 @@ function encodeWidthMemoryOpcodeBody(): WasmFunctionBodyEncoder {
     .localGet(0)
     .localGet(1)
     .i32Store16({ align: 1, memoryIndex: 0, offset: 0 })
-    .localGet(valueLocal)
-    .end();
+    .localGet(valueLocal);
 
-  return body;
+  return body.finish();
 }

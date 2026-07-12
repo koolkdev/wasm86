@@ -15,7 +15,12 @@ import { nestedBodies } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#ir/values.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
-import { wasmBranchHint, type WasmBranchHint, type WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  wasmBranchHint,
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody,
+  type WasmBranchHint
+} from "#compiler/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { analyzeLiveness, type BlockLiveness } from "./liveness.js";
@@ -25,7 +30,7 @@ import { planProducerSchedule } from "./schedule/build.js";
 import { ProducerScheduleExecutor } from "./schedule/executor.js";
 import { analyzeValueUses } from "./value-uses.js";
 import { ValueEmitter } from "./value-emitter.js";
-import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
+import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 
 // The emitter driver: walks an IrBlock in action order and fills the
 // given function body. Its product is a function body, never a module —
@@ -39,7 +44,7 @@ export type ActionFragmentContext = Readonly<{
   // takes.
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
-  helpers?: WasmHelperRegistry | undefined;
+  helpers?: LegacyHelperIndexRegistryAdapter | undefined;
   // A supplied liveness result was computed from this validated block with
   // the embedding's output roots. Without one, the fragment owns both steps.
   liveness?: BlockLiveness | undefined;
@@ -47,26 +52,26 @@ export type ActionFragmentContext = Readonly<{
 }>;
 
 export type ActionFunctionContext = Readonly<{
-  body: WasmFunctionBodyEncoder;
-  helpers?: WasmHelperRegistry | undefined;
+  helpers?: LegacyHelperIndexRegistryAdapter | undefined;
   // See ActionFragmentContext.liveness.
   liveness?: BlockLiveness | undefined;
   embedding: FunctionEmbedding;
 }>;
 
 // The function-shaped entry point: the block is the whole function body.
-export function emitActionFunction(block: IrBlock, context: ActionFunctionContext): WasmFunctionBodyEncoder {
-  const scratch = new WasmLocalScratchAllocator(context.body);
+export function emitActionFunction(block: IrBlock, context: ActionFunctionContext): EncodedWasmFunctionBody {
+  const body = new WasmFunctionBodyEncoder();
+  const scratch = new WasmLocalScratchAllocator(body);
 
   emitActionFragment(block, {
-    body: context.body,
+    body,
     scratch,
     helpers: context.helpers,
     liveness: context.liveness,
     embedding: context.embedding
   });
   scratch.assertClear();
-  return context.body.end();
+  return body.finish();
 }
 
 export function emitActionFragment(block: IrBlock, context: ActionFragmentContext): void {
@@ -213,7 +218,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       }
     };
 
-    body.ifBlock(wasmHint(action.hint));
+    body.ifBlock({ hint: wasmHint(action.hint) });
     frame.withNestedControl(() => {
       emitArm(action.thenBody);
 

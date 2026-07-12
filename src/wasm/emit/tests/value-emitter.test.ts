@@ -15,9 +15,7 @@ import { analyzeValueUses } from "#wasm/emit/value-uses.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
-import { defineLazyFlagHelper } from "#wasm/helpers/lazy-flags.js";
-import { createWasmHelperRegistry } from "#wasm/helpers/module.js";
+import { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 import {
   wasmBodyInstructions,
   wasmBodyLocalCount,
@@ -35,6 +33,12 @@ function captureBodyValues(valueEmitter: ValueEmitter, values: ValueTable, body:
   valueEmitter.captureValues(bodyInputValues(body, values));
 }
 
+function zfHelperRegistry() {
+  return new LegacyHelperIndexRegistryAdapter([
+    { key: { kind: "lazyFlag", flag: "ZF" }, functionIndex: 0 }
+  ]);
+}
+
 type TestEmitter = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
@@ -45,7 +49,7 @@ function createTestEmitter(
   values: ValueTable,
   actionBody: Body,
   externalIds: readonly ExternalValueId[] = [],
-  helpers = createWasmHelperRegistry(new WasmModuleEncoder())
+  helpers = new LegacyHelperIndexRegistryAdapter([])
 ): TestEmitter {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
@@ -72,8 +76,7 @@ test("captureProducer emits a flag resolve and binds its result", () => {
   const values = new ValueTable();
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
-  const helpers = createWasmHelperRegistry(new WasmModuleEncoder());
-  const helperIndex = defineLazyFlagHelper(helpers, "ZF");
+  const helpers = zfHelperRegistry();
   const { body, scratch, valueEmitter } = createTestEmitter(
     values,
     testBody([
@@ -84,14 +87,13 @@ test("captureProducer emits a flag resolve and binds its result", () => {
     helpers
   );
 
-  strictEqual(helperIndex, 0);
   valueEmitter.captureProducer(resolveAction);
   valueEmitter.emitUse(resolved);
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.call,
@@ -107,9 +109,7 @@ test("captureProducer observes lazy flags before later mutation", () => {
   const resolved = values.addActionOutput(fitsUnsigned(1));
   const record = values.const(0);
   const resolveAction: ResolveFlagAction = resolveFlag(resolved, "ZF");
-  const helpers = createWasmHelperRegistry(new WasmModuleEncoder());
-
-  defineLazyFlagHelper(helpers, "ZF");
+  const helpers = zfHelperRegistry();
 
   const { body, scratch, valueEmitter } = createTestEmitter(
     values,
@@ -129,7 +129,7 @@ test("captureProducer observes lazy flags before later mutation", () => {
   scratch.assertClear();
 
   // The lazy record between resolve and use pins the observation point.
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+  deepStrictEqual(wasmBodyOpcodes(body.finish().bytes), [
     wasmOpcode.call,
     wasmOpcode.localSet,
     wasmOpcode.localGet,
@@ -148,7 +148,7 @@ test("captureProducer reports a missing flag helper", () => {
       stateWrite(gprChannel("eax"), resolved)
     ]),
     [],
-    createWasmHelperRegistry(new WasmModuleEncoder())
+    new LegacyHelperIndexRegistryAdapter([])
   );
 
   throws(
@@ -165,14 +165,14 @@ test("a flag resolve with no event emits nothing", () => {
     values,
     testBody([resolveAction]),
     [],
-    createWasmHelperRegistry(new WasmModuleEncoder())
+    new LegacyHelperIndexRegistryAdapter([])
   );
 
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [wasmOpcode.end]);
   strictEqual(wasmBodyLocalCount(encoded), 0);
@@ -198,7 +198,7 @@ test("a capture event stores even a single-use result for replay", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
@@ -234,7 +234,7 @@ test("a multi-use value tees once and replays from one freed local", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
@@ -280,7 +280,7 @@ test("captured reads preserve both snapshots across swapped writes", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   // Both capture events execute before either write consumes a snapshot.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
@@ -314,7 +314,7 @@ test("a dead read emits nothing", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [wasmOpcode.end]);
   strictEqual(wasmBodyLocalCount(encoded), 0);
@@ -343,7 +343,7 @@ test("constant and external leaves re-emit per use without scratch locals", () =
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
@@ -388,7 +388,7 @@ test("select pushes whenTrue, whenFalse, then condition", () => {
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
 
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+  deepStrictEqual(wasmBodyOpcodes(body.finish().bytes), [
     wasmOpcode.localGet,
     wasmOpcode.i32Popcnt,
     wasmOpcode.localGet,
@@ -462,7 +462,7 @@ test("operators map to their wasm opcodes", () => {
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
 
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+  deepStrictEqual(wasmBodyOpcodes(body.finish().bytes), [
     wasmOpcode.localGet,
     wasmOpcode.localGet,
     wasmOpcode.i32Shl,
@@ -549,7 +549,7 @@ test("signed multiply overflow expressions lower through typed i64 products", ()
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.localGet,
@@ -620,7 +620,7 @@ test("i64 binary operators lower to wasm i64 opcodes", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+  deepStrictEqual(wasmBodyOpcodes(body.finish().bytes), [
     wasmOpcode.localGet,
     wasmOpcode.i64ExtendI32U,
     wasmOpcode.localGet,
@@ -667,7 +667,7 @@ test("i64 equality against an i64 constant lowers to i64.const and i64.eq", () =
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+  deepStrictEqual(wasmBodyOpcodes(body.finish().bytes), [
     wasmOpcode.localGet,
     wasmOpcode.i64ExtendI32S,
     wasmOpcode.i64Const,
@@ -726,7 +726,7 @@ test("truncate masks to the requested width", () => {
   valueEmitter.assertClear();
 
   // One capture supplies both truncations.
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+  deepStrictEqual(wasmBodyOpcodes(body.finish().bytes), [
     wasmOpcode.i32Const,
     wasmOpcode.i32Load,
     wasmOpcode.localSet,
@@ -761,7 +761,7 @@ test("equality against constant zero emits eqz from either side", () => {
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
 
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+  deepStrictEqual(wasmBodyOpcodes(body.finish().bytes), [
     wasmOpcode.localGet,
     wasmOpcode.i32Eqz,
     wasmOpcode.localGet,
@@ -789,7 +789,7 @@ test("ne and non-zero equality keep the generic compare", () => {
   valueEmitter.releaseFragmentLocals();
   valueEmitter.assertClear();
 
-  deepStrictEqual(wasmBodyOpcodes(body.end().encode()), [
+  deepStrictEqual(wasmBodyOpcodes(body.finish().bytes), [
     wasmOpcode.localGet,
     wasmOpcode.i32Const,
     wasmOpcode.i32Ne,
@@ -821,7 +821,7 @@ test("a captured memory read loads once and replays twice", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
@@ -854,7 +854,7 @@ test("a captured state read loads once and replays twice", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
@@ -908,7 +908,7 @@ test("a captured producer remains available to a nested body", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   // This unit invokes the capture primitive explicitly before control.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
@@ -969,7 +969,7 @@ test("captureProducer evaluates its input closure before storing the result", ()
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.localGet,
@@ -1028,7 +1028,7 @@ test("sibling bodies read one producer local initialized before both", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
@@ -1084,7 +1084,7 @@ test("a direct use behind a fault body emits once at the body's entry and replay
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   // The scope's own use means its flow pays for the value either way, so
   // captureForBody realizes the emission: one slot load set to a local
@@ -1147,7 +1147,7 @@ test("captureForBody computes an untouched compound into a local for later uses"
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   // One computation set into a local, two replays.
   deepStrictEqual(wasmBodyOpcodes(encoded), [
@@ -1235,7 +1235,7 @@ test("a borrowed compound computes once and replays from a pinned local", () => 
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   // The first push tees the computed value into a local held only by the
   // borrow's pin; the second peeks it.
@@ -1272,7 +1272,7 @@ test("a borrowed leaf re-emits per push without scratch locals", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.localGet,
@@ -1308,7 +1308,7 @@ test("a borrow leaves registry lifetimes intact for later counted uses", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   // The borrow's first push takes one counted use of the compound the
   // registry teed for its remaining use; the second push peeks that same
@@ -1350,7 +1350,7 @@ test("a borrow peeks a stable action-output local", () => {
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,
@@ -1451,7 +1451,7 @@ test("nested borrows keep the same local pinned until the outer callback ends", 
   valueEmitter.assertClear();
   scratch.assertClear();
 
-  const encoded = body.end().encode();
+  const encoded = body.finish().bytes;
 
   deepStrictEqual(wasmBodyOpcodes(encoded), [
     wasmOpcode.i32Const,

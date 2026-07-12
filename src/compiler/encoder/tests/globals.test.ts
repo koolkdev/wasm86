@@ -13,11 +13,11 @@ test("a mutable i32 global initializes and round-trips through set/get", async (
 
   module.exportFunction(
     "get",
-    module.addFunction(getType, new WasmFunctionBodyEncoder().globalGet(globalIndex).end())
+    module.addFunction(getType, new WasmFunctionBodyEncoder().globalGet(globalIndex).finish())
   );
   module.exportFunction(
     "set",
-    module.addFunction(setType, new WasmFunctionBodyEncoder(1).localGet(0).globalSet(globalIndex).end())
+    module.addFunction(setType, new WasmFunctionBodyEncoder(1).localGet(0).globalSet(globalIndex).finish())
   );
 
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(module.encode()));
@@ -37,7 +37,7 @@ test("an i64 global keeps its full-width initial value", async () => {
 
   module.exportFunction(
     "get",
-    module.addFunction(getType, new WasmFunctionBodyEncoder().globalGet(globalIndex).end())
+    module.addFunction(getType, new WasmFunctionBodyEncoder().globalGet(globalIndex).finish())
   );
 
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(module.encode()));

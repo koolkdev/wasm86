@@ -2,18 +2,20 @@ import { assert } from "#common/assert.js";
 import type { IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody
+} from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import { analyzeLiveness, type BlockLiveness } from "#wasm/emit/liveness.js";
 import {
-  createWasmHelperRegistry,
-  defineRequiredHelpers,
   helperCallsForBlock,
-  type WasmHelperRegistry
+  installHelpers
 } from "#wasm/helpers/module.js";
+import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 
 // Test-only module wrapper around the action emitter: imported state + guest
 // memories, one run export returning the encoded i64 exit. The harness
@@ -33,28 +35,27 @@ export type InstantiatedIrBlock = Readonly<{
 }>;
 
 // The fragment with direct exits to the sentinel tail.
-export function irBlockBody(block: IrBlock, externalParamCount = 0): WasmFunctionBodyEncoder {
+export function irBlockBody(block: IrBlock, externalParamCount = 0): EncodedWasmFunctionBody {
   return emitIrBlockBody(block, externalParamCount);
 }
 
-export function irBlockBodyWithHelpers(block: IrBlock, externalParamCount = 0): WasmFunctionBodyEncoder {
+export function irBlockBodyWithHelpers(block: IrBlock, externalParamCount = 0): EncodedWasmFunctionBody {
   const module = new WasmModuleEncoder();
 
   validateIrBlock(block, { allowImplicitEntryFallthrough: true });
 
   const liveness = analyzeLiveness(block);
-  const helpers = createWasmHelperRegistry(module);
+  const helpers = installHelpers(module, helperCallsForBlock(block, liveness));
 
-  defineRequiredHelpers(helpers, helperCallsForBlock(block, liveness));
   return emitIrBlockBody(block, externalParamCount, helpers, liveness);
 }
 
 function emitIrBlockBody(
   block: IrBlock,
   externalParamCount: number,
-  helpers?: WasmHelperRegistry,
+  helpers?: LegacyHelperIndexRegistryAdapter,
   liveness?: BlockLiveness
-): WasmFunctionBodyEncoder {
+): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder(externalParamCount);
   const scratch = new WasmLocalScratchAllocator(body);
 
@@ -72,7 +73,7 @@ function emitIrBlockBody(
   });
   body.endBlock();
   scratch.assertClear();
-  return body.i64Const(irBlockCompleted).end();
+  return body.i64Const(irBlockCompleted).finish();
 }
 
 export async function instantiateIrBlock(
@@ -104,7 +105,7 @@ export async function instantiateIrBlock(
 // Same wrapper around an already finished body — typically a hand-written
 // embedder function with fragments emitted inline.
 export async function instantiateFunctionBody(
-  body: WasmFunctionBodyEncoder,
+  body: EncodedWasmFunctionBody,
   paramCount = 0
 ): Promise<InstantiatedIrBlock> {
   const state = new WebAssembly.Memory({ initial: 1 });
@@ -129,7 +130,7 @@ export async function instantiateFunctionBody(
   };
 }
 
-function encodeFunctionBodyModule(body: WasmFunctionBodyEncoder, paramCount: number): Uint8Array<ArrayBuffer> {
+function encodeFunctionBodyModule(body: EncodedWasmFunctionBody, paramCount: number): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
   const typeIndex = initializeTestModule(module, paramCount);
 
@@ -144,9 +145,8 @@ function encodeIrBlockModule(block: IrBlock, externalParamCount: number): Uint8A
   validateIrBlock(block, { allowImplicitEntryFallthrough: true });
 
   const liveness = analyzeLiveness(block);
-  const helpers = createWasmHelperRegistry(module);
+  const helpers = installHelpers(module, helperCallsForBlock(block, liveness));
 
-  defineRequiredHelpers(helpers, helperCallsForBlock(block, liveness));
   module.exportFunction(
     wasmBlockExportName,
     module.addFunction(typeIndex, emitIrBlockBody(block, externalParamCount, helpers, liveness))

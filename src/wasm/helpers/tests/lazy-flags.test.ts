@@ -7,11 +7,15 @@ import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import {
-  defineLazyFlagHelper,
-  defineLazyFlagHelpers,
-  lazyFlagHelperName
+  encodeLazyFlagHelperBody
 } from "#wasm/helpers/lazy-flags.js";
-import { createWasmHelperRegistry } from "#wasm/helpers/module.js";
+import { lazyFlagHelperName } from "#wasm/helpers/key.js";
+import {
+  allHelpers,
+  helperFunctionType,
+  installHelpers,
+  orderedHelpers
+} from "#wasm/helpers/module.js";
 import { writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { x86StatusFlags, type X86StatusFlag } from "#core/flags.js";
 import type { OperandWidth } from "#core/types.js";
@@ -23,34 +27,33 @@ test("lazy flag helper names are stable", () => {
   strictEqual(lazyFlagHelperName("ZF"), "resolveZF");
 });
 
-test("lazy flag helper definitions use status flag order", () => {
-  const module = moduleWithCpuMemory();
-  const registry = createWasmHelperRegistry(module);
-
-  defineLazyFlagHelpers(registry, ["ZF", "CF"]);
-
-  strictEqual(registry.functionIndex({ kind: "lazyFlag", flag: "CF" }), 0);
-  strictEqual(registry.functionIndex({ kind: "lazyFlag", flag: "ZF" }), 1);
-  deepStrictEqual(registry.helpers(), [
+test("lazy flag helper selection deduplicates requested factories", () => {
+  const selected = orderedHelpers([
+    { kind: "lazyFlag", flag: "ZF" },
     { kind: "lazyFlag", flag: "CF" },
     { kind: "lazyFlag", flag: "ZF" }
   ]);
+
+  strictEqual(selected.length, 2);
+  deepStrictEqual(
+    new Set(selected.map((helper) => lazyFlagHelperName(helper.flag))),
+    new Set([lazyFlagHelperName("CF"), lazyFlagHelperName("ZF")])
+  );
 });
 
-test("lazy flag helper bodies compile", async () => {
+test("encoded lazy flag helper factories compile", async () => {
   const module = moduleWithCpuMemory();
-  const registry = createWasmHelperRegistry(module);
+  const typeIndex = module.addFunctionType(helperFunctionType);
 
-  defineLazyFlagHelper(registry, "ZF");
+  module.addFunction(typeIndex, encodeLazyFlagHelperBody("ZF"));
 
   await WebAssembly.compile(module.encode());
 });
 
 test("lazy flag helper dispatches through br_table", () => {
   const module = moduleWithCpuMemory();
-  const registry = createWasmHelperRegistry(module);
 
-  defineLazyFlagHelper(registry, "CF");
+  installHelpers(module, [{ kind: "lazyFlag", flag: "CF" }]);
 
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(module.encode()));
 
@@ -60,9 +63,8 @@ test("lazy flag helper dispatches through br_table", () => {
 
 test("LOGIC arms read only the lazy A channel", () => {
   const module = moduleWithCpuMemory();
-  const registry = createWasmHelperRegistry(module);
 
-  defineLazyFlagHelper(registry, "ZF");
+  installHelpers(module, [{ kind: "lazyFlag", flag: "ZF" }]);
 
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(module.encode()));
   const loads = opcodes.filter(
@@ -231,10 +233,14 @@ type LazyFlagRuntime = Readonly<{
 
 async function instantiateLazyFlagHelpers(): Promise<LazyFlagRuntime> {
   const module = moduleWithCpuMemory();
-  const registry = createWasmHelperRegistry(module);
+  const registry = installHelpers(module, allHelpers());
 
   for (const flag of x86StatusFlags) {
-    module.exportFunction(lazyFlagHelperName(flag), defineLazyFlagHelper(registry, flag));
+    const helper = { kind: "lazyFlag", flag } as const;
+    const functionIndex = registry.functionIndex(helper);
+
+    ok(functionIndex !== undefined, `missing ${lazyFlagHelperName(flag)} helper index`);
+    module.exportFunction(lazyFlagHelperName(flag), functionIndex);
   }
 
   const cpuState = new WebAssembly.Memory({ initial: 1 });

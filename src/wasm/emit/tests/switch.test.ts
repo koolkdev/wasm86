@@ -93,7 +93,7 @@ test("sequential switch joins reuse one physical local", async () => {
       ]
     }
   };
-  const encoded = irBlockBody(block, 1).encode();
+  const encoded = irBlockBody(block, 1).bytes;
 
   strictEqual(wasmBodyLocalCount(encoded), 1);
 
@@ -160,7 +160,7 @@ test("an arm-local compound over an arm-local read computes inside the arm", asy
       ]
     }
   };
-  const opcodes = wasmBodyOpcodes(irBlockBody(block, 1).encode());
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 1).bytes);
 
   // No if-chain lowering, one br_table; the ebx load sits inside the arm,
   // after dispatch — never captured in the parent.
@@ -199,7 +199,7 @@ test("a parent compound consumed by two arms captures once before the switch", a
       ]
     }
   };
-  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).encode());
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
 
   // One computation, captured before dispatch and replayed by each arm.
   strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Add).length, 1);
@@ -236,7 +236,7 @@ test("a dead switch output emits no arm values but keeps the impossible default"
       ]
     }
   };
-  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).encode());
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
 
   // Nothing demands the output: the dispatch shell remains, but no arm
   // result materializes — neither the pure arm read nor the parent-context

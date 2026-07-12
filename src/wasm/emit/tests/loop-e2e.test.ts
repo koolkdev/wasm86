@@ -245,7 +245,7 @@ const stateLoadOpcodes: readonly number[] = [
 ];
 
 test("rep movsd does not read cpu state inside the loop body", () => {
-  const body = irBlockBody(repMovsdBlock()).encode();
+  const body = irBlockBody(repMovsdBlock()).bytes;
   const instructions = wasmBodyInstructions(body);
   const loopEntry = instructions.find((instruction) => instruction.opcode === wasmOpcode.loop);
 

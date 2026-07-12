@@ -5,11 +5,11 @@ import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
 import { buildIrBlock } from "./action-compiler.js";
 import {
-  actionJitModuleLinkTargets,
-  encodeActionJitModule,
+  jitModuleLinkTargets,
+  encodeJitModule,
   jitBlockExportName,
-  type ActionJitBlock
-} from "./action-module.js";
+  type JitBlock
+} from "./module.js";
 import {
   jitModuleLinkFallbackExportName,
   JitModuleLinkTable
@@ -66,15 +66,15 @@ export function compileActionWasmBlockHandle(
 ): WasmBlockHandle {
   assertCompilableBlocks(blocks);
 
-  const moduleBlocks: ActionJitBlock[] = blocks.map((block) => ({
+  const moduleBlocks: JitBlock[] = blocks.map((block) => ({
     entryEip: u32(block.startEip),
-    actions: buildIrBlock(block.instructions)
+    ir: buildIrBlock(block.instructions)
   }));
-  const targetEips = actionJitModuleLinkTargets(moduleBlocks);
+  const targetEips = jitModuleLinkTargets(moduleBlocks);
   const moduleLinkTable = targetEips.length === 0 ? undefined : new JitModuleLinkTable({ targetEips });
-  const bytes = encodeActionJitModule(
+  const bytes = encodeJitModule(
     moduleBlocks,
-    moduleLinkTable === undefined ? {} : { moduleLinkTable }
+    moduleLinkTable === undefined ? {} : { linkLayout: moduleLinkTable.linkLayout() }
   );
 
   return instantiateCompiledBlocks(blocks, bytes, moduleLinkTable, options);

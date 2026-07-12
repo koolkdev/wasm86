@@ -39,7 +39,7 @@ function readRegister(view: DataView, name: RegName): number {
 test("decoded DIV r/m32 lowers through unsigned i64 division and writes EDX:EAX", async () => {
   const instruction = decoded(decodeBytes([0xf7, 0xf3]));
   const block = blockOf([instruction]);
-  const body = irBlockBody(block).encode();
+  const body = irBlockBody(block).bytes;
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64DivU), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64RemU), true);
@@ -67,7 +67,7 @@ test("decoded DIV r/m32 lowers through unsigned i64 division and writes EDX:EAX"
 test("decoded IDIV r/m32 lowers through signed i64 division and keeps remainder sign", async () => {
   const instruction = decoded(decodeBytes([0xf7, 0xfb]));
   const block = blockOf([instruction]);
-  const body = irBlockBody(block).encode();
+  const body = irBlockBody(block).bytes;
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64DivS), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64RemS), true);

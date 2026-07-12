@@ -10,7 +10,7 @@ import { noSegmentOverride, segmentRegisterIndex } from "#core/segments.js";
 import type { SegmentRegister } from "#core/types.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
-import type { WasmHelperRegistry } from "#wasm/helpers/module.js";
+import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 import { emitOpcodeByteFetch } from "./fragments.js";
 import type { InterpreterLocals } from "./locals.js";
 
@@ -28,7 +28,7 @@ export const repneFlagBit = prefixFlagBits.repne;
 export type PrefixEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  helpers: WasmHelperRegistry;
+  helpers: LegacyHelperIndexRegistryAdapter;
   locals: InterpreterLocals;
 }>;
 

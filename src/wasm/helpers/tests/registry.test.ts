@@ -1,43 +1,34 @@
 import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
-import { wasmValueType } from "#compiler/encoder/types.js";
-import { HelperRegistry } from "#wasm/helpers/registry.js";
+import { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 
-const helperType = {
-  params: [],
-  results: [wasmValueType.i32]
-} as const;
+test("resolved helper bindings provide numeric function indexes", () => {
+  const bound = { kind: "lazyFlag", flag: "CF" } as const;
+  const missing = { kind: "lazyFlag", flag: "ZF" } as const;
+  const registry = new LegacyHelperIndexRegistryAdapter([{ key: bound, functionIndex: 7 }]);
 
-test("define is idempotent for repeated keys", () => {
-  const registry = new HelperRegistry(new WasmModuleEncoder(), helperType, (key: string) => key);
-  const first = registry.define("same", () => helperBody(1));
-  const second = registry.define("same", () => helperBody(2));
-
-  strictEqual(first, 0);
-  strictEqual(second, first);
-  strictEqual(registry.functionIndex("same"), first);
-  strictEqual(registry.helpers().length, 1);
+  strictEqual(registry.functionIndex(bound), 7);
+  strictEqual(registry.functionIndex(missing), undefined);
 });
 
-test("requireFunctionIndex fails clearly for missing helpers", () => {
-  const registry = new HelperRegistry(new WasmModuleEncoder(), helperType, (key: string) => key);
-
-  throws(() => registry.requireFunctionIndex("missing", "missingHelper"), /missing Wasm helper missingHelper/);
+test("resolved helper bindings reject duplicate keys", () => {
+  throws(
+    () => new LegacyHelperIndexRegistryAdapter(
+      [
+        { key: { kind: "lazyFlag", flag: "CF" }, functionIndex: 1 },
+        { key: { kind: "lazyFlag", flag: "CF" }, functionIndex: 2 }
+      ]
+    ),
+    /duplicate Wasm helper index binding: resolveCF/
+  );
 });
 
-test("helpers reports definition order", () => {
-  const registry = new HelperRegistry(new WasmModuleEncoder(), helperType, (key: string) => key);
-
-  registry.define("b", () => helperBody(2));
-  registry.define("a", () => helperBody(1));
-
-  strictEqual(registry.helpers()[0], "b");
-  strictEqual(registry.helpers()[1], "a");
+test("resolved helper bindings reject invalid numeric indexes", () => {
+  throws(
+    () => new LegacyHelperIndexRegistryAdapter(
+      [{ key: { kind: "lazyFlag", flag: "CF" }, functionIndex: -1 }]
+    ),
+    /invalid Wasm helper function index for resolveCF: -1/
+  );
 });
-
-function helperBody(value: number): WasmFunctionBodyEncoder {
-  return new WasmFunctionBodyEncoder().i32Const(value).end();
-}

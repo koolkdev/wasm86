@@ -15,10 +15,51 @@ export type EncodedBranchHint = Readonly<{
   value: WasmBranchHint;
 }>;
 
+export type WasmFunctionReferences = Readonly<{
+  functionIndices: readonly number[];
+  typeIndices: readonly number[];
+  globalIndices: readonly number[];
+  tableIndices: readonly number[];
+  memoryIndices: readonly number[];
+}>;
+
+declare const encodedBodyBrand: unique symbol;
+
 export type EncodedWasmFunctionBody = Readonly<{
+  [encodedBodyBrand]: true;
   bytes: Uint8Array<ArrayBuffer>;
   branchHints: readonly EncodedBranchHint[];
+  references: WasmFunctionReferences;
 }>;
+
+class EncodedFunctionBody implements EncodedWasmFunctionBody {
+  declare readonly [encodedBodyBrand]: true;
+  readonly #bytes: Uint8Array<ArrayBuffer>;
+  readonly #branchHints: readonly EncodedBranchHint[];
+  readonly #references: WasmFunctionReferences;
+
+  constructor(
+    bytes: Uint8Array<ArrayBuffer>,
+    branchHints: readonly EncodedBranchHint[],
+    references: WasmFunctionReferences
+  ) {
+    this.#bytes = bytes.slice();
+    this.#branchHints = branchHints.map((hint) => ({ ...hint }));
+    this.#references = copyReferences(references);
+  }
+
+  get bytes(): Uint8Array<ArrayBuffer> {
+    return this.#bytes.slice();
+  }
+
+  get branchHints(): readonly EncodedBranchHint[] {
+    return this.#branchHints.map((hint) => ({ ...hint }));
+  }
+
+  get references(): WasmFunctionReferences {
+    return copyReferences(this.#references);
+  }
+}
 
 type InstructionBranchHint = Readonly<{
   instructionOffset: number;
@@ -29,8 +70,13 @@ export class WasmFunctionBodyEncoder {
   readonly #instructions = new ByteSink();
   readonly #locals: WasmValueType[] = [];
   readonly #branchHints: InstructionBranchHint[] = [];
+  readonly #functionIndices = new Set<number>();
+  readonly #typeIndices = new Set<number>();
+  readonly #globalIndices = new Set<number>();
+  readonly #tableIndices = new Set<number>();
+  readonly #memoryIndices = new Set<number>();
   readonly #paramCount: number;
-  #ended = false;
+  #finished = false;
 
   constructor(paramCount = 0) {
     if (!Number.isInteger(paramCount) || paramCount < 0) {
@@ -41,7 +87,7 @@ export class WasmFunctionBodyEncoder {
   }
 
   addLocal(type: WasmValueType): number {
-    this.#assertOpen("cannot add local after Wasm function body end");
+    this.#assertOpen("cannot add local after function body is finished");
 
     const index = this.#paramCount + this.#locals.length;
     this.#locals.push(type);
@@ -69,12 +115,14 @@ export class WasmFunctionBodyEncoder {
   globalGet(index: number): this {
     this.#writeInstruction(wasmOpcode.globalGet);
     this.#instructions.writeU32(index);
+    this.#globalIndices.add(index);
     return this;
   }
 
   globalSet(index: number): this {
     this.#writeInstruction(wasmOpcode.globalSet);
     this.#instructions.writeU32(index);
+    this.#globalIndices.add(index);
     return this;
   }
 
@@ -90,7 +138,12 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
-  ifBlock(hint?: WasmBranchHint, result?: WasmValueType): this {
+  ifBlock(options: Readonly<{
+    hint?: WasmBranchHint | undefined;
+    result?: WasmValueType | undefined;
+  }> = {}): this {
+    const { hint, result } = options;
+
     if (hint !== undefined) {
       this.#branchHints.push({
         instructionOffset: this.#instructions.byteLength,
@@ -162,6 +215,7 @@ export class WasmFunctionBodyEncoder {
   callFunction(functionIndex: number): this {
     this.#writeInstruction(wasmOpcode.call);
     this.#instructions.writeU32(functionIndex);
+    this.#functionIndices.add(functionIndex);
     return this;
   }
 
@@ -169,12 +223,15 @@ export class WasmFunctionBodyEncoder {
     this.#writeInstruction(wasmOpcode.callIndirect);
     this.#instructions.writeU32(typeIndex);
     this.#instructions.writeU32(tableIndex);
+    this.#typeIndices.add(typeIndex);
+    this.#tableIndices.add(tableIndex);
     return this;
   }
 
   returnCallFunction(functionIndex: number): this {
     this.#writeInstruction(wasmOpcode.returnCall);
     this.#instructions.writeU32(functionIndex);
+    this.#functionIndices.add(functionIndex);
     return this;
   }
 
@@ -182,6 +239,8 @@ export class WasmFunctionBodyEncoder {
     this.#writeInstruction(wasmOpcode.returnCallIndirect);
     this.#instructions.writeU32(typeIndex);
     this.#instructions.writeU32(tableIndex);
+    this.#typeIndices.add(typeIndex);
+    this.#tableIndices.add(tableIndex);
     return this;
   }
 
@@ -353,56 +412,49 @@ export class WasmFunctionBodyEncoder {
   }
 
   i32Load(immediate: WasmMemoryImmediate): this {
-    this.#writeInstruction(wasmOpcode.i32Load);
-    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#writeMemoryInstruction(wasmOpcode.i32Load, immediate);
     return this;
   }
 
   i32Load8S(immediate: WasmMemoryImmediate): this {
-    this.#writeInstruction(wasmOpcode.i32Load8S);
-    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#writeMemoryInstruction(wasmOpcode.i32Load8S, immediate);
     return this;
   }
 
   i32Load8U(immediate: WasmMemoryImmediate): this {
-    this.#writeInstruction(wasmOpcode.i32Load8U);
-    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#writeMemoryInstruction(wasmOpcode.i32Load8U, immediate);
     return this;
   }
 
   i32Load16S(immediate: WasmMemoryImmediate): this {
-    this.#writeInstruction(wasmOpcode.i32Load16S);
-    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#writeMemoryInstruction(wasmOpcode.i32Load16S, immediate);
     return this;
   }
 
   i32Load16U(immediate: WasmMemoryImmediate): this {
-    this.#writeInstruction(wasmOpcode.i32Load16U);
-    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#writeMemoryInstruction(wasmOpcode.i32Load16U, immediate);
     return this;
   }
 
   i32Store(immediate: WasmMemoryImmediate): this {
-    this.#writeInstruction(wasmOpcode.i32Store);
-    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#writeMemoryInstruction(wasmOpcode.i32Store, immediate);
     return this;
   }
 
   i32Store8(immediate: WasmMemoryImmediate): this {
-    this.#writeInstruction(wasmOpcode.i32Store8);
-    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#writeMemoryInstruction(wasmOpcode.i32Store8, immediate);
     return this;
   }
 
   i32Store16(immediate: WasmMemoryImmediate): this {
-    this.#writeInstruction(wasmOpcode.i32Store16);
-    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#writeMemoryInstruction(wasmOpcode.i32Store16, immediate);
     return this;
   }
 
   memorySize(memoryIndex: number): this {
     this.#writeInstruction(wasmOpcode.memorySize);
     this.#instructions.writeU32(memoryIndex);
+    this.#memoryIndices.add(memoryIndex);
     return this;
   }
 
@@ -486,43 +538,45 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
-  end(): this {
+  finish(): EncodedWasmFunctionBody {
     this.#writeInstruction(wasmOpcode.end);
-    this.#ended = true;
-    return this;
-  }
-
-  encode(): Uint8Array<ArrayBuffer> {
-    return this.encodeWithMetadata().bytes;
-  }
-
-  encodeWithMetadata(): EncodedWasmFunctionBody {
-    if (!this.#ended) {
-      throw new Error("Wasm function body must end with end opcode");
-    }
+    this.#finished = true;
 
     const body = new ByteSink();
     const locals = localDeclarations(this.#locals);
 
     body.writeBytes(locals);
     body.writeBytes(this.#instructions.toBytes());
-    return {
-      bytes: body.toBytes(),
-      branchHints: this.#branchHints.map((hint) => ({
+    return new EncodedFunctionBody(
+      body.toBytes(),
+      this.#branchHints.map((hint) => ({
         offset: locals.byteLength + hint.instructionOffset,
         value: hint.value
-      }))
-    };
+      })),
+      {
+        functionIndices: [...this.#functionIndices],
+        typeIndices: [...this.#typeIndices],
+        globalIndices: [...this.#globalIndices],
+        tableIndices: [...this.#tableIndices],
+        memoryIndices: [...this.#memoryIndices]
+      }
+    );
+  }
+
+  #writeMemoryInstruction(opcode: number, immediate: WasmMemoryImmediate): void {
+    this.#writeInstruction(opcode);
+    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#memoryIndices.add(immediate.memoryIndex);
   }
 
   #writeInstruction(opcode: number): void {
-    this.#assertOpen("cannot write after Wasm function body end");
+    this.#assertOpen("cannot write after function body is finished");
 
     this.#instructions.writeByte(opcode);
   }
 
   #assertOpen(message: string): void {
-    if (this.#ended) {
+    if (this.#finished) {
       throw new Error(message);
     }
   }
@@ -562,3 +616,13 @@ type LocalGroup = Readonly<{
   type: WasmValueType;
   count: number;
 }>;
+
+function copyReferences(references: WasmFunctionReferences): WasmFunctionReferences {
+  return {
+    functionIndices: [...references.functionIndices],
+    typeIndices: [...references.typeIndices],
+    globalIndices: [...references.globalIndices],
+    tableIndices: [...references.tableIndices],
+    memoryIndices: [...references.memoryIndices]
+  };
+}
