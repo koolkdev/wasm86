@@ -404,7 +404,11 @@ export class ValueTable implements Values {
       return existing;
     }
 
-    const derived = ValueTable.#deriveWidthBounds(this.node(id), (child) => this.#widthBoundsOf(child));
+    const derived = ValueTable.#deriveWidthBounds(
+      this.node(id),
+      (child) => this.#widthBoundsOf(child),
+      (child) => this.constValue(child)
+    );
 
     this.#widthBounds[id] = derived;
     return derived;
@@ -421,7 +425,8 @@ export class ValueTable implements Values {
 
   static #deriveWidthBounds(
     node: ValueNode,
-    widthBoundsOf: (id: ValueId) => WidthBounds
+    widthBoundsOf: (id: ValueId) => WidthBounds,
+    constValueOf: (id: ValueId) => number | undefined
   ): WidthBounds {
     switch (node.kind) {
       case "const":
@@ -438,7 +443,7 @@ export class ValueTable implements Values {
         return unboundedWidthBounds;
       case "binary":
         assert(node.type === "i32", `width bounds requested for ${node.type} binary value`);
-        return ValueTable.#binaryWidthBounds(node, widthBoundsOf);
+        return ValueTable.#binaryWidthBounds(node, widthBoundsOf, constValueOf);
       case "select":
         return ValueTable.#selectWidthBounds(node, widthBoundsOf);
       case "unary":
@@ -457,7 +462,8 @@ export class ValueTable implements Values {
 
   static #binaryWidthBounds(
     node: BinaryValueNode,
-    widthBoundsOf: (id: ValueId) => WidthBounds
+    widthBoundsOf: (id: ValueId) => WidthBounds,
+    constValueOf: (id: ValueId) => number | undefined
   ): WidthBounds {
     const a = widthBoundsOf(node.a);
     const b = widthBoundsOf(node.b);
@@ -473,9 +479,15 @@ export class ValueTable implements Values {
       case "xor":
         // Cannot set a bit above either operand's bound.
         return clampedBounds(Math.max(a.unsignedBits, b.unsignedBits), bitwiseSignedBits);
-      case "shr_u":
-        // A logical right shift never increases the value.
-        return clampedBounds(a.unsignedBits, 32);
+      case "shr_u": {
+        const shift = constValueOf(node.b);
+
+        // Wasm masks i32 shift counts to five bits. A known right shift
+        // removes that many possible high bits from an unsigned value.
+        return shift === undefined
+          ? clampedBounds(a.unsignedBits, 32)
+          : fitsUnsigned(Math.max(1, a.unsignedBits - (shift & 31)));
+      }
       case "rem_u":
         // Unsigned remainder is strictly below the divisor when it completes.
         return fitsUnsigned(b.unsignedBits);

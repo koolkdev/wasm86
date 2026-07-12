@@ -3,7 +3,7 @@ import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { IrBlock } from "#ir/block.js";
 import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import type { StateReadOp } from "#ir/ops.js";
-import { fitsUnsigned, type ValueId } from "#ir/values.js";
+import type { ValueId } from "#ir/values.js";
 import { statusFlagValuesForSource } from "#x86/flag-values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#x86/flags.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
@@ -76,8 +76,7 @@ function lazyFlagResolverBlock(flag: LazyFlagHelper): Readonly<{ block: IrBlock;
           logicArm(flag, width)
         ])
       ],
-      (arm) => arm.values.unreachable(),
-      fitsUnsigned(1)
+      (arm) => arm.values.unreachable()
     );
   });
 

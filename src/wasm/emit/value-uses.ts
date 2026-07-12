@@ -68,22 +68,13 @@ class ValueUseAnalysis implements ValueUses {
         }
         case "if":
           this.#addUse(action.condition);
+          if (action.output !== undefined) {
+            this.#recordControlOutput(action.output, nestedBodies(action), "if");
+          }
           break;
         case "switch": {
           this.#addUse(action.selector);
-
-          const results = nestedBodies(action).map((nested) => {
-            const result = nested.result;
-
-            assert(result !== undefined, "switch arm has no result");
-            return result;
-          });
-
-          assert(
-            !this.#outputDependencies.has(action.output),
-            `value ${action.output} already has an output producer`
-          );
-          this.#outputDependencies.set(action.output, results);
+          this.#recordControlOutput(action.output, nestedBodies(action), "switch");
           break;
         }
         case "loop":
@@ -107,6 +98,21 @@ class ValueUseAnalysis implements ValueUses {
         this.#recordBody(nested);
       }
     }
+  }
+
+  #recordControlOutput(output: ValueId, bodies: readonly Body[], kind: "if" | "switch"): void {
+    const results = bodies.map((body) => {
+      const result = body.result;
+
+      assert(result !== undefined, `${kind} arm has no result`);
+      return result;
+    });
+
+    assert(
+      !this.#outputDependencies.has(output),
+      `value ${output} already has an output producer`
+    );
+    this.#outputDependencies.set(output, results);
   }
 
   // A compound or producer computes once for however many counted replays it

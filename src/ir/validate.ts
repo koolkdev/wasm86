@@ -4,6 +4,7 @@ import {
   bodyCompletes,
   maxSwitchMatch,
   type Action,
+  type IfAction,
   type LoopAction,
   type OpAction,
   type SwitchAction
@@ -111,6 +112,9 @@ class IrValidator {
         this.#indexOpProducer(action, site);
         return;
       case "if":
+        if (action.output !== undefined) {
+          this.#indexIfProducer(action, site);
+        }
         this.#indexNestedBody(action.thenBody, site, `${site.path}.thenBody`);
         if (action.elseBody !== undefined) {
           this.#indexNestedBody(action.elseBody, site, `${site.path}.elseBody`);
@@ -179,6 +183,27 @@ class IrValidator {
         assert(
           body.result < action.output,
           `switch result ${body.result} created after its output ${action.output}`
+        );
+      }
+    }
+  }
+
+  #indexIfProducer(action: IfAction, site: ActionSite): void {
+    const output = action.output;
+
+    assert(output !== undefined, `${site.path} value-producing if is missing its output`);
+    assert(action.elseBody !== undefined, `${site.path} value-producing if is missing its else body`);
+    this.#recordProducer(output, site);
+    assert(
+      action.condition < output,
+      `if condition ${action.condition} created after its output ${output}`
+    );
+
+    for (const body of [action.thenBody, action.elseBody]) {
+      if (body.result !== undefined) {
+        assert(
+          body.result < output,
+          `if result ${body.result} created after its output ${output}`
         );
       }
     }
@@ -269,6 +294,16 @@ class IrValidator {
           this.#block.values.valueType(context.ownerOutput),
         `${context.path} result type does not match its owner output`
       );
+      if (this.#block.values.node(body.result).kind !== "unreachable") {
+        const resultBounds = this.#block.values.widthBounds(body.result);
+        const outputBounds = this.#block.values.widthBounds(context.ownerOutput);
+
+        assert(
+          outputBounds.unsignedBits >= resultBounds.unsignedBits &&
+            outputBounds.signedBits >= resultBounds.signedBits,
+          `${context.path} result bounds exceed its owner output bounds`
+        );
+      }
       return;
     }
 
@@ -332,14 +367,14 @@ class IrValidator {
       case "if":
         this.#validateBody(action.thenBody, {
           path: `${site.path}.thenBody`,
-          ownerOutput: undefined,
+          ownerOutput: action.output,
           enclosingLoop: context.enclosingLoop,
           hasPriorEipWrite
         });
         if (action.elseBody !== undefined) {
           this.#validateBody(action.elseBody, {
             path: `${site.path}.elseBody`,
-            ownerOutput: undefined,
+            ownerOutput: action.output,
             enclosingLoop: context.enclosingLoop,
             hasPriorEipWrite
           });

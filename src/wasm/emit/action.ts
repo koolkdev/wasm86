@@ -202,13 +202,26 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       captureForBody(action.elseBody);
     }
 
+    const outputLocal = action.output !== undefined && fragmentLiveness.isLive(action.output)
+      ? valueEmitter.claimControlOutput(action.output)
+      : undefined;
+    const emitArm = (armBody: Body): void => {
+      if (action.output === undefined) {
+        emitBody(armBody);
+      } else {
+        emitResultBody(armBody, outputLocal, "if");
+      }
+    };
+
     body.ifBlock(wasmHint(action.hint));
     frame.withNestedControl(() => {
-      emitBody(action.thenBody);
+      emitArm(action.thenBody);
 
       if (action.elseBody !== undefined) {
         body.elseBlock();
-        emitBody(action.elseBody);
+        emitArm(action.elseBody);
+      } else {
+        assert(action.output === undefined, "value-producing if has no else body");
       }
     });
     body.endBlock();
@@ -242,33 +255,42 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     valueEmitter.emitUse(action.selector);
     body.brTable(switchLabelDepths(action.cases), caseCount);
 
-    const emitArm = (armBody: Body): void => {
-      emitBody(armBody);
-
-      const result = armBody.result;
-
-      assert(result !== undefined, "switch arms without results have no producer yet");
-
-      emitAtSite(armBody, armBody.actions.length, () => {
-        if (outputLocal !== undefined) {
-          valueEmitter.emitUse(result);
-          body.localSet(outputLocal);
-        } else if (block.values.node(result).kind === "unreachable") {
-          // The path stays impossible even when nothing demands the output.
-          body.unreachable();
-        }
-      });
-    };
-
     action.cases.forEach((switchCase, index) => {
       body.endBlock();
-      frame.withNestedControl(() => emitArm(switchCase.body), caseCount - index + 1);
+      frame.withNestedControl(
+        () => emitResultBody(switchCase.body, outputLocal, "switch"),
+        caseCount - index + 1
+      );
       body.br(caseCount - index);
     });
 
     body.endBlock();
-    frame.withNestedControl(() => emitArm(action.defaultBody), 1);
+    frame.withNestedControl(
+      () => emitResultBody(action.defaultBody, outputLocal, "switch"),
+      1
+    );
     body.endBlock();
+  }
+
+  function emitResultBody(
+    resultBody: Body,
+    outputLocal: number | undefined,
+    kind: "if" | "switch"
+  ): void {
+    emitBody(resultBody);
+
+    const result = resultBody.result;
+
+    assert(result !== undefined, `${kind} arm has no result`);
+    emitAtSite(resultBody, resultBody.actions.length, () => {
+      if (outputLocal !== undefined) {
+        valueEmitter.emitUse(result);
+        body.localSet(outputLocal);
+      } else if (block.values.node(result).kind === "unreachable") {
+        // The path stays impossible even when nothing demands the output.
+        body.unreachable();
+      }
+    });
   }
 
   // Copy boundary outputs after ordinary actions and before control leaves

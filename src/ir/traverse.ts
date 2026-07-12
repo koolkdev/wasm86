@@ -98,7 +98,7 @@ function exitOperands(exit: IrExit): readonly ValueId[] {
 }
 
 // An action's declared output: an op action's iff its op produces a value,
-// a switch's always — the selected body's result.
+// and value-producing control owns the selected body's result.
 export function actionOutput(action: Action, access?: OpAccess): ValueId | undefined {
   switch (action.kind) {
     case "op": {
@@ -109,9 +109,10 @@ export function actionOutput(action: Action, access?: OpAccess): ValueId | undef
       assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
       return action.output;
     }
+    case "if":
+      return action.output;
     case "switch":
       return action.output;
-    case "if":
     case "loop":
     case "loopContinue":
     case "finish":

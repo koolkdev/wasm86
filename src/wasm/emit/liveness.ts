@@ -30,7 +30,7 @@ class LivenessAnalysis implements BlockLiveness {
   readonly #block: IrBlock;
   readonly #live = new Set<ValueId>();
   // Action/control output leaves have dependencies outside the value node
-  // itself: op operands or the results of each switch arm.
+  // itself: op operands or the results of each selected control arm.
   readonly #outputDependencies = new Map<ValueId, readonly ValueId[]>();
 
   constructor(block: IrBlock, exportedOutputs: Iterable<ValueId>) {
@@ -69,22 +69,13 @@ class LivenessAnalysis implements BlockLiveness {
         }
         case "if":
           this.#markLive(action.condition);
+          if (action.output !== undefined) {
+            this.#recordControlOutput(action.output, nestedBodies(action), "if");
+          }
           break;
         case "switch": {
           this.#markLive(action.selector);
-
-          const results = nestedBodies(action).map((nested) => {
-            const result = nested.result;
-
-            assert(result !== undefined, "switch arm has no result");
-            return result;
-          });
-
-          assert(
-            !this.#outputDependencies.has(action.output),
-            `value ${action.output} already has an output producer`
-          );
-          this.#outputDependencies.set(action.output, results);
+          this.#recordControlOutput(action.output, nestedBodies(action), "switch");
           break;
         }
         case "loop":
@@ -108,6 +99,21 @@ class LivenessAnalysis implements BlockLiveness {
         this.#recordBody(nested);
       }
     }
+  }
+
+  #recordControlOutput(output: ValueId, bodies: readonly Body[], kind: "if" | "switch"): void {
+    const results = bodies.map((body) => {
+      const result = body.result;
+
+      assert(result !== undefined, `${kind} arm has no result`);
+      return result;
+    });
+
+    assert(
+      !this.#outputDependencies.has(output),
+      `value ${output} already has an output producer`
+    );
+    this.#outputDependencies.set(output, results);
   }
 
   // ValueTable construction and producer validation establish a topological

@@ -430,6 +430,10 @@ test("bitwise results inherit their operands' bounds", () => {
 
   strictEqual(table.truncate(8, shifted), shifted);
 
+  const topBit = table.binary("shr_u", byte, table.const(7));
+
+  deepStrictEqual(table.widthBounds(topBit), fitsUnsigned(1));
+
   // not al: xor with -1 keeps sign extension.
   const signedByte = table.addActionOutput(signExtended(8));
   const inverted = table.binary("xor", signedByte, table.const(-1));

@@ -19,6 +19,7 @@ export type IfAction = Readonly<{
   kind: "if";
   condition: ValueId;
   hint?: BranchHint;
+  output?: ValueId;
   thenBody: Body;
   elseBody?: Body;
 }>;

@@ -17,7 +17,7 @@ import { valueTableFlagOps } from "../../flag-value-ops.js";
 import {
   flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot
 } from "../../slots.js";
-import { fitsUnsigned, type ValueId } from "../../values.js";
+import type { ValueId } from "../../values.js";
 import type { ValueTable } from "../../value-table.js";
 import type { StateCells } from "./cells.js";
 import type { StateWriteObserver } from "./write-log.js";
@@ -340,8 +340,7 @@ export class StatusFlagState {
     return this.#currentBody().switch(
       selector,
       caseSpecs.map((spec) => this.#lazyConditionArm(spec)),
-      (arm) => this.#lazyConditionDefault(arm, CONDITIONS[cc].expr),
-      fitsUnsigned(1)
+      (arm) => this.#lazyConditionDefault(arm, CONDITIONS[cc].expr)
     );
   }
 

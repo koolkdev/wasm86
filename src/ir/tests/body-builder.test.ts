@@ -5,7 +5,7 @@ import type { Action } from "#ir/actions.js";
 import { BodyBuilder, buildIrBlock, type BodyActionSink } from "#ir/body-builder.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { fitsUnsigned, unboundedWidthBounds, type ValueId } from "#ir/values.js";
+import { fitsUnsigned, type ValueId } from "#ir/values.js";
 import { ValueTable } from "#ir/value-table.js";
 import { memoryCheck, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
@@ -112,8 +112,7 @@ test("switch builds every arm before allocating the shared output", () => {
   const output = builder.switch(
     selector,
     [{ match: 3, build: (arm) => (armResult = arm.opValue({ kind: "cpu.resolveFlag", flag: "ZF" })) }],
-    (arm) => (defaultResult = arm.values.const(1)),
-    fitsUnsigned(1)
+    (arm) => (defaultResult = arm.values.const(1))
   );
 
   ok(armResult < output);
@@ -132,12 +131,16 @@ test("switch builds every arm before allocating the shared output", () => {
   });
 });
 
-test("switch output is unbounded unless bounds are given", () => {
+test("switch derives its output bounds from reachable arms", () => {
   const values = new ValueTable();
   const builder = new BodyBuilder(values);
-  const output = builder.switch(values.external(0), [], (arm) => arm.values.const(0));
+  const output = builder.switch(
+    values.external(0),
+    [{ match: 0, build: (arm) => arm.values.unreachable() }],
+    (arm) => arm.values.const(0)
+  );
 
-  deepStrictEqual(values.widthBounds(output), unboundedWidthBounds);
+  deepStrictEqual(values.widthBounds(output), { unsignedBits: 1, signedBits: 1 });
 });
 
 test("loop bodies take the back edge through loopContinue and validate", () => {

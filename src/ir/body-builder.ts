@@ -3,7 +3,11 @@ import type { Action, BranchHint, Finish, LoopCarriedCell } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
 import { opAccess, type IrOp } from "./ops.js";
 import { ValueTable } from "./value-table.js";
-import type { ValueId, WidthBounds } from "./values.js";
+import {
+  joinWidthBounds,
+  type ValueId,
+  type WidthBounds
+} from "./values.js";
 
 export type BuildBody = (b: BodyBuilder) => void;
 export type BuildResult = (b: BodyBuilder) => ValueId;
@@ -17,6 +21,10 @@ export type SwitchArm = Readonly<{ match: number; build: BuildResult }>;
 export type IfOptions = Readonly<{
   hint?: BranchHint;
   elseBuild?: BuildBody;
+}>;
+
+export type IfValueOptions = Readonly<{
+  hint?: BranchHint;
 }>;
 
 export class BodyBuilder {
@@ -69,15 +77,38 @@ export class BodyBuilder {
     });
   }
 
+  ifValue(
+    condition: ValueId,
+    thenBuild: BuildResult,
+    elseBuild: BuildResult,
+    options: IfValueOptions = {}
+  ): ValueId {
+    const thenBody = this.#childResultBody(thenBuild);
+    const elseBody = this.#childResultBody(elseBuild);
+    const output = this.#addControlOutput([thenBody, elseBody]);
+
+    this.#emit({
+      kind: "if",
+      condition,
+      ...(options.hint !== undefined ? { hint: options.hint } : {}),
+      output,
+      thenBody,
+      elseBody
+    });
+    return output;
+  }
+
   switch(
     selector: ValueId,
     arms: readonly SwitchArm[],
-    defaultBuild: BuildResult,
-    outputBounds?: WidthBounds
+    defaultBuild: BuildResult
   ): ValueId {
     const cases = arms.map(({ match, build }) => ({ match, body: this.#childResultBody(build) }));
     const defaultBody = this.#childResultBody(defaultBuild);
-    const output = this.values.addActionOutput(outputBounds);
+    const output = this.#addControlOutput([
+      ...cases.map((entry) => entry.body),
+      defaultBody
+    ]);
 
     this.#emit({ kind: "switch", selector, output, cases, defaultBody });
     return output;
@@ -115,6 +146,25 @@ export class BodyBuilder {
     const result = build(child);
 
     return child.build(result);
+  }
+
+  #addControlOutput(bodies: readonly Body[]): ValueId {
+    const bounds: WidthBounds[] = [];
+
+    for (const body of bodies) {
+      const result = body.result;
+
+      assert(result !== undefined, "value-producing control body has no result");
+      assert(
+        this.values.valueType(result) === "i32",
+        "only i32 control results are supported"
+      );
+      if (this.values.node(result).kind !== "unreachable") {
+        bounds.push(this.values.widthBounds(result));
+      }
+    }
+
+    return this.values.addActionOutput(joinWidthBounds(bounds));
   }
 
   #emit(action: Action): void {

@@ -201,36 +201,25 @@ class DemandAnalyzer implements DemandAnalysis {
         }
         case "if":
           this.#roots.push(demand(action.condition));
+          if (action.output !== undefined) {
+            this.#recordControlOutput(
+              action.output,
+              nestedBodies(action),
+              actionSite,
+              produced,
+              "if"
+            );
+          }
           break;
         case "switch": {
           this.#roots.push(demand(action.selector));
-          const results: ValueDemand[] = [];
-
-          for (const nested of nestedBodies(action)) {
-            const result = nested.result;
-
-            assert(result !== undefined, "switch arm has no result");
-            const fallthrough = { body: nested, actionIndex: nested.actions.length };
-
-            results.push({
-              value: result,
-              requiredAt: valueDependsOn(
-                this.#block.values,
-                result,
-                bodyProducedOutputs(nested)
-              )
-                ? fallthrough
-                : actionSite,
-              consumedAt: fallthrough
-            });
-          }
-
-          assert(
-            !this.#controlDependencies.has(action.output),
-            `value ${action.output} already has a control producer`
+          this.#recordControlOutput(
+            action.output,
+            nestedBodies(action),
+            actionSite,
+            produced,
+            "switch"
           );
-          this.#controlDependencies.set(action.output, results);
-          produced.add(action.output);
           break;
         }
         case "loop":
@@ -254,6 +243,42 @@ class DemandAnalyzer implements DemandAnalysis {
         this.#recordBody(nested, actionSite, loopInputsOf(action));
       }
     });
+  }
+
+  #recordControlOutput(
+    output: ValueId,
+    bodies: readonly Body[],
+    actionSite: ScheduleSite,
+    produced: Set<ValueId>,
+    kind: "if" | "switch"
+  ): void {
+    const results: ValueDemand[] = [];
+
+    for (const body of bodies) {
+      const result = body.result;
+
+      assert(result !== undefined, `${kind} arm has no result`);
+      const fallthrough = { body, actionIndex: body.actions.length };
+
+      results.push({
+        value: result,
+        requiredAt: valueDependsOn(
+          this.#block.values,
+          result,
+          bodyProducedOutputs(body)
+        )
+          ? fallthrough
+          : actionSite,
+        consumedAt: fallthrough
+      });
+    }
+
+    assert(
+      !this.#controlDependencies.has(output),
+      `value ${output} already has a control producer`
+    );
+    this.#controlDependencies.set(output, results);
+    produced.add(output);
   }
 
   #recordExports(body: Body, exportedOutputs: Iterable<ValueId>): void {
