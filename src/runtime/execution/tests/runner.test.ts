@@ -1,7 +1,6 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { runResultFromExecutionState } from "#driver/results.js";
 import { createWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import {
@@ -14,7 +13,12 @@ import {
 import { ENGINE_PROGRAM_FIXTURES, MOV_ADD_TRAP } from "#runtime/tests/fixtures/programs.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { createInstructionBudget } from "#runtime/execution/budget.js";
-import { engineDone, engineUnavailable, type RuntimeEngineResult } from "#runtime/execution/engine-result.js";
+import {
+  engineDone,
+  engineUnavailable,
+  runtimeRunResultFromExecutionState,
+  type RuntimeEngineResult
+} from "#runtime/execution/engine-result.js";
 import { RuntimeMode } from "#runtime/execution/mode.js";
 import {
   runRuntimeProgram,
@@ -26,7 +30,7 @@ import {
 test("interpreter runtime step runs only the interpreter engine", () => {
   const calls: string[] = [];
   const result = runRuntimeStep(RuntimeMode.INTERPRETER, context(), createInstructionBudget(0, 10), {
-    interpreter: engine("interpreter", calls, engineDone(runResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x11 }), { kind: "none" }))),
+    interpreter: engine("interpreter", calls, engineDone(runtimeRunResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x11 }), { kind: "none" }))),
     compiledBlocks: engine("compiled", calls, engineUnavailable("no-compiled-block"))
   });
 
@@ -38,7 +42,7 @@ test("interpreter runtime step runs only the interpreter engine", () => {
 test("compiled-blocks runtime step falls back to interpreter when no block is available", () => {
   const calls: string[] = [];
   const result = runRuntimeStep(RuntimeMode.COMPILED_BLOCKS, context(), createInstructionBudget(0, 10), {
-    interpreter: engine("interpreter", calls, engineDone(runResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x22 }), { kind: "none" }))),
+    interpreter: engine("interpreter", calls, engineDone(runtimeRunResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x22 }), { kind: "none" }))),
     compiledBlocks: engine("compiled", calls, engineUnavailable("no-compiled-block"))
   });
 
@@ -50,8 +54,8 @@ test("compiled-blocks runtime step falls back to interpreter when no block is av
 test("compiled-blocks runtime step returns compiled result when available", () => {
   const calls: string[] = [];
   const result = runRuntimeStep(RuntimeMode.COMPILED_BLOCKS, context(), createInstructionBudget(0, 10), {
-    interpreter: engine("interpreter", calls, engineDone(runResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x11 }), { kind: "none" }))),
-    compiledBlocks: engine("compiled", calls, engineDone(runResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x33 }), { kind: "none" })))
+    interpreter: engine("interpreter", calls, engineDone(runtimeRunResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x11 }), { kind: "none" }))),
+    compiledBlocks: engine("compiled", calls, engineDone(runtimeRunResultFromExecutionState(createWasmCpuStateSnapshot({ eip: 0x33 }), { kind: "none" })))
   });
 
   strictEqual(result.kind, "done");

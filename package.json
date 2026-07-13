@@ -5,6 +5,10 @@
   "license": "MIT",
   "type": "module",
   "imports": {
+    "#cpu/*": {
+      "types": "./src/cpu/*",
+      "default": "./dist/src/cpu/*"
+    },
     "#memory/*": {
       "types": "./src/memory/*",
       "default": "./dist/src/memory/*"
@@ -28,10 +32,6 @@
     "#core/*": {
       "types": "./src/core/*",
       "default": "./dist/src/core/*"
-    },
-    "#driver/*": {
-      "types": "./src/driver/*",
-      "default": "./dist/src/driver/*"
     },
     "#runtime/*": {
       "types": "./src/runtime/*",

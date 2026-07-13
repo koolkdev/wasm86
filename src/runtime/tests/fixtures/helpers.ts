@@ -1,7 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 
 import { decodeIsaBlock } from "#core/decoder/decode-block.js";
-import type { RunResult } from "#driver/results.js";
 import { readWasmCpuState, type WasmCpuStateField } from "#test/support/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
@@ -10,7 +9,11 @@ import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 import type { CompiledBlockCache } from "#engines/jit/compiled-blocks/block-cache.js";
 import { WasmBlocksEngine } from "#runtime/engines/wasm-blocks.js";
 import { WasmInterpreterEngine, type WasmInterpreter } from "#runtime/engines/wasm-interpreter.js";
-import { engineUnavailable, type RuntimeEngineResult } from "#runtime/execution/engine-result.js";
+import {
+  engineUnavailable,
+  type RuntimeEngineResult,
+  type RuntimeRunResult
+} from "#runtime/execution/engine-result.js";
 import type { RuntimeEngines } from "#runtime/execution/runner.js";
 import { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import { loadProgramRegions } from "#runtime/program/loader.js";
@@ -158,7 +161,7 @@ export function assertEngineFixtureResult(
   assertMemoryPatches(memories, fixture.expected.memory ?? []);
 }
 
-function assertResultFields(fixture: EngineFixture, actual: RunResult): void {
+function assertResultFields(fixture: EngineFixture, actual: RuntimeRunResult): void {
   for (const [field, expected] of Object.entries(fixture.expected.result)) {
     deepStrictEqual(
       actual[field as keyof typeof actual],

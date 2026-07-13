@@ -6,7 +6,7 @@ import { HostExit } from "#wasm/exit.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { runResultFromWasmExit } from "#runtime/execution/wasm-exit-result.js";
 
-test("wasm CPU exception exits pass through to run results", () => {
+test("legacy Runtime passes through Wasm CPU exception exits", () => {
   const memories = createWasmHostMemories();
   const exception = pageFault(0x1234, 0);
   const result = runResultFromWasmExit(memories.cpuState, {
@@ -20,7 +20,7 @@ test("wasm CPU exception exits pass through to run results", () => {
   });
 });
 
-test("wasm segment-load exits pass through to run results", () => {
+test("legacy Runtime converts segment-load exits", () => {
   const memories = createWasmHostMemories();
   const result = runResultFromWasmExit(memories.cpuState, {
     family: "host",

@@ -1,13 +1,8 @@
-import type { MutableCpuStateView } from "#core/state/cpu-state.js";
+import { createCpu, type Cpu } from "#cpu/cpu.js";
 import { wasmPageByteLength } from "#wasm/abi.js";
-import { WasmCpuState } from "#wasm/host/cpu-state.js";
 
 export type MachineOptions = Readonly<{
   memoryByteLength: number;
-}>;
-
-export type Cpu = Readonly<{
-  state: MutableCpuStateView;
 }>;
 
 export type Machine = Readonly<{
@@ -36,10 +31,10 @@ export function createMachine(options: MachineOptions): Machine {
   const memory = new WebAssembly.Memory({
     initial: Math.ceil(memoryByteLength / wasmPageByteLength)
   });
-  const state = new WasmCpuState(new WebAssembly.Memory({ initial: 1 }));
+  const cpu = createCpu(memory);
 
   return {
     memory,
-    cpu: { state }
+    cpu
   };
 }

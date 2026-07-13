@@ -1,8 +1,11 @@
 import type { RuntimeCodeMap } from "#runtime/program/code-map.js";
 import type { WasmHostMemories } from "#wasm/host/memories.js";
-import { runResultFromExecutionState } from "#driver/results.js";
 import type { InstructionBudget } from "./budget.js";
-import { engineDone, type RuntimeEngineResult } from "./engine-result.js";
+import {
+  engineDone,
+  runtimeRunResultFromExecutionState,
+  type RuntimeEngineResult
+} from "./engine-result.js";
 import { RuntimeMode, type RuntimeMode as RuntimeModeValue } from "./mode.js";
 
 export type RuntimeEngineContext = Readonly<{
@@ -61,5 +64,8 @@ export function runRuntimeProgram(
 }
 
 function stopWithInstructionLimit(context: RuntimeEngineContext): RuntimeEngineResult {
-  return engineDone(runResultFromExecutionState(context.memories.cpuState, { kind: "instructionLimit" }));
+  return engineDone(runtimeRunResultFromExecutionState(
+    context.memories.cpuState,
+    { kind: "instructionLimit" }
+  ));
 }

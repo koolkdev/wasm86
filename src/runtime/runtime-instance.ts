@@ -1,4 +1,3 @@
-import type { RunResult } from "#driver/results.js";
 import { u32 } from "#core/numeric.js";
 import { WasmInterpreterRuntime } from "#engines/interpreter/runtime.js";
 import {
@@ -8,6 +7,7 @@ import {
 import { WasmBlocksEngine } from "./engines/wasm-blocks.js";
 import { WasmInterpreterEngine } from "./engines/wasm-interpreter.js";
 import { createInstructionBudget } from "./execution/budget.js";
+import type { RuntimeRunResult } from "./execution/engine-result.js";
 import { RuntimeMode, type RuntimeMode as RuntimeModeValue } from "./execution/mode.js";
 import { runRuntimeProgram, type RuntimeEngines } from "./execution/runner.js";
 import { RuntimeCodeMap } from "./program/code-map.js";
@@ -77,7 +77,7 @@ export class RuntimeInstance {
     this.memories.cpuState.load(options.cpuState ?? {});
   }
 
-  run(options: RuntimeInstanceRunOptions = {}): RunResult {
+  run(options: RuntimeInstanceRunOptions = {}): RuntimeRunResult {
     if (options.eip !== undefined) {
       this.memories.cpuState.eip = u32(options.eip);
     }

@@ -1,5 +1,5 @@
-import type { RunResult } from "#driver/results.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
+import type { RuntimeRunResult } from "#runtime/execution/engine-result.js";
 
 export type MemoryPatch = Readonly<{
   address: number;
@@ -15,7 +15,7 @@ export type EngineFixture = Readonly<{
 }>;
 
 export type EngineExpectation = Readonly<{
-  result: Partial<RunResult> & Pick<RunResult, "stop">;
+  result: Partial<RuntimeRunResult> & Pick<RuntimeRunResult, "stop">;
   state: Partial<WasmCpuStateSnapshot>;
   memory?: readonly MemoryPatch[];
 }>;
