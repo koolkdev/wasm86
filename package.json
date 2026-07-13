@@ -9,6 +9,10 @@
       "types": "./src/memory/*",
       "default": "./dist/src/memory/*"
     },
+    "#machine/*": {
+      "types": "./src/machine/*",
+      "default": "./dist/src/machine/*"
+    },
     "#engines/*": {
       "types": "./src/engines/*",
       "default": "./dist/src/engines/*"
