@@ -1,9 +1,9 @@
+import { assert } from "#common/assert.js";
 import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
-import type { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#compiler/encoder/types.js";
 import {
   emitRmAddressFragment,
@@ -33,12 +33,17 @@ export const noBaseRegister = 8;
 // keeps the fragments' fault returns valid unchanged inside the helper, and
 // 0 never collides with a fault: an encoded decode fault has a nonzero
 // reason field.
-const rmDecodeHelperType = {
+export const rmDecodeHelperType = {
   params: [wasmValueType.i32, wasmValueType.i32, wasmValueType.i32],
   results: [wasmValueType.i64]
 } as const satisfies WasmFunctionType;
 
-type RmDecodeGlobals = Readonly<{ base: number; offset: number; cursor: number }>;
+export type RmDecodeGlobals = Readonly<{ base: number; offset: number; cursor: number }>;
+
+export type ResolvedRmDecodeFunction = Readonly<{
+  opcodeLength: number;
+  functionIndex: number;
+}>;
 
 export type RmDecodeCallContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -48,31 +53,27 @@ export type RmDecodeCallContext = Readonly<{
   rmAddress: RmAddressScratch;
 }>;
 
-// One module's shared rm-decode helpers: the result globals plus one helper
-// function per opcode length, added on first use.
+// One closed program's resolved rm-decode helpers. Program construction owns
+// their finite R/M length set and module layout; raw dispatch can only call
+// one of the bindings supplied here.
 export class RmDecodeHelpers {
-  readonly #module: WasmModuleEncoder;
-  readonly #typeIndex: number;
+  readonly #functions: readonly ResolvedRmDecodeFunction[];
   readonly #globals: RmDecodeGlobals;
-  readonly #functionIndexes = new Map<number, number>();
 
-  constructor(module: WasmModuleEncoder) {
-    this.#module = module;
-    this.#typeIndex = module.addFunctionType(rmDecodeHelperType);
-    this.#globals = {
-      base: module.addGlobal({ type: wasmValueType.i32, mutable: true, initialValue: 0 }),
-      offset: module.addGlobal({ type: wasmValueType.i32, mutable: true, initialValue: 0 }),
-      cursor: module.addGlobal({ type: wasmValueType.i32, mutable: true, initialValue: 0 })
-    };
+  constructor(functions: readonly ResolvedRmDecodeFunction[], globals: RmDecodeGlobals) {
+    this.#functions = functions.map((binding) => ({ ...binding }));
+    this.#globals = { ...globals };
   }
 
   // A fault result returns as-is, so exception fields and the unadvanced eip
   // match the inline emission exactly.
   emitMemoryAddressDecode(context: RmDecodeCallContext, opcodeLength: number): void {
     const { body, locals, modRm, rmAddress } = context;
-    const helperIndex = this.#functionIndex(opcodeLength);
+    const helper = this.#functions.find((candidate) => candidate.opcodeLength === opcodeLength);
 
-    body.localGet(locals.eip).localGet(modRm.mod).localGet(modRm.rm).callFunction(helperIndex);
+    assert(helper !== undefined, `unlisted interpreter R/M opcode length: ${opcodeLength}`);
+
+    body.localGet(locals.eip).localGet(modRm.mod).localGet(modRm.rm).callFunction(helper.functionIndex);
     context.scratch.withLocals([wasmValueType.i64], ([status]) => {
       body.localTee(status).i64Eqz().ifBlock();
       body.globalGet(this.#globals.base).localSet(rmAddress.base);
@@ -82,26 +83,6 @@ export class RmDecodeHelpers {
       body.localGet(status).returnFromFunction();
       body.endBlock();
     });
-  }
-
-  emittedOpcodeLengths(): readonly number[] {
-    return [...this.#functionIndexes.keys()];
-  }
-
-  #functionIndex(opcodeLength: number): number {
-    const existing = this.#functionIndexes.get(opcodeLength);
-
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const functionIndex = this.#module.addFunction(
-      this.#typeIndex,
-      encodeRmDecodeHelperBody(opcodeLength, this.#globals)
-    );
-
-    this.#functionIndexes.set(opcodeLength, functionIndex);
-    return functionIndex;
   }
 }
 
@@ -121,7 +102,7 @@ type HelperContext = Readonly<{
   globals: RmDecodeGlobals;
 }>;
 
-function encodeRmDecodeHelperBody(
+export function encodeRmDecodeHelperBody(
   opcodeLength: number,
   globals: RmDecodeGlobals
 ): EncodedWasmFunctionBody {

@@ -29,6 +29,10 @@ export function tableRef(id: string): TableRef {
   return createIdentity("table", id);
 }
 
+export function globalRef(id: string): GlobalRef {
+  return createIdentity("global", id);
+}
+
 export function exportRef(id: string): ExportRef {
   return createIdentity("export", id);
 }

@@ -8,10 +8,10 @@ import { encodeProgram } from "#compiler/program/encode.js";
 import {
   exportRef,
   functionRef,
+  globalRef,
   resourceRef,
   signatureRef,
-  tableRef,
-  type GlobalRef
+  tableRef
 } from "#compiler/program/refs.js";
 
 const voidType = { params: [], results: [] } as const satisfies WasmFunctionType;
@@ -157,6 +157,15 @@ test("successful closure rejects every later topology mutation including one fro
     /finished program/
   );
   throws(
+    () => program.global({
+      ref: globalRef("test.late-global"),
+      type: wasmValueType.i32,
+      mutable: true,
+      initialValue: 0
+    }),
+    /finished program/
+  );
+  throws(
     () => program.legacyFunction({
       ref: functionRef("test.late-function"),
       signature,
@@ -180,6 +189,7 @@ test("declarations reject duplicate stable identities and export names", () => {
   const signature = signatureRef("same-signature");
   const memory = resourceRef("same-memory");
   const table = tableRef("same-table");
+  const programGlobal = globalRef("same-global");
   const fn = functionRef("same-function");
 
   program.signature({ ref: signature, type: voidType });
@@ -206,6 +216,21 @@ test("declarations reject duplicate stable identities and export names", () => {
       limits: { minElements: 1 }
     }),
     /duplicate program table identity/
+  );
+  program.global({
+    ref: programGlobal,
+    type: wasmValueType.i32,
+    mutable: true,
+    initialValue: 0
+  });
+  throws(
+    () => program.global({
+      ref: globalRef("same-global"),
+      type: wasmValueType.i32,
+      mutable: true,
+      initialValue: 1
+    }),
+    /duplicate program global identity/
   );
   program.legacyFunction({
     ref: fn,
@@ -329,7 +354,7 @@ test("closure rejects unknown resources, tables, globals, signatures, and export
   {
     const program = new ProgramBuilder();
     const fn = functionRef("test.global-user");
-    const unknownGlobal = resourceRef("test.unknown-global") as unknown as GlobalRef;
+    const unknownGlobal = globalRef("test.unknown-global");
 
     program.signature({ ref: signature, type: voidType });
     program.legacyFunction({
@@ -464,12 +489,67 @@ test("recorded type indexes must come from the function's declared signature", (
   throws(() => encodeProgram(program.finish()), /undeclared Wasm type index 1/);
 });
 
-test("recorded global indexes reject while globals are outside the 02a program surface", () => {
+test("typed internal globals resolve through declared legacy bindings and execute", async () => {
+  const program = new ProgramBuilder();
+  const counterSignature = signatureRef("test.counter-signature");
+  const counter = globalRef("test.counter");
+  const increment = functionRef("test.increment");
+
+  program.signature({ ref: counterSignature, type: i32Type });
+  program.global({
+    ref: counter,
+    type: wasmValueType.i32,
+    mutable: true,
+    initialValue: 40
+  });
+  program.legacyFunction({
+    ref: increment,
+    signature: counterSignature,
+    calls: [],
+    resources: [],
+    globals: [counter],
+    tables: [],
+    build: (bindings) => {
+      const counterIndex = bindings.globals.get(counter);
+
+      if (counterIndex === undefined) {
+        throw new Error("missing counter global binding");
+      }
+      return new WasmFunctionBodyEncoder()
+        .globalGet(counterIndex)
+        .i32Const(1)
+        .i32Add()
+        .globalSet(counterIndex)
+        .globalGet(counterIndex)
+        .finish();
+    }
+  });
+  program.exportFunction({ ref: exportRef("test.increment-export"), name: "increment", target: increment });
+
+  const bytes = encodeProgram(program.finish());
+  const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
+  const incrementExport = instance.exports.increment;
+
+  if (typeof incrementExport !== "function") {
+    throw new Error("missing compiled global test exports");
+  }
+  strictEqual(incrementExport(), 41);
+  strictEqual(incrementExport(), 42);
+});
+
+test("recorded global indexes must come from that legacy function's globals", () => {
   const program = new ProgramBuilder();
   const signature = signatureRef("test.signature");
+  const programGlobal = globalRef("test.global");
   const fn = functionRef("test.function");
 
   program.signature({ ref: signature, type: voidType });
+  program.global({
+    ref: programGlobal,
+    type: wasmValueType.i32,
+    mutable: true,
+    initialValue: 0
+  });
   program.legacyFunction({
     ref: fn,
     signature,

@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { WasmMemoryLimits } from "#compiler/encoder/memory.js";
 import type { WasmTableLimits } from "#compiler/encoder/module.js";
-import type { WasmFunctionType } from "#compiler/encoder/types.js";
+import { wasmValueType, type WasmFunctionType } from "#compiler/encoder/types.js";
 import type {
   ExportRef,
   FunctionRef,
@@ -36,6 +36,13 @@ type TableImport = Readonly<{
   limits: WasmTableLimits;
 }>;
 
+type InternalGlobal = Readonly<{
+  ref: GlobalRef;
+  type: typeof wasmValueType.i32;
+  mutable: true;
+  initialValue: number;
+}>;
+
 type FunctionExport = Readonly<{
   ref: ExportRef;
   name: string;
@@ -61,6 +68,7 @@ type ProgramData = Readonly<{
   signatures: readonly Signature[];
   memories: readonly MemoryImport[];
   tables: readonly TableImport[];
+  globals: readonly InternalGlobal[];
   functions: readonly LegacyFunction[];
   exports: readonly FunctionExport[];
 }>;
@@ -71,6 +79,7 @@ export class ProgramBuilder {
   readonly #signatures = new Declarations<Signature>();
   readonly #memories = new Declarations<MemoryImport>();
   readonly #tables = new Declarations<TableImport>();
+  readonly #globals = new Declarations<InternalGlobal>();
   readonly #functions = new Declarations<LegacyFunction>();
   readonly #exports = new Declarations<FunctionExport>();
   readonly #exportNames = new Set<string>();
@@ -106,6 +115,12 @@ export class ProgramBuilder {
     });
   }
 
+  global(declaration: InternalGlobal): void {
+    this.#assertOpen();
+
+    this.#globals.add({ ...declaration });
+  }
+
   legacyFunction(declaration: LegacyFunctionDeclaration): FunctionRef {
     this.#assertOpen();
 
@@ -137,6 +152,7 @@ export class ProgramBuilder {
       signatures: this.#signatures.all(),
       memories: this.#memories.all(),
       tables: this.#tables.all(),
+      globals: this.#globals.all(),
       functions: this.#functions.all(),
       exports: this.#exports.all()
     } satisfies ProgramData;
@@ -165,7 +181,12 @@ export class ProgramBuilder {
         );
       }
 
-      assert(fn.globals.length === 0, `unknown program global used by function ${fn.ref.id}`);
+      for (const global of fn.globals) {
+        assert(
+          this.#globals.has(global),
+          `unknown program global ${global.id} used by function ${fn.ref.id}`
+        );
+      }
 
       for (const table of fn.tables) {
         assert(

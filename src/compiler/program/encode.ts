@@ -25,6 +25,7 @@ type ProgramLayout = Readonly<{
   functionIndices: ReadonlyMap<FunctionRef, number>;
   memoryIndices: ReadonlyMap<ResourceRef, number>;
   tableIndices: ReadonlyMap<TableRef, number>;
+  globalIndices: ReadonlyMap<GlobalRef, number>;
 }>;
 
 export function encodeProgram(program: Program): Uint8Array<ArrayBuffer> {
@@ -35,6 +36,7 @@ export function encodeProgram(program: Program): Uint8Array<ArrayBuffer> {
   addFunctionTypes(module, layout);
   addMemoryImports(module, program, layout);
   addTableImports(module, program, layout);
+  addGlobals(module, program, layout);
   addFunctions(module, program, layout, bodies);
   addExports(module, program, layout);
   return module.encode();
@@ -65,6 +67,16 @@ function addTableImports(module: WasmModuleEncoder, program: Program, layout: Pr
     assert(expectedIndex !== undefined, `missing layout for program table ${table.ref.id}`);
     const index = module.importTable(table.moduleName, table.name, table.limits);
     assert(index === expectedIndex, `unexpected Wasm table index: ${index}`);
+  }
+}
+
+function addGlobals(module: WasmModuleEncoder, program: Program, layout: ProgramLayout): void {
+  for (const global of program.globals) {
+    const expectedIndex = layout.globalIndices.get(global.ref);
+
+    assert(expectedIndex !== undefined, `missing layout for program global ${global.ref.id}`);
+    const index = module.addGlobal(global);
+    assert(index === expectedIndex, `unexpected Wasm global index: ${index}`);
   }
 }
 
@@ -115,7 +127,8 @@ function layoutProgram(program: Program): ProgramLayout {
     signatureIndices,
     functionIndices: new Map(program.functions.map((fn, index) => [fn.ref, index])),
     memoryIndices: new Map(program.memories.map((memory, index) => [memory.ref, index])),
-    tableIndices: new Map(program.tables.map((table, index) => [table.ref, index]))
+    tableIndices: new Map(program.tables.map((table, index) => [table.ref, index])),
+    globalIndices: new Map(program.globals.map((global, index) => [global.ref, index]))
   };
 }
 
@@ -145,6 +158,15 @@ function buildLegacyBody(
     resources.set(resource, memoryIndex);
   }
 
+  const globals = new Map<GlobalRef, number>();
+
+  for (const global of fn.globals) {
+    const globalIndex = layout.globalIndices.get(global);
+
+    assert(globalIndex !== undefined, `missing layout for program global ${global.id}`);
+    globals.set(global, globalIndex);
+  }
+
   const tables = new Map<TableRef, number>();
 
   for (const table of fn.tables) {
@@ -158,7 +180,7 @@ function buildLegacyBody(
     typeIndex: signatureIndex,
     functions,
     resources,
-    globals: new Map<GlobalRef, number>(),
+    globals,
     tables
   } satisfies LegacyFunctionBindings;
   const body = fn.build(bindings);
