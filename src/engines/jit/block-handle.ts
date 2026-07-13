@@ -15,49 +15,17 @@ import {
   JitModuleLinkTable
 } from "./compiled-blocks/module-link-table.js";
 
-export const wasmBlockExitEncoding = {
-  resultType: "i64",
-  payloadBits: "0..31",
-  codeBits: "32..47",
-  detailBits: "48..63"
-} as const;
-
-export type WasmBlockExitEncoding = typeof wasmBlockExitEncoding;
-
-export type WasmBlockMetadata = Readonly<{
-  blockCount: number;
-  instructionCount: number;
-  wasmByteLength: number;
-  exitEncoding: WasmBlockExitEncoding;
-}>;
-
 export type WasmBlockRun = Readonly<{
-  encodedExit: bigint;
   exit: DecodedExit;
 }>;
 
 export type WasmBlockHandle = Readonly<{
-  entryEips: readonly number[];
-  entryEip?: number;
-  blockKey?: WasmBlockKey;
-  module: WebAssembly.Module;
-  instance: WebAssembly.Instance;
-  exportedBlockFunctions: ReadonlyMap<number, () => unknown>;
-  exportedBlockFunction?: () => unknown;
-  moduleLinkTable?: JitModuleLinkTable;
-  compileMs: number;
-  instantiateMs: number;
-  metadata: WasmBlockMetadata;
-  exportedBlockFunctionForEip(eip: number): () => unknown;
   run(eip?: number): WasmBlockRun;
 }>;
-
-export type WasmBlockKey = number;
 
 export type CompileWasmBlockHandleOptions = Readonly<{
   cpuStateMemory: WebAssembly.Memory;
   guestMemory: WebAssembly.Memory;
-  blockKey?: WasmBlockKey;
 }>;
 
 export function compileActionWasmBlockHandle(
@@ -99,33 +67,12 @@ function instantiateCompiledBlocks(
   options: CompileWasmBlockHandleOptions
 ): WasmBlockHandle {
   const entryEips = blocks.map((block) => u32(block.startEip));
-  const compileStart = performance.now();
   const module = new WebAssembly.Module(bytes);
-  const compileMs = performance.now() - compileStart;
-  const instantiateStart = performance.now();
   const instance = new WebAssembly.Instance(module, wasmImports(options.cpuStateMemory, options.guestMemory, moduleLinkTable));
-  const instantiateMs = performance.now() - instantiateStart;
   installModuleLocalFallbacks(instance, moduleLinkTable);
   const exportedBlockFunctions = readExportedBlockFunctions(instance, entryEips);
-  const soleBlockFunction = entryEips.length === 1 ? requiredBlockFunction(exportedBlockFunctions, entryEips[0]!) : undefined;
 
   return {
-    entryEips,
-    ...(entryEips.length === 1 ? { entryEip: entryEips[0]!, blockKey: options.blockKey ?? entryEips[0]! } : {}),
-    module,
-    instance,
-    exportedBlockFunctions,
-    ...(soleBlockFunction === undefined ? {} : { exportedBlockFunction: soleBlockFunction }),
-    ...(moduleLinkTable === undefined ? {} : { moduleLinkTable }),
-    compileMs,
-    instantiateMs,
-    metadata: {
-      blockCount: blocks.length,
-      instructionCount: blocks.reduce((sum, block) => sum + block.instructions.length, 0),
-      wasmByteLength: bytes.byteLength,
-      exitEncoding: wasmBlockExitEncoding
-    },
-    exportedBlockFunctionForEip: (eip) => requiredBlockFunction(exportedBlockFunctions, eip),
     run: (eip) => runWasmBlock(runTargetFunction(exportedBlockFunctions, entryEips, eip))
   };
 }
@@ -138,7 +85,6 @@ function runWasmBlock(exportedBlockFunction: () => unknown): WasmBlockRun {
   }
 
   return {
-    encodedExit,
     exit: decodeExit(encodedExit)
   };
 }

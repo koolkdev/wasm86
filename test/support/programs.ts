@@ -1,6 +1,5 @@
-import type { EngineFixture } from "./types.js";
-
-export const engineFixtureStartAddress = 0x1000;
+import { startAddress } from "#test/support/addresses.js";
+import type { InstructionFixture } from "#test/support/instruction-fixture.js";
 
 export const MOV_ADD_TRAP = {
   name: "mov/add/trap",
@@ -9,18 +8,16 @@ export const MOV_ADD_TRAP = {
     0x83, 0xc0, 0x02,
     0xcd, 0x2e
   ],
-  initialState: { eip: engineFixtureStartAddress },
+  initialState: { eip: startAddress },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 0x2e }
-    },
+    stop: { kind: "hostTrap", vector: 0x2e },
     state: {
       eax: 3,
-      eip: engineFixtureStartAddress + 10,
+      eip: startAddress + 10,
       instructionCount: 3
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const MEMORY_STORE_TRAP = {
   name: "memory-store/trap",
@@ -30,22 +27,20 @@ export const MEMORY_STORE_TRAP = {
   ],
   initialState: {
     eax: 0x1234_5678,
-    eip: engineFixtureStartAddress
+    eip: startAddress
   },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 0x2e }
-    },
+    stop: { kind: "hostTrap", vector: 0x2e },
     state: {
       eax: 0x1234_5678,
-      eip: engineFixtureStartAddress + 8,
+      eip: startAddress + 8,
       instructionCount: 2
     },
     memory: [
       { address: 0x20, bytes: [0x78, 0x56, 0x34, 0x12] }
     ]
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const COUNTDOWN_BRANCH_TRAP = {
   name: "countdown-branch/trap",
@@ -57,19 +52,17 @@ export const COUNTDOWN_BRANCH_TRAP = {
   ],
   initialState: {
     eax: 3,
-    eip: engineFixtureStartAddress
+    eip: startAddress
   },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 0x2e }
-    },
+    stop: { kind: "hostTrap", vector: 0x2e },
     state: {
       eax: 0,
-      eip: engineFixtureStartAddress + 10,
+      eip: startAddress + 10,
       instructionCount: 10
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const ECX_LOOP_TRAP = {
   name: "ecx-loop/trap",
@@ -79,7 +72,7 @@ export const ECX_LOOP_TRAP = {
   ],
   initialState: {
     ecx: 3,
-    eip: engineFixtureStartAddress,
+    eip: startAddress,
     CF: 1,
     PF: 1,
     AF: 1,
@@ -88,12 +81,10 @@ export const ECX_LOOP_TRAP = {
     OF: 1
   },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 3 }
-    },
+    stop: { kind: "hostTrap", vector: 3 },
     state: {
       ecx: 0,
-      eip: engineFixtureStartAddress + 3,
+      eip: startAddress + 3,
       instructionCount: 4,
       CF: 1,
       PF: 1,
@@ -103,7 +94,7 @@ export const ECX_LOOP_TRAP = {
       OF: 1
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const LOOPE_ZF_CLEAR_TRAP = {
   name: "loope-zf-clear/trap",
@@ -113,20 +104,18 @@ export const LOOPE_ZF_CLEAR_TRAP = {
   ],
   initialState: {
     ecx: 2,
-    eip: engineFixtureStartAddress
+    eip: startAddress
   },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 3 }
-    },
+    stop: { kind: "hostTrap", vector: 3 },
     state: {
       ecx: 1,
-      eip: engineFixtureStartAddress + 3,
+      eip: startAddress + 3,
       instructionCount: 2,
       ZF: 0
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const LOOPNE_ZF_SET_TRAP = {
   name: "loopne-zf-set/trap",
@@ -136,21 +125,19 @@ export const LOOPNE_ZF_SET_TRAP = {
   ],
   initialState: {
     ecx: 2,
-    eip: engineFixtureStartAddress,
+    eip: startAddress,
     ZF: 1
   },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 3 }
-    },
+    stop: { kind: "hostTrap", vector: 3 },
     state: {
       ecx: 1,
-      eip: engineFixtureStartAddress + 3,
+      eip: startAddress + 3,
       instructionCount: 2,
       ZF: 1
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const JECXZ_TAKEN_TRAP = {
   name: "jecxz-taken/trap",
@@ -161,42 +148,38 @@ export const JECXZ_TAKEN_TRAP = {
   ],
   initialState: {
     ecx: 0,
-    eip: engineFixtureStartAddress,
+    eip: startAddress,
     OF: 1
   },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 3 }
-    },
+    stop: { kind: "hostTrap", vector: 3 },
     state: {
       ecx: 0,
-      eip: engineFixtureStartAddress + 5,
+      eip: startAddress + 5,
       instructionCount: 2,
       OF: 1
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const JECXZ_NOT_TAKEN_TRAP = {
   name: "jecxz-not-taken/trap",
   bytes: JECXZ_TAKEN_TRAP.bytes,
   initialState: {
     ecx: 1,
-    eip: engineFixtureStartAddress,
+    eip: startAddress,
     OF: 1
   },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 0x2e }
-    },
+    stop: { kind: "hostTrap", vector: 0x2e },
     state: {
       ecx: 1,
-      eip: engineFixtureStartAddress + 4,
+      eip: startAddress + 4,
       instructionCount: 2,
       OF: 1
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const INTO_TAKEN_TRAP = {
   name: "into-taken/trap",
@@ -205,55 +188,49 @@ export const INTO_TAKEN_TRAP = {
     0xcc
   ],
   initialState: {
-    eip: engineFixtureStartAddress,
+    eip: startAddress,
     OF: 1
   },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 4 }
-    },
+    stop: { kind: "hostTrap", vector: 4 },
     state: {
-      eip: engineFixtureStartAddress + 1,
+      eip: startAddress + 1,
       instructionCount: 1,
       OF: 1
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const INTO_NOT_TAKEN_TRAP = {
   name: "into-not-taken/trap",
   bytes: INTO_TAKEN_TRAP.bytes,
   initialState: {
-    eip: engineFixtureStartAddress
+    eip: startAddress
   },
   expected: {
-    result: {
-      stop: { kind: "hostTrap", vector: 3 }
-    },
+    stop: { kind: "hostTrap", vector: 3 },
     state: {
-      eip: engineFixtureStartAddress + 2,
+      eip: startAddress + 2,
       instructionCount: 2,
       OF: 0
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
 export const UNSUPPORTED_OPCODE = {
   name: "unsupported-opcode",
   bytes: [0x62],
-  initialState: { eip: engineFixtureStartAddress },
+  initialState: { eip: startAddress },
   expected: {
-    result: {
-      stop: { kind: "unsupported", reason: "unsupportedOpcode" }
-    },
+    stop: { kind: "unsupported", reason: "unsupportedOpcode" },
     state: {
-      eip: engineFixtureStartAddress,
+      eip: startAddress,
       instructionCount: 0
     }
   }
-} satisfies EngineFixture;
+} satisfies InstructionFixture;
 
-export const ENGINE_PROGRAM_FIXTURES = [
+export const CPU_PROGRAM_FIXTURES = [
   MOV_ADD_TRAP,
   MEMORY_STORE_TRAP,
   COUNTDOWN_BRANCH_TRAP,
@@ -265,4 +242,4 @@ export const ENGINE_PROGRAM_FIXTURES = [
   INTO_TAKEN_TRAP,
   INTO_NOT_TAKEN_TRAP,
   UNSUPPORTED_OPCODE
-] as const satisfies readonly EngineFixture[];
+] as const satisfies readonly InstructionFixture[];

@@ -33,10 +33,6 @@
       "types": "./src/core/*",
       "default": "./dist/src/core/*"
     },
-    "#runtime/*": {
-      "types": "./src/runtime/*",
-      "default": "./dist/src/runtime/*"
-    },
     "#ir/*": {
       "types": "./src/ir/*",
       "default": "./dist/src/ir/*"

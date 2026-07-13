@@ -2,10 +2,22 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
-import type { RunStop } from "#cpu/cpu.js";
 import { createMachine } from "#machine/machine.js";
+import { startAddress } from "#test/support/addresses.js";
+import {
+  assertInstructionFixtureResult,
+  prepareInstructionFixture
+} from "#test/support/instruction-fixture.js";
+import { CPU_PROGRAM_FIXTURES } from "#test/support/programs.js";
 
-const startAddress = 0x1000;
+for (const fixture of CPU_PROGRAM_FIXTURES) {
+  test(`Cpu executes ${fixture.name}`, () => {
+    const machine = prepareInstructionFixture(fixture);
+    const stop = machine.cpu.run({ instructionBudget: 100 });
+
+    assertInstructionFixtureResult(fixture, stop, machine);
+  });
+}
 
 test("Cpu calls its interpreter once with unchanged fuel and propagates its exception", () => {
   const realWasmInstance = WebAssembly.Instance;
@@ -73,13 +85,6 @@ test("Cpu propagates entry decoder exceptions", () => {
   }
 });
 
-test("RunStop excludes the Runtime-only transfer sentinel", () => {
-  // @ts-expect-error Runtime's legacy transfer sentinel is not a Cpu stop.
-  const invalidStop: RunStop = { kind: "none" };
-
-  void invalidStop;
-});
-
 test("Cpu exhausts fuel and resumes only on a later explicit run", () => {
   const machine = createMachine({ memoryByteLength: 0x2000 });
   const bytes = new Uint8Array(machine.memory.buffer);
@@ -108,6 +113,21 @@ test("Cpu exhausts fuel and resumes only on a later explicit run", () => {
   strictEqual(machine.cpu.state.readReg32("ecx"), 2);
 });
 
+test("Cpu fetches any in-bounds guest bytes regardless of which range the caller wrote", () => {
+  const machine = createMachine({ memoryByteLength: 0x2000 });
+  const writtenProgramAddress = 0x1000;
+  const unwrittenExecutionAddress = 0x1800;
+
+  new Uint8Array(machine.memory.buffer).set([0xcc], writtenProgramAddress);
+  machine.cpu.state.eip = unwrittenExecutionAddress;
+
+  deepStrictEqual(machine.cpu.run({ instructionBudget: 1 }), {
+    kind: "instructionLimit"
+  });
+  strictEqual(machine.cpu.state.eip, unwrittenExecutionAddress + 2);
+  strictEqual(machine.cpu.state.instructionCount, 1);
+});
+
 test("Cpu reports an interpreter CPU exception from its bound state", () => {
   const machine = createMachine({ memoryByteLength: 0x1000 });
   const boundary = machine.memory.buffer.byteLength;
@@ -119,6 +139,22 @@ test("Cpu reports an interpreter CPU exception from its bound state", () => {
     exception: pageFault(boundary, PageFaultErrorCode.INSTRUCTION_FETCH)
   });
   strictEqual(machine.cpu.state.eip, boundary);
+  strictEqual(machine.cpu.state.instructionCount, 0);
+});
+
+test("Cpu preserves the instruction start when fetch is truncated at guest-memory bounds", () => {
+  const machine = createMachine({ memoryByteLength: 0x1000 });
+  const boundary = machine.memory.buffer.byteLength;
+  const instructionStart = boundary - 1;
+
+  new Uint8Array(machine.memory.buffer)[instructionStart] = 0xb8;
+  machine.cpu.state.eip = instructionStart;
+
+  deepStrictEqual(machine.cpu.run({ instructionBudget: 1 }), {
+    kind: "cpuException",
+    exception: pageFault(boundary, PageFaultErrorCode.INSTRUCTION_FETCH)
+  });
+  strictEqual(machine.cpu.state.eip, instructionStart);
   strictEqual(machine.cpu.state.instructionCount, 0);
 });
 

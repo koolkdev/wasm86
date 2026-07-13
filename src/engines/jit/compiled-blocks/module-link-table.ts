@@ -1,23 +1,14 @@
 import { u32 } from "#core/numeric.js";
 
-export type JitLinkedBlockFunction = () => unknown;
-export type JitModuleLocalFallbackFunction = JitLinkedBlockFunction;
-
-export type JitModuleLinkTableOptions = Readonly<{
+type JitModuleLinkTableOptions = Readonly<{
   targetEips: readonly number[];
 }>;
 
 export type JitLinkLayout = ReadonlyMap<number, number>;
 
-type SlotEntry = {
-  slot: number;
-  fallback: JitModuleLocalFallbackFunction | undefined;
-  installed: JitLinkedBlockFunction | undefined;
-};
-
 export class JitModuleLinkTable {
   readonly table: WebAssembly.Table;
-  readonly #slotsByTargetEip = new Map<number, SlotEntry>();
+  readonly #slotsByTargetEip = new Map<number, number>();
 
   constructor(options: JitModuleLinkTableOptions) {
     const targetEips = uniqueTargetEips(options.targetEips);
@@ -35,49 +26,12 @@ export class JitModuleLinkTable {
         throw new Error(`missing JIT link table target for slot ${slot}`);
       }
 
-      this.#slotsByTargetEip.set(targetEip, {
-        slot,
-        fallback: undefined,
-        installed: undefined
-      });
+      this.#slotsByTargetEip.set(targetEip, slot);
     }
   }
 
-  slotForTargetEip(eip: number): number {
-    return this.#entryForTarget(eip).slot;
-  }
-
-  hasTargetEip(eip: number): boolean {
-    return this.#slotsByTargetEip.has(u32(eip));
-  }
-
-  installModuleLocalFallback(eip: number, fn: JitModuleLocalFallbackFunction): void {
-    const entry = this.#entryForTarget(eip);
-
-    entry.fallback = fn;
-
-    if (entry.installed === undefined) {
-      this.table.set(entry.slot, fn);
-    }
-  }
-
-  installTarget(eip: number, fn: JitLinkedBlockFunction): void {
-    const entry = this.#entryForTarget(eip);
-
-    entry.installed = fn;
-    this.table.set(entry.slot, fn);
-  }
-
-  invalidateTarget(eip: number): void {
-    const entry = this.#entryForTarget(eip);
-
-    entry.installed = undefined;
-
-    if (entry.fallback === undefined) {
-      throw new Error(`cannot restore missing fallback for JIT link target 0x${u32(eip).toString(16)}`);
-    }
-
-    this.table.set(entry.slot, entry.fallback);
+  installModuleLocalFallback(eip: number, fn: () => unknown): void {
+    this.table.set(this.#slotForTarget(eip), fn);
   }
 
   targetEips(): readonly number[] {
@@ -85,12 +39,10 @@ export class JitModuleLinkTable {
   }
 
   linkLayout(): JitLinkLayout {
-    return new Map(
-      [...this.#slotsByTargetEip].map(([targetEip, entry]) => [targetEip, entry.slot])
-    );
+    return new Map(this.#slotsByTargetEip);
   }
 
-  #entryForTarget(eip: number): SlotEntry {
+  #slotForTarget(eip: number): number {
     const targetEip = u32(eip);
     const existing = this.#slotsByTargetEip.get(targetEip);
 

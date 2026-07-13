@@ -229,7 +229,6 @@ test("a not-taken forward jcc keeps pre-branch register pendings live inside the
     "add.rm32_r32",
     "int.imm8"
   ].join(","));
-  strictEqual(handle.moduleLinkTable?.table.length, 1);
   strictEqual(branchIndex > 0, true);
   strictEqual(ebxReadIndex > branchIndex, true);
   strictEqual(
@@ -321,7 +320,6 @@ test("a backward jcc to the block entry self-links as a return_call tail loop", 
     guestMemory: memories.guestMemory
   });
 
-  strictEqual(handle.moduleLinkTable, undefined);
   strictEqual(opcodes.includes(wasmOpcode.returnCall), true);
 
   memories.cpuState.load({ eip: startEip, ecx: 3 });
@@ -410,8 +408,6 @@ test("a static jump to a block in the same module tail-calls it directly", () =>
     guestMemory: memories.guestMemory
   });
 
-  strictEqual(handle.moduleLinkTable, undefined);
-
   memories.cpuState.load({ eip: startEip, eax: 0 });
 
   const run = handle.run(startEip);
@@ -431,8 +427,6 @@ test("a dynamic jump target reports DYNAMIC_JUMP and resumes from flushed state"
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
-
-  strictEqual(handle.moduleLinkTable, undefined);
 
   memories.cpuState.load({ eip: startEip, eax: 0x4000 });
 

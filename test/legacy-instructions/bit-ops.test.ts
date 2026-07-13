@@ -1,18 +1,7 @@
-import { test } from "node:test";
-
-import { createInstructionBudget } from "#runtime/execution/budget.js";
-import { RuntimeMode } from "#runtime/execution/mode.js";
-import { runRuntimeProgram, type RuntimeEngines } from "#runtime/execution/runner.js";
-import {
-  assertEngineFixtureResult,
-  createFixtureCompiledOnlyEngines,
-  createFixtureInterpreterOnlyEngines,
-  prepareEngineFixture
-} from "#runtime/tests/fixtures/helpers.js";
-import { engineFixtureStartAddress } from "#runtime/tests/fixtures/programs.js";
-import type { EngineFixture } from "#runtime/tests/fixtures/types.js";
 import { pageFault } from "#core/exceptions.js";
-import type { WasmHostMemories } from "#wasm/host/memories.js";
+import { startAddress } from "#test/support/addresses.js";
+import type { InstructionFixture } from "#test/support/instruction-fixture.js";
+import { registerInstructionFixtures } from "./support.js";
 
 const trap = [0xcd, 0x2e] as const;
 const bitPreservedFlags = { PF: 0, AF: 1, ZF: 0, SF: 1, OF: 1 } as const;
@@ -26,16 +15,16 @@ const fixtures = [
       ecx: 36,
       CF: 0,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0x10,
         ecx: 36,
         CF: 1,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       }
     }
@@ -48,16 +37,16 @@ const fixtures = [
       ecx: 33,
       CF: 1,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 2,
         ecx: 33,
         CF: 0,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       }
     }
@@ -70,16 +59,16 @@ const fixtures = [
       ecx: 33,
       CF: 0,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0,
         ecx: 33,
         CF: 1,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       }
     }
@@ -92,16 +81,16 @@ const fixtures = [
       ecx: 33,
       CF: 1,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 2,
         ecx: 33,
         CF: 0,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       }
     }
@@ -114,16 +103,16 @@ const fixtures = [
       edx: 0x1f,
       CF: 0,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0xaaaa_8000,
         edx: 0x1f,
         CF: 1,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress + 6,
+        eip: startAddress + 6,
         instructionCount: 2
       }
     }
@@ -134,15 +123,15 @@ const fixtures = [
     initialState: {
       CF: 1,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     initialMemory: [{ address: 0x20, bytes: [0, 0, 0, 0] }],
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         CF: 0,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress + 10,
+        eip: startAddress + 10,
         instructionCount: 2
       },
       memory: [{ address: 0x20, bytes: [0x10, 0, 0, 0] }]
@@ -156,17 +145,17 @@ const fixtures = [
       ecx: 0xffff_ffff,
       CF: 0,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     initialMemory: [{ address: 0x20, bytes: [0, 0, 0, 0x80] }],
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0x24,
         ecx: 0xffff_ffff,
         CF: 1,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       },
       memory: [{ address: 0x20, bytes: [0, 0, 0, 0] }]
@@ -180,17 +169,17 @@ const fixtures = [
       ecx: 0xffff_ffff,
       CF: 1,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     initialMemory: [{ address: 0x20, bytes: [0, 0, 0, 0] }],
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0x24,
         ecx: 0xffff_ffff,
         CF: 0,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       },
       memory: [{ address: 0x20, bytes: [0, 0, 0, 0x80] }]
@@ -204,17 +193,17 @@ const fixtures = [
       ecx: 0xffff_ffe0,
       CF: 0,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     initialMemory: [{ address: 0xfffc, bytes: [1, 0, 0, 0] }],
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0x1_0000,
         ecx: 0xffff_ffe0,
         CF: 1,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       },
       memory: [{ address: 0xfffc, bytes: [1, 0, 0, 0] }]
@@ -228,18 +217,16 @@ const fixtures = [
       ecx: 0xffff_ffe0,
       CF: 1,
       ...bitPreservedFlags,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: {
-        stop: { kind: "cpuException", exception: pageFault(0xffff_fffc, 0) }
-      },
+      stop: { kind: "cpuException", exception: pageFault(0xffff_fffc, 0) },
       state: {
         eax: 0,
         ecx: 0xffff_ffe0,
         CF: 1,
         ...bitPreservedFlags,
-        eip: engineFixtureStartAddress,
+        eip: startAddress,
         instructionCount: 0
       }
     }
@@ -256,15 +243,15 @@ const fixtures = [
       ZF: 1,
       SF: 1,
       OF: 1,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 5,
         ebx: 0x120,
         ...scanFlags(5, 0),
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       }
     }
@@ -281,15 +268,15 @@ const fixtures = [
       ZF: 0,
       SF: 1,
       OF: 1,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0xaaaa_5555,
         ebx: 0,
         ...scanFlags(0, 1),
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       }
     }
@@ -306,15 +293,15 @@ const fixtures = [
       ZF: 1,
       SF: 1,
       OF: 1,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0xaaaa_0008,
         ebx: 0x0100,
         ...scanFlags(8, 0),
-        eip: engineFixtureStartAddress + 6,
+        eip: startAddress + 6,
         instructionCount: 2
       }
     }
@@ -330,15 +317,15 @@ const fixtures = [
       ZF: 1,
       SF: 1,
       OF: 1,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     initialMemory: [{ address: 0x20, bytes: [0x20, 0x01, 0, 0] }],
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 5,
         ...scanFlags(5, 0),
-        eip: engineFixtureStartAddress + 9,
+        eip: startAddress + 9,
         instructionCount: 2
       },
       memory: [{ address: 0x20, bytes: [0x20, 0x01, 0, 0] }]
@@ -355,12 +342,10 @@ const fixtures = [
       ZF: 0,
       SF: 1,
       OF: 1,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: {
-        stop: { kind: "cpuException", exception: pageFault(0xfffe, 0) }
-      },
+      stop: { kind: "cpuException", exception: pageFault(0xfffe, 0) },
       state: {
         eax: 0xaaaa_5555,
         CF: 1,
@@ -369,7 +354,7 @@ const fixtures = [
         ZF: 0,
         SF: 1,
         OF: 1,
-        eip: engineFixtureStartAddress,
+        eip: startAddress,
         instructionCount: 0
       }
     }
@@ -386,15 +371,15 @@ const fixtures = [
       ZF: 1,
       SF: 1,
       OF: 1,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 8,
         ebx: 0x120,
         ...scanFlags(8, 0),
-        eip: engineFixtureStartAddress + 5,
+        eip: startAddress + 5,
         instructionCount: 2
       }
     }
@@ -410,15 +395,15 @@ const fixtures = [
       ZF: 1,
       SF: 1,
       OF: 1,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     initialMemory: [{ address: 0x24, bytes: [0x20, 0x00] }],
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0xaaaa_0005,
         ...scanFlags(5, 0),
-        eip: engineFixtureStartAddress + 10,
+        eip: startAddress + 10,
         instructionCount: 2
       },
       memory: [{ address: 0x24, bytes: [0x20, 0x00] }]
@@ -436,15 +421,15 @@ const fixtures = [
       ZF: 1,
       SF: 1,
       OF: 1,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0xaaaa_0005,
         ebx: 0x20,
         ...scanFlags(5, 0),
-        eip: engineFixtureStartAddress + 6,
+        eip: startAddress + 6,
         instructionCount: 2
       }
     }
@@ -461,53 +446,22 @@ const fixtures = [
       ZF: 0,
       SF: 1,
       OF: 1,
-      eip: engineFixtureStartAddress
+      eip: startAddress
     },
     expected: {
-      result: { stop: { kind: "hostTrap", vector: 0x2e } },
+      stop: { kind: "hostTrap", vector: 0x2e },
       state: {
         eax: 0xaaaa_1234,
         ebx: 0,
         ...scanFlags(0, 1),
-        eip: engineFixtureStartAddress + 6,
+        eip: startAddress + 6,
         instructionCount: 2
       }
     }
   }
-] as const satisfies readonly EngineFixture[];
+] as const satisfies readonly InstructionFixture[];
 
-const modes = [
-  {
-    name: "interpreter",
-    mode: RuntimeMode.INTERPRETER,
-    engines: createFixtureInterpreterOnlyEngines
-  },
-  {
-    name: "compiled-blocks",
-    mode: RuntimeMode.COMPILED_BLOCKS,
-    engines: createFixtureCompiledOnlyEngines
-  }
-] as const satisfies readonly {
-  name: string;
-  mode: RuntimeMode;
-  engines(memories: WasmHostMemories): RuntimeEngines;
-}[];
-
-for (const fixture of fixtures) {
-  for (const runMode of modes) {
-    test(`${runMode.name} executes ${fixture.name}`, () => {
-      const { codeMap, memories } = prepareEngineFixture(fixture);
-      const result = runRuntimeProgram(
-        runMode.mode,
-        { codeMap, memories },
-        createInstructionBudget(0, 100),
-        runMode.engines(memories)
-      );
-
-      assertEngineFixtureResult(fixture, result, memories);
-    });
-  }
-}
+registerInstructionFixtures(fixtures);
 
 function scanFlags(indexForParity: number, zf: 0 | 1): Readonly<Record<"CF" | "PF" | "AF" | "ZF" | "SF" | "OF", number>> {
   return {
