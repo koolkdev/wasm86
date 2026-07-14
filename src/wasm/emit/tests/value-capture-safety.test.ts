@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { stateWrite } from "#ir/tests/storage-op-helpers.js";
-import { ValueTable } from "#ir/value-table.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";

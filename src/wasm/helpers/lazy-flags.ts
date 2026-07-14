@@ -3,7 +3,7 @@ import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { IrBlock } from "#ir/block.js";
 import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import type { StateReadOp } from "#ir/ops.js";
-import type { ValueId } from "#ir/values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import { statusFlagValuesForSource } from "#core/flags/values.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/state.js";
 import type { X86StatusFlag } from "#core/flags/definitions.js";

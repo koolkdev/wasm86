@@ -2,31 +2,15 @@ import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import type { OpAction } from "#ir/actions.js";
 import type { IrOp } from "#ir/ops.js";
-import {
-  type BinaryValueNode,
-  type CompareValueNode,
-  type ExtendValueNode,
-  type SelectValueNode,
-  type TruncateValueNode,
-  type UnaryValueNode,
-  type UnreachableValueNode,
-  type ValueId
-} from "#ir/values.js";
-import type { ValueTable } from "#ir/value-table.js";
+import type { ValueEmitContext } from "#compiler/ir/values/definition.js";
+import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { LocalRegistry } from "./local-registry.js";
 import type { BorrowedUse, OperandUses } from "./ops.js";
-import {
-  emitBinaryOperator,
-  emitCompareOperator,
-  emitExtend,
-  emitTruncate,
-  emitUnaryOperator,
-  wasmTypeForValue
-} from "./operators.js";
+import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
 import type { ValueUses } from "./value-uses.js";
-import { ValueTraits } from "./value-traits.js";
 
 // Turns captured values plus the value graph into stack code. emitUse pushes
 // one use; repeated values replay a temporary local until their final use.
@@ -49,22 +33,13 @@ export type ValueEmitterContext = Readonly<{
   claimProducerAtUse(output: ValueId): OpAction;
 }>;
 
-type CompoundValueNode =
-  | BinaryValueNode
-  | UnreachableValueNode
-  | UnaryValueNode
-  | CompareValueNode
-  | SelectValueNode
-  | TruncateValueNode
-  | ExtendValueNode;
-
 export class ValueEmitter implements OperandUses {
   readonly #context: ValueEmitterContext;
   readonly #body: WasmFunctionBodyEncoder;
   readonly #values: ValueTable;
   readonly #uses: ValueUses;
-  readonly #traits: ValueTraits;
   readonly #registry: LocalRegistry;
+  readonly #valueEmitContext: ValueEmitContext;
   // Open borrows per value; assertClear reports leaks.
   readonly #borrows = new Map<ValueId, number>();
   // Loop input leaf -> its carried cell's local, bound for the loop extent.
@@ -77,8 +52,26 @@ export class ValueEmitter implements OperandUses {
     this.#body = context.body;
     this.#values = context.values;
     this.#uses = context.uses;
-    this.#traits = new ValueTraits(context.values);
     this.#registry = new LocalRegistry(context.body, context.scratch);
+    this.#valueEmitContext = {
+      body: this.#body,
+      emitUse: (id) => this.emitUse(id),
+      emitActionOutput: (id) => {
+        this.#emitProducerAtUse(this.#context.claimProducerAtUse(id));
+      },
+      emitExternal: (external) => {
+        const local = this.#context.externalLocals.get(external);
+
+        assert(local !== undefined, `no local bound for external value ${external}`);
+        this.#body.localGet(local);
+      },
+      emitLoopInput: (id) => {
+        const local = this.#loopInputLocals.get(id);
+
+        assert(local !== undefined, `no local bound for loop input value ${id}`);
+        this.#body.localGet(local);
+      }
+    };
   }
 
   // Executes a capture event. Every counted use later replays its temporary
@@ -115,43 +108,15 @@ export class ValueEmitter implements OperandUses {
       return;
     }
 
-    const node = this.#values.node(id);
+    const capture = this.#values.captureMode(id);
 
-    switch (node.kind) {
-      case "const":
-        this.#body.i32Const(node.value);
-        return;
-      case "const64":
-        this.#body.i64Const(node.value);
-        return;
-      case "external": {
-        const local = this.#context.externalLocals.get(node.external);
+    this.#values.emit(id, this.#valueEmitContext);
 
-        assert(local !== undefined, `no local bound for external value ${node.external}`);
-        this.#body.localGet(local);
-        return;
-      }
-      case "loopInput": {
-        const local = this.#loopInputLocals.get(id);
+    if (capture === "compute" || capture === "unreachable") {
+      const uses = this.#uses.useCount(id);
 
-        assert(local !== undefined, `no local bound for loop input value ${id}`);
-        this.#body.localGet(local);
-        return;
-      }
-      case "actionOutput": {
-        this.#emitProducerAtUse(this.#context.claimProducerAtUse(id));
-        return;
-      }
-      default: {
-        this.#emitCompute(node);
-
-        const uses = this.#uses.useCount(id);
-
-        if (uses > 1) {
-          this.#registry.captureTee(id, uses - 1, this.#typeOf(id));
-        }
-
-        return;
+      if (uses > 1) {
+        this.#registry.captureTee(id, uses - 1, this.#typeOf(id));
       }
     }
   }
@@ -159,12 +124,7 @@ export class ValueEmitter implements OperandUses {
   // Borrows one counted use of the value for repeated observation. The local
   // is unpinned in finally, and an escaped borrowed handle cannot be pushed.
   withBorrowedUse(id: ValueId, callback: (borrowed: BorrowedUse) => void): void {
-    const node = this.#values.node(id);
-    const reemittable =
-      node.kind === "const" ||
-      node.kind === "const64" ||
-      node.kind === "external" ||
-      node.kind === "loopInput";
+    const reemittable = this.#values.captureMode(id) === "reemit";
     let active = true;
     let pushed = false;
     let pinned = false;
@@ -304,71 +264,6 @@ export class ValueEmitter implements OperandUses {
     this.#registry.assertClear();
   }
 
-  #emitCompute(node: CompoundValueNode): void {
-    switch (node.kind) {
-      case "unreachable":
-        this.#body.unreachable();
-        return;
-      case "binary":
-        this.emitUse(node.a);
-        this.emitUse(node.b);
-        emitBinaryOperator(this.#body, node);
-        return;
-      case "unary":
-        this.emitUse(node.value);
-        emitUnaryOperator(this.#body, node);
-        return;
-      case "compare": {
-        // eq against zero is wasm's eqz; the other zero compares have no
-        // dedicated opcode.
-        const eqzOperand = node.type === "i32" ? this.#zeroEqualityOperand(node) : undefined;
-
-        if (eqzOperand !== undefined) {
-          this.emitUse(eqzOperand);
-          this.#body.i32Eqz();
-          return;
-        }
-
-        this.emitUse(node.a);
-        this.emitUse(node.b);
-        emitCompareOperator(this.#body, node);
-        return;
-      }
-      case "select":
-        this.emitUse(node.whenTrue);
-        this.emitUse(node.whenFalse);
-        this.emitUse(node.condition);
-        this.#body.select();
-        return;
-      case "truncate":
-        this.emitUse(node.value);
-        emitTruncate(this.#body, node);
-        return;
-      case "extend":
-        this.emitUse(node.value);
-        emitExtend(this.#body, node);
-        return;
-    }
-  }
-
-  #zeroEqualityOperand(node: CompareValueNode): ValueId | undefined {
-    if (node.operator !== "eq") {
-      return undefined;
-    }
-
-    if (this.#isConstZero(node.a)) {
-      return node.b;
-    }
-
-    return this.#isConstZero(node.b) ? node.a : undefined;
-  }
-
-  #isConstZero(id: ValueId): boolean {
-    const node = this.#values.node(id);
-
-    return node.kind === "const" && node.value === 0;
-  }
-
   #captureValue(id: ValueId): void {
     if (this.#registry.has(id)) {
       return;
@@ -379,35 +274,62 @@ export class ValueEmitter implements OperandUses {
       return;
     }
 
-    const node = this.#values.node(id);
+    const capture = this.#values.captureMode(id);
 
-    switch (node.kind) {
-      case "const":
-      case "const64":
-      case "external":
-      case "loopInput":
-      case "unreachable":
-        // Re-emittable anywhere.
-        return;
-      case "actionOutput": {
-        assert(false, `action output ${id} has no replay source`);
-        return;
-      }
-      default: {
-        assert(
-          this.#traits.canEvaluateWithoutTrap(id, (value) => this.#registry.has(value)),
-          `value ${id} may trap and cannot be captured before a nested body is selected`
-        );
-        // Not in the registry means nothing consumed it yet, so every
-        // counted use is still to come.
-        this.#emitCompute(node);
-        this.#registry.captureSet(id, this.#uses.useCount(id), this.#typeOf(id));
-        return;
-      }
+    if (capture === "reemit" || capture === "unreachable") {
+      return;
     }
+
+    assert(capture === "compute", `action output ${id} has no replay source`);
+    assert(
+      canEvaluateWithoutTrap(
+        this.#values,
+        id,
+        (value) => this.#registry.has(value)
+      ),
+      `value ${id} may trap and cannot be captured before a nested body is selected`
+    );
+    // Not in the registry means nothing consumed it yet, so every counted
+    // use is still to come.
+    this.#values.emit(id, this.#valueEmitContext);
+    this.#registry.captureSet(id, this.#uses.useCount(id), this.#typeOf(id));
   }
 
-  #typeOf(id: ValueId) {
+  #typeOf(id: ValueId): WasmValueType {
     return wasmTypeForValue(this.#values.valueType(id));
   }
+}
+
+export function wasmTypeForValue(type: ValueType): WasmValueType {
+  return type === "i32" ? wasmValueType.i32 : wasmValueType.i64;
+}
+
+// A value already evaluated on the current path is replayed from its local,
+// so it cuts off a possibly trapping dependency closure. This query keeps
+// that path state outside the table's static non-trapping fact.
+export function canEvaluateWithoutTrap(
+  values: ValueTable,
+  id: ValueId,
+  isAlreadyBound: (value: ValueId) => boolean
+): boolean {
+  const contextual = new Map<ValueId, boolean>();
+  const visit = (value: ValueId): boolean => {
+    const existing = contextual.get(value);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    if (values.isNonTrapping(value) || isAlreadyBound(value)) {
+      contextual.set(value, true);
+      return true;
+    }
+
+    const result = !values.mayTrap(value) && values.children(value).every(visit);
+
+    contextual.set(value, result);
+    return result;
+  };
+
+  return visit(id);
 }

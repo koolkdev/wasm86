@@ -1,6 +1,6 @@
 import { zspValues } from "#core/flags/values.js";
 import { divideError } from "#core/exceptions.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#core/semantics/builder.js";
 import type { Value, ValueInput } from "#core/semantics/refs.js";
 import { writeAddFlags, writeStatusFlagValues } from "./flag-writes.js";
@@ -80,7 +80,7 @@ export function aadSemantic(): SemanticTemplate {
   };
 }
 
-function asciiAdjust(s: SemanticsBuilder, v: Values, op: "add" | "sub"): void {
+function asciiAdjust(s: SemanticsBuilder, v: ValueBuilder, op: "add" | "sub"): void {
   const oldAx = s.get(s.reg("ax"), 16);
   const oldAl = s.get(s.reg("al"), 8);
   const adjust = decimalLowAdjust(s, v, oldAl);
@@ -97,7 +97,7 @@ function asciiAdjust(s: SemanticsBuilder, v: Values, op: "add" | "sub"): void {
   writeAdjustFlags(s, v, resultAl, { lowAdjust: adjust });
 }
 
-function decimalLowAdjust(s: SemanticsBuilder, v: Values, oldAl: ValueInput): Value {
+function decimalLowAdjust(s: SemanticsBuilder, v: ValueBuilder, oldAl: ValueInput): Value {
   return v.binary(
     "or",
     v.compare(8, "gt_u", v.binary("and", oldAl, v.const(0x0f)), v.const(9)),
@@ -105,17 +105,17 @@ function decimalLowAdjust(s: SemanticsBuilder, v: Values, oldAl: ValueInput): Va
   );
 }
 
-function addSelectedByte(v: Values, value: ValueInput, condition: ValueInput, amount: number): Value {
+function addSelectedByte(v: ValueBuilder, value: ValueInput, condition: ValueInput, amount: number): Value {
   return v.truncate(8, v.binary("add", value, v.select(condition, v.const(amount), v.const(0))));
 }
 
-function subSelectedByte(v: Values, value: ValueInput, condition: ValueInput, amount: number): Value {
+function subSelectedByte(v: ValueBuilder, value: ValueInput, condition: ValueInput, amount: number): Value {
   return v.truncate(8, v.binary("sub", value, v.select(condition, v.const(amount), v.const(0))));
 }
 
 function writeAdjustFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   result: ValueInput,
   adjust?: Readonly<{ highAdjust?: ValueInput; lowAdjust?: ValueInput }>
 ): void {

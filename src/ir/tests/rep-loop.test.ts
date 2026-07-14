@@ -16,7 +16,7 @@ import type { Action, IfAction, LoopAction, StateWriteAction } from "#ir/actions
 import type { Body, IrBlock } from "#ir/block.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { slotsMayAlias } from "#ir/aliasing.js";
-import type { ValueId } from "#ir/values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import { movSemantic } from "#core/semantics/mov.js";
 import {
   repeCmpsSemantic,

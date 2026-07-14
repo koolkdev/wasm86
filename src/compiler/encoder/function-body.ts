@@ -473,6 +473,71 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i64LtS(): this {
+    this.#writeInstruction(wasmOpcode.i64LtS);
+    return this;
+  }
+
+  i64LtU(): this {
+    this.#writeInstruction(wasmOpcode.i64LtU);
+    return this;
+  }
+
+  i64GtS(): this {
+    this.#writeInstruction(wasmOpcode.i64GtS);
+    return this;
+  }
+
+  i64GtU(): this {
+    this.#writeInstruction(wasmOpcode.i64GtU);
+    return this;
+  }
+
+  i64LeS(): this {
+    this.#writeInstruction(wasmOpcode.i64LeS);
+    return this;
+  }
+
+  i64LeU(): this {
+    this.#writeInstruction(wasmOpcode.i64LeU);
+    return this;
+  }
+
+  i64GeS(): this {
+    this.#writeInstruction(wasmOpcode.i64GeS);
+    return this;
+  }
+
+  i64GeU(): this {
+    this.#writeInstruction(wasmOpcode.i64GeU);
+    return this;
+  }
+
+  i64Clz(): this {
+    this.#writeInstruction(wasmOpcode.i64Clz);
+    return this;
+  }
+
+  i64Ctz(): this {
+    this.#writeInstruction(wasmOpcode.i64Ctz);
+    return this;
+  }
+
+  i64Popcnt(): this {
+    this.#writeInstruction(wasmOpcode.i64Popcnt);
+    return this;
+  }
+
+  i64Add(): this {
+    this.#writeInstruction(wasmOpcode.i64Add);
+    return this;
+  }
+
+  i64Sub(): this {
+    this.#writeInstruction(wasmOpcode.i64Sub);
+    return this;
+  }
+
   i64Mul(): this {
     this.#writeInstruction(wasmOpcode.i64Mul);
     return this;
@@ -498,8 +563,18 @@ export class WasmFunctionBodyEncoder {
     return this;
   }
 
+  i64And(): this {
+    this.#writeInstruction(wasmOpcode.i64And);
+    return this;
+  }
+
   i64Or(): this {
     this.#writeInstruction(wasmOpcode.i64Or);
+    return this;
+  }
+
+  i64Xor(): this {
+    this.#writeInstruction(wasmOpcode.i64Xor);
     return this;
   }
 
@@ -515,6 +590,16 @@ export class WasmFunctionBodyEncoder {
 
   i64ShrU(): this {
     this.#writeInstruction(wasmOpcode.i64ShrU);
+    return this;
+  }
+
+  i64Rotl(): this {
+    this.#writeInstruction(wasmOpcode.i64Rotl);
+    return this;
+  }
+
+  i64Rotr(): this {
+    this.#writeInstruction(wasmOpcode.i64Rotr);
     return this;
   }
 

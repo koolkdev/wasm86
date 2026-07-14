@@ -18,8 +18,8 @@ import {
   type StateSlot
 } from "#ir/slots.js";
 import type { Action, StateWriteAction } from "#ir/actions.js";
-import { ValueTable } from "#ir/value-table.js";
-import type { ValueId } from "#ir/values.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import { isStateRead, isStateWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 type Harness = Readonly<{

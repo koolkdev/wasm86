@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import { pageFault, pageFaultErrorCode, type CpuException } from "#core/exceptions.js";
 import type {
   GetOptions,
@@ -42,7 +42,7 @@ export function resolvedOperandStorage(
 
 export function resolveStorageRead(
   s: SemanticOps,
-  v: Values,
+  v: ValueBuilder,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
@@ -52,7 +52,7 @@ export function resolveStorageRead(
 
 export function resolveStorageWrite(
   s: SemanticOps,
-  v: Values,
+  v: ValueBuilder,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
@@ -62,7 +62,7 @@ export function resolveStorageWrite(
 
 export function resolveStorageReadWrite(
   s: SemanticOps,
-  v: Values,
+  v: ValueBuilder,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth
@@ -95,7 +95,7 @@ export function memoryAccessException(access: MemoryAccess): CpuException<ValueI
 
 export function readStorage(
   s: SemanticOps,
-  v: Values,
+  v: ValueBuilder,
   storage: ResolvedStorageAccess,
   width: OperandWidth,
   options: GetOptions = {}
@@ -110,7 +110,7 @@ export function readStorage(
 
 export function writeStorage(
   s: SemanticOps,
-  v: Values,
+  v: ValueBuilder,
   storage: ResolvedStorageAccess<"write">,
   value: ValueInput,
   width: OperandWidth
@@ -127,7 +127,7 @@ export function writeStorage(
 
 function resolveStorage<TIntent extends MemoryAccessKind>(
   s: SemanticOps,
-  v: Values,
+  v: ValueBuilder,
   context: SemanticBuildContext,
   storage: StorageInput,
   width: OperandWidth,

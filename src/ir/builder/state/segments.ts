@@ -2,8 +2,8 @@ import { assert } from "#common/assert.js";
 import type { OperandWidth, SegmentRegister } from "#core/types.js";
 import type { BodyBuilder } from "../../body-builder.js";
 import { segmentBaseChannel, type SegmentChannel } from "../../slots.js";
-import { type ValueId } from "../../values.js";
-import type { ValueTable } from "../../value-table.js";
+import { type ValueId } from "#compiler/ir/values/types.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { StateCells } from "./cells.js";
 
 export type SegmentReadOptions = Readonly<{

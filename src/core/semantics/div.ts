@@ -1,5 +1,5 @@
 import { divideError } from "#core/exceptions.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#core/semantics/builder.js";
 import type { Value } from "#core/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
@@ -36,7 +36,7 @@ function implicitDivideSemantic(kind: DivideKind, width: OperandWidth): Semantic
 
 function unsignedDivide(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   width: OperandWidth,
   divisor: Value
 ): DivideResult {
@@ -70,7 +70,7 @@ function unsignedDivide(
 
 function signedDivide(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   width: OperandWidth,
   divisor: Value
 ): DivideResult {
@@ -125,7 +125,7 @@ function signedDivide(
 // its computation type over -1; both raise #DE (the latter overflows the
 // destination), so both are checked before dividing.
 function undefinedSignedDivision(
-  v: Values,
+  v: ValueBuilder,
   width: OperandWidth,
   dividend: Value,
   divisor: Value
@@ -148,7 +148,7 @@ function undefinedSignedDivision(
 // The quotient fits its signed width if quotient + 2^(width-1) fits the
 // unsigned width.
 function narrowQuotientOverflows(
-  v: Values,
+  v: ValueBuilder,
   width: Extract<OperandWidth, 8 | 16>,
   quotient: Value
 ): Value {
@@ -157,7 +157,7 @@ function narrowQuotientOverflows(
   return v.compare(32, "ge_u", v.binary("add", quotient, v.const(bias)), v.const(bias * 2));
 }
 
-function unsignedDividend(s: SemanticsBuilder, v: Values, width: OperandWidth): UnsignedDividend {
+function unsignedDividend(s: SemanticsBuilder, v: ValueBuilder, width: OperandWidth): UnsignedDividend {
   switch (width) {
     case 8: {
       const ax = s.get(s.reg("ax"), 16);
@@ -192,7 +192,7 @@ function unsignedDividend(s: SemanticsBuilder, v: Values, width: OperandWidth): 
 
 function signedNarrowDividend(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   width: Extract<OperandWidth, 8 | 16>
 ): Value {
   switch (width) {
@@ -207,7 +207,7 @@ function signedNarrowDividend(
   }
 }
 
-function signedDwordDividend(s: SemanticsBuilder, v: Values): Value {
+function signedDwordDividend(s: SemanticsBuilder, v: ValueBuilder): Value {
   const low = s.get(s.reg("eax"), 32);
   const high = s.get(s.reg("edx"), 32);
   const low64 = v.extend64(32, low, false);

@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { Body } from "#ir/block.js";
-import type { ValueId } from "#ir/values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Producer, ScheduleSite } from "./demands.js";
 
 export type ProducerEvent = Readonly<{

@@ -1,5 +1,5 @@
 import type { ConditionCode } from "./conditions.js";
-import type { CompareOperator } from "#ir/operators.js";
+import type { CompareOperator } from "#compiler/ir/values/comparison.js";
 import type { OperandWidth } from "../types.js";
 
 type AddFlagSource<TValue extends number = number> = Readonly<{

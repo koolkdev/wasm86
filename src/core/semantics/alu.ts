@@ -1,4 +1,4 @@
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import type { Value } from "#core/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#core/types.js";
@@ -108,7 +108,7 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
   };
 }
 
-function logicResult(v: Values, op: "and" | "or" | "xor", left: Value, right: Value): Value {
+function logicResult(v: ValueBuilder, op: "and" | "or" | "xor", left: Value, right: Value): Value {
   switch (op) {
     case "and":
       return v.binary("and", left, right);

@@ -1,5 +1,5 @@
 import { eipChannel } from "../../slots.js";
-import type { ValueId } from "../../values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { StateCells } from "./cells.js";
 
 // EIP is a single exact cell; this facet just names the channel for callers.

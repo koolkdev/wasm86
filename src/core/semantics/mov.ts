@@ -1,6 +1,6 @@
 import type { ConditionCode } from "#core/flags/conditions.js";
 import { invalidOpcode } from "#core/exceptions.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { SemanticOperandInfo, SemanticTemplate } from "#core/semantics/builder.js";
 import type { OperandWidth } from "#core/types.js";
@@ -58,7 +58,7 @@ export function movToSregSemantic(): SemanticTemplate {
   };
 }
 
-function segmentTargetIsCs(v: Values, info: SemanticOperandInfo): Value | undefined {
+function segmentTargetIsCs(v: ValueBuilder, info: SemanticOperandInfo): Value | undefined {
   if (info.segment === undefined) {
     return undefined;
   }

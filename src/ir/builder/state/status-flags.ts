@@ -9,7 +9,10 @@ import {
   statusFlagValuesForSource,
   type StatusFlagValues
 } from "#core/flags/values.js";
-import { signedComparePredicates, type CompareOperator } from "#ir/operators.js";
+import {
+  compareIsSigned,
+  type CompareOperator
+} from "#compiler/ir/values/comparison.js";
 import type { BodyBuilder, SwitchArm } from "../../body-builder.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "../../lazy-flags.js";
 import type { StateReadOp } from "../../ops.js";
@@ -17,8 +20,8 @@ import { valueTableFlagOps } from "../../flag-value-ops.js";
 import {
   flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot
 } from "../../slots.js";
-import type { ValueId } from "../../values.js";
-import type { ValueTable } from "../../value-table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { StateCells } from "./cells.js";
 import type { StateWriteObserver } from "./write-log.js";
 
@@ -366,7 +369,7 @@ export class StatusFlagState {
   }
 
   #lazyOperandRead(slot: StateSlot, spec: LazyConditionCaseSpec): StateReadOp {
-    const signed = signedComparePredicates.has(spec.operator);
+    const signed = compareIsSigned(spec.operator);
 
     switch (spec.width) {
       case 8:

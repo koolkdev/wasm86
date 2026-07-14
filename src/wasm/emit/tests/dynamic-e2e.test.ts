@@ -13,8 +13,9 @@ import {
   type StateChannel
 } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { fitsUnsigned, type ValueId } from "#ir/values.js";
-import { ValueTable } from "#ir/value-table.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import type { RegName } from "#core/types.js";
 import { aluSemantic } from "#core/semantics/alu.js";
 import { movSemantic } from "#core/semantics/mov.js";

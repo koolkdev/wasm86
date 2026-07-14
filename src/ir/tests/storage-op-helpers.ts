@@ -10,7 +10,8 @@ import type {
   StateWriteOp
 } from "#ir/ops.js";
 import type { StateSlot } from "#ir/slots.js";
-import { valueId, type ValueId } from "#ir/values.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
 

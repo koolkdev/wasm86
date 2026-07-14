@@ -1,11 +1,11 @@
 import { x86EflagsBitOffset, type X86Flag } from "#core/flags/definitions.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticsBuilder } from "#core/semantics/builder.js";
 import type { Value, ValueInput } from "#core/semantics/refs.js";
 
 export function buildFlagImage(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   flags: readonly X86Flag[],
   seed: number
 ): Value {
@@ -23,7 +23,7 @@ export function buildFlagImage(
 
 export function writeFlagsFromImage(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   flags: readonly X86Flag[],
   image: ValueInput
 ): void {

@@ -8,11 +8,11 @@ import {
   type SegmentChannel,
   channelsOverlap
 } from "../../slots.js";
-import {
-  fitsUnsigned,
-  type ValueId,
-  type WidthBounds
-} from "../../values.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
+import type {
+  ValueId,
+  WidthBounds
+} from "#compiler/ir/values/types.js";
 import type { StateWriteAction } from "../../actions.js";
 import type { BodyBuilder } from "../../body-builder.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";

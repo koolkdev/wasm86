@@ -5,8 +5,9 @@ import { maxSwitchMatch, type Action, type SwitchAction } from "#ir/actions.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { fitsUnsigned, valueId } from "#ir/values.js";
-import { ValueTable } from "#ir/value-table.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function blockWith(actions: readonly Action[]): IrBlock {

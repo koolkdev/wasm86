@@ -1,8 +1,8 @@
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { SegmentRegister } from "#core/types.js";
 import type { SegmentDynamicOperandBinding, SegmentOperandBinding } from "../operands.js";
-import type { ValueId } from "../values.js";
-import { ValueTable } from "../value-table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import type { FinishEmitter } from "./finish.js";
 
 export type SegmentMode = "flat32";

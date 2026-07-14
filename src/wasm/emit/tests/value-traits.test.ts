@@ -1,10 +1,12 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { BinaryOperator, CompareOperator, UnaryOperator } from "#ir/operators.js";
-import { ValueTable } from "#ir/value-table.js";
-import type { ValueId } from "#ir/values.js";
-import { ValueTraits } from "#wasm/emit/value-traits.js";
+import type { BinaryOperator } from "#compiler/ir/values/binary.js";
+import type { CompareOperator } from "#compiler/ir/values/comparison.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import type { UnaryOperator } from "#compiler/ir/values/unary.js";
+import { canEvaluateWithoutTrap } from "#wasm/emit/value-emitter.js";
 
 const binaryOperatorNonTrapping = {
   add: true,
@@ -27,7 +29,8 @@ const binaryOperatorNonTrapping = {
 const unaryOperators = {
   popcnt: true,
   ctz: true,
-  clz: true
+  clz: true,
+  eqz: true
 } as const satisfies Readonly<Record<UnaryOperator, true>>;
 
 const compareOperators = {
@@ -56,10 +59,9 @@ test("classifies every i32 and i64 binary operator", () => {
     const a64 = values.extend64(32, values.addActionOutput(), true);
     const b64 = values.extend64(32, values.external(1), false);
     const binary64 = values.binary64(operator, a64, b64);
-    const traits = new ValueTraits(values);
 
-    strictEqual(traits.isNonTrapping(binary32), expected, `${operator} i32`);
-    strictEqual(traits.isNonTrapping(binary64), expected, `${operator} i64`);
+    strictEqual(values.isNonTrapping(binary32), expected, `${operator} i32`);
+    strictEqual(values.isNonTrapping(binary64), expected, `${operator} i64`);
   }
 });
 
@@ -68,10 +70,9 @@ test("recognizes division and remainder by nonzero constants as nontrapping", ()
     const values = new ValueTable();
     const binary32 = values.binary(operator, values.external(0), values.const(17));
     const binary64 = values.binary64(operator, values.const64(23n), values.const64(17n));
-    const traits = new ValueTraits(values);
 
-    strictEqual(traits.isNonTrapping(binary32), true, `${operator} i32`);
-    strictEqual(traits.isNonTrapping(binary64), true, `${operator} i64`);
+    strictEqual(values.isNonTrapping(binary32), true, `${operator} i32`);
+    strictEqual(values.isNonTrapping(binary64), true, `${operator} i64`);
   }
 });
 
@@ -79,10 +80,9 @@ test("recognizes signed division by a safe constant divisor", () => {
   const values = new ValueTable();
   const bySeventeen = values.binary("div_s", values.external(0), values.const(17));
   const byNegativeOne = values.binary("div_s", values.external(0), values.const(-1));
-  const traits = new ValueTraits(values);
 
-  strictEqual(traits.isNonTrapping(bySeventeen), true);
-  strictEqual(traits.isNonTrapping(byNegativeOne), false);
+  strictEqual(values.isNonTrapping(bySeventeen), true);
+  strictEqual(values.isNonTrapping(byNegativeOne), false);
 });
 
 test("keeps zero divisors and signed-overflow cases trapping", () => {
@@ -99,12 +99,11 @@ test("keeps zero divisors and signed-overflow cases trapping", () => {
     values.const64(-0x8000_0000_0000_0000n),
     values.const64(-1n)
   );
-  const traits = new ValueTraits(values);
 
   for (const value of byZero) {
-    strictEqual(traits.isNonTrapping(value), false);
+    strictEqual(values.isNonTrapping(value), false);
   }
-  strictEqual(traits.isNonTrapping(signedOverflow), false);
+  strictEqual(values.isNonTrapping(signedOverflow), false);
 });
 
 test("classifies constants and runtime-bound values as nontrapping leaves", () => {
@@ -116,10 +115,9 @@ test("classifies constants and runtime-bound values as nontrapping leaves", () =
     values.addActionOutput(),
     values.addLoopInput()
   ];
-  const traits = new ValueTraits(values);
 
   for (const leaf of leaves) {
-    strictEqual(traits.isNonTrapping(leaf), true, `leaf value ${leaf}`);
+    strictEqual(values.isNonTrapping(leaf), true, `leaf value ${leaf}`);
   }
 });
 
@@ -127,10 +125,9 @@ test("classifies unreachable values as trapping", () => {
   const values = new ValueTable();
   const unreachable32 = values.unreachable("i32");
   const unreachable64 = values.unreachable("i64");
-  const traits = new ValueTraits(values);
 
-  strictEqual(traits.isNonTrapping(unreachable32), false);
-  strictEqual(traits.isNonTrapping(unreachable64), false);
+  strictEqual(values.isNonTrapping(unreachable32), false);
+  strictEqual(values.isNonTrapping(unreachable64), false);
 });
 
 test("propagates trapping children through every nontrapping binary wrapper", () => {
@@ -153,12 +150,11 @@ test("propagates trapping children through every nontrapping binary wrapper", ()
     const right32 = values.binary(operator, safe, trapping);
     const left64 = values.binary64(operator, trapping64, safe64);
     const right64 = values.binary64(operator, safe64, trapping64);
-    const traits = new ValueTraits(values);
 
-    strictEqual(traits.isNonTrapping(left32), false, `${operator} i32 left child`);
-    strictEqual(traits.isNonTrapping(right32), false, `${operator} i32 right child`);
-    strictEqual(traits.isNonTrapping(left64), false, `${operator} i64 left child`);
-    strictEqual(traits.isNonTrapping(right64), false, `${operator} i64 right child`);
+    strictEqual(values.isNonTrapping(left32), false, `${operator} i32 left child`);
+    strictEqual(values.isNonTrapping(right32), false, `${operator} i32 right child`);
+    strictEqual(values.isNonTrapping(left64), false, `${operator} i64 left child`);
+    strictEqual(values.isNonTrapping(right64), false, `${operator} i64 right child`);
   }
 });
 
@@ -169,11 +165,10 @@ test("propagates trapping children through every unary wrapper", () => {
   const wrapped = entries(unaryOperators).map(([operator]) => (
     [operator, values.unary(operator, safe), values.unary(operator, trapping)] as const
   ));
-  const traits = new ValueTraits(values);
 
   for (const [operator, safeValue, unsafeValue] of wrapped) {
-    strictEqual(traits.isNonTrapping(safeValue), true, `${operator} safe child`);
-    strictEqual(traits.isNonTrapping(unsafeValue), false, `${operator} trapping child`);
+    strictEqual(values.isNonTrapping(safeValue), true, `${operator} safe child`);
+    strictEqual(values.isNonTrapping(unsafeValue), false, `${operator} trapping child`);
   }
 });
 
@@ -196,14 +191,13 @@ test("propagates either trapping operand through every i32 and i64 compare", () 
     const right32 = values.compare(32, operator, safe, trapping);
     const left64 = values.compare64(operator, trapping64, safe64);
     const right64 = values.compare64(operator, safe64, trapping64);
-    const traits = new ValueTraits(values);
 
-    strictEqual(traits.isNonTrapping(safe32), true, `${operator} safe i32 operands`);
-    strictEqual(traits.isNonTrapping(safeComparison64), true, `${operator} safe i64 operands`);
-    strictEqual(traits.isNonTrapping(left32), false, `${operator} i32 left operand`);
-    strictEqual(traits.isNonTrapping(right32), false, `${operator} i32 right operand`);
-    strictEqual(traits.isNonTrapping(left64), false, `${operator} i64 left operand`);
-    strictEqual(traits.isNonTrapping(right64), false, `${operator} i64 right operand`);
+    strictEqual(values.isNonTrapping(safe32), true, `${operator} safe i32 operands`);
+    strictEqual(values.isNonTrapping(safeComparison64), true, `${operator} safe i64 operands`);
+    strictEqual(values.isNonTrapping(left32), false, `${operator} i32 left operand`);
+    strictEqual(values.isNonTrapping(right32), false, `${operator} i32 right operand`);
+    strictEqual(values.isNonTrapping(left64), false, `${operator} i64 left operand`);
+    strictEqual(values.isNonTrapping(right64), false, `${operator} i64 right operand`);
   }
 });
 
@@ -223,10 +217,9 @@ test("propagates trapping children through truncate and extend wrappers", () => 
     values.extend64(8, trapping, false),
     values.truncate64(32, trapping64)
   ];
-  const traits = new ValueTraits(values);
 
   for (const wrapper of wrappers) {
-    strictEqual(traits.isNonTrapping(wrapper), false, `wrapper value ${wrapper}`);
+    strictEqual(values.isNonTrapping(wrapper), false, `wrapper value ${wrapper}`);
   }
 });
 
@@ -242,12 +235,11 @@ test("requires all three eager select children to be nontrapping", () => {
   const unsafeCondition = values.select(trappingCondition, safeTrue, safeFalse);
   const unsafeTrue = values.select(safeCondition, trappingTrue, safeFalse);
   const unsafeFalse = values.select(safeCondition, safeTrue, trappingFalse);
-  const traits = new ValueTraits(values);
 
-  strictEqual(traits.isNonTrapping(allSafe), true);
-  strictEqual(traits.isNonTrapping(unsafeCondition), false);
-  strictEqual(traits.isNonTrapping(unsafeTrue), false);
-  strictEqual(traits.isNonTrapping(unsafeFalse), false);
+  strictEqual(values.isNonTrapping(allSafe), true);
+  strictEqual(values.isNonTrapping(unsafeCondition), false);
+  strictEqual(values.isNonTrapping(unsafeTrue), false);
+  strictEqual(values.isNonTrapping(unsafeFalse), false);
 });
 
 test("treats an already-bound trapping dependency as a safe replay cut point", () => {
@@ -256,11 +248,13 @@ test("treats an already-bound trapping dependency as a safe replay cut point", (
   const divisor = values.external(0);
   const quotient = values.binary("div_u", dividend, divisor);
   const wrapped = values.binary("add", quotient, values.const(1));
-  const traits = new ValueTraits(values);
 
-  strictEqual(traits.isNonTrapping(wrapped), false);
-  strictEqual(traits.canEvaluateWithoutTrap(wrapped, () => false), false);
-  strictEqual(traits.canEvaluateWithoutTrap(wrapped, (value) => value === quotient), true);
+  strictEqual(values.isNonTrapping(wrapped), false);
+  strictEqual(canEvaluateWithoutTrap(values, wrapped, () => false), false);
+  strictEqual(
+    canEvaluateWithoutTrap(values, wrapped, (value) => value === quotient),
+    true
+  );
 });
 
 test("does not let a bound descendant bypass an unbound trapping operation", () => {
@@ -269,8 +263,13 @@ test("does not let a bound descendant bypass an unbound trapping operation", () 
   const divisor = values.external(0);
   const quotient = values.binary("div_u", dividend, divisor);
   const wrapped = values.binary("add", quotient, values.const(1));
-  const traits = new ValueTraits(values);
 
-  strictEqual(traits.canEvaluateWithoutTrap(wrapped, (value) => value === dividend), false);
-  strictEqual(traits.canEvaluateWithoutTrap(quotient, (value) => value === quotient), true);
+  strictEqual(
+    canEvaluateWithoutTrap(values, wrapped, (value) => value === dividend),
+    false
+  );
+  strictEqual(
+    canEvaluateWithoutTrap(values, quotient, (value) => value === quotient),
+    true
+  );
 });

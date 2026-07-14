@@ -12,7 +12,7 @@ import {
 } from "#core/flags/values.js";
 import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
   SimpleFlagSource
@@ -40,7 +40,7 @@ export function logicFlagSource(
 
 export function writeAddFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   input: Readonly<{
     width: OperandWidth;
     left: ValueInput;
@@ -54,7 +54,7 @@ export function writeAddFlags(
 
 export function writeSubFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   input: Readonly<{
     width: OperandWidth;
     left: ValueInput;
@@ -68,7 +68,7 @@ export function writeSubFlags(
 
 export function writeShiftFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   input: Readonly<{
     op: ShiftFlagOp;
     width: OperandWidth;
@@ -85,7 +85,7 @@ export function writeShiftFlags(
 
 export function writeRotateFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   input: Readonly<{
     op: RotateFlagOp;
     width: OperandWidth;
@@ -107,7 +107,7 @@ export function writeRotateFlags(
 
 export function writeIncFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   input: Readonly<{ width: OperandWidth; input: ValueInput; result: ValueInput }>
 ): void {
   writeStatusFlagValues(s, incStatusFlagValues(semanticFlagOps(v), input));
@@ -115,7 +115,7 @@ export function writeIncFlags(
 
 export function writeDecFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   input: Readonly<{ width: OperandWidth; input: ValueInput; result: ValueInput }>
 ): void {
   writeStatusFlagValues(s, decStatusFlagValues(semanticFlagOps(v), input));
@@ -123,7 +123,7 @@ export function writeDecFlags(
 
 export function writeNegFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   input: Readonly<{ width: OperandWidth; input: ValueInput; result: ValueInput }>
 ): void {
   writeStatusFlagValues(s, negStatusFlagValues(semanticFlagOps(v), input));

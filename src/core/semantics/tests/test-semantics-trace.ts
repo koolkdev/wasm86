@@ -2,7 +2,7 @@ import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } fro
 import { pageFaultErrorCode, type CpuException } from "#core/exceptions.js";
 import { operand, reg, semanticVar } from "#core/semantics/refs.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
   GetOptions,
@@ -32,11 +32,9 @@ import type {
   ValueInput
 } from "#core/semantics/refs.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
-import type {
-  BinaryOperator,
-  CompareOperator,
-  UnaryOperator
-} from "#ir/operators.js";
+import type { BinaryOperator } from "#compiler/ir/values/binary.js";
+import type { CompareOperator } from "#compiler/ir/values/comparison.js";
+import type { UnaryOperator } from "#compiler/ir/values/unary.js";
 
 export type SemanticTrace = Readonly<{
   events: readonly string[];
@@ -109,7 +107,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   #nextEipValue: Value | undefined;
   #nextValueId = 0;
   #terminated = false;
-  readonly values: Values = {
+  readonly values: ValueBuilder = {
     const: (value) => this.#const(value),
     const64: (value) => this.#const64(value),
     binary: (operator, a, b) => this.#binary(operator, a, b),

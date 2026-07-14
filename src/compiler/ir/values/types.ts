@@ -1,0 +1,10 @@
+declare const valueBrand: unique symbol;
+
+export type ValueId = number & { readonly [valueBrand]: "x86-semantic-value" };
+export type ValueType = "i32" | "i64";
+
+// What is provably known about an i32 value: the smallest width it fits
+// unsigned and the smallest width it equals its own sign-extension from.
+export type WidthBounds = Readonly<{ unsignedBits: number; signedBits: number }>;
+
+export type ValueInput = Readonly<{ value: ValueId; type: ValueType }>;

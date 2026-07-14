@@ -11,7 +11,7 @@ import {
   dedupeDisjointChannels,
   type StateChannel
 } from "../slots.js";
-import type { ValueId } from "../values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   LoopSemanticsBuilderImpl,
   type LoopMemoryOps

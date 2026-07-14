@@ -1,4 +1,4 @@
-import type { ValueId } from "#ir/values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 
 // A fragment is an IrBlock emitted inline into a hand-written function
 // body. The embedding never changes the block — it only decides what the

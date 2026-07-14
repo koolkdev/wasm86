@@ -1,4 +1,4 @@
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
   SemanticTemplate
@@ -73,7 +73,7 @@ export function bitScanSemantic(op: BitScanOp, width: BitFieldWidth): SemanticTe
 
 function bitStringMemorySemantic(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   op: BitTestOp,
   width: BitFieldWidth,
   dst: OperandRef
@@ -108,7 +108,7 @@ function bitStringMemorySemantic(
 
 function writeBitTestResult(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   op: Exclude<BitTestOp, "bt">,
   width: BitFieldWidth,
   target: ResolvedStorageAccess<"write">,
@@ -122,7 +122,7 @@ function writeBitTestResult(
 
 function writeBitTestFlag(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   value: Value,
   bitIndex: Value
 ): void {
@@ -135,7 +135,7 @@ function writeBitTestFlag(
 }
 
 function bitTestWriteResult(
-  v: Values,
+  v: ValueBuilder,
   op: Exclude<BitTestOp, "bt">,
   width: BitFieldWidth,
   value: Value,
@@ -155,7 +155,7 @@ function bitTestWriteResult(
 
 function simpleBitIndex(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   width: BitFieldWidth,
   offsetSource: BitOffsetSource
 ): Value {
@@ -166,7 +166,7 @@ function simpleBitIndex(
   return v.binary("and", raw, v.const(width - 1));
 }
 
-function bitScanIndex(v: Values, op: BitScanOp, source: Value): Value {
+function bitScanIndex(v: ValueBuilder, op: BitScanOp, source: Value): Value {
   switch (op) {
     case "bsf":
       return v.unary("ctz", source);
@@ -177,7 +177,7 @@ function bitScanIndex(v: Values, op: BitScanOp, source: Value): Value {
 
 function writeBitScanFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   sourceIsZero: Value,
   scanOrZero: Value
 ): void {
@@ -197,14 +197,14 @@ function writeBitScanFlags(
   });
 }
 
-function parityFlag(v: Values, value: ValueInput): Value {
+function parityFlag(v: ValueBuilder, value: ValueInput): Value {
   const lowByte = v.binary("and", value, v.const(0xff));
   const odd = lowBit(v, v.unary("popcnt", lowByte));
 
   return v.compare(32, "eq", odd, v.const(0));
 }
 
-function lowBit(v: Values, value: ValueInput): Value {
+function lowBit(v: ValueBuilder, value: ValueInput): Value {
   return v.binary("and", value, v.const(1));
 }
 

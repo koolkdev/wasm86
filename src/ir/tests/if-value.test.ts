@@ -7,8 +7,12 @@ import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { actionOutput } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { ValueTable } from "#ir/value-table.js";
-import { fitsUnsigned, signExtended, type ValueId } from "#ir/values.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import {
+  fitsUnsigned,
+  signExtended
+} from "#compiler/ir/values/width-bounds.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 
 test("ifValue joins its arm results into one output", () => {
   const values = new ValueTable();

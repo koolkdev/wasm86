@@ -1,6 +1,6 @@
 import type { Action } from "./actions.js";
-import type { ValueId } from "./values.js";
-import type { ValueTable } from "./value-table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
 
 // `result` is the fallthrough value a body delivers when its owning control
 // action declares an output; escaping bodies carry none.

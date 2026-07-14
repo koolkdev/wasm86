@@ -10,7 +10,7 @@ import {
   nestedBodies,
   valueDependsOn
 } from "#ir/traverse.js";
-import type { ValueId } from "#ir/values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 
 export type ScheduleSite = Readonly<{
   body: Body;

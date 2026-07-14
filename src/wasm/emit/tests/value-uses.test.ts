@@ -4,8 +4,10 @@ import { test } from "node:test";
 import type { Action } from "#ir/actions.js";
 import { gprChannel } from "#ir/slots.js";
 import { memoryCheck, memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import { ValueTable } from "#ir/value-table.js";
-import { fitsUnsigned, valueId, type ValueId } from "#ir/values.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
 import { analyzeValueUses } from "#wasm/emit/value-uses.js";
 

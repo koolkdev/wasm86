@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { IrOp } from "#ir/ops.js";
-import type { ValueId } from "#ir/values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { helperFunctionName } from "#wasm/helpers/key.js";
 import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";

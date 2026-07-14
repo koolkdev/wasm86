@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { DispatchFinish, ExitFinish, HostExitReason } from "#ir/actions.js";
 import { eipChannel } from "#ir/slots.js";
-import type { ValueId } from "#ir/values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import { CpuExceptionVector, type CpuException } from "#core/exceptions.js";
 import { u32 } from "#core/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";

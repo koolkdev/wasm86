@@ -3,7 +3,8 @@ import { effectsOf, mayAlias } from "#ir/aliasing.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
 import { nestedBodies } from "#ir/traverse.js";
-import { valueChildren, valueId, type ValueId } from "#ir/values.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { BlockLiveness } from "../liveness.js";
 import type {
   ScheduleSite,
@@ -20,7 +21,6 @@ import {
   type ProducerSchedule
 } from "./model.js";
 import type { ValueUses } from "../value-uses.js";
-import { ValueTraits } from "../value-traits.js";
 import { analyzeDemands } from "./demands.js";
 import { verifyProducerEvents } from "./verify.js";
 
@@ -43,7 +43,6 @@ class ScheduleBuilder {
   readonly #liveness: BlockLiveness;
   readonly #uses: ValueUses;
   readonly #demands: DemandAnalysis;
-  readonly #traits: ValueTraits;
   readonly #demandsByValue = new Map<ValueId, ValueDemand[]>();
   readonly #sites = new Map<ValueId, ScheduleSite>();
   readonly #events = new Map<ValueId, ProducerEvent>();
@@ -58,7 +57,6 @@ class ScheduleBuilder {
     this.#liveness = liveness;
     this.#uses = uses;
     this.#demands = demands;
-    this.#traits = new ValueTraits(block.values);
   }
 
   build(): ProducerEventIndex {
@@ -107,7 +105,7 @@ class ScheduleBuilder {
 
       const computedAt = this.#demands.dominatingSite(
         valueDemands.map((demand) =>
-          this.#traits.isNonTrapping(id)
+          this.#block.values.isNonTrapping(id)
             ? demand.requiredAt
             : demand.consumedAt
         )
@@ -115,7 +113,7 @@ class ScheduleBuilder {
 
       this.#sites.set(id, computedAt);
 
-      for (const child of valueChildren(this.#block.values.node(id))) {
+      for (const child of this.#block.values.children(id)) {
         this.#addDemand({
           value: child,
           requiredAt: computedAt,
@@ -144,7 +142,7 @@ class ScheduleBuilder {
     for (const [value, site] of this.#sites) {
       if (
         this.#events.has(value) ||
-        valueChildren(this.#block.values.node(value)).length === 0
+        this.#block.values.children(value).length === 0
       ) {
         continue;
       }
@@ -194,7 +192,9 @@ class ScheduleBuilder {
 
     if (
       !this.#isAfterProducer(producer.site, site) ||
-      producer.inputs.some((input) => !this.#traits.isNonTrapping(input)) ||
+      producer.inputs.some(
+        (input) => !this.#block.values.isNonTrapping(input)
+      ) ||
       this.#writesCrossWindow(producer, site)
     ) {
       site = producer.site;

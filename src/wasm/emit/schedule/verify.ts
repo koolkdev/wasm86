@@ -2,7 +2,9 @@ import { assert } from "#common/assert.js";
 import { effectsOf, mayAlias } from "#ir/aliasing.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess, type StorageAccess } from "#ir/ops.js";
-import { valueChildren, valueId, type ValueId } from "#ir/values.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { BlockLiveness } from "../liveness.js";
 import type {
   BodyPathStep,
@@ -17,7 +19,6 @@ import {
   type ProducerEventIndex
 } from "./model.js";
 import type { ValueUses } from "../value-uses.js";
-import { ValueTraits } from "../value-traits.js";
 
 export function verifyProducerEvents(
   block: IrBlock,
@@ -33,7 +34,6 @@ export function verifyProducerEvents(
       .map((producer) => producer.output)
   );
   const seen = new Set<number>();
-  const traits = new ValueTraits(block.values);
 
   for (const event of schedule.events()) {
     assert(!seen.has(event.output), `producer ${event.output} has multiple events`);
@@ -52,15 +52,14 @@ export function verifyProducerEvents(
     liveness,
     uses,
     demands,
-    schedule,
-    traits
+    schedule
   );
 
   for (const event of schedule.events()) {
     const forProducer = expectedDemands.get(event.output);
 
     assert(forProducer !== undefined, `event ${event.output} has no analyzed demands`);
-    verifyEvent(uses, demands, schedule, traits, event, forProducer);
+    verifyEvent(block.values, uses, demands, schedule, event, forProducer);
   }
 }
 
@@ -69,8 +68,7 @@ function reconstructProducerDemands(
   liveness: BlockLiveness,
   uses: ValueUses,
   demands: DemandAnalysis,
-  schedule: ProducerEventIndex,
-  traits: ValueTraits
+  schedule: ProducerEventIndex
 ): ReadonlyMap<ValueId, readonly ValueDemand[]> {
   const byValue = new Map<ValueId, ValueDemand[]>();
   const byProducer = new Map<ValueId, readonly ValueDemand[]>();
@@ -128,13 +126,13 @@ function reconstructProducerDemands(
 
     const computedAt = demands.dominatingSite(
       valueDemands.map((demand) =>
-        traits.isNonTrapping(id)
+        block.values.isNonTrapping(id)
           ? demand.requiredAt
           : demand.consumedAt
       )
     );
 
-    for (const child of valueChildren(block.values.node(id))) {
+    for (const child of block.values.children(id)) {
       add({ value: child, requiredAt: computedAt, consumedAt: computedAt });
     }
   }
@@ -143,10 +141,10 @@ function reconstructProducerDemands(
 }
 
 function verifyEvent(
+  values: ValueTable,
   uses: ValueUses,
   demands: DemandAnalysis,
   schedule: ProducerEventIndex,
-  traits: ValueTraits,
   event: ProducerEvent,
   expectedDemands: readonly ValueDemand[]
 ): void {
@@ -180,7 +178,7 @@ function verifyEvent(
 
   if (!sameSite(producer.site, event.site)) {
     assert(
-      producer.inputs.every((input) => traits.isNonTrapping(input)),
+      producer.inputs.every((input) => values.isNonTrapping(input)),
       `producer ${event.output} moves a trapping input recipe`
     );
   }

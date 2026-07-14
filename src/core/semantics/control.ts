@@ -1,5 +1,5 @@
 import type { ConditionCode } from "#core/flags/conditions.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
   SemanticTemplate
@@ -160,7 +160,7 @@ export function loopSemantic(condition: LoopCondition): SemanticTemplate {
 
 function loopBranchPredicate(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   condition: LoopCondition,
   nonzero: Value
 ): Value {

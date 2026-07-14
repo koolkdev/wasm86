@@ -9,8 +9,8 @@ import type {
   ValueInput
 } from "#core/semantics/refs.js";
 import type { OperandWidth, SegmentRegister } from "#core/types.js";
-import type { ValueTable } from "../value-table.js";
-import type { ValueId } from "../values.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { OperandResolver } from "./operands.js";
 import type { SemanticScopeStack } from "./scope.js";
 

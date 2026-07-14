@@ -16,7 +16,7 @@ import {
 } from "#ir/slots.js";
 import type { StateSlot } from "#ir/slots.js";
 import { memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import { valueId } from "#ir/values.js";
+import { valueId } from "#compiler/ir/values/id.js";
 
 const memory: StorageEffect = { space: "memory" };
 

@@ -3,7 +3,7 @@ import { x86Flags, type X86Flag } from "#core/flags/definitions.js";
 import { registerAlias } from "#core/registers.js";
 import type { SegmentStateField } from "#core/state/fields.js";
 import { reg16, reg32, reg8, segmentRegisters, type Reg32, type RegName, type SegmentRegister } from "#core/types.js";
-import type { ValueId } from "./values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 
 export type GprChannel = Readonly<{
   kind: "gpr";

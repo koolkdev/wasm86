@@ -1,6 +1,6 @@
 import type { StateWriteAction } from "../../actions.js";
 import type { StateSlot } from "../../slots.js";
-import type { ValueId } from "../../values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 
 export type StatePathKind = "fault" | "completed";
 

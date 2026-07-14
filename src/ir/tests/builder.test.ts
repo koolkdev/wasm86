@@ -36,11 +36,13 @@ import type {
 import type { Body, IrBlock } from "#ir/block.js";
 import type { MemoryAccessKind } from "#ir/ops.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { valueId, type ValueId, type ValueNode } from "#ir/values.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueNode } from "#compiler/ir/values/table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import { invalidOpcode, PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import type { X86Flag, X86StatusFlag } from "#core/flags/definitions.js";
 import type { SemanticOps, SemanticTemplate } from "#core/semantics/builder.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   MemoryAccess,
   MemoryAccessKind as SemanticAccessKind,
@@ -102,7 +104,7 @@ function resolveDsMemory<TIntent extends SemanticAccessKind>(
 
 function writeDsMemory(
   s: SemanticOps,
-  v: Values,
+  v: ValueBuilder,
   address: ValueInput,
   value: ValueInput,
   width: OperandWidth
@@ -3342,7 +3344,7 @@ test("a narrow immExternal get truncates to the access width", () => {
 
   deepStrictEqual(v.node(write!.op.value), {
     kind: "truncate",
-    sourceType: "i32",
+    inputType: "i32",
     width: 8,
     value: v.external(0)
   });
@@ -3359,10 +3361,10 @@ test("a signed immExternal get sign-extends instead of masking", () => {
 
   deepStrictEqual(v.node(write!.op.value), {
     kind: "extend",
-    type: "i32",
-    signed: true,
+    resultType: "i32",
     width: 8,
-    value: v.external(0)
+    value: v.external(0),
+    signed: true
   });
 });
 

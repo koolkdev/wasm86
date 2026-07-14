@@ -13,7 +13,7 @@ import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
 import { nestedBodies } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
-import type { ValueId } from "#ir/values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import {
   wasmBranchHint,
@@ -25,11 +25,10 @@ import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { analyzeLiveness, type BlockLiveness } from "./liveness.js";
 import { emitOp } from "./ops.js";
-import { wasmTypeForValue } from "./operators.js";
 import { planProducerSchedule } from "./schedule/build.js";
 import { ProducerScheduleExecutor } from "./schedule/executor.js";
 import { analyzeValueUses } from "./value-uses.js";
-import { ValueEmitter } from "./value-emitter.js";
+import { ValueEmitter, wasmTypeForValue } from "./value-emitter.js";
 import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 
 // The emitter driver: walks an IrBlock in action order and fills the
@@ -291,7 +290,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       if (outputLocal !== undefined) {
         valueEmitter.emitUse(result);
         body.localSet(outputLocal);
-      } else if (block.values.node(result).kind === "unreachable") {
+      } else if (block.values.captureMode(result) === "unreachable") {
         // The path stays impossible even when nothing demands the output.
         body.unreachable();
       }

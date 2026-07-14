@@ -19,13 +19,12 @@ import {
   type StateSlot
 } from "./slots.js";
 import { actionOperands } from "./traverse.js";
+import { unboundedWidthBounds } from "#compiler/ir/values/width-bounds.js";
+import { valueId } from "#compiler/ir/values/id.js";
 import {
-  unboundedWidthBounds,
-  valueChildren,
-  valueId,
   type ValueId,
   type WidthBounds
-} from "./values.js";
+} from "#compiler/ir/values/types.js";
 
 export type ValidateIrBlockOptions = Readonly<{
   allowImplicitEntryFallthrough?: boolean;
@@ -294,7 +293,7 @@ class IrValidator {
           this.#block.values.valueType(context.ownerOutput),
         `${context.path} result type does not match its owner output`
       );
-      if (this.#block.values.node(body.result).kind !== "unreachable") {
+      if (this.#block.values.captureMode(body.result) !== "unreachable") {
         const resultBounds = this.#block.values.widthBounds(body.result);
         const outputBounds = this.#block.values.widthBounds(context.ownerOutput);
 
@@ -441,7 +440,7 @@ class IrValidator {
           return;
         }
         default:
-          for (const child of valueChildren(node)) {
+          for (const child of this.#block.values.children(id)) {
             visit(child);
           }
       }

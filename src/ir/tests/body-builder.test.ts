@@ -5,8 +5,9 @@ import type { Action } from "#ir/actions.js";
 import { BodyBuilder, buildIrBlock, type BodyActionSink } from "#ir/body-builder.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { fitsUnsigned, type ValueId } from "#ir/values.js";
-import { ValueTable } from "#ir/value-table.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import { memoryCheck, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 test("op derives the output and its bounds from the op access", () => {

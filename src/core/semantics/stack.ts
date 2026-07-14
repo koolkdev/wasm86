@@ -1,4 +1,4 @@
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticBuildContext, SemanticsBuilder, SemanticTemplate } from "#core/semantics/builder.js";
 import type { OperandRef, Value, ValueInput } from "#core/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, type X86Flag } from "#core/flags/definitions.js";
@@ -39,7 +39,7 @@ const popaCells = [
 
 export function pushStack(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   width: StackOperandWidth,
   value: ValueInput
 ): void {
@@ -58,7 +58,7 @@ export function pushStack(
 
 export function popStack(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   width: StackOperandWidth
 ): Value {
   const esp = s.get(s.reg("esp"));
@@ -134,7 +134,7 @@ export function popaSemantic(): SemanticTemplate {
   };
 }
 
-function pushAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void {
+function pushAll(s: SemanticsBuilder, v: ValueBuilder, width: StackOperandWidth): void {
   const esp = s.get(s.reg("esp"));
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
@@ -158,7 +158,7 @@ function pushAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void
   s.set(s.reg("esp"), nextEsp);
 }
 
-function popAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void {
+function popAll(s: SemanticsBuilder, v: ValueBuilder, width: StackOperandWidth): void {
   const esp = s.get(s.reg("esp"));
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
@@ -184,7 +184,7 @@ function popAll(s: SemanticsBuilder, v: Values, width: StackOperandWidth): void 
 
 function pushFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   width: StackOperandWidth,
   flags: readonly X86Flag[]
 ): void {
@@ -194,7 +194,7 @@ function pushFlags(
 
 function popFlags(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   width: StackOperandWidth,
   flags: readonly X86Flag[]
 ): void {
@@ -237,7 +237,7 @@ export function leaveSemantic(): SemanticTemplate {
 
 function popTargetStorage(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   context: SemanticBuildContext,
   width: StackOperandWidth,
   dst: OperandRef

@@ -1,4 +1,4 @@
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
   SemanticTemplate
@@ -57,7 +57,7 @@ export function doubleShiftSemantic(
   };
 }
 
-export function readShiftCount(s: SemanticsBuilder, v: Values, countSource: ShiftCountSource): Value {
+export function readShiftCount(s: SemanticsBuilder, v: ValueBuilder, countSource: ShiftCountSource): Value {
   switch (countSource) {
     case "one":
       return v.const(1);
@@ -78,7 +78,7 @@ function readDoubleShiftCount(s: SemanticsBuilder, countSource: DoubleShiftCount
 }
 
 function shiftResult(
-  v: Values,
+  v: ValueBuilder,
   op: ShiftOp,
   width: OperandWidth,
   value: Value,
@@ -95,7 +95,7 @@ function shiftResult(
 }
 
 function doubleShiftResult(
-  v: Values,
+  v: ValueBuilder,
   op: DoubleShiftOp,
   width: Extract<OperandWidth, 16 | 32>,
   value: Value,
@@ -121,7 +121,7 @@ function doubleShiftResult(
 }
 
 function sarShiftInput(
-  v: Values,
+  v: ValueBuilder,
   width: OperandWidth,
   value: Value
 ): Value {

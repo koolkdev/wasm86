@@ -3,8 +3,8 @@ import { test } from "node:test";
 
 import type { IfAction } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
-import { ValueTable } from "#ir/value-table.js";
-import { fitsUnsigned } from "#ir/values.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { pageFault } from "#core/exceptions.js";
 import { wasmBranchHint } from "#compiler/encoder/function-body.js";
 import { irBlockBody } from "./harness.js";

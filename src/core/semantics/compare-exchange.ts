@@ -1,4 +1,4 @@
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import type { Value, ValueInput } from "#core/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
@@ -87,6 +87,6 @@ function accumulator(width: OperandWidth): RegName {
   }
 }
 
-function and(v: Values, left: ValueInput, right: ValueInput): Value {
+function and(v: ValueBuilder, left: ValueInput, right: ValueInput): Value {
   return v.binary("and", left, right);
 }

@@ -6,7 +6,7 @@ import { memBinding, staticMemSegment } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
-import { ValueTable } from "#ir/value-table.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import { repMovsSemantic } from "#core/semantics/strings.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";

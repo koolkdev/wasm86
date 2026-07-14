@@ -3,8 +3,9 @@ import { test } from "node:test";
 
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { fitsUnsigned, type ValueId } from "#ir/values.js";
-import { ValueTable } from "#ir/value-table.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";

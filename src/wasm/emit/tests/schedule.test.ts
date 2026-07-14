@@ -9,7 +9,7 @@ import {
   stateRead,
   stateWrite
 } from "#ir/tests/storage-op-helpers.js";
-import { ValueTable } from "#ir/value-table.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
 import { planProducerSchedule } from "#wasm/emit/schedule/build.js";
 import { analyzeDemands } from "#wasm/emit/schedule/demands.js";

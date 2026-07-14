@@ -6,8 +6,9 @@ import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { memoryCheck, memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { ValueTable } from "#ir/value-table.js";
-import { fitsUnsigned, type ValueId } from "#ir/values.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
 
 function analyze(block: IrBlock, exportedOutputs: readonly ValueId[] = []) {

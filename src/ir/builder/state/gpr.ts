@@ -5,8 +5,8 @@ import {
   channelCovers, channelsOverlap, gprChannel, type GprDynamicSlot, type GprChannel
 } from "../../slots.js";
 import {
-  type ValueId } from "../../values.js";
-import type { ValueTable } from "../../value-table.js";
+  type ValueId } from "#compiler/ir/values/types.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { BodyBuilder } from "../../body-builder.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
 import type { StateWriteObserver } from "./write-log.js";

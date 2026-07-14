@@ -3,7 +3,8 @@ import type { OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
 import { actionOutput, finishOperands, nestedBodies } from "#ir/traverse.js";
-import { valueChildren, valueId, type ValueId } from "#ir/values.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 
 // The semantic value reachability needed outside emission. It deliberately
 // says nothing about how many times the emitter pushes a value or where an op
@@ -128,7 +129,7 @@ class LivenessAnalysis implements BlockLiveness {
       }
 
       const dependencies = this.#outputDependencies.get(id) ??
-        valueChildren(this.#block.values.node(id));
+        this.#block.values.children(id);
 
       for (const dependency of dependencies) {
         this.#markLive(dependency);

@@ -2,7 +2,7 @@ import type { CpuException } from "#core/exceptions.js";
 import type { Body } from "./block.js";
 import type { IrOp, StateWriteOp } from "./ops.js";
 import type { StateChannel } from "./slots.js";
-import type { ValueId } from "./values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 
 // Reports to the host; the action emitter owns the numeric encoding.
 export type HostExitReason = "hostTrap" | "unsupported" | "segmentLoad";

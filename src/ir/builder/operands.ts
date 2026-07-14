@@ -8,8 +8,8 @@ import type {
   EffectiveAddressTerms, MemDynamicOperandBinding, MemSegmentBinding, OperandBinding, RegDynamicOperandBinding
 } from "../operands.js";
 import type { GprDynamicSlot, GprChannel } from "../slots.js";
-import type { ValueId } from "../values.js";
-import { ValueTable } from "../value-table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import type { State } from "./state/index.js";
 
 export class OperandScope {

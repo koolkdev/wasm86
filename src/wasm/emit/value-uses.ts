@@ -2,7 +2,8 @@ import { assert } from "#common/assert.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { opAccess } from "#ir/ops.js";
 import { actionOutput, finishOperands, nestedBodies } from "#ir/traverse.js";
-import { valueChildren, valueId, type ValueId } from "#ir/values.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { BlockLiveness } from "./liveness.js";
 
 // Counts concrete consuming sites emitted for each value. Compound captures
@@ -131,7 +132,7 @@ class ValueUseAnalysis implements ValueUses {
       assert(uses > 0, `live value ${id} has no emitter uses`);
 
       const dependencies = this.#outputDependencies.get(id) ??
-        valueChildren(this.#block.values.node(id));
+        this.#block.values.children(id);
 
       for (const dependency of dependencies) {
         this.#addUse(dependency);

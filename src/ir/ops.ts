@@ -9,11 +9,13 @@ import {
 import type { StateSlot } from "./slots.js";
 import {
   fitsUnsigned,
-  signExtended,
-  type ValueId,
-  type ValueType,
-  type WidthBounds
-} from "./values.js";
+  signExtended
+} from "#compiler/ir/values/width-bounds.js";
+import type {
+  ValueId,
+  ValueType,
+  WidthBounds
+} from "#compiler/ir/values/types.js";
 
 export type MemoryAccessKind = "read" | "write";
 

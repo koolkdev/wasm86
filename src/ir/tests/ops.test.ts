@@ -22,7 +22,11 @@ import {
   segmentSelectorChannel,
   type StateSlot
 } from "#ir/slots.js";
-import { fitsUnsigned, signExtended, valueId } from "#ir/values.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import {
+  fitsUnsigned,
+  signExtended
+} from "#compiler/ir/values/width-bounds.js";
 
 const memory: StorageAccess = { space: "memory" };
 const memoryBounds: StorageAccess = { space: "memoryBounds" };

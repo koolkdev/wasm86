@@ -5,7 +5,7 @@ import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import { ValueTable } from "#ir/value-table.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   wasmBodyInstructions,

@@ -1,8 +1,15 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { ValueTable } from "#ir/value-table.js";
-import { fitsUnsigned, signExtended, valueChildren, valueId } from "#ir/values.js";
+import type { BinaryOperator } from "#compiler/ir/values/binary.js";
+import type { CompareOperator } from "#compiler/ir/values/comparison.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { ValueEmitContext } from "#compiler/ir/values/definition.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import type { UnaryOperator } from "#compiler/ir/values/unary.js";
 
 test("value table deduplicates constants by canonical i32 value", () => {
   const table = new ValueTable();
@@ -15,9 +22,12 @@ test("value table deduplicates constants by canonical i32 value", () => {
 
 test("value table exposes nodes by id", () => {
   const table = new ValueTable();
+  const seven = table.const(7);
+  const canonical = table.const(0xdeadbeef);
 
-  deepStrictEqual(table.node(table.const(7)), { kind: "const", value: 7 });
-  deepStrictEqual(table.node(table.const(0xdeadbeef)), { kind: "const", value: 0xdeadbeef | 0 });
+  strictEqual(table.constValue(seven), 7);
+  strictEqual(table.constValue(canonical), 0xdeadbeef | 0);
+  strictEqual(table.valueType(seven), "i32");
   throws(() => table.node(valueId(99)), /unknown value id 99/);
 });
 
@@ -30,7 +40,7 @@ test("building the same expression twice yields the same node id", () => {
   strictEqual(table.binary("add", a, b), add);
   notStrictEqual(table.binary("add", b, a), add);
   notStrictEqual(table.binary("sub", a, b), add);
-  deepStrictEqual(table.node(add), { kind: "binary", type: "i32", operator: "add", a, b });
+  strictEqual(table.valueType(add), "i32");
 });
 
 test("multiply expressions intern and fold as i32 low products", () => {
@@ -40,7 +50,7 @@ test("multiply expressions intern and fold as i32 low products", () => {
   const product = table.binary("mul", a, b);
 
   strictEqual(table.binary("mul", a, b), product);
-  deepStrictEqual(table.node(product), { kind: "binary", type: "i32", operator: "mul", a, b });
+  strictEqual(table.valueType(product), "i32");
   strictEqual(table.binary("mul", table.const(0x7fff_ffff), table.const(2)), table.const(-2));
   strictEqual(table.binary("mul", a, table.const(1)), a);
   strictEqual(table.binary("mul", table.const(0), b), table.const(0));
@@ -54,7 +64,6 @@ test("signed right shift is a distinct binary operator", () => {
 
   strictEqual(table.binary("shr_s", a, b), shifted);
   notStrictEqual(table.binary("shr_u", a, b), shifted);
-  deepStrictEqual(table.node(shifted), { kind: "binary", type: "i32", operator: "shr_s", a, b });
 });
 
 test("each compound kind deduplicates on its full key", () => {
@@ -68,25 +77,23 @@ test("each compound kind deduplicates on its full key", () => {
   notStrictEqual(table.unary("popcnt", a), extend);
   notStrictEqual(table.extend(16, a, true), extend);
   notStrictEqual(table.extend(8, a, false), extend);
-  deepStrictEqual(table.node(extend), { kind: "extend", type: "i32", signed: true, width: 8, value: a });
+  strictEqual(table.valueType(extend), "i32");
 
   const compare = table.compare(32, "eq", a, b);
 
   strictEqual(table.compare(32, "eq", a, b), compare);
   notStrictEqual(table.compare(32, "ne", a, b), compare);
-  deepStrictEqual(table.node(compare), { kind: "compare", type: "i32", operator: "eq", a, b });
+  strictEqual(table.valueType(compare), "i32");
 
   const select = table.select(compare, a, b);
 
   strictEqual(table.select(compare, a, b), select);
   notStrictEqual(table.select(compare, b, a), select);
-  deepStrictEqual(table.node(select), { kind: "select", condition: compare, whenTrue: a, whenFalse: b });
 
   const truncate = table.truncate(16, a);
 
   strictEqual(table.truncate(16, a), truncate);
   notStrictEqual(table.truncate(8, a), truncate);
-  deepStrictEqual(table.node(truncate), { kind: "truncate", sourceType: "i32", width: 16, value: a });
 });
 
 test("i64 values deduplicate on their typed operation keys", () => {
@@ -102,19 +109,22 @@ test("i64 values deduplicate on their typed operation keys", () => {
   const shift = table.const64(32n);
   const high = table.binary64("shr_u", product, shift);
   const low = table.truncate64(32, product);
-  const low16 = table.truncate64(16, product);
   const notEqual = table.compare64("ne", product, extendedA);
 
-  strictEqual(table.valueType(a), "i32");
-  strictEqual(table.valueType(extendedA), "i64");
-  strictEqual(table.valueType(zeroExtendedA), "i64");
-  strictEqual(table.valueType(product), "i64");
-  strictEqual(table.valueType(quotient), "i64");
-  strictEqual(table.valueType(remainder), "i64");
-  strictEqual(table.valueType(shift), "i64");
-  strictEqual(table.valueType(high), "i64");
-  strictEqual(table.valueType(low), "i32");
-  strictEqual(table.valueType(notEqual), "i32");
+  for (const [value, type] of [
+    [a, "i32"],
+    [extendedA, "i64"],
+    [zeroExtendedA, "i64"],
+    [product, "i64"],
+    [quotient, "i64"],
+    [remainder, "i64"],
+    [shift, "i64"],
+    [high, "i64"],
+    [low, "i32"],
+    [notEqual, "i32"]
+  ] as const) {
+    strictEqual(table.valueType(value), type);
+  }
   strictEqual(table.extend64(32, a, true), extendedA);
   strictEqual(table.extend64(32, a, false), zeroExtendedA);
   strictEqual(table.binary64("mul", extendedA, extendedB), product);
@@ -136,17 +146,6 @@ test("i64 values deduplicate on their typed operation keys", () => {
   strictEqual(table.truncate64(32, extendedA), a);
   strictEqual(table.truncate64(32, zeroExtendedA), a);
 
-  deepStrictEqual(table.node(extendedA), { kind: "extend", type: "i64", signed: true, width: 32, value: a });
-  deepStrictEqual(table.node(zeroExtendedA), { kind: "extend", type: "i64", signed: false, width: 32, value: a });
-  deepStrictEqual(table.node(product), { kind: "binary", type: "i64", operator: "mul", a: extendedA, b: extendedB });
-  deepStrictEqual(table.node(quotient), { kind: "binary", type: "i64", operator: "div_s", a: extendedA, b: extendedB });
-  deepStrictEqual(table.node(remainder), { kind: "binary", type: "i64", operator: "rem_s", a: zeroExtendedA, b: table.extend64(32, b, false) });
-  deepStrictEqual(table.node(shift), { kind: "const64", value: 32n });
-  deepStrictEqual(table.node(table.const64(-1n)), { kind: "const64", value: -1n });
-  deepStrictEqual(table.node(high), { kind: "binary", type: "i64", operator: "shr_u", a: product, b: shift });
-  deepStrictEqual(table.node(low), { kind: "truncate", sourceType: "i64", width: 32, value: product });
-  deepStrictEqual(table.node(low16), { kind: "truncate", sourceType: "i64", width: 16, value: product });
-  deepStrictEqual(table.node(notEqual), { kind: "compare", type: "i64", operator: "ne", a: product, b: extendedA });
 });
 
 test("binary operations fold constant operands", () => {
@@ -293,8 +292,8 @@ test("action outputs are distinct leaves, never deduped", () => {
   const second = table.addActionOutput();
 
   notStrictEqual(first, second);
-  deepStrictEqual(table.node(first), { kind: "actionOutput" });
-  deepStrictEqual(table.node(second), { kind: "actionOutput" });
+  strictEqual(table.valueType(first), "i32");
+  strictEqual(table.valueType(second), "i32");
 });
 
 test("external leaves deduplicate by external id", () => {
@@ -302,7 +301,7 @@ test("external leaves deduplicate by external id", () => {
 
   strictEqual(table.external(3), table.external(3));
   notStrictEqual(table.external(3), table.external(4));
-  deepStrictEqual(table.node(table.external(3)), { kind: "external", external: 3 });
+  strictEqual(table.valueType(table.external(3)), "i32");
 });
 
 test("compound nodes reject unknown children", () => {
@@ -350,6 +349,16 @@ test("extend folds constants and elides extensions covered by bounds", () => {
   strictEqual(table.extend(8, table.const(128), true), table.const(-128));
   strictEqual(table.extend(8, table.const(-129), true), table.const(127));
   strictEqual(table.extend(16, table.const(0x8000), true), table.const(-0x8000));
+});
+
+test("truncate64 folds matching signed and unsigned extensions", () => {
+  const table = new ValueTable();
+  const source = table.addActionOutput();
+  const low16 = table.truncate(16, source);
+
+  strictEqual(table.node(low16).kind, "truncate");
+  strictEqual(table.truncate64(16, table.extend64(16, source, true)), low16);
+  strictEqual(table.truncate64(16, table.extend64(16, source, false)), low16);
 });
 
 test("compare results fit a single bit either way", () => {
@@ -463,7 +472,145 @@ test("loop inputs are opaque i32 leaves with their creation bounds", () => {
   notStrictEqual(first, second);
   strictEqual(table.node(first).kind, "loopInput");
   strictEqual(table.valueType(first), "i32");
-  deepStrictEqual(valueChildren(table.node(first)), []);
   strictEqual(table.truncate(8, second), second);
   strictEqual(table.node(table.truncate(8, first)).kind, "truncate");
 });
+
+test("value inputs preserve repeated uses exactly", () => {
+  const table = new ValueTable();
+  const value = table.addActionOutput();
+  const doubled = table.binary("add", value, value);
+  const emitted: ValueId[] = [];
+
+  strictEqual(table.valueType(doubled), "i32");
+  table.emit(doubled, {
+    body: new WasmFunctionBodyEncoder(),
+    emitUse: (input) => emitted.push(input),
+    emitActionOutput: () => {},
+    emitExternal: () => {},
+    emitLoopInput: () => {}
+  });
+  deepStrictEqual(emitted, [value, value]);
+});
+
+test("emission visits stored inputs once in their declared order", () => {
+  const table = new ValueTable();
+  const condition = table.external(0);
+  const whenTrue = table.addActionOutput();
+  const whenFalse = table.addActionOutput();
+  const selected = table.select(condition, whenTrue, whenFalse);
+  const emitted: ValueId[] = [];
+
+  table.emit(selected, {
+    body: new WasmFunctionBodyEncoder(),
+    emitUse: (value) => emitted.push(value),
+    emitActionOutput: () => {},
+    emitExternal: () => {},
+    emitLoopInput: () => {}
+  });
+
+  deepStrictEqual(emitted, [whenTrue, whenFalse, condition]);
+});
+
+test("select joins arm bounds", () => {
+  const table = new ValueTable();
+  const condition = table.external(0);
+  const whenTrue = table.addActionOutput(fitsUnsigned(1));
+  const whenFalse = table.addActionOutput(fitsUnsigned(8));
+  const selected = table.select(condition, whenTrue, whenFalse);
+
+  strictEqual(table.valueType(selected), "i32");
+  deepStrictEqual(table.widthBounds(selected), fitsUnsigned(8));
+});
+
+test("division trap detection uses i32 and i64 constants", () => {
+  const table = new ValueTable();
+  const dividend32 = table.addActionOutput();
+  const minusOne32 = table.const(-1);
+  const zero32 = table.const(0);
+  const seventeen32 = table.const(17);
+  const min64 = table.const64(-0x8000_0000_0000_0000n);
+  const one64 = table.const64(1n);
+  const minusOne64 = table.const64(-1n);
+  const zero64 = table.const64(0n);
+  const seventeen64 = table.const64(17n);
+
+  for (const operator of ["div_s", "div_u", "rem_s", "rem_u"] as const) {
+    const zeroDivisor32 = table.binary(operator, dividend32, zero32);
+    const safeDivisor32 = table.binary(operator, dividend32, seventeen32);
+    const zeroDivisor64 = table.binary64(operator, one64, zero64);
+    const safeDivisor64 = table.binary64(operator, one64, seventeen64);
+
+    strictEqual(table.node(zeroDivisor32).kind, "binary");
+    strictEqual(table.node(safeDivisor32).kind, "binary");
+    strictEqual(table.node(zeroDivisor64).kind, "binary");
+    strictEqual(table.node(safeDivisor64).kind, "binary");
+    strictEqual(table.mayTrap(zeroDivisor32), true);
+    strictEqual(table.mayTrap(safeDivisor32), false);
+    strictEqual(table.mayTrap(zeroDivisor64), true);
+    strictEqual(table.mayTrap(safeDivisor64), false);
+  }
+
+  const possibleOverflow32 = table.binary("div_s", dividend32, minusOne32);
+  const exactOverflow64 = table.binary64("div_s", min64, minusOne64);
+  const safeMinusOne64 = table.binary64("div_s", one64, minusOne64);
+
+  strictEqual(table.node(possibleOverflow32).kind, "binary");
+  strictEqual(table.node(exactOverflow64).kind, "binary");
+  strictEqual(table.node(safeMinusOne64).kind, "binary");
+  strictEqual(table.mayTrap(possibleOverflow32), true);
+  strictEqual(table.mayTrap(exactOverflow64), true);
+  strictEqual(table.mayTrap(safeMinusOne64), false);
+});
+
+test("every scalar operator constructs and realizes its supported value types", () => {
+  const table = new ValueTable();
+  const a = table.addActionOutput();
+  const b = table.external(0);
+  const a64 = table.extend64(32, a, true);
+  const b64 = table.extend64(32, b, true);
+  const body = new WasmFunctionBodyEncoder();
+  const emitContext: ValueEmitContext = {
+    body,
+    emitUse: () => {},
+    emitActionOutput: () => {},
+    emitExternal: () => {},
+    emitLoopInput: () => {}
+  };
+
+  for (const operator of binaryOperators) {
+    const value32 = table.binary(operator, a, b);
+    const value64 = table.binary64(operator, a64, b64);
+
+    strictEqual(table.valueType(value32), "i32", operator);
+    strictEqual(table.valueType(value64), "i64", operator);
+    table.emit(value32, emitContext);
+    table.emit(value64, emitContext);
+  }
+
+  for (const operator of unaryOperators) {
+    const value = table.unary(operator, a);
+
+    strictEqual(table.valueType(value), "i32", operator);
+    table.emit(value, emitContext);
+  }
+
+  for (const operator of compareOperators) {
+    const value32 = table.compare(32, operator, a, b);
+    const value64 = table.compare64(operator, a64, b64);
+
+    strictEqual(table.valueType(value32), "i32", operator);
+    strictEqual(table.valueType(value64), "i32", operator);
+    table.emit(value32, emitContext);
+    table.emit(value64, emitContext);
+  }
+});
+
+const binaryOperators: readonly BinaryOperator[] = [
+  "add", "sub", "mul", "div_s", "div_u", "rem_s", "rem_u", "xor", "or", "and",
+  "shl", "rotl", "rotr", "shr_s", "shr_u"
+];
+const unaryOperators: readonly UnaryOperator[] = ["popcnt", "ctz", "clz", "eqz"];
+const compareOperators: readonly CompareOperator[] = [
+  "eq", "ne", "lt_u", "le_u", "gt_u", "ge_u", "lt_s", "le_s", "gt_s", "ge_s"
+];

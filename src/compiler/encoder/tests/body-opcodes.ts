@@ -127,8 +127,17 @@ export function wasmBodyOpcodes(functionBody: Uint8Array<ArrayBuffer>): readonly
       case wasmOpcode.i32LeU:
       case wasmOpcode.i32GeS:
       case wasmOpcode.i32GeU:
+      case wasmOpcode.i64Eqz:
       case wasmOpcode.i64Eq:
       case wasmOpcode.i64Ne:
+      case wasmOpcode.i64LtS:
+      case wasmOpcode.i64LtU:
+      case wasmOpcode.i64GtS:
+      case wasmOpcode.i64GtU:
+      case wasmOpcode.i64LeS:
+      case wasmOpcode.i64LeU:
+      case wasmOpcode.i64GeS:
+      case wasmOpcode.i64GeU:
       case wasmOpcode.i32Clz:
       case wasmOpcode.i32Ctz:
       case wasmOpcode.i32Popcnt:
@@ -147,15 +156,24 @@ export function wasmBodyOpcodes(functionBody: Uint8Array<ArrayBuffer>): readonly
       case wasmOpcode.i32ShrU:
       case wasmOpcode.i32Rotl:
       case wasmOpcode.i32Rotr:
+      case wasmOpcode.i64Clz:
+      case wasmOpcode.i64Ctz:
+      case wasmOpcode.i64Popcnt:
+      case wasmOpcode.i64Add:
+      case wasmOpcode.i64Sub:
       case wasmOpcode.i64Mul:
       case wasmOpcode.i64DivS:
       case wasmOpcode.i64DivU:
       case wasmOpcode.i64RemS:
       case wasmOpcode.i64RemU:
+      case wasmOpcode.i64And:
       case wasmOpcode.i64Or:
+      case wasmOpcode.i64Xor:
       case wasmOpcode.i64Shl:
       case wasmOpcode.i64ShrS:
       case wasmOpcode.i64ShrU:
+      case wasmOpcode.i64Rotl:
+      case wasmOpcode.i64Rotr:
       case wasmOpcode.i32WrapI64:
       case wasmOpcode.i64ExtendI32S:
       case wasmOpcode.i64ExtendI32U:
@@ -320,8 +338,17 @@ export function wasmBodyMemoryAccesses(functionBody: Uint8Array<ArrayBuffer>): r
       case wasmOpcode.i32LeU:
       case wasmOpcode.i32GeS:
       case wasmOpcode.i32GeU:
+      case wasmOpcode.i64Eqz:
       case wasmOpcode.i64Eq:
       case wasmOpcode.i64Ne:
+      case wasmOpcode.i64LtS:
+      case wasmOpcode.i64LtU:
+      case wasmOpcode.i64GtS:
+      case wasmOpcode.i64GtU:
+      case wasmOpcode.i64LeS:
+      case wasmOpcode.i64LeU:
+      case wasmOpcode.i64GeS:
+      case wasmOpcode.i64GeU:
       case wasmOpcode.i32Clz:
       case wasmOpcode.i32Ctz:
       case wasmOpcode.i32Popcnt:
@@ -340,15 +367,24 @@ export function wasmBodyMemoryAccesses(functionBody: Uint8Array<ArrayBuffer>): r
       case wasmOpcode.i32ShrU:
       case wasmOpcode.i32Rotl:
       case wasmOpcode.i32Rotr:
+      case wasmOpcode.i64Clz:
+      case wasmOpcode.i64Ctz:
+      case wasmOpcode.i64Popcnt:
+      case wasmOpcode.i64Add:
+      case wasmOpcode.i64Sub:
       case wasmOpcode.i64Mul:
       case wasmOpcode.i64DivS:
       case wasmOpcode.i64DivU:
       case wasmOpcode.i64RemS:
       case wasmOpcode.i64RemU:
+      case wasmOpcode.i64And:
       case wasmOpcode.i64Or:
+      case wasmOpcode.i64Xor:
       case wasmOpcode.i64Shl:
       case wasmOpcode.i64ShrS:
       case wasmOpcode.i64ShrU:
+      case wasmOpcode.i64Rotl:
+      case wasmOpcode.i64Rotr:
       case wasmOpcode.i32WrapI64:
       case wasmOpcode.i64ExtendI32S:
       case wasmOpcode.i64ExtendI32U:

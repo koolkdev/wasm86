@@ -2,12 +2,9 @@ import { assert } from "#common/assert.js";
 import type { Action, BranchHint, Finish, LoopCarriedCell } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
 import { opAccess, type IrOp } from "./ops.js";
-import { ValueTable } from "./value-table.js";
-import {
-  joinWidthBounds,
-  type ValueId,
-  type WidthBounds
-} from "./values.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import { joinWidthBounds } from "#compiler/ir/values/width-bounds.js";
+import type { ValueId, WidthBounds } from "#compiler/ir/values/types.js";
 
 export type BuildBody = (b: BodyBuilder) => void;
 export type BuildResult = (b: BodyBuilder) => ValueId;
@@ -159,7 +156,7 @@ export class BodyBuilder {
         this.values.valueType(result) === "i32",
         "only i32 control results are supported"
       );
-      if (this.values.node(result).kind !== "unreachable") {
+      if (this.values.captureMode(result) !== "unreachable") {
         bounds.push(this.values.widthBounds(result));
       }
     }

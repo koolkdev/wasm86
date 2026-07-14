@@ -2,8 +2,8 @@ import { assert } from "#common/assert.js";
 import type { Action, Finish, IrExit } from "./actions.js";
 import type { Body } from "./block.js";
 import { opAccess, type OpAccess } from "./ops.js";
-import { valueChildren, type ValueId } from "./values.js";
-import type { ValueTable } from "./value-table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
 
 export function nestedBodies(action: Action): readonly Body[] {
   switch (action.kind) {
@@ -157,7 +157,7 @@ export function valueDependsOn(
     }
 
     visited.add(current);
-    return valueChildren(values.node(current)).some(walk);
+    return values.children(current).some(walk);
   };
 
   return walk(id);
@@ -192,7 +192,7 @@ export function bodyInputValues(
     }
 
     decomposed.add(id);
-    for (const child of valueChildren(values.node(id))) {
+    for (const child of values.children(id)) {
       collect(child);
     }
   };

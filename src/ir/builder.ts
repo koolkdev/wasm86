@@ -47,8 +47,8 @@ import { StateWriteLog } from "./builder/state/write-log.js";
 import { BodyBuilder } from "./body-builder.js";
 import type { IrBlock } from "./block.js";
 import { type StateChannel } from "./slots.js";
-import { ValueTable } from "./value-table.js";
-import type { ValueId } from "./values.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 
 // Instruction addresses are known at block-compile time for JIT blocks, but
 // interpreter handlers receive them from host locals so one handler can serve

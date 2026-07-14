@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import { ValueTable } from "#ir/value-table.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
 import { planProducerSchedule } from "#wasm/emit/schedule/build.js";
 import { ProducerScheduleExecutor } from "#wasm/emit/schedule/executor.js";

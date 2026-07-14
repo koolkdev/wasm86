@@ -4,7 +4,7 @@ import type { BodyBuilder } from "../body-builder.js";
 import type { Finish, StateWriteAction } from "../actions.js";
 import type { StatePathKind } from "./state/pending-buffer.js";
 import type { State } from "./state/index.js";
-import type { ValueId } from "../values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { SemanticScopeStack } from "./scope.js";
 
 // The one place a body ends: the exit path's state flushes, then the Finish.

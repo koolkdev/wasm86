@@ -1,8 +1,8 @@
 import type { FlagValueOps } from "#core/flags/values.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { Value } from "#core/semantics/refs.js";
 
-export function semanticFlagOps(v: Values): FlagValueOps<Value> {
+export function semanticFlagOps(v: ValueBuilder): FlagValueOps<Value> {
   return {
     const32: (value) => v.const(value),
     truncate: (width, value) => v.truncate(width, value),

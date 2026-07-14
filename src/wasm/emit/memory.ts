@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { ValueId } from "#ir/values.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import { wasmGuestMemoryMinByteLength, wasmMemoryIndex } from "#wasm/abi.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#compiler/encoder/memory.js";

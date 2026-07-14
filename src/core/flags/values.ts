@@ -1,6 +1,6 @@
 import type { SimpleFlagSource } from "./sources.js";
 import type { X86StatusFlag } from "./definitions.js";
-import type { CompareOperator } from "#ir/operators.js";
+import type { CompareOperator } from "#compiler/ir/values/comparison.js";
 import { widthMask, type OperandWidth } from "../types.js";
 
 export type FlagValueOps<TValue extends number> = Readonly<{

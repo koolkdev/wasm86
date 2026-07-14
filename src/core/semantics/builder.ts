@@ -2,7 +2,7 @@ import type { ConditionCode } from "#core/flags/conditions.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#core/flags/sources.js";
 import type { X86Flag, X86StatusFlag } from "#core/flags/definitions.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {
   MemRef,
@@ -90,10 +90,10 @@ export type { MemoryAccess, MemoryAccessKind } from "./refs.js";
 export interface LoopSemanticsBuilder extends SemanticOps {}
 
 export type SemanticVar = VarRef;
-export type LoopBody = (builder: LoopSemanticsBuilder, values: Values) => ValueInput;
+export type LoopBody = (builder: LoopSemanticsBuilder, values: ValueBuilder) => ValueInput;
 export type IfBody<TBuilder extends SemanticOps = SemanticsBuilder> = (
   builder: TBuilder,
-  values: Values
+  values: ValueBuilder
 ) => void;
 
 export interface SemanticBuildContext {
@@ -102,7 +102,7 @@ export interface SemanticBuildContext {
 
 export type SemanticTemplate = (
   builder: SemanticsBuilder,
-  values: Values,
+  values: ValueBuilder,
   context: SemanticBuildContext
 ) => void;
 

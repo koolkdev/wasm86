@@ -1,4 +1,4 @@
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
   SemanticTemplate
@@ -47,7 +47,7 @@ export function rotateSemantic(
 
 function writePlainRotate(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   op: Extract<RotateOp, "rol" | "ror">,
   width: OperandWidth,
   value: Value,
@@ -73,7 +73,7 @@ function writePlainRotate(
 
 function writeCarryRotate(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   op: Extract<RotateOp, "rcl" | "rcr">,
   width: OperandWidth,
   value: Value,
@@ -100,7 +100,7 @@ function writeCarryRotate(
 }
 
 function rotateI32(
-  v: Values,
+  v: ValueBuilder,
   direction: RotateDirection,
   bits: number,
   value: Value,
@@ -118,7 +118,7 @@ function rotateI32(
 }
 
 function rotateI64(
-  v: Values,
+  v: ValueBuilder,
   direction: RotateDirection,
   bits: number,
   value: Value,
@@ -144,7 +144,7 @@ function rotateDirection(op: RotateOp): RotateDirection {
 }
 
 function rotateThroughCarry(
-  v: Values,
+  v: ValueBuilder,
   op: Extract<RotateOp, "rcl" | "rcr">,
   width: OperandWidth,
   value: Value,
@@ -161,7 +161,7 @@ function rotateThroughCarry(
 }
 
 function rotateThroughCarry32(
-  v: Values,
+  v: ValueBuilder,
   op: Extract<RotateOp, "rcl" | "rcr">,
   width: Extract<OperandWidth, 8 | 16>,
   value: Value,
@@ -178,7 +178,7 @@ function rotateThroughCarry32(
 }
 
 function buildThroughCarryRing32(
-  v: Values,
+  v: ValueBuilder,
   width: Extract<OperandWidth, 8 | 16>,
   value: Value,
   carry: Value
@@ -190,7 +190,7 @@ function buildThroughCarryRing32(
 }
 
 function rotateRing32(
-  v: Values,
+  v: ValueBuilder,
   op: Extract<RotateOp, "rcl" | "rcr">,
   ring: RotateRing32,
   count: Value
@@ -199,7 +199,7 @@ function rotateRing32(
 }
 
 function rotateThroughCarry64(
-  v: Values,
+  v: ValueBuilder,
   op: Extract<RotateOp, "rcl" | "rcr">,
   value: Value,
   carry: Value,
@@ -218,7 +218,7 @@ function rotateThroughCarry64(
 }
 
 function buildThroughCarryRing64(
-  v: Values,
+  v: ValueBuilder,
   value: Value,
   carry: Value
 ): Value {
@@ -230,7 +230,7 @@ function buildThroughCarryRing64(
 }
 
 function rotateRing64(
-  v: Values,
+  v: ValueBuilder,
   op: Extract<RotateOp, "rcl" | "rcr">,
   ring: Value,
   count: Value
@@ -238,11 +238,11 @@ function rotateRing64(
   return rotateI64(v, rotateDirection(op), 33, ring, count);
 }
 
-function extendU64(v: Values, value: Value): Value {
+function extendU64(v: ValueBuilder, value: Value): Value {
   return v.extend64(32, value, false);
 }
 
-function rotateCount(v: Values, width: OperandWidth, count: Value): Value {
+function rotateCount(v: ValueBuilder, width: OperandWidth, count: Value): Value {
   switch (width) {
     case 8:
       return v.binary("and", count, v.const(7));
@@ -253,7 +253,7 @@ function rotateCount(v: Values, width: OperandWidth, count: Value): Value {
   }
 }
 
-function throughCarryCount(v: Values, width: OperandWidth, count: Value): Value {
+function throughCarryCount(v: ValueBuilder, width: OperandWidth, count: Value): Value {
   switch (width) {
     case 8:
       return v.binary("rem_u", count, v.const(9));
@@ -264,6 +264,6 @@ function throughCarryCount(v: Values, width: OperandWidth, count: Value): Value 
   }
 }
 
-function countNonZero(v: Values, count: Value): Value {
+function countNonZero(v: ValueBuilder, count: Value): Value {
   return v.compare(32, "ne", count, v.const(0));
 }

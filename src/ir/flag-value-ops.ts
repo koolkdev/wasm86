@@ -1,6 +1,6 @@
 import type { FlagValueOps } from "#core/flags/values.js";
-import type { ValueId } from "./values.js";
-import type { ValueTable } from "./value-table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
 
 export function valueTableFlagOps(values: ValueTable): FlagValueOps<ValueId> {
   return {

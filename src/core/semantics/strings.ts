@@ -5,7 +5,7 @@ import {
   resolveStorageWrite,
   writeStorage
 } from "#core/semantics/memory.js";
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticBuildContext,
   SemanticOps,
@@ -14,7 +14,7 @@ import type {
 import type { Value } from "#core/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
 
-type StringUnit = (builder: SemanticOps, values: Values, context: SemanticBuildContext) => void;
+type StringUnit = (builder: SemanticOps, values: ValueBuilder, context: SemanticBuildContext) => void;
 
 export function movsSemantic(width: OperandWidth): SemanticTemplate {
   return movsUnit(width);
@@ -178,7 +178,7 @@ function repSemantic(
 
 function repBranchPredicate(
   s: SemanticOps,
-  v: Values,
+  v: ValueBuilder,
   condition: "E" | "NE" | undefined,
   nonzero: Value
 ): Value {
@@ -187,13 +187,13 @@ function repBranchPredicate(
     : v.binary("and", nonzero, s.condition(condition));
 }
 
-function stringDelta(s: SemanticOps, v: Values, width: OperandWidth) {
+function stringDelta(s: SemanticOps, v: ValueBuilder, width: OperandWidth) {
   const byteLength = width / 8;
 
   return v.select(s.readFlag("DF"), v.const(-byteLength), v.const(byteLength));
 }
 
-function stepRegister(s: SemanticOps, v: Values, reg: "esi" | "edi", delta: ReturnType<typeof stringDelta>): void {
+function stepRegister(s: SemanticOps, v: ValueBuilder, reg: "esi" | "edi", delta: ReturnType<typeof stringDelta>): void {
   s.set(s.reg(reg), v.binary("add", s.get(s.reg(reg), 32), delta), 32);
 }
 

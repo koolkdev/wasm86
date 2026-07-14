@@ -1,4 +1,4 @@
-import type { Values } from "#ir/values.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#core/semantics/builder.js";
 import type { StorageInput, Value } from "#core/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
@@ -60,7 +60,7 @@ export function imulRegRmImmSemantic(width: OperandWidth): SemanticTemplate {
 
 function writeImulResult(
   s: SemanticsBuilder,
-  v: Values,
+  v: ValueBuilder,
   width: OperandWidth,
   dst: StorageInput,
   left: Value,
@@ -72,7 +72,7 @@ function writeImulResult(
   s.set(dst, product.low, width);
 }
 
-function writeImplicitProduct(s: SemanticsBuilder, v: Values, width: OperandWidth, product: MultiplyProduct): void {
+function writeImplicitProduct(s: SemanticsBuilder, v: ValueBuilder, width: OperandWidth, product: MultiplyProduct): void {
   switch (width) {
     case 8:
       s.set(s.reg("ax"), v.truncate(16, product.full), 16);
@@ -89,7 +89,7 @@ function writeImplicitProduct(s: SemanticsBuilder, v: Values, width: OperandWidt
 }
 
 function multiplyProduct(
-  v: Values,
+  v: ValueBuilder,
   kind: MultiplyKind,
   width: OperandWidth,
   left: Value,
@@ -105,7 +105,7 @@ function multiplyProduct(
 }
 
 function narrowProduct(
-  v: Values,
+  v: ValueBuilder,
   kind: MultiplyKind,
   width: Extract<OperandWidth, 8 | 16>,
   left: Value,
@@ -125,7 +125,7 @@ function narrowProduct(
 }
 
 function dwordProduct(
-  v: Values,
+  v: ValueBuilder,
   kind: MultiplyKind,
   left: Value,
   right: Value
@@ -154,7 +154,7 @@ function accumulatorForWidth(width: OperandWidth): RegName {
   }
 }
 
-function writeMultiplyFlags(s: SemanticsBuilder, v: Values, overflow: Value): void {
+function writeMultiplyFlags(s: SemanticsBuilder, v: ValueBuilder, overflow: Value): void {
   const zero = v.const(0);
 
   // Undefined MUL/IMUL status flags are fixed to observed deterministic values.

@@ -1,6 +1,6 @@
 import { instructionCountChannel } from "../../slots.js";
-import type { ValueId } from "../../values.js";
-import { ValueTable } from "../../value-table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import type { StateCells } from "./cells.js";
 
 type InstructionCountStateSnapshot = Readonly<{

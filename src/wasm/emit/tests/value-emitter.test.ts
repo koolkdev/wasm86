@@ -6,8 +6,8 @@ import { gprChannel, lazyFlagsBChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { Body } from "#ir/block.js";
 import { bodyInputValues } from "#ir/traverse.js";
-import { ValueTable } from "#ir/value-table.js";
-import { fitsUnsigned } from "#ir/values.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { emitOp, type BorrowedUse } from "#wasm/emit/ops.js";
 import { ValueEmitter } from "#wasm/emit/value-emitter.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
@@ -676,7 +676,7 @@ test("i64 equality against an i64 constant lowers to i64.const and i64.eq", () =
   ]);
 });
 
-test("unsupported i64 operators fail at wasm lowering", () => {
+test("i64 binary and comparison operators use their direct opcodes", () => {
   const values = new ValueTable();
   const one = values.extend64(32, values.external(0), true);
   const two = values.extend64(32, values.external(1), true);
@@ -697,8 +697,29 @@ test("unsupported i64 operators fail at wasm lowering", () => {
     [0, 1]
   );
 
-  throws(() => sumEmitter.valueEmitter.emitUse(sum), /unsupported i64 binary operator add/);
-  throws(() => lessEmitter.valueEmitter.emitUse(less), /unsupported i64 compare operator lt_s/);
+  sumEmitter.valueEmitter.emitUse(sum);
+  sumEmitter.valueEmitter.releaseFragmentLocals();
+  sumEmitter.valueEmitter.assertClear();
+  lessEmitter.valueEmitter.emitUse(less);
+  lessEmitter.valueEmitter.releaseFragmentLocals();
+  lessEmitter.valueEmitter.assertClear();
+
+  deepStrictEqual(wasmBodyOpcodes(sumEmitter.body.finish().bytes), [
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.i64Add,
+    wasmOpcode.end
+  ]);
+  deepStrictEqual(wasmBodyOpcodes(lessEmitter.body.finish().bytes), [
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.localGet,
+    wasmOpcode.i64ExtendI32S,
+    wasmOpcode.i64LtS,
+    wasmOpcode.end
+  ]);
 });
 
 test("truncate masks to the requested width", () => {
@@ -741,12 +762,16 @@ test("truncate masks to the requested width", () => {
   ]);
 });
 
-test("equality against constant zero emits eqz from either side", () => {
+test("equality against constant zero canonicalizes to eqz from either side", () => {
   const values = new ValueTable();
   const external = values.external(3);
   const zero = values.const(0);
   const left = values.compare(32, "eq", external, zero);
   const right = values.compare(32, "eq", zero, external);
+
+  deepStrictEqual(values.node(left), { kind: "unary", operator: "eqz", value: external });
+  strictEqual(right, left);
+
   const { body, valueEmitter } = createTestEmitter(
     values,
     testBody([
@@ -764,8 +789,8 @@ test("equality against constant zero emits eqz from either side", () => {
   deepStrictEqual(wasmBodyOpcodes(body.finish().bytes), [
     wasmOpcode.localGet,
     wasmOpcode.i32Eqz,
+    wasmOpcode.localTee,
     wasmOpcode.localGet,
-    wasmOpcode.i32Eqz,
     wasmOpcode.end
   ]);
 });
