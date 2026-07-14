@@ -1,14 +1,14 @@
+import { descriptorTableByteLength } from "#memory/descriptors/layout.js";
+import { DescriptorTableView } from "#memory/descriptors/view.js";
 import { wasmGuestMemoryMinByteLength, wasmGuestMemoryMinPages, wasmPageByteLength } from "#wasm/abi.js";
-import { MACHINE_FIXED_END } from "#wasm/machine-state-layout.js";
 import { WasmCpuState } from "./cpu-state.js";
-import { MachineState } from "./machine-state.js";
 
 export type WasmHostMemories = Readonly<{
   cpuStateMemory: WebAssembly.Memory;
   guestMemory: WebAssembly.Memory;
   machineMemory: WebAssembly.Memory;
   cpuState: WasmCpuState;
-  machine: MachineState;
+  machine: DescriptorTableView;
 }>;
 
 export type WasmHostMemoryOptions = Readonly<{
@@ -24,7 +24,7 @@ export function createWasmHostMemories(options: WasmHostMemoryOptions = {}): Was
     initial: wasmPagesForByteLength(options.guestMemoryByteLength ?? wasmGuestMemoryMinByteLength)
   });
   const machineMemory = options.machineMemory ?? new WebAssembly.Memory({
-    initial: wasmPagesForByteLength(MACHINE_FIXED_END)
+    initial: wasmPagesForByteLength(descriptorTableByteLength)
   });
 
   return {
@@ -32,7 +32,7 @@ export function createWasmHostMemories(options: WasmHostMemoryOptions = {}): Was
     guestMemory,
     machineMemory,
     cpuState: new WasmCpuState(cpuStateMemory),
-    machine: new MachineState(machineMemory)
+    machine: new DescriptorTableView(machineMemory)
   };
 }
 
