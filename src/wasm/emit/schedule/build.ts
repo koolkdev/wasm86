@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import { effectsOf, mayAlias } from "#ir/aliasing.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { opAccess } from "#ir/ops.js";
+import type { StorageAccess } from "#compiler/ir/operations/definition.js";
 import { nestedBodies } from "#ir/traverse.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -222,7 +222,7 @@ class ScheduleBuilder {
   }
 
   #writesCrossWindow(producer: Producer, event: ScheduleSite): boolean {
-    const reads = opAccess(producer.action.op).reads;
+    const reads = producer.action.op.effects.reads;
     const path = this.#demands.pathFrom(producer.site.body, event.body);
 
     assert(path !== undefined, `event for ${producer.output} leaves its producer scope`);
@@ -245,7 +245,7 @@ class ScheduleBuilder {
     body: Body,
     start: number,
     end: number,
-    reads: ReturnType<typeof opAccess>["reads"]
+    reads: readonly StorageAccess[]
   ): boolean {
     for (let index = start; index < end; index += 1) {
       const action = body.actions[index];

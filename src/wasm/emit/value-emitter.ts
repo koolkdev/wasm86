@@ -1,21 +1,36 @@
 import { assert } from "#common/assert.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import type { OpAction } from "#ir/actions.js";
-import type { IrOp } from "#ir/ops.js";
+import {
+  emitOperation as emitCompilerOperation,
+  type Operation
+} from "#compiler/ir/operations/index.js";
+import type {
+  BorrowedOperationInput,
+  HelperCall,
+  OperationEmitTarget,
+  OperationValueEmitter
+} from "#compiler/ir/operations/definition.js";
 import type { ValueEmitContext } from "#compiler/ir/values/definition.js";
-import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
+import {
+  type ValueId,
+  type ValueType
+} from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type {
+  WasmFunctionBodyEncoder
+} from "#compiler/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
-import { LocalRegistry } from "./local-registry.js";
-import type { BorrowedUse, OperandUses } from "./ops.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
+import { LocalRegistry } from "./local-registry.js";
 import type { ValueUses } from "./value-uses.js";
 
 // Turns captured values plus the value graph into stack code. emitUse pushes
 // one use; repeated values replay a temporary local until their final use.
 // An op that observes one operand several times borrows it without consuming
 // extra uses.
+
+export type BorrowedUse = BorrowedOperationInput;
 
 export type ValueEmitterContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -24,21 +39,20 @@ export type ValueEmitterContext = Readonly<{
   uses: ValueUses;
   // External id -> the wasm local the embedding bound it to.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
-  // Emits one op, consuming its value inputs through the given uses; the
-  // driver wires this to the op lowering layer, so the emitter never sees
-  // slot offsets or the helper registry.
-  emitOp(op: IrOp, operands: OperandUses): void;
+  // Numeric helper resolution is still supplied by the enclosing module.
+  helperFunctionIndex(helper: HelperCall): number;
   // Claims the verified use event for an uncaptured action output.
   // Scheduling remains outside this emitter.
   claimProducerAtUse(output: ValueId): OpAction;
 }>;
 
-export class ValueEmitter implements OperandUses {
+export class ValueEmitter implements OperationValueEmitter {
   readonly #context: ValueEmitterContext;
   readonly #body: WasmFunctionBodyEncoder;
   readonly #values: ValueTable;
   readonly #uses: ValueUses;
   readonly #registry: LocalRegistry;
+  readonly #operationEmitTarget: OperationEmitTarget;
   readonly #valueEmitContext: ValueEmitContext;
   // Open borrows per value; assertClear reports leaks.
   readonly #borrows = new Map<ValueId, number>();
@@ -53,6 +67,11 @@ export class ValueEmitter implements OperandUses {
     this.#values = context.values;
     this.#uses = context.uses;
     this.#registry = new LocalRegistry(context.body, context.scratch);
+    this.#operationEmitTarget = {
+      body: this.#body,
+      variableLocal: (variable) => this.varLocal(variable),
+      helperFunctionIndex: context.helperFunctionIndex
+    };
     this.#valueEmitContext = {
       body: this.#body,
       emitUse: (id) => this.emitUse(id),
@@ -74,6 +93,10 @@ export class ValueEmitter implements OperandUses {
     };
   }
 
+  emitOperation(operation: Operation): void {
+    emitCompilerOperation(this.#operationEmitTarget, this, operation);
+  }
+
   // Executes a capture event. Every counted use later replays its temporary
   // local, which recycles after the final reference.
   captureProducer(action: OpAction): void {
@@ -83,7 +106,7 @@ export class ValueEmitter implements OperandUses {
     const uses = this.#uses.useCount(output);
 
     assert(uses > 0, `scheduled action output ${output} has no emitted uses`);
-    this.#context.emitOp(action.op, this);
+    this.emitOperation(action.op);
     this.#registry.captureSet(output, uses, this.#typeOf(output));
   }
 
@@ -96,7 +119,7 @@ export class ValueEmitter implements OperandUses {
     const uses = this.#uses.useCount(output);
 
     assert(uses > 0, `scheduled action output ${output} has no emitted uses`);
-    this.#context.emitOp(action.op, this);
+    this.emitOperation(action.op);
     if (uses > 1) {
       this.#registry.captureTee(output, uses - 1, this.#typeOf(output));
     }

@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
 import type { OperandWidth, RegName } from "#core/types.js";
 import type { StateWriteAction } from "../../actions.js";
 import {
@@ -227,15 +228,17 @@ export class GprState {
   }
 
   #readState(slot: GprChannel | GprDynamicSlot, signed: boolean): ValueId {
-    return this.#currentBody().opValue(
-      signed
-        ? { kind: "state.read", slot, signed: true }
-        : { kind: "state.read", slot }
+    return this.#currentBody().operation(
+      stateRead.create(
+        signed
+          ? { slot, signed: true }
+          : { slot }
+      )
     );
   }
 
   #writeState(slot: GprChannel | GprDynamicSlot, value: ValueId): void {
-    this.#currentBody().op({ kind: "state.write", slot, value });
+    this.#currentBody().operation(stateWrite.create({ slot, value }));
   }
 
   #flushDirty(): void {

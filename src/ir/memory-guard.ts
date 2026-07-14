@@ -1,8 +1,9 @@
 import type { Action } from "./actions.js";
 import { BodyBuilder } from "./body-builder.js";
-import type { MemoryAccessKind } from "./ops.js";
+import { memoryCheck } from "#compiler/ir/operations/memory.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
+import type { MemoryAccessKind } from "#core/semantics/refs.js";
 import {
   pageFault,
   pageFaultErrorCode,
@@ -22,12 +23,10 @@ export function memoryGuardActions(
   faultBodyPrefix: readonly Action[] = []
 ): readonly Action[] {
   const builder = new BodyBuilder(values);
-  const fault = builder.opValue({
-    kind: "memory.check",
+  const fault = builder.operation(memoryCheck.create({
     address,
-    byteLength: values.const(byteLength),
-    access: memoryCheckAccess(access)
-  });
+    byteLength: values.const(byteLength)
+  }));
 
   builder.if(
     fault,
@@ -47,15 +46,6 @@ export function memoryGuardActions(
     { hint: "unlikely" }
   );
   return builder.build().actions;
-}
-
-function memoryCheckAccess(access: MemoryGuardAccess): MemoryAccessKind {
-  switch (access.kind) {
-    case "data":
-      return access.access;
-    case "instructionFetch":
-      return "read";
-  }
 }
 
 function pageFaultAccess(access: MemoryGuardAccess): PageFaultAccess {

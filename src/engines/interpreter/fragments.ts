@@ -1,4 +1,6 @@
 import { assert } from "#common/assert.js";
+import { memoryRead } from "#compiler/ir/operations/memory.js";
+import { stateRead } from "#compiler/ir/operations/state.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import { eipChannel } from "#ir/slots.js";
 import { BodyBuilder } from "#ir/body-builder.js";
@@ -55,14 +57,13 @@ class DecodeFragment {
   }
 
   readEip(): ValueId {
-    return this.#builder.opValue({ kind: "state.read", slot: eipChannel });
+    return this.#builder.operation(stateRead.create({ slot: eipChannel }));
   }
 
   readGprWord(index: ValueId): ValueId {
-    return this.#builder.opValue({
-      kind: "state.read",
-      slot: { kind: "gprDynamic", index, byteLength: 4 }
-    });
+    return this.#builder.operation(
+      stateRead.create({ slot: { kind: "gprDynamic", index, byteLength: 4 } })
+    );
   }
 
   // The scaled-index term: zero when the index field selects "none" (4).
@@ -82,10 +83,12 @@ class DecodeFragment {
       this.#builder.push(action);
     }
 
-    return this.#builder.opValue(
-      signed && width !== 32
-        ? { kind: "memory.read", address, byteOffset: 0, width, signed: true }
-        : { kind: "memory.read", address, byteOffset: 0, width }
+    return this.#builder.operation(
+      memoryRead.create(
+        signed && width !== 32
+          ? { address, byteOffset: 0, width, signed: true }
+          : { address, byteOffset: 0, width }
+      )
     );
   }
 

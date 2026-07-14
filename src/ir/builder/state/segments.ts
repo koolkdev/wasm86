@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { stateRead } from "#compiler/ir/operations/state.js";
 import type { OperandWidth, SegmentRegister } from "#core/types.js";
 import type { BodyBuilder } from "../../body-builder.js";
 import { segmentBaseChannel, type SegmentChannel } from "../../slots.js";
@@ -58,7 +59,9 @@ export class SegmentState {
 
   readDynamicSelector(index: ValueId, accessWidth: OperandWidth, options: SegmentReadOptions): ValueId {
     return this.#widthAdjusted(
-      this.#currentBody().opValue({ kind: "state.read", slot: { kind: "segmentDynamic", index, field: "selector" } }),
+      this.#currentBody().operation(
+        stateRead.create({ slot: { kind: "segmentDynamic", index, field: "selector" } })
+      ),
       accessWidth,
       options
     );
@@ -72,7 +75,9 @@ export class SegmentState {
     let base = this.#dynamicBases.get(index);
 
     if (base === undefined) {
-      base = this.#currentBody().opValue({ kind: "state.read", slot: { kind: "segmentDynamic", index, field: "base" } });
+      base = this.#currentBody().operation(
+        stateRead.create({ slot: { kind: "segmentDynamic", index, field: "base" } })
+      );
       this.#dynamicBases.set(index, base);
     }
 

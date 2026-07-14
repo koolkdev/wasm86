@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { varRead, varWrite } from "#compiler/ir/operations/variables.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
 import type { CpuException } from "#core/exceptions.js";
 import { isX86StatusFlag, type X86Flag } from "#core/flags/definitions.js";
@@ -220,7 +221,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   var(seed: ValueInput): SemanticVar {
     const variable = this.#state.vars.create();
 
-    this.#scopes.current.body.op({ kind: "var.write", variable: variable.index, value: seed });
+    this.#scopes.current.body.operation(
+      varWrite.create({ variable: variable.index, value: seed })
+    );
     return variable;
   }
 
@@ -230,7 +233,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     switch (storage.kind) {
       case "var":
         this.#state.vars.assertKnown(storage);
-        return this.#scopes.current.body.opValue({ kind: "var.read", variable: storage.index });
+        return this.#scopes.current.body.operation(varRead.create({ variable: storage.index }));
       case "reg":
         return this.#state.gpr.read(storage.reg, accessWidth, options);
       case "operand": {
@@ -268,7 +271,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     switch (storage.kind) {
       case "var":
         this.#state.vars.assertKnown(storage);
-        this.#scopes.current.body.op({ kind: "var.write", variable: storage.index, value });
+        this.#scopes.current.body.operation(
+          varWrite.create({ variable: storage.index, value })
+        );
         return;
       case "reg":
         this.#state.gpr.write(storage.reg, value, accessWidth);

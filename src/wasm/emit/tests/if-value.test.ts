@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
+import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
 import { BodyBuilder } from "#ir/body-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
@@ -21,12 +22,12 @@ test("ifValue selects one arm result and preserves its hint", async () => {
   const body = new BodyBuilder(values);
   const output = body.ifValue(
     values.external(0),
-    (then) => then.opValue({ kind: "state.read", slot: gprChannel("ebx") }),
-    (otherwise) => otherwise.opValue({ kind: "state.read", slot: gprChannel("ecx") }),
+    (then) => then.operation(stateRead.create({ slot: gprChannel("ebx") })),
+    (otherwise) => otherwise.operation(stateRead.create({ slot: gprChannel("ecx") })),
     { hint: "unlikely" }
   );
 
-  body.op({ kind: "state.write", slot: gprChannel("eax"), value: output });
+  body.operation(stateWrite.create({ slot: gprChannel("eax"), value: output }));
 
   const block: IrBlock = { values, body: body.build() };
   const encoded = irBlockBody(block, 1);
@@ -71,7 +72,7 @@ test("an unselected ifValue arm does not evaluate a trapping result", async () =
     (otherwise) => otherwise.values.const(7)
   );
 
-  body.op({ kind: "state.write", slot: gprChannel("eax"), value: output });
+  body.operation(stateWrite.create({ slot: gprChannel("eax"), value: output }));
 
   const block: IrBlock = { values, body: body.build() };
   const { stateView, run } = await instantiateIrBlock(block, 3);

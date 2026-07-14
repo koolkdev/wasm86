@@ -1,9 +1,7 @@
 import type { X86StatusFlag } from "#core/flags/definitions.js";
+import type { HelperCall } from "#compiler/ir/operations/definition.js";
 
-export type HelperCallKey = Readonly<{
-  kind: "lazyFlag";
-  flag: X86StatusFlag;
-}>;
+export type HelperCallKey = HelperCall;
 
 export function lazyFlagHelperName(flag: X86StatusFlag): string {
   return `resolve${flag}`;

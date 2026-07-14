@@ -34,18 +34,17 @@ import type {
   SwitchAction
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import type { MemoryAccessKind } from "#ir/ops.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { ValueNode } from "#compiler/ir/values/table.js";
+import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { invalidOpcode, PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import type { X86Flag, X86StatusFlag } from "#core/flags/definitions.js";
 import type { SemanticOps, SemanticTemplate } from "#core/semantics/builder.js";
-import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   MemoryAccess,
-  MemoryAccessKind as SemanticAccessKind,
+  MemoryAccessKind,
   ValueInput
 } from "#core/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#core/flags/definitions.js";
@@ -86,7 +85,7 @@ function mem(
   }, staticMemSegment(segment));
 }
 
-function resolveDsMemory<TIntent extends SemanticAccessKind>(
+function resolveDsMemory<TIntent extends MemoryAccessKind>(
   s: SemanticOps,
   address: ValueInput,
   byteLength: ValueInput,

@@ -1,7 +1,11 @@
 import { assert } from "#common/assert.js";
 import type { Action, BranchHint, Finish, LoopCarriedCell } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
-import { opAccess, type IrOp } from "./ops.js";
+import {
+  type Operation,
+  type OperationWithResult,
+  type OperationWithoutResult
+} from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { joinWidthBounds } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId, WidthBounds } from "#compiler/ir/values/types.js";
@@ -31,20 +35,16 @@ export class BodyBuilder {
     this.#sink = sink;
   }
 
-  // Schedules an op with no value output (memory.write, state.write, ...).
-  op(op: IrOp): void {
-    assert(opAccess(op).valueOutput === undefined, `${op.kind} op has an output; emit it with opValue`);
-    this.#emit({ kind: "op", op });
-  }
+  operation(op: OperationWithoutResult): void;
+  operation(op: OperationWithResult): ValueId;
+  operation(op: Operation): void | ValueId;
+  operation(op: Operation): void | ValueId {
+    if (op.result === undefined) {
+      this.#emit({ kind: "op", op });
+      return;
+    }
 
-  // Schedules an op that produces a value; returns that value.
-  opValue(op: IrOp): ValueId {
-    const valueOutput = opAccess(op).valueOutput;
-
-    assert(valueOutput !== undefined, `${op.kind} op has no output; emit it with op`);
-    assert(valueOutput.type === "i32", `${op.kind} op action output type is not supported`);
-
-    const output = this.values.addActionOutput(valueOutput.bounds);
+    const output = this.values.addActionOutput(op.result.bounds);
 
     this.#emit({ kind: "op", op, output });
     return output;

@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { memoryRead, memoryResolve, memoryWrite } from "#compiler/ir/operations/memory.js";
 import type { GetOptions } from "#core/semantics/builder.js";
 import type {
   MemRef,
@@ -65,11 +66,9 @@ export class MemoryManager {
       `memory resolution byte length must be positive, got ${staticByteLength}`
     );
     const linearAddress = this.#operands.resolveAddress(memory);
-    const invalid = this.#scopes.current.body.opValue({
-      kind: "memory.resolve",
-      address: linearAddress,
-      byteLength
-    });
+    const invalid = this.#scopes.current.body.operation(
+      memoryResolve.create({ address: linearAddress, byteLength })
+    );
 
     return {
       kind: "memoryAccess",
@@ -112,16 +111,20 @@ export class MemoryManager {
   ): Value {
     const signed = options.signed === true && width !== 32;
 
-    return this.#scopes.current.body.opValue(
-      signed
-        ? { kind: "memory.read", address, byteOffset, width, signed: true }
-        : { kind: "memory.read", address, byteOffset, width }
+    return this.#scopes.current.body.operation(
+      memoryRead.create(
+        signed
+          ? { address, byteOffset, width, signed: true }
+          : { address, byteOffset, width }
+      )
     );
   }
 
   #writeMemory(address: ValueId, value: ValueInput, width: OperandWidth, byteOffset = 0): void {
     this.#scopes.current.recordMemoryWrite();
-    this.#scopes.current.body.op({ kind: "memory.write", address, byteOffset, value, width });
+    this.#scopes.current.body.operation(
+      memoryWrite.create({ address, byteOffset, value, width })
+    );
   }
 
   #assertSubrange(byteLength: ValueId, byteOffset: ValueId, width: OperandWidth): void {

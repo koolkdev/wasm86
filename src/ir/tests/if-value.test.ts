@@ -2,16 +2,14 @@ import { deepStrictEqual, doesNotThrow, ok, strictEqual, throws } from "node:ass
 import { test } from "node:test";
 
 import type { Action } from "#ir/actions.js";
+import { stateRead } from "#compiler/ir/operations/state.js";
 import { BodyBuilder } from "#ir/body-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { actionOutput } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import {
-  fitsUnsigned,
-  signExtended
-} from "#compiler/ir/values/width-bounds.js";
+import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 
 test("ifValue joins its arm results into one output", () => {
@@ -22,12 +20,10 @@ test("ifValue joins its arm results into one output", () => {
   let elseResult!: ValueId;
   const output = body.ifValue(
     condition,
-    (then) => (thenResult = then.opValue({ kind: "state.read", slot: gprChannel("al") })),
-    (otherwise) => (elseResult = otherwise.opValue({
-      kind: "state.read",
-      slot: gprChannel("ax"),
-      signed: true
-    })),
+    (then) => (thenResult = then.operation(stateRead.create({ slot: gprChannel("al") }))),
+    (otherwise) => (elseResult = otherwise.operation(
+      stateRead.create({ slot: gprChannel("ax"), signed: true })
+    )),
     { hint: "unlikely" }
   );
   const block = { values, body: body.build() };
@@ -78,7 +74,7 @@ test("validation rejects a control output narrower than an arm result", () => {
           actions: [{
             kind: "op",
             output: armResult,
-            op: { kind: "state.read", slot: gprChannel("eax") }
+            op: stateRead.create({ slot: gprChannel("eax") })
           }],
           result: armResult
         },

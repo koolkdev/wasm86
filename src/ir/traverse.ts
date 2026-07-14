@@ -1,7 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { Action, Finish, IrExit } from "./actions.js";
 import type { Body } from "./block.js";
-import { opAccess, type OpAccess } from "./ops.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 
@@ -56,7 +55,7 @@ export function bodyContains(root: Body, target: Body): boolean {
 export function actionOperands(action: Action): readonly ValueId[] {
   switch (action.kind) {
     case "op":
-      return opAccess(action.op).valueInputs;
+      return action.op.inputs.map((input) => input.value);
     case "if":
       return [action.condition];
     case "switch":
@@ -99,10 +98,10 @@ function exitOperands(exit: IrExit): readonly ValueId[] {
 
 // An action's declared output: an op action's iff its op produces a value,
 // and value-producing control owns the selected body's result.
-export function actionOutput(action: Action, access?: OpAccess): ValueId | undefined {
+export function actionOutput(action: Action): ValueId | undefined {
   switch (action.kind) {
     case "op": {
-      if ((access ?? opAccess(action.op)).valueOutput === undefined) {
+      if (action.op.result === undefined) {
         return undefined;
       }
 

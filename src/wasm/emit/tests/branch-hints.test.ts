@@ -7,6 +7,7 @@ import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { pageFault } from "#core/exceptions.js";
 import { wasmBranchHint } from "#compiler/encoder/function-body.js";
+import { memoryCheck } from "#compiler/ir/operations/memory.js";
 import { irBlockBody } from "./harness.js";
 
 test("if branch hints come only from the explicit action hint", () => {
@@ -26,7 +27,7 @@ test("a static memory check byte length must be positive", () => {
         {
           kind: "op",
           output: condition,
-          op: { kind: "memory.check", address, byteLength, access: "read" }
+          op: memoryCheck.create({ address, byteLength })
         },
         {
           kind: "if",
@@ -55,7 +56,7 @@ function branchHintsForCheckIf(hint: IfAction["hint"]): readonly number[] {
         {
           kind: "op",
           output: condition,
-          op: { kind: "memory.check", address, byteLength, access: "read" }
+          op: memoryCheck.create({ address, byteLength })
         },
         {
           kind: "if",

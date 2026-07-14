@@ -1,6 +1,6 @@
 import type { CpuException } from "#core/exceptions.js";
 import type { Body } from "./block.js";
-import type { IrOp, StateWriteOp } from "./ops.js";
+import type { Operation } from "#compiler/ir/operations/index.js";
 import type { StateChannel } from "./slots.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 
@@ -11,7 +11,7 @@ export type IrExit =
   | Readonly<{ class: "cpuException"; exception: CpuException<ValueId> }>
   | Readonly<{ class: "host"; reason: HostExitReason; payload?: ValueId }>;
 
-export type OpAction = Readonly<{ kind: "op"; op: IrOp; output?: ValueId }>;
+export type OpAction = Readonly<{ kind: "op"; op: Operation; output?: ValueId }>;
 
 export type BranchHint = "unlikely" | "likely";
 
@@ -92,7 +92,10 @@ export type Action =
   | LoopContinueAction
   | FinishAction;
 
-export type StateWriteAction = Readonly<{ kind: "op"; op: StateWriteOp }>;
+export type StateWriteAction = Readonly<{
+  kind: "op";
+  op: Extract<Operation, { kind: "state.write" }>;
+}>;
 
 // A control action completes if every selectable body escapes; a
 // result-bearing body does not complete — it falls through to the join.

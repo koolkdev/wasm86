@@ -3,11 +3,17 @@ import { test } from "node:test";
 
 import type { Action } from "#ir/actions.js";
 import { gprChannel } from "#ir/slots.js";
-import { memoryCheck, memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import {
+  memoryCheck,
+  memoryRead,
+  memoryWrite,
+  stateRead,
+  stateWrite
+} from "#ir/tests/storage-op-helpers.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
 import { analyzeValueUses } from "#wasm/emit/value-uses.js";
 
@@ -35,8 +41,8 @@ test("action operands count one use per consuming action", () => {
   const analysis = analyze(values, [
     stateRead(deadStateRead, gprChannel("eax")),
     memoryRead(deadMemoryRead, address, 32),
-    { kind: "op", op: { kind: "memory.write", address, byteOffset: 0, value: stored, width: 32 } },
-    memoryCheck(fault, guarded, byteLength, "read"),
+    memoryWrite(address, stored, 32),
+    memoryCheck(fault, guarded, byteLength),
     {
       kind: "if",
       condition: fault,

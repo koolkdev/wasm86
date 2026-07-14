@@ -22,8 +22,8 @@ import {
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { IfBody, SemanticBranchHint } from "#core/semantics/builder.js";
-import { type StateChannel } from "../slots.js";
-import type { Action, LoopCarriedCell } from "../actions.js";
+import { type StateChannel, type StateSlot } from "../slots.js";
+import type { Action, LoopCarriedCell, OpAction } from "../actions.js";
 import { BodyBuilder, type BodyActionSink } from "../body-builder.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -124,20 +124,27 @@ class LoopBodySink implements BodyActionSink {
   }
 
   push(action: Action): void {
-    if (action.kind === "op" && action.op.kind === "state.read") {
-      const slot = action.op.slot;
+    if (action.kind !== "op") {
+      this.#bodyActions.push(action);
+      return;
+    }
 
+    const read = loopInvariantStateRead(action);
+
+    if (read !== undefined) {
       // Dynamic GPR reads flush tracked GPR state - asserted away at their
       // call sites; a dynamic segment base is loop-invariant like any static
       // non-carried channel, since segment loads are rejected inside loop
       // bodies and end the block outside them.
-      this.#scope.assertHoistableRead(slot);
+      this.#scope.assertHoistableRead(read);
       this.#entryActions.push(action);
       return;
     }
 
-    if (action.kind === "op" && action.op.kind === "state.write") {
-      this.#scope.assertDynamicWriteSupported(action.op.slot);
+    for (const write of action.op.effects.writes) {
+      if (write.space === "state") {
+        this.#scope.assertDynamicWriteSupported(write.slot);
+      }
     }
 
     this.#bodyActions.push(action);
@@ -150,6 +157,16 @@ class LoopBodySink implements BodyActionSink {
   entryActions(): readonly Action[] {
     return this.#entryActions;
   }
+}
+
+// Loop-entry hoisting deliberately recognizes only a single state read with
+// no writes. Keeping that policy named makes new effect shapes opt into this
+// transformation explicitly during review.
+function loopInvariantStateRead(action: OpAction): StateSlot | undefined {
+  const { reads, writes } = action.op.effects;
+  const read = reads.length === 1 ? reads[0] : undefined;
+
+  return read?.space === "state" && writes.length === 0 ? read.slot : undefined;
 }
 
 // The loop body's semantic surface: the host's operations behind the scope's

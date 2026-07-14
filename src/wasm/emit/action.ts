@@ -10,7 +10,6 @@ import {
   type SwitchCase
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { opAccess } from "#ir/ops.js";
 import { nestedBodies } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -24,12 +23,14 @@ import {
 import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { analyzeLiveness, type BlockLiveness } from "./liveness.js";
-import { emitOp } from "./ops.js";
 import { planProducerSchedule } from "./schedule/build.js";
 import { ProducerScheduleExecutor } from "./schedule/executor.js";
 import { analyzeValueUses } from "./value-uses.js";
 import { ValueEmitter, wasmTypeForValue } from "./value-emitter.js";
-import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
+import {
+  resolveHelperFunctionIndex,
+  type LegacyHelperIndexRegistryAdapter
+} from "#wasm/helpers/registry.js";
 
 // The emitter driver: walks an IrBlock in action order and fills the
 // given function body. Its product is a function body, never a module —
@@ -96,7 +97,8 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     values: block.values,
     uses,
     externalLocals: context.externalLocals ?? new Map(),
-    emitOp: (op, operands) => emitOp(body, context.helpers, op, operands),
+    helperFunctionIndex: (helper) =>
+      resolveHelperFunctionIndex(context.helpers, helper),
     claimProducerAtUse: (output) =>
       scheduledProducers.executeUse(output).producer.action
   });
@@ -116,8 +118,8 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   function emitAction(action: Action): void {
     switch (action.kind) {
       case "op":
-        if (opAccess(action.op).valueOutput === undefined) {
-          emitOp(body, context.helpers, action.op, valueEmitter);
+        if (action.op.result === undefined) {
+          valueEmitter.emitOperation(action.op);
         }
         return;
       case "finish":

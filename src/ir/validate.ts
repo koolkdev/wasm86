@@ -10,7 +10,8 @@ import {
   type SwitchAction
 } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
-import { opAccess, type OpValueOutput } from "./ops.js";
+import type { OperationResult } from "#compiler/ir/operations/definition.js";
+import type { Operation } from "#compiler/ir/operations/index.js";
 import {
   channelCovers,
   channelsOverlap,
@@ -152,20 +153,23 @@ class IrValidator {
   }
 
   #indexOpProducer(action: OpAction, site: ActionSite): void {
-    const access = opAccess(action.op);
+    const operation = action.op;
 
-    if (access.valueOutput === undefined) {
+    if (operation.result === undefined) {
       assert(action.output === undefined, `${action.op.kind} op action must not declare an output`);
       return;
     }
 
     assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
     assert(
-      access.writes.length === 0,
+      operation.effects.writes.length === 0,
       `${site.path} output-producing op has writes whose execute-when-dead semantics are not modeled`
     );
-    for (const input of access.valueInputs) {
-      assert(input < action.output, `producer operand ${input} created after its output ${action.output}`);
+    for (const input of operation.inputs) {
+      assert(
+        input.value < action.output,
+        `producer operand ${input.value} created after its output ${action.output}`
+      );
     }
     this.#recordProducer(action.output, site);
   }
@@ -318,14 +322,30 @@ class IrValidator {
     hasPriorEipWrite: boolean
   ): void {
     if (action.kind === "op") {
-      validateOpAction(this.#block, action);
-      if (context.enclosingLoop !== undefined) {
-        validateLoopStateAccess(action, context.enclosingLoop, site.path);
-      }
-    }
+      const operation = action.op;
 
-    for (const operand of actionOperands(action)) {
-      this.#validateValueUse(operand, site, `${site.path} operand ${operand}`);
+      validateOpAction(this.#block, action, operation);
+      if (context.enclosingLoop !== undefined) {
+        validateLoopStateAccess(operation, context.enclosingLoop, site.path);
+      }
+
+      for (const input of operation.inputs) {
+        const actualType = this.#block.values.valueType(input.value);
+
+        assert(
+          actualType === input.type,
+          `${site.path} operand ${input.value} must be ${input.type}, got ${actualType}`
+        );
+        this.#validateValueUse(
+          input.value,
+          site,
+          `${site.path} operand ${input.value}`
+        );
+      }
+    } else {
+      for (const operand of actionOperands(action)) {
+        this.#validateValueUse(operand, site, `${site.path} operand ${operand}`);
+      }
     }
 
     switch (action.kind) {
@@ -538,16 +558,14 @@ function assertCarriableChannel(channel: StateChannel, path: string): void {
   }
 }
 
-function validateLoopStateAccess(action: OpAction, loop: LoopAction, path: string): void {
-  const access = opAccess(action.op);
-
-  for (const read of access.reads) {
+function validateLoopStateAccess(operation: Operation, loop: LoopAction, path: string): void {
+  for (const read of operation.effects.reads) {
     if (read.space === "state") {
       validateLoopStateSlotAccess(read.slot, "read", loop, path);
     }
   }
 
-  for (const write of access.writes) {
+  for (const write of operation.effects.writes) {
     if (write.space === "state") {
       validateLoopStateSlotAccess(write.slot, "write", loop, path);
     }
@@ -592,33 +610,24 @@ function validateSwitchCases(action: SwitchAction, path: string): void {
   }
 }
 
-function validateOpAction(block: IrBlock, action: OpAction): void {
-  const access = opAccess(action.op);
-
-  if (action.op.kind === "var.read" || action.op.kind === "var.write") {
-    assert(
-      Number.isInteger(action.op.variable) && action.op.variable >= 0,
-      `${action.op.kind} op has an invalid semantic var index`
-    );
-  }
-
-  if (access.valueOutput === undefined) {
+function validateOpAction(block: IrBlock, action: OpAction, operation: Operation): void {
+  if (operation.result === undefined) {
     return;
   }
 
   assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
   assert(
-    block.values.valueType(action.output) === access.valueOutput.type,
+    block.values.valueType(action.output) === operation.result.type,
     `${action.op.kind} op action output ${action.output} has the wrong value type`
   );
-  assertOutputBounds(block, action, action.output, access.valueOutput);
+  assertOutputBounds(block, action, action.output, operation.result);
 }
 
 function assertOutputBounds(
   block: IrBlock,
   action: OpAction,
   output: ValueId,
-  expected: OpValueOutput
+  expected: OperationResult
 ): void {
   const actualBounds = block.values.widthBounds(output);
   const expectedBounds = expected.bounds ?? unboundedWidthBounds;
@@ -652,7 +661,7 @@ function assertKnownAction(action: Action): void {
 }
 
 function actionWritesEip(action: Action): boolean {
-  return action.kind === "op" &&
-    action.op.kind === "state.write" &&
-    action.op.slot.kind === "eip";
+  return action.kind === "op" && action.op.effects.writes.some(
+    (write) => write.space === "state" && write.slot.kind === "eip"
+  );
 }

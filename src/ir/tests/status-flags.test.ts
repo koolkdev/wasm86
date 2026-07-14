@@ -179,11 +179,14 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
   ok(switchAction !== undefined, "expected lazy condition switch");
   strictEqual(condition, switchAction.output);
   strictEqual(actions.length, 2);
-  deepStrictEqual(actions[0], {
-    kind: "op",
-    output: switchAction.selector,
-    op: { kind: "state.read", slot: lazyFlagsKindChannel }
-  });
+  const selectorRead = actions[0];
+
+  ok(
+    selectorRead?.kind === "op" && selectorRead.op.kind === "state.read",
+    "expected lazy-kind state read"
+  );
+  strictEqual(selectorRead.output, switchAction.selector);
+  strictEqual(selectorRead.op.slot, lazyFlagsKindChannel);
   deepStrictEqual(
     switchAction.cases.map((entry) => entry.match),
     [8, 16, 32].map((width) => lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, width as 8 | 16 | 32))
@@ -193,11 +196,20 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
 
   for (const [index, switchCase] of switchAction.cases.entries()) {
     const access = accesses[index]!;
+    const accessByteLength = "accessByteLength" in access
+      ? access.accessByteLength
+      : undefined;
+    const [left, right] = switchCase.body.actions;
 
-    deepStrictEqual(switchCase.body.actions.map((action) => action.kind === "op" ? action.op : undefined), [
-      { kind: "state.read", slot: lazyFlagsAChannel, ...access },
-      { kind: "state.read", slot: lazyFlagsBChannel, ...access }
-    ]);
+    ok(
+      left?.kind === "op" && left.op.kind === "state.read" &&
+        right?.kind === "op" && right.op.kind === "state.read",
+      "expected arm-local lazy operand reads"
+    );
+    strictEqual(left.op.slot, lazyFlagsAChannel);
+    strictEqual(right.op.slot, lazyFlagsBChannel);
+    strictEqual(left.op.accessByteLength, accessByteLength);
+    strictEqual(right.op.accessByteLength, accessByteLength);
 
     const result = values.node(switchCase.body.result!);
 
@@ -205,13 +217,15 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
     strictEqual(result.operator, "le_u");
   }
 
-  deepStrictEqual(
-    switchAction.defaultBody.actions.map((action) => action.kind === "op" ? action.op : undefined),
-    [
-      { kind: "cpu.resolveFlag", flag: "CF" },
-      { kind: "cpu.resolveFlag", flag: "ZF" }
-    ]
+  const [carry, zero] = switchAction.defaultBody.actions;
+
+  ok(
+    carry?.kind === "op" && carry.op.kind === "cpu.resolveFlag" &&
+      zero?.kind === "op" && zero.op.kind === "cpu.resolveFlag",
+    "expected fallback flag resolution"
   );
+  strictEqual(carry.op.flag, "CF");
+  strictEqual(zero.op.flag, "ZF");
 
   const fallback = values.node(switchAction.defaultBody.result!);
 
@@ -232,11 +246,23 @@ test("signed compare-family conditions sign-extend through narrow lazy reads", (
 
   for (const [index, switchCase] of switchAction.cases.entries()) {
     const access = accesses[index]!;
+    const signed = "signed" in access ? access.signed : undefined;
+    const accessByteLength = "accessByteLength" in access
+      ? access.accessByteLength
+      : undefined;
     const [left, right] = switchCase.body.actions;
 
     ok(left?.kind === "op" && right?.kind === "op", "expected arm-local reads");
-    deepStrictEqual(left.op, { kind: "state.read", slot: lazyFlagsAChannel, ...access });
-    deepStrictEqual(right.op, { kind: "state.read", slot: lazyFlagsBChannel, ...access });
+    ok(
+      left.op.kind === "state.read" && right.op.kind === "state.read",
+      "expected arm-local state reads"
+    );
+    strictEqual(left.op.slot, lazyFlagsAChannel);
+    strictEqual(right.op.slot, lazyFlagsBChannel);
+    strictEqual(left.op.signed, signed);
+    strictEqual(right.op.signed, signed);
+    strictEqual(left.op.accessByteLength, accessByteLength);
+    strictEqual(right.op.accessByteLength, accessByteLength);
 
     const result = values.node(switchCase.body.result!);
 

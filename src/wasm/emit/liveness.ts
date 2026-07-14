@@ -1,7 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { opAccess } from "#ir/ops.js";
 import { actionOutput, finishOperands, nestedBodies } from "#ir/traverse.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -21,8 +20,7 @@ export function analyzeLiveness(
 }
 
 export function opActionMustExecute(action: OpAction, liveness: BlockLiveness): boolean {
-  const access = opAccess(action.op);
-  const output = actionOutput(action, access);
+  const output = actionOutput(action);
 
   return output === undefined || liveness.isLive(output);
 }
@@ -54,18 +52,18 @@ class LivenessAnalysis implements BlockLiveness {
     for (const action of body.actions) {
       switch (action.kind) {
         case "op": {
-          const access = opAccess(action.op);
-          const output = actionOutput(action, access);
+          const inputs = action.op.inputs.map((input) => input.value);
+          const output = actionOutput(action);
 
           if (output === undefined) {
-            for (const input of access.valueInputs) {
+            for (const input of inputs) {
               this.#markLive(input);
             }
             break;
           }
 
           assert(!this.#outputDependencies.has(output), `value ${output} already has an output producer`);
-          this.#outputDependencies.set(output, access.valueInputs);
+          this.#outputDependencies.set(output, inputs);
           break;
         }
         case "if":

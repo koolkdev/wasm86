@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { stateRead } from "#compiler/ir/operations/state.js";
 import {
   type FlagChannel,
   type EipChannel,
@@ -8,11 +9,7 @@ import {
   type SegmentChannel,
   channelsOverlap
 } from "../../slots.js";
-import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
-import type {
-  ValueId,
-  WidthBounds
-} from "#compiler/ir/values/types.js";
+import { type ValueId, type WidthBounds } from "#compiler/ir/values/types.js";
 import type { StateWriteAction } from "../../actions.js";
 import type { BodyBuilder } from "../../body-builder.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
@@ -113,7 +110,7 @@ export class StateCells {
   }
 
   #readState(slot: StateSlot): ValueId {
-    return this.#currentBody().opValue({ kind: "state.read", slot });
+    return this.#currentBody().operation(stateRead.create({ slot }));
   }
 
   #assertNoOverlappingEntries(channel: StateCell): void {
@@ -127,15 +124,8 @@ export class StateCells {
 }
 
 export function channelReadBounds(channel: StateCell): WidthBounds | undefined {
-  switch (channel.kind) {
-    case "flag":
-      return fitsUnsigned(1);
-    case "lazyFlags":
-      return channel.field === "lazyFlagsKind" ? fitsUnsigned(8) : undefined;
-    case "segment":
-      return channel.field === "selector" ? fitsUnsigned(16) : undefined;
-    case "eip":
-    case "instructionCount":
-      return undefined;
-  }
+  const result = stateRead.create({ slot: channel }).result;
+
+  assert(result !== undefined, "state.read definition has no result");
+  return result.bounds;
 }

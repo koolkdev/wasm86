@@ -55,7 +55,7 @@ function decodeReadFragment(k: number): DecodeReadFragment {
     body: {
       actions: [
         stateRead(eipValue, eipChannel),
-        memoryCheck(fault, address, byteLength, "read"),
+        memoryCheck(fault, address, byteLength),
         {
           kind: "if",
           condition: fault,

@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import { effectsOf, mayAlias } from "#ir/aliasing.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { opAccess, type StorageAccess } from "#ir/ops.js";
+import type { StorageAccess } from "#compiler/ir/operations/definition.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -269,7 +269,7 @@ function assertStableWindow(
   event: ScheduleSite,
   path: readonly BodyPathStep[]
 ): void {
-  const reads = opAccess(producer.action.op).reads;
+  const reads = producer.action.op.effects.reads;
   let body = producer.site.body;
   let start = producer.site.actionIndex + 1;
 

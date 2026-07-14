@@ -6,6 +6,7 @@ import { memBinding, staticMemSegment } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
+import { varRead, varWrite } from "#compiler/ir/operations/variables.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { repMovsSemantic } from "#core/semantics/strings.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
@@ -153,14 +154,14 @@ test("var locals carry loop state and survive to post-loop reads", async () => {
   const next = values.binary("sub", readOut, values.const(1));
   const block = loopBlock(values, [
     stateRead(nSeed, gprChannel("ecx")),
-    { kind: "op", op: { kind: "var.write", variable: 0, value: nSeed } },
+    { kind: "op", op: varWrite.create({ variable: 0, value: nSeed }) },
     {
       kind: "loop",
       carried: [],
       body: {
         actions: [
-          { kind: "op", output: readOut, op: { kind: "var.read", variable: 0 } },
-          { kind: "op", op: { kind: "var.write", variable: 0, value: next } },
+          { kind: "op", output: readOut, op: varRead.create({ variable: 0 }) },
+          { kind: "op", op: varWrite.create({ variable: 0, value: next }) },
           {
             kind: "if",
             condition: values.compare(32, "ne", next, values.const(0)),
@@ -169,7 +170,7 @@ test("var locals carry loop state and survive to post-loop reads", async () => {
         ]
       }
     },
-    { kind: "op", output: postOut, op: { kind: "var.read", variable: 0 } },
+    { kind: "op", output: postOut, op: varRead.create({ variable: 0 }) },
     stateWrite(gprChannel("eax"), values.binary("add", postOut, values.const(100)))
   ]);
   const { stateView, run } = await instantiateIrBlock(block);

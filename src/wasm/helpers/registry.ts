@@ -29,3 +29,16 @@ export class LegacyHelperIndexRegistryAdapter {
     return this.#functionIndices.get(helperFunctionName(key));
   }
 }
+
+export function resolveHelperFunctionIndex(
+  registry: LegacyHelperIndexRegistryAdapter | undefined,
+  helper: HelperCallKey
+): number {
+  const displayName = helperFunctionName(helper);
+
+  assert(registry !== undefined, `missing Wasm helper ${displayName} in module registry`);
+  const functionIndex = registry.functionIndex(helper);
+
+  assert(functionIndex !== undefined, `missing Wasm helper ${displayName} in resolved index registry`);
+  return functionIndex;
+}

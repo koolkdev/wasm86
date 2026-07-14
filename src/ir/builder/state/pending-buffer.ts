@@ -1,4 +1,5 @@
 import type { StateWriteAction } from "../../actions.js";
+import { stateWrite } from "#compiler/ir/operations/state.js";
 import type { StateSlot } from "../../slots.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 
@@ -94,6 +95,9 @@ export class PendingBuffer<C extends StateSlot> {
           entry.dirty ? [[channel, entry.value] as const] : []
         ));
 
-    return entries.map(([slot, value]) => ({ kind: "op", op: { kind: "state.write", slot, value } }));
+    return entries.map(([slot, value]) => ({
+      kind: "op",
+      op: stateWrite.create({ slot, value })
+    }));
   }
 }

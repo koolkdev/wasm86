@@ -15,7 +15,13 @@ import {
   segmentSelectorChannel
 } from "#ir/slots.js";
 import type { StateSlot } from "#ir/slots.js";
-import { memoryRead, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import {
+  memoryRead,
+  memoryWrite,
+  resolveFlag,
+  stateRead,
+  stateWrite
+} from "#ir/tests/storage-op-helpers.js";
 import { valueId } from "#compiler/ir/values/id.js";
 
 const memory: StorageEffect = { space: "memory" };
@@ -69,7 +75,7 @@ test("effects derive from action kind and slot", () => {
     reads: [],
     writes: [memory]
   });
-  deepStrictEqual(effectsOf({ kind: "op", output: valueId(0), op: { kind: "cpu.resolveFlag", flag: "ZF" } }), {
+  deepStrictEqual(effectsOf(resolveFlag(0, "ZF")), {
     reads: [
       state(flagChannel("ZF")),
       state(lazyFlagsKindChannel),

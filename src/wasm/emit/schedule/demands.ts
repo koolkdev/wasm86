@@ -1,7 +1,6 @@
 import { assert } from "#common/assert.js";
 import { bodyFinal, type OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { opAccess } from "#ir/ops.js";
 import {
   actionOutput,
   bodyProducedOutputs,
@@ -180,21 +179,21 @@ class DemandAnalyzer implements DemandAnalysis {
 
       switch (action.kind) {
         case "op": {
-          const access = opAccess(action.op);
-          const output = actionOutput(action, access);
+          const inputs = action.op.inputs.map((input) => input.value);
+          const output = actionOutput(action);
 
           if (output === undefined) {
-            this.#roots.push(...access.valueInputs.map(demand));
+            this.#roots.push(...inputs.map(demand));
             break;
           }
 
           assert(!this.#producers.has(output), `value ${output} already has a producer`);
-          assert(access.writes.length === 0, `producer ${output} has writes`);
+          assert(action.op.effects.writes.length === 0, `producer ${output} has writes`);
           this.#producers.set(output, {
             output,
             action,
             site: actionSite,
-            inputs: access.valueInputs
+            inputs
           });
           produced.add(output);
           break;

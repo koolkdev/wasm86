@@ -13,7 +13,7 @@ import {
   encodeHostExit
 } from "#wasm/exit.js";
 import type { DispatchTarget, FallthroughTarget, LinkCompletion } from "./embed.js";
-import { emitSlotStore } from "./state.js";
+import { emitChannelStore } from "#compiler/ir/operations/state-encoding.js";
 
 // Report and completion lowering for nested bodies emitted inline by emit.ts.
 
@@ -89,16 +89,7 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
   }
 
   function emitDispatchEipWrite(targetEip: ValueId): void {
-    emitSlotStore(body, eipChannel, targetEip, {
-      emitUse: context.emitPayload,
-      constValue: context.constValue,
-      withBorrowedUse: () => {
-        throw new Error("dispatch target EIP store does not borrow operands");
-      },
-      varLocal: () => {
-        throw new Error("dispatch target EIP store does not touch semantic vars");
-      }
-    });
+    emitChannelStore(body, eipChannel, () => context.emitPayload(targetEip));
   }
 
   function resolveLinkedTarget(link: LinkCompletion, eip: ValueId): LinkedTarget {

@@ -1,8 +1,8 @@
 import { buildIrBlock, type SwitchArm } from "#ir/body-builder.js";
+import { stateRead, type StateReadArgs } from "#compiler/ir/operations/state.js";
 import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { IrBlock } from "#ir/block.js";
 import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
-import type { StateReadOp } from "#ir/ops.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { statusFlagValuesForSource } from "#core/flags/values.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/state.js";
@@ -46,7 +46,7 @@ function lazyFlagResolverBlock(flag: X86StatusFlag): Readonly<{ block: IrBlock; 
   let output!: ValueId;
   const block = buildIrBlock((b) => {
     output = b.switch(
-      b.opValue({ kind: "state.read", slot: lazyFlagsKindChannel }),
+      b.operation(stateRead.create({ slot: lazyFlagsKindChannel })),
       [
         noneArm(flag),
         ...([8, 16, 32] as const).flatMap((width) => [
@@ -65,7 +65,7 @@ function lazyFlagResolverBlock(flag: X86StatusFlag): Readonly<{ block: IrBlock; 
 function noneArm(flag: X86StatusFlag): SwitchArm {
   return {
     match: lazyFlagsKindByte(LAZY_FLAGS_KIND.NONE, 0),
-    build: (arm) => arm.opValue({ kind: "state.read", slot: flagChannel(flag) })
+    build: (arm) => arm.operation(stateRead.create({ slot: flagChannel(flag) }))
   };
 }
 
@@ -76,8 +76,12 @@ function binaryArm(flag: X86StatusFlag, kind: "add" | "sub", width: OperandWidth
       width
     ),
     build: (arm) => {
-      const left = arm.opValue(lazyOperandReadOp(lazyFlagsAChannel, width));
-      const right = arm.opValue(lazyOperandReadOp(lazyFlagsBChannel, width));
+      const left = arm.operation(
+        stateRead.create(lazyOperandReadArgs(lazyFlagsAChannel, width))
+      );
+      const right = arm.operation(
+        stateRead.create(lazyOperandReadArgs(lazyFlagsBChannel, width))
+      );
 
       return statusFlagValuesForSource(valueTableFlagOps(arm.values), {
         kind,
@@ -94,7 +98,9 @@ function logicArm(flag: X86StatusFlag, width: OperandWidth): SwitchArm {
   return {
     match: lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, width),
     build: (arm) => {
-      const result = arm.opValue(lazyOperandReadOp(lazyFlagsAChannel, width));
+      const result = arm.operation(
+        stateRead.create(lazyOperandReadArgs(lazyFlagsAChannel, width))
+      );
 
       return statusFlagValuesForSource(valueTableFlagOps(arm.values), {
         kind: "logic",
@@ -105,8 +111,8 @@ function logicArm(flag: X86StatusFlag, width: OperandWidth): SwitchArm {
   };
 }
 
-function lazyOperandReadOp(slot: StateSlot, width: OperandWidth): StateReadOp {
+function lazyOperandReadArgs(slot: StateSlot, width: OperandWidth): StateReadArgs {
   return width === 32
-    ? { kind: "state.read", slot }
-    : { kind: "state.read", slot, accessByteLength: width === 8 ? 1 : 2 };
+    ? { slot }
+    : { slot, accessByteLength: width === 8 ? 1 : 2 };
 }

@@ -1,4 +1,3 @@
-import type { Action, OpAction } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
@@ -76,38 +75,14 @@ export function helperCallsForBlock(
   const helperCalls = new Map<string, HelperCallKey>();
 
   walkBodyActions(block.body, (action) => {
-    const helper = requiredActionHelper(action, liveness);
+    if (action.kind === "op" && opActionMustExecute(action, liveness)) {
+      const helper = action.op.helper;
 
-    if (helper !== undefined) {
-      helperCalls.set(helperFunctionName(helper), helper);
+      if (helper !== undefined) {
+        helperCalls.set(helperFunctionName(helper), helper);
+      }
     }
   });
 
   return [...helperCalls.values()];
-}
-
-function requiredActionHelper(
-  action: Action,
-  liveness: BlockLiveness
-): HelperCallKey | undefined {
-  if (action.kind !== "op") {
-    return undefined;
-  }
-
-  const helper = actionHelper(action);
-
-  if (helper === undefined) {
-    return undefined;
-  }
-
-  return opActionMustExecute(action, liveness) ? helper : undefined;
-}
-
-function actionHelper(action: OpAction): HelperCallKey | undefined {
-  switch (action.op.kind) {
-    case "cpu.resolveFlag":
-      return { kind: "lazyFlag", flag: action.op.flag };
-    default:
-      return undefined;
-  }
 }

@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { stateWrite } from "#compiler/ir/operations/state.js";
 import type { LoopCarriedCell, StateWriteAction } from "../../actions.js";
 import {
   dedupeDisjointChannels, channelsOverlap, isDynamicSlot, type StateChannel, type StateSlot
@@ -66,7 +67,7 @@ export class StateLoopScope {
   commitExitValues(exitValues: readonly ValueId[]): readonly StateWriteAction[] {
     return this.#openCells().map((cell, index) => ({
       kind: "op",
-      op: { kind: "state.write", slot: cell.channel, value: exitValues[index]! }
+      op: stateWrite.create({ slot: cell.channel, value: exitValues[index]! })
     }));
   }
 

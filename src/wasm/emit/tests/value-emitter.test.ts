@@ -8,14 +8,19 @@ import type { Body } from "#ir/block.js";
 import { bodyInputValues } from "#ir/traverse.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
-import { emitOp, type BorrowedUse } from "#wasm/emit/ops.js";
-import { ValueEmitter } from "#wasm/emit/value-emitter.js";
+import {
+  type BorrowedUse,
+  ValueEmitter
+} from "#wasm/emit/value-emitter.js";
 import { analyzeLiveness } from "#wasm/emit/liveness.js";
 import { analyzeValueUses } from "#wasm/emit/value-uses.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
-import { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
+import {
+  LegacyHelperIndexRegistryAdapter,
+  resolveHelperFunctionIndex
+} from "#wasm/helpers/registry.js";
 import {
   wasmBodyInstructions,
   wasmBodyLocalCount,
@@ -61,9 +66,7 @@ function createTestEmitter(
     values,
     uses: analyzeValueUses(block, analyzeLiveness(block)),
     externalLocals,
-    // The real op lowering: its state and guest accesses emit the same
-    // opcode shapes the assertions pin (const address + load).
-    emitOp: (op, operands) => emitOp(body, helpers, op, operands),
+    helperFunctionIndex: (helper) => resolveHelperFunctionIndex(helpers, helper),
     claimProducerAtUse: (output) => {
       throw new Error(`action output ${output} has no test schedule`);
     }

@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { stateWrite } from "#compiler/ir/operations/state.js";
 import type { LoopBody, SemanticOps } from "#core/semantics/builder.js";
 import {
   type BranchHint,
@@ -223,7 +224,9 @@ export class ControlEmitter {
 
     for (const channel of channels) {
       if (this.#state.isChannelDirty(channel)) {
-        body.op({ kind: "state.write", slot: channel, value: this.#state.readChannel(channel) });
+        body.operation(
+          stateWrite.create({ slot: channel, value: this.#state.readChannel(channel) })
+        );
         emitted = true;
       }
     }

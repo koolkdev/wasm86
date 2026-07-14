@@ -306,7 +306,7 @@ test("a dynamic memory check preserves repeated borrowed operands", async () => 
     values,
     body: {
       actions: [
-        memoryCheck(fault, address, byteLength, "read"),
+        memoryCheck(fault, address, byteLength),
         stateWrite(gprChannel("eax"), fault)
       ]
     }

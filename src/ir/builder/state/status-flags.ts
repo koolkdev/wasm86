@@ -15,7 +15,11 @@ import {
 } from "#compiler/ir/values/comparison.js";
 import type { BodyBuilder, SwitchArm } from "../../body-builder.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "../../lazy-flags.js";
-import type { StateReadOp } from "../../ops.js";
+import {
+  stateRead,
+  type StateReadArgs
+} from "#compiler/ir/operations/state.js";
+import { resolveFlag } from "#compiler/ir/operations/resolve-flag.js";
 import { valueTableFlagOps } from "../../flag-value-ops.js";
 import {
   flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot
@@ -355,33 +359,37 @@ export class StatusFlagState {
     return {
       match: lazyFlagsKindByte(spec.kind, spec.width),
       build: (arm) => {
-        const left = arm.opValue(this.#lazyOperandRead(lazyFlagsAChannel, spec));
+        const left = arm.operation(
+          stateRead.create(this.#lazyOperandRead(lazyFlagsAChannel, spec))
+        );
 
         if (spec.kind === LAZY_FLAGS_KIND.LOGIC_RESULT) {
           return this.#values.compare(spec.width, spec.operator, left, this.#values.const(0));
         }
 
-        const right = arm.opValue(this.#lazyOperandRead(lazyFlagsBChannel, spec));
+        const right = arm.operation(
+          stateRead.create(this.#lazyOperandRead(lazyFlagsBChannel, spec))
+        );
 
         return this.#values.compare(spec.width, spec.operator, left, right);
       }
     };
   }
 
-  #lazyOperandRead(slot: StateSlot, spec: LazyConditionCaseSpec): StateReadOp {
+  #lazyOperandRead(slot: StateSlot, spec: LazyConditionCaseSpec): StateReadArgs {
     const signed = compareIsSigned(spec.operator);
 
     switch (spec.width) {
       case 8:
         return signed
-          ? { kind: "state.read", slot, signed: true, accessByteLength: 1 }
-          : { kind: "state.read", slot, accessByteLength: 1 };
+          ? { slot, signed: true, accessByteLength: 1 }
+          : { slot, accessByteLength: 1 };
       case 16:
         return signed
-          ? { kind: "state.read", slot, signed: true, accessByteLength: 2 }
-          : { kind: "state.read", slot, accessByteLength: 2 };
+          ? { slot, signed: true, accessByteLength: 2 }
+          : { slot, accessByteLength: 2 };
       case 32:
-        return { kind: "state.read", slot };
+        return { slot };
     }
   }
 
@@ -395,7 +403,7 @@ export class StatusFlagState {
         return cached;
       }
 
-      const resolved = body.opValue({ kind: "cpu.resolveFlag", flag });
+      const resolved = body.operation(resolveFlag.create({ flag }));
 
       flags.set(flag, resolved);
       return resolved;
@@ -441,7 +449,7 @@ export class StatusFlagState {
       return cached;
     }
 
-    const resolved = this.#currentBody().opValue({ kind: "cpu.resolveFlag", flag });
+    const resolved = this.#currentBody().operation(resolveFlag.create({ flag }));
 
     this.#inputFlags.set(flag, resolved);
     return resolved;

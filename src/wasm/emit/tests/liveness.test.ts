@@ -30,7 +30,7 @@ test("dead producer chains remain non-live", () => {
     body: {
       actions: [
         stateRead(base, gprChannel("eax")),
-        memoryCheck(checked, address, byteLength, "read")
+        memoryCheck(checked, address, byteLength)
       ]
     }
   } as const;

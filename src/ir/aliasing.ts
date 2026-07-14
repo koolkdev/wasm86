@@ -1,10 +1,12 @@
 import { channelsOverlap, isDynamicSlot } from "./slots.js";
 import type { Action } from "./actions.js";
 import type { Body } from "./block.js";
-import { opReads, opWrites, type StorageAccess } from "./ops.js";
+import type {
+  OperationEffects,
+  StorageAccess
+} from "#compiler/ir/operations/definition.js";
 import type { StateSlot } from "./slots.js";
 
-// Effects are derived from action kind + slot, never stored per-action.
 // One aliasing rule over the address spaces: static channels alias iff their
 // byte ranges intersect; a dynamic GPR slot may alias every GPR word and a
 // dynamic segment slot may alias every segment channel for the same field;
@@ -12,11 +14,7 @@ import type { StateSlot } from "./slots.js";
 // state never alias.
 
 export type StorageEffect = StorageAccess;
-
-export type ActionEffects = Readonly<{
-  reads: readonly StorageEffect[];
-  writes: readonly StorageEffect[];
-}>;
+export type ActionEffects = OperationEffects;
 
 const noEffects: ActionEffects = { reads: [], writes: [] };
 
@@ -25,10 +23,7 @@ const noEffects: ActionEffects = { reads: [], writes: [] };
 export function effectsOf(action: Action): ActionEffects {
   switch (action.kind) {
     case "op":
-      return {
-        reads: opReads(action.op),
-        writes: opWrites(action.op)
-      };
+      return action.op.effects;
     case "if":
       return bodyEffects(action.thenBody, action.elseBody);
     case "switch":
@@ -97,7 +92,9 @@ export function slotsMayAlias(a: StateSlot, b: StateSlot): boolean {
 export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolean {
   switch (action.kind) {
     case "op":
-      return opWrites(action.op).some((write) => write.space === "state" && slotsMayAlias(write.slot, slot));
+      return action.op.effects.writes.some(
+        (write) => write.space === "state" && slotsMayAlias(write.slot, slot)
+      );
     case "if":
       return bodyMayWriteStateSlot(action.thenBody, slot) ||
         (action.elseBody !== undefined && bodyMayWriteStateSlot(action.elseBody, slot));

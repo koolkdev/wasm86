@@ -5,10 +5,11 @@ import { maxSwitchMatch, type Action, type SwitchAction } from "#ir/actions.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { valueId } from "#compiler/ir/values/id.js";
+import { varWrite } from "#compiler/ir/operations/variables.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
+import { valueId } from "#compiler/ir/values/id.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function blockWith(actions: readonly Action[]): IrBlock {
   const values = new ValueTable();
@@ -131,11 +132,7 @@ test("op action output bounds must match the op signature", () => {
     () =>
       validateIrBlock(
         entryBlock(missingBounds, [
-          {
-            kind: "op",
-            output: missingBoundsOutput,
-            op: { kind: "memory.read", address: missingBoundsAddress, byteOffset: 0, width: 8 }
-          },
+          memoryRead(missingBoundsOutput, missingBoundsAddress, 8),
           finishExit()
         ])
       ),
@@ -150,11 +147,7 @@ test("op action output bounds must match the op signature", () => {
     () =>
       validateIrBlock(
         entryBlock(overlyNarrow, [
-          {
-            kind: "op",
-            output: overlyNarrowOutput,
-            op: { kind: "memory.read", address: overlyNarrowAddress, byteOffset: 0, width: 32 }
-          },
+          memoryRead(overlyNarrowOutput, overlyNarrowAddress, 32),
           finishExit()
         ])
       ),
@@ -375,7 +368,10 @@ test("a var op with an invalid index is rejected", () => {
   throws(
     () =>
       validateIrBlock(
-        blockWith([{ kind: "op", op: { kind: "var.write", variable: -1, value: valueId(0) } }])
+        blockWith([{
+          kind: "op",
+          op: varWrite.create({ variable: -1, value: valueId(0) })
+        }])
       ),
     /invalid semantic var index/
   );
@@ -873,7 +869,7 @@ test("producer operands must have lower value ids than their output", () => {
     () =>
       validateIrBlock(
         entryBlock(values, [
-          { kind: "op", output, op: { kind: "memory.read", address, byteOffset: 0, width: 32 } },
+          memoryRead(output, address, 32),
           finishExit()
         ])
       ),
