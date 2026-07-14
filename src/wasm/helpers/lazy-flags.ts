@@ -4,9 +4,9 @@ import type { IrBlock } from "#ir/block.js";
 import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import type { StateReadOp } from "#ir/ops.js";
 import type { ValueId } from "#ir/values.js";
-import { statusFlagValuesForSource } from "#core/flag-values.js";
-import type { X86StatusFlag } from "#core/flags.js";
-import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
+import { statusFlagValuesForSource } from "#core/flags/values.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/state.js";
+import type { X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
 import {
   WasmFunctionBodyEncoder,
@@ -14,7 +14,6 @@ import {
 } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
-import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 
 // A raw encoded body factory for the temporary declared-helper compatibility
@@ -65,7 +64,7 @@ function lazyFlagResolverBlock(flag: X86StatusFlag): Readonly<{ block: IrBlock; 
 
 function noneArm(flag: X86StatusFlag): SwitchArm {
   return {
-    match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
+    match: lazyFlagsKindByte(LAZY_FLAGS_KIND.NONE, 0),
     build: (arm) => arm.opValue({ kind: "state.read", slot: flagChannel(flag) })
   };
 }
@@ -73,7 +72,7 @@ function noneArm(flag: X86StatusFlag): SwitchArm {
 function binaryArm(flag: X86StatusFlag, kind: "add" | "sub", width: OperandWidth): SwitchArm {
   return {
     match: lazyFlagsKindByte(
-      kind === "add" ? WASM_CPU_LAZY_FLAGS_KIND.ADD : WASM_CPU_LAZY_FLAGS_KIND.SUB,
+      kind === "add" ? LAZY_FLAGS_KIND.ADD : LAZY_FLAGS_KIND.SUB,
       width
     ),
     build: (arm) => {
@@ -93,7 +92,7 @@ function binaryArm(flag: X86StatusFlag, kind: "add" | "sub", width: OperandWidth
 
 function logicArm(flag: X86StatusFlag, width: OperandWidth): SwitchArm {
   return {
-    match: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, width),
+    match: lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, width),
     build: (arm) => {
       const result = arm.opValue(lazyOperandReadOp(lazyFlagsAChannel, width));
 

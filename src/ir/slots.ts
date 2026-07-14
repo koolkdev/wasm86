@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
-import { x86Flags, type X86Flag } from "#core/flags.js";
+import { x86Flags, type X86Flag } from "#core/flags/definitions.js";
 import { registerAlias } from "#core/registers.js";
+import type { SegmentStateField } from "#core/state/fields.js";
 import { reg16, reg32, reg8, segmentRegisters, type Reg32, type RegName, type SegmentRegister } from "#core/types.js";
 import type { ValueId } from "./values.js";
 
@@ -12,7 +13,7 @@ export type GprChannel = Readonly<{
 }>;
 
 export type FlagChannel<TFlag extends X86Flag = X86Flag> = Readonly<{ kind: "flag"; flag: TFlag }>;
-export type SegmentChannelField = "selector" | "base" | "limit" | "access";
+export type SegmentChannelField = SegmentStateField;
 export type SegmentChannel<
   TSegment extends SegmentRegister = SegmentRegister,
   TField extends SegmentChannelField = SegmentChannelField

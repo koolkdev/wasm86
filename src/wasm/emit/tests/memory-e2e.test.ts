@@ -15,7 +15,7 @@ import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decodeOk, startAddress } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
-import { x86Flags, x86StatusFlags, type X86Flag } from "#core/flags.js";
+import { x86Flags, x86StatusFlags, type X86Flag } from "#core/flags/definitions.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type MemOperand, type Reg32 } from "#core/types.js";
 import { decodeExit, type DecodedCpuExceptionExit } from "#wasm/exit.js";

@@ -1,6 +1,9 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
+import { cpuExecutionStateFields } from "#cpu/execution-state.js";
+import { flagStateFields } from "#core/flags/state.js";
+import { eipField, gprFields, segmentFields } from "#core/state/fields.js";
 import {
   eipChannel,
   flagChannel,
@@ -13,7 +16,7 @@ import {
   segmentLimitChannel,
   segmentSelectorChannel
 } from "#ir/slots.js";
-import { x86Flags } from "#core/flags.js";
+import { x86Flags } from "#core/flags/definitions.js";
 import { reg16, reg32, reg8, segmentRegisters } from "#core/types.js";
 import { registerAlias } from "#core/registers.js";
 import {
@@ -22,7 +25,6 @@ import {
   WASM_CPU_SEGMENT_BASE_OFFSET,
   WASM_CPU_SEGMENT_LIMIT_OFFSET,
   WASM_CPU_SEGMENT_SELECTOR_OFFSET,
-  WASM_CPU_STATE_BYTE_LENGTH,
   WASM_CPU_STATE_FIELDS,
   WASM_CPU_STATE_LAYOUT,
   WASM_CPU_STATE_OFFSETS,
@@ -31,33 +33,28 @@ import {
   wasmCpuFlagByteOffset
 } from "#wasm/cpu-state-layout.js";
 
-test("cpu state layout fields and flag offsets are stable", () => {
-  deepStrictEqual(WASM_CPU_FLAG_BYTE_OFFSETS, {
-    CF: 52,
-    PF: 53,
-    AF: 54,
-    ZF: 55,
-    SF: 56,
-    OF: 57,
-    DF: 58,
-    TF: 59,
-    NT: 60,
-    AC: 61,
-    ID: 62
-  });
-  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsKind, 40);
-  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsA, 44);
-  strictEqual(WASM_CPU_STATE_OFFSETS.lazyFlagsB, 48);
-  strictEqual(WASM_CPU_STATE_BYTE_LENGTH, 148);
+test("combined cpu state layout uses the owner field definitions", () => {
+  deepStrictEqual(reg32.map((reg) => WASM_CPU_STATE_LAYOUT[reg]), gprFields);
+  strictEqual(WASM_CPU_STATE_LAYOUT.eip, eipField);
+  strictEqual(WASM_CPU_STATE_LAYOUT.instructionCount, cpuExecutionStateFields.instructionCount);
+  strictEqual(WASM_CPU_STATE_LAYOUT.lazyFlagsKind, flagStateFields.lazyKind);
+  strictEqual(WASM_CPU_STATE_LAYOUT.lazyFlagsA, flagStateFields.lazyA);
+  strictEqual(WASM_CPU_STATE_LAYOUT.lazyFlagsB, flagStateFields.lazyB);
 
   for (const field of WASM_CPU_STATE_FIELDS) {
     strictEqual(WASM_CPU_STATE_OFFSETS[field], WASM_CPU_STATE_LAYOUT[field].offset);
-    strictEqual(WASM_CPU_STATE_OFFSETS[field] + WASM_CPU_STATE_LAYOUT[field].byteLength <= WASM_CPU_STATE_BYTE_LENGTH, true);
   }
 
   for (const flag of x86Flags) {
     strictEqual(wasmCpuFlagByteOffset(flag), WASM_CPU_FLAG_BYTE_OFFSETS[flag]);
-    strictEqual(WASM_CPU_STATE_LAYOUT[flag].byteLength, 1);
+    strictEqual(WASM_CPU_STATE_LAYOUT[flag], flagStateFields.concrete[flag]);
+  }
+
+  for (const [index, reg] of segmentRegisters.entries()) {
+    strictEqual(WASM_CPU_STATE_LAYOUT[`${reg}Selector`], segmentFields.selectors[index]);
+    strictEqual(WASM_CPU_STATE_LAYOUT[`${reg}Base`], segmentFields.bases[index]);
+    strictEqual(WASM_CPU_STATE_LAYOUT[`${reg}Limit`], segmentFields.limits[index]);
+    strictEqual(WASM_CPU_STATE_LAYOUT[`${reg}Access`], segmentFields.access[index]);
   }
 });
 

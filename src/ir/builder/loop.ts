@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
-import type { ConditionCode } from "#core/conditions.js";
-import { isX86StatusFlag, type X86Flag } from "#core/flags.js";
+import type { ConditionCode } from "#core/flags/conditions.js";
+import { isX86StatusFlag, type X86Flag } from "#core/flags/definitions.js";
 import type {
   GetOptions,
   LoopSemanticsBuilder,

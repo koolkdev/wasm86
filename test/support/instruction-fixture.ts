@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 
-import { x86Flags, type X86Flag } from "#core/flags.js";
+import { x86Flags, type X86Flag } from "#core/flags/definitions.js";
 import {
   reg32,
   segmentRegisters,

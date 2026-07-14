@@ -1,4 +1,4 @@
-import { x86EflagsBitOffset, type X86Flag } from "#core/flags.js";
+import { x86EflagsBitOffset, type X86Flag } from "#core/flags/definitions.js";
 import type { Values } from "#ir/values.js";
 import type { SemanticsBuilder } from "#core/semantics/builder.js";
 import type { Value, ValueInput } from "#core/semantics/refs.js";

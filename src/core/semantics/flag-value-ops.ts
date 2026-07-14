@@ -1,4 +1,4 @@
-import type { FlagValueOps } from "#core/flag-values.js";
+import type { FlagValueOps } from "#core/flags/values.js";
 import type { Values } from "#ir/values.js";
 import type { Value } from "#core/semantics/refs.js";
 

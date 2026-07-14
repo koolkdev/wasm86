@@ -38,7 +38,7 @@ import type { MemoryAccessKind } from "#ir/ops.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { valueId, type ValueId, type ValueNode } from "#ir/values.js";
 import { invalidOpcode, PageFaultErrorCode, pageFault } from "#core/exceptions.js";
-import type { X86Flag, X86StatusFlag } from "#core/flags.js";
+import type { X86Flag, X86StatusFlag } from "#core/flags/definitions.js";
 import type { SemanticOps, SemanticTemplate } from "#core/semantics/builder.js";
 import type { Values } from "#ir/values.js";
 import type {
@@ -46,7 +46,7 @@ import type {
   MemoryAccessKind as SemanticAccessKind,
   ValueInput
 } from "#core/semantics/refs.js";
-import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#core/flags.js";
+import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#core/flags/definitions.js";
 import { aluSemantic, unaryAluSemantic } from "#core/semantics/alu.js";
 import { cmpSemantic } from "#core/semantics/cmp.js";
 import { callSemantic, jccSemantic, jecxzSemantic, jmpSemantic, loopSemantic } from "#core/semantics/control.js";

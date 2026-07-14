@@ -17,7 +17,7 @@ import {
   orderedHelpers
 } from "#wasm/helpers/module.js";
 import { writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
-import { x86StatusFlags, type X86StatusFlag } from "#core/flags.js";
+import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
 import { aluReference } from "#wasm/emit/tests/reference.js";
 import { extractOnlyWasmFunctionBody, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";

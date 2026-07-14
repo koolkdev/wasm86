@@ -1,7 +1,7 @@
-import type { ConditionCode } from "#core/conditions.js";
+import type { ConditionCode } from "#core/flags/conditions.js";
 import type { CpuException } from "#core/exceptions.js";
-import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#core/flag-sources.js";
-import type { X86Flag, X86StatusFlag } from "#core/flags.js";
+import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#core/flags/sources.js";
+import type { X86Flag, X86StatusFlag } from "#core/flags/definitions.js";
 import type { Values } from "#ir/values.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {

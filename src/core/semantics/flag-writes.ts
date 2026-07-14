@@ -9,8 +9,8 @@ import {
   type RotateFlagOp,
   type ShiftFlagOp,
   type StatusFlagValues
-} from "#core/flag-values.js";
-import { x86StatusFlags, type X86StatusFlag } from "#core/flags.js";
+} from "#core/flags/values.js";
+import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
 import type { Values } from "#ir/values.js";
 import type {

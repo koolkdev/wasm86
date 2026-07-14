@@ -1,4 +1,4 @@
-import type { FlagValueOps } from "#core/flag-values.js";
+import type { FlagValueOps } from "#core/flags/values.js";
 import type { ValueId } from "./values.js";
 import type { ValueTable } from "./value-table.js";
 

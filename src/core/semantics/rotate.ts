@@ -3,7 +3,7 @@ import type {
   SemanticsBuilder,
   SemanticTemplate
 } from "#core/semantics/builder.js";
-import { bitAt, lowBit, signBit } from "#core/flag-values.js";
+import { bitAt, lowBit, signBit } from "#core/flags/values.js";
 import type { Value } from "#core/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
 import { semanticFlagOps } from "./flag-value-ops.js";

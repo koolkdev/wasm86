@@ -1,7 +1,7 @@
-import type { SimpleFlagSource } from "./flag-sources.js";
-import type { X86StatusFlag } from "./flags.js";
+import type { SimpleFlagSource } from "./sources.js";
+import type { X86StatusFlag } from "./definitions.js";
 import type { CompareOperator } from "#ir/operators.js";
-import { widthMask, type OperandWidth } from "./types.js";
+import { widthMask, type OperandWidth } from "../types.js";
 
 export type FlagValueOps<TValue extends number> = Readonly<{
   const32(value: number): TValue;

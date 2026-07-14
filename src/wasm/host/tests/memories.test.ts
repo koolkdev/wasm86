@@ -31,7 +31,9 @@ test("runtime Wasm memories expose canonical cpu state memory", () => {
   }));
 });
 
-test("runtime Wasm memories expose raw cpu state field offsets", () => {
+// Temporary 04a differential: delete this legacy numeric golden with the
+// combined Wasm layout adapter in 04e.
+test("owner-assembled cpu state layout preserves the legacy field offsets", () => {
   deepStrictEqual(WASM_CPU_STATE_OFFSETS, {
     eax: 0,
     ecx: 4,

@@ -7,7 +7,7 @@ import { regBinding, type OperandBinding } from "#ir/operands.js";
 import { eipChannel, gprChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
-import { x86StatusFlags } from "#core/flags.js";
+import { x86StatusFlags } from "#core/flags/definitions.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type Reg32 } from "#core/types.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";

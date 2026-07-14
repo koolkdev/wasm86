@@ -1,4 +1,4 @@
-import type { X86StatusFlag } from "#core/flags.js";
+import type { X86StatusFlag } from "#core/flags/definitions.js";
 import { widthMask, type OperandWidth } from "#core/types.js";
 
 // Test-local arithmetic-flag reference for action e2e ALU cases. It avoids

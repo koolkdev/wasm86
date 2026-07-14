@@ -1,7 +1,7 @@
-import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags.js";
+import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags/definitions.js";
 import { pageFaultErrorCode, type CpuException } from "#core/exceptions.js";
 import { operand, reg, semanticVar } from "#core/semantics/refs.js";
-import type { ConditionCode } from "#core/conditions.js";
+import type { ConditionCode } from "#core/flags/conditions.js";
 import type { Values } from "#ir/values.js";
 import type {
   SemanticsBuilder,

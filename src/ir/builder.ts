@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
-import type { ConditionCode } from "#core/conditions.js";
+import type { ConditionCode } from "#core/flags/conditions.js";
 import type { CpuException } from "#core/exceptions.js";
-import { isX86StatusFlag, type X86Flag } from "#core/flags.js";
+import { isX86StatusFlag, type X86Flag } from "#core/flags/definitions.js";
 import { operand, reg, toStorageRef } from "#core/semantics/refs.js";
 import type {
   SemanticsBuilder,

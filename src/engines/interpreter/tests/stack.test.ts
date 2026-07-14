@@ -11,7 +11,7 @@ import {
 import { startAddress } from "#test/support/addresses.js";
 import { readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
 import { HostExit } from "#wasm/exit.js";
-import { x86Flags, type X86Flag } from "#core/flags.js";
+import { x86Flags, type X86Flag } from "#core/flags/definitions.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,

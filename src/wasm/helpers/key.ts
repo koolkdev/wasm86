@@ -1,4 +1,4 @@
-import type { X86StatusFlag } from "#core/flags.js";
+import type { X86StatusFlag } from "#core/flags/definitions.js";
 
 export type HelperCallKey = Readonly<{
   kind: "lazyFlag";

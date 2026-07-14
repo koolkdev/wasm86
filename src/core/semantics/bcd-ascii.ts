@@ -1,4 +1,4 @@
-import { zspValues } from "#core/flag-values.js";
+import { zspValues } from "#core/flags/values.js";
 import { divideError } from "#core/exceptions.js";
 import type { Values } from "#ir/values.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#core/semantics/builder.js";

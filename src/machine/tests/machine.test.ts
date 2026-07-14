@@ -32,12 +32,18 @@ test("machine creates one Cpu with writable default state", () => {
 
   state.eip = 0x1000;
   state.writeReg32("eax", 0x1234_5678);
+  state.writeSegmentSelector("fs", 0x30);
   state.writeSegmentBase("fs", 0x8000_0000);
+  state.writeSegmentLimit("fs", 0xffff_ffff);
+  state.writeSegmentAccess("fs", 0x00c0_00fb);
   state.writeFlag("CF", true);
 
   strictEqual(state.eip, 0x1000);
   strictEqual(state.readReg32("eax"), 0x1234_5678);
+  strictEqual(state.readSegmentSelector("fs"), 0x30);
   strictEqual(state.readSegmentBase("fs"), 0x8000_0000);
+  strictEqual(state.readSegmentLimit("fs"), 0xffff_ffff);
+  strictEqual(state.readSegmentAccess("fs"), 0x00c0_00fb);
   strictEqual(state.readFlag("CF"), true);
 });
 

@@ -1,4 +1,4 @@
-import type { X86Flag } from "#core/flags.js";
+import type { X86Flag } from "#core/flags/definitions.js";
 import { u32 } from "#core/numeric.js";
 import { widthMask, type RegisterAlias, type Reg32, type SegmentRegister } from "#core/types.js";
 
@@ -8,6 +8,8 @@ export interface CpuStateView {
   readReg32(reg: Reg32): number;
   readSegmentSelector(reg: SegmentRegister): number;
   readSegmentBase(reg: SegmentRegister): number;
+  readSegmentLimit(reg: SegmentRegister): number;
+  readSegmentAccess(reg: SegmentRegister): number;
   readFlag(flag: X86Flag): boolean;
 }
 
@@ -17,6 +19,8 @@ export interface MutableCpuStateView extends CpuStateView {
   writeReg32(reg: Reg32, value: number): void;
   writeSegmentSelector(reg: SegmentRegister, value: number): void;
   writeSegmentBase(reg: SegmentRegister, value: number): void;
+  writeSegmentLimit(reg: SegmentRegister, value: number): void;
+  writeSegmentAccess(reg: SegmentRegister, value: number): void;
   writeFlag(flag: X86Flag, value: boolean): void;
 }
 

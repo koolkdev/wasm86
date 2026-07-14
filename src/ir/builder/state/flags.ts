@@ -1,4 +1,4 @@
-import type { X86Flag } from "#core/flags.js";
+import type { X86Flag } from "#core/flags/definitions.js";
 import { flagChannel } from "../../slots.js";
 import type { ValueId } from "../../values.js";
 import type { StateCells } from "./cells.js";
