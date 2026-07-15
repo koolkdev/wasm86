@@ -5,7 +5,7 @@ import type { LegacyFunctionBindings } from "#compiler/program/legacy-body.js";
 import type { IrBlock } from "#ir/block.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { emitActionFunction } from "#wasm/emit/action.js";
-import type { BlockLiveness } from "#wasm/emit/liveness.js";
+import type { BodyPlacement } from "#compiler/placement/place.js";
 import { helperFunctionName, type HelperCallKey } from "#wasm/helpers/key.js";
 import {
   LegacyHelperIndexRegistryAdapter,
@@ -20,7 +20,7 @@ export type JitHelperBinding = Readonly<{
 
 type LegacyActionEmbeddingAdapterOptions = Readonly<{
   ir: IrBlock;
-  liveness: BlockLiveness;
+  placement: BodyPlacement;
   helperBindings: readonly JitHelperBinding[];
   links: LegacyNumericLinkAdapter;
   cpuState: ResourceRef;
@@ -57,7 +57,7 @@ export class LegacyActionEmbeddingAdapter {
     });
     return emitActionFunction(this.#options.ir, {
       helpers: new LegacyHelperIndexRegistryAdapter(helperBindings),
-      liveness: this.#options.liveness,
+      placement: this.#options.placement,
       embedding: { dispatch: this.#options.links.resolve(bindings) }
     });
   }

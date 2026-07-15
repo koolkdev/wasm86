@@ -107,7 +107,7 @@ test("a producer declared inside a body executes only on that selected body", as
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 0x1234_5678);
 });
 
-test("an unused memory read is omitted without a materialization event", async () => {
+test("an unused memory read is omitted without a placement", async () => {
   const values = new ValueTable();
   const address = values.const(0x100);
   const loaded = values.addActionOutput();
@@ -191,6 +191,53 @@ test("a condition use tees once for a later selected-body use", async () => {
   writeWasmCpuStateSnapshot(stateView, { eax: 1, ebx: 0 });
   strictEqual(run(), irBlockCompleted);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 1);
+});
+
+test("an i32 control header preserves a pending i64 capture", async () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const input = values.external(1);
+  const wide = values.binary64(
+    "mul",
+    values.extend64(32, input, false),
+    values.const64(0x1_0000_0001n)
+  );
+  const low = values.truncate64(32, wide);
+  const high = values.truncate64(
+    32,
+    values.binary64("shr_u", wide, values.const64(32n))
+  );
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{
+        kind: "if",
+        condition,
+        thenBody: { actions: [stateWrite(gprChannel("eax"), low)] },
+        elseBody: { actions: [stateWrite(gprChannel("ebx"), high)] }
+      }]
+    }
+  };
+  const encoded = irBlockBody(block, 2).bytes;
+  const opcodes = wasmBodyOpcodes(encoded);
+  const multiplyIndex = opcodes.indexOf(wasmOpcode.i64Mul);
+  const captureIndex = opcodes.indexOf(wasmOpcode.localSet);
+  const ifIndex = opcodes.indexOf(wasmOpcode.if);
+
+  strictEqual(wasmBodyLocalCount(encoded) > 0, true);
+  strictEqual(multiplyIndex < captureIndex && captureIndex < ifIndex, true);
+
+  const { stateView, run } = await instantiateIrBlock(block, 2);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 0, ebx: 0 });
+  strictEqual(run(1, 7), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 7);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 0);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 0, ebx: 0 });
+  strictEqual(run(0, 7), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 0);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 7);
 });
 
 test("a trapping producer input still evaluates before a selected early exit", async () => {
@@ -362,8 +409,8 @@ test("an output used by both siblings cannot recycle between them", async () => 
 
   strictEqual(wasmBodyLocalCount(encoded), 1);
   deepStrictEqual(localInstructions, [
-    [wasmOpcode.localSet, 2],
     [wasmOpcode.localGet, 0],
+    [wasmOpcode.localSet, 2],
     [wasmOpcode.localGet, 2],
     [wasmOpcode.localGet, 1],
     [wasmOpcode.localGet, 2]

@@ -19,25 +19,26 @@ import {
   WASM_CPU_SEGMENT_SELECTOR_OFFSET
 } from "#wasm/cpu-state-layout.js";
 import type {
-  BorrowedOperationInput,
-  DeclaredOperationInputs
+  DeclaredOperationInputs,
+  OperationEmitTarget
 } from "./definition.js";
 
 // Mechanical state loads and stores. Static slots use layout immediates;
 // dynamic slots add an index into the corresponding contiguous state array.
 
 export function emitSlotLoad(
-  body: WasmFunctionBodyEncoder,
+  target: OperationEmitTarget,
   slot: StateSlot,
   signed: boolean,
   inputs: DeclaredOperationInputs,
   accessByteLength?: 1 | 2
 ): void {
+  const { body } = target;
   const access = accessByteLength ?? stateSlotAccessByteLength(slot);
 
   const immediate = slotImmediate(slot, access);
 
-  emitSlotAddress(body, slot, declaredSlotIndex(slot, inputs));
+  emitSlotAddress(target, slot, declaredSlotIndex(slot, inputs));
 
   switch (access) {
     case 1:
@@ -61,17 +62,18 @@ export function emitChannelStore(
 }
 
 export function emitOperationSlotStore(
-  body: WasmFunctionBodyEncoder,
+  target: OperationEmitTarget,
   slot: StateSlot,
   inputs: DeclaredOperationInputs
 ): void {
   const valueInput = isDynamicSlot(slot) ? 1 : 0;
 
   emitSlotStoreWithUses(
-    body,
+    target.body,
     slot,
     declaredSlotIndex(slot, inputs),
-    () => inputs.use(valueInput)
+    () => inputs.use(valueInput),
+    target
   );
 }
 
@@ -79,11 +81,17 @@ function emitSlotStoreWithUses(
   body: WasmFunctionBodyEncoder,
   slot: StateSlot,
   index: SlotIndexUse | undefined,
-  emitValue: () => void
+  emitValue: () => void,
+  target?: OperationEmitTarget
 ): void {
   const immediate = slotImmediate(slot, stateSlotAccessByteLength(slot));
 
-  emitSlotAddress(body, slot, index);
+  if (target === undefined) {
+    assert(!isDynamicSlot(slot), "dynamic slot lowering needs an operation target");
+    body.i32Const(0);
+  } else {
+    emitSlotAddress(target, slot, index);
+  }
   emitValue();
 
   switch (stateSlotAccessByteLength(slot)) {
@@ -101,7 +109,6 @@ function emitSlotStoreWithUses(
 
 type SlotIndexUse = Readonly<{
   emitUse(): void;
-  withBorrowedUse(callback: (borrowed: BorrowedOperationInput) => void): void;
 }>;
 
 function declaredSlotIndex(
@@ -113,20 +120,21 @@ function declaredSlotIndex(
   }
 
   return {
-    emitUse: () => inputs.use(0),
-    withBorrowedUse: (callback) => inputs.withBorrowedUse(0, callback)
+    emitUse: () => inputs.use(0)
   };
 }
 
 function emitSlotAddress(
-  body: WasmFunctionBodyEncoder,
+  target: OperationEmitTarget,
   slot: StateSlot,
   index: SlotIndexUse | undefined
 ): void {
+  const { body } = target;
+
   switch (slot.kind) {
     case "gprDynamic":
       assert(index !== undefined, "dynamic slot lowering needs operand uses");
-      emitDynamicGprOffset(body, slot, index);
+      emitDynamicGprOffset(target, slot, index);
       return;
     case "segmentDynamic":
       assert(index !== undefined, "dynamic slot lowering needs operand uses");
@@ -144,10 +152,12 @@ function emitSlotAddress(
 }
 
 function emitDynamicGprOffset(
-  body: WasmFunctionBodyEncoder,
+  target: OperationEmitTarget,
   slot: GprDynamicSlot,
   index: SlotIndexUse
 ): void {
+  const { body } = target;
+
   // Word access is (index & 7) * 4. Byte registers use word index & 3,
   // plus one byte for high-register encodings 4..7.
   switch (slot.byteLength) {
@@ -157,10 +167,11 @@ function emitDynamicGprOffset(
       body.i32Const(7).i32And().i32Const(2).i32Shl();
       return;
     case 1:
-      index.withBorrowedUse((borrowed) => {
-        borrowed.push();
+      target.withTemporaryLocal("i32", (indexLocal) => {
+        index.emitUse();
+        body.localTee(indexLocal);
         body.i32Const(3).i32And().i32Const(2).i32Shl();
-        borrowed.push();
+        body.localGet(indexLocal);
         body.i32Const(2).i32ShrU().i32Const(1).i32And();
         body.i32Add();
       });

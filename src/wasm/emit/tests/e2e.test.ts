@@ -160,8 +160,8 @@ test("xchg eax, ebx swaps the registers", async () => {
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0x11111111, ebx: 0x22222222 });
   assertCompleted(run());
-  // The pinning rule is load-bearing here: reloading ebx at its use would
-  // observe the just-stored eax and leave both registers equal.
+  // The captured snapshot is load-bearing here: reloading ebx at its use
+  // would observe the just-stored eax and leave both registers equal.
   strictEqual(readRegister(stateView, "eax"), 0x22222222);
   strictEqual(readRegister(stateView, "ebx"), 0x11111111);
 });

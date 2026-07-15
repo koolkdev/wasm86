@@ -156,6 +156,106 @@ test("a trapping condition makes its selected wrapper safe to capture", async ()
   throws(() => run(1, 0), WebAssembly.RuntimeError);
 });
 
+test("both if arms share one wrapper captured after its trapping condition", async () => {
+  const values = new ValueTable();
+  const quotient = values.binary("div_u", values.external(0), values.external(1));
+  const wrapped = values.binary("add", quotient, values.const(1));
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{
+        kind: "if",
+        condition: quotient,
+        thenBody: { actions: [stateWrite(gprChannel("eax"), wrapped)] },
+        elseBody: { actions: [stateWrite(gprChannel("ebx"), wrapped)] }
+      }]
+    }
+  };
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
+  const { stateView, run } = await instantiateIrBlock(block, 2);
+
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32DivU).length, 1);
+  writeWasmCpuStateSnapshot(stateView, { eax: 7, ebx: 9 });
+  strictEqual(run(84, 2), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 43);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 9);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 7, ebx: 9 });
+  strictEqual(run(0, 2), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 7);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 1);
+  throws(() => run(1, 0), WebAssembly.RuntimeError);
+});
+
+test("captures after an unreachable structured operand still form valid Wasm", async () => {
+  const values = new ValueTable();
+  const unreachable = values.unreachable();
+  const wrapped = values.unary("eqz", unreachable);
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{
+        kind: "if",
+        condition: unreachable,
+        thenBody: { actions: [stateWrite(gprChannel("eax"), wrapped)] },
+        elseBody: { actions: [stateWrite(gprChannel("ebx"), wrapped)] }
+      }]
+    }
+  };
+
+  const { run } = await instantiateIrBlock(block);
+
+  throws(() => run(), WebAssembly.RuntimeError);
+});
+
+test("switch arms share a wrapper captured after its trapping selector", async () => {
+  const values = new ValueTable();
+  const selector = values.binary(
+    "div_u",
+    values.external(0),
+    values.external(1)
+  );
+  const wrapped = values.binary("add", selector, values.const(1));
+  const fallback = values.const(99);
+  const output = values.addActionOutput();
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        {
+          kind: "switch",
+          selector,
+          output,
+          cases: [
+            { match: 0, body: { actions: [], result: wrapped } },
+            { match: 1, body: { actions: [], result: wrapped } }
+          ],
+          defaultBody: { actions: [], result: fallback }
+        },
+        stateWrite(gprChannel("eax"), output)
+      ]
+    }
+  };
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
+  const divideIndex = opcodes.indexOf(wasmOpcode.i32DivU);
+  const addIndex = opcodes.indexOf(wasmOpcode.i32Add);
+  const dispatchIndex = opcodes.indexOf(wasmOpcode.brTable);
+
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32DivU).length, 1);
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Add).length, 1);
+  strictEqual(divideIndex < addIndex && addIndex < dispatchIndex, true);
+
+  const { stateView, run } = await instantiateIrBlock(block, 2);
+
+  strictEqual(run(0, 2), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 1);
+  strictEqual(run(2, 2), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 2);
+  strictEqual(run(10, 2), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 99);
+  throws(() => run(1, 0), WebAssembly.RuntimeError);
+});
+
 test("an exported trapping value evaluates at the fragment boundary", async () => {
   const values = new ValueTable();
   const quotient = values.binary("div_u", values.external(0), values.external(1));

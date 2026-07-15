@@ -19,12 +19,14 @@ import { wasmGuestMemoryMinPages, wasmImport } from "#wasm/abi.js";
 import { CompletionExit, encodeCompletionExit } from "#wasm/exit.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";
-import { validateIrBlock } from "#ir/validate.js";
-import { analyzeLiveness, type BlockLiveness } from "#wasm/emit/liveness.js";
+import {
+  placeBody,
+  type BodyPlacement
+} from "#compiler/placement/place.js";
 import { helperFunctionName, type HelperCallKey } from "#wasm/helpers/key.js";
 import {
   encodeHelperBody,
-  helperCallsForBlock,
+  helperCallsForAnalysis,
   helperFunctionType,
   orderedHelpers
 } from "#wasm/helpers/module.js";
@@ -59,7 +61,7 @@ type JitProgramBlock = Readonly<{
   entryEip: number;
   exportName: string;
   ir: IrBlock;
-  liveness: BlockLiveness;
+  placement: BodyPlacement;
   helperCalls: readonly HelperCallKey[];
   linkTargets: readonly number[];
 }>;
@@ -96,15 +98,14 @@ function analyzeJitBlocks(blocks: readonly JitProgramSourceBlock[]): readonly Ji
 
     assert(!seen.has(entryEip), `duplicate JIT block module entry EIP: 0x${hex(entryEip)}`);
     seen.add(entryEip);
-    validateIrBlock(block.ir);
-    const liveness = analyzeLiveness(block.ir);
+    const placement = placeBody(block.ir);
 
     return {
       entryEip,
       exportName: jitBlockExportName(entryEip),
       ir: block.ir,
-      liveness,
-      helperCalls: helperCallsForBlock(block.ir, liveness),
+      placement,
+      helperCalls: helperCallsForAnalysis(placement.analysis),
       linkTargets: uniqueU32(jitBlockLinkTargets(block.ir))
     };
   });
@@ -290,7 +291,7 @@ function declareBlocks(
     );
     const adapter = new LegacyActionEmbeddingAdapter({
       ir: block.ir,
-      liveness: block.liveness,
+      placement: block.placement,
       helperBindings,
       links: new LegacyNumericLinkAdapter(links, linkLayout),
       cpuState: program.cpuState,

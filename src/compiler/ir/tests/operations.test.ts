@@ -1,6 +1,11 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import {
+  emitOperation,
+  type Operation
+} from "#compiler/ir/operations/index.js";
 import {
   memoryCheck,
   memoryRead,
@@ -67,7 +72,7 @@ test("operation owners do not copy caller metadata", () => {
   strictEqual("callerMetadata" in operation, false);
 });
 
-test("dynamic state definitions expose each semantic input exactly once", () => {
+test("dynamic byte state definitions expose each semantic input once", () => {
   const index = valueId(7);
   const value = valueId(8);
   const slot: StateSlot = { kind: "gprDynamic", index, byteLength: 1 };
@@ -86,6 +91,141 @@ test("dynamic state definitions expose each semantic input exactly once", () => 
   deepStrictEqual(write.result, undefined);
   deepStrictEqual(write.effects, { reads: [], writes: [{ space: "state", slot }] });
   deepStrictEqual(write.helper, undefined);
+});
+
+test("operation inputs are the complete semantic dependencies", () => {
+  const index = valueId(20);
+  const address = valueId(21);
+  const byteLength = valueId(22);
+  const value = valueId(24);
+  const wordSlot: StateSlot = { kind: "gprDynamic", index, byteLength: 2 };
+
+  deepStrictEqual(
+    stateRead.create({ slot: wordSlot }).inputs,
+    [{ value: index, type: "i32" }]
+  );
+  deepStrictEqual(
+    stateWrite.create({ slot: wordSlot, value }).inputs,
+    [
+      { value: index, type: "i32" },
+      { value, type: "i32" }
+    ]
+  );
+  deepStrictEqual(
+    memoryCheck.create({ address, byteLength }).inputs,
+    [
+      { value: address, type: "i32" },
+      { value: byteLength, type: "i32" }
+    ]
+  );
+  deepStrictEqual(
+    memoryResolve.create({ address, byteLength }).inputs,
+    [
+      { value: address, type: "i32" },
+      { value: byteLength, type: "i32" }
+    ]
+  );
+  deepStrictEqual(
+    memoryWrite.create({ address, byteOffset: 0, value, width: 32 }).inputs,
+    [
+      { value: address, type: "i32" },
+      { value, type: "i32" }
+    ]
+  );
+});
+
+test("operation emission consumes every declared input position once", () => {
+  const index = valueId(30);
+  const address = valueId(31);
+  const byteLength = valueId(32);
+  const value = valueId(33);
+  const target = {
+    body: new WasmFunctionBodyEncoder(),
+    withTemporaryLocal: (_type: "i32" | "i64", callback: (local: number) => void) => {
+      callback(0);
+    },
+    variableLocal: () => 0,
+    helperFunctionIndex: () => 0
+  };
+
+  function emittedUses(operation: Operation) {
+    const uses: typeof index[] = [];
+
+    emitOperation(target, {
+      emitUse: (id) => uses.push(id),
+      constValue: () => undefined
+    }, operation);
+    return uses;
+  }
+
+  deepStrictEqual(
+    emittedUses(memoryCheck.create({ address, byteLength })),
+    [byteLength, address]
+  );
+  deepStrictEqual(
+    emittedUses(memoryResolve.create({ address, byteLength })),
+    [byteLength, address]
+  );
+  deepStrictEqual(
+    emittedUses(stateRead.create({
+      slot: { kind: "gprDynamic", index, byteLength: 1 }
+    })),
+    [index]
+  );
+  deepStrictEqual(
+    emittedUses(stateWrite.create({
+      slot: { kind: "gprDynamic", index, byteLength: 1 },
+      value
+    })),
+    [index, value]
+  );
+  deepStrictEqual(
+    emittedUses(memoryRead.create({ address, byteOffset: 0, width: 32 })),
+    [address]
+  );
+});
+
+test("a folded operation input needs neither emission nor a temporary", () => {
+  const address = valueId(40);
+  const byteLength = valueId(41);
+  const uses: typeof address[] = [];
+  let requestedTemporary = false;
+
+  emitOperation({
+    body: new WasmFunctionBodyEncoder(),
+    withTemporaryLocal: (_type, callback) => {
+      requestedTemporary = true;
+      callback(0);
+    },
+    variableLocal: () => 0,
+    helperFunctionIndex: () => 0
+  }, {
+    emitUse: (id) => uses.push(id),
+    constValue: (id) => id === byteLength ? 4 : undefined
+  }, memoryCheck.create({ address, byteLength }));
+
+  deepStrictEqual(uses, [address]);
+  strictEqual(requestedTemporary, false);
+});
+
+test("a static memory check rejects an empty range", () => {
+  const address = valueId(42);
+  const byteLength = valueId(43);
+
+  throws(
+    () => emitOperation({
+      body: new WasmFunctionBodyEncoder(),
+      withTemporaryLocal: () => {
+        throw new Error("static check requested a temporary");
+      },
+      variableLocal: () => 0,
+      helperFunctionIndex: () => 0
+    }, {
+      emitUse: () => {},
+      constValue: (id) => id === byteLength ? 0 : undefined
+    }, memoryCheck.create({ address, byteLength })),
+    /guest access byte length must be positive, got 0/
+  );
 });
 
 test("state read bounds retain access width and signedness", () => {

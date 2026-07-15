@@ -1,13 +1,8 @@
-import type { IrBlock } from "#ir/block.js";
-import { walkBodyActions } from "#ir/traverse.js";
+import type { BodyAnalysis } from "#compiler/analysis/model.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
 import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js";
 import type { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType, type WasmFunctionType } from "#compiler/encoder/types.js";
-import {
-  opActionMustExecute,
-  type BlockLiveness
-} from "#wasm/emit/liveness.js";
 import {
   encodeLazyFlagHelperBody
 } from "./lazy-flags.js";
@@ -68,21 +63,23 @@ export function installHelpers(
   return new LegacyHelperIndexRegistryAdapter(bindings);
 }
 
-export function helperCallsForBlock(
-  block: IrBlock,
-  liveness: BlockLiveness
+export function helperCallsForAnalysis(
+  analysis: BodyAnalysis
 ): readonly HelperCallKey[] {
-  const helperCalls = new Map<string, HelperCallKey>();
+  const helpers: HelperCallKey[] = [];
+  const seen = new Set<string>();
 
-  walkBodyActions(block.body, (action) => {
-    if (action.kind === "op" && opActionMustExecute(action, liveness)) {
-      const helper = action.op.helper;
-
-      if (helper !== undefined) {
-        helperCalls.set(helperFunctionName(helper), helper);
-      }
+  for (const { action } of analysis.operations()) {
+    if (!analysis.opActionMustExecute(action) || action.op.helper === undefined) {
+      continue;
     }
-  });
+    const name = helperFunctionName(action.op.helper);
 
-  return [...helperCalls.values()];
+    if (!seen.has(name)) {
+      seen.add(name);
+      helpers.push(action.op.helper);
+    }
+  }
+
+  return helpers;
 }

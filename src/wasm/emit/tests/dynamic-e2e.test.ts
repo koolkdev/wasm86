@@ -214,7 +214,7 @@ test("a computed index drives byte access on both the read and the write path", 
   const { stateView, run } = await instantiateIrBlock(block, 1);
 
   // mov rm8, reg8 with modrm 0xe5: reg = ah, rm = ch — both high bytes, so
-  // both borrowed indices exercise the +1 term.
+  // both byte-index decompositions exercise the +1 term.
   writeWasmCpuStateSnapshot(stateView, { eax: 0x1111ab11, ecx: 0x22222222 });
   assertCompleted(run(0xe5));
   strictEqual(readRegister(stateView, "ecx"), 0x2222ab22);
@@ -297,7 +297,7 @@ test("dynamic segment slots use separate contiguous arrays for every loaded fiel
   }
 });
 
-test("a dynamic memory check preserves repeated borrowed operands", async () => {
+test("a dynamic memory check evaluates each semantic operand once", async () => {
   const values = new ValueTable();
   const address = values.external(0);
   const byteLength = values.external(1);
@@ -324,4 +324,33 @@ test("a dynamic memory check preserves repeated borrowed operands", async () => 
     strictEqual(run(start, length), irBlockCompleted);
     strictEqual(readRegister(stateView, "eax"), expectedFault);
   }
+});
+
+test("nested dynamic memory checks keep their scoped temporaries distinct", async () => {
+  const values = new ValueTable();
+  const innerAddress = values.external(0);
+  const innerByteLength = values.external(1);
+  const outerByteLength = values.external(2);
+  const innerFault = values.addActionOutput(fitsUnsigned(1));
+  const outerFault = values.addActionOutput(fitsUnsigned(1));
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        memoryCheck(innerFault, innerAddress, innerByteLength),
+        memoryCheck(outerFault, innerFault, outerByteLength),
+        stateWrite(gprChannel("eax"), outerFault)
+      ]
+    }
+  };
+  const { stateView, run } = await instantiateIrBlock(block, 3);
+
+  // The inner fault is address 1 for the outer full-memory access. If its
+  // byte-length temporary clobbers the outer one, this incorrectly succeeds.
+  assertCompleted(run(
+    wasmGuestMemoryMinByteLength - 3,
+    4,
+    wasmGuestMemoryMinByteLength
+  ));
+  strictEqual(readRegister(stateView, "eax"), 1);
 });

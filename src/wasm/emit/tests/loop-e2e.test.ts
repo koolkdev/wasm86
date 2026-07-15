@@ -142,10 +142,100 @@ test("a hoisted loop-invariant value stays live across iterations", async () => 
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 0);
 });
 
+test("an outer capture survives nested loops and both back edges", async () => {
+  const values = new ValueTable();
+  const invariant = values.addActionOutput();
+  const outerSeed = values.addActionOutput();
+  const transient = values.addActionOutput();
+  const outerInput = values.addLoopInput();
+  const innerInput = values.addLoopInput();
+  const outerRemaining = values.binary("sub", outerInput, values.const(1));
+  const innerRemaining = values.binary("sub", innerInput, values.const(1));
+  const block = loopBlock(values, [
+    stateRead(invariant, gprChannel("edx")),
+    stateRead(outerSeed, gprChannel("ecx")),
+    {
+      kind: "loop",
+      carried: [{
+        channel: gprChannel("ecx"),
+        seed: outerSeed,
+        loopInput: outerInput
+      }],
+      body: {
+        actions: [
+          {
+            kind: "loop",
+            carried: [{
+              channel: gprChannel("ebx"),
+              seed: values.const(2),
+              loopInput: innerInput
+            }],
+            body: {
+              actions: [
+                stateWrite(gprChannel("ebx"), invariant),
+                stateRead(transient, gprChannel("esi")),
+                stateWrite(gprChannel("edi"), transient),
+                stateWrite(gprChannel("ebp"), transient),
+                {
+                  kind: "if",
+                  condition: values.compare(
+                    32,
+                    "ne",
+                    innerRemaining,
+                    values.const(0)
+                  ),
+                  thenBody: {
+                    actions: [{
+                      kind: "loopContinue",
+                      updates: [innerRemaining]
+                    }]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            kind: "if",
+            condition: values.compare(
+              32,
+              "ne",
+              outerRemaining,
+              values.const(0)
+            ),
+            thenBody: {
+              actions: [{
+                kind: "loopContinue",
+                updates: [outerRemaining]
+              }]
+            }
+          },
+          stateWrite(gprChannel("eax"), invariant)
+        ]
+      }
+    }
+  ]);
+  const { stateView, run } = await instantiateIrBlock(block);
+
+  writeWasmCpuStateSnapshot(stateView, {
+    eax: 0,
+    ebx: 0,
+    ecx: 3,
+    edx: 7,
+    ebp: 0,
+    esi: 0x55,
+    edi: 0
+  });
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 7);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 7);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebp")), 0x55);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edi")), 0x55);
+});
+
 // Semantic vars back onto plain wasm locals: the loop carries no cells, the
 // var advances per iteration, and a read after the loop sees the final
-// value. The in-body read's value feeds uses past the var.write, pinning
-// the capture-before-overwrite ordering.
+// value. The in-body read feeds uses past the var.write, requiring
+// capture-before-overwrite ordering.
 test("var locals carry loop state and survive to post-loop reads", async () => {
   const values = new ValueTable();
   const nSeed = values.addActionOutput();

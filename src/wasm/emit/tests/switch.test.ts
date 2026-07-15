@@ -211,6 +211,63 @@ test("a parent compound consumed by two arms captures once before the switch", a
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 42);
 });
 
+test("a switch captures a state snapshot before the selected arm writes it", async () => {
+  const values = new ValueTable();
+  const selector = values.external(0);
+  const snapshot = values.addActionOutput();
+  const caseResult = values.const(10);
+  const defaultResult = values.const(11);
+  const output = values.addActionOutput();
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [
+        stateRead(snapshot, gprChannel("eax")),
+        {
+          kind: "switch",
+          selector,
+          output,
+          cases: [{
+            match: 0,
+            body: {
+              actions: [
+                stateWrite(gprChannel("eax"), values.const(5)),
+                stateWrite(gprChannel("ebx"), snapshot)
+              ],
+              result: caseResult
+            }
+          }],
+          defaultBody: {
+            actions: [
+              stateWrite(gprChannel("eax"), values.const(9)),
+              stateWrite(gprChannel("ecx"), snapshot)
+            ],
+            result: defaultResult
+          }
+        },
+        stateWrite(gprChannel("edx"), output)
+      ]
+    }
+  };
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 1).bytes);
+
+  strictEqual(opcodes.indexOf(wasmOpcode.localSet) < opcodes.indexOf(wasmOpcode.brTable), true);
+
+  const { stateView, run } = await instantiateIrBlock(block, 1);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 41, ebx: 0, ecx: 0, edx: 0 });
+  strictEqual(run(0), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 5);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 41);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edx")), 10);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 42, ebx: 0, ecx: 0, edx: 0 });
+  strictEqual(run(7), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 9);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 42);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edx")), 11);
+});
+
 test("a dead switch output emits no arm values but keeps the impossible default", async () => {
   const values = new ValueTable();
   const selector = values.external(0);

@@ -8,12 +8,11 @@ import {
 } from "./memory.js";
 import { stateRead, stateWrite } from "./state.js";
 import { varRead, varWrite } from "./variables.js";
-import type { ValueInput } from "#compiler/ir/values/types.js";
 import type {
   DeclaredOperationInputs,
-  OperationEmitTarget
+  OperationEmitTarget,
+  OperationValueEmitter
 } from "./definition.js";
-import type { OperationValueEmitter } from "./definition.js";
 
 export type OperationWithResult =
   | ReturnType<typeof stateRead.create>
@@ -36,30 +35,36 @@ export function emitOperation(
   operation: Operation
 ): void {
   const declared = operation.inputs;
-  const consumed = new Set<number>();
+  const consumedInputs = new Set<number>();
 
-  function consume(index: number): ValueInput {
+  function consumeInput(index: number) {
     const input = declared[index];
+
     assert(input !== undefined, `unknown operation input ${index}`);
-    assert(!consumed.has(index), `operation input ${index} is consumed more than once`);
-    consumed.add(index);
+    assert(
+      !consumedInputs.has(index),
+      `operation input ${index} is consumed more than once`
+    );
+    consumedInputs.add(index);
     return input;
   }
 
   const inputs: DeclaredOperationInputs = {
     use(index) {
-      values.emitUse(consume(index).value);
+      values.emitUse(consumeInput(index).value);
     },
-    withBorrowedUse(index, callback) {
-      values.withBorrowedUse(consume(index).value, callback);
-    },
-    takeConstant(index) {
+    constValue(index) {
       const input = declared[index];
+
       assert(input !== undefined, `unknown operation input ${index}`);
-      assert(!consumed.has(index), `operation input ${index} is consumed more than once`);
+      assert(
+        !consumedInputs.has(index),
+        `operation input ${index} is consumed more than once`
+      );
       const value = values.constValue(input.value);
+
       if (value !== undefined) {
-        consumed.add(index);
+        consumedInputs.add(index);
       }
       return value;
     }
@@ -100,6 +105,6 @@ export function emitOperation(
   }
 
   for (const index of declared.keys()) {
-    assert(consumed.has(index), `operation input ${index} was not consumed`);
+    assert(consumedInputs.has(index), `operation input ${index} was not consumed`);
   }
 }

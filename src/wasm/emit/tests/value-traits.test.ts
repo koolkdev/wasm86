@@ -6,7 +6,6 @@ import type { CompareOperator } from "#compiler/ir/values/comparison.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { UnaryOperator } from "#compiler/ir/values/unary.js";
-import { canEvaluateWithoutTrap } from "#wasm/emit/value-emitter.js";
 
 const binaryOperatorNonTrapping = {
   add: true,
@@ -240,36 +239,4 @@ test("requires all three eager select children to be nontrapping", () => {
   strictEqual(values.isNonTrapping(unsafeCondition), false);
   strictEqual(values.isNonTrapping(unsafeTrue), false);
   strictEqual(values.isNonTrapping(unsafeFalse), false);
-});
-
-test("treats an already-bound trapping dependency as a safe replay cut point", () => {
-  const values = new ValueTable();
-  const dividend = values.addActionOutput();
-  const divisor = values.external(0);
-  const quotient = values.binary("div_u", dividend, divisor);
-  const wrapped = values.binary("add", quotient, values.const(1));
-
-  strictEqual(values.isNonTrapping(wrapped), false);
-  strictEqual(canEvaluateWithoutTrap(values, wrapped, () => false), false);
-  strictEqual(
-    canEvaluateWithoutTrap(values, wrapped, (value) => value === quotient),
-    true
-  );
-});
-
-test("does not let a bound descendant bypass an unbound trapping operation", () => {
-  const values = new ValueTable();
-  const dividend = values.addActionOutput();
-  const divisor = values.external(0);
-  const quotient = values.binary("div_u", dividend, divisor);
-  const wrapped = values.binary("add", quotient, values.const(1));
-
-  strictEqual(
-    canEvaluateWithoutTrap(values, wrapped, (value) => value === dividend),
-    false
-  );
-  strictEqual(
-    canEvaluateWithoutTrap(values, quotient, (value) => value === quotient),
-    true
-  );
 });

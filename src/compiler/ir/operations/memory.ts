@@ -8,6 +8,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   type DeclaredOperationInputs,
   type OperationDefinition,
+  type OperationEmitTarget,
   type OperationResult,
   type StorageAccess
 } from "./definition.js";
@@ -153,8 +154,8 @@ export const memoryCheck: OperationDefinition<
     };
   },
 
-  emit(_operation, { body }, inputs) {
-    emitMemoryCheck(body, inputs);
+  emit(_operation, target, inputs) {
+    emitMemoryCheck(target, inputs);
   }
 };
 
@@ -187,8 +188,8 @@ export const memoryResolve: OperationDefinition<
     };
   },
 
-  emit(_operation, { body }, inputs) {
-    emitMemoryCheck(body, inputs);
+  emit(_operation, target, inputs) {
+    emitMemoryCheck(target, inputs);
   }
 };
 
@@ -204,10 +205,11 @@ function memoryReadResult(width: OperandWidth, signed: boolean): OperationResult
 const wasmPageShift = 16;
 
 function emitMemoryCheck(
-  body: WasmFunctionBodyEncoder,
+  target: OperationEmitTarget,
   inputs: DeclaredOperationInputs
 ): void {
-  const staticByteLength = inputs.takeConstant(1);
+  const { body } = target;
+  const staticByteLength = inputs.constValue(1);
 
   if (staticByteLength !== undefined) {
     inputs.use(0);
@@ -215,22 +217,19 @@ function emitMemoryCheck(
     return;
   }
 
-  inputs.withBorrowedUse(0, (address) => {
-    inputs.withBorrowedUse(1, (byteLength) => {
-      byteLength.push();
-      body.i32Const(0).i32Ne();
+  target.withTemporaryLocal("i32", (byteLengthLocal) => {
+    inputs.use(1);
+    body.localTee(byteLengthLocal).i32Const(0).i32Ne();
 
-      byteLength.push();
-      emitGuestByteLength(body);
-      body.i32GtU();
+    body.localGet(byteLengthLocal);
+    emitGuestByteLength(body);
+    body.i32GtU();
 
-      address.push();
-      emitGuestByteLength(body);
-      byteLength.push();
-      body.i32Sub().i32GtU();
+    inputs.use(0);
+    emitGuestByteLength(body);
+    body.localGet(byteLengthLocal).i32Sub().i32GtU();
 
-      body.i32Or().i32And();
-    });
+    body.i32Or().i32And();
   });
 }
 

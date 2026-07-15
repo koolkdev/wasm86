@@ -1,325 +1,256 @@
 import { assert } from "#common/assert.js";
-import type { ExternalValueId } from "#ir/operands.js";
-import type { OpAction } from "#ir/actions.js";
+import type {
+  BodyAnalysis,
+  BodySite,
+  SiteId
+} from "#compiler/analysis/model.js";
 import {
   emitOperation as emitCompilerOperation,
   type Operation
 } from "#compiler/ir/operations/index.js";
 import type {
-  BorrowedOperationInput,
   HelperCall,
   OperationEmitTarget,
   OperationValueEmitter
 } from "#compiler/ir/operations/definition.js";
 import type { ValueEmitContext } from "#compiler/ir/values/definition.js";
-import {
-  type ValueId,
-  type ValueType
-} from "#compiler/ir/values/types.js";
+import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
-import type {
-  WasmFunctionBodyEncoder
-} from "#compiler/encoder/function-body.js";
+import type { PlacementIndex } from "#compiler/placement/index.js";
+import type { PlacementPlan } from "#compiler/placement/model.js";
+import type { ExternalValueId } from "#ir/operands.js";
+import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
-import { LocalRegistry } from "./local-registry.js";
-import type { ValueUses } from "./value-uses.js";
-
-// Turns captured values plus the value graph into stack code. emitUse pushes
-// one use; repeated values replay a temporary local until their final use.
-// An op that observes one operand several times borrows it without consuming
-// extra uses.
-
-export type BorrowedUse = BorrowedOperationInput;
 
 export type ValueEmitterContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   values: ValueTable;
-  uses: ValueUses;
-  // External id -> the wasm local the embedding bound it to.
+  analysis: BodyAnalysis;
+  plan: PlacementPlan;
+  index: PlacementIndex;
+  // Physical plan local -> the scratch local reserved for this fragment.
+  locals: readonly number[];
+  // External id -> the Wasm local supplied by the embedding.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
-  // Numeric helper resolution is still supplied by the enclosing module.
   helperFunctionIndex(helper: HelperCall): number;
-  // Claims the verified use event for an uncaptured action output.
-  // Scheduling remains outside this emitter.
-  claimProducerAtUse(output: ValueId): OpAction;
 }>;
 
+// Executes a placement plan mechanically. Mutable state records only which
+// planned sources have already been emitted and the current structural site.
 export class ValueEmitter implements OperationValueEmitter {
   readonly #context: ValueEmitterContext;
   readonly #body: WasmFunctionBodyEncoder;
   readonly #values: ValueTable;
-  readonly #uses: ValueUses;
-  readonly #registry: LocalRegistry;
-  readonly #operationEmitTarget: OperationEmitTarget;
-  readonly #valueEmitContext: ValueEmitContext;
-  // Open borrows per value; assertClear reports leaks.
-  readonly #borrows = new Map<ValueId, number>();
-  // Loop input leaf -> its carried cell's local, bound for the loop extent.
-  readonly #loopInputLocals = new Map<ValueId, number>();
-  // Semantic var index -> its backing local, held for the fragment.
-  readonly #varLocals = new Map<number, number>();
+  readonly #analysis: BodyAnalysis;
+  readonly #plan: PlacementPlan;
+  readonly #realized: Uint8Array;
+  readonly #sites: SiteId[] = [];
+  readonly #operationTarget: OperationEmitTarget;
+  readonly #valueContext: ValueEmitContext;
 
   constructor(context: ValueEmitterContext) {
+    assert(
+      context.locals.length === context.plan.localTypes.length,
+      "placement local table does not match its plan"
+    );
+    assert(
+      context.index.captures.length === context.analysis.sites().length,
+      "placement capture index does not match its sites"
+    );
     this.#context = context;
     this.#body = context.body;
     this.#values = context.values;
-    this.#uses = context.uses;
-    this.#registry = new LocalRegistry(context.body, context.scratch);
-    this.#operationEmitTarget = {
-      body: this.#body,
-      variableLocal: (variable) => this.varLocal(variable),
+    this.#analysis = context.analysis;
+    this.#plan = context.plan;
+    this.#realized = new Uint8Array(context.values.size());
+
+    this.#operationTarget = {
+      body: context.body,
+      withTemporaryLocal: (type, callback) => {
+        context.scratch.withLocals([wasmTypeForValue(type)], ([local]) => callback(local));
+      },
+      variableLocal: (variable) => this.variableLocal(variable),
       helperFunctionIndex: context.helperFunctionIndex
     };
-    this.#valueEmitContext = {
-      body: this.#body,
+    this.#valueContext = {
+      body: context.body,
       emitUse: (id) => this.emitUse(id),
-      emitActionOutput: (id) => {
-        this.#emitProducerAtUse(this.#context.claimProducerAtUse(id));
-      },
+      emitActionOutput: (id) => this.#emitSource(id),
       emitExternal: (external) => {
-        const local = this.#context.externalLocals.get(external);
+        const local = context.externalLocals.get(external);
 
         assert(local !== undefined, `no local bound for external value ${external}`);
-        this.#body.localGet(local);
+        context.body.localGet(local);
       },
-      emitLoopInput: (id) => {
-        const local = this.#loopInputLocals.get(id);
-
-        assert(local !== undefined, `no local bound for loop input value ${id}`);
-        this.#body.localGet(local);
-      }
+      emitLoopInput: (id) => context.body.localGet(this.valueLocal(id))
     };
+  }
+
+  withSite(site: SiteId, emit: () => void): void {
+    const record = this.#analysis.sites()[site];
+
+    assert(record !== undefined && record.id === site, `unknown placement site ${site}`);
+    this.#sites.push(site);
+    try {
+      if (!isStructuredHeader(record)) {
+        this.#emitCapturesAt(site);
+      }
+      emit();
+    } finally {
+      assert(this.#sites.pop() === site, "placement site stack changed");
+    }
   }
 
   emitOperation(operation: Operation): void {
-    emitCompilerOperation(this.#operationEmitTarget, this, operation);
+    emitCompilerOperation(this.#operationTarget, this, operation);
   }
 
-  // Executes a capture event. Every counted use later replays its temporary
-  // local, which recycles after the final reference.
-  captureProducer(action: OpAction): void {
-    const output = action.output;
-
-    assert(output !== undefined, `${action.op.kind} op action is missing its output`);
-    const uses = this.#uses.useCount(output);
-
-    assert(uses > 0, `scheduled action output ${output} has no emitted uses`);
-    this.emitOperation(action.op);
-    this.#registry.captureSet(output, uses, this.#typeOf(output));
+  constValue(value: ValueId): number | undefined {
+    return this.#values.constValue(value);
   }
 
-  // Executes a use event. The first use stays on the stack; a tee captures
-  // only when later counted uses remain.
-  #emitProducerAtUse(action: OpAction): void {
-    const output = action.output;
+  // Structured actions call this after all header operands and before control
+  // selects or enters a nested body.
+  emitCaptures(): void {
+    const site = this.#currentSite();
+    const record = this.#analysis.sites()[site];
 
-    assert(output !== undefined, `${action.op.kind} op action is missing its output`);
-    const uses = this.#uses.useCount(output);
-
-    assert(uses > 0, `scheduled action output ${output} has no emitted uses`);
-    this.emitOperation(action.op);
-    if (uses > 1) {
-      this.#registry.captureTee(output, uses - 1, this.#typeOf(output));
-    }
+    assert(record !== undefined && isStructuredHeader(record), `site ${site} is not structured`);
+    this.#emitCapturesAt(site);
   }
 
-  // Pushes one use of the value onto the stack.
-  emitUse(id: ValueId): void {
-    if (this.#registry.replay(id)) {
+  emitUse(value: ValueId): void {
+    const mode = this.#values.captureMode(value);
+
+    if (mode === "reemit" || mode === "unreachable") {
+      this.#values.emit(value, this.#valueContext);
       return;
     }
 
-    const capture = this.#values.captureMode(id);
+    const placement = this.#plan.values[value];
 
-    this.#values.emit(id, this.#valueEmitContext);
+    assert(placement !== undefined, `value ${value} has no placement`);
+    if (this.#realized[value] !== 0) {
+      this.#body.localGet(this.valueLocal(value));
+      return;
+    }
 
-    if (capture === "compute" || capture === "unreachable") {
-      const uses = this.#uses.useCount(id);
+    assert(placement.kind === "atUse", `value ${value} used before its ${placement.kind} deadline`);
+    assert(
+      placement.anchor === this.#currentSite(),
+      `value ${value} realized outside its anchor`
+    );
+    this.#emitSource(value);
 
-      if (uses > 1) {
-        this.#registry.captureTee(id, uses - 1, this.#typeOf(id));
+    if (placement.local !== undefined) {
+      this.#body.localTee(this.#local(placement.local));
+    }
+    this.#realized[value] = 1;
+  }
+
+  markControlOutput(value: ValueId): void {
+    const placement = this.#plan.values[value];
+
+    assert(
+      placement?.kind === "control" &&
+        this.#analysis.controlProducer(value) !== undefined,
+      `value ${value} is not a control output`
+    );
+    assert(
+      placement.anchor === this.#currentSite(),
+      `control output ${value} completed outside its anchor`
+    );
+    this.valueLocal(value);
+    assert(this.#realized[value] === 0, `control output ${value} was realized twice`);
+    this.#realized[value] = 1;
+  }
+
+  valueLocal(value: ValueId): number {
+    const local = this.#plan.values[value]?.local;
+
+    assert(local !== undefined, `value ${value} has no planned local`);
+    return this.#local(local);
+  }
+
+  variableLocal(variable: number): number {
+    const local = this.#plan.variableLocals[variable];
+
+    assert(local !== undefined, `semantic variable ${variable} has no planned local`);
+    return this.#local(local);
+  }
+
+  #local(local: number): number {
+    assert(Number.isInteger(local) && local >= 0, `invalid placement local ${local}`);
+    const wasmLocal = this.#context.locals[local];
+
+    assert(wasmLocal !== undefined, `placement local ${local} is not allocated`);
+    return wasmLocal;
+  }
+
+  assertComplete(): void {
+    const missing: number[] = [];
+
+    for (const [value, placement] of this.#plan.values.entries()) {
+      if (
+        placement !== undefined &&
+        placement.kind !== "loopInput" &&
+        this.#realized[value] === 0
+      ) {
+        missing.push(value);
       }
     }
+
+    assert(missing.length === 0, `planned values never realized: ${missing.join(", ")}`);
+    assert(this.#sites.length === 0, "placement site was not closed");
   }
 
-  // Borrows one counted use of the value for repeated observation. The local
-  // is unpinned in finally, and an escaped borrowed handle cannot be pushed.
-  withBorrowedUse(id: ValueId, callback: (borrowed: BorrowedUse) => void): void {
-    const reemittable = this.#values.captureMode(id) === "reemit";
-    let active = true;
-    let pushed = false;
-    let pinned = false;
-    const borrowed: BorrowedUse = {
-      push: (): void => {
-        assert(active, `borrowed value ${id} pushed outside its scope`);
+  #emitCapturesAt(site: SiteId): void {
+    for (const value of this.#context.index.captures[site] ?? []) {
+      this.#capture(value, site);
+    }
+  }
 
-        if (!pushed) {
-          if (reemittable) {
-            this.emitUse(id);
-          } else {
-            // Record ownership before replay: if replay fails, the callback
-            // scope's finally still unpins while the fragment aborts.
-            if (this.#registry.has(id)) {
-              this.#registry.pin(id);
-              pinned = true;
-              this.emitUse(id);
-            } else {
-              this.emitUse(id);
+  #capture(value: ValueId, deadline: SiteId): void {
+    const placement = this.#plan.values[value];
+    const site = this.#currentSite();
 
-              if (this.#registry.has(id)) {
-                this.#registry.pin(id);
-              } else {
-                this.#registry.capturePinned(id, this.#typeOf(id));
-              }
-              pinned = true;
-            }
-          }
-          pushed = true;
-          return;
-        }
+    assert(
+      site === deadline &&
+        placement?.kind === "capture" &&
+        placement.anchor === deadline,
+      `value ${value} has the wrong capture deadline`
+    );
+    assert(this.#realized[value] === 0, `value ${value} was realized twice`);
+    this.#emitSource(value);
+    this.#body.localSet(this.valueLocal(value));
+    this.#realized[value] = 1;
+  }
 
-        if (reemittable) {
-          this.emitUse(id);
-        } else {
-          this.#registry.peek(id);
-        }
+  #emitSource(value: ValueId): void {
+    switch (this.#values.captureMode(value)) {
+      case "producer": {
+        const producer = this.#analysis.producer(value);
+
+        assert(producer !== undefined, `action output ${value} has no operation producer`);
+        this.emitOperation(producer.action.op);
+        return;
       }
-    };
-
-    this.#borrows.set(id, (this.#borrows.get(id) ?? 0) + 1);
-    try {
-      callback(borrowed);
-      assert(pushed, `borrowed value ${id} was never pushed`);
-    } finally {
-      active = false;
-
-      try {
-        if (pinned) {
-          this.#registry.unpin(id);
-        }
-      } finally {
-        const remaining = this.#borrows.get(id);
-
-        assert(remaining !== undefined && remaining > 0, `borrowed value ${id} is not active`);
-        remaining === 1 ? this.#borrows.delete(id) : this.#borrows.set(id, remaining - 1);
-      }
+      case "compute":
+        this.#values.emit(value, this.#valueContext);
+        return;
+      case "reemit":
+      case "unreachable":
+        assert(false, `value ${value} cannot have a planned source`);
     }
   }
 
-  constValue(id: ValueId): number | undefined {
-    return this.#values.constValue(id);
-  }
+  #currentSite(): SiteId {
+    const site = this.#sites[this.#sites.length - 1];
 
-  // Captures parent-context values that later-emitted code needs to replay.
-  // The action driver owns body traversal and supplies only those inputs.
-  captureValues(ids: Iterable<ValueId>): void {
-    for (const id of ids) {
-      this.#captureValue(id);
-    }
-  }
-
-  // Binds a loop input to its carried cell's local for the loop extent;
-  // every use inside replays the local without counting.
-  bindLoopInput(id: ValueId, local: number): void {
-    assert(this.#values.node(id).kind === "loopInput", `value ${id} is not a loop input`);
-    assert(!this.#loopInputLocals.has(id), `loop input ${id} is already bound`);
-    this.#loopInputLocals.set(id, local);
-  }
-
-  unbindLoopInput(id: ValueId): void {
-    assert(this.#loopInputLocals.delete(id), `loop input ${id} is not bound`);
-  }
-
-  // A semantic var's backing local: allocated on first touch, stable until
-  // releaseVarLocals at fragment end. Instruction-scoped var indices reuse
-  // the same local across instructions; each seed write re-initializes it.
-  varLocal(variable: number): number {
-    const existing = this.#varLocals.get(variable);
-
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const local = this.#context.scratch.allocLocal(wasmTypeForValue("i32"));
-
-    this.#varLocals.set(variable, local);
-    return local;
-  }
-
-  releaseVarLocals(): void {
-    for (const local of this.#varLocals.values()) {
-      this.#context.scratch.freeLocal(local);
-    }
-
-    this.#varLocals.clear();
-  }
-
-  // A live control action's output local: arms store into it and later uses
-  // replay it until the final emitted reference.
-  claimControlOutput(output: ValueId): number {
-    const uses = this.#uses.useCount(output);
-
-    assert(uses > 0, `live control output ${output} has no emitted uses`);
-    return this.#registry.claimOutputLocal(output, uses, this.#typeOf(output));
-  }
-
-  releaseFragmentLocals(): void {
-    this.releaseVarLocals();
-    this.#registry.releaseOutputBindings();
-  }
-
-  // Every captured value fully consumed, every scratch local returned.
-  assertClear(): void {
-    assert(
-      this.#borrows.size === 0,
-      `borrowed values never released: ${[...this.#borrows.keys()].join(", ")}`
-    );
-    assert(
-      this.#loopInputLocals.size === 0,
-      `loop inputs never unbound: ${[...this.#loopInputLocals.keys()].join(", ")}`
-    );
-    assert(
-      this.#varLocals.size === 0,
-      `semantic var locals never released: ${[...this.#varLocals.keys()].join(", ")}`
-    );
-    this.#registry.assertClear();
-  }
-
-  #captureValue(id: ValueId): void {
-    if (this.#registry.has(id)) {
-      return;
-    }
-
-    // A dead value — a dead control output's result — is never consumed.
-    if (this.#uses.useCount(id) === 0) {
-      return;
-    }
-
-    const capture = this.#values.captureMode(id);
-
-    if (capture === "reemit" || capture === "unreachable") {
-      return;
-    }
-
-    assert(capture === "compute", `action output ${id} has no replay source`);
-    assert(
-      canEvaluateWithoutTrap(
-        this.#values,
-        id,
-        (value) => this.#registry.has(value)
-      ),
-      `value ${id} may trap and cannot be captured before a nested body is selected`
-    );
-    // Not in the registry means nothing consumed it yet, so every counted
-    // use is still to come.
-    this.#values.emit(id, this.#valueEmitContext);
-    this.#registry.captureSet(id, this.#uses.useCount(id), this.#typeOf(id));
-  }
-
-  #typeOf(id: ValueId): WasmValueType {
-    return wasmTypeForValue(this.#values.valueType(id));
+    assert(site !== undefined, "value realization occurred outside a placement site");
+    return site;
   }
 }
 
@@ -327,32 +258,9 @@ export function wasmTypeForValue(type: ValueType): WasmValueType {
   return type === "i32" ? wasmValueType.i32 : wasmValueType.i64;
 }
 
-// A value already evaluated on the current path is replayed from its local,
-// so it cuts off a possibly trapping dependency closure. This query keeps
-// that path state outside the table's static non-trapping fact.
-export function canEvaluateWithoutTrap(
-  values: ValueTable,
-  id: ValueId,
-  isAlreadyBound: (value: ValueId) => boolean
-): boolean {
-  const contextual = new Map<ValueId, boolean>();
-  const visit = (value: ValueId): boolean => {
-    const existing = contextual.get(value);
-
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    if (values.isNonTrapping(value) || isAlreadyBound(value)) {
-      contextual.set(value, true);
-      return true;
-    }
-
-    const result = !values.mayTrap(value) && values.children(value).every(visit);
-
-    contextual.set(value, result);
-    return result;
-  };
-
-  return visit(id);
+function isStructuredHeader(site: BodySite): boolean {
+  return site.kind === "action" &&
+    (site.action.kind === "if" ||
+      site.action.kind === "switch" ||
+      site.action.kind === "loop");
 }

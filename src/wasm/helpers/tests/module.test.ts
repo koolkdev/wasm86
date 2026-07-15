@@ -4,18 +4,18 @@ import { test } from "node:test";
 import { gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
+import { analyzeBody } from "#compiler/analysis/analyze.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
-import { analyzeLiveness } from "#wasm/emit/liveness.js";
-import { helperCallsForBlock } from "#wasm/helpers/module.js";
+import { helperCallsForAnalysis } from "#wasm/helpers/module.js";
 import { resolveFlag, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 function helperCalls(block: IrBlock) {
   validateIrBlock(block, { allowImplicitEntryFallthrough: true });
-  return helperCallsForBlock(block, analyzeLiveness(block));
+  return helperCallsForAnalysis(analyzeBody(block));
 }
 
-test("helperCallsForBlock reports live flag resolves", () => {
+test("helperCallsForAnalysis reports live flag resolves", () => {
   const values = new ValueTable();
   const zf = values.addActionOutput(fitsUnsigned(1));
   const block = {
@@ -33,7 +33,7 @@ test("helperCallsForBlock reports live flag resolves", () => {
   ]);
 });
 
-test("helperCallsForBlock omits dead flag resolves", () => {
+test("helperCallsForAnalysis omits dead flag resolves", () => {
   const values = new ValueTable();
   const zf = values.addActionOutput(fitsUnsigned(1));
 
@@ -45,23 +45,27 @@ test("helperCallsForBlock omits dead flag resolves", () => {
   deepStrictEqual(helperCalls(block), []);
 });
 
-test("helperCallsForBlock deduplicates repeated flag resolves", () => {
+test("helperCallsForAnalysis preserves first-use order while deduplicating", () => {
   const values = new ValueTable();
   const first = values.addActionOutput(fitsUnsigned(1));
   const second = values.addActionOutput(fitsUnsigned(1));
+  const duplicate = values.addActionOutput(fitsUnsigned(1));
   const block = {
     body: {
       actions: [
         resolveFlag(first, "ZF"),
-        resolveFlag(second, "ZF"),
+        resolveFlag(second, "CF"),
+        resolveFlag(duplicate, "ZF"),
         stateWrite(gprChannel("eax"), first),
-        stateWrite(gprChannel("ebx"), second)
+        stateWrite(gprChannel("ebx"), second),
+        stateWrite(gprChannel("ecx"), duplicate)
       ]
     },
     values
   } as const;
 
   deepStrictEqual(helperCalls(block), [
-    { kind: "lazyFlag", flag: "ZF" }
+    { kind: "lazyFlag", flag: "ZF" },
+    { kind: "lazyFlag", flag: "CF" }
   ]);
 });

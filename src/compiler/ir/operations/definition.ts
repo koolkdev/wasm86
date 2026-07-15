@@ -2,6 +2,7 @@ import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js
 import type {
   ValueId,
   ValueInput,
+  ValueType,
   WidthBounds
 } from "#compiler/ir/values/types.js";
 import type { X86StatusFlag } from "#core/flags/definitions.js";
@@ -41,28 +42,28 @@ export type OperationNode<
   helper?: HelperCall;
 }>;
 
-export type BorrowedOperationInput = Readonly<{ push(): void }>;
-
 export type OperationValueEmitter = Readonly<{
   emitUse(value: ValueId): void;
-  withBorrowedUse(value: ValueId, callback: (borrowed: BorrowedOperationInput) => void): void;
   constValue(value: ValueId): number | undefined;
 }>;
 
 // Definitions can realize only the operands stored on their operation. Every
-// declared index must be consumed exactly once before emission returns.
+// input must be handled exactly once, either by emitting it or by folding a
+// statically known constant into the instruction stream.
 export type DeclaredOperationInputs = Readonly<{
   use(index: number): void;
-  withBorrowedUse(index: number, callback: (borrowed: BorrowedOperationInput) => void): void;
   // Consumes the input only when its value is statically known.
-  takeConstant(index: number): number | undefined;
+  constValue(index: number): number | undefined;
 }>;
 
-// Built once per emitted fragment. The two resolvers are temporary inputs to
-// operations removed or reshaped by later stages; inputs are passed separately
-// because their consumption state belongs to one operation emission.
+// Lowering-only services shared by operation definitions. Scoped locals never
+// escape one operation emission or become part of placement.
 export type OperationEmitTarget = Readonly<{
   body: WasmFunctionBodyEncoder;
+  withTemporaryLocal(
+    type: ValueType,
+    callback: (local: number) => void
+  ): void;
   variableLocal(variable: number): number;
   helperFunctionIndex(helper: HelperCall): number;
 }>;

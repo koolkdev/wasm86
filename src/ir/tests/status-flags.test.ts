@@ -72,7 +72,7 @@ test("new status flags start with no dirty pending entries", () => {
   deepStrictEqual(pending.flushesForPath("completed"), []);
 });
 
-test("input status flags read through scheduled resolve ops", () => {
+test("input status flags read through planned resolve ops", () => {
   const { values, actions, flags } = createHarness();
   const first = flags.read("ZF");
   const second = flags.read("ZF");

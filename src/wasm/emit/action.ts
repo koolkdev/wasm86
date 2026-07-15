@@ -5,14 +5,16 @@ import {
   bodyFinal,
   type Action,
   type BranchHint,
-  type LoopContinueAction,
   type LoopAction,
+  type LoopContinueAction,
   type SwitchCase
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { nestedBodies } from "#ir/traverse.js";
-import { validateIrBlock } from "#ir/validate.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
+import {
+  placeBody,
+  type BodyPlacement
+} from "#compiler/placement/place.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import {
   wasmBranchHint,
@@ -22,44 +24,31 @@ import {
 } from "#compiler/encoder/function-body.js";
 import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
-import { analyzeLiveness, type BlockLiveness } from "./liveness.js";
-import { planProducerSchedule } from "./schedule/build.js";
-import { ProducerScheduleExecutor } from "./schedule/executor.js";
-import { analyzeValueUses } from "./value-uses.js";
 import { ValueEmitter, wasmTypeForValue } from "./value-emitter.js";
 import {
   resolveHelperFunctionIndex,
   type LegacyHelperIndexRegistryAdapter
 } from "#wasm/helpers/registry.js";
 
-// The emitter driver: walks an IrBlock in action order and fills the
-// given function body. Its product is a function body, never a module —
-// module assembly (imports, exports, ABI) belongs to the engines; the only
-// module wrapping under emit is the test harness. A fragment leaves
-// its body open for the embedder.
-
 export type ActionFragmentContext = Readonly<{
   body: WasmFunctionBodyEncoder;
-  // The enclosing function's allocator; the fragment frees every local it
-  // takes.
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
   helpers?: LegacyHelperIndexRegistryAdapter | undefined;
-  // A supplied liveness result was computed from this validated block with
-  // the embedding's output roots. Without one, the fragment owns both steps.
-  liveness?: BlockLiveness | undefined;
+  placement?: BodyPlacement | undefined;
   embedding: FragmentEmbedding;
 }>;
 
 export type ActionFunctionContext = Readonly<{
   helpers?: LegacyHelperIndexRegistryAdapter | undefined;
-  // See ActionFragmentContext.liveness.
-  liveness?: BlockLiveness | undefined;
+  placement?: BodyPlacement | undefined;
   embedding: FunctionEmbedding;
 }>;
 
-// The function-shaped entry point: the block is the whole function body.
-export function emitActionFunction(block: IrBlock, context: ActionFunctionContext): EncodedWasmFunctionBody {
+export function emitActionFunction(
+  block: IrBlock,
+  context: ActionFunctionContext
+): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
 
@@ -67,7 +56,7 @@ export function emitActionFunction(block: IrBlock, context: ActionFunctionContex
     body,
     scratch,
     helpers: context.helpers,
-    liveness: context.liveness,
+    placement: context.placement,
     embedding: context.embedding
   });
   scratch.assertClear();
@@ -77,286 +66,267 @@ export function emitActionFunction(block: IrBlock, context: ActionFunctionContex
 export function emitActionFragment(block: IrBlock, context: ActionFragmentContext): void {
   const { body, embedding } = context;
   const outputs = embedding.outputs ?? new Map<ValueId, number>();
-  let liveness = context.liveness;
+  const placement = resolvePlacement(block, context, outputs.keys());
+  const { analysis, plan, index } = placement;
+  const locals = plan.localTypes.map((type) =>
+    context.scratch.allocLocal(wasmTypeForValue(type))
+  );
 
-  if (liveness === undefined) {
-    validateIrBlock(block, {
-      allowImplicitEntryFallthrough: context.embedding.fallthrough !== undefined,
-      exportedOutputs: outputs.keys()
+  try {
+    const valueEmitter = new ValueEmitter({
+      body,
+      scratch: context.scratch,
+      values: block.values,
+      analysis,
+      plan,
+      index,
+      locals,
+      externalLocals: context.externalLocals ?? new Map(),
+      helperFunctionIndex: (helper) =>
+        resolveHelperFunctionIndex(context.helpers, helper)
     });
-
-    liveness = analyzeLiveness(block, outputs.keys());
-  }
-  const fragmentLiveness = liveness;
-  const uses = analyzeValueUses(block, fragmentLiveness, outputs.keys());
-  const producerSchedule = planProducerSchedule(block, fragmentLiveness, uses, outputs.keys());
-  const scheduledProducers = new ProducerScheduleExecutor(producerSchedule);
-  const valueEmitter = new ValueEmitter({
-    body,
-    scratch: context.scratch,
-    values: block.values,
-    uses,
-    externalLocals: context.externalLocals ?? new Map(),
-    helperFunctionIndex: (helper) =>
-      resolveHelperFunctionIndex(context.helpers, helper),
-    claimProducerAtUse: (output) =>
-      scheduledProducers.executeUse(output).producer.action
-  });
-  const completingAction = bodyFinal(block.body);
-
-  const frame = createControlFrame({
-    body,
-    dispatch: embedding.dispatch,
-    fallthrough: embedding.fallthrough,
-    emitPayload: (id) => valueEmitter.emitUse(id),
-    constValue: (id) => block.values.constValue(id)
-  });
-
-  // The innermost open loop's carried locals, aligned with its carried list.
-  const loopCellLocals: number[][] = [];
-
-  function emitAction(action: Action): void {
-    switch (action.kind) {
-      case "op":
-        if (action.op.result === undefined) {
-          valueEmitter.emitOperation(action.op);
-        }
-        return;
-      case "finish":
-        switch (action.finish.kind) {
-          case "exit":
-            frame.emitReport(action.finish);
-            return;
-          case "dispatch":
-            frame.emitDispatch(action.finish);
-            return;
-        }
-        assert(false, "unknown finish kind");
-        return;
-      case "if":
-        emitIf(action);
-        return;
-      case "switch":
-        emitSwitch(action);
-        return;
-      case "loop":
-        emitLoop(action);
-        return;
-      case "loopContinue":
-        emitLoopContinue(action);
-        return;
-    }
-  }
-
-  // Captures first — loop-invariant values and preheader producers
-  // materialize on the enclosing flow — then one local per carried cell,
-  // seeded before the loop opens and bound to the cell's loop input.
-  function emitLoop(action: LoopAction): void {
-    captureForBody(action.body);
-
-    const locals = action.carried.map((cell) => {
-      valueEmitter.emitUse(cell.seed);
-
-      const local = context.scratch.allocLocal(wasmTypeForValue(block.values.valueType(cell.loopInput)));
-
-      body.localSet(local);
-      valueEmitter.bindLoopInput(cell.loopInput, local);
-      return local;
+    const frame = createControlFrame({
+      body,
+      dispatch: embedding.dispatch,
+      fallthrough: embedding.fallthrough,
+      emitPayload: (id) => valueEmitter.emitUse(id),
+      constValue: (id) => block.values.constValue(id)
     });
-
-    body.loop();
-    loopCellLocals.push(locals);
-    // The body re-executes per iteration: locals captured before the loop
-    // must not recycle inside it.
-    context.scratch.withReuseBarrier(() => frame.withLoopBody(() => emitBody(action.body)));
-    loopCellLocals.pop();
-    body.endBlock();
-
-    for (const [index, cell] of action.carried.entries()) {
-      valueEmitter.unbindLoopInput(cell.loopInput);
-      context.scratch.freeLocal(locals[index]!);
-    }
-  }
-
-  // All updates compute before any local rewrites — an update may read
-  // another cell's loop input — then the sets pop in reverse.
-  function emitLoopContinue(action: LoopContinueAction): void {
-    const locals = loopCellLocals[loopCellLocals.length - 1];
-
-    assert(locals !== undefined, "loopContinue action outside any loop body");
-    assert(action.updates.length === locals.length, "loopContinue updates do not align with the loop's cells");
-
-    for (const update of action.updates) {
-      valueEmitter.emitUse(update);
-    }
-
-    for (let index = locals.length - 1; index >= 0; index -= 1) {
-      body.localSet(locals[index]!);
-    }
-
-    frame.emitLoopContinue();
-  }
-
-  // The condition emits first so values it shares with the bodies tee at
-  // their first use; both bodies' values are then captured — stack-neutral
-  // sets under the pushed condition — before any path leaves the parent.
-  function emitIf(action: Extract<Action, { kind: "if" }>): void {
-    valueEmitter.emitUse(action.condition);
-    captureForBody(action.thenBody);
-
-    if (action.elseBody !== undefined) {
-      captureForBody(action.elseBody);
-    }
-
-    const outputLocal = action.output !== undefined && fragmentLiveness.isLive(action.output)
-      ? valueEmitter.claimControlOutput(action.output)
-      : undefined;
-    const emitArm = (armBody: Body): void => {
-      if (action.output === undefined) {
-        emitBody(armBody);
-      } else {
-        emitResultBody(armBody, outputLocal, "if");
-      }
-    };
-
-    body.ifBlock({ hint: wasmHint(action.hint) });
-    frame.withNestedControl(() => {
-      emitArm(action.thenBody);
-
-      if (action.elseBody !== undefined) {
-        body.elseBlock();
-        emitArm(action.elseBody);
-      } else {
-        assert(action.output === undefined, "value-producing if has no else body");
-      }
-    });
-    body.endBlock();
-
-    if (actionCompletes(action) && embedding.dispatch?.kind === "link") {
-      body.unreachable();
-    }
-  }
-
-  // Captures first, then br_table selects among one block per case plus
-  // default plus join; each arm parks its result in the output's local.
-  // Arms emit under the frame with the switch's open label count, so
-  // completions inside them escape correctly.
-  function emitSwitch(action: Extract<Action, { kind: "switch" }>): void {
-    for (const nested of nestedBodies(action)) {
-      captureForBody(nested);
-    }
-
-    const outputLocal = fragmentLiveness.isLive(action.output)
-      ? valueEmitter.claimControlOutput(action.output)
-      : undefined;
-    const caseCount = action.cases.length;
-
-    // Open order join, default, case n-1 .. case 0: case i lands at depth
-    // i in br_table's index space, the default at caseCount. The selector
-    // pushes inside the innermost block, where br_table can see it.
-    for (let index = 0; index <= caseCount + 1; index += 1) {
-      body.block();
-    }
-
-    valueEmitter.emitUse(action.selector);
-    body.brTable(switchLabelDepths(action.cases), caseCount);
-
-    action.cases.forEach((switchCase, index) => {
-      body.endBlock();
-      frame.withNestedControl(
-        () => emitResultBody(switchCase.body, outputLocal, "switch"),
-        caseCount - index + 1
-      );
-      body.br(caseCount - index);
-    });
-
-    body.endBlock();
-    frame.withNestedControl(
-      () => emitResultBody(action.defaultBody, outputLocal, "switch"),
-      1
+    const rootFinal = bodyFinal(block.body);
+    const exportSite = analysis.siteOf(
+      block.body,
+      rootFinal === undefined ? block.body.actions.length : block.body.actions.length - 1
     );
-    body.endBlock();
-  }
+    // The innermost open loop's actual Wasm locals, aligned with its cells.
+    const loopLocals: (readonly number[])[] = [];
 
-  function emitResultBody(
-    resultBody: Body,
-    outputLocal: number | undefined,
-    kind: "if" | "switch"
-  ): void {
-    emitBody(resultBody);
+    function emitAtSite(
+      actionBody: Body,
+      actionIndex: number,
+      emit: () => void
+    ): void {
+      const site = analysis.siteOf(actionBody, actionIndex);
 
-    const result = resultBody.result;
+      valueEmitter.withSite(site, () => {
+        if (site === exportSite) {
+          for (const value of analysis.exportedOutputs()) {
+            const local = outputs.get(value);
 
-    assert(result !== undefined, `${kind} arm has no result`);
-    emitAtSite(resultBody, resultBody.actions.length, () => {
-      if (outputLocal !== undefined) {
-        valueEmitter.emitUse(result);
-        body.localSet(outputLocal);
-      } else if (block.values.captureMode(result) === "unreachable") {
-        // The path stays impossible even when nothing demands the output.
+            assert(local !== undefined, `exported value ${value} has no embedding local`);
+            valueEmitter.emitUse(value);
+            body.localSet(local);
+          }
+        }
+        emit();
+      });
+    }
+
+    function emitAction(action: Action): void {
+      switch (action.kind) {
+        case "op":
+          // Result-bearing operations execute through their value anchor.
+          if (action.op.result === undefined) {
+            valueEmitter.emitOperation(action.op);
+          }
+          return;
+        case "finish":
+          switch (action.finish.kind) {
+            case "exit":
+              frame.emitReport(action.finish);
+              return;
+            case "dispatch":
+              frame.emitDispatch(action.finish);
+              return;
+          }
+        case "if":
+          emitIf(action);
+          return;
+        case "switch":
+          emitSwitch(action);
+          return;
+        case "loop":
+          emitLoop(action);
+          return;
+        case "loopContinue":
+          emitLoopContinue(action);
+          return;
+      }
+    }
+
+    function emitLoop(action: LoopAction): void {
+      const carriedLocals = action.carried.map((cell) => {
+        const local = valueEmitter.valueLocal(cell.loopInput);
+
+        valueEmitter.emitUse(cell.seed);
+        body.localSet(local);
+        return local;
+      });
+
+      valueEmitter.emitCaptures();
+      body.loop();
+      loopLocals.push(carriedLocals);
+      frame.withLoopBody(() => emitBody(action.body));
+      assert(loopLocals.pop() === carriedLocals, "loop local stack changed");
+      body.endBlock();
+    }
+
+    // Compute all updates before overwriting any carried cell.
+    function emitLoopContinue(action: LoopContinueAction): void {
+      const carriedLocals = loopLocals[loopLocals.length - 1];
+
+      assert(carriedLocals !== undefined, "loopContinue action outside any loop body");
+      assert(
+        action.updates.length === carriedLocals.length,
+        "loopContinue updates do not align with the loop's cells"
+      );
+      for (const update of action.updates) {
+        valueEmitter.emitUse(update);
+      }
+      for (let index = carriedLocals.length - 1; index >= 0; index -= 1) {
+        body.localSet(carriedLocals[index]!);
+      }
+      frame.emitLoopContinue();
+    }
+
+    function emitIf(action: Extract<Action, { kind: "if" }>): void {
+      const outputPlacement = action.output === undefined
+        ? undefined
+        : plan.values[action.output];
+
+      assert(
+        outputPlacement === undefined || outputPlacement.kind === "control",
+        `if output ${action.output} has the wrong placement`
+      );
+      let outputLocal: number | undefined;
+
+      if (outputPlacement !== undefined) {
+        assert(action.output !== undefined, "placed if output is missing");
+        outputLocal = valueEmitter.valueLocal(action.output);
+      }
+
+      valueEmitter.emitUse(action.condition);
+      valueEmitter.emitCaptures();
+      body.ifBlock({ hint: wasmHint(action.hint) });
+      frame.withNestedControl(() => {
+        emitBody(action.thenBody, outputLocal);
+
+        if (action.elseBody !== undefined) {
+          body.elseBlock();
+          emitBody(action.elseBody, outputLocal);
+        } else {
+          assert(action.output === undefined, "value-producing if has no else body");
+        }
+      });
+      body.endBlock();
+
+      if (action.output !== undefined && outputPlacement !== undefined) {
+        valueEmitter.markControlOutput(action.output);
+      }
+      if (actionCompletes(action) && embedding.dispatch?.kind === "link") {
         body.unreachable();
       }
-    });
-  }
-
-  // Copy boundary outputs after ordinary actions and before control leaves
-  // the fragment.
-  function emitExportedOutputs(): void {
-    for (const [id, local] of outputs) {
-      valueEmitter.emitUse(id);
-      body.localSet(local);
     }
-  }
 
-  function emitBody(actionBody: Body): void {
-    actionBody.actions.forEach((action, actionIndex) => {
-      emitAtSite(actionBody, actionIndex, () => emitAction(action));
-    });
-  }
+    function emitSwitch(action: Extract<Action, { kind: "switch" }>): void {
+      const outputPlacement = plan.values[action.output];
 
-  function emitAtSite(actionBody: Body, actionIndex: number, emit: () => void): void {
-    scheduledProducers.withSite(
-      actionBody,
-      actionIndex,
-      (event) => valueEmitter.captureProducer(event.producer.action),
-      emit
-    );
-  }
+      assert(
+        outputPlacement === undefined || outputPlacement.kind === "control",
+        `switch output ${action.output} has the wrong placement`
+      );
+      const outputLocal = outputPlacement === undefined
+        ? undefined
+        : valueEmitter.valueLocal(action.output);
+      const caseCount = action.cases.length;
 
-  function captureForBody(actionBody: Body): void {
-    const inputs = producerSchedule.inputsForBody(actionBody);
+      // Open order: join, default, case n-1 .. case 0.
+      for (let index = 0; index <= caseCount + 1; index += 1) {
+        body.block();
+      }
 
-    valueEmitter.captureValues(inputs);
-  }
+      valueEmitter.emitUse(action.selector);
+      valueEmitter.emitCaptures();
+      body.brTable(switchLabelDepths(action.cases), caseCount);
 
-  const completionSiteIndex = completingAction === undefined
-    ? block.body.actions.length
-    : block.body.actions.length - 1;
+      action.cases.forEach((switchCase, index) => {
+        body.endBlock();
+        frame.withNestedControl(
+          () => emitBody(switchCase.body, outputLocal),
+          caseCount - index + 1
+        );
+        body.br(caseCount - index);
+      });
 
-  for (let actionIndex = 0; actionIndex < completionSiteIndex; actionIndex += 1) {
-    const action = block.body.actions[actionIndex]!;
+      body.endBlock();
+      frame.withNestedControl(() => emitBody(action.defaultBody, outputLocal), 1);
+      body.endBlock();
 
-    emitAtSite(block.body, actionIndex, () => emitAction(action));
-  }
+      if (outputPlacement !== undefined) {
+        valueEmitter.markControlOutput(action.output);
+      }
+    }
 
-  emitAtSite(block.body, completionSiteIndex, () => {
-    emitExportedOutputs();
+    function emitBody(actionBody: Body, resultLocal?: number): void {
+      for (const [actionIndex, action] of actionBody.actions.entries()) {
+        emitAtSite(actionBody, actionIndex, () => emitAction(action));
+      }
 
-    if (completingAction === undefined) {
+      if (actionBody.result !== undefined || bodyFinal(actionBody) === undefined) {
+        emitAtSite(actionBody, actionBody.actions.length, () => {
+          const result = actionBody.result;
+
+          if (result === undefined) {
+            return;
+          }
+          if (resultLocal !== undefined) {
+            valueEmitter.emitUse(result);
+            body.localSet(resultLocal);
+          } else if (block.values.captureMode(result) === "unreachable") {
+            valueEmitter.emitUse(result);
+          }
+        });
+      }
+    }
+
+    emitBody(block.body);
+    if (rootFinal === undefined) {
       frame.emitFallthrough();
-    } else {
-      emitAction(completingAction);
     }
-  });
-
-  scheduledProducers.assertComplete();
-  valueEmitter.releaseFragmentLocals();
-  valueEmitter.assertClear();
+    valueEmitter.assertComplete();
+  } finally {
+    for (const local of [...locals].reverse()) {
+      context.scratch.freeLocal(local);
+    }
+  }
 }
 
-// The dense br_table label vector: entry m selects the case whose match is
-// m — its body starts after closing the depth-m block — and every hole
-// selects the default at depth cases.length.
+function resolvePlacement(
+  block: IrBlock,
+  context: ActionFragmentContext,
+  outputs: Iterable<ValueId>
+): BodyPlacement {
+  const exportedOutputs = [...outputs];
+  const placement = context.placement;
+
+  if (placement === undefined) {
+    return placeBody(block, {
+      exportedOutputs,
+      allowImplicitEntryFallthrough: context.embedding.fallthrough !== undefined
+    });
+  }
+
+  assert(placement.block === block, "placement belongs to another IR block");
+  assert(
+    sameValues(placement.analysis.exportedOutputs(), exportedOutputs),
+    "placement has different exported outputs"
+  );
+  return placement;
+}
+
+function sameValues(a: readonly ValueId[], b: readonly ValueId[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 function switchLabelDepths(cases: readonly SwitchCase[]): number[] {
   const size = cases.reduce((max, entry) => Math.max(max, entry.match + 1), 0);
   const table = new Array<number>(size).fill(cases.length);
@@ -364,7 +334,6 @@ function switchLabelDepths(cases: readonly SwitchCase[]): number[] {
   for (const [depth, entry] of cases.entries()) {
     table[entry.match] = depth;
   }
-
   return table;
 }
 

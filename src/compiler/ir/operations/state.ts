@@ -47,9 +47,7 @@ export const stateRead: OperationDefinition<
       ...(op.accessByteLength !== undefined
         ? { accessByteLength: op.accessByteLength }
         : {}),
-      inputs: isDynamicSlot(op.slot)
-        ? [{ value: op.slot.index, type: "i32" }]
-        : [],
+      inputs: slotInputs(op.slot),
       result: stateReadResult(op),
       effects: {
         reads: [{ space: "state", slot: op.slot }],
@@ -58,9 +56,9 @@ export const stateRead: OperationDefinition<
     };
   },
 
-  emit(operation, { body }, inputs) {
+  emit(operation, target, inputs) {
     emitSlotLoad(
-      body,
+      target,
       operation.slot,
       operation.signed === true,
       inputs,
@@ -82,9 +80,7 @@ export const stateWrite: OperationDefinition<
   kind: "state.write",
 
   create(op) {
-    const inputs: ValueInput[] = isDynamicSlot(op.slot)
-      ? [{ value: op.slot.index, type: "i32" }]
-      : [];
+    const inputs = slotInputs(op.slot);
 
     inputs.push({ value: op.value, type: "i32" });
 
@@ -101,8 +97,8 @@ export const stateWrite: OperationDefinition<
     };
   },
 
-  emit(operation, { body }, inputs) {
-    emitOperationSlotStore(body, operation.slot, inputs);
+  emit(operation, target, inputs) {
+    emitOperationSlotStore(target, operation.slot, inputs);
   }
 };
 
@@ -143,4 +139,14 @@ function byteLengthBounds(byteLength: 1 | 2 | 4, signed: boolean): WidthBounds |
     case 4:
       return undefined;
   }
+}
+
+function slotInputs(slot: StateSlot): ValueInput[] {
+  if (!isDynamicSlot(slot)) {
+    return [];
+  }
+
+  const input: ValueInput = { value: slot.index, type: "i32" };
+
+  return [input];
 }

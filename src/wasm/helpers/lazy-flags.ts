@@ -39,7 +39,7 @@ export function encodeLazyFlagHelperBody(helper: X86StatusFlag): EncodedWasmFunc
 }
 
 // One IrBlock per helper: read the lazy kind channel, switch on it, export
-// the selected arm's flag value. Each arm schedules its own channel reads,
+// the selected arm's flag value. Each arm places its own channel reads,
 // so demand stays arm-local — LOGIC arms never touch lazyFlagsB and a
 // formula that ignores a read leaves it unemitted.
 function lazyFlagResolverBlock(flag: X86StatusFlag): Readonly<{ block: IrBlock; output: ValueId }> {

@@ -1,6 +1,5 @@
 import { assert } from "#common/assert.js";
 import type { IrBlock } from "#ir/block.js";
-import { validateIrBlock } from "#ir/validate.js";
 import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import {
   WasmFunctionBodyEncoder,
@@ -9,10 +8,14 @@ import {
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
-import { emitActionFragment } from "#wasm/emit/action.js";
-import { analyzeLiveness, type BlockLiveness } from "#wasm/emit/liveness.js";
 import {
-  helperCallsForBlock,
+  placeBody,
+  type BodyPlacement
+} from "#compiler/placement/place.js";
+import { validatePlacement } from "#compiler/placement/validate.js";
+import { emitActionFragment } from "#wasm/emit/action.js";
+import {
+  helperCallsForAnalysis,
   installHelpers
 } from "#wasm/helpers/module.js";
 import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
@@ -41,23 +44,21 @@ export function irBlockBody(block: IrBlock, externalParamCount = 0): EncodedWasm
 
 export function irBlockBodyWithHelpers(block: IrBlock, externalParamCount = 0): EncodedWasmFunctionBody {
   const module = new WasmModuleEncoder();
+  const placement = placeValidatedBody(block);
+  const helpers = installHelpers(module, helperCallsForAnalysis(placement.analysis));
 
-  validateIrBlock(block, { allowImplicitEntryFallthrough: true });
-
-  const liveness = analyzeLiveness(block);
-  const helpers = installHelpers(module, helperCallsForBlock(block, liveness));
-
-  return emitIrBlockBody(block, externalParamCount, helpers, liveness);
+  return emitIrBlockBody(block, externalParamCount, helpers, placement);
 }
 
 function emitIrBlockBody(
   block: IrBlock,
   externalParamCount: number,
   helpers?: LegacyHelperIndexRegistryAdapter,
-  liveness?: BlockLiveness
+  placement?: BodyPlacement
 ): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder(externalParamCount);
   const scratch = new WasmLocalScratchAllocator(body);
+  const bodyPlacement = placement ?? placeValidatedBody(block);
 
   body.block();
   emitActionFragment(block, {
@@ -65,7 +66,7 @@ function emitIrBlockBody(
     scratch,
     externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
     helpers,
-    liveness,
+    placement: bodyPlacement,
     embedding: {
       dispatch: { kind: "br", depth: 0 },
       fallthrough: { kind: "fallthrough" }
@@ -142,16 +143,23 @@ function encodeIrBlockModule(block: IrBlock, externalParamCount: number): Uint8A
   const module = new WasmModuleEncoder();
   const typeIndex = initializeTestModule(module, externalParamCount);
 
-  validateIrBlock(block, { allowImplicitEntryFallthrough: true });
-
-  const liveness = analyzeLiveness(block);
-  const helpers = installHelpers(module, helperCallsForBlock(block, liveness));
+  const placement = placeValidatedBody(block);
+  const helpers = installHelpers(module, helperCallsForAnalysis(placement.analysis));
 
   module.exportFunction(
     wasmBlockExportName,
-    module.addFunction(typeIndex, emitIrBlockBody(block, externalParamCount, helpers, liveness))
+    module.addFunction(typeIndex, emitIrBlockBody(block, externalParamCount, helpers, placement))
   );
   return module.encode();
+}
+
+function placeValidatedBody(block: IrBlock): BodyPlacement {
+  const placement = placeBody(block, {
+    allowImplicitEntryFallthrough: true
+  });
+
+  validatePlacement(block, placement.analysis, placement.plan);
+  return placement;
 }
 
 function initializeTestModule(module: WasmModuleEncoder, paramCount: number): number {
