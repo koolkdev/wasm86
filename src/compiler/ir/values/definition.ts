@@ -9,7 +9,7 @@ import type {
 } from "./types.js";
 
 export type ValueNodeBase = Readonly<{ kind: string }>;
-export type ValueCaptureMode = "reemit" | "producer" | "compute" | "unreachable";
+export type ValueCaptureMode = "reemit" | "producer" | "compute";
 export type ValueKey = string | number | bigint | boolean;
 
 export type ValueBoundsContext = Readonly<{

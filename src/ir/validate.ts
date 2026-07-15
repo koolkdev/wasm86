@@ -297,7 +297,7 @@ class IrValidator {
           this.#block.values.valueType(context.ownerOutput),
         `${context.path} result type does not match its owner output`
       );
-      if (this.#block.values.captureMode(body.result) !== "unreachable") {
+      if (!this.#block.values.isUnreachable(body.result)) {
         const resultBounds = this.#block.values.widthBounds(body.result);
         const outputBounds = this.#block.values.widthBounds(context.ownerOutput);
 

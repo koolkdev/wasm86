@@ -156,7 +156,7 @@ export class BodyBuilder {
         this.values.valueType(result) === "i32",
         "only i32 control results are supported"
       );
-      if (this.values.captureMode(result) !== "unreachable") {
+      if (!this.values.isUnreachable(result)) {
         bounds.push(this.values.widthBounds(result));
       }
     }

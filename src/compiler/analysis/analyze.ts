@@ -187,7 +187,7 @@ class BodyAnalyzer implements BodyAnalysis {
 
     if (
       body.result !== undefined &&
-      this.#block.values.captureMode(body.result) === "unreachable"
+      this.#block.values.isUnreachable(body.result)
     ) {
       mandatoryResult = {
         value: body.result,
@@ -378,7 +378,7 @@ class BodyAnalyzer implements BodyAnalysis {
         // right. Its body-end root is also the selected arm's only realization,
         // so a live join must not count a second use of the same occurrence.
         for (const dependency of control.dependencies) {
-          if (this.#block.values.captureMode(dependency.value) !== "unreachable") {
+          if (!this.#block.values.isUnreachable(dependency.value)) {
             this.#addUse(dependency.value);
           }
         }

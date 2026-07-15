@@ -23,8 +23,7 @@ export type ValuePlacement =
     }>;
 
 export type PlacementPlan = Readonly<{
-  // ValueId-indexed. Re-emittable leaves, unreachable sentinels, and dead
-  // values have no placement.
+  // ValueId-indexed. Re-emittable and dead values have no placement.
   values: readonly (ValuePlacement | undefined)[];
   // Physical plan local -> value type.
   localTypes: readonly ValueType[];

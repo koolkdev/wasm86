@@ -63,6 +63,23 @@ test("a dead ifValue output preserves an impossible selected arm", async () => {
   throws(() => run(0), WebAssembly.RuntimeError);
 });
 
+test("a shared unreachable result traps in either selected arm", async () => {
+  const values = new ValueTable();
+  const body = new BodyBuilder(values);
+
+  body.ifValue(
+    values.external(0),
+    (then) => then.values.unreachable(),
+    (otherwise) => otherwise.values.unreachable()
+  );
+
+  const block: IrBlock = { values, body: body.build() };
+  const { run } = await instantiateIrBlock(block, 1);
+
+  throws(() => run(1), WebAssembly.RuntimeError);
+  throws(() => run(0), WebAssembly.RuntimeError);
+});
+
 test("an unselected ifValue arm does not evaluate a trapping result", async () => {
   const values = new ValueTable();
   const body = new BodyBuilder(values);

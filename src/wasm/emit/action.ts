@@ -281,7 +281,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
           if (resultLocal !== undefined) {
             valueEmitter.emitUse(result);
             body.localSet(resultLocal);
-          } else if (block.values.captureMode(result) === "unreachable") {
+          } else if (block.values.isUnreachable(result)) {
             valueEmitter.emitUse(result);
           }
         });

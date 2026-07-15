@@ -31,6 +31,15 @@ test("value table exposes nodes by id", () => {
   throws(() => table.node(valueId(99)), /unknown value id 99/);
 });
 
+test("unreachable values re-emit but retain their semantic identity", () => {
+  const table = new ValueTable();
+  const unreachable = table.unreachable();
+
+  strictEqual(table.captureMode(unreachable), "reemit");
+  strictEqual(table.isUnreachable(unreachable), true);
+  strictEqual(table.isUnreachable(table.const(0)), false);
+});
+
 test("building the same expression twice yields the same node id", () => {
   const table = new ValueTable();
   const a = table.addActionOutput();

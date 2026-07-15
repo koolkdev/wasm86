@@ -124,7 +124,7 @@ export class ValueEmitter implements OperationValueEmitter {
   emitUse(value: ValueId): void {
     const mode = this.#values.captureMode(value);
 
-    if (mode === "reemit" || mode === "unreachable") {
+    if (mode === "reemit") {
       this.#values.emit(value, this.#valueContext);
       return;
     }
@@ -241,7 +241,6 @@ export class ValueEmitter implements OperationValueEmitter {
         this.#values.emit(value, this.#valueContext);
         return;
       case "reemit":
-      case "unreachable":
         assert(false, `value ${value} cannot have a planned source`);
     }
   }

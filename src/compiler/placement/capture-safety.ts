@@ -38,12 +38,12 @@ export function canCaptureAtDeadline(
       return;
     }
     visited.add(operand);
-    const mode = block.values.captureMode(operand);
-
-    if (mode === "unreachable") {
+    if (block.values.isUnreachable(operand)) {
       headerIsUnreachable = true;
       return;
     }
+    const mode = block.values.captureMode(operand);
+
     if (mode === "reemit") {
       return;
     }

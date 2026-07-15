@@ -89,7 +89,7 @@ class AnchorPlanner {
         for (const dependency of controlDependencies) {
           // The body-end root is the selected unreachable arm's one concrete
           // occurrence. The join dependency describes the same occurrence.
-          if (this.block.values.captureMode(dependency.value) !== "unreachable") {
+          if (!this.block.values.isUnreachable(dependency.value)) {
             this.#addDemand(dependency);
           }
         }
@@ -108,10 +108,7 @@ class AnchorPlanner {
       if (mode === "compute") {
         this.#placeValue(value, anchor, demands);
       } else {
-        assert(
-          mode === "reemit" || mode === "unreachable",
-          `producer value ${value} has no producer action`
-        );
+        assert(mode === "reemit", `producer value ${value} has no producer action`);
       }
 
       for (const child of this.block.values.children(value)) {

@@ -61,7 +61,7 @@ export function validatePlacementUses(
 
     if (dependencies !== undefined) {
       for (const dependency of dependencies) {
-        if (block.values.captureMode(dependency.value) !== "unreachable") {
+        if (!block.values.isUnreachable(dependency.value)) {
           add(dependency);
         }
       }

@@ -49,7 +49,7 @@ export const unreachableValue: ValueDefinition<UnreachableArgs, UnreachableNode>
   resultType: (node) => node.type,
   widthBounds: () => unboundedWidthBounds,
   mayTrap: () => true,
-  captureMode: "unreachable",
+  captureMode: "reemit",
   emit: (_id, _node, target) => target.body.unreachable()
 };
 

@@ -193,6 +193,10 @@ export class ValueTable implements ValueBuilder {
     return this.#entry(id).isNonTrapping();
   }
 
+  isUnreachable(id: ValueId): boolean {
+    return this.#entry(id).node.kind === "unreachable";
+  }
+
   captureMode(id: ValueId): ValueCaptureMode {
     return this.#entry(id).captureMode();
   }
