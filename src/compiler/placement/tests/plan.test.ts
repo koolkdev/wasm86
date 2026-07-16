@@ -45,7 +45,7 @@ test("a producer used only in a selected body realizes at that use", () => {
   deepStrictEqual(Object.keys(plan), [
     "values",
     "localTypes",
-    "variableLocals"
+    "cellLocals"
   ]);
   deepStrictEqual(plan.values[output], {
     kind: "atUse",

@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import type { CellRef } from "#compiler/refs/cell.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { RegName, SegmentRegister } from "#core/types.js";
 
@@ -21,8 +22,7 @@ export type MemoryAccess<TIntent extends MemoryAccessKind = MemoryAccessKind> = 
   invalid: Value;
   intent: TIntent;
 }>;
-export type VarRef = Readonly<{ kind: "var"; index: number }>;
-export type StorageRef = OperandRef | RegRef | VarRef;
+export type StorageRef = OperandRef | RegRef | CellRef<"i32">;
 
 export type OperandInput = OperandRef;
 export type StorageInput = StorageRef;
@@ -39,14 +39,6 @@ export function operand(index: number): OperandRef {
 
 export function reg(reg: RegName): RegRef {
   return { kind: "reg", reg };
-}
-
-export function semanticVar(index: number): VarRef {
-  assert(
-    Number.isInteger(index) && index >= 0,
-    `semantic var index must be a non-negative integer, got ${index}`
-  );
-  return { kind: "var", index };
 }
 
 export function toStorageRef(value: StorageInput): StorageRef {

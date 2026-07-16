@@ -7,7 +7,7 @@ import {
   memoryWrite
 } from "./memory.js";
 import { stateRead, stateWrite } from "./state.js";
-import { varRead, varWrite } from "./variables.js";
+import { cellRead, cellWrite } from "./cells.js";
 import type {
   DeclaredOperationInputs,
   OperationEmitTarget,
@@ -20,12 +20,12 @@ export type OperationWithResult =
   | ReturnType<typeof memoryCheck.create>
   | ReturnType<typeof memoryResolve.create>
   | ReturnType<typeof resolveFlag.create>
-  | ReturnType<typeof varRead.create>;
+  | ReturnType<typeof cellRead.create>;
 
 export type OperationWithoutResult =
   | ReturnType<typeof stateWrite.create>
   | ReturnType<typeof memoryWrite.create>
-  | ReturnType<typeof varWrite.create>;
+  | ReturnType<typeof cellWrite.create>;
 
 export type Operation = OperationWithResult | OperationWithoutResult;
 
@@ -92,11 +92,11 @@ export function emitOperation(
     case resolveFlag.kind:
       resolveFlag.emit(operation, target, inputs);
       break;
-    case varRead.kind:
-      varRead.emit(operation, target, inputs);
+    case cellRead.kind:
+      cellRead.emit(operation, target, inputs);
       break;
-    case varWrite.kind:
-      varWrite.emit(operation, target, inputs);
+    case cellWrite.kind:
+      cellWrite.emit(operation, target, inputs);
       break;
     default: {
       const unhandled: never = operation;

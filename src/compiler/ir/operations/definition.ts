@@ -1,4 +1,5 @@
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { CellRef } from "#compiler/refs/cell.js";
 import type {
   ValueId,
   ValueInput,
@@ -12,7 +13,7 @@ export type StorageAccess =
   | Readonly<{ space: "state"; slot: StateSlot }>
   | Readonly<{ space: "memory" }>
   | Readonly<{ space: "memoryBounds" }>
-  | Readonly<{ space: "var"; variable: number }>;
+  | Readonly<{ space: "cell"; cell: CellRef }>;
 
 export type OperationEffects = Readonly<{
   reads: readonly StorageAccess[];
@@ -24,10 +25,10 @@ export type HelperCall = Readonly<{
   flag: X86StatusFlag;
 }>;
 
-export type OperationResult = Readonly<{
-  type: "i32";
-  bounds?: WidthBounds;
-}>;
+// i64 results structurally carry no i32 width bounds.
+export type OperationResult =
+  | Readonly<{ type: "i32"; bounds?: WidthBounds }>
+  | Readonly<{ type: "i64" }>;
 
 export type OperationNode<
   Kind extends string,
@@ -64,7 +65,7 @@ export type OperationEmitTarget = Readonly<{
     type: ValueType,
     callback: (local: number) => void
   ): void;
-  variableLocal(variable: number): number;
+  cellLocal(cell: CellRef): number;
   helperFunctionIndex(helper: HelperCall): number;
 }>;
 

@@ -1,15 +1,23 @@
-import { doesNotThrow, throws } from "node:assert";
+import { doesNotThrow, ok, throws } from "node:assert";
 import { test } from "node:test";
 
 import { maxSwitchMatch, type Action, type SwitchAction } from "#ir/actions.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Body, IrBlock } from "#ir/block.js";
+import { BodyBuilder } from "#ir/body-builder.js";
+import { emitMemoryGuard } from "#ir/memory-guard.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { varWrite } from "#compiler/ir/operations/variables.js";
+import { CellRef } from "#compiler/refs/cell.js";
+import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import {
+  memoryRead,
+  stateRead,
+  stateWrite
+} from "#ir/tests/storage-op-helpers.js";
 
 function blockWith(actions: readonly Action[]): IrBlock {
   const values = new ValueTable();
@@ -40,8 +48,36 @@ const finishDispatch0 = finishDispatch(0);
 const writeEip0 = stateWrite(eipChannel, 0);
 const writeEip1 = stateWrite(eipChannel, 1);
 
+function testCell(): CellRef<"i32"> {
+  return new CellRef("i32");
+}
+
+function cellReadAction(
+  output: ValueId,
+  cell: CellRef
+): Action {
+  return { kind: "op", output, op: cellRead.create({ cell }) };
+}
+
 test("a body ending with a finish exit validates", () => {
   doesNotThrow(() => validateIrBlock(blockWith([finishExit()])));
+});
+
+test("a memory guard builds its fault body in the caller's lexical scope", () => {
+  const values = new ValueTable();
+  const builder = new BodyBuilder(values);
+
+  emitMemoryGuard(
+    builder,
+    values.external(0),
+    1,
+    { kind: "instructionFetch" }
+  );
+  const block: IrBlock = { values, body: builder.build() };
+
+  doesNotThrow(() => validateIrBlock(block, {
+    allowImplicitEntryFallthrough: true
+  }));
 });
 
 test("a body ending with a finish dispatch validates", () => {
@@ -364,17 +400,183 @@ test("a loop with a dword carried cell and an aligned continue validates", () =>
   );
 });
 
-test("a var op with an invalid index is rejected", () => {
+test("a cell read before its seed is rejected", () => {
+  const values = new ValueTable();
+  const seed = values.const(7);
+  const builder = new BodyBuilder(values);
+  const cell = builder.cell(seed);
+
+  builder.read(cell);
+  builder.finish({ kind: "dispatch", targetEip: seed });
+  const body = builder.build();
+  const seedAction = body.actions[0];
+  const readAction = body.actions[1];
+  const finishAction = body.actions[2];
+
+  ok(seedAction !== undefined);
+  ok(readAction !== undefined);
+  ok(finishAction !== undefined);
+
+  (body.actions as Action[]).splice(0, 3, readAction, seedAction, finishAction);
+
   throws(
-    () =>
-      validateIrBlock(
-        blockWith([{
-          kind: "op",
-          op: varWrite.create({ variable: -1, value: valueId(0) })
-        }])
-      ),
-    /invalid semantic var index/
+    () => validateIrBlock({ values, body }),
+    /before its seed/
   );
+});
+
+test("a cell cannot be seeded more than once", () => {
+  const values = new ValueTable();
+  const seed = values.const(7);
+  const builder = new BodyBuilder(values);
+  const cell = builder.cell(seed);
+
+  builder.operation(
+    cellWrite.create({ cell, value: seed, initialization: "seed" })
+  );
+  builder.finish({ kind: "dispatch", targetEip: seed });
+
+  throws(
+    () => validateIrBlock({ values, body: builder.build() }),
+    /seeds the same cell more than once/
+  );
+});
+
+test("a cell access without any seed is rejected", () => {
+  const values = new ValueTable();
+  const target = values.const(7);
+  const builder = new BodyBuilder(values);
+  const cell = builder.cell(target);
+
+  builder.read(cell);
+  builder.finish({ kind: "dispatch", targetEip: target });
+  const body = builder.build();
+
+  (body.actions as Action[]).splice(0, 1);
+
+  throws(
+    () => validateIrBlock({ values, body }),
+    /cell with no seed/
+  );
+});
+
+test("a cell from another root is rejected", () => {
+  const values = new ValueTable();
+  const seed = values.const(7);
+  const source = new BodyBuilder(values);
+  const foreign = source.cell(seed);
+
+  source.read(foreign);
+  const foreignRead = source.build().actions[1];
+
+  ok(foreignRead !== undefined);
+  const target = new BodyBuilder(values);
+
+  target.cell(seed);
+  target.push(foreignRead);
+  target.finish({ kind: "dispatch", targetEip: seed });
+
+  throws(
+    () => validateIrBlock({ values, body: target.build() }),
+    /cell with no seed in this root/
+  );
+});
+
+test("a cell declared in one sibling body cannot be used in another", () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const seed = values.const(7);
+  const builder = new BodyBuilder(values);
+  let cell!: CellRef;
+
+  builder.if(
+    condition,
+    (then) => {
+      cell = then.cell(seed);
+    },
+    { elseBuild: () => {} }
+  );
+  builder.finish({ kind: "dispatch", targetEip: seed });
+  const body = builder.build();
+  const branch = body.actions[0];
+
+  if (branch?.kind !== "if" || branch.elseBody === undefined) {
+    throw new Error("test branch did not build both arms");
+  }
+  (branch.elseBody.actions as Action[]).push(
+    cellReadAction(values.addActionOutput(), cell)
+  );
+
+  throws(() => validateIrBlock({ values, body }), /outside its declaring body or descendants/);
+});
+
+test("a child cell cannot escape to its parent body", () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const seed = values.const(7);
+  const builder = new BodyBuilder(values);
+  let cell!: CellRef;
+
+  builder.if(condition, (then) => {
+    cell = then.cell(seed);
+  });
+  builder.push(cellReadAction(values.addActionOutput(), cell));
+  builder.finish({ kind: "dispatch", targetEip: seed });
+
+  throws(
+    () => validateIrBlock({ values, body: builder.build() }),
+    /outside its declaring body or descendants/
+  );
+});
+
+test("a cell declared outside a loop can be written in a nested loop arm", () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const seed = values.const(7);
+  const update = values.const(6);
+  const builder = new BodyBuilder(values);
+  const cell = builder.cell(seed);
+
+  builder.loop([], (loop) => {
+    loop.if(condition, (arm) => arm.write(cell, update));
+  });
+  builder.finish({ kind: "dispatch", targetEip: seed });
+
+  doesNotThrow(() => validateIrBlock({ values, body: builder.build() }));
+});
+
+test("a hand-assembled body declares cell scope by its seed action alone", () => {
+  // One regime: raw bodies validate under the same structural rule as
+  // builder-built ones — the seed write is the declaration.
+  const values = new ValueTable();
+  const seed = values.const(7);
+  const cell = testCell();
+
+  doesNotThrow(
+    () => validateIrBlock(entryBlock(values, [
+      {
+        kind: "op",
+        op: cellWrite.create({ cell, value: seed, initialization: "seed" })
+      },
+      cellReadAction(values.addActionOutput(), cell),
+      finishDispatch(seed)
+    ]))
+  );
+});
+
+test("a hand-assembled nested body may use an ancestor cell", () => {
+  const values = new ValueTable();
+  const builder = new BodyBuilder(values);
+  const seed = values.const(7);
+  const cell = builder.cell(seed);
+  const rawChild: Body = {
+    actions: [cellReadAction(values.addActionOutput(), cell)]
+  };
+
+  builder.push({ kind: "if", condition: values.external(0), thenBody: rawChild });
+  builder.finish({ kind: "dispatch", targetEip: seed });
+
+  doesNotThrow(() => validateIrBlock({ values, body: builder.build() }));
 });
 
 test("a loopContinue outside any loop body is rejected", () => {

@@ -299,7 +299,7 @@ function resolveFlagAction(block: IrBlock, flag: X86StatusFlag): ResolveFlagActi
 
 function assertResolveFlag(block: IrBlock, id: ValueId, flag: X86StatusFlag): void {
   strictEqual(resolveFlagAction(block, flag).output, id);
-  deepStrictEqual(block.values.node(id), { kind: "actionOutput" });
+  deepStrictEqual(block.values.node(id), { kind: "actionOutput", type: "i32" });
 }
 
 test("mov r32, imm32 flushes the register write and dispatches at the next eip", () => {
@@ -355,7 +355,7 @@ test("mov r32, r32 records one state.read op and forwards its leaf", () => {
     stateWrite(gprChannel("ebx"), 1),
     finishDispatch(v.const(0x1002))
   ]);
-  deepStrictEqual(v.node(valueId(1)), { kind: "actionOutput" });
+  deepStrictEqual(v.node(valueId(1)), { kind: "actionOutput", type: "i32" });
   // The instruction-start eip, read leaf, next eip, and count advance.
   strictEqual(v.size(), 6);
 });

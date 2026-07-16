@@ -45,6 +45,6 @@ export function planPlacement(
   return {
     values,
     localTypes: locals.localTypes,
-    variableLocals: locals.variableLocals
+    cellLocals: locals.cellLocals
   };
 }

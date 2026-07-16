@@ -79,7 +79,7 @@ test("input status flags read through planned resolve ops", () => {
 
   strictEqual(first, second);
   deepStrictEqual(actions, [resolveFlag(first, "ZF")]);
-  deepStrictEqual(values.node(first), { kind: "actionOutput" });
+  deepStrictEqual(values.node(first), { kind: "actionOutput", type: "i32" });
 });
 
 test("writing the current input status flag value is a no-op", () => {
@@ -326,7 +326,7 @@ test("mixed pending and input condition combines pending values with resolve out
 
   ok(node.kind === "binary", "expected BE condition to lower to CF | ZF");
   strictEqual(node.operator, "or");
-  deepStrictEqual(values.node(node.a), { kind: "actionOutput" });
+  deepStrictEqual(values.node(node.a), { kind: "actionOutput", type: "i32" });
   strictEqual(resolveOutput(actions, "CF"), node.a);
   strictEqual(node.b, zf);
   strictEqual(switchActions(actions).length, 0);
@@ -439,7 +439,7 @@ test("a direct flag write from input state flushes a full explicit image from re
     const value = flagFlushValue(completedFlushes, flag);
 
     ok(value !== undefined, `expected ${flag} to be flushed`);
-    deepStrictEqual(values.node(value), { kind: "actionOutput" });
+    deepStrictEqual(values.node(value), { kind: "actionOutput", type: "i32" });
     strictEqual(resolveOutput(actions, flag), value);
   }
   deepStrictEqual(

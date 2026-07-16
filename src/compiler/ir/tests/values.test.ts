@@ -31,6 +31,53 @@ test("value table exposes nodes by id", () => {
   throws(() => table.node(valueId(99)), /unknown value id 99/);
 });
 
+test("value table forks preserve the prefix and isolate later allocation", () => {
+  const table = new ValueTable();
+  const constant = table.const(7);
+  const input = table.addActionOutput(fitsUnsigned(8));
+  const sum = table.binary("add", input, constant);
+  const wide = table.const64(9n);
+
+  // Populate a derived cache before forking as well as the immutable graph.
+  deepStrictEqual(table.widthBounds(input), fitsUnsigned(8));
+  const parentSize = table.size();
+  const fork = table.fork();
+
+  strictEqual(fork.size(), parentSize);
+  strictEqual(fork.node(sum), table.node(sum));
+  deepStrictEqual(fork.children(sum), table.children(sum));
+  strictEqual(fork.constValue(constant), 7);
+  strictEqual(fork.valueType(input), "i32");
+  strictEqual(fork.valueType(wide), "i64");
+  deepStrictEqual(fork.widthBounds(input), fitsUnsigned(8));
+  strictEqual(fork.const(7), constant, "the copied interning trie retains prefix ids");
+  strictEqual(fork.binary("add", input, constant), sum);
+
+  const forkOnly = fork.const(11);
+  fork.addActionOutput();
+  strictEqual(table.size(), parentSize, "fork allocations do not mutate the parent");
+  const parentOnly = table.const(11);
+
+  strictEqual(table.constValue(parentOnly), 11);
+  strictEqual(fork.constValue(forkOnly), 11);
+  strictEqual(table.size(), parentSize + 1);
+  const laterParentOnly = table.const(13);
+
+  strictEqual(table.constValue(laterParentOnly), 13);
+  strictEqual(fork.constValue(fork.const(13)), 13);
+  strictEqual(table.const(7), constant, "fork interning does not mutate the parent trie");
+});
+
+test("action outputs retain their declared scalar type", () => {
+  const table = new ValueTable();
+  const narrow = table.addActionOutput();
+  const wide = table.addActionOutput64();
+
+  strictEqual(table.valueType(narrow), "i32");
+  strictEqual(table.valueType(wide), "i64");
+  throws(() => table.widthBounds(wide), /i64 action output/);
+});
+
 test("unreachable values re-emit but retain their semantic identity", () => {
   const table = new ValueTable();
   const unreachable = table.unreachable();

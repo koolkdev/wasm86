@@ -3,6 +3,7 @@ import type { CpuException } from "#core/exceptions.js";
 import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#core/flags/sources.js";
 import type { X86Flag, X86StatusFlag } from "#core/flags/definitions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
+import type { CellRef } from "#compiler/refs/cell.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {
   MemRef,
@@ -13,7 +14,6 @@ import type {
   RegRef,
   StorageInput,
   TargetInput,
-  VarRef,
   Value,
   ValueInput
 } from "./refs.js";
@@ -89,7 +89,7 @@ export type { MemoryAccess, MemoryAccessKind } from "./refs.js";
 
 export interface LoopSemanticsBuilder extends SemanticOps {}
 
-export type SemanticVar = VarRef;
+export type SemanticVar = CellRef<"i32">;
 export type LoopBody = (builder: LoopSemanticsBuilder, values: ValueBuilder) => ValueInput;
 export type IfBody<TBuilder extends SemanticOps = SemanticsBuilder> = (
   builder: TBuilder,

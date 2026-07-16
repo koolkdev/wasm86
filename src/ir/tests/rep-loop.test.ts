@@ -1,4 +1,4 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, doesNotThrow, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
@@ -28,6 +28,7 @@ import {
   repStosSemantic
 } from "#core/semantics/strings.js";
 import { isStateRead, isStateWrite, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { validateIrBlock } from "#ir/validate.js";
 
 // The fused rep shape: one loop action carrying the string registers, a
 // per-iteration path with no state traffic for carried channels, fault arms
@@ -400,16 +401,25 @@ test("derived carried channels follow body write order across rep forms", () => 
   }
 });
 
-test("loop bodies derive carries in a scratch value view before real emission", () => {
+test("loop analysis preserves captured outer value identities", () => {
   const builder = createIrBlockBuilder();
-  const loopValueViews: unknown[] = [];
-  let outerValueView: unknown;
 
   builder.addInstruction(
     (s, v) => {
-      outerValueView = v;
-      s.loop((_b, loopV) => {
-        loopValueViews.push(loopV);
+      const outerConstant = v.const(7);
+      let outerValue = s.get(s.reg("eax"));
+
+      // Keep the captured value well beyond the handful of ids a detached
+      // scratch table would happen to allocate before entering the callback.
+      for (let index = 0; index < 12; index++) {
+        outerValue = v.binary("add", outerValue, v.const(index + 1));
+      }
+
+      s.loop((loop, loopV) => {
+        loop.set(
+          loop.reg("ebx"),
+          loopV.binary("add", outerValue, outerConstant)
+        );
         return loopV.const(0);
       });
     },
@@ -417,10 +427,118 @@ test("loop bodies derive carries in a scratch value view before real emission", 
     loc(repEip, repNextEip)
   );
 
-  builder.finish();
-  strictEqual(loopValueViews.length, 2);
-  notStrictEqual(loopValueViews[0], loopValueViews[1]);
-  strictEqual(loopValueViews[1], outerValueView);
+  const block = builder.finish();
+
+  deepStrictEqual(findLoop(block).carried.map((cell) => cell.channel), [gprChannel("ebx")]);
+  doesNotThrow(() => validateIrBlock(block));
+});
+
+test("independent loop analysis and final bodies can access an enclosing-arm cell", () => {
+  const builder = createIrBlockBuilder();
+
+  doesNotThrow(() => {
+    builder.addInstruction(
+      (s, _v) => {
+        s.if(s.get(s.reg("eax")), (then, thenValues) => {
+          const counter = then.var(thenValues.const(2));
+
+          then.loop((loop, loopValues) => {
+            const next = loopValues.binary("sub", loop.get(counter), loopValues.const(1));
+
+            loop.set(counter, next);
+            return loopValues.compare(32, "ne", next, loopValues.const(0));
+          });
+          then.get(counter);
+        });
+      },
+      [],
+      loc(repEip, repNextEip)
+    );
+
+    validateIrBlock(builder.finish());
+  });
+});
+
+test("loop analysis does not force its control shape onto final construction", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    (s, v) => {
+      const counter = s.var(v.const(3));
+
+      // Discovery sees a fresh architectural state read and inspects the arm
+      // conservatively. Final construction sees this pending constant and
+      // can inline the selected arm independently.
+      s.set(s.reg("eax"), v.const(1));
+      s.loop((loop, loopValues) => {
+        loop.if(loop.get(loop.reg("eax")), (outer, outerValues) => {
+          const next = outerValues.binary(
+            "sub",
+            outer.get(counter),
+            outerValues.const(1)
+          );
+
+          outer.set(counter, next);
+          outer.if(outer.get(outer.reg("ebx")), (inner, innerValues) => {
+            inner.set(counter, innerValues.const(0));
+          });
+        });
+        return loopValues.const(0);
+      });
+      s.get(counter);
+    },
+    [],
+    loc(repEip, repNextEip)
+  );
+
+  const block = builder.finish();
+  const loop = findLoop(block);
+  const constantStructuredArm = loop.body.actions.find(
+    (action): action is IfAction => (
+      action.kind === "if" && block.values.constValue(action.condition) === 1
+    )
+  );
+  const finalNestedArm = loop.body.actions.find(
+    (action): action is IfAction => (
+      action.kind === "if" && action.thenBody.actions[0]?.kind !== "loopContinue"
+    )
+  );
+
+  strictEqual(constantStructuredArm, undefined, "final loop does not replay discovery control");
+  ok(finalNestedArm !== undefined, "selected final arm still builds its nested control");
+  doesNotThrow(() => validateIrBlock(block));
+});
+
+test("loop analysis conservatively includes writes from an unknown scratch arm", () => {
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(
+    (s, v) => {
+      // Scratch analysis has no pending EAX fact and visits the arm. Final
+      // construction knows the arm is false, but the extra EBX carry remains
+      // a safe over-approximation of the loop's architectural writes.
+      s.set(s.reg("eax"), v.const(0));
+      s.loop((loop, loopValues) => {
+        loop.if(loop.get(loop.reg("eax")), (then) => {
+          then.set(then.reg("ebx"), loopValues.const(1));
+        });
+        return loopValues.const(0);
+      });
+    },
+    [],
+    loc(repEip, repNextEip)
+  );
+
+  const block = builder.finish();
+  const loop = findLoop(block);
+
+  deepStrictEqual(loop.carried.map((cell) => cell.channel), [gprChannel("ebx")]);
+  strictEqual(
+    loop.body.actions.filter((action) => action.kind === "if").length,
+    1,
+    "only the loop back edge remains in final construction"
+  );
+  doesNotThrow(() => validateIrBlock(block));
 });
 
 test("a loop body register write is derived as a carried channel", () => {
@@ -511,13 +629,13 @@ test("a loop body advancing only semantic vars carries nothing", () => {
 
   deepStrictEqual(loop.carried, []);
 
-  // The post-loop read is its own var.read op, ordered after the loop.
+  // The post-loop read is its own cell.read op, ordered after the loop.
   const actions = block.body.actions;
   const loopIndex = actions.findIndex((action) => action === loop);
   const readIndex = actions.findIndex(
-    (action) => action.kind === "op" && action.op.kind === "var.read"
+    (action) => action.kind === "op" && action.op.kind === "cell.read"
   );
 
   ok(loopIndex >= 0, "the block holds the var-driven loop");
-  ok(readIndex > loopIndex, "the post-loop var read sits after the loop");
+  ok(readIndex > loopIndex, "the post-loop cell read sits after the loop");
 });

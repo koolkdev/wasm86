@@ -5,7 +5,7 @@ import type { ExternalValueId } from "#ir/operands.js";
 import { eipChannel } from "#ir/slots.js";
 import { BodyBuilder } from "#ir/body-builder.js";
 import type { IrBlock } from "#ir/block.js";
-import { memoryGuardActions } from "#ir/memory-guard.js";
+import { emitMemoryGuard } from "#ir/memory-guard.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { OperandWidth } from "#core/types.js";
@@ -79,9 +79,12 @@ class DecodeFragment {
   readGuest(address: ValueId, width: OperandWidth, signed = false): ValueId {
     const byteLength = width / 8;
 
-    for (const action of memoryGuardActions(this.values, address, byteLength, { kind: "instructionFetch" })) {
-      this.#builder.push(action);
-    }
+    emitMemoryGuard(
+      this.#builder,
+      address,
+      byteLength,
+      { kind: "instructionFetch" }
+    );
 
     return this.#builder.operation(
       memoryRead.create(

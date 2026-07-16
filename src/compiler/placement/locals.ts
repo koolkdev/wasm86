@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { BodyAnalysis, SiteId } from "#compiler/analysis/model.js";
+import type { CellRef } from "#compiler/refs/cell.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
 import type { IrBlock } from "#ir/block.js";
@@ -7,7 +8,7 @@ import type { PlannedValue } from "./anchors.js";
 
 export type PlannedLocals = Readonly<{
   valueLocals: readonly (number | undefined)[];
-  variableLocals: readonly (number | undefined)[];
+  cellLocals: ReadonlyMap<CellRef, number>;
   localTypes: readonly ValueType[];
 }>;
 
@@ -26,7 +27,7 @@ export function planLocals(
   placements: readonly (PlannedValue | undefined)[]
 ): PlannedLocals {
   const valueLocals = new Array<number | undefined>(block.values.size()).fill(undefined);
-  const variableLocals: (number | undefined)[] = [];
+  const cellLocals = new Map<CellRef, number>();
   const claims: LocalClaim[] = [];
   let order = 0;
 
@@ -71,44 +72,65 @@ export function planLocals(
     }
   }
 
-  const sites = analysis.sites();
-  const firstSite = sites[0];
-  const lastSite = sites[sites.length - 1];
-
-  assert(firstSite !== undefined && lastSite !== undefined, "placement has no sites");
-  const variables = new Set<number>();
-
-  for (const { action } of analysis.operations()) {
-    if (!analysis.opActionMustExecute(action)) {
-      continue;
-    }
-    for (const access of [...action.op.effects.reads, ...action.op.effects.writes]) {
-      if (access.space === "var") {
-        variables.add(access.variable);
-      }
-    }
-  }
-
-  if (variables.size > 0) {
-    variableLocals.length = Math.max(...variables) + 1;
-    variableLocals.fill(undefined);
-  }
-  for (const variable of [...variables].sort((a, b) => a - b)) {
+  // Cells join the same pooled interval allocation as value temporaries, so
+  // disjoint-lifetime cells share locals instead of accumulating one slot per
+  // cell across a block. A future IR optimization may still remove or fold
+  // accesses before placement without adding cell policy to emission.
+  for (const [cell, lifetime] of cellLifetimes(analysis)) {
     claims.push({
-      type: "i32",
-      start: firstSite.id,
-      end: lastSite.id,
+      type: cell.type,
+      start: lifetime.start,
+      end: lifetime.end,
       order: order++,
       local: -1,
-      assign(local) { variableLocals[variable] = local; }
+      assign(local) { cellLocals.set(cell, local); }
     });
   }
 
   return {
     valueLocals,
-    variableLocals,
+    cellLocals,
     localTypes: allocateLocals(claims)
   };
+}
+
+// A cell is live from its seed to its last access, widened across any loop an
+// access crosses into: the back edge makes the stored value live for the whole
+// loop. Seed dominance (IR-validated) makes the seed the range start.
+function cellLifetimes(
+  analysis: BodyAnalysis
+): Map<CellRef, { start: SiteId; end: SiteId }> {
+  const seeds = new Map<CellRef, SiteId>();
+  const accesses: { cell: CellRef; site: SiteId }[] = [];
+
+  for (const { action, site } of analysis.operations()) {
+    const operation = action.op;
+
+    if (operation.kind !== "cell.read" && operation.kind !== "cell.write") {
+      continue;
+    }
+    accesses.push({ cell: operation.cell, site });
+    if (operation.kind === "cell.write" && operation.initialization === "seed") {
+      seeds.set(operation.cell, site);
+    }
+  }
+
+  const lifetimes = new Map<CellRef, { start: SiteId; end: SiteId }>();
+
+  for (const { cell, site } of accesses) {
+    const seed = seeds.get(cell);
+
+    assert(seed !== undefined, "cell access has no seed in this block");
+    const end = localLifetimeEnd(analysis, { anchor: seed, lastDemand: site });
+    const lifetime = lifetimes.get(cell);
+
+    if (lifetime === undefined) {
+      lifetimes.set(cell, { start: seed, end });
+    } else if (end > lifetime.end) {
+      lifetime.end = end;
+    }
+  }
+  return lifetimes;
 }
 
 // A value captured outside a loop is not recomputed at the back edge. Keep

@@ -5,8 +5,8 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { memBinding, staticMemSegment } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
+import { BodyBuilder } from "#ir/body-builder.js";
 import type { IrBlock } from "#ir/block.js";
-import { varRead, varWrite } from "#compiler/ir/operations/variables.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { repMovsSemantic } from "#core/semantics/strings.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
@@ -232,37 +232,38 @@ test("an outer capture survives nested loops and both back edges", async () => {
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edi")), 0x55);
 });
 
-// Semantic vars back onto plain wasm locals: the loop carries no cells, the
-// var advances per iteration, and a read after the loop sees the final
-// value. The in-body read feeds uses past the var.write, requiring
+// Semantic cells back onto plain wasm locals: the loop carries no architectural
+// state, the cell advances per iteration, and a read after the loop sees the
+// final value. The in-body read feeds uses past the cell.write, requiring
 // capture-before-overwrite ordering.
-test("var locals carry loop state and survive to post-loop reads", async () => {
+test("cell locals carry loop state and survive to post-loop reads", async () => {
   const values = new ValueTable();
+  const body = new BodyBuilder(values);
   const nSeed = values.addActionOutput();
-  const readOut = values.addActionOutput();
-  const postOut = values.addActionOutput();
-  const next = values.binary("sub", readOut, values.const(1));
-  const block = loopBlock(values, [
-    stateRead(nSeed, gprChannel("ecx")),
-    { kind: "op", op: varWrite.create({ variable: 0, value: nSeed }) },
-    {
-      kind: "loop",
-      carried: [],
-      body: {
-        actions: [
-          { kind: "op", output: readOut, op: varRead.create({ variable: 0 }) },
-          { kind: "op", op: varWrite.create({ variable: 0, value: next }) },
-          {
-            kind: "if",
-            condition: values.compare(32, "ne", next, values.const(0)),
-            thenBody: { actions: [{ kind: "loopContinue", updates: [] }] }
-          }
-        ]
-      }
-    },
-    { kind: "op", output: postOut, op: varRead.create({ variable: 0 }) },
-    stateWrite(gprChannel("eax"), values.binary("add", postOut, values.const(100)))
-  ]);
+
+  body.push(stateRead(nSeed, gprChannel("ecx")));
+  const cell = body.cell(nSeed);
+
+  body.loop([], (loop) => {
+    const readOut = loop.read(cell);
+    const next = values.binary("sub", readOut, values.const(1));
+
+    loop.write(cell, next);
+    loop.if(
+      values.compare(32, "ne", next, values.const(0)),
+      (taken) => taken.loopContinue([])
+    );
+  });
+  const postOut = body.read(cell);
+
+  body.push(
+    stateWrite(
+      gprChannel("eax"),
+      values.binary("add", postOut, values.const(100))
+    )
+  );
+  body.finish({ kind: "dispatch", targetEip: values.const(dispatchEip) });
+  const block: IrBlock = { values, body: body.build() };
   const { stateView, run } = await instantiateIrBlock(block);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0xdead, ecx: 5 });

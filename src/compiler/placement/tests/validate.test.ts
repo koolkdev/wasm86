@@ -112,7 +112,7 @@ test("rejects a raw trapping value hoisted above sibling arms", () => {
   const forged: PlacementPlan = {
     values: placements,
     localTypes: ["i32"],
-    variableLocals: []
+    cellLocals: new Map()
   };
 
   throws(
@@ -143,7 +143,7 @@ test("rejects at-use placement without a direct demand", () => {
     () => validatePlacement(block, analysis, {
       values: placements,
       localTypes: ["i32"],
-      variableLocals: []
+      cellLocals: new Map()
     }),
     /at-use value .* has no direct demand/
   );

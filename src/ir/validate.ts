@@ -12,6 +12,7 @@ import {
 import type { Body, IrBlock } from "./block.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
+import type { CellRef } from "#compiler/refs/cell.js";
 import {
   channelCovers,
   channelsOverlap,
@@ -68,6 +69,7 @@ class IrValidator {
   readonly #bodyOwners = new Map<Body, BodyOwner | null>();
   readonly #producers = new Map<ValueId, ActionSite>();
   readonly #loopInputs = new Map<ValueId, Body>();
+  readonly #cellSeeds = new Map<CellRef, ActionSite>();
 
   constructor(block: IrBlock) {
     this.#block = block;
@@ -91,7 +93,7 @@ class IrValidator {
     );
   }
 
-  // Phase 1: claim every nested body and record all scoped definitions.
+  // Phase 1: index every nested body and record all scoped definitions.
   #indexBody(body: Body, path: string): void {
     for (const [actionIndex, action] of body.actions.entries()) {
       assertKnownAction(action);
@@ -110,6 +112,7 @@ class IrValidator {
     switch (action.kind) {
       case "op":
         this.#indexOpProducer(action, site);
+        this.#indexCellDefinition(action, site);
         return;
       case "if":
         if (action.output !== undefined) {
@@ -172,6 +175,22 @@ class IrValidator {
       );
     }
     this.#recordProducer(action.output, site);
+  }
+
+  // The seed write is the cell's declaration: the body holding it is the
+  // cell's lexical scope, so scoping needs no identity beyond this site.
+  #indexCellDefinition(action: OpAction, site: ActionSite): void {
+    const operation = action.op;
+
+    if (operation.kind !== "cell.write" || operation.initialization !== "seed") {
+      return;
+    }
+
+    assert(
+      !this.#cellSeeds.has(operation.cell),
+      `${site.path} seeds the same cell more than once`
+    );
+    this.#cellSeeds.set(operation.cell, site);
   }
 
   #indexSwitchProducer(action: SwitchAction, site: ActionSite): void {
@@ -325,6 +344,7 @@ class IrValidator {
       const operation = action.op;
 
       validateOpAction(this.#block, action, operation);
+      this.#validateCellAccess(action, site);
       if (context.enclosingLoop !== undefined) {
         validateLoopStateAccess(operation, context.enclosingLoop, site.path);
       }
@@ -373,6 +393,50 @@ class IrValidator {
       case "if":
       case "op":
         return;
+    }
+  }
+
+  #validateCellAccess(action: OpAction, site: ActionSite): void {
+    const operation = action.op;
+
+    if (operation.kind !== "cell.read" && operation.kind !== "cell.write") {
+      return;
+    }
+
+    const seed = this.#cellSeeds.get(operation.cell);
+
+    assert(seed !== undefined, `${site.path} uses a cell with no seed in this root`);
+    if (operation.kind === "cell.write" && operation.initialization === "seed") {
+      // Phase 1 proved seed uniqueness, so this occurrence is the declaration.
+      return;
+    }
+    this.#assertCellSeedDominates(seed, site);
+  }
+
+  #assertCellSeedDominates(seed: ActionSite, use: ActionSite): void {
+    if (seed.body === use.body) {
+      assert(
+        seed.actionIndex < use.actionIndex,
+        `${use.path} reads or writes a cell before its seed`
+      );
+      return;
+    }
+
+    for (let body = use.body; body !== seed.body; ) {
+      const owner = this.#bodyOwners.get(body);
+
+      assert(
+        owner !== undefined && owner !== null,
+        `${use.path} uses a cell outside its declaring body or descendants`
+      );
+      if (owner.body === seed.body) {
+        assert(
+          seed.actionIndex < owner.actionIndex,
+          `${use.path} reads or writes a cell before its seed`
+        );
+        return;
+      }
+      body = owner.body;
     }
   }
 
@@ -533,8 +597,8 @@ class IrValidator {
   }
 }
 
-// A loop may carry nothing: a body advancing only semantic vars keeps all its
-// cross-iteration state in var locals.
+// A loop may carry nothing: a body advancing only semantic cells keeps all its
+// cross-iteration state in cell locals.
 function validateLoopChannels(action: LoopAction, path: string): void {
   for (const cell of action.carried) {
     assertCarriableChannel(cell.channel, path);
@@ -629,6 +693,10 @@ function assertOutputBounds(
   output: ValueId,
   expected: OperationResult
 ): void {
+  if (expected.type === "i64") {
+    return;
+  }
+
   const actualBounds = block.values.widthBounds(output);
   const expectedBounds = expected.bounds ?? unboundedWidthBounds;
 

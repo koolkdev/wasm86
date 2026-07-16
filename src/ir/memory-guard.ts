@@ -1,8 +1,6 @@
-import type { Action } from "./actions.js";
-import { BodyBuilder } from "./body-builder.js";
+import { BodyBuilder, type BuildBody } from "./body-builder.js";
 import { memoryCheck } from "#compiler/ir/operations/memory.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { MemoryAccessKind } from "#core/semantics/refs.js";
 import {
   pageFault,
@@ -14,15 +12,15 @@ export type MemoryGuardAccess =
   | Readonly<{ kind: "data"; access: MemoryAccessKind }>
   | Readonly<{ kind: "instructionFetch" }>;
 
-export function memoryGuardActions(
-  values: ValueTable,
+export function emitMemoryGuard(
+  builder: BodyBuilder,
   address: ValueId,
   byteLength: number,
   access: MemoryGuardAccess,
   // Restores or flushes state so the fault path reports the instruction-start state.
-  faultBodyPrefix: readonly Action[] = []
-): readonly Action[] {
-  const builder = new BodyBuilder(values);
+  buildFaultBodyPrefix: BuildBody = () => {}
+): void {
+  const { values } = builder;
   const fault = builder.operation(memoryCheck.create({
     address,
     byteLength: values.const(byteLength)
@@ -31,9 +29,7 @@ export function memoryGuardActions(
   builder.if(
     fault,
     (faultBody) => {
-      for (const action of faultBodyPrefix) {
-        faultBody.push(action);
-      }
+      buildFaultBodyPrefix(faultBody);
 
       faultBody.finish({
         kind: "exit",
@@ -45,7 +41,6 @@ export function memoryGuardActions(
     },
     { hint: "unlikely" }
   );
-  return builder.build().actions;
 }
 
 function pageFaultAccess(access: MemoryGuardAccess): PageFaultAccess {

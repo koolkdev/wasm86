@@ -25,8 +25,6 @@ import type { IfBody, SemanticBranchHint } from "#core/semantics/builder.js";
 import { type StateChannel, type StateSlot } from "../slots.js";
 import type { Action, LoopCarriedCell, OpAction } from "../actions.js";
 import { BodyBuilder, type BodyActionSink } from "../body-builder.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
 import type { OperandResolver } from "./operands.js";
 import type { State } from "./state/index.js";
 import { StateLoopScope } from "./state/loop-scope.js";
@@ -43,7 +41,6 @@ export type LoopSemanticsBuilderContext = Readonly<{
 export type LoopMemoryOps = Pick<SemanticOps, "memoryRead" | "memoryWrite">;
 
 export type LoopBuilderContext = Readonly<{
-  values: ValueTable;
   state: State;
   parent: BodyBuilder;
 }>;
@@ -56,7 +53,6 @@ export class LoopBuilder {
   readonly #scope: StateLoopScope;
   readonly #bodySink: LoopBodySink;
   readonly #body: BodyBuilder;
-  #exitValues: readonly ValueId[] | undefined;
 
   private constructor(
     context: LoopBuilderContext,
@@ -67,11 +63,7 @@ export class LoopBuilder {
     this.#cells = cells;
     this.#scope = scope;
     this.#bodySink = new LoopBodySink(scope);
-    this.#body = new BodyBuilder(context.values, this.#bodySink);
-  }
-
-  get scope(): StateLoopScope {
-    return this.#scope;
+    this.#body = context.parent.child(this.#bodySink);
   }
 
   get body(): BodyBuilder {
@@ -79,39 +71,30 @@ export class LoopBuilder {
   }
 
   static begin(context: LoopBuilderContext, bodyWrites: readonly StateChannel[]): LoopBuilder {
-    const scope = new StateLoopScope(context.values, context.state, bodyWrites);
+    const scope = new StateLoopScope(context.parent.values, context.state, bodyWrites);
 
     return new LoopBuilder(context, scope.begin(), scope);
   }
 
-  // The conditional back edge, and the only one. The back edge and the exit
-  // tail see the same carried values: one capture serves both.
-  emitContinue(condition: ValueInput): void {
-    assert(this.#exitValues === undefined, "the loop back edge is already emitted");
-
+  // Close while the semantic loop scope is current: state resolution belongs
+  // in the loop body. The back edge and exit tail share one value capture.
+  close(condition: ValueInput): void {
     const exitValues = this.#scope.captureExitValues();
 
     this.#body.if(condition, (taken) => taken.loopContinue(exitValues));
-    this.#exitValues = exitValues;
-  }
-
-  close(): void {
-    assert(this.#exitValues !== undefined, "cannot close a loop without its back edge");
 
     // The exit path's one commit per carried channel.
-    for (const action of this.#scope.commitExitValues(this.#exitValues)) {
+    for (const action of this.#scope.commitExitValues(exitValues)) {
       this.#body.push(action);
     }
 
-    this.#buildBody(this.#parent);
+    this.#parent.extend(this.#bodySink.entryActions());
+    this.#parent.loop(
+      this.#cells,
+      (body) => body.extend(this.#body.build().actions)
+    );
     this.#scope.close();
   }
-
-  #buildBody(body: BodyBuilder): void {
-    body.extend(this.#bodySink.entryActions());
-    body.loop(this.#cells, (loopBody) => loopBody.extend(this.#body.build().actions));
-  }
-
 }
 
 class LoopBodySink implements BodyActionSink {

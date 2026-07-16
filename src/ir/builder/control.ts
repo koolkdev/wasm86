@@ -176,7 +176,7 @@ export class ControlEmitter {
     const writeCheckpoint = this.#writeLog.checkpoint();
 
     return this.#state.enterScope(() => {
-      const child = new BodyBuilder(this.#scopes.current.body.values);
+      const child = this.#scopes.current.body.child();
 
       return this.#scopes.enter("arm", child, (scope) => {
         scope.run(() => emitBody(child));
@@ -210,7 +210,7 @@ export class ControlEmitter {
   }
 
   #buildImplicitElse(channels: readonly StateChannel[]): Body | undefined {
-    const body = new BodyBuilder(this.#scopes.current.body.values);
+    const body = this.#scopes.current.body.child();
 
     if (!this.#flushDirtyChannelsInto(body, channels)) {
       return undefined;

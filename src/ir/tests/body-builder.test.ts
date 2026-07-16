@@ -1,4 +1,10 @@
-import { deepStrictEqual, doesNotThrow, ok, strictEqual } from "node:assert";
+import {
+  deepStrictEqual,
+  doesNotThrow,
+  ok,
+  strictEqual,
+  throws
+} from "node:assert";
 import { test } from "node:test";
 
 import type { Action } from "#ir/actions.js";
@@ -34,6 +40,84 @@ test("one operation API handles value and effect definitions", () => {
 
   strictEqual(builder.operation(stateWriteOperation.create({ slot: eipChannel, value })), undefined);
   strictEqual(builder.operation(stateReadOperation.create({ slot: eipChannel })), value + 1);
+});
+
+test("cell APIs seed typed cells and preserve lexical access in child bodies", () => {
+  const values = new ValueTable();
+  const builder = new BodyBuilder(values);
+  const seed = values.const64(7n);
+  const cell = builder.cell(seed);
+  let read!: ValueId;
+
+  builder.if(values.external(0), (child) => {
+    child.write(cell, child.values.const64(8n));
+    read = child.read(cell);
+  });
+  builder.finish({ kind: "dispatch", targetEip: values.const(0) });
+
+  const block = { values, body: builder.build() };
+  const seedAction = block.body.actions[0];
+  const branch = block.body.actions[1];
+
+  strictEqual(cell.type, "i64");
+  strictEqual(values.valueType(read), "i64");
+  ok(seedAction?.kind === "op" && seedAction.op.kind === "cell.write");
+  strictEqual(seedAction.op.initialization, "seed");
+  ok(branch?.kind === "if");
+  strictEqual(branch.thenBody.actions[0]?.kind, "op");
+  strictEqual(branch.thenBody.actions[1]?.kind, "op");
+  doesNotThrow(() => validateIrBlock(block));
+});
+
+test("validation rejects writes whose value type differs from the cell", () => {
+  const values = new ValueTable();
+  const builder = new BodyBuilder(values);
+  const cell = builder.cell(values.const(1));
+
+  builder.write(cell, values.const64(2n));
+  builder.finish({ kind: "dispatch", targetEip: values.const(0) });
+
+  throws(
+    () => validateIrBlock({ values, body: builder.build() }),
+    /operand .* must be i32, got i64/
+  );
+});
+
+test("validation rejects a cell access transplanted away from its seed", () => {
+  const values = new ValueTable();
+  const source = new BodyBuilder(values);
+  const cell = source.cell(values.const(1));
+
+  source.read(cell);
+
+  const sourceActions = source.build().actions;
+  const target = new BodyBuilder(values);
+
+  // Moving only the read leaves its declaring seed behind in another tree.
+  target.push(sourceActions[1]!);
+  target.finish({ kind: "dispatch", targetEip: values.const(0) });
+
+  throws(
+    () => validateIrBlock({ values, body: target.build() }),
+    /uses a cell with no seed in this root/
+  );
+});
+
+test("a transplanted seed carries its cell's scope with it", () => {
+  // Scope is where the seed is: relocating the whole seed+use sequence into
+  // another root is structurally sound, with no stale metadata to desync.
+  const values = new ValueTable();
+  const source = new BodyBuilder(values);
+  const cell = source.cell(values.const(1));
+
+  source.read(cell);
+
+  const target = new BodyBuilder(values);
+
+  target.extend(source.build().actions);
+  target.finish({ kind: "dispatch", targetEip: values.const(0) });
+
+  doesNotThrow(() => validateIrBlock({ values, body: target.build() }));
 });
 
 test("effect, push, and extend append actions without outputs", () => {

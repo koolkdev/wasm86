@@ -14,7 +14,8 @@ import {
 } from "#compiler/ir/operations/memory.js";
 import { resolveFlag } from "#compiler/ir/operations/resolve-flag.js";
 import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
-import { varRead, varWrite } from "#compiler/ir/operations/variables.js";
+import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
+import { CellRef } from "#compiler/refs/cell.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { WidthBounds } from "#compiler/ir/values/types.js";
@@ -35,6 +36,7 @@ test("every operation constructs through its owner", () => {
   const address = valueId(1);
   const byteLength = valueId(2);
   const value = valueId(3);
+  const cell = new CellRef("i32");
   const operations = [
     stateRead.create({ slot }),
     stateWrite.create({ slot, value }),
@@ -43,8 +45,8 @@ test("every operation constructs through its owner", () => {
     memoryCheck.create({ address, byteLength }),
     memoryResolve.create({ address, byteLength }),
     resolveFlag.create({ flag: "ZF" }),
-    varRead.create({ variable: 4 }),
-    varWrite.create({ variable: 4, value })
+    cellRead.create({ cell }),
+    cellWrite.create({ cell, value, initialization: "seed" })
   ];
 
   deepStrictEqual(operations.map((operation) => operation.kind), [
@@ -55,8 +57,8 @@ test("every operation constructs through its owner", () => {
     "memory.check",
     "memory.resolve",
     "cpu.resolveFlag",
-    "var.read",
-    "var.write"
+    "cell.read",
+    "cell.write"
   ]);
 });
 
@@ -139,12 +141,13 @@ test("operation emission consumes every declared input position once", () => {
   const address = valueId(31);
   const byteLength = valueId(32);
   const value = valueId(33);
+  const cell = new CellRef("i32");
   const target = {
     body: new WasmFunctionBodyEncoder(),
     withTemporaryLocal: (_type: "i32" | "i64", callback: (local: number) => void) => {
       callback(0);
     },
-    variableLocal: () => 0,
+    cellLocal: () => 0,
     helperFunctionIndex: () => 0
   };
 
@@ -183,6 +186,11 @@ test("operation emission consumes every declared input position once", () => {
     emittedUses(memoryRead.create({ address, byteOffset: 0, width: 32 })),
     [address]
   );
+  deepStrictEqual(emittedUses(cellRead.create({ cell })), []);
+  deepStrictEqual(
+    emittedUses(cellWrite.create({ cell, value, initialization: "update" })),
+    [value]
+  );
 });
 
 test("a folded operation input needs neither emission nor a temporary", () => {
@@ -197,7 +205,7 @@ test("a folded operation input needs neither emission nor a temporary", () => {
       requestedTemporary = true;
       callback(0);
     },
-    variableLocal: () => 0,
+    cellLocal: () => 0,
     helperFunctionIndex: () => 0
   }, {
     emitUse: (id) => uses.push(id),
@@ -218,7 +226,7 @@ test("a static memory check rejects an empty range", () => {
       withTemporaryLocal: () => {
         throw new Error("static check requested a temporary");
       },
-      variableLocal: () => 0,
+      cellLocal: () => 0,
       helperFunctionIndex: () => 0
     }, {
       emitUse: () => {},
@@ -334,24 +342,27 @@ test("flag resolution declares state reads and its helper call", () => {
   deepStrictEqual(operation.helper, { kind: "lazyFlag", flag: "ZF" });
 });
 
-test("semantic var definitions validate their index and expose exact effects", () => {
+test("typed cell definitions expose exact identity effects", () => {
   const value = valueId(6);
-
-  const read = varRead.create({ variable: 2 });
-  const write = varWrite.create({ variable: 2, value });
+  const cell = new CellRef("i32");
+  const other = new CellRef("i32");
+  const wide = new CellRef("i64");
+  const read = cellRead.create({ cell });
+  const write = cellWrite.create({ cell, value, initialization: "seed" });
 
   deepStrictEqual(read.inputs, []);
   deepStrictEqual(read.result, { type: "i32" });
-  deepStrictEqual(read.effects, { reads: [{ space: "var", variable: 2 }], writes: [] });
+  deepStrictEqual(read.effects, { reads: [{ space: "cell", cell }], writes: [] });
   deepStrictEqual(write.inputs, [{ value, type: "i32" }]);
   deepStrictEqual(write.result, undefined);
-  deepStrictEqual(write.effects, { reads: [], writes: [{ space: "var", variable: 2 }] });
-  throws(
-    () => varRead.create({ variable: -1 }),
-    /var\.read op has an invalid semantic var index/
-  );
-  throws(
-    () => varWrite.create({ variable: 1.5, value }),
-    /var\.write op has an invalid semantic var index/
+  deepStrictEqual(write.effects, { reads: [], writes: [{ space: "cell", cell }] });
+  deepStrictEqual(cellRead.create({ cell: other }).effects, {
+    reads: [{ space: "cell", cell: other }],
+    writes: []
+  });
+  deepStrictEqual(cellRead.create({ cell: wide }).result, { type: "i64" });
+  deepStrictEqual(
+    cellWrite.create({ cell: wide, value, initialization: "update" }).inputs,
+    [{ value, type: "i64" }]
   );
 });

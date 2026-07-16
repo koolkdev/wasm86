@@ -127,5 +127,6 @@ export function channelReadBounds(channel: StateCell): WidthBounds | undefined {
   const result = stateRead.create({ slot: channel }).result;
 
   assert(result !== undefined, "state.read definition has no result");
+  assert(result.type === "i32", "state channels are i32");
   return result.bounds;
 }

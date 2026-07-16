@@ -1,4 +1,5 @@
 import type { SiteId } from "#compiler/analysis/model.js";
+import type { CellRef } from "#compiler/refs/cell.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
 
 export type ValuePlacement =
@@ -27,6 +28,7 @@ export type PlacementPlan = Readonly<{
   values: readonly (ValuePlacement | undefined)[];
   // Physical plan local -> value type.
   localTypes: readonly ValueType[];
-  // Semantic variable index -> physical plan local.
-  variableLocals: readonly (number | undefined)[];
+  // Cells own dedicated physical plan locals; they never share storage with
+  // value temporaries or expose numbering outside placement.
+  cellLocals: ReadonlyMap<CellRef, number>;
 }>;

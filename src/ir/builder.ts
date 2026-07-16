@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import { varRead, varWrite } from "#compiler/ir/operations/variables.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
 import type { CpuException } from "#core/exceptions.js";
 import { isX86StatusFlag, type X86Flag } from "#core/flags/definitions.js";
@@ -107,7 +106,7 @@ export function externalInstructionLocation(
 }
 
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
-  readonly #values = new ValueTable();
+  readonly #values: ValueTable;
   readonly #body: BodyBuilder;
   readonly #scopes: SemanticScopeStack;
   readonly #state: State;
@@ -121,7 +120,12 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // "terminated" means the root body already holds its terminator.
   #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
 
-  constructor(segmentMode: SegmentMode, stateWriteLog = new StateWriteLog()) {
+  constructor(
+    segmentMode: SegmentMode,
+    stateWriteLog = new StateWriteLog(),
+    values = new ValueTable()
+  ) {
+    this.#values = values;
     this.#body = new BodyBuilder(this.#values);
     this.#scopes = new SemanticScopeStack(this.#body);
     this.#state = new State(this.#values, () => this.#scopes.current.body, stateWriteLog);
@@ -219,21 +223,19 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   var(seed: ValueInput): SemanticVar {
-    const variable = this.#state.vars.create();
-
-    this.#scopes.current.body.operation(
-      varWrite.create({ variable: variable.index, value: seed })
+    assert(
+      this.#values.valueType(seed) === "i32",
+      "semantic var seed must be i32"
     );
-    return variable;
+    return this.#scopes.current.body.cell(seed) as SemanticVar;
   }
 
   get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): Value {
     const storage = toStorageRef(source);
 
     switch (storage.kind) {
-      case "var":
-        this.#state.vars.assertKnown(storage);
-        return this.#scopes.current.body.operation(varRead.create({ variable: storage.index }));
+      case "cell":
+        return this.#scopes.current.body.read(storage);
       case "reg":
         return this.#state.gpr.read(storage.reg, accessWidth, options);
       case "operand": {
@@ -269,11 +271,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     const storage = toStorageRef(target);
 
     switch (storage.kind) {
-      case "var":
-        this.#state.vars.assertKnown(storage);
-        this.#scopes.current.body.operation(
-          varWrite.create({ variable: storage.index, value })
-        );
+      case "cell":
+        this.#scopes.current.body.write(storage, value);
         return;
       case "reg":
         this.#state.gpr.write(storage.reg, value, accessWidth);
@@ -412,21 +411,34 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   // locals while the body runs. The loop itself falls through; instruction
   // completion remains with the surrounding semantic template.
   loop(body: LoopBody): void {
+    const parent = this.#scopes.current.body;
+    const bodyWrites = this.#deriveLoopWrites(body);
+
     const loop = LoopBuilder.begin({
-      values: this.#values,
       state: this.#state,
-      parent: this.#scopes.current.body
-    }, this.#deriveLoopWrites(body));
+      parent
+    }, bodyWrites);
 
-    this.#control.runLoopBody(loop.body, body, (condition) => loop.emitContinue(condition));
-
-    loop.close();
+    this.#control.runLoopBody(
+      loop.body,
+      body,
+      (condition) => loop.close(condition)
+    );
   }
 
   #deriveLoopWrites(body: LoopBody): readonly StateChannel[] {
+    // SemanticsBuilder.loop does not declare its architectural writes, but the
+    // loop needs them before constructing its loop inputs. Run the callback once
+    // in an isolated scratch builder to collect possible x86 writes, discard that
+    // body, then run it normally to build the real loop. The callback must not
+    // depend on build-time side effects because construction invokes it twice.
     const writeLog = new StateWriteLog();
-    const scratch = new IrBlockBuilderImpl(this.#segmentMode, writeLog);
-    const scratchBody = new BodyBuilder(scratch.#values);
+    const scratchValues = this.#values.fork();
+    const scratch = new IrBlockBuilderImpl(
+      this.#segmentMode,
+      writeLog,
+      scratchValues
+    );
     const analysisMemory: LoopMemoryOps = {
       memoryRead: () => scratch.#values.addActionOutput(),
       memoryWrite: () => {}
@@ -434,14 +446,10 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
 
     scratch.#operands.beginInstruction(this.#operands.currentBindings());
     scratch.#state.beginInstruction(scratch.#values.const(0));
-    // The replayed body holds var refs created on this builder.
-    scratch.#state.vars.adopt(this.#state.vars.count);
 
     try {
       return writeLog.captureWrittenChannels(() => {
-        scratch.#control.runLoopBody(scratchBody, body, (condition) => {
-          scratch.#values.node(condition);
-        }, analysisMemory);
+        scratch.#control.runLoopBody(scratch.#body, body, () => {}, analysisMemory);
       });
     } finally {
       scratch.#operands.endInstruction();

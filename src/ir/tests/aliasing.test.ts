@@ -23,11 +23,15 @@ import {
   stateWrite
 } from "#ir/tests/storage-op-helpers.js";
 import { valueId } from "#compiler/ir/values/id.js";
+import { CellRef } from "#compiler/refs/cell.js";
 
 const memory: StorageEffect = { space: "memory" };
+const memoryBounds: StorageEffect = { space: "memoryBounds" };
+const firstCell = new CellRef("i32");
+const secondCell = new CellRef("i32");
 
-function varSlot(variable: number): StorageEffect {
-  return { space: "var", variable };
+function cellSlot(cell: CellRef): StorageEffect {
+  return { space: "cell", cell };
 }
 
 function state(slot: StateSlot): StorageEffect {
@@ -124,12 +128,29 @@ test("guest memory may-aliases guest memory and never state", () => {
   strictEqual(mayAlias(state(dynamicGpr(0)), memory), false);
 });
 
+test("cell identities alias exactly themselves and no resource domain", () => {
+  const first = cellSlot(firstCell);
+  const second = cellSlot(secondCell);
+  const foreign: StorageEffect = {
+    space: "cell",
+    cell: new CellRef("i32")
+  };
+
+  strictEqual(mayAlias(first, first), true);
+  strictEqual(mayAlias(first, second), false);
+  strictEqual(mayAlias(first, foreign), false);
+  strictEqual(mayAlias(first, state(gprChannel("eax"))), false);
+  strictEqual(mayAlias(first, memory), false);
+  strictEqual(mayAlias(first, memoryBounds), false);
+  strictEqual(mayAlias(memoryBounds, first), false);
+});
+
 test("static channels alias iff their byte ranges intersect", () => {
   strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ax"))), true);
-  strictEqual(mayAlias(varSlot(0), varSlot(0)), true);
-  strictEqual(mayAlias(varSlot(0), varSlot(1)), false);
-  strictEqual(mayAlias(varSlot(0), memory), false);
-  strictEqual(mayAlias(state(gprChannel("eax")), varSlot(0)), false);
+  strictEqual(mayAlias(cellSlot(firstCell), cellSlot(firstCell)), true);
+  strictEqual(mayAlias(cellSlot(firstCell), cellSlot(secondCell)), false);
+  strictEqual(mayAlias(cellSlot(firstCell), memory), false);
+  strictEqual(mayAlias(state(gprChannel("eax")), cellSlot(firstCell)), false);
   strictEqual(mayAlias(state(gprChannel("al")), state(gprChannel("ah"))), false);
   strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ebx"))), false);
   strictEqual(mayAlias(state(flagChannel("ZF")), state(flagChannel("ZF"))), true);

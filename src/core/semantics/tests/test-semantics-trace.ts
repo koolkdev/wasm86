@@ -1,7 +1,8 @@
 import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags/definitions.js";
 import { pageFaultErrorCode, type CpuException } from "#core/exceptions.js";
-import { operand, reg, semanticVar } from "#core/semantics/refs.js";
+import { operand, reg } from "#core/semantics/refs.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
+import { CellRef } from "#compiler/refs/cell.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
@@ -101,7 +102,8 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   readonly #inlineValues = new Map<Value, string>();
   readonly #displayValues = new Map<Value, number>();
   readonly #memoryDescriptions = new WeakMap<MemRef, string>();
-  #nextVarIndex = 0;
+  readonly #cellLabels = new WeakMap<CellRef, number>();
+  #nextCellLabel = 0;
   #nextMemoryAccessId = 0;
   #currentEipValue: Value | undefined;
   #nextEipValue: Value | undefined;
@@ -207,8 +209,10 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   }
 
   var(seed: ValueInput): SemanticVar {
-    const variable = semanticVar(this.#nextVarIndex++);
+    const label = this.#nextCellLabel++;
+    const variable = new CellRef("i32");
 
+    this.#cellLabels.set(variable, label);
     this.#emit(`var ${this.#storage(variable)} <- ${this.#value(seed)}`);
     return variable;
   }
@@ -485,8 +489,14 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
         return `op${input.index}`;
       case "reg":
         return input.reg;
-      case "var":
-        return `var${input.index}`;
+      case "cell": {
+        const label = this.#cellLabels.get(input);
+
+        if (label === undefined) {
+          throw new Error("unknown semantic var cell");
+        }
+        return `var${label}`;
+      }
     }
   }
 

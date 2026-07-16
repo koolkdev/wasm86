@@ -14,7 +14,6 @@ import { GprState } from "./gpr.js";
 import { InstructionCountState } from "./instruction-count.js";
 import { SegmentState } from "./segments.js";
 import { StatusFlagState } from "./status-flags.js";
-import { VarState } from "./vars.js";
 import type { StateWriteObserver, StateWriteObserverCheckpoint } from "./write-log.js";
 
 type StateSnapshot = Readonly<{
@@ -36,8 +35,6 @@ export class State {
   readonly segments: SegmentState;
   readonly eip: EipState;
   readonly instructionCount: InstructionCountState;
-  readonly vars: VarState;
-
   constructor(values: ValueTable, currentBody: () => BodyBuilder, writeObserver?: StateWriteObserver) {
     this.#writeObserver = writeObserver;
     this.#cells = new StateCells(currentBody, writeObserver);
@@ -48,11 +45,9 @@ export class State {
     this.segments = new SegmentState(values, this.#cells, currentBody);
     this.eip = new EipState(this.#cells);
     this.instructionCount = new InstructionCountState(values, this.#cells);
-    this.vars = new VarState();
   }
 
   beginInstruction(eip: ValueId): void {
-    this.vars.beginInstruction();
     this.segments.beginInstruction();
     this.eip.write(eip);
     this.beginInstructionBoundary();

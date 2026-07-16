@@ -1,4 +1,6 @@
 import { assert } from "#common/assert.js";
+import { CellRef } from "#compiler/refs/cell.js";
+import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import type { Action, BranchHint, Finish, LoopCarriedCell } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
 import {
@@ -31,8 +33,30 @@ export type IfValueOptions = Readonly<{
 export class BodyBuilder {
   readonly #sink: BodyActionSink;
 
-  constructor(readonly values: ValueTable, sink: BodyActionSink = new BufferedBodyActionSink()) {
+  constructor(
+    readonly values: ValueTable,
+    sink: BodyActionSink = new BufferedBodyActionSink()
+  ) {
     this.#sink = sink;
+  }
+
+  child(sink: BodyActionSink = new BufferedBodyActionSink()): BodyBuilder {
+    return new BodyBuilder(this.values, sink);
+  }
+
+  cell(seed: ValueId): CellRef {
+    const cell = new CellRef(this.values.valueType(seed));
+
+    this.operation(cellWrite.create({ cell, value: seed, initialization: "seed" }));
+    return cell;
+  }
+
+  read(cell: CellRef): ValueId {
+    return this.operation(cellRead.create({ cell }));
+  }
+
+  write(cell: CellRef, value: ValueId): void {
+    this.operation(cellWrite.create({ cell, value, initialization: "update" }));
   }
 
   operation(op: OperationWithoutResult): void;
@@ -44,7 +68,9 @@ export class BodyBuilder {
       return;
     }
 
-    const output = this.values.addActionOutput(op.result.bounds);
+    const output = op.result.type === "i64"
+      ? this.values.addActionOutput64()
+      : this.values.addActionOutput(op.result.bounds);
 
     this.#emit({ kind: "op", op, output });
     return output;
@@ -132,14 +158,14 @@ export class BodyBuilder {
   }
 
   #childBody(build: BuildBody): Body {
-    const child = new BodyBuilder(this.values);
+    const child = this.child();
 
     build(child);
     return child.build();
   }
 
   #childResultBody(build: BuildResult): Body {
-    const child = new BodyBuilder(this.values);
+    const child = this.child();
     const result = build(child);
 
     return child.build(result);

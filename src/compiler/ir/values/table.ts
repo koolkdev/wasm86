@@ -162,6 +162,20 @@ export class ValueTable implements ValueBuilder {
     return this.#values.length;
   }
 
+  // Analysis forks preserve every existing ValueId while isolating all later
+  // allocation and interning. Stored entries are immutable, so the prefix can
+  // be shared safely; mutable caches and trie nodes are copied.
+  fork(): ValueTable {
+    const fork = new ValueTable();
+
+    fork.#values.push(...this.#values);
+    fork.#widthBounds.push(...this.#widthBounds);
+    for (const [definition, root] of this.#interned) {
+      fork.#interned.set(definition, cloneInternNode(root));
+    }
+    return fork;
+  }
+
   children(id: ValueId): readonly ValueId[] {
     return this.#entry(id).children();
   }
@@ -227,7 +241,13 @@ export class ValueTable implements ValueBuilder {
   }
 
   addActionOutput(bounds?: WidthBounds): ValueId {
-    return this.#create(actionOutputValue, undefined, bounds ?? unboundedWidthBounds);
+    return this.#create(actionOutputValue, { type: "i32" }, bounds ?? unboundedWidthBounds);
+  }
+
+  // The 64 suffix is the i64 type universe; i64 values carry no i32 width
+  // bounds, so the form takes none.
+  addActionOutput64(): ValueId {
+    return this.#create(actionOutputValue, { type: "i64" });
   }
 
   addLoopInput(bounds?: WidthBounds): ValueId {
@@ -386,4 +406,13 @@ export class ValueTable implements ValueBuilder {
 
 function internNode(): InternNode {
   return { children: new Map(), value: undefined };
+}
+
+function cloneInternNode(source: InternNode): InternNode {
+  return {
+    children: new Map(
+      [...source.children].map(([key, child]) => [key, cloneInternNode(child)])
+    ),
+    value: source.value
+  };
 }

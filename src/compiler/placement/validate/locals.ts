@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { BodyAnalysis, SiteId } from "#compiler/analysis/model.js";
+import type { CellRef } from "#compiler/refs/cell.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { IrBlock } from "#ir/block.js";
@@ -76,28 +77,7 @@ export function validatePlacementLocals(
     );
   }
 
-  const variables = usedVariables(analysis);
-  const expectedVariables = variables.size === 0 ? 0 : Math.max(...variables) + 1;
-
-  assert(
-    plan.variableLocals.length === expectedVariables,
-    `placement has ${plan.variableLocals.length} variable locals, expected ${expectedVariables}`
-  );
-  const sites = analysis.sites();
-  const first = sites[0];
-  const last = sites[sites.length - 1];
-
-  assert(first !== undefined && last !== undefined, "body analysis has no sites");
-  for (let variable = 0; variable < plan.variableLocals.length; variable += 1) {
-    const local = plan.variableLocals[variable];
-
-    if (!variables.has(variable)) {
-      assert(local === undefined, `unused variable ${variable} has a local`);
-    } else {
-      assert(local !== undefined, `variable ${variable} has no local`);
-      claim(local, "i32", first.id, last.id, `variable ${variable}`);
-    }
-  }
+  claimCellLocals(analysis, plan, claim);
 
   for (let left = 0; left < claims.length; left += 1) {
     const a = claims[left]!;
@@ -116,6 +96,95 @@ export function validatePlacementLocals(
   for (let local = 0; local < plan.localTypes.length; local += 1) {
     assert(claimed.has(local), `local ${local} is never used`);
   }
+}
+
+// Cells claim through the same lifetime proof as value locals: seed to last
+// access, held through any loop an access crosses into. The lifetime is
+// recomputed here independently of the planner's ranges.
+function claimCellLocals(
+  analysis: BodyAnalysis,
+  plan: PlacementPlan,
+  claim: (
+    local: number,
+    type: ValueType,
+    start: SiteId,
+    end: SiteId,
+    owner: string
+  ) => void
+): void {
+  const seeds = new Map<CellRef, SiteId>();
+  const accesses = new Map<CellRef, SiteId[]>();
+
+  for (const { action, site } of analysis.operations()) {
+    const operation = action.op;
+
+    if (operation.kind !== "cell.read" && operation.kind !== "cell.write") {
+      continue;
+    }
+    const sites = accesses.get(operation.cell);
+
+    if (sites === undefined) {
+      accesses.set(operation.cell, [site]);
+    } else {
+      sites.push(site);
+    }
+    if (operation.kind === "cell.write" && operation.initialization === "seed") {
+      seeds.set(operation.cell, site);
+    }
+  }
+
+  for (const cell of plan.cellLocals.keys()) {
+    assert(accesses.has(cell), "cell local has no referenced cell");
+  }
+
+  let index = 0;
+
+  for (const [cell, sites] of accesses) {
+    const owner = `cell ${index}`;
+    const local = plan.cellLocals.get(cell);
+    const seed = seeds.get(cell);
+
+    index += 1;
+    assert(local !== undefined, "referenced cell has no local");
+    assert(seed !== undefined, `${owner} has no seed in this block`);
+    claim(
+      local,
+      cell.type,
+      seed,
+      cellLifetimeEnd(analysis, seed, sites, owner),
+      owner
+    );
+  }
+}
+
+function cellLifetimeEnd(
+  analysis: BodyAnalysis,
+  seed: SiteId,
+  accesses: readonly SiteId[],
+  owner: string
+): SiteId {
+  const seedSite = analysis.sites()[seed];
+
+  assert(seedSite !== undefined, `${owner} has unknown seed site ${seed}`);
+  let end = seed;
+
+  for (const access of accesses) {
+    const accessSite = analysis.sites()[access];
+
+    assert(accessSite !== undefined, `${owner} has unknown access site ${access}`);
+    end = access > end ? access : end;
+    const path = analysis.path(seedSite.body, accessSite.body);
+
+    assert(path !== undefined, `${owner} access leaves its seed scope`);
+    for (const step of path) {
+      if (analysis.isLoopBody(step.body)) {
+        const loopEnd = analysis.bodyEndSite(step.body);
+
+        end = loopEnd > end ? loopEnd : end;
+      }
+    }
+  }
+  return end;
 }
 
 function valueLifetimeEnd(
@@ -146,20 +215,4 @@ function valueLifetimeEnd(
     }
   }
   return end;
-}
-
-function usedVariables(analysis: BodyAnalysis): Set<number> {
-  const result = new Set<number>();
-
-  for (const { action } of analysis.operations()) {
-    if (!analysis.opActionMustExecute(action)) {
-      continue;
-    }
-    for (const access of [...action.op.effects.reads, ...action.op.effects.writes]) {
-      if (access.space === "var") {
-        result.add(access.variable);
-      }
-    }
-  }
-  return result;
 }

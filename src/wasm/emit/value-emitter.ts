@@ -8,6 +8,7 @@ import {
   emitOperation as emitCompilerOperation,
   type Operation
 } from "#compiler/ir/operations/index.js";
+import type { CellRef } from "#compiler/refs/cell.js";
 import type {
   HelperCall,
   OperationEmitTarget,
@@ -71,7 +72,7 @@ export class ValueEmitter implements OperationValueEmitter {
       withTemporaryLocal: (type, callback) => {
         context.scratch.withLocals([wasmTypeForValue(type)], ([local]) => callback(local));
       },
-      variableLocal: (variable) => this.variableLocal(variable),
+      cellLocal: (cell) => this.#cellLocal(cell),
       helperFunctionIndex: context.helperFunctionIndex
     };
     this.#valueContext = {
@@ -174,13 +175,6 @@ export class ValueEmitter implements OperationValueEmitter {
     return this.#local(local);
   }
 
-  variableLocal(variable: number): number {
-    const local = this.#plan.variableLocals[variable];
-
-    assert(local !== undefined, `semantic variable ${variable} has no planned local`);
-    return this.#local(local);
-  }
-
   #local(local: number): number {
     assert(Number.isInteger(local) && local >= 0, `invalid placement local ${local}`);
     const wasmLocal = this.#context.locals[local];
@@ -250,6 +244,13 @@ export class ValueEmitter implements OperationValueEmitter {
 
     assert(site !== undefined, "value realization occurred outside a placement site");
     return site;
+  }
+
+  #cellLocal(cell: CellRef): number {
+    const local = this.#plan.cellLocals.get(cell);
+
+    assert(local !== undefined, "cell has no planned local");
+    return this.#local(local);
   }
 }
 

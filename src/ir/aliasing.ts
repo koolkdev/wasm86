@@ -10,8 +10,8 @@ import type { StateSlot } from "./slots.js";
 // One aliasing rule over the address spaces: static channels alias iff their
 // byte ranges intersect; a dynamic GPR slot may alias every GPR word and a
 // dynamic segment slot may alias every segment channel for the same field;
-// guest memory may-alias guest memory (no disambiguation); guest memory and
-// state never alias.
+// guest memory may-alias guest memory (no disambiguation); compiler cells
+// alias only their own opaque identity. Distinct spaces never alias.
 
 export type StorageEffect = StorageAccess;
 export type ActionEffects = OperationEffects;
@@ -64,8 +64,8 @@ export function mayAlias(a: StorageEffect, b: StorageEffect): boolean {
       return b.space === "memoryBounds";
     case "state":
       return b.space === "state" && slotsMayAlias(a.slot, b.slot);
-    case "var":
-      return b.space === "var" && a.variable === b.variable;
+    case "cell":
+      return b.space === "cell" && a.cell === b.cell;
   }
 }
 
