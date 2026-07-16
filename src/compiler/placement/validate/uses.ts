@@ -52,7 +52,7 @@ export function validatePlacementUses(
     if (producer !== undefined) {
       assert(anchor !== undefined, `producer ${value} has no anchor`);
       for (const input of producer.inputs) {
-        add({ value: input, requiredAt: anchor, consumedAt: anchor });
+        add({ value: input, consumedAt: anchor });
       }
       continue;
     }
@@ -71,7 +71,7 @@ export function validatePlacementUses(
     if (block.values.captureMode(value) === "compute") {
       assert(anchor !== undefined, `computed value ${value} has no anchor`);
       for (const child of block.values.children(value)) {
-        add({ value: child, requiredAt: anchor, consumedAt: anchor });
+        add({ value: child, consumedAt: anchor });
       }
     }
   }

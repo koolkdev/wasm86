@@ -11,6 +11,7 @@ import { mayAlias } from "#ir/aliasing.js";
 import type { OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { canCaptureAtDeadline } from "./capture-safety.js";
+import { LoopAnchors } from "./loop-anchors.js";
 
 type AnchoredValue = Readonly<{
   anchor: SiteId;
@@ -31,12 +32,14 @@ export function planValueAnchors(
 class AnchorPlanner {
   readonly #demands = new Map<ValueId, ValueDemand[]>();
   readonly #anchored: (AnchoredValue | undefined)[];
+  readonly #loopAnchors: LoopAnchors;
 
   constructor(
     private readonly block: IrBlock,
     private readonly analysis: BodyAnalysis
   ) {
     this.#anchored = new Array(block.values.size()).fill(undefined);
+    this.#loopAnchors = new LoopAnchors(block, analysis);
   }
 
   plan(): readonly (PlannedValue | undefined)[] {
@@ -67,11 +70,7 @@ class AnchorPlanner {
 
         this.#placeValue(value, anchor, demands);
         for (const input of producer.inputs) {
-          this.#addDemand({
-            value: input,
-            requiredAt: anchor,
-            consumedAt: anchor
-          });
+          this.#addDemand({ value: input, consumedAt: anchor });
         }
         continue;
       }
@@ -96,23 +95,20 @@ class AnchorPlanner {
         continue;
       }
 
-      const anchor = this.analysis.dominatingSite(
-        demands.map((demand) =>
-          this.block.values.isNonTrapping(value)
-            ? demand.requiredAt
-            : demand.consumedAt
-        )
+      let anchor = this.analysis.dominatingSite(
+        demands.map((demand) => demand.consumedAt)
       );
       const mode = this.block.values.captureMode(value);
 
       if (mode === "compute") {
+        anchor = this.#loopAnchors.lift(value, anchor);
         this.#placeValue(value, anchor, demands);
       } else {
         assert(mode === "reemit", `producer value ${value} has no producer action`);
       }
 
       for (const child of this.block.values.children(value)) {
-        this.#addDemand({ value: child, requiredAt: anchor, consumedAt: anchor });
+        this.#addDemand({ value: child, consumedAt: anchor });
       }
     }
 

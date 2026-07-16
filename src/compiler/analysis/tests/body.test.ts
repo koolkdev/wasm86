@@ -292,11 +292,8 @@ test("an unreachable arm result executes even when its join is dead", () => {
   strictEqual(analysis.isLive(safeResult), false);
   strictEqual(analysis.isLive(unreachableResult), true);
   strictEqual(analysis.useCount(unreachableResult), 1);
-  strictEqual(unreachableRoot?.requiredAt, analysis.bodyEndSite(elseBody));
   strictEqual(unreachableRoot?.consumedAt, analysis.bodyEndSite(elseBody));
-  strictEqual(dependencies?.[0]?.requiredAt, analysis.siteOf(block.body, 0));
   strictEqual(dependencies?.[0]?.consumedAt, analysis.bodyEndSite(thenBody));
-  strictEqual(dependencies?.[1]?.requiredAt, analysis.bodyEndSite(elseBody));
   strictEqual(dependencies?.[1]?.consumedAt, analysis.bodyEndSite(elseBody));
   strictEqual(dependencies?.[1], unreachableRoot);
   deepStrictEqual(analysis.controlProducer(output), {
@@ -380,7 +377,6 @@ test("export roots preserve order and use the terminal boundary", () => {
 
   deepStrictEqual(analysis.exportedOutputs(), outputs);
   deepStrictEqual(roots.map((root) => root.value), outputs);
-  strictEqual(roots.every((root) => root.requiredAt === terminal), true);
   strictEqual(roots.every((root) => root.consumedAt === terminal), true);
   strictEqual(analysis.useCount(first), 1);
   strictEqual(analysis.useCount(second), 2);

@@ -320,6 +320,78 @@ test("keeps an outer capture live through repeated loop uses", () => {
   );
 });
 
+test("rejects hoisting a loop-dependent recipe to the preheader", () => {
+  const values = new ValueTable();
+  const loopInput = values.addLoopInput();
+  const current = values.binary("add", loopInput, values.const(1));
+  const loopBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), current),
+      { kind: "loopContinue", updates: [loopInput] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{
+        kind: "loop",
+        carried: [{ channel: gprChannel("eax"), seed: values.const(0), loopInput }],
+        body: loopBody
+      }]
+    }
+  };
+  const analysis = analyzeBody(block);
+  const plan = planPlacement(block, analysis);
+  const placements = [...plan.values];
+
+  placements[current] = {
+    kind: "capture",
+    anchor: analysis.siteOf(block.body, 0),
+    local: plan.localTypes.length
+  };
+
+  throws(
+    () => validatePlacement(block, analysis, {
+      ...plan,
+      values: placements,
+      localTypes: [...plan.localTypes, "i32"]
+    }),
+    /computed value .* illegal anchor/
+  );
+});
+
+test("accepts leaving a loop-invariant recipe at its use", () => {
+  const values = new ValueTable();
+  const invariant = values.binary("add", values.external(0), values.const(1));
+  const loopBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), invariant),
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "loop", carried: [], body: loopBody }]
+    }
+  };
+  const analysis = analyzeBody(block);
+  const plan = planPlacement(block, analysis);
+  const placements = [...plan.values];
+
+  placements[invariant] = {
+    kind: "atUse",
+    anchor: analysis.siteOf(loopBody, 0),
+    local: undefined
+  };
+
+  doesNotThrow(() => validatePlacement(block, analysis, {
+    ...plan,
+    values: placements,
+    localTypes: []
+  }));
+});
+
 function placementLocal(placement: ValuePlacement | undefined): number {
   if (placement?.local === undefined) {
     throw new Error("test value has no local");

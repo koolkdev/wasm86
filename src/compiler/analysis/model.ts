@@ -36,7 +36,6 @@ export type BodyPathStep = Readonly<{
 
 export type ValueDemand = Readonly<{
   value: ValueId;
-  requiredAt: SiteId;
   consumedAt: SiteId;
 }>;
 

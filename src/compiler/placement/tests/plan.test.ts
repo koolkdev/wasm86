@@ -55,6 +55,53 @@ test("a producer used only in a selected body realizes at that use", () => {
   deepStrictEqual(plan.localTypes, []);
 });
 
+test("a recipe used only in a selected body stays at its use", () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const result = values.binary("add", values.external(1), values.const(1));
+  const thenBody: Body = {
+    actions: [stateWrite(gprChannel("eax"), result)]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "if", condition, thenBody }]
+    }
+  };
+  const { analysis, plan } = place(block);
+  const useSite = analysis.siteOf(thenBody, 0);
+
+  deepStrictEqual(plan.values[result], {
+    kind: "atUse",
+    anchor: useSite,
+    local: undefined
+  });
+  deepStrictEqual(plan.localTypes, []);
+});
+
+test("a recipe shared with parent flow anchors at the common dominator", () => {
+  const values = new ValueTable();
+  const shared = values.binary("add", values.external(0), values.const(1));
+  const thenBody: Body = {
+    actions: [stateWrite(gprChannel("eax"), shared)]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "if", condition: shared, thenBody }]
+    }
+  };
+  const { analysis, plan } = place(block);
+  const controlSite = analysis.siteOf(block.body, 0);
+
+  deepStrictEqual(plan.values[shared], {
+    kind: "atUse",
+    anchor: controlSite,
+    local: 0
+  });
+  deepStrictEqual(plan.localTypes, ["i32"]);
+});
+
 test("an exit result is placed at its selected finish", () => {
   const values = new ValueTable();
   const condition = values.external(0);
@@ -163,6 +210,288 @@ test("an outer producer used by a loop is captured in the preheader", () => {
     local: 0
   });
   strictEqual(index.captures[preheader], undefined);
+});
+
+test("a loop-invariant recipe captures at the loop entry", () => {
+  const values = new ValueTable();
+  const invariant = values.binary("add", values.external(0), values.const(1));
+  const loopBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), invariant),
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "loop", carried: [], body: loopBody }]
+    }
+  };
+  const { analysis, plan, index } = place(block);
+  const entry = analysis.siteOf(block.body, 0);
+
+  deepStrictEqual(plan.values[invariant], {
+    kind: "capture",
+    anchor: entry,
+    local: 0
+  });
+  deepStrictEqual(index.captures[entry], [invariant]);
+});
+
+test("a loop-input recipe remains inside the loop", () => {
+  const values = new ValueTable();
+  const loopInput = values.addLoopInput();
+  const current = values.binary("add", loopInput, values.const(1));
+  const loopBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), current),
+      { kind: "loopContinue", updates: [loopInput] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{
+        kind: "loop",
+        carried: [{ channel: gprChannel("eax"), seed: values.const(0), loopInput }],
+        body: loopBody
+      }]
+    }
+  };
+  const { analysis, plan } = place(block);
+  const useSite = analysis.siteOf(loopBody, 0);
+
+  deepStrictEqual(plan.values[current], {
+    kind: "atUse",
+    anchor: useSite,
+    local: undefined
+  });
+});
+
+test("a recipe over a loop-local output remains inside the loop", () => {
+  const values = new ValueTable();
+  const output = values.addActionOutput();
+  const current = values.binary("add", output, values.const(1));
+  const loopBody: Body = {
+    actions: [
+      stateRead(output, gprChannel("eax")),
+      stateWrite(gprChannel("ebx"), current),
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "loop", carried: [], body: loopBody }]
+    }
+  };
+  const { analysis, plan } = place(block);
+  const useSite = analysis.siteOf(loopBody, 1);
+
+  deepStrictEqual(plan.values[current], {
+    kind: "atUse",
+    anchor: useSite,
+    local: undefined
+  });
+});
+
+test("a recipe over a loop-local control output remains inside the loop", () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const whenTrue = values.const(1);
+  const whenFalse = values.const(2);
+  const selected = values.addActionOutput();
+  const current = values.binary("add", selected, values.const(1));
+  const loopBody: Body = {
+    actions: [
+      {
+        kind: "if",
+        condition,
+        output: selected,
+        thenBody: { actions: [], result: whenTrue },
+        elseBody: { actions: [], result: whenFalse }
+      },
+      stateWrite(gprChannel("eax"), current),
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "loop", carried: [], body: loopBody }]
+    }
+  };
+  const { analysis, plan } = place(block);
+  const useSite = analysis.siteOf(loopBody, 1);
+
+  deepStrictEqual(plan.values[current], {
+    kind: "atUse",
+    anchor: useSite,
+    local: undefined
+  });
+});
+
+test("a transitively trapping recipe remains inside the loop", () => {
+  const values = new ValueTable();
+  const quotient = values.binary(
+    "div_u",
+    values.external(0),
+    values.external(1)
+  );
+  const adjusted = values.binary("add", quotient, values.const(1));
+  const loopBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), adjusted),
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "loop", carried: [], body: loopBody }]
+    }
+  };
+  const { analysis, plan } = place(block);
+  const useSite = analysis.siteOf(loopBody, 0);
+
+  deepStrictEqual(plan.values[adjusted], {
+    kind: "atUse",
+    anchor: useSite,
+    local: undefined
+  });
+});
+
+test("an invariant recipe in a selected loop body stays selected", () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const invariant = values.binary("add", values.external(1), values.const(1));
+  const thenBody: Body = {
+    actions: [stateWrite(gprChannel("eax"), invariant)]
+  };
+  const loopBody: Body = {
+    actions: [
+      { kind: "if", condition, thenBody },
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "loop", carried: [], body: loopBody }]
+    }
+  };
+  const { analysis, plan } = place(block);
+  const useSite = analysis.siteOf(thenBody, 0);
+
+  deepStrictEqual(plan.values[invariant], {
+    kind: "atUse",
+    anchor: useSite,
+    local: undefined
+  });
+});
+
+test("an invariant shared by both loop arms captures at the loop entry", () => {
+  const values = new ValueTable();
+  const invariant = values.binary("add", values.external(1), values.const(1));
+  const loopBody: Body = {
+    actions: [
+      {
+        kind: "if",
+        condition: values.external(0),
+        thenBody: {
+          actions: [stateWrite(gprChannel("eax"), invariant)]
+        },
+        elseBody: {
+          actions: [stateWrite(gprChannel("ebx"), invariant)]
+        }
+      },
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "loop", carried: [], body: loopBody }]
+    }
+  };
+  const { analysis, plan, index } = place(block);
+  const entry = analysis.siteOf(block.body, 0);
+
+  deepStrictEqual(plan.values[invariant], {
+    kind: "capture",
+    anchor: entry,
+    local: 0
+  });
+  deepStrictEqual(index.captures[entry], [invariant]);
+});
+
+test("an outer-loop recipe captures at an inner loop entry", () => {
+  const values = new ValueTable();
+  const outerInput = values.addLoopInput();
+  const current = values.binary("add", outerInput, values.const(1));
+  const innerBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), current),
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const outerBody: Body = {
+    actions: [
+      { kind: "loop", carried: [], body: innerBody },
+      { kind: "loopContinue", updates: [outerInput] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{
+        kind: "loop",
+        carried: [{ channel: gprChannel("eax"), seed: values.const(0), loopInput: outerInput }],
+        body: outerBody
+      }]
+    }
+  };
+  const { analysis, plan, index } = place(block);
+  const innerEntry = analysis.siteOf(outerBody, 0);
+
+  deepStrictEqual(plan.values[current], {
+    kind: "capture",
+    anchor: innerEntry,
+    local: 1
+  });
+  deepStrictEqual(index.captures[innerEntry], [current]);
+});
+
+test("an invariant recipe crosses nested loop entries", () => {
+  const values = new ValueTable();
+  const invariant = values.binary("add", values.external(0), values.const(1));
+  const innerBody: Body = {
+    actions: [
+      stateWrite(gprChannel("eax"), invariant),
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const outerBody: Body = {
+    actions: [
+      { kind: "loop", carried: [], body: innerBody },
+      { kind: "loopContinue", updates: [] }
+    ]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "loop", carried: [], body: outerBody }]
+    }
+  };
+  const { analysis, plan, index } = place(block);
+  const outerEntry = analysis.siteOf(block.body, 0);
+
+  deepStrictEqual(plan.values[invariant], {
+    kind: "capture",
+    anchor: outerEntry,
+    local: 0
+  });
+  deepStrictEqual(index.captures[outerEntry], [invariant]);
 });
 
 test("an if operand realizes at use before its nested replay", () => {

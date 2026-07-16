@@ -5,6 +5,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import { mayAlias } from "#ir/aliasing.js";
 import type { IrBlock } from "#ir/block.js";
 import { actionOutput } from "#ir/traverse.js";
+import { LoopAnchors } from "../loop-anchors.js";
 import type { PlacementPlan } from "../model.js";
 import type { PlacementProof } from "./uses.js";
 
@@ -14,6 +15,8 @@ export function validatePlacementGeometry(
   plan: PlacementPlan,
   proof: PlacementProof
 ): void {
+  const loopAnchors = new LoopAnchors(block, analysis);
+
   for (let raw = 0; raw < block.values.size(); raw += 1) {
     const value = valueId(raw);
     const placement = plan.values[value];
@@ -37,30 +40,26 @@ export function validatePlacementGeometry(
     if (producer !== undefined) {
       validateProducer(block, analysis, producer, anchor);
     } else if (analysis.controlProducer(value) === undefined) {
-      validateComputed(block, analysis, value, anchor, demands);
+      validateComputed(analysis, loopAnchors, value, anchor, demands);
     }
   }
 }
 
 function validateComputed(
-  block: IrBlock,
   analysis: BodyAnalysis,
+  loopAnchors: LoopAnchors,
   value: ValueId,
   anchor: SiteId,
   demands: PlacementProof["demands"][number]
 ): void {
-  const mayTrap = !block.values.isNonTrapping(value);
   const floor = analysis.dominatingSite(
-    demands.map((demand) => mayTrap ? demand.consumedAt : demand.requiredAt)
+    demands.map((demand) => demand.consumedAt)
   );
 
   assert(
-    analysis.dominatingSite([floor, anchor]) === floor,
-    `value ${value} anchor precedes its selected region`
+    loopAnchors.allows(value, floor, anchor),
+    `computed value ${value} has illegal anchor ${anchor} from ${floor}`
   );
-  if (mayTrap) {
-    assert(anchor === floor, `trapping value ${value} moves from ${floor} to ${anchor}`);
-  }
 }
 
 function validateProducer(

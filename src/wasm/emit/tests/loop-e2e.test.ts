@@ -16,7 +16,10 @@ import {
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import { wasmBodyInstructions } from "#compiler/encoder/tests/body-opcodes.js";
+import {
+  wasmBodyInstructions,
+  wasmBodyOpcodes
+} from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
@@ -139,6 +142,107 @@ test("a hoisted loop-invariant value stays live across iterations", async () => 
   writeWasmCpuStateSnapshot(stateView, { eax: 0, ecx: 5, edx: 7 });
   strictEqual(run(), irBlockCompleted);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 35);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 0);
+});
+
+test("a pure invariant evaluates before the loop", async () => {
+  const values = new ValueTable();
+  const invariant = values.binary("add", values.external(0), values.const(1));
+  const countSeed = values.addActionOutput();
+  const countInput = values.addLoopInput();
+  const remaining = values.binary("sub", countInput, values.const(1));
+  const block = loopBlock(values, [
+    stateRead(countSeed, gprChannel("ecx")),
+    {
+      kind: "loop",
+      carried: [{ channel: gprChannel("ecx"), seed: countSeed, loopInput: countInput }],
+      body: {
+        actions: [
+          stateWrite(gprChannel("eax"), invariant),
+          {
+            kind: "if",
+            condition: values.compare(32, "ne", remaining, values.const(0)),
+            thenBody: {
+              actions: [{ kind: "loopContinue", updates: [remaining] }]
+            }
+          },
+          stateWrite(gprChannel("ecx"), remaining)
+        ]
+      }
+    }
+  ]);
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 1).bytes);
+
+  ok(opcodes.indexOf(wasmOpcode.i32Add) < opcodes.indexOf(wasmOpcode.loop));
+  const { stateView, run } = await instantiateIrBlock(block, 1);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 0, ecx: 3 });
+  strictEqual(run(41), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 42);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 0);
+});
+
+test("an outer value captures at each inner loop entry", async () => {
+  const values = new ValueTable();
+  const outerSeed = values.addActionOutput();
+  const outerInput = values.addLoopInput();
+  const innerInput = values.addLoopInput();
+  const one = values.const(1);
+  const adjusted = values.binary("add", outerInput, values.const(10));
+  const outerRemaining = values.binary("sub", outerInput, one);
+  const innerRemaining = values.binary("sub", innerInput, one);
+  const block = loopBlock(values, [
+    stateRead(outerSeed, gprChannel("ecx")),
+    {
+      kind: "loop",
+      carried: [{ channel: gprChannel("ecx"), seed: outerSeed, loopInput: outerInput }],
+      body: {
+        actions: [
+          {
+            kind: "loop",
+            carried: [{
+              channel: gprChannel("ebx"),
+              seed: values.const(2),
+              loopInput: innerInput
+            }],
+            body: {
+              actions: [
+                stateWrite(gprChannel("eax"), adjusted),
+                {
+                  kind: "if",
+                  condition: values.compare(32, "ne", innerRemaining, values.const(0)),
+                  thenBody: {
+                    actions: [{ kind: "loopContinue", updates: [innerRemaining] }]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            kind: "if",
+            condition: values.compare(32, "ne", outerRemaining, values.const(0)),
+            thenBody: {
+              actions: [{ kind: "loopContinue", updates: [outerRemaining] }]
+            }
+          },
+          stateWrite(gprChannel("ecx"), outerRemaining)
+        ]
+      }
+    }
+  ]);
+  const opcodes = wasmBodyOpcodes(irBlockBody(block).bytes);
+  const loops = opcodes
+    .map((opcode, index) => opcode === wasmOpcode.loop ? index : -1)
+    .filter((index) => index !== -1);
+  const add = opcodes.indexOf(wasmOpcode.i32Add);
+
+  deepStrictEqual(loops.length, 2);
+  ok(loops[0]! < add && add < loops[1]!);
+  const { stateView, run } = await instantiateIrBlock(block);
+
+  writeWasmCpuStateSnapshot(stateView, { eax: 0, ebx: 0, ecx: 3 });
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 11);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 0);
 });
 

@@ -10,7 +10,7 @@ import {
   type SwitchAction
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { actionOutput, valueDependsOn } from "#ir/traverse.js";
+import { actionOutput, finishOperands } from "#ir/traverse.js";
 import type {
   BodyAnalysis,
   BodyPathStep,
@@ -34,7 +34,6 @@ const noWrites: readonly StorageAccess[] = [];
 
 type BodyWalkResult = Readonly<{
   writes: readonly StorageAccess[];
-  produced: ReadonlySet<ValueId>;
   mandatoryResult: ValueDemand | undefined;
 }>;
 
@@ -64,7 +63,7 @@ class BodyAnalyzer implements BodyAnalysis {
     this.#useCounts = new Uint32Array(block.values.size());
     this.#exportedOutputs = [...exportedOutputs];
 
-    this.#walkBody(block.body, undefined, []);
+    this.#walkBody(block.body);
     this.#recordExportDemands();
     this.#seedRoots();
     this.#propagateUses();
@@ -152,12 +151,7 @@ class BodyAnalyzer implements BodyAnalysis {
     return output === undefined || this.#useCounts[output] !== 0;
   }
 
-  #walkBody(
-    body: Body,
-    ownerSite: SiteId | undefined,
-    initiallyProduced: readonly ValueId[]
-  ): BodyWalkResult {
-    const produced = new Set(initiallyProduced);
+  #walkBody(body: Body): BodyWalkResult {
     const bodyWrites: StorageAccess[] = [];
     let mandatoryResult: ValueDemand | undefined;
 
@@ -167,15 +161,9 @@ class BodyAnalyzer implements BodyAnalysis {
       this.#writesBySite.push(undefined);
       const demand = (value: ValueId): ValueDemand => ({
         value,
-        requiredAt:
-          ownerSite === undefined ||
-          produced.has(value) ||
-          valueDependsOn(this.#block.values, value, produced)
-            ? actionSite
-            : ownerSite,
         consumedAt: actionSite
       });
-      const actionWrites = this.#walkAction(action, actionSite, demand, produced);
+      const actionWrites = this.#walkAction(action, actionSite, demand);
 
       this.#writesBySite[actionSite] = actionWrites;
       bodyWrites.push(...actionWrites);
@@ -191,7 +179,6 @@ class BodyAnalyzer implements BodyAnalysis {
     ) {
       mandatoryResult = {
         value: body.result,
-        requiredAt: endSite,
         consumedAt: endSite
       };
 
@@ -200,7 +187,6 @@ class BodyAnalyzer implements BodyAnalysis {
 
     return {
       writes: bodyWrites,
-      produced,
       mandatoryResult
     };
   }
@@ -208,8 +194,7 @@ class BodyAnalyzer implements BodyAnalysis {
   #walkAction(
     action: Action,
     site: SiteId,
-    demand: (value: ValueId) => ValueDemand,
-    produced: Set<ValueId>
+    demand: (value: ValueId) => ValueDemand
   ): readonly StorageAccess[] {
     switch (action.kind) {
       case "op": {
@@ -228,7 +213,6 @@ class BodyAnalyzer implements BodyAnalysis {
           `value ${output} already has a producer`
         );
         this.#producers.set(output, { output, action, site, inputs });
-        produced.add(output);
 
         return action.op.effects.writes;
       }
@@ -238,11 +222,11 @@ class BodyAnalyzer implements BodyAnalysis {
           ? [action.thenBody]
           : [action.thenBody, action.elseBody];
         const walked = bodies.map((body) =>
-          this.#walkNestedBody(body, site, [])
+          this.#walkNestedBody(body, site)
         );
 
         if (action.output !== undefined) {
-          this.#recordControlOutput(action.output, action, site, bodies, walked, produced);
+          this.#recordControlOutput(action.output, action, site, bodies, walked);
         }
 
         return mergeWrites(walked.map((result) => result.writes));
@@ -251,10 +235,10 @@ class BodyAnalyzer implements BodyAnalysis {
         this.#roots.push(demand(action.selector));
         const bodies = [...action.cases.map((switchCase) => switchCase.body), action.defaultBody];
         const walked = bodies.map((body) =>
-          this.#walkNestedBody(body, site, [])
+          this.#walkNestedBody(body, site)
         );
 
-        this.#recordControlOutput(action.output, action, site, bodies, walked, produced);
+        this.#recordControlOutput(action.output, action, site, bodies, walked);
         return mergeWrites(walked.map((result) => result.writes));
       }
       case "loop": {
@@ -265,7 +249,6 @@ class BodyAnalyzer implements BodyAnalysis {
         const walked = this.#walkNestedBody(
           action.body,
           site,
-          action.carried.map((cell) => cell.loopInput),
           true
         );
 
@@ -275,30 +258,18 @@ class BodyAnalyzer implements BodyAnalysis {
         this.#roots.push(...action.updates.map(demand));
         return noWrites;
       case "finish":
-        switch (action.finish.kind) {
-          case "exit":
-            // An exit result is required at its terminal action.
-            this.#roots.push({
-              value: action.finish.result,
-              requiredAt: site,
-              consumedAt: site
-            });
-            return noWrites;
-          case "dispatch":
-            this.#roots.push(demand(action.finish.targetEip));
-            return noWrites;
-        }
+        this.#roots.push(...finishOperands(action.finish).map(demand));
+        return noWrites;
     }
   }
 
   #walkNestedBody(
     body: Body,
     owner: SiteId,
-    initiallyProduced: readonly ValueId[],
     isLoop = false
   ): BodyWalkResult {
     this.#siteIndex.registerNested(body, owner, isLoop);
-    return this.#walkBody(body, owner, initiallyProduced);
+    return this.#walkBody(body);
   }
 
   #recordControlOutput(
@@ -306,8 +277,7 @@ class BodyAnalyzer implements BodyAnalysis {
     action: IfAction | SwitchAction,
     site: SiteId,
     bodies: readonly Body[],
-    walked: readonly BodyWalkResult[],
-    produced: Set<ValueId>
+    walked: readonly BodyWalkResult[]
   ): void {
     const dependencies: ValueDemand[] = [];
 
@@ -326,9 +296,6 @@ class BodyAnalyzer implements BodyAnalysis {
       } else {
         dependencies.push({
           value: result,
-          requiredAt: valueDependsOn(this.#block.values, result, bodyResult.produced)
-            ? end
-            : site,
           consumedAt: end
         });
       }
@@ -342,7 +309,6 @@ class BodyAnalyzer implements BodyAnalysis {
       producer: { action, site },
       dependencies
     });
-    produced.add(output);
   }
 
   #recordExportDemands(): void {
@@ -353,7 +319,7 @@ class BodyAnalyzer implements BodyAnalysis {
       : this.siteOf(body, lastActionIndex);
 
     for (const output of this.#exportedOutputs) {
-      this.#roots.push({ value: output, requiredAt: site, consumedAt: site });
+      this.#roots.push({ value: output, consumedAt: site });
     }
   }
 
