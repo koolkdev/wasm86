@@ -2,7 +2,6 @@ import { deepStrictEqual, match, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { wasmImport } from "#wasm/abi.js";
-import { WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
 import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
@@ -13,6 +12,7 @@ import { CompletionExit, decodeExit, encodeCompletionExit, encodeHostExit, HostE
 
 const entryExportName = "entry";
 const cpuStatePtr = 32;
+const statePayloadOffset = 0;
 const u32Align = 2;
 
 test("return_call_two_function_smoke_test", async () => {
@@ -52,7 +52,7 @@ test("return_call_preserves_cpu_state_memory_abi", async () => {
   const instance = await instantiateReturnCallModule(statePayloadTargetBody(), cpuStateMemory);
   const stateView = new DataView(cpuStateMemory.buffer);
 
-  stateView.setUint32(cpuStatePtr + WASM_CPU_STATE_OFFSETS.eax, 0xfeed_cafe, true);
+  stateView.setUint32(cpuStatePtr + statePayloadOffset, 0xfeed_cafe, true);
 
   const entry = exportedFunction(instance, entryExportName);
   const result = entry(cpuStatePtr);
@@ -157,7 +157,7 @@ function statePayloadTargetBody(): EncodedWasmFunctionBody {
     .i32Load({
       align: u32Align,
       memoryIndex: 0,
-      offset: WASM_CPU_STATE_OFFSETS.eax
+      offset: statePayloadOffset
     })
     .i64ExtendI32U()
     .i64Const(encodeCompletionExit(CompletionExit.DYNAMIC_JUMP, 0))

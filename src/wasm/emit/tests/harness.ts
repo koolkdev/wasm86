@@ -32,6 +32,7 @@ import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js
 export const irBlockCompleted = -1n;
 
 export type InstantiatedIrBlock = Readonly<{
+  stateMemory: WebAssembly.Memory;
   stateView: DataView;
   guestView: DataView;
   run(...externals: number[]): bigint;
@@ -97,6 +98,7 @@ export async function instantiateIrBlock(
   assert(typeof run === "function", `missing Wasm ${wasmBlockExportName} export`);
 
   return {
+    stateMemory: state,
     stateView: new DataView(state.buffer),
     guestView: new DataView(guest.buffer),
     run: (...externals) => (run as (...args: number[]) => bigint)(...externals)
@@ -125,6 +127,7 @@ export async function instantiateFunctionBody(
   assert(typeof run === "function", `missing Wasm ${wasmBlockExportName} export`);
 
   return {
+    stateMemory: state,
     stateView: new DataView(state.buffer),
     guestView: new DataView(guest.buffer),
     run: (...externals) => (run as (...args: number[]) => bigint)(...externals)

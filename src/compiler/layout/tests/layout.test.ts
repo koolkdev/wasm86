@@ -1,0 +1,185 @@
+import { deepStrictEqual, notDeepStrictEqual, strictEqual, throws } from "node:assert";
+import { test } from "node:test";
+
+import { ArrayRef, FieldRef } from "#compiler/layout/handles.js";
+import { createLayout } from "#compiler/layout/layout.js";
+import { layoutStructure } from "#compiler/layout/structure.js";
+
+function exampleDefinition(prefix = "example") {
+  const byte = new FieldRef(`${prefix}.state.byte`, "u8");
+  const word = new FieldRef(`${prefix}.state.word`, "u32");
+  const array = new ArrayRef(`${prefix}.state.array`, "u16", ["first", "second", "third"]);
+  const tail = new FieldRef(`${prefix}.tail.value`, "u32");
+
+  return {
+    byte,
+    word,
+    array,
+    tail,
+    state: layoutStructure(`${prefix}.state`, [byte, word, array]),
+    tailState: layoutStructure(`${prefix}.tail`, [tail])
+  };
+}
+
+test("independently declared equal definitions resolve equally", () => {
+  const first = exampleDefinition();
+  const second = exampleDefinition();
+
+  deepStrictEqual(
+    createLayout("layout.test", [first.state, first.tailState]).record,
+    createLayout("layout.test", [second.state, second.tailState]).record
+  );
+});
+
+test("structure argument order does not affect the resolved record", () => {
+  const definition = exampleDefinition();
+
+  deepStrictEqual(
+    createLayout("layout.test", [definition.state, definition.tailState]).record,
+    createLayout("layout.test", [definition.tailState, definition.state]).record
+  );
+});
+
+test("member width and explicit sequence affect resolved placement", () => {
+  const original = exampleDefinition("original");
+  const reorderedByte = new FieldRef("reordered.state.byte", "u8");
+  const reorderedWord = new FieldRef("reordered.state.word", "u32");
+  const reorderedArray = new ArrayRef("reordered.state.array", "u16", ["first", "second", "third"]);
+  const reordered = layoutStructure("reordered.state", [reorderedWord, reorderedByte, reorderedArray]);
+  const wideByte = new FieldRef("wide.state.byte", "u16");
+  const wideWord = new FieldRef("wide.state.word", "u32");
+  const wideArray = new ArrayRef("wide.state.array", "u16", ["first", "second", "third"]);
+  const wide = layoutStructure("wide.state", [wideByte, wideWord, wideArray]);
+  const originalLayout = createLayout("layout.test", [original.state]);
+  const reorderedLayout = createLayout("layout.test", [reordered]);
+  const wideLayout = createLayout("layout.test", [wide]);
+
+  notDeepStrictEqual(
+    [originalLayout.field(original.byte), originalLayout.field(original.word)],
+    [reorderedLayout.field(reorderedByte), reorderedLayout.field(reorderedWord)]
+  );
+  notDeepStrictEqual(
+    originalLayout.field(original.byte),
+    wideLayout.field(wideByte)
+  );
+});
+
+test("declared element order is the indexing authority", () => {
+  const first = new ArrayRef("array.state.values", "u32", ["eax", "ecx", "edx"]);
+  const second = new ArrayRef("array.state.values", "u32", ["edx", "ecx", "eax"]);
+  const firstLayout = createLayout("layout.test", [layoutStructure("array.state", [first])]);
+  const secondLayout = createLayout("layout.test", [layoutStructure("array.state", [second])]);
+
+  notDeepStrictEqual(firstLayout.array(first).elementIds, secondLayout.array(second).elementIds);
+  strictEqual(first.elementIndex("eax"), 0);
+  strictEqual(second.elementIndex("eax"), 2);
+  strictEqual(second.elementIndex("edx"), 0);
+  throws(() => first.elementIndex("ebx" as "eax"), /unknown element ebx/);
+});
+
+test("resolution derives natural alignment, padding, array stride, and aggregate size", () => {
+  const definition = exampleDefinition();
+  const layout = createLayout("layout.test", [definition.state, definition.tailState]);
+
+  // Structures sort as example.state then example.tail. The u32 member aligns
+  // after the leading byte, and the u16 array remains contiguous.
+  deepStrictEqual(layout.field(definition.byte), { offset: 0, byteLength: 1 });
+  deepStrictEqual(layout.field(definition.word), { offset: 4, byteLength: 4 });
+  deepStrictEqual(layout.array(definition.array), {
+    offset: 8,
+    stride: 2,
+    count: 3,
+    elementByteLength: 2,
+    elementIds: ["first", "second", "third"]
+  });
+  deepStrictEqual(layout.field(definition.tail), { offset: 16, byteLength: 4 });
+  strictEqual(layout.alignment, 4);
+  strictEqual(layout.byteLength, 20);
+});
+
+test("the resolved record enumerates canonical structures and placement facts", () => {
+  const definition = exampleDefinition();
+
+  deepStrictEqual(
+    createLayout("layout.test", [definition.tailState, definition.state]).record,
+    {
+      space: "layout.test",
+      byteLength: 20,
+      alignment: 4,
+      structures: [
+        {
+          id: "example.state",
+          members: [
+            { kind: "field", id: "example.state.byte", offset: 0, byteLength: 1 },
+            { kind: "field", id: "example.state.word", offset: 4, byteLength: 4 },
+            {
+              kind: "array",
+              id: "example.state.array",
+              offset: 8,
+              stride: 2,
+              elementByteLength: 2,
+              elementIds: ["first", "second", "third"]
+            }
+          ]
+        },
+        {
+          id: "example.tail",
+          members: [
+            { kind: "field", id: "example.tail.value", offset: 16, byteLength: 4 }
+          ]
+        }
+      ]
+    }
+  );
+});
+
+test("duplicate stable IDs and foreign handles are rejected", () => {
+  const first = new FieldRef("duplicate.state.first", "u32");
+  const second = new FieldRef("duplicate.state.first", "u16");
+
+  throws(
+    () => createLayout("layout.test", [
+      layoutStructure("duplicate.first", [first]),
+      layoutStructure("duplicate.second", [second])
+    ]),
+    /duplicate layout member id/
+  );
+  throws(
+    () => createLayout("layout.test", [
+      layoutStructure("duplicate.structure", [first]),
+      layoutStructure("duplicate.structure", [new FieldRef("duplicate.structure.second", "u8")])
+    ]),
+    /duplicate structure id/
+  );
+
+  const layout = createLayout("layout.test", [layoutStructure("foreign.state", [
+    new FieldRef("foreign.state.owned", "u32")
+  ])]);
+
+  throws(() => layout.field(new FieldRef("foreign.state.owned", "u32")), /does not belong/);
+  throws(
+    () => layout.array(new ArrayRef("foreign.state.array", "u32", ["value"])),
+    /does not belong/
+  );
+});
+
+test("malformed identities and array shapes are rejected", () => {
+  throws(
+    () => createLayout("bad space", [layoutStructure("space.state", [new FieldRef("space.state.field", "u8")])]),
+    /layout space must be a stable id/
+  );
+  throws(
+    () => createLayout("layout.test", [layoutStructure("unscoped", [new FieldRef("unscoped.field", "u8")])]),
+    /stable namespaced id/
+  );
+  throws(
+    () => createLayout("layout.test", [layoutStructure("empty.state", [new ArrayRef("empty.state.array", "u8", [])])]),
+    /has no elements/
+  );
+  throws(
+    () => createLayout("layout.test", [layoutStructure("repeat.state", [
+      new ArrayRef("repeat.state.array", "u8", ["same", "same"])
+    ])]),
+    /duplicate element id/
+  );
+});

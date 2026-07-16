@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { wasmImport } from "#wasm/abi.js";
-import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
+import { LAZY_FLAGS_KIND } from "#core/flags/state.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
@@ -91,7 +91,7 @@ test("lazy flag helpers resolve explicit NONE flag bytes", async () => {
   } as const satisfies Readonly<Record<X86StatusFlag, number>>;
 
   writeWasmCpuStateSnapshot(runtime.stateView, {
-    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
+    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.NONE, 0),
     ...explicitFlags
   });
 
@@ -113,7 +113,7 @@ test("lazy flag helpers resolve seeded SUB runtime state", async () => {
 
   for (const entry of cases) {
     writeWasmCpuStateSnapshot(runtime.stateView, {
-      lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, entry.width),
+      lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, entry.width),
       lazyFlagsA: entry.left,
       lazyFlagsB: entry.right,
       CF: 0,
@@ -149,7 +149,7 @@ test("lazy flag helpers resolve seeded ADD runtime state", async () => {
 
   for (const entry of cases) {
     writeWasmCpuStateSnapshot(runtime.stateView, {
-      lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, entry.width),
+      lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.ADD, entry.width),
       lazyFlagsA: entry.left,
       lazyFlagsB: entry.right,
       CF: 0,
@@ -185,7 +185,7 @@ test("lazy flag helpers resolve seeded LOGIC_RESULT runtime state", async () => 
 
   for (const entry of cases) {
     writeWasmCpuStateSnapshot(runtime.stateView, {
-      lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, entry.width),
+      lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, entry.width),
       lazyFlagsA: entry.result,
       lazyFlagsB: 0xffff_ffff,
       CF: 1,

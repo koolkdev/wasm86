@@ -11,8 +11,8 @@ import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { CONDITION_CODE_DESCRIPTORS } from "#core/instructions/condition-codes.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags/definitions.js";
+import { LAZY_FLAGS_KIND } from "#core/flags/state.js";
 import { widthMask, type OperandWidth } from "#core/types.js";
-import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -77,7 +77,7 @@ test("jcc and setcc use direct lazy SUB arms for compare-family conditions", asy
 test("direct-capable live-in conditions fall back to concrete flags for NONE lazy state", async () => {
   const explicitFlags = { CF: 1, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
   const state = {
-    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0),
+    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.NONE, 0),
     lazyFlagsA: 0,
     lazyFlagsB: 0,
     ...explicitFlags
@@ -798,7 +798,7 @@ function relTarget(instruction: IsaDecodedInstruction): number {
 
 function subLazyFlagsState(entry: BinaryLazyFlagsCase) {
   return {
-    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, entry.width),
+    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, entry.width),
     lazyFlagsA: entry.left,
     lazyFlagsB: entry.right
   };
@@ -806,7 +806,7 @@ function subLazyFlagsState(entry: BinaryLazyFlagsCase) {
 
 function addLazyFlagsState(entry: BinaryLazyFlagsCase) {
   return {
-    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, entry.width),
+    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.ADD, entry.width),
     lazyFlagsA: entry.left,
     lazyFlagsB: entry.right
   };
@@ -814,7 +814,7 @@ function addLazyFlagsState(entry: BinaryLazyFlagsCase) {
 
 function logicLazyFlagsState(entry: LogicLazyFlagsCase) {
   return {
-    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, entry.width),
+    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, entry.width),
     lazyFlagsA: (entry.result & widthMask(entry.width)) >>> 0,
     lazyFlagsB: 0xdead_beef
   };

@@ -17,13 +17,10 @@ export const descriptorFields = {
 } as const;
 
 export const descriptorLayout = {
-  count: 0x4000,
   byteLength: 0x10,
   alignment: 4,
   fields: descriptorFields
 } as const;
-
-export const descriptorTableByteLength = descriptorLayout.count * descriptorLayout.byteLength;
 
 export const descriptorAttr = {
   DEFINED: 1 << 0,
@@ -57,10 +54,6 @@ assert(
 
 export function descriptorKey(selector: number): number {
   return (selector & 0xffff) >>> 2;
-}
-
-export function descriptorRecordOffset(selector: number): number {
-  return descriptorKey(selector) * descriptorLayout.byteLength;
 }
 
 export function validateDescriptor(descriptor: DescriptorRecord): boolean {

@@ -1,12 +1,13 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { readRegisterAlias, writeRegisterAlias } from "#core/state/cpu-state.js";
 import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
 import { x86Flags } from "#core/flags/definitions.js";
+import { LAZY_FLAGS_KIND } from "#core/flags/state.js";
 import { registerAlias } from "#core/registers.js";
 import { readWasmCpuState, wasmCpuStatusFlagsOf } from "#test/support/cpu-state.js";
-import { WASM_CPU_LAZY_FLAGS_KIND } from "#wasm/cpu-state-layout.js";
+import { WasmCpuState } from "#wasm/host/cpu-state.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
@@ -25,6 +26,13 @@ const allFlagBytesSet = {
 } as const;
 const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 
+test("host view rejects memory shorter than the resolved execution state", () => {
+  throws(
+    () => new WasmCpuState(new WebAssembly.Memory({ initial: 0 })),
+    /cpu state memory is too small/
+  );
+});
+
 test("host view initializes lazy flag metadata to none", () => {
   const { cpuState: state } = createWasmHostMemories();
 
@@ -32,14 +40,14 @@ test("host view initializes lazy flag metadata to none", () => {
 
   const snapshot = readWasmCpuState(state);
 
-  strictEqual(snapshot.lazyFlagsKind, lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.NONE, 0));
+  strictEqual(snapshot.lazyFlagsKind, lazyFlagsKindByte(LAZY_FLAGS_KIND.NONE, 0));
   strictEqual(snapshot.lazyFlagsA, 0);
   strictEqual(snapshot.lazyFlagsB, 0);
 });
 
 test("host view stores lazy flag kind byte fields as bytes, not bits", () => {
   const { cpuState: state } = createWasmHostMemories();
-  const kindByte = lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.LOGIC_RESULT, 32);
+  const kindByte = lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, 32);
 
   state.load({ lazyFlagsKind: kindByte });
 

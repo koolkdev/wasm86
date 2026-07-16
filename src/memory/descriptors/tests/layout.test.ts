@@ -8,8 +8,6 @@ import {
   descriptorFields,
   descriptorKey,
   descriptorLayout,
-  descriptorRecordOffset,
-  descriptorTableByteLength,
   descriptorTargetAttrMask,
   validateDescriptor,
   type DescriptorRecord
@@ -31,22 +29,10 @@ function descriptor(overrides: Partial<DescriptorRecord> = {}): DescriptorRecord
   };
 }
 
-test("descriptor table size and record offsets are table-relative", () => {
-  strictEqual(descriptorLayout.byteLength % descriptorLayout.alignment, 0);
-  strictEqual(
-    descriptorTableByteLength,
-    descriptorLayout.count * descriptorLayout.byteLength
-  );
-  strictEqual(descriptorRecordOffset(0), 0);
-  strictEqual(
-    descriptorRecordOffset(0xffff) + descriptorLayout.byteLength,
-    descriptorTableByteLength
-  );
-});
-
 test("descriptor record fields are aligned, nonoverlapping u32 words", () => {
   const offsets = Object.values(descriptorFields).sort((left, right) => left - right);
 
+  strictEqual(descriptorLayout.byteLength % descriptorLayout.alignment, 0);
   strictEqual(offsets.length, 4);
   for (const [index, offset] of offsets.entries()) {
     strictEqual(offset % 4, 0);
@@ -92,7 +78,7 @@ test("descriptor keys discard RPL while retaining TI", () => {
   strictEqual(descriptorKey(0x000b), 2);
   strictEqual(descriptorKey(0x000c), 3);
   strictEqual(descriptorKey(0x000f), 3);
-  strictEqual(descriptorKey(0xffff), descriptorLayout.count - 1);
+  strictEqual(descriptorKey(0xffff), 0x3fff);
 });
 
 test("descriptor validation owns field and policy checks", () => {

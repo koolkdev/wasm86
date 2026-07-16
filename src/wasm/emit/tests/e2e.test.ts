@@ -13,11 +13,13 @@ import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import type { RegName } from "#core/types.js";
+import { LAZY_FLAGS_KIND } from "#core/flags/state.js";
+import { coreStateFields } from "#core/state/fields.js";
 import { aluSemantic } from "#core/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#core/semantics/mov.js";
 import { xchgSemantic } from "#core/semantics/xchg.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
-import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
+import { executionStateLayout } from "#ir/state-layout.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   assertLazyFlagState,
@@ -28,6 +30,8 @@ import {
 import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { isStateRead, isStateWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+
+const eaxStateOffset = executionStateLayout.array(coreStateFields.gprs).offset;
 
 // The stage's end-to-end slice: semantics -> IrBlockBuilder -> emit ->
 // instantiate -> run -> assert cpu state memory through the host view.
@@ -87,13 +91,13 @@ test("ordinary state writes leave lazy flag metadata untouched", async () => {
 
   writeWasmCpuStateSnapshot(stateView, {
     eax: 0xcafe1234,
-    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, 32),
+    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 32),
     lazyFlagsA: 0x1111_2222,
     lazyFlagsB: 0x3333_4444
   });
   assertCompleted(run());
   strictEqual(readRegister(stateView, "ebx"), 0xcafe1234);
-  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, 32));
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 32));
   strictEqual(readWasmCpuStateField(stateView, "lazyFlagsA"), 0x1111_2222);
   strictEqual(readWasmCpuStateField(stateView, "lazyFlagsB"), 0x3333_4444);
 });
@@ -101,7 +105,7 @@ test("ordinary state writes leave lazy flag metadata untouched", async () => {
 test("generic state actions load and store the lazy flags kind byte channel", async () => {
   const values = new ValueTable();
   const oldKindByte = values.addActionOutput(fitsUnsigned(8));
-  const newKindByteValue = lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.ADD, 16);
+  const newKindByteValue = lazyFlagsKindByte(LAZY_FLAGS_KIND.ADD, 16);
   const newKindByte = values.const(newKindByteValue);
   const block: IrBlock = {
     body: {
@@ -116,13 +120,13 @@ test("generic state actions load and store the lazy flags kind byte channel", as
   const { stateView, run } = await instantiateIrBlock(block);
 
   writeWasmCpuStateSnapshot(stateView, {
-    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, 32),
+    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 32),
     lazyFlagsB: 0x3333_4444
   });
 
   assertCompleted(run());
   strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), newKindByteValue);
-  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsB"), lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, 32));
+  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsB"), lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 32));
 });
 
 test("chained movs forward one read to both destinations", async () => {
@@ -178,7 +182,7 @@ test("xchg eax, eax emits no register-state Wasm access", async () => {
     wasmBodyMemoryAccesses(body).filter(
       (access) =>
         access.memoryIndex === wasmMemoryIndex.cpuState &&
-        access.offset === WASM_CPU_STATE_OFFSETS.eax
+        access.offset === eaxStateOffset
     ),
     []
   );

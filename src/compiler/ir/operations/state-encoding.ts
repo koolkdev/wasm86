@@ -8,16 +8,12 @@ import {
   type StateChannel,
   type StateSlot
 } from "#ir/slots.js";
-import { wasmMemoryIndex } from "#wasm/abi.js";
 import {
-  wasmCpuStateChannelAccessByteLength,
-  wasmCpuStateChannelOffset,
-  WASM_CPU_GPR_BASE_OFFSET,
-  WASM_CPU_SEGMENT_ACCESS_OFFSET,
-  WASM_CPU_SEGMENT_BASE_OFFSET,
-  WASM_CPU_SEGMENT_LIMIT_OFFSET,
-  WASM_CPU_SEGMENT_SELECTOR_OFFSET
-} from "#wasm/cpu-state-layout.js";
+  executionStateLayout,
+  stateSlotLocation,
+  type StateLocation
+} from "#ir/state-layout.js";
+import { wasmMemoryIndex } from "#wasm/abi.js";
 import type {
   DeclaredOperationInputs,
   OperationEmitTarget
@@ -157,20 +153,21 @@ function emitDynamicGprOffset(
   index: SlotIndexUse
 ): void {
   const { body } = target;
+  const strideShift = powerOfTwoShift(dynamicArrayStride(slot));
 
-  // Word access is (index & 7) * 4. Byte registers use word index & 3,
+  // Word access is (index & 7) * stride. Byte registers use word index & 3,
   // plus one byte for high-register encodings 4..7.
   switch (slot.byteLength) {
     case 4:
     case 2:
       index.emitUse();
-      body.i32Const(7).i32And().i32Const(2).i32Shl();
+      body.i32Const(7).i32And().i32Const(strideShift).i32Shl();
       return;
     case 1:
       target.withTemporaryLocal("i32", (indexLocal) => {
         index.emitUse();
         body.localTee(indexLocal);
-        body.i32Const(3).i32And().i32Const(2).i32Shl();
+        body.i32Const(3).i32And().i32Const(strideShift).i32Shl();
         body.localGet(indexLocal);
         body.i32Const(2).i32ShrU().i32Const(1).i32And();
         body.i32Add();
@@ -185,11 +182,11 @@ function emitDynamicSegmentOffset(
   index: SlotIndexUse
 ): void {
   index.emitUse();
-  body.i32Const(slot.field === "selector" ? 1 : 2).i32Shl();
+  body.i32Const(powerOfTwoShift(dynamicArrayStride(slot))).i32Shl();
 }
 
 function slotImmediate(slot: StateSlot, accessByteLength: 1 | 2 | 4): WasmMemoryImmediate {
-  const offset = slotBaseOffset(slot);
+  const offset = locationOffset(stateSlotLocation(slot));
 
   return {
     align: accessAlign(offset, accessByteLength),
@@ -198,45 +195,51 @@ function slotImmediate(slot: StateSlot, accessByteLength: 1 | 2 | 4): WasmMemory
   };
 }
 
-function slotBaseOffset(slot: StateSlot): number {
-  switch (slot.kind) {
-    case "gprDynamic":
-      return WASM_CPU_GPR_BASE_OFFSET;
-    case "segmentDynamic":
-      switch (slot.field) {
-        case "selector":
-          return WASM_CPU_SEGMENT_SELECTOR_OFFSET;
-        case "base":
-          return WASM_CPU_SEGMENT_BASE_OFFSET;
-        case "limit":
-          return WASM_CPU_SEGMENT_LIMIT_OFFSET;
-        case "access":
-          return WASM_CPU_SEGMENT_ACCESS_OFFSET;
-      }
-    case "gpr":
-    case "flag":
-    case "segment":
-    case "eip":
-    case "instructionCount":
-    case "lazyFlags":
-      return wasmCpuStateChannelOffset(slot);
+function locationOffset(location: StateLocation): number {
+  switch (location.kind) {
+    case "field":
+      return executionStateLayout.field(location.field).offset;
+    case "element": {
+      const array = executionStateLayout.array(location.array);
+
+      return array.offset + location.index * array.stride + location.byteOffset;
+    }
+    case "array":
+      return executionStateLayout.array(location.array).offset;
   }
 }
 
 export function stateSlotAccessByteLength(slot: StateSlot): 1 | 2 | 4 {
-  switch (slot.kind) {
-    case "gprDynamic":
-      return slot.byteLength;
-    case "segmentDynamic":
-      return slot.field === "selector" ? 2 : 4;
-    case "gpr":
-    case "flag":
-    case "segment":
-    case "eip":
-    case "instructionCount":
-    case "lazyFlags":
-      return wasmCpuStateChannelAccessByteLength(slot);
+  const location = stateSlotLocation(slot);
+
+  switch (location.kind) {
+    case "field":
+      return executionStateLayout.field(location.field).byteLength;
+    case "element":
+      return location.byteLength;
+    case "array":
+      if (slot.kind === "gprDynamic") {
+        return slot.byteLength;
+      }
+
+      assert(slot.kind === "segmentDynamic", "array location belongs to a static state slot");
+      return executionStateLayout.array(location.array).elementByteLength;
   }
+}
+
+function dynamicArrayStride(slot: GprDynamicSlot | SegmentDynamicSlot): number {
+  const location = stateSlotLocation(slot);
+
+  assert(location.kind === "array", "dynamic state slot must resolve to an array");
+  return executionStateLayout.array(location.array).stride;
+}
+
+function powerOfTwoShift(stride: number): number {
+  assert(
+    Number.isInteger(stride) && stride > 0 && (stride & (stride - 1)) === 0,
+    `dynamic state array stride must be a positive power of two, got ${stride}`
+  );
+  return Math.log2(stride);
 }
 
 function accessAlign(offset: number, byteLength: 1 | 2 | 4): 0 | 1 | 2 {

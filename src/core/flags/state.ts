@@ -1,10 +1,7 @@
+import { FieldRef } from "#compiler/layout/handles.js";
+import { layoutStructure } from "#compiler/layout/structure.js";
 import type { OperandWidth } from "#core/types.js";
-import type { X86Flag } from "./definitions.js";
-
-type FlagStateField<TByteLength extends 1 | 4> = Readonly<{
-  offset: number;
-  byteLength: TByteLength;
-}>;
+import { x86Flags, type X86Flag } from "./definitions.js";
 
 export const LAZY_FLAGS_KIND = {
   NONE: 0,
@@ -31,26 +28,30 @@ function lazyFlagsWidthCode(width: 0 | OperandWidth): 0 | 1 | 2 {
   }
 }
 
+const concreteFlagFields = {
+  CF: new FieldRef("core.flags.CF", "u8"),
+  PF: new FieldRef("core.flags.PF", "u8"),
+  AF: new FieldRef("core.flags.AF", "u8"),
+  ZF: new FieldRef("core.flags.ZF", "u8"),
+  SF: new FieldRef("core.flags.SF", "u8"),
+  OF: new FieldRef("core.flags.OF", "u8"),
+  DF: new FieldRef("core.flags.DF", "u8"),
+  TF: new FieldRef("core.flags.TF", "u8"),
+  NT: new FieldRef("core.flags.NT", "u8"),
+  AC: new FieldRef("core.flags.AC", "u8"),
+  ID: new FieldRef("core.flags.ID", "u8")
+} as const satisfies Readonly<Record<X86Flag, FieldRef<"u8">>>;
+
 export const flagStateFields = {
-  lazyKind: { offset: 40, byteLength: 1 },
-  lazyA: { offset: 44, byteLength: 4 },
-  lazyB: { offset: 48, byteLength: 4 },
-  concrete: {
-    CF: { offset: 52, byteLength: 1 },
-    PF: { offset: 53, byteLength: 1 },
-    AF: { offset: 54, byteLength: 1 },
-    ZF: { offset: 55, byteLength: 1 },
-    SF: { offset: 56, byteLength: 1 },
-    OF: { offset: 57, byteLength: 1 },
-    DF: { offset: 58, byteLength: 1 },
-    TF: { offset: 59, byteLength: 1 },
-    NT: { offset: 60, byteLength: 1 },
-    AC: { offset: 61, byteLength: 1 },
-    ID: { offset: 62, byteLength: 1 }
-  }
-} as const satisfies Readonly<{
-  lazyKind: FlagStateField<1>;
-  lazyA: FlagStateField<4>;
-  lazyB: FlagStateField<4>;
-  concrete: Readonly<Record<X86Flag, FlagStateField<1>>>;
-}>;
+  lazyKind: new FieldRef("core.flags.lazy-flag.kind", "u8"),
+  lazyA: new FieldRef("core.flags.lazy-flag.a", "u32"),
+  lazyB: new FieldRef("core.flags.lazy-flag.b", "u32"),
+  concrete: concreteFlagFields
+} as const;
+
+export const flagState = layoutStructure("core.flags", [
+  flagStateFields.lazyKind,
+  flagStateFields.lazyA,
+  flagStateFields.lazyB,
+  ...x86Flags.map((flag) => flagStateFields.concrete[flag])
+]);

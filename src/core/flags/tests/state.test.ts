@@ -26,6 +26,6 @@ test("lazy flag state encodes its kind and operand width", () => {
 
 test("concrete flags use individual byte fields", () => {
   for (const flag of x86Flags) {
-    strictEqual(flagStateFields.concrete[flag].byteLength, 1);
+    strictEqual(flagStateFields.concrete[flag].width, "u8");
   }
 });

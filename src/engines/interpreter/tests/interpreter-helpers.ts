@@ -8,7 +8,7 @@ import {
 } from "#test/support/cpu-state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { decodeExit, type DecodedExit } from "#wasm/exit.js";
-import { WASM_CPU_STATE_FIELDS } from "#wasm/cpu-state-layout.js";
+import { wasmCpuStateFields } from "#wasm/host/cpu-state.js";
 import { createGuestMemory } from "#wasm/tests/helpers.js";
 
 export type InterpreterModuleInstance = Readonly<{
@@ -67,7 +67,7 @@ export function assertInterpreterStateEquals(view: DataView, state: WasmCpuState
 
   writeWasmCpuStateSnapshot(expectedView, state);
 
-  for (const field of WASM_CPU_STATE_FIELDS) {
+  for (const field of wasmCpuStateFields) {
     strictEqual(readWasmCpuStateField(view, field), readWasmCpuStateField(expectedView, field));
   }
 }

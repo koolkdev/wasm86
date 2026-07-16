@@ -8,10 +8,11 @@ import { eipChannel, gprChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
+import { flagStateFields, LAZY_FLAGS_KIND } from "#core/flags/state.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type Reg32 } from "#core/types.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
-import { WASM_CPU_LAZY_FLAGS_KIND, WASM_CPU_STATE_OFFSETS } from "#wasm/cpu-state-layout.js";
+import { executionStateLayout } from "#ir/state-layout.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   assertLazyFlagState,
@@ -25,6 +26,7 @@ import { aluReference, type AluFlags, type AluOp } from "./reference.js";
 import { isStateWrite } from "#ir/tests/storage-op-helpers.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
+const lazyFlagsKindStateOffset = executionStateLayout.field(flagStateFields.lazyKind).offset;
 
 // ALU r32 forms through the action pipeline, checked against reference.ts.
 
@@ -147,7 +149,7 @@ test("two adds in one block store one lazy add record, with the second add's sou
       (access) =>
         access.opcode === wasmOpcode.i32Store8 &&
         access.memoryIndex === wasmMemoryIndex.cpuState &&
-        access.offset === WASM_CPU_STATE_OFFSETS.lazyFlagsKind
+        access.offset === lazyFlagsKindStateOffset
     ).length,
     1
   );
@@ -156,7 +158,7 @@ test("two adds in one block store one lazy add record, with the second add's sou
     ebx: 0x7fff_fffe,
     ecx: 0x0000_0001,
     eip: first.address,
-    lazyFlagsKind: lazyFlagsKindByte(WASM_CPU_LAZY_FLAGS_KIND.SUB, 32),
+    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 32),
     ...allFlagsSet
   };
   // ebx threads through the two adds; the block ends with the second add's flags.

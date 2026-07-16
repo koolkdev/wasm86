@@ -2,11 +2,13 @@ import { assert } from "#common/assert.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { MutableCpuStateView } from "#core/state/cpu-state.js";
 import type { SegmentRegister } from "#core/types.js";
+import { executionStateLayout } from "#ir/state-layout.js";
 import {
   bindWasmInterpreter,
   type WasmInterpreterBinding
 } from "#engines/interpreter/binding.js";
 import { WasmCpuState } from "#wasm/host/cpu-state.js";
+import { wasmPageByteLength } from "#wasm/abi.js";
 import { decodeEntryResult } from "./entry-result.js";
 
 export type UnsupportedReason =
@@ -41,7 +43,9 @@ type CpuContext = Readonly<{
 }>;
 
 export function createCpu(guestMemory: WebAssembly.Memory): Cpu {
-  const cpuStateMemory = new WebAssembly.Memory({ initial: 1 });
+  const cpuStateMemory = new WebAssembly.Memory({
+    initial: Math.ceil(executionStateLayout.byteLength / wasmPageByteLength)
+  });
   const state = new WasmCpuState(cpuStateMemory);
   const interpreter = bindWasmInterpreter(
     guestMemory,
