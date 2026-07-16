@@ -1,7 +1,12 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
+import {
+  PageFaultErrorCode,
+  divideError,
+  invalidOpcode,
+  pageFault
+} from "#core/exceptions.js";
 import { createMachine } from "#machine/machine.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
@@ -54,7 +59,7 @@ test("Cpu calls its interpreter once with unchanged fuel and propagates its exce
   }
 });
 
-test("Cpu propagates entry decoder exceptions", () => {
+test("Cpu propagates exit decoder exceptions", () => {
   const realWasmInstance = WebAssembly.Instance;
 
   Object.defineProperty(WebAssembly, "Instance", {
@@ -75,7 +80,7 @@ test("Cpu propagates entry decoder exceptions", () => {
 
     throws(
       () => cpu.run({ instructionBudget: 1 }),
-      /unknown Wasm exit family/
+      /unknown cpu.exit variant tag: 0/
     );
   } finally {
     Object.defineProperty(WebAssembly, "Instance", {
@@ -139,6 +144,56 @@ test("Cpu reports an interpreter CPU exception from its bound state", () => {
     exception: pageFault(boundary, PageFaultErrorCode.INSTRUCTION_FETCH)
   });
   strictEqual(machine.cpu.state.eip, boundary);
+  strictEqual(machine.cpu.state.instructionCount, 0);
+});
+
+test("Cpu classifies divide error from generated instruction semantics", () => {
+  const machine = createMachine({ memoryByteLength: 0x1000 });
+
+  new Uint8Array(machine.memory.buffer).set([0xf7, 0xf3], startAddress);
+  machine.cpu.state.eip = startAddress;
+  machine.cpu.state.writeReg32("eax", 0x1234_5678);
+  machine.cpu.state.writeReg32("ebx", 0);
+  machine.cpu.state.writeReg32("edx", 0x89ab_cdef);
+
+  deepStrictEqual(machine.cpu.run({ instructionBudget: 1 }), {
+    kind: "cpuException",
+    exception: divideError()
+  });
+  strictEqual(machine.cpu.state.eip, startAddress);
+  strictEqual(machine.cpu.state.instructionCount, 0);
+  strictEqual(machine.cpu.state.readReg32("eax"), 0x1234_5678);
+  strictEqual(machine.cpu.state.readReg32("edx"), 0x89ab_cdef);
+});
+
+test("Cpu classifies undefined instruction before segment-load handling", () => {
+  const machine = createMachine({ memoryByteLength: 0x1000 });
+
+  new Uint8Array(machine.memory.buffer).set([0x8e, 0xc8], startAddress);
+  machine.cpu.state.eip = startAddress;
+  machine.cpu.state.writeReg32("eax", 0x1234_5678);
+
+  deepStrictEqual(machine.cpu.run({ instructionBudget: 1 }), {
+    kind: "cpuException",
+    exception: invalidOpcode()
+  });
+  strictEqual(machine.cpu.state.eip, startAddress);
+  strictEqual(machine.cpu.state.instructionCount, 0);
+});
+
+test("Cpu classifies a typed segment-load request", () => {
+  const machine = createMachine({ memoryByteLength: 0x1000 });
+
+  new Uint8Array(machine.memory.buffer).set([0x8e, 0xc0], startAddress);
+  machine.cpu.state.eip = startAddress;
+  machine.cpu.state.writeReg32("eax", 0x1234_5678);
+
+  deepStrictEqual(machine.cpu.run({ instructionBudget: 1 }), {
+    kind: "segmentLoad",
+    segment: "es",
+    selector: 0x5678
+  });
+  strictEqual(machine.cpu.state.eip, startAddress);
   strictEqual(machine.cpu.state.instructionCount, 0);
 });
 

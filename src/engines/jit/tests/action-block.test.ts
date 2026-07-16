@@ -12,9 +12,7 @@ import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { ByteArrayDecodeReader } from "#core/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#core/decoder/decode-block.js";
-import { CompletionExit, HostExit } from "#wasm/exit.js";
-import { invalidOpcode } from "#core/exceptions.js";
-import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { invalidOpcode, pageFault } from "#core/exceptions.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 import { readWasmCpuState } from "#test/support/cpu-state.js";
 import {
@@ -23,6 +21,7 @@ import {
   wasmDefinedFunctionCount
 } from "#compiler/encoder/tests/body-opcodes.js";
 import { isStateRead, isStateWrite, resolveFlag, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { buildTrap } from "#cpu/exit.js";
 
 const startEip = 0x1000;
 
@@ -134,7 +133,10 @@ test("a guard fault mid-block reports the faulting eip with earlier state flushe
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, readPageFaultExit(faultAddress));
+  deepStrictEqual(run.exit, {
+    kind: "cpuException",
+    exception: pageFault(faultAddress, 0)
+  });
   strictEqual(state.eax, 6);
   strictEqual(state.eip, startEip + 1);
   strictEqual(state.instructionCount, 1);
@@ -162,7 +164,11 @@ test("a segment-register load exits from a compiled block before committing the 
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "host", reason: HostExit.SEGMENT_LOAD, payload: 0x5678 });
+  deepStrictEqual(run.exit, {
+    kind: "segmentLoad",
+    segment: "es",
+    selector: 0x5678
+  });
   strictEqual(state.eax, 0x1234_5678);
   strictEqual(state.esSelector, 0x1111);
   strictEqual(state.eip, startEip);
@@ -189,7 +195,7 @@ test("a compiled ENTER level 2 copies the display through semantic var loop cell
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(state.ebp, 0x11c);
   strictEqual(state.esp, 0x110);
   strictEqual(guest.getUint32(0x11c, true), 0x180);
@@ -260,7 +266,7 @@ test("a not-taken forward jcc keeps pre-branch register pendings live inside the
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(state.eax, 7);
   strictEqual(state.ebx, 0x27);
   strictEqual(state.eip, startEip + 14);
@@ -297,7 +303,7 @@ test("a folded taken jecxz truncates the block and dispatches to its target", ()
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: targetEip });
+  deepStrictEqual(run.exit, { kind: "linkStub", targetEip });
   strictEqual(state.ebx, 0x20);
   strictEqual(state.ecx, 0);
   strictEqual(state.eip, targetEip);
@@ -327,7 +333,7 @@ test("a backward jcc to the block entry self-links as a return_call tail loop", 
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(state.ecx, 0);
   strictEqual(state.eip, startEip + 7);
   strictEqual(state.instructionCount, 7);
@@ -352,7 +358,7 @@ test("into mid-block traps only on OF and otherwise falls through inside the blo
   const clearRun = handle.run();
   const clearState = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(clearRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  deepStrictEqual(clearRun.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(clearState.eax, 1);
   strictEqual(clearState.ebx, 2);
   strictEqual(clearState.eip, startEip + 13);
@@ -363,7 +369,7 @@ test("into mid-block traps only on OF and otherwise falls through inside the blo
   const setRun = handle.run();
   const setState = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(setRun.exit, { family: "host", reason: HostExit.TRAP, payload: 4 });
+  deepStrictEqual(setRun.exit, { kind: "hostTrap", vector: 4 });
   strictEqual(setState.eax, 1);
   strictEqual(setState.ebx, 0x55);
   strictEqual(setState.eip, startEip + 6);
@@ -389,7 +395,7 @@ test("a compiled MOV to CS raises invalid-opcode before segment-load handling", 
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "cpuException", exception: invalidOpcode() });
+  deepStrictEqual(run.exit, { kind: "cpuException", exception: invalidOpcode() });
   strictEqual(state.eax, 0x1234_5678);
   strictEqual(state.csSelector, 0x1111);
   strictEqual(state.eip, startEip);
@@ -413,13 +419,13 @@ test("a static jump to a block in the same module tail-calls it directly", () =>
   const run = handle.run(startEip);
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(state.eax, 2);
   strictEqual(state.eip, targetEip + 3);
   strictEqual(state.instructionCount, 4);
 });
 
-test("a dynamic jump target reports DYNAMIC_JUMP and resumes from flushed state", () => {
+test("a dynamic jump returns the legacy transfer and resumes from flushed state", () => {
   // jmp eax.
   const block = decodeBlock([0xff, 0xe0]);
   const memories = createWasmHostMemories();
@@ -433,7 +439,7 @@ test("a dynamic jump target reports DYNAMIC_JUMP and resumes from flushed state"
   const run = handle.run();
   const state = readWasmCpuState(memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.DYNAMIC_JUMP, payload: 0 });
+  deepStrictEqual(run.exit, { kind: "dynamicJump" });
   strictEqual(state.eip, 0x4000);
   strictEqual(state.instructionCount, 1);
 });
@@ -453,13 +459,14 @@ function isEaxWordSlot(slot: StateSlot): boolean {
 function syntheticBlock(withHelper: boolean): IrBlock {
   const values = new ValueTable();
   const stored = withHelper ? values.addActionOutput(fitsUnsigned(1)) : values.const(7);
+  const result = buildTrap(values, values.const(0));
 
   return {
     body: {
       actions: [
         ...(withHelper ? [resolveFlag(stored, "ZF")] : []),
         stateWrite(gprChannel("eax"), stored),
-        { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "hostTrap" } } }
+        { kind: "finish", finish: { kind: "exit", result } }
       ]
     },
     values

@@ -5,17 +5,25 @@ import type { Finish, StateWriteAction } from "../actions.js";
 import type { StatePathKind } from "./state/pending-buffer.js";
 import type { State } from "./state/index.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { SemanticScopeStack } from "./scope.js";
+import {
+  buildException,
+  buildSegmentLoad,
+  buildTrap
+} from "#cpu/exit.js";
 
 // The one place a body ends: the exit path's state flushes, then the Finish.
 // x86 exit policy (exceptions, traps, dispatch) lives here.
 export class FinishEmitter {
   readonly #state: State;
   readonly #scopes: SemanticScopeStack;
+  readonly #values: ValueTable;
 
-  constructor(state: State, scopes: SemanticScopeStack) {
+  constructor(state: State, scopes: SemanticScopeStack, values: ValueTable) {
     this.#state = state;
     this.#scopes = scopes;
+    this.#values = values;
   }
 
   finishBody(body: BodyBuilder, finish: Finish, path: StatePathKind): void {
@@ -27,7 +35,10 @@ export class FinishEmitter {
   }
 
   cpuException(exception: CpuException<ValueId>): void {
-    this.finishCurrentBody({ kind: "exit", exit: { class: "cpuException", exception } }, "fault");
+    this.finishCurrentBody(
+      { kind: "exit", result: buildException(this.#values, exception) },
+      "fault"
+    );
   }
 
   dispatch(body: BodyBuilder, targetEip: ValueId): void {
@@ -40,7 +51,20 @@ export class FinishEmitter {
   }
 
   hostTrap(vector: ValueId): void {
-    this.finishCurrentBody(hostTrapFinish(vector), "completed");
+    this.finishCurrentBody(
+      { kind: "exit", result: buildTrap(this.#values, vector) },
+      "completed"
+    );
+  }
+
+  segmentLoad(segment: ValueId, selector: ValueId): void {
+    this.finishCurrentBody(
+      {
+        kind: "exit",
+        result: buildSegmentLoad(this.#values, segment, selector)
+      },
+      "fault"
+    );
   }
 
   #finishBodyWith(body: BodyBuilder, finish: Finish, flushes: readonly StateWriteAction[]): void {
@@ -50,8 +74,4 @@ export class FinishEmitter {
 
     body.finish(finish);
   }
-}
-
-function hostTrapFinish(vector: ValueId): Finish {
-  return { kind: "exit", exit: { class: "host", reason: "hostTrap", payload: vector } };
 }

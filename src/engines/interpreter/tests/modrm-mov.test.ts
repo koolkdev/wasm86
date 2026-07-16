@@ -8,7 +8,7 @@ import {
   writeInterpreterState
 } from "./interpreter-helpers.js";
 import { startAddress } from "#test/support/addresses.js";
-import { fetchPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import {
   assertSingleInstructionExit,
   instantiateWasmInterpreter,
@@ -66,6 +66,6 @@ test("truncated ModRM returns decode fault without changing architectural state"
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, fetchPageFaultExit(eip + 1));
+  deepStrictEqual(exit, fetchPageFaultStop(eip + 1));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

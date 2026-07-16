@@ -3,7 +3,8 @@ import {
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
-import { CompletionExit, encodeCompletionExit } from "#wasm/exit.js";
+import { encodeVariant } from "#compiler/layout/variant-codec.js";
+import { exitLayout } from "#cpu/exit.js";
 import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 import type { RmDecodeHelpers } from "./decode.js";
 import { emitOpcodeDispatch } from "./dispatch.js";
@@ -11,6 +12,7 @@ import { emitOpcodeFetch } from "./fragments.js";
 import type { InterpreterHandler } from "./handlers.js";
 import { InterpreterLocals } from "./locals.js";
 import { emitPrefixStateReset } from "./prefixes.js";
+import { budgetExit } from "./exits.js";
 
 export function encodeRunLoopBody(
   rmDecode: RmDecodeHelpers,
@@ -23,7 +25,9 @@ export function encodeRunLoopBody(
 
   body.loop();
   body.localGet(fuelParam).i32Eqz().ifBlock();
-  body.i64Const(encodeCompletionExit(CompletionExit.INSTRUCTION_LIMIT, 0)).returnFromFunction();
+  body.i64Const(
+    encodeVariant(exitLayout, budgetExit())
+  ).returnFromFunction();
   body.endBlock();
 
   // Completed instructions land on this block's end; faults and unsupported

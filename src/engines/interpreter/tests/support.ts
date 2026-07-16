@@ -1,17 +1,17 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
+import type { RunStop } from "#cpu/cpu.js";
 import {
   instantiateInterpreterCompiledModule,
   readInterpreterState,
   writeInterpreterState,
   type InterpreterModuleInstance
 } from "./interpreter-helpers.js";
-import { CompletionExit, type DecodedExit } from "#wasm/exit.js";
 import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 
 export type ExecutedInstruction = Readonly<{
-  exit: DecodedExit;
+  exit: RunStop;
   state: WasmCpuStateSnapshot;
   guestView: DataView;
 }>;
@@ -62,8 +62,8 @@ export function writeGuestBytes(view: DataView, address: number, bytes: readonly
   }
 }
 
-export function assertSingleInstructionExit(exit: DecodedExit): void {
-  deepStrictEqual(exit, { family: "completion", reason: CompletionExit.INSTRUCTION_LIMIT, payload: 0 });
+export function assertSingleInstructionExit(exit: RunStop): void {
+  deepStrictEqual(exit, { kind: "instructionLimit" });
 }
 
 export function assertCompletedInstruction(

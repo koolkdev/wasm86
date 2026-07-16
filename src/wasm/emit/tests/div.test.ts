@@ -24,8 +24,8 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
-import { decodeExit } from "#wasm/exit.js";
-import { divideErrorExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { decodeExit } from "#cpu/exit.js";
+import { divideErrorStop, readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockCompleted, irBlockBody, instantiateIrBlock } from "./harness.js";
 
@@ -142,7 +142,7 @@ test("DIV divide error leaves block state atomic", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
-  deepStrictEqual(decodeExit(run()), divideErrorExit());
+  deepStrictEqual(decodeExit(run()), divideErrorStop());
   deepStrictEqual(readWasmCpuStateSnapshot(stateView), initialState);
 });
 
@@ -160,7 +160,7 @@ test("DIV quotient overflow exits before quotient, remainder, or flag writes", a
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
-  deepStrictEqual(decodeExit(run()), divideErrorExit());
+  deepStrictEqual(decodeExit(run()), divideErrorStop());
   deepStrictEqual(readWasmCpuStateSnapshot(stateView), initialState);
 });
 
@@ -178,7 +178,7 @@ test("IDIV signed quotient overflow exits before wasm signed division", async ()
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
-  deepStrictEqual(decodeExit(run()), divideErrorExit());
+  deepStrictEqual(decodeExit(run()), divideErrorStop());
   deepStrictEqual(readWasmCpuStateSnapshot(stateView), initialState);
 });
 
@@ -196,7 +196,7 @@ test("IDIV r/m16 INT32_MIN over -1 exits with divide error instead of a wasm tra
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
-  deepStrictEqual(decodeExit(run()), divideErrorExit());
+  deepStrictEqual(decodeExit(run()), divideErrorStop());
   deepStrictEqual(readWasmCpuStateSnapshot(stateView), initialState);
 });
 
@@ -214,7 +214,7 @@ test("IDIV r/m32 quotient overflow exits after the wasm division ran", async () 
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
-  deepStrictEqual(decodeExit(run()), divideErrorExit());
+  deepStrictEqual(decodeExit(run()), divideErrorStop());
   deepStrictEqual(readWasmCpuStateSnapshot(stateView), initialState);
 });
 
@@ -232,7 +232,7 @@ test("DIV memory source fault takes priority over divide error", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
-  deepStrictEqual(decodeExit(run()), readPageFaultExit(guestByteLength));
+  deepStrictEqual(decodeExit(run()), readPageFaultStop(guestByteLength));
   deepStrictEqual(readWasmCpuStateSnapshot(stateView), initialState);
 });
 

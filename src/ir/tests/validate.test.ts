@@ -19,14 +19,19 @@ import {
   stateWrite
 } from "#ir/tests/storage-op-helpers.js";
 
-function blockWith(actions: readonly Action[]): IrBlock {
+function blockWith(
+  actions: readonly Action[] | ((values: ValueTable) => readonly Action[])
+): IrBlock {
   const values = new ValueTable();
 
   for (let value = 0; value < 10; value += 1) {
     values.const(value);
   }
 
-  return { body: { actions }, values };
+  return {
+    body: { actions: typeof actions === "function" ? actions(values) : actions },
+    values
+  };
 }
 
 function entryBlock(values: ValueTable, actions: readonly Action[]): IrBlock {
@@ -40,8 +45,8 @@ function finishDispatch(targetEip: number): Action {
   return { kind: "finish", finish: { kind: "dispatch", targetEip: valueId(targetEip) } };
 }
 
-function finishExit(reason: "unsupported" = "unsupported"): Action {
-  return { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason } } };
+function finishExit(values: ValueTable): Action {
+  return { kind: "finish", finish: { kind: "exit", result: values.const64(0n) } };
 }
 
 const finishDispatch0 = finishDispatch(0);
@@ -60,7 +65,7 @@ function cellReadAction(
 }
 
 test("a body ending with a finish exit validates", () => {
-  doesNotThrow(() => validateIrBlock(blockWith([finishExit()])));
+  doesNotThrow(() => validateIrBlock(blockWith((values) => [finishExit(values)])));
 });
 
 test("a memory guard builds its fault body in the caller's lexical scope", () => {
@@ -110,8 +115,8 @@ test("an action after the finish exit terminator is rejected", () => {
   throws(
     () =>
       validateIrBlock(
-        blockWith([
-          finishExit(),
+        blockWith((values) => [
+          finishExit(values),
           stateWrite(eipChannel, 0)
         ])
       ),
@@ -131,12 +136,12 @@ test("an action after a terminal if is rejected", () => {
   throws(
     () =>
       validateIrBlock(
-        blockWith([
+        blockWith((values) => [
         {
           kind: "if",
           condition: valueId(0),
           thenBody: { actions: [finishDispatch0] },
-          elseBody: { actions: [finishExit()] }
+          elseBody: { actions: [finishExit(values)] }
         },
           stateWrite(eipChannel, 0)
         ])
@@ -169,7 +174,7 @@ test("op action output bounds must match the op signature", () => {
       validateIrBlock(
         entryBlock(missingBounds, [
           memoryRead(missingBoundsOutput, missingBoundsAddress, 8),
-          finishExit()
+          finishExit(missingBounds)
         ])
       ),
     /memory\.read op action output \d+ has the wrong bounds/
@@ -184,7 +189,7 @@ test("op action output bounds must match the op signature", () => {
       validateIrBlock(
         entryBlock(overlyNarrow, [
           memoryRead(overlyNarrowOutput, overlyNarrowAddress, 32),
-          finishExit()
+          finishExit(overlyNarrow)
         ])
       ),
     /memory\.read op action output \d+ has the wrong bounds/
@@ -208,12 +213,12 @@ test("a root dispatch EIP write is rejected", () => {
 test("a nested dispatch validates without an EIP flush", () => {
   doesNotThrow(() =>
     validateIrBlock(
-      blockWith([
+      blockWith((values) => [
         {
           kind: "if",
           condition: valueId(1),
           thenBody: { actions: [finishDispatch0] },
-          elseBody: { actions: [finishExit()] }
+          elseBody: { actions: [finishExit(values)] }
         }
       ])
     )
@@ -224,13 +229,13 @@ test("a nested dispatch rejects an ancestor EIP write", () => {
   throws(
     () =>
       validateIrBlock(
-        blockWith([
+        blockWith((values) => [
           writeEip0,
           {
             kind: "if",
             condition: valueId(0),
             thenBody: { actions: [finishDispatch0] },
-            elseBody: { actions: [finishExit()] }
+            elseBody: { actions: [finishExit(values)] }
           }
         ])
       ),
@@ -238,13 +243,18 @@ test("a nested dispatch rejects an ancestor EIP write", () => {
   );
 });
 
-function switchBlock(overrides: Partial<SwitchAction>): IrBlock {
+function switchBlock(
+  buildOverrides: Partial<SwitchAction> | ((values: ValueTable) => Partial<SwitchAction>)
+): IrBlock {
   const values = new ValueTable();
 
   for (let value = 0; value < 5; value += 1) {
     values.const(value);
   }
 
+  const overrides = typeof buildOverrides === "function"
+    ? buildOverrides(values)
+    : buildOverrides;
   const action: SwitchAction = {
     kind: "switch",
     selector: valueId(0),
@@ -257,7 +267,7 @@ function switchBlock(overrides: Partial<SwitchAction>): IrBlock {
     ...overrides
   };
 
-  return entryBlock(values, [action, finishExit()]);
+  return entryBlock(values, [action, finishExit(values)]);
 }
 
 test("a switch whose bodies all carry results validates", () => {
@@ -267,7 +277,9 @@ test("a switch whose bodies all carry results validates", () => {
 test("an escaping switch body is rejected until a producer arrives", () => {
   throws(
     () =>
-      validateIrBlock(switchBlock({ cases: [{ match: 0, body: { actions: [finishExit()] } }] })),
+      validateIrBlock(switchBlock((values) => ({
+        cases: [{ match: 0, body: { actions: [finishExit(values)] } }]
+      }))),
     /case\[0\] must carry a result/
   );
 });
@@ -277,7 +289,7 @@ test("a result on the root body is rejected", () => {
   const result = values.const(1);
 
   throws(
-    () => validateIrBlock({ values, body: { actions: [finishExit()], result } }),
+    () => validateIrBlock({ values, body: { actions: [finishExit(values)], result } }),
     /body carries a result without an owner output/
   );
 });
@@ -286,13 +298,13 @@ test("a result under an output-less owner is rejected", () => {
   throws(
     () =>
       validateIrBlock(
-        blockWith([
+        blockWith((values) => [
           {
             kind: "if",
             condition: valueId(0),
-            thenBody: { actions: [finishExit()], result: valueId(1) }
+            thenBody: { actions: [finishExit(values)], result: valueId(1) }
           },
-          finishExit()
+          finishExit(values)
         ])
       ),
     /thenBody carries a result without an owner output/
@@ -302,7 +314,9 @@ test("a result under an output-less owner is rejected", () => {
 test("a result on a completing body is rejected", () => {
   throws(
     () =>
-      validateIrBlock(switchBlock({ cases: [{ match: 0, body: { actions: [finishExit()], result: valueId(2) } }] })),
+      validateIrBlock(switchBlock((values) => ({
+        cases: [{ match: 0, body: { actions: [finishExit(values)], result: valueId(2) } }]
+      }))),
     /case\[0\] carries a result but completes/
   );
 });
@@ -362,12 +376,12 @@ test("a nested dispatch EIP write is rejected", () => {
   throws(
     () =>
       validateIrBlock(
-        blockWith([
+        blockWith((values) => [
           {
             kind: "if",
             condition: valueId(0),
             thenBody: { actions: [writeEip1, finishDispatch0] },
-            elseBody: { actions: [finishExit()] }
+            elseBody: { actions: [finishExit(values)] }
           }
         ])
       ),
@@ -679,7 +693,7 @@ test("used and unused action outputs without producers are rejected", () => {
 
   unusedValues.addActionOutput();
   throws(
-    () => validateIrBlock(entryBlock(unusedValues, [finishExit()])),
+    () => validateIrBlock(entryBlock(unusedValues, [finishExit(unusedValues)])),
     /action output \d+ has no producer/
   );
 
@@ -689,7 +703,10 @@ test("used and unused action outputs without producers are rejected", () => {
   throws(
     () =>
       validateIrBlock(
-        entryBlock(usedValues, [stateWrite(gprChannel("eax"), used), finishExit()])
+        entryBlock(usedValues, [
+          stateWrite(gprChannel("eax"), used),
+          finishExit(usedValues)
+        ])
       ),
     /action output \d+ has no producer/
   );
@@ -700,7 +717,10 @@ test("producer outputs must name actionOutput values", () => {
   const constant = constValues.const(0);
 
   throws(
-    () => validateIrBlock(entryBlock(constValues, [stateRead(constant, gprChannel("eax")), finishExit()])),
+    () => validateIrBlock(entryBlock(constValues, [
+      stateRead(constant, gprChannel("eax")),
+      finishExit(constValues)
+    ])),
     /producer output \d+ is not an actionOutput value/
   );
 
@@ -708,7 +728,10 @@ test("producer outputs must name actionOutput values", () => {
   const compound = compoundValues.binary("add", compoundValues.external(0), compoundValues.const(1));
 
   throws(
-    () => validateIrBlock(entryBlock(compoundValues, [stateRead(compound, gprChannel("eax")), finishExit()])),
+    () => validateIrBlock(entryBlock(compoundValues, [
+      stateRead(compound, gprChannel("eax")),
+      finishExit(compoundValues)
+    ])),
     /producer output \d+ is not an actionOutput value/
   );
 
@@ -716,7 +739,10 @@ test("producer outputs must name actionOutput values", () => {
   const loopInput = loopValues.addLoopInput();
 
   throws(
-    () => validateIrBlock(entryBlock(loopValues, [stateRead(loopInput, gprChannel("eax")), finishExit()])),
+    () => validateIrBlock(entryBlock(loopValues, [
+      stateRead(loopInput, gprChannel("eax")),
+      finishExit(loopValues)
+    ])),
     /producer output \d+ is not an actionOutput value/
   );
 });
@@ -731,7 +757,7 @@ test("duplicate op producers and op-vs-switch producers are rejected", () => {
         entryBlock(opValues, [
           stateRead(opOutput, gprChannel("eax")),
           stateRead(opOutput, gprChannel("ebx")),
-          finishExit()
+          finishExit(opValues)
         ])
       ),
     /action output \d+ has more than one producer/
@@ -754,7 +780,7 @@ test("duplicate op producers and op-vs-switch producers are rejected", () => {
             cases: [{ match: 0, body: { actions: [], result } }],
             defaultBody: { actions: [], result }
           },
-          finishExit()
+          finishExit(mixedValues)
         ])
       ),
     /action output \d+ has more than one producer/
@@ -771,7 +797,7 @@ test("a same-body compound use before its producer is rejected", () => {
         entryBlock(directValues, [
           stateWrite(gprChannel("eax"), directOutput),
           stateRead(directOutput, gprChannel("ebx")),
-          finishExit()
+          finishExit(directValues)
         ])
       ),
     /action output \d+.*does not dominate/
@@ -787,7 +813,7 @@ test("a same-body compound use before its producer is rejected", () => {
         entryBlock(values, [
           stateWrite(gprChannel("eax"), compound),
           stateRead(output, gprChannel("ebx")),
-          finishExit()
+          finishExit(values)
         ])
       ),
     /action output \d+.*does not dominate/
@@ -809,7 +835,7 @@ test("an action output cannot be used from a sibling body", () => {
             thenBody: { actions: [stateRead(output, gprChannel("eax"))] },
             elseBody: { actions: [stateWrite(gprChannel("ebx"), output)] }
           },
-          finishExit()
+          finishExit(values)
         ])
       ),
     /action output \d+.*does not dominate/
@@ -827,7 +853,7 @@ test("one Body object cannot be reused under multiple control actions", () => {
         entryBlock(values, [
           { kind: "if", condition, thenBody: shared },
           { kind: "if", condition, thenBody: shared },
-          finishExit()
+          finishExit(values)
         ])
       ),
     /reuses a Body object that already has an owner/
@@ -849,7 +875,7 @@ test("a loop input is scoped to its owning loop body", () => {
             body: { actions: [] }
           },
           stateWrite(gprChannel("eax"), loopInput),
-          finishExit()
+          finishExit(values)
         ])
       ),
     /loop input \d+ is used outside its owning loop body/
@@ -875,7 +901,7 @@ test("a loop input cannot be reused by a sibling loop", () => {
             carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
             body: { actions: [] }
           },
-          finishExit()
+          finishExit(values)
         ])
       ),
     /reuses loop input \d+ across carried cells or loops/
@@ -901,7 +927,7 @@ test("a loop input cannot be consumed inside a sibling loop body", () => {
             carried: [],
             body: { actions: [stateWrite(gprChannel("eax"), loopInput)] }
           },
-          finishExit()
+          finishExit(values)
         ])
       ),
     /loop input \d+ is used outside its owning loop body/
@@ -922,7 +948,7 @@ test("a loop-body action output cannot escape directly after the loop", () => {
             body: { actions: [stateRead(output, gprChannel("eax"))] }
           },
           stateWrite(gprChannel("ebx"), output),
-          finishExit()
+          finishExit(values)
         ])
       ),
     /action output \d+.*does not dominate/
@@ -945,7 +971,7 @@ test("a switch output cannot be its own selector or arm result", () => {
             cases: [{ match: 0, body: { actions: [], result: selectorResult } }],
             defaultBody: { actions: [], result: selectorResult }
           },
-          finishExit()
+          finishExit(selectorValues)
         ])
       ),
     /switch selector \d+ created after its output/
@@ -966,7 +992,7 @@ test("a switch output cannot be its own selector or arm result", () => {
             cases: [{ match: 0, body: { actions: [], result: resultOutput } }],
             defaultBody: { actions: [], result: resultSelector }
           },
-          finishExit()
+          finishExit(resultValues)
         ])
       ),
     /switch result \d+ created after its output/
@@ -990,7 +1016,7 @@ test("a valid switch output can be used after the switch", () => {
           defaultBody: { actions: [], result }
         },
         stateWrite(gprChannel("eax"), output),
-        finishExit()
+        finishExit(values)
       ])
     )
   );
@@ -1024,7 +1050,7 @@ test("an ancestor producer can feed nested if, switch-result, and loop-body uses
           carried: [],
           body: { actions: [stateWrite(gprChannel("ecx"), output)] }
         },
-        finishExit()
+        finishExit(values)
       ])
     )
   );
@@ -1056,7 +1082,7 @@ test("a body-local producer can feed its body result", () => {
           ],
           defaultBody: { actions: [], result: fallback }
         },
-        finishExit()
+        finishExit(values)
       ])
     )
   );
@@ -1072,7 +1098,7 @@ test("producer operands must have lower value ids than their output", () => {
       validateIrBlock(
         entryBlock(values, [
           memoryRead(output, address, 32),
-          finishExit()
+          finishExit(values)
         ])
       ),
     /producer operand \d+ created after its output/
@@ -1084,7 +1110,7 @@ test("exported outputs are validated at the root body boundary", () => {
   const validOutput = validValues.addActionOutput();
   const validBlock = entryBlock(validValues, [
     stateRead(validOutput, gprChannel("eax")),
-    finishExit()
+    finishExit(validValues)
   ]);
 
   doesNotThrow(() => validateIrBlock(validBlock, { exportedOutputs: [validOutput] }));
@@ -1098,7 +1124,7 @@ test("exported outputs are validated at the root body boundary", () => {
       condition,
       thenBody: { actions: [stateRead(escapingOutput, gprChannel("eax"))] }
     },
-    finishExit()
+    finishExit(escapingValues)
   ]);
 
   throws(

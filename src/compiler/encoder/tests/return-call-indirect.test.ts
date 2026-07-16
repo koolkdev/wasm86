@@ -7,13 +7,13 @@ import {
 } from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
-import { decodeExit, encodeHostExit, HostExit } from "#wasm/exit.js";
 
 const importNamespace = "wasm86";
 const tableImportName = "links";
 const entryExportName = "entry";
 const targetExportName = "target";
 const cpuStatePtr = 32;
+const forwardedResult = 0x4567_89ab_cdef_0123n;
 
 test("return_call_indirect_invokes_imported_table_target", async () => {
   const { instance, table } = await instantiateIndirectCallModule(returnCallIndirectEntryBody);
@@ -27,11 +27,7 @@ test("return_call_indirect_invokes_imported_table_target", async () => {
     throw new Error(`expected bigint result, got ${typeof result}`);
   }
 
-  deepStrictEqual(decodeExit(result), {
-    family: "host",
-    reason: HostExit.TRAP,
-    payload: 0x2e
-  });
+  strictEqual(result, forwardedResult);
 });
 
 test("call_indirect_invokes_imported_table_target", async () => {
@@ -46,11 +42,7 @@ test("call_indirect_invokes_imported_table_target", async () => {
     throw new Error(`expected bigint result, got ${typeof result}`);
   }
 
-  deepStrictEqual(decodeExit(result), {
-    family: "host",
-    reason: HostExit.TRAP,
-    payload: 0x2e
-  });
+  strictEqual(result, forwardedResult);
 });
 
 test("table_import_index_is_stable", () => {
@@ -96,7 +88,7 @@ function encodeIndirectCallModule(
   const targetIndex = module.addFunction(
     blockType,
     new WasmFunctionBodyEncoder(1)
-      .i64Const(encodeHostExit(HostExit.TRAP, 0x2e))
+      .i64Const(forwardedResult)
       .finish()
   );
   const entryIndex = module.addFunction(blockType, entryBody(blockType, tableIndex));

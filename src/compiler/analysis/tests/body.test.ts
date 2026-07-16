@@ -224,7 +224,7 @@ test("action, control, loop, and finish operands seed liveness", () => {
   const loopInput = values.addLoopInput();
   const increment = values.const(1);
   const loopUpdate = values.binary("add", loopInput, increment);
-  const finishPayload = values.const(14);
+  const finishResult = values.const64(14n);
   const actions: readonly Action[] = [
     stateWrite(gprChannel("eax"), mutated),
     {
@@ -245,7 +245,7 @@ test("action, control, loop, and finish operands seed liveness", () => {
       kind: "finish",
       finish: {
         kind: "exit",
-        exit: { class: "host", reason: "hostTrap", payload: finishPayload }
+        result: finishResult
       }
     }
   ];
@@ -259,7 +259,7 @@ test("action, control, loop, and finish operands seed liveness", () => {
     loopInput,
     increment,
     loopUpdate,
-    finishPayload
+    finishResult
   ]) {
     strictEqual(analysis.isLive(live), true, `expected value ${live} to be live`);
   }
@@ -358,11 +358,12 @@ test("export roots preserve order and use the terminal boundary", () => {
   const values = new ValueTable();
   const first = values.addActionOutput();
   const second = values.addActionOutput();
+  const exitResult = values.const64(0n);
   const finish = {
     kind: "finish",
     finish: {
       kind: "exit",
-      exit: { class: "host", reason: "unsupported" }
+      result: exitResult
     }
   } as const;
   const body: Body = {

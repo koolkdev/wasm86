@@ -3,7 +3,6 @@ import { test } from "node:test";
 
 import { decodeIsaBlock } from "#core/decoder/decode-block.js";
 import { ByteArrayDecodeReader } from "#core/decoder/tests/helpers.js";
-import { CompletionExit, HostExit } from "#wasm/exit.js";
 import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
 import { assertLazyFlagState, readWasmCpuState, wasmCpuStatusFlagsOf } from "#test/support/cpu-state.js";
 import { compileActionWasmBlockHandle, type WasmBlockHandle } from "#engines/jit/block-handle.js";
@@ -23,7 +22,7 @@ test("unlinked final static jmp uses module-local fallback stub", () => {
   const run = a.run();
   const state = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: bEip });
+  deepStrictEqual(run.exit, { kind: "linkStub", targetEip: bEip });
   strictEqual(state.eip, bEip);
   strictEqual(state.eax, 1);
 });
@@ -40,7 +39,7 @@ test("unlinked final static call uses module-local fallback stub", () => {
   const state = readWasmCpuState(fixture.memories.cpuState);
   const returnAddress = aEip + incEaxCallRel32(aEip, bEip).length;
 
-  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: bEip });
+  deepStrictEqual(run.exit, { kind: "linkStub", targetEip: bEip });
   strictEqual(state.eip, bEip);
   strictEqual(state.eax, 1);
   strictEqual(state.esp, 0x7c);
@@ -60,7 +59,7 @@ test("constant-folded indirect jump target uses module-local fallback stub", () 
   const run = a.run();
   const state = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: bEip });
+  deepStrictEqual(run.exit, { kind: "linkStub", targetEip: bEip });
   strictEqual(state.eax, bEip);
   strictEqual(state.eip, bEip);
 });
@@ -78,7 +77,7 @@ test("unlinked final jmp rel8 uses module-local fallback stub", () => {
   const run = a.run();
   const state = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(run.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: rel8B });
+  deepStrictEqual(run.exit, { kind: "linkStub", targetEip: rel8B });
   strictEqual(state.eip, rel8B);
   strictEqual(state.eax, 1);
 });
@@ -97,7 +96,7 @@ test("conditional side exit uses the module-local fallback only when taken", () 
   const takenRun = branch.run();
   const takenState = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(takenRun.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: takenEip });
+  deepStrictEqual(takenRun.exit, { kind: "linkStub", targetEip: takenEip });
   strictEqual(takenState.eip, takenEip);
   strictEqual(takenState.eax, 1);
 
@@ -106,7 +105,7 @@ test("conditional side exit uses the module-local fallback only when taken", () 
   const notTakenRun = branch.run();
   const notTakenState = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(notTakenRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  deepStrictEqual(notTakenRun.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(notTakenState.eax, 1);
   strictEqual(notTakenState.eip, notTakenEip + incEaxHostTrap().length);
 });
@@ -124,7 +123,7 @@ test("unlinked conditional side exits and local fallthrough preserve exit-store 
   const takenRun = branch.run();
   const takenState = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(takenRun.exit, { family: "completion", reason: CompletionExit.LINK_STUB, payload: takenEip });
+  deepStrictEqual(takenRun.exit, { kind: "linkStub", targetEip: takenEip });
   strictEqual(takenState.eip, takenEip);
   strictEqual(takenState.eax, 1);
   deepStrictEqual(wasmCpuStatusFlagsOf(takenState), noFlags);
@@ -135,7 +134,7 @@ test("unlinked conditional side exits and local fallthrough preserve exit-store 
   const notTakenRun = branch.run();
   const notTakenState = readWasmCpuState(fixture.memories.cpuState);
 
-  deepStrictEqual(notTakenRun.exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  deepStrictEqual(notTakenRun.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(notTakenState.eax, 0);
   deepStrictEqual(wasmCpuStatusFlagsOf(notTakenState), noFlags);
   assertLazyFlagState(notTakenState, { kind: "ADD", width: 32, a: 0xffff_ffff, b: 1 }, "not taken");

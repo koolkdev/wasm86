@@ -9,7 +9,7 @@ import {
 } from "#engines/interpreter/binding.js";
 import { WasmCpuState } from "#wasm/host/cpu-state.js";
 import { wasmPageByteLength } from "#wasm/abi.js";
-import { decodeEntryResult } from "./entry-result.js";
+import { decodeExit } from "./exit.js";
 
 export type UnsupportedReason =
   | "unsupportedOpcode"
@@ -63,9 +63,9 @@ export function createCpu(guestMemory: WebAssembly.Memory): Cpu {
         `instructionBudget must be a valid Wasm i32 fuel value: ${instructionBudget}`
       );
 
-      const encodedResult = context.interpreter.run(instructionBudget);
+      const encodedExit = context.interpreter.run(instructionBudget);
 
-      return decodeEntryResult(encodedResult);
+      return decodeExit(encodedExit);
     }
   };
 }

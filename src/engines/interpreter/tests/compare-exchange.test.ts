@@ -6,8 +6,7 @@ import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf
 } from "#test/support/cpu-state.js";
-import { HostExit } from "#wasm/exit.js";
-import { writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { writePageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
   assertInterpreterStateEquals,
@@ -229,7 +228,7 @@ test("CMPXCHG memory destination fault leaves architectural state unchanged", as
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, writePageFaultExit(faultAddress));
+  deepStrictEqual(exit, writePageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -247,8 +246,7 @@ test("LOCK-prefixed compare-exchange opcodes remain unsupported", async () => {
 
   const exit = interpreter.run(1);
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

@@ -6,7 +6,7 @@ import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf
 } from "#test/support/cpu-state.js";
-import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { startAddress } from "#test/support/addresses.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
@@ -117,7 +117,7 @@ test("memory bit-string register offsets fault at the adjusted address", async (
 
   const { exit, state } = await executeInstruction([0x0f, 0xa3, 0x08], initialState);
 
-  deepStrictEqual(exit, readPageFaultExit(0xffff_fffc));
+  deepStrictEqual(exit, readPageFaultStop(0xffff_fffc));
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ecx, initialState.ecx);
   assertCompletedInstruction(state, startAddress, 7);

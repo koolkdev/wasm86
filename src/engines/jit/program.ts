@@ -16,7 +16,7 @@ import {
   type TableRef
 } from "#compiler/program/refs.js";
 import { wasmGuestMemoryMinPages, wasmImport } from "#wasm/abi.js";
-import { CompletionExit, encodeCompletionExit } from "#wasm/exit.js";
+import { encodeTransfer } from "./legacy-transfer.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";
 import {
@@ -180,7 +180,7 @@ function declareLinkStubs(program: JitProgram, targetEips: readonly number[]): v
       effects: "none",
       traps: "never",
       build: () => new WasmFunctionBodyEncoder()
-        .i64Const(encodeCompletionExit(CompletionExit.LINK_STUB, targetEip))
+        .i64Const(encodeTransfer({ kind: "linkStub", targetEip }))
         .finish()
     });
     program.builder.exportFunction({

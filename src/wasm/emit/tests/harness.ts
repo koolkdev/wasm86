@@ -28,7 +28,8 @@ import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js
 // function's n-th i32 parameter. Module assembly for real use is the
 // engines' job.
 
-// No encoded exit equals the sentinel: its reason field is 0xffff.
+// Canonical Cpu exits leave unused high bits clear, while legacy JIT
+// transfers require their high detail bits to be zero.
 export const irBlockCompleted = -1n;
 
 export type InstantiatedIrBlock = Readonly<{

@@ -31,8 +31,7 @@ export const noBaseRegister = 8;
 
 // (eip, mod, rm) -> the encoded exit, 0 on success. The i64-only result
 // keeps the fragments' fault returns valid unchanged inside the helper, and
-// 0 never collides with a fault: an encoded decode fault has a nonzero
-// reason field.
+// 0 never collides with a fault: resolved exit tags are nonzero.
 export const rmDecodeHelperType = {
   params: [wasmValueType.i32, wasmValueType.i32, wasmValueType.i32],
   results: [wasmValueType.i64]

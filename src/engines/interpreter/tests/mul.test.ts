@@ -6,7 +6,7 @@ import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf
 } from "#test/support/cpu-state.js";
-import { readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { startAddress } from "#test/support/addresses.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
@@ -199,7 +199,7 @@ test("faulting IMUL memory source leaves destination and flags unchanged", async
 
   const { exit, state } = await executeInstruction([0x0f, 0xaf, 0x03], initialState);
 
-  deepStrictEqual(exit, readPageFaultExit(faultAddress));
+  deepStrictEqual(exit, readPageFaultStop(faultAddress));
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   assertCompletedInstruction(state, startAddress, 7);
@@ -219,7 +219,7 @@ test("faulting implicit MUL memory source leaves accumulator, high register, and
 
   const { exit, state } = await executeInstruction([0xf7, 0x23], initialState);
 
-  deepStrictEqual(exit, readPageFaultExit(faultAddress));
+  deepStrictEqual(exit, readPageFaultStop(faultAddress));
   strictEqual(state.eax, initialState.eax);
   strictEqual(state.ebx, initialState.ebx);
   strictEqual(state.edx, initialState.edx);

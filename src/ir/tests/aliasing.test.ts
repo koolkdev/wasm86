@@ -23,6 +23,7 @@ import {
   stateWrite
 } from "#ir/tests/storage-op-helpers.js";
 import { valueId } from "#compiler/ir/values/id.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import { CellRef } from "#compiler/refs/cell.js";
 
 const memory: StorageEffect = { space: "memory" };
@@ -91,12 +92,14 @@ test("effects derive from action kind and slot", () => {
 });
 
 test("ifs and finishes touch no data directly", () => {
+  const values = new ValueTable();
+
   deepStrictEqual(
     effectsOf({ kind: "if", condition: valueId(0), thenBody: { actions: [] }, elseBody: { actions: [] } }),
     { reads: [], writes: [] }
   );
   deepStrictEqual(
-    effectsOf({ kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "unsupported" } } }),
+    effectsOf({ kind: "finish", finish: { kind: "exit", result: values.const64(0n) } }),
     { reads: [], writes: [] }
   );
   deepStrictEqual(

@@ -3,8 +3,7 @@ import { test } from "node:test";
 
 import { gprChannel } from "#ir/slots.js";
 import type { RegName } from "#core/types.js";
-import { CompletionExit, HostExit, type DecodedCompletionExit, type DecodedExit, type DecodedHostExit } from "#wasm/exit.js";
-import { fetchPageFaultExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { fetchPageFaultStop, readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -48,26 +47,6 @@ function writeProgram(view: DataView, address: number, bytes: readonly number[])
   }
 }
 
-function assertHostExit(exit: DecodedExit, reason: HostExit): asserts exit is DecodedHostExit {
-  strictEqual(exit.family, "host");
-
-  if (exit.family !== "host") {
-    throw new Error("expected host exit");
-  }
-
-  strictEqual(exit.reason, reason);
-}
-
-function assertCompletionExit(exit: DecodedExit, reason: CompletionExit): asserts exit is DecodedCompletionExit {
-  strictEqual(exit.family, "completion");
-
-  if (exit.family !== "completion") {
-    throw new Error("expected completion exit");
-  }
-
-  strictEqual(exit.reason, reason);
-}
-
 function readRegister(view: DataView, name: RegName): number {
   return readWasmCpuStateChannel(view, gprChannel(name));
 }
@@ -87,7 +66,7 @@ test("a program mixing mov, ALU, cmp, and jcc runs to its halt byte", async () =
 
   const exit = interpreter.run(100);
 
-  assertHostExit(exit, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   strictEqual(readRegister(interpreter.stateView, "eax"), 15);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x11);
@@ -109,7 +88,7 @@ test("cmp against an immediate steers a two-byte jcc when taken", async () => {
 
   const exit = interpreter.run(100);
 
-  assertHostExit(exit, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   strictEqual(readRegister(interpreter.stateView, "eax"), 42);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x11);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 3);
@@ -128,7 +107,7 @@ test("a not-taken jcc falls through to the next instruction", async () => {
 
   const exit = interpreter.run(100);
 
-  assertHostExit(exit, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   strictEqual(readRegister(interpreter.stateView, "eax"), 8);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x0b);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 2);
@@ -158,7 +137,7 @@ test("memory operands round-trip through the ModRM addressing forms", async () =
 
   const exit = interpreter.run(100);
 
-  assertHostExit(exit, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   strictEqual(interpreter.guestView.getUint32(0x2004, true), 0x11223344);
   strictEqual(interpreter.guestView.getUint8(0x2000), 0xbe);
   strictEqual(readRegister(interpreter.stateView, "edx"), 0x11224444);
@@ -188,7 +167,7 @@ test("SIB addressing covers scaled-index, base-displacement, and no-index forms"
 
   const exit = interpreter.run(100);
 
-  assertHostExit(exit, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   strictEqual(readRegister(interpreter.stateView, "edx"), 0x1111);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0x2222);
   strictEqual(readRegister(interpreter.stateView, "ebx"), 0x3333);
@@ -209,7 +188,7 @@ test("byte-register forms touch only their byte of the register file", async () 
 
   const exit = interpreter.run(100);
 
-  assertHostExit(exit, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   strictEqual(readRegister(interpreter.stateView, "eax"), 0x11220744);
   strictEqual(readRegister(interpreter.stateView, "ebx"), 0x77);
   assertLazyFlagState(interpreter.stateView, { kind: "ADD", width: 8, a: 0x77, b: 0x90 });
@@ -227,7 +206,7 @@ test("test writes flags without touching its operands", async () => {
 
   const exit = interpreter.run(100);
 
-  assertHostExit(exit, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   strictEqual(readRegister(interpreter.stateView, "eax"), 0xf0);
   strictEqual(readWasmCpuFlagByte(interpreter.stateView, "ZF"), 0);
   assertLazyFlagState(interpreter.stateView, { kind: "LOGIC_RESULT", width: 8, a: 0 });
@@ -244,7 +223,7 @@ test("exhausted fuel exits with the instruction limit and the count preserved", 
 
   const exit = interpreter.run(1);
 
-  assertCompletionExit(exit, CompletionExit.INSTRUCTION_LIMIT);
+  deepStrictEqual(exit, { kind: "instructionLimit" });
   strictEqual(readRegister(interpreter.stateView, "eax"), 1);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 5);
@@ -273,7 +252,7 @@ test("rep movsd runs every unit in one dispatch past the fuel budget", async () 
 
   const exhausted = interpreter.run(1);
 
-  assertCompletionExit(exhausted, CompletionExit.INSTRUCTION_LIMIT);
+  deepStrictEqual(exhausted, { kind: "instructionLimit" });
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
   strictEqual(readRegister(interpreter.stateView, "esi"), 0x200c);
   strictEqual(readRegister(interpreter.stateView, "edi"), 0x300c);
@@ -285,7 +264,7 @@ test("rep movsd runs every unit in one dispatch past the fuel budget", async () 
 
   const completed = interpreter.run(10);
 
-  assertHostExit(completed, HostExit.TRAP);
+  deepStrictEqual(completed, { kind: "hostTrap", vector: 0x2e });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 4);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 4);
 });
@@ -298,7 +277,7 @@ test("fetching the opcode past mapped memory is a decode fault at the boundary",
 
   const exit = interpreter.run(10);
 
-  deepStrictEqual(exit, fetchPageFaultExit(eip));
+  deepStrictEqual(exit, fetchPageFaultStop(eip));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -312,7 +291,7 @@ test("an immediate crossing the end of memory faults with the instruction's eip"
 
   const exit = interpreter.run(10);
 
-  deepStrictEqual(exit, fetchPageFaultExit(eip + 1));
+  deepStrictEqual(exit, fetchPageFaultStop(eip + 1));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -326,7 +305,7 @@ test("a displacement crossing the end of memory is a decode fault", async () => 
 
   const exit = interpreter.run(10);
 
-  deepStrictEqual(exit, fetchPageFaultExit(eip + 2));
+  deepStrictEqual(exit, fetchPageFaultStop(eip + 2));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
 });
 
@@ -339,7 +318,7 @@ test("a SIB byte past the end of memory is a decode fault at its address", async
 
   const exit = interpreter.run(10);
 
-  deepStrictEqual(exit, fetchPageFaultExit(eip + 2));
+  deepStrictEqual(exit, fetchPageFaultStop(eip + 2));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -353,7 +332,7 @@ test("a SIB displacement crossing the end of memory is a decode fault", async ()
 
   const exit = interpreter.run(10);
 
-  deepStrictEqual(exit, fetchPageFaultExit(eip + 3));
+  deepStrictEqual(exit, fetchPageFaultStop(eip + 3));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -373,7 +352,7 @@ test("a guest load past the end is a memory fault, not a decode fault", async ()
 
   const exit = interpreter.run(10);
 
-  deepStrictEqual(exit, readPageFaultExit(address));
+  deepStrictEqual(exit, readPageFaultStop(address));
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });

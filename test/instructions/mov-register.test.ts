@@ -7,7 +7,6 @@ import {
   type WasmCpuStateInit
 } from "#test/support/cpu-state.js";
 import { runCompiledInstructions } from "#test/harness/compiled-instruction.js";
-import { CompletionExit } from "#wasm/exit.js";
 
 const allFlagsSet = {
   CF: 1,
@@ -254,9 +253,8 @@ async function assertMovRegisterCase(entry: MovRegisterCase): Promise<void> {
   deepStrictEqual(
     result.completion,
     {
-      family: "completion",
-      reason: CompletionExit.LINK_STUB,
-      payload: startAddress + entry.bytes.length
+      kind: "linkStub",
+      targetEip: startAddress + entry.bytes.length
     },
     entry.name
   );

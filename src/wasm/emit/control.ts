@@ -1,33 +1,25 @@
 import { assert } from "#common/assert.js";
-import type { DispatchFinish, ExitFinish, HostExitReason } from "#ir/actions.js";
+import type { DispatchFinish, ExitFinish } from "#ir/actions.js";
 import { eipChannel } from "#ir/slots.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CpuExceptionVector, type CpuException } from "#core/exceptions.js";
 import { u32 } from "#core/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import {
-  CompletionExit,
-  HostExit,
-  encodeCompletionExit,
-  encodeCpuExceptionExitBase,
-  encodeHostExit
-} from "#wasm/exit.js";
+import { encodeTransfer } from "#engines/jit/legacy-transfer.js";
 import type { DispatchTarget, FallthroughTarget, LinkCompletion } from "./embed.js";
 import { emitChannelStore } from "#compiler/ir/operations/state-encoding.js";
 
-// Report and completion lowering for nested bodies emitted inline by emit.ts.
+// Exit and completion lowering for nested bodies emitted inline by emit.ts.
 
 export type ControlFrameContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   dispatch: DispatchTarget | undefined;
   fallthrough: FallthroughTarget | undefined;
-  // Pushes an exit payload value.
-  emitPayload(id: ValueId): void;
+  emitValue(id: ValueId): void;
   constValue(id: ValueId): number | undefined;
 }>;
 
 export type ControlFrame = Readonly<{
-  emitReport(exit: ExitFinish): void;
+  emitExit(exit: ExitFinish): void;
   // Applies the embedding's dispatch target for dispatch.targetEip.
   emitDispatch(dispatch: DispatchFinish): void;
   // Applies the embedding to a natural action-body fallthrough.
@@ -48,7 +40,7 @@ type LinkedTarget = Readonly<
 >;
 
 // One frame per emission. Nested bodies are emitted at their action site,
-// while this helper owns report and completion lowering. A `br` completion
+// while this helper owns exit and completion lowering. A `br` completion
 // inside an inline if must skip that if before it can target the embedder's
 // label.
 export function createControlFrame(context: ControlFrameContext): ControlFrame {
@@ -89,7 +81,7 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
   }
 
   function emitDispatchEipWrite(targetEip: ValueId): void {
-    emitChannelStore(body, eipChannel, () => context.emitPayload(targetEip));
+    emitChannelStore(body, eipChannel, () => context.emitValue(targetEip));
   }
 
   function resolveLinkedTarget(link: LinkCompletion, eip: ValueId): LinkedTarget {
@@ -119,7 +111,9 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
   function emitLinkedCompletion(target: LinkedTarget): void {
     switch (target.kind) {
       case "dynamic":
-        body.i64Const(encodeCompletionExit(CompletionExit.DYNAMIC_JUMP, 0)).returnFromFunction();
+        body.i64Const(
+          encodeTransfer({ kind: "dynamicJump" })
+        ).returnFromFunction();
         return;
       case "function":
         body.returnCallFunction(target.functionIndex);
@@ -130,50 +124,13 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     }
   }
 
-  function emitReport(exit: ExitFinish): void {
-    switch (exit.exit.class) {
-      case "host":
-        emitHostReport(exit.exit.reason, exit.exit.payload);
-        return;
-      case "cpuException":
-        emitCpuExceptionReport(exit.exit.exception);
-        return;
-    }
-  }
-
-  function emitHostReport(reason: HostExitReason, payload: ValueId | undefined): void {
-    const code = hostExitReasonCode(reason);
-
-    if (payload === undefined) {
-      body.i64Const(encodeHostExit(code, 0)).returnFromFunction();
-      return;
-    }
-
-    context.emitPayload(payload);
-    body.i64ExtendI32U().i64Const(encodeHostExit(code, 0)).i64Or().returnFromFunction();
-  }
-
-  function emitCpuExceptionReport(exception: CpuException<ValueId>): void {
-    switch (exception.kind) {
-      case "DE":
-        body.i64Const(encodeCpuExceptionExitBase(CpuExceptionVector.DE, 0)).returnFromFunction();
-        return;
-      case "UD":
-        body.i64Const(encodeCpuExceptionExitBase(CpuExceptionVector.UD, 0)).returnFromFunction();
-        return;
-      case "PF":
-        context.emitPayload(exception.linearAddress);
-        body
-          .i64ExtendI32U()
-          .i64Const(encodeCpuExceptionExitBase(CpuExceptionVector.PF, exception.errorCode))
-          .i64Or()
-          .returnFromFunction();
-        return;
-    }
+  function emitExit(exit: ExitFinish): void {
+    context.emitValue(exit.result);
+    body.returnFromFunction();
   }
 
   return {
-    emitReport,
+    emitExit,
     emitDispatch,
     emitFallthrough,
     withNestedControl(emitBody: () => void, labels = 1): void {
@@ -201,16 +158,4 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
       body.br(inlineControlDepth - mark);
     }
   };
-}
-
-// ir/action names host exit reasons; the emitter owns the numeric encoding.
-function hostExitReasonCode(reason: HostExitReason): HostExit {
-  switch (reason) {
-    case "hostTrap":
-      return HostExit.TRAP;
-    case "unsupported":
-      return HostExit.UNSUPPORTED;
-    case "segmentLoad":
-      return HostExit.SEGMENT_LOAD;
-  }
 }

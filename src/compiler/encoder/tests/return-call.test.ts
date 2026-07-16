@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert";
+import { match, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { wasmImport } from "#wasm/abi.js";
@@ -8,15 +8,17 @@ import {
 } from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
-import { CompletionExit, decodeExit, encodeCompletionExit, encodeHostExit, HostExit } from "#wasm/exit.js";
 
 const entryExportName = "entry";
 const cpuStatePtr = 32;
 const statePayloadOffset = 0;
 const u32Align = 2;
+const forwardedResult = 0x1234_5678_9abc_def0n;
+const typescriptResult = 0x2345_6789_abcd_ef01n;
+const statePayloadPrefix = 0x3456_789a_0000_0000n;
 
 test("return_call_two_function_smoke_test", async () => {
-  const instance = await instantiateReturnCallModule(constantHostTargetBody(HostExit.TRAP, 0x2e));
+  const instance = await instantiateReturnCallModule(constantTargetBody(forwardedResult));
   const entry = exportedFunction(instance, entryExportName);
   const result = entry(cpuStatePtr);
 
@@ -24,15 +26,11 @@ test("return_call_two_function_smoke_test", async () => {
     throw new Error(`expected bigint result, got ${typeof result}`);
   }
 
-  deepStrictEqual(decodeExit(result), {
-    family: "host",
-    reason: HostExit.TRAP,
-    payload: 0x2e
-  });
+  strictEqual(result, forwardedResult);
 });
 
 test("return_call_result_reaches_typescript_once", async () => {
-  const instance = await instantiateReturnCallModule(constantCompletionTargetBody(CompletionExit.DYNAMIC_JUMP, 0x1234));
+  const instance = await instantiateReturnCallModule(constantTargetBody(typescriptResult));
   const entry = exportedFunction(instance, entryExportName);
   const result = entry(cpuStatePtr);
 
@@ -40,11 +38,7 @@ test("return_call_result_reaches_typescript_once", async () => {
     throw new Error(`expected bigint result, got ${typeof result}`);
   }
 
-  deepStrictEqual(decodeExit(result), {
-    family: "completion",
-    reason: CompletionExit.DYNAMIC_JUMP,
-    payload: 0x1234
-  });
+  strictEqual(result, typescriptResult);
 });
 
 test("return_call_preserves_cpu_state_memory_abi", async () => {
@@ -61,11 +55,7 @@ test("return_call_preserves_cpu_state_memory_abi", async () => {
     throw new Error(`expected bigint result, got ${typeof result}`);
   }
 
-  deepStrictEqual(decodeExit(result), {
-    family: "completion",
-    reason: CompletionExit.DYNAMIC_JUMP,
-    payload: 0xfeed_cafe
-  });
+  strictEqual(result, statePayloadPrefix | 0xfeed_cafen);
 });
 
 test("return_call_same_signature_required", async () => {
@@ -139,15 +129,9 @@ function returnCallEntryBody(targetFunctionIndex: number): EncodedWasmFunctionBo
     .finish();
 }
 
-function constantHostTargetBody(reason: HostExit, payload: number): EncodedWasmFunctionBody {
+function constantTargetBody(result: bigint): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
-    .i64Const(encodeHostExit(reason, payload))
-    .finish();
-}
-
-function constantCompletionTargetBody(reason: CompletionExit, payload: number): EncodedWasmFunctionBody {
-  return new WasmFunctionBodyEncoder(1)
-    .i64Const(encodeCompletionExit(reason, payload))
+    .i64Const(result)
     .finish();
 }
 
@@ -160,7 +144,7 @@ function statePayloadTargetBody(): EncodedWasmFunctionBody {
       offset: statePayloadOffset
     })
     .i64ExtendI32U()
-    .i64Const(encodeCompletionExit(CompletionExit.DYNAMIC_JUMP, 0))
+    .i64Const(statePayloadPrefix)
     .i64Or()
     .finish();
 }

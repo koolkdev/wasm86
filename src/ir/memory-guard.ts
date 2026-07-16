@@ -7,6 +7,7 @@ import {
   pageFaultErrorCode,
   type PageFaultAccess
 } from "#core/exceptions.js";
+import { buildException } from "#cpu/exit.js";
 
 export type MemoryGuardAccess =
   | Readonly<{ kind: "data"; access: MemoryAccessKind }>
@@ -33,10 +34,10 @@ export function emitMemoryGuard(
 
       faultBody.finish({
         kind: "exit",
-        exit: {
-          class: "cpuException",
-          exception: pageFault(address, pageFaultErrorCode(pageFaultAccess(access)))
-        }
+        result: buildException(
+          builder.values,
+          pageFault(address, pageFaultErrorCode(pageFaultAccess(access)))
+        )
       });
     },
     { hint: "unlikely" }

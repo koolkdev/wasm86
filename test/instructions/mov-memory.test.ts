@@ -2,7 +2,10 @@ import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
-import { runCompiledInstructions } from "#test/harness/compiled-instruction.js";
+import {
+  runCompiledInstructions,
+  type CompiledInstructionCompletion
+} from "#test/harness/compiled-instruction.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
   createWasmCpuStateSnapshot,
@@ -10,7 +13,6 @@ import {
   type WasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
-import { CompletionExit, type DecodedExit } from "#wasm/exit.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
@@ -358,7 +360,7 @@ test("compiled MOV read guards report exact 1-, 2-, and 4-byte fault ranges", as
       name: `${width}-bit read fault`,
       bytes: movReadDisp32Bytes(width, faultAddress),
       initialState: { eax: 0xaaaa_aaaa, dsBase: 0 },
-      expectedExit: pageFaultExit(faultAddress, 0)
+      expectedExit: pageFaultStop(faultAddress, 0)
     });
   }
 });
@@ -377,7 +379,7 @@ test("compiled MOV write guards fault before state or memory changes", async () 
       name: `${width}-bit write fault`,
       bytes: movWriteDisp32Bytes(width, faultAddress),
       initialState: { eax: 0x1234_5678, dsBase: 0 },
-      expectedExit: pageFaultExit(faultAddress, PageFaultErrorCode.WRITE),
+      expectedExit: pageFaultStop(faultAddress, PageFaultErrorCode.WRITE),
       memoryPatches: [{ address: observedAddress, bytes: initialBytes }],
       expectedMemory: [memory(observedAddress, initialBytes)]
     });
@@ -393,7 +395,7 @@ test("faulting compiled moffs reads and writes preserve instruction-start state 
     name: "moffs dword read fault",
     bytes: [0xa1, ...disp32(faultAddress)],
     initialState: { eax: 0xaaaa_aaaa, dsBase: 0 },
-    expectedExit: pageFaultExit(faultAddress, 0),
+    expectedExit: pageFaultStop(faultAddress, 0),
     memoryPatches: [{ address: observedAddress, bytes: initialBytes }],
     expectedMemory: [memory(observedAddress, initialBytes)]
   });
@@ -401,7 +403,7 @@ test("faulting compiled moffs reads and writes preserve instruction-start state 
     name: "moffs dword write fault",
     bytes: [0xa3, ...disp32(faultAddress)],
     initialState: { eax: 0x1234_5678, dsBase: 0 },
-    expectedExit: pageFaultExit(faultAddress, PageFaultErrorCode.WRITE),
+    expectedExit: pageFaultStop(faultAddress, PageFaultErrorCode.WRITE),
     memoryPatches: [{ address: observedAddress, bytes: initialBytes }],
     expectedMemory: [memory(observedAddress, initialBytes)]
   });
@@ -415,7 +417,7 @@ test("faulting compiled segment-selector store reports a word write before commi
     name: "segment selector word write fault",
     bytes: [0x8c, 0x2b],
     initialState: { ebx: faultAddress, gsSelector: 0xabcd },
-    expectedExit: pageFaultExit(faultAddress, PageFaultErrorCode.WRITE),
+    expectedExit: pageFaultStop(faultAddress, PageFaultErrorCode.WRITE),
     memoryPatches: [{ address: faultAddress, bytes: initialBytes }],
     expectedMemory: [memory(faultAddress, initialBytes)]
   });
@@ -446,7 +448,9 @@ async function assertSuccessfulMemoryCase(entry: SuccessfulMemoryCase): Promise<
 }
 
 async function assertFaultingMemoryCase(
-  entry: Omit<SuccessfulMemoryCase, "expectedState"> & Readonly<{ expectedExit: DecodedExit }>
+  entry: Omit<SuccessfulMemoryCase, "expectedState"> & Readonly<{
+    expectedExit: CompiledInstructionCompletion;
+  }>
 ): Promise<void> {
   const initialState = createWasmCpuStateSnapshot({
     ...allFlagsSet,
@@ -466,12 +470,12 @@ async function assertFaultingMemoryCase(
   deepStrictEqual(result.memory, entry.expectedMemory ?? [], entry.name);
 }
 
-function completion(payload: number): DecodedExit {
-  return { family: "completion", reason: CompletionExit.LINK_STUB, payload };
+function completion(targetEip: number): CompiledInstructionCompletion {
+  return { kind: "linkStub", targetEip };
 }
 
-function pageFaultExit(address: number, errorCode: number): DecodedExit {
-  return { family: "cpuException", exception: pageFault(address, errorCode) };
+function pageFaultStop(address: number, errorCode: number): CompiledInstructionCompletion {
+  return { kind: "cpuException", exception: pageFault(address, errorCode) };
 }
 
 function memory(address: number, bytes: readonly number[]): MemorySnapshot {

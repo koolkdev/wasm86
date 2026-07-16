@@ -388,6 +388,11 @@ class IrValidator {
       case "finish":
         if (action.finish.kind === "dispatch") {
           assert(!hasPriorEipWrite, `${context.path} dispatch path must not flush EIP state`);
+        } else {
+          assert(
+            this.#block.values.valueType(action.finish.result) === "i64",
+            `${site.path} exit result must be i64`
+          );
         }
         return;
       case "if":

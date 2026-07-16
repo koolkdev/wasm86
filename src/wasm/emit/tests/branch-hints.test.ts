@@ -6,6 +6,7 @@ import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { pageFault } from "#core/exceptions.js";
+import { buildException } from "#cpu/exit.js";
 import { wasmBranchHint } from "#compiler/encoder/function-body.js";
 import { memoryCheck } from "#compiler/ir/operations/memory.js";
 import { irBlockBody } from "./harness.js";
@@ -20,6 +21,8 @@ function branchHintsForCheckIf(hint: IfAction["hint"]): readonly number[] {
   const address = values.const(0x2000);
   const byteLength = values.const(4);
   const condition = values.addActionOutput(fitsUnsigned(1));
+  const pageFaultResult = buildException(values, pageFault(address, 0));
+  const fallbackResult = values.const64(0n);
   const block: IrBlock = {
     values,
     body: {
@@ -39,13 +42,13 @@ function branchHintsForCheckIf(hint: IfAction["hint"]): readonly number[] {
                 kind: "finish",
                 finish: {
                   kind: "exit",
-                  exit: { class: "cpuException", exception: pageFault(address, 0) }
+                  result: pageFaultResult
                 }
               }
             ]
           }
         },
-        { kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "unsupported" } } }
+        { kind: "finish", finish: { kind: "exit", result: fallbackResult } }
       ]
     }
   };

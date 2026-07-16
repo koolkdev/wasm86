@@ -15,8 +15,7 @@ import {
   instantiateWasmInterpreter,
   writeGuestBytes
 } from "./support.js";
-import { readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
-import { HostExit } from "#wasm/exit.js";
+import { readPageFaultStop, writePageFaultStop } from "#cpu/tests/stop-fixtures.js";
 
 type ControlRunResult = Readonly<{
   interpreter: InterpreterModuleInstance;
@@ -331,7 +330,7 @@ test("nested ENTER level 2 reads an outer local through the display", async () =
 
   const { exit, state } = await executeProgram(program, initialState, 20);
 
-  deepStrictEqual(exit, { family: "host", reason: HostExit.TRAP, payload: 0x2e });
+  deepStrictEqual(exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(state.eax, 0x1234_5678);
   strictEqual(state.ebp, 0x2fc);
   strictEqual(state.esp, 0x2f4);
@@ -354,7 +353,7 @@ test("ENTER write guard fault leaves architectural state unchanged", async () =>
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, writePageFaultExit(faultAddress));
+  deepStrictEqual(exit, writePageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -373,6 +372,6 @@ test("ENTER read guard fault leaves architectural state unchanged", async () => 
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, readPageFaultExit(faultAddress));
+  deepStrictEqual(exit, readPageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

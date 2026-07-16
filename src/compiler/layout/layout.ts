@@ -8,6 +8,7 @@ import {
   type LayoutMember,
   type LayoutWidth
 } from "./handles.js";
+import { assertId, assertScopedId, compareIds } from "./ids.js";
 import type { LayoutStructure } from "./structure.js";
 
 export type LayoutField<TWidth extends LayoutWidth = LayoutWidth> = Readonly<{
@@ -48,9 +49,9 @@ export type LayoutRecordStructure = Readonly<{
 }>;
 
 // The complete canonical resolved record: structures in canonical id order,
-// members in their declared sequences, every placement fact enumerable. 06a
-// composes manifests and fingerprints from this record; it carries no handle
-// or other object identity.
+// members in their declared sequences, every placement fact enumerable. It
+// carries no handle or other object identity, so consumers can fingerprint it
+// directly.
 export type LayoutRecord = Readonly<{
   space: string;
   byteLength: number;
@@ -120,13 +121,10 @@ export function createLayout(space: string, structures: readonly LayoutStructure
   const structureIds = new Set<string>();
   const memberIds = new Set<string>();
 
-  assert(
-    /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(space),
-    `layout space must be a stable id: ${space}`
-  );
+  assertId(space, "layout space");
 
   for (const structure of structures) {
-    assertStableId(structure.id, "structure");
+    assertScopedId(structure.id, "structure id");
     assert(!structureIds.has(structure.id), `duplicate structure id: ${structure.id}`);
     structureIds.add(structure.id);
     assert(structure.members.length > 0, `layout structure ${structure.id} has no members`);
@@ -138,9 +136,9 @@ export function createLayout(space: string, structures: readonly LayoutStructure
     }
   }
 
-  const orderedStructures = [...structures].sort((left, right) => (
-    left.id < right.id ? -1 : left.id > right.id ? 1 : 0
-  ));
+  const orderedStructures = [...structures].sort((left, right) =>
+    compareIds(left.id, right.id)
+  );
   const fields = new Map<FieldRef, LayoutField>();
   const arrays = new Map<ArrayRef, LayoutArray>();
   let offset = 0;
@@ -210,7 +208,7 @@ function memberRecord(
 }
 
 function validateMember(member: LayoutMember): void {
-  assertStableId(member.id, `${member.kind} member`);
+  assertScopedId(member.id, `${member.kind} member id`);
 
   if (member.kind === "array") {
     assert(member.elementIds.length > 0, `layout array ${member.id} has no elements`);
@@ -226,13 +224,6 @@ function validateMember(member: LayoutMember): void {
       elementIds.add(elementId);
     }
   }
-}
-
-function assertStableId(id: string, kind: string): void {
-  assert(
-    /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$/.test(id),
-    `${kind} id must be a stable namespaced id: ${id}`
-  );
 }
 
 function memberWidth(member: LayoutMember): LayoutWidth {

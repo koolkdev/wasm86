@@ -8,8 +8,7 @@ import {
   writeInterpreterState
 } from "./interpreter-helpers.js";
 import { startAddress } from "#test/support/addresses.js";
-import { fetchPageFaultExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
-import { HostExit } from "#wasm/exit.js";
+import { fetchPageFaultStop, readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { invalidOpcode } from "#core/exceptions.js";
 import {
   assertCompletedInstruction,
@@ -81,9 +80,9 @@ test("MOV to a segment register exits before committing the instruction", async 
   const { exit, state } = await executeInstruction([0x8e, 0xc0], initial);
 
   deepStrictEqual(exit, {
-    family: "host",
-    reason: HostExit.SEGMENT_LOAD,
-    payload: 0x5678
+    kind: "segmentLoad",
+    segment: "es",
+    selector: 0x5678
   });
   deepStrictEqual(state, initial);
 });
@@ -98,7 +97,7 @@ test("MOV to CS raises invalid-opcode before segment-load handling", async () =>
   const { exit, state } = await executeInstruction([0x8e, 0xc8], initial);
 
   deepStrictEqual(exit, {
-    family: "cpuException",
+    kind: "cpuException",
     exception: invalidOpcode()
   });
   deepStrictEqual(state, initial);
@@ -162,7 +161,7 @@ test("CMOVcc r16 memory source faults even when condition is false", async () =>
   });
   const { exit, state } = await executeInstruction([0x66, 0x0f, 0x45, 0x13], initial);
 
-  deepStrictEqual(exit, readPageFaultExit(0x1_0000));
+  deepStrictEqual(exit, readPageFaultStop(0x1_0000));
   strictEqual(state.edx, initial.edx);
   deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(initial));
   strictEqual(state.eip, initial.eip);
@@ -255,6 +254,6 @@ test("truncated MOV r32, imm32 returns decode fault without changing architectur
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, fetchPageFaultExit(eip + 1));
+  deepStrictEqual(exit, fetchPageFaultStop(eip + 1));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

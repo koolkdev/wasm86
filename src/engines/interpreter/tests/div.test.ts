@@ -5,7 +5,7 @@ import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf
 } from "#test/support/cpu-state.js";
-import { divideErrorExit, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { divideErrorStop, readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { startAddress } from "#test/support/addresses.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
@@ -218,7 +218,7 @@ test("DIV by zero raises divide error without changing architectural state", asy
   });
   const { exit, state } = await executeInstruction([0xf7, 0xf3], initialState);
 
-  deepStrictEqual(exit, divideErrorExit());
+  deepStrictEqual(exit, divideErrorStop());
   deepStrictEqual(state, initialState);
 });
 
@@ -233,7 +233,7 @@ test("DIV quotient overflow raises divide error before writes", async () => {
   });
   const { exit, state } = await executeInstruction([0xf7, 0xf3], initialState);
 
-  deepStrictEqual(exit, divideErrorExit());
+  deepStrictEqual(exit, divideErrorStop());
   deepStrictEqual(state, initialState);
 });
 
@@ -248,7 +248,7 @@ test("IDIV signed quotient overflow raises divide error before wasm division", a
   });
   const { exit, state } = await executeInstruction([0xf7, 0xfb], initialState);
 
-  deepStrictEqual(exit, divideErrorExit());
+  deepStrictEqual(exit, divideErrorStop());
   deepStrictEqual(state, initialState);
 });
 
@@ -264,7 +264,7 @@ test("IDIV by zero raises divide error without changing architectural state", as
   });
   const { exit, state } = await executeInstruction([0xf7, 0xfb], initialState);
 
-  deepStrictEqual(exit, divideErrorExit());
+  deepStrictEqual(exit, divideErrorStop());
   deepStrictEqual(state, initialState);
 });
 
@@ -279,7 +279,7 @@ test("IDIV word form INT32_MIN over -1 raises divide error instead of trapping",
   });
   const { exit, state } = await executeInstruction([0x66, 0xf7, 0xfb], initialState);
 
-  deepStrictEqual(exit, divideErrorExit());
+  deepStrictEqual(exit, divideErrorStop());
   deepStrictEqual(state, initialState);
 });
 
@@ -294,7 +294,7 @@ test("IDIV quotient just past the signed range raises divide error", async () =>
   });
   const { exit, state } = await executeInstruction([0xf7, 0xfb], initialState);
 
-  deepStrictEqual(exit, divideErrorExit());
+  deepStrictEqual(exit, divideErrorStop());
   deepStrictEqual(state, initialState);
 });
 
@@ -309,6 +309,6 @@ test("DIV memory source fault takes priority over divide error", async () => {
   });
   const { exit, state } = await executeInstruction([0xf7, 0x33], initialState);
 
-  deepStrictEqual(exit, readPageFaultExit(guestByteLength));
+  deepStrictEqual(exit, readPageFaultStop(guestByteLength));
   deepStrictEqual(state, initialState);
 });

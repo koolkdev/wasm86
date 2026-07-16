@@ -1,6 +1,7 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
+import { decodeExit } from "#cpu/exit.js";
 import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
 import {
   immBinding,
@@ -18,8 +19,7 @@ import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type MemOperand, type Reg32 } from "#core/types.js";
-import { HostExit, decodeExit } from "#wasm/exit.js";
-import { assertPageFaultException, readPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { assertPageFaultException, readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -106,9 +106,7 @@ test("int exits host trap with the vector payload and pending state visible", as
 
   const exit = decodeExit(run());
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.TRAP);
-  strictEqual(exit.payload, 0x21);
+  deepStrictEqual(exit, { kind: "hostTrap", vector: 0x21 });
   assertState(stateView, { regs: { ecx: 0x77 }, eip: instructions[1]!.nextEip, flags: allFlagsSet }, "int");
 });
 
@@ -120,9 +118,7 @@ test("int3 exits host trap vector 3 after the one-byte instruction", async () =>
 
   const exit = decodeExit(run());
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.TRAP);
-  strictEqual(exit.payload, 3);
+  deepStrictEqual(exit, { kind: "hostTrap", vector: 3 });
   assertState(stateView, { regs: { eax: 0x77 }, eip: instruction.nextEip, flags: allFlagsSet }, "int3");
 });
 
@@ -145,9 +141,7 @@ test("into traps vector 4 only when OF is set", async () => {
 
     const exit = decodeExit(run());
 
-    strictEqual(exit.family, "host");
-    strictEqual(exit.reason, HostExit.TRAP);
-    strictEqual(exit.payload, 4);
+    deepStrictEqual(exit, { kind: "hostTrap", vector: 4 });
     assertState(
       stateView,
       { regs: { eax: 0x77 }, eip: instruction.nextEip, flags: { ...noFlagsSet, OF: 1 } },
@@ -174,9 +168,7 @@ test("into resolves lazy overflow from a prior add before deciding to trap", asy
 
   const exit = decodeExit(run());
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.TRAP);
-  strictEqual(exit.payload, 4);
+  deepStrictEqual(exit, { kind: "hostTrap", vector: 4 });
   assertState(
     stateView,
     { regs: { eax: 0x8000_0000, ebx: 1 }, eip: instructions[1]!.nextEip, flags: noFlagsSet },
@@ -298,10 +290,10 @@ test("a faulting load before a branch exits through its fault edge", async () =>
   writeWasmCpuStateSnapshot(stateView, initial);
 
   const exit = decodeExit(run());
-  const expected = readPageFaultExit(0x10000);
+  const expected = readPageFaultStop(0x10000);
 
-  strictEqual(exit.family, "cpuException");
-  if (exit.family === "cpuException") {
+  strictEqual(exit.kind, "cpuException");
+  if (exit.kind === "cpuException") {
     strictEqual(exit.exception.kind, expected.exception.kind);
     assertPageFaultException(exit.exception);
     assertPageFaultException(expected.exception);

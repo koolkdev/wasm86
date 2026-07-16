@@ -1,5 +1,4 @@
 import { segmentRegisterIndex } from "#core/segments.js";
-import type { SegmentRegister } from "#core/types.js";
 import type { SegmentDynamicOperandBinding, SegmentOperandBinding } from "../operands.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -22,42 +21,19 @@ export function emitSegmentLoad(
 ): SegmentWriteOutcome {
   switch (mode) {
     case "flat32":
-      finish.finishCurrentBody(
-        {
-          kind: "exit",
-          exit: { class: "host", reason: "segmentLoad", payload: loadPayload(values, binding, selector) }
-        },
-        "fault"
-      );
+      finish.segmentLoad(segmentIndex(values, binding), selector);
       return "terminated";
   }
 }
 
-function loadPayload(
+function segmentIndex(
   values: ValueTable,
-  binding: SegmentOperandBinding | SegmentDynamicOperandBinding,
-  selector: ValueId
+  binding: SegmentOperandBinding | SegmentDynamicOperandBinding
 ): ValueId {
   switch (binding.kind) {
     case "segment":
-      return staticLoadPayload(values, binding.channel.reg, selector);
+      return values.const(segmentRegisterIndex(binding.channel.reg));
     case "segmentDynamic":
-      return dynamicLoadPayload(values, binding.index, selector);
+      return values.external(binding.index);
   }
-}
-
-function staticLoadPayload(values: ValueTable, reg: SegmentRegister, selector: ValueId): ValueId {
-  return values.binary(
-    "or",
-    values.const(segmentRegisterIndex(reg) << 16),
-    values.truncate(16, selector)
-  );
-}
-
-function dynamicLoadPayload(values: ValueTable, index: number, selector: ValueId): ValueId {
-  return values.binary(
-    "or",
-    values.binary("shl", values.external(index), values.const(16)),
-    values.truncate(16, selector)
-  );
 }

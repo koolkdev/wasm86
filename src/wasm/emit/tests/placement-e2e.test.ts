@@ -245,6 +245,7 @@ test("a trapping producer input still evaluates before a selected early exit", a
   const condition = values.external(0);
   const index = values.binary("div_u", values.const(1), values.external(1));
   const output = values.addActionOutput();
+  const exitResult = values.const64(0n);
   const block: IrBlock = {
     values,
     body: {
@@ -256,7 +257,7 @@ test("a trapping producer input still evaluates before a selected early exit", a
           thenBody: {
             actions: [{
               kind: "finish",
-              finish: { kind: "exit", exit: { class: "host", reason: "hostTrap" } }
+              finish: { kind: "exit", result: exitResult }
             }]
           }
         },

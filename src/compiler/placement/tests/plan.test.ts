@@ -55,6 +55,35 @@ test("a producer used only in a selected body realizes at that use", () => {
   deepStrictEqual(plan.localTypes, []);
 });
 
+test("an exit result is placed at its selected finish", () => {
+  const values = new ValueTable();
+  const condition = values.external(0);
+  const payload = values.external(1);
+  const result = values.binary64(
+    "or",
+    values.extend64(32, payload, false),
+    values.const64(0x1200n)
+  );
+  const thenBody: Body = {
+    actions: [{ kind: "finish", finish: { kind: "exit", result } }]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      actions: [{ kind: "if", condition, thenBody }]
+    }
+  };
+  const { analysis, plan } = place(block);
+  const finishSite = analysis.siteOf(thenBody, 0);
+
+  deepStrictEqual(plan.values[result], {
+    kind: "atUse",
+    anchor: finishSite,
+    local: undefined
+  });
+  deepStrictEqual(plan.localTypes, []);
+});
+
 test("an aliasing write captures a producer at its authored site", () => {
   const values = new ValueTable();
   const condition = values.external(0);

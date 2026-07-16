@@ -10,7 +10,7 @@ import {
   type SwitchAction
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { actionOutput, finishOperands, valueDependsOn } from "#ir/traverse.js";
+import { actionOutput, valueDependsOn } from "#ir/traverse.js";
 import type {
   BodyAnalysis,
   BodyPathStep,
@@ -275,8 +275,19 @@ class BodyAnalyzer implements BodyAnalysis {
         this.#roots.push(...action.updates.map(demand));
         return noWrites;
       case "finish":
-        this.#roots.push(...finishOperands(action.finish).map(demand));
-        return noWrites;
+        switch (action.finish.kind) {
+          case "exit":
+            // An exit result is required at its terminal action.
+            this.#roots.push({
+              value: action.finish.result,
+              requiredAt: site,
+              consumedAt: site
+            });
+            return noWrites;
+          case "dispatch":
+            this.#roots.push(demand(action.finish.targetEip));
+            return noWrites;
+        }
     }
   }
 

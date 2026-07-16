@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { writePageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf,
@@ -217,7 +217,7 @@ test("XCHG memory write validation faults before changing register state", async
   });
   const { exit, state } = await executeInstruction([0x87, 0x18], initial);
 
-  deepStrictEqual(exit, writePageFaultExit(0x1_0000));
+  deepStrictEqual(exit, writePageFaultStop(0x1_0000));
   strictEqual(state.eax, initial.eax);
   strictEqual(state.ebx, initial.ebx);
   deepStrictEqual(wasmCpuStatusFlagsOf(state), wasmCpuStatusFlagsOf(initial));

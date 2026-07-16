@@ -89,7 +89,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       body,
       dispatch: embedding.dispatch,
       fallthrough: embedding.fallthrough,
-      emitPayload: (id) => valueEmitter.emitUse(id),
+      emitValue: (id) => valueEmitter.emitUse(id),
       constValue: (id) => block.values.constValue(id)
     });
     const rootFinal = bodyFinal(block.body);
@@ -132,7 +132,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         case "finish":
           switch (action.finish.kind) {
             case "exit":
-              frame.emitReport(action.finish);
+              frame.emitExit(action.finish);
               return;
             case "dispatch":
               frame.emitDispatch(action.finish);

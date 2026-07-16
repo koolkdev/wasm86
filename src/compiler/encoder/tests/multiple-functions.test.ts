@@ -8,10 +8,10 @@ import {
 } from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
-import { decodeExit, encodeHostExit, HostExit } from "#wasm/exit.js";
 
 const entryExportName = "entry";
 const cpuStatePtr = 32;
+const forwardedResult = 0x1234_5678_9abc_def0n;
 
 test("writer_emits_two_internal_functions", async () => {
   const module = await WebAssembly.compile(encodeTwoFunctionModule());
@@ -28,11 +28,7 @@ test("exported_entry_calls_internal_function", async () => {
     throw new Error(`expected bigint result, got ${typeof result}`);
   }
 
-  deepStrictEqual(decodeExit(result), {
-    family: "host",
-    reason: HostExit.TRAP,
-    payload: 0x2e
-  });
+  strictEqual(result, forwardedResult);
 });
 
 test("function_indexes_are_stable", () => {
@@ -113,7 +109,7 @@ function addBlockFunctionType(module: WasmModuleEncoder): number {
 
 function helperBody(): EncodedWasmFunctionBody {
   return new WasmFunctionBodyEncoder(1)
-    .i64Const(encodeHostExit(HostExit.TRAP, 0x2e))
+    .i64Const(forwardedResult)
     .finish();
 }
 

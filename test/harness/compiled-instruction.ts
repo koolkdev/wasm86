@@ -6,7 +6,10 @@ import {
   IsaDecodeError,
   type IsaDecodeReader
 } from "#core/decoder/reader.js";
-import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
+import {
+  compileActionWasmBlockHandle,
+  type WasmBlockRun
+} from "#engines/jit/block-handle.js";
 import { readBackingByte, writeBackingBytes } from "#memory/bytes.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
@@ -14,7 +17,6 @@ import {
   type WasmCpuStateInit,
   type WasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import type { DecodedExit } from "#wasm/exit.js";
 import { createWasmHostMemories } from "#wasm/host/memories.js";
 
 export type CompiledInstructionMemoryPatch = Readonly<{
@@ -38,8 +40,10 @@ export type RunCompiledInstructionsInput = Readonly<{
   memoryRanges?: readonly CompiledInstructionMemoryRange[];
 }>;
 
+export type CompiledInstructionCompletion = WasmBlockRun["exit"];
+
 export type CompiledInstructionResult = Readonly<{
-  completion: DecodedExit;
+  completion: CompiledInstructionCompletion;
   state: WasmCpuStateSnapshot;
   memory: readonly CompiledInstructionMemorySnapshot[];
 }>;

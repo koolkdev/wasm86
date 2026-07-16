@@ -1,15 +1,7 @@
-import type { CpuException } from "#core/exceptions.js";
 import type { Body } from "./block.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import type { StateChannel } from "./slots.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-
-// Reports to the host; the action emitter owns the numeric encoding.
-export type HostExitReason = "hostTrap" | "unsupported" | "segmentLoad";
-
-export type IrExit =
-  | Readonly<{ class: "cpuException"; exception: CpuException<ValueId> }>
-  | Readonly<{ class: "host"; reason: HostExitReason; payload?: ValueId }>;
 
 export type OpAction = Readonly<{ kind: "op"; op: Operation; output?: ValueId }>;
 
@@ -72,7 +64,7 @@ export type Finish =
     }>
   | Readonly<{
       kind: "exit";
-      exit: IrExit;
+      result: ValueId;
     }>;
 
 export type FinishAction = Readonly<{

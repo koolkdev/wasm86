@@ -1,8 +1,10 @@
+import { assert } from "#common/assert.js";
 import type { IsaDecodedBlock } from "#core/decoder/decode-block.js";
 import { u32 } from "#core/numeric.js";
 import { wasmImport } from "#wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
-import { decodeExit, type DecodedExit } from "#wasm/exit.js";
+import { decodeExit, exitLayout } from "#cpu/exit.js";
+import type { RunStop } from "#cpu/cpu.js";
 import { buildIrBlock } from "./action-compiler.js";
 import {
   jitModuleLinkTargets,
@@ -14,9 +16,19 @@ import {
   jitModuleLinkFallbackExportName,
   JitModuleLinkTable
 } from "./compiled-blocks/module-link-table.js";
+import {
+  decodeTransfer,
+  transferByteLength,
+  type LegacyTransfer
+} from "./legacy-transfer.js";
+
+assert(
+  exitLayout.tagOffset >= transferByteLength,
+  "Cpu exits overlap the legacy JIT transfer namespace"
+);
 
 export type WasmBlockRun = Readonly<{
-  exit: DecodedExit;
+  exit: LegacyTransfer | RunStop;
 }>;
 
 export type WasmBlockHandle = Readonly<{
@@ -85,7 +97,7 @@ function runWasmBlock(exportedBlockFunction: () => unknown): WasmBlockRun {
   }
 
   return {
-    exit: decodeExit(encodedExit)
+    exit: decodeTransfer(encodedExit) ?? decodeExit(encodedExit)
   };
 }
 

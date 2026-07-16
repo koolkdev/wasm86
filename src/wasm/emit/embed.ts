@@ -18,7 +18,7 @@ export type LinkTable = Readonly<{
 }>;
 
 // A constant dispatch target tail-calls its target's function or table slot;
-// a dynamic one reports DYNAMIC_JUMP.
+// a dynamic one returns the legacy dynamic transfer.
 export type LinkCompletion = Readonly<{
   kind: "link";
   // Same-module target -> its function index.

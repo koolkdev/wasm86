@@ -136,7 +136,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
       operands: this.#operands
     });
     this.#control = new ControlEmitter(this.#state, stateWriteLog, this.#scopes, this, this.#operands);
-    this.#finish = new FinishEmitter(this.#state, this.#scopes);
+    this.#finish = new FinishEmitter(this.#state, this.#scopes, this.#values);
     this.#segmentMode = segmentMode;
   }
 

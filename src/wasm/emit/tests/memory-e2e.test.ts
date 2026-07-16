@@ -16,10 +16,15 @@ import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decodeOk, startAddress } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { x86Flags, x86StatusFlags, type X86Flag } from "#core/flags/definitions.js";
+import { decodeExit } from "#cpu/exit.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type MemOperand, type Reg32 } from "#core/types.js";
-import { decodeExit, type DecodedCpuExceptionExit } from "#wasm/exit.js";
-import { assertPageFaultException, readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import {
+  assertPageFaultException,
+  readPageFaultStop,
+  writePageFaultStop,
+  type CpuExceptionStop
+} from "#cpu/tests/stop-fixtures.js";
 import {
   assertLazyFlagState,
   readWasmCpuFlagByte,
@@ -221,7 +226,7 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), readPageFaultExit(guestByteLength), "read fault");
+  assertFaultExit(run(), readPageFaultStop(guestByteLength), "read fault");
   assertState(
     stateView,
     {
@@ -245,7 +250,7 @@ test("a direct-offset read fault reports the offset and leaves state unchanged",
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), readPageFaultExit(guestByteLength - 2), "moffs read fault");
+  assertFaultExit(run(), readPageFaultStop(guestByteLength - 2), "moffs read fault");
   assertState(
     stateView,
     { regs: { eax: 0x1234_5678 }, eip: instruction.address, flags: allFlagsSet },
@@ -266,7 +271,7 @@ test("a write fault leaves guest memory untouched", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), writePageFaultExit(guestByteLength - 2), "write fault");
+  assertFaultExit(run(), writePageFaultStop(guestByteLength - 2), "write fault");
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0);
   assertState(
     stateView,
@@ -286,7 +291,7 @@ test("a direct-offset write fault reports the offset and leaves state unchanged"
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), writePageFaultExit(guestByteLength - 2), "moffs write fault");
+  assertFaultExit(run(), writePageFaultStop(guestByteLength - 2), "moffs write fault");
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0);
   assertState(
     stateView,
@@ -307,7 +312,7 @@ test("a narrow access faults with its byte length", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), readPageFaultExit(guestByteLength), "byte fault");
+  assertFaultExit(run(), readPageFaultStop(guestByteLength), "byte fault");
   assertState(
     stateView,
     { regs: { ebx: guestByteLength }, eip: instruction.address, flags: allFlagsSet },
@@ -423,7 +428,7 @@ test("a faulting word push reports a word-sized stack write", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), writePageFaultExit(0xffff_ffff), "word push fault");
+  assertFaultExit(run(), writePageFaultStop(0xffff_ffff), "word push fault");
   assertState(
     stateView,
     { regs: { eax: 0x1234, esp: 1 }, eip: instruction.address, flags: allFlagsSet },
@@ -622,25 +627,25 @@ test("stack-all range guards report full dword and word ranges", async () => {
       "pushad",
       [0x60],
       { eax: 0x1111_1111, esp: 0x10, eip: startAddress, ...allFlagsSet },
-      writePageFaultExit(0xffff_fff0)
+      writePageFaultStop(0xffff_fff0)
     ],
     [
       "popad",
       [0x61],
       { eax: 0x1111_1111, esp: guestByteLength - 16, eip: startAddress, ...allFlagsSet },
-      readPageFaultExit(guestByteLength - 16)
+      readPageFaultStop(guestByteLength - 16)
     ],
     [
       "pusha",
       [0x66, 0x60],
       { eax: 0x1111_1111, esp: 8, eip: startAddress, ...allFlagsSet },
-      writePageFaultExit(0xffff_fff8)
+      writePageFaultStop(0xffff_fff8)
     ],
     [
       "popa",
       [0x66, 0x61],
       { eax: 0x1111_1111, esp: guestByteLength - 8, eip: startAddress, ...allFlagsSet },
-      readPageFaultExit(guestByteLength - 8)
+      readPageFaultStop(guestByteLength - 8)
     ]
   ] as const) {
     const instruction = decodeOk(decodeBytes(bytes));
@@ -883,7 +888,7 @@ test("a faulting pushfd write reports its eip with prior state flushed", async (
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), writePageFaultExit(0xffff_fffe), "pushfd fault");
+  assertFaultExit(run(), writePageFaultStop(0xffff_fffe), "pushfd fault");
   assertState(
     stateView,
     { regs: { eax: reference.result, esp: 2 }, eip: instructions[1]!.address, flags: noFlagsSet },
@@ -908,7 +913,7 @@ test("a faulting popfd read reports its eip with prior state flushed", async () 
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), readPageFaultExit(guestByteLength - 2), "popfd fault");
+  assertFaultExit(run(), readPageFaultStop(guestByteLength - 2), "popfd fault");
   assertState(
     stateView,
     { regs: { eax: reference.result, esp: guestByteLength - 2 }, eip: instructions[1]!.address, flags: noFlagsSet },
@@ -939,7 +944,7 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
   // The add commits esp = 0x20 and its flags before the pop faults.
   const reference = aluReference("add", 32, 0x1c, 4);
 
-  assertFaultExit(run(), writePageFaultExit(guestByteLength - 2), "pop [mem] fault");
+  assertFaultExit(run(), writePageFaultStop(guestByteLength - 2), "pop [mem] fault");
   strictEqual(guestView.getUint32(0x20, true), 0xcafe_1234);
   assertState(
     stateView,
@@ -1002,11 +1007,11 @@ function effectiveAddressTermsOf(operand: MemOperand): EffectiveAddressTerms {
   };
 }
 
-function assertFaultExit(exit: bigint, expected: DecodedCpuExceptionExit, label: string): void {
+function assertFaultExit(exit: bigint, expected: CpuExceptionStop, label: string): void {
   const decoded = decodeExit(exit);
 
-  strictEqual(decoded.family, "cpuException", `${label} family`);
-  if (decoded.family !== "cpuException") {
+  strictEqual(decoded.kind, "cpuException", `${label} kind`);
+  if (decoded.kind !== "cpuException") {
     return;
   }
 

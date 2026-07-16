@@ -6,7 +6,7 @@ import {
   wasmCpuStatusFlagsOf
 } from "#test/support/cpu-state.js";
 import { startAddress } from "#test/support/addresses.js";
-import { divideErrorExit } from "#wasm/tests/exit-fixtures.js";
+import { divideErrorStop } from "#cpu/tests/stop-fixtures.js";
 import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
 
 test("executes DAA with low and high decimal adjustment", async () => {
@@ -175,7 +175,7 @@ test("AAM base zero raises divide error without changing architectural state", a
     })
   );
 
-  deepStrictEqual(exit, divideErrorExit());
+  deepStrictEqual(exit, divideErrorStop());
   strictEqual(state.eax, 0xaaaa_1234);
   strictEqual(state.eip, startAddress);
   strictEqual(state.instructionCount, 7);

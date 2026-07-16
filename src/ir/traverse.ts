@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { Action, Finish, IrExit } from "./actions.js";
+import type { Action, Finish } from "./actions.js";
 import type { Body } from "./block.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
@@ -72,27 +72,9 @@ export function actionOperands(action: Action): readonly ValueId[] {
 export function finishOperands(finish: Finish): readonly ValueId[] {
   switch (finish.kind) {
     case "exit":
-      return exitOperands(finish.exit);
+      return [finish.result];
     case "dispatch":
       return [finish.targetEip];
-  }
-}
-
-function exitOperands(exit: IrExit): readonly ValueId[] {
-  switch (exit.class) {
-    case "cpuException": {
-      const exception = exit.exception;
-
-      switch (exception.kind) {
-        case "DE":
-        case "UD":
-          return [];
-        case "PF":
-          return [exception.linearAddress];
-      }
-    }
-    case "host":
-      return exit.payload === undefined ? [] : [exit.payload];
   }
 }
 

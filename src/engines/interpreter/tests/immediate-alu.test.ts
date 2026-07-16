@@ -7,8 +7,7 @@ import {
   writeInterpreterState
 } from "./interpreter-helpers.js";
 import { startAddress } from "#test/support/addresses.js";
-import { HostExit } from "#wasm/exit.js";
-import { readPageFaultExit, writePageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { readPageFaultStop, writePageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
@@ -535,7 +534,7 @@ test("ADC memory destination fault leaves architectural state unchanged", async 
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, writePageFaultExit(faultAddress));
+  deepStrictEqual(exit, writePageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -554,7 +553,7 @@ test("SBB memory source fault leaves architectural state unchanged", async () =>
 
   const exit = interpreter.run(1);
 
-  deepStrictEqual(exit, readPageFaultExit(faultAddress));
+  deepStrictEqual(exit, readPageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -572,8 +571,7 @@ test("unsupported F7 /1 group returns unsupported after ModRM dispatch", async (
 
   const exit = interpreter.run(1);
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

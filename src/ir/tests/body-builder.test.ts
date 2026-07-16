@@ -168,6 +168,7 @@ test("if builds hinted then and else bodies against child builders", () => {
   const values = new ValueTable();
   const builder = new BodyBuilder(values);
   const condition = values.external(0);
+  const exitResult = values.const64(0n);
 
   builder.if(
     condition,
@@ -176,7 +177,7 @@ test("if builds hinted then and else bodies against child builders", () => {
     ),
     {
       hint: "unlikely",
-      elseBuild: (other) => other.finish({ kind: "exit", exit: { class: "host", reason: "unsupported" } })
+      elseBuild: (other) => other.finish({ kind: "exit", result: exitResult })
     }
   );
   deepStrictEqual(builder.build(), {
@@ -187,7 +188,7 @@ test("if builds hinted then and else bodies against child builders", () => {
         hint: "unlikely",
         thenBody: { actions: [stateWrite(eipChannel, values.const(4))] },
         elseBody: {
-          actions: [{ kind: "finish", finish: { kind: "exit", exit: { class: "host", reason: "unsupported" } } }]
+          actions: [{ kind: "finish", finish: { kind: "exit", result: exitResult } }]
         }
       }
     ]
@@ -246,7 +247,7 @@ test("loop bodies take the back edge through loopContinue and validate", () => {
 
       body.if(body.values.compare(32, "ne", next, body.values.const(0)), (taken) => taken.loopContinue([next]));
     });
-    b.finish({ kind: "exit", exit: { class: "host", reason: "unsupported" } });
+    b.finish({ kind: "exit", result: b.values.const64(0n) });
   });
 
   doesNotThrow(() => validateIrBlock(block));

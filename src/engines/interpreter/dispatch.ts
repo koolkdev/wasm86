@@ -15,7 +15,9 @@ import type {
 import { prefixFlagMask } from "#core/decoder/prefix-flags.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { segmentRegisters } from "#core/types.js";
-import { encodeHostExit, HostExit } from "#wasm/exit.js";
+import { encodeVariant } from "#compiler/layout/variant-codec.js";
+import { exitLayout } from "#cpu/exit.js";
+import { missExit } from "./exits.js";
 import { noBaseRegister, type RmDecodeHelpers } from "./decode.js";
 import { emitModRmFetch, emitOpcodeByteFetch, type DecodeCursor } from "./fragments.js";
 import { emitInstructionHandler, type HandlerEmitContext } from "./handlers.js";
@@ -336,7 +338,9 @@ function regDispatchTable(cases: readonly ModRmRegCase[]): number[] {
 }
 
 function emitReturnUnsupported(body: WasmFunctionBodyEncoder): void {
-  body.i64Const(encodeHostExit(HostExit.UNSUPPORTED, 0)).returnFromFunction();
+  body.i64Const(
+    encodeVariant(exitLayout, missExit())
+  ).returnFromFunction();
 }
 
 function isRmOperand(operand: OperandSpec): operand is Extract<OperandSpec, { kind: "modrm.rm" }> {

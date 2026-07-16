@@ -7,7 +7,7 @@ import {
   wasmCpuStatusFlagsOf,
   type WasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import { HostExit, type DecodedExit } from "#wasm/exit.js";
+import type { RunStop } from "#cpu/cpu.js";
 import {
   assertInterpreterStateEquals,
   readInterpreterState,
@@ -25,7 +25,7 @@ const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
 type MemoryRunResult = Readonly<{
   interpreter: InterpreterModuleInstance;
-  exit: DecodedExit;
+  exit: RunStop;
   state: WasmCpuStateSnapshot;
 }>;
 
@@ -109,7 +109,6 @@ test("LEA m32 form rejects register ModRM", async () => {
   });
   const { interpreter, exit } = await executeMemoryInstruction([0x8d, 0xc0], initialState);
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

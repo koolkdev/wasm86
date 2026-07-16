@@ -10,8 +10,7 @@ import {
 import { startAddress } from "#test/support/addresses.js";
 import { assertMemoryImports } from "#wasm/tests/helpers.js";
 import { wasmImport } from "#wasm/abi.js";
-import { CompletionExit, HostExit } from "#wasm/exit.js";
-import { fetchPageFaultExit } from "#wasm/tests/exit-fixtures.js";
+import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";
 import { wasmDefinedFunctionCount } from "#compiler/encoder/tests/body-opcodes.js";
@@ -55,7 +54,7 @@ test("fuel zero returns instruction-limit exit without changing architectural st
 
   const exit = interpreter.run(0);
 
-  deepStrictEqual(exit, { family: "completion", reason: CompletionExit.INSTRUCTION_LIMIT, payload: 0 });
+  deepStrictEqual(exit, { kind: "instructionLimit" });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -72,8 +71,7 @@ test("unsupported byte returns unsupported exit without changing architectural s
 
   const exit = interpreter.run(1);
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -90,7 +88,7 @@ test("operand-size prefix dispatches to the prefixed opcode form", async () => {
   const exit = interpreter.run(1);
   const state = readInterpreterState(interpreter.stateView);
 
-  deepStrictEqual(exit, { family: "completion", reason: CompletionExit.INSTRUCTION_LIMIT, payload: 0 });
+  deepStrictEqual(exit, { kind: "instructionLimit" });
   strictEqual(state.eax, 0xffff_1234);
   strictEqual(state.eip, startAddress + 4);
   strictEqual(state.instructionCount, 8);
@@ -109,7 +107,7 @@ test("repeated operand-size prefixes execute with the override operand size", as
   const exit = interpreter.run(1);
   const state = readInterpreterState(interpreter.stateView);
 
-  deepStrictEqual(exit, { family: "completion", reason: CompletionExit.INSTRUCTION_LIMIT, payload: 0 });
+  deepStrictEqual(exit, { kind: "instructionLimit" });
   strictEqual(state.eax, 0xffff_1234);
   strictEqual(state.eip, startAddress + 5);
   strictEqual(state.instructionCount, 8);
@@ -133,8 +131,7 @@ test("unsupported prefix streams report unsupported instead of misdecoding", asy
 
     const exit = interpreter.run(1);
 
-    strictEqual(exit.family, "host");
-    strictEqual(exit.reason, HostExit.UNSUPPORTED);
+    deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
     assertInterpreterStateEquals(interpreter.stateView, initialState);
   }
 });
@@ -150,7 +147,7 @@ test("truncated two-byte opcode escape returns decode fault", async () => {
   interpreter.guestView.setUint8(lastGuestByte, 0x0f);
 
   const exit = interpreter.run(1);
-  const expected = fetchPageFaultExit(interpreter.guestView.byteLength);
+  const expected = fetchPageFaultStop(interpreter.guestView.byteLength);
 
   deepStrictEqual(exit, expected);
   assertInterpreterStateEquals(interpreter.stateView, initialState);
@@ -167,8 +164,7 @@ test("unsupported two-byte opcode path dispatches before unsupported exit", asyn
 
   const exit = interpreter.run(1);
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

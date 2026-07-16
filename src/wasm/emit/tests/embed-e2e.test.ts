@@ -10,11 +10,13 @@ import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
+import type { RunStop } from "#cpu/cpu.js";
+import { decodeExit } from "#cpu/exit.js";
+import { buildException } from "#cpu/exit.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FallthroughTarget } from "#wasm/emit/embed.js";
-import { decodeExit, type DecodedCpuExceptionExit, type DecodedExit } from "#wasm/exit.js";
 import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
-import { assertPageFaultException } from "#wasm/tests/exit-fixtures.js";
+import { assertPageFaultException } from "#cpu/tests/stop-fixtures.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
 import { memoryCheck, memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
@@ -51,6 +53,10 @@ function decodeReadFragment(k: number): DecodeReadFragment {
   const byteLength = values.const(1);
   const fault = values.addActionOutput(fitsUnsigned(1));
   const fetched = values.addActionOutput(fitsUnsigned(8));
+  const faultResult = buildException(
+    values,
+    pageFault(address, PageFaultErrorCode.INSTRUCTION_FETCH)
+  );
   const block: IrBlock = {
     body: {
       actions: [
@@ -67,10 +73,7 @@ function decodeReadFragment(k: number): DecodeReadFragment {
                 kind: "finish",
                 finish: {
                   kind: "exit",
-                  exit: {
-                    class: "cpuException",
-                    exception: pageFault(address, PageFaultErrorCode.INSTRUCTION_FETCH)
-                  }
+                  result: faultResult
                 }
               }
             ]
@@ -103,10 +106,12 @@ async function instantiateDecodeRead(fallthrough: FallthroughTarget) {
   return instantiateFunctionBody(body.finish());
 }
 
-function assertCpuException(exit: DecodedExit): asserts exit is DecodedCpuExceptionExit {
-  strictEqual(exit.family, "cpuException");
+function assertCpuException(
+  stop: RunStop
+): asserts stop is Extract<RunStop, { kind: "cpuException" }> {
+  strictEqual(stop.kind, "cpuException");
 
-  if (exit.family !== "cpuException") {
+  if (stop.kind !== "cpuException") {
     throw new Error("expected CPU exception exit");
   }
 }

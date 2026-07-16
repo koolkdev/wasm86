@@ -1,7 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { HostExit } from "#wasm/exit.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
   assertLazyFlagState,
@@ -160,8 +159,7 @@ test("unsupported prefixed opcode streams terminate without changing architectur
 
   const exit = interpreter.run(1);
 
-  strictEqual(exit.family, "host");
-  strictEqual(exit.reason, HostExit.UNSUPPORTED);
+  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
