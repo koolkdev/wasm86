@@ -1,100 +1,52 @@
 import { assert } from "#common/assert.js";
 import type { WasmMemoryLimits } from "#compiler/encoder/memory.js";
 import type { WasmTableLimits } from "#compiler/encoder/module.js";
-import { wasmValueType, type WasmFunctionType } from "#compiler/encoder/types.js";
-import type {
-  ExportRef,
-  FunctionRef,
-  GlobalRef,
-  ResourceRef,
-  SignatureRef,
-  TableRef
-} from "./refs.js";
+import type { StorageEffects } from "#compiler/ir/effects.js";
 import { Declarations } from "./declarations.js";
 import {
-  type LegacyEffects,
-  type LegacyFunctionDeclaration,
-  type LegacyTraps
-} from "./legacy-body.js";
+  type BuildFunction,
+  FunctionDefinition
+} from "./functions.js";
+import type { LegacyFunctionDeclaration } from "./legacy-body.js";
+import { linkProgram } from "./link.js";
+import type {
+  FunctionDeclaration,
+  FunctionExport,
+  InternalGlobal,
+  LegacyFunction,
+  MemoryImport,
+  Program,
+  Signature,
+  TableImport
+} from "./model.js";
+import type { FunctionRef, SignatureRef } from "./refs.js";
 
-type Signature = Readonly<{
-  ref: SignatureRef;
-  type: WasmFunctionType;
-}>;
-
-type MemoryImport = Readonly<{
-  ref: ResourceRef;
-  moduleName: string;
-  name: string;
-  limits: WasmMemoryLimits;
-}>;
-
-type TableImport = Readonly<{
-  ref: TableRef;
-  moduleName: string;
-  name: string;
-  limits: WasmTableLimits;
-}>;
-
-type InternalGlobal = Readonly<{
-  ref: GlobalRef;
-  type: typeof wasmValueType.i32;
-  mutable: true;
-  initialValue: number;
-}>;
-
-type FunctionExport = Readonly<{
-  ref: ExportRef;
-  name: string;
-  target: FunctionRef;
-}>;
-
-type LegacyFunction = Readonly<{
-  ref: FunctionRef;
-  signature: SignatureRef;
-  calls: readonly FunctionRef[];
-  resources: readonly ResourceRef[];
-  globals: readonly GlobalRef[];
-  tables: readonly TableRef[];
-  effects: LegacyEffects;
-  traps: LegacyTraps;
-  eliminable: false;
-  build: LegacyFunctionDeclaration["build"];
-}>;
-
-declare const programBrand: unique symbol;
-
-type ProgramData = Readonly<{
-  signatures: readonly Signature[];
-  memories: readonly MemoryImport[];
-  tables: readonly TableImport[];
-  globals: readonly InternalGlobal[];
-  functions: readonly LegacyFunction[];
-  exports: readonly FunctionExport[];
-}>;
-
-export type Program = ProgramData & Readonly<{ [programBrand]: true }>;
+export type { Program, ProgramFunction } from "./model.js";
 
 export class ProgramBuilder {
   readonly #signatures = new Declarations<Signature>();
   readonly #memories = new Declarations<MemoryImport>();
   readonly #tables = new Declarations<TableImport>();
   readonly #globals = new Declarations<InternalGlobal>();
-  readonly #functions = new Declarations<LegacyFunction>();
+  readonly #functions = new Declarations<FunctionDeclaration>();
   readonly #exports = new Declarations<FunctionExport>();
-  readonly #exportNames = new Set<string>();
+  readonly #owner = {};
+  #closing = false;
   #finished = false;
 
-  signature(declaration: Signature): void {
+  signature(declaration: Signature): SignatureRef {
     this.#assertOpen();
+
+    assert(
+      this.#signatures.find((signature) => signature.type === declaration.type) === undefined,
+      "function type already has a program signature"
+    );
 
     this.#signatures.add({
       ref: declaration.ref,
-      type: {
-        params: [...declaration.type.params],
-        results: [...declaration.type.results]
-      }
+      type: declaration.type
     });
+    return declaration.ref;
   }
 
   importMemory(declaration: MemoryImport): void {
@@ -123,110 +75,111 @@ export class ProgramBuilder {
 
   legacyFunction(declaration: LegacyFunctionDeclaration): FunctionRef {
     this.#assertOpen();
-
     const fn = normalizeLegacyFunction(declaration);
 
     this.#functions.add(fn);
     return fn.ref;
   }
 
+  defineFunction(
+    declaration: Readonly<{
+      ref: FunctionRef;
+      signature: SignatureRef;
+      effects: StorageEffects;
+    }>,
+    build: BuildFunction
+  ): FunctionDefinition {
+    this.#assertOpen();
+    const signature = this.#signatures.get(declaration.signature);
+
+    assert(
+      signature !== undefined,
+      `unknown program signature ${declaration.signature.id} declared by ` +
+        `function ${declaration.ref.id}`
+    );
+    const definition = new FunctionDefinition({
+      ref: declaration.ref,
+      type: signature.type,
+      effects: declaration.effects,
+      owner: this.#owner,
+      build
+    });
+
+    this.#functions.add(definition);
+    return definition;
+  }
+
   exportFunction(declaration: FunctionExport): void {
     this.#assertOpen();
     assert(declaration.name.length > 0, "empty program function export name");
-    assert(!this.#exportNames.has(declaration.name), `duplicate program export name: ${declaration.name}`);
+    assert(
+      this.#exports.find((exported) => exported.name === declaration.name) === undefined,
+      `duplicate program export name: ${declaration.name}`
+    );
 
     this.#exports.add({
       ref: declaration.ref,
       name: declaration.name,
       target: declaration.target
     });
-    this.#exportNames.add(declaration.name);
   }
 
   finish(): Program {
     this.#assertOpen();
-    this.#assertValid();
+    this.#closing = true;
+    try {
+      const program = linkProgram({
+        owner: this.#owner,
+        signatures: this.#signatures.all(),
+        memories: this.#memories.all(),
+        tables: this.#tables.all(),
+        globals: this.#globals.all(),
+        functions: this.#functions.all(),
+        exports: this.#exports.all()
+      });
 
-    this.#finished = true;
-    const program = {
-      signatures: this.#signatures.all(),
-      memories: this.#memories.all(),
-      tables: this.#tables.all(),
-      globals: this.#globals.all(),
-      functions: this.#functions.all(),
-      exports: this.#exports.all()
-    } satisfies ProgramData;
-
-    return program as Program;
-  }
-
-  #assertValid(): void {
-    for (const fn of this.#functions) {
-      assert(
-        this.#signatures.has(fn.signature),
-        `unknown program signature ${fn.signature.id} declared by function ${fn.ref.id}`
-      );
-
-      for (const call of fn.calls) {
-        assert(
-          this.#functions.has(call),
-          `unknown program function ${call.id} called by function ${fn.ref.id}`
-        );
-      }
-
-      for (const resource of fn.resources) {
-        assert(
-          this.#memories.has(resource),
-          `unknown program resource ${resource.id} used by function ${fn.ref.id}`
-        );
-      }
-
-      for (const global of fn.globals) {
-        assert(
-          this.#globals.has(global),
-          `unknown program global ${global.id} used by function ${fn.ref.id}`
-        );
-      }
-
-      for (const table of fn.tables) {
-        assert(
-          this.#tables.has(table),
-          `unknown program table ${table.id} used by function ${fn.ref.id}`
-        );
-      }
-    }
-
-    for (const exported of this.#exports) {
-      assert(
-        this.#functions.has(exported.target),
-        `unknown program function ${exported.target.id} exported by ${exported.ref.id}`
-      );
+      this.#finished = true;
+      return program;
+    } finally {
+      this.#closing = false;
     }
   }
 
   #assertOpen(): void {
     assert(!this.#finished, "cannot modify a finished program");
+    assert(!this.#closing, "cannot modify a program while it is closing");
   }
 }
 
 function normalizeLegacyFunction(declaration: LegacyFunctionDeclaration): LegacyFunction {
   const effects = declaration.effects ?? "world";
-  const traps = declaration.traps ?? "may";
+  const callTargets = unique(
+    declaration.calls.filter((call): call is FunctionDefinition =>
+      call instanceof FunctionDefinition
+    )
+  );
 
   assert(effects === "none" || effects === "world", `unknown legacy function effects: ${effects}`);
-  assert(traps === "never" || traps === "may", `unknown legacy function trap behavior: ${traps}`);
   return {
+    kind: "legacy",
     ref: declaration.ref,
     signature: declaration.signature,
-    calls: [...declaration.calls],
+    calls: unique(declaration.calls.map((call) =>
+      call instanceof FunctionDefinition ? call.ref : call
+    )),
+    callTargets,
     resources: [...declaration.resources],
     globals: [...declaration.globals],
     tables: [...declaration.tables],
+    irBlocks: declaration.irBlocks.map((entry) => ({ ...entry })),
     effects,
-    traps,
     eliminable: false,
     build: declaration.build
   };
+}
+
+function unique<T>(values: readonly T[]): readonly T[] {
+  return [...new Set(values)];
 }
 
 function copyMemoryLimits(limits: WasmMemoryLimits): WasmMemoryLimits {

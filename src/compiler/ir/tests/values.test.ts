@@ -544,6 +544,7 @@ test("value inputs preserve repeated uses exactly", () => {
     emitUse: (input) => emitted.push(input),
     emitActionOutput: () => {},
     emitExternal: () => {},
+    emitParameter: () => {},
     emitLoopInput: () => {}
   });
   deepStrictEqual(emitted, [value, value]);
@@ -562,6 +563,7 @@ test("emission visits stored inputs once in their declared order", () => {
     emitUse: (value) => emitted.push(value),
     emitActionOutput: () => {},
     emitExternal: () => {},
+    emitParameter: () => {},
     emitLoopInput: () => {}
   });
 
@@ -631,6 +633,7 @@ test("every scalar operator constructs and realizes its supported value types", 
     emitUse: () => {},
     emitActionOutput: () => {},
     emitExternal: () => {},
+    emitParameter: () => {},
     emitLoopInput: () => {}
   };
 

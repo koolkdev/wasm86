@@ -7,7 +7,6 @@ import {
   flagChannel,
   gprChannel,
   lazyFlagsAChannel,
-  lazyFlagsBChannel,
   lazyFlagsKindChannel,
   segmentAccessChannel,
   segmentBaseChannel,
@@ -18,13 +17,16 @@ import type { StateSlot } from "#ir/slots.js";
 import {
   memoryRead,
   memoryWrite,
-  resolveFlag,
+  statusFlagCall,
   stateRead,
   stateWrite
 } from "#ir/tests/storage-op-helpers.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { CellRef } from "#compiler/refs/cell.js";
+import { FunctionDefinition } from "#compiler/program/functions.js";
+import { functionRef } from "#compiler/program/refs.js";
+import { functionType } from "#compiler/program/function-type.js";
 
 const memory: StorageEffect = { space: "memory" };
 const memoryBounds: StorageEffect = { space: "memoryBounds" };
@@ -80,18 +82,13 @@ test("effects derive from action kind and slot", () => {
     reads: [],
     writes: [memory]
   });
-  deepStrictEqual(effectsOf(resolveFlag(0, "ZF")), {
-    reads: [
-      state(flagChannel("ZF")),
-      state(lazyFlagsKindChannel),
-      state(lazyFlagsAChannel),
-      state(lazyFlagsBChannel)
-    ],
+  deepStrictEqual(effectsOf(statusFlagCall(4, "ZF", 0, 1, 2, 3)), {
+    reads: [],
     writes: []
   });
 });
 
-test("ifs and finishes touch no data directly", () => {
+test("control flow and finishes touch no data directly", () => {
   const values = new ValueTable();
 
   deepStrictEqual(
@@ -106,6 +103,25 @@ test("ifs and finishes touch no data directly", () => {
     effectsOf({ kind: "finish", finish: { kind: "dispatch", targetEip: valueId(0) } }),
     { reads: [], writes: [] }
   );
+});
+
+test("call effects come from their function definition", () => {
+  const effects = {
+    reads: [state(gprChannel("eax"))],
+    writes: [state(gprChannel("ebx"))]
+  } as const;
+  const target = new FunctionDefinition({
+    ref: functionRef("test.aliasing-call"),
+    type: functionType([], []),
+    effects,
+    owner: undefined,
+    build: () => {}
+  });
+  const action = { kind: "call", target, arguments: [], outputs: [] } as const;
+
+  deepStrictEqual(effectsOf(action), effects);
+  strictEqual(actionMayWriteStateSlot(action, gprChannel("ebx")), true);
+  strictEqual(actionMayWriteStateSlot(action, gprChannel("eax")), false);
 });
 
 test("if effects aggregate nested body effects", () => {

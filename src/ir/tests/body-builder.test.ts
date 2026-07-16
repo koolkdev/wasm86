@@ -9,7 +9,6 @@ import { test } from "node:test";
 
 import type { Action } from "#ir/actions.js";
 import { memoryCheck as memoryCheckOperation } from "#compiler/ir/operations/memory.js";
-import { resolveFlag as resolveFlagOperation } from "#compiler/ir/operations/resolve-flag.js";
 import {
   stateRead as stateReadOperation,
   stateWrite as stateWriteOperation
@@ -20,7 +19,8 @@ import { validateIrBlock } from "#ir/validate.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { memoryCheck, resolveFlag, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { statusFlagResolvers } from "#core/flags/resolvers.js";
+import { memoryCheck, stateRead, stateWrite, statusFlagCall } from "#ir/tests/storage-op-helpers.js";
 
 test("operation derives the output and its bounds from the definition", () => {
   const values = new ValueTable();
@@ -40,6 +40,25 @@ test("one operation API handles value and effect definitions", () => {
 
   strictEqual(builder.operation(stateWriteOperation.create({ slot: eipChannel, value })), undefined);
   strictEqual(builder.operation(stateReadOperation.create({ slot: eipChannel })), value + 1);
+});
+
+test("call validates typed arguments and allocates its declared result", () => {
+  const values = new ValueTable();
+  const builder = new BodyBuilder(values);
+  const target = statusFlagResolvers.get("ZF");
+  const args = [values.const(0), values.const(1), values.const(2), values.const(3)] as const;
+  const [output] = builder.call(target, args);
+
+  ok(output !== undefined, "expected status-flag call result");
+  deepStrictEqual(builder.build(), {
+    actions: [statusFlagCall(output, "ZF", ...args)]
+  });
+  deepStrictEqual(values.node(output), { kind: "actionOutput", type: "i32" });
+  throws(() => builder.call(target, args.slice(1)), /expects 4 arguments, got 3/);
+  throws(
+    () => builder.call(target, [args[0]!, args[1]!, args[2]!, values.const64(3n)]),
+    /argument 3 must be i32, got i64/
+  );
 });
 
 test("cell APIs seed typed cells and preserve lexical access in child bodies", () => {
@@ -199,27 +218,39 @@ test("switch builds every arm before allocating the shared output", () => {
   const values = new ValueTable();
   const builder = new BodyBuilder(values);
   const selector = values.external(0);
+  const args = [values.const(0), values.const(1), values.const(2), values.const(3)] as const;
   let armResult!: ValueId;
   let defaultResult!: ValueId;
   const output = builder.switch(
     selector,
     [{
       match: 3,
-      build: (arm) => (armResult = arm.operation(resolveFlagOperation.create({ flag: "ZF" })))
+      build: (arm) => {
+        const [result] = arm.call(statusFlagResolvers.get("ZF"), args);
+
+        ok(result !== undefined, "expected call result");
+        return (armResult = result);
+      }
     }],
     (arm) => (defaultResult = arm.values.const(1))
   );
 
   ok(armResult < output);
   ok(defaultResult < output);
-  deepStrictEqual(values.widthBounds(output), fitsUnsigned(1));
+  deepStrictEqual(values.widthBounds(output), { unsignedBits: 32, signedBits: 32 });
   deepStrictEqual(builder.build(), {
     actions: [
       {
         kind: "switch",
         selector,
         output,
-        cases: [{ match: 3, body: { actions: [resolveFlag(armResult, "ZF")], result: armResult } }],
+        cases: [{
+          match: 3,
+          body: {
+            actions: [statusFlagCall(armResult, "ZF", ...args)],
+            result: armResult
+          }
+        }],
         defaultBody: { actions: [], result: defaultResult }
       }
     ]

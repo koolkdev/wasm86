@@ -4,7 +4,12 @@ import {
   type WasmFunctionReferences
 } from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
-import type { WasmFunctionType } from "#compiler/encoder/types.js";
+import {
+  wasmValueType,
+  type WasmFunctionType,
+  type WasmValueType
+} from "#compiler/encoder/types.js";
+import { emitFunction } from "#wasm/emit/action.js";
 import type {
   FunctionRef,
   GlobalRef,
@@ -15,9 +20,12 @@ import type {
 import type {
   LegacyFunctionBindings
 } from "./legacy-body.js";
-import type { Program } from "./builder.js";
+import type { FunctionType } from "./function-type.js";
+import type { FunctionDefinition } from "./functions.js";
+import type { Program, ProgramFunction } from "./model.js";
 
-type LegacyFunction = Program["functions"][number];
+type LegacyFunction = Extract<ProgramFunction, { kind: "legacy" }>;
+type DefinedFunction = Extract<ProgramFunction, { kind: "function" }>;
 
 type ProgramLayout = Readonly<{
   types: readonly WasmFunctionType[];
@@ -30,7 +38,7 @@ type ProgramLayout = Readonly<{
 
 export function encodeProgram(program: Program): Uint8Array<ArrayBuffer> {
   const layout = layoutProgram(program);
-  const bodies = program.functions.map((fn) => buildLegacyBody(layout, fn));
+  const bodies = program.functions.map((fn) => buildFunctionBody(program, layout, fn));
   const module = new WasmModuleEncoder();
 
   addFunctionTypes(module, layout);
@@ -113,11 +121,12 @@ function layoutProgram(program: Program): ProgramLayout {
   const signatureIndices = new Map<SignatureRef, number>();
 
   for (const signature of program.signatures) {
-    let index = types.findIndex((candidate) => functionTypesEqual(candidate, signature.type));
+    const physicalType = encodeFunctionType(signature.type);
+    let index = types.findIndex((candidate) => functionTypesEqual(candidate, physicalType));
 
     if (index === -1) {
       index = types.length;
-      types.push(signature.type);
+      types.push(physicalType);
     }
     signatureIndices.set(signature.ref, index);
   }
@@ -132,7 +141,21 @@ function layoutProgram(program: Program): ProgramLayout {
   };
 }
 
+function buildFunctionBody(
+  program: Program,
+  layout: ProgramLayout,
+  fn: ProgramFunction
+): EncodedWasmFunctionBody {
+  switch (fn.kind) {
+    case "legacy":
+      return buildLegacyBody(program, layout, fn);
+    case "function":
+      return buildDefinedBody(layout, fn);
+  }
+}
+
 function buildLegacyBody(
+  program: Program,
   layout: ProgramLayout,
   fn: LegacyFunction
 ): EncodedWasmFunctionBody {
@@ -140,14 +163,8 @@ function buildLegacyBody(
 
   assert(signatureIndex !== undefined, `missing layout for program signature ${fn.signature.id}`);
 
-  const functions = new Map<FunctionRef, number>();
-
-  for (const call of fn.calls) {
-    const functionIndex = layout.functionIndices.get(call);
-
-    assert(functionIndex !== undefined, `missing layout for called program function ${call.id}`);
-    functions.set(call, functionIndex);
-  }
+  const functions = resolveFunctionIndices(layout, fn);
+  const definitionIndices = resolveDefinitionIndices(layout, fn.callTargets);
 
   const resources = new Map<ResourceRef, number>();
 
@@ -179,14 +196,64 @@ function buildLegacyBody(
   const bindings = {
     typeIndex: signatureIndex,
     functions,
+    definitionIndices,
     resources,
     globals,
-    tables
+    tables,
+    placements: program.placements
   } satisfies LegacyFunctionBindings;
   const body = fn.build(bindings);
 
   validateRecordedReferences(fn, body.references, bindings);
   return body;
+}
+
+function buildDefinedBody(
+  layout: ProgramLayout,
+  fn: DefinedFunction
+): EncodedWasmFunctionBody {
+  const functions = resolveDefinitionIndices(layout, fn.callTargets);
+  const body = emitFunction(fn.body, {
+    functionIndices: functions,
+    placement: fn.placement
+  });
+
+  validateRecordedIndices(fn, "function", body.references.functionIndices, functions.values());
+  validateRecordedIndices(fn, "type", body.references.typeIndices, []);
+  validateRecordedIndices(fn, "global", body.references.globalIndices, []);
+  validateRecordedIndices(fn, "table", body.references.tableIndices, []);
+  validateRecordedIndices(fn, "memory", body.references.memoryIndices, []);
+  return body;
+}
+
+function resolveFunctionIndices(
+  layout: ProgramLayout,
+  fn: LegacyFunction
+): ReadonlyMap<FunctionRef, number> {
+  const functions = new Map<FunctionRef, number>();
+
+  for (const call of fn.calls) {
+    const functionIndex = layout.functionIndices.get(call);
+
+    assert(functionIndex !== undefined, `missing layout for called program function ${call.id}`);
+    functions.set(call, functionIndex);
+  }
+  return functions;
+}
+
+function resolveDefinitionIndices(
+  layout: ProgramLayout,
+  calls: readonly FunctionDefinition[]
+): ReadonlyMap<FunctionDefinition, number> {
+  const functions = new Map<FunctionDefinition, number>();
+
+  for (const call of calls) {
+    const functionIndex = layout.functionIndices.get(call.ref);
+
+    assert(functionIndex !== undefined, `missing layout for called program function ${call.ref.id}`);
+    functions.set(call, functionIndex);
+  }
+  return functions;
 }
 
 function validateRecordedReferences(
@@ -202,7 +269,7 @@ function validateRecordedReferences(
 }
 
 function validateRecordedIndices(
-  fn: LegacyFunction,
+  fn: ProgramFunction,
   kind: "function" | "type" | "global" | "table" | "memory",
   recorded: readonly number[],
   declared: Iterable<number>
@@ -212,8 +279,24 @@ function validateRecordedIndices(
   for (const index of recorded) {
     assert(
       declaredIndices.has(index),
-      `legacy function ${fn.ref.id} used undeclared Wasm ${kind} index ${index}`
+      `${fn.kind} function ${fn.ref.id} used undeclared Wasm ${kind} index ${index}`
     );
+  }
+}
+
+function encodeFunctionType(type: FunctionType): WasmFunctionType {
+  return {
+    params: type.parameters.map(encodeValueType),
+    results: type.results.map(encodeValueType)
+  };
+}
+
+function encodeValueType(type: FunctionType["parameters"][number]): WasmValueType {
+  switch (type) {
+    case "i32":
+      return wasmValueType.i32;
+    case "i64":
+      return wasmValueType.i64;
   }
 }
 

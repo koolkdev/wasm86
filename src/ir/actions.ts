@@ -2,8 +2,17 @@ import type { Body } from "./block.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import type { StateChannel } from "./slots.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
+import type { ValueInput } from "#compiler/ir/values/types.js";
+import type { FunctionDefinition } from "#compiler/program/functions.js";
 
 export type OpAction = Readonly<{ kind: "op"; op: Operation; output?: ValueId }>;
+
+export type CallAction = Readonly<{
+  kind: "call";
+  target: FunctionDefinition;
+  arguments: readonly ValueInput[];
+  outputs: readonly ValueId[];
+}>;
 
 export type BranchHint = "unlikely" | "likely";
 
@@ -72,17 +81,24 @@ export type FinishAction = Readonly<{
   finish: Finish;
 }>;
 
+export type ReturnAction = Readonly<{
+  kind: "return";
+  results: readonly ValueId[];
+}>;
+
 export type ExitFinish = Extract<Finish, { kind: "exit" }>;
 
 export type DispatchFinish = Extract<Finish, { kind: "dispatch" }>;
 
 export type Action =
   | OpAction
+  | CallAction
   | IfAction
   | SwitchAction
   | LoopAction
   | LoopContinueAction
-  | FinishAction;
+  | FinishAction
+  | ReturnAction;
 
 export type StateWriteAction = Readonly<{
   kind: "op";
@@ -94,6 +110,8 @@ export type StateWriteAction = Readonly<{
 export function actionCompletes(action: Action): boolean {
   switch (action.kind) {
     case "op":
+      return false;
+    case "call":
       return false;
     case "if":
       return action.elseBody !== undefined &&
@@ -107,6 +125,7 @@ export function actionCompletes(action: Action): boolean {
       return false;
     case "loopContinue":
     case "finish":
+    case "return":
       return true;
   }
 }

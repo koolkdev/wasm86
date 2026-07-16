@@ -3,11 +3,15 @@ import { test } from "node:test";
 
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
-import { allHelpers, helperFunctionType } from "#wasm/helpers/module.js";
-import { rmDecodeHelperType } from "#engines/interpreter/decode.js";
+import { x86StatusFlags } from "#core/flags/definitions.js";
+import {
+  statusFlagResolvers,
+  statusFlagResolverType
+} from "#core/flags/resolvers.js";
+import { rmDecodeFunctionType } from "#engines/interpreter/decode.js";
 import { buildInterpreterProgram } from "#engines/interpreter/program.js";
 
-test("interpreter declarations close every raw dependency before body emission", () => {
+test("interpreter declarations close every decoder and resolver dependency before body emission", () => {
   const built = buildInterpreterProgram();
   const { program } = built;
   const runExport = program.exports.find((entry) => entry.name === wasmBlockExportName);
@@ -16,13 +20,12 @@ test("interpreter declarations close every raw dependency before body emission",
   const run = program.functions.find((fn) => fn.ref === runExport.target);
 
   ok(run !== undefined, "missing interpreter run function declaration");
+  ok(run.kind === "legacy", "interpreter run function must be a legacy root");
   const runSignature = program.signatures.find((signature) => signature.ref === run.signature);
 
   ok(runSignature !== undefined, "missing interpreter run signature declaration");
-  deepStrictEqual(runSignature.type, {
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i64]
-  });
+  deepStrictEqual(runSignature.type.parameters, ["i32"]);
+  deepStrictEqual(runSignature.type.results, ["i64"]);
 
   const cpuState = program.memories.find((memory) => memory.name === wasmImport.cpuStateMemoryName);
   const guestMemory = program.memories.find((memory) => memory.name === wasmImport.guestMemoryName);
@@ -44,22 +47,32 @@ test("interpreter declarations close every raw dependency before body emission",
     ok(declaration !== undefined, `missing interpreter callee declaration ${ref.id}`);
     return declaration;
   });
-  const rmFunctions = called.filter((fn) => fn.globals.length > 0);
-  const helperFunctions = called.filter((fn) => fn.globals.length === 0);
+  const rmFunctions = called.filter((fn) => fn.kind === "legacy");
+  const resolverFunctions = called.filter((fn) => fn.kind === "function");
+  const expectedResolvers = statusFlagResolvers.members(x86StatusFlags);
 
   strictEqual(rmFunctions.length, built.rmDecodeHelpers.length);
-  strictEqual(helperFunctions.length, allHelpers().length);
+  strictEqual(resolverFunctions.length, x86StatusFlags.length);
+  deepStrictEqual(
+    new Set(resolverFunctions.map((fn) => fn.ref)),
+    new Set(expectedResolvers.map((definition) => definition.ref))
+  );
   for (const fn of rmFunctions) {
     deepStrictEqual(new Set(fn.resources), new Set([cpuState.ref, guestMemory.ref]));
     deepStrictEqual(new Set(fn.globals), new Set(program.globals.map((global) => global.ref)));
-    deepStrictEqual(program.signatures.find((signature) => signature.ref === fn.signature)?.type, rmDecodeHelperType);
+    strictEqual(
+      program.signatures.find((signature) => signature.ref === fn.signature)?.type,
+      rmDecodeFunctionType
+    );
     deepStrictEqual(fn.calls, []);
   }
-  for (const fn of helperFunctions) {
-    deepStrictEqual(fn.resources, [cpuState.ref]);
-    deepStrictEqual(fn.globals, []);
-    deepStrictEqual(program.signatures.find((signature) => signature.ref === fn.signature)?.type, helperFunctionType);
-    deepStrictEqual(fn.calls, []);
+  for (const fn of resolverFunctions) {
+    strictEqual(
+      program.signatures.find((signature) => signature.ref === fn.signature)?.type,
+      statusFlagResolverType
+    );
+    deepStrictEqual(fn.effects, { reads: [], writes: [] });
+    deepStrictEqual(fn.callTargets, []);
   }
 
   // Raw handler emission belongs to encodeProgram, after all declarations and

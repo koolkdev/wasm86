@@ -4,7 +4,8 @@ import {
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
-import { wasmValueType, type WasmFunctionType } from "#compiler/encoder/types.js";
+import { wasmValueType } from "#compiler/encoder/types.js";
+import { functionType } from "#compiler/program/function-type.js";
 import {
   emitRmAddressFragment,
   emitSibFetch,
@@ -32,10 +33,10 @@ export const noBaseRegister = 8;
 // (eip, mod, rm) -> the encoded exit, 0 on success. The i64-only result
 // keeps the fragments' fault returns valid unchanged inside the helper, and
 // 0 never collides with a fault: resolved exit tags are nonzero.
-export const rmDecodeHelperType = {
-  params: [wasmValueType.i32, wasmValueType.i32, wasmValueType.i32],
-  results: [wasmValueType.i64]
-} as const satisfies WasmFunctionType;
+export const rmDecodeFunctionType = functionType(
+  ["i32", "i32", "i32"],
+  ["i64"]
+);
 
 export type RmDecodeGlobals = Readonly<{ base: number; offset: number; cursor: number }>;
 
@@ -105,7 +106,7 @@ export function encodeRmDecodeHelperBody(
   opcodeLength: number,
   globals: RmDecodeGlobals
 ): EncodedWasmFunctionBody {
-  const body = new WasmFunctionBodyEncoder(rmDecodeHelperType.params.length);
+  const body = new WasmFunctionBodyEncoder(rmDecodeFunctionType.parameters.length);
   const scratch = new WasmLocalScratchAllocator(body);
   const context: HelperContext = {
     body,

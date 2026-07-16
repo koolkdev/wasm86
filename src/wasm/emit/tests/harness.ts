@@ -8,17 +8,19 @@ import {
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
-import {
-  placeBody,
-  type BodyPlacement
-} from "#compiler/placement/place.js";
+import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
+import { encodeProgram } from "#compiler/program/encode.js";
+import { functionType } from "#compiler/program/function-type.js";
+import type { LegacyFunctionBindings } from "#compiler/program/legacy-body.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
-import { emitActionFragment } from "#wasm/emit/action.js";
 import {
-  helperCallsForAnalysis,
-  installHelpers
-} from "#wasm/helpers/module.js";
-import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
+  exportRef,
+  functionRef,
+  resourceRef,
+  signatureRef
+} from "#compiler/program/refs.js";
+import { statusFlagResolverType } from "#core/flags/resolvers.js";
+import { emitActionFragment } from "#wasm/emit/action.js";
 
 // Test-only module wrapper around the action emitter: imported state + guest
 // memories, one run export returning the encoded i64 exit. The harness
@@ -41,34 +43,36 @@ export type InstantiatedIrBlock = Readonly<{
 
 // The fragment with direct exits to the sentinel tail.
 export function irBlockBody(block: IrBlock, externalParamCount = 0): EncodedWasmFunctionBody {
-  return emitIrBlockBody(block, externalParamCount);
-}
+  let encodedBody: EncodedWasmFunctionBody | undefined;
+  const program = createIrBlockProgram(
+    block,
+    externalParamCount,
+    (body) => (encodedBody = body)
+  );
 
-export function irBlockBodyWithHelpers(block: IrBlock, externalParamCount = 0): EncodedWasmFunctionBody {
-  const module = new WasmModuleEncoder();
-  const placement = placeValidatedBody(block);
-  const helpers = installHelpers(module, helperCallsForAnalysis(placement.analysis));
-
-  return emitIrBlockBody(block, externalParamCount, helpers, placement);
+  encodeProgram(program);
+  assert(encodedBody !== undefined, "test IR block body was not encoded");
+  return encodedBody;
 }
 
 function emitIrBlockBody(
   block: IrBlock,
   externalParamCount: number,
-  helpers?: LegacyHelperIndexRegistryAdapter,
-  placement?: BodyPlacement
+  bindings: LegacyFunctionBindings
 ): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder(externalParamCount);
   const scratch = new WasmLocalScratchAllocator(body);
-  const bodyPlacement = placement ?? placeValidatedBody(block);
+  const placement = bindings.placements.get(block);
+
+  assert(placement !== undefined, "missing test IR block placement");
 
   body.block();
   emitActionFragment(block, {
     body,
     scratch,
     externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
-    helpers,
-    placement: bodyPlacement,
+    functionIndices: bindings.definitionIndices,
+    placement,
     embedding: {
       dispatch: { kind: "br", depth: 0 },
       fallthrough: { kind: "fallthrough" }
@@ -144,26 +148,74 @@ function encodeFunctionBodyModule(body: EncodedWasmFunctionBody, paramCount: num
 }
 
 function encodeIrBlockModule(block: IrBlock, externalParamCount: number): Uint8Array<ArrayBuffer> {
-  const module = new WasmModuleEncoder();
-  const typeIndex = initializeTestModule(module, externalParamCount);
-
-  const placement = placeValidatedBody(block);
-  const helpers = installHelpers(module, helperCallsForAnalysis(placement.analysis));
-
-  module.exportFunction(
-    wasmBlockExportName,
-    module.addFunction(typeIndex, emitIrBlockBody(block, externalParamCount, helpers, placement))
-  );
-  return module.encode();
+  return encodeProgram(createIrBlockProgram(block, externalParamCount));
 }
 
-function placeValidatedBody(block: IrBlock): BodyPlacement {
-  const placement = placeBody(block, {
-    allowImplicitEntryFallthrough: true
-  });
+function createIrBlockProgram(
+  block: IrBlock,
+  externalParamCount: number,
+  bodyEncoded?: (body: EncodedWasmFunctionBody) => void
+): Program {
+  const builder = new ProgramBuilder();
+  const entryType = functionType(
+    Array.from({ length: externalParamCount }, () => "i32" as const),
+    ["i64"]
+  );
+  const entrySignature = signatureRef("test.ir-block-entry-signature");
+  const entry = functionRef("test.ir-block-entry");
+  const cpuState = resourceRef("test.ir-block-cpu-state");
+  const guestMemory = resourceRef("test.ir-block-guest-memory");
 
-  validatePlacement(block, placement.analysis, placement.plan);
-  return placement;
+  builder.signature({ ref: entrySignature, type: entryType });
+  builder.signature({
+    ref: signatureRef("test.status-flag-resolver-signature"),
+    type: statusFlagResolverType
+  });
+  builder.importMemory({
+    ref: cpuState,
+    moduleName: wasmImport.namespace,
+    name: wasmImport.cpuStateMemoryName,
+    limits: { minPages: 1 }
+  });
+  builder.importMemory({
+    ref: guestMemory,
+    moduleName: wasmImport.namespace,
+    name: wasmImport.guestMemoryName,
+    limits: { minPages: wasmGuestMemoryMinPages }
+  });
+  builder.legacyFunction({
+    ref: entry,
+    signature: entrySignature,
+    calls: [],
+    resources: [cpuState, guestMemory],
+    globals: [],
+    tables: [],
+    irBlocks: [{ block, allowImplicitEntryFallthrough: true }],
+    build: (bindings) => {
+      assert(
+        bindings.resources.get(cpuState) === wasmMemoryIndex.cpuState &&
+          bindings.resources.get(guestMemory) === wasmMemoryIndex.guest,
+        "unexpected Wasm memory import order"
+      );
+      const body = emitIrBlockBody(block, externalParamCount, bindings);
+
+      bodyEncoded?.(body);
+      return body;
+    }
+  });
+  builder.exportFunction({
+    ref: exportRef("test.ir-block-entry-export"),
+    name: wasmBlockExportName,
+    target: entry
+  });
+  return validateProgramPlacements(builder.finish());
+}
+
+function validateProgramPlacements(program: Program): Program {
+  for (const placement of program.placements.values()) {
+    validatePlacement(placement.block, placement.analysis, placement.plan);
+  }
+  return program;
 }
 
 function initializeTestModule(module: WasmModuleEncoder, paramCount: number): number {

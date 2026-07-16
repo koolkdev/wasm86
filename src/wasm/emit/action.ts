@@ -25,25 +25,46 @@ import {
 import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { ValueEmitter, wasmTypeForValue } from "./value-emitter.js";
-import {
-  resolveHelperFunctionIndex,
-  type LegacyHelperIndexRegistryAdapter
-} from "#wasm/helpers/registry.js";
+import type { FunctionDefinition } from "#compiler/program/functions.js";
+import type { IrFunction } from "#ir/function.js";
 
 export type ActionFragmentContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
-  helpers?: LegacyHelperIndexRegistryAdapter | undefined;
+  functionIndices?: ReadonlyMap<FunctionDefinition, number> | undefined;
   placement?: BodyPlacement | undefined;
   embedding: FragmentEmbedding;
 }>;
 
 export type ActionFunctionContext = Readonly<{
-  helpers?: LegacyHelperIndexRegistryAdapter | undefined;
+  functionIndices?: ReadonlyMap<FunctionDefinition, number> | undefined;
   placement?: BodyPlacement | undefined;
   embedding: FunctionEmbedding;
 }>;
+
+export type FunctionEmitContext = Readonly<{
+  functionIndices: ReadonlyMap<FunctionDefinition, number>;
+  placement: BodyPlacement;
+}>;
+
+export function emitFunction(
+  fn: IrFunction,
+  context: FunctionEmitContext
+): EncodedWasmFunctionBody {
+  const body = new WasmFunctionBodyEncoder(fn.parameters.length);
+  const scratch = new WasmLocalScratchAllocator(body);
+
+  emitActionFragment(fn, {
+    body,
+    scratch,
+    functionIndices: context.functionIndices,
+    placement: context.placement,
+    embedding: {}
+  });
+  scratch.assertClear();
+  return body.finish();
+}
 
 export function emitActionFunction(
   block: IrBlock,
@@ -55,7 +76,7 @@ export function emitActionFunction(
   emitActionFragment(block, {
     body,
     scratch,
-    helpers: context.helpers,
+    functionIndices: context.functionIndices,
     placement: context.placement,
     embedding: context.embedding
   });
@@ -82,8 +103,12 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       index,
       locals,
       externalLocals: context.externalLocals ?? new Map(),
-      helperFunctionIndex: (helper) =>
-        resolveHelperFunctionIndex(context.helpers, helper)
+      functionIndex: (target) => {
+        const functionIndex = context.functionIndices?.get(target);
+
+        assert(functionIndex !== undefined, `missing resolved function ${target.ref.id}`);
+        return functionIndex;
+      }
     });
     const frame = createControlFrame({
       body,
@@ -129,6 +154,19 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
             valueEmitter.emitOperation(action.op);
           }
           return;
+        case "call": {
+          const output = action.outputs[0];
+
+          if (output === undefined || !analysis.isLive(output)) {
+            if (analysis.callActionMustExecute(action)) {
+              valueEmitter.emitCall(action);
+              for (let index = 0; index < action.outputs.length; index += 1) {
+                body.drop();
+              }
+            }
+          }
+          return;
+        }
         case "finish":
           switch (action.finish.kind) {
             case "exit":
@@ -149,6 +187,12 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
           return;
         case "loopContinue":
           emitLoopContinue(action);
+          return;
+        case "return":
+          for (const result of action.results) {
+            valueEmitter.emitUse(result);
+          }
+          body.returnFromFunction();
           return;
       }
     }

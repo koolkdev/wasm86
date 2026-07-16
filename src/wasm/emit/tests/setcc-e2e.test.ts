@@ -7,6 +7,7 @@ import { gprChannel } from "#ir/slots.js";
 import { CONDITIONS, type FlagBoolExpr } from "#core/flags/conditions.js";
 import type { X86StatusFlag } from "#core/flags/definitions.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
+import type { SemanticTemplate } from "#core/semantics/builder.js";
 
 import { cmpSemantic } from "#core/semantics/cmp.js";
 import { setccSemantic } from "#core/semantics/setcc.js";
@@ -15,7 +16,7 @@ import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { isStateRead } from "#ir/tests/storage-op-helpers.js";
 
 // cmp + setcc consumes source-derived cmp conditions, and standalone setcc
-// rebuilds the condition through lazy flag helper calls.
+// rebuilds the condition through status-flag resolver calls.
 
 const comparePredicates: ReadonlyArray<
   readonly [ConditionCode, (left: number, right: number) => boolean]
@@ -41,6 +42,36 @@ const operandPairs: ReadonlyArray<readonly [number, number]> = [
   [0xffff_ffff, 1],
   [0x7fff_ffff, 0xffff_ffff]
 ];
+
+test("a condition after a flag-writing branch uses the captured pending lazy record", async () => {
+  const joinedLazyCondition: SemanticTemplate = (s, v) => {
+    const left = s.get(s.reg("ebx"));
+    const right = v.const(5);
+
+    s.writeStatusFlagsSource({
+      kind: "sub",
+      width: 32,
+      left,
+      right,
+      result: v.binary("sub", left, right)
+    });
+    s.if(s.get(s.reg("ecx")), (then) => then.writeFlag("ZF", v.const(1)));
+    s.set(s.reg("eax"), v.select(s.condition("B"), v.const(1), v.const(0)));
+  };
+  const builder = createIrBlockBuilder();
+
+  builder.addInstruction(joinedLazyCondition, [], loc(0x1000, 0x1001));
+  const { stateView, run } = await instantiateIrBlock(builder.finish());
+
+  writeWasmCpuStateSnapshot(stateView, {
+    ebx: 3,
+    ecx: 0,
+    lazyFlagsA: 10,
+    lazyFlagsB: 1
+  });
+  strictEqual(run(), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 1);
+});
 
 for (const [cc, predicate] of comparePredicates) {
   test(`cmp ebx, imm + set${cc.toLowerCase()} al matches the predicate`, async () => {

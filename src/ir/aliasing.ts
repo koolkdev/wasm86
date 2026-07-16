@@ -2,9 +2,9 @@ import { channelsOverlap, isDynamicSlot } from "./slots.js";
 import type { Action } from "./actions.js";
 import type { Body } from "./block.js";
 import type {
-  OperationEffects,
+  StorageEffects,
   StorageAccess
-} from "#compiler/ir/operations/definition.js";
+} from "#compiler/ir/effects.js";
 import type { StateSlot } from "./slots.js";
 
 // One aliasing rule over the address spaces: static channels alias iff their
@@ -14,7 +14,7 @@ import type { StateSlot } from "./slots.js";
 // alias only their own opaque identity. Distinct spaces never alias.
 
 export type StorageEffect = StorageAccess;
-export type ActionEffects = OperationEffects;
+export type ActionEffects = StorageEffects;
 
 const noEffects: ActionEffects = { reads: [], writes: [] };
 
@@ -24,6 +24,8 @@ export function effectsOf(action: Action): ActionEffects {
   switch (action.kind) {
     case "op":
       return action.op.effects;
+    case "call":
+      return action.target.effects;
     case "if":
       return bodyEffects(action.thenBody, action.elseBody);
     case "switch":
@@ -32,6 +34,7 @@ export function effectsOf(action: Action): ActionEffects {
       return bodyEffects(action.body);
     case "loopContinue":
     case "finish":
+    case "return":
       return noEffects;
   }
 }
@@ -95,6 +98,10 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
       return action.op.effects.writes.some(
         (write) => write.space === "state" && slotsMayAlias(write.slot, slot)
       );
+    case "call":
+      return action.target.effects.writes.some(
+        (write) => write.space === "state" && slotsMayAlias(write.slot, slot)
+      );
     case "if":
       return bodyMayWriteStateSlot(action.thenBody, slot) ||
         (action.elseBody !== undefined && bodyMayWriteStateSlot(action.elseBody, slot));
@@ -105,6 +112,7 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
       return bodyMayWriteStateSlot(action.body, slot);
     case "loopContinue":
     case "finish":
+    case "return":
       return false;
   }
 }

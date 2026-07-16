@@ -15,8 +15,10 @@ export function nestedBodies(action: Action): readonly Body[] {
     case "loop":
       return [action.body];
     case "op":
+    case "call":
     case "loopContinue":
     case "finish":
+    case "return":
       return [];
   }
 }
@@ -56,6 +58,8 @@ export function actionOperands(action: Action): readonly ValueId[] {
   switch (action.kind) {
     case "op":
       return action.op.inputs.map((input) => input.value);
+    case "call":
+      return action.arguments.map((argument) => argument.value);
     case "if":
       return [action.condition];
     case "switch":
@@ -66,6 +70,8 @@ export function actionOperands(action: Action): readonly ValueId[] {
       return action.updates;
     case "finish":
       return finishOperands(action.finish);
+    case "return":
+      return action.results;
   }
 }
 
@@ -90,6 +96,10 @@ export function actionOutput(action: Action): ValueId | undefined {
       assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
       return action.output;
     }
+    case "call": {
+      assert(action.outputs.length <= 1, "multiple call outputs are not supported yet");
+      return action.outputs[0];
+    }
     case "if":
       return action.output;
     case "switch":
@@ -97,8 +107,15 @@ export function actionOutput(action: Action): ValueId | undefined {
     case "loop":
     case "loopContinue":
     case "finish":
+    case "return":
       return undefined;
   }
+}
+
+export function actionOutputs(action: Action): readonly ValueId[] {
+  const output = actionOutput(action);
+
+  return output === undefined ? [] : [output];
 }
 
 // The action outputs a body's own actions produce; values computed from

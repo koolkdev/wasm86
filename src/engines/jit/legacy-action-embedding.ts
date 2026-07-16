@@ -1,27 +1,14 @@
 import { assert } from "#common/assert.js";
 import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js";
-import type { FunctionRef, ResourceRef } from "#compiler/program/refs.js";
+import type { ResourceRef } from "#compiler/program/refs.js";
 import type { LegacyFunctionBindings } from "#compiler/program/legacy-body.js";
 import type { IrBlock } from "#ir/block.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { emitActionFunction } from "#wasm/emit/action.js";
-import type { BodyPlacement } from "#compiler/placement/place.js";
-import { helperFunctionName, type HelperCallKey } from "#wasm/helpers/key.js";
-import {
-  LegacyHelperIndexRegistryAdapter,
-  type LegacyHelperIndexBinding
-} from "#wasm/helpers/registry.js";
 import type { LegacyNumericLinkAdapter } from "./legacy-numeric-link.js";
-
-export type JitHelperBinding = Readonly<{
-  key: HelperCallKey;
-  ref: FunctionRef;
-}>;
 
 type LegacyActionEmbeddingAdapterOptions = Readonly<{
   ir: IrBlock;
-  placement: BodyPlacement;
-  helperBindings: readonly JitHelperBinding[];
   links: LegacyNumericLinkAdapter;
   cpuState: ResourceRef;
   guestMemory: ResourceRef;
@@ -49,15 +36,12 @@ export class LegacyActionEmbeddingAdapter {
       `unexpected resolved guest-memory index: ${String(guestMemoryIndex)}`
     );
 
-    const helperBindings = this.#options.helperBindings.map((helper): LegacyHelperIndexBinding => {
-      const functionIndex = bindings.functions.get(helper.ref);
+    const placement = bindings.placements.get(this.#options.ir);
 
-      assert(functionIndex !== undefined, `missing resolved JIT helper ${helperFunctionName(helper.key)}`);
-      return { key: helper.key, functionIndex };
-    });
+    assert(placement !== undefined, "missing placement for JIT IR block");
     return emitActionFunction(this.#options.ir, {
-      helpers: new LegacyHelperIndexRegistryAdapter(helperBindings),
-      placement: this.#options.placement,
+      functionIndices: bindings.definitionIndices,
+      placement,
       embedding: { dispatch: this.#options.links.resolve(bindings) }
     });
   }

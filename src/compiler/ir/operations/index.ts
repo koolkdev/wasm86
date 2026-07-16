@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import { resolveFlag } from "./resolve-flag.js";
 import {
   memoryCheck,
   memoryRead,
@@ -19,7 +18,6 @@ export type OperationWithResult =
   | ReturnType<typeof memoryRead.create>
   | ReturnType<typeof memoryCheck.create>
   | ReturnType<typeof memoryResolve.create>
-  | ReturnType<typeof resolveFlag.create>
   | ReturnType<typeof cellRead.create>;
 
 export type OperationWithoutResult =
@@ -88,9 +86,6 @@ export function emitOperation(
       break;
     case memoryResolve.kind:
       memoryResolve.emit(operation, target, inputs);
-      break;
-    case resolveFlag.kind:
-      resolveFlag.emit(operation, target, inputs);
       break;
     case cellRead.kind:
       cellRead.emit(operation, target, inputs);

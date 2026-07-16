@@ -6,8 +6,8 @@ import { encodeJitModule } from "#engines/jit/module.js";
 import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
 import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
+import { BodyBuilder } from "#ir/body-builder.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { ByteArrayDecodeReader } from "#core/decoder/tests/helpers.js";
@@ -20,24 +20,26 @@ import {
   wasmBodyOpcodes,
   wasmDefinedFunctionCount
 } from "#compiler/encoder/tests/body-opcodes.js";
-import { isStateRead, isStateWrite, resolveFlag, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { isStateRead, isStateWrite, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import { buildTrap } from "#cpu/exit.js";
+import { statusFlagResolvers } from "#core/flags/resolvers.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/state.js";
 
 const startEip = 0x1000;
 
-test("JIT module emits no helper functions for ordinary blocks", () => {
+test("JIT module emits no resolver functions for ordinary blocks", () => {
   const bytes = encodeJitModule([{ entryEip: startEip, ir: syntheticBlock(false) }]);
 
   strictEqual(wasmDefinedFunctionCount(bytes), 1);
 });
 
-test("JIT module emits a referenced lazy flag helper", () => {
+test("JIT module emits a referenced status-flag resolver", () => {
   const bytes = encodeJitModule([{ entryEip: startEip, ir: syntheticBlock(true) }]);
 
   strictEqual(wasmDefinedFunctionCount(bytes), 2);
 });
 
-test("JIT module includes helpers introduced by input flag reads", () => {
+test("JIT module includes resolver members reached by input flag reads", () => {
   // seta al reads CF and ZF when there is no same-block flag source; int
   // terminates the block so the test does not need a fallthrough link target.
   const block = buildIrBlock(decodeBlock([0x0f, 0x97, 0xc0, 0xcd, 0x2e]).instructions);
@@ -456,19 +458,23 @@ function isEaxWordSlot(slot: StateSlot): boolean {
   return slot.kind === "gpr" && slot.reg === "eax" && slot.byteOffsetInReg === 0 && slot.byteLength === 4;
 }
 
-function syntheticBlock(withHelper: boolean): IrBlock {
+function syntheticBlock(withResolver: boolean): IrBlock {
   const values = new ValueTable();
-  const stored = withHelper ? values.addActionOutput(fitsUnsigned(1)) : values.const(7);
+  const builder = new BodyBuilder(values);
+  const stored = withResolver
+    ? builder.call(statusFlagResolvers.get("ZF"), [
+        values.const(lazyFlagsKindByte(LAZY_FLAGS_KIND.NONE, 0)),
+        values.const(0),
+        values.const(0),
+        values.const(1)
+      ])[0]!
+    : values.const(7);
   const result = buildTrap(values, values.const(0));
 
+  builder.push(stateWrite(gprChannel("eax"), stored));
+  builder.finish({ kind: "exit", result });
   return {
-    body: {
-      actions: [
-        ...(withHelper ? [resolveFlag(stored, "ZF")] : []),
-        stateWrite(gprChannel("eax"), stored),
-        { kind: "finish", finish: { kind: "exit", result } }
-      ]
-    },
+    body: builder.build(),
     values
   };
 }

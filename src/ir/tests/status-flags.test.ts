@@ -6,14 +6,20 @@ import { BodyBuilder } from "#ir/body-builder.js";
 import { State } from "#ir/builder/state/index.js";
 import type { StatusFlagState } from "#ir/builder/state/status-flags.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
-import { lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import { flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel } from "#ir/slots.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
 import { simpleFlagSourceConditionOperators } from "#core/flags/sources.js";
 import { isX86StatusFlag, x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import { assertOnlyLazyRecord } from "./lazy-flags.js";
-import { resolveFlag } from "./storage-op-helpers.js";
+import {
+  isStateRead,
+  isStatusFlagCall,
+  resolvedStatusFlag,
+  statusFlagCall,
+  type StatusFlagCallAction
+} from "./storage-op-helpers.js";
 
 type Harness = Readonly<{
   values: ValueTable;
@@ -49,16 +55,36 @@ function assertFullExplicitFlush(actions: readonly StateWriteAction[], values: V
   strictEqual(actions.length, x86StatusFlags.length + 1);
 }
 
-function resolveOutput(actions: readonly Action[], flag: X86StatusFlag): ValueId | undefined {
-  const action = actions.find(
-    (action): action is Action & Readonly<{ kind: "op"; output: ValueId }> =>
-      action.kind === "op" &&
-      action.op.kind === "cpu.resolveFlag" &&
-      action.op.flag === flag &&
-      action.output !== undefined
+function resolverCall(actions: readonly Action[], flag: X86StatusFlag): StatusFlagCallAction | undefined {
+  return actions.find(
+    (action): action is StatusFlagCallAction =>
+      isStatusFlagCall(action) && resolvedStatusFlag(action) === flag
   );
+}
 
-  return action?.output;
+function resolvedFlagValue(actions: readonly Action[], flag: X86StatusFlag): ValueId | undefined {
+  return resolverCall(actions, flag)?.outputs[0];
+}
+
+function resolverCalls(actions: readonly Action[]): readonly StatusFlagCallAction[] {
+  return actions.filter(isStatusFlagCall);
+}
+
+function stateReadSlots(actions: readonly Action[]) {
+  return actions.flatMap((action) =>
+    action.kind === "op" && action.op.kind === "state.read"
+      ? [action.op.slot]
+      : []
+  );
+}
+
+function assertResolverCall(
+  action: StatusFlagCallAction,
+  output: ValueId,
+  flag: X86StatusFlag,
+  args: readonly [ValueId, ValueId, ValueId, ValueId]
+): void {
+  deepStrictEqual(action, statusFlagCall(output, flag, ...args));
 }
 
 function switchActions(actions: readonly Action[]): Extract<Action, { kind: "switch" }>[] {
@@ -72,13 +98,31 @@ test("new status flags start with no dirty pending entries", () => {
   deepStrictEqual(pending.flushesForPath("completed"), []);
 });
 
-test("input status flags read through planned resolve ops", () => {
+test("input status flags read through typed resolver calls", () => {
   const { values, actions, flags } = createHarness();
   const first = flags.read("ZF");
   const second = flags.read("ZF");
 
   strictEqual(first, second);
-  deepStrictEqual(actions, [resolveFlag(first, "ZF")]);
+  deepStrictEqual(stateReadSlots(actions), [
+    lazyFlagsKindChannel,
+    lazyFlagsAChannel,
+    lazyFlagsBChannel,
+    flagChannel("ZF")
+  ]);
+  const call = resolverCall(actions, "ZF");
+
+  ok(call !== undefined, "expected ZF resolver call");
+  const inputs = actions.filter(isStateRead).map((action) => action.output) as unknown as readonly [
+    ValueId,
+    ValueId,
+    ValueId,
+    ValueId
+  ];
+
+  deepStrictEqual(call.arguments.map((argument) => argument.value), inputs);
+  assertResolverCall(call, first, "ZF", inputs);
+  strictEqual(actions.at(-1), call);
   deepStrictEqual(values.node(first), { kind: "actionOutput", type: "i32" });
 });
 
@@ -178,7 +222,7 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
 
   ok(switchAction !== undefined, "expected lazy condition switch");
   strictEqual(condition, switchAction.output);
-  strictEqual(actions.length, 2);
+  strictEqual(actions.length, 6);
   const selectorRead = actions[0];
 
   ok(
@@ -191,25 +235,23 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
     switchAction.cases.map((entry) => entry.match),
     [8, 16, 32].map((width) => lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, width as 8 | 16 | 32))
   );
+  const [kindRead, aRead, bRead] = actions.filter(isStateRead);
 
-  const accesses = [{ accessByteLength: 1 }, { accessByteLength: 2 }, {}] as const;
+  ok(kindRead !== undefined && aRead !== undefined && bRead !== undefined, "expected lazy record reads");
+  deepStrictEqual([kindRead.op.slot, aRead.op.slot, bRead.op.slot], [
+    lazyFlagsKindChannel,
+    lazyFlagsAChannel,
+    lazyFlagsBChannel
+  ]);
 
   for (const [index, switchCase] of switchAction.cases.entries()) {
-    const access = accesses[index]!;
-    const accessByteLength = "accessByteLength" in access
-      ? access.accessByteLength
-      : undefined;
-    const [left, right] = switchCase.body.actions;
+    const width = [8, 16, 32][index] as 8 | 16 | 32;
 
-    ok(
-      left?.kind === "op" && left.op.kind === "state.read" &&
-        right?.kind === "op" && right.op.kind === "state.read",
-      "expected arm-local lazy operand reads"
+    deepStrictEqual(switchCase.body.actions, []);
+    strictEqual(
+      switchCase.body.result,
+      values.compare(width, "le_u", aRead.output, bRead.output)
     );
-    strictEqual(left.op.slot, lazyFlagsAChannel);
-    strictEqual(right.op.slot, lazyFlagsBChannel);
-    strictEqual(left.op.accessByteLength, accessByteLength);
-    strictEqual(right.op.accessByteLength, accessByteLength);
 
     const result = values.node(switchCase.body.result!);
 
@@ -220,12 +262,12 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
   const [carry, zero] = switchAction.defaultBody.actions;
 
   ok(
-    carry?.kind === "op" && carry.op.kind === "cpu.resolveFlag" &&
-      zero?.kind === "op" && zero.op.kind === "cpu.resolveFlag",
+    carry !== undefined && isStatusFlagCall(carry) &&
+      zero !== undefined && isStatusFlagCall(zero),
     "expected fallback flag resolution"
   );
-  strictEqual(carry.op.flag, "CF");
-  strictEqual(zero.op.flag, "ZF");
+  strictEqual(resolvedStatusFlag(carry), "CF");
+  strictEqual(resolvedStatusFlag(zero), "ZF");
 
   const fallback = values.node(switchAction.defaultBody.result!);
 
@@ -233,7 +275,7 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
   strictEqual(fallback.operator, "or");
 });
 
-test("signed compare-family conditions sign-extend through narrow lazy reads", () => {
+test("signed compare-family conditions sign-extend captured narrow lazy operands", () => {
   const { values, actions, flags } = createHarness();
 
   flags.condition("L");
@@ -241,60 +283,47 @@ test("signed compare-family conditions sign-extend through narrow lazy reads", (
   const switchAction = switchActions(actions)[0];
 
   ok(switchAction !== undefined, "expected lazy condition switch");
+  const [, aRead, bRead] = actions.filter(isStateRead);
 
-  const accesses = [{ signed: true, accessByteLength: 1 }, { signed: true, accessByteLength: 2 }, {}] as const;
+  ok(aRead !== undefined && bRead !== undefined, "expected captured lazy operands");
 
   for (const [index, switchCase] of switchAction.cases.entries()) {
-    const access = accesses[index]!;
-    const signed = "signed" in access ? access.signed : undefined;
-    const accessByteLength = "accessByteLength" in access
-      ? access.accessByteLength
-      : undefined;
-    const [left, right] = switchCase.body.actions;
+    const width = [8, 16, 32][index] as 8 | 16 | 32;
 
-    ok(left?.kind === "op" && right?.kind === "op", "expected arm-local reads");
-    ok(
-      left.op.kind === "state.read" && right.op.kind === "state.read",
-      "expected arm-local state reads"
+    deepStrictEqual(switchCase.body.actions, []);
+    strictEqual(
+      switchCase.body.result,
+      values.compare(width, "lt_s", aRead.output, bRead.output)
     );
-    strictEqual(left.op.slot, lazyFlagsAChannel);
-    strictEqual(right.op.slot, lazyFlagsBChannel);
-    strictEqual(left.op.signed, signed);
-    strictEqual(right.op.signed, signed);
-    strictEqual(left.op.accessByteLength, accessByteLength);
-    strictEqual(right.op.accessByteLength, accessByteLength);
 
     const result = values.node(switchCase.body.result!);
 
     ok(result.kind === "compare", "expected direct arm compare");
     strictEqual(result.operator, "lt_s");
-    strictEqual(result.a, left.output);
-    strictEqual(result.b, right.output);
   }
 });
 
-test("input-backed equality condition builds lazy cases from the shared operator table", () => {
-  const { actions, flags } = createHarness();
+test("input-backed equality condition builds lazy cases from one captured record", () => {
+  const { values, actions, flags } = createHarness();
   const condition = flags.condition("E");
   const switchAction = switchActions(actions)[0];
 
   ok(switchAction !== undefined, "expected lazy condition switch");
   strictEqual(condition, switchAction.output);
   deepStrictEqual(switchAction.cases.map((entry) => entry.match), expectedLazyConditionCases("E"));
-  deepStrictEqual(
-    switchAction.cases.map((entry) => entry.body.actions.map((action) => {
-      ok(action.kind === "op" && action.op.kind === "state.read", "expected arm-local state read");
-      return action.op.slot;
-    })),
-    [
-      [lazyFlagsAChannel, lazyFlagsBChannel],
-      [lazyFlagsAChannel],
-      [lazyFlagsAChannel, lazyFlagsBChannel],
-      [lazyFlagsAChannel],
-      [lazyFlagsAChannel, lazyFlagsBChannel],
-      [lazyFlagsAChannel]
-    ]
-  );
+  const [, aRead, bRead] = actions.filter(isStateRead);
+
+  ok(aRead !== undefined && bRead !== undefined, "expected captured lazy operands");
+  for (const switchCase of switchAction.cases) {
+    const kind = switchCase.match & 0b11;
+    const width = lazyWidth(switchCase.match);
+    const rightOperand: ValueId = kind === LAZY_FLAGS_KIND.LOGIC_RESULT
+      ? values.const(0)
+      : bRead.output;
+
+    deepStrictEqual(switchCase.body.actions, []);
+    strictEqual(switchCase.body.result, values.compare(width, "eq", aRead.output, rightOperand));
+  }
 });
 
 test("condition falls back to live flag backings after a direct flag write", () => {
@@ -315,7 +344,7 @@ test("condition falls back to live flag backings after a direct flag write", () 
   deepStrictEqual(actions, []);
 });
 
-test("mixed pending and input condition combines pending values with resolve outputs", () => {
+test("mixed pending and input condition combines pending values with resolver outputs", () => {
   const { values, actions, flags } = createHarness();
   const zf = values.const(1);
 
@@ -327,16 +356,25 @@ test("mixed pending and input condition combines pending values with resolve out
   ok(node.kind === "binary", "expected BE condition to lower to CF | ZF");
   strictEqual(node.operator, "or");
   deepStrictEqual(values.node(node.a), { kind: "actionOutput", type: "i32" });
-  strictEqual(resolveOutput(actions, "CF"), node.a);
+  strictEqual(resolvedFlagValue(actions, "CF"), node.a);
   strictEqual(node.b, zf);
   strictEqual(switchActions(actions).length, 0);
 });
 
-test("non-compare-family input condition stays on the helper-backed expression path", () => {
+test("non-compare-family input condition uses a typed resolver call", () => {
   const { actions, flags } = createHarness();
   const condition = flags.condition("S");
 
-  deepStrictEqual(actions, [resolveFlag(condition, "SF")]);
+  const call = resolverCall(actions, "SF");
+
+  ok(call !== undefined, "expected SF resolver call");
+  strictEqual(call.outputs[0], condition);
+  deepStrictEqual(stateReadSlots(actions), [
+    lazyFlagsKindChannel,
+    lazyFlagsAChannel,
+    lazyFlagsBChannel,
+    flagChannel("SF")
+  ]);
   strictEqual(switchActions(actions).length, 0);
 });
 
@@ -424,7 +462,7 @@ test("writeFlag updates one status flag while preserving other pending values", 
   strictEqual(snapshotValues.find((entry) => entry.flag === "ZF")?.value, zf);
 });
 
-test("a direct flag write from input state flushes a full explicit image from resolve ops", () => {
+test("a direct flag write from input state flushes a full explicit image from resolver calls", () => {
   const { values, actions, pending, flags } = createHarness();
   const zf = values.const(1);
 
@@ -440,12 +478,22 @@ test("a direct flag write from input state flushes a full explicit image from re
 
     ok(value !== undefined, `expected ${flag} to be flushed`);
     deepStrictEqual(values.node(value), { kind: "actionOutput", type: "i32" });
-    strictEqual(resolveOutput(actions, flag), value);
+    strictEqual(resolvedFlagValue(actions, flag), value);
   }
   deepStrictEqual(
-    actions,
-    x86StatusFlags.map((flag) => resolveFlag(resolveOutput(actions, flag)!, flag))
+    resolverCalls(actions).map(resolvedStatusFlag),
+    x86StatusFlags
   );
+  const calls = resolverCalls(actions);
+  const sharedResolutionState = calls[0]?.arguments.slice(0, 3).map((argument) => argument.value);
+
+  ok(sharedResolutionState !== undefined, "expected resolver calls");
+  for (const call of calls) {
+    deepStrictEqual(
+      call.arguments.slice(0, 3).map((argument) => argument.value),
+      sharedResolutionState
+    );
+  }
 });
 
 function flagValue(flags: StatusFlagState, flag: X86StatusFlag): ValueId {
@@ -470,4 +518,17 @@ function expectedLazyConditionCase(
   supported: boolean
 ): readonly number[] {
   return supported ? [lazyFlagsKindByte(kind, width)] : [];
+}
+
+function lazyWidth(kindByte: number): 8 | 16 | 32 {
+  switch (kindByte >> 2) {
+    case 0:
+      return 8;
+    case 1:
+      return 16;
+    case 2:
+      return 32;
+    default:
+      throw new Error(`invalid lazy flag kind byte: ${kindByte}`);
+  }
 }

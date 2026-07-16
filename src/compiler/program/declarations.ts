@@ -22,6 +22,14 @@ export class Declarations<T extends Declaration> implements Iterable<T> {
     return this.#byRef.has(ref);
   }
 
+  get(ref: T["ref"]): T | undefined {
+    return this.#byRef.get(ref);
+  }
+
+  find(predicate: (declaration: T) => boolean): T | undefined {
+    return this.#ordered.find(predicate);
+  }
+
   all(): readonly T[] {
     return [...this.#ordered];
   }

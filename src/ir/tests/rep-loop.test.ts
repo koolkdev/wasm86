@@ -76,8 +76,10 @@ function collectLoops(actions: readonly Action[]): LoopAction[] {
           ...collectLoops(action.defaultBody.actions)
         ];
       case "op":
+      case "call":
       case "loopContinue":
       case "finish":
+      case "return":
         return [];
     }
   });

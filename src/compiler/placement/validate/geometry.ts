@@ -98,12 +98,16 @@ function validateProducer(
   }
   if (anchor.id !== authored.id) {
     assert(
+      analysis.actionEffects(producer.action).writes.length === 0,
+      `producer ${producer.output} moves an effectful realization`
+    );
+    assert(
       producer.inputs.every((input) => block.values.isNonTrapping(input)),
       `producer ${producer.output} moves a trapping realization`
     );
   }
 
-  const reads = producer.action.op.effects.reads;
+  const reads = analysis.actionEffects(producer.action).reads;
   let body = authored.body;
   let start = authored.actionIndex + 1;
   const stableThrough = (end: number): void => {

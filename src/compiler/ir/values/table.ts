@@ -22,6 +22,7 @@ import {
   constantValue,
   externalValue,
   loopInputValue,
+  parameterValue,
   unreachableValue
 } from "./leaves.js";
 import { selectValue } from "./select.js";
@@ -46,6 +47,7 @@ type AnyValueDefinition =
   | typeof extendValue
   | typeof externalValue
   | typeof loopInputValue
+  | typeof parameterValue
   | typeof selectValue
   | typeof truncateValue
   | typeof unreachableValue
@@ -238,6 +240,10 @@ export class ValueTable implements ValueBuilder {
 
   external(external: ExternalValueId): ValueId {
     return this.#create(externalValue, { external });
+  }
+
+  parameter(index: number, type: ValueType): ValueId {
+    return this.#create(parameterValue, { index, type });
   }
 
   addActionOutput(bounds?: WidthBounds): ValueId {

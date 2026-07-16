@@ -7,7 +7,7 @@ import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { defaultSegmentForBase } from "#core/segments.js";
-import { irBlockBody, irBlockBodyWithHelpers } from "./harness.js";
+import { irBlockBody } from "./harness.js";
 
 // Pinned harness-embedded bodies (dispatch escape block + sentinel tail):
 // these bytes may only change when the emission itself deliberately does.
@@ -46,34 +46,8 @@ test("a compare and branch emits its golden body", () => {
   );
 });
 
-test("a live-in branch condition emits its lazy switch golden body", () => {
-  // je +0x20.
-  strictEqual(
-    emitGoldenWithHelpers([[0x74, 0x20]]),
-    "01017f02400240024002400240024002400240024041002d00000e0c060006010602060306040605060b41002d0004" +
-      "41002d00084621000c060b41002d00044521000c050b41002f010441002f01084621000c040b41002f01044521000c" +
-      "030b410028020441002802084621000c020b41002802044521000c010b100021000b20000440410041002802900141016a" +
-      "36029001410041a2203602380c010b410041002802900141016a3602900141004182203602380c000b427f0b"
-  );
-});
-
-test("a live-in setcc condition emits its lazy switch golden body", () => {
-  // sete al.
-  strictEqual(
-    emitGoldenWithHelpers([[0x0f, 0x94, 0xc0]]),
-    "01017f02400240024002400240024002400240024041002d00000e0c060006010602060306040605060b41002d0004" +
-      "41002d00084621000c060b41002d00044521000c050b41002f010441002f01084621000c040b41002f01044521000c" +
-      "030b410028020441002802084621000c020b41002802044521000c010b100021000b41004101410020001b3a00184100" +
-      "41002802900141016a3602900141004183203602380c000b427f0b"
-  );
-});
-
 function emitGolden(byteLists: readonly (readonly number[])[]): string {
   return Buffer.from(irBlockBody(blockOf(byteLists)).bytes).toString("hex");
-}
-
-function emitGoldenWithHelpers(byteLists: readonly (readonly number[])[]): string {
-  return Buffer.from(irBlockBodyWithHelpers(blockOf(byteLists, "name")).bytes).toString("hex");
 }
 
 function blockOf(

@@ -5,7 +5,6 @@ import {
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { encodeVariant } from "#compiler/layout/variant-codec.js";
 import { exitLayout } from "#cpu/exit.js";
-import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 import type { RmDecodeHelpers } from "./decode.js";
 import { emitOpcodeDispatch } from "./dispatch.js";
 import { emitOpcodeFetch } from "./fragments.js";
@@ -13,10 +12,11 @@ import type { InterpreterHandler } from "./handlers.js";
 import { InterpreterLocals } from "./locals.js";
 import { emitPrefixStateReset } from "./prefixes.js";
 import { budgetExit } from "./exits.js";
+import type { FunctionCallBindings } from "./function-calls.js";
 
 export function encodeRunLoopBody(
   rmDecode: RmDecodeHelpers,
-  helpers: LegacyHelperIndexRegistryAdapter,
+  calls: FunctionCallBindings,
   handlers: InterpreterHandler[]
 ): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder(1);
@@ -33,13 +33,13 @@ export function encodeRunLoopBody(
   // Completed instructions land on this block's end; faults and unsupported
   // opcodes return from inside.
   body.block();
-  emitOpcodeFetch({ body, scratch, helpers }, { eipLocal: locals.eip, byteLocal: locals.byte });
+  emitOpcodeFetch({ body, scratch, ...calls }, { eipLocal: locals.eip, byteLocal: locals.byte });
   // Fault paths commit the start; prefix cases rebase the eip local.
   body.localGet(locals.eip).localSet(locals.instructionStart);
-  emitPrefixStateReset({ body, scratch, helpers, locals });
+  emitPrefixStateReset({ body, scratch, ...calls, locals });
   // Prefix cases branch here to rescan with their prefix folded into locals.
   body.loop();
-  emitOpcodeDispatch({ body, scratch, helpers, locals, handlers, continueDepth: 1, rmDecode });
+  emitOpcodeDispatch({ body, scratch, ...calls, locals, handlers, continueDepth: 1, rmDecode });
   body.endBlock();
   body.endBlock();
 

@@ -2,7 +2,8 @@ import { analyzeBody } from "#compiler/analysis/analyze.js";
 import type { BodyAnalysis } from "#compiler/analysis/model.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { IrBlock } from "#ir/block.js";
-import { validateIrBlock } from "#ir/validate.js";
+import type { IrFunction } from "#ir/function.js";
+import { validateIrBlock, validateIrFunction } from "#ir/validate.js";
 import { indexPlacement, type PlacementIndex } from "./index.js";
 import type { PlacementPlan } from "./model.js";
 import { planPlacement } from "./plan.js";
@@ -32,6 +33,18 @@ export function placeBody(
       options.allowImplicitEntryFallthrough === true,
     exportedOutputs
   });
+  return placeValidatedBody(block, exportedOutputs);
+}
+
+export function placeFunction(fn: IrFunction): BodyPlacement {
+  validateIrFunction(fn);
+  return placeValidatedBody(fn, []);
+}
+
+function placeValidatedBody(
+  block: IrBlock,
+  exportedOutputs: readonly ValueId[]
+): BodyPlacement {
   const analysis = analyzeBody(block, exportedOutputs);
   const plan = planPlacement(block, analysis);
   const index = indexPlacement(analysis, plan);

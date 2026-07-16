@@ -14,7 +14,7 @@ import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { encodeInterpreterModule } from "#engines/interpreter/module.js";
 import { instantiateWasmInterpreter, writeGuestBytes } from "./support.js";
 import { wasmDefinedFunctionCount } from "#compiler/encoder/tests/body-opcodes.js";
-import { allHelpers } from "#wasm/helpers/module.js";
+import { x86StatusFlags } from "#core/flags/definitions.js";
 
 test("imports cpu state and guest memories in ABI order", () => {
   const module = new WebAssembly.Module(encodeInterpreterModule().bytes);
@@ -33,12 +33,12 @@ test("exports run(fuel) -> i64", async () => {
   );
 });
 
-test("includes lazy flag helpers in the module", () => {
+test("includes the complete status-flag resolver family in the module", () => {
   const encoded = encodeInterpreterModule();
 
   strictEqual(
     wasmDefinedFunctionCount(encoded.bytes),
-    1 + encoded.rmDecodeHelpers.length + allHelpers().length
+    1 + encoded.rmDecodeHelpers.length + x86StatusFlags.length
   );
 });
 

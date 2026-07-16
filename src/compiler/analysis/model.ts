@@ -1,7 +1,8 @@
-import type { StorageAccess } from "#compiler/ir/operations/definition.js";
+import type { StorageAccess } from "#compiler/ir/effects.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type {
   Action,
+  CallAction,
   IfAction,
   OpAction,
   SwitchAction
@@ -39,9 +40,11 @@ export type ValueDemand = Readonly<{
   consumedAt: SiteId;
 }>;
 
+export type ProducingAction = OpAction | CallAction;
+
 export type Producer = Readonly<{
   output: ValueId;
-  action: OpAction;
+  action: ProducingAction;
   site: SiteId;
   inputs: readonly ValueId[];
 }>;
@@ -53,6 +56,11 @@ export type ControlProducer = Readonly<{
 
 export type OperationSite = Readonly<{
   action: OpAction;
+  site: SiteId;
+}>;
+
+export type CallSite = Readonly<{
+  action: CallAction;
   site: SiteId;
 }>;
 
@@ -75,5 +83,12 @@ export type BodyAnalysis = Readonly<{
   exportedOutputs(): readonly ValueId[];
 
   operations(): readonly OperationSite[];
+  calls(): readonly CallSite[];
+  actionEffects(action: ProducingAction): Readonly<{
+    reads: readonly StorageAccess[];
+    writes: readonly StorageAccess[];
+  }>;
+  actionMustExecute(action: ProducingAction): boolean;
   opActionMustExecute(action: OpAction): boolean;
+  callActionMustExecute(action: CallAction): boolean;
 }>;

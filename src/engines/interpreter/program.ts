@@ -2,6 +2,7 @@ import { assert } from "#common/assert.js";
 import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
+import { functionType } from "#compiler/program/function-type.js";
 import type { LegacyEffects, LegacyFunctionBindings } from "#compiler/program/legacy-body.js";
 import {
   exportRef,
@@ -15,17 +16,16 @@ import {
   type SignatureRef
 } from "#compiler/program/refs.js";
 import type { OpcodeDispatchNode } from "#core/decoder/opcode-dispatch.js";
-import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
-import { helperFunctionName, type HelperCallKey } from "#wasm/helpers/key.js";
-import { allHelpers, encodeHelperBody, helperFunctionType } from "#wasm/helpers/module.js";
+import { x86StatusFlags } from "#core/flags/definitions.js";
 import {
-  LegacyHelperIndexRegistryAdapter,
-  type LegacyHelperIndexBinding
-} from "#wasm/helpers/registry.js";
+  statusFlagResolvers,
+  statusFlagResolverType
+} from "#core/flags/resolvers.js";
+import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import {
   encodeRmDecodeHelperBody,
   RmDecodeHelpers,
-  rmDecodeHelperType,
+  rmDecodeFunctionType,
   type ResolvedRmDecodeFunction
 } from "./decode.js";
 import type { InterpreterHandler } from "./handlers.js";
@@ -43,25 +43,16 @@ type RmDecodeFunctionRef = Readonly<{
   ref: FunctionRef;
 }>;
 
-type HelperFunctionRef = Readonly<{
-  key: HelperCallKey;
-  ref: FunctionRef;
-}>;
-
-type CallRequirements = Readonly<{
-  rmLengths: readonly number[];
-  helpers: readonly HelperCallKey[];
-}>;
-
 type InterpreterProgramDeclarations = Readonly<{
   builder: ProgramBuilder;
   runSignature: SignatureRef;
   rmDecodeSignature: SignatureRef;
-  helperSignature: SignatureRef;
   cpuState: ResourceRef;
   guestMemory: ResourceRef;
   rmGlobals: RmDecodeGlobalRefs;
 }>;
+
+const interpreterRunFunctionType = functionType(["i32"], ["i64"]);
 
 export type BuiltInterpreterProgram = Readonly<{
   program: Program;
@@ -73,18 +64,17 @@ export type BuiltInterpreterProgram = Readonly<{
 // Handler metadata remains an output of the existing raw root and is filled
 // when encodeProgram realizes that root.
 export function buildInterpreterProgram(): BuiltInterpreterProgram {
-  const calls = callRequirements(interpreterDispatchRoot);
+  const rmDecodeLengths = requiredRmDecodeLengths(interpreterDispatchRoot);
   const declarations = createInterpreterProgram();
   const handlers: InterpreterHandler[] = [];
-  const helperFunctions = declareHelpers(declarations, calls.helpers);
-  const rmFunctions = declareRmDecodeHelpers(declarations, calls.rmLengths);
+  const rmFunctions = declareRmDecodeHelpers(declarations, rmDecodeLengths);
+  const resolverFunctions = statusFlagResolvers.members(x86StatusFlags);
   const run = functionRef("interpreter.run");
   const adapter = new DeclaredDependencyLegacyRootAdapter({
     cpuState: declarations.cpuState,
     guestMemory: declarations.guestMemory,
     rmGlobals: declarations.rmGlobals,
     rmFunctions,
-    helperFunctions,
     handlers
   });
 
@@ -93,13 +83,13 @@ export function buildInterpreterProgram(): BuiltInterpreterProgram {
     signature: declarations.runSignature,
     calls: [
       ...rmFunctions.map((binding) => binding.ref),
-      ...helperFunctions.map((binding) => binding.ref)
+      ...resolverFunctions
     ],
     resources: [declarations.cpuState, declarations.guestMemory],
     globals: rmGlobalRefs(declarations.rmGlobals),
     tables: [],
+    irBlocks: [],
     effects: legacyInterpreterEffects,
-    traps: "may",
     build: (bindings) => adapter.build(bindings)
   });
   declarations.builder.exportFunction({
@@ -111,7 +101,7 @@ export function buildInterpreterProgram(): BuiltInterpreterProgram {
   return {
     program: declarations.builder.finish(),
     handlers,
-    rmDecodeHelpers: [...calls.rmLengths]
+    rmDecodeHelpers: [...rmDecodeLengths]
   };
 }
 
@@ -119,7 +109,6 @@ function createInterpreterProgram(): InterpreterProgramDeclarations {
   const builder = new ProgramBuilder();
   const runSignature = signatureRef("interpreter.run-signature");
   const rmDecodeSignature = signatureRef("interpreter.rm-decode-signature");
-  const helperSignature = signatureRef("interpreter.raw-helper-signature");
   const cpuState = resourceRef("interpreter.cpu-state");
   const guestMemory = resourceRef("interpreter.guest-memory");
   const rmGlobals = {
@@ -130,10 +119,13 @@ function createInterpreterProgram(): InterpreterProgramDeclarations {
 
   builder.signature({
     ref: runSignature,
-    type: { params: [wasmValueType.i32], results: [wasmValueType.i64] }
+    type: interpreterRunFunctionType
   });
-  builder.signature({ ref: rmDecodeSignature, type: rmDecodeHelperType });
-  builder.signature({ ref: helperSignature, type: helperFunctionType });
+  builder.signature({ ref: rmDecodeSignature, type: rmDecodeFunctionType });
+  builder.signature({
+    ref: signatureRef("interpreter.status-flag-resolver-signature"),
+    type: statusFlagResolverType
+  });
   builder.importMemory({
     ref: cpuState,
     moduleName: wasmImport.namespace,
@@ -169,33 +161,10 @@ function createInterpreterProgram(): InterpreterProgramDeclarations {
     builder,
     runSignature,
     rmDecodeSignature,
-    helperSignature,
     cpuState,
     guestMemory,
     rmGlobals
   };
-}
-
-function declareHelpers(
-  program: InterpreterProgramDeclarations,
-  helpers: readonly HelperCallKey[]
-): readonly HelperFunctionRef[] {
-  return helpers.map((key) => {
-    const ref = functionRef(`interpreter.helper.${helperFunctionName(key)}`);
-
-    program.builder.legacyFunction({
-      ref,
-      signature: program.helperSignature,
-      calls: [],
-      resources: [program.cpuState],
-      globals: [],
-      tables: [],
-      effects: legacyInterpreterEffects,
-      traps: "may",
-      build: () => encodeHelperBody(key)
-    });
-    return { key, ref };
-  });
 }
 
 function declareRmDecodeHelpers(
@@ -212,8 +181,8 @@ function declareRmDecodeHelpers(
       resources: [program.cpuState, program.guestMemory],
       globals: rmGlobalRefs(program.rmGlobals),
       tables: [],
+      irBlocks: [],
       effects: legacyInterpreterEffects,
-      traps: "may",
       build: (bindings) => {
         const cpuStateMemoryIndex = bindings.resources.get(program.cpuState);
         const guestMemoryIndex = bindings.resources.get(program.guestMemory);
@@ -244,7 +213,6 @@ type DeclaredDependencyLegacyRootOptions = Readonly<{
   guestMemory: ResourceRef;
   rmGlobals: RmDecodeGlobalRefs;
   rmFunctions: readonly RmDecodeFunctionRef[];
-  helperFunctions: readonly HelperFunctionRef[];
   handlers: InterpreterHandler[];
 }>;
 
@@ -257,8 +225,7 @@ class DeclaredDependencyLegacyRootAdapter {
     this.#options = {
       ...options,
       rmGlobals: { ...options.rmGlobals },
-      rmFunctions: options.rmFunctions.map((binding) => ({ ...binding })),
-      helperFunctions: options.helperFunctions.map((binding) => ({ ...binding }))
+      rmFunctions: options.rmFunctions.map((binding) => ({ ...binding }))
     };
   }
 
@@ -290,19 +257,12 @@ class DeclaredDependencyLegacyRootAdapter {
       );
       return { opcodeLength: binding.opcodeLength, functionIndex };
     });
-    const helperBindings = this.#options.helperFunctions.map((binding): LegacyHelperIndexBinding => {
-      const functionIndex = bindings.functions.get(binding.ref);
-
-      assert(
-        functionIndex !== undefined,
-        `missing resolved interpreter helper ${helperFunctionName(binding.key)}`
-      );
-      return { key: binding.key, functionIndex };
-    });
     const emittedHandlers: InterpreterHandler[] = [];
     const body = encodeRunLoopBody(
       new RmDecodeHelpers(rmFunctions, { base, offset, cursor }),
-      new LegacyHelperIndexRegistryAdapter(helperBindings),
+      {
+        functionIndices: bindings.definitionIndices
+      },
       emittedHandlers
     );
 
@@ -315,17 +275,14 @@ function rmGlobalRefs(globals: RmDecodeGlobalRefs): readonly GlobalRef[] {
   return [globals.base, globals.offset, globals.cursor];
 }
 
-// Temporary bridge for the opaque run loop. Its declared calls may be a
-// conservative superset: all flag helpers, plus one length-specialized R/M
-// decoder for every ModRM opcode length in the dispatch tree.
-function callRequirements(root: OpcodeDispatchNode): CallRequirements {
+// The opaque run loop must conservatively declare every length-specialized
+// R/M decoder it may call. Its complete status-flag function inventory is
+// supplied separately by Core flags.
+function requiredRmDecodeLengths(root: OpcodeDispatchNode): readonly number[] {
   const rmLengths = new Set<number>();
 
   collectRmLengths(root, rmLengths);
-  return {
-    rmLengths: [...rmLengths].sort((left, right) => left - right),
-    helpers: allHelpers()
-  };
+  return [...rmLengths].sort((left, right) => left - right);
 }
 
 function collectRmLengths(node: OpcodeDispatchNode, lengths: Set<number>): void {

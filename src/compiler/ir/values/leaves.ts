@@ -21,6 +21,9 @@ type LoopInputNode = Readonly<{ kind: "loopInput" }>;
 type ExternalArgs = Readonly<{ external: ExternalValueId }>;
 type ExternalNode = Readonly<ExternalArgs & { kind: "external" }>;
 
+type ParameterArgs = Readonly<{ index: number; type: ValueType }>;
+type ParameterNode = Readonly<ParameterArgs & { kind: "parameter" }>;
+
 export const constantValue: ValueDefinition<ConstArgs, ConstNode> = {
   create: ({ value }) => ({ kind: "const", value: i32(value) }),
   internKey: (node) => [node.value],
@@ -82,6 +85,21 @@ export const externalValue: ValueDefinition<ExternalArgs, ExternalNode> = {
   widthBounds: () => unboundedWidthBounds,
   captureMode: "reemit",
   emit: (_id, node, target) => target.emitExternal(node.external)
+};
+
+export const parameterValue: ValueDefinition<ParameterArgs, ParameterNode> = {
+  create: ({ index, type }) => {
+    assert(Number.isInteger(index) && index >= 0, `invalid function parameter index: ${index}`);
+    return { kind: "parameter", index, type };
+  },
+  internKey: (node) => [node.index, node.type],
+  resultType: (node) => node.type,
+  widthBounds: (node) => {
+    assert(node.type === "i32", "width bounds requested for i64 parameter");
+    return unboundedWidthBounds;
+  },
+  captureMode: "reemit",
+  emit: (_id, node, target) => target.emitParameter(node.index)
 };
 
 function constWidthBounds(value: number): WidthBounds {

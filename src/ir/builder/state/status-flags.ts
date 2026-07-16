@@ -9,20 +9,13 @@ import {
   statusFlagValuesForSource,
   type StatusFlagValues
 } from "#core/flags/values.js";
-import {
-  compareIsSigned,
-  type CompareOperator
-} from "#compiler/ir/values/comparison.js";
+import { statusFlagResolvers } from "#core/flags/resolvers.js";
+import type { CompareOperator } from "#compiler/ir/values/comparison.js";
 import type { BodyBuilder, SwitchArm } from "../../body-builder.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "../../lazy-flags.js";
-import {
-  stateRead,
-  type StateReadArgs
-} from "#compiler/ir/operations/state.js";
-import { resolveFlag } from "#compiler/ir/operations/resolve-flag.js";
 import { valueTableFlagOps } from "../../flag-value-ops.js";
 import {
-  flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot
+  flagChannel, lazyFlagsAChannel, lazyFlagsBChannel, lazyFlagsKindChannel
 } from "../../slots.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
@@ -50,6 +43,11 @@ type StatusFlagStateSnapshot = Readonly<{
   sourcesLength: number;
   current: StatusFlagTrackerState;
   inputFlags: ReadonlyMap<X86StatusFlag, ValueId>;
+}>;
+type LazyFlagRecordValues = Readonly<{
+  kind: ValueId;
+  a: ValueId;
+  b: ValueId;
 }>;
 
 const logicUndefFlagPolicy: UndefFlagPolicy = "zero";
@@ -342,12 +340,12 @@ export class StatusFlagState {
       return undefined;
     }
 
-    const selector = this.#cells.read(lazyFlagsKindChannel);
+    const record = this.#captureLazyFlagRecord();
 
     return this.#currentBody().switch(
-      selector,
-      caseSpecs.map((spec) => this.#lazyConditionArm(spec)),
-      (arm) => this.#lazyConditionDefault(arm, CONDITIONS[cc].expr)
+      record.kind,
+      caseSpecs.map((spec) => this.#lazyConditionArm(spec, record)),
+      (arm) => this.#lazyConditionDefault(arm, CONDITIONS[cc].expr, record)
     );
   }
 
@@ -355,45 +353,26 @@ export class StatusFlagState {
     return CONDITIONS[cc].reads.every((flag) => getBacking(this.#current.backings, flag).kind === "input");
   }
 
-  #lazyConditionArm(spec: LazyConditionCaseSpec): SwitchArm {
+  #lazyConditionArm(
+    spec: LazyConditionCaseSpec,
+    record: LazyFlagRecordValues
+  ): SwitchArm {
     return {
       match: lazyFlagsKindByte(spec.kind, spec.width),
-      build: (arm) => {
-        const left = arm.operation(
-          stateRead.create(this.#lazyOperandRead(lazyFlagsAChannel, spec))
-        );
-
-        if (spec.kind === LAZY_FLAGS_KIND.LOGIC_RESULT) {
-          return this.#values.compare(spec.width, spec.operator, left, this.#values.const(0));
-        }
-
-        const right = arm.operation(
-          stateRead.create(this.#lazyOperandRead(lazyFlagsBChannel, spec))
-        );
-
-        return this.#values.compare(spec.width, spec.operator, left, right);
-      }
+      build: (arm) => arm.values.compare(
+        spec.width,
+        spec.operator,
+        record.a,
+        spec.kind === LAZY_FLAGS_KIND.LOGIC_RESULT ? arm.values.const(0) : record.b
+      )
     };
   }
 
-  #lazyOperandRead(slot: StateSlot, spec: LazyConditionCaseSpec): StateReadArgs {
-    const signed = compareIsSigned(spec.operator);
-
-    switch (spec.width) {
-      case 8:
-        return signed
-          ? { slot, signed: true, accessByteLength: 1 }
-          : { slot, accessByteLength: 1 };
-      case 16:
-        return signed
-          ? { slot, signed: true, accessByteLength: 2 }
-          : { slot, accessByteLength: 2 };
-      case 32:
-        return { slot };
-    }
-  }
-
-  #lazyConditionDefault(body: BodyBuilder, expr: FlagBoolExpr): ValueId {
+  #lazyConditionDefault(
+    body: BodyBuilder,
+    expr: FlagBoolExpr,
+    record: LazyFlagRecordValues
+  ): ValueId {
     const flags = new Map<X86StatusFlag, ValueId>();
 
     return this.#flagBoolExpr(expr, (flag) => {
@@ -403,7 +382,7 @@ export class StatusFlagState {
         return cached;
       }
 
-      const resolved = body.operation(resolveFlag.create({ flag }));
+      const resolved = this.#callStatusFlagResolver(body, flag, record);
 
       flags.set(flag, resolved);
       return resolved;
@@ -449,9 +428,42 @@ export class StatusFlagState {
       return cached;
     }
 
-    const resolved = this.#currentBody().operation(resolveFlag.create({ flag }));
+    const resolved = this.#callStatusFlagResolver(
+      this.#currentBody(),
+      flag,
+      this.#captureLazyFlagRecord()
+    );
 
     this.#inputFlags.set(flag, resolved);
+    return resolved;
+  }
+
+  #captureLazyFlagRecord(): LazyFlagRecordValues {
+    // "Input-backed" means the value belongs to the incoming StateCells
+    // snapshot, not necessarily that it must be loaded from memory here.
+    // Capture the three fields together so joined/carried SSA state reaches
+    // the resolver as one coherent lazy record.
+    return {
+      kind: this.#cells.read(lazyFlagsKindChannel),
+      a: this.#cells.read(lazyFlagsAChannel),
+      b: this.#cells.read(lazyFlagsBChannel)
+    };
+  }
+
+  #callStatusFlagResolver(
+    body: BodyBuilder,
+    flag: X86StatusFlag,
+    record: LazyFlagRecordValues
+  ): ValueId {
+    const concrete = this.#cells.read(flagChannel(flag));
+    const [resolved] = body.call(statusFlagResolvers.get(flag), [
+      record.kind,
+      record.a,
+      record.b,
+      concrete
+    ]);
+
+    assert(resolved !== undefined, `status-flag resolver for ${flag} has no result`);
     return resolved;
   }
 

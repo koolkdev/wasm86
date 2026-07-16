@@ -10,7 +10,6 @@ import {
 } from "#compiler/ir/operations/index.js";
 import type { CellRef } from "#compiler/refs/cell.js";
 import type {
-  HelperCall,
   OperationEmitTarget,
   OperationValueEmitter
 } from "#compiler/ir/operations/definition.js";
@@ -20,6 +19,8 @@ import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
 import type { ExternalValueId } from "#ir/operands.js";
+import type { CallAction } from "#ir/actions.js";
+import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
@@ -35,7 +36,7 @@ export type ValueEmitterContext = Readonly<{
   locals: readonly number[];
   // External id -> the Wasm local supplied by the embedding.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
-  helperFunctionIndex(helper: HelperCall): number;
+  functionIndex(target: FunctionDefinition): number;
 }>;
 
 // Executes a placement plan mechanically. Mutable state records only which
@@ -72,8 +73,7 @@ export class ValueEmitter implements OperationValueEmitter {
       withTemporaryLocal: (type, callback) => {
         context.scratch.withLocals([wasmTypeForValue(type)], ([local]) => callback(local));
       },
-      cellLocal: (cell) => this.#cellLocal(cell),
-      helperFunctionIndex: context.helperFunctionIndex
+      cellLocal: (cell) => this.#cellLocal(cell)
     };
     this.#valueContext = {
       body: context.body,
@@ -85,6 +85,7 @@ export class ValueEmitter implements OperationValueEmitter {
         assert(local !== undefined, `no local bound for external value ${external}`);
         context.body.localGet(local);
       },
+      emitParameter: (index) => context.body.localGet(index),
       emitLoopInput: (id) => context.body.localGet(this.valueLocal(id))
     };
   }
@@ -106,6 +107,13 @@ export class ValueEmitter implements OperationValueEmitter {
 
   emitOperation(operation: Operation): void {
     emitCompilerOperation(this.#operationTarget, this, operation);
+  }
+
+  emitCall(action: CallAction): void {
+    for (const argument of action.arguments) {
+      this.emitUse(argument.value);
+    }
+    this.#body.callFunction(this.#context.functionIndex(action.target));
   }
 
   constValue(value: ValueId): number | undefined {
@@ -227,9 +235,15 @@ export class ValueEmitter implements OperationValueEmitter {
       case "producer": {
         const producer = this.#analysis.producer(value);
 
-        assert(producer !== undefined, `action output ${value} has no operation producer`);
-        this.emitOperation(producer.action.op);
-        return;
+        assert(producer !== undefined, `action output ${value} has no producer`);
+        switch (producer.action.kind) {
+          case "op":
+            this.emitOperation(producer.action.op);
+            return;
+          case "call":
+            this.emitCall(producer.action);
+            return;
+        }
       }
       case "compute":
         this.#values.emit(value, this.#valueContext);

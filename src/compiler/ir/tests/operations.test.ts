@@ -12,7 +12,6 @@ import {
   memoryResolve,
   memoryWrite
 } from "#compiler/ir/operations/memory.js";
-import { resolveFlag } from "#compiler/ir/operations/resolve-flag.js";
 import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import { CellRef } from "#compiler/refs/cell.js";
@@ -23,7 +22,6 @@ import {
   flagChannel,
   gprChannel,
   lazyFlagsAChannel,
-  lazyFlagsBChannel,
   lazyFlagsKindChannel,
   segmentAccessChannel,
   segmentLimitChannel,
@@ -44,7 +42,6 @@ test("every operation constructs through its owner", () => {
     memoryWrite.create({ address, byteOffset: 4, value, width: 16 }),
     memoryCheck.create({ address, byteLength }),
     memoryResolve.create({ address, byteLength }),
-    resolveFlag.create({ flag: "ZF" }),
     cellRead.create({ cell }),
     cellWrite.create({ cell, value, initialization: "seed" })
   ];
@@ -56,7 +53,6 @@ test("every operation constructs through its owner", () => {
     "memory.write",
     "memory.check",
     "memory.resolve",
-    "cpu.resolveFlag",
     "cell.read",
     "cell.write"
   ]);
@@ -65,12 +61,12 @@ test("every operation constructs through its owner", () => {
 test("operation owners do not copy caller metadata", () => {
   const args = {
     slot: gprChannel("eax"),
-    helper: { kind: "lazyFlag", flag: "ZF" },
+    loweringMetadata: { kind: "unrelated" },
     callerMetadata: true
   };
   const operation = stateRead.create(args);
 
-  strictEqual(operation.helper, undefined);
+  strictEqual("loweringMetadata" in operation, false);
   strictEqual("callerMetadata" in operation, false);
 });
 
@@ -85,14 +81,12 @@ test("dynamic byte state definitions expose each semantic input once", () => {
   deepStrictEqual(read.inputs, [{ value: index, type: "i32" }]);
   deepStrictEqual(read.result, { type: "i32", bounds: fitsUnsigned(8) });
   deepStrictEqual(read.effects, { reads: [{ space: "state", slot }], writes: [] });
-  deepStrictEqual(read.helper, undefined);
   deepStrictEqual(write.inputs, [
     { value: index, type: "i32" },
     { value, type: "i32" }
   ]);
   deepStrictEqual(write.result, undefined);
   deepStrictEqual(write.effects, { reads: [], writes: [{ space: "state", slot }] });
-  deepStrictEqual(write.helper, undefined);
 });
 
 test("operation inputs are the complete semantic dependencies", () => {
@@ -147,8 +141,7 @@ test("operation emission consumes every declared input position once", () => {
     withTemporaryLocal: (_type: "i32" | "i64", callback: (local: number) => void) => {
       callback(0);
     },
-    cellLocal: () => 0,
-    helperFunctionIndex: () => 0
+    cellLocal: () => 0
   };
 
   function emittedUses(operation: Operation) {
@@ -205,8 +198,7 @@ test("a folded operation input needs neither emission nor a temporary", () => {
       requestedTemporary = true;
       callback(0);
     },
-    cellLocal: () => 0,
-    helperFunctionIndex: () => 0
+    cellLocal: () => 0
   }, {
     emitUse: (id) => uses.push(id),
     constValue: (id) => id === byteLength ? 4 : undefined
@@ -226,8 +218,7 @@ test("a static memory check rejects an empty range", () => {
       withTemporaryLocal: () => {
         throw new Error("static check requested a temporary");
       },
-      cellLocal: () => 0,
-      helperFunctionIndex: () => 0
+      cellLocal: () => 0
     }, {
       emitUse: () => {},
       constValue: (id) => id === byteLength ? 0 : undefined
@@ -292,8 +283,7 @@ test("memory definitions expose typed inputs, effects, and results", () => {
       { value: byteLength, type: "i32" }
     ],
     result: { type: "i32", bounds: fitsUnsigned(1) },
-    effects: { reads: [{ space: "memoryBounds" }], writes: [] },
-    helper: undefined
+    effects: { reads: [{ space: "memoryBounds" }], writes: [] }
   };
 
   const check = memoryCheck.create({ address, byteLength });
@@ -302,14 +292,12 @@ test("memory definitions expose typed inputs, effects, and results", () => {
   deepStrictEqual({
     inputs: check.inputs,
     result: check.result,
-    effects: check.effects,
-    helper: check.helper
+    effects: check.effects
   }, expectedMemoryBoundsUse);
   deepStrictEqual({
     inputs: resolve.inputs,
     result: resolve.result,
-    effects: resolve.effects,
-    helper: resolve.helper
+    effects: resolve.effects
   }, expectedMemoryBoundsUse);
   deepStrictEqual(
     memoryRead.create({ address, byteOffset: 0, width: 32, signed: true }).result,
@@ -323,23 +311,6 @@ test("memory definitions expose typed inputs, effects, and results", () => {
     () => memoryWrite.create({ address, byteOffset: 1.5, value, width: 8 }),
     /memory\.write byte offset must be an unsigned 32-bit integer/
   );
-});
-
-test("flag resolution declares state reads and its helper call", () => {
-  const operation = resolveFlag.create({ flag: "ZF" });
-
-  deepStrictEqual(operation.inputs, []);
-  deepStrictEqual(operation.result, { type: "i32", bounds: fitsUnsigned(1) });
-  deepStrictEqual(operation.effects, {
-    reads: [
-      { space: "state", slot: flagChannel("ZF") },
-      { space: "state", slot: lazyFlagsKindChannel },
-      { space: "state", slot: lazyFlagsAChannel },
-      { space: "state", slot: lazyFlagsBChannel }
-    ],
-    writes: []
-  });
-  deepStrictEqual(operation.helper, { kind: "lazyFlag", flag: "ZF" });
 });
 
 test("typed cell definitions expose exact identity effects", () => {

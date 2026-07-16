@@ -1,29 +1,12 @@
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import type { CellRef } from "#compiler/refs/cell.js";
+import type { StorageEffects } from "#compiler/ir/effects.js";
 import type {
   ValueId,
   ValueInput,
   ValueType,
   WidthBounds
 } from "#compiler/ir/values/types.js";
-import type { X86StatusFlag } from "#core/flags/definitions.js";
-import type { StateSlot } from "#ir/slots.js";
-
-export type StorageAccess =
-  | Readonly<{ space: "state"; slot: StateSlot }>
-  | Readonly<{ space: "memory" }>
-  | Readonly<{ space: "memoryBounds" }>
-  | Readonly<{ space: "cell"; cell: CellRef }>;
-
-export type OperationEffects = Readonly<{
-  reads: readonly StorageAccess[];
-  writes: readonly StorageAccess[];
-}>;
-
-export type HelperCall = Readonly<{
-  kind: "lazyFlag";
-  flag: X86StatusFlag;
-}>;
+import type { CellRef } from "#compiler/refs/cell.js";
 
 // i64 results structurally carry no i32 width bounds.
 export type OperationResult =
@@ -39,8 +22,7 @@ export type OperationNode<
   // Repeated ids are repeated semantic uses and remain repeated entries.
   inputs: readonly ValueInput[];
   result: Result;
-  effects: OperationEffects;
-  helper?: HelperCall;
+  effects: StorageEffects;
 }>;
 
 export type OperationValueEmitter = Readonly<{
@@ -66,7 +48,6 @@ export type OperationEmitTarget = Readonly<{
     callback: (local: number) => void
   ): void;
   cellLocal(cell: CellRef): number;
-  helperFunctionIndex(helper: HelperCall): number;
 }>;
 
 export type OperationDefinition<

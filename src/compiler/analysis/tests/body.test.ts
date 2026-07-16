@@ -2,19 +2,24 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { analyzeBody } from "#compiler/analysis/analyze.js";
+import type { StorageEffects } from "#compiler/ir/effects.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Action } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
+import { functionType } from "#compiler/program/function-type.js";
+import { FunctionDefinition } from "#compiler/program/functions.js";
+import { functionRef } from "#compiler/program/refs.js";
 import {
   memoryCheck,
   memoryRead,
-  resolveFlag,
   stateRead,
   stateWrite
 } from "#ir/tests/storage-op-helpers.js";
+
+const noEffects: StorageEffects = { reads: [], writes: [] };
 
 test("sites form one dense preorder and expose body geometry", () => {
   const values = new ValueTable();
@@ -382,30 +387,81 @@ test("export roots preserve order and use the terminal boundary", () => {
   strictEqual(analysis.useCount(second), 2);
 });
 
-test("operation execution follows result liveness", () => {
+test("pure call execution follows result liveness", () => {
   const values = new ValueTable();
   const first = values.addActionOutput(fitsUnsigned(1));
   const second = values.addActionOutput(fitsUnsigned(1));
   const dead = values.addActionOutput(fitsUnsigned(1));
-  const firstResolve = resolveFlag(first, "ZF");
-  const secondResolve = resolveFlag(second, "ZF");
-  const deadResolve = resolveFlag(dead, "CF");
+  const sourceKind = values.const(0);
+  const operandA = values.const(1);
+  const operandB = values.const(2);
+  const concrete = values.const(3);
+  const target = new FunctionDefinition({
+    ref: functionRef("tests.analysis.pure-call"),
+    type: functionType(["i32", "i32", "i32", "i32"], ["i32"]),
+    effects: noEffects,
+    owner: undefined,
+    build: () => {}
+  });
+  const args = [sourceKind, operandA, operandB, concrete].map((value) => ({
+    value,
+    type: "i32" as const
+  }));
+  const call = (output: ValueId) => ({
+    kind: "call" as const,
+    target,
+    arguments: args,
+    outputs: [output]
+  });
+  const firstCall = call(first);
+  const secondCall = call(second);
+  const deadCall = call(dead);
   const analysis = analyzeBody({
     values,
     body: {
       actions: [
-        firstResolve,
+        firstCall,
         stateWrite(gprChannel("eax"), first),
-        secondResolve,
+        secondCall,
         stateWrite(gprChannel("ebx"), second),
-        deadResolve
+        deadCall
       ]
     }
   });
 
-  strictEqual(analysis.opActionMustExecute(firstResolve), true);
-  strictEqual(analysis.opActionMustExecute(secondResolve), true);
-  strictEqual(analysis.opActionMustExecute(deadResolve), false);
+  strictEqual(analysis.callActionMustExecute(firstCall), true);
+  strictEqual(analysis.callActionMustExecute(secondCall), true);
+  strictEqual(analysis.callActionMustExecute(deadCall), false);
+  deepStrictEqual(analysis.calls().map((site) => site.action), [
+    firstCall,
+    secondCall,
+    deadCall
+  ]);
+  deepStrictEqual(analysis.producer(first)?.inputs, [sourceKind, operandA, operandB, concrete]);
+});
+
+test("effectful calls remain live even when their result is unused", () => {
+  const values = new ValueTable();
+  const argument = values.external(0);
+  const output = values.addActionOutput();
+  const target = new FunctionDefinition({
+    ref: functionRef("tests.analysis.effectful-call"),
+    type: functionType(["i32"], ["i32"]),
+    effects: { reads: [], writes: [{ space: "state", slot: gprChannel("eax") }] },
+    owner: undefined,
+    build: () => {}
+  });
+  const action = {
+    kind: "call",
+    target,
+    arguments: [{ value: argument, type: "i32" }],
+    outputs: [output]
+  } as const;
+  const analysis = analyzeBody({ values, body: { actions: [action] } });
+
+  strictEqual(analysis.isLive(output), false);
+  strictEqual(analysis.isLive(argument), true);
+  strictEqual(analysis.callActionMustExecute(action), true);
 });
 
 test("queries reject unknown values, sites, and bodies", () => {

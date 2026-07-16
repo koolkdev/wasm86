@@ -1,10 +1,14 @@
 import { assert } from "#common/assert.js";
-import type { StorageAccess } from "#compiler/ir/operations/definition.js";
+import type {
+  StorageEffects,
+  StorageAccess
+} from "#compiler/ir/effects.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   bodyFinal,
   type Action,
+  type CallAction,
   type IfAction,
   type OpAction,
   type SwitchAction
@@ -15,8 +19,10 @@ import type {
   BodyAnalysis,
   BodyPathStep,
   BodySite,
+  CallSite,
   ControlProducer,
   OperationSite,
+  ProducingAction,
   Producer,
   SiteId,
   ValueDemand
@@ -56,8 +62,13 @@ class BodyAnalyzer implements BodyAnalysis {
 
   readonly #operations: OperationSite[] = [];
   readonly #operationActions = new Set<OpAction>();
+  readonly #calls: CallSite[] = [];
+  readonly #callActions = new Set<CallAction>();
 
-  constructor(block: IrBlock, exportedOutputs: Iterable<ValueId>) {
+  constructor(
+    block: IrBlock,
+    exportedOutputs: Iterable<ValueId>
+  ) {
     this.#block = block;
     this.#siteIndex = new SiteIndex(block.body);
     this.#useCounts = new Uint32Array(block.values.size());
@@ -67,6 +78,11 @@ class BodyAnalyzer implements BodyAnalysis {
     this.#recordExportDemands();
     this.#seedRoots();
     this.#propagateUses();
+    if (this.#recordRequiredCallDemands()) {
+      this.#useCounts.fill(0);
+      this.#seedRoots();
+      this.#propagateUses();
+    }
 
     assert(
       this.#writesBySite.length === this.#siteIndex.sites().length &&
@@ -144,11 +160,43 @@ class BodyAnalyzer implements BodyAnalysis {
     return this.#operations;
   }
 
-  opActionMustExecute(action: OpAction): boolean {
-    assert(this.#operationActions.has(action), "operation action is not part of this analysis");
+  calls(): readonly CallSite[] {
+    return this.#calls;
+  }
+
+  actionEffects(action: ProducingAction): StorageEffects {
+    switch (action.kind) {
+      case "op":
+        assert(this.#operationActions.has(action), "operation action is not part of this analysis");
+        return action.op.effects;
+      case "call":
+        assert(this.#callActions.has(action), "call action is not part of this analysis");
+        return action.target.effects;
+    }
+  }
+
+  actionMustExecute(action: ProducingAction): boolean {
     const output = actionOutput(action);
 
-    return output === undefined || this.#useCounts[output] !== 0;
+    if (output !== undefined && this.#useCounts[output] !== 0) {
+      return true;
+    }
+    switch (action.kind) {
+      case "op":
+        assert(this.#operationActions.has(action), "operation action is not part of this analysis");
+        return output === undefined;
+      case "call":
+        assert(this.#callActions.has(action), "call action is not part of this analysis");
+        return action.target.effects.writes.length !== 0;
+    }
+  }
+
+  opActionMustExecute(action: OpAction): boolean {
+    return this.actionMustExecute(action);
+  }
+
+  callActionMustExecute(action: CallAction): boolean {
+    return this.actionMustExecute(action);
   }
 
   #walkBody(body: Body): BodyWalkResult {
@@ -216,6 +264,24 @@ class BodyAnalyzer implements BodyAnalysis {
 
         return action.op.effects.writes;
       }
+      case "call": {
+        this.#calls.push({ action, site });
+        this.#callActions.add(action);
+        const inputs = action.arguments.map((argument) => argument.value);
+        const output = actionOutput(action);
+        const effects = action.target.effects;
+
+        if (output === undefined) {
+          return effects.writes;
+        }
+
+        assert(
+          !this.#producers.has(output) && !this.#controlProductions.has(output),
+          `value ${output} already has a producer`
+        );
+        this.#producers.set(output, { output, action, site, inputs });
+        return effects.writes;
+      }
       case "if": {
         this.#roots.push(demand(action.condition));
         const bodies = action.elseBody === undefined
@@ -259,6 +325,9 @@ class BodyAnalyzer implements BodyAnalysis {
         return noWrites;
       case "finish":
         this.#roots.push(...finishOperands(action.finish).map(demand));
+        return noWrites;
+      case "return":
+        this.#roots.push(...action.results.map(demand));
         return noWrites;
     }
   }
@@ -321,6 +390,28 @@ class BodyAnalyzer implements BodyAnalysis {
     for (const output of this.#exportedOutputs) {
       this.#roots.push({ value: output, consumedAt: site });
     }
+  }
+
+  #recordRequiredCallDemands(): boolean {
+    let added = false;
+
+    for (const { action, site } of this.#calls) {
+      const effects = action.target.effects;
+
+      if (effects.writes.length === 0) {
+        continue;
+      }
+      const output = actionOutput(action);
+
+      if (output !== undefined && this.#useCounts[output] !== 0) {
+        continue;
+      }
+      for (const argument of action.arguments) {
+        this.#roots.push({ value: argument.value, consumedAt: site });
+        added = true;
+      }
+    }
+    return added;
   }
 
   #seedRoots(): void {

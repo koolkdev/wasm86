@@ -41,6 +41,7 @@ export type ValueEmitTarget = Readonly<{
   body: WasmFunctionBodyEncoder;
   emitActionOutput(id: ValueId): void;
   emitExternal(external: ExternalValueId): void;
+  emitParameter(index: number): void;
   emitLoopInput(id: ValueId): void;
 }>;
 

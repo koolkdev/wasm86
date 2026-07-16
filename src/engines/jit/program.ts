@@ -1,8 +1,9 @@
 import { assert } from "#common/assert.js";
 import { u32 } from "#core/numeric.js";
+import { statusFlagResolverType } from "#core/flags/resolvers.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { wasmValueType } from "#compiler/encoder/types.js";
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
+import { functionType } from "#compiler/program/function-type.js";
 import type { LegacyEffects } from "#compiler/program/legacy-body.js";
 import {
   exportRef,
@@ -20,24 +21,10 @@ import { encodeTransfer } from "./legacy-transfer.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";
 import {
-  placeBody,
-  type BodyPlacement
-} from "#compiler/placement/place.js";
-import { helperFunctionName, type HelperCallKey } from "#wasm/helpers/key.js";
-import {
-  encodeHelperBody,
-  helperCallsForAnalysis,
-  helperFunctionType,
-  orderedHelpers
-} from "#wasm/helpers/module.js";
-import {
   jitModuleLinkFallbackExportName,
   type JitLinkLayout
 } from "./compiled-blocks/module-link-table.js";
-import {
-  LegacyActionEmbeddingAdapter,
-  type JitHelperBinding
-} from "./legacy-action-embedding.js";
+import { LegacyActionEmbeddingAdapter } from "./legacy-action-embedding.js";
 import {
   LegacyNumericLinkAdapter,
   type JitLink
@@ -46,7 +33,6 @@ import {
 type JitProgram = Readonly<{
   builder: ProgramBuilder;
   blockSignature: SignatureRef;
-  helperSignature: SignatureRef | undefined;
   cpuState: ResourceRef;
   guestMemory: ResourceRef;
   linkTable: TableRef | undefined;
@@ -61,28 +47,26 @@ type JitProgramBlock = Readonly<{
   entryEip: number;
   exportName: string;
   ir: IrBlock;
-  placement: BodyPlacement;
-  helperCalls: readonly HelperCallKey[];
   linkTargets: readonly number[];
 }>;
+
+const jitBlockFunctionType = functionType([], ["i64"]);
 
 export function buildJitProgram(
   sourceBlocks: readonly JitProgramSourceBlock[],
   linkLayout: JitLinkLayout | undefined
 ): Program {
   assert(sourceBlocks.length > 0, "cannot build an empty JIT program");
-  const blocks = analyzeJitBlocks(sourceBlocks);
+  const blocks = prepareJitBlocks(sourceBlocks);
   const links = snapshotLinkLayout(linkLayout);
   const tableTargetEips = links === undefined ? [] : [...links.keys()];
-  const helpers = orderedHelpers(blocks.flatMap((block) => block.helperCalls));
-  const program = createJitProgram(tableTargetEips, helpers.length > 0);
+  const program = createJitProgram(tableTargetEips);
 
   declareLinkStubs(program, tableTargetEips);
-  const helperFunctions = declareHelpers(program, helpers);
   const blockFunctions = createBlockFunctions(blocks);
   const linksByTargetEip = declareLinks(blocks, blockFunctions, program.linkTable, links);
 
-  declareBlocks(program, blocks, blockFunctions, helperFunctions, linksByTargetEip, links);
+  declareBlocks(program, blocks, blockFunctions, linksByTargetEip, links);
   return program.builder.finish();
 }
 
@@ -90,7 +74,7 @@ export function jitBlockExportName(eip: number): string {
   return `block_${u32(eip).toString(16)}`;
 }
 
-function analyzeJitBlocks(blocks: readonly JitProgramSourceBlock[]): readonly JitProgramBlock[] {
+function prepareJitBlocks(blocks: readonly JitProgramSourceBlock[]): readonly JitProgramBlock[] {
   const seen = new Set<number>();
 
   return blocks.map((block) => {
@@ -98,14 +82,10 @@ function analyzeJitBlocks(blocks: readonly JitProgramSourceBlock[]): readonly Ji
 
     assert(!seen.has(entryEip), `duplicate JIT block module entry EIP: 0x${hex(entryEip)}`);
     seen.add(entryEip);
-    const placement = placeBody(block.ir);
-
     return {
       entryEip,
       exportName: jitBlockExportName(entryEip),
       ir: block.ir,
-      placement,
-      helperCalls: helperCallsForAnalysis(placement.analysis),
       linkTargets: uniqueU32(jitBlockLinkTargets(block.ir))
     };
   });
@@ -127,21 +107,21 @@ export function jitBlockLinkTargets(ir: IrBlock): readonly number[] {
   return targets;
 }
 
-function createJitProgram(tableTargetEips: readonly number[], hasHelpers: boolean): JitProgram {
+function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
   const builder = new ProgramBuilder();
   const blockSignature = signatureRef("jit.block-entry");
-  const helperSignature = hasHelpers ? signatureRef("jit.raw-helper") : undefined;
   const cpuState = resourceRef("jit.cpu-state");
   const guestMemory = resourceRef("jit.guest-memory");
   const linkTable = tableTargetEips.length === 0 ? undefined : tableRef("jit.links");
 
   builder.signature({
     ref: blockSignature,
-    type: { params: [], results: [wasmValueType.i64] }
+    type: jitBlockFunctionType
   });
-  if (helperSignature !== undefined) {
-    builder.signature({ ref: helperSignature, type: helperFunctionType });
-  }
+  builder.signature({
+    ref: signatureRef("jit.status-flag-resolver"),
+    type: statusFlagResolverType
+  });
   builder.importMemory({
     ref: cpuState,
     moduleName: wasmImport.namespace,
@@ -163,7 +143,7 @@ function createJitProgram(tableTargetEips: readonly number[], hasHelpers: boolea
     });
   }
 
-  return { builder, blockSignature, helperSignature, cpuState, guestMemory, linkTable };
+  return { builder, blockSignature, cpuState, guestMemory, linkTable };
 }
 
 function declareLinkStubs(program: JitProgram, targetEips: readonly number[]): void {
@@ -177,8 +157,8 @@ function declareLinkStubs(program: JitProgram, targetEips: readonly number[]): v
       resources: [],
       globals: [],
       tables: [],
+      irBlocks: [],
       effects: "none",
-      traps: "never",
       build: () => new WasmFunctionBodyEncoder()
         .i64Const(encodeTransfer({ kind: "linkStub", targetEip }))
         .finish()
@@ -189,41 +169,6 @@ function declareLinkStubs(program: JitProgram, targetEips: readonly number[]): v
       target: stub
     });
   }
-}
-
-function declareHelpers(
-  program: JitProgram,
-  helpers: readonly HelperCallKey[]
-): ReadonlyMap<string, FunctionRef> {
-  const functions = new Map<string, FunctionRef>();
-
-  if (helpers.length === 0) {
-    return functions;
-  }
-
-  const signature = program.helperSignature;
-
-  assert(signature !== undefined, "missing JIT helper signature");
-
-  for (const helper of helpers) {
-    const name = helperFunctionName(helper);
-    const ref = functionRef(`jit.helper.${name}`);
-
-    functions.set(name, ref);
-    program.builder.legacyFunction({
-      ref,
-      signature,
-      calls: [],
-      resources: [program.cpuState],
-      globals: [],
-      tables: [],
-      effects: legacyJitEffects,
-      traps: "may",
-      build: () => encodeHelperBody(helper)
-    });
-  }
-
-  return functions;
 }
 
 function createBlockFunctions(blocks: readonly JitProgramBlock[]): ReadonlyMap<number, FunctionRef> {
@@ -266,7 +211,6 @@ function declareBlocks(
   program: JitProgram,
   blocks: readonly JitProgramBlock[],
   blockFunctions: ReadonlyMap<number, FunctionRef>,
-  helperFunctions: ReadonlyMap<string, FunctionRef>,
   linksByTargetEip: ReadonlyMap<number, JitLink>,
   linkLayout: JitLinkLayout | undefined
 ): void {
@@ -274,12 +218,6 @@ function declareBlocks(
     const ref = blockFunctions.get(block.entryEip);
 
     assert(ref !== undefined, `missing JIT block identity for 0x${hex(block.entryEip)}`);
-    const helperBindings = block.helperCalls.map((helper): JitHelperBinding => {
-      const helperRef = helperFunctions.get(helperFunctionName(helper));
-
-      assert(helperRef !== undefined, `missing declared JIT helper ${helperFunctionName(helper)}`);
-      return { key: helper, ref: helperRef };
-    });
     const links = block.linkTargets.map((targetEip) => {
       const link = linksByTargetEip.get(targetEip);
 
@@ -291,8 +229,6 @@ function declareBlocks(
     );
     const adapter = new LegacyActionEmbeddingAdapter({
       ir: block.ir,
-      placement: block.placement,
-      helperBindings,
       links: new LegacyNumericLinkAdapter(links, linkLayout),
       cpuState: program.cpuState,
       guestMemory: program.guestMemory
@@ -301,14 +237,14 @@ function declareBlocks(
     program.builder.legacyFunction({
       ref,
       signature: program.blockSignature,
-      calls: uniqueFunctionRefs([...helperBindings.map((binding) => binding.ref), ...directCalls]),
+      calls: uniqueFunctionRefs(directCalls),
       resources: [program.cpuState, program.guestMemory],
       globals: [],
       tables: links.some((link) => link.target.kind === "table") && program.linkTable !== undefined
         ? [program.linkTable]
         : [],
+      irBlocks: [{ block: block.ir, allowImplicitEntryFallthrough: false }],
       effects: legacyJitEffects,
-      traps: "may",
       build: (bindings) => adapter.build(bindings)
     });
     program.builder.exportFunction({

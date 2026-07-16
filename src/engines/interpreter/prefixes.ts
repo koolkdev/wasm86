@@ -10,9 +10,9 @@ import { noSegmentOverride, segmentRegisterIndex } from "#core/segments.js";
 import type { SegmentRegister } from "#core/types.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
-import type { LegacyHelperIndexRegistryAdapter } from "#wasm/helpers/registry.js";
 import { emitOpcodeByteFetch } from "./fragments.js";
 import type { InterpreterLocals } from "./locals.js";
+import type { FunctionCallBindings } from "./function-calls.js";
 
 // Prefix bytes are first-byte dispatch cases: each writes its prefix state,
 // consumes the byte — advance the eip local, fetch the next — and branches
@@ -25,10 +25,9 @@ export const operandSizeFlagBit = prefixFlagBits.operandSizeOverride;
 export const repFlagBit = prefixFlagBits.rep;
 export const repneFlagBit = prefixFlagBits.repne;
 
-export type PrefixEmitContext = Readonly<{
+export type PrefixEmitContext = FunctionCallBindings & Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  helpers: LegacyHelperIndexRegistryAdapter;
   locals: InterpreterLocals;
 }>;
 

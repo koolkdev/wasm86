@@ -73,8 +73,27 @@ import {
   buildTrap
 } from "#cpu/exit.js";
 import { assertLazyRecord } from "./lazy-flags.js";
-import { isMemoryRead, isMemoryResolve, isMemoryWrite, isResolveFlag, isStateRead, isStateWrite, memoryRead, memoryResolve, memoryWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import type { MemoryReadAction, MemoryResolveAction, MemoryWriteAction, ResolveFlagAction, StateReadAction } from "#ir/tests/storage-op-helpers.js";
+import {
+  isMemoryRead,
+  isMemoryResolve,
+  isMemoryWrite,
+  isStateRead,
+  isStateWrite,
+  isStatusFlagCall,
+  memoryRead,
+  memoryResolve,
+  memoryWrite,
+  resolvedStatusFlag,
+  stateRead,
+  stateWrite
+} from "#ir/tests/storage-op-helpers.js";
+import type {
+  MemoryReadAction,
+  MemoryResolveAction,
+  MemoryWriteAction,
+  StateReadAction,
+  StatusFlagCallAction
+} from "#ir/tests/storage-op-helpers.js";
 
 function mem(
   address: Readonly<{
@@ -321,17 +340,18 @@ function flagWriteValue(block: IrBlock, flag: X86StatusFlag): ValueId {
   return writes[0]!.value;
 }
 
-function resolveFlagAction(block: IrBlock, flag: X86StatusFlag): ResolveFlagAction {
+function statusFlagCallAction(block: IrBlock, flag: X86StatusFlag): StatusFlagCallAction {
   const action = entryActions(block).find(
-    (action): action is ResolveFlagAction => isResolveFlag(action) && action.op.flag === flag
+    (action): action is StatusFlagCallAction =>
+      isStatusFlagCall(action) && resolvedStatusFlag(action) === flag
   );
 
-  ok(action !== undefined, `expected ${flag} resolve action`);
+  ok(action !== undefined, `expected ${flag} resolver call`);
   return action;
 }
 
-function assertResolveFlag(block: IrBlock, id: ValueId, flag: X86StatusFlag): void {
-  strictEqual(resolveFlagAction(block, flag).output, id);
+function assertResolvedStatusFlag(block: IrBlock, id: ValueId, flag: X86StatusFlag): void {
+  strictEqual(statusFlagCallAction(block, flag).outputs[0], id);
   deepStrictEqual(block.values.node(id), { kind: "actionOutput", type: "i32" });
 }
 
@@ -456,19 +476,21 @@ test("two adds in one block flush one lazy add record, second instruction wins",
   assertLazyRecord(writes, v, { kind: "ADD", width: 32, left: sum1, right: v.const(7) });
 });
 
-test("inc flushes a full explicit image with CF preserved through a resolve op", () => {
+test("inc flushes a full explicit image with CF preserved through a resolver call", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(unaryAluSemantic("inc", 32), [regBinding("eax")], loc(0x1000, 0x1001));
 
   const block = builder.finish();
 
-  strictEqual(
-    entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
-    false
+  deepStrictEqual(
+    entryActions(block).flatMap((action) =>
+      isStateRead(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
+    ),
+    x86StatusFlags
   );
   deepStrictEqual([...writtenFlags(block)].sort(), [...x86StatusFlags].sort());
-  assertResolveFlag(block, flagWriteValue(block, "CF"), "CF");
+  assertResolvedStatusFlag(block, flagWriteValue(block, "CF"), "CF");
   strictEqual(stateWrites(block).find((write) => write.op.slot === lazyFlagsKindChannel)?.op.value, block.values.const(0));
 });
 
@@ -506,7 +528,7 @@ const directZfTemplate: SemanticTemplate = (s, v) => {
   s.writeFlag("ZF", v.const(1));
 };
 
-test("writeFlag flushes a full explicit image with omitted flags preserved through resolve ops", () => {
+test("writeFlag flushes a full explicit image with omitted flags preserved through resolver calls", () => {
   const builder = createIrBlockBuilder();
 
   builder.addInstruction(directZfTemplate, [], loc(0x1000, 0x1002));
@@ -517,11 +539,13 @@ test("writeFlag flushes a full explicit image with omitted flags preserved throu
   strictEqual(flagWriteValue(block, "ZF"), block.values.const(1));
 
   for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
-    assertResolveFlag(block, flagWriteValue(block, flag), flag);
+    assertResolvedStatusFlag(block, flagWriteValue(block, flag), flag);
   }
-  strictEqual(
-    entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
-    false
+  deepStrictEqual(
+    entryActions(block).flatMap((action) =>
+      isStateRead(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
+    ),
+    x86StatusFlags
   );
 
   strictEqual(stateWrites(block).find((write) => write.op.slot === lazyFlagsKindChannel)?.op.value, block.values.const(0));
@@ -1619,7 +1643,7 @@ test("into emits a completed-path conditional host trap and fallthrough state", 
 
   const block = builder.finish();
   const v = block.values;
-  const ofRead = resolveFlagAction(block, "OF").output;
+  const ofRead = statusFlagCallAction(block, "OF").outputs[0]!;
 
   deepStrictEqual(ifAction(block), {
     kind: "if",
@@ -1774,11 +1798,13 @@ test("setcc with no pending flag value builds a lazy condition switch", () => {
   const v = block.values;
   const conditionSwitch = switchAction(block);
 
-  strictEqual(
-    entryActions(block).some((action) => isStateRead(action) && action.op.slot.kind === "flag"),
-    false
+  deepStrictEqual(
+    entryActions(block).flatMap((action) =>
+      isStateRead(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
+    ),
+    ["CF", "ZF"]
   );
-  strictEqual(entryActions(block).some((action) => isResolveFlag(action)), false);
+  strictEqual(entryActions(block).some((action) => isStatusFlagCall(action)), false);
 
   const zero = v.const(0);
   const write = stateWrites(block).find((write) => write.op.slot === gprChannel("al"));
@@ -1793,14 +1819,14 @@ test("setcc with no pending flag value builds a lazy condition switch", () => {
   strictEqual(conditionSwitch.cases.length, 3);
   strictEqual(
     conditionSwitch.cases.some((switchCase) =>
-      switchCase.body.actions.some((action) => isResolveFlag(action))
+      switchCase.body.actions.some((action) => isStatusFlagCall(action))
     ),
     false
   );
 
-  const defaultResolves = conditionSwitch.defaultBody.actions.filter(isResolveFlag);
+  const defaultCalls = conditionSwitch.defaultBody.actions.filter(isStatusFlagCall);
 
-  deepStrictEqual(defaultResolves.map((action) => action.op.flag), ["CF", "ZF"]);
+  deepStrictEqual(defaultCalls.map(resolvedStatusFlag), ["CF", "ZF"]);
 });
 
 test("setcc after an intervening add uses the latest source-expanded flag expression", () => {
@@ -1898,9 +1924,11 @@ test("popfd writes every stored flag from the popped image", () => {
 
   ok(espRead !== undefined, "expected popfd to read esp");
   ok(popRead !== undefined, "expected popfd to read stack memory");
-  strictEqual(
-    actions.filter((action) => isStateRead(action) && action.op.slot.kind === "flag").length,
-    0
+  deepStrictEqual(
+    actions.flatMap((action) =>
+      isStateRead(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
+    ),
+    x86StatusFlags
   );
 
   const writes = stateWrites(block);
@@ -1939,9 +1967,11 @@ test("popf writes only stored low-16 modeled flags", () => {
   ok(espRead !== undefined, "expected popf to read esp");
   ok(popRead !== undefined, "expected popf to read stack memory");
   strictEqual(popRead.op.width, 16);
-  strictEqual(
-    actions.filter((action) => isStateRead(action) && action.op.slot.kind === "flag").length,
-    0
+  deepStrictEqual(
+    actions.flatMap((action) =>
+      isStateRead(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
+    ),
+    x86StatusFlags
   );
 
   const writes = stateWrites(block);

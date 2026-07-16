@@ -1,15 +1,16 @@
 import { assert } from "#common/assert.js";
 import type {
   BodyAnalysis,
+  ProducingAction,
   SiteId,
   ValueDemand
 } from "#compiler/analysis/model.js";
-import type { StorageAccess } from "#compiler/ir/operations/definition.js";
+import type { StorageAccess } from "#compiler/ir/effects.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { mayAlias } from "#ir/aliasing.js";
-import type { OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
+import { actionOperands } from "#ir/traverse.js";
 import { canCaptureAtDeadline } from "./capture-safety.js";
 import { LoopAnchors } from "./loop-anchors.js";
 
@@ -191,7 +192,7 @@ class AnchorPlanner {
   }
 
   #producerAnchor(
-    action: OpAction,
+    action: ProducingAction,
     producerSite: SiteId,
     demands: readonly ValueDemand[]
   ): SiteId {
@@ -203,9 +204,8 @@ class AnchorPlanner {
 
     if (
       !this.#isAfterProducer(producerSite, anchor) ||
-      action.op.inputs.some(
-        (input) => !this.block.values.isNonTrapping(input.value)
-      ) ||
+      this.analysis.actionEffects(action).writes.length !== 0 ||
+      actionOperands(action).some((input) => !this.block.values.isNonTrapping(input)) ||
       this.#crossesAliasingWrite(action, producerSite, anchor)
     ) {
       return producerSite;
@@ -246,11 +246,11 @@ class AnchorPlanner {
   }
 
   #crossesAliasingWrite(
-    action: OpAction,
+    action: ProducingAction,
     producerSiteId: SiteId,
     anchorId: SiteId
   ): boolean {
-    const reads = action.op.effects.reads;
+    const reads = this.analysis.actionEffects(action).reads;
 
     if (reads.length === 0) {
       return false;

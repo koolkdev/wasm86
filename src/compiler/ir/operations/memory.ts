@@ -3,14 +3,14 @@ import type { OperandWidth } from "#core/types.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmMemoryImmediate } from "#compiler/encoder/memory.js";
 import { wasmGuestMemoryMinByteLength, wasmMemoryIndex } from "#wasm/abi.js";
+import type { StorageAccess } from "#compiler/ir/effects.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   type DeclaredOperationInputs,
   type OperationDefinition,
   type OperationEmitTarget,
-  type OperationResult,
-  type StorageAccess
+  type OperationResult
 } from "./definition.js";
 
 const memoryAccess: StorageAccess = { space: "memory" };

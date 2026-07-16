@@ -11,6 +11,7 @@ import {
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { joinWidthBounds } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId, WidthBounds } from "#compiler/ir/values/types.js";
+import type { FunctionDefinition } from "#compiler/program/functions.js";
 
 export type BuildBody = (b: BodyBuilder) => void;
 export type BuildResult = (b: BodyBuilder) => ValueId;
@@ -74,6 +75,39 @@ export class BodyBuilder {
 
     this.#emit({ kind: "op", op, output });
     return output;
+  }
+
+  call(target: FunctionDefinition, args: readonly ValueId[]): readonly ValueId[] {
+    const { parameters, results } = target.type;
+
+    assert(
+      args.length === parameters.length,
+      `function ${target.ref.id} expects ${parameters.length} arguments, got ${args.length}`
+    );
+    assert(
+      results.length <= 1,
+      `function ${target.ref.id} has ${results.length} results; multiple call results are not supported yet`
+    );
+    const inputs = args.map((value, index) => {
+      const expected = parameters[index];
+
+      assert(expected !== undefined, `function ${target.ref.id} has no parameter ${index}`);
+      const actual = this.values.valueType(value);
+
+      assert(
+        actual === expected,
+        `function ${target.ref.id} argument ${index} must be ${expected}, got ${actual}`
+      );
+      return { value, type: expected };
+    });
+    const outputs = results.map((type) =>
+      type === "i64"
+        ? this.values.addActionOutput64()
+        : this.values.addActionOutput()
+    );
+
+    this.#emit({ kind: "call", target, arguments: inputs, outputs });
+    return outputs;
   }
 
   // Escape hatch for an already-built action.
@@ -140,6 +174,10 @@ export class BodyBuilder {
   // Terminates this body: fault arms, trap arms, the root.
   finish(finish: Finish): void {
     this.#emit({ kind: "finish", finish });
+  }
+
+  return(results: readonly ValueId[]): void {
+    this.#emit({ kind: "return", results: [...results] });
   }
 
   loop(carried: readonly LoopCarriedCell[], bodyBuild: BuildBody): void {

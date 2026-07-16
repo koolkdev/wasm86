@@ -1,4 +1,4 @@
-import type { Action, OpAction } from "#ir/actions.js";
+import type { Action, CallAction, OpAction } from "#ir/actions.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import {
   memoryCheck as memoryCheckOperation,
@@ -6,7 +6,6 @@ import {
   memoryResolve as memoryResolveOperation,
   memoryWrite as memoryWriteOperation
 } from "#compiler/ir/operations/memory.js";
-import { resolveFlag as resolveFlagOperation } from "#compiler/ir/operations/resolve-flag.js";
 import {
   stateRead as stateReadOperation,
   stateWrite as stateWriteOperation
@@ -14,7 +13,8 @@ import {
 import type { StateSlot } from "#ir/slots.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { X86StatusFlag } from "#core/flags/definitions.js";
+import { statusFlagResolvers } from "#core/flags/resolvers.js";
+import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
 
 type TestValueId = ValueId | number;
@@ -38,9 +38,8 @@ export type MemoryResolveAction = OpAction & Readonly<{
   op: OperationOf<"memory.resolve">;
   output: ValueId;
 }>;
-export type ResolveFlagAction = OpAction & Readonly<{
-  op: OperationOf<"cpu.resolveFlag">;
-  output: ValueId;
+export type StatusFlagCallAction = CallAction & Readonly<{
+  outputs: readonly [ValueId];
 }>;
 
 export function stateRead(output: TestValueId, slot: StateSlot): StateReadAction;
@@ -125,11 +124,22 @@ export function memoryResolve(
   };
 }
 
-export function resolveFlag(output: TestValueId, flag: X86StatusFlag): ResolveFlagAction {
+export function statusFlagCall(
+  output: TestValueId,
+  flag: X86StatusFlag,
+  sourceKind: TestValueId,
+  operandA: TestValueId,
+  operandB: TestValueId,
+  concrete: TestValueId
+): StatusFlagCallAction {
   return {
-    kind: "op",
-    output: valueId(output),
-    op: resolveFlagOperation.create({ flag })
+    kind: "call",
+    target: statusFlagResolvers.get(flag),
+    arguments: [sourceKind, operandA, operandB, concrete].map((value) => ({
+      value: valueId(value),
+      type: "i32" as const
+    })),
+    outputs: [valueId(output)]
   };
 }
 
@@ -157,6 +167,19 @@ export function isMemoryResolve(action: Action): action is MemoryResolveAction {
   return action.kind === "op" && action.op.kind === "memory.resolve" && "output" in action && action.output !== undefined;
 }
 
-export function isResolveFlag(action: Action): action is ResolveFlagAction {
-  return action.kind === "op" && action.op.kind === "cpu.resolveFlag" && "output" in action && action.output !== undefined;
+export function isStatusFlagCall(action: Action): action is StatusFlagCallAction {
+  return action.kind === "call" &&
+    action.outputs.length === 1 &&
+    x86StatusFlags.some((flag) => action.target === statusFlagResolvers.get(flag));
+}
+
+export function resolvedStatusFlag(action: StatusFlagCallAction): X86StatusFlag {
+  const flag = x86StatusFlags.find((candidate) =>
+    action.target === statusFlagResolvers.get(candidate)
+  );
+
+  if (flag === undefined) {
+    throw new Error(`unknown status-flag resolver ${action.target.ref.id}`);
+  }
+  return flag;
 }

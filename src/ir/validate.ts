@@ -4,12 +4,14 @@ import {
   bodyCompletes,
   maxSwitchMatch,
   type Action,
+  type CallAction,
   type IfAction,
   type LoopAction,
   type OpAction,
   type SwitchAction
 } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
+import type { IrFunction } from "./function.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import type { CellRef } from "#compiler/refs/cell.js";
@@ -25,6 +27,7 @@ import { unboundedWidthBounds } from "#compiler/ir/values/width-bounds.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import {
   type ValueId,
+  type ValueType,
   type WidthBounds
 } from "#compiler/ir/values/types.js";
 
@@ -53,12 +56,26 @@ type BodyValidationContext = Readonly<{
   hasPriorEipWrite: boolean;
 }>;
 
+type FunctionValidation = Readonly<{
+  parameters: readonly ValueId[];
+  parameterTypes: readonly ValueType[];
+  results: readonly ValueType[];
+}>;
+
 // Structural checks: bodies terminate consistently, nested bodies are closed
 // where their owner requires it, and dispatch targets are real values. A
 // dispatch completion owns the architectural EIP commit, so state writes on
 // the same path must not also flush EIP.
 export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
-  new IrValidator(block).validate(options);
+  new IrValidator(block, undefined).validate(options);
+}
+
+export function validateIrFunction(fn: IrFunction): void {
+  new IrValidator(fn, {
+    parameters: fn.parameters,
+    parameterTypes: fn.type.parameters,
+    results: fn.type.results
+  }).validate({});
 }
 
 // Validation has two phases. Indexing establishes the unique body tree and all
@@ -70,13 +87,17 @@ class IrValidator {
   readonly #producers = new Map<ValueId, ActionSite>();
   readonly #loopInputs = new Map<ValueId, Body>();
   readonly #cellSeeds = new Map<CellRef, ActionSite>();
+  readonly #function: FunctionValidation | undefined;
+  readonly #parameterValues = new Set<ValueId>();
 
-  constructor(block: IrBlock) {
+  constructor(block: IrBlock, fn: FunctionValidation | undefined) {
     this.#block = block;
+    this.#function = fn;
     this.#bodyOwners.set(block.body, null);
   }
 
   validate(options: ValidateIrBlockOptions): void {
+    this.#validateParameters();
     this.#indexBody(this.#block.body, "body");
     this.#assertEveryActionOutputHasProducer();
     this.#validateBody(this.#block.body, {
@@ -114,6 +135,9 @@ class IrValidator {
         this.#indexOpProducer(action, site);
         this.#indexCellDefinition(action, site);
         return;
+      case "call":
+        this.#indexCallOutputs(action, site);
+        return;
       case "if":
         if (action.output !== undefined) {
           this.#indexIfProducer(action, site);
@@ -138,6 +162,7 @@ class IrValidator {
         return;
       case "loopContinue":
       case "finish":
+      case "return":
         return;
     }
   }
@@ -175,6 +200,32 @@ class IrValidator {
       );
     }
     this.#recordProducer(action.output, site);
+  }
+
+  #indexCallOutputs(action: CallAction, site: ActionSite): void {
+    const resultTypes = action.target.type.results;
+
+    assert(
+      action.outputs.length === resultTypes.length,
+      `${site.path} declares ${action.outputs.length} outputs for ${resultTypes.length} results`
+    );
+    assert(action.outputs.length <= 1, `${site.path} has unsupported multiple call outputs`);
+    for (const [index, output] of action.outputs.entries()) {
+      const expected = resultTypes[index];
+
+      assert(expected !== undefined, `${site.path} has no result ${index}`);
+      assert(
+        this.#block.values.valueType(output) === expected,
+        `${site.path} output ${index} must be ${expected}`
+      );
+      for (const argument of action.arguments) {
+        assert(
+          argument.value < output,
+          `call argument ${argument.value} created after its output ${output}`
+        );
+      }
+      this.#recordProducer(output, site);
+    }
   }
 
   // The seed write is the cell's declaration: the body holding it is the
@@ -362,6 +413,8 @@ class IrValidator {
           `${site.path} operand ${input.value}`
         );
       }
+    } else if (action.kind === "call") {
+      this.#validateCall(action, site);
     } else {
       for (const operand of actionOperands(action)) {
         this.#validateValueUse(operand, site, `${site.path} operand ${operand}`);
@@ -386,6 +439,7 @@ class IrValidator {
         );
         return;
       case "finish":
+        assert(this.#function === undefined, `${site.path} uses a block finish in a function`);
         if (action.finish.kind === "dispatch") {
           assert(!hasPriorEipWrite, `${context.path} dispatch path must not flush EIP state`);
         } else {
@@ -395,7 +449,11 @@ class IrValidator {
           );
         }
         return;
+      case "return":
+        this.#validateReturn(action.results, site.path);
+        return;
       case "if":
+      case "call":
       case "op":
         return;
     }
@@ -493,8 +551,10 @@ class IrValidator {
         });
         return;
       case "op":
+      case "call":
       case "loopContinue":
       case "finish":
+      case "return":
         return;
     }
   }
@@ -511,6 +571,12 @@ class IrValidator {
       const node = this.#block.values.node(id);
 
       switch (node.kind) {
+        case "parameter":
+          assert(
+            this.#parameterValues.has(id),
+            `function parameter ${id} is used outside its defining function at ${path}`
+          );
+          return;
         case "actionOutput": {
           const producer = this.#producers.get(id);
 
@@ -598,6 +664,91 @@ class IrValidator {
         { body: this.#block.body, actionIndex, path: "body boundary" },
         `exported output ${output}`
       );
+    }
+  }
+
+  #validateParameters(): void {
+    const fn = this.#function;
+
+    if (fn === undefined) {
+      for (let raw = 0; raw < this.#block.values.size(); raw += 1) {
+        assert(
+          this.#block.values.node(valueId(raw)).kind !== "parameter",
+          `block body declares function parameter value ${raw}`
+        );
+      }
+      return;
+    }
+    assert(
+      fn.parameters.length === fn.parameterTypes.length,
+      `function declares ${fn.parameters.length} parameters for ${fn.parameterTypes.length} types`
+    );
+    for (const [index, parameter] of fn.parameters.entries()) {
+      const node = this.#block.values.node(parameter);
+      const expectedType = fn.parameterTypes[index];
+
+      assert(node.kind === "parameter", `function parameter ${parameter} is not a parameter value`);
+      assert(expectedType !== undefined, `function has no parameter type ${index}`);
+      assert(
+        node.index === index,
+        `function parameter ${parameter} has index ${node.index}, expected ${index}`
+      );
+      assert(
+        this.#block.values.valueType(parameter) === expectedType,
+        `function parameter ${parameter} must be ${expectedType}`
+      );
+      this.#parameterValues.add(parameter);
+    }
+
+    for (let raw = 0; raw < this.#block.values.size(); raw += 1) {
+      const id = valueId(raw);
+
+      if (this.#block.values.node(id).kind === "parameter") {
+        assert(this.#parameterValues.has(id), `undeclared function parameter value ${id}`);
+      }
+    }
+  }
+
+  #validateCall(action: CallAction, site: ActionSite): void {
+    const expected = action.target.type.parameters;
+
+    assert(
+      action.arguments.length === expected.length,
+      `${site.path} passes ${action.arguments.length} arguments to ${expected.length} parameters`
+    );
+    for (const [index, argument] of action.arguments.entries()) {
+      const parameterType = expected[index];
+
+      assert(parameterType !== undefined, `${site.path} has no parameter ${index}`);
+      assert(
+        argument.type === parameterType,
+        `${site.path} argument ${index} declares ${argument.type}, expected ${parameterType}`
+      );
+      const actual = this.#block.values.valueType(argument.value);
+
+      assert(
+        actual === parameterType,
+        `${site.path} argument ${index} must be ${parameterType}, got ${actual}`
+      );
+      this.#validateValueUse(argument.value, site, `${site.path} argument ${index}`);
+    }
+  }
+
+  #validateReturn(results: readonly ValueId[], path: string): void {
+    const fn = this.#function;
+
+    assert(fn !== undefined, `${path} returns from a block body`);
+    assert(
+      results.length === fn.results.length,
+      `${path} returns ${results.length} values, expected ${fn.results.length}`
+    );
+    for (const [index, value] of results.entries()) {
+      const expected = fn.results[index];
+
+      assert(expected !== undefined, `${path} has no declared result ${index}`);
+      const actual = this.#block.values.valueType(value);
+
+      assert(actual === expected, `${path} result ${index} must be ${expected}, got ${actual}`);
     }
   }
 }
@@ -724,11 +875,13 @@ function assertKnownAction(action: Action): void {
 
   assert(
     kind === "op" ||
+      kind === "call" ||
       kind === "if" ||
       kind === "switch" ||
       kind === "loop" ||
       kind === "loopContinue" ||
-      kind === "finish",
+      kind === "finish" ||
+      kind === "return",
     `unknown IR action kind ${String(kind)}`
   );
 }
