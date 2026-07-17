@@ -1,12 +1,9 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { analyzeBody } from "#compiler/analysis/analyze.js";
-import { indexPlacement } from "#compiler/placement/index.js";
-import { planPlacement } from "#compiler/placement/plan.js";
-import { validatePlacement } from "#compiler/placement/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
+import { placeBody } from "#compiler/placement/place.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import {
@@ -16,11 +13,10 @@ import {
 } from "#ir/tests/storage-op-helpers.js";
 
 function place(block: IrBlock, exportedOutputs: readonly ValueId[] = []) {
-  const analysis = analyzeBody(block, exportedOutputs);
-  const plan = planPlacement(block, analysis);
-
-  validatePlacement(block, analysis, plan);
-  return { analysis, plan, index: indexPlacement(analysis, plan) };
+  return placeBody(block, {
+    exportedOutputs,
+    allowImplicitEntryFallthrough: true
+  });
 }
 
 test("a producer used only in a selected body realizes at that use", () => {

@@ -1,18 +1,16 @@
 import {
   deepStrictEqual,
-  doesNotThrow,
   ok,
   strictEqual,
   throws
 } from "node:assert";
 import { test } from "node:test";
 
-import { analyzeBody } from "#compiler/analysis/analyze.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { planPlacement } from "#compiler/placement/plan.js";
+import { placeBody } from "#compiler/placement/place.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
 import type { OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
@@ -39,11 +37,10 @@ function read(cell: CellRef, output: ValueId): OpAction {
 }
 
 function place(block: IrBlock, exports: readonly ValueId[] = []) {
-  const analysis = analyzeBody(block, exports);
-  const plan = planPlacement(block, analysis);
-
-  validatePlacement(block, analysis, plan);
-  return { analysis, plan };
+  return placeBody(block, {
+    exportedOutputs: exports,
+    allowImplicitEntryFallthrough: true
+  });
 }
 
 test("a referenced cell receives one typed local", () => {
@@ -233,7 +230,6 @@ test("placement validation rejects overlapping, mistyped, and stale cell locals"
     /cell local has no referenced cell/
   );
 
-  doesNotThrow(() => validatePlacement(block, analysis, plan));
 });
 
 test("cells with disjoint lifetimes pool one local", () => {

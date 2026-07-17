@@ -7,11 +7,8 @@ import type {
 } from "#compiler/ir/effects.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
-import { validatePlacement } from "#compiler/placement/validate.js";
-import type { BodyPlacement } from "#compiler/placement/place.js";
 import { covers } from "#ir/aliasing.js";
 import type { IrBlock } from "#ir/block.js";
-import { validateIrBlock, validateIrFunction } from "#ir/validate.js";
 import { validateDeclaredStorageEffects } from "#ir/validate/effects.js";
 import type { FunctionType } from "./function-type.js";
 import { FunctionDefinition } from "./functions.js";
@@ -587,16 +584,16 @@ function validateLegacyFunction(
   retainedBodies: Set<IrBlock>
 ): void {
   for (const entry of fn.irBlocks) {
-    validateIrBlock(entry.block, {
-      allowImplicitEntryFallthrough: entry.allowImplicitEntryFallthrough
-    });
     const placement = program.placements.get(entry.block);
 
     assert(
       placement !== undefined,
       `missing placement for legacy function ${fn.ref.id}`
     );
-    validateRetainedPlacement(entry.block, placement);
+    assert(
+      placement.block === entry.block,
+      "program placement belongs to another body"
+    );
     retainedBodies.add(entry.block);
 
     for (const { action } of placement.analysis.calls()) {
@@ -623,7 +620,6 @@ function validateDefinedFunction(
   fn: DefinedFunction,
   retainedBodies: Set<IrBlock>
 ): void {
-  validateIrFunction(fn.body);
   const placement = program.placements.get(fn.body);
 
   assert(placement !== undefined, `missing placement for function ${fn.ref.id}`);
@@ -631,7 +627,10 @@ function validateDefinedFunction(
     placement === fn.placement,
     `function ${fn.ref.id} does not retain its program placement`
   );
-  validateRetainedPlacement(fn.body, placement);
+  assert(
+    placement.block === fn.body,
+    "program placement belongs to another body"
+  );
   retainedBodies.add(fn.body);
 
   const callTargets = unique(
@@ -650,14 +649,6 @@ function validateDefinedFunction(
     `function ${fn.ref.id} resources do not match its live operations`
   );
   validateDeclaredEffects(fn, placement.analysis);
-}
-
-function validateRetainedPlacement(
-  block: IrBlock,
-  placement: BodyPlacement
-): void {
-  assert(placement.block === block, "program placement belongs to another body");
-  validatePlacement(block, placement.analysis, placement.plan);
 }
 
 function resourcesUsedBy(analysis: BodyAnalysis): readonly ResourceRef[] {

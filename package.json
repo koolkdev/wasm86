@@ -10,6 +10,11 @@
       "test": "./dist/test/build.js",
       "default": "./dist/src/build.js"
     },
+    "#common/assert.js": {
+      "types": "./src/common/assert.js",
+      "test": "./dist/test/assert.js",
+      "default": "./dist/src/common/assert.js"
+    },
     "#cpu/*": {
       "types": "./src/cpu/*",
       "default": "./dist/src/cpu/*"
