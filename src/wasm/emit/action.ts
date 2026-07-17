@@ -26,6 +26,7 @@ import { createControlFrame } from "./control.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { ValueEmitter, wasmTypeForValue } from "./value-emitter.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { IrFunction } from "#ir/function.js";
 
 export type ActionFragmentContext = Readonly<{
@@ -33,18 +34,21 @@ export type ActionFragmentContext = Readonly<{
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
   functionIndices?: ReadonlyMap<FunctionDefinition, number> | undefined;
+  resourceIndices?: ReadonlyMap<ResourceRef, number> | undefined;
   placement?: BodyPlacement | undefined;
   embedding: FragmentEmbedding;
 }>;
 
 export type ActionFunctionContext = Readonly<{
   functionIndices?: ReadonlyMap<FunctionDefinition, number> | undefined;
+  resourceIndices?: ReadonlyMap<ResourceRef, number> | undefined;
   placement?: BodyPlacement | undefined;
   embedding: FunctionEmbedding;
 }>;
 
 export type FunctionEmitContext = Readonly<{
   functionIndices: ReadonlyMap<FunctionDefinition, number>;
+  resourceIndices: ReadonlyMap<ResourceRef, number>;
   placement: BodyPlacement;
 }>;
 
@@ -59,6 +63,7 @@ export function emitFunction(
     body,
     scratch,
     functionIndices: context.functionIndices,
+    resourceIndices: context.resourceIndices,
     placement: context.placement,
     embedding: {}
   });
@@ -77,6 +82,7 @@ export function emitActionFunction(
     body,
     scratch,
     functionIndices: context.functionIndices,
+    resourceIndices: context.resourceIndices,
     placement: context.placement,
     embedding: context.embedding
   });
@@ -108,6 +114,12 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
 
         assert(functionIndex !== undefined, `missing resolved function ${target.ref.id}`);
         return functionIndex;
+      },
+      resourceIndex: (resource) => {
+        const resourceIndex = context.resourceIndices?.get(resource);
+
+        assert(resourceIndex !== undefined, `missing resolved resource ${resource.id}`);
+        return resourceIndex;
       }
     });
     const frame = createControlFrame({

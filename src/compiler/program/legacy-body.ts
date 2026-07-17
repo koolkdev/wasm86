@@ -2,10 +2,10 @@ import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js
 import type {
   FunctionRef,
   GlobalRef,
-  ResourceRef,
   SignatureRef,
   TableRef
 } from "./refs.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { IrBlock } from "#ir/block.js";
 import type { BodyPlacement } from "#compiler/placement/place.js";
 import type { FunctionDefinition } from "./functions.js";

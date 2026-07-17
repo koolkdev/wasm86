@@ -13,8 +13,8 @@ import { functionType } from "#compiler/program/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/program/refs.js";
 import {
-  memoryCheck,
   memoryRead,
+  memoryWrite,
   stateRead,
   stateWrite
 } from "#ir/tests/storage-op-helpers.js";
@@ -81,25 +81,18 @@ test("dead producer chains stay dead", () => {
   const base = values.addActionOutput();
   const address = values.binary("add", base, values.const(4));
   const byteLength = values.const(4);
-  const checked = values.addActionOutput(fitsUnsigned(1));
   const readBase = stateRead(base, gprChannel("eax"));
-  const check = memoryCheck(checked, address, byteLength);
   const analysis = analyzeBody({
     values,
-    body: { actions: [readBase, check] }
+    body: { actions: [readBase] }
   });
 
-  for (const dead of [base, address, byteLength, checked]) {
+  for (const dead of [base, address, byteLength]) {
     strictEqual(analysis.isLive(dead), false);
     strictEqual(analysis.useCount(dead), 0);
   }
   strictEqual(analysis.producer(base)?.action, readBase);
-  deepStrictEqual(
-    analysis.producer(checked)?.inputs,
-    check.op.inputs.map((input) => input.value)
-  );
   strictEqual(analysis.opActionMustExecute(readBase), false);
-  strictEqual(analysis.opActionMustExecute(check), false);
 });
 
 test("semantic producer inputs are charged once however often the output is used", () => {
@@ -123,30 +116,22 @@ test("semantic producer inputs are charged once however often the output is used
 
 test("each semantic operation input contributes one use", () => {
   const values = new ValueTable();
-  const byteLength = values.external(0);
+  const stored = values.external(0);
   const address = values.external(1);
-  const fault = values.addActionOutput(fitsUnsigned(1));
-  const check = memoryCheck(fault, address, byteLength);
+  const write = memoryWrite(address, stored, 32);
   const analysis = analyzeBody({
     values,
-    body: {
-      actions: [check, stateWrite(gprChannel("eax"), fault)]
-    }
+    body: { actions: [write] }
   });
-  const addressUses = check.op.inputs.filter((input) => input.value === address).length;
-  const byteLengthUses = check.op.inputs.filter(
-    (input) => input.value === byteLength
+  const addressUses = write.op.inputs.filter((input) => input.value === address).length;
+  const storedUses = write.op.inputs.filter(
+    (input) => input.value === stored
   ).length;
 
   strictEqual(addressUses, 1);
-  strictEqual(byteLengthUses, 1);
-  strictEqual(analysis.useCount(fault), 1);
+  strictEqual(storedUses, 1);
   strictEqual(analysis.useCount(address), addressUses);
-  strictEqual(analysis.useCount(byteLength), byteLengthUses);
-  deepStrictEqual(
-    analysis.producer(fault)?.inputs,
-    check.op.inputs.map((input) => input.value)
-  );
+  strictEqual(analysis.useCount(stored), storedUses);
 });
 
 test("compound dependency edges are charged once per live recipe", () => {

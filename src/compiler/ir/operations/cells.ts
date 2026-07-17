@@ -2,6 +2,7 @@ import type { CellRef } from "#compiler/refs/cell.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type {
   OperationDefinition,
+  OperationNode,
   OperationResult
 } from "./definition.js";
 
@@ -9,10 +10,15 @@ type CellReadArgs = Readonly<{
   cell: CellRef;
 }>;
 
-export const cellRead: OperationDefinition<
+type CellReadOperation = OperationNode<
   "cell.read",
   CellReadArgs,
   OperationResult
+>;
+
+export const cellRead: OperationDefinition<
+  CellReadArgs,
+  CellReadOperation
 > = {
   kind: "cell.read",
 
@@ -42,10 +48,15 @@ type CellWriteArgs = Readonly<{
   initialization: CellWriteInitialization;
 }>;
 
-export const cellWrite: OperationDefinition<
+type CellWriteOperation = OperationNode<
   "cell.write",
   CellWriteArgs,
   undefined
+>;
+
+export const cellWrite: OperationDefinition<
+  CellWriteArgs,
+  CellWriteOperation
 > = {
   kind: "cell.write",
 

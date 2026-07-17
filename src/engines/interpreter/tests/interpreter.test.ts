@@ -11,7 +11,7 @@ import {
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
+import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   instantiateInterpreterCompiledModule,
   type InterpreterModuleInstance
@@ -271,7 +271,7 @@ test("rep movsd runs every unit in one dispatch past the fuel budget", async () 
 
 test("fetching the opcode past mapped memory is a decode fault at the boundary", async () => {
   const interpreter = await instantiate();
-  const eip = wasmGuestMemoryMinByteLength;
+  const eip = guestMemoryMinimumByteLength;
 
   writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
 
@@ -282,9 +282,25 @@ test("fetching the opcode past mapped memory is a decode fault at the boundary",
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
 
+test("the temporary flat model keeps its fetch boundary after guest memory grows", async () => {
+  const interpreter = await instantiate();
+  const boundary = guestMemoryMinimumByteLength;
+
+  writeWasmCpuStateSnapshot(interpreter.stateView, { eip: boundary });
+
+  deepStrictEqual(interpreter.run(10), fetchPageFaultStop(boundary));
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), boundary);
+
+  interpreter.guestMemory.grow(1);
+  writeProgram(new DataView(interpreter.guestMemory.buffer), boundary, [0xcd, 0x2e]);
+
+  deepStrictEqual(interpreter.run(10), fetchPageFaultStop(boundary));
+  strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), boundary);
+});
+
 test("an immediate crossing the end of memory faults with the instruction's eip", async () => {
   const interpreter = await instantiate();
-  const eip = wasmGuestMemoryMinByteLength - 2;
+  const eip = guestMemoryMinimumByteLength - 2;
 
   writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
   writeProgram(interpreter.guestView, eip, [0xb8, 0x99]); // mov eax, imm32 cut short
@@ -298,7 +314,7 @@ test("an immediate crossing the end of memory faults with the instruction's eip"
 
 test("a displacement crossing the end of memory is a decode fault", async () => {
   const interpreter = await instantiate();
-  const eip = wasmGuestMemoryMinByteLength - 5;
+  const eip = guestMemoryMinimumByteLength - 5;
 
   writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
   writeProgram(interpreter.guestView, eip, [0x8b, 0x05, 0x00, 0x20, 0x00]); // mov eax, [disp32] cut short
@@ -311,7 +327,7 @@ test("a displacement crossing the end of memory is a decode fault", async () => 
 
 test("a SIB byte past the end of memory is a decode fault at its address", async () => {
   const interpreter = await instantiate();
-  const eip = wasmGuestMemoryMinByteLength - 2;
+  const eip = guestMemoryMinimumByteLength - 2;
 
   writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
   writeProgram(interpreter.guestView, eip, [0x8b, 0x04]); // mov eax, [sib...] cut short
@@ -325,7 +341,7 @@ test("a SIB byte past the end of memory is a decode fault at its address", async
 
 test("a SIB displacement crossing the end of memory is a decode fault", async () => {
   const interpreter = await instantiate();
-  const eip = wasmGuestMemoryMinByteLength - 5;
+  const eip = guestMemoryMinimumByteLength - 5;
 
   writeWasmCpuStateSnapshot(interpreter.stateView, { eip });
   writeProgram(interpreter.guestView, eip, [0x8b, 0x04, 0x45, 0x00, 0x20]); // mov eax, [eax*2+disp32] cut short
@@ -339,7 +355,7 @@ test("a SIB displacement crossing the end of memory is a decode fault", async ()
 
 test("a guest load past the end is a memory fault, not a decode fault", async () => {
   const interpreter = await instantiate();
-  const address = wasmGuestMemoryMinByteLength - 3;
+  const address = guestMemoryMinimumByteLength - 3;
 
   writeWasmCpuStateSnapshot(interpreter.stateView, { eip: startAddress });
   writeProgram(interpreter.guestView, startAddress, [

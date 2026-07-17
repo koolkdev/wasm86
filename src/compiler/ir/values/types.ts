@@ -2,6 +2,7 @@ declare const valueBrand: unique symbol;
 
 export type ValueId = number & { readonly [valueBrand]: "x86-semantic-value" };
 export type ValueType = "i32" | "i64";
+export type IntegerWidth = 8 | 16 | 32;
 
 // What is provably known about an i32 value: the smallest width it fits
 // unsigned and the smallest width it equals its own sign-extension from.

@@ -10,7 +10,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import {
-  memoryCheck,
+  memoryWrite,
   stateRead,
   stateWrite
 } from "#ir/tests/storage-op-helpers.js";
@@ -167,15 +167,13 @@ test("operation-local repetition does not create a placement local", () => {
   const base = values.external(1);
   const increment = values.const(1);
   const byteLength = values.binary("add", base, increment);
-  const checked = values.addActionOutput();
-  const check = memoryCheck(checked, address, byteLength);
-  const write = stateWrite(gprChannel("eax"), checked);
+  const write = memoryWrite(address, byteLength, 32);
   const block: IrBlock = {
     values,
-    body: { actions: [check, write] }
+    body: { actions: [write] }
   };
   const { analysis, plan } = place(block);
-  const useSite = analysis.siteOf(block.body, 1);
+  const useSite = analysis.siteOf(block.body, 0);
 
   strictEqual(analysis.useCount(byteLength), 1);
   deepStrictEqual(plan.values[byteLength], {

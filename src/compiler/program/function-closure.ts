@@ -5,7 +5,7 @@ import type {
   StorageAccess
 } from "#compiler/ir/effects.js";
 import { placeFunction, type BodyPlacement } from "#compiler/placement/place.js";
-import { channelCovers, isDynamicSlot, type StateSlot } from "#ir/slots.js";
+import { covers } from "#ir/aliasing.js";
 import { buildFunction, type IrFunction } from "#ir/function.js";
 import type { FunctionDefinition } from "./functions.js";
 
@@ -128,32 +128,8 @@ function assertEffectsCovered(
 ): void {
   for (const access of actual) {
     assert(
-      declared.some((candidate) => accessCovers(candidate, access)),
+      declared.some((candidate) => covers(candidate, access)),
       `function ${definition.ref.id} has an undeclared ${kind} effect`
     );
   }
-}
-
-function accessCovers(declared: StorageAccess, actual: StorageAccess): boolean {
-  switch (declared.space) {
-    case "memory":
-    case "memoryBounds":
-      return actual.space === declared.space;
-    case "cell":
-      return actual.space === "cell" && actual.cell === declared.cell;
-    case "state":
-      return actual.space === "state" && stateSlotCovers(declared.slot, actual.slot);
-  }
-}
-
-function stateSlotCovers(declared: StateSlot, actual: StateSlot): boolean {
-  if (isDynamicSlot(declared)) {
-    if (declared.kind === "gprDynamic") {
-      return (actual.kind === "gpr" && declared.byteLength === actual.byteLength) ||
-        (actual.kind === "gprDynamic" && declared.byteLength === actual.byteLength);
-    }
-    return (actual.kind === "segment" && declared.field === actual.field) ||
-      (actual.kind === "segmentDynamic" && declared.field === actual.field);
-  }
-  return !isDynamicSlot(actual) && channelCovers(declared, actual);
 }

@@ -30,6 +30,7 @@ import {
   type ValueType,
   type WidthBounds
 } from "#compiler/ir/values/types.js";
+import { validateResourceOperation } from "./validate/resource.js";
 
 export type ValidateIrBlockOptions = Readonly<{
   allowImplicitEntryFallthrough?: boolean;
@@ -132,6 +133,12 @@ class IrValidator {
   #indexActionDefinitions(action: Action, site: ActionSite): void {
     switch (action.kind) {
       case "op":
+        if (
+          action.op.kind === "resource.read" ||
+          action.op.kind === "resource.write"
+        ) {
+          validateResourceOperation(action.op, site.path);
+        }
         this.#indexOpProducer(action, site);
         this.#indexCellDefinition(action, site);
         return;

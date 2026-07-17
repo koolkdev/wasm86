@@ -8,7 +8,11 @@ import {
 import { test } from "node:test";
 
 import type { Action } from "#ir/actions.js";
-import { memoryCheck as memoryCheckOperation } from "#compiler/ir/operations/memory.js";
+import { resourceRead } from "#compiler/ir/operations/resource.js";
+import {
+  resourceRef,
+  type ResourceByteOperand
+} from "#compiler/ir/resource.js";
 import {
   stateRead as stateReadOperation,
   stateWrite as stateWriteOperation
@@ -20,17 +24,39 @@ import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { statusFlagResolvers } from "#core/flags/resolvers.js";
-import { memoryCheck, stateRead, stateWrite, statusFlagCall } from "#ir/tests/storage-op-helpers.js";
+import { stateRead, stateWrite, statusFlagCall } from "#ir/tests/storage-op-helpers.js";
 
 test("operation derives the output and its bounds from the definition", () => {
   const values = new ValueTable();
   const builder = new BodyBuilder(values);
-  const address = values.const(0x1000);
-  const byteLength = values.const(4);
-  const fault = builder.operation(memoryCheckOperation.create({ address, byteLength }));
+  const resource = resourceRef("test.body-builder-resource");
+  const address = values.const(0);
+  const source: ResourceByteOperand = {
+    effect: {
+      space: "resource",
+      resource,
+      range: {
+        basis: { kind: "resource" },
+        slice: { byteOffset: 0, byteLength: 1 }
+      }
+    },
+    address: { base: address, displacement: 0 },
+    width: 8
+  };
+  const read = builder.operation(resourceRead.create({
+    source
+  }));
 
-  deepStrictEqual(builder.build(), { actions: [memoryCheck(fault, address, byteLength)] });
-  deepStrictEqual(values.widthBounds(fault), fitsUnsigned(1));
+  deepStrictEqual(builder.build(), {
+    actions: [{
+      kind: "op",
+      output: read,
+      op: resourceRead.create({
+        source
+      })
+    }]
+  });
+  deepStrictEqual(values.widthBounds(read), fitsUnsigned(8));
 });
 
 test("one operation API handles value and effect definitions", () => {

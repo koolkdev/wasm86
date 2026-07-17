@@ -5,14 +5,31 @@ import { maxSwitchMatch, type Action, type SwitchAction } from "#ir/actions.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { BodyBuilder } from "#ir/body-builder.js";
-import { emitMemoryGuard } from "#ir/memory-guard.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
-import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
+import {
+  resourceRead,
+  resourceWrite,
+  type ResourceOperation
+} from "#compiler/ir/operations/resource.js";
+import {
+  DynamicByteOriginRef,
+  resourceRef,
+  type ByteRange,
+  type ResourceByteOperand,
+  type ResourceRef
+} from "#compiler/ir/resource.js";
+import {
+  fitsUnsigned,
+  signExtended
+} from "#compiler/ir/values/width-bounds.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import type {
+  IntegerWidth,
+  ValueId
+} from "#compiler/ir/values/types.js";
 import {
   memoryRead,
   stateRead,
@@ -64,25 +81,41 @@ function cellReadAction(
   return { kind: "op", output, op: cellRead.create({ cell }) };
 }
 
+const validationResource = resourceRef("test.validation-resource");
+
+function resourceOperand(
+  range: ByteRange,
+  base: ValueId,
+  displacement: number,
+  width: IntegerWidth,
+  resource: ResourceRef = validationResource
+): ResourceByteOperand {
+  return {
+    effect: { space: "resource", resource, range },
+    address: { base, displacement },
+    width
+  };
+}
+
+function blockWithResourceOperation(
+  values: ValueTable,
+  operation: ResourceOperation
+): IrBlock {
+  const operationAction: Action = operation.result === undefined
+    ? { kind: "op", op: operation }
+    : {
+        kind: "op",
+        op: operation,
+        output: operation.result.type === "i64"
+          ? values.addActionOutput64()
+          : values.addActionOutput(operation.result.bounds)
+      };
+
+  return entryBlock(values, [operationAction, finishExit(values)]);
+}
+
 test("a body ending with a finish exit validates", () => {
   doesNotThrow(() => validateIrBlock(blockWith((values) => [finishExit(values)])));
-});
-
-test("a memory guard builds its fault body in the caller's lexical scope", () => {
-  const values = new ValueTable();
-  const builder = new BodyBuilder(values);
-
-  emitMemoryGuard(
-    builder,
-    values.external(0),
-    1,
-    { kind: "instructionFetch" }
-  );
-  const block: IrBlock = { values, body: builder.build() };
-
-  doesNotThrow(() => validateIrBlock(block, {
-    allowImplicitEntryFallthrough: true
-  }));
 });
 
 test("a body ending with a finish dispatch validates", () => {
@@ -177,7 +210,7 @@ test("op action output bounds must match the op signature", () => {
           finishExit(missingBounds)
         ])
       ),
-    /memory\.read op action output \d+ has the wrong bounds/
+    /resource\.read op action output \d+ has the wrong bounds/
   );
 
   const overlyNarrow = new ValueTable();
@@ -192,8 +225,395 @@ test("op action output bounds must match the op signature", () => {
           finishExit(overlyNarrow)
         ])
       ),
-    /memory\.read op action output \d+ has the wrong bounds/
+    /resource\.read op action output \d+ has the wrong bounds/
   );
+});
+
+test("valid narrow signed resource read and write nodes validate", () => {
+  const values = new ValueTable();
+  const address = values.const(0);
+  const value = values.const(0x1234);
+  const range: ByteRange = {
+    basis: {
+      kind: "dynamic",
+      origin: new DynamicByteOriginRef()
+    },
+    slice: { byteOffset: 4, byteLength: 2 }
+  };
+  const read = resourceRead.create({
+    source: resourceOperand(range, address, 4, 16),
+    signed: true
+  });
+  const write = resourceWrite.create({
+    destination: resourceOperand(range, address, 4, 16),
+    value
+  });
+  const output = values.addActionOutput(signExtended(16));
+
+  doesNotThrow(() => validateIrBlock(entryBlock(values, [
+    { kind: "op", op: read, output },
+    { kind: "op", op: write },
+    finishExit(values)
+  ])));
+});
+
+test("resource operation validation rejects invalid displacements", () => {
+  for (const [kind, displacement] of [
+    ["read", -1],
+    ["write", 1.5]
+  ] as const) {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const value = values.const(1);
+    const range: ByteRange = { basis: { kind: "resource" } };
+    const operation: ResourceOperation = kind === "read"
+      ? resourceRead.create({
+          source: resourceOperand(range, address, displacement, 8)
+        })
+      : resourceWrite.create({
+          destination: resourceOperand(range, address, displacement, 8),
+          value
+        });
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      /address displacement must be an unsigned 32-bit integer/
+    );
+  }
+});
+
+test("resource operation validation rejects invalid width and signedness", () => {
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const operation = resourceRead.create({
+      source: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        32
+      ),
+      signed: true
+    });
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      /signedness is valid only for a narrow read/
+    );
+  }
+
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const operation = resourceRead.create({
+      source: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        64 as IntegerWidth
+      )
+    });
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      /width must be 8, 16, or 32/
+    );
+  }
+});
+
+test("resource operation validation rejects malformed identities and range bases", () => {
+  const cases: readonly [ByteRange, ResourceRef, RegExp][] = [
+    [
+      { basis: undefined } as unknown as ByteRange,
+      validationResource,
+      /range is missing its basis/
+    ],
+    [
+      { basis: { kind: "unknown" } } as unknown as ByteRange,
+      validationResource,
+      /range has an unknown basis/
+    ],
+    [
+      {
+        basis: {
+          kind: "dynamic",
+          origin: {} as DynamicByteOriginRef
+        }
+      },
+      validationResource,
+      /dynamic basis origin must be a DynamicByteOriginRef/
+    ],
+    [
+      { basis: { kind: "resource" } },
+      { kind: "resource", id: "" } as ResourceRef,
+      /effect has an invalid resource identity/
+    ]
+  ];
+
+  for (const [range, resource, expected] of cases) {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const operation = resourceRead.create({
+      source: resourceOperand(range, address, 0, 8, resource)
+    });
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      expected
+    );
+  }
+});
+
+test("resource operation validation rejects invalid byte slices", () => {
+  const cases: readonly [ByteRange, RegExp][] = [
+    [{
+      basis: { kind: "resource" },
+      slice: { byteOffset: -1, byteLength: 1 }
+    }, /slice byte offset must be a non-negative integer/],
+    [{
+      basis: { kind: "resource" },
+      slice: { byteOffset: 1.5, byteLength: 1 }
+    }, /slice byte offset must be a non-negative integer/],
+    [{
+      basis: { kind: "resource" },
+      slice: { byteOffset: 0, byteLength: 0 }
+    }, /range byte length must be a positive integer/],
+    [{
+      basis: { kind: "resource" },
+      slice: { byteOffset: 0, byteLength: 1.5 }
+    }, /range byte length must be a positive integer/],
+    [{
+      basis: {
+        kind: "dynamic",
+        origin: new DynamicByteOriginRef()
+      },
+      slice: { byteOffset: 0xffff_ffff, byteLength: 2 }
+    }, /range end must not exceed 2\^32 bytes/]
+  ];
+
+  for (const [range, expected] of cases) {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const operation = resourceRead.create({
+      source: resourceOperand(range, address, 0, 8)
+    });
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      expected
+    );
+  }
+});
+
+test("resource operation validation rejects a slice that disagrees with transfer width", () => {
+  const values = new ValueTable();
+  const address = values.const(0);
+  const operation = resourceRead.create({
+    source: resourceOperand(
+      {
+        basis: { kind: "resource" },
+        slice: { byteOffset: 0, byteLength: 1 }
+      },
+      address,
+      0,
+      32
+    )
+  });
+
+  throws(
+    () => validateIrBlock(blockWithResourceOperation(values, operation)),
+    /exact range byte length 1 must match 32-bit transfer/
+  );
+});
+
+test("resource operation validation rejects incoherent retained effects", () => {
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const read = resourceRead.create({
+      source: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        8
+      )
+    });
+    const forged = {
+      ...read,
+      effects: { reads: [], writes: [read.effect] }
+    } as ResourceOperation;
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      /effects must read its exact resource effect and write nothing/
+    );
+  }
+
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const value = values.const(1);
+    const write = resourceWrite.create({
+      destination: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        8
+      ),
+      value
+    });
+    const forged = {
+      ...write,
+      effects: { reads: [write.effect], writes: [] }
+    } as ResourceOperation;
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      /effects must write its exact resource effect and read nothing/
+    );
+  }
+
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const read = resourceRead.create({
+      source: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        8
+      )
+    });
+    const structurallyEqualEffect = {
+      ...read.effect,
+      range: { ...read.effect.range }
+    };
+    const forged = {
+      ...read,
+      effects: { reads: [structurallyEqualEffect], writes: [] }
+    } as ResourceOperation;
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      /effects must read its exact resource effect and write nothing/
+    );
+  }
+});
+
+test("resource operation validation rejects incoherent retained inputs", () => {
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const read = resourceRead.create({
+      source: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        8
+      )
+    });
+    const forged = { ...read, inputs: [] } as ResourceOperation;
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      /must have exactly one i32 address input/
+    );
+  }
+
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const value = values.const(1);
+    const write = resourceWrite.create({
+      destination: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        8
+      ),
+      value
+    });
+    const forged = {
+      ...write,
+      inputs: [
+        write.inputs[0],
+        { value, type: "i64" }
+      ]
+    } as ResourceOperation;
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      /must have exactly one i32 address and one i32 value input/
+    );
+  }
+});
+
+test("resource operation validation rejects incoherent retained results", () => {
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const read = resourceRead.create({
+      source: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        8
+      )
+    });
+    const forged = { ...read, result: undefined } as unknown as ResourceOperation;
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      /must have an i32 result/
+    );
+  }
+
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const read = resourceRead.create({
+      source: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        8
+      ),
+      signed: true
+    });
+    const forged = {
+      ...read,
+      result: { type: "i32", bounds: fitsUnsigned(8) }
+    } as ResourceOperation;
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      /result has bounds inconsistent with its transfer width and signedness/
+    );
+  }
+
+  {
+    const values = new ValueTable();
+    const address = values.const(0);
+    const value = values.const(1);
+    const write = resourceWrite.create({
+      destination: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        8
+      ),
+      value
+    });
+    const forged = {
+      ...write,
+      result: { type: "i32" }
+    } as unknown as ResourceOperation;
+
+    throws(
+      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      /must not have a result/
+    );
+  }
 });
 
 test("a root dispatch EIP write is rejected", () => {

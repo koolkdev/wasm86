@@ -8,15 +8,19 @@ import type { LegacyEffects } from "#compiler/program/legacy-body.js";
 import {
   exportRef,
   functionRef,
-  resourceRef,
   signatureRef,
   tableRef,
   type FunctionRef,
-  type ResourceRef,
   type SignatureRef,
   type TableRef
 } from "#compiler/program/refs.js";
-import { wasmGuestMemoryMinPages, wasmImport } from "#wasm/abi.js";
+import {
+  resourceRef,
+  type ResourceRef
+} from "#compiler/ir/resource.js";
+import { wasmImport } from "#wasm/abi.js";
+import { guestMemoryMinimumPages } from "#memory/constants.js";
+import { guestMemoryResource } from "#memory/flat.js";
 import { encodeTransfer } from "./legacy-transfer.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";
@@ -111,7 +115,7 @@ function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
   const builder = new ProgramBuilder();
   const blockSignature = signatureRef("jit.block-entry");
   const cpuState = resourceRef("jit.cpu-state");
-  const guestMemory = resourceRef("jit.guest-memory");
+  const guestMemory = guestMemoryResource;
   const linkTable = tableTargetEips.length === 0 ? undefined : tableRef("jit.links");
 
   builder.signature({
@@ -132,7 +136,7 @@ function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
     ref: guestMemory,
     moduleName: wasmImport.namespace,
     name: wasmImport.guestMemoryName,
-    limits: { minPages: wasmGuestMemoryMinPages }
+    limits: { minPages: guestMemoryMinimumPages }
   });
   if (linkTable !== undefined) {
     builder.importTable({

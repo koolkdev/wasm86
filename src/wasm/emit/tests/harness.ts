@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { IrBlock } from "#ir/block.js";
-import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { wasmBlockExportName, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
@@ -16,11 +16,13 @@ import { validatePlacement } from "#compiler/placement/validate.js";
 import {
   exportRef,
   functionRef,
-  resourceRef,
   signatureRef
 } from "#compiler/program/refs.js";
+import { resourceRef } from "#compiler/ir/resource.js";
 import { statusFlagResolverType } from "#core/flags/resolvers.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
+import { guestMemoryMinimumPages } from "#memory/constants.js";
+import { guestMemoryResource } from "#memory/flat.js";
 
 // Test-only module wrapper around the action emitter: imported state + guest
 // memories, one run export returning the encoded i64 exit. The harness
@@ -72,6 +74,7 @@ function emitIrBlockBody(
     scratch,
     externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
     functionIndices: bindings.definitionIndices,
+    resourceIndices: bindings.resources,
     placement,
     embedding: {
       dispatch: { kind: "br", depth: 0 },
@@ -88,7 +91,7 @@ export async function instantiateIrBlock(
   externalParamCount = 0
 ): Promise<InstantiatedIrBlock> {
   const state = new WebAssembly.Memory({ initial: 1 });
-  const guest = new WebAssembly.Memory({ initial: wasmGuestMemoryMinPages });
+  const guest = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
   const instance = await WebAssembly.instantiate(
     await WebAssembly.compile(encodeIrBlockModule(block, externalParamCount)),
     {
@@ -117,7 +120,7 @@ export async function instantiateFunctionBody(
   paramCount = 0
 ): Promise<InstantiatedIrBlock> {
   const state = new WebAssembly.Memory({ initial: 1 });
-  const guest = new WebAssembly.Memory({ initial: wasmGuestMemoryMinPages });
+  const guest = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
   const instance = await WebAssembly.instantiate(
     await WebAssembly.compile(encodeFunctionBodyModule(body, paramCount)),
     {
@@ -164,7 +167,6 @@ function createIrBlockProgram(
   const entrySignature = signatureRef("test.ir-block-entry-signature");
   const entry = functionRef("test.ir-block-entry");
   const cpuState = resourceRef("test.ir-block-cpu-state");
-  const guestMemory = resourceRef("test.ir-block-guest-memory");
 
   builder.signature({ ref: entrySignature, type: entryType });
   builder.signature({
@@ -178,24 +180,27 @@ function createIrBlockProgram(
     limits: { minPages: 1 }
   });
   builder.importMemory({
-    ref: guestMemory,
+    ref: guestMemoryResource,
     moduleName: wasmImport.namespace,
     name: wasmImport.guestMemoryName,
-    limits: { minPages: wasmGuestMemoryMinPages }
+    limits: { minPages: guestMemoryMinimumPages }
   });
   builder.legacyFunction({
     ref: entry,
     signature: entrySignature,
     calls: [],
-    resources: [cpuState, guestMemory],
+    resources: [cpuState, guestMemoryResource],
     globals: [],
     tables: [],
     irBlocks: [{ block, allowImplicitEntryFallthrough: true }],
     build: (bindings) => {
       assert(
-        bindings.resources.get(cpuState) === wasmMemoryIndex.cpuState &&
-          bindings.resources.get(guestMemory) === wasmMemoryIndex.guest,
-        "unexpected Wasm memory import order"
+        bindings.resources.get(cpuState) === wasmMemoryIndex.cpuState,
+        "unexpected CPU-state memory import index"
+      );
+      assert(
+        bindings.resources.has(guestMemoryResource),
+        "missing resolved guest-memory resource"
       );
       const body = emitIrBlockBody(block, externalParamCount, bindings);
 
@@ -221,7 +226,7 @@ function validateProgramPlacements(program: Program): Program {
 function initializeTestModule(module: WasmModuleEncoder, paramCount: number): number {
   const cpuStateMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.cpuStateMemoryName, { minPages: 1 });
   const guestMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.guestMemoryName, {
-    minPages: wasmGuestMemoryMinPages
+    minPages: guestMemoryMinimumPages
   });
 
   assert(

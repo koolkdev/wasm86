@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import type { BodyAnalysis } from "#compiler/analysis/model.js";
 import { placeBody, type BodyPlacement } from "#compiler/placement/place.js";
 import type { IrBlock } from "#ir/block.js";
 import { Declarations } from "./declarations.js";
@@ -17,6 +18,7 @@ import type {
   Signature,
   TableImport
 } from "./model.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
 
 export type LinkProgramOptions = Readonly<{
   owner: object;
@@ -52,7 +54,7 @@ export function linkProgram(options: LinkProgramOptions): Program {
   );
   const functions: readonly ProgramFunction[] = [...legacy.functions, ...defined];
 
-  validateLinkedFunctions(functions, declarations);
+  validateLinkedFunctions(functions, declarations, options.memories);
   const program: ProgramData = {
     signatures: options.signatures,
     memories: options.memories,
@@ -78,6 +80,7 @@ function placeLegacyFunctions(
   const rootPlacements: BodyPlacement[] = [];
   const functions = declarations.map((fn): LegacyFunction => {
     const liveCalls: FunctionDefinition[] = [];
+    const liveResources: ResourceRef[] = [];
 
     for (const entry of fn.irBlocks) {
       const placement = placeBody(entry.block, {
@@ -91,8 +94,16 @@ function placeLegacyFunctions(
           liveCalls.push(action.target);
         }
       }
+      liveResources.push(...resourcesUsedBy(placement.analysis));
     }
     const callTargets = unique([...fn.callTargets, ...liveCalls]);
+
+    for (const resource of unique(liveResources)) {
+      assert(
+        fn.resources.includes(resource),
+        `undeclared program resource ${resource.id} used by legacy function ${fn.ref.id}`
+      );
+    }
 
     return {
       ...fn,
@@ -117,6 +128,7 @@ function materializeDefinedFunctions(
     const callTargets = unique(placement.analysis.calls()
       .filter(({ action }) => placement.analysis.callActionMustExecute(action))
       .map(({ action }) => action.target));
+    const resources = resourcesUsedBy(placement.analysis);
 
     placements.set(body, placement);
     return {
@@ -126,6 +138,7 @@ function materializeDefinedFunctions(
       effects: definition.effects,
       signature: signature.ref,
       callTargets,
+      resources,
       body,
       placement
     };
@@ -222,7 +235,8 @@ function validateStaticProgram(
 
 function validateLinkedFunctions(
   functions: readonly ProgramFunction[],
-  declarations: Declarations<FunctionDeclaration>
+  declarations: Declarations<FunctionDeclaration>,
+  memories: readonly MemoryImport[]
 ): void {
   assert(
     functions.length === declarations.all().length,
@@ -240,7 +254,43 @@ function validateLinkedFunctions(
         `unknown program function ${call.id} called by function ${fn.ref.id}`
       );
     }
+    for (const resource of fn.resources) {
+      assert(
+        declarationByRef(memories, resource) !== undefined,
+        `unknown program resource ${resource.id} used by function ${fn.ref.id}`
+      );
+    }
+    if (fn.kind === "function") {
+      for (const access of [...fn.effects.reads, ...fn.effects.writes]) {
+        if (access.space !== "resource") {
+          continue;
+        }
+        assert(
+          declarationByRef(memories, access.resource) !== undefined,
+          `unknown program resource ${access.resource.id} declared by function ${fn.ref.id}`
+        );
+      }
+    }
   }
+}
+
+function resourcesUsedBy(analysis: BodyAnalysis): readonly ResourceRef[] {
+  const resources: ResourceRef[] = [];
+
+  for (const { action } of analysis.operations()) {
+    if (!analysis.opActionMustExecute(action)) {
+      continue;
+    }
+    for (const access of [
+      ...action.op.effects.reads,
+      ...action.op.effects.writes
+    ]) {
+      if (access.space === "resource") {
+        resources.push(access.resource);
+      }
+    }
+  }
+  return unique(resources);
 }
 
 function declarationByRef<TDeclaration extends Readonly<{ ref: object }>>(

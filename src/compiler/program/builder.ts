@@ -51,6 +51,14 @@ export class ProgramBuilder {
 
   importMemory(declaration: MemoryImport): void {
     this.#assertOpen();
+    assert(
+      this.#memories.find(
+        (memory) =>
+          memory.moduleName === declaration.moduleName &&
+          memory.name === declaration.name
+      ) === undefined,
+      `duplicate program memory import: ${declaration.moduleName}.${declaration.name}`
+    );
 
     this.#memories.add({
       ...declaration,

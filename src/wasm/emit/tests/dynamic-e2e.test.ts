@@ -21,9 +21,11 @@ import { aluSemantic } from "#core/semantics/alu.js";
 import { movSemantic } from "#core/semantics/mov.js";
 import { xchgSemantic } from "#core/semantics/xchg.js";
 import { assertLazyFlagState, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
-import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
+import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
-import { memoryCheck, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { BodyBuilder } from "#ir/body-builder.js";
+import { flatMemoryAccess } from "#memory/flat.js";
 
 // One emitted handler body per op+width, with the register indices arriving
 // as wasm params at run time.
@@ -301,23 +303,25 @@ test("a dynamic memory check evaluates each semantic operand once", async () => 
   const values = new ValueTable();
   const address = values.external(0);
   const byteLength = values.external(1);
-  const fault = values.addActionOutput(fitsUnsigned(1));
+  const body = new BodyBuilder(values);
+  const fault = flatMemoryAccess(
+    values,
+    address,
+    byteLength,
+    "read"
+  ).invalid;
+  body.push(stateWrite(gprChannel("eax"), fault));
   const block: IrBlock = {
     values,
-    body: {
-      actions: [
-        memoryCheck(fault, address, byteLength),
-        stateWrite(gprChannel("eax"), fault)
-      ]
-    }
+    body: body.build()
   };
   const { stateView, run } = await instantiateIrBlock(block, 2);
   const cases = [
     [0, 1, 0],
-    [wasmGuestMemoryMinByteLength - 4, 4, 0],
-    [wasmGuestMemoryMinByteLength - 3, 4, 1],
+    [guestMemoryMinimumByteLength - 4, 4, 0],
+    [guestMemoryMinimumByteLength - 3, 4, 1],
     [0xffff_ffff, 0, 0],
-    [0, wasmGuestMemoryMinByteLength + 1, 1]
+    [0, guestMemoryMinimumByteLength + 1, 1]
   ] as const;
 
   for (const [start, length, expectedFault] of cases) {
@@ -326,31 +330,37 @@ test("a dynamic memory check evaluates each semantic operand once", async () => 
   }
 });
 
-test("nested dynamic memory checks keep their scoped temporaries distinct", async () => {
+test("nested dynamic memory checks compose through the value graph", async () => {
   const values = new ValueTable();
   const innerAddress = values.external(0);
   const innerByteLength = values.external(1);
   const outerByteLength = values.external(2);
-  const innerFault = values.addActionOutput(fitsUnsigned(1));
-  const outerFault = values.addActionOutput(fitsUnsigned(1));
+  const body = new BodyBuilder(values);
+  const innerFault = flatMemoryAccess(
+    values,
+    innerAddress,
+    innerByteLength,
+    "read"
+  ).invalid;
+  const outerFault = flatMemoryAccess(
+    values,
+    innerFault,
+    outerByteLength,
+    "read"
+  ).invalid;
+  body.push(stateWrite(gprChannel("eax"), outerFault));
   const block: IrBlock = {
     values,
-    body: {
-      actions: [
-        memoryCheck(innerFault, innerAddress, innerByteLength),
-        memoryCheck(outerFault, innerFault, outerByteLength),
-        stateWrite(gprChannel("eax"), outerFault)
-      ]
-    }
+    body: body.build()
   };
   const { stateView, run } = await instantiateIrBlock(block, 3);
 
-  // The inner fault is address 1 for the outer full-memory access. If its
-  // byte-length temporary clobbers the outer one, this incorrectly succeeds.
+  // The inner fault becomes address 1 for the outer full-memory access.
+  // Composing the two checks through the value graph must preserve that fact.
   assertCompleted(run(
-    wasmGuestMemoryMinByteLength - 3,
+    guestMemoryMinimumByteLength - 3,
     4,
-    wasmGuestMemoryMinByteLength
+    guestMemoryMinimumByteLength
   ));
   strictEqual(readRegister(stateView, "eax"), 1);
 });

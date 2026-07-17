@@ -1,5 +1,7 @@
-import { assert } from "#common/assert.js";
-import { memoryRead, memoryResolve, memoryWrite } from "#compiler/ir/operations/memory.js";
+import {
+  resourceRead,
+  resourceWrite
+} from "#compiler/ir/operations/resource.js";
 import type { GetOptions } from "#core/semantics/builder.js";
 import type {
   MemRef,
@@ -11,7 +13,10 @@ import type {
 } from "#core/semantics/refs.js";
 import type { OperandWidth, SegmentRegister } from "#core/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import {
+  flatMemoryAccess,
+  flatMemoryOperand
+} from "#memory/flat.js";
 import type { OperandResolver } from "./operands.js";
 import type { SemanticScopeStack } from "./scope.js";
 
@@ -59,23 +64,22 @@ export class MemoryManager {
     byteLength: ValueInput,
     intent: TIntent
   ): MemoryAccess<TIntent> {
-    const staticByteLength = this.#values.constValue(byteLength);
-
-    assert(
-      staticByteLength === undefined || staticByteLength > 0,
-      `memory resolution byte length must be positive, got ${staticByteLength}`
-    );
     const linearAddress = this.#operands.resolveAddress(memory);
-    const invalid = this.#scopes.current.body.operation(
-      memoryResolve.create({ address: linearAddress, byteLength })
+    const flat = flatMemoryAccess(
+      this.#values,
+      linearAddress,
+      byteLength,
+      intent
     );
 
     return {
       kind: "memoryAccess",
-      linearAddress,
-      byteLength,
-      invalid,
-      intent
+      resource: flat.resource,
+      origin: flat.origin,
+      linearAddress: flat.start,
+      byteLength: flat.byteLength,
+      invalid: flat.invalid,
+      intent: flat.intent
     };
   }
 
@@ -85,10 +89,22 @@ export class MemoryManager {
     width: OperandWidth,
     options: GetOptions = {}
   ): Value {
-    this.#assertSubrange(access.byteLength, byteOffset, width);
-    const relative = this.#relativeAddress(access.linearAddress, byteOffset);
+    const source = flatMemoryOperand(
+      this.#values,
+      {
+        resource: access.resource,
+        origin: access.origin,
+        start: access.linearAddress,
+        byteLength: access.byteLength
+      },
+      byteOffset,
+      width
+    );
+    const signed = options.signed === true && width !== 32;
 
-    return this.#readMemory(relative.address, width, options, relative.byteOffset);
+    return this.#scopes.current.body.operation(
+      resourceRead.create(signed ? { source, signed: true } : { source })
+    );
   }
 
   memoryWrite(
@@ -97,61 +113,21 @@ export class MemoryManager {
     value: ValueInput,
     width: OperandWidth
   ): void {
-    this.#assertSubrange(access.byteLength, byteOffset, width);
-    const relative = this.#relativeAddress(access.linearAddress, byteOffset);
-
-    this.#writeMemory(relative.address, value, width, relative.byteOffset);
-  }
-
-  #readMemory(
-    address: ValueId,
-    width: OperandWidth,
-    options: GetOptions,
-    byteOffset = 0
-  ): Value {
-    const signed = options.signed === true && width !== 32;
-
-    return this.#scopes.current.body.operation(
-      memoryRead.create(
-        signed
-          ? { address, byteOffset, width, signed: true }
-          : { address, byteOffset, width }
-      )
+    const destination = flatMemoryOperand(
+      this.#values,
+      {
+        resource: access.resource,
+        origin: access.origin,
+        start: access.linearAddress,
+        byteLength: access.byteLength
+      },
+      byteOffset,
+      width
     );
-  }
 
-  #writeMemory(address: ValueId, value: ValueInput, width: OperandWidth, byteOffset = 0): void {
     this.#scopes.current.recordMemoryWrite();
     this.#scopes.current.body.operation(
-      memoryWrite.create({ address, byteOffset, value, width })
+      resourceWrite.create({ destination, value })
     );
-  }
-
-  #assertSubrange(byteLength: ValueId, byteOffset: ValueId, width: OperandWidth): void {
-    const staticByteLength = this.#values.constValue(byteLength);
-    const staticByteOffset = this.#values.constValue(byteOffset);
-
-    if (staticByteOffset === undefined) {
-      return;
-    }
-
-    assert(staticByteOffset >= 0, `memory byte offset must be non-negative, got ${staticByteOffset}`);
-    if (staticByteLength !== undefined) {
-      assert(
-        staticByteOffset + width / 8 <= staticByteLength,
-        `${width}-bit memory access at byte offset ${staticByteOffset} exceeds ${staticByteLength}-byte resolution`
-      );
-    }
-  }
-
-  #relativeAddress(
-    address: ValueId,
-    byteOffset: ValueId
-  ): Readonly<{ address: ValueId; byteOffset: number }> {
-    const staticByteOffset = this.#values.constValue(byteOffset);
-
-    return staticByteOffset === undefined
-      ? { address: this.#values.binary("add", address, byteOffset), byteOffset: 0 }
-      : { address, byteOffset: staticByteOffset };
   }
 }

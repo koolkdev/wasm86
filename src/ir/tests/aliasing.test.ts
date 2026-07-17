@@ -1,7 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { actionMayWriteStateSlot, effectsOf, mayAlias, type StorageEffect } from "#ir/aliasing.js";
+import { actionMayWriteStateSlot, effectsOf, mayAlias } from "#ir/aliasing.js";
+import type { StorageAccess } from "#compiler/ir/effects.js";
 import {
   eipChannel,
   flagChannel,
@@ -15,8 +16,6 @@ import {
 } from "#ir/slots.js";
 import type { StateSlot } from "#ir/slots.js";
 import {
-  memoryRead,
-  memoryWrite,
   statusFlagCall,
   stateRead,
   stateWrite
@@ -24,20 +23,24 @@ import {
 import { valueId } from "#compiler/ir/values/id.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { CellRef } from "#compiler/refs/cell.js";
+import { resourceRef } from "#compiler/ir/resource.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/program/refs.js";
 import { functionType } from "#compiler/program/function-type.js";
 
-const memory: StorageEffect = { space: "memory" };
-const memoryBounds: StorageEffect = { space: "memoryBounds" };
+const resourceBytes: StorageAccess = {
+  space: "resource",
+  resource: resourceRef("test.aliasing-resource"),
+  range: { basis: { kind: "resource" } }
+};
 const firstCell = new CellRef("i32");
 const secondCell = new CellRef("i32");
 
-function cellSlot(cell: CellRef): StorageEffect {
+function cellSlot(cell: CellRef): StorageAccess {
   return { space: "cell", cell };
 }
 
-function state(slot: StateSlot): StorageEffect {
+function state(slot: StateSlot): StorageAccess {
   return { space: "state", slot };
 }
 
@@ -73,14 +76,6 @@ test("effects derive from action kind and slot", () => {
   deepStrictEqual(effectsOf(stateWrite(dynamicGpr(3), 0)), {
     reads: [],
     writes: [state(dynamicGpr(3))]
-  });
-  deepStrictEqual(effectsOf(memoryRead(0, 1, 32)), {
-    reads: [memory],
-    writes: []
-  });
-  deepStrictEqual(effectsOf(memoryWrite(0, 1, 32)), {
-    reads: [],
-    writes: [memory]
   });
   deepStrictEqual(effectsOf(statusFlagCall(4, "ZF", 0, 1, 2, 3)), {
     reads: [],
@@ -129,28 +124,21 @@ test("if effects aggregate nested body effects", () => {
     kind: "if",
     condition: valueId(0),
     thenBody: { actions: [stateRead(1, gprChannel("eax")), stateWrite(gprChannel("ebx"), 1)] },
-    elseBody: { actions: [memoryWrite(2, 3, 32)] }
+    elseBody: { actions: [stateWrite(flagChannel("CF"), 2)] }
   } as const;
 
   deepStrictEqual(effectsOf(action), {
     reads: [state(gprChannel("eax"))],
-    writes: [state(gprChannel("ebx")), memory]
+    writes: [state(gprChannel("ebx")), state(flagChannel("CF"))]
   });
   strictEqual(actionMayWriteStateSlot(action, gprChannel("ebx")), true);
   strictEqual(actionMayWriteStateSlot(action, gprChannel("eax")), false);
 });
 
-test("guest memory may-aliases guest memory and never state", () => {
-  strictEqual(mayAlias(memory, memory), true);
-  strictEqual(mayAlias(memory, state(gprChannel("eax"))), false);
-  strictEqual(mayAlias(state(eipChannel), memory), false);
-  strictEqual(mayAlias(state(dynamicGpr(0)), memory), false);
-});
-
 test("cell identities alias exactly themselves and no resource domain", () => {
   const first = cellSlot(firstCell);
   const second = cellSlot(secondCell);
-  const foreign: StorageEffect = {
+  const foreign: StorageAccess = {
     space: "cell",
     cell: new CellRef("i32")
   };
@@ -159,16 +147,15 @@ test("cell identities alias exactly themselves and no resource domain", () => {
   strictEqual(mayAlias(first, second), false);
   strictEqual(mayAlias(first, foreign), false);
   strictEqual(mayAlias(first, state(gprChannel("eax"))), false);
-  strictEqual(mayAlias(first, memory), false);
-  strictEqual(mayAlias(first, memoryBounds), false);
-  strictEqual(mayAlias(memoryBounds, first), false);
+  strictEqual(mayAlias(first, resourceBytes), false);
+  strictEqual(mayAlias(resourceBytes, first), false);
 });
 
 test("static channels alias iff their byte ranges intersect", () => {
   strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ax"))), true);
   strictEqual(mayAlias(cellSlot(firstCell), cellSlot(firstCell)), true);
   strictEqual(mayAlias(cellSlot(firstCell), cellSlot(secondCell)), false);
-  strictEqual(mayAlias(cellSlot(firstCell), memory), false);
+  strictEqual(mayAlias(cellSlot(firstCell), resourceBytes), false);
   strictEqual(mayAlias(state(gprChannel("eax")), cellSlot(firstCell)), false);
   strictEqual(mayAlias(state(gprChannel("al")), state(gprChannel("ah"))), false);
   strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ebx"))), false);

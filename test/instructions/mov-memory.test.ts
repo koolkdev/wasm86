@@ -12,7 +12,7 @@ import {
   type WasmCpuStateInit,
   type WasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
+import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
@@ -330,7 +330,7 @@ test("compiled MOV applies effective, default, and overridden segments", async (
 test("compiled MOV accepts the last valid boundary address for each access width", async () => {
   for (const width of [8, 16, 32] as const) {
     const byteLength = width / 8;
-    const address = wasmGuestMemoryMinByteLength - byteLength;
+    const address = guestMemoryMinimumByteLength - byteLength;
     const value = 0x1234_5678;
     const expectedBytes = dwordBytes(value).slice(0, byteLength);
 
@@ -354,7 +354,7 @@ test("compiled MOV accepts the last valid boundary address for each access width
 
 test("compiled MOV read guards report exact 1-, 2-, and 4-byte fault ranges", async () => {
   for (const width of [8, 16, 32] as const) {
-    const faultAddress = wasmGuestMemoryMinByteLength - width / 8 + 1;
+    const faultAddress = guestMemoryMinimumByteLength - width / 8 + 1;
 
     await assertFaultingMemoryCase({
       name: `${width}-bit read fault`,
@@ -368,10 +368,10 @@ test("compiled MOV read guards report exact 1-, 2-, and 4-byte fault ranges", as
 test("compiled MOV write guards fault before state or memory changes", async () => {
   for (const width of [8, 16, 32] as const) {
     const byteLength = width / 8;
-    const faultAddress = wasmGuestMemoryMinByteLength - byteLength + 1;
+    const faultAddress = guestMemoryMinimumByteLength - byteLength + 1;
     const observedAddress = Math.max(0, faultAddress - 1);
     const initialBytes = Array.from(
-      { length: wasmGuestMemoryMinByteLength - observedAddress },
+      { length: guestMemoryMinimumByteLength - observedAddress },
       (_, index) => 0xa0 + index
     );
 
@@ -387,7 +387,7 @@ test("compiled MOV write guards fault before state or memory changes", async () 
 });
 
 test("faulting compiled moffs reads and writes preserve instruction-start state and memory", async () => {
-  const faultAddress = wasmGuestMemoryMinByteLength - 2;
+  const faultAddress = guestMemoryMinimumByteLength - 2;
   const observedAddress = faultAddress - 2;
   const initialBytes = [0xaa, 0xbb, 0xcc, 0xdd];
 
@@ -410,7 +410,7 @@ test("faulting compiled moffs reads and writes preserve instruction-start state 
 });
 
 test("faulting compiled segment-selector store reports a word write before committing", async () => {
-  const faultAddress = wasmGuestMemoryMinByteLength - 1;
+  const faultAddress = guestMemoryMinimumByteLength - 1;
   const initialBytes = [0xaa];
 
   await assertFaultingMemoryCase({

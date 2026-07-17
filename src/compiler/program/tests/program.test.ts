@@ -13,20 +13,49 @@ import {
   exportRef,
   functionRef,
   globalRef,
-  resourceRef,
   signatureRef,
   tableRef
 } from "#compiler/program/refs.js";
+import {
+  DynamicByteOriginRef,
+  resourceRef,
+  type ByteRange,
+  type ResourceByteOperand,
+  type ResourceEffect,
+  type ResourceRef
+} from "#compiler/ir/resource.js";
 import { buildIrBlock } from "#ir/body-builder.js";
 import type { FunctionBuilder } from "#ir/function.js";
 import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
+import {
+  resourceRead,
+  resourceWrite
+} from "#compiler/ir/operations/resource.js";
 import { gprChannel, segmentSelectorChannel } from "#ir/slots.js";
 import { valueId } from "#compiler/ir/values/id.js";
+import type {
+  IntegerWidth,
+  ValueId
+} from "#compiler/ir/values/types.js";
 import { emitFunction } from "#wasm/emit/action.js";
 
 const voidType = functionType([], []);
 const i32Type = functionType([], ["i32"]);
 const noEffects = { reads: [], writes: [] } as const;
+
+function byteOperand(
+  resource: ResourceRef,
+  range: ByteRange,
+  base: ValueId,
+  displacement: number,
+  width: IntegerWidth
+): ResourceByteOperand {
+  return {
+    effect: { space: "resource", resource, range },
+    address: { base, displacement },
+    width
+  };
+}
 
 test("forward function declarations close before their factories build and execute", async () => {
   const program = new ProgramBuilder();
@@ -130,6 +159,276 @@ test("functions call typed peers and execute through program encoding", async ()
   strictEqual(entry(), 42);
 });
 
+test("defined resource operations resolve memory index two", async () => {
+  const program = new ProgramBuilder();
+  const signature = signatureRef("test.resource-operation-signature");
+  const firstDummy = resourceRef("test.resource-operation-first-dummy");
+  const secondDummy = resourceRef("test.resource-operation-second-dummy");
+  const resource = resourceRef("test.resource-operation-target");
+  const range: ByteRange = {
+    basis: { kind: "resource" },
+    slice: { byteOffset: 12, byteLength: 2 }
+  };
+  const byteAccess: ResourceEffect = {
+    space: "resource",
+    resource,
+    range
+  };
+
+  program.signature({ ref: signature, type: i32Type });
+  program.importMemory({
+    ref: firstDummy,
+    moduleName: "test",
+    name: "firstDummy",
+    limits: { minPages: 1 }
+  });
+  program.importMemory({
+    ref: secondDummy,
+    moduleName: "test",
+    name: "secondDummy",
+    limits: { minPages: 1 }
+  });
+  program.importMemory({
+    ref: resource,
+    moduleName: "test",
+    name: "target",
+    limits: { minPages: 2 }
+  });
+  const definition = program.defineFunction({
+    ref: functionRef("test.resource-operation-function"),
+    signature,
+    effects: { reads: [byteAccess], writes: [byteAccess] }
+  }, (fn) => {
+    const address = fn.values.const(6);
+
+    fn.body.operation(resourceWrite.create({
+      destination: byteOperand(resource, range, address, 6, 16),
+      value: fn.values.const(0x1234)
+    }));
+    const read = fn.body.operation(resourceRead.create({
+      source: byteOperand(resource, range, address, 6, 16)
+    }));
+    fn.return([read]);
+  });
+  program.exportFunction({
+    ref: exportRef("test.resource-operation-export"),
+    name: "entry",
+    target: definition.ref
+  });
+
+  const closed = program.finish();
+  const fn = closed.functions.find((candidate) => candidate.ref === definition.ref);
+
+  if (fn === undefined || fn.kind !== "function") {
+    throw new Error("missing resource operation function");
+  }
+  deepStrictEqual(fn.resources, [resource]);
+
+  const firstDummyMemory = new WebAssembly.Memory({ initial: 1 });
+  const secondDummyMemory = new WebAssembly.Memory({ initial: 1 });
+  const targetMemory = new WebAssembly.Memory({ initial: 2 });
+  const instance = await WebAssembly.instantiate(
+    await WebAssembly.compile(encodeProgram(closed)),
+    {
+      test: {
+        firstDummy: firstDummyMemory,
+        secondDummy: secondDummyMemory,
+        target: targetMemory
+      }
+    }
+  );
+  const entry = instance.exports.entry;
+
+  if (typeof entry !== "function") {
+    throw new Error("missing resource operation export");
+  }
+  strictEqual(entry(), 0x1234);
+  strictEqual(new DataView(targetMemory.buffer).getUint16(12, true), 0x1234);
+  strictEqual(new DataView(firstDummyMemory.buffer).getUint16(12, true), 0);
+  strictEqual(new DataView(secondDummyMemory.buffer).getUint16(12, true), 0);
+});
+
+test("function definitions reject malformed declared resource effects immediately", () => {
+  const resource = resourceRef("test.malformed-declared-resource");
+  const cases: readonly [ResourceEffect, RegExp][] = [
+    [{
+      space: "resource",
+      resource: { kind: "resource", id: "" } as ResourceRef,
+      range: { basis: { kind: "resource" } }
+    }, /declared read effect 0 effect has an invalid resource identity/],
+    [{
+      space: "resource",
+      resource,
+      range: { basis: undefined } as unknown as ByteRange
+    }, /declared write effect 0 range is missing its basis/],
+    [{
+      space: "resource",
+      resource,
+      range: {
+        basis: {
+          kind: "dynamic",
+          origin: {} as DynamicByteOriginRef
+        }
+      }
+    }, /declared read effect 0 dynamic basis origin must be a DynamicByteOriginRef/],
+    [{
+      space: "resource",
+      resource,
+      range: {
+        basis: { kind: "resource" },
+        slice: { byteOffset: -1, byteLength: 1 }
+      }
+    }, /declared write effect 0 slice byte offset must be a non-negative integer/],
+    [{
+      space: "resource",
+      resource,
+      range: {
+        basis: { kind: "resource" },
+        slice: { byteOffset: 0xffff_ffff, byteLength: 2 }
+      }
+    }, /declared read effect 0 range end must not exceed 2\^32 bytes/]
+  ];
+
+  for (const [index, [effect, expected]] of cases.entries()) {
+    const program = new ProgramBuilder();
+    const signature = signatureRef(`test.malformed-effect-signature-${index}`);
+
+    program.signature({ ref: signature, type: voidType });
+    throws(
+      () => program.defineFunction({
+        ref: functionRef(`test.malformed-effect-function-${index}`),
+        signature,
+        effects: index % 2 === 0
+          ? { reads: [effect], writes: [] }
+          : { reads: [], writes: [effect] }
+      }, () => {
+        throw new Error("malformed function body must not build");
+      }),
+      expected
+    );
+  }
+});
+
+test("program closure omits dead resource reads", () => {
+  const program = new ProgramBuilder();
+  const signature = signatureRef("test.dead-resource-signature");
+  const readResource = resourceRef("test.dead-read-resource");
+  const range: ByteRange = {
+    basis: { kind: "resource" },
+    slice: { byteOffset: 0, byteLength: 1 }
+  };
+  const byteAccess: ResourceEffect = {
+    space: "resource",
+    resource: readResource,
+    range
+  };
+
+  program.signature({ ref: signature, type: i32Type });
+  program.importMemory({
+    ref: readResource,
+    moduleName: "test",
+    name: "deadRead",
+    limits: { minPages: 1 }
+  });
+  const definition = program.defineFunction({
+    ref: functionRef("test.dead-resource-function"),
+    signature,
+    effects: { reads: [byteAccess], writes: [] }
+  }, (fn) => {
+    fn.body.operation(resourceRead.create({
+      source: byteOperand(readResource, range, fn.values.const(0), 0, 8)
+    }));
+    fn.return([fn.values.const(7)]);
+  });
+
+  const fn = program.finish().functions.find((candidate) => candidate.ref === definition.ref);
+
+  if (fn === undefined || fn.kind !== "function") {
+    throw new Error("missing dead resource function");
+  }
+  deepStrictEqual(fn.resources, []);
+});
+
+test("program closure rejects unknown effects and undeclared live resource uses", () => {
+  {
+    const program = new ProgramBuilder();
+    const signature = signatureRef("test.unknown-symbolic-resource-signature");
+    const resource = resourceRef("test.unknown-symbolic-resource");
+    const byteAccess: ResourceEffect = {
+      space: "resource",
+      resource,
+      range: { basis: { kind: "resource" } }
+    };
+
+    program.signature({ ref: signature, type: i32Type });
+    program.defineFunction({
+      ref: functionRef("test.unknown-symbolic-resource-function"),
+      signature,
+      effects: { reads: [byteAccess], writes: [] }
+    }, (fn) => {
+      fn.return([fn.body.operation(resourceRead.create({
+        source: byteOperand(resource, byteAccess.range, fn.values.const(0), 0, 8)
+      }))]);
+    });
+
+    throws(() => program.finish(), /unknown program resource.*used by function/);
+  }
+  {
+    const program = new ProgramBuilder();
+    const signature = signatureRef("test.unknown-resource-effect-signature");
+    const resource = resourceRef("test.unknown-resource-effect");
+    const byteAccess: ResourceEffect = {
+      space: "resource",
+      resource,
+      range: { basis: { kind: "resource" } }
+    };
+
+    program.signature({ ref: signature, type: i32Type });
+    program.defineFunction({
+      ref: functionRef("test.unknown-resource-effect-function"),
+      signature,
+      effects: { reads: [byteAccess], writes: [] }
+    }, (fn) => fn.return([fn.values.const(1)]));
+
+    throws(() => program.finish(), /unknown program resource.*declared by function/);
+  }
+  {
+    const program = new ProgramBuilder();
+    const signature = signatureRef("test.undeclared-legacy-resource-signature");
+    const resource = resourceRef("test.undeclared-legacy-resource");
+    const range: ByteRange = {
+      basis: { kind: "resource" },
+      slice: { byteOffset: 0, byteLength: 1 }
+    };
+    const ir = buildIrBlock((body) => {
+      body.operation(resourceWrite.create({
+        destination: byteOperand(resource, range, body.values.const(0), 0, 8),
+        value: body.values.const(1)
+      }));
+    });
+
+    program.signature({ ref: signature, type: voidType });
+    program.importMemory({
+      ref: resource,
+      moduleName: "test",
+      name: "memory",
+      limits: { minPages: 1 }
+    });
+    program.legacyFunction({
+      ref: functionRef("test.undeclared-legacy-resource-function"),
+      signature,
+      calls: [],
+      resources: [],
+      globals: [],
+      tables: [],
+      irBlocks: [{ block: ir, allowImplicitEntryFallthrough: true }],
+      build: () => new WasmFunctionBodyEncoder().finish()
+    });
+
+    throws(() => program.finish(), /undeclared program resource.*used by legacy function/);
+  }
+});
+
 test("an effectful function call stays single and conditional inside its selected if arm", async () => {
   const program = new ProgramBuilder();
   const calleeType = functionType(["i32"], []);
@@ -189,6 +488,7 @@ test("an effectful function call stays single and conditional inside its selecte
   const functionIndices = new Map([[callee, 0]]);
   const emitted = emitFunction(callerDefinition.body, {
     functionIndices,
+    resourceIndices: new Map(),
     placement: callerDefinition.placement
   });
   const opcodes = wasmBodyOpcodes(emitted.bytes);
@@ -649,6 +949,15 @@ test("declarations reject duplicate stable identities and export names", () => {
     /unknown program signature/
   );
   program.importMemory({ ref: memory, moduleName: "test", name: "memory", limits: { minPages: 1 } });
+  throws(
+    () => program.importMemory({
+      ref: resourceRef("same-memory-import-coordinate"),
+      moduleName: "test",
+      name: "memory",
+      limits: { minPages: 1 }
+    }),
+    /duplicate program memory import: test\.memory/
+  );
   throws(
     () => program.importMemory({
       ref: resourceRef("same-memory"),

@@ -1,11 +1,12 @@
 import { assert } from "#common/assert.js";
-import { memoryRead } from "#compiler/ir/operations/memory.js";
+import { resourceRead } from "#compiler/ir/operations/resource.js";
 import { stateRead } from "#compiler/ir/operations/state.js";
+import { buildException } from "#cpu/exit.js";
+import { pageFault, pageFaultErrorCode } from "#core/exceptions.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import { eipChannel } from "#ir/slots.js";
 import { BodyBuilder } from "#ir/body-builder.js";
 import type { IrBlock } from "#ir/block.js";
-import { emitMemoryGuard } from "#ir/memory-guard.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { OperandWidth } from "#core/types.js";
@@ -13,9 +14,14 @@ import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
+import {
+  flatMemoryAccess,
+  flatMemoryOperand
+} from "#memory/flat.js";
 
-// Decode reads as action fragments: a guarded instruction fetch is memory.check +
-// if + memory.read with a decode-fault body, and the decoded values leave
+// Decode reads as action fragments: a guarded instruction fetch is Memory's
+// flat predicate + if + resource.read with a decode-fault body, and the decoded values leave
 // through exported outputs. This file builds the blocks; everything is
 // emitted by the action emitter and fragment bodies fall through naturally.
 
@@ -23,6 +29,7 @@ export type FragmentEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   functionIndices?: ReadonlyMap<FunctionDefinition, number> | undefined;
+  resourceIndices?: ReadonlyMap<ResourceRef, number> | undefined;
 }>;
 
 // Byte offset of the next undecoded byte from the instruction start: a
@@ -78,19 +85,37 @@ class DecodeFragment {
   // A guarded instruction fetch; the fault body reports the faulting address.
   readGuest(address: ValueId, width: OperandWidth, signed = false): ValueId {
     const byteLength = width / 8;
-
-    emitMemoryGuard(
-      this.#builder,
+    const byteLengthValue = this.values.const(byteLength);
+    const access = flatMemoryAccess(
+      this.values,
       address,
-      byteLength,
-      { kind: "instructionFetch" }
+      byteLengthValue,
+      "instructionFetch"
+    );
+
+    this.#builder.if(
+      access.invalid,
+      (faultBody) => faultBody.finish({
+        kind: "exit",
+        result: buildException(
+          this.values,
+          pageFault(access.fault.address, pageFaultErrorCode("instructionFetch"))
+        )
+      }),
+      { hint: "unlikely" }
+    );
+    const source = flatMemoryOperand(
+      this.values,
+      access,
+      this.values.const(0),
+      width
     );
 
     return this.#builder.operation(
-      memoryRead.create(
+      resourceRead.create(
         signed && width !== 32
-          ? { address, byteOffset: 0, width, signed: true }
-          : { address, byteOffset: 0, width }
+          ? { source, signed: true }
+          : { source }
       )
     );
   }
@@ -149,6 +174,7 @@ class DecodeFragment {
       scratch: context.scratch,
       externalLocals: this.#externalLocals,
       functionIndices: context.functionIndices,
+      resourceIndices: context.resourceIndices,
       embedding: { fallthrough: { kind: "fallthrough" }, outputs }
     });
   }

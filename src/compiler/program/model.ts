@@ -15,10 +15,10 @@ import type {
   ExportRef,
   FunctionRef,
   GlobalRef,
-  ResourceRef,
   SignatureRef,
   TableRef
 } from "./refs.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
 
 export type Signature = Readonly<{
   ref: SignatureRef;
@@ -74,6 +74,7 @@ export type DefinedFunction = Readonly<{
   effects: StorageEffects;
   signature: SignatureRef;
   callTargets: readonly FunctionDefinition[];
+  resources: readonly ResourceRef[];
   body: IrFunction;
   placement: BodyPlacement;
 }>;

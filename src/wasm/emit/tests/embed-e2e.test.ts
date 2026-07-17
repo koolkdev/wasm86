@@ -3,10 +3,10 @@ import { test } from "node:test";
 
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { IrBlock } from "#ir/block.js";
-import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { wasmGuestMemoryMinByteLength } from "#wasm/abi.js";
+import { guestMemoryMinimumByteLength } from "#memory/constants.js";
+import { wasmMemoryIndex } from "#wasm/abi.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
@@ -19,7 +19,15 @@ import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { assertPageFaultException } from "#cpu/tests/stop-fixtures.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
-import { memoryCheck, memoryRead, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { BodyBuilder } from "#ir/body-builder.js";
+import { stateRead as stateReadOperation } from "#compiler/ir/operations/state.js";
+import { resourceRead } from "#compiler/ir/operations/resource.js";
+import {
+  flatMemoryAccess,
+  flatMemoryOperand,
+  guestMemoryResource
+} from "#memory/flat.js";
 
 // Fragments emitted inline in hand-written function bodies. The fragments
 // here are decode reads — a guarded one-byte instruction fetch at eip+k with a
@@ -48,42 +56,41 @@ function dispatchFragment(targetEip: number): IrBlock {
 // visible.
 function decodeReadFragment(k: number): DecodeReadFragment {
   const values = new ValueTable();
-  const eipValue = values.addActionOutput();
+  const builder = new BodyBuilder(values);
+  const eipValue = builder.operation(stateReadOperation.create({ slot: eipChannel }));
   const address = values.binary("add", eipValue, values.const(k));
   const byteLength = values.const(1);
-  const fault = values.addActionOutput(fitsUnsigned(1));
-  const fetched = values.addActionOutput(fitsUnsigned(8));
+  const access = flatMemoryAccess(
+    values,
+    address,
+    byteLength,
+    "instructionFetch"
+  );
   const faultResult = buildException(
     values,
     pageFault(address, PageFaultErrorCode.INSTRUCTION_FETCH)
   );
-  const block: IrBlock = {
-    body: {
+  builder.push({
+    kind: "if",
+    condition: access.invalid,
+    hint: "unlikely",
+    thenBody: {
       actions: [
-        stateRead(eipValue, eipChannel),
-        memoryCheck(fault, address, byteLength),
+        stateWrite(eipChannel, eipValue),
         {
-          kind: "if",
-          condition: fault,
-          hint: "unlikely",
-          thenBody: {
-            actions: [
-              stateWrite(eipChannel, eipValue),
-              {
-                kind: "finish",
-                finish: {
-                  kind: "exit",
-                  result: faultResult
-                }
-              }
-            ]
+          kind: "finish",
+          finish: {
+            kind: "exit",
+            result: faultResult
           }
-        },
-        memoryRead(fetched, address, 8)
+        }
       ]
-    },
-    values
-  };
+    }
+  });
+  const fetched = builder.operation(resourceRead.create({
+    source: flatMemoryOperand(values, access, values.const(0), 8)
+  }));
+  const block: IrBlock = { body: builder.build(), values };
 
   return { block, fetched };
 }
@@ -98,6 +105,7 @@ async function instantiateDecodeRead(fallthrough: FallthroughTarget) {
   emitActionFragment(fragment.block, {
     body,
     scratch,
+    resourceIndices: new Map([[guestMemoryResource, wasmMemoryIndex.guest]]),
     embedding: { fallthrough, outputs: new Map([[fragment.fetched, fetchedLocal]]) }
   });
   body.localGet(fetchedLocal).i64ExtendI32U();
@@ -166,7 +174,7 @@ test("dispatch br target skips later enclosing harness-style actions", async () 
 
 test("the instruction-fetch fault edge keeps the encoded return", async () => {
   const { stateView, run } = await instantiateDecodeRead({ kind: "fallthrough" });
-  const eip = wasmGuestMemoryMinByteLength - 2;
+  const eip = guestMemoryMinimumByteLength - 2;
 
   writeWasmCpuStateSnapshot(stateView, { eip });
 
@@ -189,6 +197,7 @@ test("fallthrough br target lands on the embedder label across the fragment's ne
   emitActionFragment(fragment.block, {
     body,
     scratch,
+    resourceIndices: new Map([[guestMemoryResource, wasmMemoryIndex.guest]]),
     embedding: {
       fallthrough: { kind: "br", depth: 0 },
       outputs: new Map([[fragment.fetched, fetchedLocal]])
@@ -205,7 +214,7 @@ test("fallthrough br target lands on the embedder label across the fragment's ne
   guestView.setUint8(0x12, 0x90);
   strictEqual(run(), 0x90n);
 
-  writeWasmCpuStateSnapshot(stateView, { eip: wasmGuestMemoryMinByteLength - 2 });
+  writeWasmCpuStateSnapshot(stateView, { eip: guestMemoryMinimumByteLength - 2 });
   assertCpuException(decodeExit(run()));
 });
 
@@ -220,6 +229,7 @@ test("consecutive fragments share the embedder's scratch locals", async () => {
     emitActionFragment(fragment.block, {
       body,
       scratch,
+      resourceIndices: new Map([[guestMemoryResource, wasmMemoryIndex.guest]]),
       embedding: {
         fallthrough: { kind: "fallthrough" },
         outputs: new Map([[fragment.fetched, local]])

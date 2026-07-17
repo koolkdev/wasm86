@@ -8,20 +8,24 @@ import {
   exportRef,
   functionRef,
   globalRef,
-  resourceRef,
   signatureRef,
   type FunctionRef,
   type GlobalRef,
-  type ResourceRef,
   type SignatureRef
 } from "#compiler/program/refs.js";
+import {
+  resourceRef,
+  type ResourceRef
+} from "#compiler/ir/resource.js";
 import type { OpcodeDispatchNode } from "#core/decoder/opcode-dispatch.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
 import {
   statusFlagResolvers,
   statusFlagResolverType
 } from "#core/flags/resolvers.js";
-import { wasmBlockExportName, wasmGuestMemoryMinPages, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { wasmBlockExportName, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { guestMemoryMinimumPages } from "#memory/constants.js";
+import { guestMemoryResource } from "#memory/flat.js";
 import {
   encodeRmDecodeHelperBody,
   RmDecodeHelpers,
@@ -110,7 +114,7 @@ function createInterpreterProgram(): InterpreterProgramDeclarations {
   const runSignature = signatureRef("interpreter.run-signature");
   const rmDecodeSignature = signatureRef("interpreter.rm-decode-signature");
   const cpuState = resourceRef("interpreter.cpu-state");
-  const guestMemory = resourceRef("interpreter.guest-memory");
+  const guestMemory = guestMemoryResource;
   const rmGlobals = {
     base: globalRef("interpreter.rm-result.base"),
     offset: globalRef("interpreter.rm-result.offset"),
@@ -136,7 +140,7 @@ function createInterpreterProgram(): InterpreterProgramDeclarations {
     ref: guestMemory,
     moduleName: wasmImport.namespace,
     name: wasmImport.guestMemoryName,
-    limits: { minPages: wasmGuestMemoryMinPages }
+    limits: { minPages: guestMemoryMinimumPages }
   });
   builder.global({
     ref: rmGlobals.base,
@@ -195,13 +199,17 @@ function declareRmDecodeHelpers(
           `unexpected resolved interpreter CPU-state memory index: ${String(cpuStateMemoryIndex)}`
         );
         assert(
-          guestMemoryIndex === wasmMemoryIndex.guest,
-          `unexpected resolved interpreter guest-memory index: ${String(guestMemoryIndex)}`
+          guestMemoryIndex !== undefined,
+          "missing resolved interpreter guest-memory resource"
         );
         assert(base !== undefined, "missing resolved interpreter R/M base global");
         assert(offset !== undefined, "missing resolved interpreter R/M offset global");
         assert(cursor !== undefined, "missing resolved interpreter R/M cursor global");
-        return encodeRmDecodeHelperBody(opcodeLength, { base, offset, cursor });
+        return encodeRmDecodeHelperBody(
+          opcodeLength,
+          { base, offset, cursor },
+          bindings.resources
+        );
       }
     });
     return { opcodeLength, ref };
@@ -241,8 +249,8 @@ class DeclaredDependencyLegacyRootAdapter {
       `unexpected resolved interpreter CPU-state memory index: ${String(cpuStateMemoryIndex)}`
     );
     assert(
-      guestMemoryIndex === wasmMemoryIndex.guest,
-      `unexpected resolved interpreter guest-memory index: ${String(guestMemoryIndex)}`
+      guestMemoryIndex !== undefined,
+      "missing resolved interpreter guest-memory resource"
     );
     assert(base !== undefined, "missing resolved interpreter R/M base global");
     assert(offset !== undefined, "missing resolved interpreter R/M offset global");
@@ -261,7 +269,8 @@ class DeclaredDependencyLegacyRootAdapter {
     const body = encodeRunLoopBody(
       new RmDecodeHelpers(rmFunctions, { base, offset, cursor }),
       {
-        functionIndices: bindings.definitionIndices
+        functionIndices: bindings.definitionIndices,
+        resourceIndices: bindings.resources
       },
       emittedHandlers
     );

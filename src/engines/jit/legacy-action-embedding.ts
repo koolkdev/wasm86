@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js";
-import type { ResourceRef } from "#compiler/program/refs.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { LegacyFunctionBindings } from "#compiler/program/legacy-body.js";
 import type { IrBlock } from "#ir/block.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
@@ -14,8 +14,9 @@ type LegacyActionEmbeddingAdapterOptions = Readonly<{
   guestMemory: ResourceRef;
 }>;
 
-// Keeps the current IrBlock emitter behind the closed factory contract. Its
-// fixed memory ABI is asserted against resolved bindings before raw emission.
+// Keeps the current IrBlock emitter behind the closed factory contract.
+// CPU state still uses its transitional fixed ABI; guest operations resolve
+// the resource map supplied by the closed program.
 export class LegacyActionEmbeddingAdapter {
   readonly #options: LegacyActionEmbeddingAdapterOptions;
 
@@ -25,15 +26,14 @@ export class LegacyActionEmbeddingAdapter {
 
   build(bindings: LegacyFunctionBindings): EncodedWasmFunctionBody {
     const cpuStateMemoryIndex = bindings.resources.get(this.#options.cpuState);
-    const guestMemoryIndex = bindings.resources.get(this.#options.guestMemory);
 
     assert(
       cpuStateMemoryIndex === wasmMemoryIndex.cpuState,
       `unexpected resolved CPU-state memory index: ${String(cpuStateMemoryIndex)}`
     );
     assert(
-      guestMemoryIndex === wasmMemoryIndex.guest,
-      `unexpected resolved guest-memory index: ${String(guestMemoryIndex)}`
+      bindings.resources.has(this.#options.guestMemory),
+      "missing resolved guest-memory resource"
     );
 
     const placement = bindings.placements.get(this.#options.ir);
@@ -41,6 +41,7 @@ export class LegacyActionEmbeddingAdapter {
     assert(placement !== undefined, "missing placement for JIT IR block");
     return emitActionFunction(this.#options.ir, {
       functionIndices: bindings.definitionIndices,
+      resourceIndices: bindings.resources,
       placement,
       embedding: { dispatch: this.#options.links.resolve(bindings) }
     });

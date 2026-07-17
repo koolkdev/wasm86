@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
@@ -6,18 +6,27 @@ import {
   emitOperation,
   type Operation
 } from "#compiler/ir/operations/index.js";
-import {
-  memoryCheck,
-  memoryRead,
-  memoryResolve,
-  memoryWrite
-} from "#compiler/ir/operations/memory.js";
 import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import { CellRef } from "#compiler/refs/cell.js";
+import {
+  DynamicByteOriginRef,
+  resourceRef,
+  type ByteRange,
+  type ResourceByteOperand,
+  type ResourceRef
+} from "#compiler/ir/resource.js";
+import {
+  resourceRead,
+  resourceWrite
+} from "#compiler/ir/operations/resource.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import { valueId } from "#compiler/ir/values/id.js";
-import type { WidthBounds } from "#compiler/ir/values/types.js";
+import type {
+  IntegerWidth,
+  ValueId,
+  WidthBounds
+} from "#compiler/ir/values/types.js";
 import {
   flagChannel,
   gprChannel,
@@ -32,16 +41,20 @@ import {
 test("every operation constructs through its owner", () => {
   const slot = gprChannel("eax");
   const address = valueId(1);
-  const byteLength = valueId(2);
   const value = valueId(3);
   const cell = new CellRef("i32");
+  const resource = resourceRef("test.resource");
+  const range: ByteRange = {
+    basis: { kind: "dynamic", origin: new DynamicByteOriginRef() }
+  };
   const operations = [
     stateRead.create({ slot }),
     stateWrite.create({ slot, value }),
-    memoryRead.create({ address, byteOffset: 4, width: 16 }),
-    memoryWrite.create({ address, byteOffset: 4, value, width: 16 }),
-    memoryCheck.create({ address, byteLength }),
-    memoryResolve.create({ address, byteLength }),
+    resourceRead.create({ source: byteOperand(resource, range, address, 4, 16) }),
+    resourceWrite.create({
+      destination: byteOperand(resource, range, address, 4, 16),
+      value
+    }),
     cellRead.create({ cell }),
     cellWrite.create({ cell, value, initialization: "seed" })
   ];
@@ -49,10 +62,8 @@ test("every operation constructs through its owner", () => {
   deepStrictEqual(operations.map((operation) => operation.kind), [
     "state.read",
     "state.write",
-    "memory.read",
-    "memory.write",
-    "memory.check",
-    "memory.resolve",
+    "resource.read",
+    "resource.write",
     "cell.read",
     "cell.write"
   ]);
@@ -92,9 +103,10 @@ test("dynamic byte state definitions expose each semantic input once", () => {
 test("operation inputs are the complete semantic dependencies", () => {
   const index = valueId(20);
   const address = valueId(21);
-  const byteLength = valueId(22);
   const value = valueId(24);
   const wordSlot: StateSlot = { kind: "gprDynamic", index, byteLength: 2 };
+  const resource = resourceRef("test.inputs-resource");
+  const range: ByteRange = { basis: { kind: "resource" } };
 
   deepStrictEqual(
     stateRead.create({ slot: wordSlot }).inputs,
@@ -108,21 +120,16 @@ test("operation inputs are the complete semantic dependencies", () => {
     ]
   );
   deepStrictEqual(
-    memoryCheck.create({ address, byteLength }).inputs,
-    [
-      { value: address, type: "i32" },
-      { value: byteLength, type: "i32" }
-    ]
+    resourceRead.create({
+      source: byteOperand(resource, range, address, 0, 32)
+    }).inputs,
+    [{ value: address, type: "i32" }]
   );
   deepStrictEqual(
-    memoryResolve.create({ address, byteLength }).inputs,
-    [
-      { value: address, type: "i32" },
-      { value: byteLength, type: "i32" }
-    ]
-  );
-  deepStrictEqual(
-    memoryWrite.create({ address, byteOffset: 0, value, width: 32 }).inputs,
+    resourceWrite.create({
+      destination: byteOperand(resource, range, address, 0, 32),
+      value
+    }).inputs,
     [
       { value: address, type: "i32" },
       { value, type: "i32" }
@@ -133,7 +140,6 @@ test("operation inputs are the complete semantic dependencies", () => {
 test("operation emission consumes every declared input position once", () => {
   const index = valueId(30);
   const address = valueId(31);
-  const byteLength = valueId(32);
   const value = valueId(33);
   const cell = new CellRef("i32");
   const target = {
@@ -141,7 +147,8 @@ test("operation emission consumes every declared input position once", () => {
     withTemporaryLocal: (_type: "i32" | "i64", callback: (local: number) => void) => {
       callback(0);
     },
-    cellLocal: () => 0
+    cellLocal: () => 0,
+    resourceIndex: () => 0
   };
 
   function emittedUses(operation: Operation) {
@@ -155,14 +162,6 @@ test("operation emission consumes every declared input position once", () => {
   }
 
   deepStrictEqual(
-    emittedUses(memoryCheck.create({ address, byteLength })),
-    [byteLength, address]
-  );
-  deepStrictEqual(
-    emittedUses(memoryResolve.create({ address, byteLength })),
-    [byteLength, address]
-  );
-  deepStrictEqual(
     emittedUses(stateRead.create({
       slot: { kind: "gprDynamic", index, byteLength: 1 }
     })),
@@ -175,55 +174,26 @@ test("operation emission consumes every declared input position once", () => {
     })),
     [index, value]
   );
+  const resource = resourceRef("test.emission-resource");
+  const range: ByteRange = { basis: { kind: "resource" } };
+
   deepStrictEqual(
-    emittedUses(memoryRead.create({ address, byteOffset: 0, width: 32 })),
+    emittedUses(resourceRead.create({
+      source: byteOperand(resource, range, address, 0, 32)
+    })),
     [address]
+  );
+  deepStrictEqual(
+    emittedUses(resourceWrite.create({
+      destination: byteOperand(resource, range, address, 0, 32),
+      value
+    })),
+    [address, value]
   );
   deepStrictEqual(emittedUses(cellRead.create({ cell })), []);
   deepStrictEqual(
     emittedUses(cellWrite.create({ cell, value, initialization: "update" })),
     [value]
-  );
-});
-
-test("a folded operation input needs neither emission nor a temporary", () => {
-  const address = valueId(40);
-  const byteLength = valueId(41);
-  const uses: typeof address[] = [];
-  let requestedTemporary = false;
-
-  emitOperation({
-    body: new WasmFunctionBodyEncoder(),
-    withTemporaryLocal: (_type, callback) => {
-      requestedTemporary = true;
-      callback(0);
-    },
-    cellLocal: () => 0
-  }, {
-    emitUse: (id) => uses.push(id),
-    constValue: (id) => id === byteLength ? 4 : undefined
-  }, memoryCheck.create({ address, byteLength }));
-
-  deepStrictEqual(uses, [address]);
-  strictEqual(requestedTemporary, false);
-});
-
-test("a static memory check rejects an empty range", () => {
-  const address = valueId(42);
-  const byteLength = valueId(43);
-
-  throws(
-    () => emitOperation({
-      body: new WasmFunctionBodyEncoder(),
-      withTemporaryLocal: () => {
-        throw new Error("static check requested a temporary");
-      },
-      cellLocal: () => 0
-    }, {
-      emitUse: () => {},
-      constValue: (id) => id === byteLength ? 0 : undefined
-    }, memoryCheck.create({ address, byteLength })),
-    /guest access byte length must be positive, got 0/
   );
 });
 
@@ -249,69 +219,84 @@ test("state read bounds retain access width and signedness", () => {
   }
 });
 
-test("memory definitions expose typed inputs, effects, and results", () => {
-  const address = valueId(3);
-  const byteLength = valueId(4);
-  const value = valueId(5);
-
-  const read = memoryRead.create({
-    address,
-    byteOffset: 6,
-    width: 16,
+test("resource definitions retain identities, ranges, and indexed memory facts", () => {
+  const resource = resourceRef("test.generic-memory");
+  const origin = new DynamicByteOriginRef();
+  const range: ByteRange = {
+    basis: { kind: "dynamic", origin },
+    slice: { byteOffset: 6, byteLength: 2 }
+  };
+  const address = valueId(50);
+  const value = valueId(51);
+  const read = resourceRead.create({
+    source: byteOperand(resource, range, address, 6, 16),
     signed: true
   });
-  const write = memoryWrite.create({
-    address,
-    byteOffset: 6,
-    value,
-    width: 32
+  const write = resourceWrite.create({
+    destination: byteOperand(resource, range, address, 6, 16),
+    value
   });
 
-  deepStrictEqual(read.inputs, [{ value: address, type: "i32" }]);
   deepStrictEqual(read.result, { type: "i32", bounds: signExtended(16) });
-  deepStrictEqual(read.effects, { reads: [{ space: "memory" }], writes: [] });
+  deepStrictEqual(read.inputs, [{ value: address, type: "i32" }]);
+  deepStrictEqual(read.effect, { space: "resource", resource, range });
+  strictEqual(read.displacement, 6);
+  deepStrictEqual(read.effects, {
+    reads: [read.effect],
+    writes: []
+  });
+  strictEqual(read.effects.reads[0], read.effect);
+  deepStrictEqual(write.result, undefined);
   deepStrictEqual(write.inputs, [
     { value: address, type: "i32" },
     { value, type: "i32" }
   ]);
-  deepStrictEqual(write.result, undefined);
-  deepStrictEqual(write.effects, { reads: [], writes: [{ space: "memory" }] });
+  deepStrictEqual(write.effect, { space: "resource", resource, range });
+  strictEqual(write.displacement, 6);
+  deepStrictEqual(write.effects, {
+    reads: [],
+    writes: [write.effect]
+  });
+  strictEqual(write.effects.writes[0], write.effect);
 
-  const expectedMemoryBoundsUse = {
-    inputs: [
-      { value: address, type: "i32" },
-      { value: byteLength, type: "i32" }
-    ],
-    result: { type: "i32", bounds: fitsUnsigned(1) },
-    effects: { reads: [{ space: "memoryBounds" }], writes: [] }
+  const body = new WasmFunctionBodyEncoder();
+  const target = {
+    body,
+    withTemporaryLocal: () => {
+      throw new Error("resource operation requested a temporary");
+    },
+    cellLocal: () => {
+      throw new Error("resource operation requested a cell local");
+    },
+    resourceIndex: (candidate: typeof resource) => {
+      strictEqual(candidate, resource);
+      return 3;
+    }
+  };
+  const emitter = {
+    emitUse: () => body.i32Const(0),
+    constValue: () => undefined
   };
 
-  const check = memoryCheck.create({ address, byteLength });
-  const resolve = memoryResolve.create({ address, byteLength });
-
-  deepStrictEqual({
-    inputs: check.inputs,
-    result: check.result,
-    effects: check.effects
-  }, expectedMemoryBoundsUse);
-  deepStrictEqual({
-    inputs: resolve.inputs,
-    result: resolve.result,
-    effects: resolve.effects
-  }, expectedMemoryBoundsUse);
-  deepStrictEqual(
-    memoryRead.create({ address, byteOffset: 0, width: 32, signed: true }).result,
-    { type: "i32" }
-  );
-  throws(
-    () => memoryRead.create({ address, byteOffset: -1, width: 8 }),
-    /memory\.read byte offset must be an unsigned 32-bit integer/
-  );
-  throws(
-    () => memoryWrite.create({ address, byteOffset: 1.5, value, width: 8 }),
-    /memory\.write byte offset must be an unsigned 32-bit integer/
-  );
+  emitOperation(target, emitter, read);
+  body.drop();
+  emitOperation(target, emitter, write);
+  deepStrictEqual(body.finish().references.memoryIndices, [3]);
 });
+
+function byteOperand(
+  resource: ResourceRef,
+  range: ByteRange,
+  base: ValueId,
+  displacement: number,
+  width: IntegerWidth
+): ResourceByteOperand {
+  return {
+    effect: { space: "resource", resource, range },
+    address: { base, displacement },
+    width
+  };
+}
 
 test("typed cell definitions expose exact identity effects", () => {
   const value = valueId(6);

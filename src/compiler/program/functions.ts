@@ -1,5 +1,6 @@
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { FunctionBuilder } from "#ir/function.js";
+import { validateDeclaredStorageEffects } from "#ir/validate/effects.js";
 import { functionRef, type FunctionRef } from "./refs.js";
 import type { FunctionType } from "./function-type.js";
 
@@ -21,6 +22,10 @@ export class FunctionDefinition {
   readonly #buildFunction: BuildFunction;
 
   constructor(options: FunctionDefinitionOptions) {
+    validateDeclaredStorageEffects(
+      options.effects,
+      `function ${options.ref.id} declared`
+    );
     this.ref = options.ref;
     this.type = options.type;
     this.effects = {

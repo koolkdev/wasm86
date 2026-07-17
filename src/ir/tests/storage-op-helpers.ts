@@ -1,11 +1,9 @@
 import type { Action, CallAction, OpAction } from "#ir/actions.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import {
-  memoryCheck as memoryCheckOperation,
-  memoryRead as memoryReadOperation,
-  memoryResolve as memoryResolveOperation,
-  memoryWrite as memoryWriteOperation
-} from "#compiler/ir/operations/memory.js";
+  resourceRead as resourceReadOperation,
+  resourceWrite as resourceWriteOperation
+} from "#compiler/ir/operations/resource.js";
 import {
   stateRead as stateReadOperation,
   stateWrite as stateWriteOperation
@@ -16,6 +14,8 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import { statusFlagResolvers } from "#core/flags/resolvers.js";
 import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
+import { guestMemoryResource } from "#memory/flat.js";
+import { DynamicByteOriginRef } from "#compiler/ir/resource.js";
 
 type TestValueId = ValueId | number;
 type OperationOf<Kind extends Operation["kind"]> = Extract<Operation, { kind: Kind }>;
@@ -26,18 +26,10 @@ export type StateReadAction = OpAction & Readonly<{
 }>;
 export type StateWriteAction = OpAction & Readonly<{ op: OperationOf<"state.write"> }>;
 export type MemoryReadAction = OpAction & Readonly<{
-  op: OperationOf<"memory.read">;
+  op: OperationOf<"resource.read">;
   output: ValueId;
 }>;
-export type MemoryWriteAction = OpAction & Readonly<{ op: OperationOf<"memory.write"> }>;
-export type MemoryCheckAction = OpAction & Readonly<{
-  op: OperationOf<"memory.check">;
-  output: ValueId;
-}>;
-export type MemoryResolveAction = OpAction & Readonly<{
-  op: OperationOf<"memory.resolve">;
-  output: ValueId;
-}>;
+export type MemoryWriteAction = OpAction & Readonly<{ op: OperationOf<"resource.write"> }>;
 export type StatusFlagCallAction = CallAction & Readonly<{
   outputs: readonly [ValueId];
 }>;
@@ -70,56 +62,51 @@ export function memoryRead(
 ): MemoryReadAction {
   const outputId = valueId(output);
   const addressId = valueId(address);
+  const range = {
+    basis: {
+      kind: "dynamic" as const,
+      origin: new DynamicByteOriginRef()
+    },
+    slice: { byteOffset: 0, byteLength: width / 8 }
+  };
   const op = signed === true
-    ? memoryReadOperation.create({
-        address: addressId,
-        byteOffset: 0,
-        width,
+    ? resourceReadOperation.create({
+        source: {
+          effect: { space: "resource", resource: guestMemoryResource, range },
+          address: { base: addressId, displacement: 0 },
+          width
+        },
         signed: true
       })
-    : memoryReadOperation.create({ address: addressId, byteOffset: 0, width });
+    : resourceReadOperation.create({
+        source: {
+          effect: { space: "resource", resource: guestMemoryResource, range },
+          address: { base: addressId, displacement: 0 },
+          width
+        }
+      });
 
   return { kind: "op", output: outputId, op };
 }
 
 export function memoryWrite(address: TestValueId, value: TestValueId, width: OperandWidth): MemoryWriteAction {
+  const range = {
+    basis: {
+      kind: "dynamic" as const,
+      origin: new DynamicByteOriginRef()
+    },
+    slice: { byteOffset: 0, byteLength: width / 8 }
+  };
+
   return {
     kind: "op",
-    op: memoryWriteOperation.create({
-      address: valueId(address),
-      byteOffset: 0,
+    op: resourceWriteOperation.create({
+      destination: {
+        effect: { space: "resource", resource: guestMemoryResource, range },
+        address: { base: valueId(address), displacement: 0 },
+        width
+      },
       value: valueId(value),
-      width
-    })
-  };
-}
-
-export function memoryCheck(
-  output: TestValueId,
-  address: TestValueId,
-  byteLength: TestValueId
-): MemoryCheckAction {
-  return {
-    kind: "op",
-    output: valueId(output),
-    op: memoryCheckOperation.create({
-      address: valueId(address),
-      byteLength: valueId(byteLength)
-    })
-  };
-}
-
-export function memoryResolve(
-  output: TestValueId,
-  address: TestValueId,
-  byteLength: TestValueId
-): MemoryResolveAction {
-  return {
-    kind: "op",
-    output: valueId(output),
-    op: memoryResolveOperation.create({
-      address: valueId(address),
-      byteLength: valueId(byteLength)
     })
   };
 }
@@ -152,19 +139,11 @@ export function isStateWrite(action: Action): action is StateWriteAction {
 }
 
 export function isMemoryRead(action: Action): action is MemoryReadAction {
-  return action.kind === "op" && action.op.kind === "memory.read" && "output" in action && action.output !== undefined;
+  return action.kind === "op" && action.op.kind === "resource.read" && "output" in action && action.output !== undefined;
 }
 
 export function isMemoryWrite(action: Action): action is MemoryWriteAction {
-  return action.kind === "op" && action.op.kind === "memory.write";
-}
-
-export function isMemoryCheck(action: Action): action is MemoryCheckAction {
-  return action.kind === "op" && action.op.kind === "memory.check" && "output" in action && action.output !== undefined;
-}
-
-export function isMemoryResolve(action: Action): action is MemoryResolveAction {
-  return action.kind === "op" && action.op.kind === "memory.resolve" && "output" in action && action.output !== undefined;
+  return action.kind === "op" && action.op.kind === "resource.write";
 }
 
 export function isStatusFlagCall(action: Action): action is StatusFlagCallAction {

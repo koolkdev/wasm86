@@ -4,11 +4,9 @@ import { test } from "node:test";
 import type { IfAction } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { pageFault } from "#core/exceptions.js";
 import { buildException } from "#cpu/exit.js";
 import { wasmBranchHint } from "#compiler/encoder/function-body.js";
-import { memoryCheck } from "#compiler/ir/operations/memory.js";
 import { irBlockBody } from "./harness.js";
 
 test("if branch hints come only from the explicit action hint", () => {
@@ -19,19 +17,13 @@ test("if branch hints come only from the explicit action hint", () => {
 function branchHintsForCheckIf(hint: IfAction["hint"]): readonly number[] {
   const values = new ValueTable();
   const address = values.const(0x2000);
-  const byteLength = values.const(4);
-  const condition = values.addActionOutput(fitsUnsigned(1));
+  const condition = values.const(1);
   const pageFaultResult = buildException(values, pageFault(address, 0));
   const fallbackResult = values.const64(0n);
   const block: IrBlock = {
     values,
     body: {
       actions: [
-        {
-          kind: "op",
-          output: condition,
-          op: memoryCheck.create({ address, byteLength })
-        },
         {
           kind: "if",
           condition,

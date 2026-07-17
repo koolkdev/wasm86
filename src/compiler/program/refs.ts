@@ -8,7 +8,6 @@ type Ref<TKind extends string> = Readonly<{
 
 export type SignatureRef = Ref<"signature">;
 export type FunctionRef = Ref<"function">;
-export type ResourceRef = Ref<"resource">;
 export type TableRef = Ref<"table">;
 export type GlobalRef = Ref<"global">;
 export type ExportRef = Ref<"export">;
@@ -19,10 +18,6 @@ export function signatureRef(id: string): SignatureRef {
 
 export function functionRef(id: string): FunctionRef {
   return createIdentity("function", id);
-}
-
-export function resourceRef(id: string): ResourceRef {
-  return createIdentity("resource", id);
 }
 
 export function tableRef(id: string): TableRef {

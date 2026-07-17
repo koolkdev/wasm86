@@ -13,10 +13,10 @@ import { emitFunction } from "#wasm/emit/action.js";
 import type {
   FunctionRef,
   GlobalRef,
-  ResourceRef,
   SignatureRef,
   TableRef
 } from "./refs.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
 import type {
   LegacyFunctionBindings
 } from "./legacy-body.js";
@@ -166,14 +166,7 @@ function buildLegacyBody(
   const functions = resolveFunctionIndices(layout, fn);
   const definitionIndices = resolveDefinitionIndices(layout, fn.callTargets);
 
-  const resources = new Map<ResourceRef, number>();
-
-  for (const resource of fn.resources) {
-    const memoryIndex = layout.memoryIndices.get(resource);
-
-    assert(memoryIndex !== undefined, `missing layout for program resource ${resource.id}`);
-    resources.set(resource, memoryIndex);
-  }
+  const resources = resolveResourceIndices(layout, fn.resources);
 
   const globals = new Map<GlobalRef, number>();
 
@@ -213,8 +206,10 @@ function buildDefinedBody(
   fn: DefinedFunction
 ): EncodedWasmFunctionBody {
   const functions = resolveDefinitionIndices(layout, fn.callTargets);
+  const resources = resolveResourceIndices(layout, fn.resources);
   const body = emitFunction(fn.body, {
     functionIndices: functions,
+    resourceIndices: resources,
     placement: fn.placement
   });
 
@@ -222,8 +217,23 @@ function buildDefinedBody(
   validateRecordedIndices(fn, "type", body.references.typeIndices, []);
   validateRecordedIndices(fn, "global", body.references.globalIndices, []);
   validateRecordedIndices(fn, "table", body.references.tableIndices, []);
-  validateRecordedIndices(fn, "memory", body.references.memoryIndices, []);
+  validateRecordedIndices(fn, "memory", body.references.memoryIndices, resources.values());
   return body;
+}
+
+function resolveResourceIndices(
+  layout: ProgramLayout,
+  refs: readonly ResourceRef[]
+): ReadonlyMap<ResourceRef, number> {
+  const resources = new Map<ResourceRef, number>();
+
+  for (const resource of refs) {
+    const memoryIndex = layout.memoryIndices.get(resource);
+
+    assert(memoryIndex !== undefined, `missing layout for program resource ${resource.id}`);
+    resources.set(resource, memoryIndex);
+  }
+  return resources;
 }
 
 function resolveFunctionIndices(

@@ -1,4 +1,4 @@
-import { channelsOverlap, isDynamicSlot } from "./slots.js";
+import { channelCovers, channelsOverlap, isDynamicSlot } from "./slots.js";
 import type { Action } from "./actions.js";
 import type { Body } from "./block.js";
 import type {
@@ -6,21 +6,23 @@ import type {
   StorageAccess
 } from "#compiler/ir/effects.js";
 import type { StateSlot } from "./slots.js";
+import {
+  type ByteRange,
+  type ResourceEffect
+} from "#compiler/ir/resource.js";
 
 // One aliasing rule over the address spaces: static channels alias iff their
 // byte ranges intersect; a dynamic GPR slot may alias every GPR word and a
 // dynamic segment slot may alias every segment channel for the same field;
-// guest memory may-alias guest memory (no disambiguation); compiler cells
-// alias only their own opaque identity. Distinct spaces never alias.
+// compiler cells alias only their own opaque identity. Resource accesses use
+// their resource identity plus the compiler-owned region/range algebra.
+// Distinct spaces never alias.
 
-export type StorageEffect = StorageAccess;
-export type ActionEffects = StorageEffects;
-
-const noEffects: ActionEffects = { reads: [], writes: [] };
+const noEffects: StorageEffects = { reads: [], writes: [] };
 
 // A control action's signature is the union over its bodies — any one may
 // be selected. The union is for legality only; demand stays per-body.
-export function effectsOf(action: Action): ActionEffects {
+export function effectsOf(action: Action): StorageEffects {
   switch (action.kind) {
     case "op":
       return action.op.effects;
@@ -39,9 +41,9 @@ export function effectsOf(action: Action): ActionEffects {
   }
 }
 
-function bodyEffects(...bodies: readonly (Body | undefined)[]): ActionEffects {
-  const reads: StorageEffect[] = [];
-  const writes: StorageEffect[] = [];
+function bodyEffects(...bodies: readonly (Body | undefined)[]): StorageEffects {
+  const reads: StorageAccess[] = [];
+  const writes: StorageAccess[] = [];
 
   for (const body of bodies) {
     if (body === undefined) {
@@ -59,16 +61,26 @@ function bodyEffects(...bodies: readonly (Body | undefined)[]): ActionEffects {
   return { reads, writes };
 }
 
-export function mayAlias(a: StorageEffect, b: StorageEffect): boolean {
+export function mayAlias(a: StorageAccess, b: StorageAccess): boolean {
   switch (a.space) {
-    case "memory":
-      return b.space === "memory";
-    case "memoryBounds":
-      return b.space === "memoryBounds";
     case "state":
       return b.space === "state" && slotsMayAlias(a.slot, b.slot);
     case "cell":
       return b.space === "cell" && a.cell === b.cell;
+    case "resource":
+      return b.space === "resource" && resourceEffectsMayAlias(a, b);
+  }
+}
+
+// Is every location in `covered` also in `covering`?
+export function covers(covering: StorageAccess, covered: StorageAccess): boolean {
+  switch (covering.space) {
+    case "state":
+      return covered.space === "state" && stateSlotCovers(covering.slot, covered.slot);
+    case "cell":
+      return covered.space === "cell" && covering.cell === covered.cell;
+    case "resource":
+      return covered.space === "resource" && resourceEffectCovers(covering, covered);
   }
 }
 
@@ -90,6 +102,18 @@ export function slotsMayAlias(a: StateSlot, b: StateSlot): boolean {
         ? b.kind === "segmentDynamic" && a.field === b.field
         : channelsOverlap(a, b);
   }
+}
+
+export function stateSlotCovers(covering: StateSlot, covered: StateSlot): boolean {
+  if (isDynamicSlot(covering)) {
+    if (covering.kind === "gprDynamic") {
+      return (covered.kind === "gpr" && covering.byteLength === covered.byteLength) ||
+        (covered.kind === "gprDynamic" && covering.byteLength === covered.byteLength);
+    }
+    return (covered.kind === "segment" && covering.field === covered.field) ||
+      (covered.kind === "segmentDynamic" && covering.field === covered.field);
+  }
+  return !isDynamicSlot(covered) && channelCovers(covering, covered);
 }
 
 export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolean {
@@ -119,4 +143,90 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
 
 export function bodyMayWriteStateSlot(body: Body, slot: StateSlot): boolean {
   return body.actions.some((action) => actionMayWriteStateSlot(action, slot));
+}
+
+function resourceEffectsMayAlias(a: ResourceEffect, b: ResourceEffect): boolean {
+  if (a.resource !== b.resource) {
+    return false;
+  }
+  return byteRangesMayAlias(a.range, b.range);
+}
+
+function resourceEffectCovers(
+  covering: ResourceEffect,
+  covered: ResourceEffect
+): boolean {
+  if (covering.resource !== covered.resource) {
+    return false;
+  }
+  return byteRangeCovers(covering.range, covered.range);
+}
+
+function byteRangesMayAlias(a: ByteRange, b: ByteRange): boolean {
+  if (isWholeResource(a) || isWholeResource(b)) {
+    return true;
+  }
+  if (!sameByteRangeBasis(a, b)) {
+    return true;
+  }
+  if (a.slice === undefined || b.slice === undefined) {
+    return true;
+  }
+  return intervalsOverlap(
+    a.slice.byteOffset,
+    a.slice.byteLength,
+    b.slice.byteOffset,
+    b.slice.byteLength
+  );
+}
+
+function byteRangeCovers(covering: ByteRange, covered: ByteRange): boolean {
+  if (isWholeResource(covering)) {
+    return true;
+  }
+  if (!sameByteRangeBasis(covering, covered)) {
+    return false;
+  }
+  if (covering.slice === undefined) {
+    return true;
+  }
+  if (covered.slice === undefined) {
+    return false;
+  }
+  return intervalContains(
+    covering.slice.byteOffset,
+    covering.slice.byteLength,
+    covered.slice.byteOffset,
+    covered.slice.byteLength
+  );
+}
+
+function isWholeResource(range: ByteRange): boolean {
+  return range.basis.kind === "resource" && range.slice === undefined;
+}
+
+function sameByteRangeBasis(a: ByteRange, b: ByteRange): boolean {
+  if (a.basis.kind === "resource") {
+    return b.basis.kind === "resource";
+  }
+  return b.basis.kind === "dynamic" && a.basis.origin === b.basis.origin;
+}
+
+function intervalsOverlap(
+  aStart: number,
+  aByteLength: number,
+  bStart: number,
+  bByteLength: number
+): boolean {
+  return aStart < bStart + bByteLength && bStart < aStart + aByteLength;
+}
+
+function intervalContains(
+  outerStart: number,
+  outerByteLength: number,
+  innerStart: number,
+  innerByteLength: number
+): boolean {
+  return outerStart <= innerStart &&
+    innerStart + innerByteLength <= outerStart + outerByteLength;
 }

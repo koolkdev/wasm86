@@ -1,12 +1,7 @@
 import { assert } from "#common/assert.js";
-import {
-  memoryCheck,
-  memoryRead,
-  memoryResolve,
-  memoryWrite
-} from "./memory.js";
 import { stateRead, stateWrite } from "./state.js";
 import { cellRead, cellWrite } from "./cells.js";
+import { resourceRead, resourceWrite } from "./resource.js";
 import type {
   DeclaredOperationInputs,
   OperationEmitTarget,
@@ -15,14 +10,12 @@ import type {
 
 export type OperationWithResult =
   | ReturnType<typeof stateRead.create>
-  | ReturnType<typeof memoryRead.create>
-  | ReturnType<typeof memoryCheck.create>
-  | ReturnType<typeof memoryResolve.create>
+  | ReturnType<typeof resourceRead.create>
   | ReturnType<typeof cellRead.create>;
 
 export type OperationWithoutResult =
   | ReturnType<typeof stateWrite.create>
-  | ReturnType<typeof memoryWrite.create>
+  | ReturnType<typeof resourceWrite.create>
   | ReturnType<typeof cellWrite.create>;
 
 export type Operation = OperationWithResult | OperationWithoutResult;
@@ -75,17 +68,11 @@ export function emitOperation(
     case stateWrite.kind:
       stateWrite.emit(operation, target, inputs);
       break;
-    case memoryRead.kind:
-      memoryRead.emit(operation, target, inputs);
+    case resourceRead.kind:
+      resourceRead.emit(operation, target, inputs);
       break;
-    case memoryWrite.kind:
-      memoryWrite.emit(operation, target, inputs);
-      break;
-    case memoryCheck.kind:
-      memoryCheck.emit(operation, target, inputs);
-      break;
-    case memoryResolve.kind:
-      memoryResolve.emit(operation, target, inputs);
+    case resourceWrite.kind:
+      resourceWrite.emit(operation, target, inputs);
       break;
     case cellRead.kind:
       cellRead.emit(operation, target, inputs);

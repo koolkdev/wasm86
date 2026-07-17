@@ -3,7 +3,9 @@ import { pageFaultErrorCode, type CpuException } from "#core/exceptions.js";
 import { operand, reg } from "#core/semantics/refs.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
 import { CellRef } from "#compiler/refs/cell.js";
+import { DynamicByteOriginRef } from "#compiler/ir/resource.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
+import { guestMemoryResource } from "#memory/flat.js";
 import type {
   SemanticsBuilder,
   GetOptions,
@@ -254,6 +256,8 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     const invalid = this.#alloc(`not(${this.#value(valid)})`);
     const access: MemoryAccess<TIntent> = {
       kind: "memoryAccess",
+      resource: guestMemoryResource,
+      origin: new DynamicByteOriginRef(),
       linearAddress,
       byteLength,
       invalid,

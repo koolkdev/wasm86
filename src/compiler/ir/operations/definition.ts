@@ -7,6 +7,7 @@ import type {
   WidthBounds
 } from "#compiler/ir/values/types.js";
 import type { CellRef } from "#compiler/refs/cell.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
 
 // i64 results structurally carry no i32 width bounds.
 export type OperationResult =
@@ -48,17 +49,23 @@ export type OperationEmitTarget = Readonly<{
     callback: (local: number) => void
   ): void;
   cellLocal(cell: CellRef): number;
+  resourceIndex(resource: ResourceRef): number;
 }>;
 
+type AnyOperationNode = OperationNode<
+  string,
+  object,
+  OperationResult | undefined
+>;
+
 export type OperationDefinition<
-  Kind extends string,
-  Args extends object,
-  Result extends OperationResult | undefined
+  CreateArgs,
+  Operation extends AnyOperationNode
 > = Readonly<{
-  kind: Kind;
-  create(args: Args): OperationNode<Kind, Args, Result>;
+  kind: Operation["kind"];
+  create(args: CreateArgs): Operation;
   emit(
-    operation: OperationNode<Kind, Args, Result>,
+    operation: Operation,
     target: OperationEmitTarget,
     inputs: DeclaredOperationInputs
   ): void;

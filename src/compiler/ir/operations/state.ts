@@ -11,6 +11,7 @@ import type {
 } from "#compiler/ir/values/types.js";
 import {
   type OperationDefinition,
+  type OperationNode,
   type OperationResult
 } from "./definition.js";
 import {
@@ -25,10 +26,15 @@ export type StateReadArgs = Readonly<{
   accessByteLength?: 1 | 2;
 }>;
 
-export const stateRead: OperationDefinition<
+type StateReadOperation = OperationNode<
   "state.read",
   StateReadArgs,
   OperationResult
+>;
+
+export const stateRead: OperationDefinition<
+  StateReadArgs,
+  StateReadOperation
 > = {
   kind: "state.read",
 
@@ -72,10 +78,15 @@ type StateWriteArgs = Readonly<{
   value: ValueId;
 }>;
 
-export const stateWrite: OperationDefinition<
+type StateWriteOperation = OperationNode<
   "state.write",
   StateWriteArgs,
   undefined
+>;
+
+export const stateWrite: OperationDefinition<
+  StateWriteArgs,
+  StateWriteOperation
 > = {
   kind: "state.write",
 

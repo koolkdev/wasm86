@@ -1,4 +1,8 @@
-import { wasmGuestMemoryMinByteLength, wasmGuestMemoryMinPages, wasmPageByteLength } from "#wasm/abi.js";
+import {
+  guestMemoryMinimumByteLength,
+  guestMemoryMinimumPages
+} from "#memory/constants.js";
+import { wasmPageByteLength } from "#wasm/abi.js";
 import { executionStateLayout } from "#ir/state-layout.js";
 import { WasmCpuState } from "./cpu-state.js";
 
@@ -19,7 +23,7 @@ export function createWasmHostMemories(options: WasmHostMemoryOptions = {}): Was
     initial: wasmPagesForByteLength(executionStateLayout.byteLength)
   });
   const guestMemory = options.guestMemory ?? new WebAssembly.Memory({
-    initial: wasmPagesForByteLength(options.guestMemoryByteLength ?? wasmGuestMemoryMinByteLength)
+    initial: wasmPagesForByteLength(options.guestMemoryByteLength ?? guestMemoryMinimumByteLength)
   });
 
   return {
@@ -34,5 +38,5 @@ export function wasmPagesForByteLength(byteLength: number): number {
     throw new RangeError(`byteLength must be a non-negative integer: ${byteLength}`);
   }
 
-  return Math.max(wasmGuestMemoryMinPages, Math.ceil(byteLength / wasmPageByteLength));
+  return Math.max(guestMemoryMinimumPages, Math.ceil(byteLength / wasmPageByteLength));
 }
